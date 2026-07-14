@@ -41,10 +41,20 @@ const CleanCutPage: React.FC<{
   const { fps, width } = useVideoConfig();
   const localMs = (localFrame / fps) * 1000;
 
+  // CAPTION LATENESS (Zac 2026-07-14): activate on the FRAME the token starts,
+  // not on a continuous-ms threshold. The old `localMs >= fromMs - startMs`
+  // compared a stepped-16.67ms clock against a sub-frame ms value, so any
+  // threshold just above N frames needed frame N+1 — CleanCut revealed ~47% of
+  // words a full frame late (the "captions feel late" complaint). Round the
+  // activation to a frame (like Lumen/Prime/TwoTone) so it lands on the
+  // IDENTICAL frame the SFX/zoom/MG fire. Paired with the frame-aligned
+  // page.startMs (handler) this is exact: 0-frame delta across all styles.
+  const actFrame = (tok: (typeof page.tokens)[number]) =>
+    msToFrames(tok.fromMs - page.startMs, fps);
   // Pick the single active token — the last one that has started.
   let activeIdx = 0;
   for (let i = 0; i < page.tokens.length; i++) {
-    if (localMs >= page.tokens[i].fromMs - page.startMs) activeIdx = i;
+    if (localFrame >= actFrame(page.tokens[i])) activeIdx = i;
   }
   const token = page.tokens[activeIdx];
   if (!token) return null;
@@ -69,7 +79,7 @@ const CleanCutPage: React.FC<{
     "CleanCut",
   );
 
-  const since = localMs - (token.fromMs - page.startMs);
+  const since = localFrame - actFrame(token);
   // Crisp, quick entrance — a small rise + settle, no flair. WS2 fade-bound:
   // 55ms base (was 80), capped at 25% of this word's on-screen window (until the
   // next word, or page end) so fast speech doesn't leave the word still fading

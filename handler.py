@@ -4918,10 +4918,10 @@ A zoom does one of two jobs. EMPHASIS zooms map 1:1 to key_moments — they are 
 
 Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punchline, gasp = revelation, nod = statement, empathy = reaction, lean-in = question. Two beats side-by-side are usually revelation then reaction — the fact arriving, then the speaker responding — and they want different cameras: weight for the revelation (LetterboxPush when the revelation IS the payoff; at a mid-peak the snap pair — SnapReframe or StepZoom — carries it), snap for the reaction.
 
-**Zoom personality by arc position** (this rule outranks "what feels punchy") — the schema pairs each claimed position with the zoom types that live there; what remains yours is the WHY:
-  • hook → GRIP, instant — the viewer's thumb is mid-swipe and the snap is what stops it.
-  • mid_peak → PUNCTUATION, quick in/out — sized to its moment exactly; a real peak, not THE peak.
-  • payoff → COMMITMENT: the slowest and deepest move of the video, holds to the end. The slow commitment is the only thing that makes it feel bigger than the beats before it — a snap would read as just another mid-peak. Any zoom in the seconds immediately after the payoff steps on the moment you just earned.
+**Zoom personality by arc position** — the arc position names the JOB the move must do; the VIBE picks the REGISTER it does it in (punchy vs calm), exactly as the vibe scopes a caption style or a sound. These are ORTHOGONAL: read the position for the job, then read each type's FITS/FIGHTS against the vibe for the register — a peak in a calm video is a calm move, a peak in a viral video is a punchy one. Do NOT let "it's a peak" default you to punchy; the position is not the register. The schema pairs each claimed position with the zoom types that live there; what remains yours is the WHY:
+  • hook → GRIP, instant — the thumb is mid-swipe and the move is what stops it. Punchy/viral vibe: a hard SnapReframe. Calm/corporate/cinematic/professional vibe: a decisive SmoothPush lean-in grips just as well — the GRIP is the job, the snap is only the punchy register's way of doing it. A hard snap on a corporate hook is the wrong pick, the same way a boom would be.
+  • mid_peak → PUNCTUATION — sized to its moment exactly; a real peak, not THE peak. Punchy vibe: a quick snap/step in and out. Calm vibe: a small deliberate push. Same beat, register per the vibe.
+  • payoff → COMMITMENT: the slowest and deepest move of the video, holds to the end. THIS position fixes its register regardless of vibe — the slow commitment IS what makes the payoff bigger than every beat before it; a snap would read as just another mid_peak. This is the one place the moment outranks "what feels punchy": even a viral payoff commits. Any zoom in the seconds immediately after the payoff steps on the moment you just earned.
   • close → CALLBACK: echo the hook's personality at lower intensity; for a zoom-free hook, a confident lock-in. A close within 1.5s of the payoff word rides the payoff's resolution instead — validation keeps the payoff of any peak pair inside 2s, so the resolution IS the close's motion there.
   • build / breather → the camera holds; the ONLY zoom sayable there is the MASK — the small eye-carry on the first word after a splice (snap pair, under a second), serving the boundary, not the beat. The flat is doing work — it's what the next peak lands against, and a viewer needs the still frame to feel the push when it comes.
 
@@ -23115,6 +23115,7 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
     """
     if not projected_words:
         return []
+    _fps = float(fps or 60.0)
     pages = []
     current_tokens = []
     current_start_ms = None
@@ -23176,7 +23177,19 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
             elif _crosses_clip_boundary(last_word_end, w_start):
                 _flush()
         if current_start_ms is None:
-            current_start_ms = int(round(w_start * 1000))
+            # CAPTION LATENESS (Zac 2026-07-14): page.startMs must be FRAME-
+            # ALIGNED, same formula as token.fromMs below — not int(round(ms)).
+            # The page-local styles reveal a token at startFrame +
+            # msToFrames(token.fromMs - page.startMs); with a real-ms-rounded
+            # page.startMs the two roundings don't cancel, so Lumen/Prime/
+            # TwoTone jitter ±1 frame and (with CleanCut's continuous compare)
+            # CleanCut lands a full frame late on ~47% of words. Frame-aligning
+            # page.startMs makes startFrame == the component frame and the
+            # (token.fromMs - page.startMs) delta a clean frame multiple → every
+            # page-local style reveals on the IDENTICAL frame the component
+            # fires. (Measured: 0/0 late/early across styles after this + the
+            # CleanCut frame-based compare.)
+            current_start_ms = int((int(round(w_start * _fps)) * 1000.0) // _fps)
         # Token times are ABSOLUTE (output-time milliseconds), matching the
         # coordinate system of page.startMs. Caption components subtract
         # pageStartMs from token.fromMs to derive page-local time for word
@@ -23197,7 +23210,6 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
         # caption reveals on the IDENTICAL frame the components fire. It MUST be an INTEGER:
         # TikTokToken.fromMs/toMs are `int` in render_schemas, and a float fails
         # PromptlyRenderInput validation and kills the whole render (regression 2026-07-13).
-        _fps = float(fps or 60.0)
         token_from_ms = int((int(round(w_start * _fps)) * 1000.0) // _fps)
         token_to_ms = int((int(round(w_end * _fps)) * 1000.0) // _fps)
         current_tokens.append({

@@ -426,6 +426,31 @@ def _caption_frame_alignment():
     _ftok = _h._build_tiktok_pages_from_projected([_W(20.043332)], fps=_fps)[0]["tokens"][0]
     assert isinstance(_ftok["fromMs"], int) and isinstance(_ftok["toMs"], int), \
         "fractional projected onset must still produce integer tokens (this was the render-killer)"
+    # CAPTION LATENESS (Zac 2026-07-14): the PAGE-LOCAL reveal must ALSO land on the
+    # component frame. The page-local styles (CleanCut/Lumen/Prime/TwoTone) reveal a
+    # token at startFrame + msToFrames(token.fromMs - page.startMs), where
+    # startFrame = msToFrames(page.startMs). Before the fix, page.startMs was
+    # int(round(start*1000)) (real-ms) while tokens were frame-aligned, so the two
+    # roundings didn't cancel and captions revealed a frame late. Assert page.startMs
+    # is now frame-aligned AND the page-local reveal == the component frame.
+    _msToFrames = lambda ms: _math.floor((ms / 1000.0) * _fps + 0.5)   # JS Math.round
+    for _s in (1.005, 2.088, 0.508, 3.337, 1.008, 1.015, 20.043332):
+        _pg = _h._build_tiktok_pages_from_projected([_W(_s)], fps=_fps)[0]
+        _comp = int(round(_s * _fps))
+        # page.startMs frame-aligned to the component frame
+        assert _msToFrames(_pg["startMs"]) == _comp, \
+            f"page.startMs must be frame-aligned to the component frame {_comp} at {_s}s"
+        # page-local reveal = startFrame + msToFrames(fromMs - startMs) == component frame
+        _startFrame = _msToFrames(_pg["startMs"])
+        _tok0 = _pg["tokens"][0]
+        _reveal_local = _startFrame + _msToFrames(_tok0["fromMs"] - _pg["startMs"])
+        assert _reveal_local == _comp, \
+            f"page-local caption reveal {_reveal_local} must equal component frame {_comp} at {_s}s"
+    # the CleanCut component activates on a FRAME (msToFrames), not a continuous localMs
+    _cc = open("src/remotion/src/captions/CleanCut/CleanCut.tsx").read()
+    assert "localFrame >= actFrame(page.tokens[i])" in _cc \
+        and "localMs >= page.tokens[i].fromMs - page.startMs" not in _cc, \
+        "CleanCut must activate on the frame (msToFrames), not the continuous-ms threshold"
 
 
 @check("STAGEDPUSH (Zac 2026-07-13): the multi-stage emphasis zoom — 2-3 building stages, EQUAL +8% steps, each peak on its word's audible onset (threaded through the SAME source→clip-local conversion as startMs), adaptive release; emittable (registry + schema round-trip), housed at MID_PEAK only (a building climax, not the payoff — purity), <2 words degrades to SmoothPush")
@@ -471,6 +496,19 @@ def _zoom_vibe_split():
     # the prompt tells Gemini the vibe scopes the zoom register (else it defaults to punchy)
     assert "THE VIBE SCOPES THE ZOOM'S REGISTER" in _src, \
         "the zoom section must teach that the vibe picks the register (the fix's belt)"
+    # ZOOM-SPLIT PART 2 (Zac 2026-07-14): the arc-position personality must not
+    # BLANKET-outrank the vibe (that override forced punchy at every corporate
+    # peak — the bug). It names the JOB; the vibe picks the register. The
+    # "outranks what feels punchy" clause is scoped to the payoff ONLY (its
+    # legitimate home — payoff commitment is vibe-independent purity).
+    assert 'this rule outranks "what feels punchy"' not in _src, \
+        "the blanket outranks-the-vibe clause forced punchy at every peak — it must be gone"
+    assert "the GRIP is the job, the snap is only the punchy register" in _src, \
+        "the hook must teach the register is vibe-scoped (corporate hook = decisive push, not snap)"
+    assert "the one place the moment outranks" in _src, \
+        "the outranks clause belongs to the payoff only (payoff purity, vibe-independent)"
+    assert "the position is not the register" in _src, \
+        "the rule must state arc-position (job) and vibe (register) are orthogonal"
 
 
 # ─── 3b. ZOOM-ORIGIN FACE-LOCK ────────────────────────────────────────
