@@ -55,6 +55,7 @@ SIMPLE_ZOOM_TYPES: set = set()
 COMPLEX_ZOOM_TYPES = {
     "SmoothPush", "SnapReframe", "StepZoom",
     "FocusWindow", "LetterboxPush", "DepthPull",
+    "StagedPush",   # the multi-stage emphasis zoom — Remotion-rendered (bespoke staged push)
 }
 
 # Default scale per zoom type (matches Remotion components' fallbacks).
@@ -65,6 +66,7 @@ _DEFAULT_SCALE = {
     "FocusWindow": 1.8,    # bgScale default
     "LetterboxPush": 1.2,
     "DepthPull": 1.15,
+    "StagedPush": 1.24,    # final (peak) cumulative scale after 3 equal +8% steps
 }
 
 

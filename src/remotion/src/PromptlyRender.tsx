@@ -64,10 +64,10 @@ import {
   DipToBlack,
 } from "./transitions";
 
-// Zoom effects — all 7
+// Zoom effects
 import {
   SmoothPush, SnapReframe, FocusWindow, StepZoom, LetterboxPush,
-  StageZoom, DepthPull,
+  DepthPull, StagedPush,
 } from "./zoom";
 
 // Motion graphics — 29 components total (13 batch 1 + 16 batch 2). All share the
@@ -101,7 +101,7 @@ const TRANSITION_MAP: Record<string, React.FC<any>> = {
 
 const ZOOM_MAP: Record<string, React.FC<any>> = {
   SmoothPush, SnapReframe, FocusWindow, StepZoom, LetterboxPush,
-  StageZoom, DepthPull,
+  DepthPull, StagedPush,
 };
 
 export const MG_MAP: Record<string, React.FC<any>> = {
@@ -799,8 +799,8 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
 //     FFmpeg analog).
 //   - Composite-effect zoom clips (FocusWindow, LetterboxPush, DepthPull —
 //     multi-layer overlays, blur masks, bokeh orbs, etc.).
-// Pure scale-only zooms (SmoothPush, SnapReframe, StepZoom, StageZoom) and
-// no-zoom clips are produced directly by FFmpeg in handler.py.
+// Pure scale-only zooms (SmoothPush, SnapReframe, StepZoom) and no-zoom clips
+// are produced directly by FFmpeg in handler.py.
 //
 // Segments are concatenated end-to-end in the composition timeline so Python
 // can render them all in ONE Remotion process (no per-segment subprocess

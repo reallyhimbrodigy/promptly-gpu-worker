@@ -85,12 +85,28 @@ class _RemotionModel(BaseModel):
 
 
 # ── Clips & transitions ─────────────────────────────────────────────────────
+class StageSpec(_RemotionModel):
+    # One stage of a StagedPush: the emphasis word's onset in CLIP-LOCAL output ms (the
+    # render projection converts each abs-source-ms atMs the same way as startMs) — the
+    # push COMPLETES here, peak on the word — and the cumulative scale at this stage.
+    atMs: int
+    scale: float
+
+
 class ZoomEventSpec(_RemotionModel):
     startMs: int
     durationMs: int
     scale: Optional[float] = None
     originX: Optional[float] = None
     originY: Optional[float] = None
+    # StagedPush (multi-stage emphasis zoom) — 2-3 building stages + adaptive release.
+    # Populated ONLY when the parent ZoomEffectSpec.type == "StagedPush"; other zooms
+    # leave these None. The component renders push→hold→push→…→hold(final)→release.
+    stages: Optional[List[StageSpec]] = None
+    pushMs: Optional[int] = None
+    holdMs: Optional[int] = None
+    releaseMs: Optional[int] = None
+    cutTerminated: Optional[bool] = None
 
 
 class ZoomEffectSpec(_RemotionModel):

@@ -65,7 +65,8 @@ export type ZoomType =
   | "FocusWindow"
   | "StepZoom"
   | "LetterboxPush"
-  | "DepthPull";
+  | "DepthPull"
+  | "StagedPush";
 
 export interface TransitionSpec {
   afterClipIndex: number;

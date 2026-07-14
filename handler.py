@@ -742,7 +742,11 @@ _ZOOM_TYPES = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 # offers nothing but the mask form.
 ZOOM_ARC_HOMES = {
     "hook":     ("DepthPull", "SnapReframe", "StepZoom"),
-    "mid_peak": ("FocusWindow", "SnapReframe", "StepZoom"),
+    # StagedPush lives at MID_PEAK only — it is the climax of a short BUILDING phrase (a
+    # stacked 2-3 emphasis words escalating to their last: "10 million dollars"). NOT
+    # payoff (payoff purity = the committed-push family only, the singular reason-to-exist
+    # word — a multi-stage phrase is a peak, not the one payoff), NOT build/breather/hook.
+    "mid_peak": ("FocusWindow", "SnapReframe", "StepZoom", "StagedPush"),
     "payoff":   ("LetterboxPush", "SmoothPush"),
     "close":    ("SmoothPush", "SnapReframe", "StepZoom"),
     "build":    ("SnapReframe", "StepZoom"),
@@ -830,7 +834,62 @@ ZOOM_PEAK_REACH_MS = {
     "StepZoom":         0,   # instant — peak at startMs
     "LetterboxPush":  490,   # 35% × 1400ms (ramp-in end)
     "DepthPull":      770,   # 35% × 2200ms (ramp-in end)
+    "StagedPush":     280,   # the push into the FIRST stage (pushMs) — peak on word 1;
+                             # later stages peak on THEIR words via each stage's atMs
 }
+
+# ─── StagedPush — the multi-stage emphasis zoom (Zac 2026-07-13) ─────────────
+# A RESERVED move: 2-3 CONSECUTIVE building emphasis words get a smooth-fast push
+# completing on EACH word, then an adaptive release. The emphasis carries 2-3
+# word_indices (the stage anchors); the pipeline derives the stages here.
+_STAGED_PUSH_STEP_SCALE = 0.08   # EQUAL steps (Zac ruling): +8% per stage → 1.08/1.16/1.24
+_STAGED_PUSH_MS = 280            # smooth-fast push into each stage (matches the approved look)
+_STAGED_PUSH_HOLD_MS = 260       # hold at full push after the final word before release
+_STAGED_PUSH_RELEASE_MS = 360    # moderate ease-out back to baseline when the phrase continues
+_STAGED_PUSH_CUT_GAP_S = 0.30    # a clip source_end within this of the last word ⇒ cut-terminated
+
+
+def _staged_push_stages(word_indices, dg_words):
+    """The 2-3 building stages from the emphasis's CONSECUTIVE word_indices — each
+    stage's atMs is its word's AUDIBLE onset (absolute source ms, the SAME onset
+    clock every component reads post-Lever-B), scale climbs in equal +8% steps.
+    Returns (stages, valid_word_indices). <2 valid words → not a staged push."""
+    _wis = sorted(dict.fromkeys(
+        _w for _w in (word_indices or [])
+        if isinstance(_w, int) and 0 <= _w < len(dg_words)))[:3]
+    _stages = [
+        {"atMs": int(round(_audible_word_onset_s(dg_words, _w) * 1000.0)),
+         "scale": round(1.0 + _STAGED_PUSH_STEP_SCALE * (_i + 1), 4)}
+        for _i, _w in enumerate(_wis)
+    ]
+    return _stages, _wis
+
+
+def _augment_staged_push_event(ze_out, word_indices, dg_words, validated_cuts):
+    """Turn the single synthesized zoom event into a StagedPush: attach the 2-3 stages
+    (abs source ms — the render projection threads each atMs through the SAME source→
+    clip-local conversion as startMs), the release params, and cutTerminated. The event
+    window spans first-push-start → release-end. If fewer than 2 building words are
+    genuinely present, DEGRADE to a plain SmoothPush (a staged push on <2 words is wrong)."""
+    _evs = ze_out.get("events") or []
+    _stages, _wis = _staged_push_stages(word_indices, dg_words)
+    if len(_stages) < 2 or not _evs:
+        ze_out["type"] = "SmoothPush"   # not a real building phrase — a normal push, not this
+        return
+    _ev = _evs[0]
+    _last_onset_s = _stages[-1]["atMs"] / 1000.0
+    _cut = any(0.0 <= (float(_c.get("source_end") or 0.0) - _last_onset_s) <= _STAGED_PUSH_CUT_GAP_S
+               for _c in (validated_cuts or []))
+    _ev["stages"] = _stages
+    _ev["pushMs"] = _STAGED_PUSH_MS
+    _ev["holdMs"] = _STAGED_PUSH_HOLD_MS
+    _ev["releaseMs"] = _STAGED_PUSH_RELEASE_MS
+    _ev["cutTerminated"] = _cut
+    _ev["scale"] = _stages[-1]["scale"]   # the final (peak) cumulative scale
+    # startMs = the first push's START (so stage-0's PEAK lands on word 0); span to release end.
+    _ev["startMs"] = max(0, _stages[0]["atMs"] - _STAGED_PUSH_MS)
+    _span_end = _stages[-1]["atMs"] + _STAGED_PUSH_HOLD_MS + (0 if _cut else _STAGED_PUSH_RELEASE_MS)
+    _ev["durationMs"] = max(1, _span_end - _ev["startMs"])
 # ─── FINDING 3: the VISUAL REFRACTORY PERIOD (Zac 2026-07-12) ────────────────
 # Two hard visual moves landing within this window in OUTPUT time fight each
 # other and read as an accidental glitch ("right when a zoom happens, before you
@@ -4888,7 +4947,7 @@ A modeled pair — both choices signed, neither the default:
 
 **OMIT durationMs, scale, originX, originY by default.** The pipeline auto-fills the natural duration and perceptible scale per type — the values that make each move look its best — and runs face detection at the zoom's start frame to lock the origin onto the face (fallback: canvas center). Your zoom_effect is just its type — word-anchored, pipeline-timed, one move per emphasis. Emit originX/originY ONLY when zooming a NON-face element (a prop, a gesture, a whiteboard); emit durationMs/scale only when a specific beat genuinely wants a non-default feel (rare).
 
-Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms · FocusWindow 1500ms · StepZoom 800ms per hold · LetterboxPush 1400ms · DepthPull 2200ms.
+Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms · FocusWindow 1500ms · StepZoom 800ms per hold · LetterboxPush 1400ms · DepthPull 2200ms · StagedPush 280ms per-stage push (each stage's peak lands on its word).
 
 **Every zoom is word-anchored — the pipeline times it.** You author WHICH moment (word_indices) and WHICH type; the renderer back-times the event so its perceptual peak ARRIVES on the anchor word (a measured per-type arrival table) and floors it at the clip head. There is no time to compute.
 
@@ -4899,7 +4958,7 @@ Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms
 **Per-clip zoom spacing:** the camera must fully play each move (in → hold → out) before the next, so emphasis zooms sharing a clip must sit ≥ the type's natural duration apart (space the anchor words). A 6s clip composes ~3 LetterboxPush moves or ~6 StepZoom moves; past that the motion visibly oscillates.
 
 ──────────────────────────────────────────
-THE 6 ZOOM TYPES
+THE 7 ZOOM TYPES
 ──────────────────────────────────────────
 
 **SmoothPush** — slow deliberate forward glide, cubic ease, the "lean in to hear better" move. For statements of weight, revelations wanting gravity, reflective beats, the payoff. **FITS:** any vibe, leans calm/weighty/professional/story — the default lean-in for statements of weight and payoffs. **FIGHTS:** very fast/frenetic viral, where a slow 1.2s push drags against the pace — reach for a snap or step there.
@@ -4915,6 +4974,8 @@ THE 6 ZOOM TYPES
   Optional props: {{ "maxBarHeight": 0.12 }}
 
 **DepthPull** — multi-layer depth zoom with bokeh, edge blur, haze, frame lines. Premium-production claim. For intros, title-sequence energy, atmospheric reveals. **FITS:** premium, story, cinematic intros and title-sequence/atmospheric reveals. **FIGHTS:** fast, punchy, casual — its slow 2.2s atmosphere kills pace and over-produces a plain beat.
+
+**StagedPush** — a 2-OR-3-PART stepped push-in: a smooth-fast push that COMPLETES on each of 2-3 CONSECUTIVE building emphasis words, holds through the pause to the next, pushes tighter, and after the last word holds then releases. Equal small steps stack tension toward the payoff word ("10 [push] · million [push tighter] · dollars [push tightest] — hold — release"). **HOW TO EMIT:** give ONE emphasis_moment the 2-3 consecutive building word_indices IN ORDER (not one — the 2-3 stage anchors) with `zoom_effect.type: "StagedPush"` at arc_position `mid_peak`; the pipeline derives the equal-step stages and lands each push's peak on its word. **THIS IS THE RESERVED MOVE — a chef's special technique, not an everyday tool.** Use it at most on the ONE OR TWO biggest building moments of a video; most videos use it ZERO times. **WHEN:** a short punchy phrase of 2-3 CONSECUTIVE emphasis words that genuinely BUILD to a payoff — a number/stat reveal ("ten million dollars"), an escalating triad ("faster, cheaper, better"), a stacked-emphasis climax. The words MUST be consecutive/near-consecutive AND genuinely escalate toward the last. **WHEN NOT — misuse reads as a defect:** NOT on scattered non-consecutive words (a step on random words looks broken); NOT when there is no genuine BUILD (three flat equal-weight words don't earn it); NOT more than once in close succession (gimmicky — it owns its stretch and suppresses other zooms during its run); NOT on calm/corporate/cinematic/educational beats. If the moment has only ONE emphasis word, use a NORMAL zoom (SmoothPush/SnapReframe), never this. 3 consecutive building words → 3 stages; 2 → 2 stages. **FITS:** viral, punchy, high-energy — the stacked-climax punch. **FIGHTS:** corporate, calm, cinematic, educational, and ANY non-building moment — the escalating push over-dramatizes a composed beat and looks unprofessional on words that don't build.
   Optional props: {{ "edgeBlur": 4, "frameLines": true }}
 
 ═══════════════════════════════════════════════════════════════════════════
@@ -12839,6 +12900,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                 "borderColor", "bgScale", "edgeBlur", "frameLines", "maxBarHeight"):
                         if _ek in _ze_raw:
                             _ze_out[_ek] = _ze_raw[_ek]
+                    # StagedPush: derive the 2-3 stages from this emphasis's word_indices
+                    # (the stage anchors) and attach the release params. Degrades to
+                    # SmoothPush if fewer than 2 genuine building words are present.
+                    if _zt == "StagedPush":
+                        _augment_staged_push_event(_ze_out, _wis, _dg_words, validated_cuts)
                 _mg_raw = em.get("motion_graphic")
                 _mg_out = None
                 if _mg_raw is not None:
@@ -20029,6 +20095,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     "originX": _resolved_ox,
                     "originY": _resolved_oy,
                 }
+                # StagedPush: {**_ev} carried the stages in ABSOLUTE source ms — thread
+                # EACH stage's atMs through the IDENTICAL source→clip-local conversion the
+                # event's startMs got, so every stage PEAK lands on its word in clip-local
+                # frames (the crux — get this wrong and the peaks drift off the words).
+                if _ev.get("stages"):
+                    _new_event["stages"] = [
+                        {"atMs": int(round((float(_s.get("atMs", 0)) - _clip_render_source_start_ms) / _pbr)),
+                         "scale": _s.get("scale")}
+                        for _s in _ev["stages"]
+                    ]
                 _overlapping_events.append(_new_event)
                 _origin_src = (
                     "face_lock" if _face_locked

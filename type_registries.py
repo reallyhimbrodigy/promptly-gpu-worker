@@ -99,6 +99,11 @@ TIGHT_CUT_OVERLAY_MECHANISM_PHRASES = (
 VALID_ZOOM_TYPES = frozenset({
     "SmoothPush", "SnapReframe", "FocusWindow", "StepZoom", "LetterboxPush",
     "DepthPull",
+    # StagedPush — the multi-stage emphasis zoom (2-3 part stepped push-in). A RESERVED
+    # high-impact move: a short punchy phrase of 2-3 CONSECUTIVE building emphasis words
+    # gets a smooth-fast push completing on each word, then an adaptive release. The
+    # emphasis carries 2-3 word_indices (the stage anchors); the pipeline derives stages.
+    "StagedPush",
 })
 
 VALID_MG_TYPES = frozenset({

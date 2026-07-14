@@ -419,6 +419,36 @@ def _caption_frame_alignment():
             f"caption at {_s}s must reveal on the component frame {int(round(_s*_fps))}, got {_reveal(_tok['fromMs'])}"
 
 
+@check("STAGEDPUSH (Zac 2026-07-13): the multi-stage emphasis zoom — 2-3 building stages, EQUAL +8% steps, each peak on its word's audible onset (threaded through the SAME source→clip-local conversion as startMs), adaptive release; emittable (registry + schema round-trip), housed at MID_PEAK only (a building climax, not the payoff — purity), <2 words degrades to SmoothPush")
+def _staged_push_wiring():
+    import handler as _h, render_schemas as _rs, type_registries as _tr
+    _src = open("handler.py").read()
+    # emittable — registry + peak-reach + arc home (mid_peak/payoff only, reserved)
+    assert "StagedPush" in _tr.VALID_ZOOM_TYPES, "StagedPush must be a valid zoom type"
+    assert _h.ZOOM_PEAK_REACH_MS.get("StagedPush") == 280, "peak-reach = pushMs (peak on word 1)"
+    # reserved to MID_PEAK only — a building climax phrase, never the singular payoff
+    # (payoff purity), never build/breather/hook filler
+    assert "StagedPush" in _h.ZOOM_ARC_HOMES["mid_peak"], "housed at mid_peak (the building climax)"
+    assert not any("StagedPush" in _h.ZOOM_ARC_HOMES[_k]
+                   for _k in ("payoff", "build", "breather", "hook", "close")), \
+        "reserved to mid_peak only — not payoff (purity), not build/breather/hook/close"
+    # the derivation + the coordinate thread exist
+    assert "def _augment_staged_push_event(" in _src and "def _staged_push_stages(" in _src
+    assert '_new_event["stages"] = [' in _src and "_clip_render_source_start_ms) / _pbr" in _src, \
+        "each stage atMs must thread through the source→clip-local conversion (the peak-on-word crux)"
+    # equal steps + degrade + the schema round-trips (transport probe)
+    _dg = [{"word": "w", "start": s, "end": s + 0.25} for s in (1.0, 1.8, 2.6)]
+    _st, _ = _h._staged_push_stages([0, 1, 2], _dg)
+    assert [s["scale"] for s in _st] == [1.08, 1.16, 1.24], "equal +8% steps"
+    _ze = {"type": "StagedPush", "events": [{"startMs": 700, "durationMs": 1200, "scale": 1.22}]}
+    _h._augment_staged_push_event(_ze, [0], [{"word": "w", "start": 1.0, "end": 1.3}], [{"source_start": 0.0, "source_end": 5.0}])
+    assert _ze["type"] == "SmoothPush", "<2 building words degrades to SmoothPush"
+    _spec = _rs.ZoomEffectSpec(type="StagedPush", events=[{"startMs": 720, "durationMs": 3140,
+        "stages": [{"atMs": 1000, "scale": 1.08}, {"atMs": 1800, "scale": 1.16}, {"atMs": 2600, "scale": 1.24}],
+        "pushMs": 280, "holdMs": 260, "releaseMs": 360, "cutTerminated": False}])
+    assert len(_rs.ZoomEffectSpec(**_spec.model_dump()).events[0].stages) == 3, "schema round-trips 3 stages"
+
+
 # ─── 3b. ZOOM-ORIGIN FACE-LOCK ────────────────────────────────────────
 # These tests cover audit Tier-1 #3: the zoom-origin face-lock that the
 # prompt promises Gemini. They exercise _resolve_zoom_origin, the same
@@ -4953,8 +4983,8 @@ def _rhythm_beats():
     # fragment-integrity wave (Zac rider 2026-07-11): dangling referents truthed
     assert _src.count('"sound": <one of the 16 sounds') >= 2, \
         "the RESPONSE FORMAT emphasis template must carry the sound rider (the zero-sounds template gap)"
-    assert "THE 7 ZOOM TYPES" not in _src and "THE 6 ZOOM TYPES" in _src, \
-        "zoom-library header count truthed (StageZoom deleted)"
+    assert "THE 7 ZOOM TYPES" in _src and "THE 6 ZOOM TYPES" not in _src, \
+        "zoom-library header count truthed (7 zooms: StagedPush added 2026-07-13, StageZoom stays deleted)"
     assert "emit an empty sound_effects array" not in _src \
         and "sound_effects: []`" not in _src, \
         "sfx-off surfaces re-aimed at the rider (standalone list unauthorable)"
