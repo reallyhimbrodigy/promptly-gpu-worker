@@ -23190,17 +23190,20 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
         # round(start*fps) (int(round(start*fps)) in render_timeline). So a caption lands
         # 0-1 frame LATER than the components on the SAME word — a systematic, caption-only
         # lateness (~7ms avg, up to 16.7ms). The fade used to ease over it; the hard snap
-        # lands squarely on the late frame and exposes it. Shifting fromMs earlier by HALF
-        # A FRAME makes ceil(start*fps - 0.5) == round(start*fps): the caption now reveals
-        # on the IDENTICAL frame the components fire. Sub-ms float precision is preserved
-        # (caption tokens support it) so the alignment is exact, not re-quantized to int-ms.
-        _half_frame_ms = 500.0 / float(fps or 60.0)
-        token_from_ms = w_start * 1000.0 - _half_frame_ms
-        token_to_ms = w_end * 1000.0 - _half_frame_ms
+        # lands squarely on the late frame and exposes it. So land fromMs on the EXACT ms
+        # of the component's frame: the component fires at frame round(start*fps); the ms
+        # that reveals a caption on that same frame is floor(round(start*fps) * 1000 / fps)
+        # — the reveal `(frame/fps)*1000 >= fromMs` first turns true at that frame, so the
+        # caption reveals on the IDENTICAL frame the components fire. It MUST be an INTEGER:
+        # TikTokToken.fromMs/toMs are `int` in render_schemas, and a float fails
+        # PromptlyRenderInput validation and kills the whole render (regression 2026-07-13).
+        _fps = float(fps or 60.0)
+        token_from_ms = int((int(round(w_start * _fps)) * 1000.0) // _fps)
+        token_to_ms = int((int(round(w_end * _fps)) * 1000.0) // _fps)
         current_tokens.append({
             "text": w_text,
             "fromMs": token_from_ms,
-            "toMs": max(token_from_ms + 1.0, token_to_ms),
+            "toMs": max(token_from_ms + 1, token_to_ms),
         })
         current_text_parts.append(w_text)
         last_word_end = w_end

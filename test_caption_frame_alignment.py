@@ -35,10 +35,16 @@ _late_before = 0
 for _s in STARTS:
     _pages = H._build_tiktok_pages_from_projected([W(_s)], fps=FPS)
     _tok = _pages[0]["tokens"][0]
+    # THE RENDER-SCHEMA CONTRACT: TikTokToken.fromMs/toMs are `int` (render_schemas.py).
+    # A float here fails PromptlyRenderInput validation and the whole render dies —
+    # this is the regression the frame-only test missed. Tokens MUST be integers.
+    check(f"start={_s:.3f}s → fromMs/toMs are INTEGERS (render schema requires int)",
+          isinstance(_tok["fromMs"], int) and isinstance(_tok["toMs"], int),
+          f"fromMs={_tok['fromMs']!r} ({type(_tok['fromMs']).__name__}), toMs={_tok['toMs']!r}")
     _rf = reveal_frame(_tok["fromMs"], FPS)
     _cf = component_frame(_s, FPS)
     check(f"start={_s:.3f}s → caption reveals frame {_rf} == component frame {_cf}", _rf == _cf,
-          f"fromMs={_tok['fromMs']:.3f} reveal={_rf} component={_cf}")
+          f"fromMs={_tok['fromMs']} reveal={_rf} component={_cf}")
     # how many WOULD have been late under the old int-ms ceil (no half-frame shift)
     _old_from = round(_s * 1000)
     if reveal_frame(_old_from, FPS) > _cf:
@@ -47,9 +53,11 @@ for _s in STARTS:
 check(f"the fix actually mattered: {_late_before}/{len(STARTS)} of these were a frame LATE before",
       _late_before >= 3, f"only {_late_before} were late before — pick more fractional cases")
 
-# the half-frame shift constant is present + derived from fps (not hardcoded to 60)
+# the fromMs lands on the component frame's INTEGER ms (floor(round(start*fps)*1000/fps)),
+# derived from fps (not hardcoded to 60) — integer so it satisfies the render schema
 _src = open("handler.py").read()
-check("fromMs is shifted earlier by half a frame (500/fps)", "500.0 / float(fps" in _src and "w_start * 1000.0 - _half_frame_ms" in _src)
+check("fromMs lands on the component frame's integer ms (frame*1000//fps), fps-derived",
+      "int(round(w_start * _fps))" in _src and "// _fps" in _src)
 
 print(f"\n=== RESULT: {len(PASS)} passed, {len(FAIL)} failed ===")
 if FAIL:

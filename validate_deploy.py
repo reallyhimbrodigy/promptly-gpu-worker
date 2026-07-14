@@ -402,10 +402,7 @@ def _caption_crisp_entrance():
 
 @check("CAPTION FRAME ALIGNMENT (Zac 2026-07-13): captions reveal on the IDENTICAL frame the components fire — round(start*fps). The caption reveal is (frame/fps)*1000 >= fromMs = ceil(start*fps); components use int(round(start*fps)); so captions landed 0-1 frame LATE (the fade masked it, the snap exposed it). fromMs is shifted earlier by half a frame so ceil(start*fps-0.5)==round(start*fps)")
 def _caption_frame_alignment():
-    import handler as _h, math as _math
-    _src = open("handler.py").read()
-    assert "500.0 / float(fps" in _src and "w_start * 1000.0 - _half_frame_ms" in _src, \
-        "caption fromMs must be shifted earlier by half a frame (align ceil-reveal to the components' round frame)"
+    import handler as _h, math as _math, render_schemas as _rs
     _fps = 60.0
     def _reveal(from_ms):
         f = from_ms * _fps / 1000.0
@@ -415,8 +412,20 @@ def _caption_frame_alignment():
     # fractional-frame onsets (f in (0,0.5)) were the ones a frame late before the fix
     for _s in (1.005, 2.088, 0.508, 3.337, 1.008):
         _tok = _h._build_tiktok_pages_from_projected([_W(_s)], fps=_fps)[0]["tokens"][0]
+        # THE REAL-RENDER CONTRACT: tokens are `int` (TikTokToken.fromMs/toMs) — a float
+        # fails PromptlyRenderInput validation and kills the render. The frame-only test
+        # missed this; a fractional projected onset (start*1000 non-integer) shipped floats
+        # and every caption render died (regression 2026-07-13). Assert BOTH the type and
+        # that a built token actually validates through the render schema.
+        assert isinstance(_tok["fromMs"], int) and isinstance(_tok["toMs"], int), \
+            f"caption tokens MUST be int (render schema); got fromMs={_tok['fromMs']!r}"
+        _rs.TikTokToken(**_tok)  # raises if the token can't validate against the render input schema
         assert _reveal(_tok["fromMs"]) == int(round(_s * _fps)), \
             f"caption at {_s}s must reveal on the component frame {int(round(_s*_fps))}, got {_reveal(_tok['fromMs'])}"
+    # a fractional PROJECTED onset (the production case: pbr-divided times) still yields int tokens
+    _ftok = _h._build_tiktok_pages_from_projected([_W(20.043332)], fps=_fps)[0]["tokens"][0]
+    assert isinstance(_ftok["fromMs"], int) and isinstance(_ftok["toMs"], int), \
+        "fractional projected onset must still produce integer tokens (this was the render-killer)"
 
 
 @check("STAGEDPUSH (Zac 2026-07-13): the multi-stage emphasis zoom — 2-3 building stages, EQUAL +8% steps, each peak on its word's audible onset (threaded through the SAME source→clip-local conversion as startMs), adaptive release; emittable (registry + schema round-trip), housed at MID_PEAK only (a building climax, not the payoff — purity), <2 words degrades to SmoothPush")
@@ -5022,15 +5031,20 @@ def _caption_audible_onset():
     _src = open("handler.py").read()
     assert '"audible_start":' in _src, "projected words must carry audible_start"
     assert 'w.get("audible_start")' in _src, "the caption builder must consume audible_start"
-    # builder uses audible_start over raw start; both fromMs and toMs are then shifted
-    # earlier by HALF A FRAME (500/60 ≈ 8.33ms) so the ceil-reveal lands on the components'
-    # round frame (see _caption_frame_alignment) — the field consumed is still audible_start.
+    # builder uses audible_start over raw start; fromMs/toMs then land on the INTEGER ms of
+    # the component's frame — floor(round(t*fps)*1000/fps) — so the ceil-reveal lands on the
+    # components' round frame (see _caption_frame_alignment) AND stays an int for the render
+    # schema. The field consumed is still audible_start.
     _pw = [{"start": 1.60, "audible_start": 1.52, "end": 1.90, "word": "hi", "punctuated_word": "hi"}]
     _pg = _h._build_tiktok_pages_from_projected(_pw, max_words_per_page=2, fps=60.0)
-    assert _pg and abs(_pg[0]["tokens"][0]["fromMs"] - (1520 - 500.0/60.0)) < 0.01, \
-        "caption fromMs = audible start (1520) shifted earlier by half a frame for frame-alignment"
-    assert abs(_pg[0]["tokens"][0]["toMs"] - (1900 - 500.0/60.0)) < 0.01, \
-        "word end shifted by the same half frame — appears earlier, stays as long"
+    _tk = _pg[0]["tokens"][0]
+    assert isinstance(_tk["fromMs"], int) and isinstance(_tk["toMs"], int), \
+        "caption tokens must be int (render schema TikTokToken.fromMs/toMs: int)"
+    # audible_start 1.52s → round(1.52*60)=91 → floor(91*1000/60)=1516ms (the frame-91 tick)
+    assert _tk["fromMs"] == 1516, \
+        f"caption fromMs = audible start on the component frame's integer ms, got {_tk['fromMs']}"
+    # word end 1.90s → round(1.90*60)=114 → floor(114*1000/60)=1900ms
+    assert _tk["toMs"] == 1900, f"word end on its frame's integer ms, got {_tk['toMs']}"
     # LEVER B (Zac 2026-07-12): the onset correction is REMOVED — audible_start ==
     # raw start for EVERY word (one uniform clock; per-word variance impossible).
     _h._LEVEL_SILENCES_LAST[:] = [(1.20, 1.52)]; _h._WITHIN_WORD_SILENCES_LAST[:] = []
