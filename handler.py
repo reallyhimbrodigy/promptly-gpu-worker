@@ -741,12 +741,18 @@ _ZOOM_TYPES = Literal[tuple(sorted(VALID_ZOOM_TYPES))]
 # treatment. Punctuation zooms stay unrepresentable there: the mask variant
 # offers nothing but the mask form.
 ZOOM_ARC_HOMES = {
-    "hook":     ("DepthPull", "SnapReframe", "StepZoom"),
+    # SmoothPush (the calm forward push) is offered at hook + mid_peak so the VIBE can
+    # scope the tonal register the same way it already scopes captions/SFX (Zac 2026-07-13,
+    # the zoom-split fix): a corporate/calm beat picks SmoothPush, a viral beat picks the
+    # punchy SnapReframe/StepZoom — emergent from the per-zoom FITS/FIGHTS, not forced by
+    # the arc home. The schema is STATIC (same dict every job — the Vertex cache key can't
+    # move per-vibe), so BOTH registers must be available and the fitness+vibe chooses.
+    "hook":     ("DepthPull", "SnapReframe", "StepZoom", "SmoothPush"),
     # StagedPush lives at MID_PEAK only — it is the climax of a short BUILDING phrase (a
     # stacked 2-3 emphasis words escalating to their last: "10 million dollars"). NOT
     # payoff (payoff purity = the committed-push family only, the singular reason-to-exist
     # word — a multi-stage phrase is a peak, not the one payoff), NOT build/breather/hook.
-    "mid_peak": ("FocusWindow", "SnapReframe", "StepZoom", "StagedPush"),
+    "mid_peak": ("FocusWindow", "SnapReframe", "StepZoom", "StagedPush", "SmoothPush"),
     "payoff":   ("LetterboxPush", "SmoothPush"),
     "close":    ("SmoothPush", "SnapReframe", "StepZoom"),
     "build":    ("SnapReframe", "StepZoom"),
@@ -4960,6 +4966,8 @@ Natural durations (for back-timing math): SmoothPush 1200ms · SnapReframe 700ms
 ──────────────────────────────────────────
 THE 7 ZOOM TYPES
 ──────────────────────────────────────────
+
+**THE VIBE SCOPES THE ZOOM'S REGISTER — same as it scopes captions and SFX.** Most positions offer BOTH a calm push (SmoothPush) and a punchy move (SnapReframe / StepZoom); the vibe picks which. A corporate / calm / cinematic / professional / educational video takes the CALM register at its peaks — SmoothPush's gentle lean-in, not the hard snap — even on a hook or a mid_peak. A viral / punchy / high-energy video takes the punchy register — SnapReframe / StepZoom. Read each type's FITS/FIGHTS against the video's vibe exactly as you do for a caption style or a sound: a SnapReframe on a corporate beat is the wrong pick even when the beat wants a peak, just as a boom would be. Don't default to punchy because a beat is a peak — a peak in a calm video is a calm push.
 
 **SmoothPush** — slow deliberate forward glide, cubic ease, the "lean in to hear better" move. For statements of weight, revelations wanting gravity, reflective beats, the payoff. **FITS:** any vibe, leans calm/weighty/professional/story — the default lean-in for statements of weight and payoffs. **FIGHTS:** very fast/frenetic viral, where a slow 1.2s push drags against the pace — reach for a snap or step there.
 

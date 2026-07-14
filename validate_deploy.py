@@ -449,6 +449,21 @@ def _staged_push_wiring():
     assert len(_rs.ZoomEffectSpec(**_spec.model_dump()).events[0].stages) == 3, "schema round-trips 3 stages"
 
 
+@check("ZOOM VIBE-SPLIT (Zac 2026-07-13): the VIBE scopes the zoom's tonal register like it scopes captions/SFX — SmoothPush (the calm push) is OFFERED at hook + mid_peak (not payoff/close only), so a corporate/calm beat can pick calm and a viral beat picks punchy; the fitness+vibe chooses within the static schema (which can't be vibe-dependent — Vertex cache)")
+def _zoom_vibe_split():
+    import handler as _h
+    _src = open("handler.py").read()
+    # the calm push is now available at the peak positions (not just payoff/close)
+    assert "SmoothPush" in _h.ZOOM_ARC_HOMES["hook"] and "SmoothPush" in _h.ZOOM_ARC_HOMES["mid_peak"], \
+        "SmoothPush must be offered at hook + mid_peak so a calm vibe can pick calm there"
+    # the punchy options stay (viral still picks them); payoff purity untouched
+    assert "SnapReframe" in _h.ZOOM_ARC_HOMES["mid_peak"], "the punchy option stays (viral)"
+    assert set(_h.ZOOM_ARC_HOMES["payoff"]) == {"SmoothPush", "LetterboxPush"}, "payoff purity untouched"
+    # the prompt tells Gemini the vibe scopes the zoom register (else it defaults to punchy)
+    assert "THE VIBE SCOPES THE ZOOM'S REGISTER" in _src, \
+        "the zoom section must teach that the vibe picks the register (the fix's belt)"
+
+
 # ─── 3b. ZOOM-ORIGIN FACE-LOCK ────────────────────────────────────────
 # These tests cover audit Tier-1 #3: the zoom-origin face-lock that the
 # prompt promises Gemini. They exercise _resolve_zoom_origin, the same
