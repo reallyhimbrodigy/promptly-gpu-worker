@@ -523,6 +523,25 @@ def _vibe_feel_fixes():
         "corporate must be told to dress its turns with the clean transitions, not skip them"
     assert "SlideOver is the safe pick in ANY vibe" in _src, \
         "a safe-in-any-vibe transition must be elevated (the missing universal member)"
+    # WHOLE-CLASS SWEEP (Zac 2026-07-14): 6 more un-caveated overrides found + fixed.
+    # Each named the punchy register without a vibe caveat, overriding a FITS/FIGHTS.
+    assert "a committing boom on the land" not in _src, \
+        "worked Example 3 (cinematic confession) must not model boom (boom FIGHTS cinematic)"
+    assert "a committing SWELL on the land — transition-sfx, not a boom" in _src, \
+        "the cinematic example must model the swell, not the boom"
+    assert "at a mid-peak the snap pair — SnapReframe or StepZoom — carries it), snap for the reaction" not in _src, \
+        "the reaction-camera prescription must be vibe-scoped, not hardcoded snap"
+    assert "snap for a reaction or punchline (a laugh, a gasp, the speaker's expression breaking), step for a landing statement (the fact arrives, the word weighs in the chest). Both are quick in / quick out." not in _src, \
+        "the build-and-release mid_peak prescription must be vibe-scoped"
+    assert "When register and arc-position suggest different answers, arc-position wins" not in _src, \
+        "the transition arc-map must NOT subordinate the vibe to arc-position (orthogonal, not conflicting)"
+    assert "Arc-position and vibe are ORTHOGONAL" in _src, \
+        "the transition map must teach arc(job)/vibe(register) orthogonality"
+    assert "a stat snapping in → ShutterFlash. A cutaway" not in _src, \
+        "the b-roll edge stat→ShutterFlash must be vibe-caveated (ShutterFlash FIGHTS calm)"
+    # the mid_peak arc bullet no longer prescribes punchy without a caveat
+    assert "punctuation — quick in, quick out; a hit/pop/ding when this peak" not in _src, \
+        "the mid_peak arc bullet must be vibe-scoped (punchy snap+hit/pop/ding vs calm push+swell)"
 
 
 @check("ZOOM VIBE-SPLIT (Zac 2026-07-13): the VIBE scopes the zoom's tonal register like it scopes captions/SFX — SmoothPush (the calm push) is OFFERED at hook + mid_peak (not payoff/close only), so a corporate/calm beat can pick calm and a viral beat picks punchy; the fitness+vibe chooses within the static schema (which can't be vibe-dependent — Vertex cache)")
