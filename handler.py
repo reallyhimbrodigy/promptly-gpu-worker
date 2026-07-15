@@ -23208,7 +23208,15 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
             # page-local style reveals on the IDENTICAL frame the component
             # fires. (Measured: 0/0 late/early across styles after this + the
             # CleanCut frame-based compare.)
-            current_start_ms = int((int(round(w_start * _fps)) * 1000.0) // _fps)
+            # NEVER-EARLY (Zac 2026-07-15): a caption word must appear ONLY when
+            # it is audible — never a frame before its own onset. round() lands
+            # ~50% of words on the frame BEFORE the onset (up to ~8ms early),
+            # which reads as the word on screen before it is spoken. CEIL lands
+            # on the FIRST frame at-or-after the onset — 0% early, at most one
+            # frame after (still on the word). (Zooms/SFX stay on round — a
+            # motion/sound a few ms off is inaudible; a caption's hard snap
+            # before its audio is not.)
+            current_start_ms = int((int(math.ceil(w_start * _fps)) * 1000.0) // _fps)
         # Token times are ABSOLUTE (output-time milliseconds), matching the
         # coordinate system of page.startMs. Caption components subtract
         # pageStartMs from token.fromMs to derive page-local time for word
@@ -23229,8 +23237,10 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
         # caption reveals on the IDENTICAL frame the components fire. It MUST be an INTEGER:
         # TikTokToken.fromMs/toMs are `int` in render_schemas, and a float fails
         # PromptlyRenderInput validation and kills the whole render (regression 2026-07-13).
-        token_from_ms = int((int(round(w_start * _fps)) * 1000.0) // _fps)
-        token_to_ms = int((int(round(w_end * _fps)) * 1000.0) // _fps)
+        # NEVER-EARLY (Zac 2026-07-15): ceil so the word reveals on the first
+        # frame at-or-after its audible onset — never before (see current_start_ms).
+        token_from_ms = int((int(math.ceil(w_start * _fps)) * 1000.0) // _fps)
+        token_to_ms = int((int(math.ceil(w_end * _fps)) * 1000.0) // _fps)
         current_tokens.append({
             "text": w_text,
             "fromMs": token_from_ms,

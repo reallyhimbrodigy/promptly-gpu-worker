@@ -39,6 +39,12 @@ export interface CaptionFadeProbeProps {
   keywords?: string[];
   wordMs?: number; // per-word onset spacing; default 170ms (fast speech)
   label?: string; // corner tag, e.g. "before" / "after"
+  // NEVER-EARLY proof (Zac 2026-07-15): feed the ACTUAL Python-built pages
+  // (ceil fromMs) here and mark the TRUE audible onsets in onsetsMs, so the
+  // BeatPulse ticks on the audio onset (not the reveal target). The caption
+  // must SNAP on the tick, never a frame before it.
+  pages?: TikTokPage[];
+  onsetsMs?: number[];
 }
 
 function buildFastPage(words: string[], wordMs: number): TikTokPage {
@@ -82,17 +88,22 @@ export const CaptionFadeProbe: React.FC<CaptionFadeProbeProps> = ({
   keywords = [],
   wordMs = 170,
   label,
+  pages,
+  onsetsMs,
 }) => {
-  const page = buildFastPage(words, wordMs);
+  const builtPages = pages && pages.length ? pages : [buildFastPage(words, wordMs)];
+  const page = builtPages[0];
   const Comp = FADE_CAPTION_MAP[style];
   if (!Comp) throw new Error(`CaptionFadeProbe: unknown style "${style}"`);
-  const onsets = page.tokens.map((t) => t.fromMs);
+  // Metronome onsets: the TRUE audible onsets when provided (never-early proof),
+  // else the token starts (the original fade-bound sample).
+  const onsets = onsetsMs && onsetsMs.length ? onsetsMs : page.tokens.map((t) => t.fromMs);
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#141414" }}>
       <BeatPulse onsetsMs={onsets} />
       <Comp
-        pages={[page]}
+        pages={builtPages}
         position="bottom"
         keywords={keywords}
         specialWords={keywords}

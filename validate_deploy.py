@@ -400,7 +400,7 @@ def _caption_crisp_entrance():
     assert "MAX_ENTRANCE_MS = 80" in open(_os.path.join(_base, "shared", "fadeTiming.ts")).read()
 
 
-@check("CAPTION FRAME ALIGNMENT (Zac 2026-07-13): captions reveal on the IDENTICAL frame the components fire — round(start*fps). The caption reveal is (frame/fps)*1000 >= fromMs = ceil(start*fps); components use int(round(start*fps)); so captions landed 0-1 frame LATE (the fade masked it, the snap exposed it). fromMs is shifted earlier by half a frame so ceil(start*fps-0.5)==round(start*fps)")
+@check("CAPTION NEVER-EARLY (Zac 2026-07-15): a caption word reveals ONLY when it is audible — never a frame before its own onset. round(start*fps) lands ~50% of words on the frame BEFORE the onset (up to ~8ms early = word on screen before spoken); CEIL(start*fps) is the first frame at-or-after the onset (0% early, <=1 frame after = still on the word). Both the absolute reveal ((frame/fps)*1000>=fromMs) and the page-local reveal (startFrame+msToFrames(fromMs-startMs)) must equal ceil(start*fps) and be >= the onset. Tokens stay int (render schema).")
 def _caption_frame_alignment():
     import handler as _h, math as _math, render_schemas as _rs
     _fps = 60.0
@@ -409,7 +409,7 @@ def _caption_frame_alignment():
         fr = _math.floor(f)
         return fr if (fr / _fps) * 1000.0 >= from_ms - 1e-9 else fr + 1
     _W = lambda s: {"word": "w", "punctuated_word": "w", "start": s, "end": s + 0.3, "start_word_index": 0}
-    # fractional-frame onsets (f in (0,0.5)) were the ones a frame late before the fix
+    # fractional-frame onsets (f in (0,0.5)) are the ones round() revealed EARLY (before onset)
     for _s in (1.005, 2.088, 0.508, 3.337, 1.008):
         _tok = _h._build_tiktok_pages_from_projected([_W(_s)], fps=_fps)[0]["tokens"][0]
         # THE REAL-RENDER CONTRACT: tokens are `int` (TikTokToken.fromMs/toMs) — a float
@@ -420,32 +420,38 @@ def _caption_frame_alignment():
         assert isinstance(_tok["fromMs"], int) and isinstance(_tok["toMs"], int), \
             f"caption tokens MUST be int (render schema); got fromMs={_tok['fromMs']!r}"
         _rs.TikTokToken(**_tok)  # raises if the token can't validate against the render input schema
-        assert _reveal(_tok["fromMs"]) == int(round(_s * _fps)), \
-            f"caption at {_s}s must reveal on the component frame {int(round(_s*_fps))}, got {_reveal(_tok['fromMs'])}"
+        # NEVER-EARLY: reveal on ceil(start*fps) — never the frame before the onset.
+        _ceil = int(_math.ceil(_s * _fps))
+        _rev = _reveal(_tok["fromMs"])
+        assert _rev == _ceil, \
+            f"caption at {_s}s must reveal on the ceil frame {_ceil}, got {_rev}"
+        assert (_rev / _fps) >= _s - 1e-9, \
+            f"caption at {_s}s reveals at frame {_rev} ({_rev/_fps:.4f}s) — BEFORE its onset {_s}s (early = word before audible)"
     # a fractional PROJECTED onset (the production case: pbr-divided times) still yields int tokens
     _ftok = _h._build_tiktok_pages_from_projected([_W(20.043332)], fps=_fps)[0]["tokens"][0]
     assert isinstance(_ftok["fromMs"], int) and isinstance(_ftok["toMs"], int), \
         "fractional projected onset must still produce integer tokens (this was the render-killer)"
-    # CAPTION LATENESS (Zac 2026-07-14): the PAGE-LOCAL reveal must ALSO land on the
-    # component frame. The page-local styles (CleanCut/Lumen/Prime/TwoTone) reveal a
-    # token at startFrame + msToFrames(token.fromMs - page.startMs), where
-    # startFrame = msToFrames(page.startMs). Before the fix, page.startMs was
-    # int(round(start*1000)) (real-ms) while tokens were frame-aligned, so the two
-    # roundings didn't cancel and captions revealed a frame late. Assert page.startMs
-    # is now frame-aligned AND the page-local reveal == the component frame.
+    # CAPTION NEVER-EARLY (Zac 2026-07-15): the PAGE-LOCAL reveal must ALSO land on
+    # ceil(start*fps) — never the frame before the onset. The page-local styles
+    # (CleanCut/Lumen/Prime/TwoTone) reveal a token at
+    # startFrame + msToFrames(token.fromMs - page.startMs), where
+    # startFrame = msToFrames(page.startMs). page.startMs is ceil-frame-aligned, so
+    # the two frame-alignments cancel and the reveal is the ceil frame exactly.
     _msToFrames = lambda ms: _math.floor((ms / 1000.0) * _fps + 0.5)   # JS Math.round
     for _s in (1.005, 2.088, 0.508, 3.337, 1.008, 1.015, 20.043332):
         _pg = _h._build_tiktok_pages_from_projected([_W(_s)], fps=_fps)[0]
-        _comp = int(round(_s * _fps))
-        # page.startMs frame-aligned to the component frame
-        assert _msToFrames(_pg["startMs"]) == _comp, \
-            f"page.startMs must be frame-aligned to the component frame {_comp} at {_s}s"
-        # page-local reveal = startFrame + msToFrames(fromMs - startMs) == component frame
+        _ceil = int(_math.ceil(_s * _fps))
+        # page.startMs ceil-frame-aligned to the never-early frame
+        assert _msToFrames(_pg["startMs"]) == _ceil, \
+            f"page.startMs must be ceil-frame-aligned to the never-early frame {_ceil} at {_s}s"
+        # page-local reveal = startFrame + msToFrames(fromMs - startMs) == ceil frame, never before onset
         _startFrame = _msToFrames(_pg["startMs"])
         _tok0 = _pg["tokens"][0]
         _reveal_local = _startFrame + _msToFrames(_tok0["fromMs"] - _pg["startMs"])
-        assert _reveal_local == _comp, \
-            f"page-local caption reveal {_reveal_local} must equal component frame {_comp} at {_s}s"
+        assert _reveal_local == _ceil, \
+            f"page-local caption reveal {_reveal_local} must equal ceil frame {_ceil} at {_s}s"
+        assert (_reveal_local / _fps) >= _s - 1e-9, \
+            f"page-local reveal {_reveal_local} ({_reveal_local/_fps:.4f}s) is BEFORE onset {_s}s (word before audible)"
     # the CleanCut component activates on a FRAME (msToFrames), not a continuous localMs
     _cc = open("src/remotion/src/captions/CleanCut/CleanCut.tsx").read()
     assert "localFrame >= actFrame(page.tokens[i])" in _cc \
@@ -5157,17 +5163,18 @@ def _caption_audible_onset():
     assert '"audible_start":' in _src, "projected words must carry audible_start"
     assert 'w.get("audible_start")' in _src, "the caption builder must consume audible_start"
     # builder uses audible_start over raw start; fromMs/toMs then land on the INTEGER ms of
-    # the component's frame — floor(round(t*fps)*1000/fps) — so the ceil-reveal lands on the
-    # components' round frame (see _caption_frame_alignment) AND stays an int for the render
-    # schema. The field consumed is still audible_start.
+    # the NEVER-EARLY frame — floor(ceil(t*fps)*1000/fps) — the first frame at-or-after the
+    # audible onset (never the frame before it; see _caption_frame_alignment) AND an int for
+    # the render schema. The field consumed is still audible_start.
     _pw = [{"start": 1.60, "audible_start": 1.52, "end": 1.90, "word": "hi", "punctuated_word": "hi"}]
     _pg = _h._build_tiktok_pages_from_projected(_pw, max_words_per_page=2, fps=60.0)
     _tk = _pg[0]["tokens"][0]
     assert isinstance(_tk["fromMs"], int) and isinstance(_tk["toMs"], int), \
         "caption tokens must be int (render schema TikTokToken.fromMs/toMs: int)"
-    # audible_start 1.52s → round(1.52*60)=91 → floor(91*1000/60)=1516ms (the frame-91 tick)
-    assert _tk["fromMs"] == 1516, \
-        f"caption fromMs = audible start on the component frame's integer ms, got {_tk['fromMs']}"
+    # audible_start 1.52s → ceil(1.52*60)=92 → floor(92*1000/60)=1533ms (frame 92 = 1.5333s,
+    # the first frame at-or-after the 1.52s onset; frame 91 = 1.5167s would reveal it early)
+    assert _tk["fromMs"] == 1533, \
+        f"caption fromMs = audible onset on the never-early (ceil) frame's integer ms, got {_tk['fromMs']}"
     # word end 1.90s → round(1.90*60)=114 → floor(114*1000/60)=1900ms
     assert _tk["toMs"] == 1900, f"word end on its frame's integer ms, got {_tk['toMs']}"
     # LEVER B (Zac 2026-07-12): the onset correction is REMOVED — audible_start ==
