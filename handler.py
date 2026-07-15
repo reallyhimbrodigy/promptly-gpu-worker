@@ -361,24 +361,40 @@ def _vibe_requests_captions(vibe):
 # ear caught. Removed. The onset stays silence-anchored (accurate where a dB
 # silence exists); mid-phrase words keep the Deepgram start, and SFX TIMING is
 # instead guarded by attack-matched-to-measurability (_sfx_may_fire below).
-def _audible_word_onset_s(dg_words, idx):
-    """ONSET CORRECTION REMOVED — LEVER B (Zac 2026-07-12). Returns the RAW Deepgram
-    start for EVERY word, unconditionally. Every component anchor (emphasis/zoom t,
-    SFX fire, caption/MG/broll/overlay via audible_start) reads THIS, so all land on
-    ONE clock for every word.
+# SHARED-CLOCK LEAD (Zac 2026-07-14, universal-lateness finding): a UNIFORM
+# early shift of the one clock every component reads. Lever B put everything on
+# raw Deepgram for COHERENCE (no per-word variance) — correct — but the ear
+# hears the whole coherent set land a hair late, because raw Deepgram tracks
+# the ENERGY (vowel) onset while the ear locks onto the earlier PERCEPTUAL
+# onset (measured: Deepgram is ~+15ms median / +57ms mean after the
+# spectral-flux onset; NOT the ~111ms first guessed). Subtracting a single
+# constant from the shared clock shifts EVERY component earlier by the same
+# amount — coherence (the Lever B win) is preserved BY CONSTRUCTION, and the
+# systematic lateness is corrected. TUNABLE by ear: 0 = pure Lever B (no
+# change); Zac's ear sets the value. Read as a module global each call so a
+# proof render can sweep it without a redeploy.
+_SHARED_CLOCK_LEAD_MS = 0.0
 
-    History: the silence-based correction was inconsistent — a ground-truth audit
-    proved 50/60 'corrected' words had no real pause (a prev-tail clamp artifact),
-    and the true mid-phrase onset is PROVEN unmeasurable (4 detectors, 54-131ms err).
-    An inconsistent per-word correction is exactly what the ear catches as 'sometimes
-    early/late'. Since we can never correct mid-phrase words right, raw Deepgram is
-    the only UNIFORM reference: per-word timing variance is now UNREPRESENTABLE by
-    construction. A uniform bias reads as consistent/on-time; only VARIANCE reads as
-    off — and variance is now impossible. (Sound CHOICE still keys off real pauses
-    via _sfx_onset_measurable, which reads the silences directly — decoupled from
-    this timing derivation.)"""
+
+def _audible_word_onset_s(dg_words, idx):
+    """RAW Deepgram start MINUS the shared-clock lead (Lever B + the uniform
+    early shift). Every component anchor (emphasis/zoom t, SFX fire,
+    caption/MG/broll/overlay via audible_start) reads THIS, so all land on ONE
+    clock for every word — and all shift together by _SHARED_CLOCK_LEAD_MS,
+    so coherence is preserved while the systematic lateness is corrected.
+
+    Lever B history: the silence-based per-word correction was inconsistent — a
+    ground-truth audit proved 50/60 'corrected' words had no real pause (a
+    prev-tail clamp artifact), and the true mid-phrase onset is PROVEN
+    unmeasurable (4 detectors, 54-131ms err). An inconsistent PER-WORD
+    correction is exactly what the ear catches as 'sometimes early/late'. So we
+    keep the ONE uniform reference (variance unrepresentable) and correct the
+    SYSTEMATIC lateness with a single early shift instead — coherent AND
+    on-time. (Sound CHOICE still keys off real pauses via _sfx_onset_measurable,
+    which reads the silences directly — decoupled from this timing derivation.)"""
     try:
-        return float(dg_words[idx].get("start") or 0.0)
+        _raw = float(dg_words[idx].get("start") or 0.0)
+        return max(0.0, _raw - (_SHARED_CLOCK_LEAD_MS / 1000.0))
     except Exception:
         return 0.0
 
@@ -4554,7 +4570,7 @@ The plan reads the video's phases and sets each phase's energy from the footage:
 
   • **mid_peak** (1-4 per video, each a key_moments entry, intensity 0.6-0.85) — a beat lands: a fact, a reaction, a punchline mid-arc. Feeling: a small "oh!" registered in the body. Treatment: punctuation — quick in, quick out; a hit/pop/ding when this peak is one of the video's hits, the voice when it isn't — read the moment, not the safe side. Match the size of the moment exactly; this is a real peak but not THE peak.
 
-  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: the committed push, slow ramp, the deepest scale of the video — and usually the video's second hit: the payoff line is the video's reason to exist, and the boom lives here (a payoff sent bare is a deliberate claim, never a default). Captions go big on the payoff word. The slow commitment is what separates the payoff from every peak before it; a snap would read as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
+  • **payoff** (1 segment, centered on payoff_word_index, intensity 1.0) — THE moment, the line everyone shares. Feeling: the camera and sound COMMIT and the line lands with weight. Treatment: the committed push, slow ramp, the deepest scale of the video — and usually the video's second hit: the payoff line is the video's reason to exist, and a committing SOUND lives here — but WHICH sound is the vibe's call, not automatic: a punchy/viral payoff takes the boom (its sharp punch); a corporate/clean/cinematic/professional payoff commits with the push and a SWELL (transition-sfx) — a boom FIGHTS those vibes. (A payoff sent bare is a deliberate claim, never a default.) Captions go big on the payoff word. The slow commitment is what separates the payoff from every peak before it; a snap would read as just another mid-peak. The payoff word belongs to the speaker's face — the biggest face moment in the format; the cutaway lane closes before it, and the camera holds the person while it lands. **The payoff is the FINAL committed move.** It holds and resolves cleanly to the close — the payoff's zoom is the last one through the close, with one exception: a deliberate callback beat separated by real time (≥1.5s). The close rides the payoff's resolution — the settle IS the close's motion.
 
   • **breather** (between peaks or right before the payoff, intensity 0.0-0.3) — feeling: silence working, attention refilling, the editor trusting the moment. Treatment: stillness — the frame holds bare; at most one quiet B-roll when it perfectly matches what was just said. Zoom, transition, and SFX all sit this beat out. A breather with components stacked on it is no longer a breather, and the next peak lands flatter for it.
 
@@ -4925,7 +4941,7 @@ Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punc
   • close → CALLBACK: echo the hook's personality at lower intensity; for a zoom-free hook, a confident lock-in. A close within 1.5s of the payoff word rides the payoff's resolution instead — validation keeps the payoff of any peak pair inside 2s, so the resolution IS the close's motion there.
   • build / breather → the camera holds; the ONLY zoom sayable there is the MASK — the small eye-carry on the first word after a splice (snap pair, under a second), serving the boundary, not the beat. The flat is doing work — it's what the next peak lands against, and a viewer needs the still frame to feel the push when it comes.
 
-**The weight belongs to the moment first, and the camera is its first instrument.** A peak's weight is set by what the moment is doing — the laugh, the gasp, the line the video exists to deliver — and the camera is the first instrument that serves it. So when the camera is held still on a beat that already earns its place in `key_moments`, the weight still lands; it simply moves to the instruments that remain. Carry the same emphasis intent across: let a committing sound do the pushing (the boom on the payoff word), let the caption hold and go big on that word, let a stat land on the syllable it names. Read the moment's intended feeling first, then ask which available instrument delivers it here — a payoff with the camera held still still commits, through sound and a held caption, and the viewer feels the same weight arrive. This carries the intent to instruments you already own; the peak set stays exactly the 3-5 you committed in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.
+**The weight belongs to the moment first, and the camera is its first instrument.** A peak's weight is set by what the moment is doing — the laugh, the gasp, the line the video exists to deliver — and the camera is the first instrument that serves it. So when the camera is held still on a beat that already earns its place in `key_moments`, the weight still lands; it simply moves to the instruments that remain. Carry the same emphasis intent across: let a committing sound do the pushing (the boom on the payoff word in a punchy/viral vibe; a swell — transition-sfx — where the vibe is corporate/clean/cinematic, which the boom FIGHTS), let the caption hold and go big on that word, let a stat land on the syllable it names. Read the moment's intended feeling first, then ask which available instrument delivers it here — a payoff with the camera held still still commits, through sound and a held caption, and the viewer feels the same weight arrive. This carries the intent to instruments you already own; the peak set stays exactly the 3-5 you committed in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.
 
 **Variety happens at the moment, not the clip.** Pick the type each peak's actual reaction wants — the pipeline splits the underlying clip behind the scenes so adjacent emphases with different types each render their own. Two peaks sharing a clip can each render their own type, so a row of identical zooms means you didn't ask what each moment wanted. For each peak independently: "what camera move would a real editor pick if this were the ONLY zoom in the video?"
 
@@ -5244,7 +5260,8 @@ These are the mechanics the render depends on — the physics of the frame, the 
     payoff's landing are the usual two (see THE SOUNDS). The count follows
     the beats, and rotating through the rack keeps the hits reading fresh;
     boom is the one to reserve — a single deep impact on the biggest moment
-    reads harder than a repeated one.
+    reads harder than a repeated one, and ONLY where the vibe wants a punch
+    (boom FIGHTS corporate/clean/cinematic — those payoffs swell, not punch).
 
 **VARIETY:** every zoom type and SFX sound stays at or under 60% of its category's events — the mix is what keeps each firing feeling chosen. If 4 of 5 emphases share one zoom type,
 re-read those moments — at least one is doing something different.
@@ -8680,6 +8697,8 @@ _TRANSITIONS_SUBCALL_SYS = """You are placing TRANSITIONS and TIGHT-CUT OVERLAYS
 A transition is the visual treatment on a PICTURE CHANGE — the seam where what's on screen turns over: a source shot change or a B-roll cutaway edge. When the video crosses one, riding it tells the eye the picture turned; a real scene change that plays as a bare jump can read as a beat the edit missed — and a punchline seam plays bare BECAUSE the snap is the beat. Between two moments of one continuous shot the picture has not changed — those splices are not offered here.
 
 A picture change is an event the edit reads, never ignores. The treatment scales with the turn: the act turn takes the full transition where the silence fits it; the mid-scene camera cut takes the flash, the bloom, or the confident bare cut. Each seam is a decision with a why — including the bare ones.
+
+**THE VIBE SCOPES THE TRANSITION REGISTER — a scene change is universal; EVERY vibe rides its genuine turns, and the vibe picks the register, not WHETHER to transition.** A real act-turn earns a transition in a corporate explainer exactly as in a viral reel — the difference is which one. Read the editorial vision for the register: a CORPORATE / clean / professional / educational / cinematic video dresses its turns with the COMPOSED transitions (SlideOver, StepPush, DipToBlack) — clean, neutral, structured; a VIRAL / punchy / high-energy video takes the kinetic ones (ZoomThrough, ShutterFlash, CardSwipe). Do NOT read a calm vibe as "so use no transitions" — the restraint is in the COUNT (1-3, most cuts still play straight), not in refusing the register. A corporate video with real chapter turns and zero transitions has skipped a universal move; give its turns the clean transitions. SlideOver is the safe pick in ANY vibe (it fights nothing) — reach for it when a genuine turn wants dressing and the register is neutral.
 
 THE PROCEDURE — walk the seams offered; the beat is a property of each:
   1. For EACH seam, read the beat sitting under it — the plan's read (the vision, the arc position, any key moment at that word) and the dialogue around the seam.

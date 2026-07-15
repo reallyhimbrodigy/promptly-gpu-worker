@@ -483,6 +483,48 @@ def _staged_push_wiring():
     assert len(_rs.ZoomEffectSpec(**_spec.model_dump()).events[0].stages) == 3, "schema round-trips 3 stages"
 
 
+@check("SHARED-CLOCK LEAD (Zac 2026-07-14, universal-lateness): one uniform early shift of the clock every component reads — coherence preserved (Lever B win), systematic lateness corrected; TUNABLE, default 0 = no change")
+def _shared_clock_lead():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert "_SHARED_CLOCK_LEAD_MS" in _src, "the tunable shared-clock lead must exist"
+    # default 0 = pure Lever B (no production change until Zac's ear sets it)
+    assert _h._SHARED_CLOCK_LEAD_MS == 0.0, "default lead is 0 (report-approach-before-shipping)"
+    # the ONE derivation subtracts it — reads the module global (proof can sweep)
+    assert "_raw - (_SHARED_CLOCK_LEAD_MS / 1000.0)" in _src, \
+        "_audible_word_onset_s must subtract the lead from raw Deepgram"
+    _dg = [{"start": 2.0, "end": 2.3}]
+    assert abs(_h._audible_word_onset_s(_dg, 0) - 2.0) < 1e-9, "at 0, returns raw (Lever B)"
+    _saved = _h._SHARED_CLOCK_LEAD_MS
+    try:
+        _h._SHARED_CLOCK_LEAD_MS = 50.0
+        assert abs(_h._audible_word_onset_s(_dg, 0) - 1.95) < 1e-9, \
+            "a lead shifts the ONE clock earlier by the constant (all components inherit it)"
+    finally:
+        _h._SHARED_CLOCK_LEAD_MS = _saved
+
+
+@check("VIBE-FEEL (Zac 2026-07-14): the un-caveated overrides that beat the FITS/FIGHTS are caveated — boom's payoff-reinforcements name the vibe (boom FIGHTS corporate), transitions teach the vibe-register (a scene change is universal; corporate uses the clean ones, not zero)")
+def _vibe_feel_fixes():
+    _src = open("handler.py").read()
+    # boom: the three payoff reinforcements now caveat the vibe (were un-caveated,
+    # overriding boom's own FIGHTS: corporate)
+    assert "the boom lives here" not in _src, \
+        "the un-caveated 'the boom lives here' override must be caveated to the vibe"
+    assert "a boom FIGHTS those vibes" in _src, "the payoff arc must caveat boom by vibe"
+    assert "the boom on the payoff word in a punchy/viral vibe" in _src, \
+        "the held-camera routing must caveat boom by vibe"
+    assert "ONLY where the vibe wants a punch" in _src, \
+        "the sounds-layer boom-reserve note must caveat the vibe"
+    # transitions: the vibe scopes the register; a scene change is universal
+    assert "THE VIBE SCOPES THE TRANSITION REGISTER" in _src, \
+        "the sub-call must teach the vibe picks the transition register (not whether)"
+    assert "a corporate video with real chapter turns and zero transitions has skipped a universal move".lower() in _src.lower(), \
+        "corporate must be told to dress its turns with the clean transitions, not skip them"
+    assert "SlideOver is the safe pick in ANY vibe" in _src, \
+        "a safe-in-any-vibe transition must be elevated (the missing universal member)"
+
+
 @check("ZOOM VIBE-SPLIT (Zac 2026-07-13): the VIBE scopes the zoom's tonal register like it scopes captions/SFX — SmoothPush (the calm push) is OFFERED at hook + mid_peak (not payoff/close only), so a corporate/calm beat can pick calm and a viral beat picks punchy; the fitness+vibe chooses within the static schema (which can't be vibe-dependent — Vertex cache)")
 def _zoom_vibe_split():
     import handler as _h
