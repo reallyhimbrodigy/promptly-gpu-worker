@@ -15589,6 +15589,48 @@ def _mg_attack_frames(mg_type, fps):
     return int(round(_MG_ATTACK_MS.get(mg_type, _MG_ATTACK_DEFAULT_MS) / 1000.0 * float(fps or 30)))
 
 
+# ── MG VALUE-LANDING table (FIX 2, Zac 2026-07-15) ───────────────────────────
+# For a VALUE component — a count-up / fill / bar-race — the beat is the moment
+# the VALUE RESOLVES (the number reaches its final figure), not the moment the
+# container pops in. This REVERSES the 2026-07-12 container-arrival ruling FOR
+# THESE THREE: "$10M" must show 10,000,000 exactly as the speaker punches the
+# word — the card winding up BEFORE the word and the count ARRIVING on it (the
+# StagedPush principle, applied to a resolving value). The other _MG_SEQUENCED
+# types (RankedList/Timeline/TimelineRoadmap) have no single value to land, so
+# they KEEP container-arrival — the frame pops in on the beat, content sequences
+# after. These are component-LOCAL frame offsets read straight from each
+# component's interpolate ranges; the composition fps == source_fps (render
+# input carries "fps": source_fps) so localFrame and fromFrame share units — the
+# offset is exact at ANY fps with NO ms conversion (unlike the ms attack table).
+# The gate reads the TSX constants and pins the Python table to them (anti-drift).
+_MG_VALUE_LAND_FRAMES = {
+    "StatCard": 24,     # countProgress interpolate([4,24]) — the number locks at frame 24
+    "ProgressBar": 34,  # fill interpolate([FILL_START=8, FILL_END=34]) — fill completes at 34
+    # BarRace is staggered by bar count + mode → computed in _mg_arrival_frames:
+    #   settleFrame = START(8) + (N-1)*STAGGER(7) + GROW(32); race starts bars together (N-1→0)
+}
+_BARRACE_START, _BARRACE_STAGGER, _BARRACE_GROW = 8, 7, 32
+
+
+def _mg_arrival_frames(mg_type, fps, props=None):
+    """Frames from the MG's MOUNT to the moment it must land ON the anchor word.
+    VALUE components (StatCard/ProgressBar/BarRace) → the VALUE-RESOLUTION frame
+    (number/fill/race reaching final) so the VALUE lands on the beat (FIX 2); every
+    other MG → the container-arrival attack (_mg_attack_frames), the frame pops in on
+    the beat. Value-land offsets are component-local frames (composition fps ==
+    source_fps) — returned as-is, no ms conversion, so the value lands exact at any fps."""
+    props = props or {}
+    if mg_type in ("StatCard", "ProgressBar"):
+        return _MG_VALUE_LAND_FRAMES[mg_type]
+    if mg_type == "BarRace":
+        _bars = props.get("bars") or []
+        _n = max(1, min(len(_bars), 4))           # component: rendered = bars.slice(0,4)
+        _mode = props.get("mode") or "compare"    # component default mode = "compare"
+        _span = 0 if _mode == "race" else (_n - 1)  # race starts all bars together
+        return _BARRACE_START + _span * _BARRACE_STAGGER + _BARRACE_GROW
+    return _mg_attack_frames(mg_type, fps)
+
+
 # RMS measurement cache — populated lazily, avoids re-measuring same file
 _SFX_RMS_CACHE = {}
 _SFX_TARGET_RMS = -18.0  # dBFS — reference level all SFX are normalized to
@@ -20765,11 +20807,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     flush=True,
                 )
 
-        # WS1 peak-on-word: enter the MG its measured attack EARLIER so it lands
-        # SETTLED on the anchor word (was: start exactly on the anchor, so the
-        # entrance animation played AFTER the beat). The hold end (_to_frame) is
-        # unchanged — the window grows only at the front by the entrance time.
-        _mg_af = _mg_attack_frames(_mg.get("type"), source_fps)
+        # WS1 peak-on-word: enter the MG its ARRIVAL lead EARLIER so it lands ON
+        # the anchor word (was: start exactly on the anchor, so the entrance played
+        # AFTER the beat). For a VALUE component that lead is the value-RESOLUTION
+        # frame (the number/fill/race reaching final — FIX 2), else the container
+        # arrival. The hold end (_to_frame) is unchanged — the window grows only at
+        # the front by the pre-roll.
+        _mg_af = _mg_arrival_frames(_mg.get("type"), source_fps, _mg.get("props"))
         _from_frame = max(0, int(round(_out_start * source_fps)) - _mg_af)
         _to_frame = min(total_output_frames, int(round(_out_end * source_fps)))
         if _to_frame <= _from_frame:
@@ -20851,10 +20895,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # the speaker's face at this moment.
         if em["motion_graphic"]:
             _em_dur = float(em["duration"])
-            # WS1 peak-on-word: enter the MG its MEASURED attack before the anchor
-            # so it arrives SETTLED on the beat (was a 0.25*duration GUESS), and
-            # hold the authored duration AFTER arrival (window grows by the pre-roll).
-            _em_af = _mg_attack_frames(em["motion_graphic"]["type"], source_fps)
+            # WS1 peak-on-word: enter the MG its ARRIVAL lead before the anchor so it
+            # lands ON the beat (was a 0.25*duration GUESS) — value-RESOLUTION frame
+            # for a value component (FIX 2), container arrival otherwise; hold the
+            # authored duration AFTER arrival (window grows by the pre-roll).
+            _em_af = _mg_arrival_frames(
+                em["motion_graphic"]["type"], source_fps, em["motion_graphic"].get("props"))
             _mg_from_frame = max(0, _em_t_frame - _em_af)
             _mg_dur_frames = int(round(_em_dur * source_fps)) + (_em_t_frame - _mg_from_frame)
             # RULING (Zac 2026-07-09): authored anchor, never coerced (see MG site above).

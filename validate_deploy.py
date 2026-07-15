@@ -5194,7 +5194,7 @@ def _caption_audible_onset():
         "all word-anchored placements (overlay/MG/emphasis-MG/broll/caption) must read audible_start — one clock"
 
 
-@check("ITEM 2 MG entrance-arrival (Zac 2026-07-12): the measured MGAttackProbe attacks are wired into fromFrame (settle for pops, container-arrival min(hit,settle) for the 7 sequenced/count-up types) so an MG lands SETTLED on its anchor word — replacing the 0.25*duration guess; both placement sites shift fromFrame by _mg_attack_frames")
+@check("ITEM 2 MG entrance-arrival (Zac 2026-07-12): the measured MGAttackProbe attacks are wired into fromFrame (settle for pops, container-arrival min(hit,settle) for the sequenced types WITHOUT a resolving value — RankedList/Timeline/TimelineRoadmap) so an MG lands SETTLED on its anchor word — replacing the 0.25*duration guess; both placement sites shift fromFrame via _mg_arrival_frames (value components divert to value-land, see the FIX 2 check)")
 def _item2_mg_attack_wiring():
     import handler as _h
     _src = open("handler.py").read()
@@ -5207,12 +5207,60 @@ def _item2_mg_attack_wiring():
                                           "StatCard", "Timeline", "TimelineRoadmap"})
     assert _h._mg_attack_frames("BarRace", 60) == 16 and _h._mg_attack_frames("MouseDrag", 60) == 9, \
         "ms→frames at fps; unmeasured (MouseDrag/PillCluster) → default 150ms"
-    # BOTH placement sites shift fromFrame by the measured attack (the guess is gone)
+    # BOTH placement sites shift fromFrame via _mg_arrival_frames (value types → value-land;
+    # everything else → the measured container attack). The guess is gone.
+    assert "_mg_af = _mg_arrival_frames(_mg.get(\"type\"), source_fps, _mg.get(\"props\"))" in _src, \
+        "standalone MG must enter via _mg_arrival_frames (value-land for value components)"
+    assert "_em_af = _mg_arrival_frames(" in _src, \
+        "emphasis MG must enter via _mg_arrival_frames, not the 0.25*duration guess"
     assert "_from_frame = max(0, int(round(_out_start * source_fps)) - _mg_af)" in _src, \
-        "standalone MG must enter its attack earlier (settle on the anchor)"
+        "standalone MG must enter its arrival lead earlier (land on the anchor)"
     assert "_mg_from_frame = max(0, _em_t_frame - _em_af)" in _src, \
-        "emphasis MG must use the measured attack, not the 0.25*duration guess"
+        "emphasis MG must shift by the arrival lead"
     assert "int(round(_em_dur * source_fps * 0.25))" not in _src, "the 0.25*duration guess must be gone"
+    # a NON-value sequenced type still routes to the container attack (unchanged)
+    assert _h._mg_arrival_frames("RankedList", 60, {}) == _h._mg_attack_frames("RankedList", 60), \
+        "RankedList (sequenced, no resolving value) keeps container-arrival"
+
+
+@check("FIX 2 VALUE-LANDS-ON-EMPHASIS (Zac 2026-07-15): a count-up/fill/race lands its VALUE (number reaching final figure) ON the anchor word, not its container — REVERSES the 2026-07-12 container-arrival ruling FOR the three value components. The mount is back-timed by the component's value-RESOLUTION frame (read straight from the TSX interpolate ranges; composition fps == source_fps so the local frame == a fromFrame offset, exact at any fps) so the count ARRIVES on the beat. The Python table is pinned to the TSX constants (a component retiming can't silently drift the compensation).")
+def _mg_value_landing():
+    import handler as _h, re as _re
+    _mgdir = "src/remotion/src/motion-graphics"
+    # ── anti-drift: the Python value-land frames MUST equal the TSX interpolate ranges ──
+    _sc = open(f"{_mgdir}/StatCard/StatCard.tsx").read()
+    _m = _re.search(r"countProgress\s*=\s*interpolate\(\s*localFrame,\s*\[\s*\d+\s*,\s*(\d+)\s*\]", _sc)
+    assert _m and int(_m.group(1)) == _h._MG_VALUE_LAND_FRAMES["StatCard"] == 24, \
+        f"StatCard value-land must equal the count END frame in the TSX (got table={_h._MG_VALUE_LAND_FRAMES.get('StatCard')}, tsx={_m and _m.group(1)})"
+    _pb = open(f"{_mgdir}/ProgressBar/ProgressBar.tsx").read()
+    _m = _re.search(r"const\s+FILL_END\s*=\s*(\d+)\s*;", _pb)
+    assert _m and int(_m.group(1)) == _h._MG_VALUE_LAND_FRAMES["ProgressBar"] == 34, \
+        f"ProgressBar value-land must equal FILL_END in the TSX (got table={_h._MG_VALUE_LAND_FRAMES.get('ProgressBar')}, tsx={_m and _m.group(1)})"
+    _br = open(f"{_mgdir}/BarRace/BarRace.tsx").read()
+    _bc = {k: int(_re.search(rf"const\s+{k}\s*=\s*(\d+)\s*;", _br).group(1)) for k in ("START", "STAGGER", "GROW")}
+    assert (_bc["START"], _bc["STAGGER"], _bc["GROW"]) == (_h._BARRACE_START, _h._BARRACE_STAGGER, _h._BARRACE_GROW) == (8, 7, 32), \
+        f"BarRace START/STAGGER/GROW must match the TSX ({_bc} vs {(_h._BARRACE_START, _h._BARRACE_STAGGER, _h._BARRACE_GROW)})"
+    # the TSX settleFrame formula must be the one we replicate (compare mode)
+    assert "settleFrame = START + (N - 1) * STAGGER + GROW" in _br, \
+        "BarRace settleFrame formula changed — the value-land replication in _mg_arrival_frames is stale"
+    # ── the arrival lead IS the value-resolution frame (not the container attack) ──
+    assert _h._mg_arrival_frames("StatCard", 60, {}) == 24, "StatCard must back-time to the count-lock frame"
+    assert _h._mg_arrival_frames("ProgressBar", 60, {}) == 34, "ProgressBar must back-time to the fill-complete frame"
+    # BarRace: compare mode staggers by bar count; race starts together
+    _bars3 = {"bars": [{"value": 3}, {"value": 7}, {"value": 5}]}   # N=3
+    assert _h._mg_arrival_frames("BarRace", 60, {**_bars3, "mode": "compare"}) == 8 + 2 * 7 + 32 == 54, \
+        "BarRace compare N=3 → settleFrame 54"
+    assert _h._mg_arrival_frames("BarRace", 60, {**_bars3, "mode": "race"}) == 8 + 32 == 40, \
+        "BarRace race (bars start together) → 40"
+    assert _h._mg_arrival_frames("BarRace", 60, _bars3) == 54, "BarRace default mode is compare"
+    assert _h._mg_arrival_frames("BarRace", 60, {"bars": [{"value": 1}] * 9}) == 8 + 3 * 7 + 32, \
+        "BarRace caps N at 4 (component slices bars[0:4])"
+    # ── the reversal is REAL: value-land is LATER than the old container attack ──
+    for _t in ("StatCard", "ProgressBar", "BarRace"):
+        _val = _h._mg_arrival_frames(_t, 60, _bars3)
+        _cont = _h._mg_attack_frames(_t, 60)
+        assert _val > _cont, \
+            f"{_t} value-land ({_val}f) must exceed the container attack ({_cont}f) — else the value still lands late"
 
 
 @check("SFX ATTACK-MATCHED-TO-MEASURABILITY (Zac 2026-07-12): per-word onset re-detection was measured inaccurate (54-64ms err > the lateness) and REMOVED; a sharp-attack sound fires only where the onset is measurable (a dB silence anchors it), a soft swell fires anywhere; the placement DROPS a sharp sound on a mid-phrase word and Gemini is taught to pick soft sounds there")
