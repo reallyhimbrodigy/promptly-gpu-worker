@@ -504,6 +504,32 @@ def _shared_clock_lead():
         _h._SHARED_CLOCK_LEAD_MS = _saved
 
 
+@check("MOMENT PRECISION (Zac 2026-07-14): the anchor (word_indices[0]) is the EXACT vocally-stressed word to the ms — not the phrase's first word, not the merely-meaningful word (measured 40% off-word / 208ms mean gap: Gemini picked the semantic word, the ear wants the punch). Non-deterministic prompt teach, machinery untouched.")
+def _moment_precision():
+    _src = open("handler.py").read()
+    # the anchor is the punched word, to the ms — the entry shape says so
+    assert "word_indices[0] is the ANCHOR — the EXACT word the speaker's VOICE punches" in _src, \
+        "the entry shape must define word_indices[0] as the vocally-punched anchor"
+    # single word for a single landing; 2-3 only for a building phrase (StagedPush)
+    assert "For a single landing (a plain zoom / SFX / MG) list ONE word — the punched word" in _src, \
+        "single-landing components must anchor on ONE stressed word (no phrase-first ambiguity)"
+    # the meaning-vs-punch teaching (the measured miss class: creator/being, nothing/did)
+    assert "When the meaningful word and the punched word differ, anchor to the PUNCH" in _src, \
+        "the emphasis teach must resolve meaning-vs-punch toward the punch (the ear's frame)"
+    assert "Pick the anchor by LISTENING for the stress, not by reading for the meaning" in _src, \
+        "the precision layer must say pick by ear (stress), not by meaning"
+    # millisecond-precise arrival-point framing (machinery is exact; make the target exact)
+    assert "it must be the EXACT stressed word to the millisecond" in _src \
+        and "lands perfectly on the wrong beat, and the ear hears it as off" in _src, \
+        "the arrival-point teach must frame the anchor as ms-precise (machinery exact, target loose)"
+    # StagedPush per-stage anchoring already lands each stage on its word (confirmed, unchanged)
+    import handler as _h
+    _dg = [{"word": w, "start": s, "end": s + 0.25} for w, s in [("ten", 1.0), ("million", 1.8), ("dollars", 2.6)]]
+    _st, _ = _h._staged_push_stages([0, 1, 2], _dg)
+    assert abs(_st[0]["atMs"] - 1000) < 5 and abs(_st[2]["atMs"] - 2600) < 5, \
+        "each StagedPush stage anchors to its OWN word's onset (per-stage, not a phrase default)"
+
+
 @check("VIBE-FEEL (Zac 2026-07-14): the un-caveated overrides that beat the FITS/FIGHTS are caveated — boom's payoff-reinforcements name the vibe (boom FIGHTS corporate), transitions teach the vibe-register (a scene change is universal; corporate uses the clean ones, not zero)")
 def _vibe_feel_fixes():
     _src = open("handler.py").read()
