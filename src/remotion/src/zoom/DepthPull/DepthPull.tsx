@@ -30,9 +30,13 @@ export const DepthPull: React.FC<DepthPullProps> = ({
   style,
   edgeBlur = 4,
   frameLines = true,
+  punch,
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
+  // PUNCH (ease-in) lands the push impact ON the word; GLIDE (ease-out) is the
+  // default gentle settle. Only the ramp-in ease changes. (Zac 2026-07-15)
+  const rampInEase = punch ? Easing.in(Easing.cubic) : Easing.out(Easing.cubic);
 
   let zoomProgress = 0;
   let originX = 0.5;
@@ -75,7 +79,7 @@ export const DepthPull: React.FC<DepthPullProps> = ({
 
       if (frame < rampIn) {
         zoomProgress = interpolate(frame, [eventStart, rampIn], [0, 1], {
-          easing: Easing.out(Easing.cubic),
+          easing: rampInEase,
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });

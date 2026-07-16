@@ -21,6 +21,12 @@ export interface BaseZoomProps {
   events: ZoomEvent[];
   // Optional style override on the outer container.
   style?: CSSProperties;
+  // Vibe-gated motion register (Zac 2026-07-15): true → ease-IN punch (the motion
+  // accelerates INTO the word, impact ON the onset frame); false/undefined → the
+  // ease-OUT glide (motion front-loaded, a gentle settle on the word — the default).
+  // Only the RAMP effects (SmoothPush/LetterboxPush/DepthPull) read it; both still
+  // complete the SCALE on the word — only where the motion's energy lives changes.
+  punch?: boolean;
 }
 
 export interface SmoothPushProps extends BaseZoomProps {}

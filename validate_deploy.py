@@ -1209,6 +1209,38 @@ def _zoom_spring_settle_corrected():
         handler.ZOOM_PEAK_REACH_MS["FocusWindow"] not in (234,), "the mis-computed spring settle must stay corrected"
 
 
+@check("ZOOM PUNCH vs GLIDE, vibe-gated (Zac 2026-07-15): a RAMP zoom (SmoothPush/LetterboxPush/DepthPull) PUNCHES (ease-in — impact ON the word) in a viral/punchy vibe, else GLIDES (ease-out — the restrained default settle). Same punchy-vs-calm register the vibe scopes for zoom TYPE/SFX/captions. Only the ramp types read it; the springs/StepZoom/StagedPush already land impact on the word. Deterministic + gate-pinned so viral=punch / others=glide can't silently flip.")
+def _zoom_punch_vibe_gate():
+    import handler as _h, render_schemas as _rs, os as _os
+    # the classifier: PUNCH only for a clearly punchy/viral vibe
+    for _v in ("viral", "punchy", "make it HYPE", "fast-paced energetic edit", "high-energy"):
+        assert _h._vibe_punches(_v) is True, f"'{_v}' must PUNCH (ease-in)"
+    # everything else GLIDES — the restrained default (incl. empty/None)
+    for _v in ("corporate", "educational explainer", "calm cinematic story", "professional", "", None):
+        assert _h._vibe_punches(_v) is False, f"'{_v}' must GLIDE (ease-out, the default)"
+    # only the ramp types carry the register
+    assert _h._RAMP_ZOOM_TYPES == ("SmoothPush", "LetterboxPush", "DepthPull")
+    # the render sets punch = _vibe_punches(vibe) ONLY for ramp types
+    _src = open("handler.py").read()
+    assert 'if _zoom["type"] in _RAMP_ZOOM_TYPES:' in _src \
+        and '_zoomeffect["punch"] = _vibe_punches(edit_plan.get("_user_vibe"))' in _src, \
+        "the render must set punch = _vibe_punches(vibe) for ramp types only"
+    # the render schema carries punch and validates (extra=forbid would reject an unknown field)
+    _rs.ZoomEffectSpec(type="SmoothPush", events=[], punch=True)
+    _rs.ZoomEffectSpec(type="SmoothPush", events=[], punch=False)
+    # the three ramp components gate the ramp-in ease on punch (ease-in when set)
+    _zdir = "src/remotion/src/zoom"
+    for _c in _h._RAMP_ZOOM_TYPES:
+        _t = open(_os.path.join(_zdir, _c, f"{_c}.tsx")).read()
+        assert "const rampInEase = punch ? Easing.in(Easing.cubic) : Easing.out(Easing.cubic);" in _t, \
+            f"{_c} must gate the ramp-in ease on punch (ease-in punch / ease-out glide)"
+        assert "easing: rampInEase," in _t, f"{_c} must USE rampInEase in the ramp-in interpolate"
+    # non-ramp types must NOT gate ease on punch (they already land impact on the word)
+    for _c in ("StepZoom", "SnapReframe", "FocusWindow"):
+        _t = open(_os.path.join(_zdir, _c, f"{_c}.tsx")).read()
+        assert "rampInEase" not in _t, f"{_c} is not a ramp type — it must not gate its ease on punch"
+
+
 @check("zoom startMs correction: StepZoom is instant → startMs unchanged (peak = startMs)")
 def _zoom_stepzoom_correction_active():
     # StepZoom is instant — peak == startMs. Corrected == word_start_ms.

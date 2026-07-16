@@ -19,9 +19,15 @@ export const SmoothPush: React.FC<SmoothPushProps> = ({
   src,
   events,
   style,
+  punch,
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames } = useVideoConfig();
+  // PUNCH (ease-in) accelerates the push INTO the word so the impact lands ON the
+  // onset frame (viral/punchy); the default GLIDE (ease-out) front-loads the motion
+  // and settles gently on the word (calm/corporate). Only the ramp-IN ease changes;
+  // the scale still completes on the word either way. (Zac 2026-07-15)
+  const rampInEase = punch ? Easing.in(Easing.cubic) : Easing.out(Easing.cubic);
 
   let scale = 1;
   let originX = 0.5;
@@ -61,7 +67,7 @@ export const SmoothPush: React.FC<SmoothPushProps> = ({
       let progress: number;
       if (frame < rampIn) {
         progress = interpolate(frame, [eventStart, rampIn], [0, 1], {
-          easing: Easing.out(Easing.cubic),
+          easing: rampInEase,
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });

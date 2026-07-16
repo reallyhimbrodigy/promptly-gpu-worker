@@ -21,9 +21,13 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
   events,
   style,
   maxBarHeight = 0.12,
+  punch,
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames, height } = useVideoConfig();
+  // PUNCH (ease-in) lands the push impact ON the word; GLIDE (ease-out) is the
+  // default gentle settle. Only the ramp-in ease changes. (Zac 2026-07-15)
+  const rampInEase = punch ? Easing.in(Easing.cubic) : Easing.out(Easing.cubic);
 
   let scale = 1;
   let barProgress = 0;
@@ -64,7 +68,7 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
 
       if (frame < rampIn) {
         barProgress = interpolate(frame, [eventStart, rampIn], [0, 1], {
-          easing: Easing.out(Easing.cubic),
+          easing: rampInEase,
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });

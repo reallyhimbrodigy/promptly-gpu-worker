@@ -13,6 +13,7 @@ import { FitSpecimen } from "./FitSpecimen";
 import { MGAttackProbe } from "./MGAttackProbe";
 import { CaptionFadeProbe } from "./CaptionFadeProbe";
 import { StagedPushProbe } from "./StagedPushProbe";
+import { ZoomEaseProbe } from "./ZoomEaseProbe";
 
 /**
  * Remotion root — two production compositions:
@@ -197,6 +198,25 @@ export const RemotionRoot: React.FC = () => {
               cutTerminated: false,
             },
           ],
+        } as unknown as Record<string, unknown>}
+      />
+      {/* ZoomEaseProbe — glide-vs-punch A/B (Zac 2026-07-15). SmoothPush ramp
+          completing on a word at 2.0s (frame 120); green flash = the word onset.
+          Render easeDir "out" (glide) vs "in" (punch) to compare. 240f@60 = 4s. */}
+      <Composition
+        id="ZoomEaseProbe"
+        component={ZoomEaseProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={240}
+        defaultProps={{
+          punch: false,
+          startMs: 1580,     // 2000 - 420 (SmoothPush peak_reach) → scale completes at the word
+          durationMs: 1200,
+          targetScale: 1.22,
+          wordMs: 2000,      // the anchor word onset (frame 120)
+          label: "GLIDE (corporate)",
         } as unknown as Record<string, unknown>}
       />
     </>

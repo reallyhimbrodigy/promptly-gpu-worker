@@ -112,6 +112,10 @@ class ZoomEventSpec(_RemotionModel):
 class ZoomEffectSpec(_RemotionModel):
     type: ZoomType
     events: List[ZoomEventSpec] = Field(default_factory=list)
+    # Vibe-gated MOTION REGISTER for ramp zooms (Zac 2026-07-15): True → ease-IN
+    # punch (impact ON the word), False/None → ease-OUT glide (the default). Set by
+    # the pipeline from the vibe; only SmoothPush/LetterboxPush/DepthPull read it.
+    punch: Optional[bool] = None
     windowScale: Optional[float] = None
     borderWidth: Optional[float] = None
     borderColor: Optional[str] = None

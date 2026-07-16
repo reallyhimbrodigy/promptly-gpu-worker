@@ -845,6 +845,41 @@ ZOOM_PEAK_REACH_MS = {
                              # later stages peak on THEIR words via each stage's atMs
 }
 
+# ── Ramp-zoom MOTION REGISTER: punch vs glide, vibe-gated (Zac 2026-07-15) ────
+# A ramp zoom (SmoothPush/LetterboxPush/DepthPull) completes its SCALE on the word
+# either way — but WHERE the motion's energy lives is the register:
+#   PUNCH  (ease-in)  — the motion ACCELERATES into the word; the fastest movement /
+#                       visual impact lands ON the onset frame (49% of the move in the
+#                       last ~83ms). The zoom HITS on the beat. → viral/punchy.
+#   GLIDE  (ease-out) — the current behavior; the motion is front-loaded and
+#                       decelerates to a gentle settle on the word (an already-arrived
+#                       frame). The zoom ARRIVES smoothly. → calm/corporate/cinematic.
+# This is the SAME punchy-vs-calm register the vibe already scopes for zoom TYPE, SFX,
+# and captions — read the vibe for the register, exactly as everywhere else. ONLY the
+# ramp types read it; StepZoom (instant) and the springs already land impact on the
+# word, StagedPush lands per-stage. Deterministic + CONSERVATIVE: punch ONLY when the
+# vibe clearly reads viral/punchy/high-energy; every other vibe (and an absent one)
+# GLIDES — the restrained default (corporate/educational/story/cinematic).
+_VIBE_PUNCH_WORDS = (
+    "viral", "punchy", "punch", "hype", "hyped", "high energy", "high-energy",
+    "energetic", "fast-paced", "fast paced", "snappy", "kinetic", "aggressive",
+    "hard-hitting", "hard hitting", "explosive",
+)
+
+
+def _vibe_punches(vibe):
+    """True → the ramp zoom PUNCHES (ease-in, impact ON the word); False → it GLIDES
+    (ease-out, a gentle settle — the restrained default). Only a clearly punchy/viral
+    vibe punches; corporate/educational/story/cinematic (and an empty vibe) glide.
+    The USER's explicit vibe is the director, same hierarchy as everywhere else."""
+    v = str(vibe or "").lower()
+    return any(w in v for w in _VIBE_PUNCH_WORDS)
+
+
+# the RAMP types whose ease direction the register gates (glide vs punch); the
+# spring/instant/staged types land their impact on the word regardless.
+_RAMP_ZOOM_TYPES = ("SmoothPush", "LetterboxPush", "DepthPull")
+
 # ─── StagedPush — the multi-stage emphasis zoom (Zac 2026-07-13) ─────────────
 # A RESERVED move: 2-3 CONSECUTIVE building emphasis words get a smooth-fast push
 # completing on EACH word, then an adaptive release. The emphasis carries 2-3
@@ -19396,6 +19431,8 @@ _RENDER_TRANSIENT_KEYS = {
     "_render_clip_time_maps", "_render_cuts", "_render_effective_durations",
     "_render_fps", "_render_timeline", "_render_total_output_frames",
     "_rendered_generated_scenes", "_source_loudness",
+    "_user_vibe",  # a copy of the input vibe, set every render — the render reads it
+                   # for the ramp-zoom punch/glide register (_vibe_punches)
 }
 
 
@@ -20158,11 +20195,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     flush=True,
                 )
             if _overlapping_events:
-                _clip_spec["zoomEffect"] = {
+                _zoomeffect = {
                     "type": _zoom["type"],
                     "events": _overlapping_events,
                     **{k: v for k, v in _zoom.items() if k not in ("type", "events") and v is not None},
                 }
+                # Vibe-gated ramp register (Zac 2026-07-15): a ramp zoom PUNCHES
+                # (ease-in, impact ON the word) in a viral/punchy vibe, else GLIDES
+                # (ease-out — the restrained default). Only the ramp types read it;
+                # the springs/StepZoom/StagedPush already land impact on the word.
+                if _zoom["type"] in _RAMP_ZOOM_TYPES:
+                    _zoomeffect["punch"] = _vibe_punches(edit_plan.get("_user_vibe"))
+                _clip_spec["zoomEffect"] = _zoomeffect
         clips_out.append(_clip_spec)
 
     # Transitions live between cut[i] and cut[i+1] when the leading cut emits
