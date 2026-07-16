@@ -353,14 +353,21 @@ def _vibe_requests_captions(vibe):
     return True
 
 
-# ── SFX onset: silence-anchored, honest about mid-phrase (Zac 2026-07-12) ────
+# ── SFX onset: ONE clock, every word, no exceptions (Zac 2026-07-15) ─────────
 # Per-word audible-onset RE-DETECTION (spectral flux / energy) was built, then
 # MEASURED inadequate on a deterministic offline harness (sfx_onset_fixture.py):
-# 54-64ms median error vs the trusted silence-based onset — larger than the
-# 55-113ms lateness it was meant to fix, and it never corrected the words Zac's
-# ear caught. Removed. The onset stays silence-anchored (accurate where a dB
-# silence exists); mid-phrase words keep the Deepgram start, and SFX TIMING is
-# instead guarded by attack-matched-to-measurability (_sfx_may_fire below).
+# 54-64ms error vs the silence-based ground truth — that was the DETECTOR's error,
+# not Deepgram's. Removed. Every component — sharp SFX included — fires on the ONE
+# shared energy-onset clock below (_audible_word_onset_s = the Deepgram start),
+# the SAME clock the zoom / staged-push / captions already ride for every word,
+# mid-phrase or not. NO measurability gate, NO swell fallback, NO special case:
+# a sound fires on its emphasis word, period (Zac ruling 2026-07-15). Measured
+# (1070 words, 10 sources): Deepgram's mid-phrase start tracks the energy onset
+# within ~5ms median / ±34ms — it is the ground truth the whole pipeline uses.
+# The perceptual beat is not ms-localizable for the ~10% of words whose onset
+# genuinely ramps (two detectors disagree ~50ms on clean audio) — a physical
+# limit every editor hits, not a pipeline defect; the pipeline matches the
+# ground truth exactly, which is the most accurate any system can be.
 # SHARED-CLOCK LEAD (Zac 2026-07-14, universal-lateness finding): a UNIFORM
 # early shift of the one clock every component reads. Lever B put everything on
 # raw Deepgram for COHERENCE (no per-word variance) — correct — but the ear
@@ -385,13 +392,13 @@ def _audible_word_onset_s(dg_words, idx):
 
     Lever B history: the silence-based per-word correction was inconsistent — a
     ground-truth audit proved 50/60 'corrected' words had no real pause (a
-    prev-tail clamp artifact), and the true mid-phrase onset is PROVEN
-    unmeasurable (4 detectors, 54-131ms err). An inconsistent PER-WORD
-    correction is exactly what the ear catches as 'sometimes early/late'. So we
-    keep the ONE uniform reference (variance unrepresentable) and correct the
-    SYSTEMATIC lateness with a single early shift instead — coherent AND
-    on-time. (Sound CHOICE still keys off real pauses via _sfx_onset_measurable,
-    which reads the silences directly — decoupled from this timing derivation.)"""
+    prev-tail clamp artifact), and the perceptual onset of a mid-phrase word is
+    not ms-localizable (independent detectors disagree ~50ms even on clean
+    audio). An inconsistent PER-WORD correction is exactly what the ear catches
+    as 'sometimes early/late'. So we keep the ONE uniform reference (variance
+    unrepresentable) and correct the SYSTEMATIC lateness with a single early
+    shift instead — coherent AND on-time. THIS is the clock for everything,
+    sharp SFX included — no component has a separate timing gate (Zac 2026-07-15)."""
     try:
         _raw = float(dg_words[idx].get("start") or 0.0)
         return max(0.0, _raw - (_SHARED_CLOCK_LEAD_MS / 1000.0))
@@ -399,39 +406,12 @@ def _audible_word_onset_s(dg_words, idx):
         return 0.0
 
 
-# Attack-matched-to-measurability (Zac 2026-07-12): a SHARP-attack sound peaks ~on
-# its onset, so it exposes any onset-timing error; a SOFT (swell) sound ramps in
-# over its attack, masking ±error. Onset re-detection was measured inaccurate for
-# mid-phrase words, so a sharp transient may fire ONLY where the onset is
-# measurable (a dB silence anchors it); a soft sound fires anywhere. Gemini is
-# taught to pick soft sounds for mid-phrase emphasis (sound-decision prompt); this
-# is the physical guarantee if it doesn't — the emphasis keeps its zoom/caption.
-_SFX_SHARP_ATTACK_MS = 200   # attack below this = a transient exposed to onset error
-
-
-def _sfx_onset_measurable(dg_words, idx):
-    """True when a dB silence ends IMMEDIATELY before the word — a real inter-word
-    pause = a CLEAN, precise beat a sharp transient can land on; False for a
-    mid-phrase word buried in continuous speech (no clean onset). Reads the silences
-    DIRECTLY (not via _audible_word_onset_s) so it survives Lever B's timing removal:
-    measurability is about whether the beat is CLEAN, not about the timing value."""
-    try:
-        _ds = float(dg_words[idx].get("start") or 0.0)
-        for _s0, _e0 in list(_LEVEL_SILENCES_LAST) + list(_WITHIN_WORD_SILENCES_LAST):
-            if _ds - 0.15 <= float(_e0) <= _ds + 0.02:
-                return True
-        return False
-    except Exception:
-        return False
-
-
-def _sfx_may_fire(sound_style, dg_words, idx):
-    """A soft-attack sound (attack >= _SFX_SHARP_ATTACK_MS) fires anywhere; a sharp
-    one fires only on a measurable (post-silence) onset. Unknown sound → treated as
-    sharp (fire only when measurable) — conservative."""
-    if _SFX_ATTACK_MS.get(sound_style, 0) >= _SFX_SHARP_ATTACK_MS:
-        return True
-    return _sfx_onset_measurable(dg_words, idx)
+# NOTE (Zac 2026-07-15): the sharp-vs-soft measurability gate (_sfx_may_fire /
+# _sfx_onset_measurable / _SFX_SHARP_ATTACK_MS) is DELETED. A sound — sharp or soft —
+# fires on its emphasis word's shared-clock onset, no gate, no swell fallback. The
+# 54-64ms that justified the gate was the deleted re-detector's error, not the
+# placement's; the placement clock (energy onset, ±5ms) is the same one the zoom
+# already rides on these exact words. One clock, every component, no exceptions.
 
 
 def _mg_norm_token(w):
@@ -5015,8 +4995,6 @@ Most videos contain at least the two classic hits: the hook's grab and the line 
 **The scenarios live in the source.** A scenario is something the speaker says, shows, or does on camera — the sentence, the number, the reversal, the charm. That is where a sound's `why` points: at the spoken moment that matched. The graphics, zooms, and transitions this plan adds are the edit's answer to those same moments — when a sound and a component land on the same word, each earned it from the footage independently: the graphic renders the fact, the sound punctuates the delivery. A `why` that names a component has matched the edit instead of the footage — re-read that moment for its spoken scenario, and where none exists, the moment carries no sound. And a scenario is matched literally: the moment contains the thing the predicate names, not a pun or association of it ("five minutes" is time, not money).
 
 Authoring shape: the emphasis's `sound` field (one of the names below) — timing derives from the beat's word; every sound is trimmed to a zero-silence onset; no offsets to compute. The beat's `viewer_feeling` doubles as the placement's why: it names what makes THIS beat one of the video's hits — why it earned treatment where the beats around it didn't — and the moment it matched. A why that can only name a category has answered "could"; the why answers "why this one".
-
-**Attack vs. the word's onset — the beat must be landable.** A PERCUSSIVE sound (punchsfx, popsfx, mouse-click-sound, iphoneding, camera-flash, shockingsfx, rizz, awkward-moment) peaks the instant it starts, so it must land on a word whose onset the ear can pin: a word that begins after a pause, where the audible onset is precise. The transcript marks the rest: **a word tagged ⟨mid-phrase⟩ is buried in continuous speech and has NO clean onset** — its exact start is soft, so a percussive hit there lands audibly early or late and the pipeline DROPS it (the beat keeps its zoom/caption but loses the sound). On a ⟨mid-phrase⟩ word, choose a SWELL instead — boom, swoosh-sound-effects, woosh-professional, transition-sfx — whose attack ramps in and lands the peak on the beat even when the onset is imprecise. Untagged words start clean and take any sound. Match the sound's attack to the tag: a percussive sound on a ⟨mid-phrase⟩ word is the wrong choice, not a louder one — pick the swell so the beat KEEPS a sound instead of dropping to silent.
 
 ──────────────────────────────────────────
 THE 16 SOUNDS + THE BARE VOICE — each a defined moment
@@ -10004,31 +9982,18 @@ def generate_edit_gemini(
             (_w.get("punctuated_word") or _w.get("word") or "")
             for _w in kept_words
         )
-        # PER-WORD ONSET MEASURABILITY (Zac 2026-07-12): tag each mid-phrase word
-        # ⟨mid-phrase⟩ so the sound decision can SEE where a percussive sound can't
-        # land (no dB silence anchors the onset) and pick a swell there instead —
-        # the education Gemini couldn't act on without the data. Best-effort: read
-        # the source-time silences (populated by the mechanical-cuts pass) via the
-        # src index; if unavailable, tag nothing (no false constraint).
-        _mid_tags = {}
-        try:
-            for _ni in range(len(kept_words)):
-                _si = new_to_src[_ni] if _ni < len(new_to_src) else None
-                if _si is not None and not _sfx_onset_measurable(deepgram_words or [], _si):
-                    _mid_tags[_ni] = True
-        except Exception:
-            _mid_tags = {}
+        # ONE CLOCK (Zac 2026-07-15): no per-word onset-measurability tagging. A
+        # sound fires on its emphasis word's shared-clock onset like every other
+        # component — no mid-phrase special case, so the transcript carries no
+        # ⟨mid-phrase⟩ tag and Gemini picks the sound purely by vibe-fitness.
         kept_word_lines = []
         for new_idx, _w in enumerate(kept_words):
             word_text = _w.get("punctuated_word") or _w.get("word") or ""
             start = float(_w.get("start") or 0)
             end = float(_w.get("end") or 0)
             spk = int(_w.get("speaker") or 0)
-            _mid = " ⟨mid-phrase⟩" if _mid_tags.get(new_idx) else ""
-            kept_word_lines.append(f"  [{new_idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}{_mid}")
+            kept_word_lines.append(f"  [{new_idx}] {start:.2f}-{end:.2f} spk{spk}: {word_text}")
         kept_transcript_block = "\n".join(kept_word_lines)
-        print(f"[two-pass] onset measurability: {len(_mid_tags)}/{len(kept_words)} words "
-              f"tagged ⟨mid-phrase⟩ (a percussive sound can't land there)", flush=True)
 
         # Compute cut-boundary word indices in kept-only space. Two sources:
         #   1) dead_air removals — kept word followed by a removed range
@@ -21497,23 +21462,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                         _projected_t = max(0.0, _projected_t - _onset_shift)
                 except Exception:
                     pass
-                # ATTACK-MATCHED-TO-MEASURABILITY (Zac 2026-07-12): a sharp-attack
-                # transient may fire ONLY where the onset is measurable. On a
-                # mid-phrase word the exact onset is imprecise (re-detection was
-                # measured at 54-64ms error > the 55-113ms lateness), so a sharp
-                # sound would land off the beat — DROP it; the emphasis keeps its
-                # zoom/caption. Gemini is taught to pick a soft-attack sound here
-                # (sound-decision prompt), so this fires only on its residual misses.
-                _mf_words = (transcript or {}).get("words") or []
-                if not _sfx_may_fire(_sound_style, _mf_words, _sfx_wi):
-                    _record_divergence(
-                        "sfx",
-                        {"sound": _sound_style, "word": _sfx.get("word", ""),
-                         "attack_ms": _SFX_ATTACK_MS.get(_sound_style, 0)},
-                        "drop", reason="sharp_attack_on_unmeasurable_onset")
-                    print(f"[sfx] DROP sharp {_sound_style} on mid-phrase "
-                          f"'{_sfx.get('word','')}' — onset not measurable; visual emphasis kept", flush=True)
-                    continue
+                # ONE CLOCK, NO GATE (Zac 2026-07-15): the sound fires on this
+                # word's shared-clock onset — sharp or soft, mid-phrase or not,
+                # exactly like the zoom/caption/staged-push on the same word. The
+                # measurability drop + swell fallback are DELETED: no special case
+                # softens or drops Gemini's chosen sound. (The peak-on-word attack
+                # compensation below still lands the sound's peak on _projected_t.)
             else:
                 _sfx_word = _sfx.get("word", "")
                 print(f"[sfx] Skipping {_sound_style} on '{_sfx_word}' — word removed from output", flush=True)

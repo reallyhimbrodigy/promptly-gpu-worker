@@ -5263,50 +5263,35 @@ def _mg_value_landing():
             f"{_t} value-land ({_val}f) must exceed the container attack ({_cont}f) — else the value still lands late"
 
 
-@check("SFX ATTACK-MATCHED-TO-MEASURABILITY (Zac 2026-07-12): per-word onset re-detection was measured inaccurate (54-64ms err > the lateness) and REMOVED; a sharp-attack sound fires only where the onset is measurable (a dB silence anchors it), a soft swell fires anywhere; the placement DROPS a sharp sound on a mid-phrase word and Gemini is taught to pick soft sounds there")
-def _sfx_measurability():
+@check("SFX ONE-CLOCK, NO GATE (Zac 2026-07-15): the mid-phrase sound restriction is DELETED — no measurability gate, no swell fallback, no ⟨mid-phrase⟩ education. A sound (sharp or soft, mid-phrase or not) fires on its emphasis word's shared-clock onset — the SAME _audible_word_onset_s the zoom/staged-push/captions ride for every word. The 54-64ms that justified the gate was the DELETED re-detector's error, not the placement's; the placement clock is the energy onset (±5ms, measured) — the ground truth the whole pipeline uses. Removed-not-skipped: the gate/fallback/education are GONE, not bypassed.")
+def _sfx_one_clock_no_gate():
     import handler as _h
     _src = open("handler.py").read()
-    # the dead detector is fully gone — no wasted decode/FFT, no inert scaffolding
+    # the dead re-detector stays gone (no wasted decode/FFT, no inert scaffolding)
     for _dead in ("_spectral_word_onset", "_detect_word_onsets", "_WORD_ONSET_LAST"):
         assert not hasattr(_h, _dead) and f"def {_dead}" not in _src, f"{_dead} must be removed"
-    # the placement gate + its signed divergence + the prompt education must all exist
-    assert "_sfx_may_fire(_sound_style, _mf_words, _sfx_wi)" in _src, \
-        "the SFX placement must gate on _sfx_may_fire (else a sharp sound fires on a mid-phrase word)"
-    assert "sharp_attack_on_unmeasurable_onset" in _src, "the drop must sign a divergence"
-    assert "Attack vs. the word's onset — the beat must be landable" in _src, \
-        "Gemini must be TAUGHT to pick soft sounds for mid-phrase beats (educate, not only enforce)"
-    assert _h._SFX_SHARP_ATTACK_MS == 200
-    assert _h._SFX_ATTACK_MS["popsfx"] < 200 <= _h._SFX_ATTACK_MS["boom"], "the table splits sharp/soft at 200ms"
+    # the measurability machinery is DELETED — removed, not bypassed
+    for _fn in ("_sfx_may_fire", "_sfx_onset_measurable"):
+        assert not hasattr(_h, _fn) and f"def {_fn}" not in _src, f"{_fn} must be deleted (one clock, no gate)"
+    assert not hasattr(_h, "_SFX_SHARP_ATTACK_MS") and "_SFX_SHARP_ATTACK_MS = " not in _src, \
+        "the sharp/soft threshold must be deleted"
+    assert "_mid_tags" not in _src, "the ⟨mid-phrase⟩ transcript tagging must be deleted"
+    assert "{word_text}{_mid}" not in _src, "no ⟨mid-phrase⟩ tag may be emitted into the transcript"
+    assert "sharp_attack_on_unmeasurable_onset" not in _src, "the measurability DROP must be gone"
+    assert "the beat must be landable" not in _src, "the swap education must be removed from the prompt"
+    # POSITIVE INVARIANT: a sound still fires on the ONE shared clock, unconditionally —
+    # the onset-shift subtracts _audible_word_onset_s (same clock as the zoom), and there
+    # is NO gate/continue between that and the emit.
+    assert "- _audible_word_onset_s(_sfx_dgw, _sfx_wi))" in _src, \
+        "the SFX must fire on the shared-clock onset (same _audible_word_onset_s as the zoom)"
+    # the WS1 peak-on-word attack table is a SEPARATE mechanism and MUST remain — the
+    # sound's peak still lands on the onset; only the sharp/soft GATE is gone.
+    assert _h._SFX_ATTACK_MS.get("popsfx", 0) > 0 and _h._SFX_ATTACK_MS.get("boom", 0) > 0, \
+        "the WS1 attack table (peak-on-word compensation) must survive the gate removal"
+    # the shared clock returns raw Deepgram for EVERY word (Lever B) — the invariant the
+    # sound now rides, with no per-word measurability branch.
     _dg = [{"start": 1.0, "end": 1.3, "word": "a"}, {"start": 1.6, "end": 1.9, "word": "easy"}]
-    # mid-phrase (no silence): sharp does NOT fire, soft DOES
-    _h._LEVEL_SILENCES_LAST[:] = []; _h._WITHIN_WORD_SILENCES_LAST[:] = []
-    assert _h._sfx_onset_measurable(_dg, 1) is False
-    assert _h._sfx_may_fire("popsfx", _dg, 1) is False, "sharp on mid-phrase must not fire"
-    assert _h._sfx_may_fire("boom", _dg, 1) is True, "soft swell fires anywhere"
-    # post-silence (a dB silence ends at 1.52 < the 1.6 start): sharp fires
-    _h._LEVEL_SILENCES_LAST[:] = [(1.2, 1.52)]
-    assert _h._sfx_onset_measurable(_dg, 1) is True
-    assert _h._sfx_may_fire("popsfx", _dg, 1) is True, "sharp fires on a measurable onset"
-    # LEVER B (Zac 2026-07-12): _audible_word_onset_s returns RAW for EVERY word — no
-    # timing correction, one uniform clock. Measurability (sound CHOICE) is decoupled:
-    # _sfx_onset_measurable reads the silences directly (a FAR silence is not a clean
-    # beat; an IMMEDIATE pause is), so sharp SFX still fire only on clean beats.
-    _h._LEVEL_SILENCES_LAST[:] = [(1.1, 1.35)]   # ends 250ms before the 1.6 word (far)
-    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.6) < 1e-6, "Lever B: onset is always raw"
-    assert _h._sfx_onset_measurable(_dg, 1) is False, "FAR silence is not a clean beat"
-    _h._LEVEL_SILENCES_LAST[:] = [(1.3, 1.52)]   # ends 80ms before → immediate clean pause
-    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.6) < 1e-6, "Lever B: onset is always raw"
-    assert _h._sfx_onset_measurable(_dg, 1) is True, "IMMEDIATE pause = a clean beat"
-    _h._LEVEL_SILENCES_LAST[:] = []
-    # BUILD #1 (Zac 2026-07-12): the post-cuts transcript TAGS each mid-phrase word
-    # ⟨mid-phrase⟩ so Gemini can SEE where a percussive sound can't land and pick a
-    # swell — the enforcement-drop becomes the rare residual, not the norm.
-    assert "_sfx_onset_measurable(deepgram_words or [], _si)" in _src, \
-        "the kept-transcript must tag each word's onset measurability"
-    assert "⟨mid-phrase⟩" in _src, "the mid-phrase tag must be emitted into the transcript"
-    assert _src.count("⟨mid-phrase⟩") >= 2, \
-        "the sound-menu guidance must also NAME the ⟨mid-phrase⟩ tag so Gemini acts on it"
+    assert abs(_h._audible_word_onset_s(_dg, 1) - 1.6) < 1e-6, "one clock: onset is always raw Deepgram"
 
 
 @check("WS2 caption fade helper (Zac 2026-07-12, entrance SUPERSEDED by crisp-entrance 2026-07-13): boundedFade + the 0.25/MAX_ENTRANCE_MS caps stay for fade-OUT and the non-opacity motion channels (slam/slide/scale springs); the fade-IN ramp is GONE (see _caption_crisp_entrance); the real node helper math test still passes")
