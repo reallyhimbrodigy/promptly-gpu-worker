@@ -831,8 +831,13 @@ ZOOM_NATURAL_SCALE = {
 # double-correct.
 ZOOM_PEAK_REACH_MS = {
     "SmoothPush":     420,   # 35% × 1200ms (ramp-in end)
-    "SnapReframe":    171,   # spring 99% settling (damping=28, mass=0.6, stiffness=260)
-    "FocusWindow":    234,   # spring 99% settling (damping=24, mass=0.7, stiffness=180)
+    # SPRING SETTLE — CORRECTED (Zac 2026-07-15): the old 171/234 were MIS-COMPUTED.
+    # Measured against Remotion's actual spring(): at 171ms SnapReframe is only 87%
+    # pushed in (89% for FocusWindow at 234ms) — so the SETUP sat on the word and the
+    # push COMPLETED ~160-180ms LATE (Zac's "feels late" diagnosis, confirmed). The
+    # real 99%-settle — the "peak" the push arrives at — is these values:
+    "SnapReframe":    333,   # spring 99% settle, verified vs Remotion spring() (damping=28, mass=0.6, stiffness=260)
+    "FocusWindow":    417,   # spring 99% settle, verified vs Remotion spring() (damping=24, mass=0.7, stiffness=180)
     "StepZoom":         0,   # instant — peak at startMs
     "LetterboxPush":  490,   # 35% × 1400ms (ramp-in end)
     "DepthPull":      770,   # 35% × 2200ms (ramp-in end)

@@ -1194,15 +1194,19 @@ def _zoom_smoothpush_correction_active():
     assert corrected_start_ms != old_wrong, "must differ from pre-fix value 10800"
 
 
-@check("zoom startMs correction: SnapReframe at 1.2s word → startMs=1029 (peak-on-word)")
-def _zoom_snapreframe_correction_active():
-    # Spring 99% settling at ~171ms. Word at 1.2s = 1200ms.
-    # Corrected startMs = 1200 − 171 = 1029.
-    word_start_ms = 1200
-    peak_reach_ms = handler.ZOOM_PEAK_REACH_MS["SnapReframe"]
-    corrected_start_ms = word_start_ms - peak_reach_ms
-    assert peak_reach_ms == 171
-    assert corrected_start_ms == 1029, f"expected 1029, got {corrected_start_ms}"
+@check("zoom SPRING settle CORRECTED (Zac 2026-07-15): SnapReframe/FocusWindow peak-reach = the REAL 99% spring settle (333/417ms), not the mis-computed 171/234 that left the spring only 87-89% pushed in at the word — the setup on the beat, the payoff ~160-180ms late. Verified against Remotion spring().")
+def _zoom_spring_settle_corrected():
+    # The mis-computed values are GONE (removed-not-skipped): the spring must be
+    # ~fully settled (99%) on the word, not 87%. Word at 1.2s, SnapReframe:
+    #   corrected startMs = 1200 − 333 = 867.
+    assert handler.ZOOM_PEAK_REACH_MS["SnapReframe"] == 333, \
+        f"SnapReframe peak-reach must be the real 99% settle 333ms, got {handler.ZOOM_PEAK_REACH_MS['SnapReframe']}"
+    assert handler.ZOOM_PEAK_REACH_MS["FocusWindow"] == 417, \
+        f"FocusWindow peak-reach must be the real 99% settle 417ms, got {handler.ZOOM_PEAK_REACH_MS['FocusWindow']}"
+    assert 1200 - handler.ZOOM_PEAK_REACH_MS["SnapReframe"] == 867
+    # the old under-settled values must not come back (they read as late)
+    assert handler.ZOOM_PEAK_REACH_MS["SnapReframe"] not in (171,) and \
+        handler.ZOOM_PEAK_REACH_MS["FocusWindow"] not in (234,), "the mis-computed spring settle must stay corrected"
 
 
 @check("zoom startMs correction: StepZoom is instant → startMs unchanged (peak = startMs)")
