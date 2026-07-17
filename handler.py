@@ -20987,17 +20987,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # suppression / DSP boundary refinement). The emphasis ZOOM is already
             # attached to its clip upstream; only the emphasis MG is handled in
             # this loop, so DROP just this MG and continue — render proceeds.
-            print(
-                f"[generate-edit] DROP emphasis motion_graphic: word_indices[0]="
-                f"{_em_first_wi} not on the output timeline "
-                f"(transition-tail/refinement). Render continues without it.",
-                flush=True,
-            )
-            _mg_projection_misses += 1
-            _record_divergence(
-                "motion_graphic", {"type": "emphasis_mg", "word_index": _em_first_wi},
-                "projection_miss_drop",
-                reason="anchor word not on output timeline (transition-tail/refinement)")
+            #
+            # HOTFIX (2026-07-17, prod RENDER_FATAL class since 32f6eee): count +
+            # ledger the miss ONLY when this emphasis actually CARRIES an MG. The
+            # slot-parity tripwire's expected total counts emphasis moments WITH
+            # motion_graphic; incrementing here for a zoom-only emphasis created a
+            # PHANTOM miss (out+misses > expected) that tripped the integrity
+            # RuntimeError identically on every ladder rung → RENDER_FATAL
+            # (convicted on jobs 971f6a17/ab91195e/dcccb5de, Jul 14-17).
+            if em.get("motion_graphic"):
+                print(
+                    f"[generate-edit] DROP emphasis motion_graphic: word_indices[0]="
+                    f"{_em_first_wi} not on the output timeline "
+                    f"(transition-tail/refinement). Render continues without it.",
+                    flush=True,
+                )
+                _mg_projection_misses += 1
+                _record_divergence(
+                    "motion_graphic", {"type": "emphasis_mg", "word_index": _em_first_wi},
+                    "projection_miss_drop",
+                    reason="anchor word not on output timeline (transition-tail/refinement)")
             continue
         # ONE CLOCK (Zac 2026-07-12): the emphasis MG shares the audible onset with
         # its zoom (both on this emphasis) — was raw _pw["start"] = a split clock.

@@ -2746,6 +2746,19 @@ def _lumen_increment2():
     assert '_qa_dropped_scenes' in _src, "the degrade branch must mark dropped scenes for the note"
 
 
+@check("HOTFIX 2026-07-17 PHANTOM MG MISS (prod RENDER_FATAL class, since 32f6eee): a zoom-only emphasis whose anchor word fails projection must NOT count toward _mg_projection_misses — the slot-parity tripwire's expected total counts only emphasis moments WITH motion_graphic, so the phantom +1 tripped 'Pipeline integrity violation: motion_graphics_out' identically on every ladder rung → RENDER_FATAL (jobs 971f6a17/ab91195e/dcccb5de Jul 14-17). The miss counter increments ONLY under the em.get('motion_graphic') guard.")
+def _hotfix_phantom_mg_miss():
+    _src = open("handler.py").read()
+    # the drop branch must gate BOTH the counter and the ledger on the emphasis
+    # actually carrying an MG
+    _i = _src.index("word_indices[0] survived cuts but didn't project")
+    _branch = _src[_i:_i + 1600]
+    assert 'if em.get("motion_graphic"):' in _branch, \
+        "the projection-miss drop must fire only when the emphasis CARRIES an MG"
+    assert _branch.index('if em.get("motion_graphic"):') < _branch.index("_mg_projection_misses += 1"), \
+        "the counter increment must sit INSIDE the motion_graphic guard (phantom-miss regression)"
+
+
 @check("premium-values env override picks up custom tier names")
 def _tier_premium_values_override():
     # The env-var contract is the public surface for matching whatever
