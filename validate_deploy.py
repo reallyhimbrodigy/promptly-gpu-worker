@@ -2718,6 +2718,34 @@ def _tier_gate_failopen():
     )
 
 
+@check("LUMEN INCREMENT 2 (Zac 2026-07-17): (1) EVERY generation attempt persists durably — _persist_gen_attempt wired at initial gen (a0), each judged frame+scores, each regen+perturbed prompt, each degrade — rejects included, fail-open; (2) the perturbation oscillator fix — every retry carries the FULL four-dimension rubric + the previous attempt's PASSED-dims-to-preserve (score threaded from the QA loop); (3) the honesty net covers generated scenes — an explicit graphic ask (bespoke/3D phrasing detected) ends in delivery or a capability note on BOTH tiers, never silence; QA-degrade writes the quality-bar note.")
+def _lumen_increment2():
+    import handler as _h
+    _src = open("handler.py").read()
+    # (1) persistence: helper exists, fail-open, and all four call sites are wired
+    assert callable(getattr(_h, "_persist_gen_attempt", None)), "_persist_gen_attempt must exist"
+    assert _src.count("_persist_gen_attempt(") >= 5, \
+        "persistence must be wired at initial-gen, judged-frame, regen, and degrade sites (def + >=4 calls)"
+    assert '"judged"' in _src and '"degraded"' in _src, "judged frames + degrades must persist (rejects law)"
+    assert "gen-attempts/" in _src, "attempts persist under the durable gen-attempts/ prefix"
+    # (2) oscillator fix: perturbation takes the score and carries rubric + preserve list
+    import inspect as _ins
+    _sig = _ins.signature(_h._perturb_scene_prompt)
+    assert "score" in _sig.parameters, "_perturb_scene_prompt must accept the previous attempt's score"
+    assert "MUST SURVIVE" in _src and "THE RUBRIC" in _src, \
+        "the perturbation must carry the full rubric + passed-dims-to-preserve"
+    assert "score=_score_by_idx.get(_i)" in _src, "the QA loop must thread the per-scene score into the perturbation"
+    # (3) honesty: detector + both notes + Flare routing
+    assert _h._vibe_requests_generated_scene("include a bespoke 3D-render graphic when the app is revealed") is True, \
+        "the Increment-1 ask phrasing MUST be detected (it was silently dropped twice)"
+    assert _h._vibe_requests_generated_scene("generate an image of the product") is True
+    assert _h._vibe_requests_generated_scene("no AI graphics please") is False, "negated mention must not trigger"
+    assert _h._vibe_requests_generated_scene("fast paced punchy") is False
+    assert "didn't meet our quality bar" in _src, "QA-degrade of a requested scene must write the quality-bar note"
+    assert "didn't land one" in _src, "an ignored explicit ask must write the honest note"
+    assert '_qa_dropped_scenes' in _src, "the degrade branch must mark dropped scenes for the note"
+
+
 @check("premium-values env override picks up custom tier names")
 def _tier_premium_values_override():
     # The env-var contract is the public surface for matching whatever

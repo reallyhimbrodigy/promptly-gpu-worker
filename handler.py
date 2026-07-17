@@ -340,6 +340,36 @@ def _parse_unsupported_requests(text):
     return out
 
 
+# ── Explicit generated-scene ask detection (Increment 2, Zac 2026-07-17) ─────
+# The GAP-3 honesty law extended to generated scenes: "never silently drop a
+# request." Increment 1 shipped two silent drops of an explicit graphic ask
+# ("include a bespoke 3D-render graphic…" — ignored on one run with EMPTY
+# capability_notes, QA-degraded away on the next with no note). This detector
+# is the shared trigger; the delivery-verification note lives at the
+# capability-notes assembly. Wider than the _UNSUPPORTED_CAPABILITIES AI-gen
+# regex (which missed the bespoke/3D phrasing entirely).
+_GENSCENE_ASK_RE = re.compile(
+    r"\b(?:bespoke|custom|3[\s-]?d|ai[\s-]?generat\w*|generated?|premium)\b"
+    r"[^.;!?]{0,24}?"
+    r"\b(?:graphics?|scenes?|renders?|visuals?|images?|art(?:work)?s?)\b", re.I)
+_GENSCENE_ASK_NEG_RE = re.compile(
+    r"\b(?:no|without|don'?t|never|skip|avoid)\b[^.;!?]{0,40}?"
+    r"\b(?:graphics?|scenes?|renders?|visuals?|images?|art(?:work)?s?)\b", re.I)
+
+
+def _vibe_requests_generated_scene(vibe):
+    """True when the user's vibe explicitly asks for a bespoke/3D/AI-generated
+    graphic or scene (negated mentions don't count). Used for the honesty net:
+    an explicit ask must end in delivery or a plain capability note — never
+    silence."""
+    v = str(vibe or "")
+    if not _GENSCENE_ASK_RE.search(v):
+        return False
+    if _GENSCENE_ASK_NEG_RE.search(v):
+        return False
+    return True
+
+
 def _vibe_requests_captions(vibe):
     """F8 override — the instruction mappings win, as everywhere: an explicit
     captions-on ask in the vibe beats the double-caption coercion. Any
@@ -8507,11 +8537,20 @@ def _qa_judge_generated_scenes(output_path, gs_specs, fps, work_dir, palette_hin
         return []
 
 
-def _perturb_scene_prompt(scene, qa_reason, attempt):
+def _perturb_scene_prompt(scene, qa_reason, attempt, score=None):
     """Re-ask Gemini for a DIFFERENT subject generation_prompt — the recovery
     perturbation. Wires recipe_eval.Report.patch_list() (previously no caller):
-    the QA failure is formatted as a repair note fed back to the model. Returns a
-    new prompt string, or None to keep the old."""
+    the QA failure is formatted as a repair note fed back to the model.
+
+    OSCILLATOR FIX (Increment 2, Zac 2026-07-17): the Increment-1 trail
+    (txt 0→1→0, pal 0→.1→.9, coh .9→.8→.5) proved a single-dimension-reactive
+    perturbation — it optimized the last failure and regressed a previously-
+    passed dimension. Every retry now carries (a) the FULL four-dimension rubric
+    with the 0.6 threshold, (b) the dimensions the previous attempt PASSED as
+    explicit must-survive properties, and (c) the specific failure to fix —
+    regression is unconstructible in the instruction, not hoped away. `score` is
+    the previous attempt's _SceneQAScore for this scene (None → legacy wording).
+    Returns a new prompt string, or None to keep the old."""
     _cur = str(((scene or {}).get("subject") or {}).get("generation_prompt") or "")
     if not _cur:
         return None
@@ -8519,17 +8558,45 @@ def _perturb_scene_prompt(scene, qa_reason, attempt):
         import recipe_eval as _re_mod
         _rep = _re_mod.Report()
         _rep.fail("generated_scene_qa", f"attempt {attempt}: {qa_reason or 'failed art-director QA'}")
+        _rubric = (
+            "THE RUBRIC — the judged render must clear ALL FOUR simultaneously "
+            "(each scored 0.0-1.0, pass floor 0.6): coherence (clean/sharp, not "
+            "garbled/uncanny/melted), text_correct (any on-image text legible AND "
+            "exactly the intended words — safest is NO incidental text at all: "
+            "screens/dashboards read as clean shapes, icons, bars), on_palette "
+            "(the whole frame sits in the intended color world), integration "
+            "(reads as a designed part of the piece, not pasted-on clipart)."
+        )
+        _dims_line = ""
+        if score is not None:
+            _dims = {
+                "coherence": float(getattr(score, "coherence", 0.0)),
+                "text_correct": float(getattr(score, "text_correct", 0.0)),
+                "on_palette": float(getattr(score, "on_palette", 0.0)),
+                "integration": float(getattr(score, "integration", 0.0)),
+            }
+            _passed = [f"{k} ({v:.2f})" for k, v in _dims.items() if v >= _QA_PASS_THRESHOLD]
+            _failed = [f"{k} ({v:.2f})" for k, v in _dims.items() if v < _QA_PASS_THRESHOLD]
+            _dims_line = (
+                ("\n\nTHE PREVIOUS ATTEMPT PASSED: " + ", ".join(_passed) +
+                 " — these properties MUST SURVIVE your revision; keep whatever "
+                 "earned them (the working text treatment, the palette, the clean "
+                 "forms). Do NOT rewrite those aspects." if _passed else "") +
+                ("\nIT FAILED: " + ", ".join(_failed) +
+                 " — fix ONLY these, changing as little else as possible." if _failed else "")
+            )
         _client = _get_genai_client()
         _resp = _gemini_generate_with_backoff(
             lambda: _client.models.generate_content(
                 model=GEMINI_MODEL,
                 contents=[
                     "You are repairing a prompt for an AI image generator. The "
-                    "previous render FAILED art-director QA. Rewrite the prompt to "
-                    "fix it: cleaner, sharper, simpler composition; legible text "
-                    "ONLY from the brief; on-palette; less uncanny. Return ONLY the "
-                    "new prompt text, no preamble.\n\n"
-                    f"PREVIOUS PROMPT:\n{_cur}\n\n{_rep.patch_list()}"
+                    "previous render FAILED art-director QA. Rewrite the prompt so "
+                    "the NEXT render clears the WHOLE rubric at once — a revision "
+                    "that fixes one dimension by breaking another is a failure.\n\n"
+                    + _rubric + _dims_line + "\n\n"
+                    f"PREVIOUS PROMPT:\n{_cur}\n\n{_rep.patch_list()}\n\n"
+                    "Return ONLY the new prompt text, no preamble."
                 ],
                 config=genai_types.GenerateContentConfig(temperature=0.7),
             ),
@@ -8538,6 +8605,46 @@ def _perturb_scene_prompt(scene, qa_reason, attempt):
         _new = (getattr(_resp, "text", "") or "").strip()
         return _new or None
     except Exception:
+        return None
+
+
+# ── Generation-attempt persistence (Increment 2, Zac 2026-07-17) ─────────────
+# EVERY generation attempt persists durably — the image, the exact prompts, the
+# judge's sub-scores/verdict/reason, and each retry's perturbed prompt — keyed
+# by job/scene/attempt, REJECTS INCLUDED. Increment 1 lost the three rejected
+# frames (overwritten in the container); they were the exact evidence Zac's eye
+# needed. Never again. Fail-open: persistence can never block or slow a render
+# beyond the upload itself.
+_GEN_ATTEMPT_CDN = "https://d1iax8jos987n3.cloudfront.net/"
+
+
+def _persist_gen_attempt(job_id, scene_idx, attempt, kind, image_path=None, meta=None):
+    """Durably persist one generation-attempt artifact (image and/or JSON meta)
+    to gen-attempts/<job_id>/scene<idx>_a<attempt>_<kind>.{png|jpg|json} on the
+    CDN-served bucket. Returns {image?, meta?} CDN URLs, or None (fail-open)."""
+    try:
+        if _aws_s3_client is None:
+            return None
+        _bucket = os.environ.get("S3_BUCKET_NAME") or "promptly-video-storage"
+        _base = f"gen-attempts/{job_id}/scene{int(scene_idx):02d}_a{int(attempt)}_{kind}"
+        _urls = {}
+        if image_path and os.path.isfile(image_path):
+            _ext = ".jpg" if str(image_path).lower().endswith((".jpg", ".jpeg")) else ".png"
+            _ct = "image/jpeg" if _ext == ".jpg" else "image/png"
+            _aws_s3_client.upload_file(image_path, _bucket, _base + _ext,
+                                       ExtraArgs={"ContentType": _ct})
+            _urls["image"] = _GEN_ATTEMPT_CDN + _base + _ext
+        if meta is not None:
+            _aws_s3_client.put_object(
+                Bucket=_bucket, Key=_base + ".json",
+                Body=json.dumps(meta, default=str).encode("utf-8"),
+                ContentType="application/json")
+            _urls["meta"] = _GEN_ATTEMPT_CDN + _base + ".json"
+        if _urls:
+            print(f"[gen-persist] {' '.join(sorted(_urls.values()))}", flush=True)
+        return _urls or None
+    except Exception as _pe:
+        print(f"[gen-persist] skipped ({type(_pe).__name__}: {str(_pe)[:80]})", flush=True)
         return None
 
 
@@ -27693,6 +27800,17 @@ def handler(job):
                         _generated_subjects[_gen_futs[_gf]] = _res["path"]
                         if _cost_meter is not None:
                             _cost_meter.add("generated_asset", count=1, usd=float(_res.get("cost") or 0.0))
+                        # Increment 2: persist attempt 0 durably (image + brief),
+                        # rejects-included doctrine — the QA loop persists retries.
+                        _p_si = _gen_futs[_gf]
+                        _p_scene = _gen_scenes[_p_si] if 0 <= _p_si < len(_gen_scenes) else {}
+                        _persist_gen_attempt(
+                            job_id, _p_si, 0, "gen", image_path=_res["path"],
+                            meta={"generation_prompt": str(((_p_scene or {}).get("subject") or {}).get("generation_prompt") or ""),
+                                  "palette_ref": str((((_p_scene or {}).get("background") or {}) or {}).get("palette_ref") or ""),
+                                  "system_floor": "default (_IMAGE_SYSTEM_PROMPT)",
+                                  "cost": _res.get("cost"), "ms": _res.get("ms"),
+                                  "transparency": _res.get("transparency")})
                 if _generated_subjects:
                     edit_plan["_generated_subjects"] = _generated_subjects
                     print(
@@ -28069,6 +28187,16 @@ def handler(job):
                             f"cost=${(_cost_meter.total_usd() if _cost_meter is not None else 0.0):.3f}",
                             flush=True,
                         )
+                        # Increment 2: persist the JUDGED frame + full scores durably
+                        # (rejects included) — the evidence Increment 1 lost.
+                        _jf = os.path.join(work_dir, f"qa_scene_{s.scene_index:02d}.jpg")
+                        _persist_gen_attempt(
+                            job_id, s.scene_index, _attempt, "judged",
+                            image_path=_jf if os.path.isfile(_jf) else None,
+                            meta={"coherence": s.coherence, "text_correct": s.text_correct,
+                                  "on_palette": s.on_palette, "integration": s.integration,
+                                  "verdict": s.verdict, "reason": s.reason,
+                                  "attempt": _attempt, "threshold": _QA_PASS_THRESHOLD})
                     if not _fail:
                         if _scores:
                             print(f"[qa-judge] {len(_scores)} scene(s) pass — ship", flush=True)
@@ -28084,6 +28212,16 @@ def handler(job):
                             f"— re-render without them",
                             flush=True,
                         )
+                        # Increment 2 honesty marker: a QA-degrade of a scene must
+                        # end in a capability note (assembled at result time), and
+                        # the degrade itself is persisted per scene (rejects law).
+                        edit_plan["_qa_dropped_scenes"] = len(_fail_idx)
+                        for _di in sorted(_fail_idx):
+                            _persist_gen_attempt(
+                                job_id, _di, _attempt, "degraded",
+                                meta={"outcome": "degrade_drop", "attempt": _attempt,
+                                      "over_budget": bool(_over_budget),
+                                      "no_headroom": bool(_no_headroom)})
                         edit_plan["generated_scenes"] = [
                             g for i, g in enumerate(edit_plan.get("generated_scenes") or []) if i not in _fail_idx
                         ]
@@ -28101,14 +28239,19 @@ def handler(job):
                             output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
                         break
                     # RETRY — perturb failing scenes' prompts, regenerate, re-render.
+                    # The perturbation carries the full rubric + the previous
+                    # attempt's per-dimension scores (oscillator fix, Increment 2).
                     print(f"[qa-judge] verdict=retry scenes={sorted(_fail_idx)} attempt={_attempt + 1}", flush=True)
                     _reasons = {s.scene_index: s.reason for s in _fail}
+                    _score_by_idx = {s.scene_index: s for s in _fail}
                     _scene_list = edit_plan.get("generated_scenes") or []
                     for _i in _fail_idx:
                         if not (0 <= _i < len(_scene_list)) or not isinstance(_scene_list[_i], dict):
                             continue
                         _scene = _scene_list[_i]
-                        _newp = _perturb_scene_prompt(_scene, _reasons.get(_i, ""), _attempt + 1)
+                        _newp = _perturb_scene_prompt(
+                            _scene, _reasons.get(_i, ""), _attempt + 1,
+                            score=_score_by_idx.get(_i))
                         if _newp:
                             _scene.setdefault("subject", {})["generation_prompt"] = _newp
                         _res = _generate_scene_subject(_scene, _i, work_dir, _known_text)
@@ -28116,6 +28259,13 @@ def handler(job):
                             edit_plan.setdefault("_generated_subjects", {})[_i] = _res["path"]
                             if _cost_meter is not None:
                                 _cost_meter.add("generated_asset_regen", count=1, usd=float(_res.get("cost") or 0.0))
+                            # Increment 2: persist the regen image + the perturbed
+                            # prompt that produced it (the whole chain, per attempt).
+                            _persist_gen_attempt(
+                                job_id, _i, _attempt + 1, "gen", image_path=_res["path"],
+                                meta={"generation_prompt": str((_scene.get("subject") or {}).get("generation_prompt") or ""),
+                                      "perturbed": bool(_newp), "prev_reason": _reasons.get(_i, ""),
+                                      "cost": _res.get("cost"), "ms": _res.get("ms")})
                     edit_plan.pop("_rendered_generated_scenes", None)
                     _reout = output_path + ".qa.mp4"
                     render_multi_clip(
@@ -28703,6 +28853,34 @@ def handler(job):
                 if any(_w in _transient_kw for _w in _subj_words):
                     continue  # a transient picker error, not a coverage gap — stay silent, don't cry wolf
                 _capability_notes.append(f"Couldn't find footage for \"{_subj}\" — the rest of your edit is done.")
+        # ── (c) GENERATED-SCENE delivery verification (Increment 2, Zac 2026-07-17) ──
+        # The honesty law extended to generated scenes: an explicit graphic/scene
+        # ask ends in DELIVERY or a plain note — never silence. Increment 1 shipped
+        # both silent shapes: the ask ignored at emission (empty notes) and the
+        # emitted scene QA-degraded away (no note). On Lumen we verify delivery; on
+        # Flare the wider detector routes to the existing "doesn't support yet" note
+        # (the old AI-gen regex missed bespoke/3D phrasing entirely).
+        if _vibe_requests_generated_scene(vibe):
+            if route_premium:
+                # supported here — the unsupported-yet phrasing would be wrong
+                _capability_notes = [n for n in _capability_notes
+                                     if "AI-generated images or scenes" not in n]
+                _shipped_scenes = len((edit_plan.get("_rendered_generated_scenes") or [])
+                                      if isinstance(edit_plan, dict) else [])
+                _qa_dropped = int((edit_plan.get("_qa_dropped_scenes") or 0)
+                                  if isinstance(edit_plan, dict) else 0)
+                if _shipped_scenes == 0 and _qa_dropped > 0:
+                    _capability_notes.append(
+                        "You asked for a bespoke graphic — the generated versions "
+                        "didn't meet our quality bar, so this render shipped without "
+                        "it. Re-render to try again.")
+                elif _shipped_scenes == 0:
+                    _capability_notes.append(
+                        "You asked for a bespoke graphic — this edit didn't land one "
+                        "this time. Re-render to try again.")
+            elif not any("AI-generated images or scenes" in n for n in _capability_notes):
+                _capability_notes.append(
+                    "Promptly doesn't support AI-generated images or scenes yet.")
         if _capability_notes:
             print(f"[honesty] surfacing {len(_capability_notes)} capability note(s): {_capability_notes}", flush=True)
 
