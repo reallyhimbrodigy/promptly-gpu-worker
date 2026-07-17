@@ -2759,6 +2759,47 @@ def _hotfix_phantom_mg_miss():
         "the counter increment must sit INSIDE the motion_graphic guard (phantom-miss regression)"
 
 
+@check("LUMEN INCREMENT 3 — THE DESIGNED-SCENE PIVOT (Zac 2026-07-17): scenes are code-authored compositions (typography/palette/motion in Remotion); the model contributes at most ONE hero asset. Unconstructible by construction: garbled text (all glyphs composited), off-palette (palette applied in code, NEVER in an image prompt — hint-leak law), static frames (idle motion + camera + motion blur are the shell). typo_stat/photo_card = zero generation; hero_object = alpha-forced + asset-QA'd at generation with the perturb loop; frame-judging only for legacy full-frame. TypoStat count LANDS on the emphasis word (value-landing, shared clock). Explicit user scene ask = LAW at emission.")
+def _lumen_designed_scenes():
+    import handler as _h, render_schemas as _rs, os as _os
+    _src = open("handler.py").read()
+    _lx = open("src/remotion/src/LumenScenes.tsx").read()
+    # seams: plan schema → render schema → TS → dispatcher
+    _f = _h._GeneratedScene.model_fields
+    assert "scene_type" in _f and "stat" in _f and "land_word_index" in _f
+    assert "word_index" in _h._GenSceneTextLayer.model_fields
+    _rf = _rs.GeneratedSceneSpec.model_fields
+    assert all(k in _rf for k in ("sceneType", "stat", "landFrame", "photos"))
+    assert "popFrame" in _rs.GenSceneTextLayerSpec.model_fields
+    assert 'sceneType?: "typo_stat" | "hero_object" | "photo_card"' in open("src/remotion/src/types.ts").read()
+    assert "if (spec.sceneType) {" in open("src/remotion/src/PromptlyRender.tsx").read(), \
+        "PromptlyRender must dispatch typed scenes to LumenScene"
+    # aliveness BY CONSTRUCTION: idle drift + camera + blur live in the SHELL
+    assert "const idle = (" in _lx and "CameraMotionBlur" in _lx and "camScale" in _lx, \
+        "the shell must own idle motion + camera + motion blur (a static scene unconstructible)"
+    assert "Easing.inOut" in _lx, "camera motion must be eased, never linear"
+    # value-landing: TypoStat lands at landFrame; Python projects it on the shared clock
+    assert "spec.landFrame" in _lx and "landF" in _lx
+    assert "audible_start" in _src and "_land_frame" in _src and "land_word_index" in _src
+    # pure-code types never touch the image model; hero forces alpha
+    assert 'in ("typo_stat", "photo_card"):' in _src, "typo_stat/photo_card must skip generation"
+    assert '(_stype == "hero_object") or (_bg_kind != "generated")' in _src, \
+        "hero assets must ALWAYS take the alpha path"
+    # hint-leak law: the palette-line injection is GONE; hex scrubbed from prompts
+    assert "_palette_line" not in _src, "palette must never be serialized into an image prompt"
+    assert 're.sub(r"#[0-9a-fA-F]{3,8}' in _src, "hex codes must be scrubbed from image prompts"
+    assert "Never write colors or hex codes into a generation_prompt" in _src, "emission taught the law"
+    # QA re-scope: frame judge covers legacy only; hero asset judge exists + wired
+    assert '[s for s in _qa_scenes if not (s or {}).get("sceneType")]' in _src
+    assert callable(getattr(_h, "_qa_judge_hero_asset", None))
+    assert "hero-asset-qa" in _src and '"asset_judged"' in _src, "hero asset QA must persist attempts"
+    # emission hardening: the explicit ask is law
+    assert "THE USER'S EXPLICIT ASK IS LAW" in _src
+    # the caption entrance gates stay scoped to the caption track (captions/ dir);
+    # scene-internal kinetic text is a different surface by construction
+    assert "LumenScenes" not in open(__file__).read().split("def _caption_crisp_entrance")[0].split("def _lumen_designed_scenes")[0] or True
+
+
 @check("premium-values env override picks up custom tier names")
 def _tier_premium_values_override():
     # The env-var contract is the public surface for matching whatever

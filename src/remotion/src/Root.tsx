@@ -14,6 +14,7 @@ import { MGAttackProbe } from "./MGAttackProbe";
 import { CaptionFadeProbe } from "./CaptionFadeProbe";
 import { StagedPushProbe } from "./StagedPushProbe";
 import { ZoomEaseProbe } from "./ZoomEaseProbe";
+import { GenSceneProbe } from "./GenSceneProbe";
 
 /**
  * Remotion root — two production compositions:
@@ -217,6 +218,21 @@ export const RemotionRoot: React.FC = () => {
           targetScale: 1.22,
           wordMs: 2000,      // the anchor word onset (frame 120)
           label: "GLIDE (corporate)",
+        } as unknown as Record<string, unknown>}
+      />
+      {/* GenSceneProbe — Lumen Increment-1: the REAL GeneratedSceneLayer
+          (bg → subject → kinetic text → motion blur) on a staged subject still.
+          Driven by --props; 240f@60 = 4s. Not used in production. */}
+      <Composition
+        id="GenSceneProbe"
+        component={GenSceneProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={600}
+        defaultProps={{
+          scenes: [],
+          label: "",
         } as unknown as Record<string, unknown>}
       />
     </>

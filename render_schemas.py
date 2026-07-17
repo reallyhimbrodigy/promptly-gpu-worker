@@ -217,12 +217,24 @@ class GenSceneTextLayerSpec(_RemotionModel):
     content: str
     styleRef: Optional[str] = None
     anchor: GenSceneAnchor
+    # Lumen designed scenes: scene-local frame this word POPS on (VO word onset,
+    # shared clock). None → staggered default.
+    popFrame: Optional[int] = None
 
 
 class GenSceneMotionSpec(_RemotionModel):
     entrance: GenSceneEntrance
     easing: GenSceneEasing = "spring"
     motionBlur: bool = True
+
+
+class GenSceneStatSpec(_RemotionModel):
+    # TypoStat data fields — the stat is DATA composited in code, never prompt text.
+    value: Optional[float] = None
+    prefix: Optional[str] = None
+    suffix: Optional[str] = None
+    label: Optional[str] = None
+    supporting_line: Optional[str] = None
 
 
 class GeneratedSceneSpec(_RemotionModel):
@@ -232,6 +244,14 @@ class GeneratedSceneSpec(_RemotionModel):
     subject: GenSceneSubjectSpec
     textLayers: List[GenSceneTextLayerSpec] = Field(default_factory=list)
     motion: GenSceneMotionSpec
+    # Lumen DESIGNED scenes (Increment 3): typed code-authored compositions.
+    # None → legacy full-frame path.
+    sceneType: Optional[Literal["typo_stat", "hero_object", "photo_card"]] = None
+    stat: Optional[GenSceneStatSpec] = None
+    # scene-local frame the TypoStat count LANDS on (value-landing doctrine)
+    landFrame: Optional[int] = None
+    # PhotoCard imagery URLs (staged)
+    photos: Optional[List[str]] = None
 
 
 # ── Captions ───────────────────────────────────────────────────────────────

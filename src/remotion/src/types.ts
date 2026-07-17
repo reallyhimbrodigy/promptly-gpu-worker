@@ -180,6 +180,18 @@ export interface GenSceneTextLayerSpec {
   content: string;
   styleRef?: string | null;
   anchor: GenSceneAnchor;
+  /** Lumen designed scenes: scene-local frame this word POPS on (VO word onset
+   * projected onto the one shared clock). Absent → staggered default. */
+  popFrame?: number | null;
+}
+
+/** TypoStat data fields — the stat arrives as DATA, never as prompt text. */
+export interface GenSceneStatSpec {
+  value?: number | null;
+  prefix?: string | null;
+  suffix?: string | null;
+  label?: string | null;
+  supporting_line?: string | null;
 }
 
 export interface GenSceneMotionSpec {
@@ -195,6 +207,17 @@ export interface GeneratedSceneSpec {
   subject: GenSceneSubjectSpec;
   textLayers: GenSceneTextLayerSpec[];
   motion: GenSceneMotionSpec;
+  /** Lumen DESIGNED scenes (Increment 3): typed compositions — typography,
+   * palette, motion in code; the model contributes at most a hero asset.
+   * Absent/null → the legacy full-frame GeneratedScene path. */
+  sceneType?: "typo_stat" | "hero_object" | "photo_card" | null;
+  /** TypoStat: the stat as data fields. */
+  stat?: GenSceneStatSpec | null;
+  /** TypoStat: scene-local frame the count LANDS its final value on (the
+   * emphasis word's onset, shared clock — the Flare value-landing doctrine). */
+  landFrame?: number | null;
+  /** PhotoCard: staged card imagery URLs (user-provided or fetched). */
+  photos?: string[] | null;
 }
 
 // ── Captions ─────────────────────────────────────────────────────────────────

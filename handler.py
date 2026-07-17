@@ -1288,6 +1288,9 @@ class _GenSceneTextLayer(BaseModel):
     # Inherits the video's committed type voice (unified visual identity).
     style_ref: Optional[str] = Field(default=None, max_length=80)
     anchor: _SEMANTIC_ANCHOR
+    # Lumen designed scenes (Increment 3): kept-word index whose VO onset this
+    # word POPS on (shared clock). None → staggered default.
+    word_index: Optional[int] = None
 
 class _GenSceneMotion(BaseModel):
     # Smoothness levers: spring easing + motion blur at 60fps is the "looks like
@@ -1295,6 +1298,16 @@ class _GenSceneMotion(BaseModel):
     entrance: _GENSCENE_ENTRANCES
     easing: _GENSCENE_EASINGS = "spring"
     motion_blur: bool = True
+
+class _GenSceneStat(BaseModel):
+    # TypoStat DATA fields (Increment 3): the stat arrives as data, NEVER as
+    # image-prompt text — typography is composited in code. value is the number
+    # the count-up LANDS on the emphasis word (value-landing doctrine).
+    value: Optional[float] = None
+    prefix: Optional[str] = Field(default=None, max_length=8)
+    suffix: Optional[str] = Field(default=None, max_length=16)
+    label: Optional[str] = Field(default=None, max_length=60)
+    supporting_line: Optional[str] = Field(default=None, max_length=120)
 
 class _GeneratedScene(BaseModel):
     background: _GenSceneBackground
@@ -1305,6 +1318,18 @@ class _GeneratedScene(BaseModel):
     end_word_index: int
     anchor: _SEMANTIC_ANCHOR
     duration_seconds: Optional[float] = None  # override; null = use word span
+    # ── Lumen DESIGNED scenes (Increment 3) ──────────────────────────────────
+    # A typed scene is a code-authored composition (typography/palette/motion in
+    # Remotion); the model contributes at most ONE hero asset on a clean field.
+    # None → the legacy full-frame path. typo_stat = designed stat layout (pure
+    # code, zero generation); hero_object = ONE generated object, alpha-recovered,
+    # in a code glow void; photo_card = real imagery in tilted cards (zero
+    # generation; imagery via subject.ref_image_keys).
+    scene_type: Optional[Literal["typo_stat", "hero_object", "photo_card"]] = None
+    stat: Optional[_GenSceneStat] = None
+    # kept-word index whose onset the TypoStat count LANDS on (shared clock);
+    # None → land at 40% of the scene window.
+    land_word_index: Optional[int] = None
 
 class _Transition(BaseModel):
     after_word_index: int
@@ -5579,20 +5604,49 @@ then yields. One every ~15s is the directing ceiling — spacing at that rhythm 
 BORN ON-PALETTE — the scene inherits the ONE committed color world from your
 editorial_vision. Set `background.palette_ref` to that world and `text_layers[].style_ref` to the video's type voice; the subject is rendered to SIT in that palette — born inside the video's color identity. A generated scene lives or dies on palette membership — on-palette it reads as the video thinking in pictures; the bare cut outranks an off-palette one.
 
+THE THREE DESIGNED TYPES (Increment 3) — set `scene_type`; these are DESIGNED
+compositions: our typography, our palette, our motion, authored in code. The
+image model contributes at most ONE object. Prefer these over the legacy
+full-frame form in every case they cover:
+  • `typo_stat` — a designed typographic stat (big number + label + supporting
+    line), the count LANDING its final value on the emphasis word. Fill `stat`
+    with DATA fields ({value, prefix, suffix, label, supporting_line} — from the
+    dialogue verbatim) and `land_word_index` with the kept word the number lands
+    on. NO generation_prompt — this type never touches the image model. FITS
+    corporate/educational/professional; works viral. The inevitable choice for
+    any spoken number or percentage.
+  • `hero_object` — ONE bespoke object (a padlock, a folder, the product) alpha-
+    matted into a code-built glow world, with 1-4 transcript words popping
+    around it on their spoken onsets (`text_layers[].word_index`). The
+    generation_prompt names ONLY the physical object and its material — "a matte
+    black padlock, brushed metal, studio lighting" — NEVER colors/hex, NEVER
+    words to render, NEVER screens/dashboards/charts (surfaces that invite
+    text). FITS viral/punchy/product; the concept-metaphor move.
+  • `photo_card` — real imagery (user-provided / fetched refs via
+    subject.ref_image_keys) in tilted floating cards with one caption line.
+    Zero generation. FITS story/personal/proof beats ("this kid makes $2M").
+The legacy full-frame form (scene_type absent) remains ONLY for a beat that
+genuinely needs a whole generated world — rare.
+
 FILL THE FIELDS:
-  • background: { kind: "gradient" (a palette world the subject floats over) |
-    "generated" (the subject render IS the full frame, its own world) | "solid";
-    palette_ref: the editorial_vision color world }.
-  • subject: { generation_prompt: WHAT to render, in a clean bespoke 3D-render
-    style; ref_image_keys: [] (the style anchor + brand refs attach downstream);
-    anchor; scale }.
-  • text_layers: ONLY when text must live INSIDE the graphic. `content` is FROM
-    KNOWN INPUTS ONLY — a phrase from the transcript or a user-provided string.
-    NEVER invent on-screen text: no made-up numbers, stats, product names, or
-    labels. A WRONG NUMBER on a beautiful graphic is the worst failure in the
-    whole video. When in doubt, the words go in a Remotion type layer (a text_overlay) OVER the scene — type layers are the default home for words, and the image carries the picture.
+  • background: { kind: "gradient" | "solid"; palette_ref: the editorial_vision
+    color world; colors: 2-3 hex values of that world } — the palette is applied
+    IN CODE. Never write colors or hex codes into a generation_prompt.
+  • subject: { generation_prompt (hero_object/legacy only — the OBJECT, no text,
+    no colors); ref_image_keys; anchor; scale }.
+  • text_layers: `content` FROM KNOWN INPUTS ONLY — a phrase from the transcript
+    or a user-provided string. NEVER invent on-screen text: no made-up numbers,
+    stats, product names, or labels. A WRONG NUMBER on a beautiful graphic is
+    the worst failure in the whole video. All scene text is composited by the
+    type system — the image model never draws a glyph.
   • motion: { entrance: slide|scale|float|fade|rise; easing: "spring";
-    motion_blur: true } — buttery; the scene arrives moving.
+    motion_blur: true } — buttery; the scene arrives moving and never sits still.
+
+THE USER'S EXPLICIT ASK IS LAW: when the user's request (in "The user wants:")
+explicitly asks for a graphic, scene, render, or visual, you MUST emit at least
+one generated scene on the most fitting beat — the ask outranks the rarity
+doctrine, exactly as every explicit user instruction outranks a default. Not
+attempting an explicitly-requested scene is a failed edit.
 
 word indices: anchor `start_word_index`/`end_word_index` to the kept words the
 scene plays over, exactly like a B-roll cutaway. The scene HOLDS the beat the
@@ -8383,25 +8437,17 @@ def _generate_scene_subject(scene, idx, work_dir, known_text=""):
         return None
     _refs = _resolve_scene_ref_paths(_subj.get("ref_image_keys"), work_dir)
     _bg_kind = str(((scene or {}).get("background") or {}).get("kind") or "generated")
-    # PALETTE THREADING (audit fix): the committed color world reaches the
-    # generation as usable direction — the palette_ref slug + any explicit colors
-    # ride on the content prompt, so the floor's PALETTE clause has an actual
-    # world to build within (palette_ref was previously dropped before the call).
-    _bg = dict((scene or {}).get("background") or {})
-    _palette_ref = str(_bg.get("palette_ref") or "").strip()
-    _colors = [c for c in (_bg.get("colors") or []) if isinstance(c, str) and c]
-    _palette_line = ""
-    if _palette_ref or _colors:
-        _palette_line = "\n\nPalette (the video's committed color world): " + (_palette_ref or "as given")
-        if _colors:
-            _palette_line += " — anchor colors " + ", ".join(_colors[:6])
-        _palette_line += ". Build the whole image within it."
-    _content = _prompt + _palette_line
-    # TRANSPARENCY ONLY WHEN NEEDED: a full-frame takeover (the subject IS its
-    # own world, background.kind == "generated") needs NO alpha. The ~2×-cost
-    # matte runs only when the subject floats as a cutout over a SEPARATE
-    # gradient/solid background.
-    _needs_alpha = _bg_kind != "generated"
+    _stype = str((scene or {}).get("scene_type") or "")
+    # HINT-LEAK LAW (Increment 3, Zac 2026-07-17): no metadata string — palette
+    # hex, vibe labels, component names — may enter an image prompt as literal
+    # renderable content. Two confirmed leaks on record: "#4F9DF7" rendered
+    # onto a frame; "AI nodes" phrasing produced literal AI glyphs. The old
+    # palette-line injection is REMOVED (palette is applied in CODE by the
+    # designed scenes); any surviving hex/metadata tokens are scrubbed here.
+    _content = re.sub(r"#[0-9a-fA-F]{3,8}\b", "", _prompt).strip()
+    # TRANSPARENCY: a legacy full-frame takeover needs no alpha. A HERO asset
+    # (Increment 3) is ALWAYS a cutout over the code-built world → alpha forced.
+    _needs_alpha = (_stype == "hero_object") or (_bg_kind != "generated")
     _out = os.path.join(work_dir, f"genscene_{idx:02d}.png")
     _cost = 0.0
     try:
@@ -8645,6 +8691,56 @@ def _persist_gen_attempt(job_id, scene_idx, attempt, kind, image_path=None, meta
         return _urls or None
     except Exception as _pe:
         print(f"[gen-persist] skipped ({type(_pe).__name__}: {str(_pe)[:80]})", flush=True)
+        return None
+
+
+# ── HERO-ASSET QA (Increment 3): the narrowed judge ─────────────────────────
+# With designed scenes, generation risk narrows to ONE thing: the geometry of a
+# single object asset on a clean field. Judged at GENERATION time (no re-render
+# needed — the asset hasn't entered a composite yet); the proven perturb loop
+# points at the ASSET prompt. Frame-judging remains only for legacy full-frame.
+class _HeroAssetScore(BaseModel):
+    geometry: float      # object structurally intact, physically plausible
+    clean_field: float   # crisp subject, clean background field for the matte
+    no_stray_text: float # no incidental lettering/glyphs on or around the object
+    no_brand_mark: float # no real-world brand names/logos
+    verdict: Literal["pass", "fail"]
+    reason: str = ""
+
+
+def _qa_judge_hero_asset(png_path):
+    """One vision call scoring the generated HERO ASSET (pre-composite). Returns
+    a _HeroAssetScore or None (fail-open — never blocks generation)."""
+    try:
+        if genai_client_mod is None or genai_types is None or not os.path.isfile(png_path):
+            return None
+        with open(png_path, "rb") as _f:
+            _img = genai_types.Part.from_bytes(data=_f.read(), mime_type="image/png")
+        _resp = _gemini_generate_with_backoff(
+            lambda: _get_genai_client().models.generate_content(
+                model=GEMINI_MODEL,
+                contents=[_img, "Score this generated hero object asset."],
+                config=genai_types.GenerateContentConfig(
+                    temperature=0.2,
+                    response_mime_type="application/json",
+                    response_json_schema=_HeroAssetScore.model_json_schema(),
+                    system_instruction=(
+                        "You QA a single generated OBJECT asset that will be alpha-"
+                        "matted into a designed motion scene. Score 0.0-1.0: "
+                        "geometry (the object is structurally intact and physically "
+                        "plausible — no melted/broken/duplicated parts); clean_field "
+                        "(crisp subject on a clean seamless field, mattable); "
+                        "no_stray_text (1.0 = no incidental lettering or glyphs "
+                        "anywhere); no_brand_mark (1.0 = no real brand names/logos). "
+                        "verdict='fail' if the object is broken, text-contaminated, "
+                        "or branded; else 'pass'. Be strict."),
+                ),
+            ),
+            label="hero-asset-qa",
+        )
+        return _HeroAssetScore.model_validate(json.loads(_resp.text or "{}"))
+    except Exception as _he:
+        print(f"[hero-qa] judge failed ({type(_he).__name__}: {str(_he)[:100]}) — fail-open", flush=True)
         return None
 
 
@@ -22080,9 +22176,51 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _bg = dict(_scene.get("background") or {})
             _mo = dict(_scene.get("motion") or {})
             _subj = dict(_scene.get("subject") or {})
+            # ── Lumen DESIGNED scenes (Increment 3): typed pass-through ──────
+            _stype = _scene.get("scene_type") or None
+            # duration discipline: a designed scene holds ~1.5-2.5s
+            if _stype:
+                _gs_dur = max(int(round(1.5 * source_fps)),
+                              min(_gs_dur, int(round(2.5 * source_fps))))
+            # value-landing: the TypoStat count LANDS on the emphasis word's
+            # onset (shared clock), scene-local frames
+            _land_frame = None
+            _lwi = _scene.get("land_word_index")
+            if _stype == "typo_stat" and _lwi is not None:
+                _lpw = _pw_by_idx.get(int(_lwi))
+                if _lpw is not None:
+                    _lt = float(_lpw.get("audible_start") or _lpw.get("start") or 0.0)
+                    _land_frame = max(1, min(int(round(_lt * source_fps)) - _gs_from,
+                                             _gs_dur - 6))
+            # word-pops: each text layer with a word_index pops on that word's
+            # onset (matched by content — the known-inputs filter may drop rows)
+            for _tl_src in (_scene.get("text_layers") or []):
+                _twi = (_tl_src or {}).get("word_index")
+                _tc = str((_tl_src or {}).get("content") or "").strip()
+                if _twi is None or not _tc:
+                    continue
+                _tpw = _pw_by_idx.get(int(_twi))
+                if _tpw is None:
+                    continue
+                _tt = float(_tpw.get("audible_start") or _tpw.get("start") or 0.0)
+                for _tl_out in _text_layers:
+                    if _tl_out.get("content") == _tc and "popFrame" not in _tl_out:
+                        _tl_out["popFrame"] = max(
+                            0, min(int(round(_tt * source_fps)) - _gs_from, _gs_dur - 4))
+                        break
+            # photo_card imagery: staged from the scene's ref image keys
+            _photos = None
+            if _stype == "photo_card":
+                _ppaths = _resolve_scene_ref_paths(_subj.get("ref_image_keys"), work_dir)
+                _photos = [_stage_file(_pp, dest_basename=f"gsphoto_{_gsi:02d}_{os.path.basename(_pp)}")
+                           for _pp in (_ppaths or [])[:3] if _pp and os.path.isfile(_pp)] or None
             _gs_out.append({
                 "fromFrame": _gs_from,
                 "durationInFrames": _gs_dur,
+                "sceneType": _stype,
+                "stat": (_scene.get("stat") or None),
+                "landFrame": _land_frame,
+                "photos": _photos,
                 "background": {
                     "kind": _bg.get("kind") or "generated",
                     "paletteRef": _bg.get("palette_ref"),
@@ -27785,6 +27923,11 @@ def handler(job):
                 _asset_pool = premium_ctx.asset_pool(max_workers=min(4, len(_gen_scenes)))
                 _gen_futs = {}
                 for _si, _scene in enumerate(_gen_scenes):
+                    # Increment 3: typo_stat / photo_card are PURE CODE — zero
+                    # generation cost, nothing to submit. Only hero_object and
+                    # legacy full-frame scenes call the image model.
+                    if str((_scene or {}).get("scene_type") or "") in ("typo_stat", "photo_card"):
+                        continue
                     # Full-cycle COST headroom: only generate if we can ALSO afford to
                     # judge + recover this scene — never generate something we can't
                     # afford to verify (hold the non-generated beat instead).
@@ -27806,13 +27949,12 @@ def handler(job):
                     except Exception:
                         _res = None
                     if _res and _res.get("path"):
-                        _generated_subjects[_gen_futs[_gf]] = _res["path"]
+                        _p_si = _gen_futs[_gf]
+                        _p_scene = _gen_scenes[_p_si] if 0 <= _p_si < len(_gen_scenes) else {}
                         if _cost_meter is not None:
                             _cost_meter.add("generated_asset", count=1, usd=float(_res.get("cost") or 0.0))
                         # Increment 2: persist attempt 0 durably (image + brief),
                         # rejects-included doctrine — the QA loop persists retries.
-                        _p_si = _gen_futs[_gf]
-                        _p_scene = _gen_scenes[_p_si] if 0 <= _p_si < len(_gen_scenes) else {}
                         _persist_gen_attempt(
                             job_id, _p_si, 0, "gen", image_path=_res["path"],
                             meta={"generation_prompt": str(((_p_scene or {}).get("subject") or {}).get("generation_prompt") or ""),
@@ -27820,6 +27962,43 @@ def handler(job):
                                   "system_floor": "default (_IMAGE_SYSTEM_PROMPT)",
                                   "cost": _res.get("cost"), "ms": _res.get("ms"),
                                   "transparency": _res.get("transparency")})
+                        # ── Increment 3: HERO-ASSET QA at generation time ─────
+                        # geometry/clean-field/stray-text/brand — the perturb
+                        # loop points at the ASSET prompt; no re-render needed.
+                        if str((_p_scene or {}).get("scene_type") or "") == "hero_object":
+                            for _ha_try in range(1, 3):
+                                _ha = _qa_judge_hero_asset(_res["path"])
+                                if _ha is not None:
+                                    _persist_gen_attempt(
+                                        job_id, _p_si, _ha_try - 1, "asset_judged",
+                                        meta={"geometry": _ha.geometry, "clean_field": _ha.clean_field,
+                                              "no_stray_text": _ha.no_stray_text,
+                                              "no_brand_mark": _ha.no_brand_mark,
+                                              "verdict": _ha.verdict, "reason": _ha.reason})
+                                _ha_fail = _ha is not None and (
+                                    _ha.verdict == "fail"
+                                    or min(_ha.geometry, _ha.clean_field, _ha.no_stray_text,
+                                           _ha.no_brand_mark) < _QA_PASS_THRESHOLD)
+                                if not _ha_fail:
+                                    break
+                                print(f"[hero-qa] scene={_p_si} FAIL a{_ha_try - 1} "
+                                      f"({_ha.reason[:80]}) — perturb+regen", flush=True)
+                                _newp = _perturb_scene_prompt(_p_scene, _ha.reason, _ha_try)
+                                if _newp:
+                                    _p_scene.setdefault("subject", {})["generation_prompt"] = _newp
+                                _res2 = _generate_scene_subject(_p_scene, _p_si, work_dir, _known_text)
+                                if not (_res2 and _res2.get("path")):
+                                    break
+                                _res = _res2
+                                if _cost_meter is not None:
+                                    _cost_meter.add("generated_asset_regen", count=1,
+                                                    usd=float(_res2.get("cost") or 0.0))
+                                _persist_gen_attempt(
+                                    job_id, _p_si, _ha_try, "gen", image_path=_res2["path"],
+                                    meta={"generation_prompt": str((_p_scene.get("subject") or {}).get("generation_prompt") or ""),
+                                          "perturbed": bool(_newp), "hero_asset_retry": True,
+                                          "cost": _res2.get("cost"), "ms": _res2.get("ms")})
+                        _generated_subjects[_p_si] = _res["path"]
                 if _generated_subjects:
                     edit_plan["_generated_subjects"] = _generated_subjects
                     print(
@@ -28166,6 +28345,12 @@ def handler(job):
         # without it) if it can't be fixed in budget. NEVER ships a judged-bad
         # asset; fail-open — any error ships the already-validated output.
         _qa_scenes = (edit_plan.get("_rendered_generated_scenes") or []) if isinstance(edit_plan, dict) else []
+        # Increment 3 QA RE-SCOPE: designed scenes (typo_stat/photo_card/
+        # hero_object) are code-authored — garbled text and off-palette are
+        # unconstructible, so the FRAME judge covers only legacy full-frame
+        # scenes. The hero ASSET is judged at generation time (geometry/clean
+        # field/stray text/brand) with the perturb loop pointed at asset prompts.
+        _qa_scenes = [s for s in _qa_scenes if not (s or {}).get("sceneType")]
         if route_premium and premium_ctx is not None and _qa_scenes:
             try:
                 _qa_fps = float(edit_plan.get("_render_fps") or 60.0)

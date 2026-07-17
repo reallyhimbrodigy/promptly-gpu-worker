@@ -10,6 +10,7 @@ import {
   spring,
 } from "remotion";
 import { CameraMotionBlur } from "@remotion/motion-blur";
+import { LumenScene } from "./LumenScenes";
 import type {
   PromptlyRenderProps,
   PromptlyMicroSegmentsProps,
@@ -581,6 +582,11 @@ const GeneratedScene: React.FC<{ spec: GeneratedSceneSpec; fps: number }> = ({
 }) => {
   const frame = useCurrentFrame();
   const { background, subject, textLayers, motion } = spec;
+  // Lumen DESIGNED scenes (Increment 3): typed scenes route to the code-authored
+  // compositions (LumenScenes.tsx); only legacy full-frame continues below.
+  if (spec.sceneType) {
+    return <LumenScene spec={spec} />;
+  }
 
   // Entrance progress 0→1. Spring for the buttery default; linear fallback.
   const entranceDur = Math.max(1, Math.round(fps * 0.5));
@@ -687,7 +693,7 @@ const GeneratedScene: React.FC<{ spec: GeneratedSceneSpec; fps: number }> = ({
   );
 };
 
-const GeneratedSceneLayer: React.FC<{
+export const GeneratedSceneLayer: React.FC<{
   items: GeneratedSceneSpec[];
   fps: number;
 }> = ({ items, fps }) => (
