@@ -710,6 +710,36 @@ from type_registries import (
 )
 
 
+def _capture_render_plan(label, payload):
+    """LEVER 3 baseline capture: persist a finalized, schema-VALID render input
+    at the render seam to the durable corpus bucket, keyed by the active job id.
+    Plans only (this is the input json, never a render — no GPU/compute spend).
+    Flag-gated OFF by default (PROMPTLY_PLAN_CAPTURE) → zero effect on normal
+    traffic. Best-effort: a capture failure NEVER touches the render path."""
+    try:
+        import boto3
+        _jid = str(_ACTIVE_JOB_ID or "unknown")
+        _key = f"cond3_baseline/plans/{_jid}/{label}.json"
+        _body = json.dumps({
+            "job_id": _jid,
+            "label": label,
+            "build_sha": os.environ.get("PROMPTLY_BUILD_SHA", ""),
+            "prompt_epoch": "pre-Lever-3",
+            "payload": payload,
+        }, default=str).encode("utf-8")
+        boto3.client(
+            "s3", region_name=os.environ.get("AWS_REGION") or "us-west-1"
+        ).put_object(
+            Bucket="thisismybucketagainwooo", Key=_key, Body=_body,
+            ContentType="application/json",
+        )
+        print(f"[plan-capture] persisted s3://thisismybucketagainwooo/{_key} "
+              f"({len(_body)} bytes)", flush=True)
+    except Exception as _pc_err:
+        print(f"[plan-capture] non-fatal capture failure "
+              f"({type(_pc_err).__name__}: {str(_pc_err)[:120]})", flush=True)
+
+
 def _validate_and_write_render_input(
     label: str,
     payload: dict,
@@ -734,6 +764,12 @@ def _validate_and_write_render_input(
         ) from ve
     with open(output_path, "w") as _f:
         json.dump(payload, _f)
+    # LEVER 3 baseline: capture the finalized render input at the seam (the plan
+    # the CURRENT pre-Lever-3 prompt produced) for the fixed-source A/B corpus.
+    # OFF by default — only fires when PROMPTLY_PLAN_CAPTURE is set for a capture
+    # run, and never affects the render.
+    if os.environ.get("PROMPTLY_PLAN_CAPTURE", "").strip():
+        _capture_render_plan(label, payload)
 
 # Pydantic Literals derive from type_registries — single source of truth
 # for handler.py + render_schemas.py. See type_registries.py for the
@@ -10868,9 +10904,21 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 reason="recipe stage unrecoverable — deterministic safe edit "
                        "proceeds down the normal render path",
             )
-            post_cut_plan = build_safe_recipe(
-                kept_words, vocal_emphasis=_vocal, ep_off=_ep_off,
-            )
+            # LEVER 2 (terminal honesty, hole A): build_safe_recipe sits OUTSIDE
+            # the plan-building try below, so any exception it raised escaped
+            # uncaught → classify_error saw no sentinel → UNKNOWN — and worse,
+            # UNKNOWN was rescue-eligible, so a doomed re-run burned before the
+            # UNKNOWN finally stood. The deterministic rescue failing is a real,
+            # nameable class: it terminates NAMED (SAFE_EDIT_FAILED), never UNKNOWN.
+            try:
+                post_cut_plan = build_safe_recipe(
+                    kept_words, vocal_emphasis=_vocal, ep_off=_ep_off,
+                )
+            except Exception as _se_err:
+                raise RuntimeError(
+                    f"SAFE_EDIT_FAILED: safe recipe construction failed "
+                    f"({type(_se_err).__name__}: {str(_se_err)[:200]})"
+                ) from _se_err
         else:
             try:
                 try:
@@ -14357,6 +14405,23 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 "Re-emit the complete recipe JSON with this corrected:\n"
                 f"{_repair_err}"
             )
+        except Exception as _use_safe_other:
+            # LEVER 2 (terminal honesty, hole B): a non-(ValueError|RuntimeError)
+            # escaping the plan-building span while the safe edit is engaged (a
+            # construction bug — KeyError/TypeError/etc.) would otherwise land
+            # UNKNOWN. Non-safe paths keep their EXACT behavior (raw re-raise); a
+            # teardown keeps its own designed class; only the engaged-rescue case
+            # is renamed to the honest SAFE_EDIT_FAILED.
+            if not _use_safe:
+                raise
+            if _interpreter_is_shutting_down(_use_safe_other):
+                raise ContainerTeardownError(
+                    f"{type(_use_safe_other).__name__} during safe-edit plan build"
+                ) from _use_safe_other
+            raise RuntimeError(
+                f"SAFE_EDIT_FAILED: safe-edit plan build raised "
+                f"{type(_use_safe_other).__name__}: {str(_use_safe_other)[:200]}"
+            ) from _use_safe_other
 
 
 # ─── PLAN-DIFF (RE-EDIT) ─────────────────────────────────────────────────────
@@ -23957,12 +24022,39 @@ class ContainerTeardownError(RuntimeError):
         )
 
 
+def _ladder_input_sig(edit_plan, broll_clips):
+    """LEVER 4: a stable hash of the render-DETERMINING inputs — cuts + every
+    decoration layer + b-roll. Two rungs with the same signature render
+    BYTE-IDENTICALLY, so re-rendering the second cannot differ from the first
+    (a deterministic failure re-fails identically; a transient one is not worth
+    a guaranteed-identical retry). Returns None if uncomputable → the caller
+    then never skips, preserving the render (fail-safe)."""
+    import hashlib
+    try:
+        _payload = {
+            "cuts": edit_plan.get("cuts"),
+            "motion_graphics": edit_plan.get("motion_graphics"),
+            "text_overlays": edit_plan.get("text_overlays"),
+            "transitions": edit_plan.get("transitions"),
+            "tight_cut_overlays": edit_plan.get("tight_cut_overlays"),
+            "generated_scenes": edit_plan.get("generated_scenes"),
+            "broll_clips": broll_clips,
+        }
+        _blob = json.dumps(_payload, sort_keys=True, default=str, ensure_ascii=False)
+        return hashlib.sha1(_blob.encode("utf-8", "ignore")).hexdigest()
+    except Exception:
+        return None
+
+
 def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
-    """RENDER DEGRADE LADDER (zero-fatal): rung 0 = full render; a crash
-    retries the IDENTICAL spec once (rung 1, transient class); a second crash
-    strips decorations (MGs, overlays, transitions, TCOs, b-roll, generated
-    scenes — cuts + captions + zooms kept) and renders once more (rung 2);
-    only a third failure raises, classified RENDER_FATAL. The post-mux
+    """RENDER DEGRADE LADDER (zero-fatal): rung 0 = full render; a crash used to
+    retry the IDENTICAL spec once (rung 1) — LEVER 4 now SKIPS that rung when its
+    inputs are byte-identical to the last attempt (they always are by
+    construction) and advances straight to the strip rung, never re-rendering
+    identical inputs; a second-class crash strips decorations (MGs, overlays,
+    transitions, TCOs, b-roll, generated scenes — cuts + captions + zooms kept)
+    and renders once more (rung 2); only a failure with no further input-
+    differing rung raises, classified RENDER_FATAL. The post-mux
     |v-a|>30ms guard raises INSIDE the render callable, so it routes into
     this ladder (a deterministic drift re-fails through the rungs and
     surfaces as RENDER_FATAL — honest, no longer UNKNOWN). Inert on success:
@@ -23975,6 +24067,7 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
     _pristine_cuts = _copy_rl.deepcopy(edit_plan["cuts"])
     _rung = 0
     _prev_sig_rl = None
+    _last_render_sig = None  # LEVER 4: input signature of the last ATTEMPTED render
     while True:
         # (B) container-teardown fast-fail: if the interpreter has begun
         # finalizing (upstream-timeout container reclaim), no fresh thread pool
@@ -24024,6 +24117,36 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
                 edit_plan["_floor_render"] = (
                     "two render crashes — decorations stripped"
                 )
+            # LEVER 4: never re-render byte-identical inputs. Rung 1 restores the
+            # exact rung-0 spec, so its inputs are identical by construction — the
+            # render cannot differ, it just burns the seconds. If this rung's
+            # input signature equals the last ATTEMPTED render's, skip it and
+            # advance to the next input-differing rung (the strip rung) instead of
+            # re-rendering. Zero blast radius: a skipped render would have produced
+            # a byte-identical result to the one that already failed. Fail-safe:
+            # an uncomputable signature (None) never matches → the render proceeds.
+            _cur_render_sig = _ladder_input_sig(edit_plan, broll_clips)
+            if _cur_render_sig is not None and _cur_render_sig == _last_render_sig:
+                _record_divergence(
+                    "render", {"rung": _rung, "skipped": True},
+                    "ladder_identical_input_skip",
+                    reason="render inputs byte-identical to the prior attempt — "
+                           "rung skipped, not re-rendered (never retry identical inputs)")
+                print(
+                    f"[render-degrade] rung={_rung} SKIPPED — inputs byte-identical "
+                    f"to the last attempt; advancing to the next input-differing rung",
+                    flush=True,
+                )
+                if _rung >= 2:
+                    # No further input-differing rung exists — fail forward now
+                    # (the except below converts this to RENDER_FATAL). Unreachable
+                    # in practice: the strip rung always changes the inputs.
+                    raise RuntimeError(
+                        "RENDER_FATAL: degrade ladder exhausted with no "
+                        f"input-differing rung (last failure: {_prev_sig_rl})")
+                _rung += 1
+                continue
+            _last_render_sig = _cur_render_sig
             render_once(edit_plan["cuts"], broll_clips)
             return
         except Exception as _render_err:
@@ -24055,7 +24178,7 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
             _rung += 1
             print(
                 f"[render-degrade] rung={_rung} "
-                f"({'identical retry' if _rung == 1 else 'stripped re-render'}) "
+                f"({'identical → skipped by Lever 4' if _rung == 1 else 'stripped re-render'}) "
                 f"after {type(_render_err).__name__}: {str(_render_err)[:200]}",
                 flush=True,
             )
@@ -24185,6 +24308,22 @@ def classify_error(e):
         return _e(
             "RECIPE_INVALID",
             "The edit plan didn't pass validation after a retry — please run the job again.",
+            retryable=True,
+        )
+
+    # ── Safe-edit rescue itself failed (LEVER 2: terminal honesty) ────────
+    # The deterministic safe edit is the LAST net — when its own construction
+    # or plan-build fails, the job used to fall through to UNKNOWN "Something
+    # went wrong". Named explicitly so the rescue's failure is honest. A real
+    # error (refunded on the failed-row sweep, alerted via _fire_render_alert),
+    # retryable — the safe recipe is deterministic, but a re-run re-downloads /
+    # re-transcribes and the underlying transient (if any) may clear.
+    if "SAFE_EDIT_FAILED" in msg:
+        return _e(
+            "SAFE_EDIT_FAILED",
+            "We tried a simplified backup edit and it didn't come together — "
+            "your video wasn't delivered and your credit was returned. Please "
+            "run it again.",
             retryable=True,
         )
 
@@ -24762,6 +24901,12 @@ _OUTER_RESCUE_DENY = frozenset({
     "UPLOAD_NEVER_STARTED", "UPLOAD_STALLED", "UPLOAD_TIMEOUT",
     "S3_ACCESS", "S3_GENERIC", "TRANSCRIPTION",
     "RENDER_FATAL", "RECIPE_INVALID",
+    # Safe-edit rescue already failed (LEVER 2): the deterministic safe edit IS
+    # the rescue — if its own construction/plan-build failed, an outer safe-edit
+    # re-run is exactly as doomed as RECIPE_INVALID (same deterministic path).
+    # Deny it so a failed rescue terminates NAMED immediately, never burning a
+    # doomed re-run before standing.
+    "SAFE_EDIT_FAILED",
     # Container reclaim mid-render: the interpreter is finalizing and the global
     # thread-pool shutdown flag is STICKY for the life of the process — an
     # in-process handler re-run would re-hit "cannot schedule new futures" on its

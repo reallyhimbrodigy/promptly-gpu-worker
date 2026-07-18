@@ -4702,6 +4702,63 @@ def _outcome_gate_shadow():
         "PROMPTLY_OUTCOME_GATE must be baked into the image env, default 'shadow'"
 
 
+@check("LEVER 2 (safe-edit terminal honesty): a failed deterministic rescue terminates NAMED (SAFE_EDIT_FAILED), never UNKNOWN — build_safe_recipe wrapped (hole A), the plan-build span's non-(ValueError|RuntimeError) escape renamed when _use_safe (hole B); classify_error names it (real error, retryable, refunded on the failed-row sweep, NOT a designed rejection); in _OUTER_RESCUE_DENY so a failed rescue never burns a doomed re-run")
+def _lever2_safe_edit_named():
+    import handler
+    _h = open("handler.py").read()
+    # hole A: build_safe_recipe wrapped → SAFE_EDIT_FAILED sentinel
+    assert 'SAFE_EDIT_FAILED: safe recipe construction failed' in _h, \
+        "build_safe_recipe call must be wrapped to raise SAFE_EDIT_FAILED (hole A)"
+    # hole B: the plan-build span's broad escape renames only when _use_safe
+    assert 'SAFE_EDIT_FAILED: safe-edit plan build raised' in _h, \
+        "the plan-build span must rename a non-(VE|RE) escape to SAFE_EDIT_FAILED when _use_safe (hole B)"
+    assert 'if not _use_safe:\n                raise' in _h, \
+        "hole B must re-raise unchanged on the non-safe path (zero blast radius)"
+    # classify_error names it
+    _c = handler.classify_error(RuntimeError(
+        "SAFE_EDIT_FAILED: safe recipe construction failed (KeyError: 'x')"))
+    assert _c["error_code"] == "SAFE_EDIT_FAILED", _c
+    assert "Something went wrong" not in _c["user_message"], _c
+    assert _c["retryable"] is True, _c
+    # real error, NOT a designed rejection → refunded on the failed-row sweep
+    assert "SAFE_EDIT_FAILED" not in handler._DESIGNED_REJECTION_CODES, _c
+    # denied for the outer rescue (a failed rescue must not trigger another)
+    assert "SAFE_EDIT_FAILED" in handler._OUTER_RESCUE_DENY, \
+        "SAFE_EDIT_FAILED must be in _OUTER_RESCUE_DENY"
+
+
+@check("LEVER 4 (never re-render byte-identical inputs): the render degrade ladder computes an input signature (cuts + all decoration layers + b-roll) and SKIPS a rung whose inputs are byte-identical to the last attempted render (rung 1 = the pristine-restore, identical by construction), advancing to the strip rung instead of re-rendering; ledgered as ladder_identical_input_skip; fail-safe on an uncomputable signature (never skips)")
+def _lever4_no_identical_render():
+    _h = open("handler.py").read()
+    assert "def _ladder_input_sig(" in _h, "the input-signature helper must exist"
+    # the skip fires before render_once, keyed on equality with the last render
+    _i_sig = _h.find("_cur_render_sig = _ladder_input_sig(edit_plan, broll_clips)")
+    _i_render = _h.find("render_once(edit_plan[\"cuts\"], broll_clips)\n            return")
+    assert _i_sig != -1 and _i_render != -1 and _i_sig < _i_render, \
+        "the input-signature check must run BEFORE render_once"
+    assert 'if _cur_render_sig is not None and _cur_render_sig == _last_render_sig:' in _h, \
+        "must skip only when the signature is computable AND equals the last attempted render (fail-safe)"
+    assert '"ladder_identical_input_skip"' in _h, "the skip must be ledgered"
+    assert '_last_render_sig = _cur_render_sig' in _h, "the last attempted render's signature must be recorded"
+
+
+@check("LEVER 3 baseline capture: the plan-capture hook persists finalized, schema-VALID render inputs at the seam (_validate_and_write_render_input) to the durable corpus bucket, keyed by _ACTIVE_JOB_ID; flag-gated OFF by default (PROMPTLY_PLAN_CAPTURE, baked in modal_app env) so it's inert on normal traffic; best-effort — a capture failure never touches the render")
+def _lever3_plan_capture():
+    _h = open("handler.py").read()
+    assert "def _capture_render_plan(" in _h, "the plan-capture helper must exist"
+    # hooked into the seam AFTER the schema-valid write, flag-gated
+    _i_write = _h.find("json.dump(payload, _f)")
+    _i_hook = _h.find('if os.environ.get("PROMPTLY_PLAN_CAPTURE", "").strip():')
+    assert _i_write != -1 and _i_hook != -1 and _i_hook > _i_write, \
+        "the capture must fire AFTER the schema-valid write, flag-gated"
+    assert "_capture_render_plan(label, payload)" in _h, "the hook must call the capture helper"
+    assert 'cond3_baseline/plans/' in _h, "capture must persist to the durable corpus prefix"
+    # baked into the image env, default OFF
+    _m = open("modal_app.py").read()
+    assert '"PROMPTLY_PLAN_CAPTURE": os.environ.get("PROMPTLY_PLAN_CAPTURE", "")' in _m, \
+        "PROMPTLY_PLAN_CAPTURE must be baked into the image env, default OFF"
+
+
 @check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")
 def _spawn_refactor_phase3():
     _m = open("modal_app.py").read()

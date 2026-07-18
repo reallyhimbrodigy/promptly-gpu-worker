@@ -408,6 +408,11 @@ image = (
         # but changes NOTHING, so the deploy is inert until the false-positive
         # rate is measured. "enforce" = invalid salvage → retry; "off" = skip.
         "PROMPTLY_OUTCOME_GATE": os.environ.get("PROMPTLY_OUTCOME_GATE", "shadow"),
+        # Lever-3 baseline capture flag. Default "" (OFF) → the plan-capture hook
+        # at the render seam is inert. A capture run sets it
+        # (`PROMPTLY_PLAN_CAPTURE=1 ./deploy.sh`, or per-job) to persist the
+        # finalized render inputs to the corpus bucket. Never affects the render.
+        "PROMPTLY_PLAN_CAPTURE": os.environ.get("PROMPTLY_PLAN_CAPTURE", ""),
         # ── Supabase schema overrides for the tier + concurrency gate ──
         # Multi-clip premium concurrency check (handler.py:check_concurrency_gate)
         # reads from these tables. The defaults assumed `user_profiles.user_id`
