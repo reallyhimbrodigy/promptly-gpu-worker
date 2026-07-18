@@ -2019,6 +2019,84 @@ def get_encode_args(quality="high", threads=0):
 # Module-level: tracks active Remotion chunk subprocesses for cleanup on timeout
 _overlay_chunk_procs = []
 
+# ── PLATFORM-KILL SAFETY (reliability Phase 1, 2026-07-18) ────────────────────
+# Modal sends SIGTERM (then SIGKILL after a ~30s grace) on preemption/timeout.
+# The pipeline runs in an AnyIO worker thread that's blocked in the Remotion
+# render subprocess.run() — Modal can't interrupt it, so the thread survives
+# container exit and wedges runner shutdown for up to 30s ("N background thread(s)
+# [AnyIO worker thread] still running after container exit"), delaying recycling
+# (real money) and leaving the ledger unflushed.
+#
+# On the signal we (1) kill the render child processes so the blocked wait()
+# returns and the worker thread can unwind, and (2) flush the job's ledger. We
+# DELIBERATELY DO NOT write a terminal job status here: a preempted input RETRIES
+# (retries=2), and terminalizing it would falsely fail a job about to succeed on
+# the retry. The genuinely-dead case (all retries exhausted) is terminalized by
+# the server-side reaper (execution wall), which already refunds + pings [ALERT]
+# and now names the class PLATFORM_TIMEOUT. Best-effort throughout; re-raises the
+# default handler so the container still exits promptly.
+_ACTIVE_JOB_ID = None
+_SHUTDOWN_HANDLER_INSTALLED = False
+
+
+def _kill_render_children():
+    """Best-effort kill of this container's Remotion/Chromium render children by
+    scanning /proc (dependency-free — no psutil/pkill). Only ever called from the
+    shutdown signal, when the container is already being torn down, so killing
+    every render child is correct."""
+    try:
+        for _pid in os.listdir("/proc"):
+            if not _pid.isdigit():
+                continue
+            try:
+                with open(f"/proc/{_pid}/cmdline", "rb") as _f:
+                    _cmd = _f.read().replace(b"\x00", b" ").decode("utf-8", "ignore")
+                if ("render-full.mjs" in _cmd or "chrome-headless-shell" in _cmd
+                        or "chrome_crashpad" in _cmd or "/node " in _cmd and "/remotion" in _cmd):
+                    os.kill(int(_pid), signal.SIGKILL)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
+def _on_platform_shutdown(signum, frame):
+    try:
+        print(f"[platform-shutdown] signal {signum} — killing render children + "
+              f"flushing ledger (job={_ACTIVE_JOB_ID}); NO terminal write (retry-safe)",
+              flush=True)
+    except Exception:
+        pass
+    _kill_render_children()
+    try:
+        if _ACTIVE_JOB_ID:
+            _flush_divergence_ledger(_ACTIVE_JOB_ID)
+    except Exception:
+        pass
+    # Restore default disposition and re-raise so Modal's exit proceeds promptly.
+    try:
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+    except Exception:
+        pass
+
+
+def _install_shutdown_handler():
+    """Install the platform-shutdown signal handler. Called from the worker's
+    @modal.enter startup (per container start, main thread) so it survives memory
+    snapshots. Idempotent; guarded — signals can only be set from the main thread,
+    and a failure here must never break startup (the reaper is the backstop)."""
+    global _SHUTDOWN_HANDLER_INSTALLED
+    if _SHUTDOWN_HANDLER_INSTALLED:
+        return
+    try:
+        signal.signal(signal.SIGTERM, _on_platform_shutdown)
+        _SHUTDOWN_HANDLER_INSTALLED = True
+        print("[platform-shutdown] SIGTERM handler installed", flush=True)
+    except Exception as _e:
+        print(f"[platform-shutdown] handler install skipped ({type(_e).__name__}) "
+              f"— reaper remains the backstop", flush=True)
+
 _EMOJI_RE = re.compile(
     "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
     "\U0001F1E0-\U0001F1FF\U00002702-\U000027B0\U000024C2-\U0001F251"
@@ -3629,7 +3707,15 @@ def _deepgram_options(keywords=None):
     internally — so we strip the legacy `:N` form before sending.
     """
     kwargs = dict(
-        model="nova-3", detect_language=True,
+        # LATIN-SCOPE FLIP (2026-07-17): language=multi (was detect_language=True).
+        # detect_language returned 0 words + a wrong language label on ~40% of
+        # non-English talking videos (measured) — a false NO_SPEECH. multi
+        # reliably transcribes them. A downstream SCRIPT-COVERAGE gate then only
+        # lets scripts the caption fonts actually render (Latin today) reach the
+        # render path; uncovered scripts take the honest language-named reject.
+        # Verified 2026-07-17: multi accepts the full option set below incl.
+        # keyterm (HTTP 200, no PAYLOAD_ERROR).
+        model="nova-3", language="multi",
         smart_format=True, utterances=True, punctuate=True, diarize=True,
         # Deepgram silently strips disfluencies ("um", "uh", "uhm") from the
         # transcript by default. For editorial cutting we need those tokens
@@ -3732,8 +3818,21 @@ def _parse_deepgram_response(resp):
     if len(speaker_ids) > 1:
         print(f"[deepgram] Detected {len(speaker_ids)} speakers", flush=True)
 
-    print(f"[deepgram] Transcribed {len(words)} words", flush=True)
-    return {"text": alt.transcript or "", "words": words, "utterances": utterances}
+    # Surface the language multi detected (per-channel), for the script-coverage
+    # gate's honest, language-named rejection. Best-effort — never a hard field.
+    _detected_lang = None
+    try:
+        _ch0 = resp.results.channels[0]
+        _detected_lang = getattr(_ch0, "detected_language", None)
+        if not _detected_lang:
+            _langs = getattr(_ch0, "languages", None) or []
+            _detected_lang = _langs[0] if _langs else None
+    except Exception:
+        _detected_lang = None
+
+    print(f"[deepgram] Transcribed {len(words)} words (lang={_detected_lang})", flush=True)
+    return {"text": alt.transcript or "", "words": words, "utterances": utterances,
+            "detected_language": _detected_lang}
 
 
 def _deepgram_is_retriable_error(msg):
@@ -3795,6 +3894,116 @@ def transcribe_audio(source_path, keywords=None):
                 continue
             break
     raise RuntimeError(f"Deepgram transcription failed after 3 attempts: {last_err}") from last_err
+
+
+def _detect_nonenglish_speech(source_path):
+    """Interim non-English honesty (2026-07-17). When the main nova-3
+    detect_language pass returns 0 words, re-check the SAME audio with
+    language=multi — which reliably detects Hindi/Spanish/Russian/etc. speech
+    that detect_language misses (measured: ~40% of NO_SPEECH rejections carry
+    real non-English speech). Returns (language_code_or_None, word_count).
+
+    Used ONLY to make the rejection TRUE ("we heard you — English-only for
+    now"), NEVER to render: the pipeline stays English-only until the multi
+    render test clears the global flip. Best-effort — any failure returns
+    (None, 0) so the plain NO_SPEECH reject proceeds unchanged. Runs only on
+    the reject path (0 words), so it adds a Deepgram call to rejections only,
+    never to a normal edit."""
+    try:
+        if DeepgramClient is None or PrerecordedOptions is None:
+            return (None, 0)
+        dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
+        audio_bytes = prepare_audio_for_deepgram(source_path)
+        options = PrerecordedOptions(
+            model="nova-3", language="multi", smart_format=True, punctuate=True)
+        resp = dg.listen.prerecorded.v("1").transcribe_file(
+            {"buffer": audio_bytes, "mimetype": "audio/flac"}, options)
+        parsed = _parse_deepgram_response(resp)
+        n = len(parsed.get("words") or [])
+        lang = None
+        try:
+            _ch0 = resp.results.channels[0]
+            lang = getattr(_ch0, "detected_language", None)
+            if not lang:
+                _langs = getattr(_ch0, "languages", None) or []
+                lang = _langs[0] if _langs else None
+        except Exception:
+            lang = None
+        print(f"[nonenglish-check] language=multi found {n} words (lang={lang})", flush=True)
+        return (lang, n)
+    except Exception as _e:
+        print(f"[nonenglish-check] skipped ({type(_e).__name__}) — NO_SPEECH proceeds", flush=True)
+        return (None, 0)
+
+
+# ── SCRIPT-COVERAGE GATE (Latin-scope language flip, 2026-07-17) ──────────────
+# language=multi transcribes every language, but the caption fonts can only
+# render some scripts — rendering one they can't produces tofu boxes, which
+# fails the zero-defect bar WORSE than an honest rejection. So a transcript may
+# reach the render path ONLY if its dominant Unicode script is covered.
+#
+# _SCRIPT_COVERAGE is DERIVED FROM THE FONT INVENTORY, not hope: every designed
+# caption family (src/remotion/src/captions/shared/fonts.ts — Montserrat, Inter,
+# Poppins, DMSans, Teko, Playfair, Lora, …) loads the LATIN subset only, and the
+# render image installs NO Indic font (modal_app.py: fonts-dejavu-core only).
+# DejaVu's Cyrillic fallback is legible but OFF-DESIGN → excluded per the
+# zero-defect bar. So covered today = Latin. validate_deploy gate-enforces that
+# this set cannot drift ahead of the fonts (tofu stays unconstructible).
+_SCRIPT_COVERAGE = frozenset({"Latin"})
+
+# Codepoint-range → script classifier (stdlib unicodedata exposes no Script
+# property). Common chars (digits/punct/space/symbols) are script-neutral and
+# never counted.
+_SCRIPT_RANGES = (
+    ("Latin", ((0x0041, 0x024F), (0x1E00, 0x1EFF), (0x2C60, 0x2C7F), (0xA720, 0xA7FF))),
+    ("Cyrillic", ((0x0400, 0x052F), (0x2DE0, 0x2DFF), (0xA640, 0xA69F))),
+    ("Devanagari", ((0x0900, 0x097F), (0xA8E0, 0xA8FF))),
+    ("Bengali", ((0x0980, 0x09FF),)),
+    ("Gurmukhi", ((0x0A00, 0x0A7F),)),
+    ("Gujarati", ((0x0A80, 0x0AFF),)),
+    ("Tamil", ((0x0B80, 0x0BFF),)),
+    ("Telugu", ((0x0C00, 0x0C7F),)),
+    ("Kannada", ((0x0C80, 0x0CFF),)),
+    ("Malayalam", ((0x0D00, 0x0D7F),)),
+    ("Arabic", ((0x0600, 0x06FF), (0x0750, 0x077F), (0x08A0, 0x08FF))),
+    ("Hebrew", ((0x0590, 0x05FF),)),
+    ("Thai", ((0x0E00, 0x0E7F),)),
+    ("Han", ((0x3400, 0x4DBF), (0x4E00, 0x9FFF))),
+    ("Hiragana", ((0x3040, 0x309F),)),
+    ("Katakana", ((0x30A0, 0x30FF),)),
+    ("Hangul", ((0x1100, 0x11FF), (0xAC00, 0xD7AF))),
+    ("Greek", ((0x0370, 0x03FF),)),
+)
+
+# Fallback language hint per script when Deepgram returns no code.
+_SCRIPT_LANG_HINT = {
+    "Devanagari": "hi", "Cyrillic": "ru", "Arabic": "ar", "Hebrew": "he",
+    "Han": "zh", "Hiragana": "ja", "Katakana": "ja", "Hangul": "ko",
+    "Tamil": "ta", "Telugu": "te", "Bengali": "bn", "Gujarati": "gu",
+    "Gurmukhi": "pa", "Malayalam": "ml", "Kannada": "kn", "Thai": "th", "Greek": "el",
+}
+
+
+def _dominant_script(words):
+    """Dominant Unicode script of a Deepgram word list (dicts with 'word').
+    Counts letter codepoints by script range; neutral chars (digits, punct,
+    space) don't count. Returns the script with the most letters, or 'Latin'
+    when there are no classifiable letters (a digits-only transcript is safe —
+    ASCII renders everywhere). Deterministic, no I/O."""
+    counts = {}
+    for w in (words or []):
+        _t = w.get("word", "") if isinstance(w, dict) else str(w)
+        for ch in _t:
+            cp = ord(ch)
+            if cp < 0x0250 and not (0x0041 <= cp <= 0x024F):
+                continue  # ASCII digits/punct/control — neutral
+            for name, ranges in _SCRIPT_RANGES:
+                if any(lo <= cp <= hi for lo, hi in ranges):
+                    counts[name] = counts.get(name, 0) + 1
+                    break
+    if not counts:
+        return "Latin"
+    return max(counts.items(), key=lambda kv: kv[1])[0]
 
 
 # ─── TIGHTEN ──────────────────────────────────────────────────────────────────
@@ -9415,6 +9624,46 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             # L1+L2: declared caps + repetition signatures enforced at THE
             # parse edge — every downstream consumer reads capped strings.
             _enforce_string_caps(_parsed, _post_cuts_response_schema(), "post_cuts")
+            # Phase-4 OUTCOME-GATE (Cond-2 ratified). JSON-parseable is NOT the
+            # same as schema-valid: a mid-plan degeneration can still close the
+            # braces with a required field missing or a nested shape broken, and
+            # _enforce_string_caps only fixes STRING CAPS — it does not check
+            # structure. Validate the SALVAGED plan against the full strict
+            # PostCutPlan model. FLAG-GATED so the deploy is inert until the
+            # false-positive rate is measured on live traffic:
+            #   shadow  (default) — ledger the verdict, change NOTHING. Measures
+            #            how often a normal salvage trips strict validation before
+            #            we ever pay a retry for it (the frozen BEFORE baseline
+            #            measured render-INPUT validity, which is looser than
+            #            PostCutPlan, so this rate was previously unseen).
+            #   enforce — on invalid, treat as a mid-plan degeneration → fall to
+            #            the retry below (latency); NEVER ship an invalid salvage
+            #            (quality). INVARIANT: a false-positive costs only a
+            #            retry, never a shipped-broken edit.
+            #   off     — skip entirely (rollback).
+            # Frozen BEFORE baseline (45d @ a6591cd, s3://…/cond3_baseline/
+            # before.json): 0/110 real salvages were render-input-invalid; the 6
+            # non-completions all failed at a LATER, orthogonal gate (INTEGRITY_
+            # TRIP / RENDER_FATAL) with schema-valid plans → gate no-op there too.
+            _gate_mode = os.environ.get("PROMPTLY_OUTCOME_GATE", "shadow")
+            if _gate_mode != "off":
+                _gate_err = None
+                try:
+                    PostCutPlan.model_validate(_parsed)
+                except Exception as _ge:
+                    _gate_err = f"{type(_ge).__name__}: {str(_ge)[:200]}"
+                if _gate_err is not None:
+                    _record_divergence(
+                        "recipe_transport",
+                        {"class": "outcome-gate strict-schema reject",
+                         "mode": _gate_mode, "attempt": _attempt},
+                        "outcome_gate_reject", reason=_gate_err[:400])
+                    print(f"[outcome-gate] {_gate_mode}: salvaged post-cuts plan "
+                          f"failed strict PostCutPlan validation (attempt "
+                          f"{_attempt}): {_gate_err}", flush=True)
+                    if _gate_mode == "enforce":
+                        _degen = ("outcome-gate: salvaged response failed strict-"
+                                  f"schema validation ({_gate_err})")
             # [fix-4] notes soft-cap. notes is the LAST, decorative PostCutPlan
             # field (Optional[str]); its only downstream reader is the burned-
             # caption keyword scan in infer_has_burned_captions. The prompt asks
@@ -9443,7 +9692,10 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                         f"{len(_capped)} chars (cap {_NOTES_WORD_CAP}w/{_NOTES_CHAR_CAP}c)",
                         flush=True,
                     )
-            return _parsed
+            # Guarded: the outcome-gate (enforce mode) may have set _degen after
+            # the salvage — if so, do NOT return; fall through to the retry below.
+            if _degen is None:
+                return _parsed
         # Degenerate. Log a BOUNDED snippet (never the full 64K spiral) and
         # decide the retry by CLASS (L3): degeneration draws from its own +2
         # budget after the standard retry; transport-class keeps the single
@@ -23832,6 +24084,12 @@ class RecipeInvalidError(ValueError):
 # (duration-scaled editorial budget / provisioned throughput) is ledgered
 # post-launch (F1) and must re-run these probes before the cap moves up.
 _MAX_SOURCE_DURATION_S = 120.0
+# Intake FLOOR (2026-07-17): a clip too short to carry a talking-head edit.
+# Symmetric with the cap above and fired at the SAME pre-Deepgram intake probe,
+# so an ultra-short upload gets an honest duration-led reject in ~6s instead of
+# a confusing "we couldn't hear any speech" after a Deepgram call. 5s is the
+# floor below which there isn't enough speech to anchor a single cut.
+_MIN_SOURCE_DURATION_S = 5.0
 
 
 def _clip_cap_minutes_label():
@@ -23947,6 +24205,20 @@ def classify_error(e):
             retryable=True,
         )
 
+    # ── Platform kill (preemption / timeout) surfaced as a catchable error ──
+    # The canonical class for a job the infrastructure interrupted. Most platform
+    # kills are an uncatchable SIGKILL and are terminalized by the server-side
+    # reaper (which writes this same code); this branch names the catchable
+    # subset. Retryable — a re-run on a fresh container renders clean. Refunded
+    # (designed class) — an infra interruption is never the user's fault.
+    if "PLATFORM_TIMEOUT" in msg:
+        return _e(
+            "PLATFORM_TIMEOUT",
+            "This render was interrupted by our infrastructure — you weren't "
+            "charged. Please try again.",
+            retryable=True,
+        )
+
     # ── Render ladder exhaustion (ordered before the greedy ffmpeg/render
     # matches — the wrapped cause text often contains those substrings) ──
     if "RENDER_FATAL" in msg:
@@ -23958,11 +24230,13 @@ def classify_error(e):
 
     # ── Fast input rejections (honest, requires a different input) ──
     if "CLIP_TOO_LONG" in msg:
-        # Compilation-aware copy (2026-07-05, the 20-clip creator): a source
-        # several times past the cap isn't a "trim it" case — it's a
-        # compilation. "trim and resubmit" on a 41-minute upload is an absurd
-        # instruction; name the real path instead. Threshold: ≥300s (2.5×
-        # the cap) reads as multi-clip material, not an over-long take.
+        # Guiding, forward-framed copy (retires the stale "single clips /
+        # compilation" wording — Promptly edits multi-cut videos; the only
+        # limit is total length). A much-longer upload gets a nudge to pick a
+        # stretch rather than "trim"; both point at the same honest path and
+        # promise the ceiling is moving. Threshold: ≥300s reads as long-form
+        # material, not an over-long take.
+        _cap = _clip_cap_minutes_label()
         _src_len = None
         _m_len = re.search(r"source is ([\d.]+)s", msg)
         if _m_len:
@@ -23973,14 +24247,54 @@ def classify_error(e):
         if _src_len is not None and _src_len >= 300.0:
             return _e(
                 "CLIP_TOO_LONG",
-                "This looks like a compilation — Promptly edits single clips "
-                f"up to {_clip_cap_minutes_label()} minutes; split it and run "
-                "your best moments.",
+                f"Right now Promptly edits videos up to {_cap} minutes. Pick "
+                f"your best {_cap} minutes and re-upload — longer videos are coming.",
                 retryable=False, new_video=True,
             )
         return _e(
             "CLIP_TOO_LONG",
-            f"Promptly currently edits clips up to {_clip_cap_minutes_label()} minutes — trim and resubmit.",
+            f"Right now Promptly edits videos up to {_cap} minutes — trim to "
+            f"your best {_cap} minutes and re-upload. Longer videos are coming.",
+            retryable=False, new_video=True,
+        )
+    # Intake FLOOR — ultra-short clip (duration-led, unambiguous).
+    if "CLIP_TOO_SHORT" in msg:
+        return _e(
+            "CLIP_TOO_SHORT",
+            f"This clip is only a few seconds — Promptly needs at least "
+            f"{int(_MIN_SOURCE_DURATION_S)} seconds of talking to make an edit. "
+            f"Try a longer take.",
+            retryable=False, new_video=True,
+        )
+    # Non-English speech present (interim honesty — MUST precede the generic
+    # NO_SPEECH branch, whose substring it contains). Tells the truth: we heard
+    # them, we just don't edit their language yet.
+    if "NO_SPEECH_NONENGLISH" in msg:
+        _lang_names = {
+            "hi": "Hindi", "es": "Spanish", "ru": "Russian", "ar": "Arabic",
+            "pt": "Portuguese", "fr": "French", "de": "German", "ja": "Japanese",
+            "zh": "Chinese", "ko": "Korean", "ta": "Tamil", "te": "Telugu",
+            "bn": "Bengali", "ur": "Urdu", "id": "Indonesian", "tr": "Turkish",
+            "vi": "Vietnamese", "it": "Italian", "pl": "Polish", "nl": "Dutch",
+            "th": "Thai", "mr": "Marathi", "gu": "Gujarati", "pa": "Punjabi",
+            "fa": "Persian",
+        }
+        _lm = re.search(r"lang=([A-Za-z\-]+)", msg)
+        _code = (_lm.group(1).lower().split("-")[0] if _lm else "")
+        _lang_label = _lang_names.get(_code)
+        _tail = (f"Support for {_lang_label} is coming." if _lang_label
+                 else "Support for more languages is coming.")
+        return _e(
+            "NO_SPEECH_NONENGLISH",
+            f"We heard you — Promptly works best with English videos right now. {_tail}",
+            retryable=False, new_video=True,
+        )
+    # Face present but no words — mic/inaudible, not "wrong kind of video".
+    if "NO_SPEECH_FACE" in msg:
+        return _e(
+            "NO_SPEECH_FACE",
+            "We can see you, but couldn't pick up clear speech — check your mic "
+            "isn't muted and you're talking to the camera, then try again.",
             retryable=False, new_video=True,
         )
     if "NO_SPEECH" in msg:
@@ -24012,7 +24326,8 @@ def classify_error(e):
     if "NOT_TALKING_HEAD" in msg:
         return _e(
             "NOT_TALKING_HEAD",
-            "This app edits videos of someone talking on camera. Please upload a talking-head video.",
+            "Promptly edits talking-to-camera videos — someone speaking on "
+            "camera. Upload a clip like that and we'll do the rest.",
             retryable=False, new_video=True,
         )
 
@@ -24129,6 +24444,24 @@ def classify_error(e):
         return _e(
             "PLAN_VALIDATION",
             "We had trouble generating your edit. Please try again.",
+            retryable=True,
+        )
+
+    # ── Render output too short (output-length guard tripped) ─────────
+    # ORDERED before the greedy FFmpeg/Remotion render classes: a safe-recipe
+    # degeneration (or an edit plan that collapsed to almost nothing) yields a
+    # sub-second render. The output-length guard catches it BEFORE it reaches a
+    # user — a 0.8s "video" never ships (the guard is the law working). A real
+    # error: refunded on the failed-row sweep, alerted via _fire_render_alert.
+    # Named explicitly so it never wears the UNKNOWN mask / "Something went
+    # wrong". Retryable — the degeneration is usually stochastic, so a re-run
+    # tends to render a real edit.
+    if "RENDER_TOO_SHORT" in msg:
+        return _e(
+            "RENDER_TOO_SHORT",
+            "We started your edit but the result came out too short to be a "
+            "real video — so we held it back instead of sending something "
+            "broken, and your credit was returned. Please run it again.",
             retryable=True,
         )
 
@@ -24422,8 +24755,9 @@ def _enhancement_guard(subsystem, err, sink=None):
 #                     the safe recipe itself failed validation), or the source/
 #                     transcript never materialized to build a safe edit from.
 _OUTER_RESCUE_DENY = frozenset({
-    "CLIP_TOO_LONG",
-    "NO_SPEECH", "NOT_TALKING_HEAD", "INVALID_SOURCE_URL", "INVALID_FORMAT",
+    "CLIP_TOO_LONG", "CLIP_TOO_SHORT",
+    "NO_SPEECH", "NO_SPEECH_NONENGLISH", "NO_SPEECH_FACE",
+    "NOT_TALKING_HEAD", "INVALID_SOURCE_URL", "INVALID_FORMAT",
     "WRONG_ORIENTATION", "EMPTY_UPLOAD", "NO_AUDIO_TRACK",
     "UPLOAD_NEVER_STARTED", "UPLOAD_STALLED", "UPLOAD_TIMEOUT",
     "S3_ACCESS", "S3_GENERIC", "TRANSCRIPTION",
@@ -24440,6 +24774,10 @@ _OUTER_RESCUE_DENY = frozenset({
     # widens the SIGKILL-before-terminal window — a regression vs the prior
     # RENDER_FATAL path, which was already denied here.)
     "CONTAINER_TEARDOWN",
+    # Platform kill (preemption/timeout): a fresh-container re-run is the only
+    # valid retry — an in-process safe-edit rescue would re-hit the same doomed
+    # container state, exactly like CONTAINER_TEARDOWN above.
+    "PLATFORM_TIMEOUT",
     # Integrity trip = designed terminal outcome (failed + refund + P0
     # forensics). A safe-edit re-run would be an auto-retry, which the
     # gate design explicitly forbids.
@@ -24454,7 +24792,8 @@ _OUTER_RESCUE_DENY = frozenset({
 # never writes usage_events). Membership = named INPUT-boundary rejections
 # only; infrastructure failures (upload/S3/network) are not this class.
 _DESIGNED_REJECTION_CODES = frozenset({
-    "NO_AUDIO_TRACK", "NO_SPEECH", "NOT_TALKING_HEAD", "CLIP_TOO_LONG",
+    "NO_AUDIO_TRACK", "NO_SPEECH", "NO_SPEECH_NONENGLISH", "NO_SPEECH_FACE",
+    "NOT_TALKING_HEAD", "CLIP_TOO_LONG", "CLIP_TOO_SHORT",
     "WRONG_ORIENTATION", "INVALID_FORMAT", "EMPTY_UPLOAD",
     "INVALID_SOURCE_URL", "TRANSCRIPTION",
 })
@@ -24719,6 +25058,48 @@ def send_progress(job_id, step, pct, message, app_url):
                 json={"job_id": job_id, "step": step, "pct": pct, "message": message},
                 headers=headers,
                 timeout=3,
+            )
+        except Exception:
+            pass
+    threading.Thread(target=_fire, daemon=True).start()
+
+
+def _fire_render_alert(job_id, error_code, detail=None, duration_s=None, elapsed_s=None):
+    """Operational [ALERT] for a terminal REAL render failure (never a designed
+    rejection). Two independent legs, both best-effort and NON-blocking:
+      1. A loud, grep-stable `[ALERT]` log line — always emitted, so the signal
+         survives even if the push channel is down (Modal logs carry it).
+      2. A background POST to the app server's /api/internal/render-alert, which
+         pushes to the founder's own device(s) (the cheapest reachable channel).
+    A failed / crashing / no-op call must never touch the job's failure path —
+    the user's error state and refund are already written by the caller."""
+    # Leg 1 — always print, synchronous, cannot fail the caller.
+    try:
+        print(f"[ALERT] render failure job={job_id} code={error_code}"
+              + (f" dur={duration_s}s" if duration_s else "")
+              + (f" elapsed={elapsed_s}s" if elapsed_s else "")
+              + (f" detail={str(detail)[:200]}" if detail else ""), flush=True)
+    except Exception:
+        pass
+    # Leg 2 — background POST (owner push). Never blocks teardown.
+    app_url = os.environ.get("APP_URL", "").rstrip("/")
+    if not app_url:
+        return
+    import threading
+
+    def _fire():
+        try:
+            headers = {}
+            _secret = os.environ.get("MODAL_CALLBACK_SECRET", "")
+            if _secret:
+                headers["X-Modal-Secret"] = _secret
+            requests.post(
+                f"{app_url}/api/internal/render-alert",
+                json={"job_id": job_id, "error_code": error_code,
+                      "detail": (str(detail)[:500] if detail else None),
+                      "duration_s": duration_s, "elapsed_s": elapsed_s},
+                headers=headers,
+                timeout=5,
             )
         except Exception:
             pass
@@ -25396,6 +25777,8 @@ def _quick_face_check(source_path, max_samples=8):
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
+    global _ACTIVE_JOB_ID
+    _ACTIVE_JOB_ID = input_data.get("job_id")  # for the platform-shutdown ledger flush
     work_dir = None
     premium_ctx = None       # Phase 1 premium scaffold (assigned at the tier fork; torn down in finally)
     _cost_meter = None
@@ -26141,6 +26524,18 @@ def handler(job):
                 f"CLIP_TOO_LONG: source is {source_duration:.1f}s; the intake cap "
                 f"is {_MAX_SOURCE_DURATION_S:.0f}s (boundary-probed editorial-path limit)."
             )
+
+        # ─── INTAKE DURATION FLOOR (CLIP_TOO_SHORT) ───────────────────
+        # Symmetric with the cap and at the SAME pre-Deepgram probe. An
+        # ultra-short clip cannot carry a speech-anchored edit; reject it here
+        # with a duration-led message instead of letting it die downstream as a
+        # confusing NO_SPEECH after a wasted Deepgram call. `0 < source_duration`
+        # fails OPEN on a probe miss (duration=0 → proceed), exactly like the cap.
+        if mode == "full" and 0 < source_duration < _MIN_SOURCE_DURATION_S:
+            _log_intake_reject("CLIP_TOO_SHORT", source_duration, _MIN_SOURCE_DURATION_S)
+            raise RuntimeError(
+                f"CLIP_TOO_SHORT: source is {source_duration:.1f}s; the intake "
+                f"floor is {_MIN_SOURCE_DURATION_S:.0f}s.")
 
         # ─── INTAKE AUDIO-TRACK GATE (corpus-sweep L1, credit-ruling wave) ──
         # A source with no audio stream can never transcribe; pre-gate it
@@ -27298,11 +27693,43 @@ def handler(job):
                 # die downstream as a retryable RECIPE_INVALID ("removed all
                 # words"). The speech-anchored pipeline cannot edit silence —
                 # reject BEFORE recipe spend with the honest class.
+                #
+                # DIAGNOSIS-AWARE (2026-07-17): language=multi is the main
+                # transcription now, so a 0-word result means genuinely nothing
+                # heard (the old detect_language false-silence is gone). Only
+                # distinguish face-but-silent (muted/inaudible) from nothing.
+                _face_present = (_face_hits >= 3) or (_face_samples >= 5 and _face_ratio >= 0.30)
+                if _face_present:
+                    _log_intake_reject("NO_SPEECH_FACE", source_duration,
+                                       face_hits=int(_face_hits),
+                                       face_samples=int(_face_samples))
+                    raise RuntimeError(
+                        "NO_SPEECH_FACE: face present but 0 words transcribed — "
+                        "likely muted or inaudible speech."
+                    )
                 _log_intake_reject("NO_SPEECH", source_duration, word_count=0)
                 raise RuntimeError(
                     "NO_SPEECH: Deepgram returned 0 words for this source. "
                     "Every edit decision is speech-anchored — please upload "
                     "a video of someone speaking."
+                )
+
+            # ─── SCRIPT-COVERAGE GATE (Latin-scope flip) ────────────────────
+            # We have speech. It may reach the render path ONLY if its dominant
+            # script is one the caption fonts can actually draw (Latin today).
+            # An uncovered script would ship tofu boxes — worse than an honest
+            # rejection — so it takes the already-live, language-named reject.
+            # This makes tofu UNCONSTRUCTIBLE: no uncovered script renders.
+            _script = _dominant_script(_dg_words)
+            if _script not in _SCRIPT_COVERAGE:
+                _lang = (_transcript.get("detected_language")
+                         or _SCRIPT_LANG_HINT.get(_script) or "?")
+                _log_intake_reject("NO_SPEECH_NONENGLISH", source_duration,
+                                   language=str(_lang), script=str(_script),
+                                   multi_words=len(_dg_words))
+                raise RuntimeError(
+                    f"NO_SPEECH_NONENGLISH: {len(_dg_words)} words of "
+                    f"{_script}-script speech (lang={_lang}); English-only for now."
                 )
             # Cancel checkpoint #1 — before the edit recipe. The cheap CPU work
             # (download/transcribe) is done; the recipe + GPU render are next. If
@@ -28268,7 +28695,10 @@ def handler(job):
         except Exception:
             pass
         if _rv < 1.0:
-            raise RuntimeError(f"Main render output too short: video={_rv:.1f}s")
+            raise RuntimeError(
+                f"RENDER_TOO_SHORT: main render output too short (video={_rv:.1f}s) — "
+                f"the edit plan collapsed to almost no timeline (typically a "
+                f"safe-recipe degeneration); the output-length guard held it back")
         _av_end_delta_ms = ((_ra + _a_start) - (_rv + _v_start)) * 1000
         _av_start_delta_ms = (_a_start - _v_start) * 1000
         print(
@@ -28878,9 +29308,33 @@ def handler(job):
         finally:
             _upload_hb_stop.set()
 
+        _thumbnail_url = None
         if cover_bytes:
             import base64
             cover_frame_b64 = base64.b64encode(cover_bytes).decode()
+            # S3-THUMBNAIL (Phase 3): the worker uploads the cover JPEG itself and
+            # writes a presigned thumbnail_url into the result — so even a
+            # double-loss completion recovery is FULLY complete (thumbnail too).
+            # The last degraded state dies: "partial" goes 3 losses → 1 → 0. Same
+            # key the server tail uses (thumbnails/<job>.jpg), so the tail prefers
+            # this and skips re-uploading. Best-effort: on failure the server
+            # tail's cover_frame_b64 upload remains the path — zero regression.
+            try:
+                if _aws_s3_client is not None:
+                    _thumb_bucket = os.environ.get("S3_BUCKET_NAME") or "promptly-video-storage"
+                    _thumb_key = f"thumbnails/{job_id}.jpg"
+                    _aws_s3_client.put_object(
+                        Bucket=_thumb_bucket, Key=_thumb_key,
+                        Body=cover_bytes, ContentType="image/jpeg")
+                    _thumbnail_url = _aws_s3_client.generate_presigned_url(
+                        "get_object",
+                        Params={"Bucket": _thumb_bucket, "Key": _thumb_key},
+                        ExpiresIn=60 * 60 * 24 * 7)
+                    print(f"[thumbnail] worker uploaded {_thumb_key} "
+                          f"({len(cover_bytes) // 1024}KB)", flush=True)
+            except Exception as _te:
+                print(f"[thumbnail] worker S3 upload failed ({_te}) — server "
+                      f"tail will upload from b64", flush=True)
 
         # Step 13.5 — Additional format exports (parallelized)
         export_formats   = input_data.get("export_formats") or []
@@ -29107,6 +29561,8 @@ def handler(job):
             result_payload["hls_manifest_url"] = edit_plan["_hls_manifest_url"]
         if cover_frame_b64:
             result_payload["cover_frame_b64"]  = cover_frame_b64
+        if _thumbnail_url:
+            result_payload["thumbnail_url"] = _thumbnail_url
             result_payload["cover_frame_mime"] = "image/jpeg"
         if exported_formats:
             result_payload["exported_formats"] = exported_formats
@@ -29118,6 +29574,22 @@ def handler(job):
             result={
                 "video_url": result_payload.get("video_url"),
                 "hls_manifest_url": result_payload.get("hls_manifest_url"),
+                # RE-EDIT HYDRATION (2b): persist the tiny (~15KB measured) re-edit
+                # inputs here too, so a double-loss completion recovery (dispatch
+                # Supabase fallback) can still restore the Re-edit button — "no
+                # re-edit forever" becomes unconstructible. The cover frame
+                # (~200KB base64) stays OUT — a rare double-loss loses only the
+                # thumbnail, not the re-edit path (see the Phase-3 hydration note).
+                "edit_recipe": result_payload.get("edit_recipe"),
+                "transcript": result_payload.get("transcript"),
+                "analysis_data": result_payload.get("analysis_data"),
+                "resolved_broll": result_payload.get("resolved_broll"),
+                "trend_snapshot": result_payload.get("trend_snapshot"),
+                "render_version": result_payload.get("render_version"),
+                "change_summary": result_payload.get("change_summary"),
+                # S3-thumbnail (Phase 3): the worker-uploaded presigned thumbnail
+                # URL, so double-loss recovery is now FULLY complete — no residual.
+                "thumbnail_url": result_payload.get("thumbnail_url"),
                 **_floor_markers(_floor_state),
                 # Variety telemetry (directive #8 Part 4): the delivered
                 # edit's vocabulary — complete writes only (a failed job
@@ -29164,6 +29636,12 @@ def handler(job):
                 **_floor_markers(_floor_state),
             },
         )
+        # Operator [ALERT] — only for REAL failures (a user who waited and lost
+        # at the finish line), never for honest input rejections. Best-effort,
+        # never raises: the failure is already fully recorded above.
+        if not _designed_reject:
+            _fire_render_alert(input_data.get("job_id"), classified.get("error_code"),
+                               detail=str(e))
         return {
             "error": classified["user_message"],     # legacy: human text
             "error_code": classified["error_code"],   # NEW: machine code
@@ -29205,6 +29683,9 @@ def handler(job):
                   f"leaked under sources/gemini-proxies/ (visible by prefix)", flush=True)
         # LEDGER flush: persist this job's divergences so the overrule spine is queryable.
         _flush_divergence_ledger(input_data.get("job_id"))
+        # Clear the platform-shutdown job pointer — this job is done; a signal
+        # arriving after this must not re-flush a stale job's ledger.
+        _ACTIVE_JOB_ID = None
 
 
 # Modal entrypoint — handler() is called directly by modal_app.py

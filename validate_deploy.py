@@ -4251,7 +4251,7 @@ def _terminal_telemetry_wiring():
     _src = open("handler.py").read()
     _c = _src.find('status="completed", phase="Done"')
     assert _c != -1, "complete terminal write missing"
-    _win = _src[_c:_c + 700]
+    _win = _src[_c:_c + 2100]  # widened for the 2b re-edit + S3-thumbnail hydration fields
     assert "**_floor_markers(_floor_state)" in _win, "complete write lost floor markers"
     assert '"vocab": _vocab_markers(edit_plan)' in _win, "complete write lost vocab"
     # orphan-cascade wiring assertion DELETED with the cascade (Zac 2026-07-09
@@ -4627,22 +4627,223 @@ def _copy_truth_mirror():
     assert 'if status == "failed"' in _src[_mirror - 400:_mirror], "mirror must be failed-only"
 
 
-@check("compilation-aware CLIP_TOO_LONG copy: extreme-length sources get the split-it copy, moderate get trim")
-def _compilation_copy():
+@check("guiding CLIP_TOO_LONG copy: extreme-length gets 'pick your best', moderate gets 'trim to your best'; stale single-clip/compilation copy retired; forward-framed ('longer videos are coming')")
+def _clip_too_long_copy():
     import handler
     _long = handler.classify_error(RuntimeError(
         "CLIP_TOO_LONG: source is 2500.0s; the intake cap is 120s"))
     assert _long["error_code"] == "CLIP_TOO_LONG"
-    assert "compilation" in _long["user_message"] and "split it" in _long["user_message"], _long
+    # extreme-length: pick-your-best phrasing + forward promise
+    assert "Pick your best" in _long["user_message"], _long
+    assert "longer videos are coming" in _long["user_message"].lower(), _long
     _mod = handler.classify_error(RuntimeError(
         "CLIP_TOO_LONG: source is 150.6s; the intake cap is 120s"))
-    assert "trim and resubmit" in _mod["user_message"], _mod
-    # threshold pinned: 300s = 2.5× cap
+    assert "trim to your best" in _mod["user_message"], _mod
+    assert "longer videos are coming" in _mod["user_message"].lower(), _mod
+    # threshold pinned: 300s = 2.5× cap → still 'trim to your best' below it
     _edge = handler.classify_error(RuntimeError(
         "CLIP_TOO_LONG: source is 299.0s; the intake cap is 120s"))
-    assert "trim and resubmit" in _edge["user_message"], _edge
+    assert "trim to your best" in _edge["user_message"], _edge
+    # stale "single clips" / "compilation" framing RETIRED from every branch
+    for _m in (_long, _mod, _edge):
+        assert "single clip" not in _m["user_message"].lower(), _m
+        assert "compilation" not in _m["user_message"].lower(), _m
     # both remain designed rejections (credit ruling class)
     assert "CLIP_TOO_LONG" in handler._DESIGNED_REJECTION_CODES
+
+
+@check("RENDER_TOO_SHORT class: the output-length guard (video<1.0s = safe-recipe degeneration) raises a RENDER_TOO_SHORT-tagged error; classify_error names it explicitly (real error → refunded on the failed-row sweep + alerted via _fire_render_alert) with honest credit-returned copy, never the UNKNOWN mask; ordered before the greedy FFmpeg/Remotion render classes; NOT a designed rejection")
+def _render_too_short_class():
+    import handler
+    _h = open("handler.py").read()
+    # 1. the output-length guard tags the sentinel at the raise site
+    assert "RENDER_TOO_SHORT: main render output too short" in _h, \
+        "raise site must embed the RENDER_TOO_SHORT sentinel"
+    # 2. classify_error names it explicitly with honest copy (exercise the real
+    #    raised-message shape, not a bare token)
+    _c = handler.classify_error(RuntimeError(
+        "RENDER_TOO_SHORT: main render output too short (video=0.8s) — the edit "
+        "plan collapsed to almost no timeline (typically a safe-recipe "
+        "degeneration); the output-length guard held it back"))
+    assert _c["error_code"] == "RENDER_TOO_SHORT", _c
+    assert "Something went wrong" not in _c["user_message"], _c  # never the UNKNOWN mask
+    assert "credit was returned" in _c["user_message"].lower(), _c  # refund-honest
+    assert _c["retryable"] is True, _c
+    # 3. real error, NOT a designed rejection → the failed-row sweep refunds it
+    assert "RENDER_TOO_SHORT" not in handler._DESIGNED_REJECTION_CODES, \
+        "RENDER_TOO_SHORT is a real error, must NOT be a designed rejection"
+
+
+@check("Phase-4 OUTCOME-GATE (Cond-2 ratified): the salvaged post-cuts plan is validated against the full strict PostCutPlan model AFTER _enforce_string_caps; FLAG-GATED PROMPTLY_OUTCOME_GATE (default 'shadow' = ledger-only no-op → deploy INERT; 'enforce' = invalid salvage → mid-plan retry; 'off' = rollback); the post-cuts return is guarded so an enforce reject falls to the bounded retry, never ships an invalid salvage")
+def _outcome_gate_shadow():
+    _h = open("handler.py").read()
+    # flag-gated, default 'shadow' → the deploy is inert until the flag flips
+    assert 'os.environ.get("PROMPTLY_OUTCOME_GATE", "shadow")' in _h, \
+        "outcome-gate must be flag-gated, default 'shadow'"
+    # strict validation against the REAL model, AFTER the cap salvage
+    _i_enforce = _h.find('_enforce_string_caps(_parsed, _post_cuts_response_schema(), "post_cuts")')
+    _i_validate = _h.find("PostCutPlan.model_validate(_parsed)")
+    assert _i_enforce != -1 and _i_validate != -1 and _i_validate > _i_enforce, \
+        "PostCutPlan.model_validate must run AFTER the _enforce_string_caps salvage"
+    # enforce converts an invalid salvage into a degen (routes to the retry);
+    # shadow/off leave behavior unchanged
+    assert 'if _gate_mode == "enforce":' in _h and '_degen = ("outcome-gate:' in _h, \
+        "enforce mode must convert an invalid salvage into a degen (retry)"
+    # the verdict is ledgered under its own action
+    assert '"outcome_gate_reject"' in _h, "gate reject must be ledgered"
+    # the post-cuts return is GUARDED so an enforce reject falls through to the
+    # retry instead of shipping the invalid salvage
+    assert "if _degen is None:\n                return _parsed" in _h, \
+        "the post-cuts return must be guarded by 'if _degen is None' so an enforce reject retries"
+    # baked into the image env (like the spawn flag) so the enforce flip is a
+    # clean redeploy with no code change
+    _m = open("modal_app.py").read()
+    assert '"PROMPTLY_OUTCOME_GATE": os.environ.get("PROMPTLY_OUTCOME_GATE", "shadow")' in _m, \
+        "PROMPTLY_OUTCOME_GATE must be baked into the image env, default 'shadow'"
+
+
+@check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")
+def _spawn_refactor_phase3():
+    _m = open("modal_app.py").read()
+    # run_pipeline_bg: a plain retriable function that delivers completion
+    assert "def run_pipeline_bg(" in _m, "run_pipeline_bg missing"
+    assert "retries=2" in _m, "run_pipeline_bg must be retriable"
+    assert "/api/modal-complete" in _m and "modal.current_function_call_id()" in _m, \
+        "completion POST (with the call_id) missing"
+    # run_job flag-gated OFF by default → deploy is inert until the flag flips
+    assert 'os.environ.get("PROMPTLY_SPAWN_MODE") == "1"' in _m, "run_job must be flag-gated"
+    assert '"PROMPTLY_SPAWN_MODE": os.environ.get("PROMPTLY_SPAWN_MODE"' in _m, \
+        "spawn flag must be baked into the image env so the deploy shell can set it"
+    assert "run_pipeline_bg.spawn(body)" in _m and '"spawned": True' in _m, "spawn branch missing"
+    # the synchronous path stays for a no-redeploy rollback (unset the flag)
+    assert 'self._handler({"input": body})' in _m, "sync fallback must remain for rollback"
+    # handler completion result carries the tiny re-edit hydration fields (2b) so
+    # double-loss recovery restores the Re-edit button
+    _h = open("handler.py").read()
+    assert '"edit_recipe": result_payload.get("edit_recipe")' in _h, "re-edit hydration missing"
+    for _f in ("transcript", "analysis_data", "resolved_broll", "render_version", "change_summary"):
+        assert f'"{_f}": result_payload.get("{_f}")' in _h, f"hydration field {_f} missing"
+
+
+@check("Reliability Phase 1: platform-shutdown handler kills render children + flushes ledger on SIGTERM with NO terminal write (retry-safe); installed from worker startup; PLATFORM_TIMEOUT class = retryable, rescue-denied, alerts (not designed-silent)")
+def _platform_shutdown_safety():
+    import handler
+    # the pieces exist and are wired
+    assert callable(handler._on_platform_shutdown)
+    assert callable(handler._install_shutdown_handler)
+    assert callable(handler._kill_render_children)
+    assert hasattr(handler, "_ACTIVE_JOB_ID")
+    _src = open("handler.py").read()
+    # the signal handler must NOT write a terminal status (a preempted input
+    # retries — terminalizing here would falsely fail a job about to succeed).
+    _fn = _src[_src.index("def _on_platform_shutdown("):_src.index("def _install_shutdown_handler(")]
+    assert "write_job_status" not in _fn and "status=\"failed\"" not in _fn, \
+        "shutdown handler must NOT write a terminal status (retry-safe)"
+    assert "_kill_render_children()" in _fn and "_flush_divergence_ledger" in _fn, \
+        "shutdown handler must kill render children + flush the ledger"
+    # installed per-container from the worker's @modal.enter startup (snapshot-safe)
+    _mods = open("modal_app.py").read()
+    assert "_install_shutdown_handler()" in _mods, "handler must be installed from worker startup"
+    # the active job is tracked at handler entry and cleared in teardown
+    assert "_ACTIVE_JOB_ID = input_data.get(\"job_id\")" in _src, "active job not tracked at entry"
+    # PLATFORM_TIMEOUT: retryable class, rescue-denied, and NOT designed-silent
+    # (so the worker [ALERT] fires for the catchable case)
+    _pt = handler.classify_error(RuntimeError("PLATFORM_TIMEOUT: preempted"))
+    assert _pt["error_code"] == "PLATFORM_TIMEOUT" and _pt["retryable"] is True, _pt
+    assert "interrupted by our infrastructure" in _pt["user_message"], _pt
+    assert "PLATFORM_TIMEOUT" in handler._OUTER_RESCUE_DENY, "platform kill must be rescue-denied"
+    assert "PLATFORM_TIMEOUT" not in handler._DESIGNED_REJECTION_CODES, \
+        "PLATFORM_TIMEOUT must NOT be designed-silent — the [ALERT] fires for the catchable case"
+
+
+@check("Latin-scope flip: transcription=language=multi; _SCRIPT_COVERAGE=Latin (font-derived, tofu unconstructible); _dominant_script classifies Latin/Cyrillic/Devanagari/Arabic; uncovered script → NO_SPEECH_NONENGLISH BEFORE render")
+def _script_coverage_gate():
+    import handler
+    # coverage is Latin-only, with the tofu scripts explicitly OUT
+    assert handler._SCRIPT_COVERAGE == frozenset({"Latin"}), handler._SCRIPT_COVERAGE
+    for _bad in ("Cyrillic", "Devanagari", "Arabic", "Han", "Tamil", "Telugu", "Bengali", "Hangul"):
+        assert _bad not in handler._SCRIPT_COVERAGE, _bad
+    # classifier correctness on real script samples
+    def _w(s): return [{"word": s}]
+    assert handler._dominant_script(_w("hello")) == "Latin"
+    assert handler._dominant_script(_w("hola cómo estás")) == "Latin"       # Latin + accents
+    assert handler._dominant_script(_w("привет")) == "Cyrillic"
+    assert handler._dominant_script(_w("नमस्ते")) == "Devanagari"
+    assert handler._dominant_script(_w("مرحبا")) == "Arabic"
+    assert handler._dominant_script(_w("123")) == "Latin"                    # digits-only safe
+    assert handler._dominant_script(_w("the") + _w("brown") + _w("привет")) == "Latin"  # majority Latin
+    assert handler._dominant_script([]) == "Latin"                          # empty safe
+    _src = open("handler.py").read()
+    # transcription flipped to multi (the active option, not just a comment)
+    assert 'model="nova-3", language="multi"' in _src, "transcription must be language=multi"
+    # gate wired: an uncovered script raises NO_SPEECH_NONENGLISH BEFORE the edit
+    assert "_script not in _SCRIPT_COVERAGE" in _src, "script gate not wired"
+    assert _src.index("_script not in _SCRIPT_COVERAGE") < _src.index("Gemini edit starting"), \
+        "script gate must precede the Gemini edit — no render on an uncovered script"
+    # DERIVATION / tofu-unconstructible: the render image installs no Indic font,
+    # so coverage cannot silently include an unrenderable script. Adding a Noto/
+    # Indic font later forces a CONSCIOUS coverage expansion (this assert breaks).
+    _mods = open("modal_app.py").read().lower()
+    assert "fonts-dejavu-core" in _mods, "font-inventory anchor missing"
+    _has_indic = any(k in _mods for k in ("fonts-indic", "lohit", "fonts-deva", "notosansdevanagari", "noto sans devanagari"))
+    assert (not _has_indic) or handler._SCRIPT_COVERAGE != frozenset({"Latin"}), \
+        "an Indic font was added to the image but _SCRIPT_COVERAGE is still Latin-only — expand coverage deliberately"
+
+
+@check("D/D+ diagnosis-aware intake: CLIP_TOO_SHORT floor + NO_SPEECH split (non-English honesty / face-but-silent / plain) with correct ordering; new codes are designed + rescue-denied; stale copy retired")
+def _diagnosis_aware_intake():
+    import handler
+    # CLIP_TOO_SHORT — duration-led, references the floor constant
+    assert handler._MIN_SOURCE_DURATION_S == 5.0
+    _short = handler.classify_error(RuntimeError("CLIP_TOO_SHORT: source is 3.0s; the intake floor is 5s."))
+    assert _short["error_code"] == "CLIP_TOO_SHORT"
+    assert "few seconds" in _short["user_message"] and "longer take" in _short["user_message"].lower(), _short
+    # NO_SPEECH_NONENGLISH — must resolve the language name AND be ordered BEFORE
+    # the generic NO_SPEECH branch (its substring), telling the honest truth.
+    _ne = handler.classify_error(RuntimeError("NO_SPEECH_NONENGLISH: 23 words of non-English speech detected (lang=hi); English-only for now."))
+    assert _ne["error_code"] == "NO_SPEECH_NONENGLISH", _ne  # NOT swallowed by NO_SPEECH
+    assert "We heard you" in _ne["user_message"] and "Hindi" in _ne["user_message"], _ne
+    # unknown language code → generic "more languages" tail, still honest
+    _ne2 = handler.classify_error(RuntimeError("NO_SPEECH_NONENGLISH: 5 words (lang=xx); English-only for now."))
+    assert _ne2["error_code"] == "NO_SPEECH_NONENGLISH" and "We heard you" in _ne2["user_message"], _ne2
+    # NO_SPEECH_FACE — mic/inaudible, not "wrong video"
+    _fs = handler.classify_error(RuntimeError("NO_SPEECH_FACE: face present but 0 words transcribed"))
+    assert _fs["error_code"] == "NO_SPEECH_FACE" and "can see you" in _fs["user_message"], _fs
+    # plain NO_SPEECH still works (nothing detected)
+    _ns = handler.classify_error(RuntimeError("NO_SPEECH: Deepgram returned 0 words"))
+    assert _ns["error_code"] == "NO_SPEECH", _ns
+    # NOT_TALKING_HEAD stale copy retired
+    _th = handler.classify_error(RuntimeError("NOT_TALKING_HEAD: face in only 1/20 frames"))
+    assert "talking-to-camera" in _th["user_message"] and "This app edits videos of someone" not in _th["user_message"], _th
+    # all new intake codes are designed rejections AND rescue-denied (input reject never rescued)
+    for _c in ("CLIP_TOO_SHORT", "NO_SPEECH_NONENGLISH", "NO_SPEECH_FACE"):
+        assert _c in handler._DESIGNED_REJECTION_CODES, _c
+        assert _c in handler._OUTER_RESCUE_DENY, _c
+    # the interim non-English detector exists, is best-effort, and returns (None,0) on bad input
+    assert callable(handler._detect_nonenglish_speech)
+    assert handler._detect_nonenglish_speech("/nonexistent/path.mp4") == (None, 0)
+
+
+@check("render [ALERT] channel: _fire_render_alert emits a grep-stable [ALERT] line for real failures, never raises, and is gated to non-designed rejections at the call site")
+def _render_alert_channel():
+    import handler, contextlib as _ctx, io as _io, os as _os
+    # exercise the ACTIVE path: with APP_URL unset the owner-push POST is a
+    # no-op, but the grep-stable log leg must still fire (that's the leg that
+    # survives even when push is down).
+    _prev = _os.environ.pop("APP_URL", None)
+    try:
+        _buf = _io.StringIO()
+        with _ctx.redirect_stdout(_buf):
+            handler._fire_render_alert("testjob123", "RENDER_FATAL", detail="boom")
+        _out = _buf.getvalue()
+        assert "[ALERT]" in _out and "RENDER_FATAL" in _out and "testjob123" in _out, _out
+    finally:
+        if _prev is not None:
+            _os.environ["APP_URL"] = _prev
+    # the caller fires it ONLY for real failures — designed rejections stay silent
+    import inspect as _insp
+    _src = _insp.getsource(handler)
+    assert "if not _designed_reject:" in _src and "_fire_render_alert(" in _src, "alert must be gated on not _designed_reject"
 
 
 @check("120s cap MEASURE-IT (Zac 2026-07-11): every intake reject emits a grep-stable + S3-ledgered intake_rejected event (reason + measured source length) so the weekly table counts uploads the 2-min limit turns away; wired BEFORE the raise")
@@ -4679,13 +4880,20 @@ def _intake_reject_measured():
     # KILL-SITE ENUMERATION (rider): EVERY intake gate wired — none missed. The
     # explicit intake-gate raises carry "CODE:" at the message-string start;
     # classify_error branches use `"CODE"` (no colon) and don't match.
+    # Longer codes ordered FIRST so the colon-anchored alternation binds the
+    # most-specific match (NO_SPEECH_NONENGLISH before NO_SPEECH).
     import re as _re
     _raise_msgs = _re.findall(
-        r'f?"(NO_SPEECH|NO_AUDIO_TRACK|NOT_TALKING_HEAD|CLIP_TOO_LONG):', _src)
+        r'f?"(NO_SPEECH_NONENGLISH|NO_SPEECH_FACE|NO_SPEECH|NO_AUDIO_TRACK|'
+        r'NOT_TALKING_HEAD|CLIP_TOO_LONG|CLIP_TOO_SHORT):', _src)
     _measures = _src.count('_log_intake_reject("')
-    for _code in ("CLIP_TOO_LONG", "NO_AUDIO_TRACK", "NOT_TALKING_HEAD", "NO_SPEECH"):
+    for _code in ("CLIP_TOO_LONG", "CLIP_TOO_SHORT", "NO_AUDIO_TRACK",
+                  "NOT_TALKING_HEAD", "NO_SPEECH", "NO_SPEECH_NONENGLISH", "NO_SPEECH_FACE"):
         assert f'_log_intake_reject("{_code}"' in _src, f"intake gate {_code} not measured"
-    assert len(_raise_msgs) == _measures == 5, \
+    # 8 = the original 5 (CLIP_TOO_LONG, NO_AUDIO_TRACK, NOT_TALKING_HEAD ×2,
+    # NO_SPEECH) + the 3 D/D+ diagnosis gates (CLIP_TOO_SHORT, NO_SPEECH_NONENGLISH,
+    # NO_SPEECH_FACE). Every intake raise carries a measurement.
+    assert len(_raise_msgs) == _measures == 8, \
         f"kill-site enumeration: every intake-gate raise must have a measurement " \
         f"(raises={len(_raise_msgs)} measures={_measures}); a new gate was added unmeasured"
 

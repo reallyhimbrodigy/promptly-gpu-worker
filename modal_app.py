@@ -396,6 +396,18 @@ image = (
         "PROMPTLY_BUILD_DIRTY": _BUILD_DIRTY,
         "PROMPTLY_BUILD_TS": _BUILD_TS,
         "PROMPTLY_DEPLOYER": _DEPLOYER,
+        # Reliability Phase 3: spawn-mode flag, baked from the deploy shell so
+        # `PROMPTLY_SPAWN_MODE=1 ./deploy.sh` activates the spawn dispatch and a
+        # plain `./deploy.sh` leaves it OFF (sync, today's behavior). Rollback =
+        # redeploy without the flag. Default "0".
+        "PROMPTLY_SPAWN_MODE": os.environ.get("PROMPTLY_SPAWN_MODE", "0"),
+        # Phase-4 outcome-gate mode, baked from the deploy shell so the enforce
+        # flip is a clean redeploy (`PROMPTLY_OUTCOME_GATE=enforce ./deploy.sh`)
+        # with no code change — mirrors the spawn flag. Default "shadow": the
+        # gate ledgers the strict-schema verdict on every salvaged post-cuts plan
+        # but changes NOTHING, so the deploy is inert until the false-positive
+        # rate is measured. "enforce" = invalid salvage → retry; "off" = skip.
+        "PROMPTLY_OUTCOME_GATE": os.environ.get("PROMPTLY_OUTCOME_GATE", "shadow"),
         # ── Supabase schema overrides for the tier + concurrency gate ──
         # Multi-clip premium concurrency check (handler.py:check_concurrency_gate)
         # reads from these tables. The defaults assumed `user_profiles.user_id`
@@ -505,6 +517,59 @@ app = modal.App("promptly-gpu-worker", image=image, secrets=secrets)
 # both ends keeps it coherent across containers.
 prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_missing=True)
 
+
+# ── Background pipeline (reliability spawn refactor, Phase 3) ──────────────────
+# The pipeline as a PLAIN function (not a web endpoint), so Modal gives it proper
+# retry/auto-migration semantics on preemption — the web endpoint's preemption
+# behavior was "unconfirmed" (see the retries note on PromptlyWorker). run_job
+# SPAWNS this and returns a call_id in milliseconds instead of holding the ASGI
+# worker for the whole pipeline, which is what starved the health probe into the
+# 300s GET/ timeouts + the AnyIO shutdown wedge.
+#
+# Completion delivery (Phase 2 partner): at pipeline end this POSTs the FULL
+# result to the app server's /api/modal-complete (worker-controlled, first-hand,
+# reliable) → settles the dispatch's pending promise → the completion tail runs.
+# The dispatch's Supabase fallback + the reaper are the backstops if this POST is
+# ever lost. Same resources as PromptlyWorker (CPU render host).
+@app.function(
+    timeout=900, retries=2, cpu=64, memory=131072, region="us",
+    scaledown_window=180, volumes={"/prewarm": prewarm_volume},
+    enable_memory_snapshot=True,
+)
+def run_pipeline_bg(body: dict):
+    import sys as _sys, os as _os
+    _sys.path.insert(0, "/")
+    import handler as _H
+    try:
+        _H._install_shutdown_handler()  # Phase 1 safety net on this container too
+    except Exception:
+        pass
+    try:
+        prewarm_volume.reload()
+    except Exception:
+        pass
+    result = _H.handler({"input": body})
+    # PRIMARY completion delivery — POST the full result (success payload OR the
+    # classified error envelope) to the app server. Best-effort: a failed POST
+    # falls back to the dispatch's Supabase recovery + the reaper.
+    try:
+        _call_id = modal.current_function_call_id()
+        _app_url = _os.environ.get("APP_URL", "").rstrip("/")
+        _secret = _os.environ.get("MODAL_CALLBACK_SECRET", "")
+        if _app_url and _call_id:
+            import requests as _requests
+            _requests.post(
+                f"{_app_url}/api/modal-complete",
+                json={"call_id": _call_id, "job_id": body.get("job_id"), "result": result},
+                headers=({"X-Modal-Secret": _secret} if _secret else {}),
+                timeout=15,
+            )
+            print(f"[run_pipeline_bg] completion POSTed call={_call_id} job={body.get('job_id')}", flush=True)
+    except Exception as _e:
+        print(f"[run_pipeline_bg] completion POST failed ({_e}) — dispatch fallback + reaper will settle", flush=True)
+    return result
+
+
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
     timeout=900,          # 15 min — orchestrator runs init + audio + remotion + composite + upload. Raised from 600 (2026-06-21) to keep ~420s of buffer for non-Gemini work after the Gemini client timeout was raised to 480s (handler.py:_get_genai_client) to accommodate thinking_budget=60000's worst-case wall-clock (~337s). If Gemini took 480s and Modal capped at 600s, only 120s remained for download/render/composite/upload — render alone routinely needs 30-90s. 900s gives comfortable margin; jobs that don't hit Gemini's cap (the typical case) cost the same as before since billing is per-active-second, not per-cap.
@@ -589,6 +654,16 @@ class PromptlyWorker:
             print(f"[startup] CUDA setup skipped (CPU-only worker): {_cuda_e}", flush=True)
         from handler import handler as _h
         self._handler = _h
+        # Reliability Phase 1: install the platform-shutdown signal handler on
+        # each container start (main thread, so it survives memory snapshots) —
+        # kills render children + flushes the ledger on SIGTERM (preemption/
+        # timeout) so no thread wedges runner shutdown. Best-effort; never breaks
+        # startup. See handler._on_platform_shutdown.
+        try:
+            import handler as _handler_mod
+            _handler_mod._install_shutdown_handler()
+        except Exception as _sh_e:
+            print(f"[startup] shutdown-handler install skipped ({_sh_e})", flush=True)
         self._prewarm_volume = prewarm_volume
 
     @modal.fastapi_endpoint(method="POST")
@@ -600,6 +675,17 @@ class PromptlyWorker:
             self._prewarm_volume.reload()
         except Exception:
             pass
+        # DUAL-MODE (spawn refactor Phase 3): when PROMPTLY_SPAWN_MODE=1, spawn the
+        # pipeline as a retriable background function and return a call_id in
+        # milliseconds — the app server (dual-mode dispatch, already deployed)
+        # awaits completion via /api/modal-complete + its fallback. Defaults OFF,
+        # so THIS deploy is inert until the flag flips — a second safety layer on
+        # top of the deploy-order gate (server must understand {spawned} first).
+        # Rollback = unset the flag, no redeploy.
+        if os.environ.get("PROMPTLY_SPAWN_MODE") == "1":
+            _fc = run_pipeline_bg.spawn(body)
+            print(f"[run_job] spawned pipeline call={_fc.object_id} job={body.get('job_id')}", flush=True)
+            return {"spawned": True, "call_id": _fc.object_id, "job_id": body.get("job_id")}
         result = self._handler({"input": body})
         return result
 
