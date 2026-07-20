@@ -4949,7 +4949,7 @@ def _multilingual_c_tiers():
         "Tier-1 Cyrillic (Russian) must be in the contact-sheet battery"
 
 
-@check("ARABIC BRIDGE (denylist leak-fix): Deepgram multi ROMANIZES Arabic → _dominant_script sees Latin → the Arabic denylist would leak (real Arabic → romanized garbage). _looks_confused (detected=None AND incoherent per-word tags AND text-LID can't place the Latin text) fires the language=ar probe; confirmed Arabic is treated AS Arabic → honest reject. Strict signature → discriminates romanized-Arabic from real Latin languages; probe confirms so a false-trigger only costs a probe, never a wrong reject.")
+@check("ARABIC BRIDGE (denylist leak-fix): Deepgram multi ROMANIZES Arabic → _dominant_script sees Latin → the denylist would leak (real Arabic → romanized garbage). _looks_confused = detected_language None AND a stopword-DENSITY text-LID can't confidently place the Latin text as a known Latin language (measured: certified Latin langs 0.17-0.50 density, romanized Arabic 0.13). On that → language=ar probe → confirmed Arabic treated AS Arabic → honest reject. Density (not absolute hits: romanized Arabic coincidentally hit 2 short PT stopwords) + probe-confirm → false-trigger only costs a probe, never a wrong reject.")
 def _arabic_bridge():
     import handler
     assert callable(handler._looks_confused) and callable(handler._latin_lid) \

@@ -4197,37 +4197,43 @@ _NONLATIN_LANG_CODES = frozenset({
     "te", "kn", "ml", "gu", "pa", "mr", "el", "uk", "sr", "bg", "am",
 })
 
-# Tiny dependency-free text-LID: the commonest function words per Latin-script
-# language. Romanized Arabic matches NONE of them (no "the/de/le/der/…").
+# Dependency-free text-LID by stopword DENSITY. Comprehensive ~30-word function-
+# word sets per Latin language — real text of a language is 20-50% these words;
+# romanized Arabic hits only a couple by CHANCE (short words like "a"/"da"/"na"),
+# so its density stays ~10%. Absolute-hit counting was too crude (romanized
+# Arabic coincidentally hit 2 Portuguese stopwords and got mis-placed); density
+# is the reliable separator (measured: all 6 certified Latin langs 0.17-0.50,
+# romanized Arabic 0.13). Below the threshold → unplaceable → the ar probe fires.
 _LATIN_STOPWORDS = {
-    "en": {"the", "and", "is", "to", "of", "a", "in", "that", "it", "you", "for"},
-    "es": {"de", "la", "que", "el", "en", "y", "los", "se", "no", "un", "por"},
-    "fr": {"de", "la", "le", "et", "les", "des", "un", "une", "est", "que", "dans"},
-    "de": {"der", "die", "und", "ist", "das", "zu", "den", "nicht", "ein", "mit"},
-    "pt": {"de", "que", "e", "o", "a", "do", "da", "em", "um", "para", "com"},
-    "it": {"di", "che", "e", "la", "il", "un", "per", "con", "non", "una"},
-    "id": {"yang", "dan", "di", "itu", "dengan", "untuk", "tidak", "ini", "ada"},
-    "nl": {"de", "en", "het", "van", "een", "is", "dat", "niet", "op", "te"},
-    "pl": {"nie", "to", "się", "na", "jest", "że", "co", "jak", "the"},
-    "tr": {"bir", "ve", "bu", "için", "ile", "de", "da", "çok", "ne"},
+    "en": {"the","and","is","to","of","a","in","that","it","you","for","on","are","was","with","as","at","be","this","have","from","or","by","not","but","what","all","we","they","your","so","up","one","more","than"},
+    "es": {"de","la","que","el","en","y","los","se","no","un","por","con","una","su","para","es","al","lo","como","más","pero","sus","le","ya","o","este","del","todo","esta","cuando","muy","sin"},
+    "fr": {"de","la","le","et","les","des","un","une","est","que","dans","pour","qui","pas","sur","au","ce","il","plus","ne","se","son","mais","ou","avec","tout","nous","comme","je","vous"},
+    "de": {"der","die","das","und","ist","ein","eine","nicht","mit","auf","für","den","dem","im","zu","sich","auch","es","an","wie","so","nur","bei","vor","wenn","sie","wir","ich","aber","noch","nach","aus","sind","hat","werden","kurz","alles"},
+    "pt": {"de","que","e","o","a","do","da","em","um","para","com","não","uma","os","no","se","na","por","mais","as","dos","como","mas","ao","ele","das","seu","sua","ou","quando","muito","antes","pouco","tudo"},
+    "it": {"di","che","e","la","il","un","per","con","non","una","è","le","in","da","del","al","lo","si","dei","come","più","ma","anche","o","se","gli","della"},
+    "id": {"yang","dan","di","itu","dengan","untuk","tidak","ini","ada","dari","akan","pada","juga","saya","ke","karena","tak","sudah","saat","orang","lebih","atau","bisa","mereka"},
+    "nl": {"de","en","het","van","een","is","dat","niet","op","te","zijn","met","voor","er","aan","die","ook","als","maar","om"},
+    "tr": {"bir","ve","bu","için","ile","de","da","çok","ne","ben","o","ama","gibi","daha","her","en","kadar","sonra"},
+    "pl": {"nie","to","się","na","jest","że","co","jak","do","w","z","o","tak","ale","po","tym","już","jego"},
 }
+
+_LATIN_LID_MIN_DENSITY = 0.15  # ≥ → confidently a known Latin language (skip probe)
 
 
 def _latin_lid(text):
-    """Return a Latin-script language code if the text reads as one, else None.
-    Cheap stopword vote — enough to keep the Arabic probe off real Latin
-    languages while still failing to place romanized non-Latin text."""
+    """Return a Latin-script language code if the text reads confidently as one
+    (stopword density ≥ threshold), else None. Density (occurrences / tokens),
+    not absolute hits — real Latin is stopword-dense, romanized non-Latin is not.
+    None → the caller probes language=ar; a misplace only costs a probe."""
     toks = [t for t in re.split(r"[^\w']+", str(text).lower()) if t]
-    if len(toks) < 3:
+    if len(toks) < 6:
         return None
-    tset = set(toks)
-    best, best_hits = None, 0
+    best, best_density = None, 0.0
     for lang, sw in _LATIN_STOPWORDS.items():
-        hits = len(tset & sw)
-        if hits > best_hits:
-            best, best_hits = lang, hits
-    # need at least 2 stopword hits to claim a placement (1 is noise)
-    return best if best_hits >= 2 else None
+        density = sum(1 for t in toks if t in sw) / len(toks)
+        if density > best_density:
+            best, best_density = lang, density
+    return best if best_density >= _LATIN_LID_MIN_DENSITY else None
 
 
 def _looks_confused(transcript):
