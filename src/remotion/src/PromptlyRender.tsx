@@ -57,6 +57,7 @@ import {
   // Directive #12 promotions (ABE archive)
   Gadzhi,
 } from "./captions";
+import { pagesDirection } from "./captions/shared/direction";
 
 // Transitions — all 12
 import {
@@ -291,8 +292,15 @@ const CaptionSegmentRenderer: React.FC<{
       };
     }
   }
+  // MULTILINGUAL A2.2 — RTL word order. Every caption lays its words out as
+  // separate inline-block spans in a flex row; each span is an atomic bidi box,
+  // so the row flows in this wrapper's inherited `direction`. Setting it from the
+  // caption's own script reverses word order for Arabic/Hebrew across all 9
+  // components at once — no per-component change. ltr is a no-op (Latin stays
+  // byte-identical); physical `left`/`translateX` centering is unaffected.
+  const direction = pagesDirection(clippedPages);
   return (
-    <AbsoluteFill style={{ pointerEvents: "none" }}>
+    <AbsoluteFill style={{ pointerEvents: "none", direction }}>
       <Comp
         pages={clippedPages}
         keywords={keywords}

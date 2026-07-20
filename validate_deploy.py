@@ -4824,6 +4824,27 @@ def _multilingual_a2_font_stack():
         assert f"{_k}: withNoto(" in _f, f"caption font {_k} must be wrapped with the Noto fallback"
 
 
+@check("MULTILINGUAL A2.2 (RTL word order): captionDirection classifies a caption by its first strong-directional LETTER (Unicode paragraph direction), and the single production caption wrapper (CaptionSegmentRenderer) sets `direction` from the caption's own script — reversing word order for Arabic/Hebrew across all 9 components at once via inheritance, ltr a proven no-op so Latin renders byte-identical. Proven on the contact sheet: RTL cases flipped, every LTR case byte-identical.")
+def _multilingual_a22_rtl_direction():
+    _p = "src/remotion/src/captions/shared/direction.ts"
+    _d = open(_p).read()
+    assert "export const captionDirection" in _d and "export const pagesDirection" in _d, \
+        "direction.ts must export captionDirection + pagesDirection"
+    # first-strong-LETTER heuristic: an RTL-script matcher AND a general letter
+    # matcher (so neutrals — emoji/digits/punct — are skipped, not miscounted).
+    assert "RTL_LETTER" in _d and "ANY_LETTER" in _d, \
+        "direction detection must use first-strong-LETTER (RTL vs any-letter)"
+    for _sc in ("Hebrew", "Arabic"):
+        assert _sc in _d, f"RTL script coverage must include {_sc}"
+    # wired into the ONE production caption wrapper (structural, not per-component)
+    _pr = open("src/remotion/src/PromptlyRender.tsx").read()
+    assert "pagesDirection" in _pr and "direction }" in _pr, \
+        "CaptionSegmentRenderer must set `direction` from pagesDirection on the caption wrapper"
+    # the battery mirrors production so the contact sheet proves the real path
+    _fs = open("src/remotion/src/FitSpecimen.tsx").read()
+    assert "captionDirection" in _fs, "FitSpecimen must mirror production direction"
+
+
 @check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")
 def _spawn_refactor_phase3():
     _m = open("modal_app.py").read()

@@ -11,6 +11,7 @@ import { TwoTone } from "./captions/TwoTone";
 import { TypewriterReveal } from "./captions/TypewriterReveal";
 import { StickyNotes } from "./motion-graphics/StickyNotes";
 import type { TikTokPage } from "./captions/shared/types";
+import { captionDirection } from "./captions/shared/direction";
 
 // ---------------------------------------------------------------------------
 // FitSpecimen — STANDALONE F4 battery composition (not used in production
@@ -101,7 +102,12 @@ export const FitSpecimen: React.FC<FitSpecimenProps> = ({
     );
   }
 
+  // A2.2 — mirror production: the wrapper carries the caption's script direction
+  // so the battery proves RTL word order the same way real renders get it.
+  const direction = captionDirection(words.join(" "));
   return (
-    <AbsoluteFill style={{ backgroundColor: "#000000" }}>{subject}</AbsoluteFill>
+    <AbsoluteFill style={{ backgroundColor: "#000000", direction }}>
+      {subject}
+    </AbsoluteFill>
   );
 };
