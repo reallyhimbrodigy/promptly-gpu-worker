@@ -3874,10 +3874,13 @@ def _parse_deepgram_response(resp):
         {
             "word":            w.word,
             "punctuated_word": getattr(w, "punctuated_word", w.word),
-            "start":           float(w.start),
-            "end":             float(w.end),
-            "confidence":      float(getattr(w, "confidence", 1.0)),
-            "speaker":         int(getattr(w, "speaker", 0)),
+            "start":           float(w.start if w.start is not None else 0.0),
+            "end":             float(w.end if w.end is not None else 0.0),
+            "confidence":      float(getattr(w, "confidence", 1.0) or 1.0),
+            # speaker is None (not absent) when diarize is off — e.g. the
+            # Arabic-bridge language=ar probe. int(None) would crash the parse;
+            # `or 0` makes it robust so the probe (and any no-diarize call) works.
+            "speaker":         int(getattr(w, "speaker", 0) or 0),
             # per-word language tag (language=multi populates it) — feeds the
             # Arabic-confusion signature (_looks_confused): multi tags romanized
             # Arabic incoherently (e.g. a fr/hi mix on Latin text). Additive.
