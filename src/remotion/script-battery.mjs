@@ -24,6 +24,12 @@ const CASES = [
   { key: "6-cjk-latin-mix", words: ["AI技術で", "日本語"], note: "CJK + Latin in one caption (font-mix)" },
   { key: "7-emoji", words: ["Let's", "go🔥💯🚀"], note: "UGC color emoji" },
   { key: "8-latin-control", words: ["DOWNLOAD", "PROMPTLY"], note: "Latin control — must be byte-identical to before" },
+  // Fit-ladder cases: full sentences whose composed width exceeds the 920px safe
+  // box, forcing fit.ts to scale down. Proves canvasMeasurer measures non-Latin
+  // advances (CJK ~1em/glyph, Arabic joined runs) correctly — text must stay in
+  // the margins, shaping + direction intact after the scale.
+  { key: "9-cjk-overflow", words: ["人工知能", "技術", "革命", "未来", "世界", "変革"], note: "CJK sentence overflow — fit scale-down" },
+  { key: "10-arabic-overflow", words: ["الذكاء", "الاصطناعي", "يغير", "العالم", "اليوم"], note: "Arabic sentence overflow — fit scale-down, RTL held" },
 ];
 
 const STYLE = "Prime"; // a clean style that shows the glyphs plainly
