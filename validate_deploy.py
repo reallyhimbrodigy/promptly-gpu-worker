@@ -4810,16 +4810,26 @@ def _multilingual_a1_fonts():
     assert '"fonts-dejavu-core"' in _m, "the Latin font base must remain (A1 is additive)"
 
 
-@check("OpenCV PINNED <5: opencv-python-headless is version-capped below 5.0 so a rebuild can't pull OpenCV 5.x (which dropped cv2.dnn.readNetFromCaffe → face-DNN load AttributeError → EVERY talking-head render terminalizes). The floating-resolve regression class the google-genai/deepgram/pydantic pins already closed.")
-def _opencv_pinned_below_5():
+@check("IMAGE DEPS FLOOR-PINNED: every runtime pip dep is version-capped so a rebuild can't silently resolve a breaking major — the class that bit us with opencv 5.x (readNetFromCaffe gone → EVERY talking-head render terminalized), Deepgram, pyannote. opencv MUST cap <5 (has readNetFromCaffe + numpy-2 support).")
+def _image_deps_pinned():
     import re as _re
     _m = open("modal_app.py").read()
     _mm = _re.search(r'"opencv-python-headless([^"]*)"', _m)
-    assert _mm, "opencv-python-headless must be listed in the image pip_install"
-    _spec = _mm.group(1)
-    assert _spec.strip(), "opencv-python-headless must be PINNED (unpinned pulled OpenCV 5.x, which removed readNetFromCaffe)"
-    assert "<5" in _spec or _re.search(r"==4\.", _spec), \
-        f"opencv-python-headless must cap below 5.0 (has readNetFromCaffe); got '{_spec}'"
+    assert _mm and _mm.group(1).strip(), "opencv-python-headless must be PINNED"
+    assert "<5" in _mm.group(1) or _re.search(r"==4\.", _mm.group(1)), \
+        f"opencv-python-headless must cap below 5.0; got '{_mm.group(1)}'"
+    # every previously-unpinned runtime dep now carries a version constraint.
+    # certifi (date-versioned CA bundle) and wheel (build tool) are exempt.
+    for _pkg in ("numpy", "requests", "anthropic", "supabase", "boto3\\[crt\\]",
+                 "httpx", "fastapi", "tqdm", "Pillow", "google-genai",
+                 "deepgram-sdk", "pydantic"):
+        # findall (not search) — a package can be MENTIONED unversioned in a
+        # comment; only the real pip_install entry carries the version. Require
+        # at least one capped occurrence.
+        _specs = _re.findall(rf'"{_pkg}([^"]*)"', _m)
+        assert _specs, f"{_pkg} must be listed in the image pip_install"
+        assert any(("<" in _s or "==" in _s) for _s in _specs), \
+            f"{_pkg} must be version-capped (floating-resolve regression class); got {_specs}"
 
 
 @check("MULTILINGUAL A2.1 (deliberate script fallback): every CAPTION_FONTS entry appends the NOTO_FALLBACK stack (Noto per-script + Noto Color Emoji + sans-serif) so Chromium resolves non-Latin glyphs per-glyph via fontconfig against the A1 fonts — no tofu; the Latin primary font still wins for every glyph it has, so Latin captions render byte-identical")

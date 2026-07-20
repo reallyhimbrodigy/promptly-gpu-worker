@@ -214,7 +214,11 @@ image = (
         "mkdir -p /usr/share/rnnoise",
         "wget -q -O /usr/share/rnnoise/bd.rnnn https://github.com/GregorR/rnnoise-models/raw/master/beguiling-drafter-2018-08-30/bd.rnnn",
     )
-    .pip_install("numpy", "wheel")
+    # FLOOR-HARDENING (2026-07-20): every runtime dep major-capped so a rebuild
+    # can't silently resolve a breaking major — the exact class that bit us with
+    # opencv 5.x (readNetFromCaffe), and before it Deepgram/pyannote. numpy held
+    # on 2.x (the image runs 2.2.6; opencv 4.13 + aubio both numpy-2-compatible).
+    .pip_install("numpy>=2,<3", "wheel")
     .pip_install("aubio", extra_options="--no-build-isolation")
     .pip_install(
         "certifi",
@@ -228,8 +232,8 @@ image = (
         # support numpy 2.x (verified). Same floating-resolve bug the google-genai
         # / deepgram / pydantic pins below already fixed — opencv was the one left.
         "opencv-python-headless>=4.10,<5",
-        "requests",
-        "anthropic",
+        "requests>=2,<3",
+        "anthropic>=0.40,<1",
         # google-genai is pinned to a known-good range. The previous floating
         # spec ("google-genai") would let pip resolve breaking minor versions
         # at any rebuild — exactly the failure mode that bit us with Deepgram
@@ -246,17 +250,17 @@ image = (
         # surface we use is stable across the 3.x line and 3.8 → 3.10 is
         # a minor-feature bump only.
         "deepgram-sdk>=3.8.0,<4.0",
-        "supabase",
-        "boto3[crt]",   # AWS Common Runtime — 2-6× S3 throughput vs stock boto3
-        "httpx",
-        "fastapi",
+        "supabase>=2,<3",
+        "boto3[crt]>=1,<2",   # AWS Common Runtime — 2-6× S3 throughput vs stock boto3
+        "httpx>=0.27,<1",
+        "fastapi>=0.115,<1",
         # pydantic v2 syntax (BaseModel + ConfigDict) is used throughout
         # render_schemas.py and the handler. Pin to v2 so a future pip
         # resolve doesn't drop us into a hypothetical v3 with breaking
         # API changes — same class of bug as the Deepgram/pyannote ones.
         "pydantic>=2,<3",
-        "tqdm",
-        "Pillow",
+        "tqdm>=4,<5",
+        "Pillow>=11,<13",
     )
     # PyTorch with CUDA 12.4 — for RIFE 4.18 motion-compensated frame
     # interpolation on the H100 GPU at the fps-normalize step. Verified
