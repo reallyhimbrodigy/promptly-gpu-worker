@@ -4984,6 +4984,13 @@ def _arabic_bridge():
     # wired at the gate BEFORE the reject: confusion → probe → treat-as-Arabic
     assert "_looks_confused(_transcript)" in _h and "_probe_confirms_arabic(_raw_source)" in _h
     assert _h.index("_probe_confirms_arabic(_raw_source)") < _h.index("if not _script_reaches_render(_script):")
+    # density LID (not absolute hits) — the reliable discriminator
+    assert "_LATIN_LID_MIN_DENSITY" in _h, "text-LID must place by stopword density"
+    # permanent regression (Zac): durable clips + a re-runnable end-to-end check
+    # so a future Deepgram change that re-breaks probe/signature is caught.
+    _mo = open("modal_app.py").read()
+    assert "def cert_bridge_regression(" in _mo and "_BRIDGE_REGRESSION_CLIPS" in _mo, \
+        "the Arabic-bridge permanent regression must exist (a detector once proven stays proven)"
 
 
 @check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")

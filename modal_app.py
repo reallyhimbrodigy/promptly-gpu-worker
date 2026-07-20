@@ -1728,16 +1728,131 @@ def cert_collect() -> list:
     return out
 
 
+@app.function(cpu=4, memory=8192, timeout=300)
+def cert_bridge_e2e(lang: str, audio_b64: str) -> dict:
+    """One clip, full chain, RETURNED INLINE (no S3 race). transcribe multi →
+    _looks_confused → language=ar probe → treat. The definitive end-to-end."""
+    import os, sys, base64, tempfile
+    sys.path.insert(0, "/")
+    import handler
+    from deepgram import DeepgramClient, PrerecordedOptions
+    p = tempfile.mktemp(suffix=".m4a"); open(p, "wb").write(base64.b64decode(audio_b64))
+    ab = handler.prepare_audio_for_deepgram(p)
+    dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
+    tx = handler._parse_deepgram_response(dg.listen.prerecorded.v("1").transcribe_file(
+        {"buffer": ab, "mimetype": "audio/flac"},
+        PrerecordedOptions(model="nova-3", language="multi", smart_format=True, punctuate=True)))
+    script = handler._dominant_script(tx.get("words") or [])
+    confused = handler._looks_confused(tx)
+    treat, probe = script, None
+    if script == "Latin" and confused:
+        is_ar, _ = handler._probe_confirms_arabic(p)
+        probe = is_ar
+        if is_ar:
+            treat = "Arabic"
+    r = {"lang": lang, "multi_script": script, "confused": confused, "ar_probe": probe,
+         "treat": treat, "n_words": len(tx.get("words") or []),
+         "text": (tx.get("text") or "")[:120]}
+    print(f"E2E {r}")
+    return r
+
+
+@app.local_entrypoint()
+def cert_e2e():
+    import base64, os
+    cert_dir = os.environ.get("CERT_AUDIO_DIR") or "/tmp/promptly_cert_audio"
+    for lang in [s.strip() for s in os.environ.get("CERT_ONLY", "ar_r140,en").split(",") if s.strip()]:
+        with open(os.path.join(cert_dir, f"{lang}.m4a"), "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode()
+        print("RESULT", cert_bridge_e2e.remote(lang, b64))
+
+
+# ── ARABIC BRIDGE PERMANENT REGRESSION (Zac 2026-07-20) ──────────────────────
+# "A detector that was once proven must stay proven." The clips live durably in
+# S3, so `modal run modal_app.py::cert_bridge_regression_run` re-verifies the
+# WHOLE chain (real Deepgram transcribe → confusion signature → language=ar probe)
+# against the live API anytime. If a future Deepgram change re-breaks the probe
+# or the detection, this catches it on the next run — before Arabic speakers
+# silently get romanized captions again.
+_BRIDGE_REGRESSION_CLIPS = {
+    "ar_r140": {"key": f"{_CERT_PREFIX}/_bridge_regression/ar_r140.m4a", "expect": "Arabic"},
+    "en":      {"key": f"{_CERT_PREFIX}/_bridge_regression/en.m4a",      "expect": "Latin"},
+}
+
+
+@app.function(cpu=2, memory=4096, timeout=300)
+def cert_bridge_seed(clips: dict) -> list:
+    import os, base64, boto3
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1"))
+    done = []
+    for name, b64 in clips.items():
+        spec = _BRIDGE_REGRESSION_CLIPS.get(name)
+        if not spec:
+            continue
+        s3.put_object(Bucket=_CERT_BUCKET, Key=spec["key"],
+                      Body=base64.b64decode(b64), ContentType="audio/mp4")
+        done.append(spec["key"])
+    print(f"SEEDED {done}")
+    return done
+
+
+@app.function(cpu=2, memory=4096, timeout=900)
+def cert_bridge_regression() -> dict:
+    """Re-verify the bridge end-to-end on the durable clips. Asserts each clip's
+    treat == expected (Arabic clip → Arabic, control → Latin)."""
+    import os, base64, boto3
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1"))
+    rows, passed = [], True
+    for name, spec in _BRIDGE_REGRESSION_CLIPS.items():
+        try:
+            b = s3.get_object(Bucket=_CERT_BUCKET, Key=spec["key"])["Body"].read()
+        except Exception as e:
+            rows.append({"clip": name, "error": f"durable clip missing: {e}"}); passed = False; continue
+        r = cert_bridge_e2e.remote(name, base64.b64encode(b).decode())
+        ok = (r or {}).get("treat") == spec["expect"]
+        passed = passed and ok
+        rows.append({"clip": name, "expect": spec["expect"], "got": (r or {}).get("treat"),
+                     "confused": (r or {}).get("confused"), "ar_probe": (r or {}).get("ar_probe"), "ok": ok})
+    print(f"REGRESSION passed={passed}")
+    for r in rows:
+        print(f"REG {r}")
+    return {"passed": passed, "rows": rows}
+
+
+@app.local_entrypoint()
+def cert_bridge_regression_run():
+    """Seed the durable clips from local IF present (idempotent), then run the
+    permanent regression. After the first seed it re-runs from S3 alone."""
+    import base64, os
+    cert_dir = os.environ.get("CERT_AUDIO_DIR") or "/tmp/promptly_cert_audio"
+    clips = {}
+    for name in _BRIDGE_REGRESSION_CLIPS:
+        p = os.path.join(cert_dir, f"{name}.m4a")
+        if os.path.exists(p):
+            with open(p, "rb") as fh:
+                clips[name] = base64.b64encode(fh.read()).decode()
+    if clips:
+        cert_bridge_seed.remote(clips)
+        print(f"[regression] seeded {list(clips)} to durable S3")
+    print("[regression] result:", cert_bridge_regression.remote())
+
+
 @app.function(cpu=4, memory=8192, timeout=900)
 def cert_bridge_verify(audio_map: dict) -> list:
     """Verify the Arabic bridge on real Deepgram output (Zac's ask: hit rate +
     false fires). For each clip: transcribe language=multi, run the REAL
     _looks_confused signature, and — when it fires — the language=ar probe. An
     Arabic clip should end `treat=Arabic`; every control should not."""
-    import os, sys, base64, tempfile
+    import os, sys, base64, tempfile, boto3
     sys.path.insert(0, "/")
     import handler
     from deepgram import DeepgramClient, PrerecordedOptions
+    # delete any stale result FIRST so a concurrent read is never ambiguous
+    try:
+        boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1")).delete_object(
+            Bucket=_CERT_BUCKET, Key=f"{_CERT_PREFIX}/_bridge_verify.json")
+    except Exception:
+        pass
     dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
     out = []
     for lang, b64 in audio_map.items():
@@ -1781,7 +1896,19 @@ def cert_bridge_verify(audio_map: dict) -> list:
 
 @app.function(cpu=2, memory=4096, timeout=120)
 def cert_bridge_read() -> list:
-    import os, json, boto3
+    import os, json, boto3, sys
+    # SELF-TEST the DEPLOYED handler's signature (isolates "is the fix in the
+    # image" from S3 staleness) — calls the image's _looks_confused directly.
+    sys.path.insert(0, "/")
+    try:
+        import handler as _h
+        _mock = {"detected_language": None, "words": [
+            {"word": w, "language": "fr", "confidence": 0.9}
+            for w in "Muawami innasi yas tazlimuna qabil najahi mubashara".split()]}
+        print(f"SELFTEST deployed _looks_confused(romanized-ar, coherent-tags)="
+              f"{_h._looks_confused(_mock)} (want True)")
+    except Exception as _e:
+        print(f"SELFTEST error {type(_e).__name__}: {_e}")
     s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1"))
     try:
         rows = json.loads(s3.get_object(Bucket=_CERT_BUCKET, Key=f"{_CERT_PREFIX}/_bridge_verify.json")["Body"].read())
