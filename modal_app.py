@@ -1734,9 +1734,12 @@ def cert_collect() -> list:
 
 
 @app.function(cpu=4, memory=8192, timeout=300)
-def cert_bridge_e2e(lang: str, audio_b64: str) -> dict:
+def cert_bridge_e2e(lang: str, audio_b64: str, graduated: bool = False) -> dict:
     """One clip, full chain, RETURNED INLINE (no S3 race). transcribe multi →
-    _looks_confused → language=ar probe → treat. The definitive end-to-end."""
+    _looks_confused → language=ar probe → treat. With graduated=True, ALSO runs
+    the GRADUATED route on confirmed Arabic (language=ar full re-transcribe) and
+    reports the routed transcript's script — the graduated-path regression:
+    Arabic in → Arabic-script words (= verbatim captions) out."""
     import os, sys, base64, tempfile
     sys.path.insert(0, "/")
     import handler
@@ -1749,14 +1752,19 @@ def cert_bridge_e2e(lang: str, audio_b64: str) -> dict:
         PrerecordedOptions(model="nova-3", language="multi", smart_format=True, punctuate=True)))
     script = handler._dominant_script(tx.get("words") or [])
     confused = handler._looks_confused(tx)
-    treat, probe = script, None
+    treat, probe, routed_script, routed_words = script, None, None, None
     if script == "Latin" and confused:
         is_ar, _ = handler._probe_confirms_arabic(p)
         probe = is_ar
         if is_ar:
             treat = "Arabic"
+            if graduated:
+                ar_tx = handler.transcribe_audio(p, language="ar")
+                routed_words = len(ar_tx.get("words") or [])
+                routed_script = handler._dominant_script(ar_tx.get("words") or [])
     r = {"lang": lang, "multi_script": script, "confused": confused, "ar_probe": probe,
-         "treat": treat, "n_words": len(tx.get("words") or []),
+         "treat": treat, "routed_script": routed_script, "routed_words": routed_words,
+         "n_words": len(tx.get("words") or []),
          "text": (tx.get("text") or "")[:120]}
     print(f"E2E {r}")
     return r
@@ -1780,7 +1788,11 @@ def cert_e2e():
 # or the detection, this catches it on the next run — before Arabic speakers
 # silently get romanized captions again.
 _BRIDGE_REGRESSION_CLIPS = {
-    "ar_r140": {"key": f"{_CERT_PREFIX}/_bridge_regression/ar_r140.m4a", "expect": "Arabic"},
+    # graduated_expect: with the graduated env, the ROUTE must yield a native-
+    # Arabic-script transcript (captions are verbatim words, so Arabic-script
+    # words == Arabic-script captions; the render layer was pixel-proven at cert).
+    "ar_r140": {"key": f"{_CERT_PREFIX}/_bridge_regression/ar_r140.m4a", "expect": "Arabic",
+                "graduated_expect": "Arabic"},
     "en":      {"key": f"{_CERT_PREFIX}/_bridge_regression/en.m4a",      "expect": "Latin"},
 }
 
@@ -1813,11 +1825,17 @@ def cert_bridge_regression() -> dict:
             b = s3.get_object(Bucket=_CERT_BUCKET, Key=spec["key"])["Body"].read()
         except Exception as e:
             rows.append({"clip": name, "error": f"durable clip missing: {e}"}); passed = False; continue
-        r = cert_bridge_e2e.remote(name, base64.b64encode(b).decode())
+        _grad = "graduated_expect" in spec
+        r = cert_bridge_e2e.remote(name, base64.b64encode(b).decode(), _grad)
         ok = (r or {}).get("treat") == spec["expect"]
+        if _grad:
+            # graduated-path check: the route's transcript must be native script
+            ok = ok and (r or {}).get("routed_script") == spec["graduated_expect"]
         passed = passed and ok
         rows.append({"clip": name, "expect": spec["expect"], "got": (r or {}).get("treat"),
-                     "confused": (r or {}).get("confused"), "ar_probe": (r or {}).get("ar_probe"), "ok": ok})
+                     "confused": (r or {}).get("confused"), "ar_probe": (r or {}).get("ar_probe"),
+                     "routed_script": (r or {}).get("routed_script"),
+                     "routed_words": (r or {}).get("routed_words"), "ok": ok})
     print(f"REGRESSION passed={passed}")
     for r in rows:
         print(f"REG {r}")
@@ -1840,6 +1858,209 @@ def cert_bridge_regression_run():
         cert_bridge_seed.remote(clips)
         print(f"[regression] seeded {list(clips)} to durable S3")
     print("[regression] result:", cert_bridge_regression.remote())
+
+
+# ── ARABIC GRADUATION CERT (Session A) ────────────────────────────────────────
+# Full pipeline with the GRADUATED env set IN-PROCESS ONLY (PLAN_CAPTURE
+# pattern; zero prod impact): bridge detects → route re-transcribes language=ar
+# → editorial-in-language → render. The judgment is PIXELS: caption-bearing
+# frames are extracted from the render and persisted (+ presigned URLs) for
+# inspection — Arabic script, RTL, joining, chrome, zero tofu.
+_AR_GRAD_PREFIX = f"{_CERT_PREFIX}/ar-graduation"
+
+
+@app.function(cpu=32, memory=65536, timeout=1800)
+def cert_ar_graduate(clip: str, audio_b64: str, face_key: str) -> dict:
+    import os, sys, base64, json, tempfile, subprocess, uuid, time
+    # graduated IN-PROCESS: env-gated denylist emptied for THIS request only
+    os.environ["PROMPTLY_EDIT_IN_LANGUAGE"] = "1"
+    os.environ["PROMPTLY_SCRIPT_DENYLIST"] = ""
+    os.environ["JOB_STATUS_WRITES_ENABLED"] = ""   # no phantom video_jobs rows
+    os.environ["APP_URL"] = ""                      # no progress posts to prod
+    sys.path.insert(0, "/")
+    import handler
+    s3 = handler._aws_s3_client
+
+    work = tempfile.mkdtemp()
+    face_p, audio_p, src_p = (os.path.join(work, n) for n in ("face.mp4", "audio.m4a", "source.mp4"))
+    s3.download_file(_CERT_BUCKET, face_key, face_p)
+    with open(audio_p, "wb") as fh:
+        fh.write(base64.b64decode(audio_b64))
+    adur = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=nw=1:nk=1", audio_p]).decode().strip())
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-stream_loop", "-1", "-i", face_p, "-i", audio_p,
+                    "-map", "0:v:0", "-map", "1:a:0", "-t", f"{adur:.2f}", "-c:v", "libx264", "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", src_p], check=True)
+
+    src_key = f"{_AR_GRAD_PREFIX}/{clip}/source.mp4"
+    render_key = f"{_AR_GRAD_PREFIX}/{clip}/render.mp4"
+    s3.upload_file(src_p, _CERT_BUCKET, src_key, ExtraArgs={"ContentType": "video/mp4"})
+    video_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{src_key}"
+    upload_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{render_key}"
+    body = {"job_id": str(uuid.uuid4()), "video_url": video_url, "vibe": "viral",
+            "user_id": str(uuid.uuid4()), "upload_url": upload_url, "public_url": upload_url}
+    t0 = time.time()
+    try:
+        result = handler.handler({"input": body})
+    except Exception as e:
+        result = {"status": "exception", "error": f"{type(e).__name__}: {e}"}
+    elapsed = round(time.time() - t0, 1)
+
+    recipe = (result or {}).get("edit_recipe") or {}
+    tx = (result or {}).get("transcript") or {}
+    words = tx.get("words") or []
+
+    def _script_of(text):
+        try:
+            return handler._dominant_script([{"word": w} for w in str(text).split()])
+        except Exception:
+            return "?"
+
+    cap_pages = recipe.get("caption_pages") or []
+    cap_text = " ".join(t.get("text", "") for p in cap_pages for t in (p.get("tokens") or [])) \
+        or " ".join(w.get("word", "") if isinstance(w, dict) else str(w) for w in words)
+    cap_script = _script_of(cap_text)
+    chrome = []
+    for mg in (recipe.get("motion_graphics") or []):
+        for k in ("text", "title", "label", "heading"):
+            if isinstance(mg.get(k), str) and mg[k].strip():
+                chrome.append(mg[k])
+        for it in (mg.get("items") or []):
+            if isinstance(it, str):
+                chrome.append(it)
+    for ov in (recipe.get("text_overlays") or []):
+        if isinstance(ov.get("text"), str) and ov["text"].strip():
+            chrome.append(ov["text"])
+    richness = {k: len(recipe.get(k) or []) for k in
+                ("emphasis_moments", "transitions", "broll_clips", "motion_graphics",
+                 "sound_effects", "zoom_effects", "text_overlays")}
+    richness["caption_pages"] = len(cap_pages)
+
+    # ── the pixel evidence: extract caption-bearing frames from the render ──
+    frames = []
+    if (result or {}).get("video_url"):
+        rend_p = os.path.join(work, "render.mp4")
+        try:
+            s3.download_file(_CERT_BUCKET, render_key, rend_p)
+            rdur = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries",
+                         "format=duration", "-of", "default=nw=1:nk=1", rend_p]).decode().strip())
+            # frame times: caption-page midpoints spread across the video (≤4)
+            times = []
+            if cap_pages:
+                n = len(cap_pages)
+                for idx in sorted({0, n // 3, (2 * n) // 3, n - 1}):
+                    p = cap_pages[idx]
+                    times.append(min(max((p.get("startMs", 0) + p.get("durationMs", 0) / 2) / 1000.0, 0.2),
+                                     max(rdur - 0.2, 0.2)))
+            else:
+                times = [min(1.0, rdur / 2), rdur / 2]
+            for i, t in enumerate(times):
+                fp = os.path.join(work, f"frame_{i}.png")
+                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{t:.3f}",
+                                "-i", rend_p, "-frames:v", "1", fp], check=True)
+                fk = f"{_AR_GRAD_PREFIX}/{clip}/frame_{i}.png"
+                s3.upload_file(fp, _CERT_BUCKET, fk, ExtraArgs={"ContentType": "image/png"})
+                url = s3.generate_presigned_url("get_object",
+                        Params={"Bucket": _CERT_BUCKET, "Key": fk}, ExpiresIn=86400)
+                frames.append({"t": round(t, 2), "key": fk, "url": url})
+        except Exception as fe:
+            frames.append({"error": f"{type(fe).__name__}: {fe}"})
+
+    cert = {
+        "clip": clip, "graduated_env": True, "caveat": _CERT_TTS_CAVEAT,
+        "status": (result or {}).get("status"),
+        "plan_validates": bool(recipe) and (result or {}).get("status") == "success",
+        "detected_language": tx.get("detected_language"),
+        "transcript_script": handler._dominant_script(words) if words else None,
+        "transcript_sample": " ".join((w.get("word", "") if isinstance(w, dict) else str(w)) for w in words[:12]),
+        "captions": {"sample": cap_text[:200], "dominant_script": cap_script,
+                     "in_arabic": cap_script == "Arabic",
+                     "token_count": sum(len(p.get("tokens") or []) for p in cap_pages)},
+        "emphasis_count": richness["emphasis_moments"], "richness": richness,
+        "caption_style": recipe.get("caption_style"),
+        "authored_chrome": chrome[:20], "chrome_scripts": sorted({_script_of(c) for c in chrome}),
+        "render_url": (result or {}).get("video_url"),
+        "render_succeeded": bool((result or {}).get("video_url")),
+        "render_time_s": (result or {}).get("render_time"),
+        "pipeline_wall_s": elapsed, "source_url": video_url,
+        "frames": frames,
+        "error": (result or {}).get("error") or (result or {}).get("user_message"),
+    }
+    s3.put_object(Bucket=_CERT_BUCKET, Key=f"{_AR_GRAD_PREFIX}/{clip}/cert.json",
+                  Body=json.dumps(cert, ensure_ascii=False, indent=2).encode("utf-8"),
+                  ContentType="application/json")
+    print(f"[ar-grad] {clip} status={cert['status']} render={cert['render_succeeded']} "
+          f"caps_arabic={cert['captions']['in_arabic']} emphasis={cert['emphasis_count']} "
+          f"frames={len([f for f in frames if 'key' in f])}")
+    return cert
+
+
+@app.function(cpu=2, memory=4096, timeout=7200)
+def cert_ar_graduation_all(audio_map: dict) -> dict:
+    """Orchestrator (the ONE detached spawn): face → sequential graduated certs →
+    summary. Sequential, not starmap — avoids the concurrent-Gemini 429 class."""
+    import os, json, boto3
+    face_key = cert_fetch_face.remote()
+    results = []
+    for clip, b64 in audio_map.items():
+        results.append(cert_ar_graduate.remote(clip, b64, face_key))
+    summary = {
+        "n": len(results),
+        "all_clean": all(r and r.get("plan_validates") and r.get("render_succeeded")
+                         and r.get("captions", {}).get("in_arabic") for r in results),
+        "by_clip": {r.get("clip"): {"status": r.get("status"), "render": r.get("render_succeeded"),
+                    "caps_arabic": r.get("captions", {}).get("in_arabic"),
+                    "emphasis": r.get("emphasis_count"), "error": r.get("error")}
+                    for r in results if r},
+    }
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1"))
+    s3.put_object(Bucket=_CERT_BUCKET, Key=f"{_AR_GRAD_PREFIX}/_summary.json",
+                  Body=json.dumps(summary, ensure_ascii=False, indent=2).encode("utf-8"),
+                  ContentType="application/json")
+    print(f"[ar-grad-all] DONE all_clean={summary['all_clean']}")
+    return summary
+
+
+@app.function(cpu=2, memory=4096, timeout=120)
+def cert_ar_read() -> dict:
+    import os, json, boto3
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1"))
+    out = {}
+    for clip in ("ar_r140", "ar_simple"):
+        try:
+            c = json.loads(s3.get_object(Bucket=_CERT_BUCKET,
+                Key=f"{_AR_GRAD_PREFIX}/{clip}/cert.json")["Body"].read())
+            print(f"ARGRAD {clip}: status={c.get('status')} render={c.get('render_succeeded')} "
+                  f"caps_script={c.get('captions',{}).get('dominant_script')} "
+                  f"caps_arabic={c.get('captions',{}).get('in_arabic')} "
+                  f"emphasis={c.get('emphasis_count')} richness={c.get('richness')} "
+                  f"chrome_scripts={c.get('chrome_scripts')} err={str(c.get('error'))[:70]}")
+            print(f"ARGRAD_SAMPLE {clip}: {c.get('captions',{}).get('sample','')[:110]}")
+            for f in c.get("frames", []):
+                if "url" in f:
+                    print(f"ARGRAD_FRAME {clip} t={f['t']} {f['url']}")
+            out[clip] = c
+        except Exception as e:
+            print(f"ARGRAD {clip}: pending ({type(e).__name__})")
+    try:
+        summ = json.loads(s3.get_object(Bucket=_CERT_BUCKET,
+            Key=f"{_AR_GRAD_PREFIX}/_summary.json")["Body"].read())
+        print(f"ARGRAD_SUMMARY all_clean={summ.get('all_clean')} n={summ.get('n')}")
+    except Exception:
+        print("ARGRAD_SUMMARY pending")
+    return out
+
+
+@app.local_entrypoint()
+def cert_ar_graduation():
+    import base64, os
+    cert_dir = os.environ.get("CERT_AUDIO_DIR") or "/tmp/promptly_cert_audio"
+    audio_map = {}
+    for clip in ("ar_r140", "ar_simple"):
+        with open(os.path.join(cert_dir, f"{clip}.m4a"), "rb") as fh:
+            audio_map[clip] = base64.b64encode(fh.read()).decode()
+    call = cert_ar_graduation_all.spawn(audio_map)
+    print(f"[ar-grad] spawned cert_ar_graduation_all → {call.object_id}; poll cert_ar_read")
 
 
 @app.function(cpu=4, memory=8192, timeout=900)

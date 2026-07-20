@@ -28242,16 +28242,34 @@ def handler(job):
                     # utterances/filler). Inert while Arabic is denylisted
                     # (_script_reaches_render False → falls through to the reject).
                     if _script_reaches_render("Arabic"):
+                        _ar_full = None
                         try:
                             _ar_full = transcribe_audio(_raw_source, language="ar")
                         except Exception as _are:
-                            print(f"[arabic-bridge] route re-transcribe failed ({type(_are).__name__}) — reject", flush=True)
-                            _ar_full = None
-                        if _ar_full and _ar_full.get("words"):
+                            print(f"[arabic-bridge] route re-transcribe failed ({type(_are).__name__})", flush=True)
+                        # FAIL-CLOSED (graduated only): the route must yield a
+                        # NATIVE-SCRIPT transcript or the job errors honestly —
+                        # never falls through to render the romanized multi
+                        # transcript (silent garbage to an Arabic speaker).
+                        _ar_words = (_ar_full or {}).get("words") or []
+                        if _ar_words and _dominant_script(_ar_words) == "Arabic":
                             _transcript = _ar_full
                             _dg_words = _transcript.get("words", [])
                             print(f"[arabic-bridge] ROUTED language=ar → {len(_dg_words)} "
                                   f"native-script words; rendering Arabic", flush=True)
+                        else:
+                            _record_divergence(
+                                "language_coverage",
+                                {"lang": "ar", "script": "Arabic",
+                                 "route_words": len(_ar_words),
+                                 "route_script": (_dominant_script(_ar_words) if _ar_words else None)},
+                                "ar_route_failed", reason="route_no_native_script")
+                            raise RuntimeError(
+                                "Deepgram transcription failed (ar-route): confirmed "
+                                "Arabic audio but language=ar returned no native-script "
+                                "words — failing closed rather than rendering a "
+                                "romanized transcript."
+                            )
             if not _script_reaches_render(_script):
                 _lang = (_transcript.get("detected_language")
                          or _SCRIPT_LANG_HINT.get(_script) or "?")
