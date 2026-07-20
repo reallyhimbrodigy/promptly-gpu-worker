@@ -4810,6 +4810,18 @@ def _multilingual_a1_fonts():
     assert '"fonts-dejavu-core"' in _m, "the Latin font base must remain (A1 is additive)"
 
 
+@check("OpenCV PINNED <5: opencv-python-headless is version-capped below 5.0 so a rebuild can't pull OpenCV 5.x (which dropped cv2.dnn.readNetFromCaffe → face-DNN load AttributeError → EVERY talking-head render terminalizes). The floating-resolve regression class the google-genai/deepgram/pydantic pins already closed.")
+def _opencv_pinned_below_5():
+    import re as _re
+    _m = open("modal_app.py").read()
+    _mm = _re.search(r'"opencv-python-headless([^"]*)"', _m)
+    assert _mm, "opencv-python-headless must be listed in the image pip_install"
+    _spec = _mm.group(1)
+    assert _spec.strip(), "opencv-python-headless must be PINNED (unpinned pulled OpenCV 5.x, which removed readNetFromCaffe)"
+    assert "<5" in _spec or _re.search(r"==4\.", _spec), \
+        f"opencv-python-headless must cap below 5.0 (has readNetFromCaffe); got '{_spec}'"
+
+
 @check("MULTILINGUAL A2.1 (deliberate script fallback): every CAPTION_FONTS entry appends the NOTO_FALLBACK stack (Noto per-script + Noto Color Emoji + sans-serif) so Chromium resolves non-Latin glyphs per-glyph via fontconfig against the A1 fonts — no tofu; the Latin primary font still wins for every glyph it has, so Latin captions render byte-identical")
 def _multilingual_a2_font_stack():
     _p = "src/remotion/src/captions/shared/fonts.ts"

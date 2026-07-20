@@ -218,7 +218,16 @@ image = (
     .pip_install("aubio", extra_options="--no-build-isolation")
     .pip_install(
         "certifi",
-        "opencv-python-headless",
+        # PINNED <5 (2026-07-19): the unpinned spec resolved to OpenCV 5.x at the
+        # A1 image rebuild (dbffe28), and 5.x DROPPED the legacy Caffe importer —
+        # `cv2.dnn.readNetFromCaffe` vanished, so detect_face_positions_dense (the
+        # face-DNN loader, model files baked in the image) raised AttributeError
+        # and terminalized EVERY talking-head render (line 27973 awaits the face
+        # future unguarded). Latent since dbffe28 — surfaced by the multilingual
+        # cert, not yet hit by a real job. 4.10/4.11 keep readNetFromCaffe AND
+        # support numpy 2.x (verified). Same floating-resolve bug the google-genai
+        # / deepgram / pydantic pins below already fixed — opencv was the one left.
+        "opencv-python-headless>=4.10,<5",
         "requests",
         "anthropic",
         # google-genai is pinned to a known-good range. The previous floating
@@ -1501,3 +1510,223 @@ def multi_concat_probe():
     for k, v in (r or {}).items():
         print(f"{k}: {v}")
     print("=== END ===\n")
+
+
+# ── MULTILINGUAL TIER-1 CERTIFICATION (Workstream C — real-source regression tooling) ──
+# Runs the FULL pipeline with PROMPTLY_EDIT_IN_LANGUAGE=1 (set in-process at request
+# time — no activation redeploy) on constructed real-source clips: a real human face
+# (Pexels talking-head) muxed with a real target-language script spoken by macOS TTS.
+# Lives here (not a separate app) because a sibling module can't import modal_app in
+# the container (it defines the image → excluded from the mount), which breaks Modal's
+# dependency matching. As worker-app functions they share image+secrets natively.
+#   Run:  modal run --detach modal_app.py::cert_run
+# CAVEAT (recorded verbatim per lang): audio is TTS, not native — certifies the
+# in-language MACHINERY end-to-end, not native-accent transcription/prosody.
+_CERT_BUCKET = "thisismybucketagainwooo"
+_CERT_PREFIX = "multilingual-cert"
+_CERT_FACE_KEY = f"{_CERT_PREFIX}/_face/face.mp4"
+_CERT_LANG_META = {
+    "en": ("English", "Latin"), "es": ("Spanish", "Latin"),
+    "pt": ("Portuguese", "Latin"), "fr": ("French", "Latin"),
+    "de": ("German", "Latin"), "ru": ("Russian", "Cyrillic"),
+    "hi": ("Hindi", "Devanagari"), "ar": ("Arabic", "Arabic"),
+    "id": ("Indonesian", "Latin"), "ja": ("Japanese", "Han"),
+}
+_CERT_TTS_CAVEAT = (
+    "AUDIO IS TEXT-TO-SPEECH (macOS say), NOT A NATIVE SPEAKER. Certifies the "
+    "in-language MACHINERY end-to-end (multi transcription, plan validity, in-language "
+    "verbatim captions, emphasis on real language content, in-language Gemini-authored "
+    "chrome, script fonts + RTL, completed render). NOT native-accent transcription or "
+    "prosody. A genuine native-clip upgrade can replace this per language, non-blocking."
+)
+
+
+@app.function(cpu=4, memory=8192, timeout=600)
+def cert_fetch_face() -> str:
+    import os, requests, boto3
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1"))
+    try:
+        s3.head_object(Bucket=_CERT_BUCKET, Key=_CERT_FACE_KEY)
+        print(f"[cert-face] already staged")
+        return _CERT_FACE_KEY
+    except Exception:
+        pass
+    key = os.environ["PEXELS_API_KEY"]
+    best = None
+    for q in ("woman talking to camera closeup", "man talking to camera closeup", "person speaking portrait"):
+        r = requests.get("https://api.pexels.com/videos/search",
+                         headers={"Authorization": key},
+                         params={"query": q, "orientation": "portrait", "per_page": 20, "size": "medium"}, timeout=30)
+        r.raise_for_status()
+        for v in r.json().get("videos", []):
+            if v.get("duration", 0) < 6:
+                continue
+            for f in sorted(v.get("video_files", []), key=lambda x: x.get("height") or 0):
+                if f.get("file_type") == "video/mp4" and 700 <= (f.get("height") or 0) <= 1300:
+                    best = (v, f); break
+            if best: break
+        if best: break
+    if not best:
+        raise RuntimeError("Pexels returned no usable talking-head clip")
+    v, f = best
+    print(f"[cert-face] pexels id={v['id']} {f.get('width')}x{f.get('height')} dur={v.get('duration')}s")
+    vid = requests.get(f["link"], timeout=120); vid.raise_for_status()
+    s3.put_object(Bucket=_CERT_BUCKET, Key=_CERT_FACE_KEY, Body=vid.content, ContentType="video/mp4")
+    print(f"[cert-face] staged {len(vid.content)/1e6:.1f}MB")
+    return _CERT_FACE_KEY
+
+
+@app.function(cpu=32, memory=65536, timeout=1800)
+def cert_certify(lang: str, audio_b64: str, face_key: str) -> dict:
+    import os, sys, base64, json, tempfile, subprocess, uuid, time
+    os.environ["PROMPTLY_EDIT_IN_LANGUAGE"] = "1"       # flag ON for this request
+    os.environ["JOB_STATUS_WRITES_ENABLED"] = ""         # no phantom video_jobs rows
+    os.environ["APP_URL"] = ""                            # no progress posts to prod
+    sys.path.insert(0, "/")
+    import handler
+    s3 = handler._aws_s3_client
+    name, expected_script = _CERT_LANG_META[lang]
+
+    work = tempfile.mkdtemp()
+    face_p, audio_p, src_p = (os.path.join(work, n) for n in ("face.mp4", "audio.m4a", "source.mp4"))
+    s3.download_file(_CERT_BUCKET, face_key, face_p)
+    with open(audio_p, "wb") as fh:
+        fh.write(base64.b64decode(audio_b64))
+    adur = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=nw=1:nk=1", audio_p]).decode().strip())
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-stream_loop", "-1", "-i", face_p, "-i", audio_p,
+                    "-map", "0:v:0", "-map", "1:a:0", "-t", f"{adur:.2f}", "-c:v", "libx264", "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", "-shortest", src_p], check=True)
+
+    src_key, render_key = f"{_CERT_PREFIX}/{lang}/source.mp4", f"{_CERT_PREFIX}/{lang}/render.mp4"
+    s3.upload_file(src_p, _CERT_BUCKET, src_key, ExtraArgs={"ContentType": "video/mp4"})
+    video_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{src_key}"
+    upload_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{render_key}"
+    body = {"job_id": str(uuid.uuid4()), "video_url": video_url, "vibe": "viral",
+            "user_id": str(uuid.uuid4()), "upload_url": upload_url}
+    t0 = time.time()
+    try:
+        result = handler.handler({"input": body})
+    except Exception as e:
+        result = {"status": "exception", "error": f"{type(e).__name__}: {e}"}
+    elapsed = round(time.time() - t0, 1)
+
+    recipe = (result or {}).get("edit_recipe") or {}
+    transcript = (result or {}).get("transcript") or {}
+    words = transcript.get("words") or []
+
+    def _script_of(text):
+        try:
+            return handler._dominant_script([{"word": w} for w in str(text).split()])
+        except Exception:
+            return "?"
+
+    cap_pages = recipe.get("caption_pages") or []
+    cap_text = " ".join(t.get("text", "") for p in cap_pages for t in (p.get("tokens") or [])) \
+        or " ".join(w.get("word", "") if isinstance(w, dict) else str(w) for w in words)
+    cap_script = _script_of(cap_text)
+    chrome = []
+    for mg in (recipe.get("motion_graphics") or []):
+        for k in ("text", "title", "label", "heading"):
+            if isinstance(mg.get(k), str) and mg[k].strip():
+                chrome.append(mg[k])
+        for it in (mg.get("items") or []):
+            if isinstance(it, str):
+                chrome.append(it)
+    for ov in (recipe.get("text_overlays") or []):
+        if isinstance(ov.get("text"), str) and ov["text"].strip():
+            chrome.append(ov["text"])
+    richness = {k: len(recipe.get(k) or []) for k in
+                ("emphasis_moments", "transitions", "broll_clips", "motion_graphics",
+                 "sound_effects", "zoom_effects", "text_overlays")}
+    richness["caption_pages"] = len(cap_pages)
+    caps_in_lang = (cap_script == expected_script) \
+        or (lang == "ja" and cap_script in ("Han", "Hiragana", "Katakana")) \
+        or (expected_script == "Latin" and cap_script == "Latin")
+
+    cert = {
+        "lang": lang, "language": name, "expected_script": expected_script, "caveat": _CERT_TTS_CAVEAT,
+        "status": (result or {}).get("status"),
+        "plan_validates": bool(recipe) and (result or {}).get("status") == "success",
+        "detected_language": transcript.get("detected_language"),
+        "captions": {"sample": cap_text[:200], "dominant_script": cap_script,
+                     "in_language": caps_in_lang,
+                     "token_count": sum(len(p.get("tokens") or []) for p in cap_pages)},
+        "emphasis_count": richness["emphasis_moments"], "richness": richness,
+        "caption_style": recipe.get("caption_style"),
+        "authored_chrome": chrome[:20], "chrome_scripts": sorted({_script_of(c) for c in chrome}),
+        "render_url": (result or {}).get("video_url"),
+        "render_succeeded": bool((result or {}).get("video_url")),
+        "render_time_s": (result or {}).get("render_time"),
+        "output_size_mb": (result or {}).get("output_size_mb"),
+        "pipeline_wall_s": elapsed, "source_url": video_url,
+        "capability_notes": (result or {}).get("capability_notes"),
+        "error": (result or {}).get("error") or (result or {}).get("user_message"),
+    }
+    s3.put_object(Bucket=_CERT_BUCKET, Key=f"{_CERT_PREFIX}/{lang}/cert.json",
+                  Body=json.dumps(cert, ensure_ascii=False, indent=2).encode("utf-8"),
+                  ContentType="application/json")
+    print(f"[cert] {lang} status={cert['status']} render={cert['render_succeeded']} "
+          f"caps_in_lang={caps_in_lang} emphasis={cert['emphasis_count']}")
+    return cert
+
+
+@app.function(cpu=2, memory=4096, timeout=7200)
+def cert_run_all(audio_map: dict) -> dict:
+    import json, os, boto3
+    face_key = cert_fetch_face.remote()
+    print(f"[cert-run-all] face: {face_key}")
+    langs = list(audio_map.keys())
+    results = list(cert_certify.starmap([(l, audio_map[l], face_key) for l in langs]))
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1"))
+    summary = {
+        "n": len(results),
+        "all_clean": all(r and r.get("plan_validates") and r.get("render_succeeded")
+                         and r.get("captions", {}).get("in_language") for r in results),
+        "by_lang": {r.get("lang"): {"status": r.get("status"), "render": r.get("render_succeeded"),
+                    "caps_in_lang": r.get("captions", {}).get("in_language"),
+                    "emphasis": r.get("emphasis_count"), "richness": r.get("richness"),
+                    "render_url": r.get("render_url"), "error": r.get("error")}
+                    for r in results if r},
+    }
+    s3.put_object(Bucket=_CERT_BUCKET, Key=f"{_CERT_PREFIX}/_summary.json",
+                  Body=json.dumps(summary, ensure_ascii=False, indent=2).encode("utf-8"),
+                  ContentType="application/json")
+    print(f"[cert-run-all] DONE all_clean={summary['all_clean']} n={summary['n']}")
+    return summary
+
+
+@app.function(cpu=2, memory=4096, timeout=300)
+def cert_collect() -> list:
+    import os, json, boto3
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1"))
+    out = []
+    for lang in _CERT_LANG_META:
+        try:
+            o = s3.get_object(Bucket=_CERT_BUCKET, Key=f"{_CERT_PREFIX}/{lang}/cert.json")
+            out.append(json.loads(o["Body"].read()))
+        except Exception:
+            pass
+    print(f"CERT_POLL count={len(out)}/{len(_CERT_LANG_META)}")
+    for r in out:
+        print(f"CERT_ROW {r.get('lang')} status={r.get('status')} render={r.get('render_succeeded')} "
+              f"caps_in_lang={r.get('captions',{}).get('in_language')} emphasis={r.get('emphasis_count')} "
+              f"richness_total={sum((r.get('richness') or {}).values())} err={str(r.get('error'))[:60]}")
+    try:
+        summ = json.loads(s3.get_object(Bucket=_CERT_BUCKET, Key=f"{_CERT_PREFIX}/_summary.json")["Body"].read())
+        print(f"CERT_SUMMARY all_clean={summ.get('all_clean')} n={summ.get('n')}")
+    except Exception:
+        print("CERT_SUMMARY pending")
+    return out
+
+
+@app.local_entrypoint()
+def cert_run():
+    import base64, os
+    cert_dir = os.environ.get("CERT_AUDIO_DIR") or "/tmp/promptly_cert_audio"
+    audio_map = {}
+    for lang in _CERT_LANG_META:
+        with open(os.path.join(cert_dir, f"{lang}.m4a"), "rb") as fh:
+            audio_map[lang] = base64.b64encode(fh.read()).decode()
+    call = cert_run_all.spawn(audio_map)
+    print(f"[cert_run] spawned cert_run_all → {call.object_id}; poll S3 {_CERT_PREFIX}/_summary.json")
