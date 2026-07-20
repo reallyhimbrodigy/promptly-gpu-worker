@@ -4040,6 +4040,35 @@ def _detect_nonenglish_speech(source_path):
 # this set cannot drift ahead of the fonts (tofu stays unconstructible).
 _SCRIPT_COVERAGE = frozenset({"Latin"})
 
+# Workstream B (2026-07-19): the coverage MODEL flips from an allowlist (Latin
+# only) to a DENYLIST of scripts PROVEN to render broken. A1/A2 installed Noto
+# for every script in _SCRIPT_RANGES (fonts-noto-core + -extra + -cjk) and the
+# contact sheet proved each shapes clean with correct direction (Arabic/Hebrew
+# RTL, Devanagari conjuncts, Thai stacks, CJK, color emoji) — so the denylist is
+# empty. Gated behind PROMPTLY_EDIT_IN_LANGUAGE (baked OFF) so enablement and the
+# in-language editorial prompt move together: rendering non-Latin WITHOUT the
+# in-language instruction would ship source-language captions under English MG
+# chrome. Unset the flag → back to the Latin-only allowlist, no logic redeploy.
+_SCRIPT_DENYLIST = frozenset()  # scripts proven to render broken — none today
+
+
+def _edit_in_language_enabled():
+    """Whether the multilingual render path (denylist coverage + in-language
+    editorial) is live. One flag so the two move together."""
+    return bool(os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE", "").strip())
+
+
+def _script_reaches_render(script):
+    """True if a dominant script may reach the render path. Under
+    PROMPTLY_EDIT_IN_LANGUAGE it's the denylist model (every font-backed script
+    except proven failures); otherwise the legacy Latin-only allowlist. Tofu
+    stays unconstructible either way: an unlisted script classifies as its
+    nearest listed range or falls through to Latin, and no listed script lacks a
+    Noto font."""
+    if _edit_in_language_enabled():
+        return script not in _SCRIPT_DENYLIST
+    return script in _SCRIPT_COVERAGE
+
 # Codepoint-range → script classifier (stdlib unicodedata exposes no Script
 # property). Common chars (digits/punct/space/symbols) are script-neutral and
 # never counted.
@@ -4071,6 +4100,38 @@ _SCRIPT_LANG_HINT = {
     "Tamil": "ta", "Telugu": "te", "Bengali": "bn", "Gujarati": "gu",
     "Gurmukhi": "pa", "Malayalam": "ml", "Kannada": "kn", "Thai": "th", "Greek": "el",
 }
+
+# Human-readable language names for the in-language editorial prompt (Workstream
+# B). Deepgram language=multi returns a code (sometimes region-tagged, "es-419");
+# a name reads better to Gemini than a code. Covers the Tier-1 nine + the common
+# multi languages; anything unmapped falls back to the script's canonical lang,
+# then the bare code.
+_LANG_DISPLAY_NAME = {
+    "en": "English", "es": "Spanish", "pt": "Portuguese", "fr": "French",
+    "de": "German", "it": "Italian", "nl": "Dutch", "hi": "Hindi",
+    "ja": "Japanese", "ko": "Korean", "zh": "Chinese", "ru": "Russian",
+    "ar": "Arabic", "id": "Indonesian", "tr": "Turkish", "pl": "Polish",
+    "uk": "Ukrainian", "he": "Hebrew", "th": "Thai", "vi": "Vietnamese",
+    "sv": "Swedish", "da": "Danish", "no": "Norwegian", "fi": "Finnish",
+    "cs": "Czech", "ro": "Romanian", "hu": "Hungarian", "el": "Greek",
+    "ta": "Tamil", "te": "Telugu", "bn": "Bengali", "gu": "Gujarati",
+    "pa": "Punjabi", "ml": "Malayalam", "kn": "Kannada", "ur": "Urdu",
+    "fa": "Persian", "ms": "Malay", "tl": "Tagalog",
+}
+
+
+def _source_language_name(detected_language, script):
+    """Human-readable source language for the in-language editorial prompt.
+    Prefers Deepgram's detected code (region tag stripped); falls back to the
+    script's canonical language, then the script name itself. Never raises."""
+    code = str(detected_language or "").strip().lower()
+    base = code.split("-", 1)[0] if code else ""
+    if base in _LANG_DISPLAY_NAME:
+        return _LANG_DISPLAY_NAME[base]
+    hint = _SCRIPT_LANG_HINT.get(script)
+    if hint in _LANG_DISPLAY_NAME:
+        return _LANG_DISPLAY_NAME[hint]
+    return (str(script) if script and script != "Latin" else "the speaker's")
 
 
 def _dominant_script(words):
@@ -4488,6 +4549,7 @@ def _build_post_cuts_prompt(
     face_zone=None,
     prior_plan=None, prior_plan_change_request=None,
     premium=False, resolved_policy=None,
+    source_language=None,
 ):
     """Gemini prompt for the SECOND call — visual placement on a kept-only transcript.
 
@@ -6007,6 +6069,35 @@ already follow) and return when the face leads again."""
             "length. This discipline never trades away edit quality — the moments, "
             "components, and captions you choose are unchanged; only the note that "
             "explains each choice stays terse."
+        )
+
+    # WORKSTREAM B (flag-gated, 2026-07-19): EDITORIAL IN THE SOURCE LANGUAGE.
+    # Captions are the speaker's verbatim words (Deepgram), so they are already
+    # in-language — but the TEXT Gemini authors itself (motion-graphic labels,
+    # text_overlays, section dividers, pull quotes, stat headers) would default
+    # to English and read as English chrome bolted onto a non-English video. This
+    # block binds all authored text to the source language + script, so the whole
+    # frame speaks one language. Emphasis/keyword selection already operates on
+    # the in-language words; this only governs strings the model writes. OFF by
+    # default (deploy inert); rendered non-English proofs gate the flip. Latin
+    # non-English (Spanish/French/German) benefits too — same authored-chrome
+    # risk even though the script gate never blocked them.
+    if _edit_in_language_enabled() and source_language:
+        system_instruction += (
+            "\n\n=== AUTHOR EVERY WORD YOU WRITE IN THE SOURCE LANGUAGE ===\n"
+            f"This video's spoken language is {source_language}. The captions are "
+            "the speaker's own verbatim words, already in that language — you do "
+            "not translate them. But every string YOU author must be written in "
+            f"{source_language}, in its native script, NEVER in English: "
+            "motion-graphic labels and titles, text_overlay text, section-divider "
+            "and chapter labels, pull-quotes, stat-card headers, list items, "
+            "on-screen call-outs — all of it. A Spanish video with an English "
+            "'PART 1' divider, or an Arabic video with a Latin-script stat label, "
+            "reads as broken. Match the speaker: same language, same script, same "
+            "register. If a moment truly has no natural label in that language, "
+            "omit the graphic rather than fall back to English. Numerals and brand "
+            "names stay as the speaker says them. This changes only the LANGUAGE "
+            "of what you write, never which moments you choose or how you edit."
         )
 
     return system_instruction, user_content
@@ -10331,6 +10422,7 @@ def generate_edit_gemini(
     prior_plan=None, prior_plan_change_request=None,
     premium=False, resolved_policy=None,
     force_safe_reason=None,
+    source_language=None,
 ):
     _pre_analysis = cached_response
 
@@ -10417,6 +10509,7 @@ def generate_edit_gemini(
         prior_plan_change_request=prior_plan_change_request,
         premium=premium,
         resolved_policy=resolved_policy,
+        source_language=source_language,
     )
     if prior_plan:
         print(
@@ -27941,14 +28034,16 @@ def handler(job):
                     "a video of someone speaking."
                 )
 
-            # ─── SCRIPT-COVERAGE GATE (Latin-scope flip) ────────────────────
-            # We have speech. It may reach the render path ONLY if its dominant
-            # script is one the caption fonts can actually draw (Latin today).
+            # ─── SCRIPT-COVERAGE GATE (Latin allowlist → denylist flip) ─────
+            # We have speech. It may reach the render path only if its dominant
+            # script is one the caption fonts can actually draw. Under
+            # PROMPTLY_EDIT_IN_LANGUAGE that's every font-backed script (A1/A2
+            # cover all of _SCRIPT_RANGES; denylist empty); off, it's Latin only.
             # An uncovered script would ship tofu boxes — worse than an honest
             # rejection — so it takes the already-live, language-named reject.
-            # This makes tofu UNCONSTRUCTIBLE: no uncovered script renders.
+            # Tofu stays UNCONSTRUCTIBLE: no uncovered script renders.
             _script = _dominant_script(_dg_words)
-            if _script not in _SCRIPT_COVERAGE:
+            if not _script_reaches_render(_script):
                 _lang = (_transcript.get("detected_language")
                          or _SCRIPT_LANG_HINT.get(_script) or "?")
                 _log_intake_reject("NO_SPEECH_NONENGLISH", source_duration,
@@ -28059,6 +28154,11 @@ def handler(job):
                     force_safe_reason=(
                         str(input_data.get("_safe_edit_rescue") or "").strip() or None
                     ),
+                    # Workstream B: the source language for in-language editorial
+                    # (flag-gated inside the prompt builder). _script is the
+                    # dominant script computed at the coverage gate above.
+                    source_language=_source_language_name(
+                        _transcript.get("detected_language"), _script),
                 )
             finally:
                 _gemini_hb_stop.set()

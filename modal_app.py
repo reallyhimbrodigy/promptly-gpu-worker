@@ -431,6 +431,13 @@ image = (
         # "" (OFF) → the live editorial prompt, production unchanged. The A/B runs
         # it in-process; the FLIP to enforce holds for Zac's word after his pair.
         "PROMPTLY_LEVER3": os.environ.get("PROMPTLY_LEVER3", ""),
+        # Workstream B — multilingual enablement. Default "" (OFF) → Latin-only
+        # coverage gate + English-authored chrome (production unchanged). ON
+        # (`PROMPTLY_EDIT_IN_LANGUAGE=1 ./deploy.sh`) flips the coverage gate to
+        # the denylist model (every font-backed script renders; A1/A2 proved
+        # them) AND binds all Gemini-authored text to the source language. One
+        # flag so render-enablement and in-language editorial move together.
+        "PROMPTLY_EDIT_IN_LANGUAGE": os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE", ""),
         # ── Supabase schema overrides for the tier + concurrency gate ──
         # Multi-clip premium concurrency check (handler.py:check_concurrency_gate)
         # reads from these tables. The defaults assumed `user_profiles.user_id`

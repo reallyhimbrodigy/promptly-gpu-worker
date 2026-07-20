@@ -4845,6 +4845,53 @@ def _multilingual_a22_rtl_direction():
     assert "captionDirection" in _fs, "FitSpecimen must mirror production direction"
 
 
+@check("MULTILINGUAL B (editorial-in-language, flag PROMPTLY_EDIT_IN_LANGUAGE baked OFF): OFF = the Latin-only coverage allowlist + English-authored chrome, production byte-identical. ON flips the coverage gate to the denylist model (every font-backed script renders) AND binds all Gemini-authored text to the source language. Captions stay verbatim Deepgram words either way. Behavioral: gate + prompt inert when off, both flip when on.")
+def _multilingual_b_edit_in_language():
+    import os as _os
+    import handler
+    # the flag helpers + denylist exist
+    assert callable(handler._script_reaches_render) and callable(handler._edit_in_language_enabled)
+    assert isinstance(handler._SCRIPT_DENYLIST, frozenset), "denylist must be a frozenset"
+    _prev = _os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE")
+    _MARK = "AUTHOR EVERY WORD YOU WRITE IN THE SOURCE LANGUAGE"
+    try:
+        # OFF: Latin-only allowlist; a non-Latin script is refused (tofu-proof)
+        _os.environ.pop("PROMPTLY_EDIT_IN_LANGUAGE", None)
+        assert handler._script_reaches_render("Latin") is True
+        assert handler._script_reaches_render("Arabic") is False, "OFF must stay Latin-only"
+        # OFF prompt is inert AND byte-identical regardless of source_language
+        _off_none, _ = handler._build_post_cuts_prompt(vibe="viral", duration=30, source_language=None)
+        _off_ar, _ = handler._build_post_cuts_prompt(vibe="viral", duration=30, source_language="Arabic")
+        assert _MARK not in _off_none and _off_none == _off_ar, \
+            "OFF: in-language block must be absent + prompt byte-identical to no-language"
+        # ON: denylist model — every font-backed script reaches render
+        _os.environ["PROMPTLY_EDIT_IN_LANGUAGE"] = "1"
+        for _s in ("Latin", "Arabic", "Hebrew", "Devanagari", "Han", "Thai"):
+            assert handler._script_reaches_render(_s) is True, f"ON must render {_s}"
+        # ON prompt binds authored text to the named language; no-language stays inert
+        _on_ar, _ = handler._build_post_cuts_prompt(vibe="viral", duration=30, source_language="Arabic")
+        _on_none, _ = handler._build_post_cuts_prompt(vibe="viral", duration=30, source_language=None)
+        assert _MARK in _on_ar and "Arabic" in _on_ar, "ON+lang must inject the in-language block"
+        assert _MARK not in _on_none and _on_none == _off_none, \
+            "ON without a language must stay inert (no chrome-language change)"
+        # language-name resolver: code preferred, script fallback, safe default
+        assert handler._source_language_name("es-419", "Latin") == "Spanish"
+        assert handler._source_language_name(None, "Devanagari") == "Hindi"
+    finally:
+        if _prev is None:
+            _os.environ.pop("PROMPTLY_EDIT_IN_LANGUAGE", None)
+        else:
+            _os.environ["PROMPTLY_EDIT_IN_LANGUAGE"] = _prev
+    # the gate site calls the helper (not the retired inline allowlist test)
+    _h = open("handler.py").read()
+    assert "if not _script_reaches_render(_script):" in _h, \
+        "the coverage gate must route through _script_reaches_render"
+    # flag baked into the image env so the deploy shell can flip it
+    _m = open("modal_app.py").read()
+    assert '"PROMPTLY_EDIT_IN_LANGUAGE": os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE"' in _m, \
+        "PROMPTLY_EDIT_IN_LANGUAGE must be baked into the image env"
+
+
 @check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")
 def _spawn_refactor_phase3():
     _m = open("modal_app.py").read()
@@ -4919,9 +4966,12 @@ def _script_coverage_gate():
     _src = open("handler.py").read()
     # transcription flipped to multi (the active option, not just a comment)
     assert 'model="nova-3", language="multi"' in _src, "transcription must be language=multi"
-    # gate wired: an uncovered script raises NO_SPEECH_NONENGLISH BEFORE the edit
-    assert "_script not in _SCRIPT_COVERAGE" in _src, "script gate not wired"
-    assert _src.index("_script not in _SCRIPT_COVERAGE") < _src.index("Gemini edit starting"), \
+    # gate wired through the coverage helper (allowlist when PROMPTLY_EDIT_IN_LANGUAGE
+    # off — the default this check asserts — denylist when on); an uncovered
+    # script raises NO_SPEECH_NONENGLISH BEFORE the edit. See _multilingual_b_*.
+    assert "if not _script_reaches_render(_script):" in _src, "script gate not wired"
+    assert "NO_SPEECH_NONENGLISH" in _src, "the language-named reject must remain"
+    assert _src.index("if not _script_reaches_render(_script):") < _src.index("Gemini edit starting"), \
         "script gate must precede the Gemini edit — no render on an uncovered script"
     # DERIVATION / tofu-unconstructible: the render image installs no Indic font,
     # so coverage cannot silently include an unrenderable script. Adding a Noto/
