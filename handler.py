@@ -740,6 +740,59 @@ def _capture_render_plan(label, payload):
               f"({type(_pc_err).__name__}: {str(_pc_err)[:120]})", flush=True)
 
 
+def _measure_rationale_lengths(parsed):
+    """LIVE SCOREBOARD (always-on) for the degeneration class + A/B capture.
+    Measures the RAW rationale-field lengths (why / why_emphasis / reason /
+    notes) at the editorial output, BEFORE _enforce_string_caps caps them.
+    ALWAYS ledgers ONE lightweight `rationale_length` line per job — the
+    degeneration-class scoreboard the daily bleed [REPORT] reads and the Lever-3
+    flip watches from minute one (a why > 500 chars is a balloon: its ≤12-word
+    budget is ~80 chars, so 500 is a wide margin over legitimate). Additionally
+    writes the full per-field breakdown to S3 ONLY under PLAN_CAPTURE (the A/B
+    capture). Best-effort, never touches the plan."""
+    try:
+        _fields = []
+        def _walk(o):
+            if isinstance(o, dict):
+                for _k, _v in o.items():
+                    if _k in ("why", "why_emphasis", "reason", "notes") and isinstance(_v, str):
+                        _fields.append({"field": _k, "chars": len(_v), "words": len(_v.split())})
+                    else:
+                        _walk(_v)
+            elif isinstance(o, list):
+                for _it in o:
+                    _walk(_it)
+        _walk(parsed)
+        _jid = str(_ACTIVE_JOB_ID or "unknown")
+        _total = sum(f["chars"] for f in _fields)
+        _maxf = max((f["chars"] for f in _fields), default=0)
+        # ALWAYS: the live scoreboard line (one lightweight ledger row per job).
+        _record_divergence(
+            "recipe_transport",
+            {"lever3": os.environ.get("PROMPTLY_LEVER3", "") or "off",
+             "n_fields": len(_fields), "total_chars": _total,
+             "max_field_chars": _maxf, "ballooned": _maxf > 500},
+            "rationale_length",
+            reason=f"max={_maxf} total={_total} over {len(_fields)} rationale fields")
+        # A/B capture (flag-gated): the full per-field breakdown to S3.
+        if os.environ.get("PROMPTLY_PLAN_CAPTURE", "").strip():
+            import boto3
+            _payload = {"job_id": _jid, "lever3": os.environ.get("PROMPTLY_LEVER3", ""),
+                        "n_rationale_fields": len(_fields), "total_chars": _total,
+                        "total_words": sum(f["words"] for f in _fields),
+                        "max_field_chars": _maxf,
+                        "mean_field_chars": round(_total / max(1, len(_fields)), 1),
+                        "fields": _fields[:300]}
+            boto3.client("s3", region_name=os.environ.get("AWS_REGION") or "us-west-1").put_object(
+                Bucket="thisismybucketagainwooo", Key=f"cond3_baseline/plans/{_jid}/raw_whys.json",
+                Body=json.dumps(_payload, default=str).encode("utf-8"), ContentType="application/json")
+            print(f"[plan-capture] raw whys job={_jid}: {len(_fields)} fields, "
+                  f"{_total} chars, max={_maxf}", flush=True)
+    except Exception as _rw_err:
+        print(f"[rationale-length] measure failed "
+              f"({type(_rw_err).__name__}: {str(_rw_err)[:120]})", flush=True)
+
+
 def _validate_and_write_render_input(
     label: str,
     payload: dict,
@@ -5931,6 +5984,31 @@ already follow) and return when the face leads again."""
                 "missing something:\n- " + "\n- ".join(_ep_lines)
             )
 
+    # LEVER 3 (flag-gated candidate — the prompt-root fix for the degeneration
+    # class). The ≤12-word `why` rule is already present above; the degeneration
+    # is the model IGNORING it under a repetition-loop failure mode while Vertex
+    # does not enforce maxLength (a why declared 240 emitted 16,111 chars, 67×).
+    # This block reframes the rationale fields as terse internal notes and names
+    # the loop itself as a malfunction to STOP — targeting the failure behavior,
+    # not adding a field or touching anything rendered (whys never reach screen).
+    # OFF by default (deploy inert); the A/B + Zac's rendered pair gate the flip.
+    if os.environ.get("PROMPTLY_LEVER3", "").strip():
+        system_instruction += (
+            "\n\n=== RATIONALE FIELDS ARE TERSE NOTES — NEVER LET ONE RUN AWAY ===\n"
+            "Every `why`, `why_emphasis`, and `reason` is an INTERNAL NOTE, not "
+            "prose. Name the moment ONCE inside its budget (why ≤12 words, reason "
+            "≤10, why_emphasis one short clause) and STOP. Never repeat a phrase, "
+            "never restate the same point in other words, never pad, never continue "
+            "past naming the moment. A rationale that loops, lists, or keeps going is "
+            "a MALFUNCTION — a note that names its moment in a dozen words is "
+            "complete; one that runs on is broken, not thorough. `notes` is ≤50 "
+            "words of the same discipline. Brevity in these fields is correctness, not "
+            "a limit: they exist to make your intent checkable, never to be written at "
+            "length. This discipline never trades away edit quality — the moments, "
+            "components, and captions you choose are unchanged; only the note that "
+            "explains each choice stays terse."
+        )
+
     return system_instruction, user_content
 
 
@@ -9657,6 +9735,10 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 "gemini_degen_tail", reason=_degen_tail[-400:])
         if _degen is None:
             print(f"[gemini-post] RAW:\n{response_text}\n[gemini-post] END", flush=True)
+            # LIVE SCOREBOARD (always-on): rationale-length ledger line — the
+            # degeneration-class signal the daily [REPORT] reads and the Lever-3
+            # flip watches. Also does the flag-gated A/B S3 capture inside.
+            _measure_rationale_lengths(_parsed)
             # L1+L2: declared caps + repetition signatures enforced at THE
             # parse edge — every downstream consumer reads capped strings.
             _enforce_string_caps(_parsed, _post_cuts_response_schema(), "post_cuts")

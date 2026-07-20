@@ -4746,17 +4746,56 @@ def _lever4_no_identical_render():
 def _lever3_plan_capture():
     _h = open("handler.py").read()
     assert "def _capture_render_plan(" in _h, "the plan-capture helper must exist"
-    # hooked into the seam AFTER the schema-valid write, flag-gated
+    # hooked into the seam AFTER the schema-valid write, flag-gated. (Target the
+    # render-input capture call specifically — there is now a second PLAN_CAPTURE
+    # guard in the always-on scoreboard, so match the call, not the bare guard.)
     _i_write = _h.find("json.dump(payload, _f)")
-    _i_hook = _h.find('if os.environ.get("PROMPTLY_PLAN_CAPTURE", "").strip():')
+    _i_hook = _h.find('if os.environ.get("PROMPTLY_PLAN_CAPTURE", "").strip():\n        _capture_render_plan(label, payload)')
     assert _i_write != -1 and _i_hook != -1 and _i_hook > _i_write, \
-        "the capture must fire AFTER the schema-valid write, flag-gated"
-    assert "_capture_render_plan(label, payload)" in _h, "the hook must call the capture helper"
+        "the render-input capture must fire AFTER the schema-valid write, flag-gated"
     assert 'cond3_baseline/plans/' in _h, "capture must persist to the durable corpus prefix"
     # baked into the image env, default OFF
     _m = open("modal_app.py").read()
     assert '"PROMPTLY_PLAN_CAPTURE": os.environ.get("PROMPTLY_PLAN_CAPTURE", "")' in _m, \
         "PROMPTLY_PLAN_CAPTURE must be baked into the image env, default OFF"
+
+
+@check("LEVER 3 candidate (degeneration prompt-root fix): a flag-gated (PROMPTLY_LEVER3, baked OFF) anti-runaway block appended to the post-cuts system prompt reframes the why/why_emphasis/reason rationale fields as terse internal notes and names the repetition-loop as a malfunction to STOP; touches nothing rendered (whys never reach screen); deploy INERT until the A/B + Zac's pair gate the flip")
+def _lever3_candidate():
+    _h = open("handler.py").read()
+    # flag-gated, default OFF → the live prompt is unchanged in production
+    assert 'os.environ.get("PROMPTLY_LEVER3", "").strip()' in _h, \
+        "Lever-3 block must be flag-gated on PROMPTLY_LEVER3"
+    # the anti-runaway framing targets the loop behaviour, appended to system_instruction
+    assert "RATIONALE FIELDS ARE TERSE NOTES" in _h, "the anti-runaway block must be present"
+    assert "system_instruction +=" in _h and "loops, lists, or keeps going is" in _h, \
+        "the block must append to the system prompt and name the loop as a malfunction"
+    # it is inside the prompt builder (fires before the return), not a rendered field
+    _i_block = _h.find("RATIONALE FIELDS ARE TERSE NOTES")
+    _i_ret = _h.find("return system_instruction, user_content")
+    assert _i_block != -1 and _i_ret != -1 and _i_block < _i_ret, \
+        "the Lever-3 block must sit inside _build_post_cuts_prompt before its return"
+    # baked into the image env, default OFF
+    _m = open("modal_app.py").read()
+    assert '"PROMPTLY_LEVER3": os.environ.get("PROMPTLY_LEVER3", "")' in _m, \
+        "PROMPTLY_LEVER3 must be baked into the image env, default OFF"
+
+
+@check("LIVE SCOREBOARD (Lever-3 flip watches this): _measure_rationale_lengths runs on EVERY parseable editorial response (NOT flag-gated) and ALWAYS ledgers a lightweight `rationale_length` line (max/total why-chars, ballooned=max>500) — the degeneration-class incidence signal the daily bleed [REPORT] reads; the full per-field S3 breakdown stays flag-gated (PLAN_CAPTURE)")
+def _rationale_length_scoreboard():
+    _h = open("handler.py").read()
+    assert "def _measure_rationale_lengths(" in _h, "the scoreboard helper must exist"
+    # ALWAYS-on: called unconditionally (not under a PLAN_CAPTURE guard) at editorial
+    assert "\n            _measure_rationale_lengths(_parsed)" in _h, \
+        "the scoreboard must be called ALWAYS at the editorial output, not flag-gated"
+    # ALWAYS ledgers the rationale_length line
+    assert '"rationale_length"' in _h and '"ballooned": _maxf > 500' in _h, \
+        "must ledger a rationale_length line with the balloon signal on every job"
+    # the S3 breakdown is the flag-gated part (the A/B capture)
+    _i_ledger = _h.find('"rationale_length"')
+    _i_s3guard = _h.find('if os.environ.get("PROMPTLY_PLAN_CAPTURE", "").strip():\n            import boto3')
+    assert _i_ledger != -1 and _i_s3guard != -1 and _i_ledger < _i_s3guard, \
+        "the ledger line is always-on; the S3 breakdown is flag-gated after it"
 
 
 @check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")

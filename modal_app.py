@@ -413,6 +413,10 @@ image = (
         # (`PROMPTLY_PLAN_CAPTURE=1 ./deploy.sh`, or per-job) to persist the
         # finalized render inputs to the corpus bucket. Never affects the render.
         "PROMPTLY_PLAN_CAPTURE": os.environ.get("PROMPTLY_PLAN_CAPTURE", ""),
+        # Lever-3 candidate prompt flag (the degeneration prompt-root fix). Default
+        # "" (OFF) → the live editorial prompt, production unchanged. The A/B runs
+        # it in-process; the FLIP to enforce holds for Zac's word after his pair.
+        "PROMPTLY_LEVER3": os.environ.get("PROMPTLY_LEVER3", ""),
         # ── Supabase schema overrides for the tier + concurrency gate ──
         # Multi-clip premium concurrency check (handler.py:check_concurrency_gate)
         # reads from these tables. The defaults assumed `user_profiles.user_id`
