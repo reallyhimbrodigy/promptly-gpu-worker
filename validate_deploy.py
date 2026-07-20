@@ -4810,6 +4810,20 @@ def _multilingual_a1_fonts():
     assert '"fonts-dejavu-core"' in _m, "the Latin font base must remain (A1 is additive)"
 
 
+@check("MULTILINGUAL A2.1 (deliberate script fallback): every CAPTION_FONTS entry appends the NOTO_FALLBACK stack (Noto per-script + Noto Color Emoji + sans-serif) so Chromium resolves non-Latin glyphs per-glyph via fontconfig against the A1 fonts — no tofu; the Latin primary font still wins for every glyph it has, so Latin captions render byte-identical")
+def _multilingual_a2_font_stack():
+    _p = "src/remotion/src/captions/shared/fonts.ts"
+    _f = open(_p).read()
+    assert "NOTO_FALLBACK" in _f, "the Noto fallback stack must exist"
+    for _need in ("Noto Sans Devanagari", "Noto Sans Arabic", "Noto Sans Hebrew",
+                  "Noto Sans Thai", "Noto Sans CJK SC", "Noto Color Emoji", "sans-serif"):
+        assert _need in _f, f"NOTO_FALLBACK must include '{_need}'"
+    # every caption font wrapped with the fallback (append, not replace → Latin unchanged)
+    for _k in ("inter", "montserrat", "poppins", "playfairDisplay", "dmSerifDisplay",
+               "dmSans", "cormorantGaramond", "lora", "spaceMono", "teko"):
+        assert f"{_k}: withNoto(" in _f, f"caption font {_k} must be wrapped with the Noto fallback"
+
+
 @check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")
 def _spawn_refactor_phase3():
     _m = open("modal_app.py").read()
