@@ -4960,12 +4960,20 @@ def _arabic_bridge():
     assert handler._latin_lid("Muawami innasi yas tazlimuna qabil an najahi mubashara") is None
     # the confusion signature discriminates
     def _w(word, lang): return {"word": word, "language": lang, "confidence": 0.9}
+    # romanized Arabic — detected=None + text no Latin-LID can place → trips it,
+    # regardless of the (non-deterministic) per-word tags. Second mock has single-
+    # language tags to prove the detection does NOT hinge on incoherent tags.
     _romanized_ar = {"detected_language": None, "words": [
         _w("Muawami","fr"), _w("innasi","hi"), _w("yas","fr"), _w("tazlimuna","hi"),
         _w("qabil","fr"), _w("najahi","hi")]}
+    _romanized_ar2 = {"detected_language": None, "words": [
+        _w(x,"fr") for x in "Muawami innasi yas tazlimuna qabil najahi mubashara".split()]}
     assert handler._looks_confused(_romanized_ar) is True, "romanized Arabic must trip the signature"
+    assert handler._looks_confused(_romanized_ar2) is True, \
+        "romanized Arabic must trip it even with COHERENT tags (detection can't hinge on tags)"
+    # real English — placeable by the stopword LID → must NOT trip it (full text hits ≥2)
     _real_en = {"detected_language": None, "words": [_w(x,"en") for x in
-                "most people give up right before the breakthrough".split()]}
+                "the difference is not talent it is showing up one more time".split()]}
     assert handler._looks_confused(_real_en) is False, "real English must NOT trip it"
     assert handler._looks_confused({"detected_language": "es", "words": [_w("la","es")]}) is False, \
         "a placed language must NOT trip it"

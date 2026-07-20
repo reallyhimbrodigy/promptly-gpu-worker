@@ -4231,21 +4231,30 @@ def _latin_lid(text):
 
 
 def _looks_confused(transcript):
-    """Deepgram's confusion signature (all three, per Zac): it did NOT place a
-    language, the per-word tags are incoherent (a mix, or a non-Latin-script
-    language stamped on Latin text), AND a text-LID can't place the Latin text
-    as any known Latin language. Strict AND → near-zero false fires; the
-    language=ar probe is the confirmation."""
+    """Deepgram's confusion signature: it did NOT place a language AND a text-LID
+    can't place the Latin-script text as any KNOWN Latin language — the tell for a
+    romanized non-Latin language (Arabic under multi). Two reliable signals; the
+    language=ar probe is the confirmation, so an over-fire only costs a probe.
+
+    NOTE (measured, cert run): Zac's third signal — incoherent per-word tags — is
+    NON-DETERMINISTIC (Deepgram tagged the same romanized-Arabic clip ['fr','hi']
+    one run, a single language the next), so requiring it MISSED real Arabic. It's
+    kept as a LOGGED signal, not a gate. The text-LID + probe carry the detection.
+    A real Latin language reads as itself → placeable → no fire; only romanized
+    non-Latin (or a Latin tongue outside the stopword table) reaches the probe."""
     if (transcript.get("detected_language") or "").strip():
-        return False
+        return False  # Deepgram placed a language — trust it
     words = transcript.get("words") or []
-    if not words:
+    if len(words) < 3:
         return False
-    _wl = {str(w.get("language") or "").split("-")[0] for w in words} - {""}
-    incoherent = len(_wl) >= 2 or bool(_wl & (_NONLATIN_LANG_CODES - {""}))
     text = " ".join(str(w.get("word") or "") for w in words)
-    unplaceable = _latin_lid(text) is None
-    return incoherent and unplaceable
+    if _latin_lid(text) is not None:
+        return False  # reads as a known Latin language — not romanized non-Latin
+    _wl = sorted({str(w.get("language") or "").split("-")[0] for w in words} - {""})
+    incoherent = len(_wl) >= 2 or bool(set(_wl) & _NONLATIN_LANG_CODES)
+    print(f"[arabic-bridge] confusion signature: detected=None + unplaceable-Latin "
+          f"(per-word-langs={_wl} incoherent={incoherent}) → probing language=ar", flush=True)
+    return True
 
 
 def _probe_confirms_arabic(source_path):
