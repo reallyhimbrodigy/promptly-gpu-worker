@@ -4995,6 +4995,21 @@ def _arabic_bridge():
     _route_i = _h.index('transcribe_audio(_raw_source, language="ar")')
     _guard_i = _h.rindex('if _script_reaches_render("Arabic"):', 0, _route_i)
     assert _guard_i < _route_i, "the route must be gated behind _script_reaches_render('Arabic') (inert while denylisted)"
+    # ENV-GATED denylist (graduation = env flip, one-line rollback; PLAN_CAPTURE
+    # pattern) — default keeps Arabic denied; PROMPTLY_SCRIPT_DENYLIST="" graduates.
+    import os as _os2
+    assert callable(handler._script_denylist)
+    _prev = _os2.environ.get("PROMPTLY_SCRIPT_DENYLIST")
+    try:
+        _os2.environ.pop("PROMPTLY_SCRIPT_DENYLIST", None)
+        assert "Arabic" in handler._script_denylist(), "default denylist must keep Arabic (uncertified)"
+        _os2.environ["PROMPTLY_SCRIPT_DENYLIST"] = ""
+        assert handler._script_denylist() == frozenset(), "empty env must graduate (no script denied)"
+    finally:
+        if _prev is None: _os2.environ.pop("PROMPTLY_SCRIPT_DENYLIST", None)
+        else: _os2.environ["PROMPTLY_SCRIPT_DENYLIST"] = _prev
+    assert '"PROMPTLY_SCRIPT_DENYLIST": os.environ.get("PROMPTLY_SCRIPT_DENYLIST"' in open("modal_app.py").read(), \
+        "PROMPTLY_SCRIPT_DENYLIST must be baked into the image env (default Arabic)"
     # permanent regression (Zac): durable clips + a re-runnable end-to-end check
     # so a future Deepgram change that re-breaks probe/signature is caught.
     _mo = open("modal_app.py").read()

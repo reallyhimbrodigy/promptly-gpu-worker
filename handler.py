@@ -4058,15 +4058,30 @@ _SCRIPT_COVERAGE = frozenset({"Latin"})
 # in-language editorial prompt move together: rendering non-Latin WITHOUT the
 # in-language instruction would ship source-language captions under English MG
 # chrome. Unset the flag → back to the Latin-only allowlist, no logic redeploy.
-_SCRIPT_DENYLIST = frozenset({"Arabic"})  # denylist citizen #1 (2026-07-19)
+_SCRIPT_DENYLIST = frozenset({"Arabic"})  # DEFAULT denylist; env-overridable below
 # Arabic RENDERS perfectly (A2 contact sheet: joining, lam-alef, RTL, fonts all
 # proven) — but Deepgram nova-3 `language=multi` ROMANIZES Arabic audio to Latin
 # transliteration instead of Arabic script (measured: cert run; Cyrillic/
 # Devanagari/CJK all come through in native script, Arabic does not). Romanized
 # captions are worse than an honest rejection, so Arabic takes the named reject
-# ("Arabic support is coming") until Arabic-aware transcription routing lands
-# (detect Arabic → re-transcribe with language=ar for native script). Comes off
-# the denylist the day that certification passes. [[project_multilingual_initiative]]
+# ("Arabic support is coming") until the ar-route certification passes. The
+# Arabic BRIDGE detects it; the ROUTE re-transcribes language=ar (built, inert).
+# [[project_multilingual_initiative]]
+
+
+def _script_denylist():
+    """Scripts that may NOT reach render — ENV-OVERRIDABLE so graduation is an env
+    flip with a one-line rollback forever (the PLAN_CAPTURE/EDIT_IN_LANGUAGE
+    pattern), never a prod-behavior change before certification. Read at call time.
+      • unset          → the _SCRIPT_DENYLIST default ({"Arabic"})
+      • "" (empty)     → graduated: no script denied (Arabic routes to language=ar)
+      • "Arabic,Foo"   → explicit set
+    The Arabic cert sets PROMPTLY_SCRIPT_DENYLIST="" IN-PROCESS to exercise the
+    route with zero production impact; graduation bakes it "" into the image env."""
+    _raw = os.environ.get("PROMPTLY_SCRIPT_DENYLIST")
+    if _raw is None:
+        return _SCRIPT_DENYLIST
+    return frozenset(s.strip() for s in _raw.split(",") if s.strip())
 
 
 def _edit_in_language_enabled():
@@ -4083,7 +4098,7 @@ def _script_reaches_render(script):
     nearest listed range or falls through to Latin, and no listed script lacks a
     Noto font."""
     if _edit_in_language_enabled():
-        return script not in _SCRIPT_DENYLIST
+        return script not in _script_denylist()
     return script in _SCRIPT_COVERAGE
 
 # Codepoint-range → script classifier (stdlib unicodedata exposes no Script

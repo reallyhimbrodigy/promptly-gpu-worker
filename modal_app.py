@@ -451,6 +451,11 @@ image = (
         # them) AND binds all Gemini-authored text to the source language. One
         # flag so render-enablement and in-language editorial move together.
         "PROMPTLY_EDIT_IN_LANGUAGE": os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE", ""),
+        # Script denylist — env-overridable so Arabic graduation is an env flip
+        # (`PROMPTLY_SCRIPT_DENYLIST='' ./deploy.sh`) with a one-line rollback,
+        # matching every other activation. Default "Arabic" (romanization) until
+        # the ar-route cert passes; "" graduates it (routes to language=ar).
+        "PROMPTLY_SCRIPT_DENYLIST": os.environ.get("PROMPTLY_SCRIPT_DENYLIST", "Arabic"),
         # ── Supabase schema overrides for the tier + concurrency gate ──
         # Multi-clip premium concurrency check (handler.py:check_concurrency_gate)
         # reads from these tables. The defaults assumed `user_profiles.user_id`
