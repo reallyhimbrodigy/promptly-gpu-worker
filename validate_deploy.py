@@ -4876,10 +4876,15 @@ def _multilingual_b_edit_in_language():
         _off_ar, _ = handler._build_post_cuts_prompt(vibe="viral", duration=30, source_language="Arabic")
         assert _MARK not in _off_none and _off_none == _off_ar, \
             "OFF: in-language block must be absent + prompt byte-identical to no-language"
-        # ON: denylist model — every font-backed script reaches render
+        # ON: denylist model — every font-backed script reaches render EXCEPT
+        # denylisted ones. Arabic is denylisted (Deepgram multi romanizes it) →
+        # honest reject until Arabic-aware transcription routing lands.
         _os.environ["PROMPTLY_EDIT_IN_LANGUAGE"] = "1"
-        for _s in ("Latin", "Arabic", "Hebrew", "Devanagari", "Han", "Thai"):
+        for _s in ("Latin", "Hebrew", "Devanagari", "Han", "Thai", "Cyrillic"):
             assert handler._script_reaches_render(_s) is True, f"ON must render {_s}"
+        assert handler._script_reaches_render("Arabic") is False, \
+            "Arabic is denylisted (romanization) — must take the honest reject even ON"
+        assert "Arabic" in handler._SCRIPT_DENYLIST
         # ON prompt binds authored text to the named language; no-language stays inert
         _on_ar, _ = handler._build_post_cuts_prompt(vibe="viral", duration=30, source_language="Arabic")
         _on_none, _ = handler._build_post_cuts_prompt(vibe="viral", duration=30, source_language=None)

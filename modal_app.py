@@ -1602,8 +1602,12 @@ def cert_certify(lang: str, audio_b64: str, face_key: str) -> dict:
     s3.upload_file(src_p, _CERT_BUCKET, src_key, ExtraArgs={"ContentType": "video/mp4"})
     video_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{src_key}"
     upload_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{render_key}"
+    # public_url: the real dispatcher always passes it; the HLS export derives its
+    # manifest URL from it (splitext → "-hls/master.m3u8"). Omitting it made the
+    # HLS step raise AFTER a fully successful MP4 render. Point it at the render.
+    public_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{render_key}"
     body = {"job_id": str(uuid.uuid4()), "video_url": video_url, "vibe": "viral",
-            "user_id": str(uuid.uuid4()), "upload_url": upload_url}
+            "user_id": str(uuid.uuid4()), "upload_url": upload_url, "public_url": public_url}
     t0 = time.time()
     try:
         result = handler.handler({"input": body})
@@ -1724,9 +1728,14 @@ def cert_collect() -> list:
 def cert_run():
     import base64, os
     cert_dir = os.environ.get("CERT_AUDIO_DIR") or "/tmp/promptly_cert_audio"
+    # CERT_ONLY=de,ar re-runs a subset (single-lang avoids the concurrent-Gemini
+    # 429 quota exhaustion that failed a lang under the full 10-way fan-out).
+    only = [s.strip() for s in os.environ.get("CERT_ONLY", "").split(",") if s.strip()]
+    langs = only or list(_CERT_LANG_META)
     audio_map = {}
-    for lang in _CERT_LANG_META:
-        with open(os.path.join(cert_dir, f"{lang}.m4a"), "rb") as fh:
+    for lang in langs:
+        fn = os.environ.get(f"CERT_AUDIO_{lang}") or f"{lang}.m4a"
+        with open(os.path.join(cert_dir, fn), "rb") as fh:
             audio_map[lang] = base64.b64encode(fh.read()).decode()
     call = cert_run_all.spawn(audio_map)
-    print(f"[cert_run] spawned cert_run_all → {call.object_id}; poll S3 {_CERT_PREFIX}/_summary.json")
+    print(f"[cert_run] spawned cert_run_all({list(audio_map)}) → {call.object_id}; poll S3 {_CERT_PREFIX}/_summary.json")

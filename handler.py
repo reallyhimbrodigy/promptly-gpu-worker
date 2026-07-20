@@ -4049,7 +4049,15 @@ _SCRIPT_COVERAGE = frozenset({"Latin"})
 # in-language editorial prompt move together: rendering non-Latin WITHOUT the
 # in-language instruction would ship source-language captions under English MG
 # chrome. Unset the flag → back to the Latin-only allowlist, no logic redeploy.
-_SCRIPT_DENYLIST = frozenset()  # scripts proven to render broken — none today
+_SCRIPT_DENYLIST = frozenset({"Arabic"})  # denylist citizen #1 (2026-07-19)
+# Arabic RENDERS perfectly (A2 contact sheet: joining, lam-alef, RTL, fonts all
+# proven) — but Deepgram nova-3 `language=multi` ROMANIZES Arabic audio to Latin
+# transliteration instead of Arabic script (measured: cert run; Cyrillic/
+# Devanagari/CJK all come through in native script, Arabic does not). Romanized
+# captions are worse than an honest rejection, so Arabic takes the named reject
+# ("Arabic support is coming") until Arabic-aware transcription routing lands
+# (detect Arabic → re-transcribe with language=ar for native script). Comes off
+# the denylist the day that certification passes. [[project_multilingual_initiative]]
 
 
 def _edit_in_language_enabled():
@@ -24626,11 +24634,15 @@ def classify_error(e):
         _lm = re.search(r"lang=([A-Za-z\-]+)", msg)
         _code = (_lm.group(1).lower().split("-")[0] if _lm else "")
         _lang_label = _lang_names.get(_code)
-        _tail = (f"Support for {_lang_label} is coming." if _lang_label
-                 else "Support for more languages is coming.")
+        # Named, honest, and forward-framed. NOT "English-only" — Promptly now
+        # edits many languages; only denylisted scripts (Arabic today, until its
+        # transcription routing lands) take this reject. Naming the language keeps
+        # it true whether one script is held (flag on) or all non-Latin are (off).
+        _msg = (f"We heard you speaking {_lang_label} — {_lang_label} support is "
+                f"coming soon." if _lang_label
+                else "We heard you — support for more languages is coming soon.")
         return _e(
-            "NO_SPEECH_NONENGLISH",
-            f"We heard you — Promptly works best with English videos right now. {_tail}",
+            "NO_SPEECH_NONENGLISH", _msg,
             retryable=False, new_video=True,
         )
     # Face present but no words — mic/inaudible, not "wrong kind of video".
