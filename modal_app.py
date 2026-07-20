@@ -1728,6 +1728,85 @@ def cert_collect() -> list:
     return out
 
 
+@app.function(cpu=4, memory=8192, timeout=900)
+def cert_bridge_verify(audio_map: dict) -> list:
+    """Verify the Arabic bridge on real Deepgram output (Zac's ask: hit rate +
+    false fires). For each clip: transcribe language=multi, run the REAL
+    _looks_confused signature, and — when it fires — the language=ar probe. An
+    Arabic clip should end `treat=Arabic`; every control should not."""
+    import os, sys, base64, tempfile
+    sys.path.insert(0, "/")
+    import handler
+    from deepgram import DeepgramClient, PrerecordedOptions
+    dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
+    out = []
+    for lang, b64 in audio_map.items():
+        p = tempfile.mktemp(suffix=".m4a")
+        open(p, "wb").write(base64.b64decode(b64))
+        try:
+            ab = handler.prepare_audio_for_deepgram(p)
+            resp = dg.listen.prerecorded.v("1").transcribe_file(
+                {"buffer": ab, "mimetype": "audio/flac"},
+                PrerecordedOptions(model="nova-3", language="multi", smart_format=True, punctuate=True))
+            tx = handler._parse_deepgram_response(resp)
+            script = handler._dominant_script(tx.get("words") or [])
+            confused = handler._looks_confused(tx)
+            treat = script
+            probe = None
+            if script == "Latin" and confused:
+                is_ar, _ = handler._probe_confirms_arabic(p)
+                probe = is_ar
+                if is_ar:
+                    treat = "Arabic"
+            out.append({"lang": lang, "detected": tx.get("detected_language"),
+                        "multi_script": script, "confused": confused,
+                        "ar_probe": probe, "treat": treat,
+                        "sample": (tx.get("text") or "")[:45]})
+        except Exception as e:
+            out.append({"lang": lang, "error": f"{type(e).__name__}: {e}"})
+    for r in out:
+        print(f"BRIDGE {r.get('lang')}: multi_script={r.get('multi_script')} "
+              f"confused={r.get('confused')} ar_probe={r.get('ar_probe')} "
+              f"treat={r.get('treat')} detected={r.get('detected')} err={r.get('error','')}")
+    try:
+        import json, boto3
+        boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1")).put_object(
+            Bucket=_CERT_BUCKET, Key=f"{_CERT_PREFIX}/_bridge_verify.json",
+            Body=json.dumps(out, ensure_ascii=False, indent=2).encode("utf-8"),
+            ContentType="application/json")
+    except Exception:
+        pass
+    return out
+
+
+@app.function(cpu=2, memory=4096, timeout=120)
+def cert_bridge_read() -> list:
+    import os, json, boto3
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION", "us-west-1"))
+    try:
+        rows = json.loads(s3.get_object(Bucket=_CERT_BUCKET, Key=f"{_CERT_PREFIX}/_bridge_verify.json")["Body"].read())
+    except Exception:
+        print("BRIDGE_READ pending"); return []
+    for r in rows:
+        print(f"BRIDGE {r.get('lang')}: multi_script={r.get('multi_script')} confused={r.get('confused')} "
+              f"ar_probe={r.get('ar_probe')} treat={r.get('treat')} detected={r.get('detected')} err={r.get('error','')}")
+    return rows
+
+
+@app.local_entrypoint()
+def cert_bridge():
+    import base64, os
+    cert_dir = os.environ.get("CERT_AUDIO_DIR") or "/tmp/promptly_cert_audio"
+    only = [s.strip() for s in os.environ.get("CERT_ONLY", "").split(",") if s.strip()]
+    langs = only or ["ar", "ar_r140", "en", "es", "fr", "de", "id", "ru", "hi", "ja"]
+    audio_map = {}
+    for lang in langs:
+        with open(os.path.join(cert_dir, f"{lang}.m4a"), "rb") as fh:
+            audio_map[lang] = base64.b64encode(fh.read()).decode()
+    call = cert_bridge_verify.spawn(audio_map)
+    print(f"[cert_bridge] spawned → {call.object_id}; read via cert_bridge_read")
+
+
 @app.local_entrypoint()
 def cert_run():
     import base64, os

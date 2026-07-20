@@ -3878,6 +3878,10 @@ def _parse_deepgram_response(resp):
             "end":             float(w.end),
             "confidence":      float(getattr(w, "confidence", 1.0)),
             "speaker":         int(getattr(w, "speaker", 0)),
+            # per-word language tag (language=multi populates it) — feeds the
+            # Arabic-confusion signature (_looks_confused): multi tags romanized
+            # Arabic incoherently (e.g. a fr/hi mix on Latin text). Additive.
+            "language":        getattr(w, "language", None),
         }
         for w in raw_words
     ]
@@ -4170,6 +4174,104 @@ def _is_non_english(lang_code, script):
     if base:
         return base != "en"
     return bool(script) and script != "Latin"
+
+
+# ─── ARABIC BRIDGE (speculative dual-transcribe, 2026-07-20) ─────────────────
+# Deepgram nova-3 `language=multi` ROMANIZES Arabic audio to Latin transliteration
+# instead of Arabic script, and its language detector mislabels it (detected=None,
+# per-word tags an incoherent fr/hi mix). So _dominant_script sees Latin and the
+# Arabic denylist LEAKS — a real Arabic upload would render romanized garbage.
+# The fix (Zac's ruling): detect Deepgram's own confusion SIGNATURE, then confirm
+# with a cheap `language=ar` probe (nova-3 → perfect Arabic script, verified).
+# Confirmed Arabic is treated AS Arabic → honest denylist reject today; the SAME
+# detection routes it to the ar-transcript once Arabic graduates off the denylist.
+# Zero new deps: the text-LID is a stopword check.
+
+# Languages whose native script is NON-Latin — a Latin-script transcript tagged
+# with one of these is the romanization tell.
+_NONLATIN_LANG_CODES = frozenset({
+    "ar", "hi", "ja", "zh", "ko", "ru", "he", "th", "fa", "ur", "bn", "ta",
+    "te", "kn", "ml", "gu", "pa", "mr", "el", "uk", "sr", "bg", "am",
+})
+
+# Tiny dependency-free text-LID: the commonest function words per Latin-script
+# language. Romanized Arabic matches NONE of them (no "the/de/le/der/…").
+_LATIN_STOPWORDS = {
+    "en": {"the", "and", "is", "to", "of", "a", "in", "that", "it", "you", "for"},
+    "es": {"de", "la", "que", "el", "en", "y", "los", "se", "no", "un", "por"},
+    "fr": {"de", "la", "le", "et", "les", "des", "un", "une", "est", "que", "dans"},
+    "de": {"der", "die", "und", "ist", "das", "zu", "den", "nicht", "ein", "mit"},
+    "pt": {"de", "que", "e", "o", "a", "do", "da", "em", "um", "para", "com"},
+    "it": {"di", "che", "e", "la", "il", "un", "per", "con", "non", "una"},
+    "id": {"yang", "dan", "di", "itu", "dengan", "untuk", "tidak", "ini", "ada"},
+    "nl": {"de", "en", "het", "van", "een", "is", "dat", "niet", "op", "te"},
+    "pl": {"nie", "to", "się", "na", "jest", "że", "co", "jak", "the"},
+    "tr": {"bir", "ve", "bu", "için", "ile", "de", "da", "çok", "ne"},
+}
+
+
+def _latin_lid(text):
+    """Return a Latin-script language code if the text reads as one, else None.
+    Cheap stopword vote — enough to keep the Arabic probe off real Latin
+    languages while still failing to place romanized non-Latin text."""
+    toks = [t for t in re.split(r"[^\w']+", str(text).lower()) if t]
+    if len(toks) < 3:
+        return None
+    tset = set(toks)
+    best, best_hits = None, 0
+    for lang, sw in _LATIN_STOPWORDS.items():
+        hits = len(tset & sw)
+        if hits > best_hits:
+            best, best_hits = lang, hits
+    # need at least 2 stopword hits to claim a placement (1 is noise)
+    return best if best_hits >= 2 else None
+
+
+def _looks_confused(transcript):
+    """Deepgram's confusion signature (all three, per Zac): it did NOT place a
+    language, the per-word tags are incoherent (a mix, or a non-Latin-script
+    language stamped on Latin text), AND a text-LID can't place the Latin text
+    as any known Latin language. Strict AND → near-zero false fires; the
+    language=ar probe is the confirmation."""
+    if (transcript.get("detected_language") or "").strip():
+        return False
+    words = transcript.get("words") or []
+    if not words:
+        return False
+    _wl = {str(w.get("language") or "").split("-")[0] for w in words} - {""}
+    incoherent = len(_wl) >= 2 or bool(_wl & (_NONLATIN_LANG_CODES - {""}))
+    text = " ".join(str(w.get("word") or "") for w in words)
+    unplaceable = _latin_lid(text) is None
+    return incoherent and unplaceable
+
+
+def _probe_confirms_arabic(source_path):
+    """Cheap confirmation: re-transcribe with nova-3 language=ar (verified to
+    produce native Arabic script). Confirmed iff it returns a coherent run of
+    Arabic-script words. Best-effort — any failure returns (False, None) so the
+    caller proceeds unchanged (no worse than today's leak). ~half a cent, only
+    on suspect jobs."""
+    try:
+        if DeepgramClient is None or PrerecordedOptions is None:
+            return (False, None)
+        dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
+        audio_bytes = prepare_audio_for_deepgram(source_path)
+        options = PrerecordedOptions(
+            model="nova-3", language="ar", smart_format=True, punctuate=True)
+        resp = dg.listen.prerecorded.v("1").transcribe_file(
+            {"buffer": audio_bytes, "mimetype": "audio/flac"}, options)
+        parsed = _parse_deepgram_response(resp)
+        _words = parsed.get("words") or []
+        _script = _dominant_script(_words)
+        _n = len(_words)
+        _conf = (sum(w.get("confidence", 0.0) for w in _words) / _n) if _n else 0.0
+        ok = _script == "Arabic" and _n >= 5 and _conf >= 0.3
+        print(f"[arabic-bridge] language=ar probe: {_n} words, script={_script}, "
+              f"conf={_conf:.2f} → {'ARABIC' if ok else 'not-arabic'}", flush=True)
+        return (ok, parsed if ok else None)
+    except Exception as _e:
+        print(f"[arabic-bridge] probe skipped ({type(_e).__name__})", flush=True)
+        return (False, None)
 
 
 def _dominant_script(words):
@@ -28085,15 +28187,32 @@ def handler(job):
             # rejection — so it takes the already-live, language-named reject.
             # Tofu stays UNCONSTRUCTIBLE: no uncovered script renders.
             _script = _dominant_script(_dg_words)
+            # ARABIC BRIDGE (leak-fix): Deepgram `multi` romanizes Arabic to Latin,
+            # so _dominant_script sees Latin and the Arabic denylist would LEAK —
+            # a real Arabic upload would render romanized garbage. On Deepgram's
+            # own confusion signature, confirm with a cheap language=ar probe and
+            # treat confirmed Arabic AS Arabic → the honest denylist reject. Only
+            # fires under the flag, only on Latin-classified suspects (~half a cent).
+            # When Arabic graduates off the denylist, this same point routes to the
+            # ar-transcript for native-script render (lands with Arabic's own cert).
+            if (_edit_in_language_enabled() and _script == "Latin"
+                    and _looks_confused(_transcript)):
+                _is_ar, _ar_probe = _probe_confirms_arabic(_raw_source)
+                if _is_ar:
+                    _script = "Arabic"
             if not _script_reaches_render(_script):
                 _lang = (_transcript.get("detected_language")
                          or _SCRIPT_LANG_HINT.get(_script) or "?")
+                # denylisted (e.g. Arabic) under the flag, or Latin-only when off —
+                # classify_error names the language honestly ("… support is coming").
+                if _script == "Arabic":
+                    _lang = "ar"
                 _log_intake_reject("NO_SPEECH_NONENGLISH", source_duration,
                                    language=str(_lang), script=str(_script),
                                    multi_words=len(_dg_words))
                 raise RuntimeError(
                     f"NO_SPEECH_NONENGLISH: {len(_dg_words)} words of "
-                    f"{_script}-script speech (lang={_lang}); English-only for now."
+                    f"{_script}-script speech (lang={_lang}); not yet supported."
                 )
             # ─── LANGUAGE TELEMETRY (Workstream C — Tier-2 watch) ───────────
             # The gate passed. Tag every NON-English render with its language +

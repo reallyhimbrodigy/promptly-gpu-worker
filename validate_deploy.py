@@ -4949,6 +4949,35 @@ def _multilingual_c_tiers():
         "Tier-1 Cyrillic (Russian) must be in the contact-sheet battery"
 
 
+@check("ARABIC BRIDGE (denylist leak-fix): Deepgram multi ROMANIZES Arabic → _dominant_script sees Latin → the Arabic denylist would leak (real Arabic → romanized garbage). _looks_confused (detected=None AND incoherent per-word tags AND text-LID can't place the Latin text) fires the language=ar probe; confirmed Arabic is treated AS Arabic → honest reject. Strict signature → discriminates romanized-Arabic from real Latin languages; probe confirms so a false-trigger only costs a probe, never a wrong reject.")
+def _arabic_bridge():
+    import handler
+    assert callable(handler._looks_confused) and callable(handler._latin_lid) \
+        and callable(handler._probe_confirms_arabic)
+    # text-LID: places real Latin languages, fails to place romanized Arabic
+    assert handler._latin_lid("most people give up right before the breakthrough and") == "en"
+    assert handler._latin_lid("la mayoría de la gente se rinde justo antes del gran") == "es"
+    assert handler._latin_lid("Muawami innasi yas tazlimuna qabil an najahi mubashara") is None
+    # the confusion signature discriminates
+    def _w(word, lang): return {"word": word, "language": lang, "confidence": 0.9}
+    _romanized_ar = {"detected_language": None, "words": [
+        _w("Muawami","fr"), _w("innasi","hi"), _w("yas","fr"), _w("tazlimuna","hi"),
+        _w("qabil","fr"), _w("najahi","hi")]}
+    assert handler._looks_confused(_romanized_ar) is True, "romanized Arabic must trip the signature"
+    _real_en = {"detected_language": None, "words": [_w(x,"en") for x in
+                "most people give up right before the breakthrough".split()]}
+    assert handler._looks_confused(_real_en) is False, "real English must NOT trip it"
+    assert handler._looks_confused({"detected_language": "es", "words": [_w("la","es")]}) is False, \
+        "a placed language must NOT trip it"
+    # per-word language captured in the parse (feeds the signature)
+    _h = open("handler.py").read()
+    assert '"language":        getattr(w, "language", None),' in _h, \
+        "the Deepgram parse must capture per-word language for the signature"
+    # wired at the gate BEFORE the reject: confusion → probe → treat-as-Arabic
+    assert "_looks_confused(_transcript)" in _h and "_probe_confirms_arabic(_raw_source)" in _h
+    assert _h.index("_probe_confirms_arabic(_raw_source)") < _h.index("if not _script_reaches_render(_script):")
+
+
 @check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")
 def _spawn_refactor_phase3():
     _m = open("modal_app.py").read()
