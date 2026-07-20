@@ -3781,7 +3781,7 @@ def prepare_audio_for_deepgram(source_path: str) -> bytes:
     return proc.stdout
 
 
-def _deepgram_options(keywords=None):
+def _deepgram_options(keywords=None, language="multi"):
     """Deepgram Nova-3 transcription options.
 
     `keywords` is an optional list of `"term:intensifier"` strings that
@@ -3803,8 +3803,10 @@ def _deepgram_options(keywords=None):
         # lets scripts the caption fonts actually render (Latin today) reach the
         # render path; uncovered scripts take the honest language-named reject.
         # Verified 2026-07-17: multi accepts the full option set below incl.
-        # keyterm (HTTP 200, no PAYLOAD_ERROR).
-        model="nova-3", language="multi",
+        # keyterm (HTTP 200, no PAYLOAD_ERROR). `language` is overridable for the
+        # Arabic-bridge route (language="ar" → native Arabic script vs multi's
+        # romanization); default "multi" keeps the main path byte-identical.
+        model="nova-3", language=language,
         smart_format=True, utterances=True, punctuate=True, diarize=True,
         # Deepgram silently strips disfluencies ("um", "uh", "uhm") from the
         # transcript by default. For editorial cutting we need those tokens
@@ -3942,7 +3944,7 @@ def _deepgram_is_retriable_error(msg):
     )
 
 
-def transcribe_audio(source_path, keywords=None):
+def transcribe_audio(source_path, keywords=None, language="multi"):
     """File-based Deepgram with loudness-normalized FLAC audio prep.
 
     Sends the cleaned mono 48 kHz FLAC produced by prepare_audio_for_deepgram
@@ -3969,7 +3971,7 @@ def transcribe_audio(source_path, keywords=None):
         )
     else:
         print(f"[deepgram] Sending {len(audio_bytes) / 1024:.0f}KB FLAC audio", flush=True)
-    options = _deepgram_options(keywords=keywords)
+    options = _deepgram_options(keywords=keywords, language=language)
     _t0 = time.time()
     last_err = None
     for attempt in range(3):
@@ -28218,6 +28220,23 @@ def handler(job):
                 _is_ar, _ar_probe = _probe_confirms_arabic(_raw_source)
                 if _is_ar:
                     _script = "Arabic"
+                    # GRADUATION ROUTE: when Arabic is off the denylist, render it
+                    # from the native-script transcript instead of rejecting —
+                    # re-transcribe with the FULL option set at language=ar (the
+                    # probe used minimal options; the pipeline needs diarize/
+                    # utterances/filler). Inert while Arabic is denylisted
+                    # (_script_reaches_render False → falls through to the reject).
+                    if _script_reaches_render("Arabic"):
+                        try:
+                            _ar_full = transcribe_audio(_raw_source, language="ar")
+                        except Exception as _are:
+                            print(f"[arabic-bridge] route re-transcribe failed ({type(_are).__name__}) — reject", flush=True)
+                            _ar_full = None
+                        if _ar_full and _ar_full.get("words"):
+                            _transcript = _ar_full
+                            _dg_words = _transcript.get("words", [])
+                            print(f"[arabic-bridge] ROUTED language=ar → {len(_dg_words)} "
+                                  f"native-script words; rendering Arabic", flush=True)
             if not _script_reaches_render(_script):
                 _lang = (_transcript.get("detected_language")
                          or _SCRIPT_LANG_HINT.get(_script) or "?")

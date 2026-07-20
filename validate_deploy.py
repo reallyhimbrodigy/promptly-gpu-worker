@@ -4986,6 +4986,15 @@ def _arabic_bridge():
     assert _h.index("_probe_confirms_arabic(_raw_source)") < _h.index("if not _script_reaches_render(_script):")
     # density LID (not absolute hits) — the reliable discriminator
     assert "_LATIN_LID_MIN_DENSITY" in _h, "text-LID must place by stopword density"
+    # graduation route (built, inert behind the denylist): confirmed Arabic
+    # re-transcribes at language=ar for native script when Arabic reaches render.
+    assert 'transcribe_audio(_raw_source, language="ar")' in _h, \
+        "the graduation route must re-transcribe language=ar"
+    assert 'def _deepgram_options(keywords=None, language="multi")' in _h, \
+        "_deepgram_options must accept a language override (default multi = unchanged)"
+    _route_i = _h.index('transcribe_audio(_raw_source, language="ar")')
+    _guard_i = _h.rindex('if _script_reaches_render("Arabic"):', 0, _route_i)
+    assert _guard_i < _route_i, "the route must be gated behind _script_reaches_render('Arabic') (inert while denylisted)"
     # permanent regression (Zac): durable clips + a re-runnable end-to-end check
     # so a future Deepgram change that re-breaks probe/signature is caught.
     _mo = open("modal_app.py").read()
