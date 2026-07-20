@@ -4892,6 +4892,36 @@ def _multilingual_b_edit_in_language():
         "PROMPTLY_EDIT_IN_LANGUAGE must be baked into the image env"
 
 
+@check("MULTILINGUAL C (verification tiers): Tier-1 = the 9 certified languages (contact sheet proved every script incl. Cyrillic); Tier-2 = every other font-backed language, enabled+WATCHED. Every non-English render is language-tagged (lang/script/tier) via a language_coverage divergence so the daily report shows what renders and can flag a failing Tier-2 language. English/Latin skipped to keep the ledger signal.")
+def _multilingual_c_tiers():
+    import handler
+    # Tier-1 = the nine agreed certified languages
+    _t1 = frozenset({"hi", "es", "pt", "ar", "fr", "de", "ru", "id", "ja"})
+    assert handler._TIER1_LANGUAGES == _t1, handler._TIER1_LANGUAGES
+    # tiering: Tier-1 codes → 1, others → 2, script fallback when no code
+    for _c in _t1:
+        assert handler._language_tier(_c) == 1, _c
+    for _c in ("th", "vi", "he", "ta", "el"):
+        assert handler._language_tier(_c) == 2, _c
+    assert handler._language_tier(None, "Devanagari") == 1, "script fallback → Hindi is Tier-1"
+    assert handler._language_tier(None, "Thai") == 2
+    # non-English gate for telemetry: English Latin skipped, everything else tagged
+    assert handler._is_non_english("en", "Latin") is False
+    assert handler._is_non_english("es", "Latin") is True
+    assert handler._is_non_english(None, "Arabic") is True
+    assert handler._is_non_english(None, "Latin") is False
+    # telemetry wired at the gate (fires after the coverage pass, before the edit)
+    _h = open("handler.py").read()
+    assert '"language_coverage"' in _h and "rendered_language" in _h, \
+        "non-English renders must be language-tagged for the Tier-2 watch"
+    assert _h.index("if not _script_reaches_render(_script):") < _h.index('"language_coverage"'), \
+        "language telemetry must fire only after the coverage gate passes"
+    # Cyrillic (Russian) — the one Tier-1 script the original sheet missed — is certified
+    _bat = open("src/remotion/script-battery.mjs").read()
+    assert "11-cyrillic" in _bat and "Cyrillic" in _bat, \
+        "Tier-1 Cyrillic (Russian) must be in the contact-sheet battery"
+
+
 @check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")
 def _spawn_refactor_phase3():
     _m = open("modal_app.py").read()

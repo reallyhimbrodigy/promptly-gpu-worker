@@ -30,6 +30,9 @@ const CASES = [
   // the margins, shaping + direction intact after the scale.
   { key: "9-cjk-overflow", words: ["人工知能", "技術", "革命", "未来", "世界", "変革"], note: "CJK sentence overflow — fit scale-down" },
   { key: "10-arabic-overflow", words: ["الذكاء", "الاصطناعي", "يغير", "العالم", "اليوم"], note: "Arabic sentence overflow — fit scale-down, RTL held" },
+  // Tier-1 certification: Russian is the one Tier-1 language whose script (Cyrillic)
+  // the original sheet did not cover. LTR, no complex shaping, but verify not assume.
+  { key: "11-cyrillic", words: ["ПРИВЕТ", "МИР"], note: "Cyrillic (Russian) — Tier-1 script cert" },
 ];
 
 const STYLE = "Prime"; // a clean style that shows the glyphs plainly

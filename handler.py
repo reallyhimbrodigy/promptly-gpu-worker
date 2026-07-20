@@ -4134,6 +4134,36 @@ def _source_language_name(detected_language, script):
     return (str(script) if script and script != "Latin" else "the speaker's")
 
 
+# Workstream C — verification tiers. Tier-1 = CERTIFIED: the contact sheet
+# proved each script clean (Latin, Arabic RTL, Devanagari, CJK, Cyrillic) and
+# these are the highest-traffic languages, so they render with full confidence.
+# Tier-2 = every other font-backed language: enabled under the flag but WATCHED
+# via language telemetry (below) rather than certified — a Tier-2 language that
+# starts failing surfaces in the daily report instead of failing silently.
+_TIER1_LANGUAGES = frozenset({
+    "hi", "es", "pt", "ar", "fr", "de", "ru", "id", "ja",
+})
+
+
+def _language_tier(lang_code, script=None):
+    """1 for a certified Tier-1 language, 2 for any other (enabled+watched).
+    Falls back to the script's canonical language when no code is given."""
+    base = str(lang_code or "").strip().lower().split("-", 1)[0]
+    if not base:
+        base = _SCRIPT_LANG_HINT.get(script, "")
+    return 1 if base in _TIER1_LANGUAGES else 2
+
+
+def _is_non_english(lang_code, script):
+    """A render worth language-tagging: a non-English detected language, or a
+    non-Latin script when the code is missing/ambiguous. English Latin renders
+    (the overwhelming majority) are skipped so the telemetry stays signal."""
+    base = str(lang_code or "").strip().lower().split("-", 1)[0]
+    if base:
+        return base != "en"
+    return bool(script) and script != "Latin"
+
+
 def _dominant_script(words):
     """Dominant Unicode script of a Deepgram word list (dicts with 'word').
     Counts letter codepoints by script range; neutral chars (digits, punct,
@@ -28052,6 +28082,25 @@ def handler(job):
                 raise RuntimeError(
                     f"NO_SPEECH_NONENGLISH: {len(_dg_words)} words of "
                     f"{_script}-script speech (lang={_lang}); English-only for now."
+                )
+            # ─── LANGUAGE TELEMETRY (Workstream C — Tier-2 watch) ───────────
+            # The gate passed. Tag every NON-English render with its language +
+            # script + tier so the daily report shows what languages we render
+            # and can flag a Tier-2 language that starts failing. English/Latin
+            # (the majority) is skipped to keep the ledger signal. Best-effort;
+            # never blocks the edit. Under the flag this fires for the newly
+            # enabled non-Latin renders; even off it captures Latin non-English
+            # (Spanish/French/…) that already rendered — the demand picture.
+            _det_lang = _transcript.get("detected_language")
+            if _is_non_english(_det_lang, _script):
+                _record_divergence(
+                    "language_coverage",
+                    {"lang": str(_det_lang or "?"), "script": str(_script),
+                     "name": _source_language_name(_det_lang, _script),
+                     "in_language": _edit_in_language_enabled(),
+                     "words": len(_dg_words)},
+                    "rendered_language",
+                    reason=f"tier{_language_tier(_det_lang, _script)}",
                 )
             # Cancel checkpoint #1 — before the edit recipe. The cheap CPU work
             # (download/transcribe) is done; the recipe + GPU render are next. If
