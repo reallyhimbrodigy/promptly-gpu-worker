@@ -4798,6 +4798,18 @@ def _rationale_length_scoreboard():
         "the ledger line is always-on; the S3 breakdown is flag-gated after it"
 
 
+@check("MULTILINGUAL A1 (universal script fonts): the full Noto family (fonts-noto-core + fonts-noto-cjk + fonts-noto-extra) is in the render-image apt install alongside fonts-dejavu-core, so every script renders real glyphs (no tofu) by construction; the shaping/bidi C-libs (libharfbuzz + libfribidi) are already present; purely additive, zero risk to Latin rendering")
+def _multilingual_a1_fonts():
+    _m = open("modal_app.py").read()
+    for _pkg in ("fonts-noto-core", "fonts-noto-cjk", "fonts-noto-extra", "fonts-noto-color-emoji"):
+        assert f'"{_pkg}"' in _m, f"{_pkg} must be in the render-image apt install"
+    # complex scripts are broken without shaping — Noto fonts need harfbuzz + fribidi
+    assert "libharfbuzz" in _m and "libfribidi" in _m, \
+        "shaping (harfbuzz) + bidi (fribidi) libs must be present for complex scripts"
+    # additive: the Latin font stack is untouched
+    assert '"fonts-dejavu-core"' in _m, "the Latin font base must remain (A1 is additive)"
+
+
 @check("Reliability Phase 3 (spawn refactor, flag-gated OFF): run_pipeline_bg = plain retriable fn that POSTs /api/modal-complete with the call_id; run_job spawns only under PROMPTLY_SPAWN_MODE=1 (deploy INERT until the flip); sync path kept for rollback; completion result carries the re-edit hydration fields")
 def _spawn_refactor_phase3():
     _m = open("modal_app.py").read()

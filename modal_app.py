@@ -110,6 +110,20 @@ image = (
         "libass-dev",
         "libfontconfig1",
         "fonts-dejavu-core",
+        # MULTILINGUAL A1 (universal script coverage): the full Noto family so
+        # every script renders with real glyphs instead of tofu — Devanagari,
+        # Arabic, Hebrew, Thai, Bengali, Tamil, Cyrillic-extended (fonts-noto-core),
+        # CJK (fonts-noto-cjk), and the long tail (fonts-noto-extra). fc-cache
+        # (run below with the app fonts) indexes them; libharfbuzz + libfribidi
+        # (already installed) shape + bidi them. Zero risk to Latin rendering —
+        # purely additive glyph coverage. A2 makes caption font-selection
+        # deliberate; fontconfig fallback may start killing tofu before then.
+        "fonts-noto-core",
+        "fonts-noto-cjk",
+        "fonts-noto-extra",
+        # UGC captions are full of emoji — without the color-emoji font every 🔥
+        # renders tofu the moment the rest of the sheet goes green. Non-negotiable.
+        "fonts-noto-color-emoji",
         "librubberband-dev",
         "rubberband-cli",
         "build-essential",
