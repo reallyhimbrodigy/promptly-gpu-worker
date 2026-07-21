@@ -1751,9 +1751,11 @@ def cert_bridge_e2e(lang: str, audio_b64: str, graduated: bool = False) -> dict:
         {"buffer": ab, "mimetype": "audio/flac"},
         PrerecordedOptions(model="nova-3", language="multi", smart_format=True, punctuate=True)))
     script = handler._dominant_script(tx.get("words") or [])
-    confused = handler._looks_confused(tx)
+    # mirror the production bridge: Latin AND Cyrillic are suspect scripts
+    # (Deepgram transliterates Arabic into either, run-to-run), script-aware LID
+    confused = handler._looks_confused(tx, script) if script in ("Latin", "Cyrillic") else False
     treat, probe, routed_script, routed_words = script, None, None, None
-    if script == "Latin" and confused:
+    if confused:
         is_ar, _ = handler._probe_confirms_arabic(p)
         probe = is_ar
         if is_ar:
@@ -1793,6 +1795,11 @@ _BRIDGE_REGRESSION_CLIPS = {
     # words == Arabic-script captions; the render layer was pixel-proven at cert).
     "ar_r140": {"key": f"{_CERT_PREFIX}/_bridge_regression/ar_r140.m4a", "expect": "Arabic",
                 "graduated_expect": "Arabic"},
+    # second Arabic voice/script — Deepgram transliterates it into Latin OR
+    # Cyrillic run-to-run; either way the bridge must land treat=Arabic. This
+    # clip is the standing coverage for the Cyrillic-transliteration mode.
+    "ar_simple": {"key": f"{_CERT_PREFIX}/_bridge_regression/ar_simple.m4a", "expect": "Arabic",
+                  "graduated_expect": "Arabic"},
     "en":      {"key": f"{_CERT_PREFIX}/_bridge_regression/en.m4a",      "expect": "Latin"},
 }
 
@@ -1936,33 +1943,26 @@ def cert_ar_graduate(clip: str, audio_b64: str, face_key: str) -> dict:
                  "sound_effects", "zoom_effects", "text_overlays")}
     richness["caption_pages"] = len(cap_pages)
 
-    # ── the pixel evidence: extract caption-bearing frames from the render ──
+    # ── the pixel evidence: a 1fps strip of the WHOLE render (the recipe does
+    # not carry a caption_pages key, so page-midpoint sampling was blind — the
+    # strip guarantees caption-bearing frames are captured wherever they land) ──
     frames = []
     if (result or {}).get("video_url"):
         rend_p = os.path.join(work, "render.mp4")
         try:
             s3.download_file(_CERT_BUCKET, render_key, rend_p)
-            rdur = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries",
-                         "format=duration", "-of", "default=nw=1:nk=1", rend_p]).decode().strip())
-            # frame times: caption-page midpoints spread across the video (≤4)
-            times = []
-            if cap_pages:
-                n = len(cap_pages)
-                for idx in sorted({0, n // 3, (2 * n) // 3, n - 1}):
-                    p = cap_pages[idx]
-                    times.append(min(max((p.get("startMs", 0) + p.get("durationMs", 0) / 2) / 1000.0, 0.2),
-                                     max(rdur - 0.2, 0.2)))
-            else:
-                times = [min(1.0, rdur / 2), rdur / 2]
-            for i, t in enumerate(times):
-                fp = os.path.join(work, f"frame_{i}.png")
-                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", f"{t:.3f}",
-                                "-i", rend_p, "-frames:v", "1", fp], check=True)
-                fk = f"{_AR_GRAD_PREFIX}/{clip}/frame_{i}.png"
+            strip_dir = os.path.join(work, "strip")
+            os.makedirs(strip_dir, exist_ok=True)
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", rend_p,
+                            "-vf", "fps=1,scale=540:-1",
+                            os.path.join(strip_dir, "s_%02d.png")], check=True)
+            for f in sorted(os.listdir(strip_dir)):
+                fp = os.path.join(strip_dir, f)
+                fk = f"{_AR_GRAD_PREFIX}/{clip}/strip/{f}"
                 s3.upload_file(fp, _CERT_BUCKET, fk, ExtraArgs={"ContentType": "image/png"})
                 url = s3.generate_presigned_url("get_object",
                         Params={"Bucket": _CERT_BUCKET, "Key": fk}, ExpiresIn=86400)
-                frames.append({"t": round(t, 2), "key": fk, "url": url})
+                frames.append({"t": int(f[2:4]), "key": fk, "url": url})
         except Exception as fe:
             frames.append({"error": f"{type(fe).__name__}: {fe}"})
 

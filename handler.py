@@ -4234,7 +4234,32 @@ _LATIN_STOPWORDS = {
     "pl": {"nie","to","się","na","jest","że","co","jak","do","w","z","o","tak","ale","po","tym","już","jego"},
 }
 
-_LATIN_LID_MIN_DENSITY = 0.15  # ≥ → confidently a known Latin language (skip probe)
+_LATIN_LID_MIN_DENSITY = 0.15  # ≥ → confidently a known language (skip probe)
+
+# Cyrillic function-word sets — Deepgram multi transliterates Arabic into
+# CYRILLIC as well as Latin (measured: the same speaker romanized Latin one run,
+# Cyrillic the next), so the confusion signature must read Cyrillic text too.
+# Real Russian/Ukrainian/Bulgarian is dense in these; Cyrillic-transliterated
+# Arabic ("мувами ин-насия стаслимуна кобиль…") hits almost none.
+_CYRILLIC_STOPWORDS = {
+    "ru": {"и","в","не","на","что","я","с","он","как","это","то","а","но","по","у","за","от","мы","вы","они","она","так","же","бы","из","к","о","все","всё","его","её","их","был","была","было","только","когда","уже","для","до","или","если","чтобы","есть","нет","при","вот","чем","перед","прямо","люди","людей"},
+    "uk": {"і","в","не","на","що","я","з","він","як","це","то","а","але","по","у","за","від","ми","ви","вони","вона","так","же","б","із","до","о","всі","його","її","їх","був","була","було","тільки","коли","вже","для","або","якщо","щоб","є"},
+    "bg": {"и","в","не","на","що","аз","с","той","как","това","то","а","но","по","у","за","от","ние","вие","те","тя","така","до","о","все","него","нея","тях","беше","само","когато","вече","или","ако","да","е","се","ще","който"},
+}
+
+
+def _stopword_lid(text, tables):
+    """Generic stopword-density LID over the given per-language tables. Returns a
+    language code when density ≥ threshold, else None (unplaceable)."""
+    toks = [t for t in re.split(r"[^\w']+", str(text).lower()) if t]
+    if len(toks) < 6:
+        return None
+    best, best_density = None, 0.0
+    for lang, sw in tables.items():
+        density = sum(1 for t in toks if t in sw) / len(toks)
+        if density > best_density:
+            best, best_density = lang, density
+    return best if best_density >= _LATIN_LID_MIN_DENSITY else None
 
 
 def _latin_lid(text):
@@ -4242,40 +4267,45 @@ def _latin_lid(text):
     (stopword density ≥ threshold), else None. Density (occurrences / tokens),
     not absolute hits — real Latin is stopword-dense, romanized non-Latin is not.
     None → the caller probes language=ar; a misplace only costs a probe."""
-    toks = [t for t in re.split(r"[^\w']+", str(text).lower()) if t]
-    if len(toks) < 6:
-        return None
-    best, best_density = None, 0.0
-    for lang, sw in _LATIN_STOPWORDS.items():
-        density = sum(1 for t in toks if t in sw) / len(toks)
-        if density > best_density:
-            best, best_density = lang, density
-    return best if best_density >= _LATIN_LID_MIN_DENSITY else None
+    return _stopword_lid(text, _LATIN_STOPWORDS)
 
 
-def _looks_confused(transcript):
+def _cyrillic_lid(text):
+    """Cyrillic counterpart of _latin_lid — places real Russian/Ukrainian/
+    Bulgarian; fails to place Cyrillic-transliterated Arabic."""
+    return _stopword_lid(text, _CYRILLIC_STOPWORDS)
+
+
+def _looks_confused(transcript, script="Latin"):
     """Deepgram's confusion signature: it did NOT place a language AND a text-LID
-    can't place the Latin-script text as any KNOWN Latin language — the tell for a
-    romanized non-Latin language (Arabic under multi). Two reliable signals; the
-    language=ar probe is the confirmation, so an over-fire only costs a probe.
+    can't place the text as any KNOWN language of its script — the tell for a
+    TRANSLITERATED non-native language (Arabic under multi). Two reliable
+    signals; the language=ar probe is the confirmation, so an over-fire only
+    costs a probe.
+
+    SCRIPT-AWARE (graduation cert finding): Deepgram multi transliterates Arabic
+    into Latin OR Cyrillic run-to-run, so the signature reads both — Latin text
+    against the Latin stopword tables, Cyrillic against ru/uk/bg. Real Russian
+    places by density and never pays the probe.
 
     NOTE (measured, cert run): Zac's third signal — incoherent per-word tags — is
     NON-DETERMINISTIC (Deepgram tagged the same romanized-Arabic clip ['fr','hi']
     one run, a single language the next), so requiring it MISSED real Arabic. It's
     kept as a LOGGED signal, not a gate. The text-LID + probe carry the detection.
-    A real Latin language reads as itself → placeable → no fire; only romanized
-    non-Latin (or a Latin tongue outside the stopword table) reaches the probe."""
+    A real language reads as itself → placeable → no fire; only transliterated
+    non-native text (or a tongue outside the stopword tables) reaches the probe."""
     if (transcript.get("detected_language") or "").strip():
         return False  # Deepgram placed a language — trust it
     words = transcript.get("words") or []
     if len(words) < 3:
         return False
     text = " ".join(str(w.get("word") or "") for w in words)
-    if _latin_lid(text) is not None:
-        return False  # reads as a known Latin language — not romanized non-Latin
+    _lid = _cyrillic_lid if script == "Cyrillic" else _latin_lid
+    if _lid(text) is not None:
+        return False  # reads as a known language of its script — not transliteration
     _wl = sorted({str(w.get("language") or "").split("-")[0] for w in words} - {""})
     incoherent = len(_wl) >= 2 or bool(set(_wl) & _NONLATIN_LANG_CODES)
-    print(f"[arabic-bridge] confusion signature: detected=None + unplaceable-Latin "
+    print(f"[arabic-bridge] confusion signature: detected=None + unplaceable-{script} "
           f"(per-word-langs={_wl} incoherent={incoherent}) → probing language=ar", flush=True)
     return True
 
@@ -28230,8 +28260,13 @@ def handler(job):
             # fires under the flag, only on Latin-classified suspects (~half a cent).
             # When Arabic graduates off the denylist, this same point routes to the
             # ar-transcript for native-script render (lands with Arabic's own cert).
-            if (_edit_in_language_enabled() and _script == "Latin"
-                    and _looks_confused(_transcript)):
+            # Suspect scripts: Latin AND Cyrillic — Deepgram multi transliterates
+            # Arabic into EITHER (measured at the graduation cert: the same
+            # speaker romanized Latin one run, Cyrillic the next). _looks_confused
+            # is script-aware: real Russian places by Cyrillic stopword density
+            # and never pays the probe.
+            if (_edit_in_language_enabled() and _script in ("Latin", "Cyrillic")
+                    and _looks_confused(_transcript, _script)):
                 _is_ar, _ar_probe = _probe_confirms_arabic(_raw_source)
                 if _is_ar:
                     _script = "Arabic"
@@ -28253,10 +28288,35 @@ def handler(job):
                         # transcript (silent garbage to an Arabic speaker).
                         _ar_words = (_ar_full or {}).get("words") or []
                         if _ar_words and _dominant_script(_ar_words) == "Arabic":
+                            # The resolver's audio-offset compensation shifted the
+                            # multi transcript to file-time; the routed transcript
+                            # is raw audio-data-time — apply the SAME shift so
+                            # cuts/captions/SFX stay on one clock.
+                            try:
+                                _ar_off = float((future_normalize.result(timeout=180) or {})
+                                                .get("audio_stream_offset") or 0.0)
+                            except Exception:
+                                _ar_off = 0.0
+                            if _ar_off > 0.001:
+                                for _w in _ar_words:
+                                    if isinstance(_w, dict):
+                                        try:
+                                            _w["start"] = float(_w["start"]) + _ar_off
+                                            _w["end"] = float(_w["end"]) + _ar_off
+                                        except (TypeError, ValueError, KeyError):
+                                            pass
+                            # PROPAGATE THROUGH THE CACHE (the cert caught this):
+                            # every downstream consumer — caption projection, SFX,
+                            # B-roll, the result payload's re-edit hydration —
+                            # re-reads _get_resolved_transcript()'s cache. Rebinding
+                            # the local name alone left them all on the romanized
+                            # multi transcript → the projection dropped EVERY page.
+                            with _refined_tx_lock:
+                                _refined_tx_cache["value"] = _ar_full
                             _transcript = _ar_full
                             _dg_words = _transcript.get("words", [])
                             print(f"[arabic-bridge] ROUTED language=ar → {len(_dg_words)} "
-                                  f"native-script words; rendering Arabic", flush=True)
+                                  f"native-script words (cache updated); rendering Arabic", flush=True)
                         else:
                             _record_divergence(
                                 "language_coverage",

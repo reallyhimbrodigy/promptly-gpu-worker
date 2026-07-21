@@ -4996,9 +4996,27 @@ def _arabic_bridge():
     _h = open("handler.py").read()
     assert '"language":        getattr(w, "language", None),' in _h, \
         "the Deepgram parse must capture per-word language for the signature"
+    # SCRIPT-AWARE (graduation cert finding): Deepgram transliterates Arabic into
+    # Latin OR Cyrillic run-to-run — both are suspect scripts; real Russian
+    # places by Cyrillic stopword density and never pays the probe.
+    _cyr_ar = {"detected_language": None, "words": [
+        _w(x, None) for x in "ад-за-ка иль-спнайю мувами ин-насия стаслимуна кобиль ан-нажа хила кинна".split()]}
+    assert handler._looks_confused(_cyr_ar, "Cyrillic") is True, \
+        "Cyrillic-transliterated Arabic must trip the signature"
+    _real_ru = {"detected_language": None, "words": [
+        _w(x, None) for x in "большинство людей сдаются прямо перед прорывом они бросают на девяноста процентах когда не в таланте а в том чтобы".split()]}
+    assert handler._looks_confused(_real_ru, "Cyrillic") is False, \
+        "real Russian must NOT trip it (Cyrillic stopword density places it)"
     # wired at the gate BEFORE the reject: confusion → probe → treat-as-Arabic
-    assert "_looks_confused(_transcript)" in _h and "_probe_confirms_arabic(_raw_source)" in _h
+    assert '_script in ("Latin", "Cyrillic")' in _h, \
+        "the bridge must suspect BOTH transliteration scripts (Latin + Cyrillic)"
+    assert "_looks_confused(_transcript, _script)" in _h and "_probe_confirms_arabic(_raw_source)" in _h
     assert _h.index("_probe_confirms_arabic(_raw_source)") < _h.index("if not _script_reaches_render(_script):")
+    # CACHE PROPAGATION (graduation cert finding): the routed transcript must be
+    # written into the resolved-transcript cache — rebinding the local name left
+    # caption projection/SFX/hydration on the romanized transcript (0 pages).
+    assert '_refined_tx_cache["value"] = _ar_full' in _h, \
+        "the route must propagate the ar-transcript through the resolver cache"
     # density LID (not absolute hits) — the reliable discriminator
     assert "_LATIN_LID_MIN_DENSITY" in _h, "text-LID must place by stopword density"
     # graduation route (built, inert behind the denylist): confirmed Arabic
