@@ -1,0 +1,55 @@
+{
+  "plan_full": {
+    "broll_clips": [
+      {
+        "end_word_index": 16,
+        "keyword": "city",
+        "start_word_index": 6
+      }
+    ],
+    "caption_position_changes": [
+      {
+        "position": "top",
+        "word_index": 4
+      },
+      {
+        "position": "bottom",
+        "word_index": 12
+      }
+    ],
+    "caption_style": "Gadzhi",
+    "cut_refinements": [
+      {
+        "end_word_index": 6,
+        "reason": "filler",
+        "start_word_index": 5
+      }
+    ],
+    "emphasis_moments": [
+      {
+        "type": "punch",
+        "word_indices": [
+          2,
+          4
+        ]
+      },
+      {
+        "type": "reveal",
+        "word_indices": [
+          14
+        ]
+      }
+    ],
+    "generated_scenes": [],
+    "motion_graphics": [
+      {
+        "end_word_index": 8,
+        "start_word_index": 0,
+        "type": "StatCard"
+      }
+    ],
+    "sound_effects": [],
+    "text_overlays": [],
+    "thumbnail_word_index": 6
+  }
+}

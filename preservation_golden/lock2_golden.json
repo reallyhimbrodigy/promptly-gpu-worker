@@ -1,0 +1,58 @@
+{
+  "ri_min": {
+    "broll": [],
+    "clips": [
+      {
+        "durationInFrames": 120,
+        "id": "c0",
+        "playbackRate": 1.0,
+        "startFromFrames": 0
+      }
+    ],
+    "fps": 60.0,
+    "height": 1920,
+    "motionGraphics": [],
+    "sourceUrl": "s3://bucket/src.mp4",
+    "textOverlays": [],
+    "totalDurationInFrames": 120,
+    "transitions": [],
+    "width": 1080
+  },
+  "ri_tco": {
+    "broll": [],
+    "clips": [
+      {
+        "durationInFrames": 120,
+        "id": "c0",
+        "playbackRate": 1.0,
+        "startFromFrames": 0
+      },
+      {
+        "durationInFrames": 90,
+        "id": "c1",
+        "playbackRate": 1.0,
+        "startFromFrames": 120
+      }
+    ],
+    "fps": 60.0,
+    "height": 1920,
+    "motionGraphics": [],
+    "sourceUrl": "s3://bucket/src.mp4",
+    "textOverlays": [],
+    "tightCutOverlays": [
+      {
+        "atFrame": 50,
+        "durationInFrames": 11,
+        "type": "LightLeak"
+      },
+      {
+        "atFrame": 130,
+        "durationInFrames": 11,
+        "type": "ShutterFlash"
+      }
+    ],
+    "totalDurationInFrames": 210,
+    "transitions": [],
+    "width": 1080
+  }
+}

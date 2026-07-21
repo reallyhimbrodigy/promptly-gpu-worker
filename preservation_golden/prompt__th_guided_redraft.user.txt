@@ -1,0 +1,157 @@
+════════════════════════════════════════════════════════════════════
+USER VIBE / INSTRUCTIONS (read this LITERALLY, honor every directive):
+════════════════════════════════════════════════════════════════════
+The user wants: punchy
+════════════════════════════════════════════════════════════════════
+Re-read the USER INSTRUCTIONS section at the top of your system prompt before drafting the plan. If the vibe contains a specific include/exclude instruction (no captions, no B-roll, no SFX, no transitions, no zooms, no MGs, only captions, specific style name, etc.), execute it EXACTLY as described there. Defaults below the line apply only where the user's vibe is silent on a category.
+
+This video is 30.0 seconds long (30.000s source duration).
+
+=== PIPELINE SIGNALS (ground-truth data computed on the source) ===
+
+AUDIO PROFILE
+  Peak: -6.0 dB | RMS: -18.0 dB | Noise floor: -45.0 dB
+
+  Use to decide:
+    - audio_denoise = true if noise_floor > -40 dB (source is hissy / noisy).
+    - RMS > -12 dB → loud/punchy source, fits hustle/energetic vibes.
+    - RMS < -22 dB → quiet/warm source, fits cinematic/thoughtful vibes.
+
+SHOT CHANGES (source seconds)
+  []
+
+  These are the seams where the CAMERA CUT — the footage's own hard cuts, the picture changes in this video. Seam treatments (transitions, tight-cut overlays) are authored in a dedicated pass that walks these picture changes against your plan — your read here feeds it. For YOU, this list is context for emphasis: a StepZoom or SmoothPush on a word that coincides with a shot change reads cleanly because the camera move lands as the new shot enters — this is the only place the picture actually turns.
+
+VOCAL EMPHASIS PEAKS (source seconds, score 0-1)
+  []
+
+  These are moments where the speaker's voice spikes in prominence — loud
+  words, pitch peaks, punches. Use as PRIMARY anchors for:
+    - zoom_effect events (StepZoom or SmoothPush completing ON a vocal peak)
+    - emphasis_moments (pick the peak, then map word_indices to it)
+    - the emphasis's `sound` field (a punchsfx or popsfx when the peak is one of the video's hits)
+
+FACE VISIBILITY (source-seconds ranges; yes = face detected in 0.5s bucket)
+  []
+
+  Use this to choose overlays that make sense with what's on screen. When
+  `visible=NO` for a window, the viewer is looking at b-roll, a product
+  shot, text, or scenery — lean into that (e.g., use a StatCard over a
+  product shot).
+
+FACE VERTICAL ZONE (where the speaker's HEAD sits in the frame, by source-seconds)
+  (no face position data — place freely)
+
+  A motion graphic or text overlay that covers the speaker's face is the
+  fastest way to make an edit look amateur. The viewer loses the speaker
+  exactly when they're communicating something. Components resolve clear of the face — the render keeps the person visible; choose the zone that frames them, and when every zone is theirs, the bare speaker shot IS the strongest component.
+
+  The zone label tells you which third of the 1080×1920 frame the head
+  occupies right now: `upper` (y<0.33), `center` (y in [0.33, 0.50]),
+  `lower` (y>0.50), or `unknown` (no face detected in this 0.5s bucket).
+
+  `unknown` means the detector came back empty for this bucket — the face may well still be on screen; the render resolves placements clear of it, and the nearest non-`unknown` zone is your best read of where it sits. Face sampling is sparse (~5fps with
+  smoothing) and short detection gaps are common on otherwise face-full
+  talking-head footage. For an `unknown` bucket, read the face as holding whichever zone the nearest non-`unknown` bucket reported — placements resolve clear of that zone, and the render keeps the person visible. If a window mixes `lower` and `unknown`, prefer the `lower`
+  inference; if it mixes `upper` and `unknown`, treat the whole window as
+  `upper` for placement purposes.
+
+  HOW TO USE IT — for every text_overlay and motion_graphic, look up the
+  FACE VERTICAL ZONE during your component's word window. The zone label
+  is the center of the bounding box, but a face HAS HEIGHT — a face whose
+  center reads `center` often extends well into the upper third too,
+  especially for medium-close framing. Read the signal as "the face is
+  here AND PROBABLY SPILLS slightly into adjacent zones":
+
+    - face=upper  → an upper-third anchor (`upper_third_safe`, `top`,
+                    `upper_third`, `Notification`) lands the component
+                    directly on top of the face. The viewer loses both
+                    the face and the component at once. `lower_third_safe`
+                    with captions flipped to top usually reads cleanly.
+
+    - face=center → `center` lands directly on the face.
+                    A face reading `center` likely also encroaches on
+                    the upper third, so `upper_third_safe` is risky too.
+                    `lower_third_safe` is the safer
+                    place; flipping captions to top makes the
+                    `lower_third_safe` room when needed.
+
+    - face=lower  → `lower_third_safe` lands on the face. Upper or
+                    center anchors work, since the face is sitting low
+                    in frame.
+
+    - face=unknown → the detector didn't return a face here, but the
+                    face is almost certainly still on screen (this is
+                    talking-head footage, the speaker isn't gone for
+                    half a second). Read the adjacent buckets: if a
+                    neighbor says `upper`, treat this bucket as `upper`
+                    too; if all neighbors say `center`, treat as
+                    `center`. The working assumption: the face is where you last saw it — place around that zone and the render keeps the person visible; free placement arrives with a confirmed face-free window.
+
+    - face position FLUCTUATES across the component's window (e.g., `upper` for the first second, `center` for the next second) → the component is on screen for the WHOLE window, so it lives in the zone clear of BOTH — the union of face zones is the band the render keeps the person visible through. Default to
+                    the conservative anchor: side-safe, or
+                    `lower_third_safe` with captions flipped to top.
+                    Read the face position as a union across the window — a zone the face holds for even half the window belongs to the face; the whole-window-clear zone is what keeps the person visible from the component's first frame to its last.
+
+  **WHAT THIS SIGNAL IS NOT FOR.** This is overlay-placement data, not
+  zoom-targeting data. Zoom `originY` handles itself — the pipeline face-locks the origin at the exact event frame, so FACE VERTICAL ZONE (and every other signal here) is free for placement work. The pipeline
+  runs face detection at the EXACT frame of each zoom event and aligns
+  the origin precisely to the face position at that frame — far more
+  accurate than any signal you could derive. OMIT originX/originY on
+  zoom events targeting the speaker's face; emit them only when zooming
+  at a non-face element (prop, gesture, whiteboard).
+
+  SUBSTITUTION OVER OMISSION. If the obvious overlay variant collides
+  with the face, your job is to pick a DIFFERENT variant that works in
+  a safe zone. A sticky_note hook on `upper_third_safe` doesn't fit when
+  the face is upper — but a `caption_match` at `center` might, or a
+  side-anchored MG. Only skip the overlay entirely when every
+  alternative is also unsafe.
+
+  PLACEMENT AROUND THE FACE — YOU SEE THE VIDEO.
+  You watch the source at 5 fps. You can see exactly where the speaker's
+  face sits in every frame — the eyes, the mouth, the chin, the shoulders.
+  Every caption_position_change, motion_graphic anchor, and text_overlay variant resolves clear of the face — the render keeps the person visible; choose the zone that frames them. This is a visual
+  decision made on the actual pixels, not from data:
+
+    - If the face fills the lower half at a moment, captions belong on top
+      for that moment.
+    - When the face fills the center, captions stay at the bottom (the one clear zone) and motion_graphic anchors go to upper_third_safe or lower_third_safe for that window — the bands that frame the person the render keeps visible.
+    - If the face fills the upper half, captions stay at the default bottom.
+    - If no face is on screen, place freely for creative effect.
+
+  Anchors and position changes are word-anchored — emit them on the kept
+  word where the face's screen position transitions. The renderer applies
+  your choice verbatim; there is no Python re-routing layer.
+
+SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detect)
+  (no face samples correlated with any speaker)
+
+  Informational only. MGs render horizontally CENTERED — the anchor enum is vertical-only — so the speaker's left/right position stays informational, and clearance comes from the VERTICAL axis (`upper_third_safe` / `lower_third_safe`, opposite the face). Zoom origin is the pipeline's: it detects face position at the exact frame of each zoom event and aligns the origin precisely — for face-targeted zooms, omit originX/originY and the face-lock does the aiming.
+  
+SHOT SCALE (median face bbox)
+  unknown (face w≈0px, h≈0px on 1080×1920 canvas)
+  No face detected — could be a B-roll shot, a wide environment, or a detection gap. Natural scales (1.22-1.30) are safe; if the moment specifically wants gentler (e.g., reflective beat), override scale on that event.
+
+════════════════════════════════════════════════════════════════════
+GUIDED REDRAFT — RE-EDIT WITH PRIOR PLAN AS SOFT DEFAULT
+════════════════════════════════════════════════════════════════════
+This is a RE-EDIT. The user has already received one rendered version of this video, and is asking for a directional reshape — broader than a surgical tweak, more grounded than a total recast.
+
+USER'S DIRECTION FOR THIS REDRAFT: pace the middle faster
+
+RULES FOR THE REDRAFT:
+
+1) The PRIOR EDIT PLAN below is your STARTING STATE, not a constraint. Treat every prior decision as a soft default: keep it unless the user's direction (above) gives you a reason to change it.
+
+2) The user's direction is authoritative. Where it speaks to a category (pacing of a section, energy of the captions, presence of B-roll, character of the chapter break, etc.), let it OVERRIDE the prior plan in that category. Where it's SILENT on a category, the prior plan wins by default — do NOT redo decisions for novelty's sake. The user already approved those choices; touching them without cause erodes their trust.
+
+3) Carry-over is decision-level, not field-level. If the user says 'pace the middle faster', that may mean: shift some cuts later, drop a breather segment, change a zoom from SmoothPush to SnapReframe. Each of those is a deliberate consequence of the direction — appropriate. What would be WRONG: also changing the caption style, or swapping every transition, because those weren't asked for. Stay disciplined.
+
+4) The full editorial vocabulary from the rules above still applies. Components you ADD must follow the same placement rules (zoom-on-key-moments, MG grounding and anchor geometry, etc.); transitions and tight-cut overlays are owned by the dedicated seam pass and are not added here. You can't bypass the rules by citing the prior plan; the prior plan is a default, not a license.
+
+5) The video's transcript / signals / face data below are FRESH — the pipeline regenerated all of it from the source. Word indices in the prior plan reference the OLD kept-only space; translate them to the NEW kept-only space (you'll see the new kept-transcript below) by matching on word text + approximate timestamp, NOT by raw index. The prior plan exists to inform editorial intent, not to be index-merged verbatim.
+
+PRIOR EDIT PLAN (JSON):
+{"caption_style":"CleanCut","broll_clips":[{"keyword":"city skyline","start_word_index":0,"end_word_index":5}]}
+════════════════════════════════════════════════════════════════════

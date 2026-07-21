@@ -6977,6 +6977,42 @@ def _gate_behavior():
     assert len(_m3["black"]) == 1, "ShutterFlash must mask black (false-trip class otherwise)"
 
 
+# ─── PRESERVATION HARNESS (Brick 1 — general-editor zero-regression net) ─────
+# These gates freeze TODAY's live behavior at the four seams the general-editor
+# build touches. They must stay GREEN through Step 0/1 — any byte-drift or lost
+# inertness on the talking-head / Lumen path fails the deploy. Goldens live in
+# preservation_golden/ (recapture is a deliberate, reviewed act, never automatic).
+print("\n[preservation] general-editor zero-regression gates")
+
+
+@check("PRESERVATION lock1: _build_post_cuts_prompt byte-identical for TH+Lumen fixtures (67KB-prompt refactor tripwire)")
+def _preservation_lock1():
+    import preservation_harness as ph
+    ok, fails = ph.verify_lock1()
+    assert ok, "prompt byte-drift on the live path: " + " | ".join(fails)[:500]
+
+
+@check("PRESERVATION lock2: today-plan round-trips PromptlyRenderInput under extra=forbid (new []/None fields inert)")
+def _preservation_lock2():
+    import preservation_harness as ph
+    ok, fails = ph.verify_lock2()
+    assert ok, "render-input additive-inertness broken: " + " | ".join(fails)[:500]
+
+
+@check("PRESERVATION lock3: _route_guidance resolves TALKING_HEAD + Lumen to {TALKING_HEAD} (router can't touch the live path)")
+def _preservation_lock3():
+    import preservation_harness as ph
+    ok, fails = ph.verify_lock3()
+    assert ok, "router inertness broken: " + " | ".join(fails)[:500]
+
+
+@check("PRESERVATION lock4: N=1 anchor walker (_translate_post_cut_anchors_to_src) byte-identical (timeline-currency tripwire)")
+def _preservation_lock4():
+    import preservation_harness as ph
+    ok, fails = ph.verify_lock4()
+    assert ok, "N=1 anchor math drift: " + " | ".join(fails)[:500]
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
