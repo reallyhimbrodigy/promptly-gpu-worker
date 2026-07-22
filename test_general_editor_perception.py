@@ -14,25 +14,47 @@ import general_editor as ge
 
 
 def test_beat_grid_gated_on_has_audio():
-    # no-audio job pays nothing: returns [] without touching aubio
-    assert ge.compute_beat_grid("anything.wav", has_audio=False) == []
-    # has_audio but no path -> []
-    assert ge.compute_beat_grid(None, has_audio=True) == []
+    # no-audio job pays nothing: returns ([], 0.0) without touching aubio
+    assert ge.compute_beat_grid("anything.wav", has_audio=False) == ([], 0.0)
+    # has_audio but no path -> ([], 0.0)
+    assert ge.compute_beat_grid(None, has_audio=True) == ([], 0.0)
 
 
-def test_beat_grid_uses_aubio_when_present(monkeypatch=None):
-    # stub the isolated aubio call; compute_beat_grid must pass through
+def test_beat_grid_uses_aubio_when_present():
+    # stub the isolated aubio call; compute_beat_grid passes through (beats, conf)
     _orig = ge._aubio_beats
     try:
-        ge._aubio_beats = lambda p: [0.5, 1.0, 1.5, 2.0]
-        assert ge.compute_beat_grid("song.wav", has_audio=True) == [0.5, 1.0, 1.5, 2.0]
+        ge._aubio_beats = lambda p: ([0.5, 1.0, 1.5, 2.0], 0.42)
+        assert ge.compute_beat_grid("song.wav", has_audio=True) == ([0.5, 1.0, 1.5, 2.0], 0.42)
     finally:
         ge._aubio_beats = _orig
 
 
 def test_aubio_beats_failsafe_without_aubio():
-    # aubio is Modal-image-only; locally the import fails -> [] (never raises)
-    assert ge._aubio_beats("nonexistent.wav") == []
+    # aubio is Modal-image-only; locally the import fails -> ([], 0.0) (never raises)
+    assert ge._aubio_beats("nonexistent.wav") == ([], 0.0)
+
+
+def test_router_gates_on_tempo_confidence_not_beatgrid():
+    # aubio.tempo returns a beat grid on ANY audio, so beat_grid-non-empty is not a
+    # music detector — the router must gate on confidence. With the flag ON:
+    import os
+    _saved = os.environ.get("PROMPTLY_HYPE_MODE")
+    os.environ["PROMPTLY_HYPE_MODE"] = "1"
+    try:
+        # music: high confidence -> HYPE_MUSIC
+        music = ge.PerceptionResult(has_speech=False, has_audio=True,
+                                    beat_grid=[0.5, 1.0], beat_confidence=0.42)
+        assert ge._route_guidance(music) == {"HYPE_MUSIC"}
+        # ambient/silence: aubio still returns a beat grid, but LOW confidence -> NOT hype
+        ambient = ge.PerceptionResult(has_speech=False, has_audio=True,
+                                      beat_grid=[0.4, 0.9, 1.4], beat_confidence=0.06)
+        assert ge._route_guidance(ambient) == {"TALKING_HEAD"}
+    finally:
+        if _saved is None:
+            os.environ.pop("PROMPTLY_HYPE_MODE", None)
+        else:
+            os.environ["PROMPTLY_HYPE_MODE"] = _saved
 
 
 def test_perception_carries_new_fields_and_defaults_inert():

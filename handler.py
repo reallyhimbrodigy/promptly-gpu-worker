@@ -29219,7 +29219,7 @@ def handler(job):
             # beat_grid — net-new aubio detection on the USER'S OWN audio, GATED on
             # has_audio (no-audio jobs skip it entirely). Detection only; the app
             # never adds a track. Fail-safe: any error (incl. aubio absent) -> [].
-            _beat_grid = []
+            _beat_grid, _beat_conf = [], 0.0
             if _has_audio:
                 try:
                     _beat_wav = os.path.join(work_dir, "_beat_probe.wav")
@@ -29227,11 +29227,11 @@ def handler(job):
                         ["ffmpeg", "-y", "-v", "error", "-i", source_path,
                          "-vn", "-ac", "1", "-ar", "44100", _beat_wav],
                         capture_output=True, timeout=60)
-                    _beat_grid = _ge.compute_beat_grid(
+                    _beat_grid, _beat_conf = _ge.compute_beat_grid(
                         _beat_wav if (_bp.returncode == 0 and os.path.exists(_beat_wav)) else None,
                         True)
                 except Exception:
-                    _beat_grid = []
+                    _beat_grid, _beat_conf = [], 0.0
             _perception = _ge.build_perception(
                 has_speech=len(_dg_words) > 0,
                 has_audio=_has_audio,
@@ -29240,6 +29240,7 @@ def handler(job):
                 scenes=list(source_shot_changes or []),
                 content_class="talking_head" if len(_dg_words) > 0 else "unknown",
                 beat_grid=_beat_grid,
+                beat_confidence=_beat_conf,
                 motion_curve=list(_shake_cache.get("curve") or []),  # REUSE shake array
             )
             if isinstance(edit_plan, dict):

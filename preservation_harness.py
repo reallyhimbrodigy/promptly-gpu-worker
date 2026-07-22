@@ -214,8 +214,9 @@ def _lock3_perceptions():
     import general_editor as ge
     th = ge.PerceptionResult(content_class="talking_head", has_speech=True,
                              has_audio=True, faces=True, loudness={"rms_db": -18.0})
-    music = ge.PerceptionResult(content_class="music", has_speech=False,
-                                has_audio=True, faces=False, beat_grid=[0.5, 1.0, 1.5])
+    # confident rhythmic music: high tempo confidence (the detector signal)
+    music = ge.PerceptionResult(content_class="music", has_speech=False, has_audio=True,
+                                faces=False, beat_grid=[0.5, 1.0, 1.5], beat_confidence=0.42)
     return th, music
 
 

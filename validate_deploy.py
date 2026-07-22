@@ -7050,7 +7050,8 @@ def _hype_router_dark_default():
     import os as _os, general_editor as _ge
     _saved = _os.environ.pop("PROMPTLY_HYPE_MODE", None)
     try:
-        _music = _ge.PerceptionResult(has_speech=False, has_audio=True, beat_grid=[0.5, 1.0, 1.5])
+        _music = _ge.PerceptionResult(has_speech=False, has_audio=True,
+                                      beat_grid=[0.5, 1.0, 1.5], beat_confidence=0.42)
         got = _ge._route_guidance(_music)
         assert got == {"TALKING_HEAD"}, f"HYPE not dark by default: no-speech routed to {got}"
     finally:
