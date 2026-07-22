@@ -2175,3 +2175,102 @@ def cert_run():
             audio_map[lang] = base64.b64encode(fh.read()).decode()
     call = cert_run_all.spawn(audio_map)
     print(f"[cert_run] spawned cert_run_all({list(audio_map)}) → {call.object_id}; poll S3 {_CERT_PREFIX}/_summary.json")
+
+
+# ── Forced-scene E2E proof for the cost-aware overlay-chunk render budget ─────
+# (scene-timeout fix 4e4aec6). Ephemeral: `modal run modal_app.py::scene_timeout_proof`
+# — no deploy, touches nothing live. Renders a scene-BEARING PromptlyOverlay long
+# enough that the render exceeds the OLD flat 300s budget (a REAL reproduction —
+# the verdict is judged from the ACTUAL measured render time, not an estimate),
+# confirms it completes under the new scaled budget, and renders a plain
+# scene-free overlay at the unchanged 300s.
+@app.function(cpu=64, memory=131072, region="us", timeout=1800)
+def cert_scene_timeout() -> dict:
+    import subprocess, os, json, time, tempfile
+    PUB = "/remotion/bundle/public"
+    os.makedirs(PUB, exist_ok=True)
+    still = os.path.join(PUB, "placeholder_scene.png")
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                    "-i", "color=c=0x2a2a4e:s=900x900:d=1", "-frames:v", "1", still], check=True)
+
+    def _input(n, with_scene):
+        scene = {
+            "fromFrame": 0, "durationInFrames": n,
+            "background": {"kind": "gradient", "colors": ["#1a1a2e", "#0f3460"]},
+            "subject": {"imageUrl": "placeholder_scene.png",
+                        "generationPrompt": "placeholder proof still", "anchor": "center", "scale": 1.0},
+            "textLayers": [{"content": "SCENE TIMEOUT PROOF", "anchor": "upper_third_safe"},
+                           {"content": "cost aware budget", "anchor": "lower_third_safe"}],
+            "motion": {"entrance": "rise", "easing": "spring", "motionBlur": True},
+        }
+        return {
+            "sourceUrl": "placeholder_scene.png", "fps": 30, "width": 1080, "height": 1920,
+            "totalDurationInFrames": n,
+            "clips": [{"id": "c0", "startFromFrames": 0, "playbackRate": 1.0, "durationInFrames": n}],
+            "transitions": [], "broll": [], "textOverlays": [], "motionGraphics": [],
+            "generatedScenes": [scene] if with_scene else [],
+            "caption": None, "tightCutOverlays": [], "outro": None,
+        }
+
+    def _render(n, with_scene, timeout):
+        tag = "scene" if with_scene else "plain"
+        inp = os.path.join(tempfile.gettempdir(), f"in_{tag}_{n}.json")
+        out = os.path.join(tempfile.gettempdir(), f"out_{tag}_{n}.mov")
+        with open(inp, "w") as fh:
+            json.dump(_input(n, with_scene), fh)
+        cmd = ["node", "/remotion/render-full.mjs", "--input", inp, "--output", out,
+               "--public-dir", PUB, "--composition", "PromptlyOverlay", "--gl", "swangle",
+               "--frame-range", f"0,{n - 1}", "--composition-start", "0", "--concurrency", "8"]
+        t0 = time.time()
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+            el = time.time() - t0
+            ok = r.returncode == 0 and os.path.exists(out) and os.path.getsize(out) > 1000
+            return {"frames": n, "elapsed_s": round(el, 1), "completed": ok, "rc": r.returncode,
+                    "out_mb": round(os.path.getsize(out) / 1e6, 2) if os.path.exists(out) else 0,
+                    "err": "" if ok else (r.stderr or "")[-600:]}
+        except subprocess.TimeoutExpired:
+            return {"frames": n, "elapsed_s": round(time.time() - t0, 1), "completed": False,
+                    "rc": "TIMEOUT", "err": f"TIMED OUT at {timeout}s (budget too small)"}
+
+    # 1. CALIBRATION — per-scene-frame cost (180 frames dilutes Chrome startup)
+    cal = _render(180, True, 900)
+    per_frame = (cal["elapsed_s"] / 180.0) if cal["completed"] else None
+
+    # 2. SIZE the span for a ~450s render — comfortably above the old 300s so the
+    #    reproduction is real even if calibration slightly over/under-estimates.
+    N = int(450.0 / per_frame) if (per_frame and per_frame > 0) else 900
+    _new_budget = int(min(600, 300 + N * (6 - 1) * 0.4))   # the fix's computed budget
+
+    # 3. FULL scene render under the NEW budget; 4. PLAIN at the unchanged 300s
+    scene = _render(N, True, _new_budget + 30)
+    plain = _render(N, False, 300)
+
+    return {"calibration": cal, "per_scene_frame_s": round(per_frame, 3) if per_frame else None,
+            "N_scene_frames": N, "old_flat_budget_s": 300, "new_scene_chunk_budget_s": _new_budget,
+            "scene_render": scene, "plain_render": plain}
+
+
+@app.local_entrypoint()
+def scene_timeout_proof():
+    r = cert_scene_timeout.remote()
+    sc, pl, cal = r["scene_render"], r["plain_render"], r["calibration"]
+    print("\n============ FORCED-SCENE E2E PROOF (scene-timeout fix) ============")
+    if not cal["completed"]:
+        print(f"CALIBRATION FAILED — setup broken, cannot proof. err={cal.get('err','')[:300]}")
+        return
+    print(f"calibration: 180 scene frames in {cal['elapsed_s']}s -> {r['per_scene_frame_s']}s/scene-frame (CameraMotionBlur samples=6)")
+    print(f"forced span: N={r['N_scene_frames']} scene frames  |  old flat budget=300s  |  new scaled budget={r['new_scene_chunk_budget_s']}s")
+    repro = sc["elapsed_s"] > 300
+    print(f"\nSCENE render : {sc['frames']}f in {sc['elapsed_s']}s  completed={sc['completed']} ({sc['out_mb']}MB)  rc={sc['rc']}")
+    print(f"  REPRODUCTION: {sc['elapsed_s']}s {'>' if repro else '<='} 300s -> "
+          + ("REAL (old flat-300 budget WOULD have timed out and stripped the scene)" if repro
+             else "HOLLOW — render too cheap; NOT a valid reproduction, need a bigger span"))
+    print(f"  new budget {r['new_scene_chunk_budget_s']}s -> {'ACCOMMODATES: scene chunk completes' if sc['completed'] else 'SCENE FAILED: '+sc.get('err','')[:200]}")
+    plain_ok = pl["completed"] and pl["elapsed_s"] < 300
+    print(f"\nPLAIN render : {pl['frames']}f in {pl['elapsed_s']}s  completed={pl['completed']} at unchanged 300s budget -> "
+          + ("unaffected" if plain_ok else "CHECK: "+pl.get('err','')[:200]))
+    proven = repro and sc["completed"] and plain_ok
+    print(f"\n>>> E2E PROVEN: {'YES' if proven else 'NO'}  (repro={repro}, scene_completed={sc['completed']}, plain_unaffected={plain_ok})")
+    if not repro:
+        print("    verdict: NOT proven — the forced span didn't exceed 300s. Re-run with a larger N before claiming any proof.")
