@@ -6308,6 +6308,28 @@ already follow) and return when the face leads again."""
     return system_instruction, user_content
 
 
+def assemble_editorial_prompt(selected_blocks, **kwargs):
+    """Compose (system_instruction, user_content) from selected guidance blocks.
+
+    The general-editor composition seam (Step 0). Step 0 has exactly ONE block —
+    TALKING_HEAD — which IS today's `_build_post_cuts_prompt` VERBATIM, so a
+    pure-speech job is BYTE-IDENTICAL to today (same Gemini implicit-cache key,
+    proven by the golden-diff gate). CORE + non-speech blocks (MUSIC, ...) are
+    authored SEPARATELY in Step 1+ and never touch the talking-head path.
+
+    Blocks SELECT guidance; they never restrict the toolbox — every render
+    primitive stays available to Gemini regardless of which blocks load.
+    """
+    blocks = set(selected_blocks)
+    if blocks == {"TALKING_HEAD"}:
+        # VERBATIM lift: the whole monolith is the talking-head block. Do NOT
+        # re-partition or "clean up" — reordering bytes breaks the cache key.
+        return _build_post_cuts_prompt(**kwargs)
+    raise NotImplementedError(
+        f"guidance blocks {sorted(blocks)} arrive in Step 1 (music); "
+        f"Step 0 composes TALKING_HEAD only")
+
+
 def infer_has_burned_captions(edit_plan, analysis_data=None, log_prefix=None):
     has_burned_captions = bool(
         ((analysis_data or {}).get("frame_layout") or {})
@@ -10696,7 +10718,8 @@ def generate_edit_gemini(
     # Translate: every word_index in PostCutPlan back to source indices.
     # Merge: mechanical cuts result + translated PostCutPlan → edit_plan.
 
-    post_sys, post_user_base = _build_post_cuts_prompt(
+    post_sys, post_user_base = assemble_editorial_prompt(
+        {"TALKING_HEAD"},
         vibe=vibe,
         duration=duration,
         trend_context=trend_context,
@@ -29161,6 +29184,27 @@ def handler(job):
 
         _timings["normalize_transcribe_upload"] = time.time() - t
         _dg_words = transcript.get("words", [])
+        # ── PerceptionResult (general-editor Step 0) — content-agnostic signal
+        # summary computed for EVERY job. Fail-safe + UNREAD: nothing consumes it
+        # in Step 0 (the Step-1 router will). Music fields default empty; Step 1
+        # fills beat_grid (aubio on the USER'S OWN audio — detection only, never
+        # adds a track) + motion_curve. Stored as a JSON-safe _foo dict the
+        # persistence sanitizer already drops, so it cannot alter the live path.
+        try:
+            import general_editor as _ge
+            import dataclasses as _dc
+            _perception = _ge.build_perception(
+                has_speech=len(_dg_words) > 0,
+                has_audio=bool(source_loudness) or len(_dg_words) > 0,
+                faces=bool(_face_positions),
+                loudness=source_loudness if isinstance(source_loudness, dict) else {},
+                scenes=list(source_shot_changes or []),
+                content_class="talking_head" if len(_dg_words) > 0 else "unknown",
+            )
+            if isinstance(edit_plan, dict):
+                edit_plan["_perception"] = _dc.asdict(_perception)
+        except Exception as _perc_err:
+            print(f"[perception] build skipped (non-fatal): {_perc_err}", flush=True)
         if len(_dg_words) == 0 and mode != "render_only":
             # Talking-head editor requires spoken content. Silent/no-speech sources
             # produce no captions and no word-based cuts, so there's nothing to edit.

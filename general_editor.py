@@ -38,6 +38,62 @@ class PerceptionResult:
     faces: bool = False                                      # any face detected
 
 
+def build_perception(has_speech=False, has_audio=False, faces=False,
+                     loudness=None, scenes=None, content_class="unknown",
+                     has_music=False, beat_grid=None, motion_curve=None):
+    """Assemble a PerceptionResult from already-computed mega_pool signals.
+
+    Step 0: populates the signals the live pipeline already produces
+    (has_speech / has_audio / faces / loudness / scenes / content_class). The
+    music fields (has_music / beat_grid) and motion_curve default empty — they
+    are FILLED IN STEP 1 (aubio beat_grid on the USER'S OWN audio; the shake
+    probe's per-window array). Nothing reads this result in Step 0 → inert.
+
+    NOTE: beat_grid detects the beat in the user's uploaded audio (to cut to it).
+    It NEVER implies adding music — the app supplies no tracks, ever.
+    """
+    return PerceptionResult(
+        content_class=content_class,
+        has_speech=bool(has_speech),
+        has_music=bool(has_music),
+        has_audio=bool(has_audio),
+        beat_grid=list(beat_grid or []),
+        motion_curve=list(motion_curve or []),
+        scenes=list(scenes or []),
+        loudness=dict(loudness or {}),
+        faces=bool(faces),
+    )
+
+
+# ── Timeline currency (Step 0 contract; N≥2 assembly built in Step 4) ─────────
+# The universal anchor is the OUTPUT-TIMELINE-FRAME. A Timeline is an ordered
+# list of clips, each a window {source_index, in_frame, out_frame, playback_rate}
+# on some source. Single-clip is simply N=1.
+#
+# MANDATORY INVARIANT (Step 0): the N=1 case routes through the EXACT current
+# projection path (handler._pw_by_idx / _translate_post_cut_anchors_to_src) —
+# NOT a generalized recompute — until the general path is proven frame-identical
+# against a talking-head golden render. word_index is the N=1 projection, not the
+# universal currency. This contract exists so Step 4 has a shape to fill; it does
+# NOT reroute today's rendering.
+@dataclass
+class TimelineClip:
+    source_index: int          # which source (N=1 → always 0)
+    in_frame: int              # in-point on that source
+    out_frame: int             # out-point on that source
+    playback_rate: float = 1.0
+
+
+@dataclass
+class Timeline:
+    clips: List["TimelineClip"] = field(default_factory=list)
+
+    @property
+    def is_single_source(self) -> bool:
+        """N=1 (the only case that renders today) — must use the current path."""
+        return len({c.source_index for c in self.clips}) <= 1
+
+
 def _route_guidance(perception: PerceptionResult, user_request: Optional[Dict] = None):
     """Select which guidance blocks load. Returns a set of block names.
 

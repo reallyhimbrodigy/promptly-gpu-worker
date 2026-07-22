@@ -7013,6 +7013,20 @@ def _preservation_lock4():
     assert ok, "N=1 anchor math drift: " + " | ".join(fails)[:500]
 
 
+@check("PRESERVATION lock5: assemble_editorial_prompt({TALKING_HEAD}) == golden for TH+Lumen (Step-0 dispatch byte-identical)")
+def _preservation_lock5():
+    import preservation_harness as ph
+    ok, fails = ph.verify_lock5()
+    assert ok, "assemble dispatch seam drift: " + " | ".join(fails)[:500]
+
+
+@check("PRESERVATION lock6: PerceptionResult new fields inert-default + JSON-safe; N=1 Timeline single-source (Step-0 contract)")
+def _preservation_lock6():
+    import preservation_harness as ph
+    ok, fails = ph.verify_lock6()
+    assert ok, "perception/timeline contract broken: " + " | ".join(fails)[:500]
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

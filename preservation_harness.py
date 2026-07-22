@@ -285,11 +285,57 @@ def verify_lock4():
     return (len(failures) == 0, failures)
 
 
+# ══ LOCK 5 — assemble() dispatch seam byte-identity (Step 0) ═════════════════
+# assemble_editorial_prompt({TALKING_HEAD}, **kwargs) must reproduce the frozen
+# _build_post_cuts_prompt golden EXACTLY — proves the refactored dispatch is
+# byte-identical for pure-speech (same Gemini cache key).
+
+def verify_lock5():
+    import handler
+    with open(os.path.join(GOLDEN_DIR, "lock1_manifest.json")) as f:
+        manifest = json.load(f)
+    failures = []
+    for name, env, kwargs in lock1_fixtures():
+        if name not in manifest:
+            continue
+        sysp, usrp = _with_env(env, lambda k=kwargs: handler.assemble_editorial_prompt({"TALKING_HEAD"}, **k))
+        for part, cur in (("system", sysp), ("user", usrp)):
+            if _sha(cur) != manifest[name][f"{part}_sha"]:
+                failures.append(f"{name}.{part}: assemble seam DRIFT vs golden (dispatch not byte-identical)")
+    return (len(failures) == 0, failures)
+
+
+# ══ LOCK 6 — perception + timeline contract sanity / new-field inertness ══════
+
+def verify_lock6():
+    import general_editor as ge
+    import dataclasses, json as _j
+    failures = []
+    p = ge.build_perception(has_speech=True, has_audio=True, faces=True,
+                            loudness={"rms_db": -18.0}, scenes=[1.0, 2.0], content_class="talking_head")
+    d = dataclasses.asdict(p)
+    try:
+        _j.dumps(d)   # must be JSON-safe — it is stored on edit_plan
+    except Exception as e:
+        failures.append(f"PerceptionResult asdict not JSON-safe: {e}")
+    for k, exp in (("has_music", False), ("beat_grid", []), ("motion_curve", [])):
+        if d.get(k) != exp:
+            failures.append(f"perception new field {k!r} not inert-default (got {d.get(k)!r})")
+    if not (d.get("has_speech") and d.get("content_class") == "talking_head"):
+        failures.append("perception did not carry today's speech signals")
+    tl = ge.Timeline(clips=[ge.TimelineClip(source_index=0, in_frame=0, out_frame=120)])
+    if not tl.is_single_source:
+        failures.append("N=1 Timeline not recognized as single-source (would divert N=1 off the current path)")
+    return (len(failures) == 0, failures)
+
+
 _LOCKS = [
     ("lock1_prompt_golden_diff", verify_lock1),
     ("lock2_additive_inert_vocab", verify_lock2),
     ("lock3_router_inertness", verify_lock3),
     ("lock4_n1_anchor_identity", verify_lock4),
+    ("lock5_assemble_seam_identity", verify_lock5),
+    ("lock6_perception_timeline_contract", verify_lock6),
 ]
 
 
