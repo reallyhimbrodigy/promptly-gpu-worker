@@ -23248,9 +23248,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # produced — deterministic output, no driver dependencies.
     _gl_mode = "swangle"
 
-    def _run_remotion(label, cmd):
+    def _run_remotion(label, cmd, timeout=300):
         _t0 = time.time()
-        _r = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        _r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         _elapsed = time.time() - _t0
         if _r.returncode != 0:
             # Print the full stdout + stderr so the failure mode is debuggable
@@ -23296,6 +23296,40 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _PER_CHUNK_CONCURRENCY = 8  # 4 chunks × 8 tabs = 32 tabs across 64 vCPUs
     _overlay_ranges = _split_frames(int(total_output_frames), _OVERLAY_CHUNK_COUNT)
     _overlay_chunked = len(_overlay_ranges) > 1
+
+    # ── Cost-aware overlay-chunk render budget (Lumen scene-timeout fix) ──────
+    # A generated-scene frame renders through CameraMotionBlur samples=6 → ~6× a
+    # plain overlay frame, so a scene-bearing chunk blows the flat 300s subprocess
+    # budget and gets STRIPPED at render (the open defect). Scale each chunk's
+    # timeout by how many scene frames fall in its range; scene-free chunks keep
+    # the unchanged 300s. Preferred over a blanket raise (wasteful on plain chunks)
+    # or cutting samples (kills the smoothness the scene exists for).
+    _SCENE_FRAME_MULT = 6             # matches CameraMotionBlur samples=6
+    _PLAIN_CHUNK_TIMEOUT = 300        # unchanged for scene-free chunks
+    _SEC_PER_SCENE_FRAME_EXTRA = 0.4  # per extra sample-frame the 6x multiplier adds
+    _OVERLAY_TIMEOUT_CAP = 600        # ceiling — render still fits the 900s job budget
+    _scene_spans = [
+        (int(_s.get("fromFrame") or 0),
+         int(_s.get("fromFrame") or 0) + int(_s.get("durationInFrames") or 0))
+        for _s in (_gs_out or []) if isinstance(_s, dict)
+    ]
+
+    def _scene_frames_in(_fs, _fe):
+        # frames in the INCLUSIVE chunk range [_fs, _fe] that fall in a scene span
+        _n = 0
+        for _a, _b in _scene_spans:
+            _lo, _hi = max(int(_fs), _a), min(int(_fe) + 1, _b)
+            if _hi > _lo:
+                _n += _hi - _lo
+        return _n
+
+    def _overlay_chunk_timeout(_fs, _fe):
+        _sf = _scene_frames_in(_fs, _fe)
+        if _sf <= 0:
+            return _PLAIN_CHUNK_TIMEOUT
+        _extra = _sf * (_SCENE_FRAME_MULT - 1) * _SEC_PER_SCENE_FRAME_EXTRA
+        return int(min(_OVERLAY_TIMEOUT_CAP, _PLAIN_CHUNK_TIMEOUT + _extra))
+
     _overlay_chunk_paths: list = []
     overlay_cmds: list = []
     if _overlay_chunked:
@@ -23328,6 +23362,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "--gl", _gl_mode,
             ],
         ))
+
+    # Per-chunk render budgets, aligned 1:1 with overlay_cmds (scene-free -> 300s).
+    if _overlay_chunked:
+        _overlay_timeouts = [_overlay_chunk_timeout(_fs, _fe) for (_fs, _fe) in _overlay_ranges]
+    else:
+        _overlay_timeouts = [_overlay_chunk_timeout(0, max(0, int(total_output_frames) - 1))]
+    if any(_t > _PLAIN_CHUNK_TIMEOUT for _t in _overlay_timeouts):
+        print(f"[render] cost-aware overlay budgets (scenes present): {_overlay_timeouts}s "
+              f"(vs flat {_PLAIN_CHUNK_TIMEOUT}s)", flush=True)
 
     # ── Micro-segments chunk planning ──────────────────────────────────────
     # PromptlyMicroSegments was the last serial bottleneck. Single-process
@@ -23607,8 +23650,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         max_workers=max(1, len(overlay_cmds) + len(micro_cmds) + 1),
     )
     overlay_futures = [
-        _render_pool.submit(_run_remotion, _lbl, _cmd)
-        for _lbl, _cmd in overlay_cmds
+        _render_pool.submit(_run_remotion, _lbl, _cmd, _to)
+        for (_lbl, _cmd), _to in zip(overlay_cmds, _overlay_timeouts)
     ]
     # micro_futures: list of (label, future) tuples. For chunked path,
     # one future per chunk; chunks render in parallel and write to
@@ -23680,7 +23723,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         def _composite_chain(K):
             _t_chain = time.time()
             # Block on this chunk's overlay before starting composite.
-            overlay_futures[K].result(timeout=320)
+            overlay_futures[K].result(timeout=_overlay_timeouts[K] + 30)
             _ov_path = _overlay_chunk_paths[K]
             if not os.path.exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
                 raise RuntimeError(
