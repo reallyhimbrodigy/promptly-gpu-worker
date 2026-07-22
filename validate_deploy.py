@@ -7027,6 +7027,37 @@ def _preservation_lock6():
     assert ok, "perception/timeline contract broken: " + " | ".join(fails)[:500]
 
 
+@check("PERCEPTION Step-1 machinery: beat_grid gated+fail-safe, motion_curve reuse, shake scalar contract intact (unit tests)")
+def _perception_machinery_unit_tests():
+    import test_general_editor_perception as _t
+    tests = [v for k, v in vars(_t).items() if k.startswith("test_") and callable(v)]
+    assert tests, "perception unit tests not found"
+    for t in tests:
+        t()  # raises AssertionError on failure
+
+
+@check("HYPE editorial half: projection schema-valid + fail-open, prompt beat-anchored + never-adds-music, assemble routes (unit tests)")
+def _hype_editor_unit_tests():
+    import test_hype_editor as _t
+    tests = [v for k, v in vars(_t).items() if k.startswith("test_") and callable(v)]
+    assert tests, "hype-editor unit tests not found"
+    for t in tests:
+        t()  # raises AssertionError on failure
+
+
+@check("HYPE router DARK by default: PROMPTLY_HYPE_MODE unset -> no-speech clip routes {TALKING_HEAD} (live path byte-identical)")
+def _hype_router_dark_default():
+    import os as _os, general_editor as _ge
+    _saved = _os.environ.pop("PROMPTLY_HYPE_MODE", None)
+    try:
+        _music = _ge.PerceptionResult(has_speech=False, has_audio=True, beat_grid=[0.5, 1.0, 1.5])
+        got = _ge._route_guidance(_music)
+        assert got == {"TALKING_HEAD"}, f"HYPE not dark by default: no-speech routed to {got}"
+    finally:
+        if _saved is not None:
+            _os.environ["PROMPTLY_HYPE_MODE"] = _saved
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

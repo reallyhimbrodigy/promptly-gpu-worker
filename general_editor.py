@@ -10,12 +10,22 @@ never reach a changed guidance block set.
 The router selects GUIDANCE BLOCKS; it never restricts the toolbox. Every render
 primitive stays available to Gemini regardless of which blocks load.
 """
+import os
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional
 
 # Guidance block names (a block is a body of prompt guidance, not a tool gate).
 TALKING_HEAD = "TALKING_HEAD"
 MUSIC = "MUSIC"
+HYPE_MUSIC = "HYPE_MUSIC"   # beat-synced hype/montage on the user's OWN audio
+
+
+def _hype_mode_enabled():
+    """DARK by default. The router activates HYPE_MUSIC ONLY when this flag is on,
+    so with it off the live path is byte-identical (router always {TALKING_HEAD}).
+    The flip to on is GATED on Zac's quality sign-off after the real-clip loop.
+    Rollback = unset the env."""
+    return os.environ.get("PROMPTLY_HYPE_MODE", "").strip().lower() not in ("", "0", "false", "off", "no")
 
 
 @dataclass
@@ -36,6 +46,48 @@ class PerceptionResult:
     scenes: List[float] = field(default_factory=list)        # shot-change times (s) — reuses detect_shot_changes
     loudness: Dict = field(default_factory=dict)             # peak/rms/noise_floor dB
     faces: bool = False                                      # any face detected
+
+
+def _aubio_beats(wav_path):
+    """Beat grid (list of beat times in seconds) on an audio WAV via aubio.
+
+    DETECTION ONLY — finds the beat in the user's OWN audio so an edit can cut to
+    it. It NEVER adds, supplies, or mixes a track; the app ships no music.
+
+    Fail-safe: returns [] if aubio is unavailable (it is Modal-image-only — not
+    importable in local/CI) or on ANY error. Isolated so unit tests can stub it.
+    """
+    try:
+        import aubio
+    except Exception:
+        return []
+    try:
+        win_s, hop_s = 1024, 512
+        src = aubio.source(wav_path, 0, hop_s)
+        sr = src.samplerate
+        tempo = aubio.tempo("default", win_s, hop_s, sr)
+        beats = []
+        while True:
+            samples, read = src()
+            if tempo(samples):
+                beats.append(round(float(tempo.get_last_s()), 3))
+            if read < hop_s:
+                break
+        return beats
+    except Exception:
+        return []
+
+
+def compute_beat_grid(audio_path, has_audio):
+    """Gate + compute the beat grid on the user's own audio. Detection only.
+
+    GATED on has_audio: no-audio jobs return [] without touching aubio, so a
+    talking-head job pays ~nothing new. Fail-safe -> []. `audio_path` is a WAV the
+    caller extracted (handler owns I/O; this stays pure + unit-testable).
+    """
+    if not has_audio or not audio_path:
+        return []
+    return _aubio_beats(audio_path)
 
 
 def build_perception(has_speech=False, has_audio=False, faces=False,
@@ -99,17 +151,22 @@ def _route_guidance(perception: PerceptionResult, user_request: Optional[Dict] =
 
     CONSERVATIVE INVARIANT (locked by preservation_harness lock 3): a job with
     speech present ALWAYS resolves to exactly {TALKING_HEAD} — today's live path,
-    byte-for-byte. The non-speech (MUSIC) branch is reachable ONLY when there is
-    no speech, so a real talking-head — including premium/Lumen — can never reach
-    a changed block set. Step 1 fills in the MUSIC branch below; until then every
-    input routes to TALKING_HEAD (fully inert).
+    byte-for-byte. The HYPE_MUSIC branch is reachable ONLY when (a) there is NO
+    speech, AND (b) the DARK flag PROMPTLY_HYPE_MODE is on. So a real talking-head
+    — including premium/Lumen — can NEVER reach a changed block set, and with the
+    flag off (production default) NOTHING routes to HYPE_MUSIC: byte-identical.
+
+    HYPE_MUSIC beat-syncs to the user's OWN uploaded audio; it never adds a track.
     """
     p = perception
     # The live success condition. This branch MUST NOT change.
     if getattr(p, "has_speech", False):
         return {TALKING_HEAD}
-    # --- Step 1 will add here (only reachable when has_speech is False): ---
-    #   if p.has_audio and (p.beat_grid or _hype_hint(user_request)):
-    #       return {MUSIC}
-    # Until built, remain inert — no non-speech input changes behavior yet.
+    # Non-speech branch — DARK-flag-gated + conditioned. Only a genuinely
+    # speechless clip with audio and a detected beat, WITH the flag on, routes
+    # to hype. Flag off (default) or no audio/beat -> {TALKING_HEAD} (inert; the
+    # live NO_SPEECH reject then fires exactly as today).
+    if _hype_mode_enabled():
+        if getattr(p, "has_audio", False) and getattr(p, "beat_grid", None):
+            return {HYPE_MUSIC}
     return {TALKING_HEAD}

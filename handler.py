@@ -6325,9 +6325,20 @@ def assemble_editorial_prompt(selected_blocks, **kwargs):
         # VERBATIM lift: the whole monolith is the talking-head block. Do NOT
         # re-partition or "clean up" — reordering bytes breaks the cache key.
         return _build_post_cuts_prompt(**kwargs)
-    raise NotImplementedError(
-        f"guidance blocks {sorted(blocks)} arrive in Step 1 (music); "
-        f"Step 0 composes TALKING_HEAD only")
+    if blocks == {"HYPE_MUSIC"}:
+        # DARK editorial half — authored SEPARATELY (never sliced from the TH
+        # monolith). Reachable only when the router returns {HYPE_MUSIC}
+        # (PROMPTLY_HYPE_MODE on + no speech + beat). Beat-syncs to the user's
+        # own audio; never adds a track.
+        import hype_editor as _he
+        return _he.build_hype_prompt(
+            vibe=kwargs.get("vibe"),
+            duration=kwargs.get("duration") or 0.0,
+            beat_grid=kwargs.get("beat_grid") or [],
+            scenes=kwargs.get("scenes"),
+            motion_curve=kwargs.get("motion_curve"),
+        )
+    raise NotImplementedError(f"unknown guidance block set: {sorted(blocks)}")
 
 
 def infer_has_burned_captions(edit_plan, analysis_data=None, log_prefix=None):
@@ -18063,7 +18074,7 @@ def probe_cache_clear(file_path=None):
         _probe_cache.clear()
 
 
-def _probe_shake_intensity(file_path: str, sample_count: int = 12) -> float:
+def _probe_shake_intensity(file_path: str, sample_count: int = 12, curve_out=None) -> float:
     """Sample N frames at 240p and return the mean inter-frame translation
     magnitude in pixels (Lucas-Kanade sparse optical flow on a Shi-Tomasi
     feature grid, then median over good tracks per pair, mean over pairs).
@@ -18143,6 +18154,12 @@ def _probe_shake_intensity(file_path: str, sample_count: int = 12) -> float:
 
         if not magnitudes:
             return 0.0
+        # motion_curve (general-editor Step 1): expose the per-window optical-flow
+        # array via an optional out-param. The scalar RETURN is unchanged in every
+        # path, so the byte-identity-critical deshake caching is untouched — this
+        # only lets a caller KEEP the array the pipeline already computed.
+        if curve_out is not None:
+            curve_out.extend(magnitudes)
         return float(_np.mean(magnitudes))
     finally:
         cap.release()
@@ -27330,7 +27347,12 @@ def handler(job):
         def _do_shake_probe():
             with _shake_lock:
                 if "score" not in _shake_cache:
-                    _shake_cache["score"] = _probe_shake_intensity(_raw_source)
+                    # Keep the per-window optical-flow curve (motion_curve) alongside
+                    # the scalar. curve_out leaves the score byte-identical; the
+                    # deshake gate still reads the same value. UNREAD in Step 1.
+                    _curve = []
+                    _shake_cache["score"] = _probe_shake_intensity(_raw_source, curve_out=_curve)
+                    _shake_cache["curve"] = _curve
             return _shake_cache["score"]
 
         def _do_exposure_probe():
@@ -29193,13 +29215,32 @@ def handler(job):
         try:
             import general_editor as _ge
             import dataclasses as _dc
+            _has_audio = bool(source_loudness) or len(_dg_words) > 0
+            # beat_grid — net-new aubio detection on the USER'S OWN audio, GATED on
+            # has_audio (no-audio jobs skip it entirely). Detection only; the app
+            # never adds a track. Fail-safe: any error (incl. aubio absent) -> [].
+            _beat_grid = []
+            if _has_audio:
+                try:
+                    _beat_wav = os.path.join(work_dir, "_beat_probe.wav")
+                    _bp = subprocess.run(
+                        ["ffmpeg", "-y", "-v", "error", "-i", source_path,
+                         "-vn", "-ac", "1", "-ar", "44100", _beat_wav],
+                        capture_output=True, timeout=60)
+                    _beat_grid = _ge.compute_beat_grid(
+                        _beat_wav if (_bp.returncode == 0 and os.path.exists(_beat_wav)) else None,
+                        True)
+                except Exception:
+                    _beat_grid = []
             _perception = _ge.build_perception(
                 has_speech=len(_dg_words) > 0,
-                has_audio=bool(source_loudness) or len(_dg_words) > 0,
+                has_audio=_has_audio,
                 faces=bool(_face_positions),
                 loudness=source_loudness if isinstance(source_loudness, dict) else {},
                 scenes=list(source_shot_changes or []),
                 content_class="talking_head" if len(_dg_words) > 0 else "unknown",
+                beat_grid=_beat_grid,
+                motion_curve=list(_shake_cache.get("curve") or []),  # REUSE shake array
             )
             if isinstance(edit_plan, dict):
                 edit_plan["_perception"] = _dc.asdict(_perception)

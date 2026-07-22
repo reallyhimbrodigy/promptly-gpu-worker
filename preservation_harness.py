@@ -210,31 +210,55 @@ def verify_lock2():
 # exactly {"TALKING_HEAD"}. When Step 1 adds the MUSIC branch, this stays green,
 # proving a real talking-head can never reach a changed block set.
 
-def lock3_fixtures():
+def _lock3_perceptions():
     import general_editor as ge
     th = ge.PerceptionResult(content_class="talking_head", has_speech=True,
                              has_audio=True, faces=True, loudness={"rms_db": -18.0})
-    # Lumen = a premium REQUEST over talking-head perception (premium is a tier,
-    # not a perception attribute) — must still route to TALKING_HEAD.
-    lumen_req = {"premium": True}
-    # A no-speech music-ish perception (negative control): today, still inert.
-    music_neg = ge.PerceptionResult(content_class="music", has_speech=False,
-                                    has_audio=True, faces=False, beat_grid=[0.5, 1.0, 1.5])
-    return [
-        ("talking_head", th, None, {"TALKING_HEAD"}),
-        ("lumen_premium", th, lumen_req, {"TALKING_HEAD"}),
-        # negative control — asserts the current inert default (Step 1 flips this to {MUSIC})
-        ("music_no_speech_inert", music_neg, None, {"TALKING_HEAD"}),
-    ]
+    music = ge.PerceptionResult(content_class="music", has_speech=False,
+                                has_audio=True, faces=False, beat_grid=[0.5, 1.0, 1.5])
+    return th, music
+
+
+def _with_hype_flag(value, fn):
+    saved = os.environ.get("PROMPTLY_HYPE_MODE")
+    try:
+        if value is None:
+            os.environ.pop("PROMPTLY_HYPE_MODE", None)
+        else:
+            os.environ["PROMPTLY_HYPE_MODE"] = value
+        return fn()
+    finally:
+        if saved is None:
+            os.environ.pop("PROMPTLY_HYPE_MODE", None)
+        else:
+            os.environ["PROMPTLY_HYPE_MODE"] = saved
 
 
 def verify_lock3():
     import general_editor as ge
+    th, music = _lock3_perceptions()
     failures = []
-    for name, perception, req, expected in lock3_fixtures():
+
+    def _chk(label, perception, req, expected):
         got = ge._route_guidance(perception, req)
         if got != expected:
-            failures.append(f"{name}: _route_guidance returned {got}, expected {expected}")
+            failures.append(f"{label}: _route_guidance -> {got}, expected {expected}")
+
+    # (1) FLAG OFF = production default = fully INERT/DARK. A no-speech music clip
+    # routes to TALKING_HEAD (today's NO_SPEECH reject then fires) — byte-identical.
+    _with_hype_flag(None, lambda: (
+        _chk("flagoff/talking_head", th, None, {"TALKING_HEAD"}),
+        _chk("flagoff/lumen_premium", th, {"premium": True}, {"TALKING_HEAD"}),
+        _chk("flagoff/music_no_speech_INERT", music, None, {"TALKING_HEAD"}),
+    ))
+    # (2) FLAG ON: a real talking-head STILL routes to TALKING_HEAD (speech always
+    # wins) — the flag can never touch the live path. Only a no-speech+audio+beat
+    # clip activates HYPE_MUSIC.
+    _with_hype_flag("1", lambda: (
+        _chk("flagon/talking_head_UNTOUCHED", th, None, {"TALKING_HEAD"}),
+        _chk("flagon/lumen_UNTOUCHED", th, {"premium": True}, {"TALKING_HEAD"}),
+        _chk("flagon/music_no_speech_ACTIVATES", music, None, {"HYPE_MUSIC"}),
+    ))
     return (len(failures) == 0, failures)
 
 
