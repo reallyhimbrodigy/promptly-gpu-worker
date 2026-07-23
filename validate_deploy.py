@@ -5084,12 +5084,12 @@ def _spawn_refactor_phase3():
         "completion POST (with the call_id) missing"
     # run_job flag-gated OFF by default → deploy is inert until the flag flips
     assert 'os.environ.get("PROMPTLY_SPAWN_MODE") == "1"' in _m, "run_job must be flag-gated"
-    # In the promptly-lang-flags Modal Secret (value '0' — sync), read at runtime —
-    # NOT baked from the deploy shell, so a plain deploy can't silently revert it.
+    # In the promptly-lang-flags Modal Secret (value '1' — SPAWN dispatch; sync=0
+    # starves the ASGI event loop), read at runtime — NOT baked from the deploy shell.
     assert '"PROMPTLY_SPAWN_MODE": os.environ.get' not in _m, \
         "PROMPTLY_SPAWN_MODE must NOT be baked in modal_app .env() — it lives in the promptly-lang-flags secret"
     assert 'modal.Secret.from_name("promptly-lang-flags")' in _m, \
-        "the promptly-lang-flags secret (carrying PROMPTLY_SPAWN_MODE=0) must be attached app-wide"
+        "the promptly-lang-flags secret (carrying PROMPTLY_SPAWN_MODE=1) must be attached app-wide"
     assert "run_pipeline_bg.spawn(body)" in _m and '"spawned": True' in _m, "spawn branch missing"
     # the synchronous path stays for a no-redeploy rollback (unset the flag)
     assert 'self._handler({"input": body})' in _m, "sync fallback must remain for rollback"
@@ -5099,6 +5099,47 @@ def _spawn_refactor_phase3():
     assert '"edit_recipe": result_payload.get("edit_recipe")' in _h, "re-edit hydration missing"
     for _f in ("transcript", "analysis_data", "resolved_broll", "render_version", "change_summary"):
         assert f'"{_f}": result_payload.get("{_f}")' in _h, f"hydration field {_f} missing"
+
+
+@check("SECRET CANONICAL VALUES (values, not just mechanism): the promptly-lang-flags secret must carry the RIGHT values — SPAWN_MODE=1 (async spawn dispatch; sync=0 starves the ASGI loop), OUTCOME_GATE=shadow, LEVER3=1, EDIT_IN_LANGUAGE=1, SCRIPT_DENYLIST='', PLAN_CAPTURE=''. Reads the LIVE secret via an ephemeral Modal container (secret_flags_readback.py) and FAILS on any drift — so a future 'preserve the current value' sweep that bakes a regressed value (SPAWN_MODE=0) is caught HERE instead of shipping. The mechanism checks (flags not in .env(), secret attached) prove nothing can revert on a plain deploy; this proves the un-revertable value is the CORRECT one.")
+def _secret_canonical_values():
+    import subprocess as _sub, json as _json, os as _os
+    # The canonical live production values. Changing one is a real production
+    # decision — update it here AND in the secret together (never one alone).
+    CANON = {
+        "PROMPTLY_SPAWN_MODE": "1",       # async worker spawn — sync (0) starves ASGI
+        "PROMPTLY_OUTCOME_GATE": "shadow",  # salvage-schema gate ledgers only
+        "PROMPTLY_LEVER3": "1",           # degeneration-fix editorial prompt (live)
+        "PROMPTLY_EDIT_IN_LANGUAGE": "1",  # multilingual + in-language editorial ON
+        "PROMPTLY_SCRIPT_DENYLIST": "",   # graduated: no script denied
+        "PROMPTLY_PLAN_CAPTURE": "",      # plan-capture corpus hook inert
+    }
+    # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
+    # container that has it attached. secret_flags_readback.py does exactly that
+    # and prints one line: READBACK {json}. Absolute path so cwd doesn't matter.
+    _script = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                            "secret_flags_readback.py")
+    try:
+        _r = _sub.run(["modal", "run", _script],
+                      capture_output=True, text=True, timeout=300)
+    except _sub.TimeoutExpired:
+        assert False, ("could not verify promptly-lang-flags values — `modal run "
+                       "secret_flags_readback.py` timed out (>300s); the canonical-"
+                       "value guard could not run, so deploy is blocked.")
+    _out = (_r.stdout or "") + "\n" + (_r.stderr or "")
+    _line = next((l for l in _out.splitlines() if l.startswith("READBACK ")), None)
+    assert _line, ("could not read promptly-lang-flags secret values — no READBACK "
+                   "line from `modal run secret_flags_readback.py` (Modal unreachable/"
+                   f"unauthed?). Deploy blocked.\n--- output tail ---\n{_out[-800:]}")
+    _actual = _json.loads(_line[len("READBACK "):])
+    _bad = {k: {"got": _actual.get(k), "want": v}
+            for k, v in CANON.items() if _actual.get(k) != v}
+    assert not _bad, (
+        "promptly-lang-flags secret values DRIFTED from canonical: "
+        f"{_json.dumps(_bad)}. A 'preserve the current value' sweep set a wrong "
+        "value (SPAWN_MODE=0 re-opens the ASGI-starvation class). Fix: reset the "
+        "secret to canonical (modal secret create promptly-lang-flags --from-json "
+        "<canonical> --force), then redeploy.")
 
 
 @check("Reliability Phase 1: platform-shutdown handler kills render children + flushes ledger on SIGTERM with NO terminal write (retry-safe); installed from worker startup; PLATFORM_TIMEOUT class = retryable, rescue-denied, alerts (not designed-silent)")
