@@ -435,7 +435,7 @@ image = (
         #   PROMPTLY_LEVER3=1            degeneration-fix editorial prompt (A/B concluded, live)
         #   PROMPTLY_EDIT_IN_LANGUAGE=1  multilingual render + in-language editorial ON
         #   PROMPTLY_SCRIPT_DENYLIST=""  graduated: every font-backed script renders (Arabic → language=ar)
-        #   PROMPTLY_SPAWN_MODE=0        sync dispatch (spawn dispatch off — today's behavior)
+        #   PROMPTLY_SPAWN_MODE=1        spawn dispatch ON (async worker spawn — prevents ASGI starvation; MUST stay 1)
         #   PROMPTLY_OUTCOME_GATE=shadow salvage-schema gate ledgers only, changes nothing
         #   PROMPTLY_PLAN_CAPTURE=""     the plan-capture corpus hook is inert
         # Change any via `modal secret create promptly-lang-flags KEY=val … --force`.
@@ -547,7 +547,7 @@ secrets = [
     #   PROMPTLY_EDIT_IN_LANGUAGE=1   multilingual render + in-language editorial ON
     #   PROMPTLY_SCRIPT_DENYLIST=""   graduated: no script denied (Arabic → language=ar)
     #   PROMPTLY_LEVER3=1             degeneration-fix editorial prompt (live, not pending)
-    #   PROMPTLY_SPAWN_MODE=0         sync dispatch (spawn dispatch off)
+    #   PROMPTLY_SPAWN_MODE=1         spawn dispatch ON (async worker spawn — prevents ASGI starvation; MUST stay 1)
     #   PROMPTLY_OUTCOME_GATE=shadow  salvage-schema gate ledgers only, changes nothing
     #   PROMPTLY_PLAN_CAPTURE=""      plan-capture corpus hook inert
     # To change one: `modal secret create promptly-lang-flags KEY=val … --force`
