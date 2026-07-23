@@ -4760,7 +4760,7 @@ def _lever3_plan_capture():
         "PROMPTLY_PLAN_CAPTURE must be baked into the image env, default OFF"
 
 
-@check("LEVER 3 candidate (degeneration prompt-root fix): a flag-gated (PROMPTLY_LEVER3, baked OFF) anti-runaway block appended to the post-cuts system prompt reframes the why/why_emphasis/reason rationale fields as terse internal notes and names the repetition-loop as a malfunction to STOP; touches nothing rendered (whys never reach screen); deploy INERT until the A/B + Zac's pair gate the flip")
+@check("LEVER 3 candidate (degeneration prompt-root fix): a flag-gated (PROMPTLY_LEVER3=1, LIVE via the promptly-lang-flags secret) anti-runaway block appended to the post-cuts system prompt reframes the why/why_emphasis/reason rationale fields as terse internal notes and names the repetition-loop as a malfunction to STOP; touches nothing rendered (whys never reach screen); the A/B concluded — this is the live production prompt, not pending anyone's word")
 def _lever3_candidate():
     _h = open("handler.py").read()
     # flag-gated, default OFF → the live prompt is unchanged in production
@@ -4775,10 +4775,14 @@ def _lever3_candidate():
     _i_ret = _h.find("return system_instruction, user_content")
     assert _i_block != -1 and _i_ret != -1 and _i_block < _i_ret, \
         "the Lever-3 block must sit inside _build_post_cuts_prompt before its return"
-    # baked into the image env, default OFF
+    # LIVE via the promptly-lang-flags Modal Secret (PROMPTLY_LEVER3=1), read at
+    # runtime — NOT baked from the deploy shell, so a plain deploy can no longer
+    # revert it to off (the A/B concluded; this is the live production prompt).
     _m = open("modal_app.py").read()
-    assert '"PROMPTLY_LEVER3": os.environ.get("PROMPTLY_LEVER3", "")' in _m, \
-        "PROMPTLY_LEVER3 must be baked into the image env, default OFF"
+    assert '"PROMPTLY_LEVER3": os.environ.get' not in _m, \
+        "PROMPTLY_LEVER3 must NOT be baked in modal_app .env() — it lives in the promptly-lang-flags secret"
+    assert 'modal.Secret.from_name("promptly-lang-flags")' in _m, \
+        "the promptly-lang-flags secret (carrying PROMPTLY_LEVER3=1) must be attached app-wide"
 
 
 @check("LIVE SCOREBOARD (Lever-3 flip watches this): _measure_rationale_lengths runs on EVERY parseable editorial response (NOT flag-gated) and ALWAYS ledgers a lightweight `rationale_length` line (max/total why-chars, ballooned=max>500) — the degeneration-class incidence signal the daily bleed [REPORT] reads; the full per-field S3 breakdown stays flag-gated (PLAN_CAPTURE)")
@@ -4867,7 +4871,7 @@ def _multilingual_a22_rtl_direction():
     assert "captionDirection" in _fs, "FitSpecimen must mirror production direction"
 
 
-@check("MULTILINGUAL B (editorial-in-language, flag PROMPTLY_EDIT_IN_LANGUAGE baked OFF): OFF = the Latin-only coverage allowlist + English-authored chrome, production byte-identical. ON flips the coverage gate to the denylist model (every font-backed script renders) AND binds all Gemini-authored text to the source language. Captions stay verbatim Deepgram words either way. Behavioral: gate + prompt inert when off, both flip when on.")
+@check("MULTILINGUAL B (editorial-in-language, flag PROMPTLY_EDIT_IN_LANGUAGE=1 LIVE via the promptly-lang-flags secret): OFF = the Latin-only coverage allowlist + English-authored chrome; ON (the live state) flips the coverage gate to the denylist model (every font-backed script renders) AND binds all Gemini-authored text to the source language. Captions stay verbatim Deepgram words either way. Behavioral: gate + prompt inert when off, both flip when on.")
 def _multilingual_b_edit_in_language():
     import os as _os
     import handler
@@ -4926,10 +4930,14 @@ def _multilingual_b_edit_in_language():
     _h = open("handler.py").read()
     assert "if not _script_reaches_render(_script):" in _h, \
         "the coverage gate must route through _script_reaches_render"
-    # flag baked into the image env so the deploy shell can flip it
+    # LIVE via the promptly-lang-flags Modal Secret (PROMPTLY_EDIT_IN_LANGUAGE=1),
+    # read at runtime — NOT baked from the deploy shell, so a plain deploy keeps
+    # multilingual ON (a shell-baked default once Latin-only'd production).
     _m = open("modal_app.py").read()
-    assert '"PROMPTLY_EDIT_IN_LANGUAGE": os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE"' in _m, \
-        "PROMPTLY_EDIT_IN_LANGUAGE must be baked into the image env"
+    assert '"PROMPTLY_EDIT_IN_LANGUAGE": os.environ.get' not in _m, \
+        "PROMPTLY_EDIT_IN_LANGUAGE must NOT be baked in modal_app .env() — it lives in the promptly-lang-flags secret"
+    assert 'modal.Secret.from_name("promptly-lang-flags")' in _m, \
+        "the promptly-lang-flags secret (carrying PROMPTLY_EDIT_IN_LANGUAGE=1) must be attached app-wide"
 
 
 @check("MULTILINGUAL C (verification tiers): Tier-1 = the 9 certified languages (contact sheet proved every script incl. Cyrillic); Tier-2 = every other font-backed language, enabled+WATCHED. Every non-English render is language-tagged (lang/script/tier) via a language_coverage divergence so the daily report shows what renders and can flag a failing Tier-2 language. English/Latin skipped to keep the ledger signal.")
@@ -5042,8 +5050,10 @@ def _arabic_bridge():
         if _prev is None: _os2.environ.pop("PROMPTLY_SCRIPT_DENYLIST", None)
         else: _os2.environ["PROMPTLY_SCRIPT_DENYLIST"] = _prev
     _mo2 = open("modal_app.py").read()
-    assert '"PROMPTLY_SCRIPT_DENYLIST": os.environ.get("PROMPTLY_SCRIPT_DENYLIST"' in _mo2, \
-        "PROMPTLY_SCRIPT_DENYLIST must be baked into the image env (default Arabic)"
+    assert '"PROMPTLY_SCRIPT_DENYLIST": os.environ.get' not in _mo2, \
+        "PROMPTLY_SCRIPT_DENYLIST must NOT be baked in modal_app .env() — it lives in the promptly-lang-flags secret"
+    assert 'modal.Secret.from_name("promptly-lang-flags")' in _mo2, \
+        "the promptly-lang-flags secret (carrying PROMPTLY_SCRIPT_DENYLIST='' — graduated) must be attached app-wide"
     # graduated-path regression: the permanent battery must assert the ROUTE
     # yields native-Arabic-script words (a graduation once proven stays proven)
     assert '"graduated_expect": "Arabic"' in _mo2 and "routed_script" in _mo2, \

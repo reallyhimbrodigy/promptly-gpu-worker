@@ -440,22 +440,17 @@ image = (
         # (`PROMPTLY_PLAN_CAPTURE=1 ./deploy.sh`, or per-job) to persist the
         # finalized render inputs to the corpus bucket. Never affects the render.
         "PROMPTLY_PLAN_CAPTURE": os.environ.get("PROMPTLY_PLAN_CAPTURE", ""),
-        # Lever-3 candidate prompt flag (the degeneration prompt-root fix). Default
-        # "" (OFF) → the live editorial prompt, production unchanged. The A/B runs
-        # it in-process; the FLIP to enforce holds for Zac's word after his pair.
-        "PROMPTLY_LEVER3": os.environ.get("PROMPTLY_LEVER3", ""),
-        # Workstream B — multilingual enablement. Default "" (OFF) → Latin-only
-        # coverage gate + English-authored chrome (production unchanged). ON
-        # (`PROMPTLY_EDIT_IN_LANGUAGE=1 ./deploy.sh`) flips the coverage gate to
-        # the denylist model (every font-backed script renders; A1/A2 proved
-        # them) AND binds all Gemini-authored text to the source language. One
-        # flag so render-enablement and in-language editorial move together.
-        "PROMPTLY_EDIT_IN_LANGUAGE": os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE", ""),
-        # Script denylist — env-overridable so Arabic graduation is an env flip
-        # (`PROMPTLY_SCRIPT_DENYLIST='' ./deploy.sh`) with a one-line rollback,
-        # matching every other activation. Default "Arabic" (romanization) until
-        # the ar-route cert passes; "" graduates it (routes to language=ar).
-        "PROMPTLY_SCRIPT_DENYLIST": os.environ.get("PROMPTLY_SCRIPT_DENYLIST", "Arabic"),
+        # PROMPTLY_LEVER3, PROMPTLY_EDIT_IN_LANGUAGE, and PROMPTLY_SCRIPT_DENYLIST
+        # are NO LONGER baked here — they moved to the promptly-lang-flags Modal
+        # Secret (see secrets[] above), read at RUNTIME from the injected env, so a
+        # deploy that forgets to set them can no longer silently revert them (which
+        # happened once). Their LIVE production values — do NOT "restore" a default:
+        #   PROMPTLY_LEVER3=1            degeneration-fix editorial prompt is LIVE,
+        #                               not pending anyone's word (the A/B concluded).
+        #   PROMPTLY_EDIT_IN_LANGUAGE=1  multilingual render + in-language editorial ON.
+        #   PROMPTLY_SCRIPT_DENYLIST=""  graduated: every font-backed script renders,
+        #                               Arabic via the language=ar route.
+        # Change them via `modal secret create promptly-lang-flags …`, never in code.
         # ── Supabase schema overrides for the tier + concurrency gate ──
         # Multi-clip premium concurrency check (handler.py:check_concurrency_gate)
         # reads from these tables. The defaults assumed `user_profiles.user_id`
@@ -552,6 +547,20 @@ secrets = [
     # Gemini call through Vertex (scalable per-project quota) instead of the
     # single AI Studio key. Falls back to GEMINI_API_KEY when these are absent.
     modal.Secret.from_name("gemini-vertex"),
+    # promptly-lang-flags — PERSISTENT operational flags that must NOT revert on a
+    # deploy that forgets to set them. Moved here (2026-07-23) out of the image
+    # .env() block, which baked them from the DEPLOYER'S SHELL: a plain
+    # `./deploy.sh` silently reverted them to their code defaults (this actually
+    # happened — a deploy Latin-only'd multilingual + turned lever3 off for ~1h).
+    # As an app-level Secret they're injected into every container at runtime,
+    # sourced from Modal's store — independent of the deploy shell. Contents (the
+    # live, graduated production state):
+    #   PROMPTLY_EDIT_IN_LANGUAGE=1   multilingual render + in-language editorial ON
+    #   PROMPTLY_SCRIPT_DENYLIST=""   graduated: no script denied (Arabic → language=ar)
+    #   PROMPTLY_LEVER3=1             degeneration-fix editorial prompt (live, not pending)
+    # To change one: `modal secret create promptly-lang-flags KEY=val … --force`,
+    # then redeploy — never by editing code or the deploy shell.
+    modal.Secret.from_name("promptly-lang-flags"),
 ]
 
 # ── App ────────────────────────────────────────────────────────────────────────
