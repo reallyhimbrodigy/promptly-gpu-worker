@@ -25898,15 +25898,25 @@ def prewarm_handler(job):
             print(f"[prewarm] start download → {cache_key}/source.mp4", flush=True)
             _aws_s3_client.download_file(dl_bucket, dl_key, source_cache, Config=_S3_TRANSFER_CONFIG)
 
+        # word_count: explicit signal for the PRE-DISPATCH speech gate. 0 → the
+        # server rejects at the front door (NO_SPEECH) before burning a GPU
+        # dispatch; None → unknown (transcribe not run/failed) → fail-open, dispatch.
+        # This reads the SAME prewarm transcribe (no extra Deepgram call), and the
+        # worker still reuses the cached transcript (no double spend on success).
+        _prewarm_word_count = None
         if not transcript_hit and DeepgramClient is not None and os.path.exists(source_cache):
             print(f"[prewarm] start file-based transcribe (with FLAC prep) → {cache_key}/transcript.json", flush=True)
             try:
                 _tx_result = transcribe_audio(source_cache)
+                _prewarm_word_count = len((_tx_result or {}).get("words") or [])
                 if _tx_result is not None and _tx_result.get("words"):
                     with open(transcript_cache, "w") as f:
                         json.dump(_tx_result, f)
                     print(f"[prewarm] transcript cached ({len(_tx_result['words'])} words)", flush=True)
+                else:
+                    print(f"[prewarm] transcribe returned 0 words — pre-dispatch NO_SPEECH candidate", flush=True)
             except Exception as _tx_err:
+                _prewarm_word_count = None  # unknown → fail-open (dispatch, worker retries)
                 print(f"[prewarm] transcribe failed: {str(_tx_err)[:200]} (main job will retry)", flush=True)
 
         # Extract source audio to a wav alongside source.mp4. The render's
@@ -25991,6 +26001,10 @@ def prewarm_handler(job):
             "size_mb": round(size_mb, 1),
             "download_time": round(elapsed, 1),
             "transcript_cached": os.path.exists(transcript_cache),
+            # Pre-dispatch speech gate: 0 → reject NO_SPEECH before GPU dispatch;
+            # None → unknown, fail-open (dispatch). transcript_cached stays the
+            # positive cache-reuse signal (only word-bearing transcripts cache).
+            "word_count": _prewarm_word_count,
             "proxy_cached": os.path.exists(proxy_cache),
         }
     except Exception as e:
@@ -28626,6 +28640,25 @@ def handler(job):
         _mega_t0 = time.time()
         if future_edit is not None:
             edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+            # ── Lumen emission-funnel telemetry (INERT recording) ──────────────
+            # Capture what Gemini EMITTED before any downstream drop zeros it, so
+            # the premium funnel (routed → emitted → generated → shipped, and which
+            # stage stripped scenes) is queryable from the DB (result.lumen_funnel),
+            # not just Modal stdout. Pure recording — changes no behavior.
+            try:
+                if isinstance(edit_plan, dict):
+                    _lf_emit = edit_plan.get("generated_scenes") or []
+                    edit_plan["_lumen_funnel"] = {
+                        "route_premium": bool(route_premium),
+                        "tier": resolved_tier,
+                        "emitted": len(_lf_emit),
+                        "scene_types": [(_s.get("scene_type") or _s.get("sceneType") or "legacy")
+                                        for _s in _lf_emit if isinstance(_s, dict)],
+                        "subjects_generated": 0,
+                        "drop_stage": None,
+                    }
+            except Exception:
+                pass
             # Durable boundary: analyze complete / recipe ready (deterministic —
             # authoritative band-end regardless of which racing in-thread events fired).
             _async_job_status(job_id, status="processing", phase="Planning the edit", progress=29)
@@ -29108,6 +29141,8 @@ def handler(job):
                         _generated_subjects[_p_si] = _res["path"]
                 if _generated_subjects:
                     edit_plan["_generated_subjects"] = _generated_subjects
+                    if isinstance(edit_plan.get("_lumen_funnel"), dict):
+                        edit_plan["_lumen_funnel"]["subjects_generated"] = len(_generated_subjects)
                     print(
                         f"[gen-asset] generated {len(_generated_subjects)}/{len(_gen_scenes)} "
                         f"subject(s); premium asset spend="
@@ -29119,6 +29154,8 @@ def handler(job):
             if isinstance(edit_plan, dict):
                 edit_plan["generated_scenes"] = []
                 edit_plan.pop("_generated_subjects", None)
+                if isinstance(edit_plan.get("_lumen_funnel"), dict) and not edit_plan["_lumen_funnel"].get("drop_stage"):
+                    edit_plan["_lumen_funnel"]["drop_stage"] = "generation_failed"
 
         # Collect fast futures (all should be done already — they finish before Gemini).
         # Face detection is collected LATER inside render_multi_clip so Remotion can
@@ -29265,6 +29302,8 @@ def handler(job):
                 edit_plan["generated_scenes"] = []
                 edit_plan.pop("_generated_subjects", None)
                 _shed_dropped.append("generated_scenes")
+                if isinstance(edit_plan.get("_lumen_funnel"), dict) and not edit_plan["_lumen_funnel"].get("drop_stage"):
+                    edit_plan["_lumen_funnel"]["drop_stage"] = "budget_shed"
             if _shed_slack < 45.0 and _broll_fetch_futures:
                 _broll_fetch_futures = {}
                 broll_clips = []
@@ -30246,6 +30285,22 @@ def handler(job):
             result_payload["cover_frame_mime"] = "image/jpeg"
         if exported_formats:
             result_payload["exported_formats"] = exported_formats
+        # Lumen emission-funnel telemetry — finalize + persist (queryable as
+        # result.lumen_funnel, not just Modal stdout). Inert: reads already-tracked
+        # state (qa-dropped, rendered scenes) + the emitted count captured pre-drop.
+        # If scenes emitted but fewer shipped and no earlier stage tagged the drop,
+        # attribute it to qa (if any qa-dropped) else the render stage.
+        try:
+            _lf = (edit_plan.get("_lumen_funnel") or {}) if isinstance(edit_plan, dict) else {}
+            if _lf:
+                _lf["qa_dropped"] = int((edit_plan.get("_qa_dropped_scenes") or 0) if isinstance(edit_plan, dict) else 0)
+                _lf["shipped"] = len((edit_plan.get("_rendered_generated_scenes") or []) if isinstance(edit_plan, dict) else [])
+                if _lf.get("emitted", 0) > 0 and _lf["shipped"] < _lf.get("emitted", 0) and not _lf.get("drop_stage"):
+                    _lf["drop_stage"] = "qa" if _lf["qa_dropped"] > 0 else "render"
+                result_payload["lumen_funnel"] = _lf
+        except Exception:
+            pass
+
         # Durable TERMINAL write (synchronous so it lands before return): complete.
         # Carries the floor markers (Part 3) so degradation-rate is a SQL
         # query over result jsonb, not a log grep.
@@ -30266,6 +30321,9 @@ def handler(job):
                 "resolved_broll": result_payload.get("resolved_broll"),
                 "trend_snapshot": result_payload.get("trend_snapshot"),
                 "render_version": result_payload.get("render_version"),
+                # Lumen emission-funnel telemetry (routed→emitted→generated→shipped
+                # + drop_stage) — queryable as result.lumen_funnel for every job.
+                "lumen_funnel": result_payload.get("lumen_funnel"),
                 "change_summary": result_payload.get("change_summary"),
                 # S3-thumbnail (Phase 3): the worker-uploaded presigned thumbnail
                 # URL, so double-loss recovery is now FULLY complete — no residual.

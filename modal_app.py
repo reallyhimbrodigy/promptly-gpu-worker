@@ -2251,6 +2251,88 @@ def cert_scene_timeout() -> dict:
             "scene_render": scene, "plain_render": plain}
 
 
+# ── Lumen scene-reel (Pass 2) — render the DESIGNED scenes into a reel so the ──
+# actual animation state is auditable (frames extracted for the eye). Ephemeral:
+# `modal run modal_app.py::scene_reel`. Nothing live, no deploy. Uses only the
+# designed typo_stat scenes (pure typography — no generated asset needed), so it
+# shows the smoothness machinery (value-landing + settle-pulse + continuous drift
+# + camera sweep + CameraMotionBlur samples=6) honestly, at the real render path.
+@app.function(cpu=64, memory=131072, region="us", timeout=1800, secrets=[modal.Secret.from_name("promptly-secrets")])
+def cert_scene_reel(width: int = 1080, height: int = 1920) -> dict:
+    import subprocess, os, json, time, tempfile, boto3
+    PUB = "/remotion/bundle/public"
+    os.makedirs(PUB, exist_ok=True)
+    FPS, DUR = 30, 120  # 4s per scene
+
+    def _typo(from_f, colors, stat, land):
+        return {"fromFrame": from_f, "durationInFrames": DUR, "sceneType": "typo_stat",
+                "landFrame": land,
+                "background": {"kind": "gradient", "colors": colors},
+                "subject": {"generationPrompt": "n/a for typo_stat", "anchor": "center"},
+                "stat": stat, "textLayers": [],
+                "motion": {"entrance": "rise", "easing": "spring", "motionBlur": True}}
+
+    scenes = [
+        _typo(0,   ["#0b1026", "#1b2a4a"], {"value": 92, "suffix": "%", "label": "FINISH RATE", "supporting_line": "before the breakthrough"}, 48),
+        _typo(DUR, ["#1a0b26", "#3a1b4a"], {"value": 3.4, "suffix": "x", "label": "FASTER EDITS", "supporting_line": "vs. cutting by hand"}, 48),
+        _typo(2 * DUR, ["#0b2620", "#123f34"], {"value": 10000, "prefix": "$", "label": "PER MONTH", "supporting_line": "the creator ceiling"}, 54),
+    ]
+    total = 3 * DUR
+    inp = {"sourceUrl": "reel.png", "fps": FPS, "width": width, "height": height,
+           "totalDurationInFrames": total,
+           "clips": [{"id": "c0", "startFromFrames": 0, "playbackRate": 1.0, "durationInFrames": total}],
+           "transitions": [], "broll": [], "textOverlays": [], "motionGraphics": [],
+           "generatedScenes": scenes, "caption": None, "tightCutOverlays": [], "outro": None}
+    # a dummy sourceUrl asset (overlay is transparent; scenes carry their own bg)
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=c=black:s={width}x{height}:d=1",
+                    "-frames:v", "1", os.path.join(PUB, "reel.png")], check=True)
+    ip = os.path.join(tempfile.gettempdir(), "reel_in.json")
+    ov = os.path.join(tempfile.gettempdir(), "reel_overlay.mov")
+    with open(ip, "w") as fh:
+        json.dump(inp, fh)
+    t0 = time.time()
+    r = subprocess.run(["node", "/remotion/render-full.mjs", "--input", ip, "--output", ov,
+                        "--public-dir", PUB, "--composition", "PromptlyOverlay", "--gl", "swangle",
+                        "--frame-range", f"0,{total - 1}", "--composition-start", "0", "--concurrency", "8"],
+                       capture_output=True, text=True, timeout=1200)
+    if r.returncode != 0:
+        return {"ok": False, "err": (r.stderr or "")[-800:]}
+    # flatten alpha onto black -> viewable MP4
+    mp4 = os.path.join(tempfile.gettempdir(), "scene_reel.mp4")
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", f"color=black:s={width}x{height}:r={FPS}",
+                    "-i", ov, "-filter_complex", "[0][1]overlay=shortest=1[v]", "-map", "[v]",
+                    "-c:v", "libx264", "-preset", "medium", "-crf", "16", "-pix_fmt", "yuv420p", mp4], check=True)
+    # extract key frames: count-up, the value-LAND, settle, mid-drift, label-in (scene-local + offset)
+    key = {"s1_countup": 24, "s1_LAND": 48, "s1_settle": 58, "s1_drift": 108,
+           "s2_LAND": DUR + 48, "s3_countup": 2 * DUR + 30, "s3_LAND": 2 * DUR + 54, "s3_drift": 2 * DUR + 108}
+    s3 = boto3.client("s3", region_name="us-west-1")
+    B, PFX = "thisismybucketagainwooo", f"lumen-scene-reel/{width}x{height}"
+    frames = {}
+    for name, fnum in key.items():
+        pf = os.path.join(tempfile.gettempdir(), f"{name}.png")
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", mp4, "-vf", f"select=eq(n\\,{fnum})",
+                        "-vframes", "1", pf], check=True)
+        if os.path.exists(pf):
+            s3.upload_file(pf, B, f"{PFX}/frames/{name}.png")
+            frames[name] = f"{PFX}/frames/{name}.png"
+    s3.upload_file(mp4, B, f"{PFX}/scene_reel.mp4")
+    return {"ok": True, "render_s": round(time.time() - t0, 1), "aspect": f"{width}x{height}",
+            "reel_key": f"{PFX}/scene_reel.mp4", "reel_mb": round(os.path.getsize(mp4) / 1e6, 2),
+            "frame_keys": frames, "bucket": B}
+
+
+@app.local_entrypoint()
+def scene_reel():
+    r = cert_scene_reel.remote()
+    if not r.get("ok"):
+        print("SCENE REEL FAILED:", r.get("err", "")[:500]); return
+    print(f"\n=== LUMEN SCENE-REEL ({r['aspect']}) rendered in {r['render_s']}s -> {r['reel_mb']}MB ===")
+    print(f"reel: s3://{r['bucket']}/{r['reel_key']}")
+    print("frames:")
+    for n, k in r["frame_keys"].items():
+        print(f"  {n}: s3://{r['bucket']}/{k}")
+
+
 @app.local_entrypoint()
 def scene_timeout_proof():
     r = cert_scene_timeout.remote()

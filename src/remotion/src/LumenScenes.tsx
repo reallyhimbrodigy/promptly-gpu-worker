@@ -51,12 +51,28 @@ const idle = (frame: number, fps: number, phase = 0, ampPx = 6, periodS = 3.2) =
 };
 
 /** Palette with safe fallbacks — colors arrive as code values, never prompts. */
+// Lighten a too-dark color toward legibility on a dark background while KEEPING
+// its hue (brand character). A scene label whose accent falls back to a dark bg
+// color must never render dark-on-dark — it was invisible before this.
+const legibleOnDark = (hex: string | null | undefined) => {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || "");
+  if (!m) return "#C9D6F0";
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b; // 0..255
+  if (lum >= 150) return `#${m[1]}`; // already light enough
+  const mix = (ch: number) => Math.round(ch + (255 - ch) * 0.72); // blend toward white, keep hue
+  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+};
+
 const pal = (colors: string[] | null | undefined) => {
   const c = (colors || []).filter(Boolean);
   return {
     a: c[0] || "#4F9DF7",
     b: c[1] || c[0] || "#101018",
     accent: c[2] || c[0] || "#4F9DF7",
+    // the label/UI accent — always legible on the dark scene world
+    labelInk: legibleOnDark(c[2] || c[0] || "#4F9DF7"),
     ink: "#FFFFFF",
   };
 };
@@ -177,7 +193,7 @@ const TypoStat: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
                 fontWeight: 700,
                 fontSize: 44,
                 letterSpacing: "0.24em",
-                color: p.accent,
+                color: p.labelInk,
                 textTransform: "uppercase",
                 opacity: lineIn,
                 transform: `translateY(${(1 - lineIn) * 26}px)`,
