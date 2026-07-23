@@ -4695,11 +4695,13 @@ def _outcome_gate_shadow():
     # retry instead of shipping the invalid salvage
     assert "if _degen is None:\n                return _parsed" in _h, \
         "the post-cuts return must be guarded by 'if _degen is None' so an enforce reject retries"
-    # baked into the image env (like the spawn flag) so the enforce flip is a
-    # clean redeploy with no code change
+    # In the promptly-lang-flags Modal Secret (value 'shadow'), read at runtime —
+    # NOT baked from the deploy shell, so a plain deploy can't silently revert it.
     _m = open("modal_app.py").read()
-    assert '"PROMPTLY_OUTCOME_GATE": os.environ.get("PROMPTLY_OUTCOME_GATE", "shadow")' in _m, \
-        "PROMPTLY_OUTCOME_GATE must be baked into the image env, default 'shadow'"
+    assert '"PROMPTLY_OUTCOME_GATE": os.environ.get' not in _m, \
+        "PROMPTLY_OUTCOME_GATE must NOT be baked in modal_app .env() — it lives in the promptly-lang-flags secret"
+    assert 'modal.Secret.from_name("promptly-lang-flags")' in _m, \
+        "the promptly-lang-flags secret (carrying PROMPTLY_OUTCOME_GATE=shadow) must be attached app-wide"
 
 
 @check("LEVER 2 (safe-edit terminal honesty): a failed deterministic rescue terminates NAMED (SAFE_EDIT_FAILED), never UNKNOWN — build_safe_recipe wrapped (hole A), the plan-build span's non-(ValueError|RuntimeError) escape renamed when _use_safe (hole B); classify_error names it (real error, retryable, refunded on the failed-row sweep, NOT a designed rejection); in _OUTER_RESCUE_DENY so a failed rescue never burns a doomed re-run")
@@ -4754,10 +4756,13 @@ def _lever3_plan_capture():
     assert _i_write != -1 and _i_hook != -1 and _i_hook > _i_write, \
         "the render-input capture must fire AFTER the schema-valid write, flag-gated"
     assert 'cond3_baseline/plans/' in _h, "capture must persist to the durable corpus prefix"
-    # baked into the image env, default OFF
+    # In the promptly-lang-flags Modal Secret (value '' — inert), read at runtime —
+    # NOT baked from the deploy shell, so a plain deploy can't silently revert it.
     _m = open("modal_app.py").read()
-    assert '"PROMPTLY_PLAN_CAPTURE": os.environ.get("PROMPTLY_PLAN_CAPTURE", "")' in _m, \
-        "PROMPTLY_PLAN_CAPTURE must be baked into the image env, default OFF"
+    assert '"PROMPTLY_PLAN_CAPTURE": os.environ.get' not in _m, \
+        "PROMPTLY_PLAN_CAPTURE must NOT be baked in modal_app .env() — it lives in the promptly-lang-flags secret"
+    assert 'modal.Secret.from_name("promptly-lang-flags")' in _m, \
+        "the promptly-lang-flags secret (carrying PROMPTLY_PLAN_CAPTURE='') must be attached app-wide"
 
 
 @check("LEVER 3 candidate (degeneration prompt-root fix): a flag-gated (PROMPTLY_LEVER3=1, LIVE via the promptly-lang-flags secret) anti-runaway block appended to the post-cuts system prompt reframes the why/why_emphasis/reason rationale fields as terse internal notes and names the repetition-loop as a malfunction to STOP; touches nothing rendered (whys never reach screen); the A/B concluded — this is the live production prompt, not pending anyone's word")
@@ -5079,8 +5084,12 @@ def _spawn_refactor_phase3():
         "completion POST (with the call_id) missing"
     # run_job flag-gated OFF by default → deploy is inert until the flag flips
     assert 'os.environ.get("PROMPTLY_SPAWN_MODE") == "1"' in _m, "run_job must be flag-gated"
-    assert '"PROMPTLY_SPAWN_MODE": os.environ.get("PROMPTLY_SPAWN_MODE"' in _m, \
-        "spawn flag must be baked into the image env so the deploy shell can set it"
+    # In the promptly-lang-flags Modal Secret (value '0' — sync), read at runtime —
+    # NOT baked from the deploy shell, so a plain deploy can't silently revert it.
+    assert '"PROMPTLY_SPAWN_MODE": os.environ.get' not in _m, \
+        "PROMPTLY_SPAWN_MODE must NOT be baked in modal_app .env() — it lives in the promptly-lang-flags secret"
+    assert 'modal.Secret.from_name("promptly-lang-flags")' in _m, \
+        "the promptly-lang-flags secret (carrying PROMPTLY_SPAWN_MODE=0) must be attached app-wide"
     assert "run_pipeline_bg.spawn(body)" in _m and '"spawned": True' in _m, "spawn branch missing"
     # the synchronous path stays for a no-redeploy rollback (unset the flag)
     assert 'self._handler({"input": body})' in _m, "sync fallback must remain for rollback"

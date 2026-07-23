@@ -423,34 +423,22 @@ image = (
         "PROMPTLY_BUILD_DIRTY": _BUILD_DIRTY,
         "PROMPTLY_BUILD_TS": _BUILD_TS,
         "PROMPTLY_DEPLOYER": _DEPLOYER,
-        # Reliability Phase 3: spawn-mode flag, baked from the deploy shell so
-        # `PROMPTLY_SPAWN_MODE=1 ./deploy.sh` activates the spawn dispatch and a
-        # plain `./deploy.sh` leaves it OFF (sync, today's behavior). Rollback =
-        # redeploy without the flag. Default "0".
-        "PROMPTLY_SPAWN_MODE": os.environ.get("PROMPTLY_SPAWN_MODE", "0"),
-        # Phase-4 outcome-gate mode, baked from the deploy shell so the enforce
-        # flip is a clean redeploy (`PROMPTLY_OUTCOME_GATE=enforce ./deploy.sh`)
-        # with no code change — mirrors the spawn flag. Default "shadow": the
-        # gate ledgers the strict-schema verdict on every salvaged post-cuts plan
-        # but changes NOTHING, so the deploy is inert until the false-positive
-        # rate is measured. "enforce" = invalid salvage → retry; "off" = skip.
-        "PROMPTLY_OUTCOME_GATE": os.environ.get("PROMPTLY_OUTCOME_GATE", "shadow"),
-        # Lever-3 baseline capture flag. Default "" (OFF) → the plan-capture hook
-        # at the render seam is inert. A capture run sets it
-        # (`PROMPTLY_PLAN_CAPTURE=1 ./deploy.sh`, or per-job) to persist the
-        # finalized render inputs to the corpus bucket. Never affects the render.
-        "PROMPTLY_PLAN_CAPTURE": os.environ.get("PROMPTLY_PLAN_CAPTURE", ""),
-        # PROMPTLY_LEVER3, PROMPTLY_EDIT_IN_LANGUAGE, and PROMPTLY_SCRIPT_DENYLIST
-        # are NO LONGER baked here — they moved to the promptly-lang-flags Modal
-        # Secret (see secrets[] above), read at RUNTIME from the injected env, so a
-        # deploy that forgets to set them can no longer silently revert them (which
-        # happened once). Their LIVE production values — do NOT "restore" a default:
-        #   PROMPTLY_LEVER3=1            degeneration-fix editorial prompt is LIVE,
-        #                               not pending anyone's word (the A/B concluded).
-        #   PROMPTLY_EDIT_IN_LANGUAGE=1  multilingual render + in-language editorial ON.
-        #   PROMPTLY_SCRIPT_DENYLIST=""  graduated: every font-backed script renders,
-        #                               Arabic via the language=ar route.
-        # Change them via `modal secret create promptly-lang-flags …`, never in code.
+        # ── Operational flags: ALL moved to the promptly-lang-flags Modal Secret ──
+        # PROMPTLY_SPAWN_MODE, PROMPTLY_OUTCOME_GATE, PROMPTLY_PLAN_CAPTURE,
+        # PROMPTLY_LEVER3, PROMPTLY_EDIT_IN_LANGUAGE, and PROMPTLY_SCRIPT_DENYLIST are
+        # NO LONGER baked here. They used to be baked FROM THE DEPLOY SHELL, so a
+        # plain `./deploy.sh` that forgot to set them silently reverted them to their
+        # code defaults (this happened: multilingual went Latin-only + lever3 turned
+        # off for ~40 min). They now live in the promptly-lang-flags Secret (see
+        # secrets[] above), injected at runtime — no deploy can revert them. LIVE
+        # production values (do NOT "restore" a documented default):
+        #   PROMPTLY_LEVER3=1            degeneration-fix editorial prompt (A/B concluded, live)
+        #   PROMPTLY_EDIT_IN_LANGUAGE=1  multilingual render + in-language editorial ON
+        #   PROMPTLY_SCRIPT_DENYLIST=""  graduated: every font-backed script renders (Arabic → language=ar)
+        #   PROMPTLY_SPAWN_MODE=0        sync dispatch (spawn dispatch off — today's behavior)
+        #   PROMPTLY_OUTCOME_GATE=shadow salvage-schema gate ledgers only, changes nothing
+        #   PROMPTLY_PLAN_CAPTURE=""     the plan-capture corpus hook is inert
+        # Change any via `modal secret create promptly-lang-flags KEY=val … --force`.
         # ── Supabase schema overrides for the tier + concurrency gate ──
         # Multi-clip premium concurrency check (handler.py:check_concurrency_gate)
         # reads from these tables. The defaults assumed `user_profiles.user_id`
@@ -554,12 +542,16 @@ secrets = [
     # happened — a deploy Latin-only'd multilingual + turned lever3 off for ~1h).
     # As an app-level Secret they're injected into every container at runtime,
     # sourced from Modal's store — independent of the deploy shell. Contents (the
-    # live, graduated production state):
+    # live production state — every operational flag that was shell-baked now lives
+    # here so NONE can silently revert):
     #   PROMPTLY_EDIT_IN_LANGUAGE=1   multilingual render + in-language editorial ON
     #   PROMPTLY_SCRIPT_DENYLIST=""   graduated: no script denied (Arabic → language=ar)
     #   PROMPTLY_LEVER3=1             degeneration-fix editorial prompt (live, not pending)
-    # To change one: `modal secret create promptly-lang-flags KEY=val … --force`,
-    # then redeploy — never by editing code or the deploy shell.
+    #   PROMPTLY_SPAWN_MODE=0         sync dispatch (spawn dispatch off)
+    #   PROMPTLY_OUTCOME_GATE=shadow  salvage-schema gate ledgers only, changes nothing
+    #   PROMPTLY_PLAN_CAPTURE=""      plan-capture corpus hook inert
+    # To change one: `modal secret create promptly-lang-flags KEY=val … --force`
+    # (include ALL keys — --force replaces), then redeploy. Never edit code/shell.
     modal.Secret.from_name("promptly-lang-flags"),
 ]
 
