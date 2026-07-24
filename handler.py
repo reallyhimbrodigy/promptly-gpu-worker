@@ -8950,6 +8950,75 @@ _REPAIR_MIN_HEADROOM_S = 180.0   # recipe repair re-ask allowance: a corrective
                                  # 900s job budget after the projected render
                                  # time (same projection clock as the
                                  # _RERENDER_HEADROOM_S pre-check: duration*3).
+
+# ── RECIPE-STAGE WALL-CLOCK BUDGET (p=50 compounding fix) ─────────────────────
+# The repair loop (up to _repair_max+1 real re-asks) × the internal degen/
+# transport retries inside _call_gemini_post_cuts (up to 3 sub-attempts) can
+# compound to ~6 post-cuts Gemini invocations on a pathological job. Each runs
+# up to the 480s client deadline, so the recipe stage can burn ~1800s+ and hit
+# Modal's function SIGKILL mid-attempt (progress≈50) — an UNCODED death that
+# bypasses the worker's failure handler entirely (0/26 long-wall deaths carried
+# forensics). This is the exact class the source-poll deadline just fixed, one
+# stage later: bound the RUNNING wall-clock of the recipe stage so compounding
+# re-asks engage the EXISTING deterministic safe edit (a delivered simpler video)
+# BEFORE the SIGKILL, instead of grinding into it. A clean single pass is
+# 135-337s and NEVER reaches the deadline; only a job already re-asking (i.e.
+# one that has failed ≥1 validation/transport attempt) can. Off ⇒ byte-identical.
+_MODAL_FN_TIMEOUT_S = 1800.0       # modal_app.py @app.cls / run_pipeline_bg timeout
+                                   # — the hard SIGKILL wall we must land under.
+                                   # (The reaper EXEC_WALL_MS ≥ this invariant is
+                                   # already gated; this budget sits UNDER it.)
+_RECIPE_WALL_END_RESERVE_S = 480.0 # slack left after the recipe deadline for one
+                                   # in-flight call's tail (= the 480s client
+                                   # timeout, the max a single already-running
+                                   # sub-call can add past the deadline) + the
+                                   # safe-edit build. The loop-top guard only
+                                   # engages safe BETWEEN attempts (no call in
+                                   # flight), so a clean single pass is never cut
+                                   # mid-call — the deadline just has to clear
+                                   # recipe-START (~540s worst ≪ the ≥600s budget).
+                                   # The safe-edit render is SIMPLER than the
+                                   # duration*3 render reserve, so that overestimate
+                                   # covers the build beat. DOMINANT pathology
+                                   # (multi-attempt compounding, the observed
+                                   # 1868s) is cut with wide margin — the 2nd/3rd/…
+                                   # attempts never start.
+_RECIPE_WALL_MIN_BUDGET_S = 600.0  # floor: never below the clean-pass worst case
+                                   # (post-cuts 135-337s + prior-stage overhead),
+                                   # so a legit recipe is never cut short.
+
+
+def _recipe_wall_enabled():
+    """Recipe-stage wall-clock budget ON unless explicitly disabled. Kill switch
+    PROMPTLY_RECIPE_WALL=0 restores today's unbounded compounding (byte-identical
+    — the deadline is threaded as None and every check no-ops)."""
+    return os.environ.get("PROMPTLY_RECIPE_WALL", "1").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
+def _recipe_deadline_from(pipeline_start, duration):
+    """Absolute time.time() deadline past which the recipe stage stops re-asking
+    Gemini and takes the safe edit. Anchored on the pipeline's own start clock so
+    it measures the TRUE elapsed budget against Modal's timeout, not just the
+    recipe stage in isolation. Render reserve = duration*3 (the same projection
+    the static _repair_budget_ok pre-check trusts). PROMPTLY_RECIPE_WALL_S
+    overrides the computed budget with a literal seconds value — the cert lever
+    (set to 1 to force immediate exhaustion and prove the safe-edit path)."""
+    if not _recipe_wall_enabled() or pipeline_start is None:
+        return None
+    _override = os.environ.get("PROMPTLY_RECIPE_WALL_S", "").strip()
+    if _override:
+        try:
+            return float(pipeline_start) + float(_override)
+        except (TypeError, ValueError):
+            pass
+    _render_reserve = float(duration or 0.0) * 3.0
+    _budget = max(
+        _RECIPE_WALL_MIN_BUDGET_S,
+        _MODAL_FN_TIMEOUT_S - _render_reserve - _RECIPE_WALL_END_RESERVE_S,
+    )
+    return float(pipeline_start) + _budget
 _VAD_SILENCES_LAST: list = []    # v196 head-snap feed: silero silence regions
 # PACING BUDGET (Slice 3): per-job max-compression flag, RESET at every job
 # entry (warm-container-safe, like _VAD_SILENCES_LAST). Eval-gated: OFF unless
@@ -9944,7 +10013,8 @@ def _post_cuts_response_schema():
     return _s
 
 
-def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name):
+def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
+                           recipe_deadline_s=None):
     """Second Gemini call: visual placement on the kept-only transcript.
 
     Deep-thinking budget. thinking_budget=24576 (lowered from a 60000 cap).
@@ -10168,6 +10238,18 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
         _is_degen_class = "repetition-loop degeneration" in str(_degen)
         _will_retry = (_attempt < 2) or (
             _is_degen_class and _degen_extra_used < _DEGEN_EXTRA_RETRIES)
+        # Recipe wall-clock budget: once the recipe stage is past its deadline,
+        # stop re-rolling — another ~200-480s attempt would only grind toward the
+        # Modal SIGKILL. Raising here hands control to the repair loop's transport-
+        # exhaustion path, which engages the deterministic safe edit (a delivered
+        # simpler video). No-op when recipe_deadline_s is None (feature off).
+        if _will_retry and recipe_deadline_s is not None and time.time() > recipe_deadline_s:
+            _will_retry = False
+            print(
+                f"[gemini-post] recipe wall-clock budget exhausted "
+                f"(attempt {_attempt}) — stopping retries, safe edit takes over",
+                flush=True,
+            )
         print(
             f"[gemini-post] Degenerate response ({_degen}) — "
             f"{'retrying' if _will_retry else 'no attempts left'} "
@@ -10680,6 +10762,7 @@ def generate_edit_gemini(
     force_safe_reason=None,
     source_language=None,
     burned_text_override=False,
+    recipe_deadline_s=None,
 ):
     _pre_analysis = cached_response
 
@@ -11345,6 +11428,26 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
     for _repair_attempt in range(_repair_max + 2):
         if _repair_attempt > _repair_max and not _use_safe:
             break  # the extra slot is safe-mode only
+        # RECIPE WALL-CLOCK (p=50 compounding fix): before starting ANY re-ask,
+        # if the recipe stage has burned its running budget, take the safe edit
+        # instead of grinding another attempt into the Modal SIGKILL. Both the
+        # transport path (raises → safe below) and the validation-retry path
+        # (falls through → next iteration → here) funnel through this check, so
+        # one guard covers every re-ask class. A clean first pass never trips it
+        # (135-337s ≪ deadline); only a job already re-asking can. No-op when the
+        # deadline is None (feature off / first attempt of a fast job).
+        if (not _use_safe and recipe_deadline_s is not None
+                and time.time() > recipe_deadline_s and _safe_edit_on and kept_words):
+            _use_safe = True
+            _safe_reason = (
+                f"recipe wall-clock budget exhausted after {_repair_attempt} "
+                f"re-ask(s) — compounding stopped before the render timeout"
+            )
+            print(f"[recipe-wall] {_safe_reason}", flush=True)
+            _record_divergence(
+                "recipe",
+                {"reason": "recipe_wall_budget", "attempt": _repair_attempt},
+                "recipe_wall_safe_edit", reason=_safe_reason)
         # ── Call 2: visual placement on the kept-only transcript ────────────────
         # Uses GEMINI_EDITORIAL_MODEL (Pro) — instruction-following on the detailed
         # component-placement rules is materially better than Flash. The cost/
@@ -11375,7 +11478,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         else:
             try:
                 try:
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s)
                 except Exception as _ref_err:
                     if (_video_part_fallback is None
                             or type(_ref_err).__name__ != "ClientError"):
@@ -11398,7 +11501,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         "video_reference_fallback", reason=str(_ref_err)[:180])
                     _video_part = _video_part_fallback
                     _video_part_fallback = None
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s)
             except Exception as _tx_err:
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the
@@ -25793,6 +25896,68 @@ def _fold_ask_answer(answer, edit_plan, vibe):
     return vibe, _plan, _rerun
 
 
+# ── STEP-TOKEN DURABILITY (poll-fallback lifeline) ───────────────────────────
+# The iOS StageTimeline advances live off the SSE `step`, but on a long mobile
+# render SSE drops and the client falls back to POLLING video_jobs.current_step /
+# step_message (EditorView:3066). Those columns are written ONLY by the server's
+# /api/modal-progress handler, fed by send_progress's fire-and-forget POST
+# (timeout=3, no retry) — so a single dropped phase-transition POST while SSE is
+# also down freezes the label ("stuck at preparing footage") with no recovery
+# until the next phase lands. This writes current_step/step_message DIRECTLY to
+# video_jobs from the worker, POST-independent — the structural guarantee that
+# the phase the user sees is the phase the worker is actually in. Additive: the
+# two narrative columns ONLY (never status/progress/result — those stay the
+# server's). Fail-open, monotonic (a late daemon write can't regress the label),
+# never blocks the pipeline. Kill switch: PROMPTLY_STEP_DURABLE=0.
+_STEP_RANK = {
+    "queued": 0, "download": 1, "analyze": 2, "transcribe": 3, "face_detect": 4,
+    "shots": 5, "trend": 6, "plan_diff": 7, "plan": 8, "broll_search": 9,
+    "render": 10, "thumbnail": 11, "upload": 12,
+    "complete": 13, "needs_clarification": 13,
+}
+_JOB_STEP_HW = {}
+_JOB_STEP_LOCK = threading.Lock()
+
+
+def _persist_step_token(job_id, step, message):
+    """Durable, POST-independent write of current_step/step_message to video_jobs.
+    Daemon-threaded, fail-open, monotonic. No-op when PROMPTLY_STEP_DURABLE=0."""
+    if supabase is None or not job_id or not step:
+        return
+    if os.environ.get("PROMPTLY_STEP_DURABLE", "1").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        return
+
+    def _w():
+        try:
+            rank = _STEP_RANK.get(step, -1)
+            with _JOB_STEP_LOCK:
+                hw = _JOB_STEP_HW.get(job_id, -1)
+                if rank >= 0 and rank < hw:
+                    return  # a later phase already persisted — never regress the label
+                if rank >= 0:
+                    _JOB_STEP_HW[job_id] = max(hw, rank)
+                    if rank >= 13:
+                        _JOB_STEP_HW.pop(job_id, None)  # terminal — free the entry (warm-container reuse)
+            # Named _step_patch (NOT `patch`) so it stays a DISTINCT rail from the
+            # write_job_status chokepoint the cancel-fence guard pins — two video_jobs
+            # writers now exist, each carrying its own hard-terminal fence.
+            _step_patch = {
+                "current_step": step,
+                "step_message": message or "",
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            # Terminal fence: never relabel a row the server/reaper already closed
+            # (failed/canceled/completed). needs_input stays writable for resume.
+            supabase.table("video_jobs").update(_step_patch).eq("id", job_id).not_.in_(
+                "status", ("failed", "canceled", "completed")).execute()
+        except Exception as e:
+            print(f"[step-durable] write failed job={job_id}: {e} (fail open)", flush=True)
+
+    threading.Thread(target=_w, daemon=True).start()
+
+
 def send_progress(job_id, step, pct, message, app_url):
     """
     POST progress update to the JS server. Fire-and-forget in background thread.
@@ -25803,6 +25968,9 @@ def send_progress(job_id, step, pct, message, app_url):
     # unset. No-op when JOB_STATUS_WRITES_ENABLED is off (byte-identical).
     _async_job_status(job_id, status="processing", phase=message,
                       progress=_durable_progress(step, pct))
+    # Durable current_step/step_message write for the iOS poll fallback —
+    # POST-independent, so the label survives an SSE drop mid-render.
+    _persist_step_token(job_id, step, message)
     if not app_url:
         return
     import threading
@@ -28726,6 +28894,13 @@ def handler(job):
                     # dominant script computed at the coverage gate above.
                     source_language=_source_language_name(
                         _transcript.get("detected_language"), _script),
+                    # RECIPE WALL-CLOCK (p=50 compounding fix): an absolute
+                    # deadline anchored on THIS job's pipeline start, so the
+                    # recipe stage's compounding re-asks engage the safe edit
+                    # before Modal's SIGKILL. Computed from the true elapsed
+                    # budget (render reserve = source_duration*3). None ⇒ off.
+                    recipe_deadline_s=_recipe_deadline_from(
+                        _pipeline_start, source_duration),
                 )
             finally:
                 _gemini_hb_stop.set()

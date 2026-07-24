@@ -4538,8 +4538,19 @@ def _cancel_fence_wired():
     assert 'status_col, ("failed", "canceled")).execute()' in _src, \
         "hard-terminal value set missing or reordered (must be failed+canceled ONLY — needs_input stays open)"
     assert "fence declined job=" in _src, "zero-match decline log missing (the redux proof line)"
-    # exactly ONE rail write chain exists — the chokepoint stays the chokepoint
+    # exactly ONE write_job_status rail chain exists — the chokepoint stays the
+    # chokepoint (`patch` is that rail's var; the step-token rail below uses
+    # `_step_patch`, so a THIRD writer reusing `patch` still trips this).
     assert _src.count(".update(patch).eq(\"id\", job_id)") == 1, "a second rail write chain appeared"
+    # SECOND legitimate video_jobs rail (2026-07-24 step-token durability): narrow
+    # (narrative columns only) and STRICTER-fenced than the chokepoint — it also
+    # excludes `completed`. Pinned so it can never lose its terminal fence (a bare
+    # .update(_step_patch) that could relabel a closed row is the regression this
+    # catches). The two rails together are the complete video_jobs writer set.
+    assert _src.count('.update(_step_patch).eq("id", job_id).not_.in_(') == 1, \
+        "the step-token durability rail must exist and keep its hard-terminal fence"
+    assert '"failed", "canceled", "completed"' in _src, \
+        "the step-token rail's fence must exclude every closed status (failed/canceled/completed)"
 
 
 @check("integrity gate: thresholds pinned to calibration evidence (dde5945d/PC2/45-file field battery)")
@@ -5042,6 +5053,68 @@ def _source_poll_fail_fast():
     assert _t, "run_pipeline_bg timeout not found in modal_app.py"
     assert 300 < int(_t.group(1)), \
         f"source-poll default (300s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
+
+
+@check("RECIPE WALL-CLOCK BUDGET (2026-07-24, p=50 compounding fix): the edit-recipe repair loop (≤_repair_max+1 re-asks) × the internal degen/transport retries (≤3 sub-attempts) can compound to ~6 post-cuts Gemini calls, each ≤480s, running the stage past Modal's timeout → an UNCODED SIGKILL at progress≈50 that bypasses the failure handler (0/26 long-wall deaths carried forensics). A running wall-clock deadline anchored on the job's pipeline start makes compounding re-asks engage the EXISTING deterministic safe edit BEFORE the SIGKILL. A clean single pass (135-337s) never trips it. Flag PROMPTLY_RECIPE_WALL (default on); =0 → deadline None → byte-identical. Budget = Modal timeout − render reserve (duration*3) − one-client-timeout (480s) tail reserve, so even a re-ask that started just under the deadline finishes below the wall. This is the source-poll fail-fast pattern one stage later.")
+def _recipe_wall_budget():
+    import re as _re
+    import os as _os
+    import handler as H
+    # feature switch: default ON, kill switch → None (byte-identical off)
+    assert H._recipe_wall_enabled() is True, "PROMPTLY_RECIPE_WALL must default ON"
+    _os.environ["PROMPTLY_RECIPE_WALL"] = "0"
+    try:
+        assert H._recipe_deadline_from(1000.0, 180) is None, \
+            "kill switch (PROMPTLY_RECIPE_WALL=0) must yield deadline None (byte-identical)"
+    finally:
+        _os.environ.pop("PROMPTLY_RECIPE_WALL", None)
+    # deadline math: the budget always leaves the render reserve (duration*3) under
+    # the Modal wall, and clears a clean pass's recipe-START (never cuts mid-pass)
+    _dl = H._recipe_deadline_from(0.0, 180)
+    assert _dl is not None and _dl <= H._MODAL_FN_TIMEOUT_S - 180 * 3, \
+        "180s deadline must leave the duration*3 render reserve under the Modal timeout"
+    assert _dl >= H._RECIPE_WALL_MIN_BUDGET_S >= 600.0, "budget floor must clear a clean pass's recipe-start"
+    assert H._RECIPE_WALL_END_RESERVE_S >= 480.0, "tail reserve must absorb one 480s in-flight client-timeout"
+    # _MODAL_FN_TIMEOUT_S must track the ACTUAL run_pipeline_bg timeout (drift guard)
+    _t = _re.search(r"timeout=(\d+), retries=2, cpu=64, memory=131072", open("modal_app.py").read())
+    assert _t and int(_t.group(1)) == int(H._MODAL_FN_TIMEOUT_S), \
+        f"_MODAL_FN_TIMEOUT_S ({H._MODAL_FN_TIMEOUT_S}) must match run_pipeline_bg timeout ({_t.group(1) if _t else '?'})"
+    # wiring: threaded into the internal retry-stop, the repair loop-top, and the caller
+    _h = open("handler.py").read()
+    assert 'def _call_gemini_post_cuts(' in _h and 'recipe_deadline_s=None' in _h, \
+        "the post-cuts call must accept the deadline"
+    assert _h.count('recipe_deadline_s=recipe_deadline_s') == 2, \
+        "both post-cuts call sites in the repair loop must pass the deadline through"
+    assert 'if _will_retry and recipe_deadline_s is not None and time.time() > recipe_deadline_s:' in _h, \
+        "the internal degen/transport retry must stop once past the deadline"
+    assert 'recipe wall-clock budget exhausted after' in _h and 'recipe_wall_safe_edit' in _h, \
+        "the loop-top guard must engage the safe edit (named reason + divergence) when past the deadline"
+    assert 'recipe_deadline_s=_recipe_deadline_from(' in _h and '_pipeline_start, source_duration)' in _h, \
+        "the caller must compute + pass the pipeline-anchored deadline (anchored on _pipeline_start)"
+    assert 'PROMPTLY_RECIPE_WALL_S' in _h, "the cert override lever (force immediate exhaustion) must exist"
+
+
+@check("STEP-TOKEN DURABILITY (2026-07-24): the iOS StageTimeline advances live off SSE `step`, but on a long mobile render SSE drops and the client polls video_jobs.current_step/step_message (EditorView:3066) — columns written ONLY by the server's /api/modal-progress handler, fed by send_progress's fire-and-forget POST (timeout=3, no retry). A dropped phase-transition POST while SSE is down freezes the label with no recovery until the next phase lands. The worker now writes current_step/step_message DIRECTLY to video_jobs at each phase (POST-independent), the two narrative columns ONLY (never status/progress/result — those stay the server's), monotonic (a late daemon write can't regress the label via _STEP_RANK), fail-open, terminal-fenced (never relabels a failed/canceled/completed row). Kill switch PROMPTLY_STEP_DURABLE=0.")
+def _step_token_durable():
+    _h = open("handler.py").read()
+    assert 'def _persist_step_token(job_id, step, message):' in _h, "the durable step writer must exist"
+    _i = _h.find("def _persist_step_token")
+    _body = _h[_i:_i + 2200]
+    # direct video_jobs write of exactly the two narrative columns
+    assert 'supabase.table("video_jobs").update(_step_patch)' in _body, "must write directly to video_jobs"
+    assert '"current_step": step,' in _body and '"step_message": message or "",' in _body, \
+        "must persist current_step + step_message (the columns the iOS poll reads)"
+    # narrative-only: no status/progress/result KEYS in the patch (the fence's bare
+    # "status" arg has no colon, so the colon form distinguishes key from fence)
+    assert '"status":' not in _body and '"progress":' not in _body and '"result":' not in _body, \
+        "the durable step write must be narrative-only (no status/progress/result keys)"
+    # monotonic + terminal fence + kill switch
+    assert 'if rank >= 0 and rank < hw:' in _body, "monotonic guard: a late write must never regress the label"
+    assert '.not_.in_(' in _body and '"failed", "canceled", "completed"' in _body, \
+        "terminal fence: never relabel a closed row"
+    assert 'PROMPTLY_STEP_DURABLE' in _body, "kill switch required"
+    # wired into send_progress (fires on every phase transition)
+    assert '_persist_step_token(job_id, step, message)' in _h, "send_progress must invoke the durable write"
 
 
 @check("MULTILINGUAL C (verification tiers): Tier-1 = the 9 certified languages (contact sheet proved every script incl. Cyrillic); Tier-2 = every other font-backed language, enabled+WATCHED. Every non-English render is language-tagged (lang/script/tier) via a language_coverage divergence so the daily report shows what renders and can flag a failing Tier-2 language. English/Latin skipped to keep the ledger signal.")
