@@ -10671,6 +10671,7 @@ def generate_edit_gemini(
     premium=False, resolved_policy=None,
     force_safe_reason=None,
     source_language=None,
+    burned_text_override=False,
 ):
     _pre_analysis = cached_response
 
@@ -10681,9 +10682,13 @@ def generate_edit_gemini(
     # The result feeds the double-caption suppression (below) + the zoom gate (at
     # the render projection seam). Fail-safe: detect_burned_in_text returns None on
     # ANY error, and OFF (default) never runs it → the plan is byte-identical to today.
+    # burned_text_override: a PER-JOB flag-on (input_data.burned_text_test) for the
+    # pre-flip smoke test — validates the flag-on path end-to-end WITHOUT flipping the
+    # global secret, so no other job is affected. Inert for real traffic (the app
+    # never sets it); redundant once the secret flips PROMPTLY_BURNED_TEXT on.
     _burned_future = None
     _burned_pool = None
-    if _burned_text_enabled() and video_path:
+    if (_burned_text_enabled() or burned_text_override) and video_path:
         try:
             import burned_text as _bt_mod
             _burned_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -28699,6 +28704,7 @@ def handler(job):
                     force_safe_reason=(
                         str(input_data.get("_safe_edit_rescue") or "").strip() or None
                     ),
+                    burned_text_override=bool(input_data.get("burned_text_test")),
                     # Workstream B: the source language for in-language editorial
                     # (flag-gated inside the prompt builder). _script is the
                     # dominant script computed at the coverage gate above.

@@ -4996,8 +4996,11 @@ def _integrity_source_echo_black():
 def _burned_text_double_caption_gate():
     _h = open("handler.py").read()
     # concurrent, flag-gated, on the FULL-RES source (video_path), not the proxy
-    assert "if _burned_text_enabled() and video_path:" in _h, \
-        "the detector dispatch must be flag-gated and run on video_path (the source)"
+    assert "if (_burned_text_enabled() or burned_text_override) and video_path:" in _h, \
+        "the detector dispatch must be gated on the flag OR the per-job override, and run on video_path"
+    # per-job override for the pre-flip smoke test — inert unless a job opts in
+    assert "burned_text_override=bool(input_data.get(\"burned_text_test\"))" in _h, \
+        "the per-job smoke-test override (burned_text_test) must thread into generate_edit_gemini"
     assert "_burned_future = _burned_pool.submit(_bt_mod.detect_burned_in_text, video_path)" in _h, \
         "the detector must run CONCURRENTLY (thread pool) on video_path so its cost hides under Gemini"
     # the detector signal ORs into the EXISTING override — so OFF is byte-identical
