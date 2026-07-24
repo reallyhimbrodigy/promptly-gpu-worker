@@ -4975,6 +4975,23 @@ def _burned_text_layer1_prompt():
         "the block must add the zoom-preservation rule (don't scale/crop through burned-in text)"
 
 
+@check("INTEGRITY source-echo BLACK (2026-07-23): the gate downgrades a source-echoed black span (output black whose mapped SOURCE window is ALSO black — the user's video ends on black) exactly as it already downgrades source-echoed FREEZE; a render-PRODUCED black (source not black at the mapped time) still TRIPS. Fixes the #1 core-error false positive (23/25 INTEGRITY_TRIP tripped 'black'; >=9/25 sources end on black). Cert: constructed source-echo-tail -> clean, render-injected black -> trips (both PASS).")
+def _integrity_source_echo_black():
+    _h = open("handler.py").read()
+    assert "def _ig_source_echo_black(" in _h, "the black source-echo helper must exist"
+    # the helper must re-run blackdetect on the SOURCE (only a black source downgrades — a
+    # render-produced black over a non-black source stays a defect and trips)
+    _i = _h.find("def _ig_source_echo_black(")
+    _body = _h[_i:_i + 1600]
+    assert "blackdetect=d=%s:pix_th=%s" in _body and "source_path" in _body, \
+        "source-echo-black must probe the SOURCE with blackdetect (else it can't distinguish echo from defect)"
+    # wired into the gate: black_resid is downgraded, and holes covered by a source-echoed
+    # region are dropped (a source-echoed black+silent tail must not trip 'both_stream_hole')
+    assert "black_resid, black_downgraded = _ig_source_echo_black(" in _h, \
+        "black_resid must be source-echo-downgraded in _integrity_gate"
+    assert "content_black_downgraded" in _h, "the verdict must record black downgrades (observability)"
+
+
 @check("MULTILINGUAL C (verification tiers): Tier-1 = the 9 certified languages (contact sheet proved every script incl. Cyrillic); Tier-2 = every other font-backed language, enabled+WATCHED. Every non-English render is language-tagged (lang/script/tier) via a language_coverage divergence so the daily report shows what renders and can flag a failing Tier-2 language. English/Latin skipped to keep the ledger signal.")
 def _multilingual_c_tiers():
     import handler

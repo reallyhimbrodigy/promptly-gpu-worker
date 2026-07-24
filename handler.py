@@ -18527,6 +18527,48 @@ def _ig_source_echo(source_path, spans, out_to_src):
     return defects, downgraded
 
 
+def _ig_source_echo_black(source_path, spans, out_to_src):
+    """Black-tail discriminator (mirror of _ig_source_echo, for BLACK): an OUTPUT
+    black span whose mapped SOURCE window is ALSO black is source content — the
+    user's own video ends on black (phone/screen-record/export tails, an organic
+    input class per TIMELINE_HOLES), NOT a render defect. The gate already
+    source-echoes FREEZE, but a uniform black frame isn't "frozen", so without
+    this a FAITHFUL render of a black-tailed source false-fails the black check and
+    tells the user "we caught a rendering defect on our side" + refunds. Evidence:
+    of 25 INTEGRITY_TRIP jobs (28d), 23 tripped 'black' at the tail; 3/4 sampled
+    sources ended on black. Symmetric with the freeze echo: a render-PRODUCED black
+    (source NOT black at the mapped time) still returns a defect and trips.
+    """
+    defects, downgraded = [], []
+    for (s, e) in spans:
+        try:
+            src_s, src_e = out_to_src(s), out_to_src(e)
+        except Exception:
+            defects.append((s, e))
+            continue
+        if src_s is None or src_e is None or src_e <= src_s:
+            defects.append((s, e))
+            continue
+        a, b = max(0.0, src_s - 0.3), src_e + 0.3
+        p = subprocess.run(
+            ["ffmpeg", "-v", "info", "-ss", str(a), "-t", str(b - a),
+             "-i", source_path,
+             "-vf", "blackdetect=d=%s:pix_th=%s" % (
+                 _IG_BLACK_DETECT_S, _IG_BLACK_PIX_TH),
+             "-an", "-f", "null", "-"],
+            capture_output=True, text=True)
+        src_black = _ig_parse_spans(p.stderr or "",
+                                    r"black_start:([\d.]+)",
+                                    r"black_end:([\d.]+)", b - a)
+        cover = sum(be - bs for bs, be in src_black)
+        if cover >= (src_e - src_s) * _IG_SOURCE_ECHO_COVER:
+            downgraded.append({"span": (s, e), "src": (src_s, src_e),
+                               "src_black_cover_s": round(cover, 3)})
+        else:
+            defects.append((s, e))
+    return defects, downgraded
+
+
 _IG_BLACK_MASK_TYPES = frozenset({"diptoblack", "shutterflash"})
 # Transition types whose ANIMATION passes through near-black by design.
 # DipToBlack: by construction. ShutterFlash: CRT power-off — clip A
@@ -18595,10 +18637,22 @@ def _integrity_gate(output_path, v_dur, a_dur, expected_frames, nb_frames,
         freeze_resid, downgraded = _ig_source_echo(
             source_path, freeze_resid, out_to_src)
     black_resid = _ig_subtract(black, masks.get("black", []))
+    black_downgraded = []
+    if black_resid and source_path and out_to_src:
+        black_resid, black_downgraded = _ig_source_echo_black(
+            source_path, black_resid, out_to_src)
     holes = [(s, e) for (s, e) in _ig_subtract(
                  _ig_intersect(silence, sorted(set(freeze + black))),
                  masks.get("hole", []))
              if e - s >= _IG_HOLE_TRIP_S]
+    # A hole whose dead region is a source-echoed still/black tail (freeze OR
+    # black downgraded above) is the user's own content, not a render hole — keep
+    # it only if the NON-echoed remainder still clears the hole trip floor.
+    if holes and (downgraded or black_downgraded):
+        _echo = ([tuple(d["span"]) for d in downgraded]
+                 + [tuple(d["span"]) for d in black_downgraded])
+        holes = [h for h in holes
+                 if sum(e - s for (s, e) in _ig_subtract([h], _echo)) >= _IG_HOLE_TRIP_S]
     ts = _ig_probe_timestamps(output_path)
 
     trips = []
@@ -18630,6 +18684,7 @@ def _integrity_gate(output_path, v_dur, a_dur, expected_frames, nb_frames,
             "fps": fps,
             "freeze_raw": freeze, "black_raw": black, "silence": silence,
             "content_stillness_downgraded": downgraded,
+            "content_black_downgraded": black_downgraded,
             "masks": {k: [(round(s, 3), round(e, 3)) for (s, e) in v]
                       for k, v in masks.items()},
             "timestamps": ts,
