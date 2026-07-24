@@ -10674,6 +10674,23 @@ def generate_edit_gemini(
 ):
     _pre_analysis = cached_response
 
+    # ── Burned-in-text detector (DARK behind PROMPTLY_BURNED_TEXT) ────────────
+    # Runs the deterministic EAST detector on video_path — the FULL-RES source,
+    # NOT the 480p proxy Gemini watches — CONCURRENTLY with the editorial Gemini
+    # call below, so its ~3s cost hides under Gemini's ~30-60s (~0 added wall-clock).
+    # The result feeds the double-caption suppression (below) + the zoom gate (at
+    # the render projection seam). Fail-safe: detect_burned_in_text returns None on
+    # ANY error, and OFF (default) never runs it → the plan is byte-identical to today.
+    _burned_future = None
+    _burned_pool = None
+    if _burned_text_enabled() and video_path:
+        try:
+            import burned_text as _bt_mod
+            _burned_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            _burned_future = _burned_pool.submit(_bt_mod.detect_burned_in_text, video_path)
+        except Exception:
+            _burned_future = None
+
     # ── EditPolicy enforcement scope (Phase 2 · Steps 2-4) ───────────────────
     # resolved_policy is the flag-gated EditPolicy for this job (None when the
     # feature is off → EMPTY off-set → NOTHING is enforced → byte-identical to
@@ -13302,10 +13319,37 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                  or {}).get("frame_layout") or {})
                                .get("existing_overlays", {})
                                .get("has_burned_captions"))
-            if _ecr == "none" and _ana_burned:
-                _ecr = "bottom"
-                print("[generate-edit] burned captions: analysis signal engaged "
-                      "(Stage-0 read said none) — existing_caption_region=bottom",
+            # DETERMINISTIC detector signal (DARK behind PROMPTLY_BURNED_TEXT;
+            # _burned_future is None when off). It finished long ago — Gemini
+            # dominated the wall. It backstops Gemini's Stage-0 read, which misses
+            # burned captions ~a third of the time (the double-caption defect). The
+            # detector is precision-tuned to NEVER false-suppress (0/60 on the real
+            # baseline), so engaging it here can only ADD true suppressions.
+            _det_burned = False
+            _det_band = "none"
+            if _burned_future is not None:
+                try:
+                    _det_res = _burned_future.result(timeout=45)
+                except Exception:
+                    _det_res = None
+                if _burned_pool is not None:
+                    _burned_pool.shutdown(wait=False)
+                if isinstance(_det_res, dict):
+                    # carry the full result for the zoom gate at the projection seam
+                    edit_plan["_burned_text"] = {
+                        "has_burned_captions": bool(_det_res.get("has_burned_captions")),
+                        "existing_caption_region": _det_res.get("existing_caption_region", "none"),
+                        "source_text_regions": _det_res.get("source_text_regions") or [],
+                        "regions": _det_res.get("regions") or [],
+                    }
+                    _det_burned = bool(_det_res.get("has_burned_captions"))
+                    _det_band = _det_res.get("existing_caption_region") or "none"
+            if _ecr == "none" and (_ana_burned or _det_burned):
+                _ecr = (_det_band if (_det_burned and _det_band in ("bottom", "center", "top"))
+                        else "bottom")
+                print(f"[generate-edit] burned captions: "
+                      f"{'DETECTOR' if _det_burned else 'analysis'} signal engaged "
+                      f"(Stage-0 read said none) — existing_caption_region={_ecr}",
                       flush=True)
             edit_plan["existing_caption_region"] = _ecr
             if (_ecr != "none" and edit_plan["caption_style"] != "none"
@@ -21204,7 +21248,38 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 # the springs/StepZoom/StagedPush already land impact on the word.
                 if _zoom["type"] in _RAMP_ZOOM_TYPES:
                     _zoomeffect["punch"] = _vibe_punches(edit_plan.get("_user_vibe"))
-                _clip_spec["zoomEffect"] = _zoomeffect
+                # ── Burned-in-text ZOOM GATE (Layer 2e, DARK) ────────────────────
+                # A zoom scales + crops the frame. A PERSISTENT full-width burned-in
+                # band — a synced caption track, or a wide non-corner banner — cannot
+                # survive the crop: it stretches, drifts off-center, or leaves frame
+                # mid-word. Suppress the zoom there. The persistent-vs-incidental
+                # split (from the precision-tuned detector) is load-bearing: a CORNER
+                # watermark or a narrow incidental mark must NOT kill the zoom. OFF
+                # (default) → edit_plan has no _burned_text → never suppresses →
+                # byte-identical.
+                _bt = edit_plan.get("_burned_text")
+                _bt_suppress = False
+                if isinstance(_bt, dict):
+                    if _bt.get("has_burned_captions"):
+                        _bt_suppress = True          # full-width caption band — can't crop around it
+                    else:
+                        for _btr in (_bt.get("regions") or []):
+                            # a wide, non-corner signage band (a banner) is also unccroppable;
+                            # corner/narrow/incidental marks fall through and keep the zoom
+                            if (_btr.get("class") == "captions"
+                                    or (_btr.get("class") == "signage"
+                                        and not _btr.get("corner")
+                                        and float(_btr.get("max_row_extent") or 0) >= 0.5)):
+                                _bt_suppress = True
+                                break
+                if _bt_suppress:
+                    _record_divergence(
+                        "zoom",
+                        {"type": _zoom["type"], "bands": (_bt.get("source_text_regions") or [])},
+                        "burned_suppress",
+                        reason="zoom would scale/crop through persistent burned-in text")
+                else:
+                    _clip_spec["zoomEffect"] = _zoomeffect
         clips_out.append(_clip_spec)
 
     # Transitions live between cut[i] and cut[i+1] when the leading cut emits
@@ -30279,6 +30354,10 @@ def handler(job):
         _PERSIST_DERIVED_KEYS = {
             "_resolved_tight_cut_overlays", "_parsed_sound_effects",
             "_emphasis_moments", "_removed_word_indices", "_schema_generation",
+            # burned-in-text detector result (DARK): generate-derived, render-read by
+            # the zoom gate. render_only replay does NOT re-run the detector, so it
+            # must survive storage or a replay would re-add a suppressed zoom.
+            "_burned_text",
         }
         sanitized_recipe = {
             k: v for k, v in edit_plan.items()

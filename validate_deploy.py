@@ -4992,6 +4992,37 @@ def _integrity_source_echo_black():
     assert "content_black_downgraded" in _h, "the verdict must record black downgrades (observability)"
 
 
+@check("BURNED-IN TEXT Layer 2d (double-caption gate, DARK): the deterministic detector runs CONCURRENT with the editorial Gemini call (on video_path — the full-res source, NOT the 480p proxy) and its has_burned_captions backstops Gemini's Stage-0 read (which misses burned captions ~a third of the time = the double-caption defect), engaging the EXISTING caption suppression. OFF (default) → _burned_future is None → _det_burned stays False → the override condition reduces to the original _ana_burned → plan byte-identical. Precision-tuned to 0/60 false-suppress, so engaging it can only ADD true suppressions, never drop a user's real captions.")
+def _burned_text_double_caption_gate():
+    _h = open("handler.py").read()
+    # concurrent, flag-gated, on the FULL-RES source (video_path), not the proxy
+    assert "if _burned_text_enabled() and video_path:" in _h, \
+        "the detector dispatch must be flag-gated and run on video_path (the source)"
+    assert "_burned_future = _burned_pool.submit(_bt_mod.detect_burned_in_text, video_path)" in _h, \
+        "the detector must run CONCURRENTLY (thread pool) on video_path so its cost hides under Gemini"
+    # the detector signal ORs into the EXISTING override — so OFF is byte-identical
+    assert 'if _ecr == "none" and (_ana_burned or _det_burned):' in _h, \
+        "the detector signal must OR into the existing override (OFF: _det_burned=False → original _ana_burned condition)"
+    assert "_det_burned = False" in _h, "the detector signal must default False so OFF is byte-identical"
+    # result carried in-memory for the zoom gate (dropped only at persistence)
+    assert 'edit_plan["_burned_text"]' in _h, "the detector result must be carried (_burned_text) for the zoom gate"
+
+
+@check("BURNED-IN TEXT Layer 2e (zoom gate, DARK): at the render projection seam a zoom is SUPPRESSED when the detector found a persistent full-width burned-text band (a caption track, or a wide non-corner banner) it would scale/crop through — but a CORNER watermark or narrow incidental mark does NOT kill the zoom (the persistent-vs-incidental split, load-bearing so one corner logo doesn't strip every zoom in the video). OFF (default) → edit_plan has no _burned_text → the zoom is assigned unchanged → byte-identical.")
+def _burned_text_zoom_gate():
+    _h = open("handler.py").read()
+    assert '_bt = edit_plan.get("_burned_text")' in _h, "the zoom gate must read the carried detector result"
+    assert 'if _bt.get("has_burned_captions"):' in _h, "a full-width caption band must suppress the zoom"
+    # persistent-vs-incidental: only a WIDE, NON-CORNER signage band suppresses
+    assert 'and not _btr.get("corner")' in _h and 'float(_btr.get("max_row_extent") or 0) >= 0.5' in _h, \
+        "the split must spare corner/narrow incidental marks (only wide non-corner signage suppresses)"
+    # the zoom is still assigned unless suppressed — OFF path keeps zoomEffect (byte-identical)
+    _i = _h.find("_bt_suppress = False")
+    _tail = _h[_i:_i + 1400]
+    assert 'if _bt_suppress:' in _tail and 'else:' in _tail and '_clip_spec["zoomEffect"] = _zoomeffect' in _tail, \
+        "the zoom must be assigned in the ELSE of the suppress branch (OFF → not suppressed → assigned → byte-identical)"
+
+
 @check("MULTILINGUAL C (verification tiers): Tier-1 = the 9 certified languages (contact sheet proved every script incl. Cyrillic); Tier-2 = every other font-backed language, enabled+WATCHED. Every non-English render is language-tagged (lang/script/tier) via a language_coverage divergence so the daily report shows what renders and can flag a failing Tier-2 language. English/Latin skipped to keep the ledger signal.")
 def _multilingual_c_tiers():
     import handler
