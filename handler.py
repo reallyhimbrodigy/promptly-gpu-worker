@@ -1914,7 +1914,15 @@ try:
     # boto3 picks these up automatically — no explicit credential passing.
     _aws_region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-west-1")
     if os.environ.get("AWS_ACCESS_KEY_ID") and os.environ.get("AWS_SECRET_ACCESS_KEY"):
-        _aws_s3_client = boto3.client("s3", region_name=_aws_region)
+        # Explicit fail-fast timeouts + bounded retries (2026-07-24): a stalled S3
+        # transfer must surface a boto error the pipeline can classify (RENDER_FFMPEG/
+        # DOWNLOAD path), never hang the container toward the Modal timeout. 15s to
+        # connect, 60s per read, 4 standard-mode retries with backoff.
+        _aws_s3_client = boto3.client(
+            "s3", region_name=_aws_region,
+            config=BotoConfig(connect_timeout=15, read_timeout=60,
+                              retries={"max_attempts": 4, "mode": "standard"}),
+        )
         print(f"[startup] AWS S3 OK (region={_aws_region})", flush=True)
     else:
         print("[startup] AWS S3 unavailable: missing AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY", flush=True)
@@ -27063,10 +27071,18 @@ def handler(job):
             # This saves ~90% of the compute previously burned on doomed jobs
             # AND gives the frontend an actionable error code.
             _main_poll_start = time.time()
-            # 30 min — match the iOS background URLSession resource
-            # timeout. See identical reasoning at the prewarm-side
-            # poll_deadline above.
-            _main_poll_deadline = _main_poll_start + 1800
+            # 300s (fixed 2026-07-24, was 1800) — a stalled iOS upload MUST fail-fast
+            # with the clean, retryable UPLOAD_STALLED code BEFORE the Modal function
+            # timeout SIGKILLs the worker. The old 1800s was >= the function timeout
+            # (900s, now 1800s), so a stalled upload hung at "Got your video, loading
+            # it in..." until the SIGKILL — which writes NO terminal status, so the
+            # reaper terminalized it UNCODED ~5min later. THAT was the "preparing
+            # footage freezes ~9min then fails" class (UNCODED, phase frozen at
+            # download). iOS 160+ dispatches createVideoJob AFTER the upload PUT
+            # returns 200, so the source is already on S3 at dispatch and the poll
+            # finds it in seconds; 300s is a generous ceiling only a lost/stalled
+            # upload hits, and it leaves ~1500s render headroom under the 1800s cap.
+            _main_poll_deadline = _main_poll_start + int(os.environ.get("PROMPTLY_SOURCE_POLL_S", "300"))
             _main_poll_attempt = 0
             _last_progress_log = _main_poll_start
             while True:
