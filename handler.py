@@ -11292,7 +11292,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
 """
 
     # at least _REPAIR_MIN_HEADROOM_S of slack in the 900s job budget.
-    _repair_budget_ok = (float(duration or 0.0) * 3.0 + _REPAIR_MIN_HEADROOM_S) <= 900.0
+    _repair_budget_ok = (float(duration or 0.0) * 3.0 + _REPAIR_MIN_HEADROOM_S) <= 1800.0  # job budget (raised 900->1800, 2026-07-23)
     _post_user_attempt = post_user
     # THE SAFE EDIT (zero-fatal ladder): when the recipe stage is
     # unrecoverable — repair-net exhaustion or transport exhaustion — engage
@@ -24672,7 +24672,12 @@ class RecipeInvalidError(ValueError):
 # cliff. Cap per the ratified decision tree: 110s passes → 120s. Root fix
 # (duration-scaled editorial budget / provisioned throughput) is ledgered
 # post-launch (F1) and must re-run these probes before the cap moves up.
-_MAX_SOURCE_DURATION_S = 120.0
+# 2026-07-23: 120 -> 180. The 120 cap existed because a 149.9s source floored at
+# the OLD 900s Modal ceiling (Gemini 480s + safe-edit ~710s grazed it). With the
+# job budget raised to 1800s (run_pipeline_bg / @app.cls), a 3-minute source now
+# has ample render headroom, so 3-min clips are accepted. Ships in LOCKSTEP with
+# the timeout + reaper raise (reaper EXEC_WALL_MS 2100s >= worker 1800s at all times).
+_MAX_SOURCE_DURATION_S = 180.0
 # Intake FLOOR (2026-07-17): a clip too short to carry a talking-head edit.
 # Symmetric with the cap above and fired at the SAME pre-Deepgram intake probe,
 # so an ultra-short upload gets an honest duration-led reject in ~6s instead of
@@ -25456,7 +25461,7 @@ def _outer_safe_rescue(job, input_data, classified, state, run_fn=None):
             + max(60.0, min(240.0, (_dur if _dur > 0 else 80.0) * 3.0))
             + _RESCUE_MARGIN_S
         )
-        if _elapsed + _projected > 900.0:
+        if _elapsed + _projected > 1800.0:  # job budget (raised 900->1800, 2026-07-23)
             print(
                 f"[safe-edit] outer rescue skipped — budget "
                 f"(elapsed={_elapsed:.0f}s projected={_projected:.0f}s)",
@@ -29338,7 +29343,7 @@ def handler(job):
         try:  # P1b fail-open: proceed unshed
             _shed_elapsed = time.time() - _pipeline_start
             _shed_projected = max(60.0, float(source_duration) * 3.0)
-            _shed_slack = 900.0 - _shed_elapsed - _shed_projected
+            _shed_slack = 1800.0 - _shed_elapsed - _shed_projected  # job budget (raised 900->1800, 2026-07-23)
             _shed_dropped = []
             if _shed_slack < 90.0 and (edit_plan.get("generated_scenes")
                                         or edit_plan.get("_generated_subjects")):
@@ -30407,6 +30412,23 @@ def handler(job):
         # class, the app refunds on it (INTEGRITY_TRIP leg, generalized).
         _designed_reject = (classified.get("error_code")
                             in _DESIGNED_REJECTION_CODES)
+        # OBSERVABILITY (2026-07-23): persist the TECHNICAL cause on every failure,
+        # not just the user-facing copy. The "core error / our fault" bucket was
+        # un-investigable because str(e) went only to the ephemeral [ALERT] channel
+        # and the return value — never the DB — so UNKNOWN/RENDER_FATAL/INTEGRITY_TRIP
+        # rows carried no exception class, no file:line, no integrity trip summary.
+        # These three fields make the bucket self-diagnosing (queryable from result).
+        # Only meaningful for real failures; harmless on designed rejects. Best-effort.
+        _err_class = type(e).__name__
+        _err_where = ""
+        try:
+            import traceback as _tbm
+            _tbf = [f for f in _tbm.extract_tb(e.__traceback__)
+                    if "handler.py" in (f.filename or "")]
+            if _tbf:
+                _err_where = f"{os.path.basename(_tbf[-1].filename)}:{_tbf[-1].lineno} in {_tbf[-1].name}"
+        except Exception:
+            pass
         write_job_status(
             input_data.get("job_id"), status="failed", phase="Something went wrong",
             result={
@@ -30414,6 +30436,11 @@ def handler(job):
                 "user_message": classified.get("user_message"),
                 "retryable": classified.get("retryable"),
                 "designed_rejection": _designed_reject,
+                # technical cause (support/triage): exception class, message tail,
+                # and the deepest handler.py frame (file:line in fn).
+                "error_class": _err_class,
+                "error_detail": str(e)[:500],
+                "error_where": _err_where,
                 **_floor_markers(_floor_state),
             },
         )
