@@ -210,6 +210,13 @@ image = (
         "mkdir -p /models/face_detector",
         "wget -q -O /models/face_detector/deploy.prototxt https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt",
         "wget -q -O /models/face_detector/res10_300x300_ssd_iter_140000.caffemodel https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
+        # EAST text detector (burned-in-text guard, burned_text.py). Self-hosted in
+        # the app's S3/CloudFront (not a third-party repo) so the build is under our
+        # control. Consumed via cv2.dnn exactly like the face detector above.
+        "mkdir -p /models/east",
+        "wget -q -O /models/east/frozen_east_text_detection.pb https://d1iax8jos987n3.cloudfront.net/models/east/frozen_east_text_detection.pb",
+        # verify it landed intact (real .pb is ~96MB — a truncated/HTML fetch fails loud at build, not at runtime)
+        "test $(stat -c%s /models/east/frozen_east_text_detection.pb) -gt 90000000 || (echo 'EAST model download failed/truncated' && exit 1)",
         # Pre-cache arnndn noise reduction model (avoids runtime download on every cold start)
         "mkdir -p /usr/share/rnnoise",
         "wget -q -O /usr/share/rnnoise/bd.rnnn https://github.com/GregorR/rnnoise-models/raw/master/beguiling-drafter-2018-08-30/bd.rnnn",
@@ -498,6 +505,11 @@ image = (
     # the per-job/env flag is on; without this entry the flag-on path would hit
     # ModuleNotFoundError (caught + disabled per-job, but the feature wouldn't run).
     .add_local_file("edit_policy.py", "/edit_policy.py")
+    # Burned-in-text guard (burned_text.py) — deterministic EAST detector, lazy-
+    # imported only under PROMPTLY_BURNED_TEXT. Bundle it or the flag-on path hits
+    # ModuleNotFoundError (fail-safe returns None → behaves as today, but the guard
+    # wouldn't run). Pairs with the /models/east model wget above.
+    .add_local_file("burned_text.py", "/burned_text.py")
     # Premium-tier scaffold (Phase 1). handler.py lazy-imports `premium` at the
     # tier fork; mounted so the flag-on premium path can import it (guarded —
     # absence falls back to the base path, never a crash).
