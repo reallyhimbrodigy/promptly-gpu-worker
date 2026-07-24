@@ -5194,6 +5194,7 @@ def _secret_canonical_values():
         "PROMPTLY_EDIT_IN_LANGUAGE": "1",  # multilingual + in-language editorial ON
         "PROMPTLY_SCRIPT_DENYLIST": "",   # graduated: no script denied
         "PROMPTLY_PLAN_CAPTURE": "",      # plan-capture corpus hook inert
+        "PROMPTLY_BURNED_TEXT": "1",      # burned-in-text guard LIVE (flipped 2026-07-24 after flag-on smoke test)
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that
