@@ -4945,6 +4945,36 @@ def _multilingual_b_edit_in_language():
         "the promptly-lang-flags secret (carrying PROMPTLY_EDIT_IN_LANGUAGE=1) must be attached app-wide"
 
 
+@check("BURNED-IN TEXT belt (Layer 1, flag PROMPTLY_BURNED_TEXT, DARK): the sharpened Stage-0 + zoom-preservation prompt block is a PURE APPEND gated on the flag — OFF → the post-cuts system prompt is byte-identical to pre-feature (block absent, an exact prefix of the ON prompt); ON → the block appends verbatim, carrying both the intensified double-caption check and the zoom-preservation rule. No existing prompt text is modified, so talking-head output is unchanged until Zac flips the flag.")
+def _burned_text_layer1_prompt():
+    import os as _os, handler
+    assert callable(handler._burned_text_enabled), "the flag helper must exist"
+    _MARK = "BURNED-IN TEXT IS A HARD CHECK"
+    _prev = _os.environ.get("PROMPTLY_BURNED_TEXT")
+    try:
+        _os.environ.pop("PROMPTLY_BURNED_TEXT", None)    # OFF
+        _off, _ = handler._build_post_cuts_prompt(vibe="viral", duration=30)
+        _os.environ["PROMPTLY_BURNED_TEXT"] = "1"         # ON
+        _on, _ = handler._build_post_cuts_prompt(vibe="viral", duration=30)
+    finally:
+        if _prev is None:
+            _os.environ.pop("PROMPTLY_BURNED_TEXT", None)
+        else:
+            _os.environ["PROMPTLY_BURNED_TEXT"] = _prev
+    # OFF: block ABSENT → byte-identical to pre-feature production prompt
+    assert _MARK not in _off, "OFF: the burned-text block must be ABSENT (prompt byte-identical to pre-feature)"
+    # ON: block present
+    assert _MARK in _on, "ON: the burned-text block must be present"
+    # PURE APPEND: OFF is an exact prefix of ON — no existing prompt text is touched
+    assert _on.startswith(_off), "the block must be a PURE APPEND — flag-OFF must be an exact prefix of flag-ON"
+    _tail = _on[len(_off):]
+    # the block carries BOTH concerns: the intensified double-caption check AND the zoom rule
+    assert "DOUBLE CAPTIONS" in _tail and "existing_caption_region" in _tail, \
+        "the block must intensify the double-caption / existing_caption_region check"
+    assert "ZOOMS AND PUNCHES MUST PRESERVE BURNED-IN TEXT" in _tail, \
+        "the block must add the zoom-preservation rule (don't scale/crop through burned-in text)"
+
+
 @check("MULTILINGUAL C (verification tiers): Tier-1 = the 9 certified languages (contact sheet proved every script incl. Cyrillic); Tier-2 = every other font-backed language, enabled+WATCHED. Every non-English render is language-tagged (lang/script/tier) via a language_coverage divergence so the daily report shows what renders and can flag a failing Tier-2 language. English/Latin skipped to keep the ledger signal.")
 def _multilingual_c_tiers():
     import handler

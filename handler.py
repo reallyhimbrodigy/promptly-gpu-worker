@@ -4090,6 +4090,17 @@ def _edit_in_language_enabled():
     return bool(os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE", "").strip())
 
 
+def _burned_text_enabled():
+    """Whether the burned-in-text guard is live — ONE flag gating the whole
+    feature: the sharpened Stage-0 prompt block (belt), the deterministic EAST
+    text detector that runs on the ORIGINAL source frames (guarantee), and the
+    gates that feed its signal into caption suppression / MG-overlay redirects /
+    the new zoom constraint. Default OFF → prompt is byte-identical, the detector
+    never runs, and every burned-text value stays model-declared exactly as
+    today. Flip held for Zac after the detector is cert'd on real +/- clips."""
+    return bool(os.environ.get("PROMPTLY_BURNED_TEXT", "").strip())
+
+
 def _script_reaches_render(script):
     """True if a dominant script may reach the render path. Under
     PROMPTLY_EDIT_IN_LANGUAGE it's the denylist model (every font-backed script
@@ -6303,6 +6314,38 @@ already follow) and return when the face leads again."""
             "omit the graphic rather than fall back to English. Numerals and brand "
             "names stay as the speaker says them. This changes only the LANGUAGE "
             "of what you write, never which moments you choose or how you edit."
+        )
+
+    if _burned_text_enabled():
+        system_instruction += (
+            "\n\n=== BURNED-IN TEXT IS A HARD CHECK — RUN IT, DON'T SKIM IT ===\n"
+            "Stage 0 is not a formality. Before anything else, look at the actual "
+            "pixels across several sampled moments and answer one question with "
+            "certainty: is text ALREADY burned into this footage? Two kinds, two "
+            "consequences:\n"
+            "  • SYNCED WORD CAPTIONS — text that changes with the speech, usually a "
+            "lower band, sometimes small or center-frame. If they exist, the video "
+            "ALREADY HAS its caption layer: set existing_caption_region to the band "
+            "and caption_style to \"none\". Adding ours on top produces DOUBLE "
+            "CAPTIONS — the single most obvious tell that a tool, not an editor, "
+            "touched this. When you are unsure between 'a faint/small caption' and "
+            "'no caption', REPORT the region: a missed caption double-captions the "
+            "video (a glaring defect); a false report only routes emphasis to zooms "
+            "and motion graphics (harmless). Err toward reporting.\n"
+            "  • OTHER SOURCE TEXT — a watermark, a handle, on-screen signage, a UI, "
+            "a title card. Report every band it occupies in source_text_regions. "
+            "That is occupied space: your overlays, your graphics, AND your camera "
+            "all work around it.\n"
+            "ZOOMS AND PUNCHES MUST PRESERVE BURNED-IN TEXT. A push-in scales and "
+            "crops the frame; if the shot carries burned-in text, a zoom that crops "
+            "through it or scales it off-center MUTILATES it — the text stretches, "
+            "drifts off-center, or leaves the frame mid-word. So on any beat whose "
+            "frame carries burned-in text in the move's path: either DON'T zoom that "
+            "beat, or keep the move loose enough that the entire text band stays "
+            "fully in-frame and undistorted. A full-width lower-third caption cannot "
+            "be cropped around — do not zoom into it at all. A small corner watermark "
+            "can survive a gentler, well-placed move. Never trade legible source text "
+            "for a camera move."
         )
 
     return system_instruction, user_content
