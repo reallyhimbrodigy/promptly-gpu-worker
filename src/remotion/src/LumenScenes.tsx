@@ -182,6 +182,12 @@ const LumenShell: React.FC<{
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
   const glowDrift = idle(frame, fps, 1.1, 30, 7);
+  // Pass-2 (Wave-3): continuous camera micro-sway ON TOP of the eased move —
+  // the camera is hand-held-alive on every scene type (push scenes drift too),
+  // never mechanically still. Deterministic, sub-pixel-scale, blur-smoothed:
+  // this + continuous easing under CameraMotionBlur IS the 240fps feel — the
+  // canonical fps does not change.
+  const sway = idle(frame, fps, 2.4, 4, 5.6);
   return (
     <AbsoluteFill style={{ opacity: fadeOut, backgroundColor: p.b, overflow: "hidden" }}>
       {/* code-built world: deep gradient + a live glow that never sits still */}
@@ -205,7 +211,10 @@ const LumenShell: React.FC<{
       <CameraMotionBlur samples={6} shutterAngle={180}>
         <AbsoluteFill
           style={{
-            transform: `perspective(1100px) rotateY(${camRotY}deg) translateX(${camX}px) scale(${camScale})`,
+            transform:
+              `perspective(1100px) rotateY(${camRotY + sway.r * 0.35}deg) ` +
+              `translateX(${camX + sway.x}px) translateY(${sway.y * 0.6}px) ` +
+              `scale(${camScale})`,
             transformOrigin: "center",
           }}
         >
@@ -238,6 +247,9 @@ const TypoStat: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
   });
   const drift = idle(frame, fps, 0.4, 5);
   const lineIn = spring({ frame: frame - Math.round(fps * 0.12), fps, config: { damping: 16, stiffness: 130, mass: 0.8 } });
+  // Pass-2: the headline's glow BREATHES (slow, deterministic) — light in the
+  // scene world is alive, not a baked still.
+  const glowPulse = 0.5 + 0.5 * Math.sin((frame / fps) * ((2 * Math.PI) / 4.4) + 1);
   return (
     <LumenShell colors={spec.background.colors} camera="sweep" durationInFrames={spec.durationInFrames}>
       <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
@@ -257,7 +269,10 @@ const TypoStat: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
               letterSpacing: "-0.03em",
               color: p.ink,
               fontVariantNumeric: "tabular-nums",
-              textShadow: `0 0 90px ${p.a}66, 0 10px 44px rgba(0,0,0,0.55)`,
+              textShadow:
+                `0 0 ${Math.round(78 + 26 * glowPulse)}px ${p.a}66, ` +
+                `0 10px 44px rgba(0,0,0,0.55)` +
+                (p.inkScrim ? `, ${p.inkScrim}` : ""),
             }}
           >
             {display}
@@ -375,6 +390,11 @@ const PhotoCard: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
   const photos = (spec.photos || []).slice(0, 3);
   const caption = (spec.textLayers || [])[0];
   const capIn = spring({ frame: frame - Math.round(fps * 0.3), fps, config: { damping: 15, stiffness: 140, mass: 0.8 } });
+  // Pass-2: the caption is a living element — idle drift + a slow sub-1% scale
+  // breathe after its spring entrance (dynamic caption treatment; the cards
+  // already float, the words must not sit dead among them).
+  const capDrift = idle(frame, fps, 3.1, 5, 4.8);
+  const capBreathe = 1 + 0.008 * Math.sin((frame / fps) * ((2 * Math.PI) / 5.2));
   return (
     <LumenShell colors={spec.background.colors} camera="push" durationInFrames={spec.durationInFrames}>
       <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
@@ -422,7 +442,9 @@ const PhotoCard: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
               color: p.ink,
               textShadow: "0 6px 30px rgba(0,0,0,0.65)",
               opacity: capIn,
-              transform: `translateY(${(1 - capIn) * 40}px)`,
+              transform:
+                `translate(${capDrift.x}px, ${(1 - capIn) * 40 + capDrift.y}px) ` +
+                `rotate(${capDrift.r * 0.3}deg) scale(${capBreathe})`,
               padding: "0 60px",
             }}
           >
