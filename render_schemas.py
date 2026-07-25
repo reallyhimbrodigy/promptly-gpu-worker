@@ -240,6 +240,9 @@ class GenSceneStatSpec(_RemotionModel):
 class GeneratedSceneSpec(_RemotionModel):
     fromFrame: int
     durationInFrames: int
+    # ORIGIN index into the plan's generated_scenes (Wave-3 4d) — the QA judge
+    # maps verdicts back through this, never through list position.
+    sceneIndex: Optional[int] = None
     background: GenSceneBackgroundSpec
     subject: GenSceneSubjectSpec
     textLayers: List[GenSceneTextLayerSpec] = Field(default_factory=list)

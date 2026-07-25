@@ -8555,6 +8555,29 @@ def _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src):
         s = _xlate(_sk)
         e = _xlate(_ek)
         if s is None or e is None:
+            # DEFECT FIX (Wave-3 4a): one endpoint past the kept range used to
+            # kill the WHOLE scene — the premium centerpiece — e.g. the model
+            # anchoring the scene's end one word past the final kept word. When
+            # at least ONE endpoint is genuinely kept, CLAMP the other into
+            # range and keep the scene; only a scene with NO kept anchor drops
+            # (recorded for the funnel). B-roll keeps its drop semantics (stock
+            # is replaceable; a designed scene is not).
+            def _in_range(_ix):
+                return isinstance(_ix, (int, float)) and 0 <= int(_ix) < M
+            if (M > 0 and (_in_range(_sk) or _in_range(_ek))
+                    and isinstance(_sk, (int, float)) and isinstance(_ek, (int, float))):
+                _ck_s = max(0, min(int(_sk), M - 1))
+                _ck_e = max(0, min(int(_ek), M - 1))
+                if _ck_s <= _ck_e:
+                    print(
+                        f"[two-pass] generated_scene index CLAMPED into kept-range "
+                        f"({_sk},{_ek})→({_ck_s},{_ck_e}) of [0..{M-1}] — scene kept",
+                        flush=True,
+                    )
+                    gs_out.append({**gs, "start_word_index": new_to_src[_ck_s],
+                                   "end_word_index": new_to_src[_ck_e],
+                                   "_start_word_kept": _ck_s, "_end_word_kept": _ck_e})
+                    continue
             print(f"[two-pass] Dropping generated_scene: index out of kept-range", flush=True)
             _gs_dropped.append({"scene": _gi, "reason": "index_out_of_kept_range",
                                 "start": _sk, "end": _ek, "kept_len": M})
@@ -9368,6 +9391,53 @@ def _qa_judge_generated_scenes(output_path, gs_specs, fps, work_dir, palette_hin
             flush=True,
         )
         return []
+
+
+def _judge_origin_index(qa_scenes, judge_pos):
+    """CASCADE FIX (Wave-3 4d): map a judge-list POSITION (what
+    _qa_judge_generated_scenes numbers scenes by — 'SCENE {i}' over the list it
+    was HANDED) to the ORIGIN index into edit_plan["generated_scenes"], via the
+    rendered spec's sceneIndex marker. List position drifts from origin
+    whenever a scene is skipped at the converter (unresolvable timing, missing
+    asset) or filtered from the judge scope (designed scenes) — a positional
+    dereference then kills the WRONG scene (a healthy designed scene) and
+    orphans _generated_subjects keys. Falls back to the position for specs
+    predating the marker."""
+    try:
+        _jp = int(judge_pos)
+        if 0 <= _jp < len(qa_scenes):
+            _oi = (qa_scenes[_jp] or {}).get("sceneIndex")
+            if _oi is not None:
+                return int(_oi)
+        return _jp
+    except Exception:
+        return judge_pos
+
+
+def _drop_scenes_by_origin(edit_plan, fail_origin_idx):
+    """CASCADE FIX (Wave-3 4d): drop judged-failed scenes BY ORIGIN INDEX and
+    re-key _generated_subjects to the surviving positions. The old degrade
+    filtered generated_scenes by enumerate index but left subjects keyed by the
+    OLD indices — every surviving hero scene after a degrade lost its asset
+    (rendered the empty void) on the re-render. Returns the surviving scene
+    count. Fail-open: any error changes nothing."""
+    try:
+        if not isinstance(edit_plan, dict):
+            return 0
+        _scenes = edit_plan.get("generated_scenes") or []
+        _subs = edit_plan.get("_generated_subjects") or {}
+        _kept_pairs = [(_i, _g) for _i, _g in enumerate(_scenes)
+                       if _i not in set(fail_origin_idx)]
+        edit_plan["generated_scenes"] = [_g for _, _g in _kept_pairs]
+        _rekeyed = {_new: _subs[_old] for _new, (_old, _) in enumerate(_kept_pairs)
+                    if _old in _subs}
+        if _rekeyed:
+            edit_plan["_generated_subjects"] = _rekeyed
+        else:
+            edit_plan.pop("_generated_subjects", None)
+        return len(_kept_pairs)
+    except Exception:
+        return len(edit_plan.get("generated_scenes") or []) if isinstance(edit_plan, dict) else 0
 
 
 def _perturb_scene_prompt(scene, qa_reason, attempt, score=None):
@@ -23502,6 +23572,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _subj_url = _stage_file(
                     _subj_path, dest_basename=f"genscene_{_gsi:02d}_{os.path.basename(_subj_path)}"
                 )
+            # Wave-3 4b render belt: a scene REQUIRING an image asset (hero_object
+            # / legacy full-frame) renders only WITH it — never the empty glow
+            # void / dashed placeholder. Costs exactly THIS scene.
+            if str(_scene.get("scene_type") or "") not in ("typo_stat", "photo_card") and not _subj_url:
+                print(f"[gen-asset] scene={_gsi} required asset missing at render — "
+                      f"dropped (this scene only)", flush=True)
+                continue
             # TEXT-FROM-KNOWN-INPUTS: keep only text layers whose content traces
             # to the transcript; drop invented text (belt; QA judge is suspenders).
             _text_layers = []
@@ -23563,6 +23640,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _gs_out.append({
                 "fromFrame": _gs_from,
                 "durationInFrames": _gs_dur,
+                # ORIGIN index into edit_plan["generated_scenes"] (Wave-3 4d):
+                # the judge/degrade path maps its per-spec verdicts back through
+                # this — never through list POSITION, which drifts whenever a
+                # scene is skipped here or filtered from the judge scope.
+                "sceneIndex": _gsi,
                 "sceneType": _stype,
                 "stat": (_scene.get("stat") or None),
                 "landFrame": _land_frame,
@@ -26103,6 +26185,76 @@ def _floor_markers(state):
         "floor_reason": state.get("floor_reason"),
         "enhancements_dropped": list(state.get("enhancements_dropped") or []),
     }
+
+
+def _budget_shed_plan(slack_s, has_scenes, has_broll_waits):
+    """SHED ORDER (Wave-3 4c) — scenes shed LAST among enhancements.
+
+    The old ladder shed generated_scenes FIRST (slack < 90) and the b-roll
+    fetch waits second (slack < 45): the premium centerpiece died before the
+    replaceable stock enhancement. Reordered priority (documented):
+      1. b-roll fetch WAITS — recoverable stock, and skipping the await is
+         what actually buys wall-clock time. When scenes are present it sheds
+         at the same 90s line that used to kill scenes.
+      2. generated_scenes — LAST, at the 45s red line only. Between 45-90s the
+         scenes' own downstream guards (generation-time headroom pre-check,
+         judge _no_headroom degrade) still protect the 900s budget.
+    No scenes → the ladder is EXACTLY the legacy one (b-roll at 45) — the free
+    path is byte-identical by construction. Pure function; cert-tested."""
+    shed = []
+    _broll_line = 90.0 if has_scenes else 45.0
+    if slack_s < _broll_line and has_broll_waits:
+        shed.append("broll_fetch_waits")
+    if slack_s < 45.0 and has_scenes:
+        shed.append("generated_scenes")
+    return shed
+
+
+def _strip_asset_orphan_scenes(edit_plan, note_stage="asset_orphan_strip"):
+    """BLAST-RADIUS FIX (Wave-3 4b): drop ONLY scenes whose REQUIRED image
+    asset is missing — hero_object and legacy full-frame scenes with no
+    generated subject (they would render an empty glow void / the dashed
+    placeholder). Pure-code scenes (typo_stat / photo_card) and
+    asset-satisfied scenes ALWAYS survive: one Nano-Banana failure costs that
+    ONE scene, never the family. Re-keys _generated_subjects to the surviving
+    indices (the index-shift orphaning class). Returns the dropped count.
+    Fail-open: any error changes nothing."""
+    try:
+        if not isinstance(edit_plan, dict):
+            return 0
+        _scenes = edit_plan.get("generated_scenes") or []
+        if not _scenes:
+            return 0
+        _subjects = edit_plan.get("_generated_subjects") or {}
+        _kept, _rekeyed, _dropped = [], {}, []
+        for _i, _s in enumerate(_scenes):
+            _stype = str((_s or {}).get("scene_type") or "")
+            _needs_asset = _stype not in ("typo_stat", "photo_card")
+            _has_asset = _i in _subjects
+            if _needs_asset and not _has_asset:
+                _dropped.append(_i)
+                continue
+            if _has_asset:
+                _rekeyed[len(_kept)] = _subjects[_i]
+            _kept.append(_s)
+        if not _dropped:
+            return 0
+        print(
+            f"[gen-asset] asset-orphan strip: dropped scene(s) {_dropped} "
+            f"(required asset missing) — {len(_kept)} scene(s) survive "
+            f"(pure-code + asset-satisfied); subjects re-keyed",
+            flush=True,
+        )
+        _lumen_funnel_note(edit_plan, note_stage, set_drop_stage=False,
+                           scenes=_dropped)
+        edit_plan["generated_scenes"] = _kept
+        if _rekeyed:
+            edit_plan["_generated_subjects"] = _rekeyed
+        else:
+            edit_plan.pop("_generated_subjects", None)
+        return len(_dropped)
+    except Exception:
+        return 0
 
 
 def _premium_gate_scene_strip(edit_plan, route_premium, tier="", mode=""):
@@ -30892,53 +31044,70 @@ def handler(job):
                     if _res and _res.get("path"):
                         _p_si = _gen_futs[_gf]
                         _p_scene = _gen_scenes[_p_si] if 0 <= _p_si < len(_gen_scenes) else {}
-                        if _cost_meter is not None:
-                            _cost_meter.add("generated_asset", count=1, usd=float(_res.get("cost") or 0.0))
-                        # Increment 2: persist attempt 0 durably (image + brief),
-                        # rejects-included doctrine — the QA loop persists retries.
-                        _persist_gen_attempt(
-                            job_id, _p_si, 0, "gen", image_path=_res["path"],
-                            meta={"generation_prompt": str(((_p_scene or {}).get("subject") or {}).get("generation_prompt") or ""),
-                                  "palette_ref": str((((_p_scene or {}).get("background") or {}) or {}).get("palette_ref") or ""),
-                                  "system_floor": "default (_IMAGE_SYSTEM_PROMPT)",
-                                  "cost": _res.get("cost"), "ms": _res.get("ms"),
-                                  "transparency": _res.get("transparency")})
-                        # ── Increment 3: HERO-ASSET QA at generation time ─────
-                        # geometry/clean-field/stray-text/brand — the perturb
-                        # loop points at the ASSET prompt; no re-render needed.
-                        if str((_p_scene or {}).get("scene_type") or "") == "hero_object":
-                            for _ha_try in range(1, 3):
-                                _ha = _qa_judge_hero_asset(_res["path"])
-                                if _ha is not None:
+                        # Wave-3 4b: PER-SCENE isolation — an exception in ONE
+                        # scene's post-processing (cost meter / persist /
+                        # hero-QA) used to escape to the family catch-all and
+                        # zero EVERY scene. Now it costs at most this scene's
+                        # polish; the generated asset itself is kept fail-open
+                        # (QA is suspenders, never the belt).
+                        try:
+                            if _cost_meter is not None:
+                                _cost_meter.add("generated_asset", count=1, usd=float(_res.get("cost") or 0.0))
+                            # Increment 2: persist attempt 0 durably (image + brief),
+                            # rejects-included doctrine — the QA loop persists retries.
+                            _persist_gen_attempt(
+                                job_id, _p_si, 0, "gen", image_path=_res["path"],
+                                meta={"generation_prompt": str(((_p_scene or {}).get("subject") or {}).get("generation_prompt") or ""),
+                                      "palette_ref": str((((_p_scene or {}).get("background") or {}) or {}).get("palette_ref") or ""),
+                                      "system_floor": "default (_IMAGE_SYSTEM_PROMPT)",
+                                      "cost": _res.get("cost"), "ms": _res.get("ms"),
+                                      "transparency": _res.get("transparency")})
+                            # ── Increment 3: HERO-ASSET QA at generation time ─────
+                            # geometry/clean-field/stray-text/brand — the perturb
+                            # loop points at the ASSET prompt; no re-render needed.
+                            if str((_p_scene or {}).get("scene_type") or "") == "hero_object":
+                                for _ha_try in range(1, 3):
+                                    _ha = _qa_judge_hero_asset(_res["path"])
+                                    if _ha is not None:
+                                        _persist_gen_attempt(
+                                            job_id, _p_si, _ha_try - 1, "asset_judged",
+                                            meta={"geometry": _ha.geometry, "clean_field": _ha.clean_field,
+                                                  "no_stray_text": _ha.no_stray_text,
+                                                  "no_brand_mark": _ha.no_brand_mark,
+                                                  "verdict": _ha.verdict, "reason": _ha.reason})
+                                    _ha_fail = _ha is not None and (
+                                        _ha.verdict == "fail"
+                                        or min(_ha.geometry, _ha.clean_field, _ha.no_stray_text,
+                                               _ha.no_brand_mark) < _QA_PASS_THRESHOLD)
+                                    if not _ha_fail:
+                                        break
+                                    print(f"[hero-qa] scene={_p_si} FAIL a{_ha_try - 1} "
+                                          f"({_ha.reason[:80]}) — perturb+regen", flush=True)
+                                    _newp = _perturb_scene_prompt(_p_scene, _ha.reason, _ha_try)
+                                    if _newp:
+                                        _p_scene.setdefault("subject", {})["generation_prompt"] = _newp
+                                    _res2 = _generate_scene_subject(_p_scene, _p_si, work_dir, _known_text)
+                                    if not (_res2 and _res2.get("path")):
+                                        break
+                                    _res = _res2
+                                    if _cost_meter is not None:
+                                        _cost_meter.add("generated_asset_regen", count=1,
+                                                        usd=float(_res2.get("cost") or 0.0))
                                     _persist_gen_attempt(
-                                        job_id, _p_si, _ha_try - 1, "asset_judged",
-                                        meta={"geometry": _ha.geometry, "clean_field": _ha.clean_field,
-                                              "no_stray_text": _ha.no_stray_text,
-                                              "no_brand_mark": _ha.no_brand_mark,
-                                              "verdict": _ha.verdict, "reason": _ha.reason})
-                                _ha_fail = _ha is not None and (
-                                    _ha.verdict == "fail"
-                                    or min(_ha.geometry, _ha.clean_field, _ha.no_stray_text,
-                                           _ha.no_brand_mark) < _QA_PASS_THRESHOLD)
-                                if not _ha_fail:
-                                    break
-                                print(f"[hero-qa] scene={_p_si} FAIL a{_ha_try - 1} "
-                                      f"({_ha.reason[:80]}) — perturb+regen", flush=True)
-                                _newp = _perturb_scene_prompt(_p_scene, _ha.reason, _ha_try)
-                                if _newp:
-                                    _p_scene.setdefault("subject", {})["generation_prompt"] = _newp
-                                _res2 = _generate_scene_subject(_p_scene, _p_si, work_dir, _known_text)
-                                if not (_res2 and _res2.get("path")):
-                                    break
-                                _res = _res2
-                                if _cost_meter is not None:
-                                    _cost_meter.add("generated_asset_regen", count=1,
-                                                    usd=float(_res2.get("cost") or 0.0))
-                                _persist_gen_attempt(
-                                    job_id, _p_si, _ha_try, "gen", image_path=_res2["path"],
-                                    meta={"generation_prompt": str((_p_scene.get("subject") or {}).get("generation_prompt") or ""),
-                                          "perturbed": bool(_newp), "hero_asset_retry": True,
-                                          "cost": _res2.get("cost"), "ms": _res2.get("ms")})
+                                        job_id, _p_si, _ha_try, "gen", image_path=_res2["path"],
+                                        meta={"generation_prompt": str((_p_scene.get("subject") or {}).get("generation_prompt") or ""),
+                                              "perturbed": bool(_newp), "hero_asset_retry": True,
+                                              "cost": _res2.get("cost"), "ms": _res2.get("ms")})
+                        except Exception as _ps_err:
+                            print(
+                                f"[gen-asset] scene={_p_si} post-processing error "
+                                f"({type(_ps_err).__name__}: {str(_ps_err)[:100]}) — "
+                                f"asset kept, THIS scene only (no family blast)",
+                                flush=True,
+                            )
+                            _lumen_funnel_note(
+                                edit_plan, "asset_postprocess_error", set_drop_stage=False,
+                                scene=_p_si, error=f"{type(_ps_err).__name__}: {str(_ps_err)[:80]}")
                         _generated_subjects[_p_si] = _res["path"]
                 if _generated_subjects:
                     edit_plan["_generated_subjects"] = _generated_subjects
@@ -30954,11 +31123,25 @@ def handler(job):
             _enhancement_guard('generated_scenes', _eg_err, _floor_state['enhancements_dropped'])
             if isinstance(edit_plan, dict):
                 _lumen_funnel_note(
-                    edit_plan, "generation_failed",
+                    edit_plan, "generation_failed", set_drop_stage=False,
                     scenes=len(edit_plan.get("generated_scenes") or []),
                     error=f"{type(_eg_err).__name__}: {str(_eg_err)[:80]}")
-                edit_plan["generated_scenes"] = []
-                edit_plan.pop("_generated_subjects", None)
+                # BLAST-RADIUS FIX (Wave-3 4b): a generation-block failure no
+                # longer zeroes the FAMILY — the orphan strip below drops only
+                # scenes whose required asset is missing; pure-code scenes
+                # (typo_stat / photo_card, zero generation) always survive.
+        # Wave-3 4b: after generation (success, partial failure, headroom skip,
+        # cost break, or the catch-all above) — strip ONLY asset-orphan scenes.
+        # Free jobs carry [] (premium gate) → no-op by construction.
+        _strip_asset_orphan_scenes(edit_plan)
+        try:
+            if isinstance(edit_plan, dict) and isinstance(edit_plan.get("_lumen_funnel"), dict) \
+                    and not (edit_plan.get("generated_scenes") or []) \
+                    and edit_plan["_lumen_funnel"].get("emitted", 0) > 0 \
+                    and not edit_plan["_lumen_funnel"].get("drop_stage"):
+                edit_plan["_lumen_funnel"]["drop_stage"] = "generation_failed"
+        except Exception:
+            pass
 
         # Collect fast futures (all should be done already — they finish before Gemini).
         # Face detection is collected LATER inside render_multi_clip so Remotion can
@@ -31100,19 +31283,24 @@ def handler(job):
             _shed_projected = max(60.0, float(source_duration) * 3.0)
             _shed_slack = _MODAL_FN_TIMEOUT_S - _shed_elapsed - _shed_projected  # job budget (single source of truth)
             _shed_dropped = []
-            if _shed_slack < 90.0 and (edit_plan.get("generated_scenes")
-                                        or edit_plan.get("_generated_subjects")):
-                _lumen_funnel_note(edit_plan, "budget_shed",
-                                   scenes=len(edit_plan.get("generated_scenes") or []),
-                                   slack_s=round(_shed_slack, 1))
-                edit_plan["generated_scenes"] = []
-                edit_plan.pop("_generated_subjects", None)
-                _shed_dropped.append("generated_scenes")
-            if _shed_slack < 45.0 and _broll_fetch_futures:
-                _broll_fetch_futures = {}
-                broll_clips = []
-                edit_plan["broll_clips"] = []
-                _shed_dropped.append("broll_fetch_waits")
+            _has_scenes = bool(edit_plan.get("generated_scenes")
+                               or edit_plan.get("_generated_subjects"))
+            # DEFECT FIX (Wave-3 4c): shed order comes from _budget_shed_plan —
+            # b-roll fetch waits FIRST, generated scenes LAST (45s red line
+            # only). No scenes → legacy ladder exactly (free byte-identical).
+            for _shed_item in _budget_shed_plan(_shed_slack, _has_scenes,
+                                                bool(_broll_fetch_futures)):
+                if _shed_item == "broll_fetch_waits":
+                    _broll_fetch_futures = {}
+                    broll_clips = []
+                    edit_plan["broll_clips"] = []
+                elif _shed_item == "generated_scenes":
+                    _lumen_funnel_note(edit_plan, "budget_shed",
+                                       scenes=len(edit_plan.get("generated_scenes") or []),
+                                       slack_s=round(_shed_slack, 1))
+                    edit_plan["generated_scenes"] = []
+                    edit_plan.pop("_generated_subjects", None)
+                _shed_dropped.append(_shed_item)
             if _shed_dropped:
                 print(
                     f"[budget-shed] dropped={_shed_dropped} "
@@ -31383,8 +31571,12 @@ def handler(job):
                         or min(s.coherence, s.text_correct, s.on_palette, s.integration) < _QA_PASS_THRESHOLD
                     ]
                     for s in _scores:
+                        # 4d: durable evidence is keyed by ORIGIN scene index;
+                        # the judged FRAME file stays keyed by judge position
+                        # (that is how _qa_judge_generated_scenes named it).
+                        _s_origin = _judge_origin_index(_qa_scenes, s.scene_index)
                         print(
-                            f"[qa-judge] scene={s.scene_index} "
+                            f"[qa-judge] scene={_s_origin} (judge_pos={s.scene_index}) "
                             f"scores={{coh:{s.coherence:.2f},txt:{s.text_correct:.2f},"
                             f"pal:{s.on_palette:.2f},int:{s.integration:.2f}}} verdict={s.verdict} "
                             f"attempt={_attempt} "
@@ -31395,7 +31587,7 @@ def handler(job):
                         # (rejects included) — the evidence Increment 1 lost.
                         _jf = os.path.join(work_dir, f"qa_scene_{s.scene_index:02d}.jpg")
                         _persist_gen_attempt(
-                            job_id, s.scene_index, _attempt, "judged",
+                            job_id, _s_origin, _attempt, "judged",
                             image_path=_jf if os.path.isfile(_jf) else None,
                             meta={"coherence": s.coherence, "text_correct": s.text_correct,
                                   "on_palette": s.on_palette, "integration": s.integration,
@@ -31405,7 +31597,10 @@ def handler(job):
                         if _scores:
                             print(f"[qa-judge] {len(_scores)} scene(s) pass — ship", flush=True)
                         break
-                    _fail_idx = {s.scene_index for s in _fail}
+                    # CASCADE FIX (4d): verdicts map to ORIGIN indices — a
+                    # positional dereference killed the WRONG scene whenever the
+                    # judge scope was a filtered/skipped subset.
+                    _fail_idx = {_judge_origin_index(_qa_scenes, s.scene_index) for s in _fail}
                     _over_budget = _cost_meter is not None and _cost_meter.total_usd() >= _PREMIUM_ASSET_BUDGET_USD
                     _no_headroom = render_elapsed > _RERENDER_HEADROOM_S
                     if _attempt >= _MAX_QA_ATTEMPTS or _over_budget or _no_headroom:
@@ -31430,12 +31625,11 @@ def handler(job):
                                 meta={"outcome": "degrade_drop", "attempt": _attempt,
                                       "over_budget": bool(_over_budget),
                                       "no_headroom": bool(_no_headroom)})
-                        edit_plan["generated_scenes"] = [
-                            g for i, g in enumerate(edit_plan.get("generated_scenes") or []) if i not in _fail_idx
-                        ]
-                        edit_plan["_generated_subjects"] = {
-                            i: p for i, p in (edit_plan.get("_generated_subjects") or {}).items() if i not in _fail_idx
-                        }
+                        # CASCADE FIX (4d): drop by ORIGIN index + RE-KEY the
+                        # subjects to the surviving positions — the old filter
+                        # left subjects on stale keys, so every surviving hero
+                        # scene lost its asset on the degrade re-render.
+                        _drop_scenes_by_origin(edit_plan, _fail_idx)
                         edit_plan.pop("_rendered_generated_scenes", None)
                         _reout = output_path + ".qa.mp4"
                         render_multi_clip(
@@ -31445,13 +31639,28 @@ def handler(job):
                         if validate_output(_reout, "qa-degrade"):
                             os.replace(_reout, output_path)
                             output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+                        else:
+                            # 4d: the degrade re-render itself failed validation —
+                            # the ALREADY-VALIDATED original ships (fail-open law;
+                            # no retries). Loudly recorded: this is the one path
+                            # that can still ship a judged-bad scene.
+                            print(
+                                "[qa-judge] degrade re-render FAILED validation — "
+                                "shipping the validated original (judged-bad scene "
+                                "still aboard; recorded, not retried)",
+                                flush=True,
+                            )
+                            _lumen_funnel_note(edit_plan, "judge_degrade_render_invalid",
+                                               set_drop_stage=False,
+                                               scenes=sorted(_fail_idx))
                         break
                     # RETRY — perturb failing scenes' prompts, regenerate, re-render.
                     # The perturbation carries the full rubric + the previous
                     # attempt's per-dimension scores (oscillator fix, Increment 2).
                     print(f"[qa-judge] verdict=retry scenes={sorted(_fail_idx)} attempt={_attempt + 1}", flush=True)
-                    _reasons = {s.scene_index: s.reason for s in _fail}
-                    _score_by_idx = {s.scene_index: s for s in _fail}
+                    # 4d: keyed by ORIGIN index (matches _fail_idx + _scene_list)
+                    _reasons = {_judge_origin_index(_qa_scenes, s.scene_index): s.reason for s in _fail}
+                    _score_by_idx = {_judge_origin_index(_qa_scenes, s.scene_index): s for s in _fail}
                     _scene_list = edit_plan.get("generated_scenes") or []
                     for _i in _fail_idx:
                         if not (0 <= _i < len(_scene_list)) or not isinstance(_scene_list[_i], dict):
@@ -31483,7 +31692,13 @@ def handler(job):
                     if validate_output(_reout, "qa-retry"):
                         os.replace(_reout, output_path)
                         output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                    _qa_scenes = (edit_plan.get("_rendered_generated_scenes") or [])
+                    # CASCADE FIX (4d): re-apply the JUDGE SCOPE on the fresh
+                    # specs — without this, designed scenes (typo_stat/
+                    # photo_card/hero_object; frame-judging is legacy-only by
+                    # doctrine) re-entered the judge on attempt 1+ and could be
+                    # killed by a rubric that does not cover them.
+                    _qa_scenes = [s for s in (edit_plan.get("_rendered_generated_scenes") or [])
+                                  if not (s or {}).get("sceneType")]
                     _attempt += 1
             except Exception as _qa_err:
                 print(

@@ -210,6 +210,8 @@ export interface GeneratedSceneSpec {
   /** Lumen DESIGNED scenes (Increment 3): typed compositions — typography,
    * palette, motion in code; the model contributes at most a hero asset.
    * Absent/null → the legacy full-frame GeneratedScene path. */
+  /** ORIGIN index into the plan's generated_scenes (judge/degrade mapping). */
+  sceneIndex?: number | null;
   sceneType?: "typo_stat" | "hero_object" | "photo_card" | null;
   /** TypoStat: the stat as data fields. */
   stat?: GenSceneStatSpec | null;
