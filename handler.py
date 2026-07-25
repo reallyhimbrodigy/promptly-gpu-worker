@@ -10033,12 +10033,32 @@ def _zoom_claim_variants():
 # tokens, r=0.05 vs thinking), and the rationale fields (why / why_emphasis /
 # reason) are the compressible output: ≤12 words is the editorial ask, yet the
 # declared cap was 240 chars and the live balloon rate ran 9.1% (worst 21.5k
-# chars pre-Lever-3). Halving the DECLARED cap to 96 chars bounds every
-# rationale at token-generation time (Vertex enforces response_json_schema
-# maxLength) — output tokens ≈ latency, so this is a SPEED lever, not just a
-# degen lever. The parse edge (_enforce_string_caps) reads caps from this same
-# schema, so enforcement follows the flag automatically. PROMPTLY_WHY_DIET=0
-# restores 240 (one-flag rollback, no deploy).
+# chars pre-Lever-3). Halving the DECLARED cap to 96 chars is a BUDGET the
+# sane model reads and composes to — output tokens ≈ latency, so this is a
+# SPEED lever, not just a degen lever. The parse edge (_enforce_string_caps)
+# reads caps from this same schema, so enforcement follows the flag
+# automatically. PROMPTLY_WHY_DIET=0 restores 240 (one-flag rollback, no
+# deploy).
+#
+# MECHANISM CORRECTION (S-DEGEN Wave-3, 2026-07-25) — Vertex does NOT enforce
+# maxLength at token-generation; the original claim here was wrong (it also
+# contradicted the older bisected note on the _degeneration_response gate).
+# Post-diet counterexamples, declared=96 live in the response schema:
+#   · job 27eded11 07:23Z  post_cuts.why COMPLETED at 1,179 chars (the model
+#     narrates "wait why max length is 96 chars I will fix it" INSIDE the
+#     string — cap read, then blown through);
+#   · certpg-6ead996b9075 21:45Z  post_cuts.why COMPLETED at 11,610 chars
+#     (degeneration staircase);
+#   · four more small overshoots (101/112/124/122-126 chars) — impossible
+#     under token-level enforcement.
+# The ONLY hard enforcement is ours at the parse edge. Consequently a schema
+# maxLength can NEVER kill the 16k stream-abort spiral (7f1a1128 3 aborts/369s
+# and d7ee9c05 1 abort/147s post-diet, all mid-string prose loops in
+# rationale-family strings) — do not reach for another maxLength cap
+# (a PROMPTLY_DEGEN_DIET) to stop degeneration; the loop ignores declared
+# budgets entirely. Real candidate levers live stream-side (shape-aware early
+# abort in _gemini_stream_with_cache; note the L2 distinct-token-ratio at 0.18
+# catches only short-unit loops — long-phrase loops measured 0.3-0.76).
 _WHY_DIET_CAP = 96
 _WHY_DIET_FIELDS = ("why", "why_emphasis", "reason")
 

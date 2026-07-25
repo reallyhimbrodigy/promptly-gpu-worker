@@ -5201,7 +5201,7 @@ def _w2_stage_manifest():
         "the duration-scaled chunk formula (floor 1, ceiling the cap)"
 
 
-@check("A-L1 OUTPUT DIET (2026-07-25, PROMPTLY_WHY_DIET, live lever w/ one-flag rollback): the post-cuts call is OUTPUT-BOUND (r=0.59 wall vs output tokens), and the rationale fields are the compressible output — declared caps 240 chars against a ≤12-word editorial ask, 9.1% balloon rate. Under the flag the RESPONSE SCHEMA hard-caps why/why_emphasis/reason at 96 chars (Vertex enforces maxLength at token-generation time; the parse edge reads the same schema so enforcement follows automatically), and the anti-runaway prompt block names the true budget so the model composes telegrams instead of getting truncated. ONLY the three named rationale fields are dieted — every other declared cap untouched. =0 restores 240 with no deploy.")
+@check("A-L1 OUTPUT DIET (2026-07-25, PROMPTLY_WHY_DIET, live lever w/ one-flag rollback): the post-cuts call is OUTPUT-BOUND (r=0.59 wall vs output tokens), and the rationale fields are the compressible output — declared caps 240 chars against a ≤12-word editorial ask, 9.1% balloon rate. Under the flag the RESPONSE SCHEMA declares why/why_emphasis/reason at 96 chars — a BUDGET the sane model composes to; Vertex does NOT enforce maxLength at token-generation (S-DEGEN 2026-07-25 refutation: post-diet completed responses carried post_cuts.why at 1,179 chars [job 27eded11, 07:23Z] and 11,610 chars [certpg-6ead996b9075] against declared 96, plus four small 101-126-char overshoots — impossible under token-level enforcement). The parse edge (_enforce_string_caps) reading the same schema IS the enforcement, so it follows the flag automatically; the anti-runaway prompt block names the true budget so the model composes telegrams instead of getting truncated. A schema maxLength therefore can NEVER kill the 16k degen stream-aborts (which continued post-diet: 7f1a1128 369s, d7ee9c05 147s) — no PROMPTLY_DEGEN_DIET-style sibling cap may be shipped as a degen fix. ONLY the three named rationale fields are dieted — every other declared cap untouched. =0 restores 240 with no deploy.")
 def _why_diet_lever():
     import os as _os
     import handler as H
@@ -5240,6 +5240,16 @@ def _why_diet_lever():
     _h = open("handler.py").read()
     assert "caps at ~96 characters" in _h and "_why_diet_enabled()" in _h, \
         "the prompt must tell the model the real budget under the flag"
+    # DOC TRUTH (S-DEGEN 2026-07-25): the refuted enforcement claim must never
+    # come back — Vertex maxLength is advisory (post-diet counterexamples:
+    # why=1,179 chars @ declared 96 [27eded11], why=11,610 [certpg-6ead996b],
+    # 4 small 101-126-char overshoots), so a schema cap is a composition
+    # budget, not a degen stop. The corrected note must stay in handler.py and
+    # the false claim must stay out.
+    assert "Vertex does NOT enforce" in _h and "MECHANISM CORRECTION" in _h, \
+        "handler.py must carry the S-DEGEN mechanism correction"
+    assert "Vertex enforces response_json_schema" not in _h, \
+        "the refuted token-generation enforcement claim must not reappear"
 
 
 @check("ZERO-REJECT ROUTING (2026-07-25, DARK behind PROMPTLY_ZERO_REJECT): rejections become routes per Zac's ruled precedence — speech → TALKING_HEAD (untouchable); no-speech / no-audio / 2.0-5.0s → the MINIMAL path (deterministic clean cuts + calm transitions, caption-less, rendered through the SAME ffmpeg_base + render-full.mjs primitives via hype_render, delivered through the SAME presigned-S3 + shared HLS + terminal contract); < 2.0s = the ONE remaining rejection. Gate sites raise _MinimalRouteSignal (a RuntimeError subclass so every existing passthrough behaves as today's rejections); ONE outer choke point catches it and runs _run_minimal_pipeline; a minimal failure falls through to the standard coded+refunded envelope. CONSERVATISM INVARIANT: the fast-check NTH gate (faces known, words UNKNOWN) DEFERS under the flag instead of routing — a no-face voiceover must reach the word-aware deep gate so real speech is never mis-routed to the caption-less path. Flag off → every gate raises today's rejection, byte-identical. Per-job cert override: input_data.zero_reject_test (burned_text_test pattern).")
