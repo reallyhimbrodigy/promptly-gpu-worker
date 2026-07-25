@@ -26071,6 +26071,40 @@ def _floor_markers(state):
     }
 
 
+def _premium_gate_scene_strip(edit_plan, route_premium, tier="", mode=""):
+    """PREMIUM GATE (Wave-3 Task 3) — generated scenes NEVER render for a
+    non-premium job. The leak this closes: generated_scenes lives in the SHARED
+    PostCutPlan schema (the Vertex cache law forbids per-tier schemas), the free
+    path relied on the PROMPT alone, and the render converter was tier-blind —
+    so a stochastic free-path emission, or a provided/render_only/tweak plan
+    carrying scenes (e.g. a re-edit after a subscription lapsed = ghost
+    premium), composited UNJUDGED legacy scenes for free users (the
+    dashed-placeholder class; QA-judge + subject generation + persistence are
+    all premium-gated, so nothing ever recorded it). Server-side tier
+    enforcement, same doctrine as the model downgrade: strip + record, never a
+    message. Returns the number of scenes stripped (0 = no-op; free plans carry
+    [] so the common case is byte-identical)."""
+    try:
+        if route_premium or not isinstance(edit_plan, dict):
+            return 0
+        _scenes = edit_plan.get("generated_scenes") or []
+        if not _scenes:
+            return 0
+        print(
+            f"[premium-gate] STRIPPED {len(_scenes)} generated_scene(s) from a "
+            f"non-premium job (tier={tier or '(none)'} mode={mode or '?'}) — "
+            f"scenes are Lumen-only; server-side tier enforcement",
+            flush=True,
+        )
+        _lumen_funnel_note(edit_plan, "premium_gate_strip",
+                           scenes=len(_scenes), mode=mode)
+        edit_plan["generated_scenes"] = []
+        edit_plan.pop("_generated_subjects", None)
+        return len(_scenes)
+    except Exception:
+        return 0
+
+
 def _lumen_funnel_note(edit_plan, stage, set_drop_stage=True, **info):
     """Append a per-stage drop reason to the plan's _lumen_funnel (Wave-3).
     Fail-open, record-only — telemetry may never cost a job. `drop_stage`
@@ -30261,6 +30295,11 @@ def handler(job):
             import copy as _copy_mod
             edit_plan = _copy_mod.deepcopy(provided_plan)
             print("[pipeline] render_only mode — using provided edit_plan (skipped Gemini generate)", flush=True)
+        # ── PREMIUM GATE choke point (Wave-3 Task 3): covers BOTH plan sources
+        # (fresh Gemini plan AND provided render_only/tweak plans) — a
+        # non-premium job can never carry a scene past this line.
+        _premium_gate_scene_strip(edit_plan, route_premium,
+                                  tier=resolved_tier, mode=mode)
         print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
         _timings["edit_plan"] = time.time() - _mega_t0
         try:
@@ -30301,6 +30340,12 @@ def handler(job):
                 _record_divergence(
                     "reedit", {"error": type(_sc_err).__name__},
                     "scoped_copy_error", reason=str(_sc_err)[:160])
+            # PREMIUM GATE re-assert: generated_scenes is scoped-copy UNCLAIMED
+            # (copied verbatim from the prior plan), so a redraft of a plan that
+            # carried scenes re-introduces them AFTER the first choke — strip
+            # again for non-premium (idempotent; no-op on premium/empty).
+            _premium_gate_scene_strip(edit_plan, route_premium,
+                                      tier=resolved_tier, mode=mode)
 
         # ── Defensive: strip motion_graphics the renderer no longer knows ──
         # A re-edit (render_only/tweak) replaying an OLD saved plan can carry a

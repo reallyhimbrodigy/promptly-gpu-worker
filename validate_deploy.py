@@ -2900,6 +2900,36 @@ def _lumen_wave3_funnel_telemetry():
     _h._lumen_funnel_note({}, "x")                         # no funnel → no raise
 
 
+@check("PREMIUM GATE (Wave-3 leak fix): a non-premium job can NEVER carry a generated scene to the render — the schema is shared (Vertex cache law), the free path relied on the prompt alone, and the render converter was tier-blind; the choke strips at plan-bind AND re-asserts after guided_redraft scoped-copy (generated_scenes is scope-UNCLAIMED = copied verbatim from the prior plan). Behavioral + wiring")
+def _premium_gate_scene_strip_cert():
+    import handler as _h
+    _src = open("handler.py").read()
+    # Behavioral: a free job's plan carrying a legacy scene → stripped + recorded.
+    _plan = {"generated_scenes": [{"start_word_index": 1, "end_word_index": 2}],
+             "_generated_subjects": {0: "/tmp/x.png"},
+             "_lumen_funnel": {"drop_stage": None}}
+    _n = _h._premium_gate_scene_strip(_plan, False, tier="free", mode="render_only")
+    assert _n == 1 and _plan["generated_scenes"] == [] and "_generated_subjects" not in _plan, \
+        "non-premium scenes must be stripped (subjects included)"
+    assert _plan["_lumen_funnel"]["drop_stage"] == "premium_gate_strip"
+    assert _plan["_lumen_funnel"]["drop_reasons"][0]["mode"] == "render_only"
+    # Premium plan: untouched (the gate is tier enforcement, not a scene killer).
+    _p2 = {"generated_scenes": [{"a": 1}]}
+    assert _h._premium_gate_scene_strip(_p2, True, tier="premium", mode="full") == 0
+    assert _p2["generated_scenes"] == [{"a": 1}], "premium scenes must survive the gate"
+    # Free no-scene plan (the common case): byte-identical no-op.
+    _p3 = {"generated_scenes": []}
+    assert _h._premium_gate_scene_strip(_p3, False) == 0 and _p3 == {"generated_scenes": []}
+    assert _h._premium_gate_scene_strip(None, False) == 0  # fail-open on garbage
+    # Wiring: the choke fires at plan-bind AND after the scoped-copy re-introduction.
+    assert _src.count("_premium_gate_scene_strip(edit_plan, route_premium,\n") == 2, \
+        "gate must fire at plan-bind AND after guided_redraft scoped-copy"
+    # The reason the re-assert exists: scenes are scope-UNCLAIMED (copied verbatim).
+    _unclaimed = _src.split("_SCOPE_UNCLAIMED_FIELDS = {", 1)[1][:220]
+    assert '"generated_scenes"' in _unclaimed, \
+        "generated_scenes left scope-UNCLAIMED — if this moves, re-audit the gate sites"
+
+
 @check("premium-values env override picks up custom tier names")
 def _tier_premium_values_override():
     # The env-var contract is the public surface for matching whatever
