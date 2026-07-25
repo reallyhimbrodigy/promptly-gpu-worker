@@ -5428,6 +5428,7 @@ def _secret_canonical_values():
         "PROMPTLY_ZERO_REJECT": "1",      # ZERO-REJECT LIVE (Zac's "FLIP MINIMAL" 2026-07-25 on the minimal samples; cert 5/5; rollback = 0 here + secret + redeploy)
         "PROMPTLY_WHY_DIET": "1",         # A-L1 output diet LIVE (rationale caps 240→96; output-bound call → speed lever; =0 is the one-flag rollback)
         "PROMPTLY_DELIVERY_FPS": "30",    # FPS 30 APPROVED (Zac blanket-GO 2026-07-25 on the A/B pair): delivery target 30fps — halves the render tail; rollback = "" (60) here + secret
+        "PROMPTLY_RENDER_FANOUT": "1",    # A-L4 LIVE (cert 3/3: SSIM 1.0 global+boundaries, remote mode, poisoned fallback; length-floored ≥60s output where it strictly wins: 155s = −19%); rollback = "0"
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that
@@ -7384,8 +7385,13 @@ def _fanout_dark():
         "local overlay chunk dispatch (flag-off path) must survive unchanged"
     assert "(_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd))" in _h_src, \
         "local micro chunk dispatch (flag-off path) must survive unchanged"
-    assert "if _render_fanout_enabled() and (_overlay_chunked or _micro_chunked):" in _h_src, \
-        "the fan-out prepare must be gated on _render_fanout_enabled()"
+    assert "if _render_fanout_enabled() and _fanout_long_enough and (_overlay_chunked or _micro_chunked):" in _h_src, \
+        "the fan-out prepare must be gated on the flag AND the length floor"
+    # the cert-measured crossover: fan-out only where it strictly wins (30s
+    # LOST by +5.2s to staging/spawn overhead; 90s −11%, 155s −19%). Floor
+    # env-tunable, default 60s output.
+    assert 'os.environ.get("PROMPTLY_FANOUT_MIN_OUTPUT_S", "") or 60.0' in _h_src, \
+        "the length floor must be env-tunable with the 60s default"
 
     # 3. Behavioral fallback: a remote failure runs the UNCHANGED local
     # subprocess for that chunk AND ledgers component=render/action=

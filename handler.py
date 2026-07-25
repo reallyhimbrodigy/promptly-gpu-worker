@@ -24191,7 +24191,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _fanout_ctx = None
     _fanout_overlay_active = False
     _fanout_micro_active = False
-    if _render_fanout_enabled() and (_overlay_chunked or _micro_chunked):
+    # LENGTH FLOOR (cert 2026-07-25): the cert measured the crossover — fan-out
+    # LOSES on short outputs (30s: 45.5s local vs 50.7s fanned; S3 staging +
+    # container spawn dominate) and wins growing with length (90s: −11%, 155s:
+    # −19%). Fan out only when the output is long enough to profit; below the
+    # floor the local path is strictly better. Env-tunable; 60s default sits
+    # just past the measured break-even.
+    _FANOUT_MIN_OUTPUT_S = float(os.environ.get("PROMPTLY_FANOUT_MIN_OUTPUT_S", "") or 60.0)
+    _fanout_long_enough = (total_output_frames / max(source_fps, 1.0)) >= _FANOUT_MIN_OUTPUT_S
+    if _render_fanout_enabled() and _fanout_long_enough and (_overlay_chunked or _micro_chunked):
         try:
             _fanout_ctx = _fanout_prepare(
                 _stage_key, list(_staged_for_cleanup), overlay_input_path,
