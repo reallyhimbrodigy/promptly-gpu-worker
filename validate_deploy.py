@@ -2930,6 +2930,87 @@ def _premium_gate_scene_strip_cert():
         "generated_scenes left scope-UNCLAIMED — if this moves, re-audit the gate sites"
 
 
+@check("LUMEN DROP-FUNNEL STRIPPERS AS DEFECTS (Wave-3 Task 4): (a) traceability CLAMP not drop when one endpoint is kept; (b) Nano-Banana blast radius = ONE scene (orphan strip + per-scene isolation, family catch-all no longer zeroes); (c) budget shed reorders — scenes shed LAST, free ladder byte-identical; (d) judge kills map by ORIGIN index, subjects re-keyed, judge scope re-applied after re-render. Judge THRESHOLDS untouched (HELD on Zac's C01-C24 blind scores)")
+def _lumen_stripper_defects():
+    import handler as _h
+    _src = open("handler.py").read()
+
+    # ── (a) traceability: one kept endpoint ⇒ CLAMP + keep; none ⇒ drop+record ──
+    _plan = {"generated_scenes": [
+        {"start_word_index": 0, "end_word_index": 2, "scene_type": "typo_stat"},   # valid
+        {"start_word_index": 1, "end_word_index": 99, "scene_type": "hero_object"},# end overflow → clamp
+        {"start_word_index": 50, "end_word_index": 99},                            # both out → drop
+    ], "broll_clips": [{"start_word_index": 1, "end_word_index": 99}]}
+    _out = _h._translate_post_cut_anchors_to_src(_plan, [10, 11, 12])
+    _gs = _out["generated_scenes"]
+    assert len(_gs) == 2, f"clamp must keep the salvageable scene (got {len(_gs)})"
+    assert _gs[1]["_start_word_kept"] == 1 and _gs[1]["_end_word_kept"] == 2, \
+        "overflow endpoint must clamp to the last kept index"
+    assert _gs[1]["end_word_index"] == 12, "clamped endpoint must translate to src"
+    assert _out.get("_gs_emitted_raw") == 3, "pre-translation count must persist for the funnel"
+    _td = _out.get("_gs_traceability_dropped") or []
+    assert len(_td) == 1 and _td[0]["scene"] == 2 and _td[0]["reason"] == "index_out_of_kept_range"
+    assert _out["broll_clips"] == [], "b-roll keeps DROP semantics (stock is replaceable)"
+
+    # ── (b) blast radius: orphan strip drops ONLY asset-less asset-required scenes ──
+    _p = {"generated_scenes": [
+        {"scene_type": "typo_stat"},        # pure code — survives any failure
+        {"scene_type": "hero_object"},      # has asset → survives
+        {"scene_type": "hero_object"},      # NO asset → the ONE that drops
+        {"scene_type": "photo_card"},       # pure code — survives
+        {},                                  # legacy, NO asset → drops
+    ], "_generated_subjects": {1: "/a.png"}, "_lumen_funnel": {"drop_stage": None}}
+    _n = _h._strip_asset_orphan_scenes(_p)
+    assert _n == 2, f"exactly the two asset-orphans drop (got {_n})"
+    assert [s.get("scene_type") for s in _p["generated_scenes"]] == \
+        ["typo_stat", "hero_object", "photo_card"]
+    assert _p["_generated_subjects"] == {1: "/a.png"}, \
+        "surviving hero keeps its asset at its NEW index (re-key law)"
+    assert _p["_lumen_funnel"]["drop_reasons"][0]["scenes"] == [2, 4]
+    # wiring: the family catch-all no longer zeroes generated_scenes
+    _eg = _src.index("_enhancement_guard('generated_scenes'")
+    _eg_win = _src[_eg:_eg + 900]
+    assert 'edit_plan["generated_scenes"] = []' not in _eg_win, \
+        "generation catch-all must NOT zero the family"
+    assert "_strip_asset_orphan_scenes(edit_plan)" in _src, "post-generation orphan strip missing"
+    assert '"asset_postprocess_error"' in _src, "per-scene isolation must record, not cascade"
+    # render belt: an asset-required scene never renders asset-less
+    assert "required asset missing at render" in _src, "render belt missing"
+
+    # ── (c) budget shed: scenes LAST; free ladder byte-identical ──
+    assert _h._budget_shed_plan(60.0, True, True) == ["broll_fetch_waits"], \
+        "at slack 60 with scenes: b-roll waits shed, scenes SURVIVE"
+    assert _h._budget_shed_plan(30.0, True, True) == ["broll_fetch_waits", "generated_scenes"], \
+        "at the 45s red line scenes shed LAST"
+    assert _h._budget_shed_plan(60.0, False, True) == [], \
+        "no scenes: legacy ladder exactly (b-roll only under 45)"
+    assert _h._budget_shed_plan(40.0, False, True) == ["broll_fetch_waits"]
+    assert _h._budget_shed_plan(200.0, True, True) == [], "slack ⇒ shed nothing"
+
+    # ── (d) judge: ORIGIN mapping + subject re-key + scope re-applied ──
+    _qa = [{"sceneIndex": 2}, {"sceneIndex": 5}]
+    assert _h._judge_origin_index(_qa, 0) == 2 and _h._judge_origin_index(_qa, 1) == 5
+    assert _h._judge_origin_index(_qa, 9) == 9, "out-of-list position falls back to itself"
+    assert _h._judge_origin_index([{}], 0) == 0, "pre-marker spec falls back to position"
+    _p2 = {"generated_scenes": [{"n": "A"}, {"n": "B"}, {"n": "C"}],
+           "_generated_subjects": {0: "/a.png", 2: "/c.png"}}
+    _kept = _h._drop_scenes_by_origin(_p2, {0})
+    assert _kept == 2 and [s["n"] for s in _p2["generated_scenes"]] == ["B", "C"]
+    assert _p2["_generated_subjects"] == {1: "/c.png"}, \
+        "surviving scene's asset must follow it to its NEW index"
+    # scope re-applied on the fresh specs after a retry re-render (designed
+    # scenes may never re-enter the frame judge)
+    assert _src.count('if not (s or {}).get("sceneType")') >= 2, \
+        "judge scope must be re-applied after the retry re-render"
+    # the converter stamps the origin marker; the render schema registers it
+    assert '"sceneIndex": _gsi' in _src, "converter must stamp the origin index"
+    import render_schemas as _rs
+    assert "sceneIndex" in _rs.GeneratedSceneSpec.model_fields, \
+        "render schema must register sceneIndex (extra=forbid)"
+    # thresholds untouched: the pass bar + attempt cap stay as reviewed
+    assert "_QA_PASS_THRESHOLD" in _src and "_MAX_QA_ATTEMPTS = 2" in _src
+
+
 @check("premium-values env override picks up custom tier names")
 def _tier_premium_values_override():
     # The env-var contract is the public surface for matching whatever
