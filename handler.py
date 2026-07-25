@@ -25998,6 +25998,327 @@ def _persist_edit_rationale(job_id, rationale):
     threading.Thread(target=_w, daemon=True).start()
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# ZERO-REJECT ROUTING (DARK behind PROMPTLY_ZERO_REJECT) — rejections become
+# routes. Ruled precedence: speech → TALKING_HEAD (today's bytes, untouchable);
+# no-speech / no-audio / 2.0-5.0s → the MINIMAL path (clean cuts + calm
+# transitions, caption-less, deterministic); < 2.0s = the ONE honest rejection
+# left (below it not even one minimal clip fits — min_clip_s is 1.2s). HYPE
+# stays a separate dark upgrade behind its own taste gate.
+# ═════════════════════════════════════════════════════════════════════════════
+class _MinimalRouteSignal(RuntimeError):
+    """Control-flow signal: an intake gate chose the minimal route instead of
+    rejecting. Subclasses RuntimeError so every existing `except RuntimeError:
+    raise` passthrough on the gate→outer-handler path behaves EXACTLY as
+    today's rejections do; the outer handler catches it by isinstance BEFORE
+    classify_error and runs the minimal pipeline. Never user-visible."""
+    def __init__(self, reason):
+        super().__init__(f"MINIMAL_ROUTE:{reason}")
+        self.reason = reason
+
+
+def _zero_reject_enabled(input_data=None):
+    """Zero-reject routing flag. DARK by default; PROMPTLY_ZERO_REJECT=1 (Modal
+    Secret, canonical-values-gated) turns rejections into routes globally.
+    input_data.zero_reject_test is the per-job override for the pre-flip Modal
+    cert — exactly the burned_text_test pattern (inert for real traffic)."""
+    if input_data and input_data.get("zero_reject_test"):
+        return True
+    return os.environ.get("PROMPTLY_ZERO_REJECT", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+# Floor below which even a minimal edit is impossible (min_clip_s = 1.2s + a
+# breath). Zac-approved 2026-07-25: the ONE remaining rejection in the app.
+_MIN_MINIMAL_DURATION_S = 2.0
+
+
+def _encode_and_upload_hls(output_path, work_dir, upload_url, public_url):
+    """HLS ladder encode + S3 upload for a delivered MP4 — module-scope so BOTH
+    the talking-head tail (whose nested _upload_hls now delegates here) and the
+    minimal route share ONE delivery implementation. Body extracted verbatim
+    from the TH tail (same ladder, same keys, same errors); returns hls_url."""
+    if not _aws_s3_client:
+        raise RuntimeError(
+            "HLS encode requires AWS S3 — _aws_s3_client is None "
+            "(check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env)"
+        )
+    _aws_b, _aws_k = _parse_aws_s3_url(upload_url)
+    if not (_aws_b and _aws_k):
+        raise RuntimeError(
+            f"HLS encode requires the upload_url to be an AWS S3 URL — "
+            f"could not parse bucket/key from: {upload_url[:120]}"
+        )
+
+    hls_dir = os.path.join(work_dir, "hls")
+    os.makedirs(hls_dir, exist_ok=True)
+    _hls_t0 = time.time()
+
+    _hls_cmd = [
+        "ffmpeg", "-y", "-i", output_path,
+        "-filter_complex",
+        "[0:v]split=4[v1][v2][v3][v4];"
+        "[v1]scale=-2:360[v360];"
+        "[v2]scale=-2:540[v540];"
+        "[v3]scale=-2:720[v720];"
+        "[v4]scale=-2:1080[v1080]",
+        # 360p
+        "-map", "[v360]", "-map", "0:a:0",
+        "-c:v:0", "libx264", "-preset:v:0", "medium",
+        "-b:v:0", "2000k", "-maxrate:v:0", "2200k", "-bufsize:v:0", "4M",
+        "-c:a:0", "aac", "-b:a:0", "96k", "-ar:a:0", "48000",
+        # 540p
+        "-map", "[v540]", "-map", "0:a:0",
+        "-c:v:1", "libx264", "-preset:v:1", "medium",
+        "-b:v:1", "4500k", "-maxrate:v:1", "5000k", "-bufsize:v:1", "9M",
+        "-c:a:1", "aac", "-b:a:1", "128k", "-ar:a:1", "48000",
+        # 720p
+        "-map", "[v720]", "-map", "0:a:0",
+        "-c:v:2", "libx264", "-preset:v:2", "medium",
+        "-b:v:2", "7500k", "-maxrate:v:2", "8250k", "-bufsize:v:2", "15M",
+        "-c:a:2", "aac", "-b:a:2", "128k", "-ar:a:2", "48000",
+        # 1080p
+        "-map", "[v1080]", "-map", "0:a:0",
+        "-c:v:3", "libx264", "-preset:v:3", "medium",
+        "-b:v:3", "14000k", "-maxrate:v:3", "15400k", "-bufsize:v:3", "28M",
+        "-c:a:3", "aac", "-b:a:3", "128k", "-ar:a:3", "48000",
+        # Common
+        "-pix_fmt", "yuv420p",
+        "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
+        # HLS — fMP4 (CMAF) segments, 4s, VOD playlist
+        "-f", "hls",
+        "-hls_time", "4",
+        "-hls_list_size", "0",
+        "-hls_playlist_type", "vod",
+        "-hls_segment_type", "fmp4",
+        "-master_pl_name", "master.m3u8",
+        "-hls_segment_filename", os.path.join(hls_dir, "stream_%v", "seg_%d.m4s"),
+        "-var_stream_map",
+        "v:0,a:0,name:360p v:1,a:1,name:540p v:2,a:2,name:720p v:3,a:3,name:1080p",
+        os.path.join(hls_dir, "stream_%v", "playlist.m3u8"),
+    ]
+    _hls_r = subprocess.run(_hls_cmd, capture_output=True, text=True, timeout=600)
+    if _hls_r.returncode != 0:
+        raise RuntimeError(
+            f"HLS encode failed (rc={_hls_r.returncode}): "
+            f"{(_hls_r.stderr or '')[-1500:]}"
+        )
+
+    base_key, _ = os.path.splitext(_aws_k)
+    hls_prefix = f"{base_key}-hls"
+    _hls_upload_count = 0
+    for root, _, files in os.walk(hls_dir):
+        for fname in files:
+            local_path = os.path.join(root, fname)
+            rel_path = os.path.relpath(local_path, hls_dir)
+            s3_key = f"{hls_prefix}/{rel_path}".replace(os.sep, "/")
+            if fname.endswith(".m3u8"):
+                ct = "application/vnd.apple.mpegurl"
+            elif fname.endswith(".m4s"):
+                ct = "video/iso.segment"
+            elif fname.endswith(".mp4"):
+                ct = "video/mp4"
+            else:
+                ct = "application/octet-stream"
+            _aws_s3_client.upload_file(
+                local_path, _aws_b, s3_key,
+                ExtraArgs={"ContentType": ct, "CacheControl": "public, max-age=31536000"},
+            )
+            _hls_upload_count += 1
+    if _hls_upload_count == 0:
+        raise RuntimeError("HLS encode produced no output files")
+
+    if not public_url:
+        raise RuntimeError(
+            "HLS upload requires input_data['public_url'] to derive "
+            "the manifest URL — dispatcher did not pass it"
+        )
+    main_no_ext, _ = os.path.splitext(public_url)
+    hls_url = f"{main_no_ext}-hls/master.m3u8"
+
+    _hls_elapsed = time.time() - _hls_t0
+    print(
+        f"[hls] generated + uploaded {_hls_upload_count} files in "
+        f"{_hls_elapsed:.1f}s → {hls_url}",
+        flush=True,
+    )
+    return hls_url
+
+
+def _minimal_rationale(reason, duration_s):
+    """The honest, user-facing edit_rationale for a minimal-routed clip —
+    deterministic (no model call). Says plainly what was heard/not heard and
+    suggests the talking-head take for the full edit (Zac's thin-material
+    honesty rule)."""
+    if reason == "no_audio":
+        _lead = "This clip has no audio track, so I re-paced it with clean cuts and calm transitions."
+    elif reason == "too_short":
+        _lead = (f"At {duration_s:.0f} seconds there isn't room for a full edit, "
+                 "so I kept it tight with clean cuts.")
+    elif reason == "no_speech_muted":
+        _lead = ("I couldn't hear any speech in this clip, so I re-paced it with "
+                 "clean cuts and calm transitions instead of captions.")
+    elif reason == "not_talking_head":
+        _lead = ("This clip isn't a talking-head take, so I gave it a clean re-pace "
+                 "with cuts and transitions.")
+    else:  # no_speech
+        _lead = ("No speech detected, so I re-paced the footage with clean cuts "
+                 "and calm transitions instead of captions.")
+    return (_lead + " For the full edit — captions, zooms, B-roll — try a clip "
+            "of someone speaking to camera.")
+
+
+def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
+                          source_duration, app_url, reason, pipeline_start):
+    """The MINIMAL editorial path: deterministic clean cuts + calm transitions,
+    caption-less, zoom-less, rendered through the SAME primitives as production
+    (ffmpeg_base filtergraph + render-full.mjs) via the hype_render bridge, then
+    delivered through the SAME upload/HLS/terminal contract as the talking-head
+    tail. Mechanically certified (A/V ≤56ms, no stray black, sane durations) on
+    the 2026-07-25 sample battery. Raises on failure — the outer handler
+    classifies/refunds exactly as for TH failures."""
+    import minimal_editor as _me
+    import hype_editor as _he
+    import hype_render as _hr
+
+    _t0 = time.time()
+    _fps = 30.0
+    print(f"[minimal-route] engaged reason={reason} duration={source_duration:.1f}s "
+          f"job={job_id}", flush=True)
+    _record_divergence(
+        "routing", {"route": "minimal", "reason": reason},
+        "zero_reject_minimal_route",
+        reason=f"intake gate '{reason}' routed to minimal instead of rejecting")
+    send_progress(job_id, "plan", 38, "Structuring your edit", app_url)
+
+    # 1. Canonicalize (1080x1920 portrait @30fps — the bridge's contract).
+    _canon = os.path.join(work_dir, "minimal_canon.mp4")
+    _hr.normalize_source(source_path, _canon, _fps)
+    _dur = 0.0
+    try:
+        _p = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", _canon], capture_output=True, text=True)
+        _dur = float((_p.stdout or "0").strip() or 0)
+    except Exception:
+        _dur = float(source_duration or 0.0)
+    if _dur <= 0:
+        _dur = float(source_duration or 2.0)
+
+    # 2. Deterministic plan → projected caption-less PromptlyRenderInput.
+    _plan = _me.build_minimal_plan(_dur, fps=_fps)
+    _ri = _he.project_hype_plan(
+        _plan, source_url=os.path.basename(_canon), source_fps=_fps,
+        source_duration=_dur)
+
+    # 3. Render through the real primitives (base FFmpeg + Remotion micro).
+    send_progress(job_id, "render", 65, "Rendering your edit", app_url)
+    output_path = os.path.join(work_dir, "minimal_output.mp4")
+    _manifest = _hr.render_hype(
+        _ri, _canon, output_path, work_dir,
+        public_dir="/remotion/bundle/public", remotion=True)
+    _render_elapsed = time.time() - _t0
+
+    # 4. Thumbnail (same scorer as TH), best-effort — never costs the video.
+    send_progress(job_id, "thumbnail", 92, "Picking your cover frame", app_url)
+    _thumbnail_url = None
+    try:
+        _data, _mime = select_best_thumbnail_frame(
+            output_path, min(1.0, _dur / 2.0), work_dir)
+        _thumb_put = input_data.get("upload_url_thumb")
+        if _data and _thumb_put:
+            _tr = requests.put(_thumb_put, data=_data,
+                               headers={"Content-Type": "image/jpeg"}, timeout=60)
+            if _tr.status_code in (200, 201):
+                _thumbnail_url = _thumb_put.split("?")[0]
+    except Exception as _te:
+        print(f"[minimal-route] thumbnail non-fatal: {_te}", flush=True)
+
+    # 5. Deliver — SAME upload contract as the TH tail (presigned S3 multipart
+    #    + the shared HLS ladder). HLS failure is loud but non-fatal (the MP4
+    #    still delivers; the client falls back to video_url).
+    send_progress(job_id, "upload", 96, "Publishing to your library", app_url)
+    upload_url = str(input_data.get("upload_url") or "").strip()
+    if not upload_url:
+        raise RuntimeError("No upload_url provided — Node dispatcher must pre-generate the presigned PUT URL")
+    _aws_b, _aws_k = _parse_aws_s3_url(upload_url)
+    if _aws_b and _aws_k:
+        if not _aws_s3_client:
+            raise RuntimeError("AWS S3 client not initialized — cannot upload")
+        _aws_s3_client.upload_file(
+            output_path, _aws_b, _aws_k,
+            ExtraArgs={"ContentType": "video/mp4"}, Config=_S3_TRANSFER_CONFIG)
+    else:
+        _sb_b, _sb_k = _parse_supabase_storage_url(upload_url)
+        if not (_sb_b and _sb_k) or not _s3_client:
+            raise RuntimeError(
+                f"Could not parse bucket/key from upload_url: {upload_url[:120]}")
+        _s3_client.upload_file(
+            output_path, _sb_b, _sb_k,
+            ExtraArgs={"ContentType": "video/mp4"}, Config=_S3_TRANSFER_CONFIG)
+    _video_url = input_data.get("public_url") or upload_url.split("?")[0]
+    _hls_url = None
+    try:
+        _hls_url = _encode_and_upload_hls(
+            output_path, work_dir, upload_url, input_data.get("public_url"))
+    except Exception as _hle:
+        print(f"[minimal-route] HLS non-fatal (MP4 delivers): {_hle}", flush=True)
+
+    # 6. Rationale + terminal (SAME contract: durable completed write + the
+    #    complete progress event + the result payload the server persists).
+    _rationale = _minimal_rationale(reason, _dur)
+    _persist_edit_rationale(job_id, _rationale)
+    _capability_notes = [
+        "No speech was detected, so this is a clean-cut re-pace — captions and "
+        "speech-anchored effects need a talking-head clip."
+        if reason in ("no_speech", "no_speech_muted", "not_talking_head")
+        else "This clip got a clean-cut re-pace." ]
+    _out_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0.0
+    result_payload = {
+        "status": "success",
+        "job_id": job_id,
+        "route": "minimal",
+        "route_reason": reason,
+        "render_time": round(_render_elapsed, 1),
+        "pipeline_time": round(time.time() - (pipeline_start or _t0), 1),
+        "output_size_mb": round(_out_mb, 1),
+        "edit_recipe": {"route": "minimal", "reason": reason,
+                        "plan": _plan.model_dump()},
+        "transcript": [],
+        "analysis_data": None,
+        "resolved_broll": [],
+        "trend_snapshot": None,
+        "render_version": RENDER_VERSION,
+        "capability_notes": _capability_notes,
+        "edit_rationale": _rationale,
+        "video_url": _video_url,
+    }
+    if _hls_url:
+        result_payload["hls_manifest_url"] = _hls_url
+    if _thumbnail_url:
+        result_payload["thumbnail_url"] = _thumbnail_url
+    write_job_status(
+        job_id, status="completed", phase="Done", progress=100,
+        result={
+            "video_url": _video_url,
+            "hls_manifest_url": _hls_url,
+            "edit_recipe": result_payload["edit_recipe"],
+            "transcript": [],
+            "render_version": RENDER_VERSION,
+            "thumbnail_url": _thumbnail_url,
+            "capability_notes": _capability_notes,
+            "route": "minimal",
+            "route_reason": reason,
+        },
+    )
+    send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
+    print(f"[minimal-route] DONE job={job_id} {time.time() - _t0:.1f}s "
+          f"clips={len(_plan.clips)} trans={len(_plan.transitions)} "
+          f"hls={'yes' if _hls_url else 'no'}", flush=True)
+    return result_payload
+
+
 def send_progress(job_id, step, pct, message, app_url):
     """
     POST progress update to the JS server. Fire-and-forget in background thread.
@@ -26775,6 +27096,15 @@ def handler(job):
     # Floor telemetry (Part 3) — pre-initialized for the same reason; synced
     # from edit_plan markers at the recipe collect + after the render ladder.
     _floor_state = {"floor": None, "floor_reason": None, "enhancements_dropped": []}
+    # Zero-reject choke-point safety (1a72b344 used-before-assignment class):
+    # the outer except's minimal-route branch reads these. Only a
+    # _MinimalRouteSignal can enter that branch — and every signal site runs
+    # AFTER these are truly assigned — but belt over proof: pre-initialize so
+    # no execution order can ever NameError inside an except handler.
+    source_path = None
+    source_duration = 0.0
+    app_url = ""
+    _pipeline_start = time.time()
     try:
         app_url = os.environ.get("APP_URL", "").rstrip("/")
 
@@ -27525,6 +27855,18 @@ def handler(job):
         # confusing NO_SPEECH after a wasted Deepgram call. `0 < source_duration`
         # fails OPEN on a probe miss (duration=0 → proceed), exactly like the cap.
         if mode == "full" and 0 < source_duration < _MIN_SOURCE_DURATION_S:
+            # ZERO-REJECT (Zac-ruled 2.0s hard floor): 2.0s ≤ d < 5.0s routes to
+            # the minimal path instead of rejecting; < 2.0s is the ONE remaining
+            # rejection (below it not even one minimal clip fits). Flag off →
+            # today's 5.0s rejection, byte-identical.
+            if _zero_reject_enabled(input_data):
+                if source_duration >= _MIN_MINIMAL_DURATION_S:
+                    raise _MinimalRouteSignal("too_short")
+                _log_intake_reject("CLIP_TOO_SHORT", source_duration,
+                                   _MIN_MINIMAL_DURATION_S)
+                raise RuntimeError(
+                    f"CLIP_TOO_SHORT: source is {source_duration:.1f}s; even a "
+                    f"minimal edit needs about {_MIN_MINIMAL_DURATION_S:.0f} seconds.")
             _log_intake_reject("CLIP_TOO_SHORT", source_duration, _MIN_SOURCE_DURATION_S)
             raise RuntimeError(
                 f"CLIP_TOO_SHORT: source is {source_duration:.1f}s; the intake "
@@ -27548,6 +27890,11 @@ def handler(job):
             except Exception:
                 _has_audio_stream = True
             if not _has_audio_stream:
+                # ZERO-REJECT: a silent source routes to the minimal path (clean
+                # cuts, even-spacing pacing — no beat grid to sync to anyway).
+                # The check becomes routing input, not a wall. Flag off → reject.
+                if _zero_reject_enabled(input_data):
+                    raise _MinimalRouteSignal("no_audio")
                 _log_intake_reject("NO_AUDIO_TRACK", source_duration)
                 raise RuntimeError(
                     "NO_AUDIO_TRACK: source has no audio stream; "
@@ -27602,14 +27949,26 @@ def handler(job):
                 # clearly below threshold. Borderline cases proceed and
                 # are caught by the more thorough downstream gate.
                 if _qfc_samples >= 5 and _qfc_ratio < 0.25:
-                    _log_intake_reject("NOT_TALKING_HEAD", source_duration,
-                                       face_ratio=round(float(_qfc_ratio), 2),
-                                       samples=int(_qfc_samples), gate="fast_check")
-                    raise RuntimeError(
-                        f"NOT_TALKING_HEAD: face in only {_qfc_ratio*100:.0f}% "
-                        f"of {_qfc_samples} sampled frames (fast-check). "
-                        f"This app edits talking-head videos."
-                    )
+                    # ZERO-REJECT conservatism invariant: the fast-check knows
+                    # FACES but not WORDS — a no-face VOICEOVER clip must reach
+                    # the word-aware deep gate (speech → TH, never mis-routed to
+                    # the caption-less minimal). Under the flag this gate DEFERS
+                    # (proceeds) instead of rejecting; the deep gate downstream
+                    # routes no-speech content to minimal with words known.
+                    if _zero_reject_enabled(input_data):
+                        print(
+                            f"[talking-head-fastcheck] face_ratio="
+                            f"{_qfc_ratio:.2f} — zero-reject defers to the "
+                            f"word-aware deep gate (no rejection)", flush=True)
+                    else:
+                        _log_intake_reject("NOT_TALKING_HEAD", source_duration,
+                                           face_ratio=round(float(_qfc_ratio), 2),
+                                           samples=int(_qfc_samples), gate="fast_check")
+                        raise RuntimeError(
+                            f"NOT_TALKING_HEAD: face in only {_qfc_ratio*100:.0f}% "
+                            f"of {_qfc_samples} sampled frames (fast-check). "
+                            f"This app edits talking-head videos."
+                        )
             except RuntimeError:
                 # Re-raise NOT_TALKING_HEAD — caller handles it as a
                 # user-facing validation error.
@@ -28667,6 +29026,12 @@ def handler(job):
             _face_low = (_face_samples >= 8 and _face_ratio < 0.20)
             _speech_low = (source_duration >= 15.0 and _word_count < 10)
             if _face_low and _speech_low:
+                # ZERO-REJECT: face-low AND word-poor (<10 words) = no-speech
+                # CONTENT → the minimal path serves it (words known here, so the
+                # conservatism invariant holds — real speech never reaches this
+                # branch). Flag off → today's rejection, byte-identical.
+                if _zero_reject_enabled(input_data):
+                    raise _MinimalRouteSignal("not_talking_head")
                 _log_intake_reject("NOT_TALKING_HEAD", source_duration,
                                    face_ratio=round(float(_face_ratio), 2),
                                    face_hits=int(_face_hits), face_samples=int(_face_samples),
@@ -28692,6 +29057,13 @@ def handler(job):
                 # heard (the old detect_language false-silence is gone). Only
                 # distinguish face-but-silent (muted/inaudible) from nothing.
                 _face_present = (_face_hits >= 3) or (_face_samples >= 5 and _face_ratio >= 0.30)
+                # ZERO-REJECT: 0 words = no-speech content, the minimal path's
+                # home ground (universal fallback per the ruled precedence —
+                # including music clips until HYPE clears its own taste gate).
+                # Flag off → today's rejections, byte-identical.
+                if _zero_reject_enabled(input_data):
+                    raise _MinimalRouteSignal(
+                        "no_speech_muted" if _face_present else "no_speech")
                 if _face_present:
                     _log_intake_reject("NO_SPEECH_FACE", source_duration,
                                        face_hits=int(_face_hits),
@@ -30275,135 +30647,13 @@ def handler(job):
         # client never sees a half-baked job that's missing the streaming
         # variants.
         def _upload_hls():
-            if not _aws_s3_client:
-                raise RuntimeError(
-                    "HLS encode requires AWS S3 — _aws_s3_client is None "
-                    "(check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env)"
-                )
-            _aws_b, _aws_k = _parse_aws_s3_url(upload_url)
-            if not (_aws_b and _aws_k):
-                raise RuntimeError(
-                    f"HLS encode requires the upload_url to be an AWS S3 URL — "
-                    f"could not parse bucket/key from: {upload_url[:120]}"
-                )
-
-            hls_dir = os.path.join(work_dir, "hls")
-            os.makedirs(hls_dir, exist_ok=True)
-            _hls_t0 = time.time()
-
-            # 1080p variant copies the master's bitrate (no perceptible
-            # quality loss vs source); lower variants re-encode at
-            # progressively lower bitrates. veryfast preset keeps the
-            # added render time under ~25s for typical clips.
-            # HLS BITRATE / PRESET TUNING — was producing visibly soft output
-            # because the 1080p variant capped at 6 Mbps veryfast (preset is
-            # 2nd-worst libx264, needs ~50% more bitrate for same quality as
-            # medium). iPhone sources arrive at 17-25 Mbps; capping playback
-            # at 6 Mbps lost obvious detail in motion + B-roll.
-            #
-            # SETTINGS:
-            #   • preset: veryfast → medium (~3x better quality-per-bit)
-            #   • 1080p60: 6 Mbps → 14 Mbps (matches iPhone source bitrate)
-            #   • 720p:    4 Mbps → 7.5 Mbps
-            #   • 540p:    2.5 Mbps → 4.5 Mbps
-            #   • 360p:    1.5 Mbps → 2 Mbps (slight bump)
-            # Cost: HLS step adds ~30-50s vs. veryfast on a 30s video.
-            # Result: 1080p HLS is now visually close-to-transparent vs. the
-            # master MP4. CapCut / Captions.ai output around 12-16 Mbps for
-            # 1080p60 social-form content — we're now in that range.
-            _hls_cmd = [
-                "ffmpeg", "-y", "-i", output_path,
-                "-filter_complex",
-                "[0:v]split=4[v1][v2][v3][v4];"
-                "[v1]scale=-2:360[v360];"
-                "[v2]scale=-2:540[v540];"
-                "[v3]scale=-2:720[v720];"
-                "[v4]scale=-2:1080[v1080]",
-                # 360p
-                "-map", "[v360]", "-map", "0:a:0",
-                "-c:v:0", "libx264", "-preset:v:0", "medium",
-                "-b:v:0", "2000k", "-maxrate:v:0", "2200k", "-bufsize:v:0", "4M",
-                "-c:a:0", "aac", "-b:a:0", "96k", "-ar:a:0", "48000",
-                # 540p
-                "-map", "[v540]", "-map", "0:a:0",
-                "-c:v:1", "libx264", "-preset:v:1", "medium",
-                "-b:v:1", "4500k", "-maxrate:v:1", "5000k", "-bufsize:v:1", "9M",
-                "-c:a:1", "aac", "-b:a:1", "128k", "-ar:a:1", "48000",
-                # 720p
-                "-map", "[v720]", "-map", "0:a:0",
-                "-c:v:2", "libx264", "-preset:v:2", "medium",
-                "-b:v:2", "7500k", "-maxrate:v:2", "8250k", "-bufsize:v:2", "15M",
-                "-c:a:2", "aac", "-b:a:2", "128k", "-ar:a:2", "48000",
-                # 1080p
-                "-map", "[v1080]", "-map", "0:a:0",
-                "-c:v:3", "libx264", "-preset:v:3", "medium",
-                "-b:v:3", "14000k", "-maxrate:v:3", "15400k", "-bufsize:v:3", "28M",
-                "-c:a:3", "aac", "-b:a:3", "128k", "-ar:a:3", "48000",
-                # Common
-                "-pix_fmt", "yuv420p",
-                "-g", "60", "-keyint_min", "60", "-sc_threshold", "0",
-                # HLS — fMP4 (CMAF) segments, 4s, VOD playlist
-                "-f", "hls",
-                "-hls_time", "4",
-                "-hls_list_size", "0",
-                "-hls_playlist_type", "vod",
-                "-hls_segment_type", "fmp4",
-                "-master_pl_name", "master.m3u8",
-                "-hls_segment_filename", os.path.join(hls_dir, "stream_%v", "seg_%d.m4s"),
-                "-var_stream_map",
-                "v:0,a:0,name:360p v:1,a:1,name:540p v:2,a:2,name:720p v:3,a:3,name:1080p",
-                os.path.join(hls_dir, "stream_%v", "playlist.m3u8"),
-            ]
-            _hls_r = subprocess.run(_hls_cmd, capture_output=True, text=True, timeout=600)
-            if _hls_r.returncode != 0:
-                raise RuntimeError(
-                    f"HLS encode failed (rc={_hls_r.returncode}): "
-                    f"{(_hls_r.stderr or '')[-1500:]}"
-                )
-
-            # Upload all generated files. Key prefix is derived from the
-            # main MP4's S3 key: `videos/abc.mp4` → `videos/abc-hls/`.
-            base_key, _ = os.path.splitext(_aws_k)
-            hls_prefix = f"{base_key}-hls"
-            _hls_upload_count = 0
-            for root, _, files in os.walk(hls_dir):
-                for fname in files:
-                    local_path = os.path.join(root, fname)
-                    rel_path = os.path.relpath(local_path, hls_dir)
-                    s3_key = f"{hls_prefix}/{rel_path}".replace(os.sep, "/")
-                    if fname.endswith(".m3u8"):
-                        ct = "application/vnd.apple.mpegurl"
-                    elif fname.endswith(".m4s"):
-                        ct = "video/iso.segment"
-                    elif fname.endswith(".mp4"):
-                        ct = "video/mp4"
-                    else:
-                        ct = "application/octet-stream"
-                    _aws_s3_client.upload_file(
-                        local_path, _aws_b, s3_key,
-                        ExtraArgs={"ContentType": ct, "CacheControl": "public, max-age=31536000"},
-                    )
-                    _hls_upload_count += 1
-            if _hls_upload_count == 0:
-                raise RuntimeError("HLS encode produced no output files")
-
-            # Compute the master manifest URL. Public_url is required —
-            # it's how the iOS app finds the master through CloudFront.
-            # If the dispatcher didn't pass one, the render is mis-wired.
-            if not input_data.get("public_url"):
-                raise RuntimeError(
-                    "HLS upload requires input_data['public_url'] to derive "
-                    "the manifest URL — dispatcher did not pass it"
-                )
-            main_no_ext, _ = os.path.splitext(input_data["public_url"])
-            hls_url = f"{main_no_ext}-hls/master.m3u8"
-
-            _hls_elapsed = time.time() - _hls_t0
-            print(
-                f"[hls] generated + uploaded {_hls_upload_count} files in "
-                f"{_hls_elapsed:.1f}s → {hls_url}",
-                flush=True,
-            )
+            # HLS ladder tuning history (bitrates/preset rationale) lives with the
+            # implementation, now module-scope (_encode_and_upload_hls) so the
+            # minimal route shares ONE delivery path. Body extracted verbatim —
+            # same ladder, same keys, same errors; this wrapper only binds the
+            # TH tail's locals and keeps the edit_plan assignment.
+            hls_url = _encode_and_upload_hls(
+                output_path, work_dir, upload_url, input_data.get("public_url"))
             edit_plan["_hls_manifest_url"] = hls_url
             return hls_url
 
@@ -30767,6 +31017,24 @@ def handler(job):
         return result_payload
 
     except Exception as e:
+        # ZERO-REJECT choke point: an intake gate chose the minimal route (not a
+        # failure). One catch serves every gate site — the signal propagates out
+        # of nested defs / pool futures exactly as today's RuntimeError
+        # rejections do. If the minimal pipeline itself fails, fall through to
+        # the standard failure envelope below (coded, refunded) with the REAL
+        # error — a routed job that breaks is a real failure, never hidden.
+        if isinstance(e, _MinimalRouteSignal):
+            try:
+                return _run_minimal_pipeline(
+                    job_id=input_data.get("job_id"), input_data=input_data,
+                    work_dir=work_dir, source_path=source_path,
+                    source_duration=source_duration, app_url=app_url,
+                    reason=e.reason, pipeline_start=_pipeline_start)
+            except Exception as _mre:
+                print(f"[minimal-route] FAILED ({type(_mre).__name__}: "
+                      f"{str(_mre)[:200]}) — standard failure envelope takes "
+                      f"over", flush=True)
+                e = _mre
         import traceback
         traceback.print_exc()
         # classify_error now returns structured data with error_code,

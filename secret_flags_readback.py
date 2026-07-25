@@ -17,7 +17,7 @@ import json
 app = modal.App("promptly-secret-readback")
 image = modal.Image.debian_slim()
 
-# The six operational flags that live in the secret (order/keys only — the
+# The operational flags that live in the secret (order/keys only — the
 # canonical VALUES are asserted by validate_deploy.py, the single enforcement point).
 FLAG_KEYS = [
     "PROMPTLY_SPAWN_MODE",
@@ -27,6 +27,7 @@ FLAG_KEYS = [
     "PROMPTLY_SCRIPT_DENYLIST",
     "PROMPTLY_PLAN_CAPTURE",
     "PROMPTLY_BURNED_TEXT",
+    "PROMPTLY_ZERO_REJECT",
 ]
 
 

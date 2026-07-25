@@ -4249,11 +4249,22 @@ def _terminal_telemetry_wiring():
     # Behavioral coverage: test_floor_telemetry.py + test_vocab_and_orphan.py.
     # This pins the WIRING a refactor could silently drop.
     _src = open("handler.py").read()
-    _c = _src.find('status="completed", phase="Done"')
+    # TWO completed writes exist since zero-reject: the minimal route's (earlier
+    # in the file, its own contract pinned below) and the TH tail's (LAST — the
+    # one this check has always pinned; rfind targets it explicitly).
+    _c = _src.rfind('status="completed", phase="Done"')
     assert _c != -1, "complete terminal write missing"
     _win = _src[_c:_c + 2100]  # widened for the 2b re-edit + S3-thumbnail hydration fields
     assert "**_floor_markers(_floor_state)" in _win, "complete write lost floor markers"
     assert '"vocab": _vocab_markers(edit_plan)' in _win, "complete write lost vocab"
+    # the minimal route's completed write carries ITS contract (route named so
+    # the weekly table can split routed completions; TH floor/vocab semantics
+    # deliberately absent — no degrade ladder ran, claiming one would be false)
+    _cm = _src.find('status="completed", phase="Done"')
+    if _cm != _c:
+        _wm = _src[_cm:_cm + 1200]
+        assert '"route": "minimal"' in _wm and '"route_reason": reason' in _wm, \
+            "minimal completed write lost its route contract"
     # orphan-cascade wiring assertion DELETED with the cascade (Zac 2026-07-09
     # follow-through: it enforced the dead machinery-foley doctrine and inverted
     # the content-first teach).
@@ -5055,6 +5066,53 @@ def _source_poll_fail_fast():
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
 
 
+@check("ZERO-REJECT ROUTING (2026-07-25, DARK behind PROMPTLY_ZERO_REJECT): rejections become routes per Zac's ruled precedence — speech → TALKING_HEAD (untouchable); no-speech / no-audio / 2.0-5.0s → the MINIMAL path (deterministic clean cuts + calm transitions, caption-less, rendered through the SAME ffmpeg_base + render-full.mjs primitives via hype_render, delivered through the SAME presigned-S3 + shared HLS + terminal contract); < 2.0s = the ONE remaining rejection. Gate sites raise _MinimalRouteSignal (a RuntimeError subclass so every existing passthrough behaves as today's rejections); ONE outer choke point catches it and runs _run_minimal_pipeline; a minimal failure falls through to the standard coded+refunded envelope. CONSERVATISM INVARIANT: the fast-check NTH gate (faces known, words UNKNOWN) DEFERS under the flag instead of routing — a no-face voiceover must reach the word-aware deep gate so real speech is never mis-routed to the caption-less path. Flag off → every gate raises today's rejection, byte-identical. Per-job cert override: input_data.zero_reject_test (burned_text_test pattern).")
+def _zero_reject_wiring():
+    _h = open("handler.py").read()
+    # the signal + the flag + the floor
+    assert "class _MinimalRouteSignal(RuntimeError):" in _h, "route signal must subclass RuntimeError (passthrough parity)"
+    assert 'os.environ.get("PROMPTLY_ZERO_REJECT", "").strip().lower() in (' in _h, \
+        "PROMPTLY_ZERO_REJECT must default OFF (dark)"
+    assert 'input_data.get("zero_reject_test")' in _h, "per-job cert override required"
+    assert "_MIN_MINIMAL_DURATION_S = 2.0" in _h, "the Zac-ruled 2.0s hard floor"
+    # all four route sites + the deferring fast-check
+    assert _h.count("raise _MinimalRouteSignal(") == 4, "exactly 4 route-raise sites (too_short, no_audio, not_talking_head, no_speech/muted)"
+    assert '_MinimalRouteSignal("too_short")' in _h and '_MinimalRouteSignal("no_audio")' in _h \
+        and '_MinimalRouteSignal("not_talking_head")' in _h and '"no_speech_muted" if _face_present else "no_speech"' in _h
+    assert "zero-reject defers to the" in _h, \
+        "the fast-check must DEFER (not route) under the flag — the conservatism invariant"
+    # every route site is flag-guarded; flag off keeps today's raises
+    assert _h.count("_zero_reject_enabled(input_data)") >= 5, "each gate must consult the flag"
+    assert "NO_AUDIO_TRACK: source has no audio stream" in _h and \
+        "NO_SPEECH: Deepgram returned 0 words" in _h and \
+        "NOT_TALKING_HEAD: face in only" in _h, "flag-off rejections must remain intact"
+    # the one choke point + failure fall-through
+    assert "isinstance(e, _MinimalRouteSignal)" in _h and _h.count("isinstance(e, _MinimalRouteSignal)") == 1, \
+        "exactly ONE outer choke point"
+    _i = _h.find("isinstance(e, _MinimalRouteSignal)")
+    _tail = _h[_i:_i + 1200]
+    assert "_run_minimal_pipeline(" in _tail and "e = _mre" in _tail, \
+        "choke point must run the minimal pipeline and fall through to the coded envelope on failure"
+    # the minimal pipeline shares the delivery contract
+    _p = _h.find("def _run_minimal_pipeline")
+    _body = _h[_p:_p + 9000]
+    for _needle, _why in [
+        ("_encode_and_upload_hls(", "shared HLS ladder"),
+        ("write_job_status(", "durable completed terminal"),
+        ('send_progress(job_id, "complete", 100', "complete event"),
+        ("_persist_edit_rationale(job_id", "rationale rides the minimal path"),
+        ("_S3_TRANSFER_CONFIG", "same multipart upload config"),
+        ('"route": "minimal"', "route named in result"),
+    ]:
+        assert _needle in _body, f"minimal pipeline missing: {_why}"
+    # the TH tail delegates to the SAME HLS implementation (one source of truth)
+    assert _h.count("_hls_cmd = [") == 1, "exactly one HLS ladder implementation"
+    # the four routing modules ride the image
+    _m = open("modal_app.py").read()
+    for _mod in ("general_editor.py", "hype_editor.py", "minimal_editor.py", "hype_render.py"):
+        assert f'"{_mod}"' in _m, f"{_mod} must be baked into the worker image"
+
+
 @check("EDIT RATIONALE (2026-07-25): a user-facing 1-2 sentence 'why this edit' field flows end to end. PostCutPlan.edit_rationale is an additive Optional[str] (default None -> renderer never reads it -> byte-identical output); the TH post-cuts prompt asks for it in the field list (thin material -> say so + suggest a longer talking-head); edit_plan carries it via the PostCutPlan field-copy; the worker persists it to video_jobs.edit_rationale alongside current_step/step_message (narrative column ONLY, never status/progress/result), daemon-threaded, fail-open, terminal-fenced. Hype/minimal already carry a rationale via HypePlan.notes. Kill switch PROMPTLY_RATIONALE_PERSIST=0.")
 def _edit_rationale_field():
     _h = open("handler.py").read()
@@ -5309,6 +5367,7 @@ def _secret_canonical_values():
         "PROMPTLY_SCRIPT_DENYLIST": "",   # graduated: no script denied
         "PROMPTLY_PLAN_CAPTURE": "",      # plan-capture corpus hook inert
         "PROMPTLY_BURNED_TEXT": "1",      # burned-in-text guard LIVE (flipped 2026-07-24 after flag-on smoke test)
+        "PROMPTLY_ZERO_REJECT": "0",      # zero-reject routing STAGED DARK (flip = Zac's "FLIP MINIMAL" after the 4 samples; runbook updates this line + the secret together)
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that
@@ -5506,10 +5565,13 @@ def _intake_reject_measured():
     for _code in ("CLIP_TOO_LONG", "CLIP_TOO_SHORT", "NO_AUDIO_TRACK",
                   "NOT_TALKING_HEAD", "NO_SPEECH", "NO_SPEECH_NONENGLISH", "NO_SPEECH_FACE"):
         assert f'_log_intake_reject("{_code}"' in _src, f"intake gate {_code} not measured"
-    # 8 = the original 5 (CLIP_TOO_LONG, NO_AUDIO_TRACK, NOT_TALKING_HEAD ×2,
+    # 9 = the original 5 (CLIP_TOO_LONG, NO_AUDIO_TRACK, NOT_TALKING_HEAD ×2,
     # NO_SPEECH) + the 3 D/D+ diagnosis gates (CLIP_TOO_SHORT, NO_SPEECH_NONENGLISH,
-    # NO_SPEECH_FACE). Every intake raise carries a measurement.
-    assert len(_raise_msgs) == _measures == 8, \
+    # NO_SPEECH_FACE) + the zero-reject 2.0s hard floor (its own CLIP_TOO_SHORT
+    # message + measurement pair — routes raise _MinimalRouteSignal instead and
+    # ledger via zero_reject_minimal_route, deliberately NOT counted here: a
+    # route is not a rejection). Every intake raise carries a measurement.
+    assert len(_raise_msgs) == _measures == 9, \
         f"kill-site enumeration: every intake-gate raise must have a measurement " \
         f"(raises={len(_raise_msgs)} measures={_measures}); a new gate was added unmeasured"
 
