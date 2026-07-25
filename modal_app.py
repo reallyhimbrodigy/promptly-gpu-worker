@@ -523,6 +523,14 @@ image = (
     # `ModuleNotFoundError: No module named 'type_registries'`.
     .add_local_file("type_registries.py", "/type_registries.py")
     .add_local_file("cuda_driver_setup.py", "/cuda_driver_setup.py")
+    # ZERO-REJECT routing machinery (DARK behind PROMPTLY_ZERO_REJECT): the
+    # general-editor perception/router + the caption-less minimal/hype editors +
+    # the render bridge. handler.py imports these lazily only on the routed path;
+    # with the flag off they are never reached (byte-identical talking-head).
+    .add_local_file("general_editor.py", "/general_editor.py")
+    .add_local_file("hype_editor.py", "/hype_editor.py")
+    .add_local_file("minimal_editor.py", "/minimal_editor.py")
+    .add_local_file("hype_render.py", "/hype_render.py")
     # recipe_eval.py was missing from this list since the eval was first
     # wired — handler.py imports it at runtime via `from recipe_eval
     # import evaluate_recipe`, but the module never made it into the
