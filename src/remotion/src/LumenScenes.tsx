@@ -51,29 +51,106 @@ const idle = (frame: number, fps: number, phase = 0, ampPx = 6, periodS = 3.2) =
 };
 
 /** Palette with safe fallbacks — colors arrive as code values, never prompts. */
-// Lighten a too-dark color toward legibility on a dark background while KEEPING
-// its hue (brand character). A scene label whose accent falls back to a dark bg
-// color must never render dark-on-dark — it was invisible before this.
-const legibleOnDark = (hex: string | null | undefined) => {
-  const m = /^#?([0-9a-fA-F]{6})$/.exec(hex || "");
-  if (!m) return "#C9D6F0";
+// ── legibleOnDark v2 — a GUARANTEE, not a heuristic (Wave-3) ─────────────────
+// v1 lightened a too-dark accent by a fixed blend against an ASSUMED dark
+// ground. The residual defect: 2-color palettes carry no bright third accent,
+// the label falls back to a palette color, and nothing ever verified the result
+// against the ground the label actually renders on — labels went invisible on
+// dark grounds. v2 contrast-checks (WCAG relative luminance) every candidate
+// against the scene's EFFECTIVE ground and guarantees legibility:
+//   1. keep the accent when it already reads (contrast ≥ 4.5, WCAG AA);
+//   2. else lift it toward the separating pole KEEPING its hue (brand);
+//   3. else flip to white/black (whichever wins) WITH a scrim — so a label is
+//      legible on ANY ground, by construction.
+type RGB = { r: number; g: number; b: number };
+const hexToRgb = (hex: string | null | undefined): RGB | null => {
+  const m = /^#?([0-9a-fA-F]{6})$/.exec((hex || "").trim());
+  if (!m) return null;
   const n = parseInt(m[1], 16);
-  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
-  const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b; // 0..255
-  if (lum >= 150) return `#${m[1]}`; // already light enough
-  const mix = (ch: number) => Math.round(ch + (255 - ch) * 0.72); // blend toward white, keep hue
-  return `rgb(${mix(r)}, ${mix(g)}, ${mix(b)})`;
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+};
+const toHex = (c: RGB): string =>
+  "#" +
+  [c.r, c.g, c.b]
+    .map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase();
+// WCAG relative luminance (sRGB-linearized), 0..1
+const relLum = (c: RGB): number => {
+  const lin = (v: number) => {
+    const s = v / 255;
+    return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b);
+};
+const contrastRatio = (x: RGB, y: RGB): number => {
+  const lx = relLum(x), ly = relLum(y);
+  return (Math.max(lx, ly) + 0.05) / (Math.min(lx, ly) + 0.05);
+};
+const mixToward = (c: RGB, pole: RGB, t: number): RGB => ({
+  r: c.r + (pole.r - c.r) * t,
+  g: c.g + (pole.g - c.g) * t,
+  b: c.b + (pole.b - c.b) * t,
+});
+const POLE_LIGHT: RGB = { r: 255, g: 255, b: 255 };
+const POLE_DARK: RGB = { r: 16, g: 16, b: 24 }; // the scene world's ink-dark
+const LABEL_CONTRAST_MIN = 4.5; // WCAG AA, normal text
+
+/** The legibleOnDark guarantee: an ink that ALWAYS reads on `ground`. */
+const legibleOnDark = (
+  hex: string | null | undefined,
+  ground: RGB,
+): { color: string; scrim: boolean } => {
+  const cand = hexToRgb(hex) || (hexToRgb("#C9D6F0") as RGB);
+  if (contrastRatio(cand, ground) >= LABEL_CONTRAST_MIN)
+    return { color: toHex(cand), scrim: false };
+  const pole = relLum(ground) < 0.35 ? POLE_LIGHT : POLE_DARK;
+  for (let t = 0.25; t <= 0.92; t += 0.13) {
+    const lifted = mixToward(cand, pole, t);
+    if (contrastRatio(lifted, ground) >= LABEL_CONTRAST_MIN)
+      return { color: toHex(lifted), scrim: false };
+  }
+  // Last resort (mid grounds can defeat both poles at 4.5): the stronger pole
+  // plus a scrim — the scrim, not the hue, buys the separation.
+  const ink =
+    contrastRatio(POLE_LIGHT, ground) >= contrastRatio(POLE_DARK, ground)
+      ? POLE_LIGHT
+      : POLE_DARK;
+  return { color: toHex(ink), scrim: true };
+};
+
+/** Soft halo behind a scrim-flagged ink — dark halo under light ink, light
+ * halo under dark ink. Only applied when the contrast check flagged it. */
+const scrimFor = (inkHex: string): string => {
+  const c = hexToRgb(inkHex);
+  const light = c ? relLum(c) >= 0.5 : true;
+  return light
+    ? "0 2px 14px rgba(0,0,0,0.85), 0 0 34px rgba(0,0,0,0.65)"
+    : "0 2px 14px rgba(255,255,255,0.85), 0 0 34px rgba(255,255,255,0.6)";
 };
 
 const pal = (colors: string[] | null | undefined) => {
   const c = (colors || []).filter(Boolean);
+  const a = c[0] || "#4F9DF7";
+  const bHex = c[1] || c[0] || "#101018";
+  const bRgb = hexToRgb(bHex) || ({ r: 16, g: 16, b: 24 } as RGB);
+  // The label's ACTUAL ground: the base color washed with ~15% of the tint
+  // (the shell's gradient + glow) — contrast is judged against what renders,
+  // never against an assumed black.
+  const ground = mixToward(bRgb, hexToRgb(a) || bRgb, 0.15);
+  // the label/UI accent — bright third accent when the palette carries one,
+  // contrast-guaranteed against the ground either way
+  const label = legibleOnDark(c[2] || c[0] || "#4F9DF7", ground);
+  // headline ink: white on the dark scene world; flips dark on a light ground
+  const headline = legibleOnDark("#FFFFFF", ground);
   return {
-    a: c[0] || "#4F9DF7",
-    b: c[1] || c[0] || "#101018",
-    accent: c[2] || c[0] || "#4F9DF7",
-    // the label/UI accent — always legible on the dark scene world
-    labelInk: legibleOnDark(c[2] || c[0] || "#4F9DF7"),
-    ink: "#FFFFFF",
+    a,
+    b: bHex,
+    accent: c[2] || a,
+    labelInk: label.color,
+    labelScrim: label.scrim ? scrimFor(label.color) : null,
+    ink: headline.color,
+    inkScrim: headline.scrim ? scrimFor(headline.color) : null,
   };
 };
 
@@ -194,6 +271,7 @@ const TypoStat: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
                 fontSize: 44,
                 letterSpacing: "0.24em",
                 color: p.labelInk,
+                textShadow: p.labelScrim || undefined,
                 textTransform: "uppercase",
                 opacity: lineIn,
                 transform: `translateY(${(1 - lineIn) * 26}px)`,

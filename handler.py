@@ -6236,8 +6236,11 @@ genuinely needs a whole generated world — rare.
 
 FILL THE FIELDS:
   • background: { kind: "gradient" | "solid"; palette_ref: the editorial_vision
-    color world; colors: 2-3 hex values of that world } — the palette is applied
-    IN CODE. Never write colors or hex codes into a generation_prompt.
+    color world; colors: EXACTLY 3 hex values of that world — [0] the gradient
+    tint, [1] the dark ground, [2] a BRIGHT accent clearly lighter than the
+    ground ([2] inks the scene's labels, so it must read at a glance against
+    [1]; never a second dark) } — the palette is applied IN CODE.
+    Never write colors or hex codes into a generation_prompt.
   • subject: { generation_prompt (hero_object/legacy only — the OBJECT, no text,
     no colors); ref_image_keys; anchor; scale }.
   • text_layers: `content` FROM KNOWN INPUTS ONLY — a phrase from the transcript
