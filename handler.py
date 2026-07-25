@@ -28290,6 +28290,13 @@ def handler(job):
 
             _avg = _parse_rate(_avg_rate_str)
             _r_val = _parse_rate(_r_rate_str)
+            # A/B-lever input: the SOURCE's native rate, persisted (the 60fps-
+            # share question was unanswerable from the DB — analysis_data has
+            # no fps; this closes it alongside stage_timings)
+            try:
+                _timings["source_fps"] = round(float(_r_val), 2)
+            except (TypeError, ValueError):
+                pass
 
             _norm_t0 = time.time()
             _norm_path = os.path.join(work_dir, "source_canonical.mp4")
@@ -28305,8 +28312,24 @@ def handler(job):
             # the cost.
             _shake_t0 = time.time()
             _shake_score = _do_shake_probe()
-            _SHAKE_STABILIZE_THRESHOLD = 0.35
+            # A-L2 (SA-0: vidstab fires on 94% of sources at 0.35, p50 115s —
+            # the plan-phase pole in ~40% of jobs). Threshold now env-tunable so
+            # the DATA-CHOSEN recalibration (from the accruing shake_score
+            # telemetry below) slots in without a code change — default 0.35 =
+            # today's behavior, byte-identical. input_data.vidstab_test
+            # ("on"/"off") is the per-job override for Zac's A/B pair
+            # (borderline clip, stabilized vs not); inert for real traffic.
+            _SHAKE_STABILIZE_THRESHOLD = float(
+                os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 0.35)
             _needs_deshake = _shake_score >= _SHAKE_STABILIZE_THRESHOLD
+            _vs_test = str(input_data.get("vidstab_test") or "").strip().lower()
+            if _vs_test in ("on", "off"):
+                _needs_deshake = (_vs_test == "on")
+                print(f"[fps-normalize] vidstab_test override: deshake={_needs_deshake}",
+                      flush=True)
+            # persist the A/B-lever inputs (queryable alongside stage_timings —
+            # the data the threshold recalibration will be chosen from)
+            _timings["shake_score"] = round(float(_shake_score), 3)
             print(
                 f"[fps-normalize] shake probe: score={_shake_score:.2f} "
                 f"({'stabilize (vidstab)' if _needs_deshake else 'skip'}) "
@@ -28374,7 +28397,29 @@ def handler(job):
             # consistent. Platforms (TikTok / Reels) re-encode to ~30 on
             # upload, but the smoothness is visible in direct playback,
             # the in-app preview, and on YouTube (which preserves 60).
+            # CAUSE #3 LEVER (DARK): the 60fps target is universal by design —
+            # every job renders its ENTIRE pipeline (Remotion chunks + composite)
+            # at 60fps for overlay-animation smoothness, while TikTok/Reels
+            # re-encode to ~30 on upload. SA-0 measured the render bucket at
+            # 116-215s/chunk at 60fps vs 17-52s at 30 — a 30fps delivery target
+            # roughly halves the render tail. PROMPTLY_DELIVERY_FPS ("" = 60 =
+            # today, byte-identical) stages the lever; input_data.
+            # delivery_fps_test is the per-job override that generates Zac's
+            # phone-judged A/B pair (same clip, 60 vs 30). NOTHING flips on fps
+            # without his ruling.
             _target_fps = 60.0
+            try:
+                _dfps_env = os.environ.get("PROMPTLY_DELIVERY_FPS", "").strip()
+                _dfps_test = str(input_data.get("delivery_fps_test") or "").strip()
+                if _dfps_test:
+                    _target_fps = float(_dfps_test)
+                    print(f"[fps-normalize] delivery_fps_test override: {_target_fps:g}fps",
+                          flush=True)
+                elif _dfps_env:
+                    _target_fps = float(_dfps_env)
+            except (TypeError, ValueError):
+                _target_fps = 60.0
+            _timings["target_fps"] = _target_fps
             _gop_frames = max(1, int(round(_target_fps)))
 
             # Passthrough check: if the source is already canonical (right

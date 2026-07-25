@@ -5066,6 +5066,23 @@ def _source_poll_fail_fast():
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
 
 
+@check("A-L2/CAUSE-3 LEVERS STAGED DARK (2026-07-25): (a) vidstab threshold env-tunable (PROMPTLY_VIDSTAB_THRESHOLD, default '' -> 0.35 = today, byte-identical) so the data-chosen recalibration slots in with no code change, + input_data.vidstab_test per-job override for Zac's stabilized-vs-not A/B pair; (b) delivery fps env-tunable (PROMPTLY_DELIVERY_FPS, default '' -> 60.0 = today's universal 60fps pipeline target) + input_data.delivery_fps_test for the 60-vs-30 phone-judged pair — SA-0 measured the render bucket 116-215s/chunk at 60 vs 17-52s at 30, but NOTHING flips on fps without Zac's ruling; (c) the A/B-lever inputs persist alongside stage_timings (shake_score, source_fps, target_fps) so the threshold choice and the 60fps-share answer become SQL queries. Defaults = today's exact behavior; overrides inert for real traffic (the app never sets them).")
+def _ab_levers_staged_dark():
+    _h = open("handler.py").read()
+    # vidstab: env threshold defaulting to 0.35 + the per-job override
+    assert 'os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 0.35' in _h, \
+        "vidstab threshold must default to today's 0.35"
+    assert 'input_data.get("vidstab_test")' in _h and '_vs_test in ("on", "off")' in _h, \
+        "vidstab A/B per-job override missing"
+    # fps: default 60 preserved; env + per-job override staged
+    assert "_target_fps = 60.0" in _h, "the 60fps default must remain the baseline"
+    assert 'os.environ.get("PROMPTLY_DELIVERY_FPS", "").strip()' in _h and \
+        'input_data.get("delivery_fps_test")' in _h, "delivery-fps lever/override missing"
+    # the A/B-lever telemetry inputs persist
+    for _k in ('_timings["shake_score"]', '_timings["source_fps"]', '_timings["target_fps"]'):
+        assert _k in _h, f"A/B-lever input not persisted: {_k}"
+
+
 @check("A-L1 OUTPUT DIET (2026-07-25, PROMPTLY_WHY_DIET, live lever w/ one-flag rollback): the post-cuts call is OUTPUT-BOUND (r=0.59 wall vs output tokens), and the rationale fields are the compressible output — declared caps 240 chars against a ≤12-word editorial ask, 9.1% balloon rate. Under the flag the RESPONSE SCHEMA hard-caps why/why_emphasis/reason at 96 chars (Vertex enforces maxLength at token-generation time; the parse edge reads the same schema so enforcement follows automatically), and the anti-runaway prompt block names the true budget so the model composes telegrams instead of getting truncated. ONLY the three named rationale fields are dieted — every other declared cap untouched. =0 restores 240 with no deploy.")
 def _why_diet_lever():
     import os as _os
