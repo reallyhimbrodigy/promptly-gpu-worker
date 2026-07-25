@@ -3164,7 +3164,7 @@ def _recipe_omittable_field_contract():
         # reads `.get("preserved_silences") or []`, and empty means "preserve
         # nothing" = cut every located silence (the dead-air default). Omission-safe.
         "PostCutPlan": {"cut_refinements", "existing_caption_region",
-                        "generated_scenes", "notes",
+                        "edit_rationale", "generated_scenes", "notes",
                         "preserved_silences", "source_text_regions"},
         # B (Zac 2026-07-11): sound rides the beat — omission IS the default
         # ("most beats are carried by the voice"); the derivation .get()s it.
@@ -5053,6 +5053,29 @@ def _source_poll_fail_fast():
     assert _t, "run_pipeline_bg timeout not found in modal_app.py"
     assert 600 < int(_t.group(1)), \
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
+
+
+@check("EDIT RATIONALE (2026-07-25): a user-facing 1-2 sentence 'why this edit' field flows end to end. PostCutPlan.edit_rationale is an additive Optional[str] (default None -> renderer never reads it -> byte-identical output); the TH post-cuts prompt asks for it in the field list (thin material -> say so + suggest a longer talking-head); edit_plan carries it via the PostCutPlan field-copy; the worker persists it to video_jobs.edit_rationale alongside current_step/step_message (narrative column ONLY, never status/progress/result), daemon-threaded, fail-open, terminal-fenced. Hype/minimal already carry a rationale via HypePlan.notes. Kill switch PROMPTLY_RATIONALE_PERSIST=0.")
+def _edit_rationale_field():
+    _h = open("handler.py").read()
+    # schema: additive Optional field on PostCutPlan
+    assert 'edit_rationale: Optional[str] = Field(default=None, max_length=400)' in _h, \
+        "PostCutPlan must carry an additive Optional edit_rationale (default None = byte-identical)"
+    # prompt asks for it (field-list line), with the thin-material honesty
+    assert 'edit_rationale — string, 1-2 SENTENCES' in _h and 'suggest recording a longer talking-head' in _h, \
+        "the TH prompt must ask for edit_rationale + the thin-material honesty"
+    # persistence: narrative-only, terminal-fenced, wired at the recipe seam
+    _i = _h.find("def _persist_edit_rationale")
+    assert _i != -1, "the rationale persist helper must exist"
+    _body = _h[_i:_i + 1400]
+    assert '"edit_rationale": _txt' in _body and 'supabase.table("video_jobs").update(' in _body, \
+        "must write edit_rationale to video_jobs"
+    assert '"status":' not in _body and '"progress":' not in _body and '"result":' not in _body, \
+        "the rationale write must be narrative-only (no status/progress/result)"
+    assert '"failed", "canceled", "completed"' in _body, "the rationale write must be terminal-fenced"
+    assert 'PROMPTLY_RATIONALE_PERSIST' in _body, "kill switch required"
+    assert '_persist_edit_rationale(job_id, edit_plan.get("edit_rationale"))' in _h, \
+        "the pipeline must persist the rationale after the recipe resolves"
 
 
 @check("RECIPE WALL-CLOCK BUDGET (2026-07-24, p=50 compounding fix): the edit-recipe repair loop (≤_repair_max+1 re-asks) × the internal degen/transport retries (≤3 sub-attempts) can compound to ~6 post-cuts Gemini calls, each ≤480s, running the stage past Modal's timeout → an UNCODED SIGKILL at progress≈50 that bypasses the failure handler (0/26 long-wall deaths carried forensics). A running wall-clock deadline anchored on the job's pipeline start makes compounding re-asks engage the EXISTING deterministic safe edit BEFORE the SIGKILL. A clean single pass (135-337s) never trips it. Flag PROMPTLY_RECIPE_WALL (default on); =0 → deadline None → byte-identical. Budget = Modal timeout − render reserve (duration*3) − one-client-timeout (480s) tail reserve, so even a re-ask that started just under the deadline finishes below the wall. This is the source-poll fail-fast pattern one stage later.")

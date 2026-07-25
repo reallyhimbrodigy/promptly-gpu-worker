@@ -1684,6 +1684,13 @@ class PostCutPlan(BaseModel):
     # call returns; if Gemini emits notes here, they take precedence in the
     # downstream merge (see edit_plan construction in generate_edit_gemini).
     notes: Optional[str] = Field(default=None, max_length=800)
+    # EDIT RATIONALE (2026-07-25) — a 1-2 sentence, USER-FACING explanation of the
+    # editorial choices (why these cuts / this pacing / these moments), distinct
+    # from the mechanical `notes` above. Additive + purely narrative: no renderer
+    # reads it, so default=None is byte-identical to today's output. Persisted to
+    # video_jobs.edit_rationale for the client to display. For thin/short material
+    # it should say so plainly and suggest a longer talking-head next time.
+    edit_rationale: Optional[str] = Field(default=None, max_length=400)
 
 
 class EditPlan(BaseModel):
@@ -5767,6 +5774,7 @@ notes         — string ≤50 words. Brief rationale.
 audio_denoise — bool. true when noise_floor > -40 dB.
 outro         — "none" | "fade_black" | "fade_white". "none" best for looping.
 aspect_ratio  — always "9:16".
+edit_rationale — string, 1-2 SENTENCES, written TO THE USER about THIS edit: why you cut where you did, the pacing you chose, the moments you leaned into. Plain and specific ("Tightened the intro and held on the reveal at 0:14 so the punchline lands"). If the material is thin (very short, low-energy, or little happens), SAY SO honestly and suggest recording a longer talking-head next time. Never generic — name a real choice.
 
 ═══════════════════════════════════════════════════════════════════════════
 === THUMBNAIL ===
@@ -25961,6 +25969,35 @@ def _persist_step_token(job_id, step, message):
     threading.Thread(target=_w, daemon=True).start()
 
 
+def _persist_edit_rationale(job_id, rationale):
+    """Durable write of the user-facing edit rationale to video_jobs.edit_rationale,
+    alongside current_step/step_message. Additive narrative column ONLY — never
+    touches status/progress/result. Daemon-threaded, fail-open, terminal-fenced.
+    PostgREST silently drops writes to an unknown column, so this is a safe no-op
+    until the migration adds edit_rationale (frontend owns the column + client read).
+    Kill switch: PROMPTLY_RATIONALE_PERSIST=0."""
+    if supabase is None or not job_id or not rationale:
+        return
+    if os.environ.get("PROMPTLY_RATIONALE_PERSIST", "1").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        return
+    _txt = str(rationale).strip()[:400]
+    if not _txt:
+        return
+
+    def _w():
+        try:
+            supabase.table("video_jobs").update(
+                {"edit_rationale": _txt}
+            ).eq("id", job_id).not_.in_(
+                "status", ("failed", "canceled", "completed")).execute()
+        except Exception as e:
+            print(f"[edit-rationale] write failed job={job_id}: {e} (fail open)", flush=True)
+
+    threading.Thread(target=_w, daemon=True).start()
+
+
 def send_progress(job_id, step, pct, message, app_url):
     """
     POST progress update to the JS server. Fire-and-forget in background thread.
@@ -29018,6 +29055,12 @@ def handler(job):
         _mega_t0 = time.time()
         if future_edit is not None:
             edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+            # EDIT RATIONALE (2026-07-25): persist the user-facing "why" for the
+            # client to display, alongside current_step/step_message. Additive +
+            # fail-open; edit_plan carries edit_rationale via the PostCutPlan
+            # field-copy above (safe-edit / thin plans leave it None → no-op).
+            if isinstance(edit_plan, dict):
+                _persist_edit_rationale(job_id, edit_plan.get("edit_rationale"))
             # ── Lumen emission-funnel telemetry (INERT recording) ──────────────
             # Capture what Gemini EMITTED before any downstream drop zeros it, so
             # the premium funnel (routed → emitted → generated → shipped, and which
