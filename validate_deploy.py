@@ -4603,6 +4603,49 @@ def _gate_trip_path():
     assert "fail-open — instrument crashed" in _src
 
 
+@check("W1-FIX-DEEP: residual black-trip families masked — outro fade_black window + B-roll windows in the black mask, dark-scene YAVG echo discriminator (convicted 7/7: 270d756a/2f5e1b2f/acf712cf/fb141d88 fade, df1fa136 dark B-roll, 3bfc7b63/91150d15 dark scene; cert_integrity_black_families.py 14/14)")
+def _gate_black_families():
+    import handler
+    from ffmpeg_base import OUTRO_FADE_DUR_S
+    # 1. single source of truth: the mask derives from the SAME constant the
+    # fade filter renders with (a fade-length change cannot silently desync)
+    _fb = open("ffmpeg_base.py").read()
+    assert "fade_dur_seconds = OUTRO_FADE_DUR_S" in _fb, \
+        "outro fade must render from the shared constant"
+    assert OUTRO_FADE_DUR_S == 1.0, "fade length moved off its convicted geometry"
+    # 2. functional: fade_black plan → the fade window is black-masked;
+    # fade_white / none → it is not (membership stays evidence-based)
+    _plan = {"_render_fps": 60.0, "_render_total_output_frames": 600,
+             "_broll_output_ranges": [(2.0, 3.5)]}
+    _m = handler._build_integrity_masks({**_plan, "outro": "fade_black"})
+    assert any(s <= 9.01 and e >= 9.99 for (s, e) in _m["black"]), \
+        f"fade_black window missing from black mask: {_m['black']}"
+    # 3. functional: B-roll windows black-masked (dark stock footage is
+    # content, not a defect — df1fa136), for every outro value
+    for _o in ("none", "fade_black", "fade_white"):
+        _mo = handler._build_integrity_masks({**_plan, "outro": _o})
+        assert any(s <= 1.76 and e >= 3.74 for (s, e) in _mo["black"]), \
+            f"broll window missing from black mask (outro={_o}): {_mo['black']}"
+    _m_none = handler._build_integrity_masks({**_plan, "outro": "none"})
+    _m_white = handler._build_integrity_masks({**_plan, "outro": "fade_white"})
+    for _mm in (_m_none, _m_white):
+        assert not any(s <= 9.01 and e >= 9.99 for (s, e) in _mm["black"]), \
+            "outro window must be masked ONLY for fade_black"
+    # 4. dark-scene discriminator present in the black echo: unpadded window,
+    # fail-toward-defect on instrument trouble, threshold pinned
+    _src = open("handler.py").read()
+    assert handler._IG_DARK_SCENE_YAVG == 32.0, \
+        "dark-scene floor moved off its calibration (convicted scene YAVG 28.4)"
+    _echo = _src[_src.index("def _ig_source_echo_black"):]
+    _echo = _echo[:_echo.index("\ndef ") if "\ndef " in _echo else len(_echo)]
+    assert "src_dark_scene_yavg" in _echo, "dark-scene downgrade missing from black echo"
+    assert "_ig_window_yavg(source_path, max(0.0, src_s), src_e)" in _echo, \
+        "YAVG must measure the UNPADDED mapped window"
+    assert callable(getattr(handler, "_ig_window_yavg", None))
+    # 5. the cert file rides the repo (regression geometry stays runnable)
+    assert os.path.exists("cert_integrity_black_families.py")
+
+
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
 def _l1_no_audio_gate():
     import handler
@@ -5004,7 +5047,8 @@ def _integrity_source_echo_black():
     # the helper must re-run blackdetect on the SOURCE (only a black source downgrades — a
     # render-produced black over a non-black source stays a defect and trips)
     _i = _h.find("def _ig_source_echo_black(")
-    _body = _h[_i:_i + 1600]
+    _j = _h.find("\ndef ", _i)
+    _body = _h[_i:_j if _j > _i else _i + 4000]
     assert "blackdetect=d=%s:pix_th=%s" in _body and "source_path" in _body, \
         "source-echo-black must probe the SOURCE with blackdetect (else it can't distinguish echo from defect)"
     # wired into the gate: black_resid is downgraded, and holes covered by a source-echoed

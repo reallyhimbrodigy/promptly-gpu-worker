@@ -18668,6 +18668,18 @@ _IG_DUR_DELTA_TRIP_S = 0.25
 _IG_FRAME_TOL = 2
 _IG_MASK_PAD_S = 0.25
 _IG_SOURCE_ECHO_COVER = 0.60   # source frozen-coverage ≥ this → content stillness
+_IG_DARK_SCENE_YAVG = 32.0     # stored-luma mean ≤ this → source is a dark scene
+# there (night/low-light footage). blackdetect is the wrong instrument for
+# dark SCENES: it needs ~98% of pixels under pix_th, so a night shot with
+# visible lights never reads "black" on the source even though the render's
+# designed zoom framing (tighter than the canonical crop) legitimately
+# pushes the output under blackdetect's floor. Convicted: jobs 3bfc7b63 +
+# 91150d15 (SAME source, both tripped) — output dark stretch maps to the
+# source's night-metro scene at 42-47.6s whose canonical-crop YAVG is ~28
+# (min 26.7) while blackdetect on that window finds nothing. Threshold 32
+# gives headroom over the convicted 28.4 while staying far below dim-indoor
+# scenes (YAVG 50+), so a genuine render-written black over normal content
+# still trips.
 
 
 def _ig_parse_spans(text, start_pat, end_pat, total_dur):
@@ -18768,6 +18780,25 @@ def _ig_source_echo(source_path, spans, out_to_src):
     return defects, downgraded
 
 
+def _ig_window_yavg(source_path, a, b):
+    """Mean stored-luma (signalstats YAVG) of source window [a, b], sampled
+    at 10fps. None on instrument failure — caller treats None as 'not dark'
+    (fail toward keeping the defect, never toward downgrading blind)."""
+    try:
+        p = subprocess.run(
+            ["ffmpeg", "-v", "error", "-ss", str(a), "-t", str(b - a),
+             "-i", source_path,
+             "-vf", "fps=10,signalstats,"
+                    "metadata=print:key=lavfi.signalstats.YAVG:file=-",
+             "-an", "-f", "null", "-"],
+            capture_output=True, text=True)
+        vals = [float(m) for m in re.findall(
+            r"lavfi\.signalstats\.YAVG=([\d.]+)", p.stdout or "")]
+        return (sum(vals) / len(vals)) if vals else None
+    except Exception:
+        return None
+
+
 def _ig_source_echo_black(source_path, spans, out_to_src):
     """Black-tail discriminator (mirror of _ig_source_echo, for BLACK): an OUTPUT
     black span whose mapped SOURCE window is ALSO black is source content — the
@@ -18779,6 +18810,13 @@ def _ig_source_echo_black(source_path, spans, out_to_src):
     of 25 INTEGRITY_TRIP jobs (28d), 23 tripped 'black' at the tail; 3/4 sampled
     sources ended on black. Symmetric with the freeze echo: a render-PRODUCED black
     (source NOT black at the mapped time) still returns a defect and trips.
+
+    Second discriminator (dark SCENE, W1-FIX-DEEP): when blackdetect finds no
+    source black but the mapped window's mean stored luma is ≤
+    _IG_DARK_SCENE_YAVG, the source is a dark scene there (night/low-light
+    footage) and the output reading "black" is explainable by the render's
+    designed framing (zooms crop tighter than the canonical source), not by a
+    pipeline defect. See the constant's comment for the convicting pair.
     """
     defects, downgraded = [], []
     for (s, e) in spans:
@@ -18805,6 +18843,15 @@ def _ig_source_echo_black(source_path, spans, out_to_src):
         if cover >= (src_e - src_s) * _IG_SOURCE_ECHO_COVER:
             downgraded.append({"span": (s, e), "src": (src_s, src_e),
                                "src_black_cover_s": round(cover, 3)})
+            continue
+        # UNPADDED window: the discriminator asks "is the source dark exactly
+        # where the output reads black" — the ±0.3s pad (right for the span-
+        # overlap blackdetect above) would dilute the mean with adjacent
+        # bright content at scene boundaries.
+        yavg = _ig_window_yavg(source_path, max(0.0, src_s), src_e)
+        if yavg is not None and yavg <= _IG_DARK_SCENE_YAVG:
+            downgraded.append({"span": (s, e), "src": (src_s, src_e),
+                               "src_dark_scene_yavg": round(yavg, 1)})
         else:
             defects.append((s, e))
     return defects, downgraded
@@ -18822,9 +18869,30 @@ _IG_BLACK_MASK_TYPES = frozenset({"diptoblack", "shutterflash"})
 def _build_integrity_masks(edit_plan):
     """Assemble per-check mask windows from the post-safeguard render plan
     stash. freeze: transition slots + full-screen MGs + generated scenes +
-    B-roll. black: through-black slot types only (_IG_BLACK_MASK_TYPES).
-    hole: transition slots (designed handle silence under a designed-still
-    slot)."""
+    B-roll. black: through-black slot types (_IG_BLACK_MASK_TYPES) + B-roll
+    windows + the outro fade_black window. hole: transition slots (designed
+    handle silence under a designed-still slot).
+
+    Black-mask membership is evidence-based (same doctrine as
+    _IG_BLACK_MASK_TYPES — a window joins when a FAITHFUL render is shown to
+    cross blackdetect's floor there, never speculatively):
+      • outro fade_black — the plan's own 1.0s fade=t=out necessarily drives
+        the last ~0.2-0.4s under pix_th=0.10 (>= _IG_BLACK_DETECT_S=0.20) on
+        every non-black-tailed source. Convicted on jobs 270d756a / 2f5e1b2f:
+        sources hold constant luma (mean 54 / 41) to their last frame,
+        outputs ramp smoothly to black across exactly the fade window, frame
+        counts exact (1919/1919, 1782/1782). The source-echo cannot save
+        these (source tail is NOT black), so before this mask every
+        fade_black plan was a guaranteed INTEGRITY_TRIP + refund of a
+        working video.
+      • B-roll windows — same rationale the freeze mask already applies:
+        B-roll pixels are non-source content chosen deliberately; dark stock
+        footage (convicted: df1fa136, keyword "cinematic glowing smartphone
+        screen in dark room", black spans wholly inside the B-roll window)
+        is legitimate content, not a render defect. Real holes under a
+        B-roll window remain caught by both_stream_hole / frame_count /
+        av_duration_delta / timestamps.
+    """
     pad = _IG_MASK_PAD_S
     slots = edit_plan.get("_integrity_slot_ranges") or []
     fullmg = edit_plan.get("_integrity_fullmg_ranges") or []
@@ -18840,9 +18908,17 @@ def _build_integrity_masks(edit_plan):
     slot_rngs = [(s["start"], s["end"]) for s in slots]
     black_rngs = [(s["start"], s["end"]) for s in slots
                   if str(s.get("type") or "").lower() in _IG_BLACK_MASK_TYPES]
+    outro_rngs = []
+    if str(edit_plan.get("outro") or "none") == "fade_black":
+        _tof = int(edit_plan.get("_render_total_output_frames") or 0)
+        if _tof > 0 and fps > 0:
+            from ffmpeg_base import OUTRO_FADE_DUR_S
+            _total_s = _tof / fps
+            outro_rngs.append((max(0.0, _total_s - OUTRO_FADE_DUR_S),
+                               _total_s))
     return {
         "freeze": _p(slot_rngs) + _p(list(fullmg)) + _p(list(broll)) + _p(gs),
-        "black": _p(black_rngs),
+        "black": _p(black_rngs) + _p(list(broll)) + _p(outro_rngs),
         "hole": _p(slot_rngs),
     }
 

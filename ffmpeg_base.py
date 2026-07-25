@@ -33,6 +33,17 @@ from typing import List, Dict, Optional, Tuple
 import math
 
 
+# ── Outro fade duration ─────────────────────────────────────────────────────
+# Single source of truth for the outro fade length. The integrity gate's
+# black-mask (handler._build_integrity_masks) imports this to mask the
+# DESIGNED fade_black window — the fade's sub-threshold tail (last ~0.2-0.4s
+# of a 1.0s linear fade) reads as "black" to blackdetect (pix_th=0.10) and
+# must never trip the gate (convicted: jobs 270d756a / 2f5e1b2f — sources
+# hold constant luma to their last frame, outputs ramp smoothly to black
+# across exactly this window). Change it here and the mask follows.
+OUTRO_FADE_DUR_S = 1.0
+
+
 # ── Zoom categorization ──────────────────────────────────────────────────────
 
 # All zooms render through Remotion using the ABE.zip components verbatim.
@@ -605,7 +616,7 @@ def build_final_filtergraph(
     #   fade window; fade_start is recomputed in CHUNK-LOCAL seconds.
     if outro and outro != "none":
         fade_color = "black" if outro == "fade_black" else "white"
-        fade_dur_seconds = 1.0
+        fade_dur_seconds = OUTRO_FADE_DUR_S
         fade_start_seconds = 0.0  # re-bound on every apply_fade=True path
         if chunk_global_start_frame is None:
             total_seconds = total_output_frames / source_fps
