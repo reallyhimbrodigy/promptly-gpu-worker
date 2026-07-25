@@ -25194,12 +25194,16 @@ def classify_error(e):
             f"your best {_cap} minutes and re-upload. Longer videos are coming.",
             retryable=False, new_video=True,
         )
-    # Intake FLOOR — ultra-short clip (duration-led, unambiguous).
+    # Intake FLOOR — ultra-short clip (duration-led, unambiguous). Under
+    # zero-reject the floor is the 2.0s minimal-edit minimum (the ONE remaining
+    # rejection); the copy names the floor that actually applied.
     if "CLIP_TOO_SHORT" in msg:
+        _floor_s = int(_MIN_MINIMAL_DURATION_S) if _zero_reject_enabled() \
+            else int(_MIN_SOURCE_DURATION_S)
         return _e(
             "CLIP_TOO_SHORT",
             f"This clip is only a few seconds — Promptly needs at least "
-            f"{int(_MIN_SOURCE_DURATION_S)} seconds of talking to make an edit. "
+            f"{_floor_s} seconds of video to make an edit. "
             f"Try a longer take.",
             retryable=False, new_video=True,
         )

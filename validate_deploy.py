@@ -5425,7 +5425,7 @@ def _secret_canonical_values():
         "PROMPTLY_SCRIPT_DENYLIST": "",   # graduated: no script denied
         "PROMPTLY_PLAN_CAPTURE": "",      # plan-capture corpus hook inert
         "PROMPTLY_BURNED_TEXT": "1",      # burned-in-text guard LIVE (flipped 2026-07-24 after flag-on smoke test)
-        "PROMPTLY_ZERO_REJECT": "0",      # zero-reject routing STAGED DARK (flip = Zac's "FLIP MINIMAL" after the 4 samples; runbook updates this line + the secret together)
+        "PROMPTLY_ZERO_REJECT": "1",      # ZERO-REJECT LIVE (Zac's "FLIP MINIMAL" 2026-07-25 on the minimal samples; cert 5/5; rollback = 0 here + secret + redeploy)
         "PROMPTLY_WHY_DIET": "1",         # A-L1 output diet LIVE (rationale caps 240→96; output-bound call → speed lever; =0 is the one-flag rollback)
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
