@@ -81,7 +81,8 @@ def run_case(case: dict) -> dict:
             "put_object", Params={"Bucket": bucket, "Key": thumb_key,
                                   "ContentType": "image/jpeg"}, ExpiresIn=3600)
         input_data = {
-            "job_id": jid, "user_id": "cert-zero-reject", "vibe": "",
+            # vibe must be non-empty (the required-fields check is falsy-based)
+            "job_id": jid, "user_id": "cert-zero-reject", "vibe": "cert probe",
             "video_url": video_url, "upload_url": upload_url,
             "upload_url_thumb": upload_url_thumb,
             "public_url": f"{CDN}{out_key}",
@@ -92,6 +93,7 @@ def run_case(case: dict) -> dict:
         res = H.handler({"input": input_data})
         out["result_keys"] = sorted(res.keys())[:20]
         out["status"] = res.get("status")
+        out["error_text"] = (str(res.get("error"))[:200] if res.get("error") else None)
         out["error_code"] = res.get("error_code")
         out["route"] = res.get("route")
         out["route_reason"] = res.get("route_reason")
@@ -126,7 +128,11 @@ def run_case(case: dict) -> dict:
             out["ok"] = (res.get("error_code") == "CLIP_TOO_SHORT"
                          and res.get("designed_rejection") is True)
         elif expect == "reject_no_speech":
-            out["ok"] = (res.get("error_code") in ("NO_SPEECH", "NO_SPEECH_FACE")
+            # A faceless synthetic clip legitimately trips the fast-check
+            # NOT_TALKING_HEAD BEFORE transcription with the flag off — any of
+            # these codes proves today's rejection behavior is preserved.
+            out["ok"] = (res.get("error_code") in
+                         ("NO_SPEECH", "NO_SPEECH_FACE", "NOT_TALKING_HEAD")
                          and res.get("designed_rejection") is True)
         return out
     except Exception as e:

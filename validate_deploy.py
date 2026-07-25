@@ -5066,6 +5066,47 @@ def _source_poll_fail_fast():
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
 
 
+@check("A-L1 OUTPUT DIET (2026-07-25, PROMPTLY_WHY_DIET, live lever w/ one-flag rollback): the post-cuts call is OUTPUT-BOUND (r=0.59 wall vs output tokens), and the rationale fields are the compressible output — declared caps 240 chars against a ≤12-word editorial ask, 9.1% balloon rate. Under the flag the RESPONSE SCHEMA hard-caps why/why_emphasis/reason at 96 chars (Vertex enforces maxLength at token-generation time; the parse edge reads the same schema so enforcement follows automatically), and the anti-runaway prompt block names the true budget so the model composes telegrams instead of getting truncated. ONLY the three named rationale fields are dieted — every other declared cap untouched. =0 restores 240 with no deploy.")
+def _why_diet_lever():
+    import os as _os
+    import handler as H
+    assert H._WHY_DIET_CAP == 96 and set(H._WHY_DIET_FIELDS) == {"why", "why_emphasis", "reason"}
+    assert H._why_diet_enabled() is True, "PROMPTLY_WHY_DIET must default ON (the lever is flipped)"
+
+    def _collect(schema):
+        caps = {}
+        def _w(props):
+            for k, p in (props or {}).items():
+                if not isinstance(p, dict):
+                    continue
+                if isinstance(p.get("maxLength"), int):
+                    caps.setdefault(k, set()).add(p["maxLength"])
+                for v in (p.get("anyOf") or []):
+                    if isinstance(v, dict) and isinstance(v.get("maxLength"), int):
+                        caps.setdefault(k, set()).add(v["maxLength"])
+        _w(schema.get("properties"))
+        for d in (schema.get("$defs") or {}).values():
+            if isinstance(d, dict):
+                _w(d.get("properties"))
+        return caps
+    # ON: every rationale field ≤96; a non-rationale cap (video_identity 500) untouched
+    _on = _collect(H._post_cuts_response_schema())
+    for f in ("why", "reason"):
+        assert f in _on and max(_on[f]) <= 96, f"{f} not dieted: {_on.get(f)}"
+    assert 500 in _on.get("video_identity", set()), "non-rationale caps must be untouched"
+    # OFF: the 240s return (one-flag rollback, no deploy)
+    _os.environ["PROMPTLY_WHY_DIET"] = "0"
+    try:
+        _off = _collect(H._post_cuts_response_schema())
+        assert max(_off["why"]) == 240, f"rollback must restore 240 (got {_off.get('why')})"
+    finally:
+        _os.environ.pop("PROMPTLY_WHY_DIET", None)
+    # the prompt names the true budget (rides the Lever-3 anti-runaway block)
+    _h = open("handler.py").read()
+    assert "caps at ~96 characters" in _h and "_why_diet_enabled()" in _h, \
+        "the prompt must tell the model the real budget under the flag"
+
+
 @check("ZERO-REJECT ROUTING (2026-07-25, DARK behind PROMPTLY_ZERO_REJECT): rejections become routes per Zac's ruled precedence — speech → TALKING_HEAD (untouchable); no-speech / no-audio / 2.0-5.0s → the MINIMAL path (deterministic clean cuts + calm transitions, caption-less, rendered through the SAME ffmpeg_base + render-full.mjs primitives via hype_render, delivered through the SAME presigned-S3 + shared HLS + terminal contract); < 2.0s = the ONE remaining rejection. Gate sites raise _MinimalRouteSignal (a RuntimeError subclass so every existing passthrough behaves as today's rejections); ONE outer choke point catches it and runs _run_minimal_pipeline; a minimal failure falls through to the standard coded+refunded envelope. CONSERVATISM INVARIANT: the fast-check NTH gate (faces known, words UNKNOWN) DEFERS under the flag instead of routing — a no-face voiceover must reach the word-aware deep gate so real speech is never mis-routed to the caption-less path. Flag off → every gate raises today's rejection, byte-identical. Per-job cert override: input_data.zero_reject_test (burned_text_test pattern).")
 def _zero_reject_wiring():
     _h = open("handler.py").read()
@@ -5368,6 +5409,7 @@ def _secret_canonical_values():
         "PROMPTLY_PLAN_CAPTURE": "",      # plan-capture corpus hook inert
         "PROMPTLY_BURNED_TEXT": "1",      # burned-in-text guard LIVE (flipped 2026-07-24 after flag-on smoke test)
         "PROMPTLY_ZERO_REJECT": "0",      # zero-reject routing STAGED DARK (flip = Zac's "FLIP MINIMAL" after the 4 samples; runbook updates this line + the secret together)
+        "PROMPTLY_WHY_DIET": "1",         # A-L1 output diet LIVE (rationale caps 240→96; output-bound call → speed lever; =0 is the one-flag rollback)
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that

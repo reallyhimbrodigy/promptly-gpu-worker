@@ -6302,6 +6302,16 @@ already follow) and return when the face leads again."""
             "components, and captions you choose are unchanged; only the note that "
             "explains each choice stays terse."
         )
+        # A-L1 OUTPUT DIET (2026-07-25, rides the Lever-3 flag's anti-runaway
+        # block): the schema now HARD-caps these fields at 96 chars under
+        # PROMPTLY_WHY_DIET — tell the model the true budget so it composes a
+        # telegram instead of getting truncated mid-clause at the cap.
+        if _why_diet_enabled():
+            system_instruction += (
+                "\nHard budget: every rationale field caps at ~96 characters — "
+                "one telegraphic clause. Compose FOR that budget; never write "
+                "toward a longer note and get cut off."
+            )
 
     # WORKSTREAM B (flag-gated, 2026-07-19): EDITORIAL IN THE SOURCE LANGUAGE.
     # Captions are the speaker's verbatim words (Deepgram), so they are already
@@ -9546,6 +9556,12 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
         raise
 
 
+# SA-0 stage telemetry: per-job Gemini call log (container runs 1 input at a
+# time; reset at pipeline start). Additive observability only — no behavior
+# change, no new failure modes (every write is wrapped).
+_GEMINI_CALL_LOG = []
+
+
 def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
                               system_instruction, abort_over_output_tokens=None,
                               label="post-cuts"):
@@ -9620,6 +9636,13 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
             f"rate={_rate:.0f}tok/s)",
             flush=True,
         )
+        try:
+            _GEMINI_CALL_LOG.append({
+                "total_s": round(_total, 1), "ttfb_s": round(_ttfb or 0.0, 1),
+                "out_tok": _eff_out, "aborted": bool(_aborted), "label": label,
+            })
+        except Exception:
+            pass
         return {
             "text": _full,
             "output_tokens": _out_tok or None,
@@ -10005,6 +10028,48 @@ def _zoom_claim_variants():
     return _variants
 
 
+# ── A-L1 OUTPUT DIET (latency lever, one-flag rollback) ──────────────────────
+# The post-cuts call is OUTPUT-BOUND (measured r=0.59 wall-clock vs output
+# tokens, r=0.05 vs thinking), and the rationale fields (why / why_emphasis /
+# reason) are the compressible output: ≤12 words is the editorial ask, yet the
+# declared cap was 240 chars and the live balloon rate ran 9.1% (worst 21.5k
+# chars pre-Lever-3). Halving the DECLARED cap to 96 chars bounds every
+# rationale at token-generation time (Vertex enforces response_json_schema
+# maxLength) — output tokens ≈ latency, so this is a SPEED lever, not just a
+# degen lever. The parse edge (_enforce_string_caps) reads caps from this same
+# schema, so enforcement follows the flag automatically. PROMPTLY_WHY_DIET=0
+# restores 240 (one-flag rollback, no deploy).
+_WHY_DIET_CAP = 96
+_WHY_DIET_FIELDS = ("why", "why_emphasis", "reason")
+
+
+def _why_diet_enabled():
+    return os.environ.get("PROMPTLY_WHY_DIET", "1").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
+def _apply_why_diet(schema):
+    """Walk the schema (top-level + $defs) and cap the rationale fields'
+    maxLength at _WHY_DIET_CAP. Touches ONLY the named fields; every other
+    declared cap is untouched. Idempotent; returns the schema for chaining."""
+    def _walk(props):
+        for _k, _p in (props or {}).items():
+            if _k in _WHY_DIET_FIELDS and isinstance(_p, dict):
+                # plain {maxLength} or Optional (anyOf [{str, maxLength}, null])
+                if isinstance(_p.get("maxLength"), int) and _p["maxLength"] > _WHY_DIET_CAP:
+                    _p["maxLength"] = _WHY_DIET_CAP
+                for _v in (_p.get("anyOf") or []):
+                    if isinstance(_v, dict) and isinstance(_v.get("maxLength"), int) \
+                            and _v["maxLength"] > _WHY_DIET_CAP:
+                        _v["maxLength"] = _WHY_DIET_CAP
+    _walk(schema.get("properties"))
+    for _d in (schema.get("$defs") or {}).values():
+        if isinstance(_d, dict):
+            _walk(_d.get("properties"))
+    return schema
+
+
 def _post_cuts_response_schema():
     """PostCutPlan schema with the zoom claim-anyOf injected at
     $defs/_EmphasisMoment.properties.zoom_effect. Everything else stays
@@ -10021,6 +10086,11 @@ def _post_cuts_response_schema():
     # the pydantic _ZoomEffect def is unreferenced post-injection (the model
     # remains the contract source for the override fields; gate-pinned)
     _s["$defs"].pop("_ZoomEffect", None)
+    # A-L1 output diet: rationale caps 240→96 under PROMPTLY_WHY_DIET (default
+    # ON). The zoom-claim variants injected above carry their own why caps —
+    # applied after injection so they are dieted too.
+    if _why_diet_enabled():
+        _s = _apply_why_diet(_s)
     return _s
 
 
@@ -27411,6 +27481,7 @@ def handler(job):
         print(f"{'='*80}", flush=True)
         _pipeline_start = time.time()
         _timings = {}
+        del _GEMINI_CALL_LOG[:]  # fresh per job — 1 input per container
 
         # Step 1 — Download + parallel stage kickoff
         # ─────────────────────────────────────────────────────────────────
@@ -27685,6 +27756,7 @@ def handler(job):
                         _last_progress_log = _now
                     _wait = 1.0 if _elapsed < 10 else (2.0 if _elapsed < 60 else 4.0)
                     time.sleep(_wait)
+            _timings["source_poll"] = time.time() - _main_poll_start
             _aws_s3_client.download_file(_dl_bucket, _dl_key, source_path, Config=_S3_TRANSFER_CONFIG)
             _dl_method = "s3-crt"
         size_mb = os.path.getsize(source_path) / (1024*1024)
@@ -28352,6 +28424,7 @@ def handler(job):
                     f"{time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
                     flush=True,
                 )
+                _timings["fps_normalize"] = time.time() - _norm_t0
                 # Skip the keyframe verification block — we don't control
                 # the source's GOP structure on the passthrough path. If
                 # iPhone uploads have 2-3s GOPs, Remotion seeks will be
@@ -28710,6 +28783,7 @@ def handler(job):
                 f"{time.time() - _norm_t0:.1f}s ({_size_mb:.1f}MB)",
                 flush=True,
             )
+            _timings["fps_normalize"] = time.time() - _norm_t0
             # Verify dense keyframes actually landed in the encoded file.
             # x264 sometimes ignores -keyint_min when scene-cuts trigger; the
             # -sc_threshold 0 flag should disable that, but we have no proof
@@ -29462,6 +29536,12 @@ def handler(job):
             edit_plan = _copy_mod.deepcopy(provided_plan)
             print("[pipeline] render_only mode — using provided edit_plan (skipped Gemini generate)", flush=True)
         print(f"[TIMING] edit_plan ready in {time.time() - _mega_t0:.1f}s (critical path)", flush=True)
+        _timings["edit_plan"] = time.time() - _mega_t0
+        try:
+            _timings["gemini_call"] = sum(c["total_s"] for c in _GEMINI_CALL_LOG if not c["aborted"])
+            _timings["gemini_wasted_degen"] = sum(c["total_s"] for c in _GEMINI_CALL_LOG if c["aborted"])
+        except Exception:
+            pass
 
         # ── TIER-3b PART 3: guided_redraft SCOPED-COPY + ONE-PLAN CONTRACT ──
         # generate_edit_gemini re-authored the WHOLE plan against a freshly
@@ -30931,6 +31011,8 @@ def handler(job):
             "job_id": job_id,
             "render_time": round(render_elapsed, 1),
             "pipeline_time": round(_timings.get("total", 0), 1),
+            # SA-0: full per-stage wall-clock decomposition (seconds)
+            "stage_timings": {k: round(float(v), 1) for k, v in _timings.items()},
             "output_size_mb": round(output_size_mb, 1),
             "edit_recipe": sanitized_recipe,
             "cover_frame_timestamp": round(cover_frame_ts, 3),
@@ -31012,6 +31094,14 @@ def handler(job):
                 # completion row — carry the honest capability notes here so the
                 # user is told what we couldn't do, never a silent drop.
                 "capability_notes": _capability_notes,
+                # SA-0: per-stage wall-clock decomposition — queryable as
+                # result.stage_timings {source_poll, download, fps_normalize,
+                # edit_plan, gemini_call, gemini_wasted_degen,
+                # normalize_transcribe_upload, render, upload_export, total}.
+                # THIS is the write the DB keeps (the worker owns result;
+                # dispatch-to-modal.js never writes result) — pipeline_time /
+                # render_time in the HTTP result_payload were never persisted.
+                "stage_timings": result_payload.get("stage_timings"),
             },
         )
         return result_payload
@@ -31086,6 +31176,10 @@ def handler(job):
                 "error_class": _err_class,
                 "error_detail": str(e)[:500],
                 "error_where": _err_where,
+                # SA-0: partial stage timings at time of death — shows how far
+                # the pipeline got and what the wall was spent on before failing.
+                "stage_timings": {k: round(float(v), 1)
+                                  for k, v in (locals().get("_timings") or {}).items()},
                 **_floor_markers(_floor_state),
             },
         )
