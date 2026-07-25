@@ -107,7 +107,11 @@ def build_reel() -> dict:
     out = {"ok": False}
     try:
         work = "/tmp/lumen_reel"
-        pub = os.path.join(work, "public")
+        os.makedirs(work, exist_ok=True)
+        # Stage assets into the PREBUNDLE's public dir — the exact production
+        # convention (modal_app cert: public_dir = /remotion/bundle/public);
+        # staticFile() URLs resolve against the served bundle's /public route.
+        pub = "/remotion/bundle/public"
         os.makedirs(pub, exist_ok=True)
 
         # ── constructed source: a slow living gradient, 12s @30fps vertical ──
