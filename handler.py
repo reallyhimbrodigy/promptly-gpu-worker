@@ -23662,8 +23662,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Decide chunk count based on total frames. Below 300 frames the
     # per-process startup tax (~3.5s) dominates — single process is faster.
-    _OVERLAY_CHUNK_COUNT = 4 if total_output_frames >= 300 else 1
-    _PER_CHUNK_CONCURRENCY = 8  # 4 chunks × 8 tabs = 32 tabs across 64 vCPUs
+    # A-L3 (Zac GO 2026-07-25): chunk count env-tunable, default 8 to pair with
+    # the cpu=128 host (8 chunks × 8 tabs = 64 tabs across 128 vCPUs — the same
+    # tabs-to-cores ratio the 4×8-on-64 layout had). Rollback = env 4 (no deploy).
+    _RENDER_CHUNKS = max(1, int(os.environ.get("PROMPTLY_RENDER_CHUNKS", "") or 8))
+    _OVERLAY_CHUNK_COUNT = _RENDER_CHUNKS if total_output_frames >= 300 else 1
+    _PER_CHUNK_CONCURRENCY = 8
     _overlay_ranges = _split_frames(int(total_output_frames), _OVERLAY_CHUNK_COUNT)
     _overlay_chunked = len(_overlay_ranges) > 1
 
@@ -23839,7 +23843,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Below 400 frames the per-process startup tax dominates → composite
     # falls back to single-pass. Below 300 frames overlay is also single,
     # so pipelining is meaningless either way.
-    _N_COMPOSITE_CHUNKS = 4 if total_output_frames >= 400 else 1
+    _N_COMPOSITE_CHUNKS = (max(1, int(os.environ.get("PROMPTLY_RENDER_CHUNKS", "") or 8))
+                           if total_output_frames >= 400 else 1)  # A-L3: paired with cpu=128
     _composite_ranges = split_timeline_into_chunks(int(total_output_frames), _N_COMPOSITE_CHUNKS)
     _composite_chunked = len(_composite_ranges) > 1
     # Chunks are LOSSLESS ProRes 4444 intermediates (.mov) — see encoder

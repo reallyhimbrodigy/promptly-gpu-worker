@@ -5060,7 +5060,7 @@ def _source_poll_fail_fast():
     # the default (600) must be strictly under the run_pipeline_bg Modal timeout so the
     # clean UPLOAD_STALLED fires BEFORE the SIGKILL — the invariant that was violated
     _m = open("modal_app.py").read()
-    _t = _re.search(r"timeout=(\d+), retries=2, cpu=64, memory=131072", _m)
+    _t = _re.search(r"timeout=(\d+), retries=2, cpu=128, memory=131072", _m)
     assert _t, "run_pipeline_bg timeout not found in modal_app.py"
     assert 600 < int(_t.group(1)), \
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
@@ -5215,7 +5215,7 @@ def _recipe_wall_budget():
     assert _dl >= H._RECIPE_WALL_MIN_BUDGET_S >= 600.0, "budget floor must clear a clean pass's recipe-start"
     assert H._RECIPE_WALL_END_RESERVE_S >= 480.0, "tail reserve must absorb one 480s in-flight client-timeout"
     # _MODAL_FN_TIMEOUT_S must track the ACTUAL run_pipeline_bg timeout (drift guard)
-    _t = _re.search(r"timeout=(\d+), retries=2, cpu=64, memory=131072", open("modal_app.py").read())
+    _t = _re.search(r"timeout=(\d+), retries=2, cpu=128, memory=131072", open("modal_app.py").read())
     assert _t and int(_t.group(1)) == int(H._MODAL_FN_TIMEOUT_S), \
         f"_MODAL_FN_TIMEOUT_S ({H._MODAL_FN_TIMEOUT_S}) must match run_pipeline_bg timeout ({_t.group(1) if _t else '?'})"
     # wiring: threaded into the internal retry-stop, the repair loop-top, and the caller
@@ -5427,6 +5427,7 @@ def _secret_canonical_values():
         "PROMPTLY_BURNED_TEXT": "1",      # burned-in-text guard LIVE (flipped 2026-07-24 after flag-on smoke test)
         "PROMPTLY_ZERO_REJECT": "1",      # ZERO-REJECT LIVE (Zac's "FLIP MINIMAL" 2026-07-25 on the minimal samples; cert 5/5; rollback = 0 here + secret + redeploy)
         "PROMPTLY_WHY_DIET": "1",         # A-L1 output diet LIVE (rationale caps 240→96; output-bound call → speed lever; =0 is the one-flag rollback)
+        "PROMPTLY_DELIVERY_FPS": "30",    # FPS 30 APPROVED (Zac blanket-GO 2026-07-25 on the A/B pair): delivery target 30fps — halves the render tail; rollback = "" (60) here + secret
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that
