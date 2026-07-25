@@ -2865,6 +2865,41 @@ def _lumen_label_legibility_guarantee():
     assert _src.count("EXACTLY 3 hex values") == 1, "the 3-hex demand must be premium-only"
 
 
+@check("LUMEN telemetry (Wave-3): tier/model/premium markers persisted on EVERY recipe (HTTP payload + durable completed write) + FULL scene funnel (eligible→emitted_raw→survived_traceability→asset→survived_budget→survived_judge→rendered, per-stage drop_reasons) + fail-open note helper (behavioral)")
+def _lumen_wave3_funnel_telemetry():
+    import handler as _h
+    _src = open("handler.py").read()
+    # Tier/model markers in BOTH the HTTP payload and the durable completed write
+    assert '"model": ("lumen" if route_premium else "flare")' in _src, "model marker missing"
+    assert '"premium_pipeline_enabled": bool(_premium_flag_on)' in _src, "flag marker missing"
+    for _k in ('"tier": result_payload.get("tier")', '"model": result_payload.get("model")',
+               '"route_premium": result_payload.get("route_premium")',
+               '"premium_pipeline_enabled": result_payload.get("premium_pipeline_enabled")'):
+        assert _k in _src, f"durable-write marker {_k} missing"
+    # Full-funnel keys (additive — the legacy emitted/shipped/drop_stage stay)
+    for _k in ('"eligible"', '"emitted_raw"', '"survived_traceability"',
+               '"traceability_dropped"', '"asset_required"', '"survived_budget"',
+               '"survived_judge"', '"rendered"', '"drop_reasons"'):
+        assert _k in _src, f"funnel key {_k} missing"
+    for _k in ('"emitted"', '"shipped"', '"drop_stage"', '"subjects_generated"'):
+        assert _k in _src, f"legacy funnel key {_k} must stay (additive law)"
+    # Translation-stage evidence feeds the funnel — "emitted" can no longer
+    # silently undercount what the model authored.
+    assert "_gs_emitted_raw" in _src and "_gs_traceability_dropped" in _src
+    # Behavioral: the note helper appends evidence, keeps FIRST-drop semantics,
+    # and is fail-open on garbage (telemetry may never cost a job).
+    _plan = {"_lumen_funnel": {"drop_stage": None}}
+    _h._lumen_funnel_note(_plan, "budget_shed", scenes=2, slack_s=12.0)
+    _h._lumen_funnel_note(_plan, "judge", scenes=[0])
+    _lf = _plan["_lumen_funnel"]
+    assert _lf["drop_stage"] == "budget_shed", "FIRST drop must win"
+    assert [r["stage"] for r in _lf["drop_reasons"]] == ["budget_shed", "judge"]
+    assert _lf["drop_reasons"][0]["slack_s"] == 12.0
+    _h._lumen_funnel_note(None, "x")                       # no plan → no raise
+    _h._lumen_funnel_note({"_lumen_funnel": "notadict"}, "x")  # bad shape → no raise
+    _h._lumen_funnel_note({}, "x")                         # no funnel → no raise
+
+
 @check("premium-values env override picks up custom tier names")
 def _tier_premium_values_override():
     # The env-var contract is the public surface for matching whatever
@@ -4319,7 +4354,7 @@ def _terminal_telemetry_wiring():
     # one this check has always pinned; rfind targets it explicitly).
     _c = _src.rfind('status="completed", phase="Done"')
     assert _c != -1, "complete terminal write missing"
-    _win = _src[_c:_c + 2100]  # widened for the 2b re-edit + S3-thumbnail hydration fields
+    _win = _src[_c:_c + 2700]  # widened for 2b re-edit + S3-thumbnail + Wave-3 tier/model markers
     assert "**_floor_markers(_floor_state)" in _win, "complete write lost floor markers"
     assert '"vocab": _vocab_markers(edit_plan)' in _win, "complete write lost vocab"
     # the minimal route's completed write carries ITS contract (route named so

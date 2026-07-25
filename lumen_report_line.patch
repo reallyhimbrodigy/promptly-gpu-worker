@@ -1,0 +1,85 @@
+diff --git a/lib/bleed-meter.js b/lib/bleed-meter.js
+index a74cdef..32de7d8 100644
+--- a/lib/bleed-meter.js
++++ b/lib/bleed-meter.js
+@@ -285,7 +285,61 @@ async function _languageScoreboard(sinceISO, untilISO) {
+   }
+ }
+ 
+-function formatDigest(d, commerce, degen, languages) {
++// Lumen scoreboard (premium designed-scene funnel watch): reads the worker's
++// result.lumen_funnel + tier/model markers off completed video_jobs rows —
++// routed premium jobs, scenes the model emitted, scenes that actually shipped,
++// and which stage stripped the rest (the 0-shipped-in-80-jobs class becomes a
++// one-line daily read). Same hygiene as every count: internal accounts and
++// test-prefixed job ids excluded. Best-effort; returns null (line reads "—")
++// when no premium job ran, and on ANY error — never breaks the digest.
++async function _lumenScoreboard(supabaseAdmin, { sinceISO, untilISO }) {
++  try {
++    const internal = await _internalIds(supabaseAdmin);
++    const agg = { routed: 0, emitted: 0, shipped: 0, drops: {} };
++    const PAGE = 1000;
++    for (let offset = 0; ; offset += PAGE) {
++      const { data, error } = await supabaseAdmin
++        .from('video_jobs')
++        .select('id,status,result,user_id')
++        .eq('status', 'completed')
++        .gte('created_at', sinceISO)
++        .lt('created_at', untilISO)
++        .order('created_at', { ascending: true })
++        .range(offset, offset + PAGE - 1);
++      if (error) throw error;
++      const rows = data || [];
++      for (const row of rows) {
++        if (_isTestJob(row.id) || internal.has(row.user_id)) continue;
++        const res = row.result;
++        if (!res || typeof res !== 'object') continue;
++        const lf = (res.lumen_funnel && typeof res.lumen_funnel === 'object')
++          ? res.lumen_funnel : {};
++        const routed = res.route_premium === true || res.model === 'lumen'
++          || lf.route_premium === true;
++        if (!routed) continue;
++        agg.routed++;
++        const emitted = Number(lf.emitted_raw != null ? lf.emitted_raw : lf.emitted) || 0;
++        const shipped = Number(lf.shipped) || 0;
++        agg.emitted += emitted;
++        agg.shipped += shipped;
++        if (emitted > shipped && lf.drop_stage) {
++          agg.drops[lf.drop_stage] = (agg.drops[lf.drop_stage] || 0) + 1;
++        }
++      }
++      if (rows.length < PAGE) break;
++    }
++    if (agg.routed === 0) return null;
++    const dropStr = Object.entries(agg.drops)
++      .sort((a, b) => b[1] - a[1])
++      .map(([k, v]) => `${k}:${v}`).join(' ');
++    return `routed ${agg.routed} · emitted ${agg.emitted} · shipped ${agg.shipped}`
++      + (dropStr ? `  (drops ${dropStr})` : '');
++  } catch (_) {
++    return null;
++  }
++}
++
++function formatDigest(d, commerce, degen, languages, lumen) {
+   const day = String(d.untilISO).slice(0, 10);
+   const hrs = (d.computeSeconds / 3600);
+   const ratePerHr = d.ratePerSec * 3600;
+@@ -301,6 +355,7 @@ function formatDigest(d, commerce, degen, languages) {
+     `🔴 Errors: ${d.realErrors}${errd ? `  (${errd})` : ''}${d.inFlight ? ` · ${d.inFlight} in-flight` : ''}`,
+     `🌀 Degen: ${degen || '— (0 ballooned)'}`,
+     `🌐 Languages: ${languages || '— (English only)'}`,
++    `🎨 Lumen: ${lumen || '— (no premium routed)'}`,
+     `💸 Est. Modal: $${d.estUsd.toFixed(2)}  (${hrs.toFixed(2)}h @ $${ratePerHr.toFixed(2)}/h)`,
+     `📈 Commerce: ${commerce || '— (awaiting iOS event ship)'}`,
+   ];
+@@ -367,7 +422,8 @@ async function maybeRunBleedMeter(supabaseAdmin, opts = {}) {
+   const commerce = await _commerceLine(supabaseAdmin, { sinceISO, untilISO });
+   const degen = await _degenScoreboard(sinceISO, untilISO);
+   const languages = await _languageScoreboard(sinceISO, untilISO);
+-  const { title, body } = formatDigest(digest, commerce, degen, languages);
++  const lumen = await _lumenScoreboard(supabaseAdmin, { sinceISO, untilISO });
++  const { title, body } = formatDigest(digest, commerce, degen, languages, lumen);
+ 
+   console.log(`[REPORT] ${title}\n${body}`);
+   try {

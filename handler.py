@@ -8532,18 +8532,28 @@ def _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src):
     # scene on the wrong line. See _project_scene_to_frames + its deploy test.
     gs_in = out.get("generated_scenes") or []
     gs_out = []
-    for gs in gs_in:
+    _gs_dropped = []  # funnel evidence: which scenes translation stripped, and why
+    for _gi, gs in enumerate(gs_in):
         if not isinstance(gs, dict):
+            _gs_dropped.append({"scene": _gi, "reason": "not_a_dict"})
             continue
         _sk, _ek = gs.get("start_word_index"), gs.get("end_word_index")
         s = _xlate(_sk)
         e = _xlate(_ek)
         if s is None or e is None:
             print(f"[two-pass] Dropping generated_scene: index out of kept-range", flush=True)
+            _gs_dropped.append({"scene": _gi, "reason": "index_out_of_kept_range",
+                                "start": _sk, "end": _ek, "kept_len": M})
             continue
         gs_out.append({**gs, "start_word_index": s, "end_word_index": e,
                        "_start_word_kept": _sk, "_end_word_kept": _ek})
     out["generated_scenes"] = gs_out
+    # Funnel telemetry (Wave-3): the pre-translation emission count + the drops
+    # this stage made — consumed (popped) by the _lumen_funnel init downstream,
+    # so "emitted" can no longer silently undercount what the model authored.
+    if gs_in:
+        out["_gs_emitted_raw"] = len(gs_in)
+        out["_gs_traceability_dropped"] = _gs_dropped
 
     # video_plan — hook/payoff/close word_index + each key_moment.word_index.
     # The plan is for Gemini's reasoning scaffold, not consumed directly by
@@ -26061,6 +26071,22 @@ def _floor_markers(state):
     }
 
 
+def _lumen_funnel_note(edit_plan, stage, set_drop_stage=True, **info):
+    """Append a per-stage drop reason to the plan's _lumen_funnel (Wave-3).
+    Fail-open, record-only — telemetry may never cost a job. `drop_stage`
+    keeps FIRST-drop semantics (only set when empty); `drop_reasons` is the
+    complete per-stage evidence list."""
+    try:
+        _lf = edit_plan.get("_lumen_funnel") if isinstance(edit_plan, dict) else None
+        if not isinstance(_lf, dict):
+            return
+        _lf.setdefault("drop_reasons", []).append({"stage": stage, **info})
+        if set_drop_stage and not _lf.get("drop_stage"):
+            _lf["drop_stage"] = stage
+    except Exception:
+        pass
+
+
 def _sync_floor_state(state, edit_plan):
     """Copy the recipe/render floor markers off edit_plan into the job-scoped
     state dict (pre-initialized before handler's try, so terminal writes can
@@ -27760,6 +27786,7 @@ def handler(job):
     premium_ctx = None       # Phase 1 premium scaffold (assigned at the tier fork; torn down in finally)
     _cost_meter = None
     route_premium = False
+    _premium_flag_on = False  # the premium_pipeline_enabled REQUEST (persisted per job, Wave-3)
     # Outermost-rung eligibility state (P1a) — pre-initialized so the outer
     # except can ALWAYS read it. "ready" flips once transcript + prepared
     # source are both established in this scope; mode/dur recorded there too.
@@ -27844,7 +27871,8 @@ def handler(job):
         is_premium = bool(resolved_tier) and (resolved_tier in _premium_values())
         try:
             import premium as _premium_mod
-            route_premium = is_premium and _premium_mod.premium_pipeline_enabled(input_data)
+            _premium_flag_on = _premium_mod.premium_pipeline_enabled(input_data)
+            route_premium = is_premium and _premium_flag_on
             _cost_meter = _premium_mod.CostMeter(job_id)
             premium_ctx = _premium_mod.PremiumContext(
                 is_premium=is_premium, route_premium=route_premium, cost_meter=_cost_meter,
@@ -27886,6 +27914,7 @@ def handler(job):
             premium_ctx = None
             _cost_meter = None
             route_premium = False
+            _premium_flag_on = False
 
         # ── Re-edit mode resolution ──────────────────────────────────────
         # mode: "full" (default — fresh plan), "render_only" (render supplied plan
@@ -30199,14 +30228,27 @@ def handler(job):
             try:
                 if isinstance(edit_plan, dict):
                     _lf_emit = edit_plan.get("generated_scenes") or []
+                    # Wave-3 FULL-FUNNEL keys (additive): eligible → emitted_raw →
+                    # survived_traceability → asset_* → survived_budget →
+                    # survived_judge → rendered, with per-stage drop_reasons.
+                    _lf_raw = edit_plan.pop("_gs_emitted_raw", None)
+                    _lf_tdrop = edit_plan.pop("_gs_traceability_dropped", None) or []
                     edit_plan["_lumen_funnel"] = {
                         "route_premium": bool(route_premium),
                         "tier": resolved_tier,
+                        "model": ("lumen" if route_premium else "flare"),
+                        "premium_pipeline_enabled": bool(_premium_flag_on),
+                        "eligible": bool(route_premium),
                         "emitted": len(_lf_emit),
+                        "emitted_raw": int(_lf_raw) if _lf_raw is not None else len(_lf_emit),
+                        "survived_traceability": len(_lf_emit),
+                        "traceability_dropped": len(_lf_tdrop),
                         "scene_types": [(_s.get("scene_type") or _s.get("sceneType") or "legacy")
                                         for _s in _lf_emit if isinstance(_s, dict)],
                         "subjects_generated": 0,
-                        "drop_stage": None,
+                        "drop_stage": ("traceability" if (_lf_tdrop and not _lf_emit) else None),
+                        "drop_reasons": [{"stage": "traceability", **_d} for _d in _lf_tdrop
+                                         if isinstance(_d, dict)],
                     }
             except Exception:
                 pass
@@ -30611,8 +30653,21 @@ def handler(job):
                         f"non-generated beat(s)",
                         flush=True,
                     )
+                    # funnel: not a drop (the beats hold, non-generated) — recorded
+                    # so a shipped-without-asset outcome is attributable.
+                    _lumen_funnel_note(edit_plan, "generation_headroom_skip",
+                                       set_drop_stage=False, scenes=len(_gen_scenes))
                     _gen_scenes = []
             if route_premium and premium_ctx is not None and _gen_scenes:
+                # funnel: how many scenes NEED an image-model asset (hero_object /
+                # legacy full-frame) vs pure-code (typo_stat / photo_card).
+                try:
+                    if isinstance(edit_plan.get("_lumen_funnel"), dict):
+                        edit_plan["_lumen_funnel"]["asset_required"] = sum(
+                            1 for _s in _gen_scenes
+                            if str((_s or {}).get("scene_type") or "") not in ("typo_stat", "photo_card"))
+                except Exception:
+                    pass
                 _scene_cycle_cost = 6.0 * _IMAGE_COST_USD_EST  # gen + ≤2 regens, worst case
                 _known_text = " ".join(
                     str(w.get("word") or "") for w in (_get_resolved_transcript().get("words") or [])
@@ -30635,6 +30690,8 @@ def handler(job):
                             f"> ${_PREMIUM_ASSET_BUDGET_USD:.2f}) — scene={_si}+ hold non-generated",
                             flush=True,
                         )
+                        _lumen_funnel_note(edit_plan, "asset_cost_headroom",
+                                           set_drop_stage=False, first_skipped_scene=_si)
                         break
                     _gen_futs[_asset_pool.submit(
                         _generate_scene_subject, _scene, _si, work_dir, _known_text
@@ -30643,8 +30700,17 @@ def handler(job):
                 for _gf in concurrent.futures.as_completed(_gen_futs):
                     try:
                         _res = _gf.result()
-                    except Exception:
+                        if not (_res and _res.get("path")):
+                            _lumen_funnel_note(
+                                edit_plan, "asset_generation_failed", set_drop_stage=False,
+                                scene=_gen_futs.get(_gf), error="no_image_returned")
+                    except Exception as _gf_err:
                         _res = None
+                        # ONE scene's asset failed — recorded as THAT scene's
+                        # failure (the Task-4 orphan strip drops only this scene).
+                        _lumen_funnel_note(
+                            edit_plan, "asset_generation_failed", set_drop_stage=False,
+                            scene=_gen_futs.get(_gf), error=f"{type(_gf_err).__name__}: {str(_gf_err)[:80]}")
                     if _res and _res.get("path"):
                         _p_si = _gen_futs[_gf]
                         _p_scene = _gen_scenes[_p_si] if 0 <= _p_si < len(_gen_scenes) else {}
@@ -30709,10 +30775,12 @@ def handler(job):
         except Exception as _eg_err:
             _enhancement_guard('generated_scenes', _eg_err, _floor_state['enhancements_dropped'])
             if isinstance(edit_plan, dict):
+                _lumen_funnel_note(
+                    edit_plan, "generation_failed",
+                    scenes=len(edit_plan.get("generated_scenes") or []),
+                    error=f"{type(_eg_err).__name__}: {str(_eg_err)[:80]}")
                 edit_plan["generated_scenes"] = []
                 edit_plan.pop("_generated_subjects", None)
-                if isinstance(edit_plan.get("_lumen_funnel"), dict) and not edit_plan["_lumen_funnel"].get("drop_stage"):
-                    edit_plan["_lumen_funnel"]["drop_stage"] = "generation_failed"
 
         # Collect fast futures (all should be done already — they finish before Gemini).
         # Face detection is collected LATER inside render_multi_clip so Remotion can
@@ -30856,11 +30924,12 @@ def handler(job):
             _shed_dropped = []
             if _shed_slack < 90.0 and (edit_plan.get("generated_scenes")
                                         or edit_plan.get("_generated_subjects")):
+                _lumen_funnel_note(edit_plan, "budget_shed",
+                                   scenes=len(edit_plan.get("generated_scenes") or []),
+                                   slack_s=round(_shed_slack, 1))
                 edit_plan["generated_scenes"] = []
                 edit_plan.pop("_generated_subjects", None)
                 _shed_dropped.append("generated_scenes")
-                if isinstance(edit_plan.get("_lumen_funnel"), dict) and not edit_plan["_lumen_funnel"].get("drop_stage"):
-                    edit_plan["_lumen_funnel"]["drop_stage"] = "budget_shed"
             if _shed_slack < 45.0 and _broll_fetch_futures:
                 _broll_fetch_futures = {}
                 broll_clips = []
@@ -30875,6 +30944,13 @@ def handler(job):
                 )
         except Exception as _eg_err:
             _enhancement_guard('budget_shed', _eg_err, _floor_state['enhancements_dropped'])
+        # funnel: how many scenes stand after the shed ladder (Wave-3)
+        try:
+            if isinstance(edit_plan.get("_lumen_funnel"), dict):
+                edit_plan["_lumen_funnel"]["survived_budget"] = len(
+                    edit_plan.get("generated_scenes") or [])
+        except Exception:
+            pass
         try:  # P1b fail-open: b-roll collection
             if _broll_fetch_futures:
                 broll_clips = prefetch_and_verify_broll(broll_clips, _broll_fetch_futures)
@@ -31165,6 +31241,10 @@ def handler(job):
                         # Increment 2 honesty marker: a QA-degrade of a scene must
                         # end in a capability note (assembled at result time), and
                         # the degrade itself is persisted per scene (rejects law).
+                        # (set_drop_stage False: the finalize keeps its existing
+                        # "qa" drop_stage vocabulary; drop_reasons carries detail)
+                        _lumen_funnel_note(edit_plan, "judge", set_drop_stage=False,
+                                           scenes=sorted(_fail_idx), attempt=_attempt)
                         edit_plan["_qa_dropped_scenes"] = len(_fail_idx)
                         for _di in sorted(_fail_idx):
                             _persist_gen_attempt(
@@ -31761,6 +31841,13 @@ def handler(job):
             "resolved_broll": resolved_broll_out,
             "trend_snapshot": trend_used,
             "render_version": RENDER_VERSION,
+            # ── Tier/model persistence (Wave-3): on EVERY recipe — which model
+            # RAN (flare|lumen), the resolved tier, and the premium routing
+            # markers — queryable from result jsonb, never a stdout grep.
+            "tier": resolved_tier,
+            "model": ("lumen" if route_premium else "flare"),
+            "route_premium": bool(route_premium),
+            "premium_pipeline_enabled": bool(_premium_flag_on),
         }
         if change_summary:
             result_payload["change_summary"] = change_summary
@@ -31788,6 +31875,11 @@ def handler(job):
             if _lf:
                 _lf["qa_dropped"] = int((edit_plan.get("_qa_dropped_scenes") or 0) if isinstance(edit_plan, dict) else 0)
                 _lf["shipped"] = len((edit_plan.get("_rendered_generated_scenes") or []) if isinstance(edit_plan, dict) else [])
+                # Wave-3 full-funnel closers: survived_judge = the plan's scene
+                # count after every QA drop mutated it; rendered = what the final
+                # output actually carries (== shipped, kept as the stage-named key).
+                _lf["survived_judge"] = len((edit_plan.get("generated_scenes") or []) if isinstance(edit_plan, dict) else [])
+                _lf["rendered"] = _lf["shipped"]
                 if _lf.get("emitted", 0) > 0 and _lf["shipped"] < _lf.get("emitted", 0) and not _lf.get("drop_stage"):
                     _lf["drop_stage"] = "qa" if _lf["qa_dropped"] > 0 else "render"
                 result_payload["lumen_funnel"] = _lf
@@ -31817,6 +31909,12 @@ def handler(job):
                 # Lumen emission-funnel telemetry (routed→emitted→generated→shipped
                 # + drop_stage) — queryable as result.lumen_funnel for every job.
                 "lumen_funnel": result_payload.get("lumen_funnel"),
+                # Tier/model persistence (Wave-3): stamped on EVERY completed
+                # recipe's durable row, not only jobs that built a funnel.
+                "tier": result_payload.get("tier"),
+                "model": result_payload.get("model"),
+                "route_premium": result_payload.get("route_premium"),
+                "premium_pipeline_enabled": result_payload.get("premium_pipeline_enabled"),
                 "change_summary": result_payload.get("change_summary"),
                 # S3-thumbnail (Phase 3): the worker-uploaded presigned thumbnail
                 # URL, so double-loss recovery is now FULLY complete — no residual.
