@@ -8964,7 +8964,10 @@ _REPAIR_MIN_HEADROOM_S = 180.0   # recipe repair re-ask allowance: a corrective
 # BEFORE the SIGKILL, instead of grinding into it. A clean single pass is
 # 135-337s and NEVER reaches the deadline; only a job already re-asking (i.e.
 # one that has failed ≥1 validation/transport attempt) can. Off ⇒ byte-identical.
-_MODAL_FN_TIMEOUT_S = 1800.0       # modal_app.py @app.cls / run_pipeline_bg timeout
+_MODAL_FN_TIMEOUT_S = 3000.0       # modal_app.py @app.cls / run_pipeline_bg timeout
+                                   # (raised 1800->3000 for 5-min support, 2026-07-25:
+                                   #  a 300s source's render + recipe must fit under it;
+                                   #  the reaper EXEC_WALL_MS stays >= this at all times)
                                    # — the hard SIGKILL wall we must land under.
                                    # (The reaper EXEC_WALL_MS ≥ this invariant is
                                    # already gated; this budget sits UNDER it.)
@@ -11405,7 +11408,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
 """
 
     # at least _REPAIR_MIN_HEADROOM_S of slack in the 900s job budget.
-    _repair_budget_ok = (float(duration or 0.0) * 3.0 + _REPAIR_MIN_HEADROOM_S) <= 1800.0  # job budget (raised 900->1800, 2026-07-23)
+    _repair_budget_ok = (float(duration or 0.0) * 3.0 + _REPAIR_MIN_HEADROOM_S) <= _MODAL_FN_TIMEOUT_S  # job budget (single source of truth: _MODAL_FN_TIMEOUT_S)
     _post_user_attempt = post_user
     # THE SAFE EDIT (zero-fatal ladder): when the recipe stage is
     # unrecoverable — repair-net exhaustion or transport exhaustion — engage
@@ -24923,7 +24926,7 @@ class RecipeInvalidError(ValueError):
 # job budget raised to 1800s (run_pipeline_bg / @app.cls), a 3-minute source now
 # has ample render headroom, so 3-min clips are accepted. Ships in LOCKSTEP with
 # the timeout + reaper raise (reaper EXEC_WALL_MS 2100s >= worker 1800s at all times).
-_MAX_SOURCE_DURATION_S = 180.0
+_MAX_SOURCE_DURATION_S = 300.0   # 5-min support (raised 180->300, 2026-07-25); CLIP_TOO_LONG floor
 # Intake FLOOR (2026-07-17): a clip too short to carry a talking-head edit.
 # Symmetric with the cap above and fired at the SAME pre-Deepgram intake probe,
 # so an ultra-short upload gets an honest duration-led reject in ~6s instead of
@@ -25707,7 +25710,7 @@ def _outer_safe_rescue(job, input_data, classified, state, run_fn=None):
             + max(60.0, min(240.0, (_dur if _dur > 0 else 80.0) * 3.0))
             + _RESCUE_MARGIN_S
         )
-        if _elapsed + _projected > 1800.0:  # job budget (raised 900->1800, 2026-07-23)
+        if _elapsed + _projected > _MODAL_FN_TIMEOUT_S:  # job budget (single source of truth)
             print(
                 f"[safe-edit] outer rescue skipped — budget "
                 f"(elapsed={_elapsed:.0f}s projected={_projected:.0f}s)",
@@ -27250,7 +27253,7 @@ def handler(job):
             # returns 200, so the source is already on S3 at dispatch and the poll
             # finds it in seconds; 300s is a generous ceiling only a lost/stalled
             # upload hits, and it leaves ~1500s render headroom under the 1800s cap.
-            _main_poll_deadline = _main_poll_start + int(os.environ.get("PROMPTLY_SOURCE_POLL_S", "300"))
+            _main_poll_deadline = _main_poll_start + int(os.environ.get("PROMPTLY_SOURCE_POLL_S", "600"))
             _main_poll_attempt = 0
             _last_progress_log = _main_poll_start
             while True:
@@ -29670,7 +29673,7 @@ def handler(job):
         try:  # P1b fail-open: proceed unshed
             _shed_elapsed = time.time() - _pipeline_start
             _shed_projected = max(60.0, float(source_duration) * 3.0)
-            _shed_slack = 1800.0 - _shed_elapsed - _shed_projected  # job budget (raised 900->1800, 2026-07-23)
+            _shed_slack = _MODAL_FN_TIMEOUT_S - _shed_elapsed - _shed_projected  # job budget (single source of truth)
             _shed_dropped = []
             if _shed_slack < 90.0 and (edit_plan.get("generated_scenes")
                                         or edit_plan.get("_generated_subjects")):

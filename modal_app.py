@@ -599,7 +599,7 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
     # 300s slack) or a healthy long render gets false-reaped mid-flight. Deploy the
     # reaper raise FIRST, this SECOND. Billing is per-active-second, so short jobs
     # (the common case) cost the same as before — the cap only bounds the tail.
-    timeout=1800, retries=2, cpu=64, memory=131072, region="us",
+    timeout=3000, retries=2, cpu=64, memory=131072, region="us",
     scaledown_window=180, volumes={"/prewarm": prewarm_volume},
     enable_memory_snapshot=True,
 )
@@ -639,7 +639,7 @@ def run_pipeline_bg(body: dict):
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
-    timeout=1800,         # 30 min (raised from 900, 2026-07-23) — matches run_pipeline_bg so the SYNC-fallback path (SPAWN_MODE=0) can also finish a 3-minute render. Under SPAWN_MODE=1 run_job returns in ms (it spawns run_pipeline_bg), so this cap binds only the sync fallback; kept in lockstep for correctness. Orchestrator runs init + audio + remotion + composite + upload; the Gemini client timeout is 480s (handler.py:_get_genai_client). Billing is per-active-second, so short jobs cost the same — the cap only bounds the tail.
+    timeout=3000,         # 50 min (raised 900->1800->3000; 3000 for 5-min support 2026-07-25) — matches run_pipeline_bg so the SYNC-fallback path (SPAWN_MODE=0) can also finish a 5-minute render. Under SPAWN_MODE=1 run_job returns in ms (it spawns run_pipeline_bg), so this cap binds only the sync fallback; kept in lockstep for correctness. Orchestrator runs init + audio + remotion + composite + upload; the Gemini client timeout is 480s (handler.py:_get_genai_client). Billing is per-active-second, so short jobs cost the same — the cap only bounds the tail. INVARIANT: content-studio reaper EXEC_WALL_MS must be >= this (>=3300s) at all times, raised FIRST.
     scaledown_window=180, # 3 min — covers the warmup() (fired at upload-start) →
                           # run_job gap so the FIRST render after idle hits a warm
                           # container (no cold start), plus back-to-back jobs. At

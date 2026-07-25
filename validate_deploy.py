@@ -5037,22 +5037,22 @@ def _burned_text_zoom_gate():
         "the zoom must be assigned in the ELSE of the suppress branch (OFF → not suppressed → assigned → byte-identical)"
 
 
-@check("SOURCE-POLL fail-fast (2026-07-24): the MAIN source-wait deadline is env-tunable (PROMPTLY_SOURCE_POLL_S, default 300s) and MUST stay well under the run_pipeline_bg Modal timeout. The old 1800s was >= the 900s function timeout, so a stalled iOS upload hung at 'Got your video, loading it in...' until the SIGKILL — which writes NO terminal status, so the reaper terminalized it UNCODED ~5min later (the 'preparing footage freezes ~9min then fails' class). At 300s a stalled upload raises the coded, RETRYABLE UPLOAD_STALLED long before the SIGKILL. Regression guard: the default must remain < the worker timeout.")
+@check("SOURCE-POLL fail-fast (2026-07-24, poll 600 for 5-min support 2026-07-25): the MAIN source-wait deadline is env-tunable (PROMPTLY_SOURCE_POLL_S, default 600s) and MUST stay well under the run_pipeline_bg Modal timeout. The old 1800s was >= the 900s function timeout, so a stalled iOS upload hung at 'Got your video, loading it in...' until the SIGKILL — which writes NO terminal status, so the reaper terminalized it UNCODED ~5min later. The poll raised 300->600 for 5-min support: a 5-min source uploads a bigger file, and the v353 census caught real uploads finishing at ~305s (300s was false-stalling slow-but-live uploads). At 600s a genuinely stalled upload still raises the coded, RETRYABLE UPLOAD_STALLED long before the 3000s SIGKILL. Regression guard: the default must remain < the worker timeout.")
 def _source_poll_fail_fast():
     import re as _re
     _h = open("handler.py").read()
-    assert '_main_poll_deadline = _main_poll_start + int(os.environ.get("PROMPTLY_SOURCE_POLL_S", "300"))' in _h, \
-        "the main source-poll deadline must be env-tunable (PROMPTLY_SOURCE_POLL_S) defaulting to 300s"
+    assert '_main_poll_deadline = _main_poll_start + int(os.environ.get("PROMPTLY_SOURCE_POLL_S", "600"))' in _h, \
+        "the main source-poll deadline must be env-tunable (PROMPTLY_SOURCE_POLL_S) defaulting to 600s"
     # UPLOAD_STALLED must be a CODED, RETRYABLE error so the fast fail is actionable
     assert '"UPLOAD_STALLED"' in _h and 'if "UPLOAD_STALLED" in msg:' in _h, \
         "UPLOAD_STALLED must be classified (coded + retryable) so the fast fail surfaces a clean retry"
-    # the default (300) must be strictly under the run_pipeline_bg Modal timeout so the
+    # the default (600) must be strictly under the run_pipeline_bg Modal timeout so the
     # clean UPLOAD_STALLED fires BEFORE the SIGKILL — the invariant that was violated
     _m = open("modal_app.py").read()
     _t = _re.search(r"timeout=(\d+), retries=2, cpu=64, memory=131072", _m)
     assert _t, "run_pipeline_bg timeout not found in modal_app.py"
-    assert 300 < int(_t.group(1)), \
-        f"source-poll default (300s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
+    assert 600 < int(_t.group(1)), \
+        f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
 
 
 @check("RECIPE WALL-CLOCK BUDGET (2026-07-24, p=50 compounding fix): the edit-recipe repair loop (≤_repair_max+1 re-asks) × the internal degen/transport retries (≤3 sub-attempts) can compound to ~6 post-cuts Gemini calls, each ≤480s, running the stage past Modal's timeout → an UNCODED SIGKILL at progress≈50 that bypasses the failure handler (0/26 long-wall deaths carried forensics). A running wall-clock deadline anchored on the job's pipeline start makes compounding re-asks engage the EXISTING deterministic safe edit BEFORE the SIGKILL. A clean single pass (135-337s) never trips it. Flag PROMPTLY_RECIPE_WALL (default on); =0 → deadline None → byte-identical. Budget = Modal timeout − render reserve (duration*3) − one-client-timeout (480s) tail reserve, so even a re-ask that started just under the deadline finishes below the wall. This is the source-poll fail-fast pattern one stage later.")
