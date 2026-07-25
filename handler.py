@@ -26519,6 +26519,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
 
     _t0 = time.time()
     _fps = 30.0
+    _mini_t = {}   # W1 observability: stage_timings for the caption-less routes
     print(f"[minimal-route] engaged reason={reason} duration={source_duration:.1f}s "
           f"job={job_id}", flush=True)
     _record_divergence(
@@ -26531,6 +26532,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     # 1. Canonicalize (1080x1920 portrait @30fps — the bridge's contract).
     _canon = os.path.join(work_dir, "minimal_canon.mp4")
     _hr.normalize_source(source_path, _canon, _fps)
+    _mini_t["normalize"] = time.time() - _t0
     _dur = 0.0
     try:
         _p = subprocess.run(
@@ -26598,6 +26600,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             _plan = None
     if _plan is None:
         _plan = _me.build_minimal_plan(_dur, fps=_fps)
+    _mini_t["plan"] = time.time() - _t0 - _mini_t.get("normalize", 0)
     _ri = _he.project_hype_plan(
         _plan, source_url=os.path.basename(_canon), source_fps=_fps,
         source_duration=_dur)
@@ -26609,6 +26612,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         _ri, _canon, output_path, work_dir,
         public_dir="/remotion/bundle/public", remotion=True)
     _render_elapsed = time.time() - _t0
+    _mini_t["render"] = _render_elapsed - sum(_mini_t.values())
 
     # 4. Thumbnail (same scorer as TH), best-effort — never costs the video.
     send_progress(job_id, "thumbnail", 92, "Picking your cover frame", app_url)
@@ -26649,6 +26653,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             ExtraArgs={"ContentType": "video/mp4"}, Config=_S3_TRANSFER_CONFIG)
     _video_url = input_data.get("public_url") or upload_url.split("?")[0]
     _hls_url = None
+    _hls_t0 = time.time()
     try:
         _hls_url = _encode_and_upload_hls(
             output_path, work_dir, upload_url, input_data.get("public_url"))
@@ -26692,6 +26697,10 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         },
         "render_time": round(_render_elapsed, 1),
         "pipeline_time": round(time.time() - (pipeline_start or _t0), 1),
+        "stage_timings": {**{k: round(v, 1) for k, v in _mini_t.items()},
+                          "hls": round(time.time() - _hls_t0, 1),
+                          "total": round(time.time() - _t0, 1),
+                          "target_fps": _fps},
         "output_size_mb": round(_out_mb, 1),
         "edit_recipe": {"route": _route_name, "reason": reason,
                         "plan": _plan.model_dump()},
@@ -26720,6 +26729,8 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "capability_notes": _capability_notes,
             "route": _route_name,
             "route_reason": reason,
+            "stage_timings": result_payload.get("stage_timings"),
+            "stage_manifest": result_payload.get("stage_manifest"),
         },
     )
     send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
