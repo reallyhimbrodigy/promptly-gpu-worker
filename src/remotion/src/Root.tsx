@@ -235,6 +235,22 @@ export const RemotionRoot: React.FC = () => {
           label: "",
         } as unknown as Record<string, unknown>}
       />
+      {/* LumenReel — Wave-3 scene reel (ephemeral modal app drives it): the
+          REAL GeneratedSceneLayer over a constructed source, at the canonical
+          30fps. Vertical 1080x1920 only. Not used in production. */}
+      <Composition
+        id="LumenReel"
+        component={GenSceneProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={30}
+        durationInFrames={360}
+        defaultProps={{
+          scenes: [],
+          label: "",
+          sourceSrc: "",
+        } as unknown as Record<string, unknown>}
+      />
     </>
   );
 };
