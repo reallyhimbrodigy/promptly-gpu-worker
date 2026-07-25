@@ -4263,7 +4263,7 @@ def _terminal_telemetry_wiring():
     _cm = _src.find('status="completed", phase="Done"')
     if _cm != _c:
         _wm = _src[_cm:_cm + 1200]
-        assert '"route": "minimal"' in _wm and '"route_reason": reason' in _wm, \
+        assert '"route": _route_name' in _wm and '"route_reason": reason' in _wm, \
             "minimal completed write lost its route contract"
     # orphan-cascade wiring assertion DELETED with the cascade (Zac 2026-07-09
     # follow-through: it enforced the dead machinery-foley doctrine and inverted
@@ -5153,14 +5153,14 @@ def _zero_reject_wiring():
         "choke point must run the minimal pipeline and fall through to the coded envelope on failure"
     # the minimal pipeline shares the delivery contract
     _p = _h.find("def _run_minimal_pipeline")
-    _body = _h[_p:_p + 9000]
+    _body = _h[_p:_p + 16000]  # widened for the hype-upgrade branch
     for _needle, _why in [
         ("_encode_and_upload_hls(", "shared HLS ladder"),
         ("write_job_status(", "durable completed terminal"),
         ('send_progress(job_id, "complete", 100', "complete event"),
         ("_persist_edit_rationale(job_id", "rationale rides the minimal path"),
         ("_S3_TRANSFER_CONFIG", "same multipart upload config"),
-        ('"route": "minimal"', "route named in result"),
+        ('"route": _route_name', "route named in result (minimal or the hype upgrade)"),
     ]:
         assert _needle in _body, f"minimal pipeline missing: {_why}"
     # the TH tail delegates to the SAME HLS implementation (one source of truth)
@@ -5429,6 +5429,7 @@ def _secret_canonical_values():
         "PROMPTLY_WHY_DIET": "1",         # A-L1 output diet LIVE (rationale caps 240→96; output-bound call → speed lever; =0 is the one-flag rollback)
         "PROMPTLY_DELIVERY_FPS": "30",    # FPS 30 APPROVED (Zac blanket-GO 2026-07-25 on the A/B pair): delivery target 30fps — halves the render tail; rollback = "" (60) here + secret
         "PROMPTLY_RENDER_FANOUT": "1",    # A-L4 LIVE (cert 3/3: SSIM 1.0 global+boundaries, remote mode, poisoned fallback; length-floored ≥60s output where it strictly wins: 155s = −19%); rollback = "0"
+        "PROMPTLY_HYPE_MODE": "1",        # HYPE LIVE (Zac "FLIP HYPE" 2026-07-25 on the v2 pair): no-speech + confident beat (aubio tconf > 0.15) → beat-synced edit; every miss fail-safes to minimal; rollback = "0"
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that

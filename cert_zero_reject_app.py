@@ -35,6 +35,33 @@ CDN = "https://d1iax8jos987n3.cloudfront.net/"
 
 def _synth(path, dur_s, with_audio, audio_kind="tone"):
     import subprocess
+    if with_audio and audio_kind == "beat":
+        # confident 4/4 kick+hat (the beat-cert synth) — aubio tempo-confidence
+        # fires high on this; the HYPE route's positive case.
+        import numpy as np, wave, os as _os
+        sr = 44100
+        wav = path + ".beat.wav"
+        n = int(dur_s * sr); audio = np.zeros(n, dtype=np.float32)
+        hit = int(0.04 * sr); env = np.exp(-np.linspace(0, 8, hit))
+        t, idx, period = 0.0, 0, (60.0 / 128) / 2
+        while t < dur_s - 0.05:
+            pos = int(t * sr); down = (idx % 2 == 0)
+            f, a = (60.0, 0.95) if down else (8000.0, 0.5)
+            burst = (a * np.sin(2 * np.pi * f * np.arange(hit) / sr) * env).astype(np.float32)
+            e = min(pos + hit, n); audio[pos:e] += burst[:e - pos]
+            t += period; idx += 1
+        with wave.open(wav, "w") as w:
+            w.setnchannels(1); w.setsampwidth(2); w.setframerate(sr)
+            w.writeframes((np.clip(audio, -1, 1) * 32767).astype("<i2").tobytes())
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error",
+             "-f", "lavfi", "-i", f"testsrc2=size=720x1280:rate=30:duration={dur_s}",
+             "-i", wav, "-map", "0:v", "-map", "1:a",
+             "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
+             "-c:a", "aac", "-shortest", path],
+            check=True, capture_output=True, text=True)
+        _os.remove(wav)
+        return path
     cmd = ["ffmpeg", "-y", "-v", "error",
            "-f", "lavfi", "-i", f"testsrc2=size=720x1280:rate=30:duration={dur_s}"]
     if with_audio:
@@ -67,7 +94,7 @@ def run_case(case: dict) -> dict:
         base = f"cert/zero-reject/{jid}"
         # source
         src_local = f"/tmp/{jid}_src.mp4"
-        _synth(src_local, case["dur"], case["audio"])
+        _synth(src_local, case["dur"], case["audio"], case.get("audio_kind", "tone"))
         src_key = f"{base}/source.mp4"
         s3.upload_file(src_local, bucket, src_key, ExtraArgs={"ContentType": "video/mp4"})
         video_url = s3.generate_presigned_url(
@@ -90,6 +117,8 @@ def run_case(case: dict) -> dict:
         }
         if case.get("flag_on", True):
             input_data["zero_reject_test"] = True
+        if case.get("hype_on"):
+            input_data["hype_test"] = True
         res = H.handler({"input": input_data})
         out["result_keys"] = sorted(res.keys())[:20]
         out["status"] = res.get("status")
@@ -99,7 +128,11 @@ def run_case(case: dict) -> dict:
         out["route_reason"] = res.get("route_reason")
         out["edit_rationale"] = res.get("edit_rationale")
         expect = case["expect"]
-        if expect == "minimal_complete":
+        if expect == "hype_complete":
+            ok = (res.get("status") == "success" and res.get("route") == "hype"
+                  and bool(res.get("video_url")) and bool(res.get("edit_rationale")))
+            out["ok"] = bool(ok)
+        elif expect == "minimal_complete":
             ok = (res.get("status") == "success" and res.get("route") == "minimal"
                   and bool(res.get("video_url")))
             # mechanical: pull the delivered MP4 back and probe it
@@ -155,6 +188,11 @@ def main():
          "expect": "reject_too_short"},
         {"name": "off_control_no_speech", "dur": 12.0, "audio": True,
          "flag_on": False, "expect": "reject_no_speech"},
+        # HYPE FLIP cert: confident beat → hype route; pure tone → stays minimal
+        {"name": "hype_music", "dur": 14.0, "audio": True, "audio_kind": "beat",
+         "flag_on": True, "hype_on": True, "expect": "hype_complete"},
+        {"name": "hype_gate_tone", "dur": 12.0, "audio": True, "audio_kind": "tone",
+         "flag_on": True, "hype_on": True, "expect": "minimal_complete"},
     ]
     results = list(run_case.map(cases))
     print("\n================ ZERO-REJECT CERT ================")

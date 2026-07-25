@@ -87,9 +87,16 @@ YOUR TOOLBOX (the same universal set the whole editor uses — use what FITS hyp
   scale peak ON a strong beat. `punch=true` = ease-IN impact. FITS: the drop, a
   reveal, the hardest beat. FIGHTS: overuse — 2-4 across a 20-30s clip, on the
   beats that actually hit.
-- TRANSITIONS ({list(_TRANSITION)}): punctuate a SECTION change (a new location,
-  the drop), not every cut. FITS: viral, dramatic. FIGHTS: back-to-back — a
-  transition on every cut deletes the footage.
+- TRANSITIONS ({list(_TRANSITION)}): the HARD CUT is this format's default joint —
+  restraint IS the style. A transition may appear ONLY at a moment the footage or
+  music MOTIVATES: the drop, a true section change in the music, a subject or
+  location change in the footage. If you cannot name the motivating moment in the
+  clip, there is no transition there. ZERO transitions is a strong, common answer;
+  one is typical; two is the ceiling and only when two genuinely motivated moments
+  exist. Match the TYPE to the energy of the moment (a flash for an impact, a push
+  for a build) — never decorative variety. An ending treatment must read as an
+  INTENTIONAL outro (use the `outro` field for that) or not exist at all — a
+  transition floating near the end that is not the outro reads as an accident.
 - MOTION GRAPHICS ({list(_MG)}): sparse kinetic text/graphics for a title card or
   a callout the footage can't say. FITS: a hook title, a location stamp. FIGHTS:
   covering the shot; captioning what's already on screen.

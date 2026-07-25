@@ -26513,9 +26513,10 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     print(f"[minimal-route] engaged reason={reason} duration={source_duration:.1f}s "
           f"job={job_id}", flush=True)
     _record_divergence(
-        "routing", {"route": "minimal", "reason": reason},
+        "routing", {"route": "caption_less_pipeline", "reason": reason},
         "zero_reject_minimal_route",
-        reason=f"intake gate '{reason}' routed to minimal instead of rejecting")
+        reason=f"intake gate '{reason}' routed instead of rejecting "
+               f"(hype-vs-minimal decided below)")
     send_progress(job_id, "plan", 38, "Structuring your edit", app_url)
 
     # 1. Canonicalize (1080x1920 portrait @30fps — the bridge's contract).
@@ -26532,8 +26533,62 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     if _dur <= 0:
         _dur = float(source_duration or 2.0)
 
-    # 2. Deterministic plan → projected caption-less PromptlyRenderInput.
-    _plan = _me.build_minimal_plan(_dur, fps=_fps)
+    # 2. Plan. HYPE UPGRADE (Zac "FLIP HYPE" 2026-07-25): a no-speech clip whose
+    #    OWN audio is confidently rhythmic (aubio tempo-confidence — the ruled
+    #    music discriminant, NOT beat-grid-non-empty) gets the beat-synced hype
+    #    edit (Gemini HypePlan, v2 transition doctrine) instead of the
+    #    deterministic minimal. FAIL-SAFE at every step: any miss (no audio,
+    #    low confidence, Gemini error, parse) falls to minimal — a hype attempt
+    #    can never cost a user their video. no_audio/too_short never try (no
+    #    track to sync to / too short to groove).
+    import general_editor as _ge
+    _plan = None
+    _route_name = "minimal"
+    _hype_on = bool(input_data.get("hype_test")) or _ge._hype_mode_enabled()
+    if _hype_on and reason in ("no_speech", "not_talking_head") and _dur >= 8.0:
+        try:
+            _wav = os.path.join(work_dir, "minimal_audio.wav")
+            _wr = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-i", _canon, "-vn",
+                 "-ac", "1", "-ar", "44100", _wav],
+                capture_output=True, text=True, timeout=120)
+            if _wr.returncode == 0 and os.path.exists(_wav):
+                _beats, _conf = _ge.compute_beat_grid(_wav, has_audio=True)
+                print(f"[hype-route] beats={len(_beats)} tempo_confidence={_conf} "
+                      f"(gate > {_ge.BEAT_CONF_MIN})", flush=True)
+                if _conf > _ge.BEAT_CONF_MIN and len(_beats) >= 8:
+                    _sys_i, _user_c = _he.build_hype_prompt(
+                        input_data.get("vibe") or "", _dur, _beats)
+                    _client = _get_genai_client()
+                    _resp = _client.models.generate_content(
+                        model=GEMINI_EDITORIAL_MODEL, contents=_user_c,
+                        config=genai_types.GenerateContentConfig(
+                            system_instruction=_sys_i, temperature=1.0,
+                            response_mime_type="application/json",
+                            response_schema=_he.HypePlan,
+                            thinking_config=genai_types.ThinkingConfig(
+                                thinking_budget=8192)))
+                    _hp = getattr(_resp, "parsed", None)
+                    if not isinstance(_hp, _he.HypePlan):
+                        import json as _hj
+                        _hp = _he.HypePlan.model_validate(_hj.loads(_resp.text))
+                    if _hp.clips:
+                        _plan = _hp
+                        _route_name = "hype"
+                        _record_divergence(
+                            "routing", {"route": "hype", "conf": _conf},
+                            "hype_music_route",
+                            reason=f"beat_confidence {_conf} > {_ge.BEAT_CONF_MIN} "
+                                   f"— beat-synced edit ({len(_beats)} beats)")
+        except Exception as _hype_err:
+            print(f"[hype-route] fail-safe → minimal "
+                  f"({type(_hype_err).__name__}: {str(_hype_err)[:160]})", flush=True)
+            _record_divergence(
+                "routing", {"route": "hype", "error": type(_hype_err).__name__},
+                "hype_fallback_minimal", reason=str(_hype_err)[:200])
+            _plan = None
+    if _plan is None:
+        _plan = _me.build_minimal_plan(_dur, fps=_fps)
     _ri = _he.project_hype_plan(
         _plan, source_url=os.path.basename(_canon), source_fps=_fps,
         source_duration=_dur)
@@ -26593,23 +26648,32 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
 
     # 6. Rationale + terminal (SAME contract: durable completed write + the
     #    complete progress event + the result payload the server persists).
-    _rationale = _minimal_rationale(reason, _dur)
+    if _route_name == "hype":
+        # the model's own notes (bounded) or an honest default — the user hears
+        # WHY it's a beat edit
+        _rationale = (str(getattr(_plan, "notes", "") or "").strip()[:400]
+                      or "I heard the beat in your clip, so I cut it to the music — "
+                         "punches and pacing land on the rhythm.")
+        _capability_notes = ["No speech detected but the music had a clear beat — "
+                            "this is a beat-synced edit cut to your own track."]
+    else:
+        _rationale = _minimal_rationale(reason, _dur)
+        _capability_notes = [
+            "No speech was detected, so this is a clean-cut re-pace — captions and "
+            "speech-anchored effects need a talking-head clip."
+            if reason in ("no_speech", "no_speech_muted", "not_talking_head")
+            else "This clip got a clean-cut re-pace." ]
     _persist_edit_rationale(job_id, _rationale)
-    _capability_notes = [
-        "No speech was detected, so this is a clean-cut re-pace — captions and "
-        "speech-anchored effects need a talking-head clip."
-        if reason in ("no_speech", "no_speech_muted", "not_talking_head")
-        else "This clip got a clean-cut re-pace." ]
     _out_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0.0
     result_payload = {
         "status": "success",
         "job_id": job_id,
-        "route": "minimal",
+        "route": _route_name,
         "route_reason": reason,
         "render_time": round(_render_elapsed, 1),
         "pipeline_time": round(time.time() - (pipeline_start or _t0), 1),
         "output_size_mb": round(_out_mb, 1),
-        "edit_recipe": {"route": "minimal", "reason": reason,
+        "edit_recipe": {"route": _route_name, "reason": reason,
                         "plan": _plan.model_dump()},
         "transcript": [],
         "analysis_data": None,
@@ -26634,12 +26698,12 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "render_version": RENDER_VERSION,
             "thumbnail_url": _thumbnail_url,
             "capability_notes": _capability_notes,
-            "route": "minimal",
+            "route": _route_name,
             "route_reason": reason,
         },
     )
     send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
-    print(f"[minimal-route] DONE job={job_id} {time.time() - _t0:.1f}s "
+    print(f"[minimal-route] DONE route={_route_name} job={job_id} {time.time() - _t0:.1f}s "
           f"clips={len(_plan.clips)} trans={len(_plan.transitions)} "
           f"hls={'yes' if _hls_url else 'no'}", flush=True)
     return result_payload
