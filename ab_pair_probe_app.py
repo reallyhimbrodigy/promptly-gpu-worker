@@ -45,7 +45,7 @@ def _build_th_source(work, wobble=False):
     face = os.path.join(work, "face.mp4")
     voice = os.path.join(work, "voice.m4a")
     s3.download_file(bucket, "multilingual-cert/_face/face.mp4", face)
-    s3.download_file(bucket, "multilingual-cert/en.m4a", voice)
+    s3.download_file(bucket, "multilingual-cert/_bridge_regression/en.m4a", voice)
     out = os.path.join(work, "th_source.mp4")
     vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
     if wobble:
