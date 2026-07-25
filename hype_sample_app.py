@@ -82,6 +82,29 @@ def _fetch_pexels(query, work, min_dur=12.0):
     key = os.environ.get("PEXELS_API_KEY")
     if not key:
         raise RuntimeError("PEXELS_API_KEY not set in promptly-secrets")
+    ua = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+          "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+    # id-pin: "id:12345" fetches that EXACT video (before/after pairs must hold
+    # the source constant — a fresh search may return a different clip).
+    if query.startswith("id:"):
+        vid = query[3:]
+        req = urllib.request.Request(f"https://api.pexels.com/videos/videos/{vid}",
+                                     headers={"Authorization": key, "User-Agent": ua})
+        with urllib.request.urlopen(req, timeout=30) as r:
+            v = json.loads(r.read().decode())
+        files = sorted([f for f in (v.get("video_files") or [])
+                        if (f.get("height") or 0) >= (f.get("width") or 0)],
+                       key=lambda f: abs((f.get("height") or 0) - 1280)) \
+            or sorted(v.get("video_files") or [],
+                      key=lambda f: abs((f.get("height") or 0) - 1280))
+        out = os.path.join(work, "pexels_raw.mp4")
+        dl = urllib.request.Request(files[0]["link"], headers={"User-Agent": ua})
+        with urllib.request.urlopen(dl, timeout=120) as resp, open(out, "wb") as fh:
+            fh.write(resp.read())
+        meta = {"pexels_id": v.get("id"), "duration": v.get("duration"),
+                "res": f"{files[0].get('width')}x{files[0].get('height')}", "pinned": True}
+        print(f"[hype-sample] pexels pinned id={vid} {meta['res']} {meta['duration']}s", flush=True)
+        return out, meta
     url = ("https://api.pexels.com/videos/search?query="
            + urllib.parse.quote(query) + "&orientation=portrait&per_page=15&size=medium")
     # Pexels sits behind Cloudflare, which 403s urllib's default bot UA — send a
@@ -190,6 +213,15 @@ def render_sample(spec: dict) -> dict:
         # 1. source: pexels visual + synthetic beat = the constructed durable clip
         stage = "pexels"
         raw, pmeta = _fetch_pexels(spec["pexels_query"], work)
+        # COST MEASUREMENT: loop a short clip up to loop_to_s to build a long
+        # (e.g. ~290s) source so we can price a full 5-minute render.
+        if spec.get("loop_to_s"):
+            import subprocess as _sp
+            looped = os.path.join(work, "looped.mp4")
+            _sp.run(["ffmpeg", "-y", "-v", "warning", "-stream_loop", "-1", "-i", raw,
+                     "-t", str(float(spec["loop_to_s"])), "-c", "copy", looped],
+                    check=True, capture_output=True, text=True)
+            raw = looped
         vdur = min(_duration(raw), float(spec.get("max_src_s", 24.0)))
         stage = "synth_beat"
         beat = os.path.join(work, "beat.wav")
@@ -212,7 +244,8 @@ def render_sample(spec: dict) -> dict:
         if mode == "minimal":
             stage = "minimal_plan"
             import minimal_editor as me
-            plan = me.build_minimal_plan(dur, fps=FPS, motion_curve=None)
+            plan = me.build_minimal_plan(dur, fps=FPS, motion_curve=None,
+                                         target_clip_s=float(spec.get("target_clip_s", 2.5)))
         else:
             stage = "prompt"
             sys_i, user_c = he.build_hype_prompt(spec["vibe"], dur, beats)
@@ -249,10 +282,21 @@ def render_sample(spec: dict) -> dict:
         try:
             stage = "render"
             out = os.path.join(work, f"{name}_hype.mp4")
+            import time as _t
+            _t0 = _t.time()
             # render-full.mjs resolves source BASENAMES against the bundle's public
             # dir (/remotion/bundle/public) — stage there, exactly as production does.
             manifest = hr.render_hype(ri, canon, out, work,
                                       public_dir="/remotion/bundle/public", remotion=True)
+            _render_wall = _t.time() - _t0
+            # COST: the worker is CPU-only (cpu=8 here). Modal bills per physical
+            # core-second (~$0.0000131/core-s at the CPU tier). Report cpu-seconds
+            # so the exact bill follows from whatever rate is current.
+            _cpu = 8.0
+            summary["render_wall_s"] = round(_render_wall, 1)
+            summary["render_cpu_seconds"] = round(_render_wall * _cpu, 1)
+            summary["est_cost_usd_at_1_31e-5"] = round(_render_wall * _cpu * 1.31e-5, 4)
+            summary["render_wall_per_out_s"] = round(_render_wall / max(out_dur, 0.1), 2)
             stage = "upload"
             ts = spec.get("ts", "0")
             summary["url"] = _upload(out, f"hype-samples/{name}_{ts}.mp4")
@@ -274,8 +318,38 @@ def render_sample(spec: dict) -> dict:
 
 @app.local_entrypoint()
 def main():
-    import json, time
+    import json, time, os as _os
     ts = str(int(time.time()))
+    if _os.environ.get("HYPE_V2"):
+        # TASTE READ #1 re-render: SAME car/gym sources (id-pinned), tuned
+        # transition doctrine + groove-continuous transition audio. Before/after
+        # pairs go to the Review Queue as 09/10.
+        specs = [
+            {"name": "car_v2", "ts": ts, "bpm": 128, "max_src_s": 22.0,
+             "pexels_query": "id:5638366",
+             "vibe": "high-energy car edit synced to the beat, punchy cuts on the drop"},
+            {"name": "gym_v2", "ts": ts, "bpm": 140, "max_src_s": 22.0,
+             "pexels_query": "id:20559800",
+             "vibe": "gym hype montage, hard cuts and speed into the lift"},
+        ]
+        results = list(render_sample.map(specs))
+        print("\n================ HYPE V2 RESULTS ================")
+        for r in results:
+            print(json.dumps(r, indent=2, default=str))
+        print("=================================================")
+        return
+    if _os.environ.get("HYPE_COST"):
+        # 5-min cost measurement: loop a clip to ~290s, minimal even-cut plan (a
+        # representative clip count), render through the real bridge, time it.
+        specs = [{"name": "cost_290", "ts": ts, "bpm": 120, "mode": "minimal",
+                  "loop_to_s": 290.0, "max_src_s": 290.0, "target_clip_s": 2.0,
+                  "pexels_query": "city street timelapse", "vibe": "cost probe"}]
+        results = list(render_sample.map(specs))
+        print("\n================ 5-MIN RENDER COST ================")
+        for r in results:
+            print(json.dumps(r, indent=2, default=str))
+        print("===================================================")
+        return
     specs = [
         {"name": "car_action", "ts": ts, "bpm": 128, "max_src_s": 22.0,
          "pexels_query": "sports car driving fast",

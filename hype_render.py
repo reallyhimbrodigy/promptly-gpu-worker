@@ -127,9 +127,25 @@ def build_hype_audio(source_canonical: str, clips: list, transitions: list,
             chain += "," + tempo
         parts.append(f"[0:a]{chain},{_afmt}[a{idx}]")
         labels.append(f"[a{idx}]"); idx += 1
-        if i in trans_after:                       # match the additive transition frames
+        if i in trans_after:
+            # TRANSITION AUDIO = clip A's source audio CONTINUING through the
+            # window — never silence. The taste-read diagnosis (2026-07-25)
+            # measured that an inserted 267ms silence is not a beat multiple
+            # (0.57-0.62 beat at 128-140bpm), so every transition broke the
+            # groove's phase by construction — Zac heard it as "random". The
+            # music keeps playing under the visual transition (A has source
+            # material past its out-point by construction on a music clip);
+            # total length still matches the video timeline exactly.
             tdur_s = trans_after[i] / fps
-            parts.append(f"anullsrc=r={SR}:cl=stereo:d={tdur_s:.5f},{_afmt}[a{idx}]")
+            _t0 = s1
+            _t1 = s1 + tdur_s * rate      # source-time span covering the window
+            # apad + output-side atrim force the EXACT window length even if A
+            # ends at the source tail (pad the remainder with silence — never
+            # drift A/V).
+            parts.append(
+                f"[0:a]atrim=start={_t0:.5f}:end={_t1:.5f},asetpts=PTS-STARTPTS"
+                + ("," + tempo if tempo else "")
+                + f",{_afmt},apad,atrim=end={tdur_s:.5f}[a{idx}]")
             labels.append(f"[a{idx}]"); idx += 1
     fc = ";".join(parts) + ";" + "".join(labels) + f"concat=n={idx}:v=0:a=1[aout]"
     _run(["ffmpeg", "-y", "-v", "warning", "-i", source_canonical,
