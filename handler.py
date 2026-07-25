@@ -27739,7 +27739,8 @@ def handler(job):
 
                     if _now >= _main_poll_deadline:
                         raise RuntimeError(
-                            f"UPLOAD_STALLED: Source video did not arrive on S3 within 300s "
+                            f"UPLOAD_STALLED: Source video did not arrive on S3 within "
+                            f"{int(_main_poll_deadline - _main_poll_start)}s "
                             f"(bucket={_dl_bucket!r} key={_dl_key!r} last HEAD error={_code}). "
                             f"A multipart upload was in progress but never completed. "
                             f"Likely cause: iOS upload was cancelled, the network dropped, "
