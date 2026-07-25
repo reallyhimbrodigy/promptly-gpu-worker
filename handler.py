@@ -23662,12 +23662,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # Decide chunk count based on total frames. Below 300 frames the
     # per-process startup tax (~3.5s) dominates — single process is faster.
-    # A-L3 (Zac GO 2026-07-25): chunk count env-tunable, default 8 to pair with
-    # the cpu=128 host (8 chunks × 8 tabs = 64 tabs across 128 vCPUs — the same
-    # tabs-to-cores ratio the 4×8-on-64 layout had). Rollback = env 4 (no deploy).
+    # A-L3 REVISED (2026-07-25): Modal caps per-function CPU at 64 — the
+    # achievable form is 8 chunks × 4 tabs on the same 64 vCPUs (32 total tabs,
+    # unchanged load, but 2× the PROCESSES against Remotion's per-instance
+    # ~16-22fps ceiling, issue #4664). Chunk count env-tunable; rollback =
+    # PROMPTLY_RENDER_CHUNKS=4 (concurrency auto-rebalances, no deploy).
     _RENDER_CHUNKS = max(1, int(os.environ.get("PROMPTLY_RENDER_CHUNKS", "") or 8))
     _OVERLAY_CHUNK_COUNT = _RENDER_CHUNKS if total_output_frames >= 300 else 1
-    _PER_CHUNK_CONCURRENCY = 8
+    _PER_CHUNK_CONCURRENCY = max(2, 32 // max(_OVERLAY_CHUNK_COUNT, 1)) \
+        if _OVERLAY_CHUNK_COUNT > 1 else 8
     _overlay_ranges = _split_frames(int(total_output_frames), _OVERLAY_CHUNK_COUNT)
     _overlay_chunked = len(_overlay_ranges) > 1
 

@@ -607,7 +607,7 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
     # 300s slack) or a healthy long render gets false-reaped mid-flight. Deploy the
     # reaper raise FIRST, this SECOND. Billing is per-active-second, so short jobs
     # (the common case) cost the same as before — the cap only bounds the tail.
-    timeout=3000, retries=2, cpu=128, memory=131072, region="us",  # A-L3 (Zac GO 2026-07-25): 64→128 vCPU; chunks 4→8 ride PROMPTLY_RENDER_CHUNKS. Modal bills vCPU-seconds — near-linear chunk scaling ≈ cost-neutral; before/after via stage_timings.render
+    timeout=3000, retries=2, cpu=64, memory=131072, region="us",  # A-L3 REVISED (2026-07-25): Modal caps per-function CPU at 64 (128 bounced the deploy: "Must be between 0.125 and 64") — 64 IS the platform max. The achievable A-L3 = 8 chunks × 4 tabs (same 32 total tabs, 2× process parallelism vs Remotion's per-instance fps ceiling, issue #4664). Past-64 scaling = A-L4 cross-container fan-out.
     scaledown_window=180, volumes={"/prewarm": prewarm_volume},
     enable_memory_snapshot=True,
 )
@@ -670,7 +670,7 @@ def run_pipeline_bg(body: dict):
     # (_load_pyannote: .to("cuda") fails with no GPU -> runs on CPU). If CPU
     # diarization proves too slow for multi-speaker jobs, split pyannote into a
     # short-lived small-GPU function (so the long CPU render never holds a GPU).
-    cpu=128,              # A-L3 lockstep with run_pipeline_bg (sync-fallback path must match)
+    cpu=64,               # platform max (Modal caps per-function CPU at 64); lockstep with run_pipeline_bg
     memory=131072,        # 128GB — Remotion overlay + Remotion micro-segments run in parallel here, plus per-cut numpy audio resampler, plus the big single-pass ffmpeg composite
     region="us",  # COST (Zac 2026-07-12, Tier 1.1): broad "us" is the 1.5x
                   # multiplier tier; the old ["us-west","us-east"] narrow pin was
