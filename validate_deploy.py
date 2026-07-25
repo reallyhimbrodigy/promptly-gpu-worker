@@ -7585,6 +7585,163 @@ def _fanout_dark():
         "teardown must clear the prefix pointer (warm-container reuse)"
 
 
+print("\n[W3] Progressive delivery (DARK behind PROMPTLY_PROGRESSIVE)")
+
+
+@check("PROGRESSIVE Layer 0 (flag law): PROMPTLY_PROGRESSIVE default OFF — env unset/empty → previews dark; per-job cert override input_data.progressive_test (the zero_reject_test pattern, inert for real traffic); module global _PROGRESSIVE_PUB defaults None and EVERY render hook is `is not None`-guarded, so flag OFF touches zero lines of render behavior")
+def _progressive_flag_law():
+    import handler
+    _h = open("handler.py").read()
+    assert callable(getattr(handler, "_progressive_enabled", None)), \
+        "_progressive_enabled helper must exist"
+    _saved = os.environ.pop("PROMPTLY_PROGRESSIVE", None)
+    try:
+        assert handler._progressive_enabled(None) is False, "default must be OFF"
+        assert handler._progressive_enabled({}) is False, "default must be OFF"
+        assert handler._progressive_enabled({"progressive_test": True}) is True, \
+            "per-job cert override must work with the env unset"
+        os.environ["PROMPTLY_PROGRESSIVE"] = "1"
+        assert handler._progressive_enabled({}) is True, "env=1 must enable"
+        os.environ["PROMPTLY_PROGRESSIVE"] = "0"
+        assert handler._progressive_enabled({}) is False, "env=0 must disable"
+    finally:
+        os.environ.pop("PROMPTLY_PROGRESSIVE", None)
+        if _saved is not None:
+            os.environ["PROMPTLY_PROGRESSIVE"] = _saved
+    assert handler._PROGRESSIVE_PUB is None, \
+        "module global must default None (flag OFF = byte-identical pipeline)"
+    # Every render hook is guarded — nothing runs when the global is None.
+    assert _h.count("_PROGRESSIVE_PUB is not None") >= 4, \
+        "all four hooks (begin_attempt/chunk_ready/audio_ready/finalize) must be None-guarded"
+    # The wiring block itself is gated on the flag helper.
+    assert "if _progressive_enabled(input_data):" in _h, \
+        "publisher instantiation must sit behind the flag check"
+    assert 'input_data.get("progressive_test")' in _h, \
+        "per-job cert override (progressive_test) must be read"
+
+
+@check("PROGRESSIVE Layer 1 (prefix law): previews publish to {base_key}-preview-hls/ — a DIFFERENT prefix from the final -hls/ ladder, derived in the constructor, so a PARTIAL manifest can never be served at (or collide with) the final URL; the module source can never emit the final '-hls' prefix")
+def _progressive_prefix_distinct():
+    _p = open("progressive_publish.py").read()
+    assert '-preview-hls' in _p, "preview prefix constant missing"
+    # The module must be structurally unable to write the final prefix: after
+    # removing every '-preview-hls' occurrence, any remaining '-hls' must be
+    # an ffmpeg muxer flag ('-hls_time', '-hls_segment_type', ...), never a
+    # prefix/URL form ('-hls"', '-hls/', "{base_key}-hls").
+    for _m in re.finditer(r"-hls(.)", _p.replace("-preview-hls", "")):
+        assert _m.group(1) == "_", \
+            "progressive_publish must never construct the final -hls prefix"
+    from progressive_publish import ProgressivePublisher
+    _pub = ProgressivePublisher(
+        "/tmp", "https://b.s3.us-west-1.amazonaws.com/renders/x.mp4",
+        "https://cdn.example.net/renders/x.mp4", 60.0, "/tmp/none.wav",
+        s3_client=object(), parse_s3_url=lambda _u: ("b", "renders/x.mp4"))
+    assert _pub._preview_prefix == "renders/x-preview-hls"
+    assert _pub._preview_prefix != "renders/x-hls", "partial must never equal final"
+    assert _pub.preview_hls_url.endswith("-preview-hls/master.m3u8")
+
+
+@check("PROGRESSIVE Layer 2 (partial ≠ final): the media playlist is a LIVE EVENT playlist — #EXT-X-ENDLIST appears at EXACTLY ONE write site, gated on final=True (written only after the LAST chunk + the real mux), so a partial manifest is never servable as a final state; playback is startable at segment 1 (EVENT type, MEDIA-SEQUENCE 0)")
+def _progressive_no_endlist_until_final():
+    from progressive_publish import _render_media_playlist
+    _partial = _render_media_playlist([[("seg_00_000.ts", 4.0)]], final=False)
+    assert "#EXT-X-ENDLIST" not in _partial, "partial playlist carried ENDLIST"
+    assert "#EXT-X-PLAYLIST-TYPE:EVENT" in _partial, \
+        "preview must be an EVENT playlist (startable at segment 1, append-only)"
+    assert "#EXT-X-MEDIA-SEQUENCE:0" in _partial
+    _final = _render_media_playlist(
+        [[("seg_00_000.ts", 4.0)], [("seg_01_000.ts", 3.5)]], final=True)
+    assert _final.rstrip().endswith("#EXT-X-ENDLIST"), \
+        "final playlist must end with ENDLIST after the LAST segment"
+    assert _final.count("#EXT-X-DISCONTINUITY") == 1, \
+        "independently encoded chunks must be discontinuity-marked"
+    _p = open("progressive_publish.py").read()
+    assert _p.count('"#EXT-X-ENDLIST"') == 1, \
+        "ENDLIST must have exactly ONE write site in the module"
+    _tail = _p[:_p.index('"#EXT-X-ENDLIST"')]
+    assert _tail.rstrip().endswith("if final:\n        lines.append("), \
+        "the single ENDLIST write must be gated on final=True"
+
+
+@check("PROGRESSIVE Layer 3 (loud fallback law): ANY publishing error → loud print + _record_divergence(component='render', action='progressive_publish_fallback') + publishing DISABLED for the job; the event API (begin_attempt/chunk_ready/audio_ready/finalize) NEVER raises into the render — behaviorally verified with a poisoned chunk path")
+def _progressive_loud_fallback():
+    import time as _t
+    from progressive_publish import ProgressivePublisher
+    _records = []
+    _pub = ProgressivePublisher(
+        "/tmp", "u", "https://cdn/x.mp4", 30.0, "/tmp/missing_audio.wav",
+        s3_client=object(), parse_s3_url=lambda _u: ("b", "k.mp4"),
+        divergence_cb=lambda _c, _o, _a, **_k: _records.append((_c, _a, _k)))
+    _pub.begin_attempt(n_chunks=2, fps=30.0)
+    _pub.audio_ready()
+    _pub.chunk_ready(0, "/nonexistent/progressive_gate_chunk.mov", 0, 60)
+    _t0 = _t.time()
+    while not _pub.disabled and _t.time() - _t0 < 10:
+        _t.sleep(0.05)
+    assert _pub.disabled, "poisoned chunk must trip the fallback"
+    assert _records, "fallback must record a divergence"
+    assert _records[0][0] == "render" and _records[0][1] == "progressive_publish_fallback", \
+        f"divergence must be (render, progressive_publish_fallback): {_records[0]}"
+    # Post-fallback the event API is a silent no-op and still never raises.
+    _pub.chunk_ready(1, "/also_missing.mov", 60, 120)
+    _pub.finalize()
+    assert not _pub.finalized, "a tripped publisher must never finalize (no ENDLIST)"
+    # The handler wiring records its own setup-failure divergence too.
+    _h = open("handler.py").read()
+    assert _h.count('"progressive_publish_fallback"') >= 1, \
+        "handler setup-failure path must record the same divergence action"
+
+
+@check("PROGRESSIVE Layer 4 (Phase-B persist law): _persist_preview imitates _persist_step_token EXACTLY — daemon thread, fail-open, terminal-fenced (never relabels failed/canceled/completed), kill switch PROMPTLY_PREVIEW_PERSIST default ON, and writes the NARRATIVE `preview` jsonb column ONLY (never status/progress/result; PostgREST no-ops until the frontend migration adds the column)")
+def _progressive_persist_law():
+    import handler
+    _h = open("handler.py").read()
+    assert callable(getattr(handler, "_persist_preview", None))
+    _i = _h.index("def _persist_preview")
+    _blk = _h[_i:_h.index("\ndef ", _i + 10)]
+    assert '{"preview": payload}' in _blk, \
+        "must write the single narrative `preview` jsonb column"
+    assert '"status", ("failed", "canceled", "completed")' in _blk, \
+        "terminal fence required (never write a closed row)"
+    assert "daemon=True" in _blk, "must write from a daemon thread"
+    assert "PROMPTLY_PREVIEW_PERSIST" in _blk, "kill switch required"
+    assert "fail open" in _blk, "must be fail-open"
+    for _forbidden in ('"status":', '"progress":', '"result":', '"current_step"'):
+        assert _forbidden not in _blk, \
+            f"_persist_preview must never write {_forbidden} — narrative column only"
+
+
+@check("PROGRESSIVE Layer 5 (wiring + audio-ordering law): the four hooks sit at the exact seams — begin_attempt at composite-chunk planning (announces n_chunks+fps; a SECOND attempt after published chunks abandons the preview, never mixes attempts), chunk_ready inside _composite_chain after ffmpeg success, audio_ready AFTER the final-audio build (chains dispatch BEFORE the audio exists, so the publisher HOLDS every publish until this signal — no boundary ships without its exact audio slice), finalize after the real concat+mux; the ladder's finally clears _PROGRESSIVE_PUB (warm-container hygiene)")
+def _progressive_wiring_seams():
+    _h = open("handler.py").read()
+    assert "_PROGRESSIVE_PUB.begin_attempt(" in _h
+    assert "_PROGRESSIVE_PUB.chunk_ready(" in _h
+    assert "_PROGRESSIVE_PUB.audio_ready()" in _h
+    assert "_PROGRESSIVE_PUB.finalize()" in _h
+    # chunk_ready fires only after the composite chunk's ffmpeg SUCCEEDED.
+    _chain = _h[_h.index("def _composite_chain(K):"):]
+    _chain = _chain[:_chain.index("_composite_chain_futures = [")]
+    assert "chunk_ready(" in _chain, \
+        "chunk_ready must hook the pipelined composite chain"
+    assert _chain.index("ffmpeg failed") < _chain.index("chunk_ready("), \
+        "chunk_ready must sit AFTER the ffmpeg returncode check"
+    # audio_ready fires only after final_audio.wav is fully built.
+    assert _h.index("Final audio built in") < _h.index("_PROGRESSIVE_PUB.audio_ready()"), \
+        "audio_ready must fire after the audio build completes"
+    # finalize fires at the real-mux completion seam.
+    assert _h.index("_mux_elapsed = time.time() - _mux_t0") < _h.index("_PROGRESSIVE_PUB.finalize()"), \
+        "finalize must fire after the final concat+mux"
+    # The render section's finally detaches the publisher.
+    _lad = _h[_h.index("global _PROGRESSIVE_PUB"):]
+    _lad = _lad[:_lad.index("edit_plan[\"_deepgram_words\"]")]
+    assert "_render_hb_stop.set()" in _lad and _lad.rstrip().endswith("_PROGRESSIVE_PUB = None"), \
+        "the ladder finally must clear _PROGRESSIVE_PUB (warm-container hygiene)"
+    # The publisher HOLDS until audio_ready (audio-ordering finding).
+    _p = open("progressive_publish.py").read()
+    assert "_audio_evt.wait" in _p, \
+        "publisher must wait on the audio_ready signal before slicing audio"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
