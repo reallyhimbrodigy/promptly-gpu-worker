@@ -7355,6 +7355,111 @@ def _gate_behavior():
     assert len(_m3["black"]) == 1, "ShutterFlash must mask black (false-trip class otherwise)"
 
 
+@check("A-L4 RENDER FAN-OUT (DARK): flag default OFF (local path byte-identical); per-chunk remote error falls back to the UNCHANGED local subprocess + fanout_fallback ledger; render_chunk_fanout exists in modal_app (cpu=16/mem=32768/timeout=1200, secrets exclude gemini); S3 round-trip helpers (upload-once prepare + download-to-exact-local-path); teardown deletes the fanout/ prefix best-effort")
+def _fanout_dark():
+    import os as _os
+    import handler
+    _h_src = open("handler.py").read()
+    _m_src = open("modal_app.py").read()
+
+    # 1. Flag default OFF — behavioral, env save/restore.
+    _saved = _os.environ.pop("PROMPTLY_RENDER_FANOUT", None)
+    try:
+        assert handler._render_fanout_enabled() is False, \
+            "PROMPTLY_RENDER_FANOUT must default OFF"
+        _os.environ["PROMPTLY_RENDER_FANOUT"] = "1"
+        assert handler._render_fanout_enabled() is True
+        _os.environ["PROMPTLY_RENDER_FANOUT"] = "0"
+        assert handler._render_fanout_enabled() is False
+    finally:
+        if _saved is None:
+            _os.environ.pop("PROMPTLY_RENDER_FANOUT", None)
+        else:
+            _os.environ["PROMPTLY_RENDER_FANOUT"] = _saved
+
+    # 2. Flag-off dispatch is today's local-subprocess path, byte-identical:
+    # both else-branch submit lines survive verbatim, and the fan-out branch
+    # is gated on the flag helper.
+    assert "_render_pool.submit(_run_remotion, _lbl, _cmd, _to)" in _h_src, \
+        "local overlay chunk dispatch (flag-off path) must survive unchanged"
+    assert "(_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd))" in _h_src, \
+        "local micro chunk dispatch (flag-off path) must survive unchanged"
+    assert "if _render_fanout_enabled() and (_overlay_chunked or _micro_chunked):" in _h_src, \
+        "the fan-out prepare must be gated on _render_fanout_enabled()"
+
+    # 3. Behavioral fallback: a remote failure runs the UNCHANGED local
+    # subprocess for that chunk AND ledgers component=render/action=
+    # fanout_fallback (never fails the job for the experiment).
+    class _BoomFn:
+        def spawn(self, *_a, **_k):
+            raise RuntimeError("boom")
+    _ctx = {"fn": _BoomFn(), "bucket": "b", "prefix": "fanout/vd-test",
+            "manifest": [], "input_keys": {"overlay": "k"}}
+    _calls = []
+    def _local(_label, _cmd, _timeout):
+        _calls.append((_label, _timeout))
+        return 1.23
+    _n_div = len(handler._DIVERGENCE_LOG)
+    _r = handler._fanout_render_chunks(
+        _ctx, "overlay", "overlay-00", ["node", "fake"], 300,
+        "/tmp/_vd_fanout_never_written.mov", 0, 99, 0, 8, _local)
+    assert _r == 1.23 and _calls == [("overlay-00", 300)], \
+        "remote failure must run the local fallback with the ORIGINAL cmd/timeout"
+    _new = handler._DIVERGENCE_LOG[_n_div:]
+    assert any(_d.get("component") == "render" and _d.get("action") == "fanout_fallback"
+               for _d in _new), "fallback must ledger fanout_fallback via _record_divergence"
+    del handler._DIVERGENCE_LOG[_n_div:]  # don't leak test entries
+
+    # 4. The remote function exists in modal_app with the pinned shape.
+    import ast as _ast
+    _tree = _ast.parse(_m_src)
+    _fn = next((_n for _n in _ast.walk(_tree)
+                if isinstance(_n, _ast.FunctionDef) and _n.name == "render_chunk_fanout"), None)
+    assert _fn is not None, "modal_app.py must define render_chunk_fanout"
+    assert _fn.decorator_list, "render_chunk_fanout must be an @app.function"
+    _dec_src = _ast.get_source_segment(_m_src, _fn.decorator_list[0]) or ""
+    assert "cpu=16" in _dec_src and "memory=32768" in _dec_src \
+        and "timeout=1200" in _dec_src, \
+        "render_chunk_fanout must pin cpu=16 / memory=32768 / timeout=1200"
+    assert "gemini" not in _dec_src, \
+        "render_chunk_fanout must NOT mount a gemini secret (no editorial model)"
+    assert "promptly-secrets" in _dec_src and "promptly-cloudfront" in _dec_src
+    _fn_src = _ast.get_source_segment(_m_src, _fn) or ""
+    assert "render-full.mjs" in _fn_src and "--composition-start" in _fn_src \
+        and "swangle" in _fn_src, \
+        "remote chunk render must run render-full.mjs exactly like _run_remotion"
+    assert "upload_file(out_local, bucket, output_key" in _fn_src, \
+        "remote chunk must upload its .mov to output_key"
+    _args = [_a.arg for _a in _fn.args.args]
+    assert _args == ["s3_prefix", "files_manifest", "render_kind",
+                     "input_json_key", "frame_start", "frame_end",
+                     "composition_start", "concurrency", "output_key"], \
+        f"render_chunk_fanout signature drifted: {_args}"
+
+    # 5. S3 round-trip helpers present: prepare uploads ONCE (public files +
+    # input JSONs), the chunk helper downloads to the exact local path, and
+    # the downloaded file is validated before use.
+    assert callable(getattr(handler, "_fanout_prepare", None))
+    assert callable(getattr(handler, "_fanout_render_chunks", None))
+    assert 'upload_file(str(_p), _bucket, f"{_prefix}/public/{_bn}"' in _h_src, \
+        "prepare must upload every staged public-dir file once"
+    assert 'input/overlay_input.json' in _h_src, \
+        "prepare must upload the overlay input JSON"
+    assert "download_file(ctx[\"bucket\"], _out_key, chunk_local_path" in _h_src, \
+        "chunk helper must download the remote chunk to the exact local path"
+    assert "os.path.getsize(chunk_local_path) < 1000" in _h_src, \
+        "downloaded chunk must be validated before the composite reads it"
+
+    # 6. Teardown cleanup: the handler() finally block deletes the fanout/
+    # prefix best-effort (and never carries it across warm-container jobs).
+    assert "_FANOUT_S3_PREFIX_LAST" in _h_src
+    _td = _h_src[_h_src.index("A-L4 fan-out teardown"):]
+    assert "delete_objects" in _td[:2000] and "list_objects_v2" in _td[:2000], \
+        "teardown must list+delete the job's fanout prefix"
+    assert '_FANOUT_S3_PREFIX_LAST["prefix"] = None' in _td[:2000], \
+        "teardown must clear the prefix pointer (warm-container reuse)"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

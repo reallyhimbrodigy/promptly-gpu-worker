@@ -20758,6 +20758,162 @@ def _apply_caption_text_overrides(projected_words, overrides):
     return _out
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# A-L4 RENDER FAN-OUT (DARK behind PROMPTLY_RENDER_FANOUT, default OFF)
+# ═══════════════════════════════════════════════════════════════════════════
+# Past-64-vCPU scaling: Modal caps a single function at 64 vCPUs (the A-L3
+# deploy bounce), so the only way to widen the render past one container is to
+# run the Remotion CHUNK renders (overlay + micro — the heavy leg SA-0
+# measured) on SEPARATE containers. The fan-out replaces ONLY the "run the N
+# chunk subprocesses" step: inputs are uploaded ONCE to S3, each chunk renders
+# remotely via the DEPLOYED `render_chunk_fanout` function (modal_app.py) and
+# its lossless ProRes .mov is pulled back to the EXACT local path the local
+# subprocess would have written. Everything upstream/downstream (FFmpeg
+# composite, audio, concat/mux, the single lossy encode) is untouched —
+# render-full.mjs is deterministic for a given (input, frame range), so the
+# chunks are pixel-equivalent (cert_fanout_app.py proves it).
+#
+# DEPLOYED-APP ONLY: modal.Function.from_name resolves against the deployed
+# "promptly-gpu-worker" app — the fan-out is inert in `modal run` cert
+# contexts unless the cert itself calls the deployed function. The flag stays
+# OFF there (and everywhere) by default.
+#
+# FALLBACK SEMANTICS (never fail a job because the experiment misfired):
+#   - prepare failure (S3 upload / function lookup) → the WHOLE render falls
+#     back to today's local-subprocess path, ledgered fanout_fallback.
+#   - per-chunk failure (spawn / remote error / download) → THAT chunk falls
+#     back to its unchanged local subprocess command, ledgered — the leg
+#     completes with mixed provenance (pixel-equivalent either way).
+#
+# S3 LAYOUT (bucket = S3_BUCKET_NAME, prefix cleaned in the job's teardown):
+#   fanout/{stage_key}/public/{basename}       every file the job staged into
+#                                              /remotion/bundle/public
+#   fanout/{stage_key}/input/overlay_input.json
+#   fanout/{stage_key}/input/micro_input.json  (only when the micro leg fans)
+#   fanout/{stage_key}/chunks/{label}.mov      remote chunk outputs
+
+# Teardown pointer (same pattern as _VIDEO_REF_UPLOADED_LAST): the handler()
+# finally block deletes this prefix best-effort. Flag OFF → never set → no-op.
+_FANOUT_S3_PREFIX_LAST = {"prefix": None}
+# Remote budget: spawn + queue + container start + input download + render +
+# upload, bounded so the local fallback still fits the job budget.
+_FANOUT_REMOTE_GET_TIMEOUT_S = 600
+# Widening applied to every downstream future-wait while the fan-out is live
+# (remote attempt + S3 transfers + margin BEFORE the local fallback's own
+# timeout even starts). Flag OFF → the widening is 0 → waits are numerically
+# identical to today.
+_FANOUT_WAIT_EXTRA_S = 720
+
+
+def _render_fanout_enabled():
+    """A-L4 cross-container chunk-render flag. DARK by default;
+    PROMPTLY_RENDER_FANOUT=1 (Modal secret/env) turns it on. Default OFF →
+    the local-subprocess chunk path runs byte-identical."""
+    return os.environ.get("PROMPTLY_RENDER_FANOUT", "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+
+
+def _fanout_s3_bucket():
+    return (os.environ.get("S3_BUCKET_NAME")
+            or os.environ.get("SUPABASE_S3_BUCKET") or "promptly-video-storage")
+
+
+def _fanout_prepare(stage_key, staged_public_paths, overlay_input_path,
+                    micro_input_path=None):
+    """Upload the fan-out inputs ONCE: every staged public-dir file (source +
+    B-roll + gen-scene assets + zoom pre-extracts — exactly what
+    _staged_for_cleanup tracked) plus the render input JSON(s). Returns the
+    fan-out context consumed by _fanout_render_chunks. Raises on ANY failure —
+    the caller ledgers fanout_fallback and runs today's local path."""
+    import modal as _modal  # lazy: only the flag-ON path needs the client
+    if _aws_s3_client is None:
+        raise RuntimeError("AWS S3 client unavailable (fan-out needs the S3 round-trip)")
+    _t0 = time.time()
+    # Resolve the DEPLOYED function FIRST (cheap): if the deployed app
+    # predates render_chunk_fanout this raises HERE and the whole render
+    # falls back local before a single byte is uploaded.
+    _fn = _modal.Function.from_name("promptly-gpu-worker", "render_chunk_fanout")
+    try:
+        _fn.hydrate()
+    except AttributeError:
+        pass  # older modal clients hydrate lazily at .spawn(); errors surface there
+    _bucket = _fanout_s3_bucket()
+    _prefix = f"fanout/{stage_key}"
+    _manifest = []
+    _seen = set()
+    for _p in (staged_public_paths or []):
+        _bn = os.path.basename(str(_p))
+        if not _bn or _bn in _seen or not os.path.exists(str(_p)):
+            continue
+        _seen.add(_bn)
+        _aws_s3_client.upload_file(str(_p), _bucket, f"{_prefix}/public/{_bn}",
+                                   Config=_S3_TRANSFER_CONFIG)
+        _manifest.append(_bn)
+    _input_keys = {}
+    _ov_key = f"{_prefix}/input/overlay_input.json"
+    _aws_s3_client.upload_file(overlay_input_path, _bucket, _ov_key)
+    _input_keys["overlay"] = _ov_key
+    if micro_input_path and os.path.exists(micro_input_path):
+        _mi_key = f"{_prefix}/input/micro_input.json"
+        _aws_s3_client.upload_file(micro_input_path, _bucket, _mi_key)
+        _input_keys["micro"] = _mi_key
+    _FANOUT_S3_PREFIX_LAST["prefix"] = _prefix
+    print(f"[fanout] prepared s3://{_bucket}/{_prefix} in {time.time() - _t0:.1f}s "
+          f"({len(_manifest)} public file(s) + {len(_input_keys)} input JSON(s))",
+          flush=True)
+    return {"fn": _fn, "bucket": _bucket, "prefix": _prefix,
+            "manifest": _manifest, "input_keys": _input_keys}
+
+
+def _fanout_render_chunks(ctx, render_kind, label, cmd, timeout,
+                          chunk_local_path, frame_start, frame_end,
+                          composition_start, concurrency, run_local_fn):
+    """Render ONE Remotion chunk on a separate Modal container (the deployed
+    render_chunk_fanout function) and download the resulting lossless ProRes
+    .mov to the EXACT local path the local subprocess would have written —
+    downstream (composite chains, concat, mux) reads the same file either way.
+
+    On ANY error (spawn, remote render, download, invalid file): loud log +
+    _record_divergence(component="render", action="fanout_fallback") + run the
+    UNCHANGED local subprocess command for this chunk via `run_local_fn`
+    (the _run_remotion closure). Returns elapsed seconds (matching
+    _run_remotion's contract) so every downstream print/timing is unchanged."""
+    try:
+        _t0 = time.time()
+        _out_key = f"{ctx['prefix']}/chunks/{label}.mov"
+        _call = ctx["fn"].spawn(
+            ctx["prefix"], list(ctx["manifest"]), render_kind,
+            ctx["input_keys"][render_kind], int(frame_start), int(frame_end),
+            int(composition_start), int(concurrency), _out_key,
+        )
+        _res = _call.get(timeout=_FANOUT_REMOTE_GET_TIMEOUT_S)
+        if not (isinstance(_res, dict) and _res.get("ok")):
+            _err = _res.get("error") if isinstance(_res, dict) else _res
+            raise RuntimeError(f"remote chunk returned error: {str(_err)[:1500]}")
+        _aws_s3_client.download_file(ctx["bucket"], _out_key, chunk_local_path,
+                                     Config=_S3_TRANSFER_CONFIG)
+        if (not os.path.exists(chunk_local_path)
+                or os.path.getsize(chunk_local_path) < 1000):
+            raise RuntimeError(f"downloaded chunk missing/invalid: {chunk_local_path}")
+        _elapsed = time.time() - _t0
+        print(f"[fanout] {label} rendered remotely in {_elapsed:.1f}s "
+              f"(remote {_res.get('seconds')}s) → "
+              f"{os.path.getsize(chunk_local_path)/1024/1024:.1f}MB", flush=True)
+        return _elapsed
+    except Exception as _fo_err:
+        print(f"[fanout] ERROR on {label} ({type(_fo_err).__name__}: {_fo_err}) — "
+              f"FALLING BACK to the local subprocess for this chunk", flush=True)
+        _record_divergence(
+            "render",
+            {"chunk": label, "kind": render_kind,
+             "frames": f"{frame_start}-{frame_end}"},
+            "fanout_fallback",
+            reason=f"fanout_{type(_fo_err).__name__}",
+        )
+        return run_local_fn(label, cmd, timeout)
+
+
 def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, work_dir, speech_segments=None,
                       broll_clips=None):
     """
@@ -23772,6 +23928,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     micro_cmds: list = []
     micro_chunk_paths: list = []
     _micro_chunked = False
+    _micro_ranges: list = []  # rebound below; read by the A-L4 fan-out dispatch
     _MICRO_CONCURRENCY = _PER_CHUNK_CONCURRENCY  # re-bound below when chunked
     if micro_input is not None:
         _MICRO_CHUNK_THRESHOLD = 200
@@ -24020,6 +24177,52 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             ]
         return cmd
 
+    # ── A-L4 RENDER FAN-OUT branch (DARK behind PROMPTLY_RENDER_FANOUT) ───
+    # See the module-level block above _render_fanout_enabled for the full
+    # design. Flag ON + a chunked leg: upload the render inputs ONCE, then
+    # each chunk renders on its OWN Modal container (deployed
+    # render_chunk_fanout) and the chunk .mov lands at the EXACT local path
+    # the local subprocess would have written — the pipelined composite
+    # chains, concat, and mux downstream are untouched. Prepare failure →
+    # whole render falls back local (ledgered). Per-chunk failure → that
+    # chunk falls back to its unchanged local subprocess (ledgered). Flag
+    # OFF (default): _fanout_ctx stays None and the dispatch below is
+    # today's local-subprocess path, byte-identical.
+    _fanout_ctx = None
+    _fanout_overlay_active = False
+    _fanout_micro_active = False
+    if _render_fanout_enabled() and (_overlay_chunked or _micro_chunked):
+        try:
+            _fanout_ctx = _fanout_prepare(
+                _stage_key, list(_staged_for_cleanup), overlay_input_path,
+                micro_input_path if _micro_chunked else None,
+            )
+            _fanout_overlay_active = _overlay_chunked
+            _fanout_micro_active = bool(
+                _micro_chunked and "micro" in _fanout_ctx["input_keys"])
+            print(f"[fanout] ACTIVE — overlay={_fanout_overlay_active} "
+                  f"micro={_fanout_micro_active} (chunk renders fan out to "
+                  f"separate containers; composite/audio/mux stay local)",
+                  flush=True)
+        except Exception as _fo_prep_err:
+            print(f"[fanout] PREPARE FAILED ({type(_fo_prep_err).__name__}: "
+                  f"{_fo_prep_err}) — falling back to the LOCAL subprocess "
+                  f"path for every chunk", flush=True)
+            _record_divergence(
+                "render", {"stage": "prepare"}, "fanout_fallback",
+                reason=f"fanout_prepare_{type(_fo_prep_err).__name__}")
+            _fanout_ctx = None
+            _fanout_overlay_active = False
+            _fanout_micro_active = False
+    # Wait widening ONLY while the fan-out is live: a remote chunk may spend
+    # up to _FANOUT_REMOTE_GET_TIMEOUT_S + S3 transfers before its local
+    # fallback even STARTS, so every downstream future-wait widens by this.
+    # Flag OFF → 0 → every wait below is numerically identical to today.
+    _fanout_wait_extra = (
+        _FANOUT_WAIT_EXTRA_S
+        if (_fanout_overlay_active or _fanout_micro_active) else 0
+    )
+
     # +1 worker reserved for _finalize_micros (waits on micros + runs the
     # tiny concat). Without it, finalize could occupy a render slot the
     # moment one render finishes and block on the slowest micro chunk,
@@ -24027,18 +24230,45 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _render_pool = concurrent.futures.ThreadPoolExecutor(
         max_workers=max(1, len(overlay_cmds) + len(micro_cmds) + 1),
     )
-    overlay_futures = [
-        _render_pool.submit(_run_remotion, _lbl, _cmd, _to)
-        for (_lbl, _cmd), _to in zip(overlay_cmds, _overlay_timeouts)
-    ]
+    if _fanout_ctx is not None and _fanout_overlay_active:
+        # Fan-out: one future per chunk (same shape as the local path — the
+        # pipelined composite chain K waits on overlay_futures[K] either way).
+        # The local cmd + timeout ride along as the per-chunk fallback.
+        overlay_futures = [
+            _render_pool.submit(
+                _fanout_render_chunks, _fanout_ctx, "overlay", _lbl, _cmd, _to,
+                _overlay_chunk_paths[_ci], _fs, _fe, _fs,
+                _PER_CHUNK_CONCURRENCY, _run_remotion,
+            )
+            for _ci, ((_lbl, _cmd), _to, (_fs, _fe)) in enumerate(
+                zip(overlay_cmds, _overlay_timeouts, _overlay_ranges))
+        ]
+    else:
+        overlay_futures = [
+            _render_pool.submit(_run_remotion, _lbl, _cmd, _to)
+            for (_lbl, _cmd), _to in zip(overlay_cmds, _overlay_timeouts)
+        ]
     # micro_futures: list of (label, future) tuples. For chunked path,
     # one future per chunk; chunks render in parallel and write to
     # micro_chunk_XX.mov. For single-process path, one future writes to
     # micro_video_path directly (matching the pre-chunking shape).
-    micro_futures = [
-        (_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd))
-        for _lbl, _cmd in micro_cmds
-    ]
+    if _fanout_ctx is not None and _fanout_micro_active:
+        # Fan-out mirrors the overlay branch; 300 = _run_remotion's default
+        # timeout, so the per-chunk fallback behaves exactly like today.
+        micro_futures = [
+            (_lbl, _render_pool.submit(
+                _fanout_render_chunks, _fanout_ctx, "micro", _lbl, _cmd, 300,
+                micro_chunk_paths[_ci], _fs, _fe, _fs,
+                _MICRO_CONCURRENCY, _run_remotion,
+            ))
+            for _ci, ((_lbl, _cmd), (_fs, _fe)) in enumerate(
+                zip(micro_cmds, _micro_ranges))
+        ]
+    else:
+        micro_futures = [
+            (_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd))
+            for _lbl, _cmd in micro_cmds
+        ]
 
     # _micro_finalize_future: single shared barrier that waits for all
     # micro renders to finish and, in the chunked path, concats them into
@@ -24053,7 +24283,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _t0 = time.time()
         _per_chunk: list = []
         for _mlbl, _mfut in micro_futures:
-            _per_chunk.append((_mlbl, _mfut.result(timeout=320)))
+            # +_fanout_wait_extra: 0 with the fan-out off (today's 320s).
+            _per_chunk.append((_mlbl, _mfut.result(timeout=320 + _fanout_wait_extra)))
         if _micro_chunked:
             for _p in micro_chunk_paths:
                 if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
@@ -24101,7 +24332,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         def _composite_chain(K):
             _t_chain = time.time()
             # Block on this chunk's overlay before starting composite.
-            overlay_futures[K].result(timeout=_overlay_timeouts[K] + 30)
+            # +_fanout_wait_extra: 0 with the fan-out off (today's +30s).
+            overlay_futures[K].result(
+                timeout=_overlay_timeouts[K] + 30 + _fanout_wait_extra)
             _ov_path = _overlay_chunk_paths[K]
             if not os.path.exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
                 raise RuntimeError(
@@ -24114,7 +24347,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # future already resolved (Future caches → concat runs exactly
             # once across all chains).
             if _micro_finalize_future is not None:
-                _micro_finalize_future.result(timeout=400)
+                _micro_finalize_future.result(timeout=400 + _fanout_wait_extra)
             _cs, _ce = _composite_ranges[K]
             _cmd = _build_composite_cmd(
                 K, _cs, _ce, _composite_chunk_paths[K],
@@ -24220,7 +24453,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # mode each chunk lands in its own .mov; we concat them in order below).
     _overlay_chunk_elapsed = []
     for _i, _f in enumerate(overlay_futures):
-        _e = _f.result(timeout=320)
+        # +_fanout_wait_extra: 0 with the fan-out off (today's 320s).
+        _e = _f.result(timeout=320 + _fanout_wait_extra)
         _overlay_chunk_elapsed.append(_e)
         _label = overlay_cmds[_i][0]
         _path = _overlay_chunk_paths[_i] if _overlay_chunked else overlay_video_path
@@ -24230,7 +24464,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             flush=True,
         )
     if _micro_finalize_future is not None:
-        _micro_total_elapsed, _micro_per_chunk = _micro_finalize_future.result(timeout=400)
+        _micro_total_elapsed, _micro_per_chunk = _micro_finalize_future.result(
+            timeout=400 + _fanout_wait_extra)
         if _micro_chunked:
             _micro_max = max(e for _, e in _micro_per_chunk)
             print(
@@ -24338,7 +24573,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _composite_chunk_elapsed = []
         for _ci, _f in enumerate(_composite_chain_futures):
             # 600s ≥ overlay max + composite max + safety margin.
-            _e = _f.result(timeout=600)
+            # +_fanout_wait_extra: 0 with the fan-out off (today's 600s).
+            _e = _f.result(timeout=600 + _fanout_wait_extra)
             _composite_chunk_elapsed.append(_e)
             _path = _composite_chunk_paths[_ci]
             print(
@@ -31286,6 +31522,31 @@ def handler(job):
             # object under sources/gemini-proxies/ — visible by prefix.
             print(f"[video-ref] teardown delete failed ({_vrd_err}) — one object "
                   f"leaked under sources/gemini-proxies/ (visible by prefix)", flush=True)
+        # A-L4 fan-out teardown: best-effort removal of this job's fanout S3
+        # prefix (staged inputs + remote chunk outputs). Never raises; a
+        # failed delete leaks objects only under fanout/<stage_key>/ (visible
+        # by prefix). Flag OFF → the prefix is never set → this is a no-op.
+        try:
+            _fo_prefix = _FANOUT_S3_PREFIX_LAST.get("prefix")
+            _FANOUT_S3_PREFIX_LAST["prefix"] = None  # never carry across jobs
+            if _fo_prefix:
+                _fo_s3 = globals().get("_aws_s3_client")
+                if _fo_s3 is not None:
+                    _fo_bucket = (os.environ.get("S3_BUCKET_NAME")
+                                  or os.environ.get("SUPABASE_S3_BUCKET")
+                                  or "promptly-video-storage")
+                    _fo_resp = _fo_s3.list_objects_v2(
+                        Bucket=_fo_bucket, Prefix=_fo_prefix + "/")
+                    _fo_objs = [{"Key": _o["Key"]}
+                                for _o in (_fo_resp.get("Contents") or [])]
+                    if _fo_objs:
+                        _fo_s3.delete_objects(
+                            Bucket=_fo_bucket, Delete={"Objects": _fo_objs})
+                    print(f"[fanout] teardown removed {len(_fo_objs)} object(s) "
+                          f"under {_fo_prefix}/", flush=True)
+        except Exception as _fo_td_err:
+            print(f"[fanout] teardown cleanup failed ({_fo_td_err}) — objects "
+                  f"remain under fanout/ (visible by prefix)", flush=True)
         # LEDGER flush: persist this job's divergences so the overrule spine is queryable.
         _flush_divergence_ledger(input_data.get("job_id"))
         # Clear the platform-shutdown job pointer — this job is done; a signal

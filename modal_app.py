@@ -645,6 +645,115 @@ def run_pipeline_bg(body: dict):
     return result
 
 
+# ── A-L4 RENDER FAN-OUT chunk worker (DARK behind PROMPTLY_RENDER_FANOUT) ──────
+# Past-64-vCPU scaling (the A-L3 ceiling: Modal caps a single function at 64
+# vCPUs). Renders ONE Remotion chunk — a (composition, frame range) slice of
+# PromptlyOverlay or PromptlyMicroSegments — on its OWN container: downloads the
+# job's staged public-dir files + render input JSON from S3
+# (fanout/{stage_key}/...), runs render-full.mjs EXACTLY like handler.py's
+# _run_remotion does (same args, same swangle rasterizer, same image → same
+# fonts/chrome → deterministic, pixel-equivalent output; cert_fanout_app.py
+# proves it), uploads the lossless ProRes .mov chunk back to S3, and returns a
+# small status dict. The orchestrator (handler._fanout_render_chunks) pulls the
+# chunk to the exact local path the local subprocess would have written; the
+# FFmpeg composite + audio + final mux stay on the orchestrator, so the
+# single-lossy-pass / render==delivery laws are untouched.
+#
+# DEPLOYED-APP ONLY: handler reaches this via
+# modal.Function.from_name("promptly-gpu-worker", "render_chunk_fanout") — the
+# supported call-a-function-from-inside-a-function path. An ephemeral
+# `modal run` context therefore exercises the fan-out only by calling the
+# DEPLOYED function (which is what the cert does); the flag stays OFF there.
+#
+# NEVER raises: every failure returns {ok: False, error} so the orchestrator's
+# per-chunk local fallback keys off a clean value instead of a RemoteError.
+# Secrets: promptly-secrets (AWS creds) + promptly-cloudfront — NO gemini
+# (this worker touches no editorial model).
+@app.function(
+    cpu=16, memory=32768, region="us", timeout=1200,
+    secrets=[
+        modal.Secret.from_name("promptly-secrets"),
+        modal.Secret.from_name("promptly-cloudfront"),
+    ],
+)
+def render_chunk_fanout(s3_prefix: str, files_manifest: list, render_kind: str,
+                        input_json_key: str, frame_start: int, frame_end: int,
+                        composition_start: int, concurrency: int,
+                        output_key: str) -> dict:
+    import os, time, subprocess, traceback
+    t0 = time.time()
+    out = {"ok": False, "output_key": output_key, "seconds": 0.0}
+    try:
+        import boto3
+        from boto3.s3.transfer import TransferConfig
+        bucket = os.environ.get("S3_BUCKET_NAME") or "promptly-video-storage"
+        region = os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION", "us-west-1")
+        s3 = boto3.client("s3", region_name=region)
+        tc = TransferConfig(multipart_threshold=8 * 1024 * 1024,
+                            multipart_chunksize=8 * 1024 * 1024,
+                            max_concurrency=32, use_threads=True)
+        # Stage every public-dir file the job staged (source + B-roll +
+        # gen-scene assets + zoom pre-extracts). Flat layout only — basenames,
+        # exactly what render input JSONs reference via staticFile().
+        public_dir = "/remotion/bundle/public"
+        os.makedirs(public_dir, exist_ok=True)
+        for name in (files_manifest or []):
+            base = os.path.basename(str(name))  # defensive: no path traversal
+            if not base:
+                continue
+            s3.download_file(bucket, f"{s3_prefix}/public/{base}",
+                             os.path.join(public_dir, base), Config=tc)
+        kind = str(render_kind or "").strip().lower()
+        if kind not in ("overlay", "micro"):
+            out["error"] = f"render_kind must be 'overlay' or 'micro', got {render_kind!r}"
+            return out
+        composition = "PromptlyOverlay" if kind == "overlay" else "PromptlyMicroSegments"
+        input_local = f"/tmp/{kind}_input.json"
+        s3.download_file(bucket, input_json_key, input_local, Config=tc)
+        out_local = f"/tmp/{kind}_chunk_{int(frame_start):06d}.mov"
+        # EXACTLY the argument shape handler's _run_remotion dispatches — the
+        # only difference is WHERE the process runs.
+        cmd = ["node", "/remotion/render-full.mjs",
+               "--input", input_local,
+               "--output", out_local,
+               "--public-dir", public_dir,
+               "--composition", composition,
+               "--gl", "swangle",
+               "--frame-range", f"{int(frame_start)},{int(frame_end)}",
+               "--composition-start", str(int(composition_start)),
+               "--concurrency", str(int(concurrency))]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1080)
+        if r.returncode != 0:
+            # Full stdout+stderr so the failure mode is debuggable from logs
+            # (same rationale as _run_remotion's full-dump policy).
+            print(f"[render_chunk_fanout] ─── FULL STDOUT ───\n{r.stdout or ''}", flush=True)
+            print(f"[render_chunk_fanout] ─── FULL STDERR ───\n{r.stderr or ''}", flush=True)
+            out["error"] = f"remotion rc={r.returncode}: {(r.stderr or '')[-2000:]}"
+            out["seconds"] = round(time.time() - t0, 2)
+            return out
+        if r.stdout:
+            for line in r.stdout.split("\n"):
+                ls = line.strip()
+                if ls.startswith("[render-full]") or ls.startswith("[gpu-info]"):
+                    print(f"[render_chunk_fanout {kind} {frame_start}-{frame_end}] {ls}",
+                          flush=True)
+        if not os.path.exists(out_local) or os.path.getsize(out_local) < 1000:
+            out["error"] = f"chunk output missing/invalid at {out_local}"
+            out["seconds"] = round(time.time() - t0, 2)
+            return out
+        s3.upload_file(out_local, bucket, output_key, Config=tc,
+                       ExtraArgs={"ContentType": "video/quicktime"})
+        out["ok"] = True
+        out["mb"] = round(os.path.getsize(out_local) / 1024.0 / 1024.0, 1)
+        out["seconds"] = round(time.time() - t0, 2)
+        return out
+    except Exception as e:
+        out["error"] = f"{type(e).__name__}: {e}"
+        out["traceback"] = traceback.format_exc()[-1500:]
+        out["seconds"] = round(time.time() - t0, 2)
+        return out
+
+
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
     timeout=3000,         # 50 min (raised 900->1800->3000; 3000 for 5-min support 2026-07-25) — matches run_pipeline_bg so the SYNC-fallback path (SPAWN_MODE=0) can also finish a 5-minute render. Under SPAWN_MODE=1 run_job returns in ms (it spawns run_pipeline_bg), so this cap binds only the sync fallback; kept in lockstep for correctness. Orchestrator runs init + audio + remotion + composite + upload; the Gemini client timeout is 480s (handler.py:_get_genai_client). Billing is per-active-second, so short jobs cost the same — the cap only bounds the tail. INVARIANT: content-studio reaper EXEC_WALL_MS must be >= this (>=3300s) at all times, raised FIRST.
