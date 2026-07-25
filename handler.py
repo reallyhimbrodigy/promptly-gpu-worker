@@ -23862,9 +23862,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _stdout_full = _r.stdout or ""
             print(f"[{label}] ─── FULL STDOUT ───\n{_stdout_full}", flush=True)
             print(f"[{label}] ─── FULL STDERR ───\n{_stderr_full}", flush=True)
+            # SIGNATURE-FIRST (W1-FIX-DEEP): the message must LEAD with the
+            # real fatal error, not whatever noise opens stderr. Remotion
+            # prints warnings (e.g. the cgroup "Detected differing memory
+            # amounts" block on Modal hosts) BEFORE the crash, and downstream
+            # truncation (degrade-ladder [:300], envelope sig [:200]) was
+            # keeping the warning and cutting the real error — job 7f09fe28
+            # was misfiled as a memory failure when the true cause was the
+            # browser-connect TimeoutError buried 450 chars in. Pull the LAST
+            # line-anchored *Error/Exception line (the thrown one) to the
+            # front; the stderr tail stays for context.
+            _err_lines = re.findall(
+                r"^[A-Za-z_.$]*(?:Error|Exception)\b.*", _stderr_full, re.M)
+            _salient = (_err_lines[-1].strip()[:400] + " ||| ") if _err_lines else ""
             raise RuntimeError(
                 f"[{label}] Remotion render failed (rc={_r.returncode}) in "
-                f"{_elapsed:.1f}s: {_stderr_full[-3000:]}"
+                f"{_elapsed:.1f}s: {_salient}{_stderr_full[-3000:]}"
             )
         # Surface render-fps lines for diagnostics.
         if _r.stdout:
@@ -24315,6 +24328,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _FANOUT_WAIT_EXTRA_S
         if (_fanout_overlay_active or _fanout_micro_active) else 0
     )
+
+    # Serial Chrome pre-warm, once per container — pays the cold-start
+    # materialization cost BEFORE the N-way parallel spawn storm (the
+    # RENDER_FATAL 7f09fe28 geometry). No-op on warm containers.
+    _prewarm_chrome_once()
 
     # +1 worker reserved for _finalize_micros (waits on micros + runs the
     # tiny concat). Without it, finalize could occupy a render slot the
@@ -25313,6 +25331,69 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
                 flush=True,
             )
 
+
+
+_CHROME_PREWARM = {"done": False}  # per-container: cold-start cost paid once
+
+
+def _prewarm_chrome_once(timeout_s=60.0):
+    """Serially launch chrome-headless-shell ONCE per container before the
+    N-way parallel Remotion spawns (W1-FIX-DEEP Class B). On a cold Modal
+    container the FIRST Chrome exec pays lazy image-FS materialization; the
+    observed failure geometry (job 7f09fe28 + the 2026-07-21 e2e capture) is
+    8 simultaneous FIRST-execs whose earliest stderr output appeared ~25s
+    after spawn — none reached the DevTools endpoint inside the browser-
+    connect deadline, every ladder rung died identically, RENDER_FATAL. The
+    same container class launches Chrome fine ~2 minutes later (stripped-rung
+    success in 127.6s), so one warm serial launch converts the cold 8-way
+    storm into 8 warm fast connects. NOT a retry mechanism: a single bounded
+    attempt, once per container, fail-OPEN with a loud log — the image-
+    patched 120s connect deadline (patch-remotion-env.mjs) is the render-path
+    backstop. Returns elapsed seconds, or None if skipped/failed."""
+    if _CHROME_PREWARM["done"]:
+        return None
+    _CHROME_PREWARM["done"] = True   # one attempt per container, ever
+    _bin = "/usr/local/bin/chrome-headless-shell"
+    if not os.path.exists(_bin):
+        print("[chrome-prewarm] binary missing — skipped", flush=True)
+        return None
+    _t0 = time.time()
+    _proc = None
+    _killer = None
+    try:
+        _proc = subprocess.Popen(
+            [_bin, "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+             "--remote-debugging-port=0",
+             "--user-data-dir=/tmp/chrome-prewarm", "about:blank"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        # Bounded: a silently-hung Chrome must never block the render — the
+        # watchdog kills it at the deadline, EOF ends the read loop.
+        _killer = threading.Timer(timeout_s, _proc.kill)
+        _killer.start()
+        _ready = False
+        for _line in _proc.stdout:
+            if "DevTools listening" in _line:
+                _ready = True
+                break
+        _e = time.time() - _t0
+        print(f"[chrome-prewarm] {'ready' if _ready else 'NO DevTools endpoint'} "
+              f"in {_e:.1f}s (fail-open; render proceeds either way)", flush=True)
+        return _e
+    except Exception as _cw_err:
+        print(f"[chrome-prewarm] failed ({type(_cw_err).__name__}: "
+              f"{str(_cw_err)[:120]}) — fail-open", flush=True)
+        return None
+    finally:
+        try:
+            if _killer is not None:
+                _killer.cancel()
+        except Exception:
+            pass
+        try:
+            if _proc is not None:
+                _proc.kill()
+        except Exception:
+            pass
 
 
 class RecipeInvalidError(ValueError):

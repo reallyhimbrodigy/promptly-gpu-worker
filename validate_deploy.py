@@ -4646,6 +4646,57 @@ def _gate_black_families():
     assert os.path.exists("cert_integrity_black_families.py")
 
 
+@check("W1-FIX-DEEP: RENDER_FATAL 'cgroup memory' class root-caused as the 25s browser-connect deadline (job 7f09fe28: memory lines were a WARNING; the buried killer was TimeoutError after 8-way cold Chrome spawns) — image patch (25s→120s + sentinel guard) + signature-first error capture + serial Chrome pre-warm, certs: cert_remotion_env_patch.py 12/12 local + cert_remotion_env_app.py live")
+def _render_fatal_env_class():
+    _h = open("handler.py").read()
+    # 1. the image-build patch script exists, carries all four patch shapes,
+    # and FAILS THE BUILD when the top-level renderer is not patched
+    assert os.path.exists("src/remotion/patch-remotion-env.mjs"), "patch script missing"
+    _p = open("src/remotion/patch-remotion-env.mjs").read()
+    assert '"timeout: 25000,"' in _p and "timeout: 120000," in _p, \
+        "browser-connect deadline patch (25000→120000) missing"
+    assert _p.count("timeout: 25000") >= 2, "both esm + cjs deadline patches required"
+    assert "1125899906842624" in _p, ">1PiB cgroup sentinel guard missing"
+    assert "getAvailableMemoryFromCgroup()" in _p \
+        and "from_docker_cgroup_1.getAvailableMemoryFromCgroup" in _p, \
+        "sentinel guard must patch BOTH the esm bundle and the cjs consumer"
+    assert "process.exit(1)" in _p and "top-level" in _p, \
+        "the patch must fail the IMAGE BUILD when the top-level renderer is unpatched"
+    # 2. wired into the image build as its own layer
+    _m = open("modal_app.py").read()
+    assert "node patch-remotion-env.mjs /remotion/node_modules" in _m, \
+        "modal_app.py must run the patch after npm install"
+    assert _m.index("npm install") < _m.index("node patch-remotion-env.mjs"), \
+        "patch must run AFTER npm install (which restores pristine files)"
+    # 3. signature-first error capture: the thrown *Error line leads the
+    # message so ladder [:300] / envelope truncation keeps the REAL cause
+    assert r're.findall(' in _h and r'(?:Error|Exception)\b' in _h, \
+        "salient-error extraction missing from _run_remotion"
+    assert "_salient}{_stderr_full[-3000:]}" in _h, \
+        "the salient line must LEAD the raised message, tail kept for context"
+    import re as _re
+    _sample = ("Detected differing memory amounts:\nMemory reported by CGroup: 8796093016236.07 MB\n"
+               "TimeoutError: Timed out after 25000 ms while trying to connect to the browser!\n"
+               "    at Timeout.onTimeout (...)\n")
+    _err = _re.findall(r"^[A-Za-z_.$]*(?:Error|Exception)\b.*", _sample, _re.M)
+    assert _err and _err[-1].startswith("TimeoutError"), \
+        "the extraction regex must pull the thrown TimeoutError, not the memory warning"
+    # 4. serial Chrome pre-warm: once per container, bounded, fail-open,
+    # placed BEFORE the parallel render-pool spawn
+    assert "def _prewarm_chrome_once(" in _h and '_CHROME_PREWARM = {"done": False}' in _h
+    _pw = _h[_h.index("def _prewarm_chrome_once("):]
+    _pw = _pw[:_pw.index("\nclass ")]
+    assert "threading.Timer" in _pw, "pre-warm must be watchdog-bounded (a hung Chrome must never block the render)"
+    assert "fail-open" in _pw, "pre-warm must be fail-open"
+    assert "raise" not in _pw, "pre-warm must NEVER raise into the render path"
+    assert _h.index("_prewarm_chrome_once()", _h.index("def render_multi_clip")) \
+        < _h.index("_render_pool = concurrent.futures.ThreadPoolExecutor"), \
+        "pre-warm must run before the parallel render pool spawns"
+    # 5. certs ride the repo
+    assert os.path.exists("cert_remotion_env_patch.py")
+    assert os.path.exists("cert_remotion_env_app.py")
+
+
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
 def _l1_no_audio_gate():
     import handler

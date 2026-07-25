@@ -420,6 +420,27 @@ image = (
         'cd /remotion && node -e "require(\'@remotion/renderer\'); console.log(\'[remotion] renderer OK\')"',
         "cd /remotion && node prebundle.mjs",
     )
+    # W1-FIX-DEEP Class B: environment patches for the PINNED @remotion/renderer
+    # (4.0.450), applied AFTER npm install (which restores pristine files).
+    #   1. browser-connect deadline 25000→120000ms — the real RENDER_FATAL
+    #      killer (job 7f09fe28): 8 parallel cold-container Chrome spawns all
+    #      produced their first output ~25s after spawn and none met Remotion's
+    #      HARD-CODED 25s DevTools deadline (no option/env exists); the same
+    #      container launched Chrome fine 2 min later. Healthy launches connect
+    #      in <3s — only the failure deadline moves.
+    #   2. cgroup >1PiB sentinel → null — Modal reports ~2^63 bytes; Remotion
+    #      then opens EVERY render's stderr with the multi-line "Detected
+    #      differing memory amounts" warning, which buried the real error under
+    #      envelope truncation (the class was misfiled as a memory failure).
+    #      Behavior-preserving: the code took min(freemem, 2^63)=freemem anyway
+    #      (proven by cert_remotion_env_patch.py); only the noise dies.
+    # The script is IDEMPOTENT and FAILS THE BUILD if the top-level renderer
+    # copy does not end up patched (a Remotion bump that changes the code shape
+    # must break loudly here, never silently ship unpatched). Kept as its own
+    # layer so the heavy npm-install layer above stays cached.
+    .run_commands(
+        "cd /remotion && node patch-remotion-env.mjs /remotion/node_modules",
+    )
     # Build identification — placed AFTER the heavy install/run_commands
     # layers but BEFORE the add_local_* layers (Modal forbids any build
     # step after add_local_*). A SHA bump invalidates only the final layers,
@@ -728,7 +749,14 @@ def render_chunk_fanout(s3_prefix: str, files_manifest: list, render_kind: str,
             # (same rationale as _run_remotion's full-dump policy).
             print(f"[render_chunk_fanout] ─── FULL STDOUT ───\n{r.stdout or ''}", flush=True)
             print(f"[render_chunk_fanout] ─── FULL STDERR ───\n{r.stderr or ''}", flush=True)
-            out["error"] = f"remotion rc={r.returncode}: {(r.stderr or '')[-2000:]}"
+            # SIGNATURE-FIRST (mirrors handler._run_remotion, W1-FIX-DEEP):
+            # lead with the thrown *Error line so downstream truncation keeps
+            # the real cause, not the warning noise that opens stderr.
+            import re as _re_fo
+            _err_lines_fo = _re_fo.findall(
+                r"^[A-Za-z_.$]*(?:Error|Exception)\b.*", r.stderr or "", _re_fo.M)
+            _sal_fo = (_err_lines_fo[-1].strip()[:400] + " ||| ") if _err_lines_fo else ""
+            out["error"] = f"remotion rc={r.returncode}: {_sal_fo}{(r.stderr or '')[-2000:]}"
             out["seconds"] = round(time.time() - t0, 2)
             return out
         if r.stdout:
