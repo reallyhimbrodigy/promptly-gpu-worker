@@ -24026,6 +24026,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # back to the legacy wave-based pattern (overlay all → concat → composite).
     _pipeline_chunks = _composite_chunked and _overlay_chunked
 
+    # W3 PROGRESSIVE (DARK): announce this render attempt's chunk plan to the
+    # preview publisher. Flag OFF → _PROGRESSIVE_PUB is None → zero behavior.
+    # begin_attempt never raises; a SECOND attempt after any published chunk
+    # (degrade-ladder retry / QA re-render) makes the publisher abandon the
+    # preview rather than mix attempts.
+    if _PROGRESSIVE_PUB is not None:
+        _PROGRESSIVE_PUB.begin_attempt(
+            n_chunks=(len(_composite_ranges) if _composite_chunked else 0),
+            fps=source_fps,
+            frame_ranges=(list(_composite_ranges) if _composite_chunked else []),
+        )
+
     def _build_composite_cmd(
         chunk_idx: int,
         chunk_start: int,
@@ -24372,6 +24384,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     f"[composite-{K:02d}] ffmpeg failed (rc={_r.returncode}) "
                     f"in {_e_ff:.1f}s: {(_r.stderr or '')[-1500:]}"
                 )
+            # W3 PROGRESSIVE (DARK): this chunk's lossless intermediate is
+            # complete — hand it to the preview publisher (accepts ANY order,
+            # publishes IN order; never raises; flag OFF → None → no-op).
+            if _PROGRESSIVE_PUB is not None:
+                _PROGRESSIVE_PUB.chunk_ready(
+                    K, _composite_chunk_paths[K], _cs, _ce)
             return time.time() - _t_chain
 
         _composite_chain_futures = [
@@ -24446,6 +24464,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         raise RuntimeError(f"Audio post-processing failed: {(_audio_r.stderr or '')[-600:]}")
     _audio_elapsed = time.time() - _audio_t0
     print(f"[render] Final audio built in {_audio_elapsed:.1f}s → {_final_audio_path}", flush=True)
+    # W3 PROGRESSIVE (DARK): the composite chains above were dispatched BEFORE
+    # this audio build, so early chunks can complete first — the publisher
+    # holds every per-segment publish until this signal (A/V law: no boundary
+    # ships without its exact audio slice). Never raises; flag OFF → no-op.
+    if _PROGRESSIVE_PUB is not None:
+        _PROGRESSIVE_PUB.audio_ready()
 
     # ── 12. Wait for Remotion renders, then ffmpeg composite ────────────
     # All the heavy v62 work happens in this one ffmpeg invocation:
@@ -24705,6 +24729,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _am_elapsed = time.time() - _am_t0
 
     _mux_elapsed = time.time() - _mux_t0
+    # W3 PROGRESSIVE (DARK): the REAL final artifact now exists — request
+    # preview finalization. Non-blocking best-effort: the publisher's worker
+    # writes #EXT-X-ENDLIST only after it has drained the LAST chunk (a
+    # partial manifest is never servable as final). Never raises; flag OFF →
+    # no-op; single-pass path → publisher inert → no-op.
+    if _PROGRESSIVE_PUB is not None:
+        _PROGRESSIVE_PUB.finalize()
     print(
         f"[render] Final composite (clips+overlay+encode+audio) done in {_mux_elapsed:.1f}s "
         f"(audio mux={_am_elapsed:.1f}s)",
@@ -26320,6 +26351,65 @@ def _persist_edit_rationale(job_id, rationale):
                 "status", ("failed", "canceled", "completed")).execute()
         except Exception as e:
             print(f"[edit-rationale] write failed job={job_id}: {e} (fail open)", flush=True)
+
+    threading.Thread(target=_w, daemon=True).start()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# W3 PROGRESSIVE DELIVERY (DARK behind PROMPTLY_PROGRESSIVE) — the user sees
+# their video BEGIN before the render finishes. The composite already renders
+# as sequential lossless chunk intermediates; when the flag is ON, each
+# completed chunk is transcoded to a single-variant HLS preview and published
+# IN ORDER to {base_key}-preview-hls/ (a DIFFERENT prefix from the final
+# -hls/ ladder, so a partial can never collide with the final), behind a LIVE
+# EVENT playlist that gets #EXT-X-ENDLIST only after the LAST chunk. The
+# machinery lives in progressive_publish.ProgressivePublisher; the render path
+# carries four `_PROGRESSIVE_PUB is not None`-guarded hooks (begin_attempt /
+# chunk_ready / audio_ready / finalize). Flag OFF (default): _PROGRESSIVE_PUB
+# stays None, every hook is a no-op, the pipeline is byte-identical. Any
+# publishing error is LOUD (print + divergence progressive_publish_fallback)
+# and disables previews for the job — the render itself is never affected.
+# ═════════════════════════════════════════════════════════════════════════════
+_PROGRESSIVE_PUB = None  # per-job publisher; set by the TH tail, cleared in its finally
+
+
+def _progressive_enabled(input_data=None):
+    """Progressive-delivery flag. DARK by default; PROMPTLY_PROGRESSIVE=1
+    turns preview publishing on globally (orchestrator stages the Secret at
+    flip time — this code only reads env). input_data.progressive_test is the
+    per-job override for the pre-flip Modal cert — exactly the
+    zero_reject_test / burned_text_test pattern (inert for real traffic)."""
+    if input_data and input_data.get("progressive_test"):
+        return True
+    return os.environ.get("PROMPTLY_PROGRESSIVE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _persist_preview(job_id, payload):
+    """Durable write of the Phase-B preview payload to video_jobs.preview
+    (jsonb): {preview_hls_url, segments_published, plan_summary,
+    first_frame_url}. Additive narrative column ONLY — never touches
+    status/progress/result. Daemon-threaded, fail-open, terminal-fenced
+    (imitates _persist_step_token exactly). PostgREST silently drops writes to
+    an unknown column, so this is a safe no-op until the migration adds
+    `preview` (frontend owns the column + client read). Kill switch:
+    PROMPTLY_PREVIEW_PERSIST=0."""
+    if supabase is None or not job_id or not isinstance(payload, dict):
+        return
+    if os.environ.get("PROMPTLY_PREVIEW_PERSIST", "1").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        return
+
+    def _w():
+        try:
+            supabase.table("video_jobs").update(
+                {"preview": payload}
+            ).eq("id", job_id).not_.in_(
+                "status", ("failed", "canceled", "completed")).execute()
+        except Exception as e:
+            print(f"[preview-persist] write failed job={job_id}: {e} (fail open)", flush=True)
 
     threading.Thread(target=_w, daemon=True).start()
 
@@ -30603,6 +30693,51 @@ def handler(job):
             duration_estimate_s=_render_est,
         )
         t = time.time()
+        # ── W3 PROGRESSIVE DELIVERY (DARK behind PROMPTLY_PROGRESSIVE) ──────
+        # Flag ON: previews of the composite chunks publish IN ORDER to
+        # {base_key}-preview-hls/ WHILE render_multi_clip runs, and the
+        # Phase-B payload lands in video_jobs.preview from segment 1. Flag
+        # OFF (default): _PROGRESSIVE_PUB stays None, all four render hooks
+        # are no-ops, the pipeline is byte-identical. ANY setup error here is
+        # LOUD (print + divergence progressive_publish_fallback) and the job
+        # proceeds exactly as today.
+        global _PROGRESSIVE_PUB
+        _prog_pub = None
+        if _progressive_enabled(input_data):
+            try:
+                from progressive_publish import ProgressivePublisher
+                _prog_pub = ProgressivePublisher(
+                    work_dir,
+                    upload_url,
+                    input_data.get("public_url"),
+                    60.0,  # nominal; begin_attempt overrides with exact source_fps
+                    os.path.join(work_dir, "final_audio.wav"),
+                    s3_client=_aws_s3_client,
+                    parse_s3_url=_parse_aws_s3_url,
+                    transfer_config=_S3_TRANSFER_CONFIG,
+                    job_id=job_id,
+                    plan_summary={
+                        "route": "talking_head",
+                        "clip_count": len(edit_plan.get("cuts") or []),
+                        "caption_style": str(edit_plan.get("caption_style") or ""),
+                        "broll_count": len(broll_clips or []),
+                        "edit_rationale": str(edit_plan.get("edit_rationale") or "")[:400],
+                    },
+                    persist_cb=(lambda _pl, _jid=job_id: _persist_preview(_jid, _pl)),
+                    divergence_cb=_record_divergence,
+                )
+                _PROGRESSIVE_PUB = _prog_pub
+            except Exception as _pg_err:
+                print(f"[progressive] SETUP FAILED ({type(_pg_err).__name__}: "
+                      f"{_pg_err}) — previews off, standard delivery "
+                      f"unaffected", flush=True)
+                _record_divergence(
+                    "render", {"stage": "setup",
+                               "detail": str(_pg_err)[:300]},
+                    "progressive_publish_fallback",
+                    reason="progressive_setup")
+                _prog_pub = None
+                _PROGRESSIVE_PUB = None
         # Degrade ladder — see _render_degrade_ladder (module level, tested
         # behaviorally in test_render_ladder.py).
         try:
@@ -30615,6 +30750,11 @@ def handler(job):
             )
         finally:
             _render_hb_stop.set()
+            # W3 PROGRESSIVE: detach the per-job publisher (warm-container
+            # hygiene — the next job must never see this one's publisher).
+            # The daemon worker finishes/abandons on its own timers; QA
+            # re-renders after this point see None and publish nothing.
+            _PROGRESSIVE_PUB = None
         edit_plan["_deepgram_words"] = transcript.get("words", [])
         # Floor telemetry (Part 3): pick up the render floor (stripped) the
         # ladder may have recorded during the render that just returned.
