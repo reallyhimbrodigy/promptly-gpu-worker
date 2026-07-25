@@ -2800,6 +2800,71 @@ def _lumen_designed_scenes():
     assert "LumenScenes" not in open(__file__).read().split("def _caption_crisp_entrance")[0].split("def _lumen_designed_scenes")[0] or True
 
 
+@check("LUMEN legibleOnDark v2 (Wave-3): scene-label ink CONTRAST-GUARANTEED against the ACTUAL rendered ground (WCAG 4.5 check + hue-keeping lift + white/scrim last resort) — a 2-color palette can no longer render an invisible label; emission prompt demands a BRIGHT third accent (premium block only)")
+def _lumen_label_legibility_guarantee():
+    import re as _re
+    _lx = open("src/remotion/src/LumenScenes.tsx").read()
+    _src = open("handler.py").read()
+    # Mechanism pins: contrast math, AA threshold, ground-aware check, scrim.
+    assert "const contrastRatio" in _lx and "LABEL_CONTRAST_MIN = 4.5" in _lx, \
+        "label legibility must be a WCAG contrast CHECK, not a fixed lighten"
+    assert "ground: RGB" in _lx and "legibleOnDark = (" in _lx, \
+        "legibleOnDark must take the ground it is checked against"
+    assert "mixToward(bRgb, hexToRgb(a) || bRgb, 0.15)" in _lx, \
+        "the ground must be the RENDERED ground (base washed with the tint), never an assumed black"
+    assert "scrimFor" in _lx and "p.labelScrim" in _lx, \
+        "the last-resort ink must carry a scrim where the label renders"
+    # ALGORITHM guarantee — python mirror of the exact TS math (same constants,
+    # same op order): for a worst-case palette grid, the returned ink reads
+    # (>=4.5 vs its ground) or explicitly carries a scrim. Non-vacuous: the grid
+    # includes the v1 failure vector (2-color dark palette, label falls back to
+    # the dark tint) and the both-poles-weak mid-gray ground.
+    def _lin(v):
+        s = v / 255.0
+        return s / 12.92 if s <= 0.03928 else ((s + 0.055) / 1.055) ** 2.4
+    def _lum(c):
+        return 0.2126 * _lin(c[0]) + 0.7152 * _lin(c[1]) + 0.0722 * _lin(c[2])
+    def _cr(x, y):
+        lx, ly = _lum(x), _lum(y)
+        return (max(lx, ly) + 0.05) / (min(lx, ly) + 0.05)
+    def _mix(c, p, t):
+        return tuple(c[i] + (p[i] - c[i]) * t for i in range(3))
+    _W, _K = (255.0, 255.0, 255.0), (16.0, 16.0, 24.0)
+    def _legible(cand, ground):
+        if _cr(cand, ground) >= 4.5:
+            return cand, False
+        pole = _W if _lum(ground) < 0.35 else _K
+        t = 0.25
+        while t <= 0.92:
+            lifted = _mix(cand, pole, t)
+            if _cr(lifted, ground) >= 4.5:
+                return lifted, False
+            t += 0.13
+        ink = _W if _cr(_W, ground) >= _cr(_K, ground) else _K
+        return ink, True
+    _grounds = [(10, 10, 16), (26, 26, 46), (60, 60, 70), (119, 119, 119),
+                (150, 150, 160), (235, 235, 240)]
+    _accents = [(20, 20, 30), (79, 60, 90), (79, 157, 247), (255, 200, 40),
+                (240, 240, 245), (128, 128, 128)]
+    for _g in _grounds:
+        for _acc in _accents:
+            _ink, _scrim = _legible(_acc, _g)
+            assert _scrim or _cr(_ink, _g) >= 4.5, \
+                f"ink {_ink} fails on ground {_g} without a scrim"
+    # v1 failure vector: 2-color dark palette — label falls back to the dark
+    # tint c[0]; the ground is c[1] washed 15% toward c[0] (what renders).
+    _ground = _mix((16.0, 18.0, 34.0), (28.0, 30.0, 52.0), 0.15)
+    _ink, _scrim = _legible((28.0, 30.0, 52.0), _ground)
+    assert _scrim or _cr(_ink, _ground) >= 4.5, "the v1 dark-on-dark vector must be legible"
+    # Prompt tightening lives INSIDE the premium-only emission block (free path
+    # never sees it), and demands the bright third accent for the label ink.
+    _m = _re.search(r'if premium:\s*\n\s*system_instruction \+= """(.*?)"""', _src, _re.S)
+    assert _m, "premium emission-prompt block not found"
+    assert "EXACTLY 3 hex values" in _m.group(1) and "BRIGHT accent" in _m.group(1), \
+        "emission prompt must demand a bright third accent for the label ink"
+    assert _src.count("EXACTLY 3 hex values") == 1, "the 3-hex demand must be premium-only"
+
+
 @check("premium-values env override picks up custom tier names")
 def _tier_premium_values_override():
     # The env-var contract is the public surface for matching whatever
