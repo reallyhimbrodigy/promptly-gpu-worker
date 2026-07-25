@@ -1691,6 +1691,18 @@ class PostCutPlan(BaseModel):
     # video_jobs.edit_rationale for the client to display. For thin/short material
     # it should say so plainly and suggest a longer talking-head next time.
     edit_rationale: Optional[str] = Field(default=None, max_length=400)
+    # POST PACKAGE (2026-07-25, S-PACKAGE) — posting substance delivered WITH
+    # the video: post_caption is the platform-ready caption (one line in the
+    # speaker's voice + 1-2 relevant hashtags); post_hook is the scroll-stopping
+    # first line. Additive + purely narrative (no renderer reads them → default
+    # None is byte-identical), schema-capped at token-generation (the
+    # established pattern — Vertex enforces maxLength in constrained decoding).
+    # Latency guard measured BEFORE shipping: ≤180 chars + JSON keys ≈ 57 output
+    # tokens ≈ 1.8s at the observed 32 tok/s marginal rate (2.5s at the 22.8
+    # tok/s worst-case effective rate) — see the S-PACKAGE commit. Delivered as
+    # result.post_package + video_jobs.post_package (POST_PACKAGE_CONTRACT.md).
+    post_caption: Optional[str] = Field(default=None, max_length=120)
+    post_hook: Optional[str] = Field(default=None, max_length=60)
 
 
 class EditPlan(BaseModel):
@@ -5774,7 +5786,9 @@ notes         — string ≤50 words. Brief rationale.
 audio_denoise — bool. true when noise_floor > -40 dB.
 outro         — "none" | "fade_black" | "fade_white". "none" best for looping.
 aspect_ratio  — always "9:16".
-edit_rationale — string, 1-2 SENTENCES, written TO THE USER about THIS edit: why you cut where you did, the pacing you chose, the moments you leaned into. Plain and specific ("Tightened the intro and held on the reveal at 0:14 so the punchline lands"). If the material is thin (very short, low-energy, or little happens), SAY SO honestly and suggest recording a longer talking-head next time. Never generic — name a real choice.
+edit_rationale — string, 1-2 SENTENCES, written TO THE USER about THIS edit: why you cut where you did, the pacing you chose, the moments you leaned into. Plain and specific ("Tightened the intro and held on the reveal at 0:14 so the punchline lands"). Describe what the viewer SEES, in words the user would say — NEVER an internal component or style name (say "a quick punch-in on the reveal" or "captions that type on as you speak", not "StepZoom", "TypewriterReveal", or a caption-style name — those mean nothing to the user). If the material is thin (very short, low-energy, or little happens), SAY SO honestly and suggest recording a longer talking-head next time. Never generic — name a real choice.
+post_caption — string, ≤120 chars, user-facing: the ready-to-post caption for THIS video — one line in the speaker's own voice that sells the CONTENT (never the edit), plus 1-2 hashtags drawn from what the video is actually about ("Behind every launch is a spreadsheet nobody saw #startup #buildinpublic" — never "An edit with zooms and captions").
+post_hook — string, ≤60 chars, user-facing: the scroll-stopping first line for the post — the video's sharpest claim or question, in the speaker's own words. Plain text, no hashtags.
 
 ═══════════════════════════════════════════════════════════════════════════
 === THUMBNAIL ===
@@ -26541,6 +26555,50 @@ def _persist_edit_rationale(job_id, rationale):
     threading.Thread(target=_w, daemon=True).start()
 
 
+def _build_post_package(edit_rationale=None, post_caption=None, post_hook=None):
+    """The ONE post-package shape (POST_PACKAGE_CONTRACT.md): re-caps every
+    field at the persistence boundary (schema caps already bound the model
+    output; deterministic-route strings are capped here too), drops empties,
+    returns None when nothing survives — callers then skip the key entirely,
+    so an absent package means 'not available', never an empty object."""
+    _pkg = {}
+    for _k, _v, _cap in (("edit_rationale", edit_rationale, 400),
+                         ("post_caption", post_caption, 120),
+                         ("post_hook", post_hook, 60)):
+        _t = str(_v).strip()[:_cap] if _v else ""
+        if _t:
+            _pkg[_k] = _t
+    return _pkg or None
+
+
+def _persist_post_package(job_id, package):
+    """Durable write of the post package {edit_rationale, post_caption,
+    post_hook} to video_jobs.post_package (jsonb), alongside edit_rationale.
+    Additive narrative column ONLY — never touches status/progress/result
+    (those stay the server's). Daemon-threaded, fail-open, terminal-fenced
+    (imitates _persist_step_token exactly). PostgREST silently drops writes to
+    an unknown column, so this is a safe no-op until the frontend migration
+    adds post_package (the 219 client build owns the column + read — see
+    POST_PACKAGE_CONTRACT.md). Kill switch: PROMPTLY_PACKAGE_PERSIST=0."""
+    if supabase is None or not job_id or not isinstance(package, dict) or not package:
+        return
+    if os.environ.get("PROMPTLY_PACKAGE_PERSIST", "1").strip().lower() in (
+        "0", "false", "no", "off",
+    ):
+        return
+
+    def _w():
+        try:
+            supabase.table("video_jobs").update(
+                {"post_package": package}
+            ).eq("id", job_id).not_.in_(
+                "status", ("failed", "canceled", "completed")).execute()
+        except Exception as e:
+            print(f"[post-package] write failed job={job_id}: {e} (fail open)", flush=True)
+
+    threading.Thread(target=_w, daemon=True).start()
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # W3 PROGRESSIVE DELIVERY (DARK behind PROMPTLY_PROGRESSIVE) — the user sees
 # their video BEGIN before the render finishes. The composite already renders
@@ -26765,10 +26823,29 @@ def _minimal_rationale(reason, duration_s):
         _lead = ("This clip isn't a talking-head take, so I gave it a clean re-pace "
                  "with cuts and transitions.")
     else:  # no_speech
-        _lead = ("No speech detected, so I re-paced the footage with clean cuts "
-                 "and calm transitions instead of captions.")
+        # (S-PACKAGE audit 2026-07-25: "No speech detected" opened like a system
+        # log — same honesty, first person, warmer.)
+        _lead = ("I couldn't hear anyone speaking in this clip, so I re-paced the "
+                 "footage with clean cuts and calm transitions instead of captions.")
     return (_lead + " For the full edit — captions, zooms, B-roll — try a clip "
             "of someone speaking to camera.")
+
+
+def _minimal_post_package(reason, duration_s):
+    """Deterministic, honest post_caption/post_hook for a minimal-routed clip —
+    derived from the route reason, no model call (the S-PACKAGE rule for the
+    caption-less routes). There is no transcript to mine, so the copy leans on
+    what IS true of the edit: the pacing. Caps mirror PostCutPlan (120/60)."""
+    if reason == "no_audio":
+        _hook = "No sound. Just watch."
+        _caption = "Cut clean and paced to be watched, not heard. #visuals"
+    elif reason == "too_short":
+        _hook = "Don't blink."
+        _caption = f"{max(2, int(round(duration_s or 2)))} seconds, zero filler. #shorts"
+    else:  # no_speech / no_speech_muted / not_talking_head
+        _hook = "No words needed."
+        _caption = "Letting the visuals do the talking — clean cuts, calm pacing. #visuals"
+    return {"post_caption": _caption[:120], "post_hook": _hook[:60]}
 
 
 def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
@@ -26822,6 +26899,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     import general_editor as _ge
     _plan = None
     _route_name = "minimal"
+    _hype_bpm = None  # S-PACKAGE: measured tempo for the deterministic hype package
     _hype_on = bool(input_data.get("hype_test")) or _ge._hype_mode_enabled()
     if _hype_on and reason in ("no_speech", "not_talking_head") and _dur >= 8.0:
         try:
@@ -26853,6 +26931,14 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
                     if _hp.clips:
                         _plan = _hp
                         _route_name = "hype"
+                        # S-PACKAGE: derive BPM from the measured beat grid
+                        # (timestamps in seconds) — deterministic, no model call.
+                        try:
+                            if len(_beats) >= 2 and _beats[-1] > _beats[0]:
+                                _bpm = 60.0 * (len(_beats) - 1) / (_beats[-1] - _beats[0])
+                                _hype_bpm = _bpm if 30.0 <= _bpm <= 220.0 else None
+                        except Exception:
+                            _hype_bpm = None
                         _record_divergence(
                             "routing", {"route": "hype", "conf": _conf},
                             "hype_music_route",
@@ -26937,6 +27023,15 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
                          "punches and pacing land on the rhythm.")
         _capability_notes = ["No speech detected but the music had a clear beat — "
                             "this is a beat-synced edit cut to your own track."]
+        # S-PACKAGE: deterministic-honest package from the beat/energy — the
+        # measured BPM when the grid gave one, no extra model call ever.
+        _pkg_fields = {
+            "post_caption": (f"Cut to the beat at {_hype_bpm:.0f} BPM — every hit "
+                             "lands on the music. #beatsync"
+                             if _hype_bpm else
+                             "Cut to the beat — every hit lands on the music. #beatsync"),
+            "post_hook": "Turn the sound on for this one.",
+        }
     else:
         _rationale = _minimal_rationale(reason, _dur)
         _capability_notes = [
@@ -26944,7 +27039,12 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "speech-anchored effects need a talking-head clip."
             if reason in ("no_speech", "no_speech_muted", "not_talking_head")
             else "This clip got a clean-cut re-pace." ]
+        # S-PACKAGE: deterministic-honest package derived from the route reason.
+        _pkg_fields = _minimal_post_package(reason, _dur)
     _persist_edit_rationale(job_id, _rationale)
+    _post_package = _build_post_package(
+        _rationale, _pkg_fields.get("post_caption"), _pkg_fields.get("post_hook"))
+    _persist_post_package(job_id, _post_package)
     _out_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0.0
     result_payload = {
         "status": "success",
@@ -26978,6 +27078,9 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         "render_version": RENDER_VERSION,
         "capability_notes": _capability_notes,
         "edit_rationale": _rationale,
+        # S-PACKAGE: the post package rides every route's result payload —
+        # {edit_rationale, post_caption, post_hook} (POST_PACKAGE_CONTRACT.md).
+        "post_package": _post_package,
         "video_url": _video_url,
     }
     if _hls_url:
@@ -26998,6 +27101,8 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "route_reason": reason,
             "stage_timings": result_payload.get("stage_timings"),
             "stage_manifest": result_payload.get("stage_manifest"),
+            # S-PACKAGE: durable copy — queryable as result.post_package.
+            "post_package": result_payload.get("post_package"),
         },
     )
     send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
@@ -30208,6 +30313,14 @@ def handler(job):
             # field-copy above (safe-edit / thin plans leave it None → no-op).
             if isinstance(edit_plan, dict):
                 _persist_edit_rationale(job_id, edit_plan.get("edit_rationale"))
+                # S-PACKAGE: persist the posting substance at the same seam —
+                # the recipe just resolved, well before the terminal fence can
+                # race the write. edit_plan carries post_caption/post_hook via
+                # the PostCutPlan field-copy (None → no-op, fail-open).
+                _persist_post_package(job_id, _build_post_package(
+                    edit_plan.get("edit_rationale"),
+                    edit_plan.get("post_caption"),
+                    edit_plan.get("post_hook")))
             # ── Lumen emission-funnel telemetry (INERT recording) ──────────────
             # Capture what Gemini EMITTED before any downstream drop zeros it, so
             # the premium funnel (routed → emitted → generated → shipped, and which
@@ -31783,6 +31896,15 @@ def handler(job):
             result_payload["change_summary"] = change_summary
         if _capability_notes:
             result_payload["capability_notes"] = _capability_notes
+        # S-PACKAGE: the post package {edit_rationale, post_caption, post_hook}
+        # rides every route's result payload (POST_PACKAGE_CONTRACT.md). Absent
+        # key = not available (safe-edit / thin plans may omit all three).
+        _post_package = _build_post_package(
+            edit_plan.get("edit_rationale"),
+            edit_plan.get("post_caption"),
+            edit_plan.get("post_hook"))
+        if _post_package:
+            result_payload["post_package"] = _post_package
         # Include CDN video URL if available (direct S3 upload path)
         if edit_plan.get("_rendered_video_url"):
             result_payload["video_url"] = edit_plan["_rendered_video_url"]
@@ -31856,6 +31978,9 @@ def handler(job):
                 # render_time in the HTTP result_payload were never persisted.
                 "stage_timings": result_payload.get("stage_timings"),
                 "stage_manifest": result_payload.get("stage_manifest"),
+                # S-PACKAGE: durable copy — queryable as result.post_package
+                # on every route (POST_PACKAGE_CONTRACT.md).
+                "post_package": result_payload.get("post_package"),
             },
         )
         return result_payload

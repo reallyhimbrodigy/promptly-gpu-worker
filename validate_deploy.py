@@ -3163,8 +3163,13 @@ def _recipe_omittable_field_contract():
         # preserved_silences: Vertex drops it when empty → generate_edit_gemini
         # reads `.get("preserved_silences") or []`, and empty means "preserve
         # nothing" = cut every located silence (the dead-air default). Omission-safe.
+        # post_caption/post_hook: S-PACKAGE (2026-07-25) — omission-tolerant BY
+        # DESIGN: pure narrative fields, no validator or renderer reads them;
+        # the only consumer is _build_post_package which .get()s with None →
+        # the package key is simply absent (never a raise, never a drop).
         "PostCutPlan": {"cut_refinements", "existing_caption_region",
                         "edit_rationale", "generated_scenes", "notes",
+                        "post_caption", "post_hook",
                         "preserved_silences", "source_text_regions"},
         # B (Zac 2026-07-11): sound rides the beat — omission IS the default
         # ("most beats are carried by the voice"); the derivation .get()s it.
@@ -5320,6 +5325,71 @@ def _edit_rationale_field():
     assert 'PROMPTLY_RATIONALE_PERSIST' in _body, "kill switch required"
     assert '_persist_edit_rationale(job_id, edit_plan.get("edit_rationale"))' in _h, \
         "the pipeline must persist the rationale after the recipe resolves"
+
+
+@check("POST PACKAGE (2026-07-25, S-PACKAGE): when a video completes the user receives substance — {edit_rationale, post_caption, post_hook} delivered as result.post_package on EVERY route + video_jobs.post_package jsonb. PostCutPlan grows two additive Optional fields schema-capped at token-generation (post_caption<=120 platform-ready caption with 1-2 hashtags; post_hook<=60 scroll-stopping first line). Latency guard measured BEFORE shipping: ~57 output tokens ~= 1.8s at the observed 32 tok/s marginal rate (2.5s at the 22.8 tok/s worst-case effective), under the 3-5s bar -> the ask ships in the planning call, render never delayed. Minimal/hype fill deterministic-honest values (route reason / measured beat BPM — no extra model calls). The persist helper imitates _persist_step_token: daemon-threaded, fail-open, terminal-fenced, narrative column ONLY, kill switch PROMPTLY_PACKAGE_PERSIST=0; PostgREST no-ops until the 219 client migration adds the column. Contract: POST_PACKAGE_CONTRACT.md.")
+def _post_package_contract():
+    import handler as H
+    _h = open("handler.py").read()
+    # schema shape: additive Optionals, caps live IN the generation schema
+    # (token-generation capping — the established edit_rationale pattern)
+    assert 'post_caption: Optional[str] = Field(default=None, max_length=120)' in _h, \
+        "PostCutPlan must carry additive Optional post_caption (cap 120)"
+    assert 'post_hook: Optional[str] = Field(default=None, max_length=60)' in _h, \
+        "PostCutPlan must carry additive Optional post_hook (cap 60)"
+    _props = H.PostCutPlan.model_json_schema()["properties"]
+    def _cap_of(_p):
+        if isinstance(_p.get("maxLength"), int):
+            return _p["maxLength"]
+        for _v in (_p.get("anyOf") or []):
+            if isinstance(_v, dict) and isinstance(_v.get("maxLength"), int):
+                return _v["maxLength"]
+        return None
+    assert _cap_of(_props["post_caption"]) == 120 and _cap_of(_props["post_hook"]) == 60, \
+        "caps must be enforced at token-generation (response schema maxLength)"
+    assert H.PostCutPlan.model_fields["post_caption"].default is None and \
+        H.PostCutPlan.model_fields["post_hook"].default is None, \
+        "defaults must be None (Vertex omission-safe, byte-identical when absent)"
+    # prompt: both asks present in the GLOBAL FIELDS list, user-facing framing
+    assert 'post_caption — string' in _h and '1-2 hashtags' in _h, \
+        "the TH prompt must ask for the platform-ready post_caption"
+    assert 'post_hook — string' in _h and 'scroll-stopping first line' in _h, \
+        "the TH prompt must ask for the scroll-stopping post_hook"
+    # rationale-audit guidance (2026-07-25: 4 of 8 live rationales leaked
+    # internal component names) — the ask must forbid them, wording-only
+    assert 'NEVER an internal component or style name' in _h, \
+        "edit_rationale guidance must forbid internal component/style names"
+    # persistence helper: narrative-only, terminal-fenced, kill-switched
+    _i = _h.find("def _persist_post_package")
+    assert _i != -1, "the post-package persist helper must exist"
+    _body = _h[_i:_h.find("\ndef ", _i + 10)]
+    assert '{"post_package": package}' in _body and 'supabase.table("video_jobs").update(' in _body, \
+        "must write post_package to video_jobs"
+    assert '"status":' not in _body and '"progress":' not in _body and '"result":' not in _body, \
+        "the package write must be narrative-only (no status/progress/result)"
+    assert '"failed", "canceled", "completed"' in _body, \
+        "the package write must be terminal-fenced"
+    assert 'PROMPTLY_PACKAGE_PERSIST' in _body, "kill switch required"
+    # ONE builder shape, re-capped at the persistence boundary
+    _b = _h.find("def _build_post_package")
+    assert _b != -1 and '("post_caption", post_caption, 120)' in _h[_b:_b + 1400] \
+        and '("post_hook", post_hook, 60)' in _h[_b:_b + 1400], \
+        "the ONE builder must re-cap every field at the boundary"
+    # all-routes carriage: TH persist seam + TH durable completed write
+    assert _h.count('"post_package": result_payload.get("post_package")') == 2, \
+        "both durable completed writes (TH + caption-less) must carry result.post_package"
+    assert "_persist_post_package(job_id, _build_post_package(" in _h, \
+        "the TH pipeline must persist the package at the recipe-resolve seam"
+    # caption-less routes: deterministic-honest values, persisted + carried
+    _p = _h.find("def _run_minimal_pipeline")
+    _mbody = _h[_p:_h.find("\ndef send_progress", _p)]
+    assert "_persist_post_package(job_id, _post_package)" in _mbody \
+        and '"post_package": _post_package' in _mbody, \
+        "the caption-less routes must persist + carry the package"
+    assert "def _minimal_post_package" in _h and "_minimal_post_package(reason, _dur)" in _mbody, \
+        "minimal derives deterministic-honest values from the route reason"
+    assert "_hype_bpm" in _mbody, \
+        "hype derives its package from the measured beat (BPM), no model call"
 
 
 @check("RECIPE WALL-CLOCK BUDGET (2026-07-24, p=50 compounding fix): the edit-recipe repair loop (≤_repair_max+1 re-asks) × the internal degen/transport retries (≤3 sub-attempts) can compound to ~6 post-cuts Gemini calls, each ≤480s, running the stage past Modal's timeout → an UNCODED SIGKILL at progress≈50 that bypasses the failure handler (0/26 long-wall deaths carried forensics). A running wall-clock deadline anchored on the job's pipeline start makes compounding re-asks engage the EXISTING deterministic safe edit BEFORE the SIGKILL. A clean single pass (135-337s) never trips it. Flag PROMPTLY_RECIPE_WALL (default on); =0 → deadline None → byte-identical. Budget = Modal timeout − render reserve (duration*3) − one-client-timeout (480s) tail reserve, so even a re-ask that started just under the deadline finishes below the wall. This is the source-poll fail-fast pattern one stage later.")
