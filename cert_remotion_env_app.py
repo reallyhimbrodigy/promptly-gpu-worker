@@ -26,10 +26,13 @@ import sys
 
 import modal
 
+sys.path.insert(0, "/")
 sys.path.insert(0, ".")
 import modal_app  # noqa: E402
 
-image = modal_app.image
+# modal_app.py must ride the image: the container re-imports THIS module,
+# which imports modal_app (same pattern as cert_fanout_app.py).
+image = modal_app.image.add_local_file("modal_app.py", "/modal_app.py")
 app = modal.App("cert-remotion-env", image=image)
 
 
