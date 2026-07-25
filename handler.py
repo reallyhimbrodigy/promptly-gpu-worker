@@ -23824,7 +23824,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # ~16-22fps ceiling, issue #4664). Chunk count env-tunable; rollback =
     # PROMPTLY_RENDER_CHUNKS=4 (concurrency auto-rebalances, no deploy).
     _RENDER_CHUNKS = max(1, int(os.environ.get("PROMPTLY_RENDER_CHUNKS", "") or 8))
-    _OVERLAY_CHUNK_COUNT = _RENDER_CHUNKS if total_output_frames >= 300 else 1
+    # W2 chunking-by-duration: the cap (PROMPTLY_RENDER_CHUNKS) applies only to
+    # LONG outputs; short ones scale down (8 chunks on a 10s clip is process-
+    # startup tax, ~56 frames/chunk). One chunk per PROMPTLY_CHUNK_FRAMES
+    # (default 450 ≈ 15s @30fps), floor 1, ceiling the cap. Pixel-safe: chunk
+    # boundaries are lossless ProRes joins (A-L4 cert proved boundary SSIM 1.0).
+    _CHUNK_FRAMES = max(150, int(os.environ.get("PROMPTLY_CHUNK_FRAMES", "") or 450))
+    _EFFECTIVE_CHUNKS = min(_RENDER_CHUNKS, max(1, int(total_output_frames) // _CHUNK_FRAMES))
+    _OVERLAY_CHUNK_COUNT = _EFFECTIVE_CHUNKS if total_output_frames >= 300 else 1
     _PER_CHUNK_CONCURRENCY = max(2, 32 // max(_OVERLAY_CHUNK_COUNT, 1)) \
         if _OVERLAY_CHUNK_COUNT > 1 else 8
     _overlay_ranges = _split_frames(int(total_output_frames), _OVERLAY_CHUNK_COUNT)
@@ -24003,8 +24010,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Below 400 frames the per-process startup tax dominates → composite
     # falls back to single-pass. Below 300 frames overlay is also single,
     # so pipelining is meaningless either way.
-    _N_COMPOSITE_CHUNKS = (max(1, int(os.environ.get("PROMPTLY_RENDER_CHUNKS", "") or 8))
-                           if total_output_frames >= 400 else 1)  # A-L3: paired with cpu=128
+    _N_COMPOSITE_CHUNKS = (min(max(1, int(os.environ.get("PROMPTLY_RENDER_CHUNKS", "") or 8)),
+                               max(1, int(total_output_frames) //
+                                   max(150, int(os.environ.get("PROMPTLY_CHUNK_FRAMES", "") or 450))))
+                           if total_output_frames >= 400 else 1)  # W2 chunking-by-duration (see overlay site)
     _composite_ranges = split_timeline_into_chunks(int(total_output_frames), _N_COMPOSITE_CHUNKS)
     _composite_chunked = len(_composite_ranges) > 1
     # Chunks are LOSSLESS ProRes 4444 intermediates (.mov) — see encoder
@@ -26670,6 +26679,17 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         "job_id": job_id,
         "route": _route_name,
         "route_reason": reason,
+        # W2: the caption-less routes ARE the effort-proportional proof — name it
+        "stage_manifest": {
+            "run": (["normalize", "beat_analysis", "hype_plan", "render", "hls", "upload"]
+                    if _route_name == "hype"
+                    else ["normalize", "minimal_plan", "render", "hls", "upload"]),
+            "skipped": {"transcribe": "no speech to transcribe",
+                        "planning": "no Gemini planning on this route"
+                        if _route_name == "minimal" else "lighter hype plan",
+                        "face_detect": "caption-less route",
+                        "broll": "caption-less route"},
+        },
         "render_time": round(_render_elapsed, 1),
         "pipeline_time": round(time.time() - (pipeline_start or _t0), 1),
         "output_size_mb": round(_out_mb, 1),
@@ -29794,6 +29814,43 @@ def handler(job):
         # Manual pool management — do NOT use `with` block because it calls
         # shutdown(wait=True) on exit, which would block on future_faces and defeat
         # the deferred face collection optimization (face detection should overlap with Remotion).
+        # ── W2 STAGE MANIFEST (effort-proportional pipeline) ─────────────────
+        # Every stage's entry condition, NAMED and RECORDED. v1 formalizes the
+        # decisions this block already made (mode/provided-artifact skips) and
+        # records the always-run stages with their reasons — persisted as
+        # result.stage_manifest so "per video should be different" is a
+        # reported fact. CONSERVATISM LAW: when uncertain, run the stage —
+        # a manifest entry may only skip on an airtight, documented condition.
+        # (Routed minimal/hype jobs never reach this block — they short-circuit
+        # at the intake gates and carry their own mini-manifest.)
+        _stage_manifest = {}
+
+        def _manifest(stage, run, why):
+            _stage_manifest[stage] = {"run": bool(run), "why": why}
+            return run
+
+        _manifest("normalize", True, "always: canonical container precondition")
+        _manifest("transcribe", not _skip_transcribe,
+                  "provided/url transcript" if _skip_transcribe else "speech is the spine")
+        _manifest("gemini_proxy", not _skip_proxy,
+                  "render_only: no Gemini call" if _skip_proxy else "feeds the editorial call")
+        _manifest("trend", not _skip_trend,
+                  "render_only/provided" if _skip_trend else "editorial context")
+        _manifest("loudness", True, "has_audio (no-audio sources routed at intake)")
+        _manifest("shot_changes", True, "cut/transition grounding")
+        _manifest("vocal_emphasis", True, "has_audio: emphasis anchors")
+        _manifest("shake_probe", True, "vidstab decision input (threshold env-tunable)")
+        _manifest("exposure_probe", True, "input-quality pass")
+        _manifest("fps_normalize", True,
+                  "always probes; internally passthrough when already canonical "
+                  "+ vidstab only over shake threshold")
+        _manifest("planning", not _skip_edit_gen,
+                  "render_only: plan provided" if _skip_edit_gen
+                  else "TH full planning (quality law: never degraded)")
+        _manifest("face_detect", True, "TH framing/zoom anchors")
+        _manifest("diarization", True,
+                  "lazy: dispatched only if Deepgram detects 2+ speakers")
+
         mega_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         future_normalize = mega_pool.submit(_do_normalize)
         future_transcribe = None if _skip_transcribe else mega_pool.submit(_do_transcribe)
@@ -31379,6 +31436,8 @@ def handler(job):
             "pipeline_time": round(_timings.get("total", 0), 1),
             # SA-0: full per-stage wall-clock decomposition (seconds)
             "stage_timings": {k: round(float(v), 1) for k, v in _timings.items()},
+            # W2: which stages ran/skipped and WHY (effort-proportional proof)
+            "stage_manifest": _stage_manifest,
             "output_size_mb": round(output_size_mb, 1),
             "edit_recipe": sanitized_recipe,
             "cover_frame_timestamp": round(cover_frame_ts, 3),
@@ -31468,6 +31527,7 @@ def handler(job):
                 # dispatch-to-modal.js never writes result) — pipeline_time /
                 # render_time in the HTTP result_payload were never persisted.
                 "stage_timings": result_payload.get("stage_timings"),
+                "stage_manifest": result_payload.get("stage_manifest"),
             },
         )
         return result_payload
@@ -31546,6 +31606,7 @@ def handler(job):
                 # the pipeline got and what the wall was spent on before failing.
                 "stage_timings": {k: round(float(v), 1)
                                   for k, v in (locals().get("_timings") or {}).items()},
+                "stage_manifest": locals().get("_stage_manifest") or None,
                 **_floor_markers(_floor_state),
             },
         )

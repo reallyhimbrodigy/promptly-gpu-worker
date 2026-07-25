@@ -5083,6 +5083,29 @@ def _ab_levers_staged_dark():
         assert _k in _h, f"A/B-lever input not persisted: {_k}"
 
 
+@check("W2 STAGE MANIFEST (effort-proportional pipeline, 2026-07-25): every TH stage's entry condition is NAMED + RECORDED (result.stage_manifest, persisted on completions AND at death beside stage_timings); the caption-less routes carry their own mini-manifest; the existing mode-based skips are formalized through the manifest with identical semantics. CONSERVATISM LAW pinned: only airtight documented conditions may skip — planning on the TH path is manifest-recorded as never-skipped (captions ARE the product). One behavioral gate ships in v1: CHUNKING-BY-DURATION — chunk count scales one-per-PROMPTLY_CHUNK_FRAMES (default 450 ≈ 15s@30fps), floor 1, ceiling PROMPTLY_RENDER_CHUNKS, at BOTH the overlay and composite sites (8 chunks on a 10s clip was pure process-startup tax; pixel-safe: A-L4 cert proved chunk boundaries SSIM-1.0).")
+def _w2_stage_manifest():
+    _h = open("handler.py").read()
+    # the manifest exists, is populated at the submission block, and persists
+    assert "_stage_manifest = {}" in _h and 'def _manifest(stage, run, why):' in _h
+    for _st in ('"transcribe"', '"planning"', '"fps_normalize"', '"shake_probe"', '"face_detect"'):
+        assert f"_manifest({_st}" in _h, f"stage {_st} not manifest-recorded"
+    assert '"stage_manifest": _stage_manifest,' in _h, "manifest must persist in result_payload"
+    assert '"stage_manifest": result_payload.get("stage_manifest"),' in _h, \
+        "manifest must persist on the durable completed write"
+    assert '"stage_manifest": locals().get("_stage_manifest") or None,' in _h, \
+        "partial manifest must persist at death"
+    # TH planning never skipped by the manifest (quality law)
+    assert 'TH full planning (quality law: never degraded)' in _h
+    # the caption-less mini-manifest
+    assert '"minimal_plan", "render", "hls", "upload"' in _h, "caption-less mini-manifest missing"
+    # chunking-by-duration at both sites, floor 1, env-tunable divisor
+    assert 'PROMPTLY_CHUNK_FRAMES' in _h and _h.count('PROMPTLY_CHUNK_FRAMES') >= 2, \
+        "chunk divisor must gate BOTH the overlay and composite sites"
+    assert "_EFFECTIVE_CHUNKS = min(_RENDER_CHUNKS, max(1, int(total_output_frames) // _CHUNK_FRAMES))" in _h, \
+        "the duration-scaled chunk formula (floor 1, ceiling the cap)"
+
+
 @check("A-L1 OUTPUT DIET (2026-07-25, PROMPTLY_WHY_DIET, live lever w/ one-flag rollback): the post-cuts call is OUTPUT-BOUND (r=0.59 wall vs output tokens), and the rationale fields are the compressible output — declared caps 240 chars against a ≤12-word editorial ask, 9.1% balloon rate. Under the flag the RESPONSE SCHEMA hard-caps why/why_emphasis/reason at 96 chars (Vertex enforces maxLength at token-generation time; the parse edge reads the same schema so enforcement follows automatically), and the anti-runaway prompt block names the true budget so the model composes telegrams instead of getting truncated. ONLY the three named rationale fields are dieted — every other declared cap untouched. =0 restores 240 with no deploy.")
 def _why_diet_lever():
     import os as _os
