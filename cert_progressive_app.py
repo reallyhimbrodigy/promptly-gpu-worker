@@ -438,7 +438,7 @@ def run_case(case: dict) -> dict:
                  "-filter_complex",
                  (f"[0:v]trim=0:{swap_t:.3f},setpts=PTS-STARTPTS[a];"
                   f"[1:v]trim={swap_t:.3f},setpts=PTS-STARTPTS[b];"
-                  f"[a][b]concat=n=2:v=1:0[v]"),
+                  f"[a][b]concat=n=2:v=1:a=0[v]"),
                  "-map", "[v]", "-c:v", "libx264", "-preset", "fast",
                  "-crf", "18", "-pix_fmt", "yuv420p", swap_out],
                 check=True, capture_output=True, text=True, timeout=1200)
