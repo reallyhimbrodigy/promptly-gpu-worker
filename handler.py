@@ -8665,6 +8665,35 @@ def _drop_gemini_cache(model_name: str, system_instruction: str) -> None:
         _GEMINI_CACHE_REGISTRY.pop(key, None)
 
 
+_SHARED_CACHE_DICT = None
+_SHARED_CACHE_DICT_TRIED = False
+
+
+def _shared_gemini_cache_dict():
+    """Cross-container shared registry of Vertex cache IDs (Zac 2026-07-26).
+    A fresh container's in-memory _GEMINI_CACHE_REGISTRY is empty, so without
+    this it RECREATES a Vertex cache that already exists server-side (created by
+    another container) — wasteful duplicate + first-job creation latency. This
+    modal.Dict, keyed by (model, sys-hash), lets any container REUSE the existing
+    cache. Fail-open: unavailable -> per-container create (today's behavior).
+    Kill switch: PROMPTLY_SHARED_GEMINI_CACHE=0."""
+    global _SHARED_CACHE_DICT, _SHARED_CACHE_DICT_TRIED
+    if _SHARED_CACHE_DICT is not None or _SHARED_CACHE_DICT_TRIED:
+        return _SHARED_CACHE_DICT
+    _SHARED_CACHE_DICT_TRIED = True
+    if os.environ.get("PROMPTLY_SHARED_GEMINI_CACHE", "1").strip().lower() in ("0", "false", "no", "off"):
+        return None
+    try:
+        import modal as _modal
+        _SHARED_CACHE_DICT = _modal.Dict.from_name(
+            "gemini-cache-registry", create_if_missing=True)
+    except Exception as _e:
+        print(f"[gemini-cache] shared dict unavailable ({type(_e).__name__}: {_e}) "
+              f"— per-container caching only", flush=True)
+        _SHARED_CACHE_DICT = None
+    return _SHARED_CACHE_DICT
+
+
 def _get_or_create_gemini_system_cache(client, model_name: str, system_instruction: str):
     """Return a Gemini cache resource name covering `system_instruction`,
     creating one if needed. Returns None on failure — caller should fall
@@ -8681,6 +8710,22 @@ def _get_or_create_gemini_system_cache(client, model_name: str, system_instructi
                 return cache_name
             # Local entry near/past TTL — drop and recreate.
             _GEMINI_CACHE_REGISTRY.pop(key, None)
+    # SHARED lookup (cross-container): reuse an existing server-side cache
+    # instead of recreating a duplicate on this fresh container. Conservative
+    # TTL margin (120s) so we never hand back a near-dead cache. Fail-open.
+    _dkey = f"{key[0]}:{key[1]}"
+    _shared = _shared_gemini_cache_dict()
+    if _shared is not None:
+        try:
+            _se = _shared.get(_dkey)
+            if _se and float(_se.get("expires_at", 0)) > now + 120 and _se.get("cache_name"):
+                with _GEMINI_CACHE_LOCK:
+                    _GEMINI_CACHE_REGISTRY[key] = (_se["cache_name"], float(_se["expires_at"]))
+                print(f"[gemini-cache] shared HIT {_se['cache_name']} (reused, not recreated)", flush=True)
+                return _se["cache_name"]
+        except Exception as _le:
+            print(f"[gemini-cache] shared lookup failed ({type(_le).__name__}: {_le}) "
+                  f"— per-container create", flush=True)
     try:
         _t0 = time.time()
         cache = client.caches.create(
@@ -8693,8 +8738,15 @@ def _get_or_create_gemini_system_cache(client, model_name: str, system_instructi
         cache_name = getattr(cache, "name", None)
         if not cache_name:
             return None
+        _exp = now + _GEMINI_CACHE_TTL_SECONDS
         with _GEMINI_CACHE_LOCK:
-            _GEMINI_CACHE_REGISTRY[key] = (cache_name, now + _GEMINI_CACHE_TTL_SECONDS)
+            _GEMINI_CACHE_REGISTRY[key] = (cache_name, _exp)
+        if _shared is not None:
+            try:
+                _shared[_dkey] = {"cache_name": cache_name, "expires_at": _exp}
+            except Exception as _we:
+                print(f"[gemini-cache] shared write failed ({type(_we).__name__}: {_we}) "
+                      f"— local registry only", flush=True)
         print(
             f"[gemini-cache] created {cache_name} for {model_name} "
             f"({len(system_instruction)} chars, ttl={_GEMINI_CACHE_TTL_SECONDS}s, "

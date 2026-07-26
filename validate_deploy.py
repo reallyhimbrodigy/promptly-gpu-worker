@@ -5605,6 +5605,25 @@ def _loud_failsafe_ledgers():
     assert _h.count('"PGRST204" in str(') >= 7, "PGRST204 detection at every persist fail-open"
 
 
+@check("SHARED GEMINI CACHE REGISTRY (Zac 2026-07-26): a fresh container's in-memory _GEMINI_CACHE_REGISTRY is empty, and there is NO server-side lookup before caches.create — so without sharing, every cold/post-deploy container RECREATES a Vertex cache that already exists server-side (duplicate + first-job creation latency). A cross-container modal.Dict keyed by (model, sys-hash) lets any container REUSE the existing cache. MUST be fail-open (dict unavailable/lookup/write error -> per-container create = today's behavior, byte-identical) and kill-switchable (PROMPTLY_SHARED_GEMINI_CACHE=0). Quality-neutral: same cache CONTENT, only reuse vs recreate.")
+def _shared_gemini_cache():
+    _h = open("handler.py").read()
+    assert "def _shared_gemini_cache_dict():" in _h, "the shared-dict accessor must exist"
+    assert '_modal.Dict.from_name(' in _h and '"gemini-cache-registry"' in _h, "must use a named cross-container modal.Dict"
+    assert 'PROMPTLY_SHARED_GEMINI_CACHE' in _h, "kill switch required"
+    # fail-open: the accessor swallows errors -> None; the lookup + write are try/wrapped
+    _i = _h.find("def _shared_gemini_cache_dict")
+    _body = _h[_i:_i+1200]
+    assert "per-container caching only" in _body, "accessor must fail-open to None"
+    assert "shared HIT" in _h and "shared lookup failed" in _h and "shared write failed" in _h, \
+        "lookup + write must be individually fail-open (never fail a job over the cache dict)"
+    # the shared lookup must sit AFTER the local-registry check and BEFORE caches.create
+    _lc = _h.find("_GEMINI_CACHE_REGISTRY.get(key)")
+    _sh = _h.find("_shared_gemini_cache_dict()", _lc)
+    _cr = _h.find("client.caches.create(", _lc)
+    assert _lc < _sh < _cr, "shared lookup must be between local miss and server create"
+
+
 @check("LOUD FAIL-SAFE MOUNT LAW (Zac standing rule 2026-07-25, from the moodreel_editor + progressive_publish mount catches): EVERY repo-local module that handler.py defer-imports inside a function body MUST be add_local_file-baked into the worker image — derived DYNAMICALLY from the source so any future mode is covered the day it is written. A deferred import inside a fail-safe try/except is exactly the class that dies silently (the fallback masks the ImportError and the feature quietly never runs); top-level imports crash loudly at container start and need no law.")
 def _loud_failsafe_mount_law():
     import re as _re, os as _os
