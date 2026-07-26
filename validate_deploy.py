@@ -5394,6 +5394,16 @@ def _ab_levers_staged_dark():
         assert _k in _h, f"A/B-lever input not persisted: {_k}"
 
 
+@check("SINGLE-PASS MUX AUDIO = AAC (ruling 5, 2026-07-26): the short-clip (<400-frame) single-pass composite mux shipped pcm_s16le-in-MP4 — the exact combination the chunked path's comment documents as 'iOS AVPlayer drops audio silently in production'. Both shipping muxes now AAC-LC 192k/48k; PCM remains only in INTERMEDIATE wavs (never a delivered MP4).")
+def _single_pass_mux_aac():
+    _h = open("handler.py").read()
+    _i = _h.find('if include_audio and c_audio_idx is not None:')
+    assert _i != -1
+    _win = _h[_i:_i + 900]
+    assert '"-c:a", "aac"' in _win and 'pcm_s16le' not in _win, \
+        "the single-pass shipping mux must be AAC (PCM-in-MP4 silently drops audio on iOS)"
+
+
 @check("W2 STAGE MANIFEST (effort-proportional pipeline, 2026-07-25): every TH stage's entry condition is NAMED + RECORDED (result.stage_manifest, persisted on completions AND at death beside stage_timings); the caption-less routes carry their own mini-manifest; the existing mode-based skips are formalized through the manifest with identical semantics. CONSERVATISM LAW pinned: only airtight documented conditions may skip — planning on the TH path is manifest-recorded as never-skipped (captions ARE the product). One behavioral gate ships in v1: CHUNKING-BY-DURATION — chunk count scales one-per-PROMPTLY_CHUNK_FRAMES (default 450 ≈ 15s@30fps), floor 1, ceiling PROMPTLY_RENDER_CHUNKS, at BOTH the overlay and composite sites (8 chunks on a 10s clip was pure process-startup tax; pixel-safe: A-L4 cert proved chunk boundaries SSIM-1.0).")
 def _w2_stage_manifest():
     _h = open("handler.py").read()
@@ -7475,6 +7485,11 @@ def _w3_source_text():
         "fully-burned frame → never clear, even without face data"
     assert _h._mg_clear_region_exists("StatCard", 0.5, 1.5, [], burned_bands={"top"}), \
         "no face data + partial burn → fail-open on the face axis"
+    # CERT-FOUND GAP (0/3 FAIL, 2026-07-25): the module MUST ride the image —
+    # wiring without the mount = loud fallback on every job with the flag on.
+    _mm = open("modal_app.py").read()
+    assert '"progressive_publish.py"' in _mm, "progressive_publish.py must be baked into the worker image"
+
 
 
 @check("DEGENERATION RESPONSE (L1/L2/L3/R1): declared caps ENFORCED at the parse edge (Vertex does not enforce maxLength); repetition signature fires the tail instrument on completed responses; degen retries bounded +2 and ledgered; the three TCO drops ledgered")

@@ -24343,11 +24343,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             "-map", f"[{_final_labels[0]}]",
         ]
         if include_audio and c_audio_idx is not None:
-            # PCM s16le for the master MP4 audio — sample-exact, 0ms drift.
-            # See the longer rationale at the final concat+mux step. Do NOT
-            # swap to AAC: any frame-based codec reintroduces the structural
-            # ~21ms drift floor that produced audible word clipping pre-v37.
-            cmd += ["-map", f"{c_audio_idx}:a:0", "-c:a", "pcm_s16le"]
+            # AAC-LC — aligned with the chunked path's final concat+mux (ruling
+            # 5, 2026-07-26). The old PCM-s16le-in-MP4 here predated the chunked
+            # path's fix and its comment: iOS AVPlayer streaming PCM-in-MP4
+            # DROPS AUDIO SILENTLY in production — every short clip (<400
+            # frames → this single-pass mux) was shipping that combination
+            # while long clips shipped AAC. The ~21ms AAC frame floor is
+            # accepted exactly as on the chunked path (the v−a sync probe
+            # tolerates it; Apple's own exports carry single-frame drift).
+            cmd += ["-map", f"{c_audio_idx}:a:0",
+                    "-c:a", "aac", "-b:a", "192k", "-ar", "48000"]
 
         # Two encoder paths:
         #
