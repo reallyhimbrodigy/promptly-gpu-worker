@@ -1,72 +1,64 @@
-# PROGRESSIVE DELIVERY — CLIENT PLAYBACK CONTRACT (for the 219 frontend agent)
-Status: backend APPROVED (Zac watched the swap artifacts, no pop objection, 2026-07-26).
-Server cert 3/3 (safety: final byte-equivalent within render noise; publisher reads render
-intermediates only, no write path to the final; partial-never-final; A/V ≤56ms; completeness;
-prefix). **The flip is COORDINATED: publisher + client go live TOGETHER, never publisher alone**
-(a preview no client reads is pure per-job compute for zero benefit). Nothing flips without Zac's word.
+# PROGRESSIVE DELIVERY — TWO-SIDED CONTRACT (client · server · worker)
+Traced from live code 2026-07-26 during the "no preview on device" debug. Backend + frontend read this.
 
-## ⚠️ PREREQUISITE #1 — the `video_jobs.preview` column migration (BLOCKER)
-The worker persists the preview payload to `video_jobs.preview` (jsonb). That column does NOT exist
-yet — the certs show `PGRST204 Could not find the 'preview' column` (now correctly ledgered as an
-absent_column_defect). **The client has nothing to read until this column is added.** Required SQL:
-```sql
-ALTER TABLE video_jobs ADD COLUMN IF NOT EXISTS preview jsonb;
+## THE FOUR SEAMS (a job flows through all four; break any one → no preview)
 ```
-This must land before the flip. (This is the same class as the demo/post_package migrations.)
-
-## THE DATA CONTRACT — `video_jobs.preview` (jsonb)
-Written by the worker during the render (daemon-threaded, fail-open, terminal-fenced except the
-stamped terminal payloads). Shape:
-```json
-{
-  "preview_hls_url": "https://<cdn>/<base>-preview-hls/master.m3u8",  // EVENT playlist, GROWS
-  "segments_published": 3,               // published chunk-group count so far
-  "plan_summary": { "route": "talking_head", "clip_count": 11, "caption_style": "Cove",
-                    "broll_count": 4, "edit_rationale": "..." },      // for a loading affordance
-  "first_frame_url": "https://<cdn>/<base>-preview-hls/first_frame.jpg", // poster, Phase B
-  "final": false,        // true ONCE the preview reached ENDLIST (finalized)
-  "superseded": false    // true if the render finished first and the preview was cancelled
-}
+(a) CLIENT  ──supports_progressive:true──▶ (b) SERVER ──supports_progressive──▶ (c) WORKER ──preview+hls_manifest──▶ (d) CLIENT
+    219 app, per dispatch                     content-studio                      promptly-gpu-worker                   219 app reads
 ```
-- `final` / `superseded` are the TERMINAL STAMPS — either one means the final artifact is authoritative
-  and the client MUST swap to it. Only these stamped payloads are written at/after terminal status;
-  in-flight chunk payloads are fenced off before terminal.
 
-## THE FINAL ARTIFACT (unchanged, already live)
-On completion, the job's terminal result already carries the FINAL delivery:
-- `result.hls_manifest_url` → `https://<cdn>/<base>-hls/master.m3u8` (the fMP4 ladder, distinct
-  `-hls/` prefix — NEVER `-preview-hls/`)
-- `result.video_url` → the progressive-download MP4
-The final ALWAYS replaces the preview. The preview is never a terminal state.
+### (a) CLIENT → SERVER  [frontend owns]
+The 219 app POSTs the dispatch body with **`supports_progressive: true`** (a strict boolean `true`).
+Commit 309cc9c "send supports_progressive capability per dispatch (flip sequencing)". **VERIFY:** the
+client actually sets this to boolean `true` on the dispatch request (not a string, not omitted, not gated
+off by a local capability handshake). The server check is `=== true` (strict) — anything else = no preview.
 
-## CLIENT PLAYBACK FLOW
-1. **Job dispatched** → poll (or realtime-subscribe to) `video_jobs` for this job.
-2. **Preview appears** (`preview.preview_hls_url` non-null): show `first_frame_url` as a poster
-   immediately, then begin playing `preview_hls_url`. It is an **EVENT-type HLS playlist that GROWS**
-   as chunks publish — treat it as a live stream. It will NOT contain `#EXT-X-ENDLIST` until the whole
-   preview is finalized (partial-never-final is cert-guaranteed, so a growing manifest is always
-   safe to start).
-3. **Final ready** — swap to `result.hls_manifest_url` when ANY of:
-   - `status == "completed"` and `result.hls_manifest_url` present (the normal path), OR
-   - `preview.final == true` (preview finalized — final ladder is up), OR
-   - `preview.superseded == true` (render finished first; preview cancelled; final is authoritative).
-   The swap = load the `-hls/` master and seek to the current playback position. Preview→final SSIM
-   measured 0.976–0.986, so expect a subtle sharpening, no structural jump (Zac approved the look).
-4. **No preview** (short/single-chunk jobs, or progressive OFF): fall back to today's behavior —
-   wait for `status==completed` then play `result.hls_manifest_url`. Progressive is TH-only and
-   only engages for multi-composite-chunk renders; single-chunk jobs go inert (no preview).
+### (b) SERVER → WORKER  [content-studio, origin/main — CONFIRMED wired]
+- `server.js:4130`: `supportsProgressive = body?.supports_progressive === true && progressivePlaybackEnabled()`
+- `progressivePlaybackEnabled()` = `PROGRESSIVE_PLAYBACK_ENABLED` env (Render), accepts `1|true|yes|on`.
+- `dispatch-to-modal.js:577`: payload `supports_progressive: !!supportsProgressive` — TOP LEVEL of the
+  Modal payload (alongside `public_url`, `vibe`, `user_id`).
+- So the worker gets `supports_progressive:true` IFF (client sent `true`) AND (flag on). Either false → false.
 
-## SEMANTICS THE CLIENT CAN RELY ON (cert-guaranteed)
-- Preview prefix `-preview-hls/` is ALWAYS distinct from the final `-hls/`.
-- The preview EVENT playlist starts at media-sequence 0 and only grows; ENDLIST appears only when ALL
-  chunks are present.
-- Every published preview segment has A/V start+end skew ≤ 56ms.
-- The final artifact is byte-equivalent to a non-progressive render within the render's own run-to-run
-  noise (the publisher never re-renders and has no write path to the final).
+### (c) WORKER  [promptly-gpu-worker, v368+ — CONFIRMED wired]
+- `run_job(body)` → (SPAWN_MODE) `run_pipeline_bg.spawn(body)` → `handler({"input": body})` →
+  `input_data = body`, so `input_data.get("supports_progressive")` reads the top-level payload field. ✓
+- `_progressive_enabled(input_data)`: returns True if `supports_progressive` truthy (or `progressive_test`),
+  UNLESS `PROMPTLY_PROGRESSIVE=0` (backend kill switch). Default: per-job capability drives it.
+- When enabled + the render is multi-composite-chunk, the publisher publishes preview chunks to
+  `{base}-preview-hls/` and persists the payload to `video_jobs.preview` from segment 1.
+- **SEAM-TRACE (new, v369): every job logs `[progressive] GATE job=<id> supports_progressive=<v> -> enabled=<b>`
+  AND records a `progressive`/`progressive_gate` divergence** — queryable per job to prove (b)→(c).
 
-## THE COORDINATED FLIP
-Backend flip = set `PROMPTLY_PROGRESSIVE=1` (currently env-only dark; the flip promotes it to the
-canonical secret + gate). The worker machinery is deployed and cert-passed. **Do not flip the backend
-until: (a) the `preview` column migration has landed, and (b) the 219 client can consume this contract.**
-When both sides confirm ready, Zac flips on one word. First real iOS-recording confirmation happens
-during the 219 TestFlight pass (Zac's approval so far is on the server-side swap artifacts).
+### (d) WORKER → CLIENT  [the fields the client reads]
+- **`video_jobs.hls_manifest_url`** is written EARLY with the PREVIEW manifest once a chunk is playable
+  (`segments_published >= 1`, not final/superseded); the terminal completion write OVERWRITES it with the
+  FINAL manifest. So a client polling `hls_manifest_url` gets the preview first, then the final.
+- **`video_jobs.preview`** (jsonb) carries the richer payload: `{preview_hls_url, segments_published,
+  plan_summary, first_frame_url, final, superseded}`. `final:true`/`superseded:true` = swap to the final.
+- Preview prefix `-preview-hls/` is ALWAYS distinct from final `-hls/`. Preview EVENT playlist has no
+  ENDLIST until finalized. A/V skew ≤56ms per segment. Final is byte-equivalent to a non-progressive
+  render within the render's own run-to-run noise (publisher never re-renders, no write path to the final).
+
+## DEBUGGING A "NO PREVIEW" JOB (use the seam trace)
+1. Query `video_jobs` for the job: `preview` object-shaped? `hls_manifest_url` a `-preview-hls/` URL early?
+   If `preview` is `false`/null and hls is only the final → the worker never published → go to step 2.
+2. Grep the worker's `[progressive] GATE job=<id>` log, or query the `progressive_gate` divergence:
+   - `supports_progressive=false/None` → break is UPSTREAM (a client didn't send `true`, or b flag off).
+     The server+worker are correct; fix is client-side or the Render flag.
+   - `supports_progressive=true, enabled=true` but no preview published → the render was single-chunk
+     (publisher inert — short/minimal jobs have no composite chunks) OR the publisher tripped its loud
+     fallback (check `progressive_publish_fallback` divergence). Not a contract break.
+3. If the worker got `true` and published but the client showed nothing → seam (d): confirm the client
+   reads `hls_manifest_url` (early) or `preview.preview_hls_url` — the worker writes BOTH.
+
+## CURRENT KNOWN STATE (device test job c24ab2b6, 2026-07-26 21:35Z)
+`preview=false`, `hls_manifest_url=final only` → the worker NEVER PUBLISHED a preview on a 371s TH
+(multi-chunk) render → it received `supports_progressive` falsy. Server (3458d86) + worker (v368) were
+BOTH deployed before the job (3458d86 @20:51Z, v368 @21:10Z, job @21:35Z). So seams b/c are wired; the
+break is (a)/flag. The v369 seam trace will show the exact received value on the next test.
+
+## FLIP STATE
+- `PROMPTLY_PROGRESSIVE` (worker) = UNSET (kill switch inactive) → per-job `supports_progressive` gating.
+- `PROGRESSIVE_PLAYBACK_ENABLED` (Render) = set by Zac → server forwards when client sends true.
+- Both halves deployed. The remaining unknown is seam (a): does the 219 client send `supports_progressive:true`?

@@ -31897,7 +31897,25 @@ def handler(job):
         # proceeds exactly as today.
         global _PROGRESSIVE_PUB
         _prog_pub = None
-        if _progressive_enabled(input_data):
+        # SEAM TRACE (Zac 2026-07-26, no-preview-on-device debug): the two-sided
+        # contract must be OBSERVABLE. Log + ledger exactly what the worker
+        # RECEIVED (supports_progressive) and the gate result on EVERY job, so a
+        # single job id tells us whether the break is upstream (client didn't
+        # send / server didn't forward -> supports_progressive falsy here) or in
+        # the worker. Queryable via the divergence ledger (component=progressive).
+        _prog_sp = input_data.get("supports_progressive")
+        _prog_on = _progressive_enabled(input_data)
+        print(f"[progressive] GATE job={job_id} supports_progressive={_prog_sp!r} "
+              f"progressive_test={input_data.get('progressive_test')!r} "
+              f"PROMPTLY_PROGRESSIVE={os.environ.get('PROMPTLY_PROGRESSIVE', '')!r} "
+              f"-> enabled={_prog_on}", flush=True)
+        _record_divergence(
+            "progressive",
+            {"supports_progressive": _prog_sp, "enabled": bool(_prog_on),
+             "job_id": job_id},
+            "progressive_gate",
+            reason=f"supports_progressive={_prog_sp} enabled={_prog_on}")
+        if _prog_on:
             try:
                 from progressive_publish import ProgressivePublisher
                 _prog_pub = ProgressivePublisher(

@@ -8124,8 +8124,8 @@ def _progressive_flag_law():
     assert _h.count("_PROGRESSIVE_PUB is not None") >= 4, \
         "all four hooks (begin_attempt/chunk_ready/audio_ready/finalize) must be None-guarded"
     # The wiring block itself is gated on the flag helper.
-    assert "if _progressive_enabled(input_data):" in _h, \
-        "publisher instantiation must sit behind the flag check"
+    assert "_prog_on = _progressive_enabled(input_data)" in _h and "if _prog_on:" in _h, \
+        "publisher instantiation must sit behind the gate result (_prog_on = _progressive_enabled(...))"
     assert 'input_data.get("progressive_test")' in _h, \
         "per-job cert override (progressive_test) must be read"
 
