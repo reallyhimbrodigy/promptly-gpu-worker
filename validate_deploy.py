@@ -5525,6 +5525,88 @@ def _zero_reject_wiring():
         assert f'"{_mod}"' in _m, f"{_mod} must be baked into the worker image"
 
 
+@check("PROGRESSIVE TERMINAL SEAM + BAR REDESIGN (Zac ruling 1, 2026-07-25): (b-race) the publisher's every input/output lives inside work_dir, so the handler's terminal finally must drain-or-cancel it BEFORE shutil.rmtree — success path (finalize requested) gets a bounded 120s drain so the last chunk transcodes finish cleanly; anything else (or drain timeout) is a DELIBERATE cancel: quiet worker exit (never the loud _fail), progressive_cancelled ledger, payload stamped superseded. (a) a preview is NEVER servable as a terminal state: finalize stamps payload final=true, cancel stamps superseded=true, and ONLY stamped payloads bypass _persist_preview's terminal status fence. CERT bars: FINAL byte-identical under a baseline-vs-baseline2 DETERMINISM CONTROL (names render_nondeterministic vs progressive_leg_perturbs_render honestly); PREVIEW relaxed to SSIM>=0.999 vs final (RELAX BAR — separate -bf 0 encode, replaced by final); terminal_state asserts result.hls_manifest_url points at the final ladder.")
+def _progressive_terminal_seam():
+    _h = open("handler.py").read()
+    # early init so every path reaching the finally can reference the handle
+    assert "_prog_pub = None         # progressive publisher handle; the terminal seam drains it" in _h, \
+        "_prog_pub must init beside work_dir creation (pre-TH-tail paths reach the finally)"
+    # the seam sits inside the terminal finally BEFORE work_dir teardown
+    _fin = _h.find("PROGRESSIVE TERMINAL SEAM (Zac ruling 1b")
+    assert _fin != -1, "terminal seam block missing"
+    _rm = _h.find("shutil.rmtree(work_dir, ignore_errors=True)", _fin)
+    assert _rm != -1 and (_rm - _fin) < 2000, "the seam must run IMMEDIATELY before the terminal rmtree"
+    _seam = _h[_fin:_rm]
+    assert "_prog_pub.finalize_requested" in _seam and "_prog_pub.drain(timeout_s=120.0)" in _seam \
+        and '_prog_pub.cancel("terminal_drain_timeout")' in _seam \
+        and '_prog_pub.cancel("job_terminal_before_finalize")' in _seam, \
+        "seam law: bounded drain on the finalize path; deliberate cancel otherwise"
+    # stamped payloads bypass the terminal fence; chunk payloads keep it
+    assert 'if not (payload.get("final") or payload.get("superseded")):' in _h, \
+        "_persist_preview: only stamped terminal payloads bypass the status fence"
+    _p = open("progressive_publish.py").read()
+    assert "class _PublishCancelled(Exception):" in _p and "def cancel(self" in _p \
+        and "def drain(self" in _p and "def finalize_requested(self)" in _p, \
+        "publisher must expose cancel/drain/finalize_requested"
+    assert _p.count("self._cancelled") >= 6, "cancel checkpoints must cover the publish path (audio wait, post-transcode, pre-upload)"
+    assert '"final": bool(self.finalized)' in _p and '"superseded": bool(superseded)' in _p, \
+        "payload stamps: final on finalize, superseded on cancel"
+    assert "progressive_cancelled" in _p, "the deliberate cancel is ledgered (visible, non-defect)"
+    assert "post-cancel worker noise suppressed" in _p, \
+        "teardown-adjacent noise after a deliberate cancel must not fire the loud fallback"
+    _c = open("cert_progressive_app.py").read()
+    assert "DETERMINISM CONTROL" in _c and 'cap["deterministic"] = filecmp.cmp(kb, kb2' in _c, \
+        "cert: baseline2 determinism control"
+    assert 'eq["ok"] = bool(cap["deterministic"] and cap["bytes_identical"])' in _c, \
+        "cert: FINAL bar is strict byte-identity under the determinism control"
+    assert "render_nondeterministic" in _c and "progressive_leg_perturbs_render" in _c, \
+        "cert: failure mechanisms are NAMED, never blended"
+    assert 'pv["ssim_preview_vs_final"] >= 0.999' in _c, "cert: preview bar SSIM>=0.999 (RELAX BAR ruling)"
+    assert '"-preview-hls" not in ts["result_hls_manifest_url"]' in _c \
+        and 'payload.get("final") is True' in _c, \
+        "cert: terminal state points at the final ladder + stamped payload"
+
+
+@check("LOUD FAIL-SAFE LEDGERS (Zac standing rule 2026-07-25): a fallback that masks a MISSING MODULE or ABSENT DB COLUMN must ledger an explicit defect-class divergence (action *_defect, component 'defect') so the daily [REPORT] defects line surfaces it — degrade allowed, silence not. Worker sites: ImportError ledgers at the deferred-import swallows (burned_text arm, motion-curve extract, recipe_eval run+perturb, premium scaffold, edit_policy arm, prewarm_volume reload) + PGRST204 detection at every video_jobs persist helper (job-status write/read, ask-back, step-token, edit-rationale, post-package, preview). The ledger writer itself failing stays print-only (recursion floor).")
+def _loud_failsafe_ledgers():
+    _h = open("handler.py").read()
+    assert "def _ledger_defect(kind, site, err, job_id=None):" in _h, "the defect-ledger helper"
+    assert '"{kind}_defect"' in _h or 'f"{kind}_defect"' in _h, "action must be {kind}_defect (server matcher pins /_defect$/)"
+    _mm = _h.count('_ledger_defect("missing_module"')
+    assert _mm >= 6, f"missing_module defect ledgers at the import swallows (found {_mm}, need >=6)"
+    _ac = _h.count('_ledger_defect("absent_column"')
+    assert _ac >= 7, f"absent_column defect ledgers at the persist helpers (found {_ac}, need >=7)"
+    assert _h.count('"PGRST204" in str(') >= 7, "PGRST204 detection at every persist fail-open"
+
+
+@check("LOUD FAIL-SAFE MOUNT LAW (Zac standing rule 2026-07-25, from the moodreel_editor + progressive_publish mount catches): EVERY repo-local module that handler.py defer-imports inside a function body MUST be add_local_file-baked into the worker image — derived DYNAMICALLY from the source so any future mode is covered the day it is written. A deferred import inside a fail-safe try/except is exactly the class that dies silently (the fallback masks the ImportError and the feature quietly never runs); top-level imports crash loudly at container start and need no law.")
+def _loud_failsafe_mount_law():
+    import re as _re, os as _os
+    _h = open("handler.py").read()
+    _local = {f[:-3] for f in _os.listdir(".") if f.endswith(".py")}
+    _mods = set()
+    for _m in _re.finditer(r"^[ \t]+import ([a-z_][a-z0-9_]*)", _h, _re.M):
+        if _m.group(1) in _local:
+            _mods.add(_m.group(1))
+    for _m in _re.finditer(r"^[ \t]+from ([a-z_][a-z0-9_]*) import", _h, _re.M):
+        if _m.group(1) in _local:
+            _mods.add(_m.group(1))
+    assert _mods, "the scan must find the known deferred imports (regex drift?)"
+    # the known family is the floor — if the scan ever misses these, the regex broke
+    for _known in ("general_editor", "hype_editor", "minimal_editor", "hype_render",
+                   "moodreel_editor", "progressive_publish"):
+        assert _known in _mods, f"scan lost a known deferred module: {_known} (regex drift)"
+    # modal_app is the app-definition module: Modal auto-mounts it in deployed
+    # containers (the function is DEFINED in it) and it cannot add_local_file
+    # itself into its own image. The only lawful exemption.
+    _mods.discard("modal_app")
+    _ma = open("modal_app.py").read()
+    _missing = sorted(_mod for _mod in _mods if f'"{_mod}.py"' not in _ma)
+    assert not _missing, (
+        f"deferred repo-local imports NOT baked into the worker image (they will "
+        f"die SILENTLY inside their fail-safes): {_missing}")
+
+
 @check("MOODREEL ROUTE + ADOPTED MINIMAL PACING (Zac verdicts 2026-07-25: MOODREEL APPROVED + PAIR1 B + PAIR2 B): the route ladder inside _run_minimal_pipeline is hype (confident beat) -> MOODREEL (cinematic motion-resolve cut for no_speech/not_talking_head/no_audio clips >=8s without confident music; motion curve -> build_moodreel_prompt -> Gemini HypePlan) -> minimal; EVERY miss fail-safes to minimal (a moodreel attempt can never cost a user their video). The motion curve is extracted ONCE (fail-safe []) and shared: moodreel doctrine + the ADOPTED minimal pacing — boundaries at motion PEAKS (pair 2) + low-motion boundary skip-trims 0.4-0.8s median-relative (pair 1); no curve -> today's even pacing byte-identical. Flag PROMPTLY_MOODREEL (Secret canonical =1), per-job override moodreel_test; moodreel_editor.py baked into the image (the progressive-mount lesson: an unmounted module dies silently inside the fail-safe).")
 def _moodreel_route_wiring():
     _h = open("handler.py").read()

@@ -63,6 +63,10 @@ import threading
 import time
 
 # ── Tunables (env-overridable; defaults sized for the production render) ────
+class _PublishCancelled(Exception):
+    """Deliberate terminal-seam cancel — worker exits quietly, never _fail."""
+
+
 _AUDIO_WAIT_S = float(os.environ.get("PROMPTLY_PROGRESSIVE_AUDIO_WAIT_S", "") or 900.0)
 _IDLE_ABANDON_S = float(os.environ.get("PROMPTLY_PROGRESSIVE_IDLE_S", "") or 1200.0)
 _TOTAL_DEADLINE_S = float(os.environ.get("PROMPTLY_PROGRESSIVE_DEADLINE_S", "") or 7200.0)
@@ -179,6 +183,7 @@ class ProgressivePublisher:
         self._attempts = 0
         self._audio_evt = threading.Event()
         self._finalize_requested = False
+        self._cancelled = False       # deliberate terminal-seam cancel (not a defect)
         self._master_uploaded = False
         self._first_frame_url = None
         self._last_progress = time.time()
@@ -282,6 +287,56 @@ class ProgressivePublisher:
         except Exception as e:  # pragma: no cover — event API never raises
             self._fail("finalize", e)
 
+    @property
+    def finalize_requested(self):
+        return bool(self._finalize_requested)
+
+    def drain(self, timeout_s=120.0):
+        """Bounded wait for the worker to reach a terminal state (finalized /
+        disabled / inert / never started). Returns True when the worker is done.
+        Called at the handler's terminal seam BEFORE work_dir teardown — the
+        publisher's every input and output lives inside work_dir, so teardown
+        under an in-flight publish is the long-clip race (cert 2026-07-25)."""
+        t = self._thread
+        if t is None or not t.is_alive():
+            return True
+        t.join(timeout=max(0.0, float(timeout_s)))
+        return not t.is_alive()
+
+    def cancel(self, reason="terminal_teardown"):
+        """Deliberate stop at the terminal seam: the FINAL artifact is already
+        delivered, so the preview is moot — this is a designed path, NOT the
+        loud _fail fallback (no PUBLISH FALLBACK, no defect ledger). It is
+        still ledgered (progressive_cancelled) and the persisted payload is
+        stamped superseded so a preview is never servable as a terminal state
+        (Zac ruling 1a, 2026-07-25)."""
+        try:
+            with self._cond:
+                if self.finalized or self.disabled or self.inert:
+                    return
+                self._cancelled = True
+                self.disabled = True
+                self._cond.notify_all()
+            self._audio_evt.set()   # wake any audio-law wait immediately
+            print(f"[progressive] CANCELLED ({reason}) — final delivered, "
+                  f"preview publishing stopped after "
+                  f"{self.segments_published} chunk group(s)", flush=True)
+            try:
+                if self._divergence_cb is not None:
+                    self._divergence_cb(
+                        "render",
+                        {"stage": "cancel", "reason": reason,
+                         "job_id": self._job_id,
+                         "published": int(self.segments_published)},
+                        "progressive_cancelled",
+                        reason=f"deliberate terminal-seam cancel ({reason})")
+            except Exception as de:
+                print(f"[progressive] cancel divergence record failed: {de}",
+                      flush=True)
+            self._persist_payload(superseded=True)
+        except Exception:   # never raise into the terminal seam
+            pass
+
     # ── Worker ──────────────────────────────────────────────────────────────
 
     def _run(self):
@@ -332,11 +387,21 @@ class ProgressivePublisher:
             print(f"[progressive] FINALIZED — {self.segments_published} chunk "
                   f"group(s) published, ENDLIST written → "
                   f"{self.preview_hls_url}", flush=True)
+        except _PublishCancelled as ce:
+            print(f"[progressive] worker exit on cancel: {ce}", flush=True)
         except Exception as e:
-            self._fail("worker", e)
+            if self._cancelled:
+                # teardown-adjacent noise after a deliberate cancel is not a
+                # defect — the loud fallback is reserved for real publish bugs
+                print(f"[progressive] post-cancel worker noise suppressed: "
+                      f"{type(e).__name__}: {e}", flush=True)
+            else:
+                self._fail("worker", e)
 
     def _publish_chunk(self, k, chunk_path, frame_start, frame_end):
         t0 = time.time()
+        if self._cancelled:
+            raise _PublishCancelled(f"chunk {k} skipped: cancelled")
         if not os.path.exists(chunk_path) or os.path.getsize(chunk_path) < 1000:
             raise RuntimeError(
                 f"chunk {k} file missing/invalid at publish time: {chunk_path}")
@@ -348,6 +413,8 @@ class ProgressivePublisher:
             raise RuntimeError(
                 f"final audio not ready within {_AUDIO_WAIT_S:.0f}s — cannot "
                 f"publish chunk {k} without its audio slice")
+        if self._cancelled:   # cancel() sets the event to break the wait
+            raise _PublishCancelled(f"chunk {k} skipped: cancelled during audio wait")
         if (not self._audio_path or not os.path.exists(self._audio_path)
                 or os.path.getsize(self._audio_path) < 44):
             raise RuntimeError(
@@ -410,6 +477,8 @@ class ProgressivePublisher:
                 f"preview transcode of chunk {k} failed "
                 f"(rc={r.returncode}): {(r.stderr or '')[-800:]}")
 
+        if self._cancelled:
+            raise _PublishCancelled(f"chunk {k} discarded post-transcode: cancelled")
         segments = self._parse_chunk_playlist(chunk_pl)
         if not segments:
             raise RuntimeError(
@@ -499,16 +568,22 @@ class ProgressivePublisher:
                   f"{type(fe).__name__}: {fe}", flush=True)
             self._first_frame_url = None
 
-    def _persist_payload(self):
+    def _persist_payload(self, superseded=False):
         """Phase B: hand the preview payload to the injected persist callback
         (handler._persist_preview — daemon, fail-open, terminal-fenced).
-        Fail-open here too: a status-write miss never costs the preview."""
+        Fail-open here too: a status-write miss never costs the preview.
+        TERMINAL-STATE LAW (Zac ruling 1a): the payload carries `final` once
+        ENDLIST is written and `superseded` on a terminal-seam cancel — a
+        preview must never be servable as a terminal state; the client always
+        swaps to the final artifact."""
         try:
             payload = {
                 "preview_hls_url": self.preview_hls_url,
                 "segments_published": int(self.segments_published),
                 "plan_summary": self._plan_summary,
                 "first_frame_url": self._first_frame_url,
+                "final": bool(self.finalized),
+                "superseded": bool(superseded),
             }
             self.last_payload = payload
             if self._persist_cb is not None:

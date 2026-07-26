@@ -9507,7 +9507,9 @@ def _perturb_scene_prompt(scene, qa_reason, attempt, score=None):
         )
         _new = (getattr(_resp, "text", "") or "").strip()
         return _new or None
-    except Exception:
+    except Exception as _pt_err:
+        if isinstance(_pt_err, ImportError):
+            _ledger_defect("missing_module", "recipe_eval_perturb", _pt_err)
         return None
 
 
@@ -10891,6 +10893,24 @@ def _record_divergence(component, original, action, *, final=None, reason=""):
 _DIVERGENCE_LOG: list = []
 
 
+def _ledger_defect(kind, site, err, job_id=None):
+    """LOUD FAIL-SAFE LAW (Zac standing rule 2026-07-25, from the
+    moodreel_editor/progressive_publish mount catches): a fallback that masks a
+    MISSING MODULE or ABSENT DB COLUMN must ledger an explicit defect-class
+    divergence — action `{kind}_defect` — so it surfaces in the daily [REPORT]
+    defects line. Degrade is allowed; silence is not. kind: "missing_module" |
+    "absent_column". Never raises."""
+    try:
+        _record_divergence(
+            "defect",
+            {"site": site, "detail": str(err)[:300],
+             **({"job_id": job_id} if job_id else {})},
+            f"{kind}_defect",
+            reason=f"{site}:{type(err).__name__}")
+    except Exception:
+        pass
+
+
 def _flush_divergence_ledger(job_id):
     """Persist this job's accumulated divergences to S3 as JSONL so the overrule spine
     is QUERYABLE by component+action across renders (not print-to-void). Best-effort:
@@ -11270,7 +11290,11 @@ def generate_edit_gemini(
             import burned_text as _bt_mod
             _burned_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
             _burned_future = _burned_pool.submit(_bt_mod.detect_burned_in_text, video_path)
-        except Exception:
+        except Exception as _bt_err:
+            print(f"[burned-text] arm failed ({type(_bt_err).__name__}: "
+                  f"{_bt_err}) — detector off this job", flush=True)
+            if isinstance(_bt_err, ImportError):
+                _ledger_defect("missing_module", "burned_text_arm", _bt_err)
             _burned_future = None
 
     # ── EditPolicy enforcement scope (Phase 2 · Steps 2-4) ───────────────────
@@ -12108,6 +12132,9 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 except Exception as _eval_err:
                     # Eval errors must never block the render — log and continue.
                     print(f"[recipe-eval] error: {_eval_err} (non-blocking)", flush=True)
+                    if isinstance(_eval_err, ImportError):
+                        _ledger_defect("missing_module", "recipe_eval_run",
+                                       _eval_err)
 
             # ── DELETED (Zac step-6): the claims-but-empty detector + the overlay
             # reconcile re-ask (a LIVE Gemini call that ran and was overwritten by
@@ -26450,6 +26477,8 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                       f"patch_keys={sorted(patch.keys())} matched=0", flush=True)
         except Exception as e:
             print(f"[job-status] write failed job={job_id}: {e} (fail open)", flush=True)
+            if "PGRST204" in str(e):
+                _ledger_defect("absent_column", "job_status_write", e, job_id=job_id)
         if _terminal:
             _JOB_PROGRESS_HW.pop(job_id, None)  # free the high-water entry — warm containers reuse the process
 
@@ -26830,6 +26859,8 @@ def read_job_status(job_id):
         return r.data[0] if r.data else {"status": "unknown"}
     except Exception as e:
         print(f"[job-status] read failed job={job_id}: {e} (fail open)", flush=True)
+        if "PGRST204" in str(e):
+            _ledger_defect("absent_column", "job_status_read", e, job_id=job_id)
         return {"status": "unknown"}
 
 
@@ -26931,6 +26962,8 @@ def _emit_ask_and_suspend(job_id, ask, partial_state, app_url=None):
         )
     except Exception as _e:
         print(f"[ask-back] status write failed job={job_id}: {_e} (fail open)", flush=True)
+        if "PGRST204" in str(_e):
+            _ledger_defect("absent_column", "ask_back_write", _e, job_id=job_id)
     print(
         f"[ask-back] parked job={job_id} ask_id={ask.get('ask_id')} "
         f"kinds={ask.get('answer_kinds')} optional={ask.get('optional')} — suspended (no slot held)",
@@ -27030,6 +27063,8 @@ def _persist_step_token(job_id, step, message):
                 "status", ("failed", "canceled", "completed")).execute()
         except Exception as e:
             print(f"[step-durable] write failed job={job_id}: {e} (fail open)", flush=True)
+            if "PGRST204" in str(e):
+                _ledger_defect("absent_column", "step_token_write", e, job_id=job_id)
 
     threading.Thread(target=_w, daemon=True).start()
 
@@ -27059,6 +27094,8 @@ def _persist_edit_rationale(job_id, rationale):
                 "status", ("failed", "canceled", "completed")).execute()
         except Exception as e:
             print(f"[edit-rationale] write failed job={job_id}: {e} (fail open)", flush=True)
+            if "PGRST204" in str(e):
+                _ledger_defect("absent_column", "edit_rationale_write", e, job_id=job_id)
 
     threading.Thread(target=_w, daemon=True).start()
 
@@ -27103,6 +27140,8 @@ def _persist_post_package(job_id, package):
                 "status", ("failed", "canceled", "completed")).execute()
         except Exception as e:
             print(f"[post-package] write failed job={job_id}: {e} (fail open)", flush=True)
+            if "PGRST204" in str(e):
+                _ledger_defect("absent_column", "post_package_write", e, job_id=job_id)
 
     threading.Thread(target=_w, daemon=True).start()
 
@@ -27156,12 +27195,20 @@ def _persist_preview(job_id, payload):
 
     def _w():
         try:
-            supabase.table("video_jobs").update(
+            _q = supabase.table("video_jobs").update(
                 {"preview": payload}
-            ).eq("id", job_id).not_.in_(
-                "status", ("failed", "canceled", "completed")).execute()
+            ).eq("id", job_id)
+            # TERMINAL-STATE LAW (Zac ruling 1a): stamped payloads (final /
+            # superseded) are the swap-to-final fence for the client and are
+            # written AT or AFTER the terminal status by design — only the
+            # in-flight chunk payloads keep the terminal fence.
+            if not (payload.get("final") or payload.get("superseded")):
+                _q = _q.not_.in_("status", ("failed", "canceled", "completed"))
+            _q.execute()
         except Exception as e:
             print(f"[preview-persist] write failed job={job_id}: {e} (fail open)", flush=True)
+            if "PGRST204" in str(e):
+                _ledger_defect("absent_column", "preview_write", e, job_id=job_id)
 
     threading.Thread(target=_w, daemon=True).start()
 
@@ -27415,6 +27462,14 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         _mcurve = _mre.extract_motion_curve(_canon) or []
     except Exception as _mc_err:
         print(f"[minimal-route] motion-curve fail-safe ({type(_mc_err).__name__})", flush=True)
+        if isinstance(_mc_err, ImportError):
+            _ledger_defect("missing_module", "motion_curve_extract", _mc_err,
+                           job_id=job_id)
+        else:
+            _record_divergence(
+                "routing", {"error": type(_mc_err).__name__},
+                "motion_curve_fallback",
+                reason="curve extraction failed — even pacing, moodreel ineligible")
     _hype_bpm = None  # S-PACKAGE: measured tempo for the deterministic hype package
     _hype_on = bool(input_data.get("hype_test")) or _ge._hype_mode_enabled()
     if _hype_on and reason in ("no_speech", "not_talking_head") and _dur >= 8.0:
@@ -28473,6 +28528,7 @@ def handler(job):
     global _ACTIVE_JOB_ID
     _ACTIVE_JOB_ID = input_data.get("job_id")  # for the platform-shutdown ledger flush
     work_dir = None
+    _prog_pub = None         # progressive publisher handle; the terminal seam drains it
     premium_ctx = None       # Phase 1 premium scaffold (assigned at the tier fork; torn down in finally)
     _cost_meter = None
     route_premium = False
@@ -28601,6 +28657,9 @@ def handler(job):
                 f"{str(_pm_err)[:120]}) — base path",
                 flush=True,
             )
+            if isinstance(_pm_err, ImportError):
+                _ledger_defect("missing_module", "premium_scaffold", _pm_err,
+                               job_id=job_id)
             premium_ctx = None
             _cost_meter = None
             route_premium = False
@@ -28862,6 +28921,9 @@ def handler(job):
                 _pv.reload()
             except Exception as _rl_err:
                 print(f"[pipeline] volume reload failed: {_rl_err}", flush=True)
+                if isinstance(_rl_err, ImportError):
+                    _ledger_defect("missing_module", "prewarm_volume_reload",
+                                   _rl_err, job_id=job_id)
             time.sleep(0.5)
             _has_cached_source = os.path.exists(_cached_source_path) and os.path.getsize(_cached_source_path) > 1024
             _has_cached_transcript = (
@@ -30907,6 +30969,9 @@ def handler(job):
                     f"({type(_ep_imp_err).__name__}: {str(_ep_imp_err)[:120]}) — disabled this job",
                     flush=True,
                 )
+                if isinstance(_ep_imp_err, ImportError):
+                    _ledger_defect("missing_module", "edit_policy_arm",
+                                   _ep_imp_err, job_id=job_id)
                 future_policy = None
 
         # Collect results — get edit_plan FIRST so we can start B-roll fetch early
@@ -32837,6 +32902,27 @@ def handler(job):
             _cost_meter.log()
         if premium_ctx is not None:
             premium_ctx.shutdown()
+        # PROGRESSIVE TERMINAL SEAM (Zac ruling 1b, 2026-07-25 — the long-clip
+        # race): every preview input/output lives inside work_dir, so the
+        # publisher must reach a terminal state BEFORE teardown. Success path
+        # (finalize was requested at mux time): bounded drain lets the last
+        # 1-2 chunk transcodes finish cleanly (~20s each). Anything else — or
+        # a drain timeout — is a deliberate cancel: the final is delivered (or
+        # the job failed), the preview is moot, and the payload is stamped
+        # superseded so a preview is never servable as a terminal state.
+        try:
+            if _prog_pub is not None and not (
+                    _prog_pub.finalized or _prog_pub.disabled or _prog_pub.inert):
+                if _prog_pub.finalize_requested:
+                    if not _prog_pub.drain(timeout_s=120.0):
+                        _prog_pub.cancel("terminal_drain_timeout")
+                        _prog_pub.drain(timeout_s=10.0)
+                else:
+                    _prog_pub.cancel("job_terminal_before_finalize")
+                    _prog_pub.drain(timeout_s=10.0)
+        except Exception as _ts_err:
+            print(f"[progressive] terminal seam error (non-fatal): "
+                  f"{type(_ts_err).__name__}: {_ts_err}", flush=True)
         if work_dir:
             shutil.rmtree(work_dir, ignore_errors=True)
         # LEVER 4 lifecycle: delete the job's UPLOADED proxy reference (only

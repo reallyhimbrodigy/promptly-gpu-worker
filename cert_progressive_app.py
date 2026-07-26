@@ -157,7 +157,8 @@ def run_case(case: dict) -> dict:
         # ── 3. render_multi_clip wrapper — equivalence dual-render ───────────
         orig_rmc = H.render_multi_clip
         cap = {"ran": False, "pub": None, "n_calls": 0,
-               "bytes_identical": None, "baseline": None, "progressive": None,
+               "bytes_identical": None, "deterministic": None,
+               "baseline": None, "baseline2": None, "progressive": None,
                "err": None}
         cap_lock = threading.Lock()
 
@@ -181,9 +182,20 @@ def run_case(case: dict) -> dict:
             b_plan = copy.deepcopy(edit_plan)
             b_tx = copy.deepcopy(transcript)
             b_out = os.path.join(work_dir, "cert_baseline.mp4")
+            b2_out = os.path.join(work_dir, "cert_baseline2.mp4")
             H._PROGRESSIVE_PUB = None
             try:
                 orig_rmc(source_path, b_cuts, b_plan, b_out, b_tx, work_dir,
+                         speech_segments=copy.deepcopy(speech_segments),
+                         broll_clips=copy.deepcopy(broll_clips))
+                # DETERMINISM CONTROL (2026-07-25): the SAME plan rendered a
+                # third time with the publisher off. If baseline != baseline2
+                # the render itself is nondeterministic and the strict final
+                # byte-identity bar is unmeetable — the cert must NAME that
+                # mechanism, not blame the progressive leg.
+                orig_rmc(source_path, copy.deepcopy(cuts),
+                         copy.deepcopy(edit_plan), b2_out,
+                         copy.deepcopy(transcript), work_dir,
                          speech_segments=copy.deepcopy(speech_segments),
                          broll_clips=copy.deepcopy(broll_clips))
             finally:
@@ -195,10 +207,13 @@ def run_case(case: dict) -> dict:
                          broll_clips=broll_clips)
             # Keep both outputs OUTSIDE the handler's work_dir (teardown-safe).
             kb = os.path.join(keep, "baseline.mp4")
+            kb2 = os.path.join(keep, "baseline2.mp4")
             kp = os.path.join(keep, "progressive.mp4")
             shutil.copy2(b_out, kb)
+            shutil.copy2(b2_out, kb2)
             shutil.copy2(output_path, kp)
-            cap["baseline"], cap["progressive"] = kb, kp
+            cap["baseline"], cap["baseline2"], cap["progressive"] = kb, kb2, kp
+            cap["deterministic"] = filecmp.cmp(kb, kb2, shallow=False)
             cap["bytes_identical"] = filecmp.cmp(kb, kp, shallow=False)
             return r
 
@@ -256,18 +271,33 @@ def run_case(case: dict) -> dict:
                             "failed before both outputs existed)")
             return out
 
-        # ── (a) EQUIVALENCE ─────────────────────────────────────────────────
-        eq = {"bytes_identical": cap["bytes_identical"], "ssim_all": None}
-        if not cap["bytes_identical"]:
+        # ── (a) EQUIVALENCE (Zac ruling 1, 2026-07-25) ──────────────────────
+        # The DELIVERED FINAL must be byte-identical to the publisher-off
+        # render of the same plan — asserted strictly, under a determinism
+        # control (baseline vs baseline2) that names the mechanism honestly
+        # when identical-input renders differ at all.
+        def _ssim(a, b):
             r = subprocess.run(
-                ["ffmpeg", "-v", "info", "-i", cap["baseline"],
-                 "-i", cap["progressive"], "-lavfi", "ssim", "-f", "null", "-"],
+                ["ffmpeg", "-v", "info", "-i", a, "-i", b,
+                 "-lavfi", "ssim", "-f", "null", "-"],
                 capture_output=True, text=True, timeout=1800)
             m = re.search(r"All:([0-9.]+)", r.stderr or "")
-            eq["ssim_all"] = float(m.group(1)) if m else None
-        eq["ok"] = bool(cap["bytes_identical"]
-                        or (eq["ssim_all"] is not None
-                            and eq["ssim_all"] >= 0.9999))
+            return float(m.group(1)) if m else None
+
+        eq = {"deterministic": cap["deterministic"],
+              "final_bytes_identical": cap["bytes_identical"],
+              "ssim_baseline_vs_baseline2": None,
+              "ssim_final_vs_baseline": None, "mechanism": None}
+        if not cap["deterministic"]:
+            eq["ssim_baseline_vs_baseline2"] = _ssim(cap["baseline"],
+                                                     cap["baseline2"])
+            eq["mechanism"] = "render_nondeterministic"
+        if not cap["bytes_identical"]:
+            eq["ssim_final_vs_baseline"] = _ssim(cap["baseline"],
+                                                 cap["progressive"])
+            if eq["mechanism"] is None:
+                eq["mechanism"] = "progressive_leg_perturbs_render"
+        eq["ok"] = bool(cap["deterministic"] and cap["bytes_identical"])
         out["equivalence"] = eq
 
         # ── (b) PARTIAL ≠ FINAL (live manifest history) ─────────────────────
@@ -341,9 +371,48 @@ def run_case(case: dict) -> dict:
                         and manifest_groups == n_chunks)
         out["completeness"] = cn
 
+        # ── (f) PREVIEW VISUAL BAR (Zac ruling 1: relaxed to ~0.999 for the
+        # PREVIEW artifact only — it is a separate -bf 0 encode, replaced by
+        # the final; "visually identical" is its honest bar) ────────────────
+        pv = {"ssim_preview_vs_final": None}
+        try:
+            seg_list = [os.path.join(segdir, os.path.basename(k))
+                        for k in seg_keys]
+            concat_arg = "concat:" + "|".join(seg_list)
+            prev_cat = os.path.join(work, "preview_concat.ts")
+            subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-i", concat_arg,
+                 "-c", "copy", prev_cat],
+                check=True, capture_output=True, text=True, timeout=600)
+            r = subprocess.run(
+                ["ffmpeg", "-v", "info", "-i", prev_cat,
+                 "-i", cap["progressive"], "-lavfi", "ssim",
+                 "-f", "null", "-"],
+                capture_output=True, text=True, timeout=1800)
+            m = re.search(r"All:([0-9.]+)", r.stderr or "")
+            pv["ssim_preview_vs_final"] = float(m.group(1)) if m else None
+        except Exception as pe:
+            pv["error"] = f"{type(pe).__name__}: {pe}"
+        pv["ok"] = bool(pv["ssim_preview_vs_final"] is not None
+                        and pv["ssim_preview_vs_final"] >= 0.999)
+        out["preview_visual"] = pv
+
         final_listed = s3.list_objects_v2(Bucket=bucket, Prefix=final_prefix + "/")
         final_keys = [o["Key"] for o in (final_listed.get("Contents") or [])]
         payload = pub.last_payload or {}
+
+        # ── (g) TERMINAL STATE (Zac ruling 1a: a preview must NEVER be
+        # servable as a terminal state — the final always replaces it) ──────
+        ts = {"result_hls_manifest_url": str(res.get("hls_manifest_url") or ""),
+              "payload_final": payload.get("final"),
+              "payload_superseded": payload.get("superseded"),
+              "finalized": bool(pub.finalized)}
+        ts["ok"] = bool(
+            "-preview-hls" not in ts["result_hls_manifest_url"]
+            and "-hls/" in ts["result_hls_manifest_url"]
+            and pub.finalized and payload.get("final") is True
+            and not payload.get("superseded"))
+        out["terminal_state"] = ts
         px = {"preview_prefix": preview_prefix, "final_prefix": final_prefix,
               "distinct": preview_prefix != final_prefix,
               "final_ladder_objects": len(final_keys),
@@ -354,14 +423,14 @@ def run_case(case: dict) -> dict:
             px["distinct"]
             and "-preview-hls/" in str(payload.get("preview_hls_url"))
             and len(final_keys) > 0
-            and sorted(payload.keys()) == ["first_frame_url", "plan_summary",
-                                           "preview_hls_url",
-                                           "segments_published"]
+            and sorted(payload.keys()) == ["final", "first_frame_url",
+                                           "plan_summary", "preview_hls_url",
+                                           "segments_published", "superseded"]
             and px["first_frame_in_s3"])
         out["prefix_and_payload"] = px
 
-        out["ok"] = bool(eq["ok"] and pf["ok"] and av["ok"] and cn["ok"]
-                         and px["ok"])
+        out["ok"] = bool(eq["ok"] and pv["ok"] and ts["ok"] and pf["ok"]
+                         and av["ok"] and cn["ok"] and px["ok"])
         return out
     except Exception as e:
         out["error"] = f"{type(e).__name__}: {e}"
@@ -400,7 +469,9 @@ def main():
         print(json.dumps(r, indent=2, default=str))
     verdict = {"cert": "progressive-delivery", "cases": len(cases),
                "pass": npass, "ok": npass == len(cases),
-               "bar": {"equivalence": "bytes or SSIM>=0.9999",
+               "bar": {"final": "byte-identical (determinism-controlled)",
+                       "preview": "SSIM>=0.999 vs final (Zac RELAX BAR 2026-07-25)",
+                       "terminal_state": "result points at final; payload stamped final — preview never terminal",
                        "partial_never_final": "no ENDLIST until ALL chunks",
                        "av_law_ms": AV_SKEW_LIMIT_MS,
                        "completeness": "published == chunks",
