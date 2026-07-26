@@ -69,13 +69,33 @@ def _motion_cuts(motion_curve: List[float], duration: float, target_s: float,
 def build_minimal_plan(source_duration: float, fps: float = 30.0,
                        motion_curve: Optional[List[float]] = None,
                        target_clip_s: float = 2.5, min_clip_s: float = 1.2,
-                       transition_every: int = 4) -> HypePlan:
-    """Deterministic minimal edit for a silent/no-speech clip: clean sequential
-    cuts (motion-guided if a curve is given, else even) + a calm transition every
-    `transition_every` cuts. speed=1.0, zoom=None, no MG, no captions.
+                       transition_every: int = 4,
+                       trim_lo: float = 0.4, trim_hi: float = 0.8) -> HypePlan:
+    """Deterministic minimal edit for a silent/no-speech clip. ADOPTED (Zac
+    PAIR1 B + PAIR2 B, 2026-07-25, on the sample pairs): WITH a motion curve —
+    boundaries land at motion PEAKS (pair 2) and any boundary whose following
+    region is LOW motion skip-trims 0.4-0.8s of dead seam air (pair 1; deeper
+    below the median → the bigger skip). WITHOUT a curve (extractor fail-safe):
+    today's even pacing, unchanged. speed=1.0, zoom=None, no MG, no captions.
     """
-    if motion_curve:
-        cuts = _motion_cuts(list(motion_curve), source_duration, target_clip_s, min_clip_s)
+    curve = list(motion_curve or [])
+    if curve:
+        cuts = _motion_cuts(curve, source_duration, target_clip_s, min_clip_s)
+        # PAIR1 B: skip dead air at low-motion boundaries. Rebuild the cut list
+        # inserting source-skips AFTER any boundary sitting at/below the median
+        # motion energy.
+        med = sorted(curve)[len(curve) // 2]
+        win = source_duration / len(curve)
+        trimmed, consumed = [], 0.0
+        for (a, b) in cuts:
+            a2 = max(a, consumed)
+            if b - a2 < min_clip_s:
+                continue
+            trimmed.append((round(a2, 3), round(b, 3)))
+            e = curve[min(int(b / win), len(curve) - 1)]
+            skip = (trim_hi if e <= 0.5 * med else trim_lo) if e <= med else 0.0
+            consumed = b + skip
+        cuts = trimmed or cuts
     else:
         cuts = _even_cuts(source_duration, target_clip_s, min_clip_s)
     if not cuts:

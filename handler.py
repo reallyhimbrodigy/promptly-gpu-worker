@@ -27407,6 +27407,14 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     import general_editor as _ge
     _plan = None
     _route_name = "minimal"
+    # ONE motion-curve extraction feeds the whole ladder (moodreel doctrine +
+    # the adopted minimal pacing/skip-trim). ~1s wall; fail-safe [] → even pacing.
+    _mcurve = []
+    try:
+        import moodreel_editor as _mre
+        _mcurve = _mre.extract_motion_curve(_canon) or []
+    except Exception as _mc_err:
+        print(f"[minimal-route] motion-curve fail-safe ({type(_mc_err).__name__})", flush=True)
     _hype_bpm = None  # S-PACKAGE: measured tempo for the deterministic hype package
     _hype_on = bool(input_data.get("hype_test")) or _ge._hype_mode_enabled()
     if _hype_on and reason in ("no_speech", "not_talking_head") and _dur >= 8.0:
@@ -27459,8 +27467,48 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
                 "routing", {"route": "hype", "error": type(_hype_err).__name__},
                 "hype_fallback_minimal", reason=str(_hype_err)[:200])
             _plan = None
+    # MOODREEL (Zac "MOODREEL APPROVED" 2026-07-25): the nominated mode —
+    # posed/aesthetic no-speech clips WITHOUT confident music get the cinematic
+    # cut (motion-resolve doctrine, sampled + approved). Runs when the hype
+    # attempt didn't take the clip; same fail-safe contract: ANY miss →
+    # deterministic minimal. no_audio clips qualify (no music needed).
+    _moodreel_on = bool(input_data.get("moodreel_test")) or (
+        os.environ.get("PROMPTLY_MOODREEL", "").strip().lower() in ("1", "true", "yes", "on"))
+    if (_plan is None and _moodreel_on and _dur >= 8.0 and _mcurve
+            and reason in ("no_speech", "not_talking_head", "no_audio")):
+        try:
+            import moodreel_editor as _mre2
+            _sys_i, _user_c = _mre2.build_moodreel_prompt(
+                input_data.get("vibe") or "", _dur, _mcurve)
+            _client = _get_genai_client()
+            _resp = _client.models.generate_content(
+                model=GEMINI_EDITORIAL_MODEL, contents=_user_c,
+                config=genai_types.GenerateContentConfig(
+                    system_instruction=_sys_i, temperature=1.0,
+                    response_mime_type="application/json",
+                    response_schema=_he.HypePlan,
+                    thinking_config=genai_types.ThinkingConfig(
+                        thinking_budget=8192)))
+            _mp = getattr(_resp, "parsed", None)
+            if not isinstance(_mp, _he.HypePlan):
+                import json as _mj
+                _mp = _he.HypePlan.model_validate(_mj.loads(_resp.text))
+            if _mp.clips:
+                _plan = _mp
+                _route_name = "moodreel"
+                _record_divergence(
+                    "routing", {"route": "moodreel"},
+                    "moodreel_route",
+                    reason=f"cinematic mood-reel cut ({len(_mcurve)} motion windows)")
+        except Exception as _mr_err:
+            print(f"[moodreel-route] fail-safe → minimal "
+                  f"({type(_mr_err).__name__}: {str(_mr_err)[:160]})", flush=True)
+            _record_divergence(
+                "routing", {"route": "moodreel", "error": type(_mr_err).__name__},
+                "moodreel_fallback_minimal", reason=str(_mr_err)[:200])
+            _plan = None
     if _plan is None:
-        _plan = _me.build_minimal_plan(_dur, fps=_fps)
+        _plan = _me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve)
     _mini_t["plan"] = time.time() - _t0 - _mini_t.get("normalize", 0)
     _ri = _he.project_hype_plan(
         _plan, source_url=os.path.basename(_canon), source_fps=_fps,
@@ -27550,6 +27598,20 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
                              "Cut to the beat — every hit lands on the music. #beatsync"),
             "post_hook": "Turn the sound on for this one.",
         }
+    elif _route_name == "moodreel":
+        # cinematic mood-reel (Zac-approved mode): the model's own notes or an
+        # honest doctrine default — the user hears WHY it's paced this way
+        _rationale = (str(getattr(_plan, "notes", "") or "").strip()[:400]
+                      or "No speech to caption, so I gave your footage the "
+                         "cinematic treatment — cuts land where the motion "
+                         "resolves, and the strongest shots get room to breathe.")
+        _capability_notes = ["No speech detected — this is a cinematic mood-reel "
+                            "cut paced to your footage's own motion."]
+        _pkg_fields = {
+            "post_caption": "Cut like a film — every shot earns its screen time. "
+                            "#cinematic",
+            "post_hook": "Watch how the cuts breathe with the motion.",
+        }
     elif _mm_passthrough:
         _rationale = (
             f"Your {_dur:.0f}-second clip was already tight, so I kept it intact "
@@ -27581,12 +27643,16 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         "route_reason": reason,
         # W2: the caption-less routes ARE the effort-proportional proof — name it
         "stage_manifest": {
-            "run": (["normalize", "beat_analysis", "hype_plan", "render", "hls", "upload"]
+            "run": (["normalize", "motion_curve", "beat_analysis", "hype_plan", "render", "hls", "upload"]
                     if _route_name == "hype"
-                    else ["normalize", "minimal_plan", "render", "hls", "upload"]),
+                    else ["normalize", "motion_curve", "moodreel_plan", "render", "hls", "upload"]
+                    if _route_name == "moodreel"
+                    else ["normalize", "motion_curve", "minimal_plan", "render", "hls", "upload"]),
             "skipped": {"transcribe": "no speech to transcribe",
                         "planning": "no Gemini planning on this route"
-                        if _route_name == "minimal" else "lighter hype plan",
+                        if _route_name == "minimal"
+                        else "cinematic motion plan" if _route_name == "moodreel"
+                        else "lighter hype plan",
                         "face_detect": "caption-less route",
                         "broll": "caption-less route"},
         },

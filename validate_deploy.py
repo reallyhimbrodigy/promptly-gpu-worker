@@ -5507,7 +5507,7 @@ def _zero_reject_wiring():
         "choke point must run the minimal pipeline and fall through to the coded envelope on failure"
     # the minimal pipeline shares the delivery contract
     _p = _h.find("def _run_minimal_pipeline")
-    _body = _h[_p:_p + 16000]  # widened for the hype-upgrade branch
+    _body = _h[_p:_p + 22000]  # widened for the hype + moodreel branches
     for _needle, _why in [
         ("_encode_and_upload_hls(", "shared HLS ladder"),
         ("write_job_status(", "durable completed terminal"),
@@ -5521,8 +5521,62 @@ def _zero_reject_wiring():
     assert _h.count("_hls_cmd = [") == 1, "exactly one HLS ladder implementation"
     # the four routing modules ride the image
     _m = open("modal_app.py").read()
-    for _mod in ("general_editor.py", "hype_editor.py", "minimal_editor.py", "hype_render.py"):
+    for _mod in ("general_editor.py", "hype_editor.py", "minimal_editor.py", "hype_render.py", "moodreel_editor.py"):
         assert f'"{_mod}"' in _m, f"{_mod} must be baked into the worker image"
+
+
+@check("MOODREEL ROUTE + ADOPTED MINIMAL PACING (Zac verdicts 2026-07-25: MOODREEL APPROVED + PAIR1 B + PAIR2 B): the route ladder inside _run_minimal_pipeline is hype (confident beat) -> MOODREEL (cinematic motion-resolve cut for no_speech/not_talking_head/no_audio clips >=8s without confident music; motion curve -> build_moodreel_prompt -> Gemini HypePlan) -> minimal; EVERY miss fail-safes to minimal (a moodreel attempt can never cost a user their video). The motion curve is extracted ONCE (fail-safe []) and shared: moodreel doctrine + the ADOPTED minimal pacing — boundaries at motion PEAKS (pair 2) + low-motion boundary skip-trims 0.4-0.8s median-relative (pair 1); no curve -> today's even pacing byte-identical. Flag PROMPTLY_MOODREEL (Secret canonical =1), per-job override moodreel_test; moodreel_editor.py baked into the image (the progressive-mount lesson: an unmounted module dies silently inside the fail-safe).")
+def _moodreel_route_wiring():
+    _h = open("handler.py").read()
+    _p = _h.find("def _run_minimal_pipeline")
+    _body = _h[_p:_p + 22000]
+    # ONE shared extraction, fail-safe, before the ladder
+    assert _body.count("extract_motion_curve(") == 1, "the motion curve is extracted ONCE and shared"
+    assert _body.find("extract_motion_curve(") < _body.find("_hype_on ="), \
+        "extraction must precede the ladder (moodreel + minimal both consume it)"
+    assert "motion-curve fail-safe" in _body, "curve extraction must be fail-safe (no curve = even pacing, never a dead job)"
+    # the moodreel branch: flag + override + reasons + floor + fail-safe
+    assert 'input_data.get("moodreel_test")' in _body, "per-job cert override required"
+    assert 'os.environ.get("PROMPTLY_MOODREEL", "")' in _body, "the Secret-canonical flag gates the route"
+    assert 'reason in ("no_speech", "not_talking_head", "no_audio")' in _body, \
+        "moodreel eligibility: the three caption-less reasons (no_audio qualifies — no music needed)"
+    assert "_moodreel_on and _dur >= 8.0 and _mcurve" in _body, \
+        "the 8s floor + curve-required guard (every Zac-approved sample was motion-anchored; no curve -> minimal)"
+    assert "build_moodreel_prompt(" in _body and "moodreel_fallback_minimal" in _body, \
+        "doctrine prompt + the ledgered fail-safe to minimal"
+    _mi = _body.find("_moodreel_on =")
+    assert 0 < _body.find("hype_fallback_minimal") < _mi, "moodreel runs AFTER the hype attempt (beat wins)"
+    assert _mi < _body.find("_me.build_minimal_plan("), "minimal stays the ladder floor"
+    # route consumers: moodreel sets all three payload fields (the mypy lesson)
+    assert '_route_name == "moodreel":' in _body and "cinematic mood-reel" in _body, \
+        "moodreel must set its own rationale/capability_notes/pkg_fields — never the generic re-pace text"
+    assert '"moodreel_plan"' in _body and '"motion_curve"' in _body, "stage_manifest names the moodreel stages"
+    # PAIR2 B: the live call passes the curve
+    assert "_me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve)" in _body, \
+        "PAIR2 B adopted: the live minimal call consumes the motion curve"
+    # PAIR1 B: skip-trim is first-class in minimal_editor with the sampled constants
+    _m = open("minimal_editor.py").read()
+    assert "trim_lo: float = 0.4, trim_hi: float = 0.8" in _m, "the sampled skip-trim constants (pair 1 B as approved)"
+    assert "trim_hi if e <= 0.5 * med else trim_lo" in _m and "if e <= med" in _m, \
+        "median-relative low-motion trim (deeper below median -> bigger skip)"
+    # behavioral fixtures: adopted path trims; fail-safe path unchanged even pacing
+    import importlib, sys as _sys
+    _sys.path.insert(0, ".")
+    _me_mod = importlib.import_module("minimal_editor")
+    _pn = _me_mod.build_minimal_plan(20.0)
+    assert len(_pn.clips) == 8 and abs(sum(c.end_s - c.start_s for c in _pn.clips) - 20.0) < 0.1, \
+        "no-curve fail-safe must remain today's even pacing (8x2.5s over 20s)"
+    _curve = [1, 1, 8, 1, 1, 1, 9, 1, 2, 1, 7, 1, 1, 1, 10, 1, 1, 1, 2, 1]
+    _pc = _me_mod.build_minimal_plan(20.0, motion_curve=_curve)
+    _span = sum(c.end_s - c.start_s for c in _pc.clips)
+    assert _span < 19.5, "with a low-motion curve the skip-trims must actually drop seam air"
+    assert all(b.start_s >= a.end_s - 1e-6 for a, b in zip(_pc.clips, _pc.clips[1:])), \
+        "trimmed cuts must stay monotonic (skips only move forward)"
+    assert all((c.end_s - c.start_s) >= 1.2 - 1e-6 for c in _pc.clips), "min clip length holds through trimming"
+    assert all(c.speed == 1.0 and c.zoom is None for c in _pc.clips), "minimal stays 1.0x, zoom-less"
+    # the image bakes the module (the progressive-mount lesson, pinned)
+    _ma = open("modal_app.py").read()
+    assert '"moodreel_editor.py"' in _ma, "moodreel_editor.py must ride the worker image"
 
 
 @check("EDIT RATIONALE (2026-07-25): a user-facing 1-2 sentence 'why this edit' field flows end to end. PostCutPlan.edit_rationale is an additive Optional[str] (default None -> renderer never reads it -> byte-identical output); the TH post-cuts prompt asks for it in the field list (thin material -> say so + suggest a longer talking-head); edit_plan carries it via the PostCutPlan field-copy; the worker persists it to video_jobs.edit_rationale alongside current_step/step_message (narrative column ONLY, never status/progress/result), daemon-threaded, fail-open, terminal-fenced. Hype/minimal already carry a rationale via HypePlan.notes. Kill switch PROMPTLY_RATIONALE_PERSIST=0.")
@@ -5849,7 +5903,8 @@ def _secret_canonical_values():
         "PROMPTLY_DELIVERY_FPS": "30",    # FPS 30 APPROVED (Zac blanket-GO 2026-07-25 on the A/B pair): delivery target 30fps — halves the render tail; rollback = "" (60) here + secret
         "PROMPTLY_RENDER_FANOUT": "1",    # A-L4 LIVE (cert 3/3: SSIM 1.0 global+boundaries, remote mode, poisoned fallback; length-floored ≥60s output where it strictly wins: 155s = −19%); rollback = "0"
         "PROMPTLY_HYPE_MODE": "1",        # HYPE LIVE (Zac "FLIP HYPE" 2026-07-25 on the v2 pair): no-speech + confident beat (aubio tconf > 0.15) → beat-synced edit; every miss fail-safes to minimal; rollback = "0"
-        "PROMPTLY_SHAPE_ABORT": "1",     # degen shape-abort LIVE (ruling 1a; 5/5 shapes, 0 FP on 7.9k healthy; ~85-90% burn cut; rollback = "0")
+        "PROMPTLY_SHAPE_ABORT": "1",
+        "PROMPTLY_MOODREEL": "1",     # cinematic mood-reel route LIVE (Zac "MOODREEL APPROVED" 2026-07-25; fail-safe-to-minimal; rollback = "0")     # degen shape-abort LIVE (ruling 1a; 5/5 shapes, 0 FP on 7.9k healthy; ~85-90% burn cut; rollback = "0")
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that

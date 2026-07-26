@@ -551,6 +551,7 @@ image = (
     .add_local_file("general_editor.py", "/general_editor.py")
     .add_local_file("hype_editor.py", "/hype_editor.py")
     .add_local_file("minimal_editor.py", "/minimal_editor.py")
+    .add_local_file("moodreel_editor.py", "/moodreel_editor.py")
     .add_local_file("hype_render.py", "/hype_render.py")
     .add_local_file("progressive_publish.py", "/progressive_publish.py")  # W3 previews (DARK) — the cert-found gap: wiring shipped, module didn't
     # recipe_eval.py was missing from this list since the eval was first

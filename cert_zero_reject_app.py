@@ -15,6 +15,12 @@ CASES (the cert bar per path):
   4. floor_reject  — 1.5s source → CLIP_TOO_SHORT, the ONE honest rejection.
   5. off_control   — 12s no-speech source with the flag OFF → today's NO_SPEECH
                      rejection, byte-identical live behavior preserved.
+  6-7. hype_music / hype_gate_tone — the beat-confidence gate (route vs defer).
+  8. moodreel_visual — 14s video-only source with moodreel_test → the cinematic
+                     mood-reel route (motion curve → doctrine prompt → Gemini
+                     HypePlan), completed + mechanically sound. Containers carry
+                     no lang-flags secret, so ONLY the override arms the route —
+                     existing minimal expectations stay untouched.
 """
 import os
 import sys
@@ -119,6 +125,8 @@ def run_case(case: dict) -> dict:
             input_data["zero_reject_test"] = True
         if case.get("hype_on"):
             input_data["hype_test"] = True
+        if case.get("moodreel_on"):
+            input_data["moodreel_test"] = True
         res = H.handler({"input": input_data})
         out["result_keys"] = sorted(res.keys())[:20]
         out["status"] = res.get("status")
@@ -132,8 +140,9 @@ def run_case(case: dict) -> dict:
             ok = (res.get("status") == "success" and res.get("route") == "hype"
                   and bool(res.get("video_url")) and bool(res.get("edit_rationale")))
             out["ok"] = bool(ok)
-        elif expect == "minimal_complete":
-            ok = (res.get("status") == "success" and res.get("route") == "minimal"
+        elif expect in ("minimal_complete", "moodreel_complete"):
+            _want = "minimal" if expect == "minimal_complete" else "moodreel"
+            ok = (res.get("status") == "success" and res.get("route") == _want
                   and bool(res.get("video_url")))
             # mechanical: pull the delivered MP4 back and probe it
             if ok:
@@ -193,6 +202,10 @@ def main():
          "flag_on": True, "hype_on": True, "expect": "hype_complete"},
         {"name": "hype_gate_tone", "dur": 12.0, "audio": True, "audio_kind": "tone",
          "flag_on": True, "hype_on": True, "expect": "minimal_complete"},
+        # MOODREEL (Zac-approved mode): video-only source (reason=no_audio, an
+        # eligible reason — moodreel needs no music) + the per-job override.
+        {"name": "moodreel_visual", "dur": 14.0, "audio": False, "flag_on": True,
+         "moodreel_on": True, "expect": "moodreel_complete"},
     ]
     results = list(run_case.map(cases))
     print("\n================ ZERO-REJECT CERT ================")
