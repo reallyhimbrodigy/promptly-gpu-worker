@@ -36,7 +36,7 @@ def _s3():
         (os.environ.get("S3_BUCKET_NAME") or BUCKET_DEFAULT)
 
 
-def _build_th_source(work, wobble=False):
+def _build_th_source(work, wobble=False, amp=1.0):
     """face.mp4 looped over the en TTS track = a constructed durable talking-head.
     wobble=True overlays a deterministic handheld-style jitter (sin-driven crop
     pan + slight rotation) so the vidstab pair judges realistic borderline shake."""
@@ -50,9 +50,10 @@ def _build_th_source(work, wobble=False):
     vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920"
     if wobble:
         # deterministic pseudo-handheld: ±14px pan @ ~2.3Hz/1.7Hz + ±0.6° roll.
+        _ax, _ay, _ar = 14*amp, 11*amp, 0.010*amp
         vf = ("scale=1188:2112:force_original_aspect_ratio=increase,"
-              "crop=1080:1920:x='54+14*sin(2.3*t*2*PI)':y='96+11*sin(1.7*t*2*PI+1.1)',"
-              "rotate='0.010*sin(2.9*t*2*PI)':fillcolor=black")
+              f"crop=1080:1920:x='54+{_ax:.1f}*sin(2.3*t*2*PI)':y='96+{_ay:.1f}*sin(1.7*t*2*PI+1.1)',"
+              f"rotate='{_ar:.4f}*sin(2.9*t*2*PI)':fillcolor=black")
     subprocess.run(
         ["ffmpeg", "-y", "-v", "error", "-stream_loop", "-1", "-i", face,
          "-i", voice, "-map", "0:v", "-map", "1:a", "-vf", vf,
@@ -73,7 +74,8 @@ def run_pair_case(case: dict) -> dict:
         s3, bucket = _s3()
         work = f"/tmp/ab/{case['name']}"
         os.makedirs(work, exist_ok=True)
-        src = _build_th_source(work, wobble=case.get("wobble", False))
+        src = _build_th_source(work, wobble=case.get("wobble", False),
+                               amp=float(case.get("wobble_amp", 1.0)))
         jid = str(uuid.uuid4())
         base = f"hype-samples/ab-pairs/{case['name']}_{case['ts']}"
         src_key = f"cert/ab-src/{jid}.mp4"
@@ -183,8 +185,24 @@ def proxy_detect_eval() -> dict:
 
 @app.local_entrypoint()
 def main():
-    import json, time
+    import json, time, os as _os
     ts = str(int(time.time()))
+    if _os.environ.get("VIDSTAB_PAIR"):
+        # Borderline evidence pair (threshold 5.0 ships): amp tuned so the
+        # shake score lands ~2 (the mild-handheld class the new threshold
+        # SKIPS). Same clip, stabilized vs not — Zac's veto evidence.
+        pairs = [
+            {"name": "vstab_borderline_on", "ts": ts, "wobble": True, "wobble_amp": 0.22,
+             "overrides": {"vidstab_test": "on"}},
+            {"name": "vstab_borderline_off", "ts": ts, "wobble": True, "wobble_amp": 0.22,
+             "overrides": {"vidstab_test": "off"}},
+        ]
+        results = list(run_pair_case.map(pairs))
+        print("\n================ VIDSTAB BORDERLINE PAIR ================")
+        for r in results:
+            print(json.dumps(r, indent=2, default=str))
+        print("========================================================")
+        return
     pairs = [
         {"name": "fps60", "ts": ts, "overrides": {"delivery_fps_test": "60"}},
         {"name": "fps30", "ts": ts, "overrides": {"delivery_fps_test": "30"}},
