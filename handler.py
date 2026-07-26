@@ -9659,6 +9659,221 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
 _GEMINI_CALL_LOG = []
 
 
+# ── SHAPE-AWARE STREAM ABORT (DEGEN-LEVER-A, Zac ruling 1c part a, 2026-07-25) ─
+# The 16k-token cutoff below catches a spiral only after 144-247s of burn
+# (observed: d7ee9c05 146.9s/abort at ~109 tok/s; 7f1a1128 3 aborts/369.2s at
+# ~130 tok/s). The spiral class (S-DEGEN Wave-3, gate-pinned): single-string
+# PROSE runaways in the rationale fields — Vertex does NOT enforce maxLength at
+# token-generation, so a declared-96 `why` can stream 60,032 chars (measured).
+# This detector catches the runaway IN THE STREAM, thousands of tokens sooner.
+#
+# DESIGN — two tiers behind a JSON string-state gate:
+#   GATE  an incremental scanner tracks whether the stream cursor is inside a
+#         JSON string (escape-aware) and how long the CURRENT string has run.
+#         Healthy strings measured max 433 chars (60 completed recipes, every
+#         field) / 462 (148 long free-prose editorial_vision/what_happens
+#         fields) — no repetition check ever runs below 1024 chars, so healthy
+#         structural JSON (which measures probe-count 6, 24-gram multiplicity
+#         9, period-fraction 0.416 — all loop-like) is UNREACHABLE by
+#         construction and the signals only ever see runaway prose.
+#   TIER 1 (signals, checked at run 1024/2048/3072 chars on the last-1200 tail):
+#     · phrase-period autocorrelation — max over period p∈[2,220] of
+#       fraction(s[i]==s[i-p]); ≥0.55 fires (healthy prose max ≈0.42 incl.
+#       structural JSON; pure loops 0.64-1.0). Catches short-unit loops
+#       ("bye bye bye"), exact long-phrase loops (p=146 measured 0.686), and
+#       templated self-argument loops (p=169 measured 0.64).
+#     · distinct-token-ratio < 0.36 on the last 800 chars (≥40 tokens) — the
+#       vocabulary-collapse staircase AND the florid synonym chain (its
+#       synonym vocabulary recycles: measured 0.233 in-window). Healthy
+#       windows measured min 0.450. (The existing L2 0.18 stays untouched at
+#       the parse edge for completed responses.)
+#     · template-loop probe — a 64-char probe from 3 tail offsets repeating
+#       ≥4× in the window (healthy prose never; healthy JSON structure hits 6
+#       but sits behind the gate).
+#     · token-concentration — top-8 tokens covering ≥55% of the window.
+#   TIER 2 (net, run ≥4096 chars): "string-runaway" fires REGARDLESS of shape —
+#     every single-string spiral crosses it by construction (observed runs
+#     16,737-60,032 chars). 4096 is ~9× the healthy string ceiling and above
+#     every declared schema cap; worst case it costs one L3 re-roll on a
+#     response whose 4k+ rationale would have been parse-edge-truncated anyway.
+#
+# CORPUS VERDICT (192 unique real stream-abort spiral tails from the
+# divergence ledgers; 60 healthy full-recipe streams + 148 long-prose fields
+# + 7,315 individual recipe strings as controls):
+#   · FALSE POSITIVES: 0 across every healthy stream, window, and string.
+#   · 5/5 canonical shapes caught by TIER-1 at the FIRST check (1024 chars
+#     into the run): short-unit → phrase-loop p=4; vocab-staircase →
+#     vocab-collapse 0.228; long-phrase → phrase-loop p=146; florid-synonym →
+#     vocab-collapse 0.233; self-argument → phrase-loop p=169.
+#   · full corpus: 164/192 caught by Tier-1 at ~1024 chars, +22 by the 4096
+#     net = 186/192 (96.9%). HONEST RESIDUAL: 6/192 are NOT single-string
+#     prose runaways — 5 whole-document JSON structure loops (the model
+#     re-emitting the entire plan; structure repetition is exactly what
+#     healthy JSON looks like, so catching it is FP-territory) + 1 quote-dense
+#     broken-JSON prose loop (unescaped quotes reset the string gate). Those 6
+#     keep falling through to the UNCHANGED 16k cutoff, exactly as today.
+#
+# COST: string-state scan is O(chunk); a signature check is ~3ms and runs at
+# most 4 times per string run — healthy streams (strings ≤ ~500 chars) run
+# ZERO signature checks.
+#
+# FLAG: PROMPTLY_SHAPE_ABORT (default ON, env-only; =0 restores 16k-only
+# behavior — the 16k cutoff is NOT behind this flag). Fires EXACTLY like the
+# 16k path: same aborted-flag semantics, so the existing degen re-roll
+# machinery (L3 +2 retries, wasted-seconds ledger, degen-tail conviction)
+# takes over unchanged.
+#
+# 🌀 MEASUREMENT (S-DEGEN):
+#   · burn-seconds per degen BEFORE/AFTER: distribution of
+#     video_jobs.result.stage_timings.gemini_wasted_degen split at the deploy
+#     timestamp — shape aborts keep aborted=True, so gemini_wasted_degen
+#     counts them with no query change. Expected: ~123-147s/spiral → ~15-40s
+#     (Tier-1 fires ~1-3k output tokens into a 16k spiral at 109-130 tok/s).
+#   · abort latency + per-fire savings: divergences/{job_id}.jsonl records
+#     with action=shape_abort (shape, period, run_len, tokens_at_abort,
+#     rate_tok_s, est_saved_s), bucket 'thisismybucketagainwooo'.
+#   · residual 16k aborts (the 6/192 class): gemini_degen_tail records whose
+#     class still reads "streamed output crossed 16000 tok".
+#   · runnable: node measure_shape_abort.js (worktree root; both queries).
+
+_SHAPE_ABORT_WINDOW = 1200      # chars of run tail the signals read
+_SHAPE_ABORT_MIN_RUN = 1024     # first check — healthy strings max 433/462 measured
+_SHAPE_ABORT_CHECK_EVERY = 1024 # re-check cadence while the run keeps growing
+_SHAPE_ABORT_HARD_RUN = 4096    # string-runaway net — shape-independent
+
+
+def _shape_abort_enabled():
+    return os.environ.get("PROMPTLY_SHAPE_ABORT", "1").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
+def _shape_window_signature(s):
+    """PURE repetition discriminant on ONE in-string window (≤1200 chars of the
+    current string run's tail). Returns (shape, period, metric) or None.
+
+    Only ever called on runs ≥1024 chars (the gate) — thresholds are tuned
+    0-FP on 444 healthy prose windows + 7,315 real recipe strings; the
+    structural-JSON FP class (probe 6, period-frac 0.416) cannot reach this
+    function because healthy strings never grow past ~500 chars."""
+    s = s[-_SHAPE_ABORT_WINDOW:]
+    n = len(s)
+    if n < 400:
+        return None
+    # (1) phrase-period autocorrelation: a repeating unit of length p aligns
+    # the window with itself p chars back. Exact-loop tails measure 0.64-1.0;
+    # healthy prose max ≈0.42. min-span 280 keeps a long period honest.
+    _best_f, _best_p = 0.0, 0
+    _max_p = min(220, n - 280)
+    for _p in range(2, _max_p + 1):
+        _m = n - _p
+        _eq = sum(1 for _x, _y in zip(s[_p:], s[:-_p]) if _x == _y)
+        _f = _eq / _m
+        if _f > _best_f:
+            _best_f, _best_p = _f, _p
+    if _best_f >= 0.55:
+        return ("phrase-loop", _best_p, round(_best_f, 3))
+    # (2) distinct-token collapse — staircases AND florid synonym chains
+    # (their vocabulary recycles). Healthy windows min 0.450.
+    _toks = s[-800:].split()
+    if len(_toks) >= 40:
+        _ratio = len(set(_toks)) / len(_toks)
+        if _ratio < 0.36:
+            return ("vocab-collapse", None, round(_ratio, 3))
+    # (3) template-loop: a verbatim 64-char block from the tail repeating ≥4×
+    # in the window — catches varying-slot template loops whose fixed part
+    # the probes land on. Three offsets = three chances per check.
+    for _off in (0, 150, 320):
+        if n < _off + 64:
+            continue
+        _probe = s[n - _off - 64:n - _off] if _off else s[-64:]
+        _c = s.count(_probe)
+        if _c >= 4:
+            return ("template-loop", None, _c)
+    # (4) token concentration: top-8 tokens covering ≥55% of the window
+    # (healthy max 0.541 measured ON STRUCTURAL JSON, which sits behind the
+    # gate; healthy prose is far lower).
+    _toks = s.split()
+    if len(_toks) >= 50:
+        _counts = {}
+        for _t in _toks:
+            _counts[_t] = _counts.get(_t, 0) + 1
+        _cov = sum(sorted(_counts.values(), reverse=True)[:8]) / len(_toks)
+        if _cov >= 0.55:
+            return ("token-concentration", None, round(_cov, 3))
+    return None
+
+
+def _shape_abort_state():
+    """Fresh incremental scanner state for one stream."""
+    return {"esc": False, "ins": False, "run": 0, "tail": "",
+            "next_check": _SHAPE_ABORT_MIN_RUN}
+
+
+def _shape_abort_feed(state, chunk):
+    """Feed one streamed text delta through the JSON string-state gate;
+    returns a fire dict {shape, period, metric, run_len} or None.
+
+    O(len(chunk)) scan: tracks in-string/escape state exactly (valid-JSON
+    semantics — `\\"` stays in-string, bare `"` toggles), accumulates the
+    CURRENT string's run length + last-1200 tail, and checks the signature
+    at run 1024/2048/3072 with the hard string-runaway net at 4096. A string
+    close resets everything — healthy streams pay only the char scan."""
+    _esc = state["esc"]
+    _ins = state["ins"]
+    _run = state["run"]
+    _nxt = state["next_check"]
+    _acc = []
+    _fire = None
+    for _ch in chunk:
+        if _ins:
+            if _esc:
+                _esc = False
+                _run += 1
+                _acc.append(_ch)
+            elif _ch == "\\":
+                _esc = True
+                _run += 1
+                _acc.append(_ch)
+            elif _ch == '"':
+                _ins = False
+                _run = 0
+                _acc = []
+                state["tail"] = ""
+                _nxt = _SHAPE_ABORT_MIN_RUN
+            else:
+                _run += 1
+                _acc.append(_ch)
+            if _run >= _nxt:
+                state["tail"] = (state["tail"] + "".join(_acc))[-_SHAPE_ABORT_WINDOW:]
+                _acc = []
+                if _run >= _SHAPE_ABORT_HARD_RUN:
+                    _fire = {"shape": "string-runaway", "period": None,
+                             "metric": _run, "run_len": _run}
+                else:
+                    _sig = _shape_window_signature(state["tail"])
+                    if _sig is not None:
+                        _fire = {"shape": _sig[0], "period": _sig[1],
+                                 "metric": _sig[2], "run_len": _run}
+                _nxt = _run + _SHAPE_ABORT_CHECK_EVERY
+                if _fire is not None:
+                    break
+        elif _ch == '"':
+            _ins = True
+            _esc = False
+            _run = 0
+            _acc = []
+            state["tail"] = ""
+            _nxt = _SHAPE_ABORT_MIN_RUN
+    if _acc:
+        state["tail"] = (state["tail"] + "".join(_acc))[-_SHAPE_ABORT_WINDOW:]
+    state["esc"] = _esc
+    state["ins"] = _ins
+    state["run"] = _run
+    state["next_check"] = _nxt
+    return _fire
+
+
 def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
                               system_instruction, abort_over_output_tokens=None,
                               label="post-cuts"):
@@ -9697,6 +9912,12 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
         _out_tok = 0
         _usage = None
         _aborted = False
+        # DEGEN-LEVER-A: shape-aware abort rides ONLY the calls that opted
+        # into the degen cutoff (abort_over_output_tokens), under its flag.
+        _shape_state = (_shape_abort_state()
+                        if (abort_over_output_tokens and _shape_abort_enabled())
+                        else None)
+        _shape_fire = None
         _stream = client.models.generate_content_stream(
             model=model_name, contents=contents, config=_build_config(use_cache),
         )
@@ -9706,6 +9927,56 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
             _delta = getattr(_chunk, "text", None)
             if _delta:
                 _parts.append(_delta)
+                if _shape_state is not None and _shape_fire is None:
+                    _shape_fire = _shape_abort_feed(_shape_state, _delta)
+                    if _shape_fire is not None:
+                        # Same aborted-flag semantics as the 16k path — the
+                        # existing degen re-roll machinery takes over unchanged.
+                        _aborted = True
+                        _el = time.time() - _t0
+                        _est_now = _out_tok or (sum(len(p) for p in _parts) // 4)
+                        _rate_now = (_est_now / _el) if (_est_now and _el) else 0.0
+                        _saved_s = (((abort_over_output_tokens - _est_now) / _rate_now)
+                                    if (_rate_now > 0
+                                        and abort_over_output_tokens > _est_now)
+                                    else 0.0)
+                        _shape_fire["tokens_at_abort"] = _est_now
+                        _shape_fire["rate_tok_s"] = round(_rate_now, 1)
+                        _shape_fire["est_saved_s"] = round(_saved_s, 1)
+                        print(
+                            f"[gemini-post] stream ABORTED@shape "
+                            f"(period={_shape_fire['period']}, "
+                            f"window={_SHAPE_ABORT_WINDOW}, "
+                            f"shape={_shape_fire['shape']}, "
+                            f"metric={_shape_fire['metric']}, "
+                            f"run={_shape_fire['run_len']}ch, tok={_est_now}, "
+                            f"est_saved={_saved_s:.0f}s vs "
+                            f"{abort_over_output_tokens}tok cutoff)",
+                            flush=True,
+                        )
+                        try:
+                            _record_divergence(
+                                "recipe_transport",
+                                {"shape": _shape_fire["shape"],
+                                 "period": _shape_fire["period"],
+                                 "metric": _shape_fire["metric"],
+                                 "run_len": _shape_fire["run_len"],
+                                 "tokens_at_abort": _est_now,
+                                 "rate_tok_s": round(_rate_now, 1),
+                                 "est_saved_s": round(_saved_s, 1),
+                                 "label": label},
+                                "shape_abort",
+                                reason=f"{_shape_fire['shape']} caught in-stream "
+                                       f"at ~{_est_now} tok — est {_saved_s:.0f}s "
+                                       f"burn saved vs the "
+                                       f"{abort_over_output_tokens} tok cutoff")
+                        except Exception:
+                            pass
+                        try:
+                            _stream.close()
+                        except Exception:
+                            pass
+                        break
             _um = getattr(_chunk, "usage_metadata", None)
             if _um is not None:
                 _usage = _um
@@ -9727,8 +9998,10 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
         _full = "".join(_parts)
         _eff_out = _out_tok or (len(_full) // 4)
         _rate = (_eff_out / _total) if (_eff_out and _total) else 0.0
+        _abort_tag = ("ABORTED@shape" if _shape_fire is not None
+                      else ("ABORTED@degen-cutoff" if _aborted else "complete"))
         print(
-            f"[gemini-post] stream {'ABORTED@degen-cutoff' if _aborted else 'complete'} "
+            f"[gemini-post] stream {_abort_tag} "
             f"in {_total:.1f}s (ttfb={(_ttfb or 0):.1f}s, out={_eff_out}tok, "
             f"rate={_rate:.0f}tok/s)",
             flush=True,
@@ -9737,6 +10010,7 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
             _GEMINI_CALL_LOG.append({
                 "total_s": round(_total, 1), "ttfb_s": round(_ttfb or 0.0, 1),
                 "out_tok": _eff_out, "aborted": bool(_aborted), "label": label,
+                "shape": (_shape_fire or {}).get("shape"),
             })
         except Exception:
             pass
@@ -9747,6 +10021,7 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
             "cached_tokens": getattr(_usage, "cached_content_token_count", None) if _usage else None,
             "thoughts_tokens": getattr(_usage, "thoughts_token_count", None) if _usage else None,
             "ttfb_s": _ttfb, "total_s": _total, "aborted": _aborted,
+            "shape_abort": _shape_fire,
         }
 
     try:
@@ -10321,12 +10596,25 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
         _degen = None
         _parsed = None
         if _stream_result["aborted"]:
-            # Lever 1 early cutoff: the stream crossed the degen threshold and was
-            # stopped mid-flight (saved the run to the cap). The partial JSON is
-            # unparseable by construction — re-roll, exactly as an oversized
-            # completed response would, but ~200s sooner.
-            _degen = (f"streamed output crossed {_POST_CUTS_DEGEN_OUTPUT_TOKENS} tok "
-                      f"— repetition-loop degeneration, aborted early at {dt:.0f}s")
+            _shape_info = _stream_result.get("shape_abort")
+            if _shape_info:
+                # DEGEN-LEVER-A: the shape discriminant caught the spiral
+                # in-stream, thousands of tokens before the 16k cutoff. Same
+                # class string ("repetition-loop degeneration") → the L3
+                # degen-retry budget and every downstream reader engage
+                # unchanged; the shape/period ride along for the ledger.
+                _degen = (f"shape-abort {_shape_info['shape']} "
+                          f"(period={_shape_info['period']}, "
+                          f"run={_shape_info['run_len']}ch, "
+                          f"~{_shape_info.get('tokens_at_abort')} tok) "
+                          f"— repetition-loop degeneration, aborted early at {dt:.0f}s")
+            else:
+                # Lever 1 early cutoff: the stream crossed the degen threshold
+                # and was stopped mid-flight (saved the run to the cap). The
+                # partial JSON is unparseable by construction — re-roll, exactly
+                # as an oversized completed response would, but ~200s sooner.
+                _degen = (f"streamed output crossed {_POST_CUTS_DEGEN_OUTPUT_TOKENS} tok "
+                          f"— repetition-loop degeneration, aborted early at {dt:.0f}s")
         elif not response_text:
             _degen = "empty/None response"
         elif isinstance(_out_tokens, int) and _out_tokens > _POST_CUTS_DEGEN_OUTPUT_TOKENS:
