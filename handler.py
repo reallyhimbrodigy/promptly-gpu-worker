@@ -29260,8 +29260,17 @@ def handler(job):
             # today's behavior, byte-identical. input_data.vidstab_test
             # ("on"/"off") is the per-job override for Zac's A/B pair
             # (borderline clip, stabilized vs not); inert for real traffic.
+            # DATA-CHOSEN (Zac's word 2026-07-25, standing pre-auth): live
+            # shake_score distribution (n=8): tripod 0.2 · mild 2.1/6 ·
+            # normal-handheld 11-12 · heavy 45. The old 0.35 stabilized
+            # everything but tripods (94% fire rate, the plan-phase pole).
+            # 5.0 skips tripod+mild (~25% of jobs save the whole vidstab leg)
+            # and keeps every normal-handheld clip stabilized — conservative:
+            # score 6 still stabilizes. Borderline evidence pair (score ~2,
+            # stabilized-vs-not) in the Review Queue; Zac's veto standing;
+            # rollback = env 0.35, no deploy.
             _SHAKE_STABILIZE_THRESHOLD = float(
-                os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 0.35)
+                os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 5.0)
             _needs_deshake = _shake_score >= _SHAKE_STABILIZE_THRESHOLD
             _vs_test = str(input_data.get("vidstab_test") or "").strip().lower()
             if _vs_test in ("on", "off"):

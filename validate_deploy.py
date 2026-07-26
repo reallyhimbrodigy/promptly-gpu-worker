@@ -5381,8 +5381,8 @@ def _source_poll_fail_fast():
 def _ab_levers_staged_dark():
     _h = open("handler.py").read()
     # vidstab: env threshold defaulting to 0.35 + the per-job override
-    assert 'os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 0.35' in _h, \
-        "vidstab threshold must default to today's 0.35"
+    assert 'os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 5.0' in _h, \
+        "vidstab threshold: data-chosen 5.0 (2026-07-25 distribution; env rollback to 0.35)"
     assert 'input_data.get("vidstab_test")' in _h and '_vs_test in ("on", "off")' in _h, \
         "vidstab A/B per-job override missing"
     # fps: default 60 preserved; env + per-job override staged
