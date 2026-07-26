@@ -74,8 +74,15 @@ def run_pair_case(case: dict) -> dict:
         s3, bucket = _s3()
         work = f"/tmp/ab/{case['name']}"
         os.makedirs(work, exist_ok=True)
-        src = _build_th_source(work, wobble=case.get("wobble", False),
-                               amp=float(case.get("wobble_amp", 1.0)))
+        if case.get("source_url"):
+            # real-traffic evidence clip (durable-mirrored first by the caller)
+            import urllib.request
+            src = os.path.join(work, "real_src.mp4")
+            with urllib.request.urlopen(case["source_url"], timeout=120) as resp, open(src, "wb") as fh:
+                fh.write(resp.read())
+        else:
+            src = _build_th_source(work, wobble=case.get("wobble", False),
+                                   amp=float(case.get("wobble_amp", 1.0)))
         jid = str(uuid.uuid4())
         base = f"hype-samples/ab-pairs/{case['name']}_{case['ts']}"
         src_key = f"cert/ab-src/{jid}.mp4"
@@ -191,12 +198,21 @@ def main():
         # Borderline evidence pair (threshold 5.0 ships): amp tuned so the
         # shake score lands ~2 (the mild-handheld class the new threshold
         # SKIPS). Same clip, stabilized vs not — Zac's veto evidence.
-        pairs = [
-            {"name": "vstab_borderline_on", "ts": ts, "wobble": True, "wobble_amp": 0.22,
-             "overrides": {"vidstab_test": "on"}},
-            {"name": "vstab_borderline_off", "ts": ts, "wobble": True, "wobble_amp": 0.22,
-             "overrides": {"vidstab_test": "off"}},
-        ]
+        _real = _os.environ.get("VIDSTAB_PAIR_SOURCE", "")
+        if _real:
+            pairs = [
+                {"name": "vstab_borderline_on", "ts": ts, "source_url": _real,
+                 "overrides": {"vidstab_test": "on"}},
+                {"name": "vstab_borderline_off", "ts": ts, "source_url": _real,
+                 "overrides": {"vidstab_test": "off"}},
+            ]
+        else:
+            pairs = [
+                {"name": "vstab_borderline_on", "ts": ts, "wobble": True, "wobble_amp": 0.22,
+                 "overrides": {"vidstab_test": "on"}},
+                {"name": "vstab_borderline_off", "ts": ts, "wobble": True, "wobble_amp": 0.22,
+                 "overrides": {"vidstab_test": "off"}},
+            ]
         results = list(run_pair_case.map(pairs))
         print("\n================ VIDSTAB BORDERLINE PAIR ================")
         for r in results:
