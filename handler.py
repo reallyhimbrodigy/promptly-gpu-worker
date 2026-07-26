@@ -18484,9 +18484,11 @@ def _verify_broll_content(path, keyword, intent, idx, input_data=None):
     shipped. This samples frames and asks Gemini vision whether the clip actually
     depicts the intent AND is safe. FAIL-CLOSED: unverifiable → REJECT (a clean
     cut on the speaker beats an unverified clip — Zac's law + zero-is-strong).
-    Returns (keep: bool, reason: str). No-op (keep) when the gate is dark."""
+    Returns (keep, reason, is_error) — is_error distinguishes a transient verify
+    FAILURE (fail-closed) from a legitimate content REJECT so a Gemini outage never
+    looks like the gate working. No-op (keep) when the gate is dark."""
     if not _broll_gate_enabled(input_data):
-        return True, "gate off"
+        return True, "gate off", False
     try:
         _wd = os.path.dirname(path) or "/tmp"
         _pr = subprocess.run(
@@ -18509,7 +18511,7 @@ def _verify_broll_content(path, keyword, intent, idx, input_data=None):
             if os.path.exists(_fp) and os.path.getsize(_fp) > 500:
                 _frames.append(_fp)
         if not _frames:
-            return False, "no frames extractable (fail-closed)"
+            return False, "no frames extractable (fail-closed)", True
         _parts = []
         for _fp in _frames:
             with open(_fp, "rb") as _f:
@@ -18540,9 +18542,9 @@ def _verify_broll_content(path, keyword, intent, idx, input_data=None):
                 thinking_config=genai_types.ThinkingConfig(thinking_budget=0)))
         _txt = (getattr(_resp, "text", "") or "").strip()
         _keep = _txt.upper().lstrip().startswith("KEEP")
-        return _keep, _txt[:200]
+        return _keep, _txt[:200], False
     except Exception as _e:
-        return False, f"verify error (fail-closed): {type(_e).__name__}: {str(_e)[:120]}"
+        return False, f"verify error (fail-closed): {type(_e).__name__}: {str(_e)[:120]}", True
 
 
 def prefetch_and_verify_broll(
@@ -18647,23 +18649,49 @@ def prefetch_and_verify_broll(
             print(f"[broll] verify #{i}: duration={dur:.3f}s too short", flush=True)
             continue
 
-        # FRAME-LEVEL CONTENT + SAFETY GATE (Flare quality campaign): the clip is
-        # a playable video — now confirm its CONTENT matches the intent and is
-        # safe. A reject omits the entry (zero b-roll for the beat = a clean cut,
-        # the strong answer). DARK by default → keeps everything (byte-identical).
-        _bkeep, _breason = _verify_broll_content(
-            path, bc.get("keyword", ""), bc.get("reason", ""), i,
-            input_data=_broll_gate_input)
-        if not _bkeep:
-            print(f"[broll] verify #{i}: REJECTED by content+safety gate — "
-                  f"{_breason}", flush=True)
-            _record_divergence(
-                "broll",
-                {"keyword": bc.get("keyword"), "video_id": bc.get("pexels_video_id")},
-                "broll_content_reject", reason=str(_breason)[:200])
-            continue
         bc["_local_path"] = path
         resolved.append(bc)
+
+    # FRAME-LEVEL CONTENT + SAFETY GATE (Flare quality campaign, Zac 2026-07-26):
+    # the surviving clips are playable videos — now confirm CONTENT matches intent
+    # and is safe. Zac flag 1 (latency): run the per-candidate Gemini vision checks
+    # CONCURRENTLY (one thread each) so N candidates cost ~one call's wall-clock,
+    # not N — and this whole stage already overlaps the main pipeline (b-roll is
+    # fetched off the critical path). DARK → gate returns keep instantly → no-op
+    # (byte-identical). Zac flag 2: content-reject vs verify-error ledgered as
+    # DIFFERENT actions so a Gemini outage (fail-closed) never looks like the gate
+    # legitimately rejecting bad footage.
+    if resolved and _broll_gate_enabled(_broll_gate_input):
+        _gt0 = time.time()
+        _n_before = len(resolved)
+        _gpool = concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(resolved)))
+        _futs = {
+            _gpool.submit(_verify_broll_content, _bc["_local_path"],
+                          _bc.get("keyword", ""), _bc.get("reason", ""), _gi,
+                          _broll_gate_input): _bc
+            for _gi, _bc in enumerate(resolved)
+        }
+        _kept = []
+        for _fut, _bc in _futs.items():
+            try:
+                _keep, _reason, _is_err = _fut.result(timeout=60)
+            except Exception as _ge:
+                _keep, _reason, _is_err = False, f"gate future error: {type(_ge).__name__}", True
+            if _keep:
+                _kept.append(_bc)
+                continue
+            _act = "broll_verify_error" if _is_err else "broll_content_reject"
+            print(f"[broll] gate {'ERROR' if _is_err else 'REJECT'} "
+                  f"kw={str(_bc.get('keyword',''))[:40]!r}: {_reason}", flush=True)
+            _record_divergence(
+                "broll",
+                {"keyword": _bc.get("keyword"), "video_id": _bc.get("pexels_video_id"),
+                 "is_error": bool(_is_err)},
+                _act, reason=str(_reason)[:200])
+        _gpool.shutdown(wait=False)
+        print(f"[broll] content+safety gate: {len(_kept)}/{_n_before} kept "
+              f"(concurrent, {time.time() - _gt0:.1f}s)", flush=True)
+        resolved = _kept
 
     print(
         f"[broll] prefetch: {len(resolved)}/{len(broll_clips)} entries verified "

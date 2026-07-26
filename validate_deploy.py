@@ -5661,9 +5661,14 @@ def _broll_content_gate():
     assert "faces-to-camera" not in _b or "toward the camera" in _b, "prompt must reject faces-to-camera"
     assert "legible text" in _b and "watermark" in _b, "prompt must catch legible text/URLs + watermarks (brand/legal)"
     assert "KEEP" in _b and "REJECT" in _b, "vision check must return KEEP/REJECT"
-    # wired into the verify loop, rejects omit + ledger
-    assert "REJECTED by content+safety gate" in _h and '"broll_content_reject"' in _h, \
-        "a rejected clip must be omitted from the spec + ledgered"
+    # wired into the verify loop, rejects omit + ledger — content vs error SEPARATELY (Zac flag 2)
+    assert '"broll_content_reject"' in _h and '"broll_verify_error"' in _h, \
+        "content-reject and transient verify-error must ledger as DIFFERENT actions"
+    assert '_act = "broll_verify_error" if _is_err else "broll_content_reject"' in _h, \
+        "the ledger action must branch on is_error"
+    # concurrency (Zac flag 1): the vision checks run across candidates in a thread pool
+    assert "ThreadPoolExecutor" in _h and "content+safety gate:" in _h and "concurrent," in _h, \
+        "per-candidate vision checks must run CONCURRENTLY, not sequentially"
     # dark → byte-identical: the call threads input_data; off returns keep
     assert "_broll_gate_input=input_data" in _h, "the verify call must thread input_data for the gate/override"
 
