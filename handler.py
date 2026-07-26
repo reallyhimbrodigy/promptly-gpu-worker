@@ -18466,10 +18466,90 @@ def get_video_duration(path):
     return probe_duration(path) or 0.0
 
 
+def _broll_gate_enabled(input_data=None):
+    """Frame-level b-roll content+safety gate flag (Flare quality campaign, Zac
+    2026-07-26). DARK by default → the verify is a no-op → today's behavior
+    (byte-identical). Per-job cert override: input_data.broll_gate_test."""
+    if input_data and input_data.get("broll_gate_test"):
+        return True
+    return os.environ.get("PROMPTLY_BROLL_GATE", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _verify_broll_content(path, keyword, intent, idx, input_data=None):
+    """FRAME-LEVEL CONTENT + SAFETY GATE (Zac 2026-07-26). The old pipeline
+    ranked candidates on URL-slug word overlap (_vid_url_words) and validated
+    only that the download was a PLAYABLE VIDEO — never the CONTENT. That is why
+    an object query returned a stranger's face and a clip's legible browser UI
+    shipped. This samples frames and asks Gemini vision whether the clip actually
+    depicts the intent AND is safe. FAIL-CLOSED: unverifiable → REJECT (a clean
+    cut on the speaker beats an unverified clip — Zac's law + zero-is-strong).
+    Returns (keep: bool, reason: str). No-op (keep) when the gate is dark."""
+    if not _broll_gate_enabled(input_data):
+        return True, "gate off"
+    try:
+        _wd = os.path.dirname(path) or "/tmp"
+        _pr = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", path], capture_output=True, text=True)
+        _dur = 0.0
+        try:
+            _dur = float((_pr.stdout or "0").strip() or 0)
+        except (TypeError, ValueError):
+            _dur = 0.0
+        if _dur <= 0:
+            _dur = 3.0
+        _frames = []
+        for _frac in (0.15, 0.5, 0.85):
+            _fp = os.path.join(_wd, f"_brollqa_{idx}_{int(_frac * 100)}.jpg")
+            subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-ss", str(round(_dur * _frac, 2)),
+                 "-i", path, "-frames:v", "1", "-vf", "scale=384:-1", _fp],
+                capture_output=True, text=True, timeout=30)
+            if os.path.exists(_fp) and os.path.getsize(_fp) > 500:
+                _frames.append(_fp)
+        if not _frames:
+            return False, "no frames extractable (fail-closed)"
+        _parts = []
+        for _fp in _frames:
+            with open(_fp, "rb") as _f:
+                _parts.append(genai_types.Part.from_bytes(
+                    data=_f.read(), mime_type="image/jpeg"))
+        _parts.append(
+            "These are sampled frames from a stock B-ROLL clip considered for a "
+            "vertical talking-head short. The speaker is the main subject; this "
+            "b-roll would briefly cut away to illustrate a beat.\n\n"
+            f'BEAT INTENT: "{intent or keyword}"  (search query: "{keyword}")\n\n'
+            "Answer KEEP only if ALL hold across the frames:\n"
+            "1. It clearly depicts the INTENT (the right objects/action/environment).\n"
+            "2. NO person looks toward the camera and NO prominent human face "
+            "dominates a frame — a stranger's face competes with the speaker and "
+            "reads uncanny.\n"
+            "3. NO legible text, URLs, website/app UI (browsers, photo-gallery "
+            "grids, pexels/pinterest), or watermarks — a brand/legal risk.\n"
+            "4. Clean, well-lit, high quality — NOT unsettling, heavily moody/dark, "
+            "low-quality, or compressed.\n"
+            "Prefer objects, hands, environments, textures, abstract motion. When "
+            "in doubt REJECT — a clean cut on the speaker beats a questionable clip.\n\n"
+            "Respond with exactly KEEP or REJECT on the first line, then a short reason.")
+        _client = _get_genai_client()
+        _resp = _client.models.generate_content(
+            model=GEMINI_EDITORIAL_MODEL, contents=_parts,
+            config=genai_types.GenerateContentConfig(
+                temperature=0.0, max_output_tokens=200,
+                thinking_config=genai_types.ThinkingConfig(thinking_budget=0)))
+        _txt = (getattr(_resp, "text", "") or "").strip()
+        _keep = _txt.upper().lstrip().startswith("KEEP")
+        return _keep, _txt[:200]
+    except Exception as _e:
+        return False, f"verify error (fail-closed): {type(_e).__name__}: {str(_e)[:120]}"
+
+
 def prefetch_and_verify_broll(
     broll_clips,
     broll_fetch_futures,
     timeout_s: float = 120.0,
+    _broll_gate_input=None,
 ):
     """Wait for every B-roll fetch, verify the asset, return the surviving clips.
 
@@ -18567,6 +18647,21 @@ def prefetch_and_verify_broll(
             print(f"[broll] verify #{i}: duration={dur:.3f}s too short", flush=True)
             continue
 
+        # FRAME-LEVEL CONTENT + SAFETY GATE (Flare quality campaign): the clip is
+        # a playable video — now confirm its CONTENT matches the intent and is
+        # safe. A reject omits the entry (zero b-roll for the beat = a clean cut,
+        # the strong answer). DARK by default → keeps everything (byte-identical).
+        _bkeep, _breason = _verify_broll_content(
+            path, bc.get("keyword", ""), bc.get("reason", ""), i,
+            input_data=_broll_gate_input)
+        if not _bkeep:
+            print(f"[broll] verify #{i}: REJECTED by content+safety gate — "
+                  f"{_breason}", flush=True)
+            _record_divergence(
+                "broll",
+                {"keyword": bc.get("keyword"), "video_id": bc.get("pexels_video_id")},
+                "broll_content_reject", reason=str(_breason)[:200])
+            continue
         bc["_local_path"] = path
         resolved.append(bc)
 
@@ -31843,7 +31938,8 @@ def handler(job):
             pass
         try:  # P1b fail-open: b-roll collection
             if _broll_fetch_futures:
-                broll_clips = prefetch_and_verify_broll(broll_clips, _broll_fetch_futures)
+                broll_clips = prefetch_and_verify_broll(
+                    broll_clips, _broll_fetch_futures, _broll_gate_input=input_data)
                 edit_plan["broll_clips"] = broll_clips
             if _broll_fetch_pool:
                 _broll_fetch_pool.shutdown(wait=False)

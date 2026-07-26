@@ -5645,6 +5645,29 @@ def _shared_gemini_cache():
     assert _lc < _sh < _cr, "shared lookup must be between local miss and server create"
 
 
+@check("B-ROLL CONTENT + SAFETY GATE (Flare quality campaign, Zac 2026-07-26, DARK behind PROMPTLY_BROLL_GATE): the old pipeline ranked candidates on URL-slug word overlap and validated ONLY that the download was a playable video — never the CONTENT, so an object query returned a stranger's face and a clip's legible browser UI shipped. prefetch_and_verify_broll now runs a Gemini-vision frame check per surviving candidate: KEEP only if it depicts the intent AND is safe (no faces-to-camera/prominent faces, no legible text/URLs/site-UI/watermarks, not unsettling/moody/low-quality). FAIL-CLOSED: unverifiable → REJECT (zero-is-strong; a clean cut beats an unverified clip). A reject omits the entry (ledgered broll_content_reject). Flag DARK by default → verify is a no-op → byte-identical; per-job cert override broll_gate_test. Expect b-roll frequency to fall sharply — intended.")
+def _broll_content_gate():
+    _h = open("handler.py").read()
+    assert "def _verify_broll_content(" in _h and "def _broll_gate_enabled(" in _h, \
+        "the b-roll content gate + flag helper must exist"
+    assert 'os.environ.get("PROMPTLY_BROLL_GATE"' in _h, "gate must default DARK behind PROMPTLY_BROLL_GATE"
+    assert 'input_data.get("broll_gate_test")' in _h, "per-job cert override required"
+    # fail-closed: the verify's except returns REJECT (False), not keep
+    _i = _h.find("def _verify_broll_content")
+    _b = _h[_i:_i+4200]
+    assert 'return False, f"verify error (fail-closed)' in _b, "vision-check errors must FAIL-CLOSED (reject)"
+    assert 'if not _broll_gate_enabled(input_data):' in _b and 'return True, "gate off"' in _b, \
+        "gate OFF must be a no-op (keep) → byte-identical"
+    assert "faces-to-camera" not in _b or "toward the camera" in _b, "prompt must reject faces-to-camera"
+    assert "legible text" in _b and "watermark" in _b, "prompt must catch legible text/URLs + watermarks (brand/legal)"
+    assert "KEEP" in _b and "REJECT" in _b, "vision check must return KEEP/REJECT"
+    # wired into the verify loop, rejects omit + ledger
+    assert "REJECTED by content+safety gate" in _h and '"broll_content_reject"' in _h, \
+        "a rejected clip must be omitted from the spec + ledgered"
+    # dark → byte-identical: the call threads input_data; off returns keep
+    assert "_broll_gate_input=input_data" in _h, "the verify call must thread input_data for the gate/override"
+
+
 @check("LOUD FAIL-SAFE MOUNT LAW (Zac standing rule 2026-07-25, from the moodreel_editor + progressive_publish mount catches): EVERY repo-local module that handler.py defer-imports inside a function body MUST be add_local_file-baked into the worker image — derived DYNAMICALLY from the source so any future mode is covered the day it is written. A deferred import inside a fail-safe try/except is exactly the class that dies silently (the fallback masks the ImportError and the feature quietly never runs); top-level imports crash loudly at container start and need no law.")
 def _loud_failsafe_mount_law():
     import re as _re, os as _os
