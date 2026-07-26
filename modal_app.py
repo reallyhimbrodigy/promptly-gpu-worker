@@ -552,6 +552,7 @@ image = (
     .add_local_file("hype_editor.py", "/hype_editor.py")
     .add_local_file("minimal_editor.py", "/minimal_editor.py")
     .add_local_file("hype_render.py", "/hype_render.py")
+    .add_local_file("progressive_publish.py", "/progressive_publish.py")  # W3 previews (DARK) — the cert-found gap: wiring shipped, module didn't
     # recipe_eval.py was missing from this list since the eval was first
     # wired — handler.py imports it at runtime via `from recipe_eval
     # import evaluate_recipe`, but the module never made it into the
