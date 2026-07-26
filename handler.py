@@ -27262,6 +27262,11 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             f"Your {_dur:.0f}-second clip was already tight, so I kept it intact "
             "and cleaned up the delivery. For a full edit — captions, zooms, "
             "B-roll — try a clip of someone speaking to camera.")
+        _capability_notes = ["This clip was delivered intact — it was already tight."]
+        _pkg_fields = {
+            "post_caption": "Short and sharp — no trimming needed. #keepitreal",
+            "post_hook": "Some clips are ready the moment you shoot them.",
+        }
     else:
         _rationale = _minimal_rationale(reason, _dur)
         _capability_notes = [
