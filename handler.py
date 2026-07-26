@@ -27230,6 +27230,16 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
 
     # 6. Rationale + terminal (SAME contract: durable completed write + the
     #    complete progress event + the result payload the server persists).
+    # DURATION-HONEST (ruling 4a; S-ANYVIDEO: minimal plans whose clips are
+    # contiguous over ~the whole source are visual PASSTHROUGHS — claiming a
+    # "re-pace" over-claims). Detect: clips contiguous AND covering ≥96% of the
+    # source → the rationale says what actually happened.
+    _mm_clips = getattr(_plan, "clips", []) or []
+    _mm_span = sum((c.end_s - c.start_s) for c in _mm_clips)
+    _mm_contig = all(abs(_mm_clips[i].end_s - _mm_clips[i + 1].start_s) < 0.05
+                     for i in range(len(_mm_clips) - 1)) if len(_mm_clips) > 1 else True
+    _mm_passthrough = (_route_name == "minimal" and _mm_contig
+                       and _dur > 0 and (_mm_span / _dur) >= 0.96)
     if _route_name == "hype":
         # the model's own notes (bounded) or an honest default — the user hears
         # WHY it's a beat edit
@@ -27247,6 +27257,11 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
                              "Cut to the beat — every hit lands on the music. #beatsync"),
             "post_hook": "Turn the sound on for this one.",
         }
+    elif _mm_passthrough:
+        _rationale = (
+            f"Your {_dur:.0f}-second clip was already tight, so I kept it intact "
+            "and cleaned up the delivery. For a full edit — captions, zooms, "
+            "B-roll — try a clip of someone speaking to camera.")
     else:
         _rationale = _minimal_rationale(reason, _dur)
         _capability_notes = [
