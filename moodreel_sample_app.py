@@ -402,13 +402,17 @@ def main():
         return
     if os.environ.get("MOODREEL"):
         # The two cinematic mood-reel samples — posed/aesthetic, no confident
-        # music (the S-ANYVIDEO class). PINNED ids (reproducibility law).
+        # music (the S-ANYVIDEO class). PINNED ids (reproducibility law):
+        #   8893569  = "a model wearing a suit and black boots" (27s, 2160x4096
+        #              portrait) — the posed/fashion face of the class
+        #   31521814 = "moody urban night cityscape with traffic" (54s,
+        #              2160x3840 portrait) — the moody city/landscape face
         specs = [
             {"name": "mood_pose", "ts": ts, "mode": "moodreel", "max_src_s": 24.0,
-             "pexels_query": os.environ.get("MOOD_POSE_ID", "fashion model posing studio"),
+             "pexels_query": os.environ.get("MOOD_POSE_ID", "id:8893569"),
              "vibe": "a cinematic mood reel — slow, expensive, editorial"},
             {"name": "mood_city", "ts": ts, "mode": "moodreel", "max_src_s": 24.0,
-             "pexels_query": os.environ.get("MOOD_CITY_ID", "moody city street night rain"),
+             "pexels_query": os.environ.get("MOOD_CITY_ID", "id:31521814"),
              "vibe": "a moody cinematic city reel — dusk, weight, stillness"},
         ]
         results = list(render_case.map(specs))
@@ -419,7 +423,10 @@ def main():
         return
     if os.environ.get("MOODPAIRS"):
         # Ruling 4b: two minimal A/B pairs on ONE pinned source.
-        src = os.environ.get("MOODPAIR_ID", "moody city street night rain")
+        #   29583716 = "rainy night street scene with lights and mountains"
+        #              (53s, 2160x3840 portrait) — aesthetic no-speech with
+        #              genuinely varying motion (rain, traffic, light)
+        src = os.environ.get("MOODPAIR_ID", "id:29583716")
         specs = [
             {"name": "pair1_baseline", "ts": ts, "mode": "pair_baseline",
              "max_src_s": 22.0, "pexels_query": src},
