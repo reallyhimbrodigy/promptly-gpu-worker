@@ -5849,6 +5849,7 @@ def _secret_canonical_values():
         "PROMPTLY_DELIVERY_FPS": "30",    # FPS 30 APPROVED (Zac blanket-GO 2026-07-25 on the A/B pair): delivery target 30fps — halves the render tail; rollback = "" (60) here + secret
         "PROMPTLY_RENDER_FANOUT": "1",    # A-L4 LIVE (cert 3/3: SSIM 1.0 global+boundaries, remote mode, poisoned fallback; length-floored ≥60s output where it strictly wins: 155s = −19%); rollback = "0"
         "PROMPTLY_HYPE_MODE": "1",        # HYPE LIVE (Zac "FLIP HYPE" 2026-07-25 on the v2 pair): no-speech + confident beat (aubio tconf > 0.15) → beat-synced edit; every miss fail-safes to minimal; rollback = "0"
+        "PROMPTLY_SHAPE_ABORT": "1",     # degen shape-abort LIVE (ruling 1a; 5/5 shapes, 0 FP on 7.9k healthy; ~85-90% burn cut; rollback = "0")
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that
