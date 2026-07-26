@@ -5557,11 +5557,37 @@ def _progressive_terminal_seam():
     _c = open("cert_progressive_app.py").read()
     assert "DETERMINISM CONTROL" in _c and 'cap["deterministic"] = filecmp.cmp(kb, kb2' in _c, \
         "cert: baseline2 determinism control"
-    assert 'eq["ok"] = bool(cap["deterministic"] and cap["bytes_identical"])' in _c, \
-        "cert: FINAL bar is strict byte-identity under the determinism control"
-    assert "render_nondeterministic" in _c and "progressive_leg_perturbs_render" in _c, \
-        "cert: failure mechanisms are NAMED, never blended"
-    assert 'pv["ssim_preview_vs_final"] >= 0.999' in _c, "cert: preview bar SSIM>=0.999 (RELAX BAR ruling)"
+    # DETERMINISM-RELATIVE FINAL BAR (Zac ruling 2026-07-26): progressive-ON must
+    # diverge from a fresh baseline by <= the render's own run-to-run noise.
+    assert 'eq["ok"] = bool(cap["bytes_identical"] or _perturb <= _noise + _EPS)' in _c, \
+        "cert: FINAL bar is determinism-relative (progressive perturbation <= render run-to-run noise), NOT strict byte-identity (unmeetable: x264 nondeterminism ~0.99994)"
+    assert "render_run_to_run_noise" in _c and "progressive_added_perturbation" in _c, \
+        "cert: both quantities measured + reported (noise floor + progressive's added perturbation)"
+    # ARCHITECTURAL INVARIANT (Zac ruling 2026-07-26: the SAFETY property, SSIM is
+    # only corroboration): the publisher reads render intermediates + audio ONLY,
+    # writes ONLY to the preview prefix, and has NO write path to the final
+    # artifact and NO render/re-render call. This is what makes the final safe
+    # regardless of the (non-deterministic) pixel comparison.
+    _pp = open("progressive_publish.py").read()
+    assert "renderMedia" not in _pp and "render_multi_clip" not in _pp \
+        and "_run_remotion" not in _pp and "generate_content" not in _pp, \
+        "publisher must NEVER render/re-render — it composites previews from the render's own intermediates"
+    assert "output_path" not in _pp, \
+        "publisher must have NO reference to the final output_path (no write path to the final artifact)"
+    # every ffmpeg output in the publisher lands under self._out_dir (work_dir/
+    # preview_hls) or the preview S3 prefix — never the final output or final HLS.
+    assert 'self._out_dir = os.path.join(work_dir, "preview_hls")' in _pp, \
+        "publisher's only local write dir is the preview_hls subdir"
+    assert "_final_prefix" not in _pp and "output-hls" not in _pp, \
+        "publisher must not reference the final HLS prefix"
+    # PREVIEW BAR WITHDRAWN (Zac ruling 2026-07-26): no numeric SSIM gate — the
+    # preview SSIM is informational and a preview->final SWAP artifact is
+    # produced for Zac's eye (the visible-pop risk, not a decimal).
+    assert 'pv["ok"] = True' in _c and "swap artifact is the judge" in _c, \
+        "cert: preview SSIM must be informational (no numeric bar)"
+    assert "PREVIEW\u2192FINAL SWAP ARTIFACT" in _c or "PREVIEW\N{RIGHTWARDS ARROW}FINAL SWAP ARTIFACT" in _c or "swap_artifact_url" in _c, \
+        "cert: must produce the preview->final swap artifact for Zac's eye"
+    assert "cert-progressive-swaps/" in _c, "swap artifact must persist OUTSIDE base_key (survives cert cleanup)"
     assert '"-preview-hls" not in ts["result_hls_manifest_url"]' in _c \
         and 'payload.get("final") is True' in _c, \
         "cert: terminal state points at the final ladder + stamped payload"

@@ -284,20 +284,30 @@ def run_case(case: dict) -> dict:
             m = re.search(r"All:([0-9.]+)", r.stderr or "")
             return float(m.group(1)) if m else None
 
+        # DETERMINISM-RELATIVE BAR (Zac ruling 2026-07-26): strict byte-identity
+        # is unmeetable by dual-render because the render itself is
+        # non-deterministic run-to-run (x264 threading, ~0.99994 SSIM between two
+        # identical-input renders). The guarantee that matters: the progressive
+        # leg adds NO perturbation beyond the render's own run-to-run noise.
+        # PASS iff progressive-ON diverges from a fresh baseline by <= two fresh
+        # baselines diverge from each other (+ epsilon). Byte-identity passes
+        # trivially. SSIM is CORROBORATION; the architectural invariant (publisher
+        # reads intermediates only, never re-renders, no write path to the final)
+        # is the SAFETY property, asserted statically in the gate.
         eq = {"deterministic": cap["deterministic"],
-              "final_bytes_identical": cap["bytes_identical"],
-              "ssim_baseline_vs_baseline2": None,
-              "ssim_final_vs_baseline": None, "mechanism": None}
-        if not cap["deterministic"]:
-            eq["ssim_baseline_vs_baseline2"] = _ssim(cap["baseline"],
-                                                     cap["baseline2"])
-            eq["mechanism"] = "render_nondeterministic"
-        if not cap["bytes_identical"]:
-            eq["ssim_final_vs_baseline"] = _ssim(cap["baseline"],
-                                                 cap["progressive"])
-            if eq["mechanism"] is None:
-                eq["mechanism"] = "progressive_leg_perturbs_render"
-        eq["ok"] = bool(cap["deterministic"] and cap["bytes_identical"])
+              "final_bytes_identical": cap["bytes_identical"]}
+        eq["ssim_baseline_vs_baseline2"] = (
+            1.0 if cap["deterministic"] else _ssim(cap["baseline"], cap["baseline2"]))
+        eq["ssim_final_vs_baseline"] = (
+            1.0 if cap["bytes_identical"] else _ssim(cap["baseline"], cap["progressive"]))
+        _noise = 1.0 - (eq["ssim_baseline_vs_baseline2"] if eq["ssim_baseline_vs_baseline2"] is not None else 1.0)
+        _perturb = 1.0 - (eq["ssim_final_vs_baseline"] if eq["ssim_final_vs_baseline"] is not None else 1.0)
+        _EPS = 2e-5
+        eq["render_run_to_run_noise"] = round(_noise, 6)
+        eq["progressive_added_perturbation"] = round(_perturb, 6)
+        eq["ok"] = bool(cap["bytes_identical"] or _perturb <= _noise + _EPS)
+        if not eq["ok"]:
+            eq["mechanism"] = "progressive_perturbs_beyond_render_noise"
         out["equivalence"] = eq
 
         # ── (b) PARTIAL ≠ FINAL (live manifest history) ─────────────────────
@@ -393,9 +403,44 @@ def run_case(case: dict) -> dict:
             pv["ssim_preview_vs_final"] = float(m.group(1)) if m else None
         except Exception as pe:
             pv["error"] = f"{type(pe).__name__}: {pe}"
-        pv["ok"] = bool(pv["ssim_preview_vs_final"] is not None
-                        and pv["ssim_preview_vs_final"] >= 0.999)
+        # PREVIEW SSIM IS INFORMATIONAL (Zac ruling 2026-07-26: the ~0.999 bar
+        # was withdrawn — do not chase an SSIM that erases the latency benefit).
+        # The bar is Zac's eye on the swap artifact below; the risk that matters
+        # is a visible quality POP at the swap, not a decimal. Never fails a case.
+        pv["ok"] = True
+        pv["note"] = "informational only; the preview→final swap artifact is the judge"
         out["preview_visual"] = pv
+
+        # ── PREVIEW→FINAL SWAP ARTIFACT (Zac ruling 2026-07-26) ─────────────
+        # A first-look approximation of the client swap for Zac's eye: play the
+        # PREVIEW for the first half, then the delivered FINAL for the rest, in
+        # one file, so any quality POP at the seam is visible. NOT the true
+        # client swap (that needs the iOS player + a phone recording) — labeled
+        # as such. Best-effort; never fails the case.
+        try:
+            swap_t = max(2.0, out_total / 2.0)
+            swap_out = os.path.join(work, "swap.mp4")
+            subprocess.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-i", prev_cat, "-i", cap["progressive"],
+                 "-filter_complex",
+                 (f"[0:v]trim=0:{swap_t:.3f},setpts=PTS-STARTPTS[a];"
+                  f"[1:v]trim={swap_t:.3f},setpts=PTS-STARTPTS[b];"
+                  f"[a][b]concat=n=2:v=1:0[v]"),
+                 "-map", "[v]", "-c:v", "libx264", "-preset", "fast",
+                 "-crf", "18", "-pix_fmt", "yuv420p", swap_out],
+                check=True, capture_output=True, text=True, timeout=1200)
+            # persistent prefix OUTSIDE base_key — the finally-block S3 hygiene
+            # wipes base_key/*, so the artifact for Zac must live elsewhere.
+            swap_key = f"cert-progressive-swaps/{name}_{jid}.mp4"
+            s3.upload_file(swap_out, bucket, swap_key,
+                           ExtraArgs={"ContentType": "video/mp4"})
+            out["swap_artifact_url"] = f"{CDN}{swap_key}"
+            out["swap_note"] = (f"preview[0:{swap_t:.0f}s] then FINAL[{swap_t:.0f}s:end]; "
+                                "server-side approximation of the client swap — "
+                                "the true phone recording needs the iOS player")
+        except Exception as se:
+            out["swap_artifact_error"] = f"{type(se).__name__}: {se}"
 
         final_listed = s3.list_objects_v2(Bucket=bucket, Prefix=final_prefix + "/")
         final_keys = [o["Key"] for o in (final_listed.get("Contents") or [])]

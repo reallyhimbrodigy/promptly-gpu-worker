@@ -442,7 +442,13 @@ class ProgressivePublisher:
              f"[1:a]atrim=start={a_start:.6f}:end={a_end:.6f},"
              f"asetpts=PTS-STARTPTS[pa]"),
             "-map", "[pv]", "-map", "[pa]",
-            "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+            # Preset/CRF (Zac ruling 2026-07-26: minimize the visible quality
+            # POP at the preview→final swap, without erasing the latency win).
+            # fast/crf18 is closer to the final's look than veryfast/crf20 at a
+            # small encode-time cost that stays well inside the chunk cadence;
+            # -bf 0 (below) keeps the boundary-latency guarantee. The bar is
+            # Zac's eye on a recorded phone swap, not an SSIM number.
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18",
             "-profile:v", "high", "-level:v", "4.1",
             # -bf 0: no B-frame reordering delay. With B-frames the first TS
             # packet lands ~2 frames late (measured +67ms video start), which
