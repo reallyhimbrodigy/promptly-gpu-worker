@@ -8048,6 +8048,146 @@ def _progressive_wiring_seams():
         "publisher must wait on the audio_ready signal before slicing audio"
 
 
+
+
+# ─── SHAPE-AWARE STREAM ABORT (DEGEN-LEVER-A, Zac ruling 1c-a, 2026-07-25) ───
+# REAL prod fixtures: the 5 canonical spiral shapes are VERBATIM
+# gemini_degen_tail reasons from the divergence ledgers (class "streamed
+# output crossed 16000 tok"); the healthy fixtures are the two most
+# structurally-adversarial completed recipes (probe-count 6 / period-frac
+# 0.416 — the loop-like healthy JSON the string-state gate must hide from
+# the signals) plus the longest real free-prose fields.
+
+_SHAPE_GATE_REAL_TAILS = {
+    'short-unit': 'e bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye ok bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye bye',
+    'vocab-staircase': 'ations space mapping representations space. Variables variable mapping mapping representations mapping space representations. Hence variable variables variables mapping variables representations representation representations mapping. This variables representations variables map variable representation. Note space space representation variables representation representation. By map representations',
+    'long-phrase': 'ment exactly as he says it out loud clearly and slowly for emphasis on the final recommendation point of the video review here and now for this moment exactly as he says it out loud clearly and slowly for emphasis on the final recommendation point of the video review here and now for this moment exactly as he says it out loud clearly and slowly for emphasis on the final recommendation point of the',
+    'florid-synonym': 'stonishingly accomplished amazingly done exceptionally executed spectacularly performed fabulously achieved brilliantly accomplished phenomenally done remarkably executed miraculously performed amazingly achieved exceptionally accomplished brilliantly done fabulously executed spectacularly performed phenomenally achieved astonishingly accomplished amazingly done exceptionally executed miraculously',
+    'self-argument': 'kay. Here is the string: \\"renders the paypal payout as a real phone event\\". Okay. I will just output the string. \\"renders the paypal payout as a real phone event\\". Okay. Here is the string: \\"renders the paypal payout as a real phone event\\". Okay. I will just output the string. \\"renders the paypal payout as a real phone event\\". Okay. Here is the string: \\"renders the paypal payout as a real',
+}
+_SHAPE_GATE_EXPECTED = {
+    'short-unit': 'phrase-loop',
+    'vocab-staircase': 'vocab-collapse',
+    'long-phrase': 'phrase-loop',
+    'florid-synonym': 'vocab-collapse',
+    'self-argument': 'phrase-loop',
+}
+_SHAPE_GATE_HEALTHY_RECIPES = [
+    '{"cuts":[{"speed":1,"source_end":3.9,"source_start":0.11,"_original_idx":0,"transition_out":"none"},{"speed":1,"source_end":6.65546485260771,"source_start":4.438934240362812,"_original_idx":1,"transition_out":"none"},{"speed":1,"source_end":7.5325,"source_start":6.7881179138322,"_original_idx":2,"transition_out":"none"},{"speed":1,"source_end":13.457687074829932,"source_start":7.5325,"_original_idx":3,"transition_out":"none"},{"speed":1,"source_end":18.725351473922903,"source_start":13.698888888888888,"_original_idx":4,"transition_out":"none"},{"speed":1,"source_end":28.8475,"source_start":18.831360544217688,"_original_idx":5,"transition_out":"none"},{"speed":1,"source_end":31.90324263038549,"source_start":28.8475,"_original_idx":6,"transition_out":"none"},{"speed":1,"source_end":39.301,"source_start":31.99498866213152,"_original_idx":7,"transition_out":"none"}],"notes":"Mechanical cuts: 3 located_silence (Gemini decides), 1 filler, 0 false_start, 0 stutter, 0 retake","outro":"none","pacing":"fast","video_plan":{"movements":[{"job":"establish the problem with traditional transfers","energy":"calm","captions":"rest","end_word_index":37,"lead_instrument":"clean_frame","start_word_index":0},{"job":"demonstrate the PureFi app","energy":"deep","captions":"rest","end_word_index":92,"lead_instrument":"clean_frame","start_word_index":38},{"job":"deliver the APY payoff and call to action","energy":"calm","captions":"rest","end_word_index":123,"lead_instrument":"clean_frame","start_word_index":93}],"key_moments":[{"what_i_saw":"slight head shake, earnest expression","what_lands":"without thinking twice","word_index":17,"why_emphasis":"the pain of past financial mistakes","viewer_feeling":"empathy with the common mistake"},{"what_i_saw":"direct eye contact, serious tone","what_lands":"paying attention","word_index":30,"why_emphasis":"the pivot to responsibility","viewer_feeling":"the shift in mindset"},{"what_i_saw":"confident delivery alongside the app demo","what_lands":"see exactly what I\'m paying","word_index":51,"why_emphasis":"the relief of transparency","viewer_feeling":"trust in the product"},{"what_i_saw":"eyebrow raise, emphasis on the number","what_lands":"up to 6% APY","word_index":98,"why_emphasis":"the major financial benefit lands","viewer_feeling":"the undeniable value proposition"}],"story_shape":"hook \\u2192 past mistakes \\u2192 realization \\u2192 introduction of PureFi \\u2192 payoff of 6% APY \\u2192 call to action","arc_segments":[{"position":"hook","intensity":0.8,"end_word_index":9,"start_word_index":0},{"position":"build","intensity":0.4,"end_word_index":24,"start_word_index":10},{"position":"mid_peak","intensity":0.6,"end_word_index":37,"start_word_index":25},{"position":"build","intensity":0.4,"end_word_index":92,"start_word_index":38},{"position":"payoff","intensity":0.9,"end_word_index":110,"start_word_index":93},{"position":"close","intensity":0.7,"end_word_index":123,"start_word_index":111}],"what_happens":"A male creator delivers a professional pitch for the PureFi app, shifting from his past mistakes with hidden fees to demonstrating the app\'s transparent pricing and 6% APY feature.","hook_word_index":0,"close_word_index":117,"editorial_vision":"A polished, professional corporate ad that honors the request for no captions and respects the existing burned-in elements. The camera remains static to protect the app demo PIP, relying on subtle, professional sound design to land the key moments.","payoff_word_index":98},"broll_clips":[],"transitions":[],"_burned_text":{"regions":[{"band":"top","class":"signage","change":37.72,"corner":false,"n_boxes":18,"persistence":0.667,"max_row_extent":0.869,"wide_persistence":0.333},{"band":"center","class":"signage","change":34.51,"corner":false,"n_boxes":12,"persistence":1,"max_row_extent":0.227,"wide_persistence":0},{"band":"bottom","class":"captions","change":30.88,"corner":true,"n_boxes":56,"persistence":1,"max_row_extent":0.84,"wide_persistence":0.833}],"has_burned_captions":true,"source_text_regions":["top","center","bottom"],"existing_caption_region":"bottom"},"aspect_ratio":"9:16","color_effect":null,"audio_denoise":false,"caption_style":"none","sound_effects":[{"t":6.24,"why":"empathy with the common mistake","word":"thinking","sound":"woosh-professional","_word_idx":17},{"t":17.414999,"why":"trust in the product","word":"exactly","sound":"mouse-click-sound","_word_idx":51},{"t":30.2,"why":"the undeniable value proposition","word":"6%","sound":"transition-sfx","_word_idx":98}],"text_overlays":[],"video_identity":"A clean, professional UGC ad for PureFi, where a male speaker explains how he stopped ignoring exchange rates and started using the app to see fees upfront and earn 6% APY on his balance. The source footage already features its own burned-in text and a continuous app demo PIP.","cut_refinements":[],"motion_graphics":[],"caption_keywords":[],"emphasis_moments":[{"type":"reaction","sound":"woosh-professional","duration":2,"intensity":"medium","zoom_effect":null,"word_indices":[17],"motion_graphic":null,"viewer_feeling":"empathy with the common mistake"},{"type":"statement","sound":"voice","duration":2,"intensity":"medium","zoom_effect":null,"word_indices":[30],"motion_graphic":null,"viewer_feeling":"the shift in mindset"},{"type":"statement","sound":"mouse-click-sound","duration":2,"intensity":"medium","zoom_effect":null,"word_indices":[51],"motion_graphic":null,"viewer_feeling":"trust in the product"},{"type":"revelation","sound":"transition-sfx","duration":2.5,"intensity":"high","zoom_effect":null,"word_indices":[98],"motion_graphic":null,"viewer_feeling":"the undeniable value proposition"}],"generated_scenes":[],"_emphasis_moments":[{"t":6.24,"type":"reaction","word":"thinking","duration":2,"intensity":"medium","zoom_effect":null,"word_indices":[17],"motion_graphic":null},{"t":10.639999,"type":"statement","word":"attention","duration":2,"intensity":"medium","zoom_effect":null,"word_indices":[30],"motion_graphic":null},{"t":17.414999,"type":"statement","word":"exactly","duration":2,"intensity":"medium","zoom_effect":null,"word_indices":[51],"motion_graphic":null},{"t":30.2,"type":"revelation","word":"6%","duration":2.5,"intensity":"high","zoom_effect":null,"word_indices":[98],"motion_graphic":null}],"_schema_generation":"a1a2","tight_cut_overlays":[],"source_text_regions":["center","top"],"thumbnail_timestamp":30.84,"thumbnail_word_index":99,"_parsed_sound_effects":[{"t":6.24,"why":"empathy with the common mistake","word":"thinking","sound":"woosh-professional","_word_idx":17},{"t":17.414999,"why":"trust in the product","word":"exactly","sound":"mouse-click-sound","_word_idx":51},{"t":30.2,"why":"the undeniable value proposition","word":"6%","sound":"transition-sfx","_word_idx":98}],"_removed_word_indices":[55],"existing_caption_region":"top","caption_position_changes":[],"caption_position_segments":[{"position":"bottom","to_seconds":39.301,"from_seconds":0}],"_resolved_tight_cut_overlays":[]}',
+    '{"cuts":[{"speed":1,"source_end":3.0474375,"source_start":0.195,"_original_idx":0,"transition_out":"none"},{"speed":1,"source_end":4.527729166666667,"source_start":3.151479166666667,"_original_idx":1,"transition_out":"none"},{"speed":1,"source_end":13.4839375,"_zoom_effect":{"type":"SnapReframe","events":[{"scale":1.3,"startMs":8387,"durationMs":700}]},"source_start":4.820604166666667,"_original_idx":2,"transition_out":"none"},{"speed":1,"source_end":22.707333333333334,"_zoom_effect":{"type":"StepZoom","events":[{"scale":1.25,"startMs":13715,"durationMs":800}]},"source_start":13.510625,"_original_idx":3,"transition_out":"none"},{"speed":1,"source_end":26.783333,"_zoom_effect":{"type":"SnapReframe","events":[{"scale":1.3,"startMs":25382,"durationMs":700}]},"source_start":23.659208333333332,"_original_idx":4,"transition_out":"none"}],"notes":"safe-edit fallback","outro":"none","pacing":"fast","video_plan":{"movements":[{"job":"carry the piece cleanly","energy":"calm","captions":"run","end_word_index":83,"lead_instrument":"kinetic_captions","start_word_index":0}],"key_moments":[{"what_i_saw":"the speaker leaning into the line","what_lands":"measured vocal peak","word_index":24,"why_emphasis":"strongest energy in the recording","viewer_feeling":"this is the moment"},{"what_i_saw":"the speaker leaning into the line","what_lands":"measured vocal peak","word_index":41,"why_emphasis":"strongest energy in the recording","viewer_feeling":"this is the moment"},{"what_i_saw":"the speaker leaning into the line","what_lands":"measured vocal peak","word_index":81,"why_emphasis":"strongest energy in the recording","viewer_feeling":"this is the moment"}],"story_shape":"single take, cleaned","arc_segments":[{"position":"hook","intensity":0.7,"end_word_index":2,"start_word_index":0},{"position":"build","intensity":0.4,"end_word_index":23,"start_word_index":3},{"position":"payoff","intensity":1,"end_word_index":25,"start_word_index":24},{"position":"close","intensity":0.3,"end_word_index":83,"start_word_index":26}],"what_happens":"The speaker talks through their piece; the edit keeps it clean and paced.","hook_word_index":0,"close_word_index":83,"editorial_vision":"lean and legible \\u2014 cuts and captions carry it","payoff_word_index":24},"broll_clips":[],"transitions":[],"aspect_ratio":"9:16","color_effect":null,"audio_denoise":false,"caption_style":"CleanCut","sound_effects":[],"text_overlays":[],"video_identity":"Safe-edit fallback: a talking-head video delivered with clean mechanical cuts, legible captions, and the speaker\'s own energy.","cut_refinements":[],"motion_graphics":[],"caption_keywords":[],"emphasis_moments":[{"type":"statement","sound":"voice","duration":2,"intensity":"medium","zoom_effect":{"type":"SnapReframe","events":[{"startMs":0}]},"word_indices":[24],"motion_graphic":null,"viewer_feeling":"the strongest measured beat lands"},{"type":"statement","sound":"voice","duration":2,"intensity":"medium","zoom_effect":{"type":"StepZoom","events":[{"startMs":0}]},"word_indices":[41],"motion_graphic":null,"viewer_feeling":"the strongest measured beat lands"},{"type":"statement","sound":"voice","duration":2,"intensity":"medium","zoom_effect":{"type":"SnapReframe","events":[{"startMs":0}]},"word_indices":[81],"motion_graphic":null,"viewer_feeling":"the strongest measured beat lands"}],"generated_scenes":[],"_emphasis_moments":[{"t":8.72,"type":"statement","word":"\\u092f\\u0939","duration":2,"intensity":"medium","zoom_effect":{"type":"SnapReframe","events":[{"scale":1.3,"startMs":8387,"durationMs":700}]},"word_indices":[24],"motion_graphic":null},{"t":13.715,"type":"statement","word":"\\u0905\\u0917\\u0930","duration":2,"intensity":"medium","zoom_effect":{"type":"StepZoom","events":[{"scale":1.25,"startMs":13715,"durationMs":800}]},"word_indices":[41],"motion_graphic":null},{"t":25.715,"type":"statement","word":"\\u0938\\u0947","duration":2,"intensity":"medium","zoom_effect":{"type":"SnapReframe","events":[{"scale":1.3,"startMs":25382,"durationMs":700}]},"word_indices":[81],"motion_graphic":null}],"_schema_generation":"a1a2","tight_cut_overlays":[],"source_text_regions":[],"thumbnail_timestamp":8.72,"thumbnail_word_index":24,"_parsed_sound_effects":[],"_removed_word_indices":[],"existing_caption_region":"none","caption_position_changes":[],"caption_position_segments":[{"position":"bottom","to_seconds":26.783333,"from_seconds":0}],"_resolved_tight_cut_overlays":[]}',
+]
+_SHAPE_GATE_HEALTHY_PROSE = [
+    ('notes', "Added a subtle low-frequency background pulse implicitly to drive the pacing. The cyan/neon blue highlight request is met via the Gadzhi preset accentColor implementation, utilizing Montserrat 700 bold as requested. B-roll frequency strictly honors the 4-6 second shift instruction, using cinematic pop-culture aesthetic. Preserved_silences is intentionally left blank to eliminate any dead air per the 'tight jump cut' requirement, creating relentless momentum."),
+    ('editorial_vision', "A premium dealership pitch driven by bold Hinglish graphics. We hold the long 15-second silence mid-video to let the viewer admire the bike in its pure stock condition, while the text layer does the heavy lifting: highlighting the 2024 model year, the ultra-low 7000km mileage, and the single-owner status. The palette uses Lumen's gold accents to match the Royal Enfield brand prestige, keeping the frame clean and the numbers loud."),
+    ('editorial_vision', "I'm treating this like a premium Netflix business documentary. The edit relies on a clean, sophisticated frame with CleanCut captions, leaning into deliberate SmoothPush zooms and deep cinematic sound design rather than fast cuts. B-roll choices evoke high-end tech and modern business, creating an atmosphere of authority and massive scale that climaxes on the final 'billions' realization."),
+    ('editorial_vision', "I'm executing the user's specific request for kinetic 'write-as-he-speaks' captions using the TypewriterReveal style, paired with hard-hitting zooms and sound effects on the key numbers to drive the promo energy. The edit strips away dead air and anchors the massive 50% discount with a Stamp graphic, treating this customer testimonial like a high-converting UGC ad."),
+]
+
+
+@check("SHAPE-AWARE STREAM ABORT (DEGEN-LEVER-A, 2026-07-25): the 16k cutoff burns 144-247s per spiral; the phrase-period discriminant catches the single-string prose runaway IN-STREAM. Two tiers behind an escape-aware JSON string-state gate (healthy strings max 433/462 chars measured, so structural JSON — which measures loop-LIKE: probe 6, period-frac 0.416 — never reaches the signals): Tier-1 signals at run 1024/2048/3072 (phrase-period autocorr >=0.55, distinct-ratio <0.36, 64-char probe >=4x, top-8 concentration >=0.55), Tier-2 string-runaway net at 4096 regardless of shape. Corpus verdict: 0 FP on 60 healthy recipe streams + 148 prose fields + 7,315 recipe strings; 5/5 canonical shapes at first check; 186/192 real spirals (residual 6 = document-structure loops, deliberately left to the UNCHANGED 16k backstop — structure repetition is what healthy JSON looks like). Flag PROMPTLY_SHAPE_ABORT default ON, env-only, =0 restores 16k-only. Fires with the SAME aborted-flag semantics as the 16k path so L3 re-roll machinery is untouched.")
+def _shape_abort_gate():
+    import handler as _h, os as _os, json as _json
+
+    # constants pinned — a silent retune fails the gate
+    assert _h._SHAPE_ABORT_WINDOW == 1200 and _h._SHAPE_ABORT_MIN_RUN == 1024, \
+        "window/min-run retuned"
+    assert _h._SHAPE_ABORT_CHECK_EVERY == 1024 and _h._SHAPE_ABORT_HARD_RUN == 4096, \
+        "cadence/hard-run retuned"
+
+    # flag: default ON with env unset; =0 restores 16k-only
+    _saved_env = _os.environ.pop("PROMPTLY_SHAPE_ABORT", None)
+    try:
+        assert _h._shape_abort_enabled() is True, "default must be ON"
+        _os.environ["PROMPTLY_SHAPE_ABORT"] = "0"
+        assert _h._shape_abort_enabled() is False, "=0 must disable"
+    finally:
+        _os.environ.pop("PROMPTLY_SHAPE_ABORT", None)
+        if _saved_env is not None:
+            _os.environ["PROMPTLY_SHAPE_ABORT"] = _saved_env
+
+    def _feed_all(_text, _chunk=137):
+        _st = _h._shape_abort_state()
+        for _i in range(0, len(_text), _chunk):
+            _f = _h._shape_abort_feed(_st, _text[_i:_i + _chunk])
+            if _f is not None:
+                return _f
+        return None
+
+    _PREFIX = ('{"video_plan":{"editorial_vision":"clean and legible cuts '
+               'and captions carry it","what_happens":"The speaker talks '
+               'through their piece"},"emphasis_moments":[{"word_index":12,"why":"')
+
+    def _synth(_tail, _total=9000):
+        _body = (_tail * (_total // max(1, len(_tail)) + 2))[:_total]
+        return _PREFIX + _body.replace("\n", "\\n")
+
+    # (1) the 5 REAL shapes MUST fire — at the FIRST check, with the pinned shape
+    for _name, _tail in _SHAPE_GATE_REAL_TAILS.items():
+        _f = _feed_all(_synth(_tail))
+        assert _f is not None, f"real shape {_name} did not fire"
+        assert _f["shape"] == _SHAPE_GATE_EXPECTED[_name], \
+            f"{_name}: fired as {_f['shape']}, pinned {_SHAPE_GATE_EXPECTED[_name]}"
+        assert _f["run_len"] == 1024, \
+            f"{_name}: fired at run {_f['run_len']}, expected first check (1024)"
+
+    # (2) >=5 synthetic variants MUST fire (loop mechanics, not corpus echoes)
+    _synths = {
+        "syn-short-unit": "the end. " * 600,
+        "syn-staircase": "auto edit fast " * 400,
+        "syn-long-phrase": ("this exact sentence repeats to fill the budget "
+                             "with the same long phrase over and over for the "
+                             "final recommendation here " * 60),
+        "syn-self-argue": "".join(f"Wait, <= 12 words: version {_i} of the "
+                                   f"caption why. Okay. " for _i in range(200)),
+        "syn-noisy-loop": "bye bye bye bye ok bye bye bye bye bye hm bye bye " * 150,
+        # all-unique vocabulary, template only — the hardest synthetic; the
+        # 4096 string-runaway net is its guaranteed floor
+        "syn-florid-unique": " ".join(f"adverb{_i}ly done{_i} accomplished{_i}"
+                                       for _i in range(700)),
+    }
+    for _name, _body in _synths.items():
+        _f = _feed_all(_PREFIX + _body.replace("\n", "\\n"))
+        assert _f is not None, f"synthetic {_name} did not fire"
+        assert _f["run_len"] <= _h._SHAPE_ABORT_HARD_RUN, _name
+
+    # (3) healthy fixtures MUST NOT fire — full streams through the feed
+    for _i, _recipe_json in enumerate(_SHAPE_GATE_HEALTHY_RECIPES):
+        _json.loads(_recipe_json)  # fixture integrity: real, valid recipe JSON
+        assert _feed_all(_recipe_json) is None, f"FP on healthy recipe {_i}"
+    for _field, _text in _SHAPE_GATE_HEALTHY_PROSE:
+        _stream = '{"video_plan":{"%s":%s}}' % (_field, _json.dumps(_text))
+        assert _feed_all(_stream) is None, f"FP on healthy prose {_field}"
+        assert _h._shape_window_signature(_text) is None, \
+            f"signature FP on healthy prose {_field}"
+
+    # (4) the string-runaway net: a 5k-char non-repeating string must fire
+    # at EXACTLY 4096 (the shape-independent floor under every spiral)
+    import random as _random
+    _rng = _random.Random(7)
+    _uniq = " ".join("w%06x" % _rng.getrandbits(24) for _ in range(900))[:5200]
+    _f = _feed_all(_PREFIX + _uniq)
+    assert _f is not None and _f["shape"] == "string-runaway" \
+        and _f["run_len"] == 4096, f"runaway net broken: {_f}"
+
+    # (5) wiring: the discriminant sits INSIDE _gemini_stream_with_cache,
+    # aborts with the SAME flag the 16k path uses, ledgers shape_abort, and
+    # the caller keeps the L3 class string
+    _src = open("handler.py").read()
+    _stream_fn = _src[_src.index("def _gemini_stream_with_cache"):]
+    _stream_fn = _stream_fn[:_stream_fn.index("def _build_transitions_subcall_schema")]
+    assert "_shape_abort_feed(" in _stream_fn, "feed not wired in the stream loop"
+    assert "ABORTED@shape" in _stream_fn, "shape-abort log line missing"
+    assert '"shape_abort",' in _stream_fn, "shape_abort divergence not ledgered"
+    assert "_aborted = True" in _stream_fn.split("_shape_abort_feed(")[1][:2000], \
+        "shape fire must set the SAME aborted flag the 16k path sets"
+    assert 'os.environ.get("PROMPTLY_SHAPE_ABORT", "1")' in _src, \
+        "flag must default ON, env-only"
+    _caller = _src[_src.index("def _call_gemini_post_cuts"):][:20000]
+    assert "shape-abort " in _caller, "caller must name the shape-abort class"
+    _shape_branch = _caller[_caller.index("shape-abort "):][:600]
+    assert "repetition-loop degeneration" in _shape_branch, \
+        "shape aborts must keep the L3 degen class string (re-roll budget)"
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
