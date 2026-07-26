@@ -25,6 +25,10 @@ SECRETS = [
     modal.Secret.from_name("promptly-secrets"),
     modal.Secret.from_name("gemini-vertex"),
     modal.Secret.from_name("promptly-cloudfront"),
+    # prod parity: without the flags secret the containers regress to legacy
+    # behavior (Latin-only script gate rejected the real borderline clip as
+    # NO_SPEECH_NONENGLISH; delivery fps read 60) — pairs must match prod.
+    modal.Secret.from_name("promptly-lang-flags"),
 ]
 CDN = "https://d1iax8jos987n3.cloudfront.net/"
 BUCKET_DEFAULT = "promptly-video-storage"
