@@ -27217,16 +27217,23 @@ _PROGRESSIVE_PUB = None  # per-job publisher; set by the TH tail, cleared in its
 
 
 def _progressive_enabled(input_data=None):
-    """Progressive-delivery flag. DARK by default; PROMPTLY_PROGRESSIVE=1
-    turns preview publishing on globally (orchestrator stages the Secret at
-    flip time — this code only reads env). input_data.progressive_test is the
-    per-job override for the pre-flip Modal cert — exactly the
-    zero_reject_test / burned_text_test pattern (inert for real traffic)."""
+    """Progressive-delivery gate. COORDINATED FLIP (Zac 2026-07-26, 219 on
+    TestFlight): publish previews ONLY for jobs whose CLIENT supports
+    progressive playback — the 219+ app sets input_data.supports_progressive.
+    An old client never sends it, so it never gets a preview it can't read
+    (zero wasted compute), and the render is byte-identical to today. The
+    global PROMPTLY_PROGRESSIVE stays a backend KILL SWITCH: '0' forces OFF
+    regardless of the per-job capability; '1' would force ON globally.
+    input_data.progressive_test is the pre-flip Modal cert override."""
     if input_data and input_data.get("progressive_test"):
         return True
-    return os.environ.get("PROMPTLY_PROGRESSIVE", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    _global = os.environ.get("PROMPTLY_PROGRESSIVE", "").strip().lower()
+    if _global in ("0", "false", "no", "off"):
+        return False  # explicit backend kill switch — no previews for anyone
+    # PRIMARY per-job gate: the client's declared capability.
+    if input_data and input_data.get("supports_progressive"):
+        return True
+    return _global in ("1", "true", "yes", "on")
 
 
 def _persist_preview(job_id, payload):
@@ -27247,9 +27254,21 @@ def _persist_preview(job_id, payload):
 
     def _w():
         try:
-            _q = supabase.table("video_jobs").update(
-                {"preview": payload}
-            ).eq("id", job_id)
+            _update = {"preview": payload}
+            # EARLY hls_manifest_url (Zac 2026-07-26, 219 coordinated flip): the
+            # client polls hls_manifest_url — emit the PREVIEW manifest there the
+            # moment it is PLAYABLE (>=1 chunk group published) so playback can
+            # start before the render finishes. The FINAL manifest overwrites
+            # this at the terminal completion write. Only for IN-FLIGHT previews:
+            # a finalized/superseded payload leaves hls_manifest_url to the
+            # terminal write (the true final), and the terminal fence below keeps
+            # this preview write from ever landing after completion.
+            if (payload.get("preview_hls_url")
+                    and int(payload.get("segments_published") or 0) >= 1
+                    and not payload.get("final")
+                    and not payload.get("superseded")):
+                _update["hls_manifest_url"] = payload["preview_hls_url"]
+            _q = supabase.table("video_jobs").update(_update).eq("id", job_id)
             # TERMINAL-STATE LAW (Zac ruling 1a): stamped payloads (final /
             # superseded) are the swap-to-final fence for the client and are
             # written AT or AFTER the terminal status by design — only the

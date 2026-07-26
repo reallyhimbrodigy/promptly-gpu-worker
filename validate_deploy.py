@@ -5605,6 +5605,27 @@ def _loud_failsafe_ledgers():
     assert _h.count('"PGRST204" in str(') >= 7, "PGRST204 detection at every persist fail-open"
 
 
+@check("PROGRESSIVE COORDINATED FLIP (Zac 2026-07-26, 219 on TestFlight): preview publishing is gated on the PER-JOB client capability input_data.supports_progressive (an old client never sends it -> no preview -> byte-identical render), with PROMPTLY_PROGRESSIVE as a backend KILL SWITCH ('0' forces off) and progressive_test as the cert override. AND the worker emits hls_manifest_url EARLY: _persist_preview writes the preview manifest to hls_manifest_url the moment a chunk is playable (segments_published>=1, not final/superseded), so the 219 client (which polls hls_manifest_url) starts playback before the render finishes; the terminal completion write overwrites it with the FINAL manifest, and the preview write's terminal fence keeps it from ever landing after completion.")
+def _progressive_coordinated_flip():
+    _h = open("handler.py").read()
+    _i = _h.find("def _progressive_enabled")
+    _body = _h[_i:_i+1400]
+    assert 'input_data.get("supports_progressive")' in _body, \
+        "preview publishing must gate on the per-job supports_progressive capability"
+    assert 'if _global in ("0", "false", "no", "off"):' in _body and "kill switch" in _body, \
+        "PROMPTLY_PROGRESSIVE must be a backend kill switch"
+    assert 'input_data.get("progressive_test")' in _body, "cert override preserved"
+    # early hls_manifest_url emission in _persist_preview
+    _p = _h.find("def _persist_preview")
+    _pb = _h[_p:_p+2400]
+    assert '_update["hls_manifest_url"] = payload["preview_hls_url"]' in _pb, \
+        "the worker must emit hls_manifest_url EARLY (preview manifest) once playable"
+    assert 'int(payload.get("segments_published") or 0) >= 1' in _pb, \
+        "early hls emission requires a playable segment"
+    assert 'not payload.get("final")' in _pb and 'not payload.get("superseded")' in _pb, \
+        "early hls emission only for in-flight previews (the terminal write owns the final)"
+
+
 @check("SHARED GEMINI CACHE REGISTRY (Zac 2026-07-26): a fresh container's in-memory _GEMINI_CACHE_REGISTRY is empty, and there is NO server-side lookup before caches.create — so without sharing, every cold/post-deploy container RECREATES a Vertex cache that already exists server-side (duplicate + first-job creation latency). A cross-container modal.Dict keyed by (model, sys-hash) lets any container REUSE the existing cache. MUST be fail-open (dict unavailable/lookup/write error -> per-container create = today's behavior, byte-identical) and kill-switchable (PROMPTLY_SHARED_GEMINI_CACHE=0). Quality-neutral: same cache CONTENT, only reuse vs recreate.")
 def _shared_gemini_cache():
     _h = open("handler.py").read()
