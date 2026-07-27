@@ -5052,6 +5052,40 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
     _n_styles = len(VALID_CAPTION_STYLES) - 1   # minus the "none" sentinel
     _n_transitions = len(VALID_TRANSITION_TYPES)
     _n_mgs = len(VALID_MG_TYPES)
+
+    # ── E1 density reshape (dark unless PROMPTLY_DENSITY; OFF = current verbatim) ──
+    if _density_reshape_enabled():
+        _emph_move_line = (
+            "Each emphasis carries the ONE move that best FITS the beat — a zoom, a motion "
+            "graphic, a text overlay, or a transition on a genuine turn — and a beat may also "
+            "land on sound plus a held caption alone. Choose the instrument by what the moment "
+            "is DOING (a number → a StatCard; a named place or object → b-roll; a punched "
+            "verb or reveal → a zoom; an act-turn → a transition), and NEVER default every "
+            "emphasis to a zoom: an edit made of zooms reads monotonous even at the right "
+            "density. VARY the instrument across the video — prefer a different move type than "
+            "the previous beat used unless the beat specifically wants a repeat."
+        )
+        _density_rhythm_block = (
+            "**DENSITY & RHYTHM — how ALIVE the edit feels (the difference viewers feel most).** "
+            "Something should be happening most of the time, in BURSTS WITH RESTS: target a mean "
+            "of ~0.8-1.0 visual moves per second with NO dead stretch longer than ~3s, achieved "
+            "by CLUSTERING moves on the content's peaks and letting the quiet stretches breathe. "
+            "Evenly spacing one move per second is metronomic and reads mechanical — the "
+            "reference edits burst then rest; dynamics read alive, uniformity reads like a "
+            "machine. Density comes from VARIETY, not repetition: across any ~4s window prefer "
+            "DIFFERENT move types (a zoom, then an overlay, then b-roll, then a transition) over "
+            "the same move again. Where other guidance below says '3-5 peaks,' that is the old "
+            "rarity target — the felt peaks are still your 3-5 HERO moments, but you now ALSO "
+            "mark the lighter legitimate beats (list items, numbers, name-drops, contrasts, "
+            "question→answer turns, tonal shifts) with lighter, varied moves to carry the "
+            "rhythm. This is NOT license to decorate arbitrary words — every move still names a "
+            "real moment; it is license to FIND the moments a good editor would, so that "
+            "everything earns its place AND something is always happening.\n\n"
+        )
+    else:
+        _emph_move_line = "Every emphasis carries a zoom by default (null is the rare exception)."
+        _density_rhythm_block = ""
+
     system_instruction = f"""=== YOUR JOB ===
 You are the editor inside Promptly. Every video you will ever receive is UGC — one real person talking to a phone camera for TikTok, Reels, or Shorts: pitches, storytimes, teach-downs, rants, demos. The whole genre lives on a phone screen held eighteen inches from a face, and the person who hit record is handing you their take; what you return is the version they wish they'd made.
 
@@ -5602,7 +5636,7 @@ Every instrument here is an equal — the moment picks. Reading the footage fres
 === EMPHASIS MOMENTS + ZOOM ===
 ═══════════════════════════════════════════════════════════════════════════
 
-An emphasis moment is a PEAK — a moment the viewer will physically react to, not every word the pitch treats as important. The test is the body, not the meaning: does the viewer FEEL something land here — a laugh, a small gasp, a nod, a lean-in? A peak is felt energy — delivery spikes, stakes land; "important to the argument" is a property of the writing, and peaks are a property of the performance. "Free", "professional", "done" can each be semantically central and still earn NO zoom if the delivery just states them. A word the speaker leans on with voice, face, or timing is a peak; a word that merely carries information is not. Map emphasis 1:1 to video_plan.key_moments. Emphasis lands on the words that carry the beat — the payoff noun, the number, the verb of the reveal; on connector words, qualifiers, or generic nouns ("entire", "this", "after") a zoom reads as the camera zooming on random words. **And the ANCHOR within the beat is exact — the ONE word the speaker's VOICE punches, to the millisecond.** This is the precision layer on top of "which beat": the beat says a peak lives here; the anchor (word_indices[0]) says WHICH EXACT WORD carries the punch. When the meaningful word and the punched word differ, anchor to the PUNCH — "I did NOTHING" means 'nothing', but if the voice lands the hit on "did", the component goes on "did", because that is the frame the ear is braced for. "ten million dollars" delivered flat-then-hard anchors on "million" if that is the stressed syllable, not "ten" just because it comes first. A component one word off from the vocal stress reads as late/off even though the machinery lands it pixel-perfect — the target was loose, not the delivery. Pick the anchor by LISTENING for the stress, not by reading for the meaning. Every emphasis carries a zoom by default (null is the rare exception).
+{_density_rhythm_block}An emphasis moment is a PEAK — a moment the viewer will physically react to, not every word the pitch treats as important. The test is the body, not the meaning: does the viewer FEEL something land here — a laugh, a small gasp, a nod, a lean-in? A peak is felt energy — delivery spikes, stakes land; "important to the argument" is a property of the writing, and peaks are a property of the performance. "Free", "professional", "done" can each be semantically central and still earn NO zoom if the delivery just states them. A word the speaker leans on with voice, face, or timing is a peak; a word that merely carries information is not. Map emphasis 1:1 to video_plan.key_moments. Emphasis lands on the words that carry the beat — the payoff noun, the number, the verb of the reveal; on connector words, qualifiers, or generic nouns ("entire", "this", "after") a zoom reads as the camera zooming on random words. **And the ANCHOR within the beat is exact — the ONE word the speaker's VOICE punches, to the millisecond.** This is the precision layer on top of "which beat": the beat says a peak lives here; the anchor (word_indices[0]) says WHICH EXACT WORD carries the punch. When the meaningful word and the punched word differ, anchor to the PUNCH — "I did NOTHING" means 'nothing', but if the voice lands the hit on "did", the component goes on "did", because that is the frame the ear is braced for. "ten million dollars" delivered flat-then-hard anchors on "million" if that is the stressed syllable, not "ten" just because it comes first. A component one word off from the vocal stress reads as late/off even though the machinery lands it pixel-perfect — the target was loose, not the delivery. Pick the anchor by LISTENING for the stress, not by reading for the meaning. {_emph_move_line}
 
 **Count follows the footage — the real peaks set it, however many there are.** The footage sets the count — the real peaks are however many the delivery contains. Three peaks that each land beat five that blur together, and the reason is contrast: a peak is only a peak against the flat around it. When emphases arrive at even spacing with even weight, the ear stops hearing them as peaks and starts hearing a metronome. So find the moments the speaker actually leans on, and let their number be what it is.
 
@@ -18501,11 +18535,22 @@ def _verify_broll_content(path, keyword, intent, idx, input_data=None):
             _dur = 0.0
         if _dur <= 0:
             _dur = 3.0
+        # Evaluate the CUTAWAY WINDOW that actually renders, not the whole asset
+        # (Zac 2026-07-26: a face at second 12 of a clip we use seconds 3-6 of is
+        # irrelevant; a face at second 4 is a hard reject). The render CENTER-seeks
+        # the asset for the used duration (see the seekFromSeconds spec build), so
+        # mirror that: a centered window ~the max cutaway length, sampled DENSELY
+        # (~every 0.7s) so a turn-TO-camera can't hide between frames.
+        _CUTAWAY_MAX_S = 6.0            # conservative upper bound on a cutaway's used length
+        _win = min(_dur, _CUTAWAY_MAX_S)
+        _win_start = max(0.0, (_dur - _win) / 2.0)   # center-seek — matches the render
+        _n = max(3, min(6, int(_win / 0.7) + 1))     # dense: ~every 0.7s, 3-6 frames
         _frames = []
-        for _frac in (0.15, 0.5, 0.85):
-            _fp = os.path.join(_wd, f"_brollqa_{idx}_{int(_frac * 100)}.jpg")
+        for _k in range(_n):
+            _ts = _win_start + (_win * _k / max(1, _n - 1))
+            _fp = os.path.join(_wd, f"_brollqa_{idx}_{_k}.jpg")
             subprocess.run(
-                ["ffmpeg", "-y", "-v", "error", "-ss", str(round(_dur * _frac, 2)),
+                ["ffmpeg", "-y", "-v", "error", "-ss", str(round(_ts, 2)),
                  "-i", path, "-frames:v", "1", "-vf", "scale=384:-1", _fp],
                 capture_output=True, text=True, timeout=30)
             if os.path.exists(_fp) and os.path.getsize(_fp) > 500:
@@ -18518,15 +18563,21 @@ def _verify_broll_content(path, keyword, intent, idx, input_data=None):
                 _parts.append(genai_types.Part.from_bytes(
                     data=_f.read(), mime_type="image/jpeg"))
         _parts.append(
-            "These are sampled frames from a stock B-ROLL clip considered for a "
-            "vertical talking-head short. The speaker is the main subject; this "
-            "b-roll would briefly cut away to illustrate a beat.\n\n"
+            "These frames are sampled DENSELY from the EXACT window of a stock "
+            "B-ROLL clip that will appear in the edit — a brief cutaway inside a "
+            "vertical talking-head short, where the speaker is the main subject.\n\n"
             f'BEAT INTENT: "{intent or keyword}"  (search query: "{keyword}")\n\n'
             "Answer KEEP only if ALL hold across the frames:\n"
-            "1. It clearly depicts the INTENT (the right objects/action/environment).\n"
+            "1. ACTION MATCH — the subject is DOING the SPECIFIC action the beat "
+            "describes: the exact VERB, not merely the same topic. Recording a "
+            "video, scrolling a short-form VIDEO feed (TikTok/Reels), and scrolling "
+            "a PHOTO gallery/grid are three DIFFERENT actions — only the one the "
+            "beat names counts. A near-miss on the action (right topic, wrong verb) "
+            "is a REJECT, exactly like off-topic.\n"
             "2. NO person looks toward the camera and NO prominent human face "
-            "dominates a frame — a stranger's face competes with the speaker and "
-            "reads uncanny.\n"
+            "dominates in ANY frame — a stranger's face competes with the speaker "
+            "and reads uncanny. Someone who TURNS to face the camera partway "
+            "through the window is a REJECT (check every frame, not just the first).\n"
             "3. NO legible text, URLs, website/app UI (browsers, photo-gallery "
             "grids, pexels/pinterest), or watermarks — a brand/legal risk.\n"
             "4. Clean, well-lit, high quality — NOT unsettling, heavily moody/dark, "
@@ -19745,6 +19796,21 @@ def _source_clean_enough(bpp):
     Reused by resample (A) now and the zoom-sharpen paths (B/C) later, so the
     pipeline decides per job instead of us splitting populations by hand."""
     return bpp >= 0.12
+
+
+def _density_reshape_enabled():
+    """E1 DENSITY RESHAPE (Zac 2026-07-26), dark unless PROMPTLY_DENSITY. When on,
+    the editorial prompt (1) DECOUPLES emphasis→move-type (a beat carries the
+    best-FIT move — zoom/MG/overlay/transition/sound — not always a zoom; the
+    all-zoom default is what made zoom half of all events and read monotonous),
+    (2) states the target as a DISTRIBUTION not a rate (mean ~0.8-1.0 events/s,
+    no dead stretch >3s, bursts clustered on content peaks + rests REQUIRED —
+    metronomic 1/s reads mechanical), (3) expands the markable-moment vocabulary
+    (felt peaks PLUS list items/numbers/name-drops/contrasts/Q→A turns/tonal
+    shifts — real moments, never arbitrary decoration), and (4) forces move-type
+    VARIETY. OFF → every gated fragment is the CURRENT doctrine verbatim →
+    byte-identical planning. A/B pair renders via a cert-app toggling the env."""
+    return os.environ.get("PROMPTLY_DENSITY", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def analyze_source_video(source_path):

@@ -354,6 +354,22 @@ export interface PromptlyRenderInput {
    *  is a true A/B — see motion-graphics/shared/motion.ts. Never touches the
    *  caption text layer (FRAME-1-IS-FINAL). Worker sets it from MOTION_TOKENS. */
   motionTokens?: boolean;
+  /** Workstream D2 — MOTION BLUR. Absent/false = NO new motion blur added
+   *  anywhere (byte-identical to pre-D2; the existing Lumen / generated-scene
+   *  blur is on its OWN path and is unaffected by this flag). true = wrap
+   *  Flare's moving elements — component entrances/exits, composite zoom moves,
+   *  transitions, and b-roll cutaway pushes — in CameraMotionBlur. Mirrors
+   *  motionTokens: ONE reversible flag, default OFF, so the before/after is a
+   *  true A/B. Never a global full-video blur (only motion-bearing elements).
+   *  Worker sets it from MOTION_BLUR. See motion-graphics/shared/motion-blur.tsx. */
+  motionBlur?: boolean;
+  /** Optional per-render overrides so the parent can sweep the blur tunables
+   *  WITHOUT recompiling. Omitted → MOTION_BLUR_DEFAULTS (samples=6,
+   *  shutterAngle=180 — the 180° film convention). `samples` is the cost knob
+   *  (render cost scales ~linearly with it); `shutterAngle` sets the smear
+   *  SPREAD only and costs nothing extra. */
+  motionBlurSamples?: number;
+  motionBlurShutterAngle?: number;
 }
 
 export interface PromptlyRenderProps {
@@ -388,6 +404,13 @@ export interface PromptlyMicroSegmentsInput {
   /** Sum of all segment durations. */
   totalDurationInFrames: number;
   segments: MicroSegmentSpec[];
+  /** Workstream D2 — MOTION BLUR (see PromptlyRenderInput.motionBlur). This is
+   *  the composition that renders transitions and composite zoom moves — every
+   *  segment here IS motion — so the flag threads here too. Absent/false =
+   *  byte-identical. Overrides fall through to MOTION_BLUR_DEFAULTS. */
+  motionBlur?: boolean;
+  motionBlurSamples?: number;
+  motionBlurShutterAngle?: number;
 }
 
 export interface PromptlyMicroSegmentsProps {

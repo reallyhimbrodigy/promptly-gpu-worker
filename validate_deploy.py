@@ -184,6 +184,7 @@ def _system_instruction_format():
     prompt.format(
         _caption_enum="X", _mg_enum="X", _transition_enum="X", _tco_enum="X",
         _n_styles=0, _n_transitions=0, _n_mgs=0,
+        _emph_move_line="X", _density_rhythm_block="X",
     )
 
 
@@ -5654,13 +5655,22 @@ def _broll_content_gate():
     assert 'input_data.get("broll_gate_test")' in _h, "per-job cert override required"
     # fail-closed: the verify's except returns REJECT (False), not keep
     _i = _h.find("def _verify_broll_content")
-    _b = _h[_i:_i+4200]
+    _b = _h[_i:_i+6000]
     assert 'return False, f"verify error (fail-closed)' in _b, "vision-check errors must FAIL-CLOSED (reject)"
     assert 'if not _broll_gate_enabled(input_data):' in _b and 'return True, "gate off"' in _b, \
         "gate OFF must be a no-op (keep) → byte-identical"
     assert "faces-to-camera" not in _b or "toward the camera" in _b, "prompt must reject faces-to-camera"
     assert "legible text" in _b and "watermark" in _b, "prompt must catch legible text/URLs + watermarks (brand/legal)"
     assert "KEEP" in _b and "REJECT" in _b, "vision check must return KEEP/REJECT"
+    # ACTION MATCH not topic match (Zac 2026-07-26, from the phone-scrolling reject):
+    assert "ACTION MATCH" in _b and "wrong verb" in _b, \
+        "prompt must demand the SPECIFIC action/verb, not topic — near-miss-on-action is a hard reject"
+    # Evaluate the CUTAWAY WINDOW densely (Zac 2026-07-26, from the turn-to-camera miss):
+    assert "center-seek" in _b and "CUTAWAY WINDOW" in _b, \
+        "must evaluate the rendered cutaway window (center-seek), not the whole asset"
+    assert "sampled DENSELY" in _b and "TURNS to face the camera" in _b, \
+        "must sample densely across the window so a turn-to-camera can't hide between frames"
+    assert "int(_win / 0.7)" in _b, "dense sampling must be ~every 0.7s across the window"
     # wired into the verify loop, rejects omit + ledger — content vs error SEPARATELY (Zac flag 2)
     assert '"broll_content_reject"' in _h and '"broll_verify_error"' in _h, \
         "content-reject and transient verify-error must ledger as DIFFERENT actions"
@@ -5697,6 +5707,42 @@ def _hq_resample_direction_gate():
     assert "_resample_flags(_norm_scale, _source_clean)" in _h, "center-crop normalize must pass scale + clean flag"
     assert "_resample_flags(1080.0 / max(1, crop_w), _source_clean)" in _h, "reframe normalize must pass scale + clean flag"
     assert "scale=1080:1920:flags=" not in _h, "no hardcoded normalize kernel — must go through the dark flag"
+
+
+@check("E1 DENSITY RESHAPE (Zac 2026-07-26, DARK behind PROMPTLY_DENSITY): our edits run ~0.23 component-events/s vs the 0.8-1.0/s reference, zoom-dominated (half of all events) with ~10s dead stretches — the planner under-produces AND every emphasis defaults to a zoom (the monotony root). When on, the editorial prompt (1) DECOUPLES emphasis→move-type (best-FIT move, never always a zoom; VARY the instrument), (2) states the target as a DISTRIBUTION — mean ~0.8-1.0/s, no dead stretch >3s, BURSTS clustered on peaks + rests REQUIRED (metronomic reads mechanical), (3) expands markable moments (felt peaks PLUS list items/numbers/name-drops/contrasts/Q→A/tonal shifts, never arbitrary decoration). OFF → both gated fragments are the CURRENT doctrine verbatim → byte-identical planning (the else-branch reproduces the exact original 'every emphasis carries a zoom' line + empty rhythm block).")
+def _e1_density_reshape_gate():
+    _h = open("handler.py").read()
+    assert "def _density_reshape_enabled(" in _h, "the density-reshape flag helper must exist"
+    assert 'os.environ.get("PROMPTLY_DENSITY"' in _h, "must default DARK behind PROMPTLY_DENSITY"
+    # byte-identical OFF: the else-branch must reproduce the EXACT original doctrine
+    assert '_emph_move_line = "Every emphasis carries a zoom by default (null is the rare exception)."' in _h, \
+        "OFF must reproduce the exact original emphasis→zoom line (byte-identical planning)"
+    assert '_density_rhythm_block = ""' in _h, "OFF rhythm block must be empty (byte-identical)"
+    # the f-string must interpolate the gated fragments, not the hardcoded original
+    assert "for the meaning. {_emph_move_line}" in _h, "decouple line must be gated via {_emph_move_line}"
+    assert "{_density_rhythm_block}An emphasis moment is a PEAK" in _h, "rhythm block injects before the emphasis def"
+    # ON content: decouple + distribution + expanded moments
+    assert "NEVER default every" in _h and "reads monotonous" in _h, "ON must decouple emphasis→move-type"
+    assert "0.8-1.0 visual moves per second" in _h and "BURSTS WITH RESTS" in _h and "dead stretch longer than ~3s" in _h, \
+        "ON must state the distribution target (mean, bursts+rests, no dead >3s)"
+    assert "question→answer turns" in _h and "name-drops" in _h, "ON must expand the markable-moment vocabulary"
+
+
+@check("D2 MOTION BLUR dark-flag (Zac 2026-07-26, 30fps+blur ruling): CameraMotionBlur (was Lumen-only) now selectively wraps Flare's 4 motion sites (MG entrance/exit, b-roll push, transitions, composite zooms) behind input.motionBlur, DARK by default. OFF is byte-identical BY CONSTRUCTION — MotionBlurWrap returns children untouched when disabled (no wrapper, no extra DOM/paint). shutterAngle is free (temporal spread only); samples is the sole cost knob (6× on the wrapped subtree). Tunables (samples=6/shutterAngle=180 film convention) live in ONE token so the samples∈{3,6,10} sweep has one home. NOTE: blur smears the crisp payoff frame — re-verify impact-on-word before flipping; cost compounds with E1 density (both multiply the same frames).")
+def _d2_motion_blur_dark_flag():
+    _mb = open("src/remotion/src/motion-graphics/shared/motion-blur.tsx").read()
+    assert "if (!enabled) return <>{children}</>;" in _mb, \
+        "MotionBlurWrap must pass children through untouched when disabled — the OFF-path byte-identity guarantee"
+    assert "MOTION_BLUR_DEFAULTS" in _mb and "samples: 6," in _mb and "shutterAngle: 180," in _mb, \
+        "MOTION_BLUR_DEFAULTS (samples=6, shutterAngle=180) must stay the single tunable token"
+    _pr = open("src/remotion/src/PromptlyRender.tsx").read()
+    assert _pr.count("input.motionBlur ?? false") == 2, \
+        "the DARK default input.motionBlur ?? false must gate BOTH compositions (PromptlyOverlay + PromptlyMicroSegments)"
+    assert _pr.count("<MotionBlurWrap>") == 4, \
+        "expected exactly 4 selective MotionBlurWrap sites (MG, b-roll, transition, composite zoom) — never a global comp blur"
+    _ts = open("src/remotion/src/types.ts").read()
+    assert _ts.count("motionBlur?: boolean") == 2, \
+        "motionBlur?: boolean must be on BOTH PromptlyRenderInput and PromptlyMicroSegmentsInput"
 
 
 @check("LOUD FAIL-SAFE MOUNT LAW (Zac standing rule 2026-07-25, from the moodreel_editor + progressive_publish mount catches): EVERY repo-local module that handler.py defer-imports inside a function body MUST be add_local_file-baked into the worker image — derived DYNAMICALLY from the source so any future mode is covered the day it is written. A deferred import inside a fail-safe try/except is exactly the class that dies silently (the fallback masks the ImportError and the feature quietly never runs); top-level imports crash loudly at container start and need no law.")
@@ -6108,6 +6154,7 @@ def _secret_canonical_values():
         "PROMPTLY_SHAPE_ABORT": "1",
         "PROMPTLY_MOODREEL": "1",     # cinematic mood-reel route LIVE (Zac "MOODREEL APPROVED" 2026-07-25; fail-safe-to-minimal; rollback = "0")     # degen shape-abort LIVE (ruling 1a; 5/5 shapes, 0 FP on 7.9k healthy; ~85-90% burn cut; rollback = "0")
         "PROMPTLY_HQ_RESAMPLE": "1",  # Part A fidelity LIVE (Zac "FLIP A" 2026-07-26 after FIDELITY_C): lanczos downscale + adaptive bpp-gated spline upscale; OFF-code is byte-identical so rollback = "0" here + secret + redeploy
+        "PROMPTLY_BROLL_GATE": "1",   # B-roll content+safety gate LIVE (Zac "flip as ordered" 2026-07-26 after refined-gate cert 40% keep/60% reject, extinction guard passed): action-match + cutaway-window dense sampling; fail-closed to clean cuts; rollback = "0" here + secret + redeploy
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that

@@ -92,6 +92,15 @@ import {
 import { MotionTokensProvider, useMotionTokens } from "./motion-graphics/shared/motion-flag";
 import { GLIDE, EASE_GLIDE, dur } from "./motion-graphics/shared/motion";
 
+// Flare motion blur (Workstream D2). Parallel dark flag to motionTokens.
+// `MotionBlurWrap` wraps a moving element in CameraMotionBlur when ON, and
+// returns the child untouched when OFF (byte-identical). `MotionBlurProvider`
+// carries the flag + tunables (samples / shutterAngle) from the render input.
+import {
+  MotionBlurProvider,
+  MotionBlurWrap,
+} from "./motion-graphics/shared/motion-blur";
+
 // ─── Component maps ────────────────────────────────────────────────────────
 const CAPTION_MAP: Record<string, React.FC<any>> = {
   Prime, TypewriterReveal, Cove, Lumen, Pulse, Quintessence,
@@ -462,7 +471,13 @@ const MotionGraphicsLayer: React.FC<{
         from={mg.fromFrame}
         durationInFrames={mg.durationInFrames}
       >
-        <MotionGraphicRenderer spec={mg} fps={fps} />
+        {/* D2: the MG's entrance/exit is the motion. Blur wraps the whole MG
+            window (per-frame entrance/exit windowing isn't available at this
+            layer); static hold frames re-render identically under the blur but
+            still pay the samples× cost — see the cost note in the D2 report. */}
+        <MotionBlurWrap>
+          <MotionGraphicRenderer spec={mg} fps={fps} />
+        </MotionBlurWrap>
       </Sequence>
     ))}
   </>
@@ -555,21 +570,28 @@ const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) =>
   const startFromFrames = Math.round(spec.seekFromSeconds * fps);
 
   return (
-    <AbsoluteFill
-      style={{
-        pointerEvents: "none",
-        opacity,
-        backgroundColor: "#000",
-        transform: `scale(${scale})`,
-      }}
-    >
-      <OffthreadVideo
-        src={resolvedSrc}
-        startFrom={startFromFrames}
-        playbackRate={spec.playbackRate || 1.0}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-      />
-    </AbsoluteFill>
+    // D2: the cutaway "push" (the scale-settle on the token path) is the motion
+    // that carries the smear. NOTE (report §cost): this wraps a full-frame
+    // OffthreadVideo, so it is the MOST expensive site (video decode/composite
+    // ×samples) and the LEAST valuable on the legacy path (which is an
+    // opacity-only fade — motion blur smears position/scale, not opacity).
+    <MotionBlurWrap>
+      <AbsoluteFill
+        style={{
+          pointerEvents: "none",
+          opacity,
+          backgroundColor: "#000",
+          transform: `scale(${scale})`,
+        }}
+      >
+        <OffthreadVideo
+          src={resolvedSrc}
+          startFrom={startFromFrames}
+          playbackRate={spec.playbackRate || 1.0}
+          style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        />
+      </AbsoluteFill>
+    </MotionBlurWrap>
   );
 };
 
@@ -806,6 +828,11 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
 
   return (
     <MotionTokensProvider enabled={input.motionTokens ?? false}>
+    <MotionBlurProvider
+      enabled={input.motionBlur ?? false}
+      samples={input.motionBlurSamples}
+      shutterAngle={input.motionBlurShutterAngle}
+    >
     <AbsoluteFill style={{ background: "transparent" }}>
       {/* B-roll cutaways render at the BOTTOM of the overlay z-stack —
           under captions, text overlays, and MGs. Each B-roll fills the
@@ -850,6 +877,7 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
           the components return null (no z-stack cost). */}
       <TightCutOverlayLayer overlays={tightCutOverlays ?? []} />
     </AbsoluteFill>
+    </MotionBlurProvider>
     </MotionTokensProvider>
   );
 };
@@ -875,6 +903,14 @@ export const PromptlyMicroSegments: React.FC<PromptlyMicroSegmentsProps> = ({
   const resolvedSourceUrl = resolveSrc(sourceUrl);
 
   return (
+    // D2: this composition renders ONLY transitions + composite zoom moves —
+    // every segment here IS motion — so the blur provider gates it too. OFF
+    // (default) → MotionBlurWrap is a passthrough → byte-identical.
+    <MotionBlurProvider
+      enabled={input.motionBlur ?? false}
+      samples={input.motionBlurSamples}
+      shutterAngle={input.motionBlurShutterAngle}
+    >
     <AbsoluteFill style={{ background: "#000" }}>
       {segments.map((seg, i) => (
         <Sequence
@@ -883,17 +919,22 @@ export const PromptlyMicroSegments: React.FC<PromptlyMicroSegmentsProps> = ({
           durationInFrames={seg.durationInFrames}
         >
           {seg.type === "transition" && seg.transition ? (
-            <TransitionRenderer
-              transition={seg.transition}
-              sourceUrl={resolvedSourceUrl}
-            />
+            <MotionBlurWrap>
+              <TransitionRenderer
+                transition={seg.transition}
+                sourceUrl={resolvedSourceUrl}
+              />
+            </MotionBlurWrap>
           ) : null}
           {seg.type === "zoom_clip" && seg.clip ? (
-            <ClipRenderer clip={seg.clip} sourceUrl={resolvedSourceUrl} />
+            <MotionBlurWrap>
+              <ClipRenderer clip={seg.clip} sourceUrl={resolvedSourceUrl} />
+            </MotionBlurWrap>
           ) : null}
         </Sequence>
       ))}
     </AbsoluteFill>
+    </MotionBlurProvider>
   );
 };
 
