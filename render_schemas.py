@@ -354,6 +354,13 @@ class PromptlyRenderInput(_RemotionModel):
     # change vs the pre-overlay pipeline.
     tightCutOverlays: List[TightCutOverlaySpec] = Field(default_factory=list)
     outro: Optional[OutroKind] = None
+    # D2 motion blur (Zac 2026-07-26). Default off → Remotion reads `?? false`
+    # → byte-identical; the worker only emits these when the per-job blur
+    # override (motion_blur_test) is set. samples/angle fall through to the
+    # Remotion MOTION_BLUR_DEFAULTS token when omitted.
+    motionBlur: bool = False
+    motionBlurSamples: Optional[int] = None
+    motionBlurShutterAngle: Optional[int] = None
 
 
 # ── Micro-segments (discriminated by type) ─────────────────────────────────
@@ -372,5 +379,10 @@ class PromptlyMicroSegmentsInput(_RemotionModel):
     height: int
     totalDurationInFrames: int
     segments: List[MicroSegmentSpec]
+    # D2 motion blur — transitions + composite zooms render here (see
+    # PromptlyRenderInput note). Default off → byte-identical.
+    motionBlur: bool = False
+    motionBlurSamples: Optional[int] = None
+    motionBlurShutterAngle: Optional[int] = None
 
 

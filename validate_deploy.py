@@ -5745,6 +5745,25 @@ def _d2_motion_blur_dark_flag():
         "motionBlur?: boolean must be on BOTH PromptlyRenderInput and PromptlyMicroSegmentsInput"
 
 
+@check("E1+D2 A/B PER-JOB OVERRIDES (Zac 2026-07-26): density_test toggles the E1 density reshape and motion_blur_test (+samples/shutter) toggles D2 blur for ONE job without flipping the global flags — so the four-arm A/B (baseline / density-only / blur-only / BOTH) runs on real jobs. Both dark/absent for real traffic → byte-identical (density_test → generate_edit_gemini density_override; motion_blur_test → edit_plan[_motion_blur] → both render inputs, emitted ONLY when enabled). Mirrors burned_text_test / broll_gate_test.")
+def _e1_d2_ab_overrides():
+    _h = open("handler.py").read()
+    # density_test → generate_edit_gemini(density_override) → _build_post_cuts_prompt → (flag OR override)
+    assert 'density_override=bool(input_data.get("density_test"))' in _h, "density_test must reach generate_edit_gemini at the call site"
+    assert "_density_reshape_enabled() or density_override" in _h, "the prompt-builder flag check must honor the per-job override"
+    assert "density_override=density_override," in _h, "generate_edit_gemini must pass density_override into _build_post_cuts_prompt"
+    # motion_blur_test → edit_plan[_motion_blur] → both render inputs, conditional emit (OFF byte-identical)
+    assert 'input_data.get("motion_blur_test")' in _h and 'edit_plan["_motion_blur"] = {' in _h, "motion_blur_test must thread via edit_plan"
+    assert '_blur_cfg = edit_plan.get("_motion_blur")' in _h and _h.count('_blur_cfg.get("enabled")') >= 2, \
+        "render_multi_clip must read the blur config and conditionally emit into BOTH legs (only when enabled → OFF byte-identical)"
+    assert 'overlay_input["motionBlur"] = True' in _h and 'micro_input["motionBlur"] = True' in _h, "both render legs must carry the blur override"
+    # render_schemas registers the fields on BOTH models (extra='forbid' → must be declared)
+    _rs = open("render_schemas.py").read()
+    assert _rs.count("motionBlur: bool = False") == 2, "motionBlur must be on PromptlyRenderInput AND PromptlyMicroSegmentsInput (extra=forbid)"
+    assert _rs.count("motionBlurSamples: Optional[int] = None") == 2 and _rs.count("motionBlurShutterAngle: Optional[int] = None") == 2, \
+        "samples/shutter registered on both render-input models"
+
+
 @check("LOUD FAIL-SAFE MOUNT LAW (Zac standing rule 2026-07-25, from the moodreel_editor + progressive_publish mount catches): EVERY repo-local module that handler.py defer-imports inside a function body MUST be add_local_file-baked into the worker image — derived DYNAMICALLY from the source so any future mode is covered the day it is written. A deferred import inside a fail-safe try/except is exactly the class that dies silently (the fallback masks the ImportError and the feature quietly never runs); top-level imports crash loudly at container start and need no law.")
 def _loud_failsafe_mount_law():
     import re as _re, os as _os

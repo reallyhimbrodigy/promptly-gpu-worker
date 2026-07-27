@@ -4793,6 +4793,7 @@ def _build_post_cuts_prompt(
     prior_plan=None, prior_plan_change_request=None,
     premium=False, resolved_policy=None,
     source_language=None,
+    density_override=False,
 ):
     """Gemini prompt for the SECOND call — visual placement on a kept-only transcript.
 
@@ -5054,7 +5055,7 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
     _n_mgs = len(VALID_MG_TYPES)
 
     # ── E1 density reshape (dark unless PROMPTLY_DENSITY; OFF = current verbatim) ──
-    if _density_reshape_enabled():
+    if _density_reshape_enabled() or density_override:
         _emph_move_line = (
             "Each emphasis carries the ONE move that best FITS the beat — a zoom, a motion "
             "graphic, a text overlay, or a transition on a genuine turn — and a beat may also "
@@ -11355,6 +11356,7 @@ def generate_edit_gemini(
     source_language=None,
     burned_text_override=False,
     recipe_deadline_s=None,
+    density_override=False,
 ):
     _pre_analysis = cached_response
 
@@ -11467,6 +11469,7 @@ def generate_edit_gemini(
         premium=premium,
         resolved_policy=resolved_policy,
         source_language=source_language,
+        density_override=density_override,
     )
     if prior_plan:
         print(
@@ -21494,6 +21497,8 @@ _RENDER_TRANSIENT_KEYS = {
     "_rendered_generated_scenes", "_source_loudness",
     "_user_vibe",  # a copy of the input vibe, set every render — the render reads it
                    # for the ramp-zoom punch/glide register (_vibe_punches)
+    "_motion_blur",  # D2 per-job blur override (motion_blur_test), recomputed from
+                     # input_data every render → transient, never persisted in the recipe
 }
 
 
@@ -24338,6 +24343,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         "tightCutOverlays": tight_cut_overlays_out,
         "outro": _outro,
     }
+    # D2 motion blur (per-job override for the E1+D2 A/B; dark/absent for real
+    # traffic → byte-identical). Only emitted when enabled so the OFF render
+    # input JSON is unchanged; samples/angle omitted → Remotion defaults token.
+    _blur_cfg = edit_plan.get("_motion_blur") or {}
+    if _blur_cfg.get("enabled"):
+        overlay_input["motionBlur"] = True
+        overlay_input["motionBlurSamples"] = int(_blur_cfg.get("samples") or 6)
+        overlay_input["motionBlurShutterAngle"] = int(_blur_cfg.get("shutter") or 180)
     overlay_input_path = os.path.join(_stage_dir, "overlay_input.json")
     _validate_and_write_render_input(
         "overlay", overlay_input, _SchemaOverlayInput, overlay_input_path,
@@ -24448,6 +24461,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     micro_input, micro_segments_meta = build_micro_segments_input(
         clips_out, transitions_out, _source_url, source_fps,
     )
+    # D2 motion blur — transitions + composite zooms render in this leg, so the
+    # per-job override must reach it too (same dark/absent default as overlay).
+    if micro_input is not None and _blur_cfg.get("enabled"):
+        micro_input["motionBlur"] = True
+        micro_input["motionBlurSamples"] = int(_blur_cfg.get("samples") or 6)
+        micro_input["motionBlurShutterAngle"] = int(_blur_cfg.get("shutter") or 180)
     # AUDIT #5 (Zac 2026-07-12): instrument the MICRO leg — the render's heaviest
     # painter (measured 97.6s / 1.5GB on Zac's render, LONGER than the caption
     # overlay). Log WHICH composite-effect zoom types (FocusWindow/LetterboxPush/
@@ -31145,6 +31164,10 @@ def handler(job):
                         str(input_data.get("_safe_edit_rescue") or "").strip() or None
                     ),
                     burned_text_override=bool(input_data.get("burned_text_test")),
+                    # E1 density A/B: per-job override toggles the density reshape
+                    # for one job without flipping the global secret (mirrors
+                    # burned_text_test / broll_gate_test). Inert for real traffic.
+                    density_override=bool(input_data.get("density_test")),
                     # Workstream B: the source language for in-language editorial
                     # (flag-gated inside the prompt builder). _script is the
                     # dominant script computed at the coverage gate above.
@@ -32213,6 +32236,16 @@ def handler(job):
                     reason="progressive_setup")
                 _prog_pub = None
                 _PROGRESSIVE_PUB = None
+        # D2 motion blur — per-job override for the E1+D2 A/B (dark/absent for
+        # real traffic → byte-identical). Threaded via edit_plan into BOTH
+        # render inputs (render_multi_clip reads edit_plan["_motion_blur"]);
+        # edit_plan is mutated in place so every render path below sees it.
+        if bool(input_data.get("motion_blur_test")):
+            edit_plan["_motion_blur"] = {
+                "enabled": True,
+                "samples": int(input_data.get("motion_blur_samples") or 6),
+                "shutter": int(input_data.get("motion_blur_shutter") or 180),
+            }
         # Degrade ladder — see _render_degrade_ladder (module level, tested
         # behaviorally in test_render_ladder.py).
         try:
