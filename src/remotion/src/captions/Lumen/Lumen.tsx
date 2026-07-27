@@ -162,6 +162,7 @@ export const Lumen: React.FC<LumenProps> = ({
   pages,
   fontSize = 70,
   position = "bottom",
+  anchor,
   keywords = [],
   shineWords = [],
   maxWordsPerLine = 4,
@@ -176,7 +177,7 @@ export const Lumen: React.FC<LumenProps> = ({
   const maxWidth = width * 0.85;
   const keywordSet = useMemo(() => buildKeywordSet(keywords), [keywords]);
   const shineSet = useMemo(() => buildKeywordSet(shineWords), [shineWords]);
-  const positionStyle = getCaptionPositionStyle(position);
+  const positionStyle = getCaptionPositionStyle(position, anchor);
 
   return (
     <AbsoluteFill>

@@ -216,6 +216,7 @@ export const TypewriterReveal: React.FC<TypewriterRevealProps> = ({
   fontSize = 62, // directive #12: bumped from 48 — mono identity was too faint at phone scale
   fontFamily = CAPTION_FONTS.spaceMono,
   position = "bottom",
+  anchor,
   showCursor = true,
   cursorBlinkMs = 530,
   enableBox = false,
@@ -235,7 +236,7 @@ export const TypewriterReveal: React.FC<TypewriterRevealProps> = ({
     [scheme, customColors],
   );
 
-  const positionStyle = getCaptionPositionStyle(position);
+  const positionStyle = getCaptionPositionStyle(position, anchor);
 
   return (
     <AbsoluteFill>

@@ -6749,6 +6749,184 @@ def _force_caption_position_around_overlays(
     return out
 
 
+# ── SPEAKER-FOLLOWING CAPTIONS (Zac campaign 2026-07-26, DARK) ────────────────
+# Captions dynamically FOLLOW the speaker's head instead of sitting in a fixed
+# slot. Each caption PAGE gets a constant {topPx} anchor pinning the caption
+# block just below (or, for a low head, above) the smoothed face bbox, clamped
+# into the TikTok safe rect. Constant-per-page → the render SNAPS between pages
+# and never slides, so the FRAME-1-IS-FINAL law (feedback_caption_crisp_entrance)
+# is preserved (repositioning between pages is fine; sliding is not). DARK unless
+# PROMPTLY_SPEAKER_CAPTIONS → no anchor key emitted → render-input JSON
+# byte-identical. The pixel geometry below mirrors src/remotion/src/shared/
+# safeZone.ts (single source of truth on the TS side); the values are duplicated
+# here only so the anchor math runs Python-side without importing TS.
+_SPEAKER_CAP_CANVAS_H = 1920
+_SPEAKER_CAP_SAFE_TOP = 270       # == safeZone.ts TIKTOK_SAFE_TOP (clock/header)
+_SPEAKER_CAP_SAFE_BOTTOM = 420    # == safeZone.ts TIKTOK_SAFE_BOTTOM (caption drawer)
+_SPEAKER_CAP_BLOCK_RESERVE = 300  # assumed rendered caption-block height (2 lines, large)
+_SPEAKER_CAP_BELOW_GAP = 300      # px below the face CENTRE to the caption top (clears chin)
+_SPEAKER_CAP_ABOVE_GAP = 220      # px above the face when flipping the block ABOVE a low head
+
+
+def _speaker_captions_enabled():
+    """SPEAKER-FOLLOWING CAPTIONS flag (Zac 2026-07-26). DARK unless
+    PROMPTLY_SPEAKER_CAPTIONS is set. OFF → _apply_speaker_follow_captions is
+    never called → the caption position segment list is untouched → the render
+    input JSON is byte-identical to today's fixed-slot output. Rollback = unset
+    the env. Mirrors the _broll_gate_enabled / _density_reshape_enabled pattern."""
+    return os.environ.get("PROMPTLY_SPEAKER_CAPTIONS", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _output_time_to_source_time(projected_words, t_out_s):
+    """Map an OUTPUT-timeline second to the nearest SOURCE second using the
+    projected-word table (each projected word already carries both output
+    `start` and `_source_start`). Reuses the ONE projection every caption / SFX /
+    MG consumer shares — no new timeline arithmetic, no re-derivation of the
+    subtle cut/handle cursor. Returns None on an empty table."""
+    if not projected_words:
+        return None
+    _best = min(projected_words,
+                key=lambda w: abs(float(w.get("start") or 0.0) - float(t_out_s)))
+    return float(_best.get("_source_start") or _best.get("start") or 0.0)
+
+
+def _speaker_caption_anchor(trajectory, t_src_s):
+    """Return an integer caption-block top (px) anchoring the caption just below
+    the smoothed speaker head at source time `t_src_s`, or None when no face is
+    known there.
+
+    Reuses the existing SPARSE smoothed trajectory via the same nearest-neighbour
+    lookup _face_position_at uses — NO new sampling (feedback_no_face_detect_
+    stride_change). Geometry: place the block BELOW the head (top = faceCy +
+    below-gap, clearing the chin); if that would push the block under the safe
+    bottom (the head sits low in frame), FLIP it fully ABOVE the head. The result
+    is clamped into the TikTok safe rect and is CONSTANT for the page — the caller
+    emits one anchor per page so the render snaps, never slides."""
+    if not trajectory:
+        return None
+    _closest = min(trajectory,
+                   key=lambda p: abs(float(p.get("t", 0.0)) - float(t_src_s)))
+    if not _closest.get("found"):
+        return None
+    _cy = float(_closest.get("cy", 0.0))
+    _min_top = _SPEAKER_CAP_SAFE_TOP
+    _max_top = _SPEAKER_CAP_CANVAS_H - _SPEAKER_CAP_SAFE_BOTTOM - _SPEAKER_CAP_BLOCK_RESERVE
+    if _max_top <= _min_top:
+        return None
+    _below = _cy + _SPEAKER_CAP_BELOW_GAP
+    if _below <= _max_top:
+        _top = _below
+    else:
+        # Head sits low — flip the caption block fully ABOVE the head.
+        _top = _cy - _SPEAKER_CAP_ABOVE_GAP - _SPEAKER_CAP_BLOCK_RESERVE
+    _top = max(_min_top, min(_max_top, _top))
+    return int(round(_top))
+
+
+def _apply_speaker_follow_captions(
+    segments, caption_pages, face_trajectory, projected_words,
+    blocked_frame_ranges, total_output_frames, source_fps):
+    """Rebuild the caption position segment list at PAGE granularity, attaching a
+    constant per-page {topPx} anchor that pins the caption block to the speaker's
+    head. Returns the ORIGINAL `segments` object unchanged when there is no face
+    trajectory, no pages, or every page is blocked / faceless — so the OFF path
+    and any no-face render stay byte-identical.
+
+    Rules honoured:
+      • Pages inside a pipeline-controlled window (MG / B-roll / text-overlay,
+        i.e. `blocked_frame_ranges`) keep the position the earlier force / composer
+        passes already decided and get NO anchor — the pipeline owns those.
+      • Horizontal is untouched (the anchor only sets the vertical top; the
+        render keeps captions centred, clear of the right action rail).
+      • Constant-per-page anchor = a hard SNAP between pages, never a slide —
+        FRAME-1-IS-FINAL preserved (feedback_caption_crisp_entrance).
+
+    Construction: split the incoming (tiling, gap-free) position segments at every
+    page boundary so each page's window carries its own anchor, inheriting the
+    base position verbatim. Page edges become boundaries, so every emitted piece
+    lies wholly inside one page (→ gets that page's anchor) or wholly in a gap
+    (→ no anchor). The result still tiles [0, total_output_frames] with no gaps."""
+    if not segments or not caption_pages or not face_trajectory:
+        return segments
+    _fps = float(source_fps or 60.0)
+
+    def _pos_at(frame):
+        for s in segments:
+            if int(s["fromFrame"]) <= frame < int(s["toFrame"]):
+                return s.get("position")
+        return segments[-1].get("position") if segments else "bottom"
+
+    _blocked = [(int(a), int(b)) for a, b in (blocked_frame_ranges or [])
+                if int(b) > int(a)]
+
+    def _is_blocked(a, b):
+        return any(_ba <= a and _bb >= b for _ba, _bb in _blocked)
+
+    _page_anchor = {}    # (pf0, pf1) -> topPx
+    _page_windows = []
+    _n_pages = 0
+    _n_anchored = 0
+    for _pg in caption_pages:
+        _start_ms = float(_pg.get("startMs") or 0.0)
+        _dur_ms = float(_pg.get("durationMs") or 0.0)
+        _pf0 = int(round(_start_ms / 1000.0 * _fps))
+        _pf1 = int(round((_start_ms + _dur_ms) / 1000.0 * _fps))
+        if _pf1 <= _pf0:
+            continue
+        _n_pages += 1
+        _page_windows.append((_pf0, _pf1))
+        if _is_blocked(_pf0, _pf1):
+            continue
+        _mid_out_s = (_start_ms + _dur_ms / 2.0) / 1000.0
+        _t_src = _output_time_to_source_time(projected_words, _mid_out_s)
+        if _t_src is None:
+            continue
+        _anchor_top = _speaker_caption_anchor(face_trajectory, _t_src)
+        if _anchor_top is None:
+            continue
+        _page_anchor[(_pf0, _pf1)] = _anchor_top
+        _n_anchored += 1
+
+    if not _page_anchor:
+        print(f"[speaker-captions] 0/{_n_pages} pages anchored "
+              f"(no face / all blocked) — segments unchanged", flush=True)
+        return segments
+
+    _bounds = set()
+    for s in segments:
+        _bounds.add(int(s["fromFrame"]))
+        _bounds.add(int(s["toFrame"]))
+    for _pf0, _pf1 in _page_windows:
+        _bounds.add(_pf0)
+        _bounds.add(_pf1)
+    _sorted = sorted(b for b in _bounds if 0 <= b <= int(total_output_frames))
+    out = []
+    for i in range(len(_sorted) - 1):
+        a, b = _sorted[i], _sorted[i + 1]
+        if a >= b:
+            continue
+        _pos = _pos_at(a)
+        _anchor = None
+        for (_pf0, _pf1), _top in _page_anchor.items():
+            if _pf0 <= a and _pf1 >= b:
+                _anchor = _top
+                break
+        _seg = {"fromFrame": a, "toFrame": b, "position": _pos}
+        if _anchor is not None:
+            _seg["anchor"] = {"topPx": int(_anchor)}
+        if (out and int(out[-1]["toFrame"]) == a
+                and out[-1].get("position") == _pos
+                and out[-1].get("anchor") == _seg.get("anchor")):
+            out[-1]["toFrame"] = b
+        else:
+            out.append(_seg)
+
+    print(f"[speaker-captions] {_n_anchored}/{_n_pages} pages anchored "
+          f"(head-follow → {len(out)} segments)", flush=True)
+    return out
+
+
 # Motion-graphic types whose metaphor REQUIRES the top band (drop-down) —
 # treated as fixed-TOP occupants. Only Notification is pinned here, matching
 # the existing _force_caption_position_around_overlays authority (line 5273),
@@ -24135,6 +24313,33 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         print(f"[captions] USER LOCK: every caption pinned {_cap_lock} for the whole video "
               f"(above the default, Gemini, and every force-flip)", flush=True)
 
+    # ── SPEAKER-FOLLOWING CAPTIONS (Zac 2026-07-26, DARK) ────────────────────
+    # Applied LAST — after the force-clear pass, the shadow-composer cutover, and
+    # the user lock — so the per-page {topPx} anchor rides on top of whatever
+    # vertical BAND those passes settled on (the composer, default-on, would
+    # otherwise overwrite anchors set earlier). DARK unless PROMPTLY_SPEAKER_CAPTIONS
+    # → _apply_speaker_follow_captions returns the same list object → the render
+    # input JSON is byte-identical. NEVER runs under an explicit user caption lock
+    # (user obedience is the floor). Reuses edit_plan["_face_trajectory"] and the
+    # shared projected-word table — NO new face sampling. The MG / B-roll / text-
+    # overlay windows the pipeline already force-controls stay anchor-free (the
+    # caption defers to the force-cleared position there).
+    if _speaker_captions_enabled() and not _cap_lock:
+        _speaker_blocked = list(_broll_ranges_for_caption_override)
+        for _mg in motion_graphics_out:
+            _mf0 = int(_mg.get("fromFrame") or 0)
+            _mf1 = _mf0 + int(_mg.get("durationInFrames") or 0)
+            if _mf1 > _mf0:
+                _speaker_blocked.append((_mf0, _mf1))
+        for _ov in text_overlays_out:
+            _of0 = int(_ov.get("fromFrame") or 0)
+            _of1 = _of0 + int(_ov.get("durationInFrames") or 0)
+            if _of1 > _of0:
+                _speaker_blocked.append((_of0, _of1))
+        caption_position_segments_out = _apply_speaker_follow_captions(
+            caption_position_segments_out, caption_pages, _face_trajectory,
+            _projected_words, _speaker_blocked, total_output_frames, source_fps)
+
     # ── Integrity-gate designed-window stash ────────────────────────────────
     # The gate (post-assembly, pre-upload) masks DESIGNED stillness/black/
     # silence. Windows come from the ONE post-safeguard plan, right here where
@@ -27755,6 +27960,140 @@ def _minimal_post_package(reason, duration_s):
     return {"post_caption": _caption[:120], "post_hook": _hook[:60]}
 
 
+# ── CAPTION-LESS MOTION ANCHORS (Zac campaign 2026-07-26, DARK) ───────────────
+# The wordless routes (minimal / hype / moodreel) can leave long STATIC HOLDS —
+# a shot the plan never animated, no beat, no caption, dead stretches measured to
+# ~38s. This module gives those holds motion-based anchors: peak-find the motion
+# curve (moodreel_editor.motion_features), fuse the shot-change list, and drop
+# slow drift-push zoom events onto the anchors so nothing dead runs longer than
+# ~3s, honouring the 2.0s minimum zoom spacing (_VISUAL_REFRACTORY_S). DARK unless
+# PROMPTLY_MOTION_ANCHORS → never invoked → today's sparse output byte-identical.
+def _motion_anchors_enabled(input_data=None):
+    """CAPTION-LESS MOTION ANCHORS flag. DARK unless PROMPTLY_MOTION_ANCHORS is
+    set. OFF → the caption-less plan builder never calls _apply_motion_anchors →
+    the wordless routes emit today's sparse render input, byte-identical. Per-job
+    cert override: input_data.motion_anchors_test (lets the A/B cert app toggle
+    without an env flip). Rollback = unset the env. Mirrors _moodreel_on /
+    _hype_mode_enabled."""
+    if input_data and input_data.get("motion_anchors_test"):
+        return True
+    return os.environ.get("PROMPTLY_MOTION_ANCHORS", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _space_motion_anchors(candidates, clip_dur_s, min_spacing, max_dead, target):
+    """Pick clip-local OUTPUT-second anchor times inside one dead hold. Snaps to
+    the provided motion `candidates` (source→clip-local seconds) where one lands
+    near the target cadence; otherwise synthesizes an evenly-paced anchor. Keeps
+    every anchor >= `min_spacing` apart (the 2.0s law) and ensures no gap — from
+    the clip start, between anchors, or to the clip end — exceeds `max_dead`.
+    Deterministic; returns [] for a clip with no room."""
+    placements = []
+    last = -1e9
+    # First target sits within max_dead of the clip start so the opening isn't dead.
+    next_t = min(target * 0.6, max(0.5, clip_dur_s - 0.5))
+    win = target * 0.5
+    _guard = 0
+    while next_t < clip_dur_s - 0.3 and _guard < 200:
+        _guard += 1
+        near = [c for c in candidates
+                if abs(c - next_t) <= win and (c - last) >= min_spacing and c >= 0.3]
+        if near:
+            pick = min(near, key=lambda c: abs(c - next_t))
+        else:
+            pick = next_t if (next_t - last) >= min_spacing else last + min_spacing
+        if pick >= clip_dur_s - 0.3:
+            break
+        placements.append(round(pick, 2))
+        last = pick
+        next_t = pick + target
+    return placements
+
+
+def _apply_motion_anchors(render_input, motion_curve, shot_changes, source_fps,
+                          window_s=1.0):
+    """Drop motion-based drift-push anchors into the caption-less render input so
+    no static hold runs dead longer than ~3s. Returns the SAME dict, mutated in
+    place; a no-op (returns unchanged) when no clip qualifies.
+
+    Surgical + additive: only clips that currently carry NO zoomEffect AND are
+    longer than the dead-stretch bound get anchors — clips the plan already
+    animated are left exactly as they were. Each anchor is the SAME zoomEffect
+    primitive the moodreel drift zoom already ships in this path (SmoothPush,
+    punch=false, centre origin, scale ~1.10) — no new render family, no new
+    schema. Anchors snap to motion peaks / resolves / shot-changes when one is
+    near, else fall on an even cadence; spacing honours _VISUAL_REFRACTORY_S.
+
+    Face-lock note: these routes are no-speech clips and this path computes no
+    face trajectory, so origins stay centred (0.5, 0.5) — identical to the
+    existing moodreel/hype zoom origins. A face-locked origin would require the
+    trajectory these routes deliberately skip (feedback_no_face_detect_stride_
+    change), so centre is the honest default here."""
+    clips = render_input.get("clips") or []
+    if not clips:
+        return render_input
+    fps = float(render_input.get("fps") or source_fps or 30.0)
+    try:
+        import moodreel_editor as _mre
+        _peaks, _resolves = _mre.motion_features(motion_curve or [], window_s)
+    except Exception:
+        _peaks, _resolves = [], []
+    _cands = sorted(set(
+        [round(float(t), 3) for t in (_peaks or [])]
+        + [round(float(t), 3) for t in (_resolves or [])]
+        + [round(float(t), 3) for t in (shot_changes or [])]))
+
+    _MIN_SPACING = float(_VISUAL_REFRACTORY_S)   # 2.0s — the min-zoom-spacing law
+    _MAX_DEAD = 3.0                              # no dead stretch longer than this
+    _TARGET = 2.4                                # as dense as the 2.0s law allows
+    _DRIFT_SCALE = 1.10
+    _PUSH_S = 1.6                                # each drift push length (output s)
+
+    _n_events = 0
+    _n_clips = 0
+    _out_cursor_f = 0
+    for _clip in clips:
+        _dur_out_f = int(_clip.get("durationInFrames") or 0)
+        _out_cursor_f += _dur_out_f
+        if _clip.get("zoomEffect"):
+            continue                             # already animated — leave it
+        _rate = float(_clip.get("playbackRate") or 1.0) or 1.0
+        _clip_out_dur_s = _dur_out_f / fps
+        if _clip_out_dur_s <= _MAX_DEAD:
+            continue                             # short hold — not a dead stretch
+        _src_start_s = int(_clip.get("startFromFrames") or 0) / fps
+        _src_end_s = _src_start_s + _dur_out_f * _rate / fps
+        _local = sorted(
+            (t - _src_start_s) / _rate
+            for t in _cands if _src_start_s < t < _src_end_s)
+        _placements = _space_motion_anchors(
+            _local, _clip_out_dur_s, _MIN_SPACING, _MAX_DEAD, _TARGET)
+        if not _placements:
+            continue
+        _events = []
+        for _a in _placements:
+            _dur_ms = int(round(min(_PUSH_S, _clip_out_dur_s - _a) * 1000.0))
+            if _dur_ms < 200:
+                continue
+            _events.append({
+                "startMs": int(round(_a * 1000.0)), "durationMs": _dur_ms,
+                "scale": _DRIFT_SCALE, "originX": 0.5, "originY": 0.5})
+        if _events:
+            _clip["zoomEffect"] = {"type": "SmoothPush", "events": _events,
+                                   "punch": False}
+            _n_events += len(_events)
+            _n_clips += 1
+
+    if _n_events:
+        print(f"[motion-anchors] filled {_n_clips} dead hold(s) with {_n_events} "
+              f"drift anchor(s) (min-spacing {_MIN_SPACING}s, no dead >{_MAX_DEAD}s, "
+              f"{len(_cands)} motion/shot candidates)", flush=True)
+    else:
+        print("[motion-anchors] no dead hold qualified — render input unchanged",
+              flush=True)
+    return render_input
+
+
 def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
                           source_duration, app_url, reason, pipeline_start):
     """The MINIMAL editorial path: deterministic clean cuts + calm transitions,
@@ -27920,6 +28259,23 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     _ri = _he.project_hype_plan(
         _plan, source_url=os.path.basename(_canon), source_fps=_fps,
         source_duration=_dur)
+
+    # ── CAPTION-LESS MOTION ANCHORS (Zac 2026-07-26, DARK) ────────────────────
+    # Covers ALL three wordless routes (this is the one point where minimal /
+    # hype / moodreel plans converge on the render input). When PROMPTLY_MOTION_
+    # ANCHORS is on, drop slow drift-push zooms onto the motion curve's peaks +
+    # the shot-change list so a long static hold never runs dead > ~3s (2.0s min
+    # spacing honoured). Reuses the ALREADY-extracted _mcurve; the shot-change
+    # pass runs only under the flag. DARK → _ri untouched → sparse output
+    # byte-identical. Fail-safe: a detect miss degrades to curve-only anchors.
+    if _motion_anchors_enabled(input_data):
+        try:
+            _shot_changes = detect_shot_changes(_canon)
+        except Exception as _sc_err:
+            print(f"[motion-anchors] shot-change detect fail-safe "
+                  f"({type(_sc_err).__name__}: {str(_sc_err)[:120]})", flush=True)
+            _shot_changes = []
+        _ri = _apply_motion_anchors(_ri, _mcurve, _shot_changes, _fps)
 
     # 3. Render through the real primitives (base FFmpeg + Remotion micro).
     send_progress(job_id, "render", 65, "Rendering your edit", app_url)

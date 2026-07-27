@@ -149,6 +149,7 @@ export const GadzhiStyle: React.FC<GadzhiStyleProps> = ({
   pages,
   fontSize = 90,
   position = "bottom",
+  anchor,
   textColor = "#FFFFFF",
   highlightColor = "#F5C518",
   keywords = [],
@@ -175,9 +176,16 @@ export const GadzhiStyle: React.FC<GadzhiStyleProps> = ({
             <AbsoluteFill
               style={{
                 display: "flex",
-                justifyContent: position === "top" ? "flex-start" : position === "center" ? "center" : "flex-end",
+                // SPEAKER-FOLLOWING CAPTIONS (Zac 2026-07-26, DARK): a per-page
+                // anchor top-pins the block at `topPx`; absent → the fixed-slot
+                // branches below run byte-identically.
+                justifyContent: anchor
+                  ? "flex-start"
+                  : position === "top" ? "flex-start" : position === "center" ? "center" : "flex-end",
                 alignItems: "flex-start",
-                ...(position === "top"
+                ...(anchor
+                  ? { paddingTop: anchor.topPx, paddingLeft: 80, paddingRight: 80 }
+                  : position === "top"
                   ? { paddingTop: CAPTION_PADDING.top, paddingLeft: 80, paddingRight: 80 }
                   : position === "center"
                     ? { paddingLeft: 80, paddingRight: 80 }

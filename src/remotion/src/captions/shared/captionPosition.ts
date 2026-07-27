@@ -26,7 +26,22 @@ export const CAPTION_PADDING = {
 
 export function getCaptionPositionStyle(
   position: "top" | "center" | "bottom",
+  anchor?: { topPx: number },
 ): React.CSSProperties {
+  // SPEAKER-FOLLOWING CAPTIONS (Zac 2026-07-26, DARK): when a per-page anchor is
+  // present it OVERRIDES the fixed vertical slot — the block is flex-start-pinned
+  // at `topPx` (constant per page → the render snaps between pages, never slides,
+  // so FRAME-1-IS-FINAL holds). Horizontal padding is unchanged (captions stay
+  // centred, clear of the right action rail). Undefined anchor → the switch below
+  // runs exactly as before (byte-identical fixed-slot behavior).
+  if (anchor) {
+    return {
+      justifyContent: "flex-start",
+      paddingTop: anchor.topPx,
+      paddingLeft: CAPTION_PADDING.sidesSafe,
+      paddingRight: CAPTION_PADDING.sidesSafe,
+    };
+  }
   switch (position) {
     case "top":
       return {

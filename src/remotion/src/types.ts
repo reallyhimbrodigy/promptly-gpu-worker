@@ -247,10 +247,22 @@ export type CaptionStyle =
   | "Gadzhi"
   | "CleanCut";
 
+/**
+ * SPEAKER-FOLLOWING CAPTIONS (Zac 2026-07-26, DARK): a per-page vertical anchor
+ * pinning the caption block to the smoothed speaker head. `topPx` is the caption
+ * block's top in canonical 1080x1920 canvas px. Present only when
+ * PROMPTLY_SPEAKER_CAPTIONS is on; absent (undefined) → the style falls back to
+ * its fixed `position` slot exactly as before. Horizontal is untouched.
+ */
+export interface CaptionAnchor {
+  topPx: number;
+}
+
 export interface CaptionPositionSegment {
   fromFrame: number;
   toFrame: number;
   position: "top" | "center" | "bottom";
+  anchor?: CaptionAnchor;
 }
 
 export interface CaptionSpec {
