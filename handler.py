@@ -19698,6 +19698,55 @@ def _download_and_concat_sources(source_urls, dest_path, work_dir):
     return _durs
 
 
+def _hq_resample_enabled():
+    """Part A (Flare fidelity, Zac 2026-07-26): direction-aware HQ resampling on
+    the source→canvas normalize scale. Dark by default (env off). The base
+    normalize previously used FFmpeg's default kernel (bicubic); measured on real
+    user sources, lanczos is +14% sharper DOWNSCALING (4K→1080, no ring risk) and
+    spline is +5% sharper UPSCALING sub-HD with less overshoot than lanczos (which
+    can ring/amplify compression artifacts on the 32% of uploads that are sub-HD).
+    Reaches ~64% of uploads (every source that isn't already 1080×1920)."""
+    return os.environ.get("PROMPTLY_HQ_RESAMPLE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _resample_flags(scale_factor, source_clean):
+    """`:flags=…` suffix for a source→canvas scale, chosen BY DIRECTION when HQ
+    resampling is enabled, else "" (FFmpeg default).
+
+    DOWNSCALE (scale ≤ 1) → lanczos: measured +14% sharper than the bicubic
+    default on real 4K sources, no ringing risk.
+
+    UPSCALE (scale > 1) → keep the FFmpeg default (bicubic), i.e. NO change.
+    Measured on a genuinely-compressed 576×1024 @0.38Mbps social re-download (the
+    real upscale population — 31.8% of uploads are sub-HD re-downloads, client is
+    clean so this is permanent): a sharper kernel (spline/lanczos) buys ~nothing
+    (global VoL 9.7→10.2, the detail is already gone to compression) while raising
+    ringing/overshoot (bicubic 0.28% < spline 0.32% < lanczos 0.34%, ~10× the
+    ring of clean footage). denoise-before-upscale helped neither. So upscale =
+    do no harm; only downscale gets the sharper kernel.
+
+    UPSCALE of a CLEAN source (adaptive gate below) → spline: on genuinely-clean
+    sub-HD/landscape footage spline recovers real detail (+5–9% measured) with
+    negligible ring. The per-job bpp gate is what lets upscale sharpen clean
+    sources without touching compressed ones — no hand-split cohorts."""
+    if not _hq_resample_enabled():
+        return ""
+    if scale_factor <= 1.0:
+        return ":flags=lanczos"
+    return ":flags=spline" if source_clean else ""
+
+
+def _source_clean_enough(bpp):
+    """ONE adaptive quality gate (Zac 2026-07-26): decide PER JOB whether a
+    source carries enough real detail that sharpening HELPS rather than
+    amplifying compression artifacts. bpp = bitrate / (w·h·fps). Measured:
+    compressed social re-downloads 0.02–0.11 bpp; clean phone footage ≥0.2.
+    Threshold 0.12 separates them. Unknown/zero bitrate → NOT clean (do-no-harm).
+    Reused by resample (A) now and the zoom-sharpen paths (B/C) later, so the
+    pipeline decides per job instead of us splitting populations by hand."""
+    return bpp >= 0.12
+
+
 def analyze_source_video(source_path):
     """Analyze source video and return metadata + scale/crop filter for the main render.
 
@@ -19807,7 +19856,28 @@ def analyze_source_video(source_path):
     # For center crop (scale first, then crop): scale to fit, crop center
     #   → transform: new_cx = raw_cx * scale - crop_offset_in_scaled_space
 
-    normalize_vf = "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+    # Adaptive quality gate: is this source clean enough that sharpening helps?
+    # (bitrate from the ffprobe we already ran — no extra probe.)
+    try:
+        _vbr = float(video.get("bit_rate") or (info.get("format") or {}).get("bit_rate") or 0.0)
+    except (ValueError, TypeError):
+        _vbr = 0.0
+    _bpp = _vbr / (w * h * fps) if (_vbr > 0 and w > 0 and h > 0 and fps > 0) else 0.0
+    _source_clean = _source_clean_enough(_bpp)
+    print(
+        f"[analyze] source quality: {_vbr/1e6:.2f}Mbps bpp={_bpp:.3f} → "
+        f"{'CLEAN (upscale may sharpen)' if _source_clean else 'compressed (upscale do-no-harm)'}",
+        flush=True,
+    )
+
+    # force_original_aspect_ratio=increase scales by max(scale_x, scale_y); pick
+    # the resample kernel by that direction (Part A, dark unless PROMPTLY_HQ_RESAMPLE).
+    _norm_scale = max(1080.0 / w, 1920.0 / h)
+    normalize_vf = (
+        f"scale=1080:1920:force_original_aspect_ratio=increase"
+        f"{_resample_flags(_norm_scale, _source_clean)},"
+        f"crop=1080:1920,setsar=1"
+    )
     # Default transform: identity (raw == output)
     _face_transform = {"mode": "identity"}
 
@@ -19841,7 +19911,10 @@ def analyze_source_video(source_path):
             avg_y = int(sum(c["crop_y"] for c in avg_crops) / len(avg_crops))
             crop_w = int(reframe_crops[0]["crop_w"])
             crop_h = int(reframe_crops[0]["crop_h"])
-            normalize_vf = f"crop={crop_w}:{crop_h}:{avg_x}:{avg_y},scale=1080:1920,setsar=1"
+            normalize_vf = (
+                f"crop={crop_w}:{crop_h}:{avg_x}:{avg_y},"
+                f"scale=1080:1920{_resample_flags(1080.0 / max(1, crop_w), _source_clean)},setsar=1"
+            )
             _face_transform = {
                 "mode": "crop_then_scale",
                 "crop_x": avg_x, "crop_y": avg_y,

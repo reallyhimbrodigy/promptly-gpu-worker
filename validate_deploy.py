@@ -5673,6 +5673,32 @@ def _broll_content_gate():
     assert "_broll_gate_input=input_data" in _h, "the verify call must thread input_data for the gate/override"
 
 
+@check("HQ RESAMPLE — PART A (Flare fidelity, Zac 2026-07-26, DARK behind PROMPTLY_HQ_RESAMPLE): the source→canvas normalize scale (analyze_source_video) used FFmpeg's DEFAULT kernel (bicubic). DIRECTION-AWARE + DO-NO-HARM: lanczos DOWNSCALING (4K→1080, +14% sharper, no ring) but UPSCALE keeps bicubic default UNCHANGED — measured on a genuinely-compressed 576×1024@0.38Mbps social re-download (the real upscale population; client verified clean → sub-HD is permanent), a sharper kernel buys ~nothing (VoL 9.7→10.2, detail already gone to compression) while RAISING ring (bicubic 0.28 < spline 0.32 < lanczos 0.34, ~10× clean footage); denoise-before-upscale helped neither. OFF → flags='' → FFmpeg default → byte-identical. Reason the retired FFmpeg lanczos zoom path's sharpness was collateral damage — see feedback_audit_retired_paths.")
+def _hq_resample_direction_gate():
+    _h = open("handler.py").read()
+    assert "def _hq_resample_enabled(" in _h and "def _resample_flags(" in _h, \
+        "the HQ-resample flag helper + direction picker must exist"
+    assert 'os.environ.get("PROMPTLY_HQ_RESAMPLE"' in _h, "must default DARK behind PROMPTLY_HQ_RESAMPLE"
+    _i = _h.find("def _resample_flags")
+    _b = _h[_i:_i + 1600]
+    assert 'if not _hq_resample_enabled():' in _b and 'return ""' in _b, \
+        "OFF must return '' (FFmpeg default kernel) → byte-identical"
+    # DIRECTION-AWARE + ADAPTIVE: lanczos down always; upscale sharpens (spline) ONLY on a clean source
+    assert 'if scale_factor <= 1.0:' in _b and 'return ":flags=lanczos"' in _b, \
+        "downscale must always get lanczos (safe, averages artifacts)"
+    assert 'return ":flags=spline" if source_clean else ""' in _b, \
+        "upscale sharpens ONLY when the per-job quality gate says clean; compressed → FFmpeg default (do-no-harm)"
+    # ONE adaptive quality gate, bpp-based, reused across A/B/C
+    assert "def _source_clean_enough(" in _h and "bpp >= 0.12" in _h, \
+        "the per-job bpp quality gate must exist (threshold 0.12 separates compressed re-downloads from clean footage)"
+    assert "_source_clean = _source_clean_enough(_bpp)" in _h and "_vbr / (w * h * fps)" in _h, \
+        "analyze_source_video must compute bpp from the source bitrate and derive the clean flag"
+    # both normalize_vf sites must route through the direction picker WITH the clean flag
+    assert "_resample_flags(_norm_scale, _source_clean)" in _h, "center-crop normalize must pass scale + clean flag"
+    assert "_resample_flags(1080.0 / max(1, crop_w), _source_clean)" in _h, "reframe normalize must pass scale + clean flag"
+    assert "scale=1080:1920:flags=" not in _h, "no hardcoded normalize kernel — must go through the dark flag"
+
+
 @check("LOUD FAIL-SAFE MOUNT LAW (Zac standing rule 2026-07-25, from the moodreel_editor + progressive_publish mount catches): EVERY repo-local module that handler.py defer-imports inside a function body MUST be add_local_file-baked into the worker image — derived DYNAMICALLY from the source so any future mode is covered the day it is written. A deferred import inside a fail-safe try/except is exactly the class that dies silently (the fallback masks the ImportError and the feature quietly never runs); top-level imports crash loudly at container start and need no law.")
 def _loud_failsafe_mount_law():
     import re as _re, os as _os
@@ -6081,6 +6107,7 @@ def _secret_canonical_values():
         "PROMPTLY_HYPE_MODE": "1",        # HYPE LIVE (Zac "FLIP HYPE" 2026-07-25 on the v2 pair): no-speech + confident beat (aubio tconf > 0.15) → beat-synced edit; every miss fail-safes to minimal; rollback = "0"
         "PROMPTLY_SHAPE_ABORT": "1",
         "PROMPTLY_MOODREEL": "1",     # cinematic mood-reel route LIVE (Zac "MOODREEL APPROVED" 2026-07-25; fail-safe-to-minimal; rollback = "0")     # degen shape-abort LIVE (ruling 1a; 5/5 shapes, 0 FP on 7.9k healthy; ~85-90% burn cut; rollback = "0")
+        "PROMPTLY_HQ_RESAMPLE": "1",  # Part A fidelity LIVE (Zac "FLIP A" 2026-07-26 after FIDELITY_C): lanczos downscale + adaptive bpp-gated spline upscale; OFF-code is byte-identical so rollback = "0" here + secret + redeploy
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that
