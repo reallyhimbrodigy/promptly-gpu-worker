@@ -10,6 +10,7 @@ export const Cove: React.FC<CoveProps> = ({
   pages,
   fontSize = 76,
   position = "bottom",
+  anchor,
   boxedWords = [],
   boxPaddingX = 14,
   boxPaddingY = 8,
@@ -28,7 +29,22 @@ export const Cove: React.FC<CoveProps> = ({
 
   const maxWidth = width * 0.85;
 
+  // SPEAKER-FOLLOWING CAPTIONS (Zac 2026-07-26, DARK): a per-page anchor pins the
+  // block top at `topPx` (centred, safe-rect inset) — same box geometry as the
+  // "bottom" case but top-anchored to the speaker head. Absent → the switch below
+  // runs exactly as before (byte-identical fixed-slot behavior).
+  const anchored = !!anchor;
   let positionStyles: React.CSSProperties;
+  if (anchor) {
+    positionStyles = {
+      position: "absolute",
+      left: CAPTION_PADDING.sidesSafe,
+      right: CAPTION_PADDING.sidesSafe,
+      top: anchor.topPx,
+      display: "flex",
+      justifyContent: "center",
+    };
+  } else
   switch (position) {
     case "top":
       positionStyles = {
@@ -76,7 +92,7 @@ export const Cove: React.FC<CoveProps> = ({
         // The box the style actually occupies depends on position: bottom
         // is inset 200px both sides; top/center are left-anchored at 80.
         const fitBox =
-          position === "bottom"
+          position === "bottom" || anchored
             ? width - 2 * CAPTION_PADDING.sidesSafe
             : Math.min(maxWidth, width - 2 * CAPTION_PADDING.sides);
         const fit = fitScale(

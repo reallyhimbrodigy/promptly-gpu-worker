@@ -165,6 +165,7 @@ export const TwoTone: React.FC<TwoToneProps> = ({
   fontFamily = CAPTION_FONTS.montserrat,
   fontSize = 110,
   position = "center",
+  anchor,
   strokeWidth = 6,
   strokeColor = "#101014",
   allCaps = true,
@@ -172,7 +173,7 @@ export const TwoTone: React.FC<TwoToneProps> = ({
   const frame = useCurrentFrame();
   const { fps, width } = useVideoConfig();
   const maxWidth = width * 0.88;
-  const positionStyle = getCaptionPositionStyle(position);
+  const positionStyle = getCaptionPositionStyle(position, anchor);
 
   // Both lines extrude into a dark base for the chunky 3D "sticker" depth —
   // top line into cool-dark, accent line into warm-dark to match its hue.

@@ -271,10 +271,21 @@ class TikTokPage(_RemotionModel):
     tokens: List[TikTokToken]
 
 
+# SPEAKER-FOLLOWING CAPTIONS (Zac 2026-07-26, DARK): per-page vertical anchor
+# pinning the caption block to the smoothed speaker head. Emitted ONLY when
+# PROMPTLY_SPEAKER_CAPTIONS is on — the OFF path never adds the key, and the
+# writer dumps the dict as-is (no None-normalization), so the render input JSON
+# is byte-identical while dark. topPx is the caption block's top in canonical
+# 1080x1920 canvas px (used as paddingTop against a flex-start container).
+class _CaptionAnchor(_RemotionModel):
+    topPx: int
+
+
 class CaptionPositionSegment(_RemotionModel):
     fromFrame: int
     toFrame: int
     position: CaptionPosition
+    anchor: Optional[_CaptionAnchor] = None
 
 
 class CaptionSpec(_RemotionModel):

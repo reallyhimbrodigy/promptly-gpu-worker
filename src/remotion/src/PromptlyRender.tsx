@@ -219,11 +219,12 @@ const CaptionSegmentRenderer: React.FC<{
   keywords: string[];
   extraProps?: Record<string, unknown>;
   position: "top" | "center" | "bottom";
+  anchor?: { topPx: number };
   segmentStartFrame: number;
   segmentDurationInFrames: number;
   fps: number;
 }> = ({
-  style, pages, keywords, extraProps, position,
+  style, pages, keywords, extraProps, position, anchor,
   segmentStartFrame, segmentDurationInFrames, fps,
 }) => {
   const Comp = CAPTION_MAP[style];
@@ -320,6 +321,7 @@ const CaptionSegmentRenderer: React.FC<{
         pages={clippedPages}
         keywords={keywords}
         position={position}
+        anchor={anchor}
         {...(extraProps ?? {})}
       />
     </AbsoluteFill>
@@ -347,6 +349,7 @@ const CaptionsLayer: React.FC<{ caption: CaptionSpec; fps: number }> = ({
               keywords={caption.keywords}
               extraProps={caption.extraProps}
               position={seg.position}
+              anchor={seg.anchor}
               segmentStartFrame={seg.fromFrame}
               segmentDurationInFrames={dur}
               fps={fps}

@@ -277,6 +277,7 @@ export const Prime: React.FC<PrimeProps> = ({
   pages,
   fontFamily = CAPTION_FONTS.inter,
   position = "bottom",
+  anchor,
   line1Color = "#FFFFFF",
   line2Color = "#3BA5FF",
   line1FontSize = 52,
@@ -316,7 +317,13 @@ export const Prime: React.FC<PrimeProps> = ({
                 position: "absolute",
                 left: "50%",
                 maxWidth,
-                ...(position === "top"
+                // SPEAKER-FOLLOWING CAPTIONS (Zac 2026-07-26, DARK): a per-page
+                // anchor pins the block top at `topPx` (still horizontally
+                // centred via translateX). Absent → fixed-slot branches below run
+                // byte-identically.
+                ...(anchor
+                  ? { top: anchor.topPx, transform: "translateX(-50%)" }
+                  : position === "top"
                   ? { top: CAPTION_PADDING.top, transform: "translateX(-50%)" }
                   : position === "center"
                     ? { top: "50%", transform: "translate(-50%, -50%)" }

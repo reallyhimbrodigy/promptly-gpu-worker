@@ -140,13 +140,14 @@ export const CleanCut: React.FC<CleanCutProps> = ({
   fontSize = 100,
   fontWeight = 800,
   position = "center",
+  anchor,
   allCaps = false,
   textShadow = "0 4px 22px rgba(0,0,0,0.6), 0 2px 6px rgba(0,0,0,0.55), 0 0 1px rgba(0,0,0,0.5)",
 }) => {
   const frame = useCurrentFrame();
   const { fps, width } = useVideoConfig();
   const maxWidth = width * 0.85;
-  const positionStyle = getCaptionPositionStyle(position);
+  const positionStyle = getCaptionPositionStyle(position, anchor);
 
   // Render the active page by comparing the current frame to each page's
   // window — the component owns no <Sequence> (the pipeline bounds visibility).

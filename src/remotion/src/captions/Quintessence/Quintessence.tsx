@@ -47,6 +47,7 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
   pages,
   fontSize = 160,
   position = "bottom",
+  anchor,
   color = "#E8D44D",
   stretchY = 1.6,
 }) => {
@@ -117,7 +118,7 @@ export const Quintessence: React.FC<QuintessenceProps> = ({
   return (
     <AbsoluteFill
       style={{
-        ...getCaptionPositionStyle(position),
+        ...getCaptionPositionStyle(position, anchor),
         alignItems: "center",
         opacity,
       }}

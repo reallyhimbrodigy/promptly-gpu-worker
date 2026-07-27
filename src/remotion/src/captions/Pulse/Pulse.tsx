@@ -89,6 +89,7 @@ export const Pulse: React.FC<PulseProps> = ({
   pages,
   fontSize = 80,
   position = "bottom",
+  anchor,
   keywords = [],
   textColor = "#FFFFFF",
   keywordColor = "#FF6B4A", // directive #12: recolored off the blue family (was #00BFFF); Prime owns blue
@@ -98,7 +99,7 @@ export const Pulse: React.FC<PulseProps> = ({
   const { fps, width } = useVideoConfig();
   const maxWidth = width * 0.85;
   const keywordSet = useMemo(() => buildKeywordSet(keywords), [keywords]);
-  const positionStyle = getCaptionPositionStyle(position);
+  const positionStyle = getCaptionPositionStyle(position, anchor);
 
   // Find latest page that has started = active line
   let activeIdx = -1;
