@@ -31,3 +31,4 @@ src/remotion/out_editorialpop_test/
 # inspection only (regenerate via the extraction script); not source.
 post_cuts_system_prompt.txt
 promptly_gemini_system_prompt.txt
+.worktrees
