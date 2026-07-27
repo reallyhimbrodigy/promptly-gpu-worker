@@ -348,6 +348,12 @@ export interface PromptlyRenderInput {
    *  z-stack behaves identically to the pre-overlay pipeline. */
   tightCutOverlays?: TightCutOverlaySpec[];
   outro?: "none" | "fade_black" | "fade_white";
+  /** Flare motion-token system (Workstream D). Absent/false = legacy
+   *  per-component motion (today's exact pixels); true = shared SNAP/SETTLE/
+   *  GLIDE tokens. ONE reversible flag for the whole system so the before/after
+   *  is a true A/B — see motion-graphics/shared/motion.ts. Never touches the
+   *  caption text layer (FRAME-1-IS-FINAL). Worker sets it from MOTION_TOKENS. */
+  motionTokens?: boolean;
 }
 
 export interface PromptlyRenderProps {

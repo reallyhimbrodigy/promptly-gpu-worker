@@ -86,6 +86,12 @@ import {
   DropBanner, DropCard, PillMarquee, TimelineRoadmap, MouseDrag,
 } from "./motion-graphics";
 
+// Flare motion-token system (Workstream D). The provider gates the whole
+// system on one flag; migrated components read useMotionTokens(). GLIDE/
+// EASE_GLIDE/dur drive the token-ON b-roll path below.
+import { MotionTokensProvider, useMotionTokens } from "./motion-graphics/shared/motion-flag";
+import { GLIDE, EASE_GLIDE, dur } from "./motion-graphics/shared/motion";
+
 // ─── Component maps ────────────────────────────────────────────────────────
 const CAPTION_MAP: Record<string, React.FC<any>> = {
   Prime, TypewriterReveal, Cove, Lumen, Pulse, Quintessence,
@@ -488,22 +494,55 @@ const resolveSrc = (s: string): string => {
 
 const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) => {
   const frame = useCurrentFrame();
+  const motionTokens = useMotionTokens();
 
   const totalFrames = spec.durationInFrames;
   const fadeFrames = Math.max(1, Math.round(fps * 0.067));
-  const fadeIn = interpolate(
+
+  // LEGACY (flag OFF) — today's exact pixels: bare-linear opacity crossfade,
+  // ~67ms each side, no transform. Preserved verbatim so the OFF render is a
+  // true off-state for the A/B (the audit's "amateur linear fade").
+  const legacyFadeIn = interpolate(
     frame,
     [0, fadeFrames],
     [0, 1],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
-  const fadeOut = interpolate(
+  const legacyFadeOut = interpolate(
     frame,
     [totalFrames - fadeFrames, totalFrames],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" }
   );
-  const opacity = Math.min(fadeIn, fadeOut);
+  const legacyOpacity = Math.min(legacyFadeIn, legacyFadeOut);
+
+  // TOKEN (flag ON) — same ~67ms fade windows (still reads as a cut), but the
+  // opacity is eased (EASE_GLIDE) rather than dead-linear, and the cutaway
+  // "lands" via a subtle GLIDE scale-settle 1.04→1.0 over BASE. GLIDE is
+  // clamped → monotonic, so a cutaway never wobbles (a bounce here would look
+  // wrong). No slide/position move — full-frame cover is preserved.
+  const tokenFadeIn = interpolate(
+    frame,
+    [0, fadeFrames],
+    [0, 1],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_GLIDE }
+  );
+  const tokenFadeOut = interpolate(
+    frame,
+    [totalFrames - fadeFrames, totalFrames],
+    [1, 0],
+    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_GLIDE }
+  );
+  const settle = spring({
+    frame,
+    fps,
+    config: GLIDE,
+    durationInFrames: dur("BASE", fps),
+  });
+  const tokenScale = 1.04 - 0.04 * settle; // 1.04 → 1.0, no overshoot (clamped)
+
+  const opacity = motionTokens ? Math.min(tokenFadeIn, tokenFadeOut) : legacyOpacity;
+  const scale = motionTokens ? tokenScale : 1;
 
   // Source resolution: handler.py stages B-roll files into /remotion/bundle/
   // public with a stage-key-prefixed basename; spec.src is just that basename.
@@ -516,7 +555,14 @@ const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) =>
   const startFromFrames = Math.round(spec.seekFromSeconds * fps);
 
   return (
-    <AbsoluteFill style={{ pointerEvents: "none", opacity, backgroundColor: "#000" }}>
+    <AbsoluteFill
+      style={{
+        pointerEvents: "none",
+        opacity,
+        backgroundColor: "#000",
+        transform: `scale(${scale})`,
+      }}
+    >
       <OffthreadVideo
         src={resolvedSrc}
         startFrom={startFromFrames}
@@ -759,6 +805,7 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
   const { caption, motionGraphics, textOverlays, fps, broll, tightCutOverlays, generatedScenes } = input;
 
   return (
+    <MotionTokensProvider enabled={input.motionTokens ?? false}>
     <AbsoluteFill style={{ background: "transparent" }}>
       {/* B-roll cutaways render at the BOTTOM of the overlay z-stack —
           under captions, text overlays, and MGs. Each B-roll fills the
@@ -803,6 +850,7 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
           the components return null (no z-stack cost). */}
       <TightCutOverlayLayer overlays={tightCutOverlays ?? []} />
     </AbsoluteFill>
+    </MotionTokensProvider>
   );
 };
 
