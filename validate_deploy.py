@@ -185,6 +185,7 @@ def _system_instruction_format():
         _caption_enum="X", _mg_enum="X", _transition_enum="X", _tco_enum="X",
         _n_styles=0, _n_transitions=0, _n_mgs=0,
         _emph_move_line="X", _density_rhythm_block="X",
+        _peak_budget="X", _peak_set_ref="X", _peak_count_ref="X",
     )
 
 
@@ -5728,6 +5729,28 @@ def _e1_density_reshape_gate():
     assert "question→answer turns" in _h and "name-drops" in _h, "ON must expand the markable-moment vocabulary"
 
 
+@check("TRANSCRIPTION-COVERAGE GATE (content-destruction P0 fix, Zac 2026-07-27, DARK behind PROMPTLY_COVERAGE_GATE): the cutter assembles output from transcript WORDS, so VAD-confirmed speech carrying NO words is DELETED as silence (measured: an Urdu upload 89.7s→31.6s, 58s of continuous speech destroyed). ON → a source whose VAD SPEECH is materially untranscribed is rejected with an honest TRANSCRIPTION_INCOMPLETE coded error + refund BEFORE the cutter runs — never a butchered edit. Silero VAD SPEECH (not energy → music beds never false-reject); language-agnostic (subsumes the script gate for the transcription-failure class). Thresholds data-driven from the 34-job cert (clean ≤0.8s/0.023 vs mangled ≥3.2s/0.24 — a 10x gap). FAIL-OPEN on measurement error (a safety net, never a new failure source). OFF → the check never runs (byte-identical). Refunded + rescue-denied via both frozensets.")
+def _transcription_coverage_gate():
+    _h = open("handler.py").read()
+    assert "def _coverage_gate_enabled(" in _h, "coverage-gate flag helper must exist"
+    assert 'os.environ.get("PROMPTLY_COVERAGE_GATE"' in _h, "must default DARK behind PROMPTLY_COVERAGE_GATE"
+    assert 'input_data.get("coverage_gate_test")' in _h, "per-job cert override must exist (dark for real traffic)"
+    assert "def _transcription_coverage_check(" in _h, "the VAD coverage measurement must exist"
+    assert "_COVERAGE_MIN_UNWORDED_S = 2.0" in _h and "_COVERAGE_MIN_UNWORDED_FRAC = 0.10" in _h, \
+        "data-driven thresholds (2.0s AND 0.10 frac) — the values the 2026-07-27 cert separated on"
+    assert "_detect_silence_regions_vad(source_path, min_silence_s=0.30)" in _h, \
+        "must use Silero VAD SPEECH (not energy) so a music bed never false-rejects"
+    assert "FAIL-OPEN" in _h and "return True, stats" in _h, \
+        "measurement must FAIL-OPEN — the gate is a safety net, never a new failure source"
+    assert "if _coverage_gate_enabled(input_data):" in _h, "gate must be wired at intake"
+    assert '"TRANSCRIPTION_INCOMPLETE: "' in _h, "must raise the honest coded error"
+    assert 'if "TRANSCRIPTION_INCOMPLETE" in msg:' in _h, "must have its own classifier branch (honest user message)"
+    _dr = _h[_h.find("_DESIGNED_REJECTION_CODES = frozenset("):]
+    assert '"TRANSCRIPTION_INCOMPLETE"' in _dr[:400], "must be a DESIGNED REJECTION so the app refunds the credit"
+    _or = _h[_h.find("_OUTER_RESCUE_DENY = frozenset("):]
+    assert '"TRANSCRIPTION_INCOMPLETE"' in _or[:1200], "must be rescue-denied (no doomed safe-edit re-run on unsupported language)"
+
+
 @check("D2 MOTION BLUR dark-flag (Zac 2026-07-26, 30fps+blur ruling): CameraMotionBlur (was Lumen-only) now selectively wraps Flare's 4 motion sites (MG entrance/exit, b-roll push, transitions, composite zooms) behind input.motionBlur, DARK by default. OFF is byte-identical BY CONSTRUCTION — MotionBlurWrap returns children untouched when disabled (no wrapper, no extra DOM/paint). shutterAngle is free (temporal spread only); samples is the sole cost knob (6× on the wrapped subtree). Tunables (samples=6/shutterAngle=180 film convention) live in ONE token so the samples∈{3,6,10} sweep has one home. NOTE: blur smears the crisp payoff frame — re-verify impact-on-word before flipping; cost compounds with E1 density (both multiply the same frames).")
 def _d2_motion_blur_dark_flag():
     _mb = open("src/remotion/src/motion-graphics/shared/motion-blur.tsx").read()
@@ -5762,6 +5785,66 @@ def _e1_d2_ab_overrides():
     assert _rs.count("motionBlur: bool = False") == 2, "motionBlur must be on PromptlyRenderInput AND PromptlyMicroSegmentsInput (extra=forbid)"
     assert _rs.count("motionBlurSamples: Optional[int] = None") == 2 and _rs.count("motionBlurShutterAngle: Optional[int] = None") == 2, \
         "samples/shutter registered on both render-input models"
+
+
+@check("SPEAKER-FOLLOWING CAPTIONS (Lane 2, flag PROMPTLY_SPEAKER_CAPTIONS, DARK): captions FOLLOW the smoothed speaker head via a per-page {topPx} anchor pinned below the head bbox (flips above for a low head), clamped into the TikTok safe rect, horizontal centred; constant-per-page = snap not slide (FRAME-1-IS-FINAL). Reuses edit_plan['_face_trajectory'] + the projected-word table, no new sampling. OFF (default) -> _apply_speaker_follow_captions never runs AND emits no anchor key; the render schema accepts a segment with OR without anchor and rejects an unknown anchor field (extra=forbid) -> render input JSON byte-identical while dark.")
+def _speaker_captions_dark_and_correct():
+    import os, handler, render_schemas as rs
+    os.environ.pop("PROMPTLY_SPEAKER_CAPTIONS", None)
+    assert handler._speaker_captions_enabled() is False, "flag must default OFF"
+    rs.CaptionPositionSegment.model_validate({"fromFrame": 0, "toFrame": 100, "position": "bottom"})
+    rs.CaptionPositionSegment.model_validate({"fromFrame": 0, "toFrame": 100, "position": "center", "anchor": {"topPx": 742}})
+    try:
+        rs.CaptionPositionSegment.model_validate({"fromFrame": 0, "toFrame": 1, "position": "bottom", "anchor": {"topPx": 1, "x": 2}})
+        raise AssertionError("extra=forbid must reject an unknown anchor field")
+    except Exception as e:
+        assert "AssertionError" not in type(e).__name__ or "extra" in str(e), e
+    segs = [{"fromFrame": 0, "toFrame": 300, "position": "bottom"}]
+    assert handler._apply_speaker_follow_captions(segs, [], [], [], [], 300, 60.0) is segs
+    pages = [{"text": "hi", "startMs": 0, "durationMs": 2000, "tokens": []}]
+    pw = [{"start": 0.9, "_source_start": 0.9}]
+    traj = [{"t": 1.0, "cx": 540, "cy": 500, "found": True, "confidence": 0.9}]
+    out = handler._apply_speaker_follow_captions(segs, pages, traj, pw, [], 300, 60.0)
+    assert out is not segs and any(s.get("anchor") for s in out), "a face must produce an anchor"
+    assert out[0]["fromFrame"] == 0 and out[-1]["toFrame"] == 300
+    for i in range(len(out) - 1):
+        assert out[i]["toFrame"] == out[i + 1]["fromFrame"], "segments must tile with no gap"
+    rs.CaptionSpec.model_validate({"style": "CleanCut", "pages": [], "keywords": [], "positionSegments": out, "extraProps": None})
+    out2 = handler._apply_speaker_follow_captions(segs, pages, traj, pw, [(0, 300)], 300, 60.0)
+    assert out2 is segs, "an all-blocked page set must leave segments unchanged"
+
+
+@check("CAPTION-LESS MOTION ANCHORS (Lane 2, flag PROMPTLY_MOTION_ANCHORS, DARK): the wordless routes (minimal/hype/moodreel) get motion-based drift-push anchors so no static hold runs dead > ~3s, honouring the 2.0s min-zoom-spacing law (_VISUAL_REFRACTORY_S). Additive: only clips with NO zoom and longer than the dead bound get events; already-animated clips are byte-identical; the same SmoothPush zoomEffect primitive moodreel already ships (validates against PromptlyRenderInput). Wired at the one point all three plans converge (_run_minimal_pipeline, after project_hype_plan). OFF (default) -> never invoked -> sparse render input byte-identical.")
+def _motion_anchors_dark_and_correct():
+    import os, copy, inspect, handler, render_schemas as rs
+    os.environ.pop("PROMPTLY_MOTION_ANCHORS", None)
+    assert handler._motion_anchors_enabled() is False, "flag must default OFF"
+    assert handler._motion_anchors_enabled({"motion_anchors_test": True}) is True, "per-job override"
+    src = inspect.getsource(handler._run_minimal_pipeline)
+    assert "_motion_anchors_enabled(" in src and "_apply_motion_anchors(" in src, "must be wired into _run_minimal_pipeline"
+    fps = 30.0
+    def clip(cid, s, d, zoom=None):
+        c = {"id": cid, "startFromFrames": int(s * fps), "playbackRate": 1.0, "durationInFrames": int(d * fps)}
+        if zoom:
+            c["zoomEffect"] = zoom
+        return c
+    animated = {"type": "DepthPull", "events": [{"startMs": 0, "durationMs": 3000, "scale": 1.18, "originX": 0.5, "originY": 0.5}], "punch": False}
+    ri = {"sourceUrl": "x.mp4", "fps": fps, "width": 1080, "height": 1920, "totalDurationInFrames": int(20 * fps),
+          "clips": [clip("h0", 0, 12), clip("h1", 12, 3, animated), clip("h2", 15, 5)],
+          "transitions": [], "broll": [], "textOverlays": [], "motionGraphics": [], "caption": None, "outro": None}
+    before = copy.deepcopy(ri)
+    mc = [0.9 if i % 3 == 0 else 0.2 for i in range(20)]
+    handler._apply_motion_anchors(ri, mc, [4.0, 9.5, 16.0], fps)
+    assert ri["clips"][1] == before["clips"][1], "already-animated clip must be byte-identical"
+    assert ri["clips"][0].get("zoomEffect") and ri["clips"][2].get("zoomEffect"), "long static holds must get anchors"
+    for c in ri["clips"]:
+        ze = c.get("zoomEffect")
+        if not ze:
+            continue
+        st = [e["startMs"] / 1000.0 for e in ze["events"]]
+        for i in range(1, len(st)):
+            assert st[i] - st[i - 1] >= handler._VISUAL_REFRACTORY_S - 1e-6, "2.0s min spacing law"
+    rs.PromptlyRenderInput.model_validate(ri)
 
 
 @check("LOUD FAIL-SAFE MOUNT LAW (Zac standing rule 2026-07-25, from the moodreel_editor + progressive_publish mount catches): EVERY repo-local module that handler.py defer-imports inside a function body MUST be add_local_file-baked into the worker image — derived DYNAMICALLY from the source so any future mode is covered the day it is written. A deferred import inside a fail-safe try/except is exactly the class that dies silently (the fallback masks the ImportError and the feature quietly never runs); top-level imports crash loudly at container start and need no law.")
@@ -6174,6 +6257,7 @@ def _secret_canonical_values():
         "PROMPTLY_MOODREEL": "1",     # cinematic mood-reel route LIVE (Zac "MOODREEL APPROVED" 2026-07-25; fail-safe-to-minimal; rollback = "0")     # degen shape-abort LIVE (ruling 1a; 5/5 shapes, 0 FP on 7.9k healthy; ~85-90% burn cut; rollback = "0")
         "PROMPTLY_HQ_RESAMPLE": "1",  # Part A fidelity LIVE (Zac "FLIP A" 2026-07-26 after FIDELITY_C): lanczos downscale + adaptive bpp-gated spline upscale; OFF-code is byte-identical so rollback = "0" here + secret + redeploy
         "PROMPTLY_BROLL_GATE": "1",   # B-roll content+safety gate LIVE (Zac "flip as ordered" 2026-07-26 after refined-gate cert 40% keep/60% reject, extinction guard passed): action-match + cutaway-window dense sampling; fail-closed to clean cuts; rollback = "0" here + secret + redeploy
+        "PROMPTLY_COVERAGE_GATE": "1",  # TRANSCRIPTION-COVERAGE gate + bridge-selection LIVE (P0 content-destruction fix, Zac 2026-07-27; cert: Urdu delivers via multi 3.8s-unworded, truly-untranscribable refunds; E2E TRANSCRIPTION_INCOMPLETE+designed_rejection PASS; zero FP on clean corpus): VAD-speech-with-no-words > 2.0s/0.10 → coded error+refund; bridge keeps the better-coverage transcript; rollback = "0" here + secret + redeploy
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that

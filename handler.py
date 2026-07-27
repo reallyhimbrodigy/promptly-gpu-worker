@@ -4794,6 +4794,7 @@ def _build_post_cuts_prompt(
     premium=False, resolved_policy=None,
     source_language=None,
     density_override=False,
+    density_variant=0,
 ):
     """Gemini prompt for the SECOND call — visual placement on a kept-only transcript.
 
@@ -5054,18 +5055,53 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
     _n_transitions = len(VALID_TRANSITION_TYPES)
     _n_mgs = len(VALID_MG_TYPES)
 
-    # ── E1 density reshape (dark unless PROMPTLY_DENSITY; OFF = current verbatim) ──
-    if _density_reshape_enabled() or density_override:
-        _emph_move_line = (
-            "Each emphasis carries the ONE move that best FITS the beat — a zoom, a motion "
-            "graphic, a text overlay, or a transition on a genuine turn — and a beat may also "
-            "land on sound plus a held caption alone. Choose the instrument by what the moment "
-            "is DOING (a number → a StatCard; a named place or object → b-roll; a punched "
-            "verb or reveal → a zoom; an act-turn → a transition), and NEVER default every "
-            "emphasis to a zoom: an edit made of zooms reads monotonous even at the right "
-            "density. VARY the instrument across the video — prefer a different move type than "
-            "the previous beat used unless the beat specifically wants a repeat."
+    # ── E1 density reshape — variant-selected (dark unless PROMPTLY_DENSITY / density_test / density_variant) ──
+    # The n=3 A/B proved the ADD approach (variant 1) is a ~no-op (0.95x): the base "3-5
+    # peaks" rarity doctrine outweighs an added density block. So the real lever is REMOVAL —
+    # delete the count cap at its source (via _peak_budget / _peak_set_ref below), not add a
+    # supersede sentence. _dv: 0=off (base verbatim); 1=v1 full reshape (ADD control);
+    # 2=lever-1 ALONE (delete cap, nothing else); 3=lever-1 + lever-4 (delete cap + decouple
+    # emphasis→best-fit move + zoom-share ceiling). No count quota, no dead-zone gap-plug.
+    _dv = int(density_variant or 0)
+    if not _dv and (_density_reshape_enabled() or density_override):
+        _dv = 1
+    _delete_rarity = _dv >= 2
+    if _delete_rarity:
+        _peak_budget = (
+            "as many true peaks as the delivery genuinely lands — energetic UGC lands many "
+            "more than a handful, so count the REAL ones and never cap at a fixed number; "
+            "every peak is still a beat the DELIVERY hits (a reaction, a landing, a turn), "
+            "never filler and never a quota"
         )
+        _peak_set_ref = "the set you committed"
+        _peak_count_ref = "true peaks"
+    else:
+        _peak_budget = "3-5 true peaks for a typical 30s video"
+        _peak_set_ref = "the 3-5 you committed"
+        _peak_count_ref = "3-5 true peaks"
+
+    _emph_decoupled = (
+        "Each emphasis carries the ONE move that best FITS the beat — a zoom, a motion "
+        "graphic, a text overlay, or a transition on a genuine turn — and a beat may also "
+        "land on sound plus a held caption alone. Choose the instrument by what the moment "
+        "is DOING (a number → a StatCard; a named place or object → b-roll; a punched "
+        "verb or reveal → a zoom; an act-turn → a transition), and NEVER default every "
+        "emphasis to a zoom: an edit made of zooms reads monotonous even at the right "
+        "density. VARY the instrument across the video — prefer a different move type than "
+        "the previous beat used unless the beat specifically wants a repeat."
+    )
+    _zoom_ceiling_block = (
+        "**VARIETY CEILING.** Zooms are ONE instrument, not the default — today they are half "
+        "of all moves and that alone reads as monotony even at the right density. Across the "
+        "whole edit, no more than about HALF of your marked moves should be zooms: where a beat "
+        "is a number, a named thing, a list, or an act-turn, reach for the stat card, b-roll, "
+        "overlay, or transition that fits it, and let the zooms land on the punched verbs and "
+        "reveals. A stretch with no move is fine when the content there is genuinely quiet — a "
+        "deliberate breather — and is only a MISS when it held a real beat you skipped; never "
+        "add a move just to fill a gap.\n\n"
+    )
+    if _dv == 1:
+        _emph_move_line = _emph_decoupled
         _density_rhythm_block = (
             "**DENSITY & RHYTHM — how ALIVE the edit feels (the difference viewers feel most).** "
             "Something should be happening most of the time, in BURSTS WITH RESTS: target a mean "
@@ -5083,6 +5119,14 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
             "real moment; it is license to FIND the moments a good editor would, so that "
             "everything earns its place AND something is always happening.\n\n"
         )
+    elif _dv == 2:
+        # LEVER-1 ALONE: the 3-5 cap is DELETED above (_peak_budget); nothing else changes —
+        # emphasis stays zoom-by-default (base), no rhythm block. Isolates the removal.
+        _emph_move_line = "Every emphasis carries a zoom by default (null is the rare exception)."
+        _density_rhythm_block = ""
+    elif _dv == 3:
+        _emph_move_line = _emph_decoupled
+        _density_rhythm_block = _zoom_ceiling_block
     else:
         _emph_move_line = "Every emphasis carries a zoom by default (null is the rare exception)."
         _density_rhythm_block = ""
@@ -5260,7 +5304,7 @@ Some sources arrive already edited: burned-in captions, existing text overlays, 
   • **hook_word_index** — where the curiosity gap OPENS, not necessarily word 0. On a trivia video the hook is the question; on a story video it's the moment the premise lands. A hook grips — a claim, a stake, a reveal. "Hello, what's your name?" is exposition; the hook starts where the grip starts.
   • **payoff_word_index** — the single strongest moment. ONE peak only.
   • **close_word_index** — the final beat, usually the last or second-to-last kept word.
-  • **key_moments** — 3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — the count follows the footage's real peaks, and a shorter honest list beats a padded one. Space peaks ≥2.0s apart in OUTPUT time — two hard visual moves landing closer than that FIGHT each other: the second lands before the eye has processed the first, and the pair reads as an accidental glitch rather than two directed beats. The refractory floor enforces this after the plan — of any two zooms within 2s, the higher arc-ranked beat (payoff > mid_peak > other) KEEPS its zoom and the lower one downgrades (it rides its caption and sound instead) — so the spacing you plan in this list is the spacing that survives, and a zoom you crowd against a stronger one is a zoom you spend for nothing. Each: word_index, what_lands, why_emphasis, what_i_saw, viewer_feeling. **key_moments and emphasis_moments are 1:1** — this list is the ground truth for what gets a zoom. To add a zoom, expand this list first; only zoom peaks you can justify here.
+  • **key_moments** — {_peak_budget}; a flat even-energy stretch may have only 2-3 — the count follows the footage's real peaks, and a shorter honest list beats a padded one. Space peaks ≥2.0s apart in OUTPUT time — two hard visual moves landing closer than that FIGHT each other: the second lands before the eye has processed the first, and the pair reads as an accidental glitch rather than two directed beats. The refractory floor enforces this after the plan — of any two zooms within 2s, the higher arc-ranked beat (payoff > mid_peak > other) KEEPS its zoom and the lower one downgrades (it rides its caption and sound instead) — so the spacing you plan in this list is the spacing that survives, and a zoom you crowd against a stronger one is a zoom you spend for nothing. Each: word_index, what_lands, why_emphasis, what_i_saw, viewer_feeling. **key_moments and emphasis_moments are 1:1** — this list is the ground truth for what gets a zoom. To add a zoom, expand this list first; only zoom peaks you can justify here.
   • **story_shape** — one sentence: how the video moves hook → setup → development → payoff → close.
   • **arc_segments** — THE SPINE. Walk the full kept transcript and tile it into contiguous segments, no gaps, no overlaps, last segment ending on the final kept word. Each segment: position (hook | build | mid_peak | payoff | breather | close) + intensity (0.0-1.0). Component picks begin once this is complete — the committed arc is the frame every pick hangs on.
   • **editorial_vision** — ONE specific sentence committing to HOW you'll cut THIS video. ("I'm leaning into the absurdity with TwoTone captions, pop SFX on every receipt detail, and a slow LetterboxPush when he opens the bag.") Every component below flows from this sentence. The same sentence also names the LOOK the whole video shares — the one color world it lives in, read off the speaker's actual setting and register: a warm low-light confession, a bright clean product demo, a high-contrast hype cut. Once you've named that world, every layer below inherits it: the caption's emphasis color, the motion-graphic accents, and the B-roll's grade all belong to one palette, so the cut reads as a single designed piece rather than parts borrowed from different tools. One palette is not one texture. The movements still rise and fall, one dominant instrument still hands to the next — what holds steady across all of that is the visual FAMILY (the colors, the typographic voice); what moves is the intensity. The aim is one identity spoken LOUD in the hook and QUIET in the breather — the same world at different volumes — which is a different thing from the same look at the same level everywhere.
@@ -5654,11 +5698,11 @@ Pick each emphasis by the AUDIENCE REACTION it earns with sound on: laugh = punc
   • close → CALLBACK: echo the hook's personality at lower intensity; for a zoom-free hook, a confident lock-in. A close within 1.5s of the payoff word rides the payoff's resolution instead — validation keeps the payoff of any peak pair inside 2s, so the resolution IS the close's motion there.
   • build / breather → the camera holds; the ONLY zoom sayable there is the MASK — the small eye-carry on the first word after a splice (snap pair, under a second), serving the boundary, not the beat. The flat is doing work — it's what the next peak lands against, and a viewer needs the still frame to feel the push when it comes.
 
-**The weight belongs to the moment first, and the camera is its first instrument.** A peak's weight is set by what the moment is doing — the laugh, the gasp, the line the video exists to deliver — and the camera is the first instrument that serves it. So when the camera is held still on a beat that already earns its place in `key_moments`, the weight still lands; it simply moves to the instruments that remain. Carry the same emphasis intent across: let a committing sound do the pushing (the boom on the payoff word in a punchy/viral vibe; a swell — transition-sfx — where the vibe is corporate/clean/cinematic, which the boom FIGHTS), let the caption hold and go big on that word, let a stat land on the syllable it names. Read the moment's intended feeling first, then ask which available instrument delivers it here — a payoff with the camera held still still commits, through sound and a held caption, and the viewer feels the same weight arrive. This carries the intent to instruments you already own; the peak set stays exactly the 3-5 you committed in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.
+**The weight belongs to the moment first, and the camera is its first instrument.** A peak's weight is set by what the moment is doing — the laugh, the gasp, the line the video exists to deliver — and the camera is the first instrument that serves it. So when the camera is held still on a beat that already earns its place in `key_moments`, the weight still lands; it simply moves to the instruments that remain. Carry the same emphasis intent across: let a committing sound do the pushing (the boom on the payoff word in a punchy/viral vibe; a swell — transition-sfx — where the vibe is corporate/clean/cinematic, which the boom FIGHTS), let the caption hold and go big on that word, let a stat land on the syllable it names. Read the moment's intended feeling first, then ask which available instrument delivers it here — a payoff with the camera held still still commits, through sound and a held caption, and the viewer feels the same weight arrive. This carries the intent to instruments you already own; the peak set stays exactly {_peak_set_ref} in `key_moments`, build/breather words stay clear, and only the routing changes when the camera is the one tool that's quiet.
 
 **Variety happens at the moment, not the clip.** Pick the type each peak's actual reaction wants — the pipeline splits the underlying clip behind the scenes so adjacent emphases with different types each render their own. Two peaks sharing a clip can each render their own type, so a row of identical zooms means you didn't ask what each moment wanted. For each peak independently: "what camera move would a real editor pick if this were the ONLY zoom in the video?"
 
-**Build-and-release pulse** — this governs HOW a peak you ALREADY chose moves; WHICH moments get a zoom was settled upstream in key_moments. The peak set is fixed upstream: the 3-5 true peaks in key_moments — build and breather words live outside it by definition. This paragraph only shapes the motion of those few approved peaks. **For the payoff**, the move is the slow committed push that begins gently and RESOLVES on the next cut — the lean-in mirrors how a listener leans toward something interesting; the cut snaps attention back. That push → cut release is the rhythm of pro short-form editing, and it is what makes the payoff read as a composed commitment rather than a scattered punch. **For mid_peaks**, pick the punctuation by the beat's character AND the vibe's register: in a punchy vibe, snap for a reaction or punchline (a laugh, a gasp, the speaker's expression breaking), step for a landing statement (the fact arrives, the word weighs in the chest) — both quick in / quick out; in a calm/corporate/cinematic vibe the SAME beats take a small deliberate SmoothPush instead (the snap and step FIGHT calm) — the beat-character picks the shape, the vibe picks whether it snaps or glides. On tight-cut footage (most boundaries play as hard splices with no handle room), the cut itself IS the release — a slow push landing INTO a tight cut is the canonical move for the payoff, and what would otherwise feel like a jump cut becomes the engine of the pulse. When this paragraph makes a serious-sounding statement outside your 3-5 true peaks feel zoom-worthy, the peak set holds — importance is a property of the writing, a peak is a property of the delivery, and the zoom follows the delivery.
+**Build-and-release pulse** — this governs HOW a peak you ALREADY chose moves; WHICH moments get a zoom was settled upstream in key_moments. The peak set is fixed upstream: the {_peak_count_ref} in key_moments — build and breather words live outside it by definition. This paragraph only shapes the motion of those few approved peaks. **For the payoff**, the move is the slow committed push that begins gently and RESOLVES on the next cut — the lean-in mirrors how a listener leans toward something interesting; the cut snaps attention back. That push → cut release is the rhythm of pro short-form editing, and it is what makes the payoff read as a composed commitment rather than a scattered punch. **For mid_peaks**, pick the punctuation by the beat's character AND the vibe's register: in a punchy vibe, snap for a reaction or punchline (a laugh, a gasp, the speaker's expression breaking), step for a landing statement (the fact arrives, the word weighs in the chest) — both quick in / quick out; in a calm/corporate/cinematic vibe the SAME beats take a small deliberate SmoothPush instead (the snap and step FIGHT calm) — the beat-character picks the shape, the vibe picks whether it snaps or glides. On tight-cut footage (most boundaries play as hard splices with no handle room), the cut itself IS the release — a slow push landing INTO a tight cut is the canonical move for the payoff, and what would otherwise feel like a jump cut becomes the engine of the pulse. When this paragraph makes a serious-sounding statement outside your {_peak_count_ref} feel zoom-worthy, the peak set holds — importance is a property of the writing, a peak is a property of the delivery, and the zoom follows the delivery.
 
 ──────────────────────────────────────────
 PIPELINE MECHANICS — read carefully, these are load-bearing
@@ -5954,7 +5998,7 @@ These are the mechanics the render depends on — the physics of the frame, the 
     movement.
 
 **PER-COMPONENT RULES:**
-  • emphasis_moments: 1:1 with key_moments (3-5 true peaks for a typical 30s video; a flat even-energy stretch may have only 2-3 — the honest peak count is the right count). At least 2 distinct zoom types across
+  • emphasis_moments: 1:1 with key_moments ({_peak_budget}; a flat even-energy stretch may have only 2-3 — the honest peak count is the right count). At least 2 distinct zoom types across
     them. Peaks only — build and breather words run flat, and that flatness is what gives each peak its contrast. Claim each zoom's arc_position honestly — the peak set is judged by it. Zooms are word-anchored; the pipeline times them.
   • transitions: a transition marks a genuine
     turn — a movement boundary, an act shift, the walk into the payoff — and
@@ -6032,7 +6076,7 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
         "what_i_saw": "<one short phrase on what's visible in the proxy at this word. Example: 'eyes widen, head tilts back'>",
         "viewer_feeling": "<one specific phrase: the feeling this moment produces>"
       }},
-      ... 3-5 true peaks; count what the footage actually has — the honest count is the deliverable ...
+      ... {_peak_count_ref}; count what the footage actually has — the honest count is the deliverable ...
     ],
     "story_shape": "<one sentence: hook → setup → development → payoff → close>",
     "arc_segments": [
@@ -11535,6 +11579,7 @@ def generate_edit_gemini(
     burned_text_override=False,
     recipe_deadline_s=None,
     density_override=False,
+    density_variant=0,
 ):
     _pre_analysis = cached_response
 
@@ -11648,6 +11693,7 @@ def generate_edit_gemini(
         resolved_policy=resolved_policy,
         source_language=source_language,
         density_override=density_override,
+        density_variant=density_variant,
     )
     if prior_plan:
         print(
@@ -19994,6 +20040,73 @@ def _density_reshape_enabled():
     return os.environ.get("PROMPTLY_DENSITY", "").strip().lower() in ("1", "true", "yes", "on")
 
 
+def _coverage_gate_enabled(input_data=None):
+    """TRANSCRIPTION-COVERAGE GATE (content-destruction fix, Zac 2026-07-27), dark
+    unless PROMPTLY_COVERAGE_GATE. Per-job override input_data['coverage_gate_test']
+    for the cert. When on, a source whose VAD-confirmed SPEECH is materially
+    untranscribed is rejected with an honest coded error + refund BEFORE the cutter
+    deletes it as silence (measured: an Urdu upload 89.7s→31.6s, 58s of speech gone).
+    OFF → byte-identical (the check never runs)."""
+    if isinstance(input_data, dict) and input_data.get("coverage_gate_test"):
+        return True
+    return os.environ.get("PROMPTLY_COVERAGE_GATE", "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# TRANSCRIPTION-COVERAGE thresholds — data-driven from the 2026-07-27 cert (34 jobs,
+# 3 corpora): clean English maxed at 0.8s / 0.023 frac; mangled speech ≥3.2s / ≥0.24 —
+# a ~10x clean gap. Set inside it, biased toward rejecting per the asymmetry Zac named:
+# a false positive is an honest refund; a false negative destroys the user's video.
+_COVERAGE_MIN_UNWORDED_S = 2.0
+_COVERAGE_MIN_UNWORDED_FRAC = 0.10
+
+
+def _transcription_coverage_check(source_path, words, source_duration):
+    """Measure VAD-confirmed SPEECH time that carries NO transcript word — the
+    content-destruction signal (the cutter would delete it as silence, since output
+    is assembled from transcript words). Silero VAD SPEECH, not energy, so music beds
+    never false-reject. Returns (ok, stats). FAIL-OPEN on any measurement error: the
+    gate is a safety net, never a new failure source — a real VAD outage still surfaces
+    downstream at detect_dead_air."""
+    stats = {"unworded_speech_s": None, "unworded_frac": None, "vad_speech_s": None}
+    try:
+        _dur = float(source_duration or 0)
+        if _dur <= 0 or not words:
+            return True, stats
+        silence = _detect_silence_regions_vad(source_path, min_silence_s=0.30)
+        sil = sorted((float(a), float(b)) for a, b in silence)
+        wrd = sorted(
+            (float(w.get("start") or 0), max(float(w.get("end") or 0), float(w.get("start") or 0)))
+            for w in words if str(w.get("word") or w.get("punctuated_word") or "").strip()
+        )
+
+        def _iniv(iv, t):
+            for a, b in iv:
+                if a - 1e-6 <= t <= b + 1e-6:
+                    return True
+                if a > t:
+                    break
+            return False
+
+        BIN = 0.1
+        nb = int(_dur / BIN) + 1
+        speech = unwd = 0.0
+        for i in range(nb):
+            t = i * BIN + BIN / 2.0
+            if _iniv(sil, t):
+                continue
+            speech += BIN
+            if not _iniv(wrd, t):
+                unwd += BIN
+        frac = (unwd / speech) if speech > 0 else 0.0
+        stats = {"unworded_speech_s": round(unwd, 1), "unworded_frac": round(frac, 3),
+                 "vad_speech_s": round(speech, 1)}
+        ok = not (unwd >= _COVERAGE_MIN_UNWORDED_S and frac >= _COVERAGE_MIN_UNWORDED_FRAC)
+        return ok, stats
+    except Exception as _e:
+        print(f"[coverage-gate] measurement failed ({type(_e).__name__}: {_e}) — FAIL-OPEN", flush=True)
+        return True, stats
+
+
 def analyze_source_video(source_path):
     """Analyze source video and return metadata + scale/crop filter for the main render.
 
@@ -21677,6 +21790,8 @@ _RENDER_TRANSIENT_KEYS = {
                    # for the ramp-zoom punch/glide register (_vibe_punches)
     "_motion_blur",  # D2 per-job blur override (motion_blur_test), recomputed from
                      # input_data every render → transient, never persisted in the recipe
+    "_caption_max_words",  # caption phrase-chunk override (caption_max_words), recomputed
+                           # from input_data every render → transient, never persisted
 }
 
 
@@ -23055,7 +23170,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # style, because each word span is unbreakable (whiteSpace:nowrap) — the
         # two words sit on one line if they fit, else one per line, never more.
         # Words RE-PAGINATE across more pages; nothing is clipped.
-        _max_words_per_page = 2
+        # PHRASE-LEVEL CHUNKING (caption workstream lever 1, per-job override, DARK):
+        # default 2 = the word-by-word 2-line cap; a phrase override (2-5) gives each
+        # caption CHANGE real visual mass (a styled line, not a single swapped word).
+        # The chunker already breaks on gaps/sentence-end/position/clip boundaries, so a
+        # higher cap yields natural phrases, not arbitrary N-word blocks. Clamped to 6.
+        _max_words_per_page = max(1, min(6, int(edit_plan.get("_caption_max_words") or 2)))
         # USER OBEDIENCE: apply the literal spelling override to the CAPTION word
         # stream only (the user's instruction wins over the transcript spelling).
         _caption_words = _apply_caption_text_overrides(
@@ -26678,6 +26798,14 @@ def classify_error(e):
             "isn't muted and you're talking to the camera, then try again.",
             retryable=False, new_video=True,
         )
+    if "TRANSCRIPTION_INCOMPLETE" in msg:
+        return _e(
+            "TRANSCRIPTION_INCOMPLETE",
+            "We couldn't transcribe a large part of the speech in this video — most "
+            "likely a language Promptly doesn't support yet. We stopped instead of "
+            "returning a cut-up edit, and your credit was returned.",
+            retryable=False, new_video=True,
+        )
     if "NO_SPEECH" in msg:
         return _e(
             "NO_SPEECH",
@@ -27263,7 +27391,7 @@ _OUTER_RESCUE_DENY = frozenset({
     "NOT_TALKING_HEAD", "INVALID_SOURCE_URL", "INVALID_FORMAT",
     "WRONG_ORIENTATION", "EMPTY_UPLOAD", "NO_AUDIO_TRACK",
     "UPLOAD_NEVER_STARTED", "UPLOAD_STALLED", "UPLOAD_TIMEOUT",
-    "S3_ACCESS", "S3_GENERIC", "TRANSCRIPTION",
+    "S3_ACCESS", "S3_GENERIC", "TRANSCRIPTION", "TRANSCRIPTION_INCOMPLETE",
     "RENDER_FATAL", "RECIPE_INVALID",
     # Safe-edit rescue already failed (LEVER 2): the deterministic safe edit IS
     # the rescue — if its own construction/plan-build failed, an outer safe-edit
@@ -27304,7 +27432,7 @@ _DESIGNED_REJECTION_CODES = frozenset({
     "NO_AUDIO_TRACK", "NO_SPEECH", "NO_SPEECH_NONENGLISH", "NO_SPEECH_FACE",
     "NOT_TALKING_HEAD", "CLIP_TOO_LONG", "CLIP_TOO_SHORT",
     "WRONG_ORIENTATION", "INVALID_FORMAT", "EMPTY_UPLOAD",
-    "INVALID_SOURCE_URL", "TRANSCRIPTION",
+    "INVALID_SOURCE_URL", "TRANSCRIPTION", "TRANSCRIPTION_INCOMPLETE",
 })
 _RESCUE_REPREP_S = 90.0   # projected re-download + re-transcribe + re-probe
 _RESCUE_MARGIN_S = 60.0   # slack under the 900s job budget after the render
@@ -31360,18 +31488,44 @@ def handler(job):
                                             _w["end"] = float(_w["end"]) + _ar_off
                                         except (TypeError, ValueError, KeyError):
                                             pass
-                            # PROPAGATE THROUGH THE CACHE (the cert caught this):
-                            # every downstream consumer — caption projection, SFX,
-                            # B-roll, the result payload's re-edit hydration —
-                            # re-reads _get_resolved_transcript()'s cache. Rebinding
-                            # the local name alone left them all on the romanized
-                            # multi transcript → the projection dropped EVERY page.
-                            with _refined_tx_lock:
-                                _refined_tx_cache["value"] = _ar_full
-                            _transcript = _ar_full
-                            _dg_words = _transcript.get("words", [])
-                            print(f"[arabic-bridge] ROUTED language=ar → {len(_dg_words)} "
-                                  f"native-script words (cache updated); rendering Arabic", flush=True)
+                            # BRIDGE SELECTION (Zac 2026-07-27): accept the ar
+                            # re-transcription only if it does NOT lose VAD-speech
+                            # coverage vs the multi transcript. Real Arabic covers as
+                            # well as multi (and gives native script) → accept; a
+                            # MISIDENTIFIED language (Urdu probed as Arabic) transcribes
+                            # far fewer words → KEEP multi so the user gets their video
+                            # (romanized captions) instead of a butchered ar edit. Same
+                            # VAD coverage metric as the gate, used here as a SELECTION.
+                            # Gated by the same flag → dark/byte-identical when off.
+                            _keep_multi_over_ar = False
+                            if _coverage_gate_enabled(input_data):
+                                _, _ar_cov = _transcription_coverage_check(_raw_source, _ar_words, source_duration)
+                                _, _mu_cov = _transcription_coverage_check(_raw_source, _dg_words, source_duration)
+                                _ar_u, _mu_u = _ar_cov.get("unworded_speech_s"), _mu_cov.get("unworded_speech_s")
+                                if _ar_u is not None and _mu_u is not None and _ar_u > _mu_u + 1.0:
+                                    _keep_multi_over_ar = True
+                                    print(f"[arabic-bridge] ar coverage WORSE (ar {_ar_u}s vs multi "
+                                          f"{_mu_u}s unworded) — KEEPING multi transcript (deliver, "
+                                          f"not butcher); language likely NOT Arabic", flush=True)
+                                    _record_divergence(
+                                        "language_coverage",
+                                        {"ar_unworded_s": _ar_u, "multi_unworded_s": _mu_u,
+                                         "ar_words": len(_ar_words), "multi_words": len(_dg_words)},
+                                        "ar_route_kept_multi", reason="ar_coverage_worse")
+                                    _script = _dominant_script(_dg_words)
+                            if not _keep_multi_over_ar:
+                                # PROPAGATE THROUGH THE CACHE (the cert caught this):
+                                # every downstream consumer — caption projection, SFX,
+                                # B-roll, the result payload's re-edit hydration —
+                                # re-reads _get_resolved_transcript()'s cache. Rebinding
+                                # the local name alone left them all on the romanized
+                                # multi transcript → the projection dropped EVERY page.
+                                with _refined_tx_lock:
+                                    _refined_tx_cache["value"] = _ar_full
+                                _transcript = _ar_full
+                                _dg_words = _transcript.get("words", [])
+                                print(f"[arabic-bridge] ROUTED language=ar → {len(_dg_words)} "
+                                      f"native-script words (cache updated); rendering Arabic", flush=True)
                         else:
                             _record_divergence(
                                 "language_coverage",
@@ -31418,6 +31572,39 @@ def handler(job):
                     "rendered_language",
                     reason=f"tier{_language_tier(_det_lang, _script)}",
                 )
+
+            # ─── TRANSCRIPTION-COVERAGE GATE (content-destruction fix, DARK) ─────
+            # _dg_words is now FINAL — past the script-coverage gate AND any arabic-
+            # bridge re-transcription (which downgrades Urdu 207 multi words → 51 arabic
+            # words, the actual butchering: 89.7s→31.6s, 58s of speech destroyed). If a
+            # MATERIAL fraction of VAD-confirmed SPEECH carries no transcript word, the
+            # cutter (which assembles output from words) will DELETE it as silence.
+            # Checking the FINAL transcript catches Urdu (bad coverage even after the
+            # ar re-transcribe) while a real Arabic clip (good ar coverage) passes. VAD
+            # SPEECH not energy → music beds never trip. Reject + refund BEFORE the edit
+            # spend, never a butchered video. Asymmetry: a false positive is a refund;
+            # a false negative destroys the user's video.
+            if _coverage_gate_enabled(input_data):
+                _cov_ok, _cov = _transcription_coverage_check(
+                    _raw_source, _dg_words, source_duration)
+                print(f"[coverage-gate] unworded={_cov.get('unworded_speech_s')}s "
+                      f"frac={_cov.get('unworded_frac')} vad_speech={_cov.get('vad_speech_s')}s "
+                      f"words={len(_dg_words)} script={_script} → "
+                      f"{'REJECT' if not _cov_ok else 'pass'}", flush=True)
+                if not _cov_ok:
+                    _log_intake_reject(
+                        "TRANSCRIPTION_INCOMPLETE", source_duration,
+                        unworded_speech_s=_cov.get("unworded_speech_s"),
+                        unworded_frac=_cov.get("unworded_frac"), script=str(_script))
+                    raise RuntimeError(
+                        "TRANSCRIPTION_INCOMPLETE: "
+                        f"{_cov.get('unworded_speech_s')}s of spoken audio "
+                        f"({int(100 * (_cov.get('unworded_frac') or 0))}% of the speech) "
+                        "was not transcribed — most likely a language we don't support "
+                        "yet. Editing would delete the untranscribed speech, so we "
+                        "stopped instead of returning a cut-up video."
+                    )
+
             # Cancel checkpoint #1 — before the edit recipe. The cheap CPU work
             # (download/transcribe) is done; the recipe + GPU render are next. If
             # the user cancelled while the button was visible, abort now.
@@ -31524,6 +31711,7 @@ def handler(job):
                     # for one job without flipping the global secret (mirrors
                     # burned_text_test / broll_gate_test). Inert for real traffic.
                     density_override=bool(input_data.get("density_test")),
+                    density_variant=int(input_data.get("density_variant") or 0),
                     # Workstream B: the source language for in-language editorial
                     # (flag-gated inside the prompt builder). _script is the
                     # dominant script computed at the coverage gate above.
@@ -32602,6 +32790,11 @@ def handler(job):
                 "samples": int(input_data.get("motion_blur_samples") or 6),
                 "shutter": int(input_data.get("motion_blur_shutter") or 180),
             }
+        # Caption phrase-chunk — per-job override for the caption A/B (dark/absent for
+        # real traffic → byte-identical; the caption builder defaults to 2). Threaded
+        # via edit_plan the same way; render_multi_clip reads edit_plan["_caption_max_words"].
+        if input_data.get("caption_max_words"):
+            edit_plan["_caption_max_words"] = int(input_data.get("caption_max_words"))
         # Degrade ladder — see _render_degrade_ladder (module level, tested
         # behaviorally in test_render_ladder.py).
         try:
