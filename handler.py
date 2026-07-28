@@ -31885,6 +31885,11 @@ def handler(job):
                         _transcript = _bl_tx
                         _dg_words = _bl_words
                         _script = _dominant_script(_dg_words)
+                        # REFRESH the coverage the gate reuses — it must reflect the RECOVERED
+                        # transcript, not the failing pre-recovery multi coverage; otherwise the
+                        # gate rejects the very clip Stage A just fixed (silent no-op).
+                        _bundle_cov_ok, _bundle_cov = _transcription_coverage_check(
+                            _raw_source, _dg_words, source_duration)
                         _record_divergence(
                             "language_coverage",
                             {"routed_language": _bl_lang, "words": len(_dg_words),
