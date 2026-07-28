@@ -6361,19 +6361,23 @@ def _tier1_stage_a():
     _h = open("handler.py").read()
     assert "def _lang_routing_enabled(" in _h and 'os.environ.get("PROMPTLY_LANG_ROUTING"' in _h, \
         "Stage A must be flag-gated (dark by default)"
-    assert "def _probe_best_language(" in _h, "the generalized monolingual probe must exist"
-    assert "_transcription_coverage_check(source_path, _w, source_duration)" in _h, \
-        "SELECTION law: must measure VAD-coverage per candidate"
-    assert "_EXPECTED_SCRIPT_FOR_LANG.get(_lg)" in _h, \
-        "FAIL-CLOSED law: must confirm the candidate produced its native script (not transliteration)"
-    assert "if not _script_reaches_render(_sc):" in _h, \
-        "FONT-BACKED law: must skip a recovered script with no caption font (would render tofu)"
+    # SELECTION must be INDEPENDENT — Gemini language-ID, NOT acoustic probe-and-select (the
+    # negative control proved cross-model confidence/coverage/word-count all mis-select).
+    assert "def _identify_language_gemini(" in _h, "selection must use an independent Gemini language-ID"
+    assert "def _route_language_via_gemini(" in _h, "the safe Gemini-ID→single-model route must exist"
+    assert "_bl_lang, _bl_tx, _bl_u = _route_language_via_gemini(" in _h, \
+        "the wiring must use the Gemini-ID route, NOT the acoustic _probe_best_language"
+    # GRADUATION: route only scripts proven end-to-end (Hindi certified; others gated by frontend)
+    assert "def _graduated_route_langs(" in _h and "_lang not in _graduated_route_langs()" in _h, \
+        "must route only GRADUATED languages (per-script frontend gate); en/ungraduated held for Stage B"
+    assert handler._GRADUATED_ROUTE_LANGS_DEFAULT == frozenset({"hi"}), \
+        "Hindi is the only certified route until each further script graduates"
+    # FAIL-CLOSED + FONT-BACKED + coverage-PASS inside the route (a Gemini mis-ID is caught by these)
+    assert "_sc != _expected" in _h and "if not _script_reaches_render(_sc):" in _h, \
+        "route must fail-closed on wrong script AND require a font-backed script"
     assert "if _lang_routing_enabled() and _coverage_gate_enabled(input_data):" in _h, \
         "Stage A must run BEFORE the coverage-gate reject, only when coverage fails"
     assert '"lang_routing_recovered"' in _h, "a recovery must be ledgered (divergence)"
-    assert handler._LANG_ROUTING_CANDIDATES and all(
-        c in handler._EXPECTED_SCRIPT_FOR_LANG for c in handler._LANG_ROUTING_CANDIDATES), \
-        "every routing candidate must carry an expected native script"
 
 
 @check("Latin-scope flip: transcription=language=multi; _SCRIPT_COVERAGE=Latin (font-derived, tofu unconstructible); _dominant_script classifies Latin/Cyrillic/Devanagari/Arabic; uncovered script → NO_SPEECH_NONENGLISH BEFORE render")

@@ -4463,6 +4463,97 @@ def _probe_best_language(source_path, candidates, source_duration):
     return (_best["lang"], _best["tx"], _best["unworded"])
 
 
+# Per-script GRADUATION (Zac 2026-07-28): route only languages whose script has been proven end-
+# to-end (one sample rendered → frontend gates tofu/fit/timing/coverage). Hindi (Devanagari) is
+# certified; others graduate one at a time. Env-overridable (PROMPTLY_ROUTE_LANGS="hi,bn,ta").
+_GRADUATED_ROUTE_LANGS_DEFAULT = frozenset({"hi"})
+
+
+def _graduated_route_langs():
+    _raw = os.environ.get("PROMPTLY_ROUTE_LANGS")
+    if _raw is None:
+        return _GRADUATED_ROUTE_LANGS_DEFAULT
+    return frozenset(c.strip() for c in _raw.split(",") if c.strip())
+
+
+def _identify_language_gemini(source_path):
+    """INDEPENDENT spoken-language identification via Gemini. Acoustic probe-and-select can't
+    separate languages — Deepgram confidence is cross-model-incomparable (Gujarati out-scored
+    Bengali on a Bengali clip) and Hindi/Urdu are the same spoken language. Gemini hears the audio
+    AND reads on-screen text/context, so it reliably distinguishes DISTINCT languages. Returns an
+    ISO 639-1 code or None. Best-effort — any failure returns None → the caller falls to Stage B."""
+    try:
+        if genai_types is None:
+            return None
+        _client = _get_genai_client()
+        _audio = prepare_audio_for_deepgram(source_path)
+        _prompt = ("Identify the PRIMARY spoken language of this audio. Return JSON "
+                   '{"language": "<ISO 639-1 two-letter lowercase code>"} — e.g. hi, bn, ta, te, '
+                   'gu, kn, mr, ur, es, pt, en. For Hindi/Urdu ambiguity default to hi.')
+        # NO max_output_tokens cap — GEMINI_MODEL is a thinking model; a tiny cap is spent on
+        # thinking and yields an EMPTY answer. JSON mime + schema forces a clean code.
+        _resp = _client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[genai_types.Part.from_bytes(data=_audio, mime_type="audio/flac"), _prompt],
+            config=genai_types.GenerateContentConfig(
+                temperature=0.0, response_mime_type="application/json"))
+        _txt = (_resp.text or "").strip()
+        try:
+            _code = str(json.loads(_txt or "{}").get("language") or "").strip().lower()
+        except Exception:
+            _code = "".join(ch for ch in _txt.lower() if ch.isalpha())
+        _code = "".join(ch for ch in _code if ch.isalpha())[:2]
+        if len(_code) == 2:
+            print(f"[lang-id] Gemini identified language={_code}", flush=True)
+            return _code
+        print(f"[lang-id] Gemini returned no usable code (raw={_txt[:60]!r}) — Stage B", flush=True)
+    except Exception as _e:
+        print(f"[lang-id] Gemini language-ID failed ({type(_e).__name__}: {str(_e)[:80]}) — Stage B", flush=True)
+    return None
+
+
+def _route_language_via_gemini(source_path, source_duration):
+    """SAFE Stage A: Gemini IDs the language, then route to that ONE Deepgram monolingual model —
+    no cross-model acoustic selection. Guards: GRADUATED (script proven end-to-end), FAIL-CLOSED
+    ON SCRIPT (native or bail), FONT-BACKED, SELECTION (recovered transcript must PASS coverage —
+    a Gemini mis-ID that transcribes poorly is caught here). Returns (lang, transcript, unworded_s)
+    or (None, None, None) → Stage B."""
+    _lang = _identify_language_gemini(source_path)
+    if not _lang:
+        return (None, None, None)
+    if _lang == "en" or _lang not in _graduated_route_langs():
+        print(f"[lang-routing] language={_lang} not graduated (routable={sorted(_graduated_route_langs())}) "
+              f"— hold for Stage B / graduation", flush=True)
+        return (None, None, None)
+    try:
+        _tx = transcribe_audio(source_path, language=_lang)
+    except Exception as _e:
+        print(f"[lang-routing] Deepgram language={_lang} unsupported ({type(_e).__name__}) — Stage B", flush=True)
+        return (None, None, None)
+    _w = (_tx or {}).get("words") or []
+    if len(_w) < 5:
+        return (None, None, None)
+    _sc = _dominant_script(_w)
+    _expected = _EXPECTED_SCRIPT_FOR_LANG.get(_lang)
+    if _expected and _sc != _expected:
+        print(f"[lang-routing] language={_lang} produced {_sc}≠{_expected} — bail (fail-closed)", flush=True)
+        return (None, None, None)
+    if not _script_reaches_render(_sc):
+        print(f"[lang-routing] language={_lang} script={_sc} has no caption font — Stage B/translate", flush=True)
+        return (None, None, None)
+    try:
+        _ok, _cov = _transcription_coverage_check(source_path, _w, source_duration)
+    except Exception:
+        return (None, None, None)
+    if not _ok:
+        print(f"[lang-routing] language={_lang} still fails coverage ({_cov.get('unworded_speech_s')}s) "
+              f"— likely a Gemini mis-ID; Stage B", flush=True)
+        return (None, None, None)
+    _u = _cov.get("unworded_speech_s")
+    print(f"[lang-routing] Gemini-ID→Deepgram language={_lang}: {len(_w)}w {_sc} unworded={_u}s — RECOVERED", flush=True)
+    return (_lang, _tx, _u)
+
+
 def _dominant_script(words):
     """Dominant Unicode script of a Deepgram word list (dicts with 'word').
     Counts letter codepoints by script range; neutral chars (digits, punct,
@@ -31763,10 +31854,12 @@ def handler(job):
             # (native captions) instead of an honest rejection. Flag-gated; selection + fail-closed
             # + font-backed laws enforced inside _probe_best_language.
             if _lang_routing_enabled() and _coverage_gate_enabled(input_data):
-                _pre_ok, _pre_cov = _transcription_coverage_check(_raw_source, _dg_words, source_duration)
+                _pre_ok, _pre_cov = _bundle_cov_ok, _bundle_cov  # reuse (computed once above)
                 if not _pre_ok:
-                    _bl_lang, _bl_tx, _bl_u = _probe_best_language(
-                        _raw_source, _LANG_ROUTING_CANDIDATES, source_duration)
+                    # SAFE selection: Gemini IDs the language (acoustic probe-select fails the
+                    # negative control), then route to that ONE graduated Deepgram monolingual model.
+                    _bl_lang, _bl_tx, _bl_u = _route_language_via_gemini(
+                        _raw_source, source_duration)
                     if _bl_tx is not None:
                         _bl_words = _bl_tx.get("words") or []
                         # Same audio-stream offset the multi transcript carries → one clock
