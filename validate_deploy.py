@@ -3193,6 +3193,8 @@ def _plan_diff_tight_cut_overlays_visible():
         "re-edit prompt won't know the field exists, and Gemini cannot add "
         "or remove an overlay on a re-edit. Restore the field listing."
     )
+
+
     # All 4 overlay names must be visible too, otherwise Gemini can't pick
     # one by name on an ADD request.
     for _name in ("LightLeak", "ShutterFlash"):
@@ -3201,6 +3203,19 @@ def _plan_diff_tight_cut_overlays_visible():
             f"re-edit prompt needs every overlay visible so the user can request "
             f"any of them by name."
         )
+
+
+@check("RE-EDIT RESILIENCE (Zac 2026-07-28, CRITICAL #3): a surgical plan-diff that raises (empty/non-JSON/zero-ops/all-ops-fail or a transient model blip) must degrade to a full reinterpret, never hard-fail a PAID re-edit")
+def _plan_diff_reinterpret_fallback():
+    _h = open("handler.py").read()
+    # The generate_plan_diff call in the dispatcher must be wrapped so a RuntimeError
+    # becomes a reinterpret (the fallback its own docstring prescribes), not a job failure.
+    _seg = _h[_h.find("if mode == \"tweak\":"):]
+    _seg = _seg[:_seg.find("classification = diff.get(\"classification\")") + 60]
+    assert "try:" in _seg and "diff = generate_plan_diff(" in _seg, \
+        "the generate_plan_diff call must be wrapped in try/except"
+    assert 'diff = {"classification": "reinterpret"}' in _seg, \
+        "on plan-diff failure the dispatcher must degrade to reinterpret (fuse vibe + re-plan), not raise"
 
 
 @check("generate_plan_diff does NOT truncate transcript to 300 words on tweak")
@@ -7283,13 +7298,24 @@ def _findings_placement_and_content_cut():
     # to spell "Blue filter" as "Blufilter" rendered "BLUE FILTER", ignored).
     assert "def _parse_caption_text_overrides(" in _src and "def _apply_caption_text_overrides(" in _src, \
         "the spelling-override capture + apply must exist"
-    assert 'edit_plan["_caption_text_overrides"] = _parse_caption_text_overrides(vibe)' in _src, \
-        "the override must be captured from the user's ask"
+    # RE-EDIT OBEDIENCE (Zac 2026-07-28): the override is parsed from vibe + the RAW
+    # change_request (folded), so a spelling correction on the surgical tweak→render_only
+    # path — where vibe is the stale original — is no longer invisible (CRITICAL #1).
+    assert 'edit_plan["_caption_text_overrides"] = _parse_caption_text_overrides(_reedit_intent_text)' in _src, \
+        "the override must be captured from vibe + the raw change_request (the re-edit fold)"
+    assert '_reedit_intent_text = f"{vibe or \'\'} . {change_request}"' in _src, \
+        "must fold the raw change_request into the render-time intent parse (surgical path obedience)"
     assert "_apply_caption_text_overrides(\n            _projected_words" in _src or \
            "_caption_words = _apply_caption_text_overrides(" in _src, \
         "the override must be applied to the caption word stream"
     assert _h._parse_caption_text_overrides("spell Blue filter as Blufilter") == {("blue", "filter"): "Blufilter"}, \
         "the real request is captured"
+    # Folding change_request made the bare 'change X to Y' form a fabrication hazard — an
+    # ordinary editorial ask must NEVER become a false caption override.
+    assert _h._parse_caption_text_overrides("change the pacing to slower") == {}, \
+        "an editorial ask must not fabricate a caption override (generic verbs require a caption/word qualifier)"
+    assert _h._parse_caption_text_overrides('change the caption "teh" to "the"') == {("teh",): "the"}, \
+        "an explicit caption-text change is still captured"
     _sw = [{"word": w, "punctuated_word": w, "start": 0.0, "end": 1.0} for w in ("Blue", "filter", "is")]
     assert [w["word"] for w in _h._apply_caption_text_overrides(_sw, {("blue", "filter"): "Blufilter"})] == ["Blufilter", "is"], \
         "'Blue filter' renders as the exact user spelling 'Blufilter'"
@@ -7297,8 +7323,8 @@ def _findings_placement_and_content_cut():
     # a hard lock — every caption pinned that band the whole video (a real one drifted
     # top "toward the end"); a colliding accent relocates, the caption never moves.
     assert "def _parse_caption_position_lock(" in _src, "the position-lock capture must exist"
-    assert 'edit_plan["_caption_position_lock"] = _parse_caption_position_lock(vibe)' in _src, \
-        "the lock must be captured from the user's ask"
+    assert 'edit_plan["_caption_position_lock"] = _parse_caption_position_lock(_reedit_intent_text)' in _src, \
+        "the lock must be captured from vibe + the raw change_request (the re-edit fold)"
     assert "caption_lock=edit_plan.get(\"_caption_position_lock\")" in _src, \
         "the lock must thread into the composer (accents avoid the locked band)"
     assert 'USER LOCK: every caption pinned' in _src, "the absolute lock floor must run after every caption pass"

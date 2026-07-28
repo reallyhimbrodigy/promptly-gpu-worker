@@ -21846,26 +21846,39 @@ _RENDER_TRANSIENT_KEYS = {
 
 
 def _parse_caption_text_overrides(text):
-    """USER OBEDIENCE (Zac 2026-07-12): capture an explicit spelling/text instruction
-    — "spell X as Y", "write X as Y", 'change the caption "X" to "Y"' — as a LITERAL,
-    deterministic caption-text override (no Gemini interpretation, no drift). A real
-    request to spell "Blue filter" as "Blufilter" rendered "BLUE FILTER" — the
-    instruction was ignored entirely. Returns {(lowercased phrase word tuple): replacement}."""
+    """USER OBEDIENCE (Zac 2026-07-12, re-scoped 2026-07-28): capture an explicit literal
+    caption-text instruction — "spell X as Y", 'change the caption "X" to "Y"', "fix the
+    spelling of X to Y" — as a deterministic caption-text override (no Gemini drift). A real
+    "spell Blue filter as Blufilter" once rendered "BLUE FILTER"; the instruction was ignored.
+
+    Two families, split to kill a fabrication hazard exposed when the re-edit change_request
+    is folded into this parse (2026-07-28): a bare "change X to Y" would turn an ordinary
+    editorial ask ("change the pacing to slower") into a false caption override. So:
+      - spell/respell — X may be bare (the verb itself means "the text").
+      - change/make/write/correct/replace/swap/fix — REQUIRE an explicit caption/word/text
+        qualifier, so a non-caption noun never matches.
+    Y may be multi-word only when quoted; X/Y accept digits (brand/number captions: 2024, B2B).
+    Returns {(lowercased phrase word tuple): replacement}."""
     _ov = {}
     if not text:
         return _ov
-    for _m in re.finditer(
-            r"(?:spell|respell|write|change|make)\s+"
-            r"(?:the\s+(?:word|words|caption|phrase|text)\s+)?"
-            r"[\"“'`]?(?P<x>[A-Za-z][A-Za-z '\-]*?)[\"”'`]?\s+"
-            r"(?:as|to|like)\s+"
-            r"[\"“'`]?(?P<y>[A-Za-z][A-Za-z'\-]*?)[\"”'`]?(?=[\s.,;!?)]|$)",
-            str(text), re.IGNORECASE):
-        _x = _m.group("x").strip().lower()
-        _y = _m.group("y").strip()
-        _key = tuple(_w for _w in re.split(r"\s+", _x) if _w)
-        if _key and _y:
-            _ov[_key] = _y
+    _X = r"[\"“'`]?(?P<x>[A-Za-z0-9][A-Za-z0-9 '\-&]*?)[\"”'`]?"
+    # Y: quoted (multi-word allowed) OR a single unquoted token.
+    _Y = r"(?:[\"“'`](?P<yq>[^\"”'`]+)[\"”'`]|(?P<y>[A-Za-z0-9][A-Za-z0-9'\-&]*))"
+    _CONN = r"(?:as|to|like|with|into)"
+    _pats = (
+        rf"(?:spell|re-?spell)\s+{_X}\s+{_CONN}\s+{_Y}(?=[\s.,;!?)]|$)",
+        rf"(?:write|change|make|correct|replace|swap|fix)\s+(?:the\s+)?"
+        rf"(?:word|words|caption|captions|phrase|text|subtitle|subtitles|spelling)\s+(?:of\s+)?"
+        rf"{_X}\s+{_CONN}\s+{_Y}(?=[\s.,;!?)]|$)",
+    )
+    for _pat in _pats:
+        for _m in re.finditer(_pat, str(text), re.IGNORECASE):
+            _x = _m.group("x").strip().lower()
+            _y = (_m.group("yq") or _m.group("y") or "").strip()
+            _key = tuple(_w for _w in re.split(r"\s+", _x) if _w)
+            if _key and _y:
+                _ov[_key] = _y
     return _ov
 
 
@@ -30046,12 +30059,23 @@ def handler(job):
         change_summary = None
         if mode == "tweak":
             send_progress(job_id, "plan_diff", 10, "Figuring out exactly what to change...", app_url)
-            diff = generate_plan_diff(
-                old_plan=provided_plan,
-                change_request=change_request,
-                old_vibe=old_vibe or vibe,
-                transcript=provided_transcript,
-            )
+            try:
+                diff = generate_plan_diff(
+                    old_plan=provided_plan,
+                    change_request=change_request,
+                    old_vibe=old_vibe or vibe,
+                    transcript=provided_transcript,
+                )
+            except Exception as _pd_err:
+                # RE-EDIT RESILIENCE (Zac 2026-07-28, CRITICAL #3): a surgical plan-diff that
+                # raises — empty/non-JSON/out-of-enum, zero ops, all ops fail to anchor, or a
+                # transient model blip — must NOT hard-fail a PAID re-edit. Degrade to a full
+                # reinterpret (the fallback generate_plan_diff's own docstring prescribes): the
+                # else branch below fuses vibe + change_request and re-plans from source.
+                print(f"[plan-diff] generate_plan_diff failed ({type(_pd_err).__name__}: "
+                      f"{str(_pd_err)[:160]}) — degrading to reinterpret (no hard fail on a paid re-edit)",
+                      flush=True)
+                diff = {"classification": "reinterpret"}
 
             classification = diff.get("classification")
             if classification == "needs_clarification":
@@ -32649,14 +32673,22 @@ def handler(job):
             print("[reframe] Source is native 9:16 — ingest only did fps + pix_fmt", flush=True)
 
         edit_plan["_user_vibe"] = vibe
+        # RE-EDIT OBEDIENCE (Zac 2026-07-28): the render-time user-intent rails below parse
+        # the user's LITERAL ask, but on the surgical tweak→render_only path `vibe` stays the
+        # ORIGINAL (change_request is never folded in), and on guided_redraft/reinterpret the
+        # fused_vibe is a Gemini PARAPHRASE that can drop the literal instruction — so a spelling
+        # correction / position lock (and, below, an unsupported-capability ask the honesty rail
+        # must surface) would be INVISIBLE on a re-edit. Parse from vibe + the RAW change_request.
+        # (Same root cause fixes caption obedience AND honesty in one edit — CRITICAL #1 + #4.)
+        _reedit_intent_text = f"{vibe or ''} . {change_request}".strip(" .") if change_request else vibe
         # USER OBEDIENCE (Zac 2026-07-12): capture an explicit spelling instruction
         # from the user's ask as a LITERAL caption-text override (the caption builder
         # applies it deterministically — no Gemini drift). "spell Blue filter as Blufilter".
-        edit_plan["_caption_text_overrides"] = _parse_caption_text_overrides(vibe)
+        edit_plan["_caption_text_overrides"] = _parse_caption_text_overrides(_reedit_intent_text)
         # USER OBEDIENCE: an explicit "captions at the bottom" is a HARD position lock
         # every caption inherits for the whole video (above the default, Gemini, AND
         # the overlay/composer force-flips — the drift the user saw "toward the end").
-        edit_plan["_caption_position_lock"] = _parse_caption_position_lock(vibe)
+        edit_plan["_caption_position_lock"] = _parse_caption_position_lock(_reedit_intent_text)
         edit_plan["_source_path"] = source_path
         # Record what reframe filter was applied at ingest for downstream
         # face-coordinate mapping. The render pipeline no longer reads this
@@ -33607,7 +33639,12 @@ def handler(job):
         # couldn't do, instead of a silent drop. (a) unsupported-but-understood
         # capabilities in the vibe; (b) a REQUIRED user b-roll subject (Item 1) that
         # got no footage after a real attempt. The user always knows done-or-can't.
-        _capability_notes = _parse_unsupported_requests(vibe)
+        # RE-EDIT OBEDIENCE (Zac 2026-07-28): fold the raw change_request in — on a surgical
+        # re-edit `vibe` is the stale original, so an unsupported ask that lives only in the
+        # change_request ("add background music", "make it 16:9") would be silently dropped
+        # with no honest note. The honesty guarantee must hold on re-edits too (CRITICAL #4).
+        _honesty_intent_text = f"{vibe or ''} . {change_request}".strip(" .") if change_request else vibe
+        _capability_notes = _parse_unsupported_requests(_honesty_intent_text)
         _requested_broll = _parse_broll_requests(vibe)
         if _requested_broll:
             _resolved_kw = " ".join(str(_e.get("keyword") or "") for _e in resolved_broll_out).lower()
