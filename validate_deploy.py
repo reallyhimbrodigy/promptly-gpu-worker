@@ -5729,7 +5729,7 @@ def _e1_density_reshape_gate():
     assert "question→answer turns" in _h and "name-drops" in _h, "ON must expand the markable-moment vocabulary"
 
 
-@check("TRANSCRIPTION-COVERAGE GATE (content-destruction P0 fix, Zac 2026-07-27, DARK behind PROMPTLY_COVERAGE_GATE): the cutter assembles output from transcript WORDS, so VAD-confirmed speech carrying NO words is DELETED as silence (measured: an Urdu upload 89.7s→31.6s, 58s of continuous speech destroyed). ON → a source whose VAD SPEECH is materially untranscribed is rejected with an honest TRANSCRIPTION_INCOMPLETE coded error + refund BEFORE the cutter runs — never a butchered edit. Silero VAD SPEECH (not energy → music beds never false-reject); language-agnostic (subsumes the script gate for the transcription-failure class). Thresholds data-driven from the 34-job cert (clean ≤0.8s/0.023 vs mangled ≥3.2s/0.24 — a 10x gap). FAIL-OPEN on measurement error (a safety net, never a new failure source). OFF → the check never runs (byte-identical). Refunded + rescue-denied via both frozensets.")
+@check("TRANSCRIPTION-COVERAGE GATE (content-destruction P0 fix, Zac 2026-07-27, DARK behind PROMPTLY_COVERAGE_GATE): the cutter assembles output from transcript WORDS, so VAD-confirmed speech carrying NO words is DELETED as silence (measured: an Urdu upload 89.7s→31.6s, 58s of continuous speech destroyed). ON → a source whose VAD SPEECH is materially untranscribed is rejected with an honest TRANSCRIPTION_INCOMPLETE coded error + refund BEFORE the cutter runs — never a butchered edit. Silero VAD SPEECH (not energy → music beds never false-reject); language-agnostic (subsumes the script gate for the transcription-failure class). Measures DELETABLE untranscribed speech by POSITION (2026-07-27 cutter trace + adversarial workflow): the output is assembled only from [first kept word .. last kept word], so VAD-speech OUTSIDE that envelope (leading intro / trailing tail past the 0.5s pad) is dropped at ANY duration (the 58s-Urdu vector), while INTERIOR untranscribed speech between kept words is PRESERVED (plays through, uncaptioned). So the gate counts EDGE speech only. This beats a duration floor two ways: it catches a STACCATO edge intro (untranscribed bursts split by breaths, each below any floor, would leak a duration gate) and it stops false-rejecting interior-untranscribed clips that deliver fine — the 2026-07-27 over-fire (230s clip, 21.8s scattered INTERIOR gaps) now contributes ZERO. Thresholds (≥2.0s AND ≥0.10 frac of EDGE speech) still data-driven from the 34-job cert. FAIL-OPEN on measurement error (a safety net, never a new failure source). OFF → the check never runs (byte-identical). Refunded + rescue-denied via both frozensets.")
 def _transcription_coverage_gate():
     _h = open("handler.py").read()
     assert "def _coverage_gate_enabled(" in _h, "coverage-gate flag helper must exist"
@@ -5738,6 +5738,15 @@ def _transcription_coverage_gate():
     assert "def _transcription_coverage_check(" in _h, "the VAD coverage measurement must exist"
     assert "_COVERAGE_MIN_UNWORDED_S = 2.0" in _h and "_COVERAGE_MIN_UNWORDED_FRAC = 0.10" in _h, \
         "data-driven thresholds (2.0s AND 0.10 frac) — the values the 2026-07-27 cert separated on"
+    assert "_COVERAGE_TAIL_KEEP_S = 0.5" in _h and "_COVERAGE_MIN_INTERIOR_S = 1.5" in _h, \
+        "must bound the kept-word envelope with the cutter's tail pad AND floor large interior spans"
+    assert "if t < first_ws or t > tail_keep:" in _h and "edge_deletable" in _h, \
+        "must count EDGE untranscribed speech by POSITION (outside [first word, last word+pad]) at ANY " \
+        "span size — NOT a duration floor: a staccato edge intro fragments below any floor and would leak " \
+        "(2026-07-27 cutter trace + adversarial workflow)."
+    assert "reject_speech = edge_deletable + interior_reject" in _h, \
+        "reject measure = EDGE (deleted, any size) + LARGE CONTIGUOUS INTERIOR (≥1.5s, preserved-but-bad-edit); " \
+        "scattered interior gaps excluded (the 2026-07-27 over-fire). Not the scattered bin-sum, not a flat span-floor."
     assert "_detect_silence_regions_vad(source_path, min_silence_s=0.30)" in _h, \
         "must use Silero VAD SPEECH (not energy) so a music bed never false-rejects"
     assert "FAIL-OPEN" in _h and "return True, stats" in _h, \

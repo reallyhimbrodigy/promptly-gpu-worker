@@ -20058,15 +20058,39 @@ def _coverage_gate_enabled(input_data=None):
 # a false positive is an honest refund; a false negative destroys the user's video.
 _COVERAGE_MIN_UNWORDED_S = 2.0
 _COVERAGE_MIN_UNWORDED_FRAC = 0.10
+# We measure untranscribed speech by POSITION (2026-07-27 cutter trace, build_clips_from_words
+# @21009, confirmed by an adversarial workflow). The output is assembled ONLY from [first kept
+# word .. last kept word], so two kinds of untranscribed speech are reject-worthy:
+#   (1) EDGE — VAD-speech OUTSIDE the envelope (before the first word / after the last word past
+#       a 0.5s tail pad) is DROPPED unconditionally at ANY duration (the 58s-Urdu P0 vector).
+#       Counted at any span size, so a STACCATO edge intro (untranscribed bursts split by breaths,
+#       each below any duration floor) is fully caught — the hole every duration-floor gate had.
+#   (2) LARGE INTERIOR — untranscribed speech BETWEEN two kept words is PRESERVED (plays through,
+#       just uncaptioned), so it is not deleted; but a large CONTIGUOUS interior stretch is an
+#       unusable half-captioned edit, which the original gate rejected. We keep that behavior:
+#       count interior spans ≥ _COVERAGE_MIN_INTERIOR_S. SCATTERED sub-floor interior gaps
+#       (breaths, mid-phrase pauses) are excluded — that was the 2026-07-27 over-fire (230s clip,
+#       21.8s across 67 sub-1.8s scattered gaps → only 1.8s counts, 0.9% → passes). The 10% frac
+#       guard then decides small-gap-deliver vs large-fraction-reject.
+# NOTE (product, Zac 2026-07-28): interior untranscribed speech is NOT deleted, but delivering it
+# "uncaptioned interior" would produce PATCHY captions (appearing/vanishing across the video), which
+# reads as a DEFECT — worse than either extreme. So conservative REJECT is right for now. Revisit after
+# Tier-1 (universal transcription largely dissolves this case). The future choice is NOT reject-vs-
+# deliver-patchy; the only acceptable options are: (a) deliver with NO captions at all + an honest note,
+# (b) deliver FULLY captioned once Tier-1 makes it possible, or (c) reject. Patchy captions are ruled out.
+_COVERAGE_TAIL_KEEP_S = 0.5   # matches the cutter's _FINAL_TAIL_PAD_S: speech within this of the last word is kept
+_COVERAGE_MIN_INTERIOR_S = 1.5  # a contiguous interior untranscribed span ≥ this = reject-worthy (bad edit); edges have NO floor
 
 
 def _transcription_coverage_check(source_path, words, source_duration):
-    """Measure VAD-confirmed SPEECH time that carries NO transcript word — the
-    content-destruction signal (the cutter would delete it as silence, since output
-    is assembled from transcript words). Silero VAD SPEECH, not energy, so music beds
-    never false-reject. Returns (ok, stats). FAIL-OPEN on any measurement error: the
-    gate is a safety net, never a new failure source — a real VAD outage still surfaces
-    downstream at detect_dead_air."""
+    """Measure untranscribed VAD-speech the cutter would destroy or leave uncaptioned — the
+    content-destruction signal. The output is assembled only from [first kept word .. last kept
+    word] (build_clips_from_words), so EDGE speech outside that envelope (leading intro / trailing
+    tail past the 0.5s pad) is DROPPED at any duration; INTERIOR untranscribed speech between kept
+    words is PRESERVED (plays through, uncaptioned). We count edge speech at any span size (catches
+    a staccato edge intro a duration floor would miss) PLUS large contiguous interior spans
+    (≥_COVERAGE_MIN_INTERIOR_S; scattered breaths excluded → no over-fire). Silero VAD SPEECH, not
+    energy, so music beds never false-reject. Returns (ok, stats). FAIL-OPEN on measurement error."""
     stats = {"unworded_speech_s": None, "unworded_frac": None, "vad_speech_s": None}
     try:
         _dur = float(source_duration or 0)
@@ -20078,6 +20102,8 @@ def _transcription_coverage_check(source_path, words, source_duration):
             (float(w.get("start") or 0), max(float(w.get("end") or 0), float(w.get("start") or 0)))
             for w in words if str(w.get("word") or w.get("punctuated_word") or "").strip()
         )
+        if not wrd:
+            return True, stats
 
         def _iniv(iv, t):
             for a, b in iv:
@@ -20087,20 +20113,44 @@ def _transcription_coverage_check(source_path, words, source_duration):
                     break
             return False
 
+        # The kept-word envelope: everything the assembled output can contain. Speech before
+        # the first word start or after (last word end + tail pad) is dropped by the cutter.
+        first_ws = wrd[0][0]
+        last_we = max(e for _s, e in wrd)
+        tail_keep = last_we + _COVERAGE_TAIL_KEEP_S
         BIN = 0.1
         nb = int(_dur / BIN) + 1
-        speech = unwd = 0.0
+        speech = 0.0
+        edge_deletable = 0.0          # VAD-speech OUTSIDE the envelope → DELETED at any duration
+        _int_run = 0                  # current contiguous interior-unworded run (in bins)
+        _int_spans = []               # contiguous interior untranscribed spans (PRESERVED, but large = bad edit)
         for i in range(nb):
             t = i * BIN + BIN / 2.0
             if _iniv(sil, t):
+                if _int_run:
+                    _int_spans.append(_int_run * BIN); _int_run = 0
                 continue
             speech += BIN
-            if not _iniv(wrd, t):
-                unwd += BIN
-        frac = (unwd / speech) if speech > 0 else 0.0
-        stats = {"unworded_speech_s": round(unwd, 1), "unworded_frac": round(frac, 3),
-                 "vad_speech_s": round(speech, 1)}
-        ok = not (unwd >= _COVERAGE_MIN_UNWORDED_S and frac >= _COVERAGE_MIN_UNWORDED_FRAC)
+            if t < first_ws or t > tail_keep:
+                edge_deletable += BIN
+                if _int_run:
+                    _int_spans.append(_int_run * BIN); _int_run = 0
+            elif not _iniv(wrd, t):
+                _int_run += 1
+            elif _int_run:
+                _int_spans.append(_int_run * BIN); _int_run = 0
+        if _int_run:
+            _int_spans.append(_int_run * BIN)
+        interior_reject = sum(s for s in _int_spans if s >= _COVERAGE_MIN_INTERIOR_S)
+        reject_speech = edge_deletable + interior_reject
+        frac = (reject_speech / speech) if speech > 0 else 0.0
+        stats = {"unworded_speech_s": round(reject_speech, 1), "unworded_frac": round(frac, 3),
+                 "vad_speech_s": round(speech, 1),
+                 "edge_deletable_s": round(edge_deletable, 1),
+                 "interior_reject_s": round(interior_reject, 1),
+                 "interior_total_s": round(sum(_int_spans), 1),
+                 "lead_edge_start_s": round(first_ws, 1), "envelope_end_s": round(last_we, 1)}
+        ok = not (reject_speech >= _COVERAGE_MIN_UNWORDED_S and frac >= _COVERAGE_MIN_UNWORDED_FRAC)
         return ok, stats
     except Exception as _e:
         print(f"[coverage-gate] measurement failed ({type(_e).__name__}: {_e}) — FAIL-OPEN", flush=True)
@@ -32795,6 +32845,11 @@ def handler(job):
         # via edit_plan the same way; render_multi_clip reads edit_plan["_caption_max_words"].
         if input_data.get("caption_max_words"):
             edit_plan["_caption_max_words"] = int(input_data.get("caption_max_words"))
+        # Caption STYLE — per-job override for the style-comparison A/B (dark/absent for
+        # real traffic → byte-identical; Gemini's pick stands). render_multi_clip reads
+        # edit_plan["caption_style"] at the caption build.
+        if input_data.get("caption_style_test"):
+            edit_plan["caption_style"] = str(input_data["caption_style_test"])
         # Degrade ladder — see _render_degrade_ladder (module level, tested
         # behaviorally in test_render_ladder.py).
         try:
