@@ -6342,6 +6342,19 @@ def _platform_shutdown_safety():
         "PLATFORM_TIMEOUT must NOT be designed-silent — the [ALERT] fires for the catchable case"
 
 
+@check("THREE-FIELD LANGUAGE BUNDLE (Zac 2026-07-28, surge, LIVE on every job): detected_language + transcript-script + vad_coverage persisted via a queryable divergence + the success result, so the frontend's per-script graduation gate (coverage-based criterion) and true by-language rejection reporting can read what previously lived only inside the coverage-gate trigger. Coverage computed ONCE and reused by the gate (no double VAD). Reject path carries detected_language.")
+def _language_bundle():
+    _h = open("handler.py").read()
+    assert '_record_divergence("language_bundle"' in _h, "the bundle must be persisted on every job"
+    assert '"detected_language": _det_lang' in _h and '"transcript_script": str(_script)' in _h \
+        and '"vad_coverage_unworded_s"' in _h, "bundle must carry all three fields"
+    assert 'edit_plan["_lang_bundle"] = _lang_bundle' in _h, "bundle must flow into the success result payload"
+    assert "_cov_ok, _cov = _bundle_cov_ok, _bundle_cov" in _h, \
+        "the coverage gate must REUSE the bundle's coverage (computed once, no double VAD)"
+    assert "detected_language=_det_lang)  # by-language reject reporting" in _h, \
+        "the reject path must tag detected_language for by-language reporting"
+
+
 @check("TIER-1 STAGE A (Zac 2026-07-28, viral surge, DARK behind PROMPTLY_LANG_ROUTING): Deepgram multi mislabels + under-covers non-English (cert: Bengali/Tamil tagged 'hi', 40-85% short). When the FINAL transcript fails coverage, probe monolingual models (language=xx) for the candidate set and recover the best-coverage NATIVE transcript BEFORE rejecting — the arabic-bridge mechanism generalised past 'ar', turning an honest rejection into a delivery. Three binding laws: SELECTION (accept only a coverage-PASSING transcript), FAIL-CLOSED ON SCRIPT (native script or skip — never transliteration), FONT-BACKED (_script_reaches_render or skip — never tofu). OFF → never runs (byte-identical).")
 def _tier1_stage_a():
     import handler

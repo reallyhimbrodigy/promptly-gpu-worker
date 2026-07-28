@@ -4388,54 +4388,79 @@ def _lang_routing_enabled():
     return os.environ.get("PROMPTLY_LANG_ROUTING", "").strip() == "1"
 
 
-# Candidate monolingual languages, ordered by arriving volume (the 2026-07-28 South-Asian surge).
-# Deepgram supports each in language=xx (pa/te errored at the cert → omitted until confirmed).
-_LANG_ROUTING_CANDIDATES = ("hi", "bn", "ta", "ur")
-# The native script each candidate MUST produce (fail-closed: a probe that returns the wrong
-# script is transliteration/garbage, never accepted — it would render as silent nonsense).
+# Candidate monolingual languages — every Deepgram-supported language that plausibly arrives
+# (India is ~67% of the 2026-07-28 surge → all major Indian languages) + the Latin non-English
+# arrivals. Probing is PARALLEL, so a wider set costs no extra latency; an unsupported language
+# (Deepgram 400s, e.g. pa) just drops out. Selection-by-confidence (below) keeps a wider set safe.
+_LANG_ROUTING_CANDIDATES = ("hi", "mr", "bn", "ta", "te", "gu", "ml", "kn", "ur", "pa", "es", "pt")
+# The native script each candidate MUST produce (fail-closed: a probe returning the wrong script
+# is transliteration/garbage, never accepted — it would render as silent nonsense).
 _EXPECTED_SCRIPT_FOR_LANG = {
-    "hi": "Devanagari", "bn": "Bengali", "ta": "Tamil", "ur": "Arabic",
-    "ar": "Arabic", "ru": "Cyrillic", "te": "Telugu", "gu": "Gujarati", "pa": "Gurmukhi",
+    "hi": "Devanagari", "mr": "Devanagari", "bn": "Bengali", "ta": "Tamil",
+    "te": "Telugu", "gu": "Gujarati", "ml": "Malayalam", "kn": "Kannada",
+    "pa": "Gurmukhi", "ur": "Arabic", "ar": "Arabic", "ru": "Cyrillic",
+    "es": "Latin", "pt": "Latin", "fr": "Latin", "de": "Latin", "it": "Latin",
 }
 
 
 def _probe_best_language(source_path, candidates, source_duration):
-    """Probe Deepgram MONOLINGUAL models for each candidate and return the transcript that best
-    RECOVERS VAD-speech coverage. Because multi mislabels, we probe the whole set (not a detected
-    label) and pick by coverage. THREE laws bind every candidate:
-      • SELECTION — accept only a transcript that PASSES the coverage gate (improves the failing
-        current transcript by construction).
+    """Probe Deepgram MONOLINGUAL models (in PARALLEL) and return the transcript that best fits
+    the audio. Deepgram multi mislabels, so we probe the whole set, not a detected label. FOUR
+    binding rules:
+      • PARALLEL — fire every probe concurrently; a rejected user has already waited a full
+        render, so sequential probes would stack latency onto exactly the slowest jobs.
+      • SELECTION BY CONFIDENCE — a WRONG language phonetically APPROXIMATES the audio and can
+        still pass coverage with plausible word counts, so coverage alone mis-selects (measured:
+        Bengali beat Hindi on a Hindi clip by 0.1s coverage). The true language scores higher
+        Deepgram word CONFIDENCE; select by confidence (word count breaks ties). Negative-control
+        certified: a known-Hindi clip must pick hi, not bn/ta.
       • FAIL-CLOSED ON SCRIPT — must produce the language's native script, never transliteration.
-      • FONT-BACKED — the native script must actually render (_script_reaches_render), else the
-        recovery is tofu; skip it (Stage B/translation handles those later).
-    Returns (lang, parsed_transcript, unworded_s) for the best recovery, or (None, None, None)."""
-    _best = None  # (lang, parsed, unworded_s)
-    for _lg in candidates:
+      • FONT-BACKED — the native script must render (_script_reaches_render), else it is tofu;
+        skip (Stage B / translation handles those).
+    Only coverage-PASSING candidates are eligible (recovery must actually fix the failing gate).
+    Returns (lang, parsed_transcript, unworded_s) for the best, or (None, None, None)."""
+    import concurrent.futures as _cf
+
+    def _probe_one(_lg):
         try:
-            _tx = transcribe_audio(source_path, language=_lg)
+            return (_lg, transcribe_audio(source_path, language=_lg))
         except Exception as _e:
             print(f"[lang-routing] probe {_lg} failed ({type(_e).__name__}) — skip", flush=True)
-            continue
-        _w = (_tx or {}).get("words") or []
+            return (_lg, None)
+
+    _raw = {}
+    with _cf.ThreadPoolExecutor(max_workers=min(len(candidates), 12)) as _ex:
+        for _lg, _tx in _ex.map(_probe_one, candidates):
+            _raw[_lg] = _tx
+
+    _scored = []
+    for _lg in candidates:
+        _tx = _raw.get(_lg)
+        _w = (_tx or {}).get("words") or [] if _tx else []
         if len(_w) < 5:
             continue
         _sc = _dominant_script(_w)
         _expected = _EXPECTED_SCRIPT_FOR_LANG.get(_lg)
         if _expected and _sc != _expected:
-            print(f"[lang-routing] probe {_lg}: {len(_w)}w but script={_sc}≠{_expected} — reject (not native)", flush=True)
-            continue
+            continue  # transliteration / wrong script → fail-closed
         if not _script_reaches_render(_sc):
-            print(f"[lang-routing] probe {_lg}: script={_sc} has no caption font — skip (needs translation)", flush=True)
-            continue
+            continue  # no caption font → would render tofu
         try:
             _ok, _cov = _transcription_coverage_check(source_path, _w, source_duration)
         except Exception:
             continue
-        _u = _cov.get("unworded_speech_s")
-        print(f"[lang-routing] probe {_lg}: {len(_w)}w script={_sc} unworded={_u}s ok={_ok}", flush=True)
-        if _ok and _u is not None and (_best is None or _u < _best[2]):
-            _best = (_lg, _tx, _u)
-    return _best or (None, None, None)
+        if not _ok:
+            continue  # recovery must PASS coverage
+        _conf = (sum(float(_x.get("confidence") or 0.0) for _x in _w) / len(_w)) if _w else 0.0
+        _scored.append({"lang": _lg, "tx": _tx, "words": len(_w), "conf": round(_conf, 3),
+                        "unworded": _cov.get("unworded_speech_s"), "script": _sc})
+    if not _scored:
+        return (None, None, None)
+    _scored.sort(key=lambda s: (s["conf"], s["words"]), reverse=True)
+    _best = _scored[0]
+    print(f"[lang-routing] scored {[(s['lang'], s['words'], s['conf']) for s in _scored]} → "
+          f"selected {_best['lang']} (conf={_best['conf']}, {_best['words']}w, {_best['script']})", flush=True)
+    return (_best["lang"], _best["tx"], _best["unworded"])
 
 
 def _dominant_script(words):
@@ -31697,6 +31722,28 @@ def handler(job):
             # enabled non-Latin renders; even off it captures Latin non-English
             # (Spanish/French/…) that already rendered — the demand picture.
             _det_lang = _transcript.get("detected_language")
+            # ─── THREE-FIELD LANGUAGE BUNDLE (Zac 2026-07-28, surge) — persist on EVERY job ───
+            # detected_language + transcript-script + vad_coverage, so the frontend's per-script
+            # graduation gate (criterion 3 is coverage-based) and true by-language rejection
+            # reporting can read them — coverage previously lived ONLY inside the coverage-gate
+            # trigger, unqueryable. Computed ONCE here and reused by the gate below (no double VAD).
+            _bundle_cov_ok, _bundle_cov = True, {}
+            try:
+                _bundle_cov_ok, _bundle_cov = _transcription_coverage_check(
+                    _raw_source, _dg_words, source_duration)
+                _lang_bundle = {
+                    "detected_language": _det_lang,
+                    "transcript_script": str(_script),
+                    "vad_coverage_unworded_s": _bundle_cov.get("unworded_speech_s"),
+                    "vad_coverage_frac": _bundle_cov.get("unworded_frac"),
+                    "vad_speech_s": _bundle_cov.get("vad_speech_s"),
+                    "words": len(_dg_words),
+                }
+                edit_plan["_lang_bundle"] = _lang_bundle  # flows into the success result payload
+                _record_divergence("language_bundle", _lang_bundle, "lang_bundle",
+                                   reason=str(_det_lang or _script or "?"))
+            except Exception as _lbe:
+                print(f"[lang-bundle] persist failed ({type(_lbe).__name__}) — non-fatal", flush=True)
             if _is_non_english(_det_lang, _script):
                 _record_divergence(
                     "language_coverage",
@@ -31767,8 +31814,8 @@ def handler(job):
             # spend, never a butchered video. Asymmetry: a false positive is a refund;
             # a false negative destroys the user's video.
             if _coverage_gate_enabled(input_data):
-                _cov_ok, _cov = _transcription_coverage_check(
-                    _raw_source, _dg_words, source_duration)
+                # Reuse the three-field bundle's coverage — computed once above, no double VAD.
+                _cov_ok, _cov = _bundle_cov_ok, _bundle_cov
                 print(f"[coverage-gate] unworded={_cov.get('unworded_speech_s')}s "
                       f"frac={_cov.get('unworded_frac')} vad_speech={_cov.get('vad_speech_s')}s "
                       f"words={len(_dg_words)} script={_script} → "
@@ -31777,7 +31824,8 @@ def handler(job):
                     _log_intake_reject(
                         "TRANSCRIPTION_INCOMPLETE", source_duration,
                         unworded_speech_s=_cov.get("unworded_speech_s"),
-                        unworded_frac=_cov.get("unworded_frac"), script=str(_script))
+                        unworded_frac=_cov.get("unworded_frac"), script=str(_script),
+                        detected_language=_det_lang)  # by-language reject reporting
                     raise RuntimeError(
                         "TRANSCRIPTION_INCOMPLETE: "
                         f"{_cov.get('unworded_speech_s')}s of spoken audio "
