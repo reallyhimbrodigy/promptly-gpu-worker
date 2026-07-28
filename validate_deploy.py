@@ -6342,6 +6342,27 @@ def _platform_shutdown_safety():
         "PLATFORM_TIMEOUT must NOT be designed-silent — the [ALERT] fires for the catchable case"
 
 
+@check("TIER-1 STAGE A (Zac 2026-07-28, viral surge, DARK behind PROMPTLY_LANG_ROUTING): Deepgram multi mislabels + under-covers non-English (cert: Bengali/Tamil tagged 'hi', 40-85% short). When the FINAL transcript fails coverage, probe monolingual models (language=xx) for the candidate set and recover the best-coverage NATIVE transcript BEFORE rejecting — the arabic-bridge mechanism generalised past 'ar', turning an honest rejection into a delivery. Three binding laws: SELECTION (accept only a coverage-PASSING transcript), FAIL-CLOSED ON SCRIPT (native script or skip — never transliteration), FONT-BACKED (_script_reaches_render or skip — never tofu). OFF → never runs (byte-identical).")
+def _tier1_stage_a():
+    import handler
+    _h = open("handler.py").read()
+    assert "def _lang_routing_enabled(" in _h and 'os.environ.get("PROMPTLY_LANG_ROUTING"' in _h, \
+        "Stage A must be flag-gated (dark by default)"
+    assert "def _probe_best_language(" in _h, "the generalized monolingual probe must exist"
+    assert "_transcription_coverage_check(source_path, _w, source_duration)" in _h, \
+        "SELECTION law: must measure VAD-coverage per candidate"
+    assert "_EXPECTED_SCRIPT_FOR_LANG.get(_lg)" in _h, \
+        "FAIL-CLOSED law: must confirm the candidate produced its native script (not transliteration)"
+    assert "if not _script_reaches_render(_sc):" in _h, \
+        "FONT-BACKED law: must skip a recovered script with no caption font (would render tofu)"
+    assert "if _lang_routing_enabled() and _coverage_gate_enabled(input_data):" in _h, \
+        "Stage A must run BEFORE the coverage-gate reject, only when coverage fails"
+    assert '"lang_routing_recovered"' in _h, "a recovery must be ledgered (divergence)"
+    assert handler._LANG_ROUTING_CANDIDATES and all(
+        c in handler._EXPECTED_SCRIPT_FOR_LANG for c in handler._LANG_ROUTING_CANDIDATES), \
+        "every routing candidate must carry an expected native script"
+
+
 @check("Latin-scope flip: transcription=language=multi; _SCRIPT_COVERAGE=Latin (font-derived, tofu unconstructible); _dominant_script classifies Latin/Cyrillic/Devanagari/Arabic; uncovered script → NO_SPEECH_NONENGLISH BEFORE render")
 def _script_coverage_gate():
     import handler

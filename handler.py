@@ -4377,6 +4377,67 @@ def _probe_confirms_arabic(source_path):
         return (False, None)
 
 
+# ── TIER-1 STAGE A: DEEPGRAM MONOLINGUAL ROUTING (Zac 2026-07-28, viral surge) ──────────
+# Deepgram `multi` mislabels + under-covers non-English (a 2026-07-28 cert: it tagged Bengali
+# and Tamil clips 'hi', and covered them 40-85% short). Deepgram supports many more languages
+# in `language=xx` monolingual than in multi. When multi coverage FAILS, probe the monolingual
+# models for the arriving-language candidate set and recover the best-coverage NATIVE transcript
+# — the exact Arabic-bridge mechanism, generalised past 'ar'.
+def _lang_routing_enabled():
+    """Flag-gated (PROMPTLY_LANG_ROUTING=1). OFF → the probe never runs (byte-identical)."""
+    return os.environ.get("PROMPTLY_LANG_ROUTING", "").strip() == "1"
+
+
+# Candidate monolingual languages, ordered by arriving volume (the 2026-07-28 South-Asian surge).
+# Deepgram supports each in language=xx (pa/te errored at the cert → omitted until confirmed).
+_LANG_ROUTING_CANDIDATES = ("hi", "bn", "ta", "ur")
+# The native script each candidate MUST produce (fail-closed: a probe that returns the wrong
+# script is transliteration/garbage, never accepted — it would render as silent nonsense).
+_EXPECTED_SCRIPT_FOR_LANG = {
+    "hi": "Devanagari", "bn": "Bengali", "ta": "Tamil", "ur": "Arabic",
+    "ar": "Arabic", "ru": "Cyrillic", "te": "Telugu", "gu": "Gujarati", "pa": "Gurmukhi",
+}
+
+
+def _probe_best_language(source_path, candidates, source_duration):
+    """Probe Deepgram MONOLINGUAL models for each candidate and return the transcript that best
+    RECOVERS VAD-speech coverage. Because multi mislabels, we probe the whole set (not a detected
+    label) and pick by coverage. THREE laws bind every candidate:
+      • SELECTION — accept only a transcript that PASSES the coverage gate (improves the failing
+        current transcript by construction).
+      • FAIL-CLOSED ON SCRIPT — must produce the language's native script, never transliteration.
+      • FONT-BACKED — the native script must actually render (_script_reaches_render), else the
+        recovery is tofu; skip it (Stage B/translation handles those later).
+    Returns (lang, parsed_transcript, unworded_s) for the best recovery, or (None, None, None)."""
+    _best = None  # (lang, parsed, unworded_s)
+    for _lg in candidates:
+        try:
+            _tx = transcribe_audio(source_path, language=_lg)
+        except Exception as _e:
+            print(f"[lang-routing] probe {_lg} failed ({type(_e).__name__}) — skip", flush=True)
+            continue
+        _w = (_tx or {}).get("words") or []
+        if len(_w) < 5:
+            continue
+        _sc = _dominant_script(_w)
+        _expected = _EXPECTED_SCRIPT_FOR_LANG.get(_lg)
+        if _expected and _sc != _expected:
+            print(f"[lang-routing] probe {_lg}: {len(_w)}w but script={_sc}≠{_expected} — reject (not native)", flush=True)
+            continue
+        if not _script_reaches_render(_sc):
+            print(f"[lang-routing] probe {_lg}: script={_sc} has no caption font — skip (needs translation)", flush=True)
+            continue
+        try:
+            _ok, _cov = _transcription_coverage_check(source_path, _w, source_duration)
+        except Exception:
+            continue
+        _u = _cov.get("unworded_speech_s")
+        print(f"[lang-routing] probe {_lg}: {len(_w)}w script={_sc} unworded={_u}s ok={_ok}", flush=True)
+        if _ok and _u is not None and (_best is None or _u < _best[2]):
+            _best = (_lg, _tx, _u)
+    return _best or (None, None, None)
+
+
 def _dominant_script(words):
     """Dominant Unicode script of a Deepgram word list (dicts with 'word').
     Counts letter codepoints by script range; neutral chars (digits, punct,
@@ -31646,6 +31707,53 @@ def handler(job):
                     "rendered_language",
                     reason=f"tier{_language_tier(_det_lang, _script)}",
                 )
+
+            # ─── TIER-1 STAGE A: DEEPGRAM MONOLINGUAL ROUTING (before the reject) ─────
+            # If the FINAL transcript still fails coverage, Deepgram multi likely mislabeled or
+            # under-covered a non-English language (cert 2026-07-28: Bengali/Tamil tagged 'hi',
+            # 40-85% short). Probe monolingual models for the candidate set and recover the best-
+            # coverage NATIVE transcript, so the gate below PASSES and the user gets their video
+            # (native captions) instead of an honest rejection. Flag-gated; selection + fail-closed
+            # + font-backed laws enforced inside _probe_best_language.
+            if _lang_routing_enabled() and _coverage_gate_enabled(input_data):
+                _pre_ok, _pre_cov = _transcription_coverage_check(_raw_source, _dg_words, source_duration)
+                if not _pre_ok:
+                    _bl_lang, _bl_tx, _bl_u = _probe_best_language(
+                        _raw_source, _LANG_ROUTING_CANDIDATES, source_duration)
+                    if _bl_tx is not None:
+                        _bl_words = _bl_tx.get("words") or []
+                        # Same audio-stream offset the multi transcript carries → one clock
+                        # for cuts/captions/SFX (the probe is raw audio-data-time).
+                        try:
+                            _bl_off = float((future_normalize.result(timeout=180) or {})
+                                            .get("audio_stream_offset") or 0.0)
+                        except Exception:
+                            _bl_off = 0.0
+                        if _bl_off > 0.001:
+                            for _w in _bl_words:
+                                if isinstance(_w, dict):
+                                    try:
+                                        _w["start"] = float(_w["start"]) + _bl_off
+                                        _w["end"] = float(_w["end"]) + _bl_off
+                                    except (TypeError, ValueError, KeyError):
+                                        pass
+                        # Propagate through the resolved-transcript cache — every downstream
+                        # consumer re-reads it (the arabic-bridge cert proved a local rebind
+                        # alone drops every caption page).
+                        with _refined_tx_lock:
+                            _refined_tx_cache["value"] = _bl_tx
+                        _transcript = _bl_tx
+                        _dg_words = _bl_words
+                        _script = _dominant_script(_dg_words)
+                        _record_divergence(
+                            "language_coverage",
+                            {"routed_language": _bl_lang, "words": len(_dg_words),
+                             "unworded_before_s": _pre_cov.get("unworded_speech_s"),
+                             "unworded_after_s": _bl_u},
+                            "lang_routing_recovered", reason=f"monolingual_{_bl_lang}")
+                        print(f"[lang-routing] RECOVERED via language={_bl_lang}: {len(_dg_words)}w "
+                              f"native {_script}, unworded {_pre_cov.get('unworded_speech_s')}s→{_bl_u}s "
+                              f"— delivering instead of rejecting", flush=True)
 
             # ─── TRANSCRIPTION-COVERAGE GATE (content-destruction fix, DARK) ─────
             # _dg_words is now FINAL — past the script-coverage gate AND any arabic-
