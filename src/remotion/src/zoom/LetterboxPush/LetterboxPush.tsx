@@ -7,7 +7,7 @@ import {
   Easing,
   OffthreadVideo,
 } from "remotion";
-import { msToFrames } from "../shared/timing";
+import { msToFrames, msToFramesFloor } from "../shared/timing";
 import type { LetterboxPushProps } from "../types";
 
 /**
@@ -57,7 +57,7 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
   } else {
     for (const event of events) {
       const targetScale = event.scale ?? 1.2;
-      const eventStart = msToFrames(event.startMs, fps);
+      const eventStart = msToFramesFloor(event.startMs, fps);
       const eventEnd = msToFrames(event.startMs + event.durationMs, fps);
 
       if (frame < eventStart || frame > eventEnd) continue;

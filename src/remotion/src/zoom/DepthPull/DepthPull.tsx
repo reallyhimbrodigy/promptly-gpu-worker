@@ -7,7 +7,7 @@ import {
   Easing,
 } from "remotion";
 import { Video } from "@remotion/media";
-import { msToFrames } from "../shared/timing";
+import { msToFrames, msToFramesFloor } from "../shared/timing";
 import type { DepthPullProps } from "../types";
 
 const BOKEH_ORBS = [
@@ -65,7 +65,7 @@ export const DepthPull: React.FC<DepthPullProps> = ({
     }
   } else {
     for (const event of events) {
-      const eventStart = msToFrames(event.startMs, fps);
+      const eventStart = msToFramesFloor(event.startMs, fps);
       const eventEnd = msToFrames(event.startMs + event.durationMs, fps);
       if (frame < eventStart || frame > eventEnd) continue;
 

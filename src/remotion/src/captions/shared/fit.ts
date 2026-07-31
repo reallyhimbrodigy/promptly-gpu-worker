@@ -166,7 +166,26 @@ function greedyWrap(
   return lines;
 }
 
-/** Character-level split of one word so every fragment fits safeWidth. */
+// Grapheme-cluster split of a string. `for...of` over a string iterates code
+// POINTS, which still severs a Devanagari/Tamil/Thai syllable (a base letter
+// plus its combining vowel signs / virama conjuncts is ONE user-perceived
+// character spread across several code points) and ZWJ emoji sequences — the
+// fragments render as visibly broken glyphs. Intl.Segmenter groups by grapheme
+// cluster so every fragment is a whole character. It is present in the Chromium
+// that renders these compositions; the code-point fallback only runs if it
+// somehow is not (still strictly better than the old code-unit behavior).
+const _graphemeSeg =
+  typeof Intl !== "undefined" && (Intl as any).Segmenter
+    ? new (Intl as any).Segmenter(undefined, { granularity: "grapheme" })
+    : null;
+function toGraphemes(word: string): string[] {
+  if (_graphemeSeg) {
+    return Array.from(_graphemeSeg.segment(word), (s: any) => s.segment);
+  }
+  return Array.from(word);
+}
+
+/** Grapheme-level split of one word so every fragment fits safeWidth. */
 function charwrapWord(
   word: string,
   tokenIndex: number,
@@ -177,7 +196,7 @@ function charwrapWord(
 ): FitEntry[] {
   const frags: FitEntry[] = [];
   let frag = "";
-  for (const ch of word) {
+  for (const ch of toGraphemes(word)) {
     const next = frag + ch;
     if (frag.length > 0 && measure(next, fontSize, font) > safeWidth) {
       frags.push({ tokenIndex, text: frag });

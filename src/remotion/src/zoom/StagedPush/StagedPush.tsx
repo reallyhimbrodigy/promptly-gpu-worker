@@ -7,7 +7,7 @@ import {
   Easing,
 } from "remotion";
 import { Video } from "@remotion/media";
-import { msToFrames } from "../shared/timing";
+import { msToFrames, msToFramesFloor } from "../shared/timing";
 import type { StagedPushProps } from "../types";
 
 /**
@@ -51,7 +51,7 @@ export const StagedPush: React.FC<StagedPushProps> = ({ src, events, style }) =>
     const releaseF = Math.max(1, msToFrames(ev.releaseMs ?? 360, fps)); // moderate ease-out if continuing
 
     // each stage's PEAK lands on its word's onset frame (the component clock)
-    const st = stages.map((s) => ({ peak: msToFrames(s.atMs, fps), scale: s.scale }));
+    const st = stages.map((s) => ({ peak: msToFramesFloor(s.atMs, fps), scale: s.scale }));
     const first = st[0];
     const last = st[st.length - 1];
 

@@ -4756,7 +4756,7 @@ def _v196_divider():
     _w = [{"word": "a", "punctuated_word": "a", "start": 0.0, "end": 1.0},
           {"word": "d", "punctuated_word": "d", "start": 1.0, "end": 1.32},
           {"word": "d", "punctuated_word": "d", "start": 1.32, "end": 1.64}]
-    _c, _ = handler.build_clips_from_words(_w, [{"word_index": 1}], video_duration=10.0)
+    _c, _, _ = handler.build_clips_from_words(_w, [{"word_index": 1}], video_duration=10.0)
     assert _c[0]["source_end"] <= 1.0 + 1e-6, "release entered the removed word"
     assert _c[1]["source_start"] >= 1.32 - 1e-6, "incoming edge below removed end"
 
@@ -4769,7 +4769,7 @@ def _v196_headsnap():
     assert "vad_silences=list(_VAD_SILENCES_LAST)" in _src, "call-site plumbing missing"
     _w = [{"word": "a", "punctuated_word": "a", "start": 0.0, "end": 1.0},
           {"word": "b", "punctuated_word": "b", "start": 2.6, "end": 3.2}]
-    _c, _ = handler.build_clips_from_words(
+    _c, _, _ = handler.build_clips_from_words(
         _w, [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}],
         video_duration=10.0, vad_silences=[(1.05, 2.95)])
     assert abs(_c[1]["source_start"] - 2.875) < 0.01, "snap-forward failed"
@@ -4963,6 +4963,31 @@ def _credit_ruling_marker():
         "marker must ride BOTH the durable row result and the return dict"
 
 
+@check("alert routing (Zac 2026-07-28): PAGE ONLY ON AT-FAULT — gate keys on _NON_ALERTING_CODES (designed UNION client-upload), broader than the refund set; UNKNOWN + unclassified still page (loud-failsafe); refund gate stays separate")
+def _alert_routing_split():
+    import handler
+    # the no-page set is a STRICT SUPERSET of the refund set (adds client-upload)
+    assert handler._DESIGNED_REJECTION_CODES <= handler._NON_ALERTING_CODES, \
+        "non-alerting set must contain the whole refund set"
+    assert handler._NON_ALERTING_CODES > handler._DESIGNED_REJECTION_CODES, \
+        "non-alerting set must be strictly broader (client-upload family added)"
+    # client-upload family: alert-suppressed, but NOT designed (refund/retry unchanged)
+    for c in ("UPLOAD_STALLED", "UPLOAD_TIMEOUT", "UPLOAD_NEVER_STARTED"):
+        assert c in handler._NON_ALERTING_CODES, c + " must be alert-suppressed (digest, not page)"
+        assert c not in handler._DESIGNED_REJECTION_CODES, c + " must NOT release credit as a designed rejection"
+    # loud-failsafe: UNKNOWN and every at-fault code MUST still page (absent from no-page set)
+    for c in ("UNKNOWN", "RENDER_FATAL", "INTEGRITY_TRIP", "RENDER_TOO_SHORT",
+              "PLATFORM_TIMEOUT", "CONTAINER_TEARDOWN", "RECIPE_INVALID", "SAFE_EDIT_FAILED"):
+        assert c not in handler._NON_ALERTING_CODES, c + " must still page the operator"
+    # the terminal gate must key on the non-alerting set, not the bare refund flag
+    _src = open("handler.py").read()
+    assert "_NON_ALERTING_CODES = _DESIGNED_REJECTION_CODES | _CLIENT_UPLOAD_CODES" in _src, \
+        "non-alerting set must be defined as designed UNION client-upload"
+    assert "_page_operator = (classified.get(\"error_code\") not in _NON_ALERTING_CODES)" in _src, \
+        "alert gate must key on _NON_ALERTING_CODES"
+    assert "if _page_operator:" in _src, "alert must fire on _page_operator, not the bare _designed_reject flag"
+
+
 @check("copy-truth mirror: failed-terminal patch carries error_message = result.user_message atomically")
 def _copy_truth_mirror():
     _src = open("handler.py").read()
@@ -5001,26 +5026,33 @@ def _clip_too_long_copy():
     assert "CLIP_TOO_LONG" in handler._DESIGNED_REJECTION_CODES
 
 
-@check("RENDER_TOO_SHORT class: the output-length guard (video<1.0s = safe-recipe degeneration) raises a RENDER_TOO_SHORT-tagged error; classify_error names it explicitly (real error → refunded on the failed-row sweep + alerted via _fire_render_alert) with honest credit-returned copy, never the UNKNOWN mask; ordered before the greedy FFmpeg/Remotion render classes; NOT a designed rejection")
-def _render_too_short_class():
+@check("RENDER COLLAPSE = ZERO-REJECTION (Zac 2026-07-28): a collapsed edit (rendered video<1.0s) is NOT a dead-end RENDER_TOO_SHORT failure — it FALLS BACK to the minimal pipeline (straight cuts + captions on the source) like no_speech/not-TH/2-5s clips, so the user gets a real video, not a refund + dead end (30d census: 4 collapses/3 users, 100% churned, 0 recovered). The collapse is RECORDED (render_collapsed_to_minimal divergence — routed, not suppressed) so cutter over-removal stays visible in the daily report. classify_error still names any legacy RENDER_TOO_SHORT string (defensive); still NOT a designed rejection.")
+def _render_collapse_zero_reject():
     import handler
     _h = open("handler.py").read()
-    # 1. the output-length guard tags the sentinel at the raise site
-    assert "RENDER_TOO_SHORT: main render output too short" in _h, \
-        "raise site must embed the RENDER_TOO_SHORT sentinel"
-    # 2. classify_error names it explicitly with honest copy (exercise the real
-    #    raised-message shape, not a bare token)
-    _c = handler.classify_error(RuntimeError(
-        "RENDER_TOO_SHORT: main render output too short (video=0.8s) — the edit "
-        "plan collapsed to almost no timeline (typically a safe-recipe "
-        "degeneration); the output-length guard held it back"))
+    # the output-length collapse guard now ROUTES TO MINIMAL, not a dead-end failure
+    _i = _h.find("if _rv < 1.0:")
+    assert _i != -1, "the output-length collapse guard must remain"
+    _guard = _h[_i:_i + 1800]
+    # flag ON -> zero-reject minimal fallback (user gets a video), RECORDED as a divergence
+    assert "if _zero_reject_enabled(input_data):" in _guard, \
+        "the render-collapse fallback must be flag-gated behind PROMPTLY_ZERO_REJECT"
+    assert 'raise _MinimalRouteSignal("render_collapsed")' in _guard, \
+        "flag on: a collapsed render falls back to minimal (zero-reject), not a dead-end"
+    assert '"render_collapsed_to_minimal"' in _guard, \
+        "the collapse must be RECORDED as a divergence (routed, not suppressed)"
+    # flag OFF -> today's RENDER_TOO_SHORT dead-end retained (byte-identical rollback)
+    assert "RENDER_TOO_SHORT: main render output too short" in _guard, \
+        "flag off must keep today's RENDER_TOO_SHORT raise (byte-identical rollback)"
+    # the handler catches the minimal-route signal + runs the minimal pipeline
+    assert "isinstance(e, _MinimalRouteSignal)" in _h and "_run_minimal_pipeline(" in _h, \
+        "the minimal-route signal must be caught + routed to the minimal pipeline"
+    # classify_error still names any legacy RENDER_TOO_SHORT string (defensive)
+    _c = handler.classify_error(RuntimeError("RENDER_TOO_SHORT: main render output too short (video=0.8s)"))
     assert _c["error_code"] == "RENDER_TOO_SHORT", _c
-    assert "Something went wrong" not in _c["user_message"], _c  # never the UNKNOWN mask
-    assert "credit was returned" in _c["user_message"].lower(), _c  # refund-honest
-    assert _c["retryable"] is True, _c
-    # 3. real error, NOT a designed rejection → the failed-row sweep refunds it
+    # unchanged: never a designed rejection
     assert "RENDER_TOO_SHORT" not in handler._DESIGNED_REJECTION_CODES, \
-        "RENDER_TOO_SHORT is a real error, must NOT be a designed rejection"
+        "RENDER_TOO_SHORT must NOT be a designed rejection"
 
 
 @check("Phase-4 OUTCOME-GATE (Cond-2 ratified): the salvaged post-cuts plan is validated against the full strict PostCutPlan model AFTER _enforce_string_caps; FLAG-GATED PROMPTLY_OUTCOME_GATE (default 'shadow' = ledger-only no-op → deploy INERT; 'enforce' = invalid salvage → mid-plan retry; 'off' = rollback); the post-cuts return is guarded so an enforce reject falls to the bounded retry, never ships an invalid salvage")
@@ -5388,7 +5420,7 @@ def _source_poll_fail_fast():
     # the default (600) must be strictly under the run_pipeline_bg Modal timeout so the
     # clean UPLOAD_STALLED fires BEFORE the SIGKILL — the invariant that was violated
     _m = open("modal_app.py").read()
-    _t = _re.search(r"timeout=(\d+), retries=2, cpu=64, memory=131072", _m)
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=49152", _m)
     assert _t, "run_pipeline_bg timeout not found in modal_app.py"
     assert 600 < int(_t.group(1)), \
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
@@ -5505,9 +5537,10 @@ def _zero_reject_wiring():
     assert 'input_data.get("zero_reject_test")' in _h, "per-job cert override required"
     assert "_MIN_MINIMAL_DURATION_S = 2.0" in _h, "the Zac-ruled 2.0s hard floor"
     # all four route sites + the deferring fast-check
-    assert _h.count("raise _MinimalRouteSignal(") == 4, "exactly 4 route-raise sites (too_short, no_audio, not_talking_head, no_speech/muted)"
+    assert _h.count("raise _MinimalRouteSignal(") == 6, "exactly 6 route-raise sites (too_short, no_audio, not_talking_head, no_speech/muted, plan_collapsed — the min-output-ratio plan guard, render_collapsed — the post-render backstop; both Zac 2026-07-28)"
     assert '_MinimalRouteSignal("too_short")' in _h and '_MinimalRouteSignal("no_audio")' in _h \
-        and '_MinimalRouteSignal("not_talking_head")' in _h and '"no_speech_muted" if _face_present else "no_speech"' in _h
+        and '_MinimalRouteSignal("not_talking_head")' in _h and '"no_speech_muted" if _face_present else "no_speech"' in _h \
+        and '_MinimalRouteSignal("render_collapsed")' in _h and '_MinimalRouteSignal("plan_collapsed")' in _h
     assert "zero-reject defers to the" in _h, \
         "the fast-check must DEFER (not route) under the flag — the conservatism invariant"
     # every route site is flag-guarded; flag off keeps today's raises
@@ -5545,9 +5578,17 @@ def _zero_reject_wiring():
 @check("PROGRESSIVE TERMINAL SEAM + BAR REDESIGN (Zac ruling 1, 2026-07-25): (b-race) the publisher's every input/output lives inside work_dir, so the handler's terminal finally must drain-or-cancel it BEFORE shutil.rmtree — success path (finalize requested) gets a bounded 120s drain so the last chunk transcodes finish cleanly; anything else (or drain timeout) is a DELIBERATE cancel: quiet worker exit (never the loud _fail), progressive_cancelled ledger, payload stamped superseded. (a) a preview is NEVER servable as a terminal state: finalize stamps payload final=true, cancel stamps superseded=true, and ONLY stamped payloads bypass _persist_preview's terminal status fence. CERT bars: FINAL byte-identical under a baseline-vs-baseline2 DETERMINISM CONTROL (names render_nondeterministic vs progressive_leg_perturbs_render honestly); PREVIEW relaxed to SSIM>=0.999 vs final (RELAX BAR — separate -bf 0 encode, replaced by final); terminal_state asserts result.hls_manifest_url points at the final ladder.")
 def _progressive_terminal_seam():
     _h = open("handler.py").read()
-    # early init so every path reaching the finally can reference the handle
-    assert "_prog_pub = None         # progressive publisher handle; the terminal seam drains it" in _h, \
-        "_prog_pub must init beside work_dir creation (pre-TH-tail paths reach the finally)"
+    # early init so every path reaching the finally can reference the handle. The
+    # publisher now lives in render_stage() (Phase 1 extraction); a 1-cell holder
+    # carries it back so the finally drains it even if render_stage RAISES
+    # (INTEGRITY_TRIP etc.) — a plain return would leave the handle unbound on the
+    # exception path and leak the publisher under the terminal rmtree.
+    assert "_prog_pub_cell = [None]" in _h, \
+        "_prog_pub_cell must init early in handler (every path reaching the finally references it)"
+    assert "_prog_pub_cell[0] = ProgressivePublisher(" in _h, \
+        "render_stage must write the publisher INTO the cell at creation (exception-safe drain)"
+    assert "_prog_pub = _prog_pub_cell[0]" in _h, \
+        "the terminal seam must read the publisher from the cell before draining"
     # the seam sits inside the terminal finally BEFORE work_dir teardown
     _fin = _h.find("PROGRESSIVE TERMINAL SEAM (Zac ruling 1b")
     assert _fin != -1, "terminal seam block missing"
@@ -6062,7 +6103,7 @@ def _recipe_wall_budget():
     assert _dl >= H._RECIPE_WALL_MIN_BUDGET_S >= 600.0, "budget floor must clear a clean pass's recipe-start"
     assert H._RECIPE_WALL_END_RESERVE_S >= 480.0, "tail reserve must absorb one 480s in-flight client-timeout"
     # _MODAL_FN_TIMEOUT_S must track the ACTUAL run_pipeline_bg timeout (drift guard)
-    _t = _re.search(r"timeout=(\d+), retries=2, cpu=64, memory=131072", open("modal_app.py").read())
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=49152", open("modal_app.py").read())
     assert _t and int(_t.group(1)) == int(H._MODAL_FN_TIMEOUT_S), \
         f"_MODAL_FN_TIMEOUT_S ({H._MODAL_FN_TIMEOUT_S}) must match run_pipeline_bg timeout ({_t.group(1) if _t else '?'})"
     # wiring: threaded into the internal retry-stop, the repair loop-top, and the caller
@@ -6237,7 +6278,7 @@ def _spawn_refactor_phase3():
     _m = open("modal_app.py").read()
     # run_pipeline_bg: a plain retriable function that delivers completion
     assert "def run_pipeline_bg(" in _m, "run_pipeline_bg missing"
-    assert "retries=2" in _m, "run_pipeline_bg must be retriable"
+    assert "retries=0" in _m, "run_pipeline_bg retries pinned to 0 (EMERGENCY cost cut 2026-07-30 — a failing job billed up to 3x; restore to 2 post-fix)"
     assert "/api/modal-complete" in _m and "modal.current_function_call_id()" in _m, \
         "completion POST (with the call_id) missing"
     # run_job flag-gated OFF by default → deploy is inert until the flag flips
@@ -6257,6 +6298,50 @@ def _spawn_refactor_phase3():
     assert '"edit_recipe": result_payload.get("edit_recipe")' in _h, "re-edit hydration missing"
     for _f in ("transcript", "analysis_data", "resolved_broll", "render_version", "change_summary"):
         assert f'"{_f}": result_payload.get("{_f}")' in _h, f"hydration field {_f} missing"
+
+
+@check("COST split Phase 0 — cls-demotion / SPAWN_MODE COUPLING: PromptlyWorker is demoted to cpu<64 (pure DISPATCHER — run_job spawns run_pipeline_bg under SPAWN_MODE=1 and never renders), which stopped the ~$700/mo iOS editor-open warmup leak (the warmup endpoint provisions THIS container). SAFE ONLY while SPAWN_MODE=1: the sync fallback (self._handler at run_job) would render the FULL pipeline on the small dispatcher and OOM/timeout if the flag flipped to 0. This gate FAILS if the cls is demoted without the SPAWN_MODE=1 run_job gate present — so a future cpu-raise or a silent flag-flip (this project has flipped SPAWN_MODE before) can't reintroduce the landmine. The canonical live VALUE (=1) is separately enforced by _secret_canonical_values.")
+def _cls_demotion_spawn_mode_coupling():
+    import re as _re
+    _m = open("modal_app.py").read()
+    _idx = _m.find("class PromptlyWorker")
+    assert _idx > 0, "PromptlyWorker class missing"
+    _dec = _m.rfind("@app.cls(", 0, _idx)
+    assert _dec > 0, "PromptlyWorker @app.cls decorator missing"
+    _block = _m[_dec:_idx]
+    _cpu = _re.search(r"cpu=(\d+)", _block)
+    assert _cpu, "PromptlyWorker cls cpu= missing"
+    _cls_cpu = int(_cpu.group(1))
+    if _cls_cpu < 64:
+        assert 'os.environ.get("PROMPTLY_SPAWN_MODE") == "1"' in _m, (
+            f"COUPLING VIOLATION: PromptlyWorker is cpu={_cls_cpu} (dispatcher-only) but run_job is NOT "
+            f"gated on SPAWN_MODE=1 — the sync fallback would render the full pipeline on cpu={_cls_cpu} and "
+            f"OOM/timeout. Restore cpu=64 OR keep the SPAWN_MODE=1 gate (live value enforced by _secret_canonical_values).")
+
+
+@check("MOTION BLUR production wiring (Zac 2026-07-28 quality fix): DELIVERY_FPS=30 halved every Remotion spring's frame samples (a 180ms entrance dropped ~11→~5 frames) → visible stepping across all components at once. The remedy is the guard-passed s3_sh180 blur (3 samples, 180deg shutter) enabled for REAL traffic via PROMPTLY_MOTION_BLUR — blur fills the inter-frame gap so 30fps reads like 60 — NOT reverting to 60fps (which doubles render cost mid cost-emergency). This gate FAILS if the production blur path is removed from handler.py — the SAME silent-regression class that let the 60->30 fps drop ship ungated for two days. Flag-gated: unset/'0' restores byte-identical no-blur output.")
+def _motion_blur_production_wiring():
+    _h = open("handler.py").read()
+    assert 'os.environ.get("PROMPTLY_MOTION_BLUR"' in _h, \
+        "production motion-blur flag read removed from handler.py — 30fps renders will step again"
+    assert '"samples": 3, "shutter": 180' in _h, \
+        "s3_sh180 production blur config (3 samples / 180deg shutter) missing from handler.py"
+
+
+@check("CUTTER content-word protection (Zac 2026-07-28): the cutter deleted CONTENT words like the 'Next' in 'Next question'. Root cause: _gemini_cut_span_removable clause (iii) authorized a cut from its LEFT boundary ALONE (sentence-final prev + >=0.70s pause), never inspecting the span's content — so a content word that merely OPENS a new sentence after a pause was dropped; AND Step-1 remove_words trusted every entry with no code-side validation (where the Hindi function word 'में' died). Fix: clause (iii) now requires dead air on BOTH sides (silence_after_s), Step-1 routes any untrusted-reason removal through the same gate, and per-word cut reasons are persisted for audit. This gate FAILS if any protection is stripped — the silent-regression class Zac flagged. Behavioral proof: test_cutter_content_protection.py (8 cases incl. the 3 real jobs; pure cut-logic, no Modal).")
+def _cutter_content_protection():
+    _h = open("handler.py").read()
+    assert "def _gemini_cut_span_removable(span_words, following_words, prev_word, silence_before_s, silence_after_s" in _h, \
+        "gate signature lost silence_after_s — fix #1 (both-sides dead air) removed; sentence-opener content words will be cut again"
+    assert "(silence_after_s or 0.0) >= _MIDSENTENCE_STALL_S" in _h, \
+        "clause (iii) no longer requires TRAILING dead air — a content word that opens a new sentence after a pause will be deleted again"
+    assert "_TRUSTED_CUT_REASONS" in _h and "_gemini_cut_span_removable([_w], _fw, _pw, _sb, _sa)" in _h, \
+        "Step-1 remove_words bypass reopened (fix #2) — untrusted-reason removals no longer routed through the content-word gate"
+    assert 'edit_plan["_removed_word_reasons"]' in _h, \
+        "per-word cut-reason persistence (addition #1) removed — deletions become unauditable from the DB again"
+    import os as _os
+    assert _os.path.exists("test_cutter_content_protection.py"), \
+        "cutter regression suite (addition #2) missing — the 3-real-job protection can silently return"
 
 
 @check("SECRET CANONICAL VALUES (values, not just mechanism): the promptly-lang-flags secret must carry the RIGHT values — SPAWN_MODE=1 (async spawn dispatch; sync=0 starves the ASGI loop), OUTCOME_GATE=shadow, LEVER3=1, EDIT_IN_LANGUAGE=1, SCRIPT_DENYLIST='', PLAN_CAPTURE=''. Reads the LIVE secret via an ephemeral Modal container (secret_flags_readback.py) and FAILS on any drift — so a future 'preserve the current value' sweep that bakes a regressed value (SPAWN_MODE=0) is caught HERE instead of shipping. The mechanism checks (flags not in .env(), secret attached) prove nothing can revert on a plain deploy; this proves the un-revertable value is the CORRECT one.")
@@ -6468,10 +6553,15 @@ def _render_alert_channel():
     finally:
         if _prev is not None:
             _os.environ["APP_URL"] = _prev
-    # the caller fires it ONLY for real failures — designed rejections stay silent
+    # the caller fires it ONLY for AT-FAULT failures — designed rejections AND
+    # non-actionable client-upload failures stay silent (Zac 2026-07-28). The
+    # gate now keys on _NON_ALERTING_CODES (see _alert_routing_split); UNKNOWN
+    # and every unclassified code still page (loud-failsafe).
     import inspect as _insp
     _src = _insp.getsource(handler)
-    assert "if not _designed_reject:" in _src and "_fire_render_alert(" in _src, "alert must be gated on not _designed_reject"
+    assert ('_page_operator = (classified.get("error_code") not in _NON_ALERTING_CODES)' in _src
+            and "if _page_operator:" in _src and "_fire_render_alert(" in _src), \
+        "alert must be gated on _page_operator (code not in _NON_ALERTING_CODES)"
 
 
 @check("120s cap MEASURE-IT (Zac 2026-07-11): every intake reject emits a grep-stable + S3-ledgered intake_rejected event (reason + measured source length) so the weekly table counts uploads the 2-min limit turns away; wired BEFORE the raise")
@@ -6605,8 +6695,8 @@ def _pacing_max_compress():
     W = [{"word": "a", "punctuated_word": "a", "start": 0.0, "end": 1.0},
          {"word": "b", "punctuated_word": "b", "start": 1.6, "end": 2.0},
          {"word": "c", "punctuated_word": "c", "start": 2.25, "end": 2.6}]
-    base, _ = handler.build_clips_from_words(W, [], video_duration=10.0, vad_silences=[], max_compress=False)
-    mc, _ = handler.build_clips_from_words(W, [], video_duration=10.0, vad_silences=[], max_compress=True)
+    base, _, _ = handler.build_clips_from_words(W, [], video_duration=10.0, vad_silences=[], max_compress=False)
+    mc, _, _ = handler.build_clips_from_words(W, [], video_duration=10.0, vad_silences=[], max_compress=True)
     base_dur = sum(c["source_end"] - c["source_start"] for c in base)
     mc_dur = sum(c["source_end"] - c["source_start"] for c in mc)
     assert mc_dur < base_dur, "max_compress must shorten output (removes gap silence)"
@@ -6706,8 +6796,12 @@ def _phrase_retake_detector():
     import handler
     _src = open("handler.py").read()
     # wired as the 5th detector, feeding word_removals like the other four
-    assert "retakes = detect_phrase_retake(deepgram_words)" in _src, \
+    assert "detect_phrase_retake(deepgram_words)" in _src, \
         "detect_phrase_retake must run in compute_mechanical_cuts"
+    # it now runs behind the per-word English gate (_en_cut) — the LANGUAGE WINS check
+    # proves reduplication is preserved while English/route retakes still cut.
+    assert "retakes = [d for d in detect_phrase_retake(deepgram_words) if _en_cut(d)]" in _src, \
+        "retake cuts must be filtered by the per-word English gate (_en_cut)"
     assert "word_removals = fillers + false_starts + stutters + retakes" in _src, \
         "retakes must join the mechanical word_removals set"
     # behavioral: build word dicts and exercise recall + the FP guards
@@ -6823,7 +6917,7 @@ def _within_clip_deadair():
     _dg = [{"word": "one", "punctuated_word": "one", "start": 0.0, "end": 0.5},
            {"word": "two", "punctuated_word": "two", "start": 1.5, "end": 2.0}]
     _rw = [{"after_word_index": 0, "before_word_index": 1, "reason": "dead_air"}]
-    _g, _ = handler.build_clips_from_words(_dg, _rw, video_duration=2.2,
+    _g, _, _ = handler.build_clips_from_words(_dg, _rw, video_duration=2.2,
                                            level_silences=[(0.40, 1.60)], within_clip_15ms=True)
     _half = handler._BETWEEN_WORD_GAP_S / 2.0
     # D2 reconciliation: over DEAD-FLAT silence (this fixture: -50dB floor in
@@ -6841,7 +6935,7 @@ def _within_clip_deadair():
     _arr2[int(0.40 / _hop):int(0.50 / _hop)] = -42.0
     _arr2[int(1.60 / _hop):int(2.00 / _hop)] = -20.0
     handler._AUDIO_DB_LAST = _arr2
-    _g2, _ = handler.build_clips_from_words(_dg, _rw, video_duration=2.2,
+    _g2, _, _ = handler.build_clips_from_words(_dg, _rw, video_duration=2.2,
                                             level_silences=[(0.50, 1.60)], within_clip_15ms=True)
     assert abs(_g2[0]["source_end"] - (0.50 + _half)) < 0.012, \
         f"decaying tail: clip_end must FLOOR at word_end 0.50 + gap/2, got {_g2[0]['source_end']}"
@@ -6855,7 +6949,7 @@ def _within_clip_deadair():
     handler._AUDIO_DB_LAST = _arr2
     handler._AUDIO_DB_META = {"floor": -50.0, "range": 40.0, "hop": _hop}
     handler._WITHIN_WORD_SILENCES_LAST[:] = [(1.0, 1.5)]
-    _solo, _ = handler.build_clips_from_words(
+    _solo, _, _ = handler.build_clips_from_words(
         [{"word": "you", "punctuated_word": "you", "start": 0.5, "end": 1.0}],
         [], video_duration=1.5, level_silences=[(1.0, 1.5)], within_clip_15ms=True)
     assert _solo and _solo[-1]["source_end"] >= 1.0 - 1e-6, \
@@ -6876,12 +6970,12 @@ def _within_clip_deadair():
     handler._PRESERVED_SILENCES_LAST[:] = []
     # A (Zac 2026-07-11): the linguistic gate — the split now requires
     # sentence-final context (or a >=700ms stall). Sentence-final word: splits.
-    _sp, _ = handler.build_clips_from_words(
+    _sp, _, _ = handler.build_clips_from_words(
         [{"word": "offff", "punctuated_word": "offff.", "start": 0.0, "end": 2.4}],
         [], video_duration=2.4, level_silences=[(0.8, 1.2)], within_clip_15ms=True)
     assert len(_sp) == 2, f"interior 400ms silence AFTER sentence-final punct must SPLIT, got {len(_sp)} clip(s)"
     # Mid-sentence (no punctuation), same 400ms quiet: RHYTHM — uncuttable.
-    _sp_r, _ = handler.build_clips_from_words(
+    _sp_r, _, _ = handler.build_clips_from_words(
         [{"word": "offff", "punctuated_word": "offff", "start": 0.0, "end": 2.4}],
         [], video_duration=2.4, level_silences=[(0.8, 1.2)], within_clip_15ms=True)
     assert len(_sp_r) == 1, f"mid-sentence 400ms quiet is RHYTHM — must NOT split, got {len(_sp_r)}"
@@ -6891,7 +6985,7 @@ def _within_clip_deadair():
     assert abs(_sp[1]["source_start"] - (1.2 - _half2)) < 0.012, \
         f"split piece2 must start at sound_start 1.2 - gap/2, got {_sp[1]['source_start']}"
     handler._PRESERVED_SILENCES_LAST[:] = [(0.8, 1.2)]
-    _sp2, _ = handler.build_clips_from_words(
+    _sp2, _, _ = handler.build_clips_from_words(
         [{"word": "offff", "punctuated_word": "offff", "start": 0.0, "end": 2.4}],
         [], video_duration=2.4, level_silences=[(0.8, 1.2)], within_clip_15ms=True)
     assert len(_sp2) == 1, \
@@ -7170,8 +7264,8 @@ def _item2_mg_attack_wiring():
         "standalone MG must enter via _mg_arrival_frames (value-land for value components)"
     assert "_em_af = _mg_arrival_frames(" in _src, \
         "emphasis MG must enter via _mg_arrival_frames, not the 0.25*duration guess"
-    assert "_from_frame = max(0, int(round(_out_start * source_fps)) - _mg_af)" in _src, \
-        "standalone MG must enter its arrival lead earlier (land on the anchor)"
+    assert "_from_frame = max(0, _anchor_land_frame(_out_start, source_fps) - _mg_af)" in _src, \
+        "standalone MG must enter its arrival lead earlier and land on the FLOORED anchor (see FRAME-FLOOR check)"
     assert "_mg_from_frame = max(0, _em_t_frame - _em_af)" in _src, \
         "emphasis MG must shift by the arrival lead"
     assert "int(round(_em_dur * source_fps * 0.25))" not in _src, "the 0.25*duration guess must be gone"
@@ -7218,6 +7312,132 @@ def _mg_value_landing():
         _cont = _h._mg_attack_frames(_t, 60)
         assert _val > _cont, \
             f"{_t} value-land ({_val}f) must exceed the container attack ({_cont}f) — else the value still lands late"
+
+
+def _mg_entrance_fingerprint():
+    """Deterministic hash over every MG entrance-timing PRIMITIVE — the shared
+    useMGPhase curve + timing.ts (full), and per component only the lines that
+    define animation timing (spring damping/mass/stiffness, enterFrames,
+    ENTRANCE_FRAMES, interpolate/Sequence). Styling (colors, layout, fonts) is
+    excluded, so a cosmetic edit does NOT trip it but any move that could shift
+    the measured attack DOES. MUST match handler._mg_entrance_fingerprint's
+    intent — this is the single source of truth for the fingerprint algorithm."""
+    import hashlib as _hl, os as _os, re as _re2, glob as _glob
+    _root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                          "src", "remotion", "src", "motion-graphics")
+    _tok = _re2.compile(r"spring\(|interpolate\(|damping|stiffness|mass|enterFrames|"
+                        r"exitFrames|ENTRANCE_FRAMES|defaultEnterFrames|useMGPhase|"
+                        r"Easing|<Sequence|from=\{|durationInFrames")
+    _parts = []
+    for _shared in ("shared/useMGPhase.ts", "shared/timing.ts"):
+        _p = _os.path.join(_root, _shared)
+        if _os.path.exists(_p):
+            _parts.append(_shared + "::" + open(_p, encoding="utf-8").read().strip())
+    for _tsx in sorted(_glob.glob(_os.path.join(_root, "**", "*.tsx"), recursive=True)):
+        _rel = _os.path.relpath(_tsx, _root)
+        _lines = [ln.strip() for ln in open(_tsx, encoding="utf-8").read().splitlines() if _tok.search(ln)]
+        if _lines:
+            _parts.append(_rel + "::" + "\n".join(_lines))
+    return "sha256:" + _hl.sha256("\n====\n".join(_parts).encode("utf-8")).hexdigest()
+
+
+@check("MG ATTACK TABLE ANTI-DRIFT (Zac 2026-07-28): _MG_ATTACK_MS is a MEASURED table (mg-attack-battery renders each MG entrance; the settle/container-arrival ms is read off the presence curve). Unlike _MG_VALUE_LAND_FRAMES — which the gate above pins to the TSX interpolate range it reads directly — a measured table cannot be re-derived from one readable constant, so it would rot silently the instant an entrance config changed, reintroducing the late-payoff bug invisibly. This gate fingerprints every MG entrance-timing primitive (useMGPhase curve, spring damping/mass/stiffness, enterFrames, ENTRANCE_FRAMES, interpolate/Sequence) and FAILS the deploy if it moves — forcing a battery re-measure. The SNAP/SETTLE/GLIDE motion-token work changes exactly these configs, so this is the guard that keeps the back-timing honest across it. It also asserts every battery-measured type carries a table entry, so a NEW component can't ship unmeasured.")
+def _mg_attack_antidrift():
+    import handler as _h
+    _live = _mg_entrance_fingerprint()
+    assert _live == _h._MG_ATTACK_FINGERPRINT, (
+        "MG entrance configs changed — the MEASURED _MG_ATTACK_MS attack table is likely STALE, "
+        "and the back-timing would silently reintroduce late payoffs.\n"
+        f"  stored: {_h._MG_ATTACK_FINGERPRINT}\n  live:   {_live}\n"
+        "  FIX (do NOT just paste the live value): re-run\n"
+        "    node src/remotion/mg-attack-battery.mjs <out>\n"
+        "    python3 src/remotion/measure_mg_attack.py <out> 60\n"
+        "  reconcile _MG_ATTACK_MS to the new settle/container-arrival ms, THEN set\n"
+        f"    _MG_ATTACK_FINGERPRINT = \"{_live}\"")
+
+    # completeness: every type the battery renders must have an attack entry (or be
+    # a known blank-prop probe that intentionally falls back to the default).
+    import os as _os, re as _re2
+    _battery = open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                  "src", "remotion", "mg-attack-battery.mjs"), encoding="utf-8").read()
+    _types_blob = _battery[_battery.index("const TYPES = {"):_battery.index("};", _battery.index("const TYPES = {"))]
+    _battery_types = set(_re2.findall(r"^\s*([A-Z][A-Za-z0-9]+):\s*\{", _types_blob, _re2.M))
+    _known_blank = {"MouseDrag", "PillCluster"}   # probe props render blank; documented → default
+    _missing = _battery_types - set(_h._MG_ATTACK_MS) - _known_blank
+    assert not _missing, f"battery renders {_missing} but _MG_ATTACK_MS has no measured entry (ships unmeasured)"
+
+
+@check("FRAME-FLOOR payoff anchors (Zac 2026-07-28): a payoff LANDING (an MG pop, a zoom peak) quantizes round-EARLY (floor), never round-nearest — one frame early reads on-time (the move completes as the word arrives), one frame late reads mistimed. It only moves the sub-frame ≥0.5 cases (the ones that were rounding UP into lateness); already-early landings are byte-identical. MG: both placement sites land via _anchor_land_frame. Zoom: all 7 components' eventStart/stage-peak use msToFramesFloor (eventEnd stays round). Captions keep their OPPOSITE never-EARLY ceil — msToFramesFloor must never appear under captions/.")
+def _frame_floor_payoff():
+    import handler as _h, glob as _g
+    _src = open("handler.py").read()
+    # MG — both placement sites land on the floored anchor frame
+    assert "_anchor_land_frame(_out_start, source_fps)" in _src, "standalone MG must land via _anchor_land_frame"
+    assert "_em_t_frame = _anchor_land_frame(_em_t_out, source_fps)" in _src, "emphasis MG must land via _anchor_land_frame"
+    # the helper is a floor (never-late) — round-up case must floor, whole frame unchanged
+    assert _h._anchor_land_frame(1.02, 30) == 30 and _h._anchor_land_frame(1.0, 30) == 30, \
+        "_anchor_land_frame must floor (never round-nearest)"
+    # zoom — the floor variant exists and is a Math.floor; the round msToFrames stays for eventEnd
+    _zt = open("src/remotion/src/zoom/shared/timing.ts").read()
+    assert "export function msToFramesFloor" in _zt and "Math.floor((ms / 1000) * fps)" in _zt, \
+        "zoom msToFramesFloor missing/altered"
+    for _name in ("DepthPull", "FocusWindow", "SmoothPush", "LetterboxPush", "SnapReframe", "StepZoom", "StagedPush"):
+        _c = open(f"src/remotion/src/zoom/{_name}/{_name}.tsx").read()
+        assert "msToFramesFloor(" in _c, f"{_name} must floor its payoff landing (eventStart/stage peak)"
+        assert "const eventStart = msToFrames(" not in _c, f"{_name} eventStart still round-nearest — must floor"
+    # captions keep the OPPOSITE invariant (never-early ceil) — the payoff floor must not leak in
+    for _cf in _g.glob("src/remotion/src/captions/**/*.ts*", recursive=True):
+        assert "msToFramesFloor" not in open(_cf).read(), \
+            f"{_cf}: captions must keep their never-EARLY ceil, not the payoff floor"
+
+
+@check("CAPTION SEQUENCE-ALIGNER (Zac 2026-07-28, DARK PROMPTLY_CAPTION_ALIGN): Gemini's CORRECT words marry onto Deepgram TIMING slots — caption-only, cuts untouched (the projection is index-coupled; text is corrected in place on existing slots). Thresholds DERIVED from cert_caption_align_derive (6 clips): the discriminant is TOKEN COUNT not a time gap (corrections were 1-2 tokens, dropped spans 11 & 60, all trailing), plus an align-rate floor (the song aligned 0.0). Flag defaults OFF; refuses below the floor; a dropped span (open-ended, or >token-ceiling) is OMITTED, never fabricated across the gap (the Hindi-30s catastrophe); English is skipped at the call site (Deepgram already 5/5).")
+def _caption_aligner_gate():
+    import handler as _h, os as _os
+    # derived thresholds pinned — a silent retune fails the gate
+    assert _h._CAPTION_ALIGN_MIN_RATE == 0.30, "align-rate floor retuned"
+    assert _h._CAPTION_ALIGN_MAX_INSERT_TOKENS == 3, "insert token ceiling retuned"
+    assert _h._CAPTION_ALIGN_MAX_INSERT_GAP_S == 4.0, "insert gap backstop retuned"
+    # flag DARK by default; =1 enables
+    _saved = _os.environ.pop("PROMPTLY_CAPTION_ALIGN", None)
+    try:
+        assert _h._caption_align_enabled() is False, "flag must default OFF (dark)"
+        _os.environ["PROMPTLY_CAPTION_ALIGN"] = "1"
+        assert _h._caption_align_enabled() is True, "=1 must enable"
+    finally:
+        _os.environ.pop("PROMPTLY_CAPTION_ALIGN", None)
+        if _saved is not None:
+            _os.environ["PROMPTLY_CAPTION_ALIGN"] = _saved
+
+    def _W(w, s, e):
+        return {"word": w, "punctuated_word": w, "start": s, "end": e}
+    # 1->1 replace corrects the slot; equal slots keep Deepgram's (already-correct) surface
+    mp, meta = _h._corrected_text_by_index([_W("buy", 0, .3), _W("the", .3, .5), _W("cat", .5, .8)], ["biophilia", "the", "cat"])
+    assert mp.get(0) == "biophilia" and 1 not in mp and 2 not in mp and not meta["refused"]
+    # 2->1 replace (with an equal anchor so it clears the align floor): surplus
+    # Deepgram slot blanked (caption builder skips empties)
+    mp, _m = _h._corrected_text_by_index([_W("buy", 0, .3), _W("fill", .3, .6), _W("it", .6, .8)], ["biophilia", "it"])
+    assert mp.get(0) == "biophilia" and mp.get(1) == "" and not _m["refused"]
+    # over-token-ceiling interior insert = dropped span, none of it fabricated
+    _big = ["a"] + [f"w{_i}" for _i in range(6)] + ["b"]
+    mp, meta = _h._corrected_text_by_index([_W("a", 0, .2), _W("b", 5, 5.2)], _big)
+    assert not any("w0" in str(_v) for _v in mp.values()) and any(d["kind"] == "over_ceiling" for d in meta["dropped_spans"])
+    # trailing insert (the Hindi-30s shape) omitted, never fabricated
+    mp, meta = _h._corrected_text_by_index([_W("a", 0, .2)], ["a", "x", "y", "z"])
+    assert mp == {} and any(d["kind"] == "open_ended" for d in meta["dropped_spans"])
+    # refuse below the align floor (garbage text — nothing to anchor)
+    mp, meta = _h._corrected_text_by_index([_W("aa", 0, .2), _W("bb", .2, .4), _W("cc", .4, .6)], ["xx", "yy", "zz"])
+    assert mp == {} and meta["refused"]
+    # apply overlays by _word_index, caption-only (mutates projected caption words only)
+    _pw = [{"_word_index": 0, "word": "buy", "punctuated_word": "buy"},
+           {"_word_index": 1, "word": "the", "punctuated_word": "the"}]
+    _h._apply_caption_alignment(_pw, {0: "biophilia"})
+    assert _pw[0]["punctuated_word"] == "biophilia" and _pw[1]["punctuated_word"] == "the"
+    # WIRING: present at the caption site, gated + cached + English-skipped + timing untouched
+    _src = open("handler.py").read()
+    assert "_apply_caption_alignment(_caption_words, _cal_map)" in _src, "aligner not wired into the caption path"
+    assert 'if _det_lang != "en":' in _src, "English clips must be skipped (Deepgram already 5/5)"
+    assert "_gemini_correct_transcript(prepare_audio_for_deepgram(source_path))" in _src, "correction call missing at caption site"
 
 
 @check("SFX ONE-CLOCK, NO GATE (Zac 2026-07-15): the mid-phrase sound restriction is DELETED — no measurability gate, no swell fallback, no ⟨mid-phrase⟩ education. A sound (sharp or soft, mid-phrase or not) fires on its emphasis word's shared-clock onset — the SAME _audible_word_onset_s the zoom/staged-push/captions ride for every word. The 54-64ms that justified the gate was the DELETED re-detector's error, not the placement's; the placement clock is the energy onset (±5ms, measured) — the ground truth the whole pipeline uses. Removed-not-skipped: the gate/fallback/education are GONE, not bypassed.")
@@ -7298,7 +7518,14 @@ def _findings_placement_and_content_cut():
         "'to edit' in a flowing sentence must be KEPT (the bug)"
     assert _h._gemini_cut_span_removable([_W("um"), _W("uh")], [_W("so")], _W("okay."), 0.0) is True, "filler removable"
     assert _h._gemini_cut_span_removable([_W("the"), _W("cat")], [_W("the"), _W("cat")], _W("and"), 0.0) is True, "verbatim restart removable"
-    assert _h._gemini_cut_span_removable([_W("anyway")], [_W("so")], _W("done."), 0.85) is True, "dead-air-bounded removable"
+    # Zac 2026-07-28: clause (iii) now requires dead air on BOTH sides. A left-only
+    # dead-air boundary — a content word opening a new sentence, flowing INTO the
+    # following word — is KEPT; only a span stranded between two >=0.70s stalls is
+    # a removable fragment. (This is the "Next"/"So" defect fix.)
+    assert _h._gemini_cut_span_removable([_W("anyway")], [_W("so")], _W("done."), 0.85, 0.03) is False, \
+        "left-only dead-air (content flows into 'so') must be KEPT under the both-sides rule"
+    assert _h._gemini_cut_span_removable([_W("anyway")], [_W("so")], _W("done."), 0.85, 0.90) is True, \
+        "genuinely isolated fragment (dead air on BOTH sides) still removable"
     # Finding 1 — cross-type collision MOVE-NOT-DROP (Zac ruled: relocation, a legibility invariant)
     assert "def _apply_composed_accent_bands(" in _src, "the move-not-drop collision resolver must exist"
     assert "_apply_composed_accent_bands(" in _src and "cross_type_collision_move" in _src, \
@@ -8670,6 +8897,49 @@ def _shape_abort_gate():
     _shape_branch = _caller[_caller.index("shape-abort "):][:600]
     assert "repetition-loop degeneration" in _shape_branch, \
         "shape aborts must keep the L3 degen class string (re-roll budget)"
+
+@check("LANGUAGE WINS (Zac 2026-07-28, fewer-cuts-safe): (1) native-comma recognition ، 、 in _COMMA_CHARS + _ends_with_comma; (2) per-word English gate — stutter/false_start/retake only cut English-eligible words (non-English reduplication like 'jalan jalan' preserved, English stutter still cut, an UNSET/route tag stays eligible); (3) grapheme-cluster caption wrap in fit.ts (Devanagari/Tamil/Thai conjuncts + ZWJ emoji never split mid-cluster).")
+def _language_wins_gate():
+    import handler as _h
+
+    # (1) native commas are recognized as commas, in-language.
+    assert "," in _h._COMMA_CHARS and "،" in _h._COMMA_CHARS and "、" in _h._COMMA_CHARS, \
+        f"_COMMA_CHARS missing a native glyph: {_h._COMMA_CHARS!r}"
+    assert _h._ends_with_comma({"punctuated_word": "جملة،"}) is True, "Arabic comma not recognized"
+    assert _h._ends_with_comma({"punctuated_word": "言葉、"}) is True, "CJK comma not recognized"
+    assert _h._ends_with_comma({"punctuated_word": "word."}) is False, "period must not read as comma"
+
+    # (2) per-word English gate — the tag decides eligibility.
+    assert _h._is_english_word({"language": "en"}) is True
+    assert _h._is_english_word({"language": "en-US"}) is True
+    assert _h._is_english_word({"language": None}) is True, "unset tag (single-language route) must stay eligible"
+    assert _h._is_english_word({}) is True
+    for _lg in ("hi", "ar", "id", "ta", "bn"):
+        assert _h._is_english_word({"language": _lg}) is False, f"{_lg} must skip the English-shaped detectors"
+
+    # end-to-end through the real detector aggregation: reduplication preserved,
+    # English stutter still cut, an untagged repeat still cut (route path unchanged).
+    def _idx(words):
+        return {d.get("word_index") for d in _h.compute_mechanical_cuts(words).get("remove_words", [])}
+    _redup = [{"language": "id", "word": "jalan", "punctuated_word": "jalan", "start": 0.0, "end": 0.3, "speaker": 0},
+              {"language": "id", "word": "jalan", "punctuated_word": "jalan", "start": 0.3, "end": 0.6, "speaker": 0}]
+    assert 0 not in _idx(_redup), "non-English reduplication was cut as a stutter"
+    _en = [{"language": "en", "word": "the", "punctuated_word": "the", "start": 0.0, "end": 0.2, "speaker": 0},
+           {"language": "en", "word": "the", "punctuated_word": "the", "start": 0.2, "end": 0.4, "speaker": 0},
+           {"language": "en", "word": "cat", "punctuated_word": "cat", "start": 0.4, "end": 0.7, "speaker": 0}]
+    assert 0 in _idx(_en), "English stutter must still be cut"
+    _route = [{"language": None, "word": "the", "punctuated_word": "the", "start": 0.0, "end": 0.2, "speaker": 0},
+              {"language": None, "word": "the", "punctuated_word": "the", "start": 0.2, "end": 0.4, "speaker": 0},
+              {"language": None, "word": "cat", "punctuated_word": "cat", "start": 0.4, "end": 0.7, "speaker": 0}]
+    assert 0 in _idx(_route), "untagged (route) stutter must still be cut — no English regression"
+
+    # (3) grapheme-cluster caption wrap in the Remotion fit helper.
+    _fit = open("src/remotion/src/captions/shared/fit.ts").read()
+    for _tok in ("Intl", "Segmenter", "granularity", "grapheme", "toGraphemes"):
+        assert _tok in _fit, f"grapheme segmenter token '{_tok}' missing from fit.ts"
+    assert "for (const ch of toGraphemes(word))" in _fit, \
+        "charwrapWord must iterate grapheme clusters, not code points"
+
 
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")

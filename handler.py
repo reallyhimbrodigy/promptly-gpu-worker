@@ -7690,7 +7690,16 @@ def _cut_lemma(w):
     return "".join(ch for ch in str((w or {}).get("word") or "").lower() if ch.isalnum())
 
 
-def _gemini_cut_span_removable(span_words, following_words, prev_word, silence_before_s):
+# Native comma glyphs — Deepgram punctuates a non-English transcript with that
+# script's own comma: ، (U+060C Arabic) and 、 (U+3001 CJK ideographic). Treating
+# them as commas keeps every comma-gated rule working IN-LANGUAGE (filler
+# comma-wrap, dead-air COMMA_END_THRESHOLD selection, retake list-continuation
+# guard) instead of silently falling through to the mid-clause path. Additive,
+# fewer-cuts-safe. (Zac 2026-07-28.)
+_COMMA_CHARS = (",", "،", "、")
+
+
+def _gemini_cut_span_removable(span_words, following_words, prev_word, silence_before_s, silence_after_s=0.0):
     """CONTENT-WORD PROTECTION (Zac 2026-07-12): a Gemini cut_refinement ('YOUR CUT
     PASS') removed the content phrase "to edit" from "It took five minutes to edit.
     I did nothing." — a subjective 'drag/tighten' judgment nothing validated. A
@@ -7698,8 +7707,10 @@ def _gemini_cut_span_removable(span_words, following_words, prev_word, silence_b
       (i)  every word is filler/hesitation (um/uh/like/you know…), OR
       (ii) it is a verbatim RESTART — its lemmas prefix the following words (an
            abandoned start the speaker re-did), OR
-      (iii) it sits on a real dead-air boundary — the prior word is sentence-final
-            AND a >= _MIDSENTENCE_STALL_S (0.70s) pause precedes the span.
+      (iii) it is an ISOLATED dead-air fragment — the prior word is sentence-final
+            AND >= _MIDSENTENCE_STALL_S (0.70s) dead air on BOTH sides (before AND
+            after the span), so a content word that merely OPENS a new sentence
+            (dead air before, flows into the following word) is KEPT.
     A mid-sentence CONTENT span with none of these is a WRONG cut → return False so
     the words are kept. Content words in a flowing sentence are never removable."""
     if not span_words:
@@ -7713,8 +7724,17 @@ def _gemini_cut_span_removable(span_words, following_words, prev_word, silence_b
     _foll = [_cut_lemma(w) for w in (following_words or [])][:len(_span)]
     if _span and _span == _foll:
         return True
-    # (iii) true dead air on a sentence-final boundary
-    if _sentence_final_word(prev_word) and (silence_before_s or 0.0) >= _MIDSENTENCE_STALL_S:
+    # (iii) ISOLATED dead-air fragment — dead air on BOTH sides (Zac 2026-07-28 fix).
+    # The old check accepted ANY span whose LEFT boundary was sentence-final + a
+    # >=0.70s pause, WITHOUT inspecting the span's content — so a content word that
+    # merely OPENS a new sentence after a pause ("...that's it. [0.9s] Next question")
+    # was deleted, indistinguishable to this gate from a dangling dead-air fragment.
+    # A genuine fragment is stranded between two stalls; a sentence-opener FLOWS INTO
+    # the following word (dead air BEFORE, none AFTER). Require dead air on BOTH sides
+    # so "Next"/"So"/etc. that modify the following word are KEPT — when in doubt, keep.
+    if (_sentence_final_word(prev_word)
+            and (silence_before_s or 0.0) >= _MIDSENTENCE_STALL_S
+            and (silence_after_s or 0.0) >= _MIDSENTENCE_STALL_S):
         return True
     return False
 
@@ -8411,7 +8431,7 @@ def detect_dead_air(
         ).rstrip()
         if _prev_text.endswith((".", "?", "!")):
             _threshold = SENTENCE_END_THRESHOLD
-        elif _prev_text.endswith(","):
+        elif _prev_text.endswith(_COMMA_CHARS):
             _threshold = COMMA_END_THRESHOLD
         else:
             _threshold = MID_CLAUSE_THRESHOLD
@@ -8425,9 +8445,10 @@ def detect_dead_air(
 
 
 def _ends_with_comma(word: dict) -> bool:
-    """True when the punctuated form of the word ends with a comma."""
+    """True when the punctuated form of the word ends with a comma — the ASCII
+    comma or a native script comma (، 、), see _COMMA_CHARS."""
     text = str(word.get("punctuated_word") or word.get("word") or "").rstrip()
-    return text.endswith(",")
+    return text.endswith(_COMMA_CHARS)
 
 
 def detect_filler(words: list) -> list:
@@ -8491,6 +8512,24 @@ def detect_filler(words: list) -> list:
                 out.append({"word_index": i, "reason": "filler"})
 
     return out
+
+
+def _is_english_word(w: dict) -> bool:
+    """The per-word language tag (Deepgram language=multi) decides whether the
+    English-shaped structural detectors are allowed to earn a cut. 'en'/'en-US'
+    — or UNSET (None/'' when the tag isn't populated, e.g. a single-language
+    route) — counts as English-eligible; any other populated tag ('hi','ar',
+    'id','ta',…) does not.
+
+    Why gate: word repetition is grammatical REDUPLICATION in many languages
+    (Indonesian 'jalan-jalan', Tamil, Swahili, Malay), a trailing hyphen is not
+    a Deepgram false-start fragment outside English, and the retake stem/anaphora
+    heuristics are English-tuned. Firing them on non-English text deletes real
+    words. Fewer cuts is the safe direction — a non-English tag skips the cut,
+    never the reverse. English words inside a code-switched (multi) clip are
+    tagged 'en' and STILL get cut. (Zac 2026-07-28.)"""
+    lg = str((w or {}).get("language") or "").split("-")[0].lower()
+    return lg == "" or lg == "en"
 
 
 def detect_false_start(words: list) -> list:
@@ -8705,10 +8744,22 @@ def compute_mechanical_cuts(
     if not deepgram_words:
         return {"notes": "", "remove_words": [], "pacing": "fast"}
 
+    # Per-word language gate (Zac 2026-07-28): the three English-shaped
+    # structural detectors may only cut a word tagged English-eligible (see
+    # _is_english_word). detect_filler is NOT gated — its hesitation regex is
+    # ASCII-only (never matches non-Latin script) and its parenthetical classes
+    # are already comma-wrapped English lemmas, so it is self-limiting. Filtering
+    # by the CUT word's tag is fewer-cuts-safe: a non-English cut is dropped, an
+    # English cut inside a code-switched clip survives.
+    def _en_cut(d):
+        wi = d.get("word_index")
+        return (isinstance(wi, int) and 0 <= wi < len(deepgram_words)
+                and _is_english_word(deepgram_words[wi]))
+
     fillers = detect_filler(deepgram_words)
-    false_starts = detect_false_start(deepgram_words)
-    stutters = detect_stutter(deepgram_words)
-    retakes = detect_phrase_retake(deepgram_words)
+    false_starts = [d for d in detect_false_start(deepgram_words) if _en_cut(d)]
+    stutters = [d for d in detect_stutter(deepgram_words) if _en_cut(d)]
+    retakes = [d for d in detect_phrase_retake(deepgram_words) if _en_cut(d)]
     word_removals = fillers + false_starts + stutters + retakes
 
     removed_so_far: set = set()
@@ -12797,7 +12848,15 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     _cw_gap = ((float(_cw_span[0].get("start") or 0.0)
                                 - float((_cw_prev or {}).get("end") or 0.0))
                                if (_cw_span and _cw_prev) else 0.0)
-                    if not _gemini_cut_span_removable(_cw_span, _cw_foll, _cw_prev, _cw_gap):
+                    # gap AFTER the span (to the next transcript word) — clause (iii)
+                    # now requires dead air on BOTH sides so a sentence-opener that
+                    # flows into the following word is kept. No following word (end of
+                    # transcript) → 0.0 (conservative: never treat the last word as a
+                    # cuttable dead-air fragment).
+                    _cw_gap_after = ((float(_cw_foll[0].get("start") or 0.0)
+                                      - float(_cw_span[-1].get("end") or 0.0))
+                                     if (_cw_span and _cw_foll) else 0.0)
+                    if not _gemini_cut_span_removable(_cw_span, _cw_foll, _cw_prev, _cw_gap, _cw_gap_after):
                         _record_divergence(
                             "cut_boundary",
                             {"kept_range": [_ra, _rb], "reason": _rr,
@@ -13272,7 +13331,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     f"{len(normalized_remove_words)} Gemini removals",
                     flush=True,
                 )
-                validated_cuts, _removed_word_indices = build_clips_from_words(
+                validated_cuts, _removed_word_indices, _removed_word_reasons = build_clips_from_words(
                     _dg_words, normalized_remove_words,
                     video_duration=video_duration,
                     vad_silences=list(_VAD_SILENCES_LAST),
@@ -13280,6 +13339,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     within_clip_15ms=_WITHIN_CLIP_DEADAIR,
                     level_silences=list(_LEVEL_SILENCES_LAST))
                 edit_plan["_removed_word_indices"] = sorted(_removed_word_indices or [])
+                # ADDITION #1 (Zac 2026-07-28): persist the per-word cut REASON map
+                # {word_index: reason} alongside _removed_word_indices so deletions
+                # are auditable from the DB, not only the S3 divergence ledger.
+                edit_plan["_removed_word_reasons"] = {
+                    str(_k): _v for _k, _v in (_removed_word_reasons or {}).items()}
                 _register_splits("build_clips",
                                  [float(_c.get("source_end") or 0.0)
                                   for _c in validated_cuts[:-1]], reset=True)
@@ -17691,6 +17755,25 @@ _MG_ATTACK_MS = {
 }
 _MG_ATTACK_DEFAULT_MS = 150   # median settle — unmeasured / unknown types
 
+# ── Anti-drift fingerprint for the MEASURED attack table (Zac 2026-07-28) ─────
+# _MG_ATTACK_MS is not a readable constant — it is the OUTPUT of rendering each
+# MG entrance (mg-attack-battery) and measuring settle/container-arrival. Unlike
+# _MG_VALUE_LAND_FRAMES (which validate_deploy pins to the TSX interpolate range
+# it reads directly), a measured table cannot be re-derived by the gate — so it
+# would rot silently the moment an entrance config changed, reintroducing the
+# late-payoff bug invisibly. This fingerprint hashes EVERY MG entrance-timing
+# primitive (the shared useMGPhase curve + timing.ts, plus each component's
+# spring damping/mass/stiffness, enterFrames, ENTRANCE_FRAMES, interpolate and
+# Sequence timing). validate_deploy recomputes it from the live Remotion source
+# and FAILS the deploy if it moves — forcing a battery re-measure. The
+# SNAP/SETTLE/GLIDE motion-token work will change exactly these configs, so this
+# is the guard that keeps the back-timing honest across it. REGENERATE after any
+# intended entrance change:
+#   node src/remotion/mg-attack-battery.mjs <out>
+#   python3 src/remotion/measure_mg_attack.py <out> 60   # reconcile _MG_ATTACK_MS
+#   → paste the fingerprint the gate prints into the constant below.
+_MG_ATTACK_FINGERPRINT = "sha256:655442e4378b8ab38e9d616cb52e9e699b44ca4b1bc226ff2b2f9a65579f90da"
+
 
 def _mg_attack_frames(mg_type, fps):
     """Frames the MG's entrance takes to ARRIVE (settle for pops; container-
@@ -17740,6 +17823,19 @@ def _mg_arrival_frames(mg_type, fps, props=None):
         _span = 0 if _mode == "race" else (_n - 1)  # race starts all bars together
         return _BARRACE_START + _span * _BARRACE_STAGGER + _BARRACE_GROW
     return _mg_attack_frames(mg_type, fps)
+
+
+def _anchor_land_frame(t_out_s, fps):
+    """Output frame a PAYOFF component must LAND on — FLOORED (round-early), never
+    round-nearest. A hard beat-landing (an MG pop, a zoom peak) one frame EARLY
+    reads on-time — the motion completes AS the word arrives — while one frame LATE
+    reads as a mistimed hit. Flooring only moves anchors whose sub-frame fraction
+    was rounding UP into lateness; every already-early landing is byte-identical.
+    This is the payoff-side counterpart to the caption never-EARLY ceil (opposite
+    invariant, opposite rounding) — captions must never precede the word, payoffs
+    must never trail it. The zoom uses msToFramesFloor in Remotion for the same
+    reason, so an MG + zoom on the same payoff word land coherent. (Zac 2026-07-28.)"""
+    return int(math.floor(max(0.0, float(t_out_s)) * float(fps)))
 
 
 # RMS measurement cache — populated lazily, avoids re-measuring same file
@@ -21269,11 +21365,25 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
         sorted_words = [w for w in sorted_words if w["_start"] < _vd and w["_end"] > w["_start"]]
 
     removed_indices = set()
+    # ADDITION #1 (Zac 2026-07-28): per-word cut REASON, persisted alongside
+    # _removed_word_indices so the cutter's deletions are auditable from the DB
+    # (previously the reason lived only in the S3 divergence ledger, forcing
+    # code+timing inference). index -> reason string.
+    _removal_reason_by_index: dict = {}
+    # Objective removal signals trusted without re-validation: the mechanical
+    # detectors (compute_mechanical_cuts) + the already-gated cut-refine path.
+    _TRUSTED_CUT_REASONS = frozenset({
+        "filler", "false_start", "stutter", "retake", "dead_air",
+        "located_silence", "gemini_cut", "range_remove",
+    })
 
-    # ── Step 1: Apply Gemini's remove_words ───────────────────────────────
-    # Gemini's word removal decisions are trusted. No code-side validation
-    # or rejection of filler calls — if Gemini says a word is filler, it is.
-    # If filler detection is wrong, the fix is the prompt, not code heuristics.
+    # ── Step 1: Apply remove_words (content-word protection, Zac 2026-07-28 fix #2) ──
+    # Step 1 previously trusted EVERY entry with "no code-side validation" — the
+    # hole that let a Hindi function word ("में") die with no filler/restart/dead-air
+    # justification. Trusted objective reasons (mechanical detectors + gated
+    # gemini_cut) still pass untouched; ANY other/novel reason must clear the SAME
+    # gate the cut-refine path uses (_gemini_cut_span_removable), else the word is
+    # KEPT — a deleted content word breaks the sentence; an extra one costs nothing.
     for item in remove_words or []:
         if not isinstance(item, dict):
             continue
@@ -21284,7 +21394,22 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                 continue
             if not (0 <= idx < len(sorted_words)):
                 continue
+            _rsn = str(item.get("reason") or "gemini_remove")
+            if _rsn not in _TRUSTED_CUT_REASONS:
+                _w = sorted_words[idx]
+                _pw = sorted_words[idx - 1] if idx > 0 else None
+                _fw = sorted_words[idx + 1: idx + 4]
+                _sb = (_w["_start"] - _pw["_end"]) if _pw else 0.0
+                _sa = (_fw[0]["_start"] - _w["_end"]) if _fw else 0.0
+                if not _gemini_cut_span_removable([_w], _fw, _pw, _sb, _sa):
+                    _record_divergence(
+                        "cut_boundary",
+                        {"word_index": idx, "word": _w.get("_text"), "reason": _rsn},
+                        "drop_content_word_cut",
+                        reason=f"Step-1 remove '{_rsn}' of a content word (not filler/restart/dead-air) — KEPT")
+                    continue
             removed_indices.add(idx)
+            _removal_reason_by_index[idx] = _rsn
 
     # ── Step 1b: Range removals — index-based AND legacy float-range ──────
     # Index-based form: {"after_word_index": int, "before_word_index": int,
@@ -21335,6 +21460,7 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     continue
                 if _aw < _wi < _bw:
                     removed_indices.add(_wi)
+                    _removal_reason_by_index[_wi] = _reason
                     _range_removed_count += 1
                     print(
                         f"[tighten] Word '{_w['_text']}' at {_w['_start']:.3f}s removed "
@@ -21356,6 +21482,7 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                 # Strict containment: word must be entirely inside the range
                 if _w["_start"] >= _r_start and _w["_end"] <= _r_end:
                     removed_indices.add(_w["_word_index"])
+                    _removal_reason_by_index[_w["_word_index"]] = _reason
                     _range_removed_count += 1
                     print(
                         f"[tighten] Word '{_w['_text']}' at {_w['_start']:.3f}s removed "
@@ -21456,6 +21583,7 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
             "raw_start": first_start,
             "raw_end": last_end,
             "_last_word_end": last_end,
+            "_first_word_start": first_start,  # fix #3: leading-edge word-start floor (mirror _last_word_end)
             "padded_start": first_start,
             "padded_end": last_end,
             "first_word": word_group[0]["_text"],
@@ -21692,6 +21820,23 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
             _sound_start = _first_audible(_cs, _ce)
             if _sound_start is not None:
                 _head_pad = _VIDEO_EDGE_PAD_S if _ci == 0 else _half
+                # WORD-START FLOOR (Zac 2026-07-28 fix #3): mirror the trailing
+                # _floor_we. If the clip's FIRST Deepgram word starts BEFORE the
+                # first energy-audible sample, the leading edge must NOT snap past
+                # the word onset — a soft/quiet first word (a low-spoken "Next")
+                # would otherwise be swallowed. Hold sound_start at word_start when
+                # the band [word_start, sound_start] carries speech (the same
+                # floor+10%·range test the trailing side uses); over dead-flat
+                # silence the loose Deepgram start is the artifact and the energy
+                # onset rules. Conservative by construction: only moves the edge
+                # EARLIER (keeps more of the word), never later.
+                _floor_ws = float(_rc.get("_first_word_start") or 0.0)
+                if 0.0 < _floor_ws < _sound_start:
+                    _fk_lo = max(0, int(max(_floor_ws, _sound_start - 0.25) / _hop))
+                    _fk_hi = min(_nfr, int(_sound_start / _hop))
+                    _fk_line = _AUDIO_DB_META["floor"] + 0.10 * _AUDIO_DB_META["range"]
+                    if _fk_hi > _fk_lo and float(_np.mean(_db[_fk_lo:_fk_hi])) > _fk_line:
+                        _sound_start = _floor_ws
                 _new_cs = _sound_start - _head_pad
                 if _cs + 0.001 < _new_cs < _ce - 0.05:
                     _rc["padded_start"] = _new_cs
@@ -21873,7 +22018,7 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
 
     # Caption projection / SFX snapping consume this set so they walk the
     # same kept-word list the splicer used.
-    return final_clips, set(removed_indices)
+    return final_clips, set(removed_indices), _removal_reason_by_index
 
 
 def build_clip_time_map(clip_start, clip_end, clip_speed, fps=60):
@@ -22019,6 +22164,8 @@ _RENDER_TRANSIENT_KEYS = {
                      # input_data every render → transient, never persisted in the recipe
     "_caption_max_words",  # caption phrase-chunk override (caption_max_words), recomputed
                            # from input_data every render → transient, never persisted
+    "_caption_align_map",  # PROMPTLY_CAPTION_ALIGN: Gemini-corrected caption text map,
+                           # recomputed (once, cached) every render → transient, never persisted
 }
 
 
@@ -22116,6 +22263,168 @@ def _apply_caption_text_overrides(projected_words, overrides):
             _out.append(projected_words[_i])
             _i += 1
     return _out
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CAPTION SEQUENCE-ALIGNER (DARK behind PROMPTLY_CAPTION_ALIGN, default OFF)
+# ═══════════════════════════════════════════════════════════════════════════
+# Deepgram is the WHEN (word timing) and the baseline text; for a language whose
+# TEXT it transcribes poorly (Hindi 2-3/5, Punjabi garbage) Gemini supplies the
+# CORRECT words. This marries Gemini's corrected tokens onto Deepgram's timing
+# slots by edit distance so each corrected caption word inherits its slot's
+# timing — CAPTION-ONLY; cuts stay on the untouched Deepgram indices/timing.
+#
+# The measured Gemini-vs-Deepgram timestamp drift (unusable as a clock) is why
+# timing stays Deepgram's; this only borrows Gemini's TEXT. Thresholds DERIVED
+# from the divergence data (cert_caption_align_derive, 6 clips), NOT guessed:
+#   - corrections (interior inserts) were ~nonexistent (n=1, 0.0s gap); the real
+#     divergence is REPLACE (wrong word, right slot). Dropped spans were 11 & 60
+#     tokens, all TRAILING (open-ended). So the discriminant is TOKEN COUNT
+#     (valley [2,11]), not a time gap (a dropped run has normal word density).
+#   - align_rate 0.0 on the song → nothing to anchor → refuse.
+_CAPTION_ALIGN_MIN_RATE = 0.30          # below this, Deepgram text too garbage to anchor → refuse
+_CAPTION_ALIGN_MAX_INSERT_TOKENS = 3    # interior insert run > this = dropped span (valley [2,11])
+_CAPTION_ALIGN_MAX_INSERT_GAP_S = 4.0   # backstop above the largest legit multi-word acoustic run (3.63s)
+
+
+def _caption_align_enabled(edit_plan=None) -> bool:
+    try:
+        if edit_plan is not None and edit_plan.get("_caption_align_test") is not None:
+            return bool(edit_plan.get("_caption_align_test"))
+    except Exception:
+        pass
+    return os.environ.get("PROMPTLY_CAPTION_ALIGN", "") == "1"
+
+
+def _cap_norm(s):
+    return "".join(ch for ch in str(s or "").lower() if ch.isalnum())
+
+
+def align_caption_tokens(dg_words, gemini_tokens):
+    """FULL aligner (reference + gate): marry Gemini's corrected tokens onto
+    Deepgram timing slots. Returns (tokens, dropped_spans). equal→inherit slot
+    timing; replace→split the matched slot SPAN across the M tokens; insert→
+    interpolate across the neighbour gap IFF n_tokens<=CEIL and gap<=CEIL_GAP,
+    else it is a DROPPED SPAN and is omitted; open-ended (leading/trailing)
+    inserts are always omitted; delete→omit. Read-only over dg_words."""
+    import difflib
+    dgt = [_cap_norm(w.get("word")) for w in dg_words]
+    gmt = [_cap_norm(t) for t in gemini_tokens]
+    sm = difflib.SequenceMatcher(None, dgt, gmt, autojunk=False)
+    out, dropped = [], []
+    for tag, i1, i2, j1, j2 in sm.get_opcodes():
+        if tag == "equal":
+            for k in range(i2 - i1):
+                w = dg_words[i1 + k]
+                out.append({"text": gemini_tokens[j1 + k], "start": float(w.get("start") or 0.0),
+                            "end": float(w.get("end") or 0.0), "source": "inherit"})
+        elif tag == "delete":
+            continue
+        elif tag == "replace":
+            s = float(dg_words[i1].get("start") or 0.0); e = float(dg_words[i2 - 1].get("end") or 0.0)
+            if e <= s:
+                e = s + 1e-3
+            m = j2 - j1
+            for k in range(m):
+                out.append({"text": gemini_tokens[j1 + k], "start": s + (e - s) * k / m,
+                            "end": s + (e - s) * (k + 1) / m, "source": "split"})
+        elif tag == "insert":
+            m = j2 - j1
+            left = float(dg_words[i1 - 1].get("end") or 0.0) if i1 > 0 else None
+            right = float(dg_words[i1].get("start") or 0.0) if i1 < len(dg_words) else None
+            if left is None or right is None:
+                dropped.append({"kind": "open_ended", "n": m}); continue
+            gap = right - left
+            if m > _CAPTION_ALIGN_MAX_INSERT_TOKENS or gap > _CAPTION_ALIGN_MAX_INSERT_GAP_S:
+                dropped.append({"kind": "over_ceiling", "n": m, "gap_s": round(gap, 2)}); continue
+            for k in range(m):
+                out.append({"text": gemini_tokens[j1 + k], "start": left + gap * k / m,
+                            "end": left + gap * (k + 1) / m, "source": "interp"})
+    return out, dropped
+
+
+def _corrected_text_by_index(dg_words, gemini_tokens):
+    """PRODUCTION per-slot map {source_word_index: corrected_text} — the cuts-
+    untouched wiring (the projection is index-coupled, so captions correct text
+    IN PLACE on existing slots rather than inserting new tokens). equal slots keep
+    Deepgram's already-correct surface; replace slots take Gemini's token(s)
+    (surplus Deepgram slots blank → skipped by the caption builder); a SMALL
+    interior insert rides the preceding slot; a large or open-ended insert is a
+    dropped span (omitted → coverage-gate/re-probe territory). Refuses (empty map)
+    below the align-rate floor. Returns (map, meta)."""
+    dgt = [_cap_norm(w.get("word")) for w in dg_words]
+    gmt = [_cap_norm(t) for t in gemini_tokens]
+    import difflib
+    ops = difflib.SequenceMatcher(None, dgt, gmt, autojunk=False).get_opcodes()
+    n_equal = sum(i2 - i1 for tag, i1, i2, _j1, _j2 in ops if tag == "equal")
+    rate = n_equal / max(1, min(len(dgt), len(gmt)))
+    meta = {"align_rate": round(rate, 3), "corrected_slots": 0, "dropped_spans": [], "refused": False}
+    if rate < _CAPTION_ALIGN_MIN_RATE or not gemini_tokens:
+        meta["refused"] = True
+        return {}, meta
+    mp = {}
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "replace":
+            n = i2 - i1; gm = list(gemini_tokens[j1:j2]); m = len(gm)
+            if m <= n:
+                for k in range(n):
+                    mp[i1 + k] = gm[k] if k < m else ""
+            else:
+                for k in range(n - 1):
+                    mp[i1 + k] = gm[k]
+                mp[i2 - 1] = " ".join(gm[n - 1:])
+            meta["corrected_slots"] += (i2 - i1)
+        elif tag == "insert":
+            m = j2 - j1
+            if i1 <= 0 or i1 >= len(dg_words):
+                meta["dropped_spans"].append({"kind": "open_ended", "n": m}); continue
+            gap = float(dg_words[i1].get("start") or 0.0) - float(dg_words[i1 - 1].get("end") or 0.0)
+            if m <= _CAPTION_ALIGN_MAX_INSERT_TOKENS and gap <= _CAPTION_ALIGN_MAX_INSERT_GAP_S:
+                _prev = mp.get(i1 - 1)
+                _base = _prev if _prev is not None else (dg_words[i1 - 1].get("punctuated_word")
+                                                         or dg_words[i1 - 1].get("word") or "")
+                mp[i1 - 1] = (str(_base) + " " + " ".join(gemini_tokens[j1:j2])).strip()
+            else:
+                meta["dropped_spans"].append({"kind": "over_ceiling", "n": m, "gap_s": round(gap, 2)})
+        # equal → keep Deepgram surface (already correct); delete → keep Deepgram word
+    return mp, meta
+
+
+def _apply_caption_alignment(projected_words, corrected_by_index):
+    """Overlay the per-slot corrected text onto the projected caption words by
+    _word_index. A blank ('') correction empties the word (caption builder skips
+    empties). Anything without a correction is left verbatim. Caption-only."""
+    if not corrected_by_index or not projected_words:
+        return projected_words
+    for w in projected_words:
+        _wi = w.get("_word_index")
+        if _wi in corrected_by_index:
+            _ct = corrected_by_index[_wi]
+            w["word"] = _ct
+            w["punctuated_word"] = _ct
+    return projected_words
+
+
+def _gemini_correct_transcript(audio_bytes):
+    """Ask Gemini for the CORRECT spoken-word sequence (native script, no timing —
+    timing stays Deepgram's). Best-effort; returns [] on any failure so the caller
+    falls back to raw Deepgram captions. Robust to list-vs-{words} response shape."""
+    try:
+        if genai_types is None:
+            return []
+        _prompt = ("Transcribe this audio into the correct sequence of SPOKEN WORDS in the "
+                   "native script. Do NOT translate. Return JSON {\"words\":[\"<w1>\",\"<w2>\"]} "
+                   "in spoken order.")
+        _resp = _get_genai_client().models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[genai_types.Part.from_bytes(data=audio_bytes, mime_type="audio/flac"), _prompt],
+            config=genai_types.GenerateContentConfig(temperature=0.0, response_mime_type="application/json"))
+        _obj = json.loads((_resp.text or "{}"))
+        _w = _obj.get("words") if isinstance(_obj, dict) else _obj
+        return [str(t) for t in (_w or []) if _cap_norm(t)]
+    except Exception as _e:
+        print(f"[caption-align] Gemini correction failed: {_e} — raw captions", flush=True)
+        return []
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -23420,6 +23729,32 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # stream only (the user's instruction wins over the transcript spelling).
         _caption_words = _apply_caption_text_overrides(
             _projected_words, edit_plan.get("_caption_text_overrides") or {})
+        # CAPTION SEQUENCE-ALIGNER (DARK, PROMPTLY_CAPTION_ALIGN): for a language
+        # Deepgram transcribes poorly, borrow Gemini's CORRECT words onto Deepgram's
+        # timing slots (caption-only; cuts already ran on the untouched indices).
+        # English (Deepgram 5/5) is skipped; computed once + cached on edit_plan;
+        # refuses below the align floor; dropped spans are omitted, never fabricated.
+        if _caption_align_enabled(edit_plan):
+            _det_lang = str((transcript or {}).get("detected_language") or "").split("-")[0].lower()
+            if _det_lang != "en":
+                _cal_map = edit_plan.get("_caption_align_map")
+                if _cal_map is None:
+                    try:
+                        _gm_corr = _gemini_correct_transcript(prepare_audio_for_deepgram(source_path))
+                        _cal_map, _cal_meta = _corrected_text_by_index(transcript.get("words") or [], _gm_corr)
+                        edit_plan["_caption_align_map"] = _cal_map
+                        _record_divergence(
+                            "caption", {"detected_lang": _det_lang or "?", "gemini_words": len(_gm_corr)},
+                            "caption_aligned",
+                            reason=(f"align_rate={_cal_meta.get('align_rate')} "
+                                    f"corrected_slots={_cal_meta.get('corrected_slots')} "
+                                    f"refused={_cal_meta.get('refused')} "
+                                    f"dropped_spans={len(_cal_meta.get('dropped_spans') or [])}"))
+                    except Exception as _cal_e:
+                        print(f"[caption-align] failed: {_cal_e} — raw captions", flush=True)
+                        _cal_map = {}; edit_plan["_caption_align_map"] = {}
+                if _cal_map:
+                    _caption_words = _apply_caption_alignment(_caption_words, _cal_map)
         caption_pages = _build_tiktok_pages_from_projected(
             _caption_words,
             max_words_per_page=_max_words_per_page,
@@ -23619,7 +23954,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # arrival. The hold end (_to_frame) is unchanged — the window grows only at
         # the front by the pre-roll.
         _mg_af = _mg_arrival_frames(_mg.get("type"), source_fps, _mg.get("props"))
-        _from_frame = max(0, int(round(_out_start * source_fps)) - _mg_af)
+        # FRAME-FLOOR (Zac 2026-07-28): the MG's ARRIVAL (fromFrame + _mg_af) lands
+        # on the anchor's FLOORED frame — never-late (see _anchor_land_frame).
+        _from_frame = max(0, _anchor_land_frame(_out_start, source_fps) - _mg_af)
         _to_frame = min(total_output_frames, int(round(_out_end * source_fps)))
         if _to_frame <= _from_frame:
             # Window collapsed to zero output frames (anchor at the very tail of
@@ -23695,7 +24032,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # ONE CLOCK (Zac 2026-07-12): the emphasis MG shares the audible onset with
         # its zoom (both on this emphasis) — was raw _pw["start"] = a split clock.
         _em_t_out = float(_em_pw.get("audible_start") or _em_pw["start"])
-        _em_t_frame = int(round(_em_t_out * source_fps))
+        # FRAME-FLOOR (Zac 2026-07-28): the emphasis-MG arrival lands on the floored
+        # anchor frame (never-late). _em_t_frame feeds ONLY the MG here (the zoom
+        # rides validated_cuts), so flooring it keeps the pop on the beat and its
+        # duration derivation (below) consistent. See _anchor_land_frame.
+        _em_t_frame = _anchor_land_frame(_em_t_out, source_fps)
 
         # Zoom is already attached to validated_cuts during the validation
         # phase (collision check at line ~4717), so it propagates to clips_out
@@ -27674,6 +28015,24 @@ _DESIGNED_REJECTION_CODES = frozenset({
     "WRONG_ORIENTATION", "INVALID_FORMAT", "EMPTY_UPLOAD",
     "INVALID_SOURCE_URL", "TRANSCRIPTION", "TRANSCRIPTION_INCOMPLETE",
 })
+
+# ─── ALERT ROUTING (Zac, 2026-07-28): PAGE ONLY ON AT-FAULT ────────────────
+# The operator wakes for failures WE can act on; designed rejections AND
+# non-actionable CLIENT-boundary events go to the daily digest, never a push.
+# _NON_ALERTING_CODES is DELIBERATELY BROADER than _DESIGNED_REJECTION_CODES
+# (which drives the refund): it adds the client-upload family. A stalled/aborted
+# device upload is the user's network — no worker code or infra change fixes a
+# dropped cellular upload — so a per-job page is the wrong instrument; a genuine
+# SPIKE (bad presigned URLs, bucket policy) is caught by the digest's per-code
+# counts, which is the right instrument for a rate signal. Everything NOT in
+# this set still pages — UNKNOWN and every unclassified error included — so a
+# new failure mode is never silently swallowed (loud-failsafe law). The refund
+# gate stays separate: UPLOAD_STALLED is NOT a designed rejection, so its
+# refund/retry semantics are unchanged by this routing decision.
+_CLIENT_UPLOAD_CODES = frozenset({
+    "UPLOAD_STALLED", "UPLOAD_TIMEOUT", "UPLOAD_NEVER_STARTED",
+})
+_NON_ALERTING_CODES = _DESIGNED_REJECTION_CODES | _CLIENT_UPLOAD_CODES
 _RESCUE_REPREP_S = 90.0   # projected re-download + re-transcribe + re-probe
 _RESCUE_MARGIN_S = 60.0   # slack under the 900s job budget after the render
 
@@ -29078,12 +29437,19 @@ def prewarm_handler(job):
         # dispatch-before-upload race condition. See the matching logic in
         # the render handler for full context. Same fail-fast pattern.
         poll_start = time.time()
-        # 30 min. iOS background URLSession is willing to push for 30 min
-        # before iOS itself gives up (timeoutIntervalForResource), and a
-        # multi-hundred-MB clip on slow cellular legitimately takes ~10-15
-        # min. The old 5-min cap was hard-failing healthy uploads that
-        # were still streaming bytes. Match the client's tolerance.
-        poll_deadline = poll_start + 1800
+        # PREWARM POLL CAP (2026-07-28 fix): the prewarm is a best-effort warm
+        # cache on the PromptlyPrewarmWorker container, which Modal caps at 300s
+        # (modal_app.py). The 2026-06-10 raise of this deadline to 1800s COLLIDED
+        # with that 300s cap — every upload not landed by ~300s got the container
+        # force-killed (surfaced as GET/->500 red on the app activity chart)
+        # instead of hitting the graceful UPLOAD_STALLED return below, burning
+        # ~300s of an 8-vCPU container for nothing. Cap the poll BELOW the
+        # container timeout so the graceful return always wins; slow uploads (iOS
+        # tolerates 30 min) simply fall through to the RENDER, whose own poll runs
+        # under a 3000s timeout and CAN wait. 240s leaves ~60s headroom for a late
+        # upload's download+transcribe or the graceful return. Env-overridable.
+        _prewarm_budget = float(os.environ.get("PROMPTLY_PREWARM_POLL_S", "240"))
+        poll_deadline = poll_start + min(1800.0, _prewarm_budget)
         poll_attempt = 0
         while True:
             poll_attempt += 1
@@ -29598,13 +29964,810 @@ def _quick_face_check(source_path, max_samples=8):
         cap.release()
 
 
+def render_stage(
+        job_id, input_data, edit_plan, work_dir, source_path, output_path,
+        transcript, source_duration, app_url, broll_clips, upload_url,
+        _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
+        integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+):
+    """Render stage — extracted verbatim from handler() (Phase 1). Owns the
+    render ladder, QA-judge recovery, integrity gate, upload/HLS/cover fan-out
+    and format export. Every cross-boundary value leaves by RETURN (dicts by
+    ref+return) or by the two exception-safe CELLS (_prog_pub_cell drives the
+    finally's terminal drain; _rs_cost_cell carries the QA-regen spend the
+    finally folds into the meter once). _PROGRESSIVE_PUB stays a module global
+    the render hooks read during the ladder."""
+    global _PROGRESSIVE_PUB
+    _rs_seed = _cost_meter.total_usd() if _cost_meter is not None else 0.0
+    _render_hb_stop = _start_progress_heartbeat(
+        job_id, "render", 65, 90,
+        [
+            "Stabilizing your footage",
+            "Cutting your timeline",
+            "Adding captions and emphasis",
+            "Compositing your edit",
+            "Mastering audio",
+            "Finalizing your video",
+        ],
+        app_url,
+        duration_estimate_s=_render_est,
+    )
+    t = time.time()
+    # ── W3 PROGRESSIVE DELIVERY (DARK behind PROMPTLY_PROGRESSIVE) ──────
+    # Flag ON: previews of the composite chunks publish IN ORDER to
+    # {base_key}-preview-hls/ WHILE render_multi_clip runs, and the
+    # Phase-B payload lands in video_jobs.preview from segment 1. Flag
+    # OFF (default): _PROGRESSIVE_PUB stays None, all four render hooks
+    # are no-ops, the pipeline is byte-identical. ANY setup error here is
+    # LOUD (print + divergence progressive_publish_fallback) and the job
+    # proceeds exactly as today.
+    global _PROGRESSIVE_PUB
+    _prog_pub_cell[0] = None
+    # SEAM TRACE (Zac 2026-07-26, no-preview-on-device debug): the two-sided
+    # contract must be OBSERVABLE. Log + ledger exactly what the worker
+    # RECEIVED (supports_progressive) and the gate result on EVERY job, so a
+    # single job id tells us whether the break is upstream (client didn't
+    # send / server didn't forward -> supports_progressive falsy here) or in
+    # the worker. Queryable via the divergence ledger (component=progressive).
+    _prog_sp = input_data.get("supports_progressive")
+    _prog_on = _progressive_enabled(input_data)
+    print(f"[progressive] GATE job={job_id} supports_progressive={_prog_sp!r} "
+          f"progressive_test={input_data.get('progressive_test')!r} "
+          f"PROMPTLY_PROGRESSIVE={os.environ.get('PROMPTLY_PROGRESSIVE', '')!r} "
+          f"-> enabled={_prog_on}", flush=True)
+    _record_divergence(
+        "progressive",
+        {"supports_progressive": _prog_sp, "enabled": bool(_prog_on),
+         "job_id": job_id},
+        "progressive_gate",
+        reason=f"supports_progressive={_prog_sp} enabled={_prog_on}")
+    if _prog_on:
+        try:
+            from progressive_publish import ProgressivePublisher
+            _prog_pub_cell[0] = ProgressivePublisher(
+                work_dir,
+                upload_url,
+                input_data.get("public_url"),
+                60.0,  # nominal; begin_attempt overrides with exact source_fps
+                os.path.join(work_dir, "final_audio.wav"),
+                s3_client=_aws_s3_client,
+                parse_s3_url=_parse_aws_s3_url,
+                transfer_config=_S3_TRANSFER_CONFIG,
+                job_id=job_id,
+                plan_summary={
+                    "route": "talking_head",
+                    "clip_count": len(edit_plan.get("cuts") or []),
+                    "caption_style": str(edit_plan.get("caption_style") or ""),
+                    "broll_count": len(broll_clips or []),
+                    "edit_rationale": str(edit_plan.get("edit_rationale") or "")[:400],
+                },
+                persist_cb=(lambda _pl, _jid=job_id: _persist_preview(_jid, _pl)),
+                divergence_cb=_record_divergence,
+            )
+            _PROGRESSIVE_PUB = _prog_pub_cell[0]
+        except Exception as _pg_err:
+            print(f"[progressive] SETUP FAILED ({type(_pg_err).__name__}: "
+                  f"{_pg_err}) — previews off, standard delivery "
+                  f"unaffected", flush=True)
+            _record_divergence(
+                "render", {"stage": "setup",
+                           "detail": str(_pg_err)[:300]},
+                "progressive_publish_fallback",
+                reason="progressive_setup")
+            _prog_pub_cell[0] = None
+            _PROGRESSIVE_PUB = None
+    # D2 motion blur — per-job override for the E1+D2 A/B (dark/absent for
+    # real traffic → byte-identical). Threaded via edit_plan into BOTH
+    # render inputs (render_multi_clip reads edit_plan["_motion_blur"]);
+    # edit_plan is mutated in place so every render path below sees it.
+    if bool(input_data.get("motion_blur_test")):
+        edit_plan["_motion_blur"] = {
+            "enabled": True,
+            "samples": int(input_data.get("motion_blur_samples") or 6),
+            "shutter": int(input_data.get("motion_blur_shutter") or 180),
+        }
+    elif os.environ.get("PROMPTLY_MOTION_BLUR", "").strip().lower() in ("1", "true", "yes", "on"):
+        # PRODUCTION motion blur (Zac 2026-07-28, quality regression fix): DELIVERY_FPS=30
+        # halved the render tail for cost but made motion (zooms/transitions/MG) read STEPPED
+        # at 30fps. Zac's ruling: blur — not frame rate — is the smoothness lever. This flips
+        # the guard-passed s3_sh180 variant (3 samples, 180° shutter) for ALL real traffic, so
+        # 30fps motion reads smooth at ~half the cost of reverting to 60fps. Flag-gated:
+        # unset PROMPTLY_MOTION_BLUR (or "0") restores byte-identical no-blur output instantly.
+        edit_plan["_motion_blur"] = {"enabled": True, "samples": 3, "shutter": 180}
+    # Caption phrase-chunk — per-job override for the caption A/B (dark/absent for
+    # real traffic → byte-identical; the caption builder defaults to 2). Threaded
+    # via edit_plan the same way; render_multi_clip reads edit_plan["_caption_max_words"].
+    if input_data.get("caption_max_words"):
+        edit_plan["_caption_max_words"] = int(input_data.get("caption_max_words"))
+    # Caption STYLE — per-job override for the style-comparison A/B (dark/absent for
+    # real traffic → byte-identical; Gemini's pick stands). render_multi_clip reads
+    # edit_plan["caption_style"] at the caption build.
+    if input_data.get("caption_style_test"):
+        edit_plan["caption_style"] = str(input_data["caption_style_test"])
+    # Degrade ladder — see _render_degrade_ladder (module level, tested
+    # behaviorally in test_render_ladder.py).
+    try:
+        _render_degrade_ladder(
+            lambda _cuts, _bc: render_multi_clip(
+                source_path, _cuts, edit_plan, output_path, transcript,
+                work_dir, broll_clips=_bc,
+            ),
+            edit_plan, broll_clips, output_path,
+        )
+    finally:
+        _render_hb_stop.set()
+        # W3 PROGRESSIVE: detach the per-job publisher (warm-container
+        # hygiene — the next job must never see this one's publisher).
+        # The daemon worker finishes/abandons on its own timers; QA
+        # re-renders after this point see None and publish nothing.
+        _PROGRESSIVE_PUB = None
+    edit_plan["_deepgram_words"] = transcript.get("words", [])
+    # Floor telemetry (Part 3): pick up the render floor (stripped) the
+    # ladder may have recorded during the render that just returned.
+    _sync_floor_state(_floor_state, edit_plan)
+
+    render_elapsed = time.time() - t
+    _timings["render"] = render_elapsed
+    print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
+    # NB: this label must match the actual encode in _build_composite_cmd
+    # / final concat+mux; both currently use libx264 -preset medium -crf 18.
+    # Update here too if you change the encoder.
+    _enc_label = "NVENC" if _HAS_NVENC else "libx264/medium crf=18 threads=auto"
+    print(f"[render] Encoding: {_enc_label}", flush=True)
+    # Validate render output — single ffprobe for file check + duration extraction
+    if not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
+        raise RuntimeError(f"Main render produced invalid output: {output_path}")
+    # Durable boundary: render complete (closes the heartbeat-only 90->92 gap
+    # so a reconnect mid-finalize resumes correctly).
+    _async_job_status(job_id, status="processing", phase="Finalizing", progress=95)
+    _rv, _ra = 0.0, 0.0
+    _v_start, _a_start = 0.0, 0.0
+    try:
+        probe_cache_clear(output_path)  # freshly rendered — clear stale cache
+        _cp = _probe_full(output_path)
+        for _s in (_cp.get("streams") or []):
+            if _s.get("codec_type") == "video":
+                if _s.get("duration"):
+                    _rv = float(_s["duration"])
+                if _s.get("start_time"):
+                    _v_start = float(_s["start_time"])
+            elif _s.get("codec_type") == "audio":
+                if _s.get("duration"):
+                    _ra = float(_s["duration"])
+                if _s.get("start_time"):
+                    _a_start = float(_s["start_time"])
+    except Exception:
+        pass
+    if _rv < 1.0:
+        # ZERO-REJECTION (Zac 2026-07-28): a collapsed edit is the SAME class as
+        # no_speech / not-talking-head / 2-5s clips — the user has usable footage,
+        # so we hand back a MINIMAL edit (straight cuts + captions on the source)
+        # instead of a dead-end RENDER_TOO_SHORT failure + refund. 30d census: 4
+        # collapses / 3 users, 100% churned (0 recovered) — every one a lost user.
+        # Flag-gated behind PROMPTLY_ZERO_REJECT like every other route (flag off ->
+        # today's dead-end raise, byte-identical rollback). RECORDED not suppressed:
+        # a divergence carries the why-data the failed envelope never did (source
+        # seconds, transcript words, surviving cuts, rendered duration) so cutter
+        # over-removal stays visible in the daily report even as the user gets a video.
+        if _zero_reject_enabled(input_data):
+            _rts_words = len(transcript.get("words") or []) if isinstance(transcript, dict) else 0
+            _rts_cuts = len(edit_plan.get("_render_cuts") or edit_plan.get("cuts") or [])
+            _record_divergence(
+                "render",
+                {"job_id": job_id, "source_s": round(float(source_duration or 0), 1),
+                 "transcript_words": _rts_words, "surviving_cuts": _rts_cuts,
+                 "rendered_s": round(_rv, 2)},
+                "render_collapsed_to_minimal",
+                reason=(f"edit collapsed to {_rv:.2f}s from {source_duration:.1f}s source "
+                        f"({_rts_cuts} cuts / {_rts_words} words) — zero-reject fallback to minimal"))
+            raise _MinimalRouteSignal("render_collapsed")
+        raise RuntimeError(
+            f"RENDER_TOO_SHORT: main render output too short (video={_rv:.1f}s) — "
+            f"the edit plan collapsed to almost no timeline (typically a "
+            f"safe-recipe degeneration); the output-length guard held it back")
+    _av_end_delta_ms = ((_ra + _a_start) - (_rv + _v_start)) * 1000
+    _av_start_delta_ms = (_a_start - _v_start) * 1000
+    print(
+        f"[render] Output valid: {os.path.getsize(output_path)/1024/1024:.1f}MB, "
+        f"video={_rv:.3f}s audio={_ra:.3f}s",
+        flush=True,
+    )
+    print(
+        f"[render] A/V sync probe: "
+        f"v_start={_v_start*1000:+.2f}ms  a_start={_a_start*1000:+.2f}ms  "
+        f"start_delta={_av_start_delta_ms:+.2f}ms  end_delta={_av_end_delta_ms:+.2f}ms",
+        flush=True,
+    )
+    # ── DIAG PROBE 4: output content verification ──
+    # Re-prints the key numbers in a stable format for cross-referencing
+    # against probes 1-3. If everything above this point is right but
+    # this row shows mismatch, the bug is in the final mux/encode step.
+    # If everything else is wrong, this row will inherit those errors.
+    try:
+        _out_v_pkt = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "packet=pts_time", "-of", "csv=p=0",
+             "-read_intervals", "0%+1", output_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        _out_a_pkt = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0",
+             "-show_entries", "packet=pts_time", "-of", "csv=p=0",
+             "-read_intervals", "0%+1", output_path],
+            capture_output=True, text=True, timeout=15,
+        )
+        _first_v = (_out_v_pkt.stdout or "").splitlines()[0] if _out_v_pkt.stdout else "?"
+        _first_a = (_out_a_pkt.stdout or "").splitlines()[0] if _out_a_pkt.stdout else "?"
+        print(
+            f"[output-probe] actual: v_dur={_rv:.4f}s a_dur={_ra:.4f}s "
+            f"first_v_pts={_first_v.strip(',')} first_a_pts={_first_a.strip(',')}",
+            flush=True,
+        )
+    except Exception as _opb:
+        print(f"[output-probe] probe failed: {_opb}", flush=True)
+
+    cuts = edit_plan.get("_render_cuts") or edit_plan.get("cuts") or []
+    effective_durations = edit_plan.get("_render_effective_durations") or compute_effective_durations(cuts)
+    final_dur = _rv
+
+    # B-roll is now integrated into the first FFmpeg pass (no second encode needed)
+    _timings["broll"] = 0.0
+
+    # ── Parallel group 2: cover frame + upload ────────────────────────────────
+    t = time.time()
+    thumbnail_source_ts = edit_plan.get("thumbnail_timestamp")
+    if thumbnail_source_ts is None:
+        thumbnail_source_ts = (source_duration / 3.0) if source_duration > 0 else 1.0
+    cover_frame_ts = project_source_time_to_final_output(
+        float(thumbnail_source_ts),
+        cuts,
+        effective_durations,
+        clip_time_maps=edit_plan.get("_render_clip_time_maps"),
+    )
+    if cover_frame_ts is None:
+        cover_frame_ts = min(1.0, max(0.1, final_dur - 0.1))
+    cover_frame_b64  = None
+    cover_frame_mime = "image/jpeg"
+
+    if not validate_output(output_path, "final"):
+        raise RuntimeError(f"Final output is invalid: {output_path}")
+    output_size_mb = os.path.getsize(output_path) / (1024*1024)
+
+    # ── QA judge + recovery for generated scenes (Phase E · Sub-step 4) ──
+    # PREMIUM + has-rendered-scene only → free/no-scene jobs skip entirely
+    # (byte-identical). Judge the generated scenes; on failure PERTURB the
+    # plan (patch_list) + regenerate + re-render, bounded by attempts (≤2) AND
+    # a re-render-time headroom check; DEGRADE (drop the scene, re-render
+    # without it) if it can't be fixed in budget. NEVER ships a judged-bad
+    # asset; fail-open — any error ships the already-validated output.
+    _qa_scenes = (edit_plan.get("_rendered_generated_scenes") or []) if isinstance(edit_plan, dict) else []
+    # Increment 3 QA RE-SCOPE: designed scenes (typo_stat/photo_card/
+    # hero_object) are code-authored — garbled text and off-palette are
+    # unconstructible, so the FRAME judge covers only legacy full-frame
+    # scenes. The hero ASSET is judged at generation time (geometry/clean
+    # field/stray text/brand) with the perturb loop pointed at asset prompts.
+    _qa_scenes = [s for s in _qa_scenes if not (s or {}).get("sceneType")]
+    if route_premium and premium_ctx is not None and _qa_scenes:
+        try:
+            _qa_fps = float(edit_plan.get("_render_fps") or 60.0)
+            _palette_hint = str(edit_plan.get("video_identity") or "")[:120]
+            _known_text = " ".join(str(w.get("word") or "") for w in (transcript.get("words") or [])).strip()
+            _MAX_QA_ATTEMPTS = 2
+            # A recovery re-render costs ≈ render_elapsed. We gate on that so a
+            # slow render can't blow the 900s function timeout (judge itself is
+            # a cheap ~5-15s vision call; the re-render is the expensive part).
+            # Uses the module-level _RERENDER_HEADROOM_S (shared with the S3
+            # generation-time pre-check).
+            _attempt = 0
+            while True:
+                _scores = _qa_judge_generated_scenes(
+                    output_path, _qa_scenes, _qa_fps, work_dir, _palette_hint, _known_text
+                )
+                _fail = [
+                    s for s in _scores
+                    if s.verdict == "fail"
+                    or min(s.coherence, s.text_correct, s.on_palette, s.integration) < _QA_PASS_THRESHOLD
+                ]
+                for s in _scores:
+                    # 4d: durable evidence is keyed by ORIGIN scene index;
+                    # the judged FRAME file stays keyed by judge position
+                    # (that is how _qa_judge_generated_scenes named it).
+                    _s_origin = _judge_origin_index(_qa_scenes, s.scene_index)
+                    print(
+                        f"[qa-judge] scene={_s_origin} (judge_pos={s.scene_index}) "
+                        f"scores={{coh:{s.coherence:.2f},txt:{s.text_correct:.2f},"
+                        f"pal:{s.on_palette:.2f},int:{s.integration:.2f}}} verdict={s.verdict} "
+                        f"attempt={_attempt} "
+                        f"cost=${(_rs_seed + _rs_cost_cell[0]):.3f}",
+                        flush=True,
+                    )
+                    # Increment 2: persist the JUDGED frame + full scores durably
+                    # (rejects included) — the evidence Increment 1 lost.
+                    _jf = os.path.join(work_dir, f"qa_scene_{s.scene_index:02d}.jpg")
+                    _persist_gen_attempt(
+                        job_id, _s_origin, _attempt, "judged",
+                        image_path=_jf if os.path.isfile(_jf) else None,
+                        meta={"coherence": s.coherence, "text_correct": s.text_correct,
+                              "on_palette": s.on_palette, "integration": s.integration,
+                              "verdict": s.verdict, "reason": s.reason,
+                              "attempt": _attempt, "threshold": _QA_PASS_THRESHOLD})
+                if not _fail:
+                    if _scores:
+                        print(f"[qa-judge] {len(_scores)} scene(s) pass — ship", flush=True)
+                    break
+                # CASCADE FIX (4d): verdicts map to ORIGIN indices — a
+                # positional dereference killed the WRONG scene whenever the
+                # judge scope was a filtered/skipped subset.
+                _fail_idx = {_judge_origin_index(_qa_scenes, s.scene_index) for s in _fail}
+                _over_budget = _cost_meter is not None and (_rs_seed + _rs_cost_cell[0]) >= _PREMIUM_ASSET_BUDGET_USD
+                _no_headroom = render_elapsed > _RERENDER_HEADROOM_S
+                if _attempt >= _MAX_QA_ATTEMPTS or _over_budget or _no_headroom:
+                    # DEGRADE — drop the unfixable scenes, one final re-render.
+                    print(
+                        f"[qa-judge] verdict=degrade dropping {sorted(_fail_idx)} "
+                        f"(attempt={_attempt} over_budget={_over_budget} no_headroom={_no_headroom}) "
+                        f"— re-render without them",
+                        flush=True,
+                    )
+                    # Increment 2 honesty marker: a QA-degrade of a scene must
+                    # end in a capability note (assembled at result time), and
+                    # the degrade itself is persisted per scene (rejects law).
+                    # (set_drop_stage False: the finalize keeps its existing
+                    # "qa" drop_stage vocabulary; drop_reasons carries detail)
+                    _lumen_funnel_note(edit_plan, "judge", set_drop_stage=False,
+                                       scenes=sorted(_fail_idx), attempt=_attempt)
+                    edit_plan["_qa_dropped_scenes"] = len(_fail_idx)
+                    for _di in sorted(_fail_idx):
+                        _persist_gen_attempt(
+                            job_id, _di, _attempt, "degraded",
+                            meta={"outcome": "degrade_drop", "attempt": _attempt,
+                                  "over_budget": bool(_over_budget),
+                                  "no_headroom": bool(_no_headroom)})
+                    # CASCADE FIX (4d): drop by ORIGIN index + RE-KEY the
+                    # subjects to the surviving positions — the old filter
+                    # left subjects on stale keys, so every surviving hero
+                    # scene lost its asset on the degrade re-render.
+                    _drop_scenes_by_origin(edit_plan, _fail_idx)
+                    edit_plan.pop("_rendered_generated_scenes", None)
+                    _reout = output_path + ".qa.mp4"
+                    render_multi_clip(
+                        source_path, edit_plan["cuts"], edit_plan, _reout, transcript, work_dir,
+                        broll_clips=broll_clips,
+                    )
+                    if validate_output(_reout, "qa-degrade"):
+                        os.replace(_reout, output_path)
+                        output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+                    else:
+                        # 4d: the degrade re-render itself failed validation —
+                        # the ALREADY-VALIDATED original ships (fail-open law;
+                        # no retries). Loudly recorded: this is the one path
+                        # that can still ship a judged-bad scene.
+                        print(
+                            "[qa-judge] degrade re-render FAILED validation — "
+                            "shipping the validated original (judged-bad scene "
+                            "still aboard; recorded, not retried)",
+                            flush=True,
+                        )
+                        _lumen_funnel_note(edit_plan, "judge_degrade_render_invalid",
+                                           set_drop_stage=False,
+                                           scenes=sorted(_fail_idx))
+                    break
+                # RETRY — perturb failing scenes' prompts, regenerate, re-render.
+                # The perturbation carries the full rubric + the previous
+                # attempt's per-dimension scores (oscillator fix, Increment 2).
+                print(f"[qa-judge] verdict=retry scenes={sorted(_fail_idx)} attempt={_attempt + 1}", flush=True)
+                # 4d: keyed by ORIGIN index (matches _fail_idx + _scene_list)
+                _reasons = {_judge_origin_index(_qa_scenes, s.scene_index): s.reason for s in _fail}
+                _score_by_idx = {_judge_origin_index(_qa_scenes, s.scene_index): s for s in _fail}
+                _scene_list = edit_plan.get("generated_scenes") or []
+                for _i in _fail_idx:
+                    if not (0 <= _i < len(_scene_list)) or not isinstance(_scene_list[_i], dict):
+                        continue
+                    _scene = _scene_list[_i]
+                    _newp = _perturb_scene_prompt(
+                        _scene, _reasons.get(_i, ""), _attempt + 1,
+                        score=_score_by_idx.get(_i))
+                    if _newp:
+                        _scene.setdefault("subject", {})["generation_prompt"] = _newp
+                    _res = _generate_scene_subject(_scene, _i, work_dir, _known_text)
+                    if _res and _res.get("path"):
+                        edit_plan.setdefault("_generated_subjects", {})[_i] = _res["path"]
+                        if _cost_meter is not None:
+                            _rs_cost_cell[0] += float(_res.get("cost") or 0.0); _rs_cost_cell[1] += 1
+                        # Increment 2: persist the regen image + the perturbed
+                        # prompt that produced it (the whole chain, per attempt).
+                        _persist_gen_attempt(
+                            job_id, _i, _attempt + 1, "gen", image_path=_res["path"],
+                            meta={"generation_prompt": str((_scene.get("subject") or {}).get("generation_prompt") or ""),
+                                  "perturbed": bool(_newp), "prev_reason": _reasons.get(_i, ""),
+                                  "cost": _res.get("cost"), "ms": _res.get("ms")})
+                edit_plan.pop("_rendered_generated_scenes", None)
+                _reout = output_path + ".qa.mp4"
+                render_multi_clip(
+                    source_path, edit_plan["cuts"], edit_plan, _reout, transcript, work_dir,
+                    broll_clips=broll_clips,
+                )
+                if validate_output(_reout, "qa-retry"):
+                    os.replace(_reout, output_path)
+                    output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
+                # CASCADE FIX (4d): re-apply the JUDGE SCOPE on the fresh
+                # specs — without this, designed scenes (typo_stat/
+                # photo_card/hero_object; frame-judging is legacy-only by
+                # doctrine) re-entered the judge on attempt 1+ and could be
+                # killed by a rubric that does not cover them.
+                _qa_scenes = [s for s in (edit_plan.get("_rendered_generated_scenes") or [])
+                              if not (s or {}).get("sceneType")]
+                _attempt += 1
+        except Exception as _qa_err:
+            print(
+                f"[qa-judge] recovery error ({type(_qa_err).__name__}: {str(_qa_err)[:140]}) "
+                f"— shipping the validated output",
+                flush=True,
+            )
+
+    # ── POST-RENDER INTEGRITY GATE (CUT_STACK_REFORM Part 1) ────────────
+    # The render never leaves the box unexamined. Runs on the FINAL
+    # output_path (after any QA-judge re-render), before any byte
+    # uploads. Trip → INTEGRITY_TRIP failure (app owns the credit
+    # refund on that code), forensic preservation, NO auto-retry
+    # (INTEGRITY_TRIP is in _OUTER_RESCUE_DENY). An instrument crash
+    # inside the gate itself fails OPEN with a loud log line — a gate
+    # bug must never eat a good render.
+    try:
+        probe_cache_clear(output_path)
+        _ig_meta = _probe_full(output_path)
+        _ig_v = next((s for s in _ig_meta.get("streams", [])
+                      if s.get("codec_type") == "video"), {})
+        _ig_a = next((s for s in _ig_meta.get("streams", [])
+                      if s.get("codec_type") == "audio"), {})
+        _ig_vd = float(_ig_v.get("duration") or 0)
+        _ig_ad = float(_ig_a.get("duration") or 0)
+        _ig_nb = int(_ig_v.get("nb_frames") or 0)
+        _ig_fps = float(edit_plan.get("_render_fps") or 60.0)
+        _ig_expected = int(edit_plan.get("_render_total_output_frames") or 0)
+        _ig_cranges = edit_plan.get("_render_clip_output_ranges") or []
+        _ig_rcuts = edit_plan.get("_render_cuts") or []
+        _ig_tmaps = edit_plan.get("_render_clip_time_maps") or []
+
+        def _ig_out_to_src(t):
+            for _ci, _r in enumerate(_ig_cranges):
+                if _r["start"] - 1e-6 <= t <= _r["end"] + 1e-6:
+                    if _ci < len(_ig_rcuts):
+                        _pbr = 1.0
+                        if _ci < len(_ig_tmaps):
+                            _pbr = float(_ig_tmaps[_ci].get("avg_speed") or 1.0)
+                        return (float(_ig_rcuts[_ci]["source_start"])
+                                + (t - _r["start"]) * _pbr)
+            return None
+
+        _ig_verdict = _integrity_gate(
+            output_path, _ig_vd, _ig_ad, _ig_expected, _ig_nb, _ig_fps,
+            _build_integrity_masks(edit_plan),
+            source_path=source_path if os.path.exists(source_path) else None,
+            out_to_src=_ig_out_to_src,
+        )
+    except Exception as _ig_err:
+        _ig_verdict = {"clean": None, "trips": [],
+                       "gate_error": f"{type(_ig_err).__name__}: {str(_ig_err)[:200]}"}
+        print(f"[integrity-gate] ERROR (fail-open — instrument crashed, "
+              f"render delivered unexamined): {_ig_verdict['gate_error']}",
+              flush=True)
+
+    # Verdict persisted ALWAYS — clean verdicts feed the corpus baseline.
+    _ig_bucket = None
+    try:
+        import io as _ig_io
+        if _aws_s3_client is not None:
+            _ig_bucket = (os.environ.get("S3_BUCKET_NAME")
+                          or os.environ.get("SUPABASE_S3_BUCKET")
+                          or "promptly-video-storage")
+            _aws_s3_client.upload_fileobj(
+                _ig_io.BytesIO(json.dumps(
+                    {"job_id": job_id, **_ig_verdict}).encode()),
+                _ig_bucket, f"integrity/{job_id}.json",
+                ExtraArgs={"ContentType": "application/json"})
+    except Exception as _ig_persist_err:
+        print(f"[integrity-gate] verdict persist failed (non-fatal): "
+              f"{str(_ig_persist_err)[:120]}", flush=True)
+
+    if _ig_verdict.get("clean") is True:
+        print(f"[integrity-gate] CLEAN in {_ig_verdict.get('gate_elapsed_s')}s "
+              f"(masks: {sum(len(v) for v in _ig_verdict['detail']['masks'].values())} windows, "
+              f"downgrades: {len(_ig_verdict['detail']['content_stillness_downgraded'])})",
+              flush=True)
+    elif _ig_verdict.get("clean") is False:
+        _ig_summary = ", ".join(
+            t["check"] + "=" + json.dumps(t.get("spans") or t.get("delta_s")
+                                          or t.get("nb_frames"))
+            for t in _ig_verdict["trips"])
+        print(f"[integrity-gate] TRIP {_ig_summary}", flush=True)
+        try:
+            if _aws_s3_client is not None and _ig_bucket:
+                _aws_s3_client.upload_file(
+                    output_path, _ig_bucket,
+                    f"forensics/{job_id}/output.mp4",
+                    ExtraArgs={"ContentType": "video/mp4"},
+                    Config=_S3_TRANSFER_CONFIG)
+                print(f"[integrity-gate] forensic specimen preserved → "
+                      f"forensics/{job_id}/", flush=True)
+        except Exception as _ig_f_err:
+            print(f"[integrity-gate] forensic preserve failed: "
+                  f"{str(_ig_f_err)[:120]}", flush=True)
+        if integrity_observe_only:
+            print("[integrity-gate] TRIP (observe-only — operator "
+                  "fixture, delivering anyway)", flush=True)
+        else:
+            raise RuntimeError(f"INTEGRITY_TRIP: {_ig_summary}")
+
+    send_progress(job_id, "thumbnail", 92, "Picking your cover frame", app_url)
+    send_progress(job_id, "upload", 96, "Publishing to your library", app_url)
+    print(f"[pipeline] output: {output_size_mb:.1f}MB, {final_dur:.1f}s — parallel upload + cover frame", flush=True)
+
+    def _upload_main():
+        print("[pipeline] step=upload", flush=True)
+        # Direct S3 multipart upload — much faster than single-stream HTTP PUT
+        # for 100-200 MB videos. boto3[crt] does multipart automatically with
+        # _S3_TRANSFER_CONFIG (32 concurrent 16-MB parts).
+        #
+        # Route by URL scheme:
+        #   AWS S3 (virtual-host or accelerate or path-style or CloudFront)
+        #     → _aws_s3_client. This is the normal dispatcher path.
+        #   Supabase storage (legacy)
+        #     → _s3_client (Supabase S3-compatible endpoint).
+        # End destination is identical to what the dispatcher pre-signed,
+        # so any CDN origin access remains valid.
+        if not upload_url:
+            raise RuntimeError("No upload_url provided — Node dispatcher must pre-generate the presigned PUT URL")
+        _aws_b, _aws_k = _parse_aws_s3_url(upload_url)
+        if _aws_b and _aws_k:
+            if not _aws_s3_client:
+                raise RuntimeError("AWS S3 client not initialized — cannot upload (check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env)")
+            _client, _bucket, _key, _scheme = _aws_s3_client, _aws_b, _aws_k, "aws"
+        else:
+            _sb_b, _sb_k = _parse_supabase_storage_url(upload_url)
+            if _sb_b and _sb_k:
+                if not _s3_client:
+                    raise RuntimeError("Supabase S3 client not initialized — cannot upload (check SUPABASE_S3_ACCESS_KEY/SECRET_KEY env)")
+                _client, _bucket, _key, _scheme = _s3_client, _sb_b, _sb_k, "supabase"
+            else:
+                raise RuntimeError(
+                    f"Could not parse bucket/key from upload_url (neither AWS nor Supabase pattern matched): "
+                    f"{upload_url[:120]}"
+                )
+        _ut0 = time.time()
+        _client.upload_file(
+            output_path, _bucket, _key,
+            ExtraArgs={"ContentType": "video/mp4"},
+            Config=_S3_TRANSFER_CONFIG,
+        )
+        _ue = time.time() - _ut0
+        if input_data.get("public_url"):
+            _video_url = input_data["public_url"]
+        else:
+            _video_url = upload_url.split("?")[0]
+        _mb = os.path.getsize(output_path) / (1024 * 1024)
+        print(
+            f"[pipeline] upload complete ({_scheme}-multipart {_mb:.1f}MB in {_ue:.1f}s "
+            f"@ {_mb / max(_ue, 0.001):.1f}MB/s → {_video_url})",
+            flush=True,
+        )
+        edit_plan["_rendered_video_url"] = _video_url
+
+    def _extract_and_upload_cover():
+        # Pick the visually best frame from the FINAL RENDERED OUTPUT around
+        # Gemini's projected timestamp. The output has captions burned in,
+        # speed warps applied, and zoom effects — exactly what makes a great
+        # social-media thumbnail. NO additional post-processing.
+        #
+        # If Gemini's seed lands inside a b-roll segment, shift it to the
+        # nearest moment showing the speaker (not the b-roll content).
+        _thumb_seed = float(cover_frame_ts)
+        _broll_ranges = edit_plan.get("_broll_output_ranges") or []
+        for _br_start, _br_end in _broll_ranges:
+            if _br_start <= _thumb_seed <= _br_end:
+                # Shift to whichever side of the b-roll is closer
+                _dist_before = _thumb_seed - _br_start
+                _dist_after = _br_end - _thumb_seed
+                if _dist_before <= _dist_after:
+                    _thumb_seed = max(0.1, _br_start - 0.3)
+                else:
+                    _thumb_seed = min(final_dur - 0.1, _br_end + 0.3)
+                print(
+                    f"[thumbnail] Seed was inside b-roll [{_br_start:.2f}, {_br_end:.2f}], "
+                    f"shifted to {_thumb_seed:.2f}s",
+                    flush=True,
+                )
+                break
+        # AI-scored thumbnail selection. A scorer failure re-raises here
+        # and is absorbed at the f_cover collection point (P1b enhancement
+        # guard) — the video still ships, the drop is logged loudly for
+        # root-causing. It no longer costs the job.
+        data, mime = select_best_thumbnail_frame(
+            output_path, _thumb_seed, work_dir,
+        )
+        if data:
+            print(
+                f"[pipeline] cover frame at {cover_frame_ts:.2f}s "
+                f"(AI-selected from source {float(thumbnail_source_ts):.2f}s, {len(data)//1024}KB)",
+                flush=True,
+            )
+            # Upload thumbnail in parallel with main video upload
+            upload_url_thumb = input_data.get("upload_url_thumb")
+            if upload_url_thumb:
+                _thumb_uploaded = False
+                if _s3_client:
+                    _tb, _tk = _parse_supabase_storage_url(upload_url_thumb)
+                    if _tb and _tk:
+                        try:
+                            import io as _io_thumb
+                            _s3_client.upload_fileobj(
+                                _io_thumb.BytesIO(data), _tb, _tk,
+                                ExtraArgs={"ContentType": mime},
+                            )
+                            print("[pipeline] thumbnail uploaded (s3)", flush=True)
+                            _thumb_uploaded = True
+                        except Exception as _s3_thumb_err:
+                            print(f"[pipeline] S3 thumbnail upload failed ({_s3_thumb_err}), falling back to HTTP", flush=True)
+                if not _thumb_uploaded:
+                    try:
+                        thumb_resp = requests.put(
+                            upload_url_thumb, data=data,
+                            headers={"Content-Type": mime}, timeout=30,
+                        )
+                        thumb_resp.raise_for_status()
+                        print("[pipeline] thumbnail uploaded (http)", flush=True)
+                    except Exception as thumb_err:
+                        print(f"[pipeline] thumbnail upload failed (non-fatal): {thumb_err}", flush=True)
+            else:
+                print("[pipeline] thumbnail: no upload_url_thumb provided by frontend", flush=True)
+        return data, mime
+
+    # ── HLS variant ladder + upload ───────────────────────────────────
+    # Generates a 4-variant adaptive bitrate ladder (360p / 540p / 720p
+    # / 1080p) packaged as fMP4 segments behind a master .m3u8 manifest.
+    # AVPlayer's fastest playback path is HLS — first segment is
+    # independently playable in <100ms, adaptive bitrate handles
+    # network changes gracefully, no whole-file metadata to load.
+    # Required: failure raises and fails the whole render so the
+    # client never sees a half-baked job that's missing the streaming
+    # variants.
+    def _upload_hls():
+        # HLS ladder tuning history (bitrates/preset rationale) lives with the
+        # implementation, now module-scope (_encode_and_upload_hls) so the
+        # minimal route shares ONE delivery path. Body extracted verbatim —
+        # same ladder, same keys, same errors; this wrapper only binds the
+        # TH tail's locals and keeps the edit_plan assignment.
+        hls_url = _encode_and_upload_hls(
+            output_path, work_dir, upload_url, input_data.get("public_url"))
+        edit_plan["_hls_manifest_url"] = hls_url
+        return hls_url
+
+    # Heartbeat: the post-render fan-out (main MP4 upload + HLS encode +
+    # HLS multi-file upload + cover frame upload) was the worst stuck-bar
+    # gap in the entire pipeline — the user saw 96% for 30-90 seconds with
+    # NO signal that anything was still happening, indistinguishable from
+    # a frozen client. HLS encoding alone is 30-50s on a typical clip,
+    # then segment uploads add 10-30s. The bar now creeps 96→99 over
+    # the estimate (60s default — short videos finish well before, long
+    # videos cap at 99 and hold until `complete` fires at 100).
+    _upload_hb_stop = _start_progress_heartbeat(
+        job_id, "upload", 96, 99,
+        [
+            "Building HD stream",
+            "Building HQ stream",
+            "Packaging for fast playback",
+            "Uploading to your library",
+            "Almost there",
+        ],
+        app_url,
+        duration_estimate_s=60.0,
+    )
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as post_executor:
+            f_upload = post_executor.submit(_upload_main)
+            f_cover  = post_executor.submit(_extract_and_upload_cover)
+            f_hls    = post_executor.submit(_upload_hls)
+            # upload/HLS ARE the video — their .result() calls re-raise.
+            # The cover frame is an ENHANCEMENT (P1b): its loss may not
+            # cost the uploaded video.
+            f_upload.result()
+            try:
+                cover_bytes, _ = f_cover.result()
+            except Exception as _eg_err:
+                _enhancement_guard("cover_frame", _eg_err, _floor_state['enhancements_dropped'])
+                cover_bytes = None
+            f_hls.result()
+            # Durable boundary: upload+HLS complete (closes the documented
+            # "worst stuck-bar gap" so a reconnect mid-HLS resumes correctly).
+            _async_job_status(job_id, status="processing", phase="Finalizing", progress=99)
+    finally:
+        _upload_hb_stop.set()
+
+    _thumbnail_url = None
+    if cover_bytes:
+        import base64
+        cover_frame_b64 = base64.b64encode(cover_bytes).decode()
+        # S3-THUMBNAIL (Phase 3): the worker uploads the cover JPEG itself and
+        # writes a presigned thumbnail_url into the result — so even a
+        # double-loss completion recovery is FULLY complete (thumbnail too).
+        # The last degraded state dies: "partial" goes 3 losses → 1 → 0. Same
+        # key the server tail uses (thumbnails/<job>.jpg), so the tail prefers
+        # this and skips re-uploading. Best-effort: on failure the server
+        # tail's cover_frame_b64 upload remains the path — zero regression.
+        try:
+            if _aws_s3_client is not None:
+                _thumb_bucket = os.environ.get("S3_BUCKET_NAME") or "promptly-video-storage"
+                _thumb_key = f"thumbnails/{job_id}.jpg"
+                _aws_s3_client.put_object(
+                    Bucket=_thumb_bucket, Key=_thumb_key,
+                    Body=cover_bytes, ContentType="image/jpeg")
+                _thumbnail_url = _aws_s3_client.generate_presigned_url(
+                    "get_object",
+                    Params={"Bucket": _thumb_bucket, "Key": _thumb_key},
+                    ExpiresIn=60 * 60 * 24 * 7)
+                print(f"[thumbnail] worker uploaded {_thumb_key} "
+                      f"({len(cover_bytes) // 1024}KB)", flush=True)
+        except Exception as _te:
+            print(f"[thumbnail] worker S3 upload failed ({_te}) — server "
+                  f"tail will upload from b64", flush=True)
+
+    # Step 13.5 — Additional format exports (parallelized)
+    export_formats   = input_data.get("export_formats") or []
+    exported_formats = []
+
+    def _export_and_upload(fmt):
+        ar  = str(fmt.get("aspect_ratio") or "").strip()
+        url = str(fmt.get("upload_url") or "").strip()
+        if not ar or not url:
+            return None
+        fmt_path = os.path.join(work_dir, f"output_{ar.replace(':','x')}.mp4")
+        export_additional_format(output_path, ar, fmt_path)
+        _fmt_uploaded = False
+        if _s3_client:
+            _fb, _fk = _parse_supabase_storage_url(url)
+            if _fb and _fk:
+                try:
+                    _s3_client.upload_file(fmt_path, _fb, _fk, ExtraArgs={"ContentType": "video/mp4"})
+                    _fmt_uploaded = True
+                except Exception:
+                    pass
+        if not _fmt_uploaded:
+            with open(fmt_path, "rb") as f:
+                fmt_resp = requests.put(url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
+                fmt_resp.raise_for_status()
+        fmt_size = os.path.getsize(fmt_path) / (1024 * 1024)
+        print(f"[pipeline] exported {ar} ({fmt_size:.1f}MB) -> uploaded", flush=True)
+        return {"aspect_ratio": ar, "size_mb": round(fmt_size, 1)}
+
+    if export_formats:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(export_formats))) as fmt_executor:
+            fmt_futures = {fmt_executor.submit(_export_and_upload, fmt): fmt for fmt in export_formats}
+            for future in concurrent.futures.as_completed(fmt_futures):
+                try:
+                    result = future.result()
+                    if result:
+                        exported_formats.append(result)
+                except Exception as fmt_err:
+                    print(f"[pipeline] format export failed (non-fatal): {fmt_err}", flush=True)
+
+    _timings["upload_export"] = time.time() - t
+    return {
+        "edit_plan": edit_plan, "timings": _timings, "floor_state": _floor_state,
+        "render_elapsed": render_elapsed, "output_size_mb": output_size_mb,
+        "cover_frame_ts": cover_frame_ts, "thumbnail_source_ts": thumbnail_source_ts,
+        "cover_frame_b64": cover_frame_b64, "thumbnail_url": _thumbnail_url,
+        "exported_formats": exported_formats,
+    }
+
+
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
     global _ACTIVE_JOB_ID
     _ACTIVE_JOB_ID = input_data.get("job_id")  # for the platform-shutdown ledger flush
     work_dir = None
-    _prog_pub = None         # progressive publisher handle; the terminal seam drains it
+    _prog_pub_cell = [None]  # 1-cell holder: render_stage writes the publisher here so the finally drains it even if render_stage raises
+    _rs_cost_cell = [0.0, 0]  # (usd, count) QA-regen spend accumulated in render_stage; folded into the meter once (both paths) before the cost log
     premium_ctx = None       # Phase 1 premium scaffold (assigned at the tier fork; torn down in finally)
     _cost_meter = None
     route_premium = False
@@ -33038,749 +34201,82 @@ def handler(job):
         # 92% thumbnail event fired. Now: ~3× source duration, clamped to
         # [60, 240]s, so the bar paces the actual render and snaps cleanly
         # to the next milestone instead of stalling.
+        # MINIMUM-OUTPUT-RATIO GUARD (Zac 2026-07-28) — PRIMARY collapse catch, at
+        # plan-validation time. The cutter is duration-blind: on a short source
+        # (~10-12s) filler + dead-air + false-start removal COMPOUND to strip ~90%,
+        # collapsing the edit to <1s; on a 60s source the same aggressiveness is
+        # invisible. Catch it where the defect is CREATED (analogue of the coverage
+        # gate refusing a transcript that doesn't cover the speech) and route to
+        # minimal BEFORE paying for a collapsed render — the post-render _rv<1.0
+        # route stays as the belt-and-braces backstop. For talking-head the edit
+        # normally keeps most of the speech, so surviving < max(40% of source, 3s) is
+        # over-removal, not a tight edit. Flag-gated + env-tunable; RECORDED as a
+        # divergence (routed, not suppressed) so the collapse rate stays visible.
+        # FLOOR IS DATA-DRIVEN (14d census, 250 edits): good edits keep p50=93%,
+        # p25=77%, p10=51% of source, tightest ~30% / >=1.6s output; the observed
+        # collapses kept <8% / <1s. A 40% floor would route 4.8% of GOOD tight edits
+        # to minimal (a silent downgrade), so the floor sits in the gap: max(20% of
+        # source, 1.5s) — catches every collapse, over-fires ~0.5%. Tune via env.
+        _plan_cuts = edit_plan.get("cuts") or []
+        _proj_out_s = float(sum(compute_effective_durations(_plan_cuts))) if _plan_cuts else 0.0
+        # Per-job override (min_output_ratio_test) for DETERMINISTIC verification: the
+        # collapse is stochastic (can't be forced by source), but set ~0.99 on a cert
+        # job and the guard fires on ANY plan — exercising the whole plan_collapsed
+        # route (routing, minimal render, delivery, divergence) in one render. Same
+        # zero_reject_test / motion_blur_test cert-override pattern; real traffic uses
+        # the env default 0.20.
+        # DEFAULT DISARMED (Zac 2026-07-28 process ruling): ship the mechanism dark
+        # and ARM once the plan_collapsed->minimal route is proven (set the secret
+        # PROMPTLY_MIN_OUTPUT_RATIO=0.20). Default 0.0 => floor = max(0, 1.5s) = 1.5s,
+        # so the guard fires ONLY on near-collapse plans (<1.5s), never on the ~0.5%
+        # good-tight-edit over-fire band, until the route is verified. Per-job
+        # min_output_ratio_test still forces it for the deterministic cert.
+        _min_ratio = float(input_data.get("min_output_ratio_test")
+                           or os.environ.get("PROMPTLY_MIN_OUTPUT_RATIO", "") or 0.0)
+        _collapse_floor_s = max(_min_ratio * float(source_duration or 0.0),
+                                float(os.environ.get("PROMPTLY_MIN_OUTPUT_S", "") or 1.5))
+        # TELEMETRY (Zac 2026-07-28): record the plan's surviving-ratio on EVERY job,
+        # not just collapses — the distribution of plan aggressiveness over time shows
+        # whether over-aggressive plans are rare noise or a drifting trend, whether
+        # the ~0.5% over-fire estimate holds in prod, and (shared-cause with degen) if
+        # both spike together it's planning variance.
+        if _plan_cuts and source_duration:
+            _record_divergence(
+                "render",
+                {"job_id": job_id, "source_s": round(float(source_duration), 1),
+                 "projected_out_s": round(_proj_out_s, 2),
+                 "ratio": round(_proj_out_s / float(source_duration), 3)},
+                "plan_output_ratio",
+                reason=f"plan keeps {100.0 * _proj_out_s / float(source_duration):.0f}% of source ({_proj_out_s:.1f}s / {source_duration:.1f}s)")
+        if (_zero_reject_enabled(input_data) and _plan_cuts and _proj_out_s < _collapse_floor_s
+                and source_duration and source_duration > _MIN_MINIMAL_DURATION_S):
+            _record_divergence(
+                "render",
+                {"job_id": job_id, "source_s": round(float(source_duration), 1),
+                 "projected_out_s": round(_proj_out_s, 2), "floor_s": round(_collapse_floor_s, 2),
+                 "cuts": len(_plan_cuts)},
+                "plan_collapsed_to_minimal",
+                reason=(f"plan projects {_proj_out_s:.1f}s output < floor {_collapse_floor_s:.1f}s "
+                        f"from {source_duration:.1f}s source ({len(_plan_cuts)} cuts) — "
+                        f"zero-reject fallback to minimal BEFORE render"))
+            raise _MinimalRouteSignal("plan_collapsed")
         _render_est = max(60.0, min(240.0, float(source_duration) * 3.0))
-        _render_hb_stop = _start_progress_heartbeat(
-            job_id, "render", 65, 90,
-            [
-                "Stabilizing your footage",
-                "Cutting your timeline",
-                "Adding captions and emphasis",
-                "Compositing your edit",
-                "Mastering audio",
-                "Finalizing your video",
-            ],
-            app_url,
-            duration_estimate_s=_render_est,
+        _rs = render_stage(
+            job_id, input_data, edit_plan, work_dir, source_path, output_path,
+            transcript, source_duration, app_url, broll_clips, upload_url,
+            _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
+            integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
         )
-        t = time.time()
-        # ── W3 PROGRESSIVE DELIVERY (DARK behind PROMPTLY_PROGRESSIVE) ──────
-        # Flag ON: previews of the composite chunks publish IN ORDER to
-        # {base_key}-preview-hls/ WHILE render_multi_clip runs, and the
-        # Phase-B payload lands in video_jobs.preview from segment 1. Flag
-        # OFF (default): _PROGRESSIVE_PUB stays None, all four render hooks
-        # are no-ops, the pipeline is byte-identical. ANY setup error here is
-        # LOUD (print + divergence progressive_publish_fallback) and the job
-        # proceeds exactly as today.
-        global _PROGRESSIVE_PUB
-        _prog_pub = None
-        # SEAM TRACE (Zac 2026-07-26, no-preview-on-device debug): the two-sided
-        # contract must be OBSERVABLE. Log + ledger exactly what the worker
-        # RECEIVED (supports_progressive) and the gate result on EVERY job, so a
-        # single job id tells us whether the break is upstream (client didn't
-        # send / server didn't forward -> supports_progressive falsy here) or in
-        # the worker. Queryable via the divergence ledger (component=progressive).
-        _prog_sp = input_data.get("supports_progressive")
-        _prog_on = _progressive_enabled(input_data)
-        print(f"[progressive] GATE job={job_id} supports_progressive={_prog_sp!r} "
-              f"progressive_test={input_data.get('progressive_test')!r} "
-              f"PROMPTLY_PROGRESSIVE={os.environ.get('PROMPTLY_PROGRESSIVE', '')!r} "
-              f"-> enabled={_prog_on}", flush=True)
-        _record_divergence(
-            "progressive",
-            {"supports_progressive": _prog_sp, "enabled": bool(_prog_on),
-             "job_id": job_id},
-            "progressive_gate",
-            reason=f"supports_progressive={_prog_sp} enabled={_prog_on}")
-        if _prog_on:
-            try:
-                from progressive_publish import ProgressivePublisher
-                _prog_pub = ProgressivePublisher(
-                    work_dir,
-                    upload_url,
-                    input_data.get("public_url"),
-                    60.0,  # nominal; begin_attempt overrides with exact source_fps
-                    os.path.join(work_dir, "final_audio.wav"),
-                    s3_client=_aws_s3_client,
-                    parse_s3_url=_parse_aws_s3_url,
-                    transfer_config=_S3_TRANSFER_CONFIG,
-                    job_id=job_id,
-                    plan_summary={
-                        "route": "talking_head",
-                        "clip_count": len(edit_plan.get("cuts") or []),
-                        "caption_style": str(edit_plan.get("caption_style") or ""),
-                        "broll_count": len(broll_clips or []),
-                        "edit_rationale": str(edit_plan.get("edit_rationale") or "")[:400],
-                    },
-                    persist_cb=(lambda _pl, _jid=job_id: _persist_preview(_jid, _pl)),
-                    divergence_cb=_record_divergence,
-                )
-                _PROGRESSIVE_PUB = _prog_pub
-            except Exception as _pg_err:
-                print(f"[progressive] SETUP FAILED ({type(_pg_err).__name__}: "
-                      f"{_pg_err}) — previews off, standard delivery "
-                      f"unaffected", flush=True)
-                _record_divergence(
-                    "render", {"stage": "setup",
-                               "detail": str(_pg_err)[:300]},
-                    "progressive_publish_fallback",
-                    reason="progressive_setup")
-                _prog_pub = None
-                _PROGRESSIVE_PUB = None
-        # D2 motion blur — per-job override for the E1+D2 A/B (dark/absent for
-        # real traffic → byte-identical). Threaded via edit_plan into BOTH
-        # render inputs (render_multi_clip reads edit_plan["_motion_blur"]);
-        # edit_plan is mutated in place so every render path below sees it.
-        if bool(input_data.get("motion_blur_test")):
-            edit_plan["_motion_blur"] = {
-                "enabled": True,
-                "samples": int(input_data.get("motion_blur_samples") or 6),
-                "shutter": int(input_data.get("motion_blur_shutter") or 180),
-            }
-        # Caption phrase-chunk — per-job override for the caption A/B (dark/absent for
-        # real traffic → byte-identical; the caption builder defaults to 2). Threaded
-        # via edit_plan the same way; render_multi_clip reads edit_plan["_caption_max_words"].
-        if input_data.get("caption_max_words"):
-            edit_plan["_caption_max_words"] = int(input_data.get("caption_max_words"))
-        # Caption STYLE — per-job override for the style-comparison A/B (dark/absent for
-        # real traffic → byte-identical; Gemini's pick stands). render_multi_clip reads
-        # edit_plan["caption_style"] at the caption build.
-        if input_data.get("caption_style_test"):
-            edit_plan["caption_style"] = str(input_data["caption_style_test"])
-        # Degrade ladder — see _render_degrade_ladder (module level, tested
-        # behaviorally in test_render_ladder.py).
-        try:
-            _render_degrade_ladder(
-                lambda _cuts, _bc: render_multi_clip(
-                    source_path, _cuts, edit_plan, output_path, transcript,
-                    work_dir, broll_clips=_bc,
-                ),
-                edit_plan, broll_clips, output_path,
-            )
-        finally:
-            _render_hb_stop.set()
-            # W3 PROGRESSIVE: detach the per-job publisher (warm-container
-            # hygiene — the next job must never see this one's publisher).
-            # The daemon worker finishes/abandons on its own timers; QA
-            # re-renders after this point see None and publish nothing.
-            _PROGRESSIVE_PUB = None
-        edit_plan["_deepgram_words"] = transcript.get("words", [])
-        # Floor telemetry (Part 3): pick up the render floor (stripped) the
-        # ladder may have recorded during the render that just returned.
-        _sync_floor_state(_floor_state, edit_plan)
-
-        render_elapsed = time.time() - t
-        _timings["render"] = render_elapsed
-        print(f"[pipeline] parallel_render complete in {render_elapsed:.1f}s", flush=True)
-        # NB: this label must match the actual encode in _build_composite_cmd
-        # / final concat+mux; both currently use libx264 -preset medium -crf 18.
-        # Update here too if you change the encoder.
-        _enc_label = "NVENC" if _HAS_NVENC else "libx264/medium crf=18 threads=auto"
-        print(f"[render] Encoding: {_enc_label}", flush=True)
-        # Validate render output — single ffprobe for file check + duration extraction
-        if not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
-            raise RuntimeError(f"Main render produced invalid output: {output_path}")
-        # Durable boundary: render complete (closes the heartbeat-only 90->92 gap
-        # so a reconnect mid-finalize resumes correctly).
-        _async_job_status(job_id, status="processing", phase="Finalizing", progress=95)
-        _rv, _ra = 0.0, 0.0
-        _v_start, _a_start = 0.0, 0.0
-        try:
-            probe_cache_clear(output_path)  # freshly rendered — clear stale cache
-            _cp = _probe_full(output_path)
-            for _s in (_cp.get("streams") or []):
-                if _s.get("codec_type") == "video":
-                    if _s.get("duration"):
-                        _rv = float(_s["duration"])
-                    if _s.get("start_time"):
-                        _v_start = float(_s["start_time"])
-                elif _s.get("codec_type") == "audio":
-                    if _s.get("duration"):
-                        _ra = float(_s["duration"])
-                    if _s.get("start_time"):
-                        _a_start = float(_s["start_time"])
-        except Exception:
-            pass
-        if _rv < 1.0:
-            raise RuntimeError(
-                f"RENDER_TOO_SHORT: main render output too short (video={_rv:.1f}s) — "
-                f"the edit plan collapsed to almost no timeline (typically a "
-                f"safe-recipe degeneration); the output-length guard held it back")
-        _av_end_delta_ms = ((_ra + _a_start) - (_rv + _v_start)) * 1000
-        _av_start_delta_ms = (_a_start - _v_start) * 1000
-        print(
-            f"[render] Output valid: {os.path.getsize(output_path)/1024/1024:.1f}MB, "
-            f"video={_rv:.3f}s audio={_ra:.3f}s",
-            flush=True,
-        )
-        print(
-            f"[render] A/V sync probe: "
-            f"v_start={_v_start*1000:+.2f}ms  a_start={_a_start*1000:+.2f}ms  "
-            f"start_delta={_av_start_delta_ms:+.2f}ms  end_delta={_av_end_delta_ms:+.2f}ms",
-            flush=True,
-        )
-        # ── DIAG PROBE 4: output content verification ──
-        # Re-prints the key numbers in a stable format for cross-referencing
-        # against probes 1-3. If everything above this point is right but
-        # this row shows mismatch, the bug is in the final mux/encode step.
-        # If everything else is wrong, this row will inherit those errors.
-        try:
-            _out_v_pkt = subprocess.run(
-                ["ffprobe", "-v", "error", "-select_streams", "v:0",
-                 "-show_entries", "packet=pts_time", "-of", "csv=p=0",
-                 "-read_intervals", "0%+1", output_path],
-                capture_output=True, text=True, timeout=15,
-            )
-            _out_a_pkt = subprocess.run(
-                ["ffprobe", "-v", "error", "-select_streams", "a:0",
-                 "-show_entries", "packet=pts_time", "-of", "csv=p=0",
-                 "-read_intervals", "0%+1", output_path],
-                capture_output=True, text=True, timeout=15,
-            )
-            _first_v = (_out_v_pkt.stdout or "").splitlines()[0] if _out_v_pkt.stdout else "?"
-            _first_a = (_out_a_pkt.stdout or "").splitlines()[0] if _out_a_pkt.stdout else "?"
-            print(
-                f"[output-probe] actual: v_dur={_rv:.4f}s a_dur={_ra:.4f}s "
-                f"first_v_pts={_first_v.strip(',')} first_a_pts={_first_a.strip(',')}",
-                flush=True,
-            )
-        except Exception as _opb:
-            print(f"[output-probe] probe failed: {_opb}", flush=True)
-
-        cuts = edit_plan.get("_render_cuts") or edit_plan.get("cuts") or []
-        effective_durations = edit_plan.get("_render_effective_durations") or compute_effective_durations(cuts)
-        final_dur = _rv
-
-        # B-roll is now integrated into the first FFmpeg pass (no second encode needed)
-        _timings["broll"] = 0.0
-
-        # ── Parallel group 2: cover frame + upload ────────────────────────────────
-        t = time.time()
-        thumbnail_source_ts = edit_plan.get("thumbnail_timestamp")
-        if thumbnail_source_ts is None:
-            thumbnail_source_ts = (source_duration / 3.0) if source_duration > 0 else 1.0
-        cover_frame_ts = project_source_time_to_final_output(
-            float(thumbnail_source_ts),
-            cuts,
-            effective_durations,
-            clip_time_maps=edit_plan.get("_render_clip_time_maps"),
-        )
-        if cover_frame_ts is None:
-            cover_frame_ts = min(1.0, max(0.1, final_dur - 0.1))
-        cover_frame_b64  = None
-        cover_frame_mime = "image/jpeg"
-
-        if not validate_output(output_path, "final"):
-            raise RuntimeError(f"Final output is invalid: {output_path}")
-        output_size_mb = os.path.getsize(output_path) / (1024*1024)
-
-        # ── QA judge + recovery for generated scenes (Phase E · Sub-step 4) ──
-        # PREMIUM + has-rendered-scene only → free/no-scene jobs skip entirely
-        # (byte-identical). Judge the generated scenes; on failure PERTURB the
-        # plan (patch_list) + regenerate + re-render, bounded by attempts (≤2) AND
-        # a re-render-time headroom check; DEGRADE (drop the scene, re-render
-        # without it) if it can't be fixed in budget. NEVER ships a judged-bad
-        # asset; fail-open — any error ships the already-validated output.
-        _qa_scenes = (edit_plan.get("_rendered_generated_scenes") or []) if isinstance(edit_plan, dict) else []
-        # Increment 3 QA RE-SCOPE: designed scenes (typo_stat/photo_card/
-        # hero_object) are code-authored — garbled text and off-palette are
-        # unconstructible, so the FRAME judge covers only legacy full-frame
-        # scenes. The hero ASSET is judged at generation time (geometry/clean
-        # field/stray text/brand) with the perturb loop pointed at asset prompts.
-        _qa_scenes = [s for s in _qa_scenes if not (s or {}).get("sceneType")]
-        if route_premium and premium_ctx is not None and _qa_scenes:
-            try:
-                _qa_fps = float(edit_plan.get("_render_fps") or 60.0)
-                _palette_hint = str(edit_plan.get("video_identity") or "")[:120]
-                _known_text = " ".join(str(w.get("word") or "") for w in (transcript.get("words") or [])).strip()
-                _MAX_QA_ATTEMPTS = 2
-                # A recovery re-render costs ≈ render_elapsed. We gate on that so a
-                # slow render can't blow the 900s function timeout (judge itself is
-                # a cheap ~5-15s vision call; the re-render is the expensive part).
-                # Uses the module-level _RERENDER_HEADROOM_S (shared with the S3
-                # generation-time pre-check).
-                _attempt = 0
-                while True:
-                    _scores = _qa_judge_generated_scenes(
-                        output_path, _qa_scenes, _qa_fps, work_dir, _palette_hint, _known_text
-                    )
-                    _fail = [
-                        s for s in _scores
-                        if s.verdict == "fail"
-                        or min(s.coherence, s.text_correct, s.on_palette, s.integration) < _QA_PASS_THRESHOLD
-                    ]
-                    for s in _scores:
-                        # 4d: durable evidence is keyed by ORIGIN scene index;
-                        # the judged FRAME file stays keyed by judge position
-                        # (that is how _qa_judge_generated_scenes named it).
-                        _s_origin = _judge_origin_index(_qa_scenes, s.scene_index)
-                        print(
-                            f"[qa-judge] scene={_s_origin} (judge_pos={s.scene_index}) "
-                            f"scores={{coh:{s.coherence:.2f},txt:{s.text_correct:.2f},"
-                            f"pal:{s.on_palette:.2f},int:{s.integration:.2f}}} verdict={s.verdict} "
-                            f"attempt={_attempt} "
-                            f"cost=${(_cost_meter.total_usd() if _cost_meter is not None else 0.0):.3f}",
-                            flush=True,
-                        )
-                        # Increment 2: persist the JUDGED frame + full scores durably
-                        # (rejects included) — the evidence Increment 1 lost.
-                        _jf = os.path.join(work_dir, f"qa_scene_{s.scene_index:02d}.jpg")
-                        _persist_gen_attempt(
-                            job_id, _s_origin, _attempt, "judged",
-                            image_path=_jf if os.path.isfile(_jf) else None,
-                            meta={"coherence": s.coherence, "text_correct": s.text_correct,
-                                  "on_palette": s.on_palette, "integration": s.integration,
-                                  "verdict": s.verdict, "reason": s.reason,
-                                  "attempt": _attempt, "threshold": _QA_PASS_THRESHOLD})
-                    if not _fail:
-                        if _scores:
-                            print(f"[qa-judge] {len(_scores)} scene(s) pass — ship", flush=True)
-                        break
-                    # CASCADE FIX (4d): verdicts map to ORIGIN indices — a
-                    # positional dereference killed the WRONG scene whenever the
-                    # judge scope was a filtered/skipped subset.
-                    _fail_idx = {_judge_origin_index(_qa_scenes, s.scene_index) for s in _fail}
-                    _over_budget = _cost_meter is not None and _cost_meter.total_usd() >= _PREMIUM_ASSET_BUDGET_USD
-                    _no_headroom = render_elapsed > _RERENDER_HEADROOM_S
-                    if _attempt >= _MAX_QA_ATTEMPTS or _over_budget or _no_headroom:
-                        # DEGRADE — drop the unfixable scenes, one final re-render.
-                        print(
-                            f"[qa-judge] verdict=degrade dropping {sorted(_fail_idx)} "
-                            f"(attempt={_attempt} over_budget={_over_budget} no_headroom={_no_headroom}) "
-                            f"— re-render without them",
-                            flush=True,
-                        )
-                        # Increment 2 honesty marker: a QA-degrade of a scene must
-                        # end in a capability note (assembled at result time), and
-                        # the degrade itself is persisted per scene (rejects law).
-                        # (set_drop_stage False: the finalize keeps its existing
-                        # "qa" drop_stage vocabulary; drop_reasons carries detail)
-                        _lumen_funnel_note(edit_plan, "judge", set_drop_stage=False,
-                                           scenes=sorted(_fail_idx), attempt=_attempt)
-                        edit_plan["_qa_dropped_scenes"] = len(_fail_idx)
-                        for _di in sorted(_fail_idx):
-                            _persist_gen_attempt(
-                                job_id, _di, _attempt, "degraded",
-                                meta={"outcome": "degrade_drop", "attempt": _attempt,
-                                      "over_budget": bool(_over_budget),
-                                      "no_headroom": bool(_no_headroom)})
-                        # CASCADE FIX (4d): drop by ORIGIN index + RE-KEY the
-                        # subjects to the surviving positions — the old filter
-                        # left subjects on stale keys, so every surviving hero
-                        # scene lost its asset on the degrade re-render.
-                        _drop_scenes_by_origin(edit_plan, _fail_idx)
-                        edit_plan.pop("_rendered_generated_scenes", None)
-                        _reout = output_path + ".qa.mp4"
-                        render_multi_clip(
-                            source_path, edit_plan["cuts"], edit_plan, _reout, transcript, work_dir,
-                            broll_clips=broll_clips,
-                        )
-                        if validate_output(_reout, "qa-degrade"):
-                            os.replace(_reout, output_path)
-                            output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                        else:
-                            # 4d: the degrade re-render itself failed validation —
-                            # the ALREADY-VALIDATED original ships (fail-open law;
-                            # no retries). Loudly recorded: this is the one path
-                            # that can still ship a judged-bad scene.
-                            print(
-                                "[qa-judge] degrade re-render FAILED validation — "
-                                "shipping the validated original (judged-bad scene "
-                                "still aboard; recorded, not retried)",
-                                flush=True,
-                            )
-                            _lumen_funnel_note(edit_plan, "judge_degrade_render_invalid",
-                                               set_drop_stage=False,
-                                               scenes=sorted(_fail_idx))
-                        break
-                    # RETRY — perturb failing scenes' prompts, regenerate, re-render.
-                    # The perturbation carries the full rubric + the previous
-                    # attempt's per-dimension scores (oscillator fix, Increment 2).
-                    print(f"[qa-judge] verdict=retry scenes={sorted(_fail_idx)} attempt={_attempt + 1}", flush=True)
-                    # 4d: keyed by ORIGIN index (matches _fail_idx + _scene_list)
-                    _reasons = {_judge_origin_index(_qa_scenes, s.scene_index): s.reason for s in _fail}
-                    _score_by_idx = {_judge_origin_index(_qa_scenes, s.scene_index): s for s in _fail}
-                    _scene_list = edit_plan.get("generated_scenes") or []
-                    for _i in _fail_idx:
-                        if not (0 <= _i < len(_scene_list)) or not isinstance(_scene_list[_i], dict):
-                            continue
-                        _scene = _scene_list[_i]
-                        _newp = _perturb_scene_prompt(
-                            _scene, _reasons.get(_i, ""), _attempt + 1,
-                            score=_score_by_idx.get(_i))
-                        if _newp:
-                            _scene.setdefault("subject", {})["generation_prompt"] = _newp
-                        _res = _generate_scene_subject(_scene, _i, work_dir, _known_text)
-                        if _res and _res.get("path"):
-                            edit_plan.setdefault("_generated_subjects", {})[_i] = _res["path"]
-                            if _cost_meter is not None:
-                                _cost_meter.add("generated_asset_regen", count=1, usd=float(_res.get("cost") or 0.0))
-                            # Increment 2: persist the regen image + the perturbed
-                            # prompt that produced it (the whole chain, per attempt).
-                            _persist_gen_attempt(
-                                job_id, _i, _attempt + 1, "gen", image_path=_res["path"],
-                                meta={"generation_prompt": str((_scene.get("subject") or {}).get("generation_prompt") or ""),
-                                      "perturbed": bool(_newp), "prev_reason": _reasons.get(_i, ""),
-                                      "cost": _res.get("cost"), "ms": _res.get("ms")})
-                    edit_plan.pop("_rendered_generated_scenes", None)
-                    _reout = output_path + ".qa.mp4"
-                    render_multi_clip(
-                        source_path, edit_plan["cuts"], edit_plan, _reout, transcript, work_dir,
-                        broll_clips=broll_clips,
-                    )
-                    if validate_output(_reout, "qa-retry"):
-                        os.replace(_reout, output_path)
-                        output_size_mb = os.path.getsize(output_path) / (1024 * 1024)
-                    # CASCADE FIX (4d): re-apply the JUDGE SCOPE on the fresh
-                    # specs — without this, designed scenes (typo_stat/
-                    # photo_card/hero_object; frame-judging is legacy-only by
-                    # doctrine) re-entered the judge on attempt 1+ and could be
-                    # killed by a rubric that does not cover them.
-                    _qa_scenes = [s for s in (edit_plan.get("_rendered_generated_scenes") or [])
-                                  if not (s or {}).get("sceneType")]
-                    _attempt += 1
-            except Exception as _qa_err:
-                print(
-                    f"[qa-judge] recovery error ({type(_qa_err).__name__}: {str(_qa_err)[:140]}) "
-                    f"— shipping the validated output",
-                    flush=True,
-                )
-
-        # ── POST-RENDER INTEGRITY GATE (CUT_STACK_REFORM Part 1) ────────────
-        # The render never leaves the box unexamined. Runs on the FINAL
-        # output_path (after any QA-judge re-render), before any byte
-        # uploads. Trip → INTEGRITY_TRIP failure (app owns the credit
-        # refund on that code), forensic preservation, NO auto-retry
-        # (INTEGRITY_TRIP is in _OUTER_RESCUE_DENY). An instrument crash
-        # inside the gate itself fails OPEN with a loud log line — a gate
-        # bug must never eat a good render.
-        try:
-            probe_cache_clear(output_path)
-            _ig_meta = _probe_full(output_path)
-            _ig_v = next((s for s in _ig_meta.get("streams", [])
-                          if s.get("codec_type") == "video"), {})
-            _ig_a = next((s for s in _ig_meta.get("streams", [])
-                          if s.get("codec_type") == "audio"), {})
-            _ig_vd = float(_ig_v.get("duration") or 0)
-            _ig_ad = float(_ig_a.get("duration") or 0)
-            _ig_nb = int(_ig_v.get("nb_frames") or 0)
-            _ig_fps = float(edit_plan.get("_render_fps") or 60.0)
-            _ig_expected = int(edit_plan.get("_render_total_output_frames") or 0)
-            _ig_cranges = edit_plan.get("_render_clip_output_ranges") or []
-            _ig_rcuts = edit_plan.get("_render_cuts") or []
-            _ig_tmaps = edit_plan.get("_render_clip_time_maps") or []
-
-            def _ig_out_to_src(t):
-                for _ci, _r in enumerate(_ig_cranges):
-                    if _r["start"] - 1e-6 <= t <= _r["end"] + 1e-6:
-                        if _ci < len(_ig_rcuts):
-                            _pbr = 1.0
-                            if _ci < len(_ig_tmaps):
-                                _pbr = float(_ig_tmaps[_ci].get("avg_speed") or 1.0)
-                            return (float(_ig_rcuts[_ci]["source_start"])
-                                    + (t - _r["start"]) * _pbr)
-                return None
-
-            _ig_verdict = _integrity_gate(
-                output_path, _ig_vd, _ig_ad, _ig_expected, _ig_nb, _ig_fps,
-                _build_integrity_masks(edit_plan),
-                source_path=source_path if os.path.exists(source_path) else None,
-                out_to_src=_ig_out_to_src,
-            )
-        except Exception as _ig_err:
-            _ig_verdict = {"clean": None, "trips": [],
-                           "gate_error": f"{type(_ig_err).__name__}: {str(_ig_err)[:200]}"}
-            print(f"[integrity-gate] ERROR (fail-open — instrument crashed, "
-                  f"render delivered unexamined): {_ig_verdict['gate_error']}",
-                  flush=True)
-
-        # Verdict persisted ALWAYS — clean verdicts feed the corpus baseline.
-        _ig_bucket = None
-        try:
-            import io as _ig_io
-            if _aws_s3_client is not None:
-                _ig_bucket = (os.environ.get("S3_BUCKET_NAME")
-                              or os.environ.get("SUPABASE_S3_BUCKET")
-                              or "promptly-video-storage")
-                _aws_s3_client.upload_fileobj(
-                    _ig_io.BytesIO(json.dumps(
-                        {"job_id": job_id, **_ig_verdict}).encode()),
-                    _ig_bucket, f"integrity/{job_id}.json",
-                    ExtraArgs={"ContentType": "application/json"})
-        except Exception as _ig_persist_err:
-            print(f"[integrity-gate] verdict persist failed (non-fatal): "
-                  f"{str(_ig_persist_err)[:120]}", flush=True)
-
-        if _ig_verdict.get("clean") is True:
-            print(f"[integrity-gate] CLEAN in {_ig_verdict.get('gate_elapsed_s')}s "
-                  f"(masks: {sum(len(v) for v in _ig_verdict['detail']['masks'].values())} windows, "
-                  f"downgrades: {len(_ig_verdict['detail']['content_stillness_downgraded'])})",
-                  flush=True)
-        elif _ig_verdict.get("clean") is False:
-            _ig_summary = ", ".join(
-                t["check"] + "=" + json.dumps(t.get("spans") or t.get("delta_s")
-                                              or t.get("nb_frames"))
-                for t in _ig_verdict["trips"])
-            print(f"[integrity-gate] TRIP {_ig_summary}", flush=True)
-            try:
-                if _aws_s3_client is not None and _ig_bucket:
-                    _aws_s3_client.upload_file(
-                        output_path, _ig_bucket,
-                        f"forensics/{job_id}/output.mp4",
-                        ExtraArgs={"ContentType": "video/mp4"},
-                        Config=_S3_TRANSFER_CONFIG)
-                    print(f"[integrity-gate] forensic specimen preserved → "
-                          f"forensics/{job_id}/", flush=True)
-            except Exception as _ig_f_err:
-                print(f"[integrity-gate] forensic preserve failed: "
-                      f"{str(_ig_f_err)[:120]}", flush=True)
-            if integrity_observe_only:
-                print("[integrity-gate] TRIP (observe-only — operator "
-                      "fixture, delivering anyway)", flush=True)
-            else:
-                raise RuntimeError(f"INTEGRITY_TRIP: {_ig_summary}")
-
-        send_progress(job_id, "thumbnail", 92, "Picking your cover frame", app_url)
-        send_progress(job_id, "upload", 96, "Publishing to your library", app_url)
-        print(f"[pipeline] output: {output_size_mb:.1f}MB, {final_dur:.1f}s — parallel upload + cover frame", flush=True)
-
-        def _upload_main():
-            print("[pipeline] step=upload", flush=True)
-            # Direct S3 multipart upload — much faster than single-stream HTTP PUT
-            # for 100-200 MB videos. boto3[crt] does multipart automatically with
-            # _S3_TRANSFER_CONFIG (32 concurrent 16-MB parts).
-            #
-            # Route by URL scheme:
-            #   AWS S3 (virtual-host or accelerate or path-style or CloudFront)
-            #     → _aws_s3_client. This is the normal dispatcher path.
-            #   Supabase storage (legacy)
-            #     → _s3_client (Supabase S3-compatible endpoint).
-            # End destination is identical to what the dispatcher pre-signed,
-            # so any CDN origin access remains valid.
-            if not upload_url:
-                raise RuntimeError("No upload_url provided — Node dispatcher must pre-generate the presigned PUT URL")
-            _aws_b, _aws_k = _parse_aws_s3_url(upload_url)
-            if _aws_b and _aws_k:
-                if not _aws_s3_client:
-                    raise RuntimeError("AWS S3 client not initialized — cannot upload (check AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY env)")
-                _client, _bucket, _key, _scheme = _aws_s3_client, _aws_b, _aws_k, "aws"
-            else:
-                _sb_b, _sb_k = _parse_supabase_storage_url(upload_url)
-                if _sb_b and _sb_k:
-                    if not _s3_client:
-                        raise RuntimeError("Supabase S3 client not initialized — cannot upload (check SUPABASE_S3_ACCESS_KEY/SECRET_KEY env)")
-                    _client, _bucket, _key, _scheme = _s3_client, _sb_b, _sb_k, "supabase"
-                else:
-                    raise RuntimeError(
-                        f"Could not parse bucket/key from upload_url (neither AWS nor Supabase pattern matched): "
-                        f"{upload_url[:120]}"
-                    )
-            _ut0 = time.time()
-            _client.upload_file(
-                output_path, _bucket, _key,
-                ExtraArgs={"ContentType": "video/mp4"},
-                Config=_S3_TRANSFER_CONFIG,
-            )
-            _ue = time.time() - _ut0
-            if input_data.get("public_url"):
-                _video_url = input_data["public_url"]
-            else:
-                _video_url = upload_url.split("?")[0]
-            _mb = os.path.getsize(output_path) / (1024 * 1024)
-            print(
-                f"[pipeline] upload complete ({_scheme}-multipart {_mb:.1f}MB in {_ue:.1f}s "
-                f"@ {_mb / max(_ue, 0.001):.1f}MB/s → {_video_url})",
-                flush=True,
-            )
-            edit_plan["_rendered_video_url"] = _video_url
-
-        def _extract_and_upload_cover():
-            # Pick the visually best frame from the FINAL RENDERED OUTPUT around
-            # Gemini's projected timestamp. The output has captions burned in,
-            # speed warps applied, and zoom effects — exactly what makes a great
-            # social-media thumbnail. NO additional post-processing.
-            #
-            # If Gemini's seed lands inside a b-roll segment, shift it to the
-            # nearest moment showing the speaker (not the b-roll content).
-            _thumb_seed = float(cover_frame_ts)
-            _broll_ranges = edit_plan.get("_broll_output_ranges") or []
-            for _br_start, _br_end in _broll_ranges:
-                if _br_start <= _thumb_seed <= _br_end:
-                    # Shift to whichever side of the b-roll is closer
-                    _dist_before = _thumb_seed - _br_start
-                    _dist_after = _br_end - _thumb_seed
-                    if _dist_before <= _dist_after:
-                        _thumb_seed = max(0.1, _br_start - 0.3)
-                    else:
-                        _thumb_seed = min(final_dur - 0.1, _br_end + 0.3)
-                    print(
-                        f"[thumbnail] Seed was inside b-roll [{_br_start:.2f}, {_br_end:.2f}], "
-                        f"shifted to {_thumb_seed:.2f}s",
-                        flush=True,
-                    )
-                    break
-            # AI-scored thumbnail selection. A scorer failure re-raises here
-            # and is absorbed at the f_cover collection point (P1b enhancement
-            # guard) — the video still ships, the drop is logged loudly for
-            # root-causing. It no longer costs the job.
-            data, mime = select_best_thumbnail_frame(
-                output_path, _thumb_seed, work_dir,
-            )
-            if data:
-                print(
-                    f"[pipeline] cover frame at {cover_frame_ts:.2f}s "
-                    f"(AI-selected from source {float(thumbnail_source_ts):.2f}s, {len(data)//1024}KB)",
-                    flush=True,
-                )
-                # Upload thumbnail in parallel with main video upload
-                upload_url_thumb = input_data.get("upload_url_thumb")
-                if upload_url_thumb:
-                    _thumb_uploaded = False
-                    if _s3_client:
-                        _tb, _tk = _parse_supabase_storage_url(upload_url_thumb)
-                        if _tb and _tk:
-                            try:
-                                import io as _io_thumb
-                                _s3_client.upload_fileobj(
-                                    _io_thumb.BytesIO(data), _tb, _tk,
-                                    ExtraArgs={"ContentType": mime},
-                                )
-                                print("[pipeline] thumbnail uploaded (s3)", flush=True)
-                                _thumb_uploaded = True
-                            except Exception as _s3_thumb_err:
-                                print(f"[pipeline] S3 thumbnail upload failed ({_s3_thumb_err}), falling back to HTTP", flush=True)
-                    if not _thumb_uploaded:
-                        try:
-                            thumb_resp = requests.put(
-                                upload_url_thumb, data=data,
-                                headers={"Content-Type": mime}, timeout=30,
-                            )
-                            thumb_resp.raise_for_status()
-                            print("[pipeline] thumbnail uploaded (http)", flush=True)
-                        except Exception as thumb_err:
-                            print(f"[pipeline] thumbnail upload failed (non-fatal): {thumb_err}", flush=True)
-                else:
-                    print("[pipeline] thumbnail: no upload_url_thumb provided by frontend", flush=True)
-            return data, mime
-
-        # ── HLS variant ladder + upload ───────────────────────────────────
-        # Generates a 4-variant adaptive bitrate ladder (360p / 540p / 720p
-        # / 1080p) packaged as fMP4 segments behind a master .m3u8 manifest.
-        # AVPlayer's fastest playback path is HLS — first segment is
-        # independently playable in <100ms, adaptive bitrate handles
-        # network changes gracefully, no whole-file metadata to load.
-        # Required: failure raises and fails the whole render so the
-        # client never sees a half-baked job that's missing the streaming
-        # variants.
-        def _upload_hls():
-            # HLS ladder tuning history (bitrates/preset rationale) lives with the
-            # implementation, now module-scope (_encode_and_upload_hls) so the
-            # minimal route shares ONE delivery path. Body extracted verbatim —
-            # same ladder, same keys, same errors; this wrapper only binds the
-            # TH tail's locals and keeps the edit_plan assignment.
-            hls_url = _encode_and_upload_hls(
-                output_path, work_dir, upload_url, input_data.get("public_url"))
-            edit_plan["_hls_manifest_url"] = hls_url
-            return hls_url
-
-        # Heartbeat: the post-render fan-out (main MP4 upload + HLS encode +
-        # HLS multi-file upload + cover frame upload) was the worst stuck-bar
-        # gap in the entire pipeline — the user saw 96% for 30-90 seconds with
-        # NO signal that anything was still happening, indistinguishable from
-        # a frozen client. HLS encoding alone is 30-50s on a typical clip,
-        # then segment uploads add 10-30s. The bar now creeps 96→99 over
-        # the estimate (60s default — short videos finish well before, long
-        # videos cap at 99 and hold until `complete` fires at 100).
-        _upload_hb_stop = _start_progress_heartbeat(
-            job_id, "upload", 96, 99,
-            [
-                "Building HD stream",
-                "Building HQ stream",
-                "Packaging for fast playback",
-                "Uploading to your library",
-                "Almost there",
-            ],
-            app_url,
-            duration_estimate_s=60.0,
-        )
-        try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as post_executor:
-                f_upload = post_executor.submit(_upload_main)
-                f_cover  = post_executor.submit(_extract_and_upload_cover)
-                f_hls    = post_executor.submit(_upload_hls)
-                # upload/HLS ARE the video — their .result() calls re-raise.
-                # The cover frame is an ENHANCEMENT (P1b): its loss may not
-                # cost the uploaded video.
-                f_upload.result()
-                try:
-                    cover_bytes, _ = f_cover.result()
-                except Exception as _eg_err:
-                    _enhancement_guard("cover_frame", _eg_err, _floor_state['enhancements_dropped'])
-                    cover_bytes = None
-                f_hls.result()
-                # Durable boundary: upload+HLS complete (closes the documented
-                # "worst stuck-bar gap" so a reconnect mid-HLS resumes correctly).
-                _async_job_status(job_id, status="processing", phase="Finalizing", progress=99)
-        finally:
-            _upload_hb_stop.set()
-
-        _thumbnail_url = None
-        if cover_bytes:
-            import base64
-            cover_frame_b64 = base64.b64encode(cover_bytes).decode()
-            # S3-THUMBNAIL (Phase 3): the worker uploads the cover JPEG itself and
-            # writes a presigned thumbnail_url into the result — so even a
-            # double-loss completion recovery is FULLY complete (thumbnail too).
-            # The last degraded state dies: "partial" goes 3 losses → 1 → 0. Same
-            # key the server tail uses (thumbnails/<job>.jpg), so the tail prefers
-            # this and skips re-uploading. Best-effort: on failure the server
-            # tail's cover_frame_b64 upload remains the path — zero regression.
-            try:
-                if _aws_s3_client is not None:
-                    _thumb_bucket = os.environ.get("S3_BUCKET_NAME") or "promptly-video-storage"
-                    _thumb_key = f"thumbnails/{job_id}.jpg"
-                    _aws_s3_client.put_object(
-                        Bucket=_thumb_bucket, Key=_thumb_key,
-                        Body=cover_bytes, ContentType="image/jpeg")
-                    _thumbnail_url = _aws_s3_client.generate_presigned_url(
-                        "get_object",
-                        Params={"Bucket": _thumb_bucket, "Key": _thumb_key},
-                        ExpiresIn=60 * 60 * 24 * 7)
-                    print(f"[thumbnail] worker uploaded {_thumb_key} "
-                          f"({len(cover_bytes) // 1024}KB)", flush=True)
-            except Exception as _te:
-                print(f"[thumbnail] worker S3 upload failed ({_te}) — server "
-                      f"tail will upload from b64", flush=True)
-
-        # Step 13.5 — Additional format exports (parallelized)
-        export_formats   = input_data.get("export_formats") or []
-        exported_formats = []
-
-        def _export_and_upload(fmt):
-            ar  = str(fmt.get("aspect_ratio") or "").strip()
-            url = str(fmt.get("upload_url") or "").strip()
-            if not ar or not url:
-                return None
-            fmt_path = os.path.join(work_dir, f"output_{ar.replace(':','x')}.mp4")
-            export_additional_format(output_path, ar, fmt_path)
-            _fmt_uploaded = False
-            if _s3_client:
-                _fb, _fk = _parse_supabase_storage_url(url)
-                if _fb and _fk:
-                    try:
-                        _s3_client.upload_file(fmt_path, _fb, _fk, ExtraArgs={"ContentType": "video/mp4"})
-                        _fmt_uploaded = True
-                    except Exception:
-                        pass
-            if not _fmt_uploaded:
-                with open(fmt_path, "rb") as f:
-                    fmt_resp = requests.put(url, data=f, headers={"Content-Type": "video/mp4"}, timeout=120)
-                    fmt_resp.raise_for_status()
-            fmt_size = os.path.getsize(fmt_path) / (1024 * 1024)
-            print(f"[pipeline] exported {ar} ({fmt_size:.1f}MB) -> uploaded", flush=True)
-            return {"aspect_ratio": ar, "size_mb": round(fmt_size, 1)}
-
-        if export_formats:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=min(3, len(export_formats))) as fmt_executor:
-                fmt_futures = {fmt_executor.submit(_export_and_upload, fmt): fmt for fmt in export_formats}
-                for future in concurrent.futures.as_completed(fmt_futures):
-                    try:
-                        result = future.result()
-                        if result:
-                            exported_formats.append(result)
-                    except Exception as fmt_err:
-                        print(f"[pipeline] format export failed (non-fatal): {fmt_err}", flush=True)
-
-        _timings["upload_export"] = time.time() - t
+        edit_plan = _rs["edit_plan"]
+        _timings = _rs["timings"]
+        _floor_state = _rs["floor_state"]
+        render_elapsed = _rs["render_elapsed"]
+        output_size_mb = _rs["output_size_mb"]
+        cover_frame_ts = _rs["cover_frame_ts"]
+        thumbnail_source_ts = _rs["thumbnail_source_ts"]
+        cover_frame_b64 = _rs["cover_frame_b64"]
+        _thumbnail_url = _rs["thumbnail_url"]
+        exported_formats = _rs["exported_formats"]
         _timings["total"] = time.time() - _pipeline_start
 
         print(f"\n{'='*80}", flush=True)
@@ -34157,10 +34653,17 @@ def handler(job):
                 **_floor_markers(_floor_state),
             },
         )
-        # Operator [ALERT] — only for REAL failures (a user who waited and lost
-        # at the finish line), never for honest input rejections. Best-effort,
-        # never raises: the failure is already fully recorded above.
-        if not _designed_reject:
+        # Operator [ALERT] — PAGE ONLY ON AT-FAULT (Zac 2026-07-28). REAL
+        # failures we can act on wake the operator; designed rejections AND
+        # non-actionable client-upload failures (the UPLOAD_STALLED family)
+        # route to the daily digest instead — a per-job page can't act on a
+        # dropped cellular upload, but the digest's per-code counts surface a
+        # genuine spike. Everything NOT in _NON_ALERTING_CODES still pages
+        # (UNKNOWN and every unclassified error included — loud-failsafe law).
+        # The refund gate (_designed_reject, above) is separate and unchanged.
+        # Best-effort, never raises: the failure is already fully recorded above.
+        _page_operator = (classified.get("error_code") not in _NON_ALERTING_CODES)
+        if _page_operator:
             _fire_render_alert(input_data.get("job_id"), classified.get("error_code"),
                                detail=str(e))
         return {
@@ -34178,8 +34681,14 @@ def handler(job):
         # Premium scaffold teardown (Phase 1): log the cost meter only on the
         # premium-routed path so base/free jobs emit ZERO new lines, and shut
         # down the asset pool if a (future) stage created it (no-op in Phase 1).
-        if _cost_meter is not None and route_premium:
-            _cost_meter.log()
+        if _cost_meter is not None:
+            # Fold render_stage's QA-regen spend into the meter ONCE (both success
+            # and failure paths reach here) — the return-value crossing for the
+            # cost that a separate render container could not mutate by reference.
+            if _rs_cost_cell[0]:
+                _cost_meter.add("generated_asset_regen", count=_rs_cost_cell[1], usd=_rs_cost_cell[0])
+            if route_premium:
+                _cost_meter.log()
         if premium_ctx is not None:
             premium_ctx.shutdown()
         # PROGRESSIVE TERMINAL SEAM (Zac ruling 1b, 2026-07-25 — the long-clip
@@ -34191,6 +34700,7 @@ def handler(job):
         # the job failed), the preview is moot, and the payload is stamped
         # superseded so a preview is never servable as a terminal state.
         try:
+            _prog_pub = _prog_pub_cell[0]
             if _prog_pub is not None and not (
                     _prog_pub.finalized or _prog_pub.disabled or _prog_pub.inert):
                 if _prog_pub.finalize_requested:

@@ -8,7 +8,7 @@ import {
   spring,
 } from "remotion";
 import { OffthreadVideo } from "remotion";
-import { msToFrames } from "../shared/timing";
+import { msToFrames, msToFramesFloor } from "../shared/timing";
 import type { FocusWindowProps } from "../types";
 
 /**
@@ -35,7 +35,7 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
   let eventBgScale = bgScale;
 
   for (const event of events) {
-    const eventStart = msToFrames(event.startMs, fps);
+    const eventStart = msToFramesFloor(event.startMs, fps);
     const eventEnd = msToFrames(event.startMs + event.durationMs, fps);
 
     if (frame < eventStart || frame > eventEnd) continue;

@@ -630,8 +630,9 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
     # 300s slack) or a healthy long render gets false-reaped mid-flight. Deploy the
     # reaper raise FIRST, this SECOND. Billing is per-active-second, so short jobs
     # (the common case) cost the same as before — the cap only bounds the tail.
-    timeout=3000, retries=2, cpu=64, memory=131072, region="us",  # A-L3 REVISED (2026-07-25): Modal caps per-function CPU at 64 (128 bounced the deploy: "Must be between 0.125 and 64") — 64 IS the platform max. The achievable A-L3 = 8 chunks × 4 tabs (same 32 total tabs, 2× process parallelism vs Remotion's per-instance fps ceiling, issue #4664). Past-64 scaling = A-L4 cross-container fan-out.
-    scaledown_window=180, volumes={"/prewarm": prewarm_volume},
+    timeout=3000, retries=0, cpu=16, memory=49152, region="us",  # EMERGENCY COST CUT (2026-07-30): retries 2->0 — a failing job was billing up to 3x (2 retries); during the cost emergency a permanent fail beats 3x spend, restore post-fix. 64/128GB → 16/48GB. The app hit the $1500 cap; Phase 1 inc2 (render_burst split) is not yet shipped, so this container held cpu=64/128GB for ~450s/job while only the render stage (~72s) needs the cores — and with PROMPTLY_RENDER_FANOUT=1 the heavy Remotion chunks already run on the cpu=16 render_chunk_fanout containers, so this box was mostly idle-waiting at cpu=64. ~4× cost cut now; render stage slower (~+100-200s, cpu-bound composite/HLS/exports), transcribe/plan/Gemini-wait unaffected (network-bound). 48GB floor: the blur A/B OOM'd at 32GB, so do NOT go lower. Restore/replace with the render_burst split (inc2). Prior A-L3 note: 8 chunks × 4 tabs = 32 tabs at cpu=64 was the platform max.
+    scaledown_window=45,  # COST FIX-4 (2026-07-28): render-container idle. run_pipeline_bg (cpu=64) is spawned per job; at normal traffic (~1 job/30min) each job cold-starts anyway (gap >> scaledown), so the old 180s post-render idle bought ~ZERO reuse — pure cpu=64 idle bleed. 45s still catches spike back-to-back reuse while cutting the idle 4×. (Cold start pays the in-body handler import ~10-12s; snapshot is a no-op here without @enter — acceptable vs the bleed.)
+    volumes={"/prewarm": prewarm_volume},
     enable_memory_snapshot=True,
 )
 def run_pipeline_bg(body: dict):
@@ -809,8 +810,8 @@ def render_chunk_fanout(s3_prefix: str, files_manifest: list, render_kind: str,
     # (_load_pyannote: .to("cuda") fails with no GPU -> runs on CPU). If CPU
     # diarization proves too slow for multi-speaker jobs, split pyannote into a
     # short-lived small-GPU function (so the long CPU render never holds a GPU).
-    cpu=64,               # platform max (Modal caps per-function CPU at 64); lockstep with run_pipeline_bg
-    memory=131072,        # 128GB — Remotion overlay + Remotion micro-segments run in parallel here, plus per-cut numpy audio resampler, plus the big single-pass ffmpeg composite
+    cpu=8,                # COST split Phase 0 (2026-07-28): under SPAWN_MODE=1 this cls is a pure DISPATCHER — run_job spawns run_pipeline_bg and returns in ms; it never renders. The iOS editor-open warmup provisions THIS container, so at cpu=64 every editor-open (incl. the 63% who never render) spun a 64-core box that idled scaledown_window — ~$700/mo of pure leak, warming the dispatcher not the pipeline. cpu=8 stops the leak and keeps the dormant SPAWN_MODE=0 sync-fallback (self._handler at run_job) degraded-but-survivable rather than an OOM/timeout landmine. The cpu=64 render burst moves to render_burst (split Phase 1). SPAWN_MODE MUST stay 1.
+    memory=32768,         # 32GB — split Phase 0: the dispatcher + warmup path needs no render memory; the 128GB was sized for the Remotion overlay/micro + ffmpeg composite that now lives in render_burst (Phase 1). A dormant SPAWN_MODE=0 sync-render would be memory-tight here — acceptable, SPAWN_MODE MUST stay 1.
     region="us",  # COST (Zac 2026-07-12, Tier 1.1): broad "us" is the 1.5x
                   # multiplier tier; the old ["us-west","us-east"] narrow pin was
                   # 1.75x (Modal: narrow=1.75x, broad=1.5x, no-pin=1.0x). Broad
@@ -2350,7 +2351,7 @@ def cert_run():
 # the verdict is judged from the ACTUAL measured render time, not an estimate),
 # confirms it completes under the new scaled budget, and renders a plain
 # scene-free overlay at the unchanged 300s.
-@app.function(cpu=64, memory=131072, region="us", timeout=1800)
+@app.function(cpu=8, memory=32768, region="us", timeout=1800)  # COST de-risk (2026-07-28): a test harness must NOT sit in the DEPLOYED app at the 64-core/128GB max spec — an accidental invoke (stray `modal run`, a from_name().remote() from any authed client, or a wedged detached .spawn()) would provision the biggest box Modal offers against a near-capped budget. Demoted cpu 64->8 + mem 128->32GB caps that ~8x. FOLLOW-UP (daytime, verified): move the whole harness out to certs_app.py so there is no deployed-surface vector at all.
 def cert_scene_timeout() -> dict:
     import subprocess, os, json, time, tempfile
     PUB = "/remotion/bundle/public"
@@ -2423,7 +2424,7 @@ def cert_scene_timeout() -> dict:
 # designed typo_stat scenes (pure typography — no generated asset needed), so it
 # shows the smoothness machinery (value-landing + settle-pulse + continuous drift
 # + camera sweep + CameraMotionBlur samples=6) honestly, at the real render path.
-@app.function(cpu=64, memory=131072, region="us", timeout=1800, secrets=[modal.Secret.from_name("promptly-secrets")])
+@app.function(cpu=8, memory=32768, region="us", timeout=1800, secrets=[modal.Secret.from_name("promptly-secrets")])  # COST de-risk (2026-07-28): demoted cpu 64->8 + mem 128->32GB — a harness must not sit in the deployed app at the max spec (accidental-invoke $ hazard on a near-capped budget). FOLLOW-UP: move to certs_app.py.
 def cert_scene_reel(width: int = 1080, height: int = 1920) -> dict:
     import subprocess, os, json, time, tempfile, boto3
     PUB = "/remotion/bundle/public"

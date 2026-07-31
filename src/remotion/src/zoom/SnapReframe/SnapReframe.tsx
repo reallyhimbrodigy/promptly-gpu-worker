@@ -6,7 +6,7 @@ import {
   spring,
 } from "remotion";
 import { Video } from "@remotion/media";
-import { msToFrames } from "../shared/timing";
+import { msToFrames, msToFramesFloor } from "../shared/timing";
 import type { SnapReframeProps } from "../types";
 
 /**
@@ -28,7 +28,7 @@ export const SnapReframe: React.FC<SnapReframeProps> = ({
 
   for (const event of events) {
     const targetScale = event.scale ?? 1.3;
-    const eventStart = msToFrames(event.startMs, fps);
+    const eventStart = msToFramesFloor(event.startMs, fps);
     const eventEnd = msToFrames(event.startMs + event.durationMs, fps);
 
     if (frame < eventStart) continue;

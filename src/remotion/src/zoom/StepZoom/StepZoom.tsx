@@ -5,7 +5,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { Video } from "@remotion/media";
-import { msToFrames } from "../shared/timing";
+import { msToFrames, msToFramesFloor } from "../shared/timing";
 import type { StepZoomProps } from "../types";
 
 /**
@@ -26,7 +26,7 @@ export const StepZoom: React.FC<StepZoomProps> = ({
   let originY = 0.5;
 
   for (const event of events) {
-    const eventStart = msToFrames(event.startMs, fps);
+    const eventStart = msToFramesFloor(event.startMs, fps);
     const eventEnd = msToFrames(event.startMs + event.durationMs, fps);
 
     if (frame >= eventStart && frame < eventEnd) {
