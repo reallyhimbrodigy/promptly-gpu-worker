@@ -5537,10 +5537,11 @@ def _zero_reject_wiring():
     assert 'input_data.get("zero_reject_test")' in _h, "per-job cert override required"
     assert "_MIN_MINIMAL_DURATION_S = 2.0" in _h, "the Zac-ruled 2.0s hard floor"
     # all four route sites + the deferring fast-check
-    assert _h.count("raise _MinimalRouteSignal(") == 6, "exactly 6 route-raise sites (too_short, no_audio, not_talking_head, no_speech/muted, plan_collapsed — the min-output-ratio plan guard, render_collapsed — the post-render backstop; both Zac 2026-07-28)"
+    assert _h.count("raise _MinimalRouteSignal(") == 7, "exactly 7 route-raise sites (too_short, no_audio, not_talking_head, no_speech/muted, plan_collapsed — the min-output-ratio plan guard, render_collapsed — the post-render backstop [both Zac 2026-07-28], transcription_incomplete — GATE #5 the LANGUAGE NET, Zac 2026-07-31: unroutable/untranscribable language → caption-less minimal visual edit, never a failed job)"
     assert '_MinimalRouteSignal("too_short")' in _h and '_MinimalRouteSignal("no_audio")' in _h \
         and '_MinimalRouteSignal("not_talking_head")' in _h and '"no_speech_muted" if _face_present else "no_speech"' in _h \
-        and '_MinimalRouteSignal("render_collapsed")' in _h and '_MinimalRouteSignal("plan_collapsed")' in _h
+        and '_MinimalRouteSignal("render_collapsed")' in _h and '_MinimalRouteSignal("plan_collapsed")' in _h \
+        and '_MinimalRouteSignal("transcription_incomplete")' in _h  # GATE #5 language net
     assert "zero-reject defers to the" in _h, \
         "the fast-check must DEFER (not route) under the flag — the conservatism invariant"
     # every route site is flag-guarded; flag off keeps today's raises

@@ -33087,6 +33087,24 @@ def handler(job):
                         unworded_speech_s=_cov.get("unworded_speech_s"),
                         unworded_frac=_cov.get("unworded_frac"), script=str(_script),
                         detected_language=_det_lang)  # by-language reject reporting
+                    # GATE #5 — LANGUAGE NET (Zac 2026-07-31): a language we can't
+                    # transcribe/caption (Stage A/B exhausted, coverage below the bar) is
+                    # NOT a dead-end. Route to the minimal VISUAL edit — captions are
+                    # suppressed there because the transcript is unreliable (never patchy),
+                    # and the honest rationale names the missing capability. The <2.0s floor
+                    # stays the only rejection. Same _MinimalRouteSignal contract as the other
+                    # 5 gates; caught at the handler choke point → _run_minimal_pipeline. This
+                    # lives on the PLANNER side (pre-edit-recipe), so it does not touch
+                    # render_stage's boundary that inc2 restructures.
+                    if _zero_reject_enabled(input_data):
+                        _record_divergence(
+                            "intake", {"code": "TRANSCRIPTION_INCOMPLETE",
+                                       "detected_language": _det_lang, "script": str(_script),
+                                       "unworded_frac": _cov.get("unworded_frac")},
+                            "language_net_to_minimal",
+                            reason=("unroutable/untranscribable language → minimal visual edit "
+                                    "(no captions), never a failed job"))
+                        raise _MinimalRouteSignal("transcription_incomplete")
                     raise RuntimeError(
                         "TRANSCRIPTION_INCOMPLETE: "
                         f"{_cov.get('unworded_speech_s')}s of spoken audio "
