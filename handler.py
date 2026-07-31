@@ -28980,6 +28980,27 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
                 "routing", {"route": "moodreel", "error": type(_mr_err).__name__},
                 "moodreel_fallback_minimal", reason=str(_mr_err)[:200])
             _plan = None
+    # SPEECH-PRESERVATION (option a, 2026-07-31) — the prerequisite that makes
+    # gate #5 CORRECT rather than harmful. A clip routed here for a SPEECH-bearing
+    # reason must NOT go through build_minimal_plan: that path is documented "for a
+    # silent/no-speech clip" and cuts at MOTION PEAKS (~2.5s), which would chop the
+    # very (untranscribed) speech gate #5 exists to protect — the Urdu-class law
+    # (destroyed content is worse than an honest failure). Give it ONE FULL-SPAN
+    # CLIP (the statically-clean cuts=[] path) so the speech is preserved verbatim,
+    # uncut. Captions/floor are Stage B; this is the floor of correctness beneath
+    # them. DEFAULT (not a separate flag) so enabling zero-reject can NEVER ship the
+    # harmful version — and only reachable under zero-reject, which is dark.
+    _speech_bearing = reason not in ("no_speech", "no_audio", "not_talking_head")
+    if _plan is None and _speech_bearing:
+        _plan = _me.HypePlan(
+            clips=[_me.HypeClip(start_s=0.0, end_s=round(float(_dur), 3),
+                                speed=1.0, zoom=None, punch=False)],
+            transitions=[], motion_graphics=[], outro="none")
+        _route_name = "minimal_speech_uncut"
+        _record_divergence(
+            "routing", {"route": "minimal_speech_uncut", "reason": reason},
+            "speech_preserved_single_clip",
+            reason=f"speech-bearing '{reason}' -> one full-span clip (no motion cuts, speech preserved)")
     if _plan is None:
         _plan = _me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve)
     _mini_t["plan"] = time.time() - _t0 - _mini_t.get("normalize", 0)
