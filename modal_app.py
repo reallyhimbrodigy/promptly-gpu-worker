@@ -653,8 +653,13 @@ def run_pipeline_bg(body: dict):
     # cpu (e.g. 32 not 64) and save more — size on data, not "more cores is better".
     # Daemon thread, log-only, zero render impact. psutil = cgroup-aware cores-used;
     # os.getloadavg() is the fallback (load average ≈ runnable threads).
+    # PER-STAGE (Zac 2026-07-31): a single peak conflates vidstab (cpu-bound, sets the
+    # PLANNER's floor) with the render — the split can't be sized from it. Each sample is
+    # bucketed by the handler's current stage marker (_H._CPU_STAGE[0]), so vidstab and
+    # render report SEPARATE peak/mean/duration. Interval 3s → ~15-24 samples per stage.
     import threading as _threading
-    _cpu_samples = []
+    _SAMPLE_S = 3.0
+    _cpu_by_stage = {}   # stage name -> list of cores-in-use
     _cpu_stop = _threading.Event()
     _ncores = _os.cpu_count() or 0
     try:
@@ -664,12 +669,14 @@ def run_pipeline_bg(body: dict):
         _psutil = None
 
     def _cpu_sampler():
-        while not _cpu_stop.wait(5.0):
+        while not _cpu_stop.wait(_SAMPLE_S):
             try:
-                if _psutil is not None:
-                    _cpu_samples.append(_psutil.cpu_percent(interval=None) / 100.0 * _ncores)
-                else:
-                    _cpu_samples.append(_os.getloadavg()[0])
+                _cores = (_psutil.cpu_percent(interval=None) / 100.0 * _ncores) if _psutil is not None else _os.getloadavg()[0]
+                try:
+                    _stage = _H._CPU_STAGE[0]
+                except Exception:
+                    _stage = "unknown"
+                _cpu_by_stage.setdefault(_stage, []).append(_cores)
             except Exception:
                 pass
 
@@ -680,13 +687,25 @@ def run_pipeline_bg(body: dict):
     finally:
         _cpu_stop.set()
         try:
-            if _cpu_samples:
-                _peak = max(_cpu_samples)
-                _mean = sum(_cpu_samples) / len(_cpu_samples)
-                print(f"[cpu-util] job={body.get('job_id')} src={'psutil' if _psutil else 'loadavg'} "
-                      f"peak={_peak:.1f} mean={_mean:.1f} cores-in-use of {_ncores} allocated "
-                      f"({100 * _peak / max(1, _ncores):.0f}% peak) over {len(_cpu_samples)} samples — "
-                      f"if peak plateaus below allocated, render_burst can size down (inc2)", flush=True)
+            _jid = body.get('job_id')
+            _src = 'psutil' if _psutil else 'loadavg'
+            _all = [c for _cs in _cpu_by_stage.values() for c in _cs]
+            if _all:
+                _peak = max(_all); _mean = sum(_all) / len(_all)
+                print(f"[cpu-util] job={_jid} src={_src} OVERALL peak={_peak:.1f} mean={_mean:.1f} "
+                      f"of {_ncores} cores ({100 * _peak / max(1, _ncores):.0f}% peak) "
+                      f"over {len(_all)} samples", flush=True)
+                # PER-STAGE — size run_pipeline_bg on the vidstab peak, render_burst on the render peak.
+                for _st in ("pre_normalize", "fps_normalize", "gemini_plan", "render", "unknown"):
+                    _cs = _cpu_by_stage.get(_st)
+                    if _cs:
+                        print(f"[cpu-util]   stage={_st:<14} peak={max(_cs):5.1f} mean={sum(_cs)/len(_cs):5.1f} cores "
+                              f"~{len(_cs) * int(_SAMPLE_S)}s ({len(_cs)} samples)", flush=True)
+                # any stage name not in the known list (defensive)
+                for _st, _cs in _cpu_by_stage.items():
+                    if _st not in ("pre_normalize", "fps_normalize", "gemini_plan", "render", "unknown") and _cs:
+                        print(f"[cpu-util]   stage={_st:<14} peak={max(_cs):5.1f} mean={sum(_cs)/len(_cs):5.1f} cores "
+                              f"~{len(_cs) * int(_SAMPLE_S)}s ({len(_cs)} samples)", flush=True)
         except Exception:
             pass
     # PRIMARY completion delivery — POST the full result (success payload OR the

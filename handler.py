@@ -29964,6 +29964,20 @@ def _quick_face_check(source_path, max_samples=8):
         cap.release()
 
 
+# CPU-STAGE MARKER (Zac 2026-07-31): run_pipeline_bg's cpu sampler reads _CPU_STAGE[0]
+# to bucket cores-in-use PER STAGE, so inc2 can size the split from vidstab (cpu-bound,
+# sets the planner's floor) vs render (the burst) SEPARATELY instead of one conflated
+# peak. Pure observability — a no-op variable write, wrapped so it can never raise.
+_CPU_STAGE = ["pre_normalize"]
+
+
+def _set_cpu_stage(_name):
+    try:
+        _CPU_STAGE[0] = str(_name)
+    except Exception:
+        pass
+
+
 def render_stage(
         job_id, input_data, edit_plan, work_dir, source_path, output_path,
         transcript, source_duration, app_url, broll_clips, upload_url,
@@ -31931,6 +31945,7 @@ def handler(job):
                 pass
 
             _norm_t0 = time.time()
+            _set_cpu_stage("fps_normalize")
             _norm_path = os.path.join(work_dir, "source_canonical.mp4")
 
             # Cheap probe: ~12 frames @ 240p Lucas-Kanade flow, 1-2s. Decides
@@ -32112,6 +32127,7 @@ def handler(job):
                     flush=True,
                 )
                 _timings["fps_normalize"] = time.time() - _norm_t0
+                _set_cpu_stage("gemini_plan")
                 # Skip the keyframe verification block — we don't control
                 # the source's GOP structure on the passthrough path. If
                 # iPhone uploads have 2-3s GOPs, Remotion seeks will be
@@ -32471,6 +32487,7 @@ def handler(job):
                 flush=True,
             )
             _timings["fps_normalize"] = time.time() - _norm_t0
+            _set_cpu_stage("gemini_plan")
             # Verify dense keyframes actually landed in the encoded file.
             # x264 sometimes ignores -keyint_min when scene-cuts trigger; the
             # -sc_threshold 0 flag should disable that, but we have no proof
@@ -34279,6 +34296,7 @@ def handler(job):
                         f"zero-reject fallback to minimal BEFORE render"))
             raise _MinimalRouteSignal("plan_collapsed")
         _render_est = max(60.0, min(240.0, float(source_duration) * 3.0))
+        _set_cpu_stage("render")
         _rs = render_stage(
             job_id, input_data, edit_plan, work_dir, source_path, output_path,
             transcript, source_duration, app_url, broll_clips, upload_url,
