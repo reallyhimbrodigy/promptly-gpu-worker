@@ -679,7 +679,7 @@ def _face_occupied_bands(face_traj, t0_s, t1_s):
 #     come from adjacent cuts at contrasting speeds (the buildup-arrival
 #     pattern), not from interpolating speed within a single clip.
 from pydantic import BaseModel, Field, ValidationError
-from typing import List, Optional, Literal, Dict, Any, Annotated
+from typing import List, Optional, Literal, Dict, Any, Annotated, get_args
 
 # Pydantic schemas mirroring src/remotion/src/types.ts. Validating the
 # render input dicts against these models BEFORE writing JSON turns every
@@ -5231,6 +5231,11 @@ SPEAKER POSITIONS (where each speaker sits in frame, by diarization + face detec
     _n_styles = len(VALID_CAPTION_STYLES) - 1   # minus the "none" sentinel
     _n_transitions = len(VALID_TRANSITION_TYPES)
     _n_mgs = len(VALID_MG_TYPES)
+    # Palette counts DERIVED from the registries so they can never go stale (the
+    # 28-graphics/10-transitions/3-overlays/16-sounds miscounts came from hand-writing
+    # them). A validate_deploy gate fails on any hand-written palette count reappearing.
+    _n_overlays = len(get_args(_TEXT_OVERLAY_VARIANTS))
+    _n_sounds = len(get_args(_SFX_SOUNDS))
 
     # ── E1 density reshape — variant-selected (dark unless PROMPTLY_DENSITY / density_test / density_variant) ──
     # The n=3 A/B proved the ADD approach (variant 1) is a ~no-op (0.95x): the base "3-5
@@ -5860,7 +5865,7 @@ Every instrument here is an equal — the moment picks. Reading the footage fres
 
 {_density_rhythm_block}An emphasis moment is a PEAK — a moment the viewer will physically react to, not every word the pitch treats as important. The test is the body, not the meaning: does the viewer FEEL something land here — a laugh, a small gasp, a nod, a lean-in? A peak is felt energy — delivery spikes, stakes land; "important to the argument" is a property of the writing, and peaks are a property of the performance. "Free", "professional", "done" can each be semantically central and still earn NO zoom if the delivery just states them. A word the speaker leans on with voice, face, or timing is a peak; a word that merely carries information is not. Map emphasis 1:1 to video_plan.key_moments. Emphasis lands on the words that carry the beat — the payoff noun, the number, the verb of the reveal; on connector words, qualifiers, or generic nouns ("entire", "this", "after") a zoom reads as the camera zooming on random words. **And the ANCHOR within the beat is exact — the ONE word the speaker's VOICE punches, to the millisecond.** This is the precision layer on top of "which beat": the beat says a peak lives here; the anchor (word_indices[0]) says WHICH EXACT WORD carries the punch. When the meaningful word and the punched word differ, anchor to the PUNCH — "I did NOTHING" means 'nothing', but if the voice lands the hit on "did", the component goes on "did", because that is the frame the ear is braced for. "ten million dollars" delivered flat-then-hard anchors on "million" if that is the stressed syllable, not "ten" just because it comes first. A component one word off from the vocal stress reads as late/off even though the machinery lands it pixel-perfect — the target was loose, not the delivery. Pick the anchor by LISTENING for the stress, not by reading for the meaning. {_emph_move_line}
 
-**Count follows the footage — the real peaks set it, however many there are.** The footage sets the count — the real peaks are however many the delivery contains. Three peaks that each land beat five that blur together, and the reason is contrast: a peak is only a peak against the flat around it. When emphases arrive at even spacing with even weight, the ear stops hearing them as peaks and starts hearing a metronome. So find the moments the speaker actually leans on, and let their number be what it is.
+**Count follows the footage — the real peaks set it, however many there are.** The footage sets the count — the real peaks are however many the delivery contains. Three peaks that each land beat five that blur together, and the reason is contrast: a peak is only a peak against the flat around it. When emphases arrive at even spacing with even weight, the ear stops hearing them as peaks and starts hearing a metronome. So find the moments the speaker actually leans on, and let their number be what it is within the {_peak_count_ref} budget (this is how you DECIDE the count from the footage; once committed in key_moments it is fixed — the motion pass never re-opens it).
 
 **Peaks must differ in WEIGHT, not just type.** A real edit has a rhythm of sizes: ONE deepest moment (the payoff — the line the video exists to deliver), a few mid-peaks that punctuate without competing with it, and a hook that grips. Look at your emphasis list as a SET before finalizing: if more than half share one type, or they're all "high" intensity, or they're spaced evenly end-to-end, you haven't found the real peaks — you've highlighted the transcript. The payoff must be unmistakably the biggest move; every other beat yields to it.
 
@@ -5890,10 +5895,10 @@ Entry shape:
     "word_indices": [int, ...],     # word_indices[0] is the ANCHOR — the EXACT word the speaker's VOICE punches, where the component lands to the MILLISECOND. NOT the phrase's first word in reading order, NOT the merely-meaningful word: the stressed one. For a single landing (a plain zoom / SFX / MG) list ONE word — the punched word. List 2-3 words ONLY for a genuine building phrase (it becomes a StagedPush; each word lands per-stage in reading order).
     "type": "punchline" | "revelation" | "statement" | "reaction" | "question",
     "intensity": "high" | "medium",
-    "duration": float,              # 1.5-3.0 output-seconds the visual hit lasts
+    "duration": float,              # 1.5-3.0 output-seconds the emphasis HIT stays on screen (how long the moment reads) — NOT the zoom's motion time; the zoom's motion speed is durationMs inside zoom_effect (omitted by default). Two different fields.
     "viewer_feeling": "<one specific phrase: the feeling this moment produces in the viewer>",
     "zoom_effect": {{ "arc_position": <the arc position this zoom serves — your CLAIM, same vocabulary as arc_segments>, "type": <a type that position offers> }} | null,   // word-anchored; the pipeline times it. A build/breather claim offers ONLY the mask form — the small eye-carry on the first word after a splice; arc punctuation there is unsayable.
-    "sound": <one of the 16 sounds, or "voice"> ,   // REQUIRED — the beat's signed choice: ONE sound that amplifies it (the hook's grab and the payoff's landing are the usual two) or "voice", the signed bare choice; viewer_feeling carries the why either way
+    "sound": <one of the {_n_sounds} sounds, or "voice"> ,   // REQUIRED — the beat's signed choice: ONE sound that amplifies it (the hook's grab and the payoff's landing are the usual two) or "voice", the signed bare choice; viewer_feeling carries the why either way
     "motion_graphic": {{...}} | null   # the zoom is the camera's punctuation; a graphic joins it when the moment names something the camera cannot show
   }}
 
@@ -5951,7 +5956,7 @@ Most videos contain at least the two classic hits: the hook's grab and the line 
 Authoring shape: the emphasis's `sound` field (one of the names below) — timing derives from the beat's word; every sound is trimmed to a zero-silence onset; no offsets to compute. The beat's `viewer_feeling` doubles as the placement's why: it names what makes THIS beat one of the video's hits — why it earned treatment where the beats around it didn't — and the moment it matched. A why that can only name a category has answered "could"; the why answers "why this one".
 
 ──────────────────────────────────────────
-THE 16 SOUNDS + THE BARE VOICE — each a defined moment
+THE {_n_sounds} SOUNDS + THE BARE VOICE — each a defined moment
 ──────────────────────────────────────────
 
 **boom** — A deep cinematic bass impact with weight and finality. **THE MOMENT:** the video's single heaviest claim — the payoff line the whole video was built to deliver, or the one stat that reframes everything before it. It lands on the word that carries the weight. **WHAT IT DOES:** the floor drops under the sentence; and because it is the one bass hit in the video, the ear measures it against every beat that carried nothing. **FITS:** viral, punchy, high-energy payoffs — the single heaviest hit. **FIGHTS:** corporate, clean, professional, educational; and cinematic/story climaxes — a boom PUNCHES (sharp attack) where a cinematic climax SWELLS, so a story climax reaches for transition-sfx or a swell, never boom's punch.
@@ -5962,7 +5967,7 @@ THE 16 SOUNDS + THE BARE VOICE — each a defined moment
 
 **woosh-professional** — A smooth, polished whoosh with more body. **THE MOMENT:** the narration itself travels — an explicit spoken jump in time or place mid-story ("fast-forward two years," "now come with me to the warehouse," "meanwhile, back at the office"). It belongs on the travel phrase. **WHAT IT DOES:** the viewer is carried through the jump instead of dropped across it; the story's motion gets a body. **FITS:** any vibe, leans professional/corporate/educational/story — a polished travel cue. **FIGHTS:** nothing tonally; the restrained default.
 
-**transition-sfx** — A broad cinematic sweep. **THE MOMENT:** the video's single largest act turn, where a full transition renders — this is the sound of that turn itself. **WHAT IT DOES:** the turn becomes physical; the sweep carries the eye's journey in the ear. **FITS:** cinematic, story, professional, educational act-turns; safe on the single biggest turn in any vibe. **FIGHTS:** nothing tonally; reserved for the ONE largest turn, not scattered.
+**transition-sfx** — A broad cinematic sweep. **THE MOMENT:** the video's single largest act turn, where a full transition renders — this is the sound of that turn itself. **WHAT IT DOES:** the turn becomes physical; the sweep carries the eye's journey in the ear. **FITS:** cinematic, story, professional, educational act-turns; safe on the single biggest turn in any vibe. **FIGHTS:** nothing tonally; reserved for the ONE largest turn — or the committing swell on a cinematic/corporate payoff word (where the boom FIGHTS) — not scattered.
 
 **camera-flash** — A camera shutter click with flash. **THE MOMENT:** a photo or screenshot is taken, shown, or demanded in the content — "screenshot this," "I took one picture," the moment the story itself contains a shutter. The sound IS the shutter the story references. **WHAT IT DOES:** diegetic reality; the viewer hears the photo happen inside the story. **FITS:** any vibe — a photo/screenshot literally happening in the content is the gate, not the vibe; the clean snap suits tech/product/viral. **FIGHTS:** non-diegetic decoration (never where no shutter happens); its snap is a touch sharp only for a slow, somber beat.
 
@@ -6022,7 +6027,7 @@ Entry shape:
 **Window:** the cutaway runs exactly the phrase's word span — first word to last word. One word if the referent is one verb, a full sentence if it's a scene. The dialogue at those indices should describe what's in the cutaway. The window matches the phrase — it opens where the phrase opens and closes where it closes, the full thought and only the thought.
 
 **Placement rules:**
-  • Opening gate (check BEFORE you construct any keyword): do NOT GENERATE a `broll_clips` entry whose window opens in the first ~3 seconds of output, or anywhere inside the hook segment — whichever extends later. The OPENING belongs to the speaker; viewers form "whose story is this" judgments in the first 2 seconds and need a face to anchor on. This is a gate on what you emit, not a filter applied afterward — if a beat you'd otherwise cut lands in that window, the entry simply does not exist. (Not about clip index: a long first clip can still carry B-roll in its later build words; and the hook IS the exception only when the hook itself is a visual claim — then the B-roll is the hook.)
+  • Opening gate (check BEFORE you construct any keyword): do NOT GENERATE a `broll_clips` entry whose window opens in the first ~3 seconds of output, or anywhere inside the hook segment — whichever extends later. The OPENING belongs to the speaker; viewers form "whose story is this" judgments in the first ~2 seconds and need a face to anchor on, and the ~3s gate covers that window with a margin (the gate value and the judgment window are not the same number). This is a gate on what you emit, not a filter applied afterward — if a beat you'd otherwise cut lands in that window, the entry simply does not exist. (Not about clip index: a long first clip can still carry B-roll in its later build words; and the hook IS the exception only when the hook itself is a visual claim — then the B-roll is the hook.)
   • B-roll and overlays each get the screen alone — the pipeline drops a B-roll whose frames overlap any motion_graphic or text_overlay (overlays win: word-anchored and scarce, while B-roll has 2-3s of flex to slide clear). Plan B-roll before or after your overlays.
   • Face moments are off-limits. Any word inside an emphasis_moments[].word_indices with a non-null zoom is a face moment by your own declaration — keep B-roll windows clear. When dialogue both describes an action AND is the moment of recognition, the face wins — the camera holds the person and the recognition lands on them.
   • Arc placement: **build** is where B-roll lives — the concrete nouns named during build are your cutaway candidates, and most of the video's B-roll belongs there. **breather** takes a quiet, perfectly-matched cutaway when the moment has a picture to give; otherwise the held frame is itself the event. **hook** — the face carries it (when the hook IS a visual claim, the B-roll is the hook). **mid_peak** — the peak word stays on the face; B-roll resumes right after. **payoff** — the payoff word belongs entirely to the face. **close** — a deliberate callback to a hook-era cutaway is the one move that fits.
@@ -6050,7 +6055,7 @@ post_hook — string, ≤60 chars, user-facing: the scroll-stopping first line f
 === THUMBNAIL ===
 ═══════════════════════════════════════════════════════════════════════════
 
-thumbnail_word_index — the single highest-leverage visual choice in the recipe; a bad thumbnail tanks the video regardless of the edit. The best frame sits beside the narrative peak, in the beat after the line lands — mid-syllable mouths read awkward, speaking blurs the head, vocal effort squints the eyes; the settled face right after is the photogenic one. The drama is in the audio at that word; the face is somewhere else. The visual peak sits in one of three places:
+thumbnail_word_index — the single highest-leverage visual choice in the recipe; a bad thumbnail tanks the video regardless of the edit. The best frame sits beside the narrative peak, in the beat AROUND the line — usually just after it lands, sometimes just before it for a reveal (see the three places below) — mid-syllable mouths read awkward, speaking blurs the head, vocal effort squints the eyes; the settled face beside the line is the photogenic one. The drama is in the audio at that word; the face is somewhere else. The visual peak sits in one of three places:
 
   • **Pre-reveal anticipation** — 0.3-1.5s BEFORE the dramatic word: leaning in, eyes wide, mouth set. Best for reveals and punchlines.
   • **Post-reveal reaction** — 0.3-1.5s AFTER: often the most extreme expression in the whole video — jaw set, eyes huge, disbelief tilt.
@@ -6088,7 +6093,7 @@ EXAMPLE 4 — product-pitch UGC
 
 Caption style: Gadzhi — hustle energy in left-aligned gold keeps the pitch confident and premium. A PillCluster renders the three features as the speaker lists them ("the trio on screen as the trio is spoken"), the demo walk-in earns the video's one transition — ZoomThrough on a 1.4s CUT boundary ("setup into payoff, the most committed move, and the gap gives it handle") with woosh-professional — and a DropCard lands the price with money-ching ("the number arrives like a product drop"). Two windows in the build stayed bare; the pace was the polish.
 
-These four rotate the palette on purpose — nine caption styles, twenty-eight graphics, ten transitions, three overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
+These four rotate the palette on purpose — {_n_styles} caption styles, {_n_mgs} graphics, {_n_transitions} transitions, {_n_overlays} overlays, the full sound rack. The registry is the palette; the moment picks the instrument; the strongest sign you read the footage fresh is reaching for instruments these examples never wore.
 
 ──────────────────────────────────────────
 REJECTED RECIPE A — the THIN edit (app pitch, 19 seconds)
@@ -6290,14 +6295,14 @@ Output is a bare JSON object — the response is JSON-parsed and the parser is t
       "word_indices": [int, ...],
       "type": "punchline" | "revelation" | "statement" | "reaction" | "question",
       "intensity": "high" | "medium",
-      "duration": float,                          // 1.5-3.0 output-seconds
+      "duration": float,                          // 1.5-3.0 output-seconds the emphasis HIT stays on screen — NOT the zoom's motion speed (durationMs inside zoom_effect, omitted by default). Two different fields.
       "viewer_feeling": "<one specific phrase>",
       "zoom_effect": {{
         "arc_position": "hook" | "build" | "mid_peak" | "payoff" | "breather" | "close",   // your claim — the position this zoom serves; each offers its own types (build/breather: ONLY the mask form)
         "type": <the claimed position's offering — the schema knows>,
         "originX": float, "originY": float         // ONLY for non-face zoom targets; omit for faces — the face-lock aims. durationMs/scale likewise omitted unless a beat genuinely wants a non-default feel.
       }} | null,
-      "sound": <one of the 16 sounds, or "voice">,   // REQUIRED — the signed choice; see THE SOUNDS
+      "sound": <one of the {_n_sounds} sounds, or "voice">,   // REQUIRED — the signed choice; see THE SOUNDS
       "motion_graphic": {{ "type": <MG type>, "anchor": <semantic zone>, "props": {{...}} }} | null   // almost always null
     }}
   ],

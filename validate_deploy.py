@@ -183,7 +183,7 @@ def _system_instruction_format():
     # (enum lines + roster counts) are supplied as kwargs.
     prompt.format(
         _caption_enum="X", _mg_enum="X", _transition_enum="X", _tco_enum="X",
-        _n_styles=0, _n_transitions=0, _n_mgs=0,
+        _n_styles=0, _n_transitions=0, _n_mgs=0, _n_overlays=0, _n_sounds=0,
         _emph_move_line="X", _density_rhythm_block="X",
         _peak_budget="X", _peak_set_ref="X", _peak_count_ref="X",
     )
@@ -576,6 +576,27 @@ def _vibe_feel_fixes():
     # the mid_peak arc bullet no longer prescribes punchy without a caveat
     assert "punctuation — quick in, quick out; a hit/pop/ding when this peak" not in _src, \
         "the mid_peak arc bullet must be vibe-scoped (punchy snap+hit/pop/ding vs calm push+swell)"
+
+
+@check("PALETTE COUNTS ARE A CHECK, NOT A MEMORY (2026-07-31): the palette sizes are DERIVED from the registries via {_n_mgs}/{_n_transitions}/{_n_overlays}/{_n_sounds}/{_n_styles}, never hand-written — the 28-graphics/10-transitions/3-overlays/16-sounds miscounts came from hand-writing them. FAILS if a literal number reappears before a palette noun, so the lesson can't rot.")
+def _palette_counts_derived():
+    import re
+    _src = open("handler.py").read()
+    _num = r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|" \
+           r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|twenty-\w+|thirty|forty)"
+    # NEGATIVE — scoped to the palette-summary + sounds-header LINES only (editorial "1-3
+    # transitions" guidance elsewhere is legitimate; only the CATALOGUE SIZE must be derived).
+    for _line in _src.split("\n"):
+        if "rotate the palette on purpose" in _line:
+            _bad = re.findall(rf"\b{_num}\s+(?:graphics|transitions|overlays|caption styles)\b", _line, re.I)
+            assert not _bad, f"palette-summary hand-written count: {_bad} — derive via {{_n_...}}"
+        if "SOUNDS + THE BARE VOICE" in _line or "one of the" in _line and "sounds, or" in _line:
+            _bad = re.findall(rf"\b{_num}\s+[Ss][Oo][Uu][Nn][Dd][Ss]\b", _line)
+            assert not _bad, f"sounds-count hand-written: {_bad} — use {{_n_sounds}}"
+    # POSITIVE: the derived interpolations are present (so the counts are actually registry-driven)
+    for _needle in ("{_n_styles} caption styles", "{_n_mgs} graphics", "{_n_transitions} transitions",
+                    "{_n_overlays} overlays", "THE {_n_sounds} SOUNDS", "one of the {_n_sounds} sounds"):
+        assert _needle in _src, f"palette count must interpolate the registry: missing {_needle!r}"
 
 
 @check("ZOOM VIBE-SPLIT (Zac 2026-07-13): the VIBE scopes the zoom's tonal register like it scopes captions/SFX — SmoothPush (the calm push) is OFFERED at hook + mid_peak (not payoff/close only), so a corporate/calm beat can pick calm and a viral beat picks punchy; the fitness+vibe chooses within the static schema (which can't be vibe-dependent — Vertex cache)")
@@ -7188,7 +7209,7 @@ def _rhythm_beats():
     assert "Zero treatments is the honest read" not in _src \
         and "rarest currency" not in _src, "safe-harbor phrasing swept"
     # fragment-integrity wave (Zac rider 2026-07-11): dangling referents truthed
-    assert _src.count('"sound": <one of the 16 sounds') >= 2, \
+    assert _src.count('"sound": <one of the {_n_sounds} sounds') >= 2, \
         "the RESPONSE FORMAT emphasis template must carry the sound rider (the zero-sounds template gap)"
     assert "THE 7 ZOOM TYPES" in _src and "THE 6 ZOOM TYPES" not in _src, \
         "zoom-library header count truthed (7 zooms: StagedPush added 2026-07-13, StageZoom stays deleted)"
