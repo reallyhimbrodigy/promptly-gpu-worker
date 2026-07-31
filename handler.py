@@ -28988,8 +28988,10 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     # (destroyed content is worse than an honest failure). Give it ONE FULL-SPAN
     # CLIP (the statically-clean cuts=[] path) so the speech is preserved verbatim,
     # uncut. Captions/floor are Stage B; this is the floor of correctness beneath
-    # them. DEFAULT (not a separate flag) so enabling zero-reject can NEVER ship the
-    # harmful version — and only reachable under zero-reject, which is dark.
+    # them. DEFAULT (not a separate flag), so gate #5 can NEVER route a speech clip
+    # into the harmful motion-cut path — correctness rides entirely on this default,
+    # with no interlock behind it. zero-reject is LIVE (PROMPTLY_ZERO_REJECT=1 since
+    # 2026-07-25), so this is a REAL route reached in production, not a dark one.
     _speech_bearing = reason not in ("no_speech", "no_audio", "not_talking_head")
     if _plan is None and _speech_bearing:
         _plan = _me.HypePlan(
