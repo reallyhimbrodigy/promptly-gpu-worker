@@ -647,7 +647,48 @@ def run_pipeline_bg(body: dict):
         prewarm_volume.reload()
     except Exception:
         pass
-    result = _H.handler({"input": body})
+    # CPU-UTILISATION TELEMETRY (Zac 2026-07-31): sample cores-in-use during the
+    # job so the watched render reveals whether the 32-tab Remotion render PLATEAUS
+    # below the allocated cores. If it does, inc2's render_burst can ship at a lower
+    # cpu (e.g. 32 not 64) and save more — size on data, not "more cores is better".
+    # Daemon thread, log-only, zero render impact. psutil = cgroup-aware cores-used;
+    # os.getloadavg() is the fallback (load average ≈ runnable threads).
+    import threading as _threading
+    _cpu_samples = []
+    _cpu_stop = _threading.Event()
+    _ncores = _os.cpu_count() or 0
+    try:
+        import psutil as _psutil
+        _psutil.cpu_percent(interval=None)  # prime the delta baseline
+    except Exception:
+        _psutil = None
+
+    def _cpu_sampler():
+        while not _cpu_stop.wait(5.0):
+            try:
+                if _psutil is not None:
+                    _cpu_samples.append(_psutil.cpu_percent(interval=None) / 100.0 * _ncores)
+                else:
+                    _cpu_samples.append(_os.getloadavg()[0])
+            except Exception:
+                pass
+
+    _cpu_thread = _threading.Thread(target=_cpu_sampler, daemon=True)
+    _cpu_thread.start()
+    try:
+        result = _H.handler({"input": body})
+    finally:
+        _cpu_stop.set()
+        try:
+            if _cpu_samples:
+                _peak = max(_cpu_samples)
+                _mean = sum(_cpu_samples) / len(_cpu_samples)
+                print(f"[cpu-util] job={body.get('job_id')} src={'psutil' if _psutil else 'loadavg'} "
+                      f"peak={_peak:.1f} mean={_mean:.1f} cores-in-use of {_ncores} allocated "
+                      f"({100 * _peak / max(1, _ncores):.0f}% peak) over {len(_cpu_samples)} samples — "
+                      f"if peak plateaus below allocated, render_burst can size down (inc2)", flush=True)
+        except Exception:
+            pass
     # PRIMARY completion delivery — POST the full result (success payload OR the
     # classified error envelope) to the app server. Best-effort: a failed POST
     # falls back to the dispatch's Supabase recovery + the reaper.
