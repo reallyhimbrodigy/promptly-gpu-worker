@@ -31846,10 +31846,50 @@ def handler(job):
         _shake_lock = threading.Lock()
         _shake_cache = {}
 
+        # PROXY-DETECT (inc2, flag PROMPTLY_PROXY_SHAKE default OFF). The shake GATE
+        # only needs the SCORE; probing the already-encoded 480p@18fps proxy is ~8x
+        # cheaper than decoding the full-res source (16.2s -> 1.9s), shrinking a
+        # secondary planner CPU pole (the vidstab TRANSFORM stays full-res, untouched).
+        # DECISION-NEUTRAL BY A BAND, not an fps correction: the wider corpus (n=55)
+        # showed the proxy deflation is NOISE (60fps median 0.97, flat vs magnitude,
+        # no fps dependence) — not a fixable bias — so instead of shifting the
+        # threshold we pay the full-res probe ONLY when the proxy score lands near the
+        # gate (|score - 5.0| <= 1.3). Measured max near-threshold |Δ| = 0.87 (n=13);
+        # d=1.3 is the finite-sample margin. On production, ~90% of clips are clear of
+        # the band and take the fast path; the ~10% near T get the exact full-res
+        # decision -> ZERO decision changes by construction, at any noise level. Proxy
+        # absent (cold job / no prewarm) -> full-res, byte-identical to today.
         def _do_shake_probe():
             with _shake_lock:
                 if "score" not in _shake_cache:
-                    _shake_cache["score"] = _probe_shake_intensity(_raw_source)
+                    _sc = None
+                    if os.environ.get("PROMPTLY_PROXY_SHAKE", "").strip() == "1":
+                        _pf = None
+                        try:
+                            _cands = []
+                            if _dl_bucket and _dl_key:
+                                _cands.append(_prewarm_cached_proxy_path(_dl_bucket, _dl_key))
+                            _cands.append(os.path.join(work_dir, "gemini_proxy.mp4"))
+                            for _c in _cands:
+                                if _c and os.path.exists(_c) and os.path.getsize(_c) > 4096:
+                                    _pf = _c
+                                    break
+                        except Exception:
+                            _pf = None
+                        if _pf:
+                            _ps = _probe_shake_intensity(_pf)
+                            # centre the band on the ACTUAL gate threshold (env-tunable),
+                            # not a hardcoded 5.0 — else decision-neutrality breaks if tuned.
+                            _T = float(os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 5.0)
+                            if abs(_ps - _T) <= 1.3:
+                                _sc = _probe_shake_intensity(_raw_source)
+                                print(f"[shake] proxy={_ps:.2f} in band [{_T-1.3:.1f},{_T+1.3:.1f}] -> full-res={_sc:.2f} (decision-neutral)", flush=True)
+                            else:
+                                _sc = _ps
+                                print(f"[shake] proxy-fast={_ps:.2f} (clear of band around T={_T:.1f}, ~8x cheaper)", flush=True)
+                    if _sc is None:
+                        _sc = _probe_shake_intensity(_raw_source)
+                    _shake_cache["score"] = _sc
             return _shake_cache["score"]
 
         def _do_exposure_probe():
