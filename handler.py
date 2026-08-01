@@ -30453,62 +30453,19 @@ def _quick_face_check(source_path, max_samples=8):
     "is there a person on camera." The full-pipeline face tracker still
     runs later on the proxy with dense sampling.
     """
-    import cv2 as _cv2
-    cap = _cv2.VideoCapture(source_path)
-    try:
-        if not cap.isOpened():
-            return 0.0, 0
-        total_frames = int(cap.get(_cv2.CAP_PROP_FRAME_COUNT) or 0)
-        if total_frames < max_samples:
-            max_samples = max(1, total_frames)
-        # Evenly spaced sample indices, avoiding very first/last frames
-        # (some phone cameras have leader/trailer black frames).
-        start = int(total_frames * 0.05)
-        end = int(total_frames * 0.95)
-        if end <= start:
-            return 0.0, 0
-        stride = max(1, (end - start) // max_samples)
-
-        # DNN face detector — loaded fresh per call (cheap on small sample
-        # count, and avoids global state issues across concurrent jobs).
-        PROTOTXT = "/models/face_detector/deploy.prototxt"
-        CAFFEMODEL = "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel"
-        if not (os.path.exists(PROTOTXT) and os.path.exists(CAFFEMODEL)):
-            # Models not installed — fail OPEN (don't block) and let the
-            # full-pipeline gate handle validation. Better to occasionally
-            # over-accept than to false-positive reject due to missing models.
-            return 1.0, 0
-        net = _cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
-        CONFIDENCE_THRESHOLD = 0.5
-
-        face_hits = 0
-        samples_taken = 0
-        for i in range(max_samples):
-            frame_idx = start + i * stride
-            if frame_idx >= total_frames:
-                break
-            cap.set(_cv2.CAP_PROP_POS_FRAMES, float(frame_idx))
-            ok, frame = cap.read()
-            if not ok or frame is None:
-                continue
-            samples_taken += 1
-            # Downsample for detection — 300x300 is what the SSD expects.
-            h, w = frame.shape[:2]
-            blob = _cv2.dnn.blobFromImage(
-                _cv2.resize(frame, (300, 300)),
-                1.0, (300, 300), (104.0, 177.0, 123.0),
-            )
-            net.setInput(blob)
-            detections = net.forward()
-            for j in range(detections.shape[2]):
-                conf = float(detections[0, 0, j, 2])
-                if conf >= CONFIDENCE_THRESHOLD:
-                    face_hits += 1
-                    break  # one face per frame is enough
-        ratio = (face_hits / samples_taken) if samples_taken > 0 else 0.0
-        return ratio, samples_taken
-    finally:
-        cap.release()
+    # YuNet + ffmpeg-upright (Zac 2026-08-01): res10 systematically missed distant /
+    # non-frontal / darker-skin faces (our IND cohort), false-rejecting real talking
+    # heads at this fail-fast gate. Delegate to the SAME detector the validator now
+    # uses (ffmpeg autorotate → display-matrix rotation + display-aspect + YuNet).
+    # This is a RATIO-ONLY site (no zoom coordinates), so the swap carries no pixel
+    # risk — the coordinate-producing detect_face_positions_dense is gated on Zac's
+    # render pair. Fail-OPEN contract PRESERVED: 0 samples (models missing / source
+    # unreadable / too short) → 1.0 so a probe miss never blocks; the word-aware deep
+    # gate still validates. (max_samples now unused — the delegate samples every 6th.)
+    _hits, _samples, _ratio = _validator_face_signals(source_path, every_n_frames=6)
+    if _samples <= 0:
+        return 1.0, 0
+    return _ratio, _samples
 
 
 # CPU-STAGE MARKER (Zac 2026-07-31): run_pipeline_bg's cpu sampler reads _CPU_STAGE[0]
