@@ -11019,9 +11019,13 @@ def _payoff_punchy_enabled():
     production payoffs punchy; schema offers only the slow pair), which explains the
     DWELL null AND is the lead on the timing complaint. Offering the option lets the
     MODEL choose per moment (the vibe-system principle) rather than swapping a
-    default. PRE-REGISTERED READ: offered-but-never-picked → the constraint was
-    taste-correct, payoff-purity stands on the model's own judgement; picked →
-    report which beats, Zac's eye on rendered pairs. DARK; off = byte-identical."""
+    default. PRE-REGISTERED READ (amended by Zac 2026-07-31): picked → report which
+    beats, rendered pairs for Zac (he would be overriding a deliberate, twice-expressed
+    design decision — his call, but on PIXELS not a flag). Never-picked → INCONCLUSIVE,
+    NOT confirmed: the base payoff prose still tells the model "a snap reads as just
+    another mid_peak," so a null may be OBEYANCE, not judgement. The clean test of
+    payoff-purity is a 7th arm with BOTH the enum widened AND the payoff prose
+    neutralised — built ONLY if arm 6 comes back null. DARK; off = byte-identical."""
     return os.environ.get("PROMPTLY_PAYOFF_PUNCHY", "").strip().lower() in (
         "1", "true", "yes", "on",
     )
