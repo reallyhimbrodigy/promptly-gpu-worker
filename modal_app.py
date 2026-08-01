@@ -995,6 +995,41 @@ def render_burst(payload: dict) -> dict:
         _H._set_cpu_stage("render")
     except Exception:
         pass
+    # ── burst cpu/RSS sampler: confirms the cpu=48 / 64 GiB sizing on real burst
+    #    traffic (does the render plateau BELOW 48, or peg it and want more?).
+    #    Daemon, cgroup-read, log-only, render-inert. ──────────────────────────
+    import threading as _threading, time as _t2
+    _samp_stop = _threading.Event()
+    _cpu_s = []
+    _mem_s = []
+    _ncores = _os.cpu_count() or 0
+    def _rd_cpu():
+        try:
+            with open("/sys/fs/cgroup/cpu.stat") as _f:
+                for _ln in _f:
+                    if _ln.startswith("usage_usec"):
+                        return int(_ln.split()[1])
+        except Exception:
+            return None
+        return None
+    def _rd_mem():
+        try:
+            with open("/sys/fs/cgroup/memory.current") as _f:
+                return int(_f.read().strip())
+        except Exception:
+            return None
+    def _samp():
+        _lu = _rd_cpu(); _lt = _t2.monotonic()
+        while not _samp_stop.wait(3.0):
+            _nt = _t2.monotonic(); _nu = _rd_cpu()
+            if _nu is not None and _lu is not None and _nt > _lt:
+                _cpu_s.append((_nu - _lu) / ((_nt - _lt) * 1e6))
+            _lu, _lt = _nu, _nt
+            _m = _rd_mem()
+            if _m is not None:
+                _mem_s.append(_m)
+    _samp_t = _threading.Thread(target=_samp, daemon=True)
+    _samp_t.start()
     # 1. reconstitute the local work_dir (all planner media) at the SAME path so
     #    every embedded absolute path in the render args resolves unchanged.
     _H._extract_workdir_from_s3(payload["s3_workdir_key"], _work_dir)
@@ -1028,6 +1063,22 @@ def render_burst(payload: dict) -> dict:
         # dict always means success; the planner folds cost_delta into its meter.)
         return {"rs": _rs, "cost_delta": [float(_rs_cost_cell[0]), int(_rs_cost_cell[1])]}
     finally:
+        # burst sizing telemetry — peak/mean cores + peak RSS (confirms cpu=48 /
+        # 64 GiB against real render work).
+        _samp_stop.set()
+        try:
+            if _cpu_s:
+                _pk = max(_cpu_s); _mn = sum(_cpu_s) / len(_cpu_s)
+                print(f"[burst-cpu] job={_job_id} peak={_pk:.1f} mean={_mn:.1f} of "
+                      f"{_ncores} cores ({100 * _pk / max(1, _ncores):.0f}% peak, "
+                      f"{len(_cpu_s)} samples) — cpu=48 sizing check", flush=True)
+            if _mem_s:
+                _MB = 1024 * 1024
+                print(f"[burst-mem] job={_job_id} peak={max(_mem_s)/_MB:.0f}MB "
+                      f"mean={(sum(_mem_s)/len(_mem_s))/_MB:.0f}MB ({len(_mem_s)} "
+                      f"samples) — 64GiB sizing check", flush=True)
+        except Exception:
+            pass
         # THE straddling lifecycle, moved WHOLE into the burst (Zac #4): drain +
         # cancel the publisher on EVERY exit — success AND the raise path — so a
         # preview is never left servable as a terminal state. Then tear down the
