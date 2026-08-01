@@ -210,6 +210,12 @@ image = (
         "mkdir -p /models/face_detector",
         "wget -q -O /models/face_detector/deploy.prototxt https://raw.githubusercontent.com/opencv/opencv/master/samples/dnn/face_detector/deploy.prototxt",
         "wget -q -O /models/face_detector/res10_300x300_ssd_iter_140000.caffemodel https://raw.githubusercontent.com/opencv/opencv_3rdparty/dnn_samples_face_detector_20170830/res10_300x300_ssd_iter_140000.caffemodel",
+        # YuNet (Zac 2026-08-01): the VALIDATOR's face detector. res10 systematically
+        # fails on distant/non-frontal/darker-skin faces — our IND-dominant traffic
+        # (measured: res10 face_ratio below-0.25 = 52% vs YuNet 22%, p50 0.2 vs 0.8;
+        # viewed misses were real people res10 couldn't see, YuNet nailed). Faster +
+        # materially better on exactly these cases.
+        "wget -q -O /models/face_detector/yunet.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
         # EAST text detector (burned-in-text guard, burned_text.py). Self-hosted in
         # the app's S3/CloudFront (not a third-party repo) so the build is under our
         # control. Consumed via cv2.dnn exactly like the face detector above.

@@ -30213,45 +30213,45 @@ def _rotate_upright(frame, rot_cw):
 
 
 def _validator_face_signals(sample_path, every_n_frames=6):
-    """Rotation-aware face ratio for the VALIDATOR ONLY (Zac 2026-08-01). Same res10
-    DNN + confidence 0.5 as detect_face_positions_dense, but reads frames UPRIGHT via
-    the rotation-aware reader so a rotated talking head is not falsely scored 0 faces.
-    Returns (hits, samples, ratio). ISOLATED to validate_handler — it reads the RAW
-    sample; the editorial path reads the upright ffmpeg PROXY, so no editorial
-    coordinate can move."""
-    import cv2
-    PROTOTXT = "/models/face_detector/deploy.prototxt"
-    CAFFEMODEL = "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel"
-    if not (os.path.exists(PROTOTXT) and os.path.exists(CAFFEMODEL)):
+    """YuNet + ffmpeg-upright face ratio for the VALIDATOR ONLY (Zac 2026-08-01).
+    Replaces res10, which systematically failed on distant / non-frontal / darker-skin
+    faces — our IND-dominant traffic (measured: res10 face_ratio below-0.25 = 52% vs
+    YuNet 22%, p50 0.2 vs 0.8; the low-res10 clips were real people YuNet detected).
+    Frames are extracted by FFMPEG, which reliably applies the display-matrix rotation
+    (autorotate ON by default) AND preserves DISPLAY aspect (scale=-2:480) — fixing
+    BOTH the cv2-autorotate double-rotation AND the coded-dims distortion in one change.
+    Returns (hits, samples, ratio). ISOLATED to validate_handler.
+    SEQUENCE (Zac): forced-true (PROMPTLY_VALIDATOR_FORCE_TH) stays LIVE until this is
+    verified on real traffic; only then is the honest verdict re-enabled."""
+    import cv2, tempfile, glob, shutil
+    _YUNET = "/models/face_detector/yunet.onnx"
+    if not os.path.exists(_YUNET):
         return 0, 0, 0.0
-    net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
-    cap, _rot = _open_upright(sample_path)
+    _fdir = tempfile.mkdtemp(prefix="valface_")
     try:
-        if int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0) < 1:
-            return 0, 0, 0.0
-        _i = 0
-        _samples = 0
+        subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-i", sample_path,
+             "-vf", f"select=not(mod(n\\,{every_n_frames})),scale=-2:480",
+             "-vsync", "0", os.path.join(_fdir, "f_%04d.jpg")],
+            capture_output=True, text=True, timeout=30)
+        _frames = sorted(glob.glob(os.path.join(_fdir, "f_*.jpg")))
+        if len(_frames) < 4:
+            return 0, len(_frames), 0.0
+        _yn = cv2.FaceDetectorYN_create(_YUNET, "", (320, 320), 0.6, 0.3, 5000)
         _hits = 0
-        while True:
-            _ok, _frame = cap.read()
-            if not _ok:
-                break
-            if _i % every_n_frames == 0:
-                _frame = _rotate_upright(_frame, _rot)
-                if _frame is not None:
-                    _samples += 1
-                    _blob = cv2.dnn.blobFromImage(
-                        cv2.resize(_frame, (300, 300)), 1.0, (300, 300),
-                        (104.0, 177.0, 123.0), swapRB=False, crop=False)
-                    net.setInput(_blob)
-                    _dets = net.forward()
-                    if any(float(_dets[0, 0, _k, 2]) >= 0.5 for _k in range(_dets.shape[2])):
-                        _hits += 1
-            _i += 1
-        _ratio = (_hits / _samples) if _samples > 0 else 0.0
-        return _hits, _samples, _ratio
+        for _fp in _frames:
+            _img = cv2.imread(_fp)
+            if _img is None:
+                continue
+            _h, _w = _img.shape[:2]
+            _yn.setInputSize((_w, _h))
+            _n, _fc = _yn.detect(_img)
+            if _fc is not None and len(_fc) > 0:
+                _hits += 1
+        _samples = len(_frames)
+        return _hits, _samples, (round(_hits / _samples, 3) if _samples else 0.0)
     finally:
-        cap.release()
+        shutil.rmtree(_fdir, ignore_errors=True)
 
 
 def validate_handler(job):
