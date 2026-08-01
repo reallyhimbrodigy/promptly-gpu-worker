@@ -71,6 +71,26 @@ def _modal_syntax():
         ast.parse(f.read())
 
 
+@check("SOURCE_DURATION PERSIST GUARD (Zac 2026-08-01, RULE-1): source_duration_s must be NESTED inside the stage_timings dict, never a top-level result_payload key. content-studio strips unknown top-level result keys — a top-level source_duration_s persisted 0/62 on real traffic (same class as cpu_by_stage). stage_timings persists whole, so the field must ride inside it. This regex FAILS if source_duration_s appears as a top-level `\"source_duration_s\":` at result-payload indentation (12 spaces) rather than nested (16 spaces), catching a silent regression back to the stripped location.")
+def _source_duration_persist_guard():
+    src = open("handler.py").read()
+    assert '"source_duration_s"' in src, (
+        "source_duration_s missing entirely — the cohort-control field was dropped")
+    # It must appear nested one level deeper than a top-level result_payload key.
+    # A top-level key sits at 12-space indent; the nested (inside stage_timings)
+    # form sits at 16-space indent. Fail if the 12-space top-level form exists.
+    import re
+    top_level = re.search(r'\n {12}"source_duration_s"\s*:', src)
+    nested = re.search(r'\n {16}"source_duration_s"\s*:', src)
+    assert nested is not None, (
+        "source_duration_s must be NESTED inside stage_timings (16-space indent) "
+        "so content-studio persists it; not found at that depth")
+    assert top_level is None, (
+        "source_duration_s found at TOP-LEVEL result_payload indent (12 spaces) — "
+        "content-studio strips unknown top-level keys (0/62 on traffic). Nest it "
+        "inside the stage_timings dict instead.")
+
+
 @check("DEPLOY-STATE GUARD (Zac 2026-08-01): a deploy must not DROP a commit already known live. deploy.sh records the last successfully-deployed HEAD in .last_deployed_commit; this FAILS if that commit is not an ancestor of the current HEAD — i.e. you are deploying from a stale branch/checkout that lost a live fix (the 4th deploy-state footgun today: stale server.js, fanout canonical, snapshot env-freeze, the 06:10 validator scare). FAIL-SAFE: passes silently if the file is absent (first deploy), empty, or the commit is unknown to this tree, so it can never wrongly block a legitimate deploy.")
 def _deploy_state_guard():
     import subprocess as _sp

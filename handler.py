@@ -35020,13 +35020,21 @@ def handler(job):
             "job_id": job_id,
             "render_time": round(render_elapsed, 1),
             "pipeline_time": round(_timings.get("total", 0), 1),
-            # SA-0: full per-stage wall-clock decomposition (seconds)
-            "stage_timings": {k: round(float(v), 1) for k, v in _timings.items()},
-            # SOURCE DURATION (Zac 2026-08-01, the recurring blocker): persist the
-            # probed source length so EVERY latency/cost read can cohort-control by
-            # duration and split fixed-vs-slope (the two-term fit). Without it the
-            # 90s target can't be tracked and $/job questions stay unresolved.
-            "source_duration_s": round(float(source_duration), 1) if source_duration else None,
+            # SA-0: full per-stage wall-clock decomposition (seconds).
+            # SOURCE DURATION (Zac 2026-08-01, the recurring blocker) NESTED HERE
+            # DELIBERATELY: content-studio strips UNKNOWN top-level result keys
+            # (proven — a top-level "source_duration_s" persisted 0/62 on real
+            # traffic, same class as cpu_by_stage/mem_by_stage). stage_timings is
+            # a known dict that persists whole, so the field rides inside it. Do
+            # NOT move it back to top level — validate_deploy asserts it lives in
+            # this dict (RULE-1 regression guard). Persisting the probed source
+            # length lets EVERY latency/cost read cohort-control by duration and
+            # split fixed-vs-slope (the two-term fit); without it the 90s target
+            # can't be tracked and $/job questions stay unresolved.
+            "stage_timings": {
+                **{k: round(float(v), 1) for k, v in _timings.items()},
+                "source_duration_s": round(float(source_duration), 1) if source_duration else None,
+            },
             # W2: which stages ran/skipped and WHY (effort-proportional proof)
             "stage_manifest": _stage_manifest,
             "output_size_mb": round(output_size_mb, 1),
