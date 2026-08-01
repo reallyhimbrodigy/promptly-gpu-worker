@@ -29135,6 +29135,43 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "post_caption": "Short and sharp — no trimming needed. #keepitreal",
             "post_hook": "Some clips are ready the moment you shoot them.",
         }
+    elif _route_name == "minimal_speech_uncut":
+        # SPEECH-PRESERVED UNCUT (option a, Stage B honest note). This route was
+        # taken because the captioned edit could NOT be built safely, and the clip
+        # carries SPEECH — so it was delivered COMPLETE and UNCUT rather than cut
+        # (which would destroy the untranscribed speech gate #5 protects) or
+        # rejected. The note MUST be honest and MUST NOT claim a "clean-cut
+        # re-pace" (the fall-through copy) — the clip is uncut and uncaptioned.
+        # No-captions + honest note is the sanctioned patchy-caption-law option;
+        # the alternatives are full-via-Tier-1 (upstream recovery) or reject.
+        if reason == "transcription_incomplete":
+            _rationale = (
+                f"I couldn't fully transcribe the speech in this {_dur:.0f}-second clip, "
+                "so I kept it complete and uncut rather than cut around the parts I "
+                "couldn't read — nothing you said was lost. That does mean no captions "
+                "this time; for captions, try a clip with clearer audio or a supported "
+                "language.")
+            _capability_notes = [
+                "The speech here couldn't be fully transcribed, so the clip was "
+                "delivered complete and uncut with no captions — nothing was cut out."]
+            _pkg_fields = {
+                "post_caption": "Kept it whole — every word intact. #unedited",
+                "post_hook": "Some takes you leave exactly as they are.",
+            }
+        else:
+            # render_collapsed / plan_collapsed / too_short-with-speech: the edit
+            # couldn't be assembled cleanly, so the footage was delivered intact
+            # rather than shipped as a broken cut.
+            _rationale = (
+                f"I kept your {_dur:.0f}-second clip complete and uncut — I couldn't "
+                "land a clean edit on this one, so I delivered your footage intact "
+                "rather than ship a cut I wasn't happy with.")
+            _capability_notes = [
+                "This clip was delivered complete and uncut."]
+            _pkg_fields = {
+                "post_caption": "Straight through, no cuts. #asrecorded",
+                "post_hook": "Raw and whole.",
+            }
     else:
         _rationale = _minimal_rationale(reason, _dur)
         _capability_notes = [
@@ -29154,21 +29191,34 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         "job_id": job_id,
         "route": _route_name,
         "route_reason": reason,
-        # W2: the caption-less routes ARE the effort-proportional proof — name it
-        "stage_manifest": {
-            "run": (["normalize", "motion_curve", "beat_analysis", "hype_plan", "render", "hls", "upload"]
-                    if _route_name == "hype"
-                    else ["normalize", "motion_curve", "moodreel_plan", "render", "hls", "upload"]
-                    if _route_name == "moodreel"
-                    else ["normalize", "motion_curve", "minimal_plan", "render", "hls", "upload"]),
-            "skipped": {"transcribe": "no speech to transcribe",
-                        "planning": "no Gemini planning on this route"
-                        if _route_name == "minimal"
-                        else "cinematic motion plan" if _route_name == "moodreel"
-                        else "lighter hype plan",
-                        "face_detect": "caption-less route",
-                        "broll": "caption-less route"},
-        },
+        # W2: the caption-less routes ARE the effort-proportional proof — name it.
+        # minimal_speech_uncut is NOT caption-less by choice — it HAS speech that
+        # couldn't be fully transcribed, so its manifest must not claim "no speech".
+        "stage_manifest": (
+            {
+                "run": ["normalize", "transcribe", "render", "hls", "upload"],
+                "skipped": {"transcribe": "speech present but could not be fully "
+                            "transcribed — clip delivered complete/uncut, no captions",
+                            "planning": "no editorial plan on this route (uncut passthrough)",
+                            "face_detect": "no captions to place",
+                            "broll": "no editorial plan"},
+            }
+            if _route_name == "minimal_speech_uncut" else
+            {
+                "run": (["normalize", "motion_curve", "beat_analysis", "hype_plan", "render", "hls", "upload"]
+                        if _route_name == "hype"
+                        else ["normalize", "motion_curve", "moodreel_plan", "render", "hls", "upload"]
+                        if _route_name == "moodreel"
+                        else ["normalize", "motion_curve", "minimal_plan", "render", "hls", "upload"]),
+                "skipped": {"transcribe": "no speech to transcribe",
+                            "planning": "no Gemini planning on this route"
+                            if _route_name == "minimal"
+                            else "cinematic motion plan" if _route_name == "moodreel"
+                            else "lighter hype plan",
+                            "face_detect": "caption-less route",
+                            "broll": "caption-less route"},
+            }
+        ),
         "render_time": round(_render_elapsed, 1),
         "pipeline_time": round(time.time() - (pipeline_start or _t0), 1),
         "stage_timings": {**{k: round(v, 1) for k, v in _mini_t.items()},

@@ -5558,7 +5558,7 @@ def _zero_reject_wiring():
         "choke point must run the minimal pipeline and fall through to the coded envelope on failure"
     # the minimal pipeline shares the delivery contract
     _p = _h.find("def _run_minimal_pipeline")
-    _body = _h[_p:_p + 22000]  # widened for the hype + moodreel branches
+    _body = _h[_p:_h.find("\ndef ", _p + 10)]  # widened for the hype + moodreel branches
     for _needle, _why in [
         ("_encode_and_upload_hls(", "shared HLS ladder"),
         ("write_job_status(", "durable completed terminal"),
@@ -5945,7 +5945,7 @@ def _loud_failsafe_mount_law():
 def _moodreel_route_wiring():
     _h = open("handler.py").read()
     _p = _h.find("def _run_minimal_pipeline")
-    _body = _h[_p:_p + 22000]
+    _body = _h[_p:_h.find("\ndef ", _p + 10)]
     # ONE shared extraction, fail-safe, before the ladder
     assert _body.count("extract_motion_curve(") == 1, "the motion curve is extracted ONCE and shared"
     assert _body.find("extract_motion_curve(") < _body.find("_hype_on ="), \
