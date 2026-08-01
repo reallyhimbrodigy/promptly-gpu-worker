@@ -660,8 +660,29 @@ def run_pipeline_bg(body: dict):
     import threading as _threading, time as _time
     _SAMPLE_S = 3.0
     _cpu_by_stage = {}   # stage name -> list of cores-in-use
+    _mem_by_stage = {}   # stage name -> list of charged-memory bytes (per-stage peak RSS)
     _cpu_stop = _threading.Event()
     _ncores = _os.cpu_count() or 0
+
+    # CGROUP MEMORY accounting (Zac 2026-08-01: memory is 59% of the bill, so inc2
+    # is sized on per-stage PEAK RSS, not cores). Read the container's CHARGED memory
+    # (cgroup v2 memory.current; v1 memory.usage_in_bytes) — the number that counts
+    # toward the OOM limit. Bucket per stage; the per-stage PEAK sizes each inc2
+    # container. Same cgroup mechanism as the CPU reader (probe-confirmed non-zero).
+    def _read_mem_bytes():
+        try:
+            with open("/sys/fs/cgroup/memory.current") as _f:              # cgroup v2
+                return int(_f.read().strip())
+        except Exception:
+            pass
+        for _p in ("/sys/fs/cgroup/memory/memory.usage_in_bytes",          # cgroup v1
+                   "/sys/fs/cgroup/memory.usage_in_bytes"):
+            try:
+                with open(_p) as _f:
+                    return int(_f.read().strip())
+            except Exception:
+                continue
+        return None
 
     # CGROUP CPU accounting (Zac 2026-07-31 FIX): psutil.cpu_percent and
     # os.getloadavg read the HOST, not the container's cgroup, so under Modal they
@@ -710,6 +731,9 @@ def run_pipeline_bg(body: dict):
                 except Exception:
                     _stage = "unknown"
                 _cpu_by_stage.setdefault(_stage, []).append(_cores)
+                _mb = _read_mem_bytes()   # charged memory NOW, bucketed per stage
+                if _mb is not None:
+                    _mem_by_stage.setdefault(_stage, []).append(_mb)
             except Exception:
                 pass
 
@@ -751,6 +775,14 @@ def run_pipeline_bg(body: dict):
                                   "n": len(_cs), "dur_s": len(_cs) * int(_SAMPLE_S)}
                             for _st, _cs in _cpu_by_stage.items() if _cs}
                         result["cpu_src"] = _src
+                        # PER-STAGE PEAK RSS (Zac 2026-08-01, the PRIORITY line —
+                        # memory is 59% of the bill): sizes each inc2 container.
+                        _MB = 1024 * 1024
+                        result["mem_by_stage"] = {
+                            _st: {"peak_mb": round(max(_ms) / _MB, 1),
+                                  "mean_mb": round((sum(_ms) / len(_ms)) / _MB, 1),
+                                  "n": len(_ms)}
+                            for _st, _ms in _mem_by_stage.items() if _ms}
                 except Exception:
                     pass
         except Exception:
