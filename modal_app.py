@@ -775,16 +775,25 @@ def run_pipeline_bg(body: dict):
                 # instead of log-only. Telemetry, best-effort; render-inert.
                 try:
                     if isinstance(result, dict):
-                        result["cpu_by_stage"] = {
+                        # NEST inside stage_timings (speed agent 2026-08-01): content-studio
+                        # STRIPS unknown TOP-LEVEL result keys — cpu_by_stage/mem_by_stage
+                        # persisted 0/121 on real traffic exactly like source_duration did.
+                        # stage_timings persists whole, so the inc2-sizing telemetry rides
+                        # inside it and becomes queryable on ORGANIC traffic. Root cause
+                        # (content-studio silently dropping unknown top-level keys, twice
+                        # now) is flagged for the errors agent — nesting is the workaround.
+                        # validate_deploy asserts this nesting (RULE-1 guard).
+                        _st_dict = result.setdefault("stage_timings", {})
+                        _st_dict["cpu_by_stage"] = {
                             _st: {"peak": round(max(_cs), 1),
                                   "mean": round(sum(_cs) / len(_cs), 1),
                                   "n": len(_cs), "dur_s": len(_cs) * int(_SAMPLE_S)}
                             for _st, _cs in _cpu_by_stage.items() if _cs}
-                        result["cpu_src"] = _src
+                        _st_dict["cpu_src"] = _src
                         # PER-STAGE PEAK RSS (Zac 2026-08-01, the PRIORITY line —
                         # memory is 59% of the bill): sizes each inc2 container.
                         _MB = 1024 * 1024
-                        result["mem_by_stage"] = {
+                        _st_dict["mem_by_stage"] = {
                             _st: {"peak_mb": round(max(_ms) / _MB, 1),
                                   "mean_mb": round((sum(_ms) / len(_ms)) / _MB, 1),
                                   "n": len(_ms)}

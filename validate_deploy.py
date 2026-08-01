@@ -71,6 +71,17 @@ def _modal_syntax():
         ast.parse(f.read())
 
 
+@check("INC2-TELEMETRY NEST GUARD (speed agent 2026-08-01, RULE-1): the cpu_by_stage / mem_by_stage sizing telemetry must be NESTED inside stage_timings (result.setdefault('stage_timings')), never a top-level result key — content-studio strips unknown top-level keys, so a top-level cpu_by_stage persisted 0/121 on real traffic (same class as source_duration). FAILS if it regresses to `result[\"cpu_by_stage\"] =`, which would make the inc2 burst-sizing data silently un-queryable again.")
+def _inc2_telemetry_nest_guard():
+    src = open("modal_app.py").read()
+    assert '_st_dict["cpu_by_stage"]' in src and '_st_dict["mem_by_stage"]' in src, (
+        "cpu_by_stage/mem_by_stage must be nested via _st_dict (result.setdefault('stage_timings')) "
+        "so they persist — the inc2 sizing telemetry")
+    assert 'result["cpu_by_stage"] =' not in src and 'result["mem_by_stage"] =' not in src, (
+        "cpu_by_stage/mem_by_stage found at TOP-LEVEL result — content-studio strips unknown "
+        "top-level keys (0/121 on traffic). Nest inside stage_timings instead.")
+
+
 @check("VIDSTAB RIP-OUT GUARD (Zac 2026-08-01, RULE-1): vidstab is disabled via a secret-independent clamp (_SHAKE_STABILIZE_THRESHOLD = max(..., 1e9)) so organic stabilisation NEVER fires regardless of any live PROMPTLY_VIDSTAB_THRESHOLD secret. FAILS if the clamp is removed — the rip-out cannot silently regress to always-on without a deliberate, reviewed revert.")
 def _vidstab_ripout_guard():
     src = open("handler.py").read()
