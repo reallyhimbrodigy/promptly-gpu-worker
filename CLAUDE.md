@@ -55,6 +55,18 @@ in the same ledger as user-job spend with a running session total.
 `.spawn()`ed containers outlive the local orchestrator — a batch is dead only
 when `modal app list` shows 0 tasks.
 
+## Rule 7 — Cut by USER before declaring a systemic failure
+
+Compute failure rates **per affected user**, not per job. A user who fails five
+times and gives up is **one lost user, not five failures** — per-job counting
+inflates every class by the retry multiplier, which is exactly what made a
+one-user 100fps bug read as a 67% outage. **Report both numbers; lead with the
+user count.**
+
+Precedent from Aug 1: the render "wave" (1 user), UPLOAD_STALLED (5 of 6 = 1
+user), RENDER_FATAL (4 of N = 1 user) — three classes, three single users, each
+inflated by retries into an apparent outage.
+
 ## Standing product laws
 
 - **Zero-reject**: content classes are ROUTES, not errors. The only permitted
