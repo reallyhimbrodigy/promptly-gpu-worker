@@ -6647,6 +6647,27 @@ already follow) and return when the face leads again."""
             "for a camera move."
         )
 
+    # FIX 3 (dark) — SCAFFOLD RELOCATION (Zac GO 2026-07-31). The lean response
+    # schema carries no per-moment prose (what_i_saw / why_emphasis / what_lands /
+    # viewer_feeling) and no per-cut reason — those were telemetry-only, and their
+    # generation is the r=0.59 output-bound degen surface. But their GROUNDING was
+    # real, so relocate it to the THINKING channel (r=0.05, ~free): reason it out
+    # BEFORE emitting, then emit only the structural fields. Same grounding, no
+    # output balloon. Appended (not woven) so flag-off is byte-identical.
+    if _lean_schema_enabled():
+        system_instruction += (
+            "\n\nGROUNDING LIVES IN YOUR REASONING, NOT IN OUTPUT FIELDS. The "
+            "response schema no longer carries the per-moment prose fields "
+            "(what_i_saw, why_emphasis, what_lands, viewer_feeling) or the per-cut "
+            "reason — earlier instructions that name those fields describe grounding "
+            "you must still DO, just not EMIT. For every key_moment, before you emit "
+            "it, reason through what is actually visible in the proxy at that word "
+            "and why the beat is load-bearing; let that reasoning decide the "
+            "word_index, the zoom, the sound. Then emit ONLY the structural fields. "
+            "The single top-level `notes` field is your one short combined rationale "
+            "for the whole edit. Ground first in thought; keep the emitted plan lean."
+        )
+
     return system_instruction, user_content
 
 
@@ -11071,6 +11092,74 @@ def _apply_why_diet(schema):
     return schema
 
 
+def _lean_schema_enabled():
+    """FIX 3 (degen bound, Zac GO 2026-07-31): the r=0.59 root lever. wall-clock is
+    OUTPUT-bound (r=0.59) not thinking-bound (r=0.05), and the output is the
+    telemetry-only rationale PROSE (what_lands/why_emphasis/what_i_saw/viewer_feeling
+    per moment + per-cut reason). A maxLength cap is INERT — Vertex ignores it at
+    generation (parse-edge only; Wave-3: 240 declared→16,111 emitted). The only fix
+    that cuts generation is REMOVING the field from the response schema — a field
+    that does not exist cannot balloon. The grounding those fields did is RELOCATED
+    to the thinking channel via a prompt instruction (Zac: same grounding, ~free).
+    The top-level `notes` stays as the one combined rationale. broll_clips.reason
+    (functional: content gate + picker) and remove_words.reason (code-generated) are
+    UNTOUCHED. DARK by default; the free plan-decision A/B decides if the scaffold
+    was load-bearing before this ever ships."""
+    return os.environ.get("PROMPTLY_LEAN_SCHEMA", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+# The telemetry-only rationale-prose fields removed by the lean schema, per def.
+# broll_clips.reason and remove_words.reason are NOT here — they are functional.
+_LEAN_DROP_FIELDS = {
+    "_VideoPlanMoment": ("what_lands", "why_emphasis", "what_i_saw", "viewer_feeling"),
+    "_EmphasisMoment": ("viewer_feeling",),
+    "_CutRefinement": ("reason",),
+}
+
+
+def _apply_lean_schema(_s):
+    """Strip the telemetry-only rationale prose from the response schema so the
+    model never GENERATES it (the r=0.59 output-bound degen surface). Mirrors
+    _apply_why_diet's post-derivation surgery. Removes each field from both
+    `properties` and `required` of its $def. Idempotent; missing defs/fields are
+    skipped (schema-shape robust)."""
+    _defs = _s.get("$defs", {})
+    for _def, _fields in _LEAN_DROP_FIELDS.items():
+        _d = _defs.get(_def)
+        if not isinstance(_d, dict):
+            continue
+        _props = _d.get("properties")
+        if isinstance(_props, dict):
+            for _f in _fields:
+                _props.pop(_f, None)
+        _req = _d.get("required")
+        if isinstance(_req, list):
+            _d["required"] = [_r for _r in _req if _r not in _fields]
+    return _s
+
+
+def _backfill_lean_fields(_parsed):
+    """Restore the dropped prose as "" so the strict PostCutPlan model validates
+    (the fields stay REQUIRED in the pydantic contract — off-arm byte-identical).
+    Downstream readers are all .get()-tolerant telemetry, so "" empties the ledger
+    reasons exactly as intended. No-op when the fields are already present."""
+    if not isinstance(_parsed, dict):
+        return _parsed
+    for _km in (_parsed.get("key_moments") or []):
+        if isinstance(_km, dict):
+            for _f in _LEAN_DROP_FIELDS["_VideoPlanMoment"]:
+                _km.setdefault(_f, "")
+    for _em in (_parsed.get("emphasis_moments") or []):
+        if isinstance(_em, dict):
+            _em.setdefault("viewer_feeling", "")
+    for _cr in (_parsed.get("cut_refinements") or []):
+        if isinstance(_cr, dict):
+            _cr.setdefault("reason", "")
+    return _parsed
+
+
 def _post_cuts_response_schema():
     """PostCutPlan schema with the zoom claim-anyOf injected at
     $defs/_EmphasisMoment.properties.zoom_effect. Everything else stays
@@ -11092,6 +11181,9 @@ def _post_cuts_response_schema():
     # applied after injection so they are dieted too.
     if _why_diet_enabled():
         _s = _apply_why_diet(_s)
+    # FIX 3: strip the telemetry-only rationale prose (dark; the r=0.59 root lever).
+    if _lean_schema_enabled():
+        _s = _apply_lean_schema(_s)
     return _s
 
 
@@ -11239,6 +11331,11 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
         else:
             try:
                 _parsed = extract_json(response_text)
+                # FIX 3: the lean schema omitted the telemetry-only prose fields,
+                # so backfill "" before the strict PostCutPlan validation below
+                # (the pydantic contract keeps them required → off-arm identical).
+                if _lean_schema_enabled():
+                    _parsed = _backfill_lean_fields(_parsed)
             except Exception as _pe:
                 _degen = f"unparseable JSON ({type(_pe).__name__}: {str(_pe)[:140]})"
         if _degen is not None and response_text:
