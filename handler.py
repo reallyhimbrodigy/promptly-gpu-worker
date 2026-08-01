@@ -11012,6 +11012,21 @@ _ZOOM_OVERRIDE_FIELDS = {"durationMs": "integer", "scale": "number",
                          "originX": "number", "originY": "number"}
 
 
+def _payoff_punchy_enabled():
+    """6th-arm flag (Zac 2026-07-31): ADD (not replace) SnapReframe to the payoff
+    zoom enum — ZOOM_ARC_HOMES['payoff'] becomes (LetterboxPush, SmoothPush,
+    SnapReframe). Q1 proved a punchy payoff is structurally unreachable (0/253
+    production payoffs punchy; schema offers only the slow pair), which explains the
+    DWELL null AND is the lead on the timing complaint. Offering the option lets the
+    MODEL choose per moment (the vibe-system principle) rather than swapping a
+    default. PRE-REGISTERED READ: offered-but-never-picked → the constraint was
+    taste-correct, payoff-purity stands on the model's own judgement; picked →
+    report which beats, Zac's eye on rendered pairs. DARK; off = byte-identical."""
+    return os.environ.get("PROMPTLY_PAYOFF_PUNCHY", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 def _zoom_claim_variants():
     """The zoom static-anyOf, at the surface it governs: four tiny variants,
     each pairing arc_position (const — Gemini's authored CLAIM) with that
@@ -11036,8 +11051,13 @@ def _zoom_claim_variants():
     _mask_scale_max = max(ZOOM_NATURAL_SCALE[_t]
                           for _t in ZOOM_ARC_HOMES["build"])
     for _pos in ("hook", "build", "mid_peak", "payoff", "breather", "close"):
+        _types = ZOOM_ARC_HOMES[_pos]
+        # 6th arm (dark): ADD SnapReframe as a payoff OPTION so the model can choose
+        # punch at the payoff (structurally unreachable today). Off = byte-identical.
+        if _pos == "payoff" and _payoff_punchy_enabled():
+            _types = tuple(_types) + ("SnapReframe",)
         _props = {"arc_position": {"type": "string", "enum": [_pos]},
-                  "type": {"type": "string", "enum": sorted(ZOOM_ARC_HOMES[_pos])}}
+                  "type": {"type": "string", "enum": sorted(_types)}}
         for _f, _t in _ZOOM_OVERRIDE_FIELDS.items():
             _props[_f] = {"type": _t}
         if _pos in ZOOM_MASK_POSITIONS:
