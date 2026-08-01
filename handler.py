@@ -10308,6 +10308,21 @@ def _shape_abort_enabled():
     )
 
 
+def _structure_abort_enabled():
+    """FIX 2 (degen bound, Zac GO 2026-07-31): the 6/192 residual — whole-document
+    JSON STRUCTURE loops (the model re-emitting the entire plan) — that shape-abort
+    deliberately does NOT catch (structure repetition looks like healthy JSON → FP
+    territory for the string gate) and that fall through to the slow 16k cutoff.
+    Signal: once the top-level JSON object CLOSES (brace/bracket depth returns to 0
+    after opening), any further non-whitespace output is a structure loop → abort
+    at that boundary instead of at 16k. DARK by default (byte-identical when off);
+    A/B measures the residual's gemini_wasted_degen (target: 16k-cutoff → abort
+    latency). Rides the SAME aborted-flag path as shape-abort → the degen re-roll."""
+    return os.environ.get("PROMPTLY_STRUCTURE_ABORT", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 def _shape_window_signature(s):
     """PURE repetition discriminant on ONE in-string window (≤1200 chars of the
     current string run's tail). Returns (shape, period, metric) or None.
@@ -10365,9 +10380,13 @@ def _shape_window_signature(s):
 
 
 def _shape_abort_state():
-    """Fresh incremental scanner state for one stream."""
+    """Fresh incremental scanner state for one stream. `struct_on`/`shape_on` are
+    read ONCE here (not per-char) so the feed's gating is a cheap local check.
+    depth/seen_open/closed track FIX 2's top-level JSON structure completion."""
     return {"esc": False, "ins": False, "run": 0, "tail": "",
-            "next_check": _SHAPE_ABORT_MIN_RUN}
+            "next_check": _SHAPE_ABORT_MIN_RUN,
+            "depth": 0, "seen_open": False, "closed": False,
+            "shape_on": _shape_abort_enabled(), "struct_on": _structure_abort_enabled()}
 
 
 def _shape_abort_feed(state, chunk):
@@ -10383,6 +10402,11 @@ def _shape_abort_feed(state, chunk):
     _ins = state["ins"]
     _run = state["run"]
     _nxt = state["next_check"]
+    _shape_on = state["shape_on"]
+    _struct_on = state["struct_on"]
+    _depth = state["depth"]
+    _seen_open = state["seen_open"]
+    _closed = state["closed"]
     _acc = []
     _fire = None
     for _ch in chunk:
@@ -10407,14 +10431,15 @@ def _shape_abort_feed(state, chunk):
             if _run >= _nxt:
                 state["tail"] = (state["tail"] + "".join(_acc))[-_SHAPE_ABORT_WINDOW:]
                 _acc = []
-                if _run >= _SHAPE_ABORT_HARD_RUN:
-                    _fire = {"shape": "string-runaway", "period": None,
-                             "metric": _run, "run_len": _run}
-                else:
-                    _sig = _shape_window_signature(state["tail"])
-                    if _sig is not None:
-                        _fire = {"shape": _sig[0], "period": _sig[1],
-                                 "metric": _sig[2], "run_len": _run}
+                if _shape_on:   # string-shape fire is the shape-abort lever only
+                    if _run >= _SHAPE_ABORT_HARD_RUN:
+                        _fire = {"shape": "string-runaway", "period": None,
+                                 "metric": _run, "run_len": _run}
+                    else:
+                        _sig = _shape_window_signature(state["tail"])
+                        if _sig is not None:
+                            _fire = {"shape": _sig[0], "period": _sig[1],
+                                     "metric": _sig[2], "run_len": _run}
                 _nxt = _run + _SHAPE_ABORT_CHECK_EVERY
                 if _fire is not None:
                     break
@@ -10425,12 +10450,33 @@ def _shape_abort_feed(state, chunk):
             _acc = []
             state["tail"] = ""
             _nxt = _SHAPE_ABORT_MIN_RUN
+        elif _struct_on:
+            # FIX 2: track top-level JSON structure depth OUTSIDE strings. A new
+            # structural OPEN after the top-level object already closed = the model
+            # re-emitting the plan (the 6/192 structure-loop) → abort at that
+            # boundary, thousands of tokens before the 16k cutoff. Firing ONLY on a
+            # trailing '{'/'[' (not arbitrary trailing content) keeps a legit
+            # trailing fence / whitespace from false-tripping.
+            if _ch == "{" or _ch == "[":
+                if _closed:
+                    _fire = {"shape": "structure-loop", "period": None,
+                             "metric": _depth, "run_len": _run}
+                    break
+                _depth += 1
+                _seen_open = True
+            elif _ch == "}" or _ch == "]":
+                _depth -= 1
+                if _depth <= 0 and _seen_open:
+                    _closed = True
     if _acc:
         state["tail"] = (state["tail"] + "".join(_acc))[-_SHAPE_ABORT_WINDOW:]
     state["esc"] = _esc
     state["ins"] = _ins
     state["run"] = _run
     state["next_check"] = _nxt
+    state["depth"] = _depth
+    state["seen_open"] = _seen_open
+    state["closed"] = _closed
     return _fire
 
 
@@ -10474,8 +10520,11 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
         _aborted = False
         # DEGEN-LEVER-A: shape-aware abort rides ONLY the calls that opted
         # into the degen cutoff (abort_over_output_tokens), under its flag.
+        # FIX 2 shares this scanner (structure-abort), so create the state if
+        # EITHER lever is on; each lever's FIRE is gated independently in the feed.
         _shape_state = (_shape_abort_state()
-                        if (abort_over_output_tokens and _shape_abort_enabled())
+                        if (abort_over_output_tokens
+                            and (_shape_abort_enabled() or _structure_abort_enabled()))
                         else None)
         _shape_fire = None
         _stream = client.models.generate_content_stream(
