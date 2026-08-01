@@ -11363,8 +11363,10 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 # MEDIUM (was LOW) — shipped as a production A/B. Measured
                 # token-identical to LOW on the 480p proxy (a no-op on the
                 # synthetic probe), so any real-footage output change is the
-                # signal this swap is testing for.
-                media_resolution="MEDIA_RESOLUTION_MEDIUM",
+                # signal this swap is testing for. FIX A (dark): LOW is ~66 vs
+                # ~258 tok/frame — the fps A/B pairs with this. Default MEDIUM.
+                media_resolution=(os.environ.get("PROMPTLY_MEDIA_RESOLUTION", "").strip()
+                                  or "MEDIA_RESOLUTION_MEDIUM"),
             ),
             system_instruction=system_instruction,
             # Lever 1: stream and abort the instant output crosses the degen
@@ -12237,7 +12239,13 @@ def generate_edit_gemini(
     # smiles, eye-shifts) hold across 5-10 frames; gestures play over
     # 100-200ms; 18fps captures all of them with comfortable margin.
     # Paired with the 480p@18fps proxy encode (see _do_gemini_proxy).
-    _video_fps_meta = genai_types.VideoMetadata(fps=18) if hasattr(genai_types, "VideoMetadata") else None
+    # FIX A (90s campaign, dark): Gemini SAMPLES at this fps (default 1 without the
+    # override). We pinned 18 with NO cost measurement; emphasis onsets are Deepgram-
+    # timed, shot changes are detect_shot_changes — 18fps only feeds VISUAL grounding,
+    # which 1-2fps carries. PROMPTLY_PROXY_SAMPLE_FPS lowers it (18->2 ~= 9x fewer
+    # video tokens -> lower TTFB). Default 18 = byte-identical. A/B decides quality.
+    _sample_fps = int(os.environ.get("PROMPTLY_PROXY_SAMPLE_FPS", "18") or "18")
+    _video_fps_meta = genai_types.VideoMetadata(fps=_sample_fps) if hasattr(genai_types, "VideoMetadata") else None
     _video_part_fallback = None
     if inline_video_bytes and video_reference_url:
         # LEVER 4: the call references the job's ONE uploaded proxy; the
