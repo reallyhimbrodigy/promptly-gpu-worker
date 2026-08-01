@@ -33649,6 +33649,17 @@ def handler(job):
         _mega_t0 = time.time()
         if future_edit is not None:
             edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+            # PLAN-ONLY test seam (dark, Zac 2026-07-31): return the finalized plan
+            # and skip render — a render-FREE planning A/B (e.g. the lean-schema
+            # decision test). Full-fidelity signals (real transcribe/proxy/faces).
+            # Off by default → byte-identical; never set on production traffic.
+            if os.environ.get("PROMPTLY_PLAN_ONLY", "").strip():
+                import json as _plj
+                try:
+                    _plan_json = _plj.loads(_plj.dumps(edit_plan, default=str))
+                except Exception as _ple:
+                    _plan_json = {"_unserializable": f"{type(_ple).__name__}"}
+                return {"status": "plan_only", "job_id": job_id, "edit_plan": _plan_json}
             # EDIT RATIONALE (2026-07-25): persist the user-facing "why" for the
             # client to display, alongside current_step/step_message. Additive +
             # fail-open; edit_plan carries edit_rationale via the PostCutPlan
