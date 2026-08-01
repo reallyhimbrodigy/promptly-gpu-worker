@@ -4608,9 +4608,15 @@ def measure_source_loudness(source_path):
     Measure the source audio's peak level, RMS, and noise floor using ffmpeg.
     Returns dict with 'peak_db', 'rms_db', 'noise_floor_db' (all negative floats).
     """
-    # astats gives us peak, RMS; we sample the first 60s to keep it fast
+    # astats gives us peak, RMS; we sample the first 60s to keep it fast.
+    # -vn (P0 fix, Zac 2026-08-01): AUDIO-only measurement — without -vn ffmpeg
+    # DECODES THE FULL VIDEO too, so a 100fps source is 6000 pointless frames of
+    # decode that blow the 30s timeout and fail the render with RENDER_FFMPEG
+    # (measure_source_loudness). -vn skips the video stream → sub-second at any
+    # fps. Pre-existing high-fps edge case (surfaced by a user's 100fps uploads),
+    # NOT the vidstab/tblend filtergraph work — the stderr named this line.
     cmd = [
-        "ffmpeg", "-i", source_path, "-t", "60",
+        "ffmpeg", "-vn", "-i", source_path, "-t", "60",
         "-af", "astats=metadata=1:reset=0,ametadata=mode=print",
         "-f", "null", "-"
     ]
