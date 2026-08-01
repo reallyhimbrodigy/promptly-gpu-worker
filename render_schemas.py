@@ -365,6 +365,16 @@ class PromptlyRenderInput(_RemotionModel):
     # change vs the pre-overlay pipeline.
     tightCutOverlays: List[TightCutOverlaySpec] = Field(default_factory=list)
     outro: Optional[OutroKind] = None
+    # Flare motion-token system (Workstream D) + re-sprung zoom settle (Zac
+    # 2026-07-31/08-01). Both default OFF → Remotion reads `?? false` → today's
+    # exact pixels; ONE reversible flag each so the before/after is a true A/B.
+    # The TS interface already declares these (types.ts) — this mirror lagged,
+    # which is why the worker could never emit them. motionTokens gates MGs in
+    # PromptlyOverlay; resprungZooms is unread here (its provider lives only in
+    # PromptlyMicroSegments) but is declared to keep the mirror parity the smoke
+    # test enforces.
+    motionTokens: bool = False
+    resprungZooms: bool = False
     # D2 motion blur (Zac 2026-07-26). Default off → Remotion reads `?? false`
     # → byte-identical; the worker only emits these when the per-job blur
     # override (motion_blur_test) is set. samples/angle fall through to the
@@ -393,6 +403,10 @@ class PromptlyMicroSegmentsInput(_RemotionModel):
     # D2 motion blur — transitions + composite zooms render here (see
     # PromptlyRenderInput note). Default off → byte-identical.
     motionBlur: bool = False
+    # Re-sprung zoom settle — this composition mounts FocusWindow/LetterboxPush/
+    # DepthPull/StagedPush via ClipRenderer, so the resprung flag threads here
+    # (its provider wraps this tree). Default off → today's clamped pixels.
+    resprungZooms: bool = False
     motionBlurSamples: Optional[int] = None
     motionBlurShutterAngle: Optional[int] = None
 

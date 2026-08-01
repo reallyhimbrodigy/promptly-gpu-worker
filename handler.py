@@ -25560,6 +25560,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         overlay_input["motionBlur"] = True
         overlay_input["motionBlurSamples"] = int(_blur_cfg.get("samples") or 6)
         overlay_input["motionBlurShutterAngle"] = int(_blur_cfg.get("shutter") or 180)
+    # Smoothness dark flag — motion tokens (Workstream D). Gates MG entrance/exit
+    # opacity+scale in PromptlyOverlay. Emitted ONLY when the env flag is set →
+    # the OFF render input JSON is byte-identical. (resprungZooms is threaded on
+    # the MICRO input, where its provider lives — see below.) This is half the
+    # captions.ai smoothness pair (Zac 2026-08-01).
+    if os.environ.get("PROMPTLY_MOTION_TOKENS", "").strip().lower() in ("1", "true", "yes", "on"):
+        overlay_input["motionTokens"] = True
     overlay_input_path = os.path.join(_stage_dir, "overlay_input.json")
     _validate_and_write_render_input(
         "overlay", overlay_input, _SchemaOverlayInput, overlay_input_path,
@@ -25676,6 +25683,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         micro_input["motionBlur"] = True
         micro_input["motionBlurSamples"] = int(_blur_cfg.get("samples") or 6)
         micro_input["motionBlurShutterAngle"] = int(_blur_cfg.get("shutter") or 180)
+    # Re-sprung zoom settle (Zac 2026-07-31/08-01) — this leg mounts the composite
+    # zooms (FocusWindow/LetterboxPush/DepthPull/StagedPush) whose React springs
+    # read the resprung provider; un-clamps damping (FocusWindow 24→19.5 etc).
+    # Emitted only when set → OFF micro input JSON is byte-identical. NOTE: the
+    # FFmpeg scale-only zooms (SnapReframe/SmoothPush/StepZoom) render on handler's
+    # own curve and are NOT reached by this flag — reported to Zac.
+    if micro_input is not None and os.environ.get("PROMPTLY_RESPRUNG_ZOOMS", "").strip().lower() in ("1", "true", "yes", "on"):
+        micro_input["resprungZooms"] = True
     # AUDIT #5 (Zac 2026-07-12): instrument the MICRO leg — the render's heaviest
     # painter (measured 97.6s / 1.5GB on Zac's render, LONGER than the caption
     # overlay). Log WHICH composite-effect zoom types (FocusWindow/LetterboxPush/
