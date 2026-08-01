@@ -6671,6 +6671,23 @@ already follow) and return when the face leads again."""
             "The single top-level `notes` field is your one short combined rationale "
             "for the whole edit. Ground first in thought; keep the emitted plan lean."
         )
+        # 5TH ARM (Zac 2026-07-31): the lean A/B showed text_overlays + sound_effects
+        # density DROPPING — the decorative families whose justification the removed
+        # viewer_feeling/what_lands prose used to force. This names them explicitly so
+        # the thinking-channel grounding preserves the decoration the prose fields did.
+        # Off = the plain lean relocation above (byte-identical to arm 3).
+        if _lean_decor_ground_enabled():
+            system_instruction += (
+                "\n\nDECORATIVE FAMILIES EARN THEIR PLACE IN YOUR REASONING TOO. "
+                "text_overlays and sound_effects are decoration — the removed "
+                "viewer_feeling / what_lands fields are exactly what used to make you "
+                "justify each one. Do that justification in thought, per beat: name what "
+                "the overlay LANDS and the feeling the sound serves before you place it. "
+                "Do not drop a text_overlay or a sound_effect merely because its prose "
+                "field is gone — a beat that earned decoration under the old fields still "
+                "earns it; the justification just lives in your reasoning now, not the "
+                "output. Keep the decoration the beat warrants; keep the emitted plan lean."
+            )
 
     return system_instruction, user_content
 
@@ -11110,6 +11127,17 @@ def _lean_schema_enabled():
     UNTOUCHED. DARK by default; the free plan-decision A/B decides if the scaffold
     was load-bearing before this ever ships."""
     return os.environ.get("PROMPTLY_LEAN_SCHEMA", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _lean_decor_ground_enabled():
+    """5th-arm sub-flag (Zac 2026-07-31): with lean schema, add a STRONGER thinking-
+    channel instruction naming the decorative families (text_overlays / sound_effects)
+    so the grounding preserves the decoration the removed viewer_feeling/what_lands
+    prose used to justify. Only meaningful alongside PROMPTLY_LEAN_SCHEMA. Off =
+    plain lean relocation."""
+    return os.environ.get("PROMPTLY_LEAN_DECOR_GROUND", "").strip().lower() in (
         "1", "true", "yes", "on",
     )
 
