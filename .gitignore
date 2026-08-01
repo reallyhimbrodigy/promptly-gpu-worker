@@ -2,7 +2,12 @@ __pycache__/
 *.pyc
 .DS_Store
 node_modules/
-.claude/
+# Ignore all local .claude state (worktrees, session data) EXCEPT the agent-team
+# definitions — those are ONE tracked source of truth so every worktree inherits
+# them like CLAUDE.md (Zac 2026-08-01).
+.claude/*
+!.claude/agents/
+!.claude/agents/*.md
 models/
 models/
 # Local Remotion smoke-bundle cache (built by scripts/smoke.sh; production
