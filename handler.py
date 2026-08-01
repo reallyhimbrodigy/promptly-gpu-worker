@@ -30153,6 +30153,104 @@ def diagnose_upload_handler(job):
         return {"error": str(e), "diagnosis": "Diagnostic itself failed"}
 
 
+# ── Rotation-aware frame reader (Zac 2026-08-01) ─────────────────────────────
+# The 1.3.3 (221) picker switched to Passthrough remux → uploads carry rotation as
+# METADATA (pixels sideways). cv2.VideoCapture's autorotate is inconsistent and
+# detect_face_positions_dense's ffmpeg extraction scales by CODED dims, so a portrait
+# talking-head sample reaches the upright-only res10 detector SIDEWAYS → 0 faces →
+# false is_talking_head:false → the client (EditorView.swift:1262 blocks on that
+# field) refuses to dispatch. These helpers read frames UPRIGHT deterministically:
+# disable cv2 autorotate, read the rotation from ffprobe (Display-Matrix side_data +
+# legacy rotate tag), apply cv2.rotate explicitly. Proven on live rotated samples
+# (0→5/5 faces; upright unchanged; no double-rotation).
+def _probe_rotation_cw(path):
+    """Clockwise degrees to bake into the coded frame for upright display (0/90/180/270)."""
+    try:
+        _p = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream_side_data=rotation:stream_tags=rotate",
+             "-of", "json", path], capture_output=True, text=True, timeout=10)
+        _j = json.loads(_p.stdout or "{}")
+        _rot = 0
+        for _s in _j.get("streams", []):
+            for _sd in _s.get("side_data_list", []):
+                if "rotation" in _sd:
+                    _rot = int(_sd["rotation"])
+            if _s.get("tags", {}).get("rotate"):
+                _rot = int(_s["tags"]["rotate"])
+        return (-_rot) % 360
+    except Exception:
+        return 0
+
+
+def _open_upright(path):
+    """cv2.VideoCapture with autorotate DISABLED (deterministic coded frames) + the
+    CW rotation to apply. Callers apply _rotate_upright(frame, rot) after each read()
+    and MUST derive width/height from the returned FRAME, not cap.get()."""
+    import cv2
+    _cap = cv2.VideoCapture(path)
+    try:
+        _cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 0)
+    except Exception:
+        pass
+    return _cap, _probe_rotation_cw(path)
+
+
+def _rotate_upright(frame, rot_cw):
+    import cv2
+    if frame is None or not rot_cw:
+        return frame
+    if rot_cw == 90:
+        return cv2.rotate(frame, cv2.ROTATE_90_CLOCKWISE)
+    if rot_cw == 180:
+        return cv2.rotate(frame, cv2.ROTATE_180)
+    if rot_cw == 270:
+        return cv2.rotate(frame, cv2.ROTATE_90_COUNTERCLOCKWISE)
+    return frame
+
+
+def _validator_face_signals(sample_path, every_n_frames=6):
+    """Rotation-aware face ratio for the VALIDATOR ONLY (Zac 2026-08-01). Same res10
+    DNN + confidence 0.5 as detect_face_positions_dense, but reads frames UPRIGHT via
+    the rotation-aware reader so a rotated talking head is not falsely scored 0 faces.
+    Returns (hits, samples, ratio). ISOLATED to validate_handler — it reads the RAW
+    sample; the editorial path reads the upright ffmpeg PROXY, so no editorial
+    coordinate can move."""
+    import cv2
+    PROTOTXT = "/models/face_detector/deploy.prototxt"
+    CAFFEMODEL = "/models/face_detector/res10_300x300_ssd_iter_140000.caffemodel"
+    if not (os.path.exists(PROTOTXT) and os.path.exists(CAFFEMODEL)):
+        return 0, 0, 0.0
+    net = cv2.dnn.readNetFromCaffe(PROTOTXT, CAFFEMODEL)
+    cap, _rot = _open_upright(sample_path)
+    try:
+        if int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0) < 1:
+            return 0, 0, 0.0
+        _i = 0
+        _samples = 0
+        _hits = 0
+        while True:
+            _ok, _frame = cap.read()
+            if not _ok:
+                break
+            if _i % every_n_frames == 0:
+                _frame = _rotate_upright(_frame, _rot)
+                if _frame is not None:
+                    _samples += 1
+                    _blob = cv2.dnn.blobFromImage(
+                        cv2.resize(_frame, (300, 300)), 1.0, (300, 300),
+                        (104.0, 177.0, 123.0), swapRB=False, crop=False)
+                    net.setInput(_blob)
+                    _dets = net.forward()
+                    if any(float(_dets[0, 0, _k, 2]) >= 0.5 for _k in range(_dets.shape[2])):
+                        _hits += 1
+            _i += 1
+        _ratio = (_hits / _samples) if _samples > 0 else 0.0
+        return _hits, _samples, _ratio
+    finally:
+        cap.release()
+
+
 def validate_handler(job):
     """Fast pre-upload validation: is this a talking-head video?
 
@@ -30224,15 +30322,14 @@ def validate_handler(job):
         # half-second of source at 12fps proxy speed). Trades coverage for
         # speed; we don't need dense sampling to determine "is there a face."
         _t0 = time.time()
-        face_positions = detect_face_positions_dense(
-            sample_path, every_n_frames=6,
-        )
-        _face_samples = len(face_positions or [])
-        _face_hits = sum(
-            1 for _fp in (face_positions or [])
-            if isinstance(_fp, dict) and _fp.get("found")
-        )
-        _face_ratio = (_face_hits / _face_samples) if _face_samples > 0 else 0.0
+        # ROTATION-AWARE (Zac 2026-08-01): read the sample UPRIGHT before res10 so a
+        # portrait talking head (221 Passthrough remux → sideways pixels) is not
+        # falsely scored 0 faces. Bypasses detect_face_positions_dense's ffmpeg
+        # extraction (which scales by CODED dims and distorts rotated sources) —
+        # cv2 reads the full frame, _rotate_upright corrects it, res10 sees an
+        # upright face. VALIDATOR-ONLY: editorial reads the upright proxy, untouched.
+        _face_hits, _face_samples, _face_ratio = _validator_face_signals(
+            sample_path, every_n_frames=6)
         _elapsed = time.time() - _t0
 
         print(

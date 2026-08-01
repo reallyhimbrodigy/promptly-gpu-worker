@@ -71,6 +71,32 @@ def _modal_syntax():
         ast.parse(f.read())
 
 
+@check("DEPLOY-STATE GUARD (Zac 2026-08-01): a deploy must not DROP a commit already known live. deploy.sh records the last successfully-deployed HEAD in .last_deployed_commit; this FAILS if that commit is not an ancestor of the current HEAD — i.e. you are deploying from a stale branch/checkout that lost a live fix (the 4th deploy-state footgun today: stale server.js, fanout canonical, snapshot env-freeze, the 06:10 validator scare). FAIL-SAFE: passes silently if the file is absent (first deploy), empty, or the commit is unknown to this tree, so it can never wrongly block a legitimate deploy.")
+def _deploy_state_guard():
+    import subprocess as _sp
+    if not os.path.exists(".last_deployed_commit"):
+        return  # first deploy — nothing to protect yet
+    _last = open(".last_deployed_commit").read().strip()
+    if not _last:
+        return
+    try:
+        _known = _sp.run(["git", "cat-file", "-e", _last + "^{commit}"],
+                         capture_output=True).returncode == 0
+        if not _known:
+            return  # last-deployed commit not in this object db — can't judge, skip
+        _anc = _sp.run(["git", "merge-base", "--is-ancestor", _last, "HEAD"],
+                       capture_output=True)
+        _head = _sp.run(["git", "rev-parse", "--short", "HEAD"],
+                        capture_output=True, text=True).stdout.strip()
+    except Exception:
+        return  # git unavailable — fail-safe pass
+    assert _anc.returncode == 0, (
+        f"DEPLOY WOULD DROP A LIVE COMMIT — last deployed {_last[:10]} is NOT an "
+        f"ancestor of HEAD {_head}. You are deploying from a tree that lost it. "
+        f"Merge/rebase {_last[:10]} in first. If the drop is deliberate, "
+        f"rm .last_deployed_commit and re-run.")
+
+
 @check("no UnboundLocalError via static analysis (pyflakes)")
 def _pyflakes_check():
     # pyflakes catches: name X assigned but never used / referenced before
