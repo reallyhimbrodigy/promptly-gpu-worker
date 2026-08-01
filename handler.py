@@ -6679,14 +6679,19 @@ already follow) and return when the face leads again."""
         if _lean_decor_ground_enabled():
             system_instruction += (
                 "\n\nDECORATIVE FAMILIES EARN THEIR PLACE IN YOUR REASONING TOO. "
-                "text_overlays and sound_effects are decoration — the removed "
-                "viewer_feeling / what_lands fields are exactly what used to make you "
-                "justify each one. Do that justification in thought, per beat: name what "
-                "the overlay LANDS and the feeling the sound serves before you place it. "
-                "Do not drop a text_overlay or a sound_effect merely because its prose "
-                "field is gone — a beat that earned decoration under the old fields still "
-                "earns it; the justification just lives in your reasoning now, not the "
-                "output. Keep the decoration the beat warrants; keep the emitted plan lean."
+                "text_overlays, sound_effects, AND b-roll cutaways (broll_clips) are "
+                "decoration — the removed viewer_feeling / what_lands / reason fields are "
+                "exactly what used to make you justify each one. Do that justification in "
+                "thought, per beat: name what the overlay LANDS, the feeling the sound "
+                "serves, and — for b-roll — the concrete referent the dialogue names that a "
+                "cutaway would show, before you place it. Do NOT drop a text_overlay, a "
+                "sound_effect, or a b-roll cutaway merely because its prose field is gone — "
+                "a beat that earned decoration under the old fields still earns it; the "
+                "justification just lives in your reasoning now, not the output. B-roll "
+                "stays SELECTIVE (mine every window, place only where the referent's cutaway "
+                "writes itself — do not pad coverage), but a named referent that earned a "
+                "cutaway before still earns it now. Keep the decoration each beat warrants; "
+                "keep the emitted plan lean."
             )
 
     return system_instruction, user_content
