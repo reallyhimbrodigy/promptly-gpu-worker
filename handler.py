@@ -30264,6 +30264,23 @@ def validate_handler(job):
         confidence = min(1.0, _face_ratio / FACE_THRESHOLD) if is_talking_head else min(1.0, (FACE_THRESHOLD - _face_ratio) / FACE_THRESHOLD)
 
         if not is_talking_head:
+            # ADVISORY MODE (Zac P0 2026-07-31): this pre-dispatch gate was
+            # rejecting not_talking_head clips BEFORE the worker ever ran — 308
+            # rejections/24h, 100% on 1.3.3 (221), ~13x more than render_completed
+            # in the same window. But PROMPTLY_ZERO_REJECT (live since Jul 25,
+            # took DESIGNED failures 295->2) already routes not_talking_head to
+            # _run_minimal_pipeline, which delivers a real video. The reject here
+            # meant that route NEVER GOT TO RUN. Fix: keep the HONEST verdict
+            # (is_talking_head:False — it rides to the worker's route; a blanket
+            # True would force the ~10x talking-head editorial path, worse edits +
+            # more money) but STOP SIGNALLING reject: user_message goes null so the
+            # 221 client (which blocks only on a non-null user_message) dispatches.
+            # ONE-LINE REVERSIBLE: PROMPTLY_VALIDATOR_ADVISORY=0 restores the block.
+            # The only remaining pre-dispatch rejections are <2.0s / >300s
+            # (enforced client/server-side, not in this endpoint).
+            _advisory = os.environ.get(
+                "PROMPTLY_VALIDATOR_ADVISORY", "1").strip().lower() in (
+                "1", "true", "yes", "on")
             return {
                 "is_talking_head": False,
                 "confidence": confidence,
@@ -30272,8 +30289,9 @@ def validate_handler(job):
                 "reason": (
                     f"face detected in only {_face_hits}/{_face_samples} "
                     f"({_face_ratio*100:.0f}%) sampled frames"
+                    + ("; advisory — routing to minimal edit" if _advisory else "")
                 ),
-                "user_message": (
+                "user_message": None if _advisory else (
                     "This app edits videos of someone talking on camera. "
                     "Please choose a different video."
                 ),
