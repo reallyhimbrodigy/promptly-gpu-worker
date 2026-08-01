@@ -91,9 +91,6 @@ import {
 // EASE_GLIDE/dur drive the token-ON b-roll path below.
 import { MotionTokensProvider, useMotionTokens } from "./motion-graphics/shared/motion-flag";
 import { ResprungZoomsProvider } from "./zoom/shared/resprung-flag";
-// SMOOTH-GRAPHICS (Zac 2026-08-01): eased + ms-floored entrances/exits/fades/
-// transitions. Wraps both compositions; migrated components read useSmoothGraphics().
-import { SmoothGraphicsProvider, useSmoothGraphics } from "./motion-graphics/shared/smooth-graphics-flag";
 import { GLIDE, EASE_GLIDE, dur } from "./motion-graphics/shared/motion";
 
 // Flare motion blur (Workstream D2). Parallel dark flag to motionTokens.
@@ -563,26 +560,8 @@ const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) =>
   });
   const tokenScale = 1.04 - 0.04 * settle; // 1.04 → 1.0, no overshoot (clamped)
 
-  // SMOOTH-GRAPHICS (Zac 2026-08-01): the b-roll cutaway is the WORST case — a
-  // 67ms/2-frame bare-linear opacity fade with no transform, on every cut. Widen
-  // the fade to ~300ms (≥9 samples @30fps) + EASE_GLIDE so it glides instead of
-  // stepping, and keep the scale-settle so the cutaway "lands." Full-frame cover
-  // preserved (no slide). Cut-vs-fade feel is Zac's-eye via the pair.
-  const smoothGraphics = useSmoothGraphics();
-  const smoothFadeFrames = Math.max(1, Math.round(fps * 0.30));
-  const smoothFadeIn = interpolate(
-    frame, [0, smoothFadeFrames], [0, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_GLIDE }
-  );
-  const smoothFadeOut = interpolate(
-    frame, [totalFrames - smoothFadeFrames, totalFrames], [1, 0],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp", easing: EASE_GLIDE }
-  );
-
-  const opacity = smoothGraphics
-    ? Math.min(smoothFadeIn, smoothFadeOut)
-    : motionTokens ? Math.min(tokenFadeIn, tokenFadeOut) : legacyOpacity;
-  const scale = smoothGraphics || motionTokens ? tokenScale : 1;
+  const opacity = motionTokens ? Math.min(tokenFadeIn, tokenFadeOut) : legacyOpacity;
+  const scale = motionTokens ? tokenScale : 1;
 
   // Source resolution: handler.py stages B-roll files into /remotion/bundle/
   // public with a stage-key-prefixed basename; spec.src is just that basename.
@@ -852,7 +831,6 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
   const { caption, motionGraphics, textOverlays, fps, broll, tightCutOverlays, generatedScenes } = input;
 
   return (
-    <SmoothGraphicsProvider enabled={input.smoothGraphics ?? false}>
     <MotionTokensProvider enabled={input.motionTokens ?? false}>
     <MotionBlurProvider
       enabled={input.motionBlur ?? false}
@@ -905,7 +883,6 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
     </AbsoluteFill>
     </MotionBlurProvider>
     </MotionTokensProvider>
-    </SmoothGraphicsProvider>
   );
 };
 
@@ -935,7 +912,6 @@ export const PromptlyMicroSegments: React.FC<PromptlyMicroSegmentsProps> = ({
     // (default) → MotionBlurWrap is a passthrough → byte-identical.
     // ResprungZooms gates the SnapReframe/FocusWindow settle (default OFF →
     // today's clamped pixels); the zoom clips mount below via ClipRenderer.
-    <SmoothGraphicsProvider enabled={input.smoothGraphics ?? false}>
     <ResprungZoomsProvider enabled={input.resprungZooms ?? false}>
     <MotionBlurProvider
       enabled={input.motionBlur ?? false}
@@ -967,7 +943,6 @@ export const PromptlyMicroSegments: React.FC<PromptlyMicroSegmentsProps> = ({
     </AbsoluteFill>
     </MotionBlurProvider>
     </ResprungZoomsProvider>
-    </SmoothGraphicsProvider>
   );
 };
 
