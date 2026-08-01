@@ -657,21 +657,54 @@ def run_pipeline_bg(body: dict):
     # PLANNER's floor) with the render — the split can't be sized from it. Each sample is
     # bucketed by the handler's current stage marker (_H._CPU_STAGE[0]), so vidstab and
     # render report SEPARATE peak/mean/duration. Interval 3s → ~15-24 samples per stage.
-    import threading as _threading
+    import threading as _threading, time as _time
     _SAMPLE_S = 3.0
     _cpu_by_stage = {}   # stage name -> list of cores-in-use
     _cpu_stop = _threading.Event()
     _ncores = _os.cpu_count() or 0
-    try:
-        import psutil as _psutil
-        _psutil.cpu_percent(interval=None)  # prime the delta baseline
-    except Exception:
-        _psutil = None
+
+    # CGROUP CPU accounting (Zac 2026-07-31 FIX): psutil.cpu_percent and
+    # os.getloadavg read the HOST, not the container's cgroup, so under Modal they
+    # returned 0.0 / host-load — the per-stage numbers were useless (measured: all
+    # 0.0 on the watched render). Read the container's cumulative CPU-time directly
+    # (cgroup v2 cpu.stat 'usage_usec'; v1 cpuacct.usage in ns) and derive
+    # cores-in-use = Δusage / Δwallclock between 3s samples.
+    def _read_cpu_usage_usec():
+        try:
+            with open("/sys/fs/cgroup/cpu.stat") as _f:            # cgroup v2
+                for _ln in _f:
+                    if _ln.startswith("usage_usec"):
+                        return int(_ln.split()[1])
+        except Exception:
+            pass
+        for _p in ("/sys/fs/cgroup/cpuacct/cpuacct.usage",         # cgroup v1
+                   "/sys/fs/cgroup/cpu,cpuacct/cpuacct.usage",
+                   "/sys/fs/cgroup/cpuacct.usage"):
+            try:
+                with open(_p) as _f:
+                    return int(_f.read().strip()) // 1000          # ns -> usec
+            except Exception:
+                continue
+        return None
+
+    _cg_ok = _read_cpu_usage_usec() is not None
+    _cpu_src = "cgroup" if _cg_ok else "loadavg"
 
     def _cpu_sampler():
+        _last_u = _read_cpu_usage_usec()
+        _last_t = _time.monotonic()
         while not _cpu_stop.wait(_SAMPLE_S):
             try:
-                _cores = (_psutil.cpu_percent(interval=None) / 100.0 * _ncores) if _psutil is not None else _os.getloadavg()[0]
+                _now_t = _time.monotonic()
+                if _cg_ok:
+                    _now_u = _read_cpu_usage_usec()
+                    if _now_u is None or _last_u is None or _now_t <= _last_t:
+                        _last_u, _last_t = _now_u, _now_t
+                        continue
+                    _cores = (_now_u - _last_u) / ((_now_t - _last_t) * 1e6)  # Δcpu-usec / Δwall-usec = cores busy
+                    _last_u, _last_t = _now_u, _now_t
+                else:
+                    _cores = _os.getloadavg()[0]
                 try:
                     _stage = _H._CPU_STAGE[0]
                 except Exception:
@@ -688,7 +721,7 @@ def run_pipeline_bg(body: dict):
         _cpu_stop.set()
         try:
             _jid = body.get('job_id')
-            _src = 'psutil' if _psutil else 'loadavg'
+            _src = _cpu_src
             _all = [c for _cs in _cpu_by_stage.values() for c in _cs]
             if _all:
                 _peak = max(_all); _mean = sum(_all) / len(_all)

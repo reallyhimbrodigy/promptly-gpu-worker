@@ -6361,7 +6361,7 @@ def _secret_canonical_values():
         "PROMPTLY_ZERO_REJECT": "1",      # ZERO-REJECT LIVE (Zac's "FLIP MINIMAL" 2026-07-25 on the minimal samples; cert 5/5; rollback = 0 here + secret + redeploy)
         "PROMPTLY_WHY_DIET": "1",         # A-L1 output diet LIVE (rationale caps 240→96; output-bound call → speed lever; =0 is the one-flag rollback)
         "PROMPTLY_DELIVERY_FPS": "30",    # FPS 30 APPROVED (Zac blanket-GO 2026-07-25 on the A/B pair): delivery target 30fps — halves the render tail; rollback = "" (60) here + secret
-        "PROMPTLY_RENDER_FANOUT": "1",    # A-L4 LIVE (cert 3/3: SSIM 1.0 global+boundaries, remote mode, poisoned fallback; length-floored ≥60s output where it strictly wins: 155s = −19%); rollback = "0"
+        "PROMPTLY_RENDER_FANOUT": "0",    # A-L4 OFF — DELIBERATE EMERGENCY LEVER (Zac 2026-07-31). Fanout bills 8-16 parallel containers/long-render for a ~19% wall-clock win (cert 3/3 SSIM 1.0) and is implicated in the $1500 wall. Held at 0 during the cost emergency. Turning it back to 1 is a PRICED trade decision (fanout=1+cpu=16 vs fanout=0+cpu=16 $/job), NOT a drift-fix. Canonical tracks the deliberate LIVE value.
         "PROMPTLY_HYPE_MODE": "1",        # HYPE LIVE (Zac "FLIP HYPE" 2026-07-25 on the v2 pair): no-speech + confident beat (aubio tconf > 0.15) → beat-synced edit; every miss fail-safes to minimal; rollback = "0"
         "PROMPTLY_SHAPE_ABORT": "1",
         "PROMPTLY_MOODREEL": "1",     # cinematic mood-reel route LIVE (Zac "MOODREEL APPROVED" 2026-07-25; fail-safe-to-minimal; rollback = "0")     # degen shape-abort LIVE (ruling 1a; 5/5 shapes, 0 FP on 7.9k healthy; ~85-90% burn cut; rollback = "0")
