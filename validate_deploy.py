@@ -5660,16 +5660,26 @@ def _progressive_terminal_seam():
         "render_stage must write the publisher INTO the cell at creation (exception-safe drain)"
     assert "_prog_pub = _prog_pub_cell[0]" in _h, \
         "the terminal seam must read the publisher from the cell before draining"
-    # the seam sits inside the terminal finally BEFORE work_dir teardown
+    # the seam sits inside the terminal finally BEFORE work_dir teardown. The
+    # drain-or-cancel logic is EXTRACTED into _drain_progressive_publisher (inc2
+    # render-burst: the ONE drain, shared by the planner's finally AND
+    # render_burst's own finally). So the finally must DRIVE it (the call)
+    # immediately before rmtree, and the extracted HELPER must carry the
+    # bounded-drain / deliberate-cancel law.
     _fin = _h.find("PROGRESSIVE TERMINAL SEAM (Zac ruling 1b")
     assert _fin != -1, "terminal seam block missing"
     _rm = _h.find("shutil.rmtree(work_dir, ignore_errors=True)", _fin)
     assert _rm != -1 and (_rm - _fin) < 2000, "the seam must run IMMEDIATELY before the terminal rmtree"
     _seam = _h[_fin:_rm]
-    assert "_prog_pub.finalize_requested" in _seam and "_prog_pub.drain(timeout_s=120.0)" in _seam \
-        and '_prog_pub.cancel("terminal_drain_timeout")' in _seam \
-        and '_prog_pub.cancel("job_terminal_before_finalize")' in _seam, \
-        "seam law: bounded drain on the finalize path; deliberate cancel otherwise"
+    assert "_drain_progressive_publisher(_prog_pub_cell)" in _seam, \
+        "the terminal finally must DRIVE the extracted drain immediately before the terminal rmtree"
+    _dh = _h.find("def _drain_progressive_publisher(")
+    assert _dh != -1, "the extracted drain helper must exist (shared by planner + render_burst finally)"
+    _dbody = _h[_dh:_dh + 1800]
+    assert "_prog_pub.finalize_requested" in _dbody and "_prog_pub.drain(timeout_s=120.0)" in _dbody \
+        and '_prog_pub.cancel("terminal_drain_timeout")' in _dbody \
+        and '_prog_pub.cancel("job_terminal_before_finalize")' in _dbody, \
+        "seam law: bounded drain on the finalize path; deliberate cancel otherwise (in the extracted helper)"
     # stamped payloads bypass the terminal fence; chunk payloads keep it
     assert 'if not (payload.get("final") or payload.get("superseded")):' in _h, \
         "_persist_preview: only stamped terminal payloads bypass the status fence"
@@ -8670,6 +8680,91 @@ def _fanout_dark():
         "teardown must list+delete the job's fanout prefix"
     assert '_FANOUT_S3_PREFIX_LAST["prefix"] = None' in _td[:2000], \
         "teardown must clear the prefix pointer (warm-container reuse)"
+
+
+@check("inc2 RENDER BURST (DARK, RULE-1): PROMPTLY_RENDER_BURST default OFF → render_stage runs IN-PROCESS byte-identical; the seam dispatches through _run_render_via_burst_or_local(..., is_premium); render_burst exists in modal_app pinned cpu=48 / memory>=49152 (48 GiB blur-OOM floor) / timeout=3000; the ProgressivePublisher drain (_drain_progressive_publisher) runs in render_burst's OWN finally (the one straddling lifecycle moved whole into the burst); the burst PROPAGATES failure (no {ok:False}/error-envelope swallow) so the planner's ONE existing terminal classifies it; a STAGING hiccup ledgers render_burst_fallback and runs the local render. FAILS if any of these regress — a burst that swallowed errors, dropped the drain, or shrank memory below the OOM floor would break the money path the instant the flag flips.")
+def _render_burst_dark():
+    import os as _os, ast as _ast
+    import handler
+    _h_src = open("handler.py").read()
+    _m_src = open("modal_app.py").read()
+
+    # 1. Flag default OFF — behavioral, env save/restore (mirror the fanout gate).
+    _saved = _os.environ.pop("PROMPTLY_RENDER_BURST", None)
+    try:
+        assert handler._render_burst_enabled() is False, \
+            "PROMPTLY_RENDER_BURST must default OFF"
+        _os.environ["PROMPTLY_RENDER_BURST"] = "1"
+        assert handler._render_burst_enabled() is True
+        _os.environ["PROMPTLY_RENDER_BURST"] = "0"
+        assert handler._render_burst_enabled() is False
+    finally:
+        if _saved is None:
+            _os.environ.pop("PROMPTLY_RENDER_BURST", None)
+        else:
+            _os.environ["PROMPTLY_RENDER_BURST"] = _saved
+
+    # 2. Flag-OFF path is today's in-process render, byte-identical: the
+    # dispatcher's first act is `if not _render_burst_enabled(): return
+    # render_stage(...)`, and the seam calls the dispatcher (passing is_premium).
+    assert "def _run_render_via_burst_or_local(" in _h_src, \
+        "the render dispatcher must exist"
+    _disp = _h_src[_h_src.index("def _run_render_via_burst_or_local("):]
+    _disp = _disp[:_disp.index("\ndef _fanout_prepare(")]
+    assert "if not _render_burst_enabled():" in _disp and "return render_stage(" in _disp, \
+        "flag-OFF dispatch must return render_stage(...) unchanged (byte-identical)"
+    assert "_rs = _run_render_via_burst_or_local(" in _h_src, \
+        "the render seam must dispatch through _run_render_via_burst_or_local"
+    assert "integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,\n            is_premium,\n        )" in _h_src, \
+        "the seam must pass is_premium to the dispatcher (premium_ctx reconstruction)"
+
+    # 3. render_burst exists in modal_app with the pinned shape.
+    _tree = _ast.parse(_m_src)
+    _fn = next((_n for _n in _ast.walk(_tree)
+                if isinstance(_n, _ast.FunctionDef) and _n.name == "render_burst"), None)
+    assert _fn is not None, "modal_app.py must define render_burst"
+    assert _fn.decorator_list, "render_burst must be an @app.function"
+    _dec_src = _ast.get_source_segment(_m_src, _fn.decorator_list[0]) or ""
+    assert "cpu=48" in _dec_src, "render_burst must pin cpu=48 (Zac: 48 covers ~46 threads)"
+    assert "timeout=3000" in _dec_src, "render_burst timeout must match run_pipeline_bg (3000)"
+    import re as _re
+    _mm = _re.search(r"memory=(\d+)", _dec_src)
+    assert _mm and int(_mm.group(1)) >= 49152, \
+        "render_burst memory must be >= 49152 (48 GiB) — the blur A/B OOM'd at 32 GiB"
+
+    # 4. The publisher drain — the ONE straddling lifecycle — runs in render_burst's
+    # OWN finally, and the helper is shared (extracted, called BOTH sides).
+    _fn_src = _ast.get_source_segment(_m_src, _fn) or ""
+    assert "finally:" in _fn_src and "_drain_progressive_publisher(_prog_pub_cell)" in _fn_src, \
+        "render_burst must drain the publisher in its own finally (lifecycle moved into the burst)"
+    assert callable(getattr(handler, "_drain_progressive_publisher", None)), \
+        "the drain helper must be extracted + importable"
+    assert _h_src.count("def _drain_progressive_publisher(") == 1, \
+        "exactly one _drain_progressive_publisher definition (shared source of truth)"
+    assert "_drain_progressive_publisher(_prog_pub_cell)" in _h_src, \
+        "the planner's finally must drive the SAME extracted drain (None-safe under the split)"
+
+    # 5. PROPAGATE contract (Zac #4): the burst returns a success dict and RAISES
+    # on failure — it must NOT swallow render_stage errors into an {ok:False}/
+    # error envelope (that would need a second terminal emitter and hide the
+    # classification the planner's one terminal needs).
+    assert '"rs":' in _fn_src and '"cost_delta":' in _fn_src, \
+        "render_burst must return {rs, cost_delta} on success (picklable crossing)"
+    assert '"ok": False' not in _fn_src and '"ok":False' not in _fn_src, \
+        "render_burst must NOT return an {ok:False} envelope — failure PROPAGATES (one terminal)"
+    assert 'return {"error"' not in _fn_src, \
+        "render_burst must NOT swallow errors into a return — they propagate to the planner's terminal"
+
+    # 6. Staging: whole-work_dir tar (gen-scene determinism), and a staging hiccup
+    # falls back to the LOCAL render (a job is never lost to S3).
+    assert callable(getattr(handler, "_stage_workdir_to_s3", None)), \
+        "burst staging helper _stage_workdir_to_s3 must exist"
+    assert callable(getattr(handler, "_extract_workdir_from_s3", None)), \
+        "burst extract helper _extract_workdir_from_s3 must exist"
+    assert 'arcname="."' in _h_src, \
+        "staging must tar the whole work_dir CONTENTS (source + B-roll + gen-scene)"
+    assert '"render_burst_fallback"' in _disp and "return render_stage(" in _disp, \
+        "a staging failure must ledger render_burst_fallback and run the local render"
 
 
 print("\n[W3] Progressive delivery (DARK behind PROMPTLY_PROGRESSIVE)")

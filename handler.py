@@ -22792,9 +22792,185 @@ def _render_fanout_enabled():
     )
 
 
+def _render_burst_enabled():
+    """inc2 Phase 1 render-burst flag. DARK by default; PROMPTLY_RENDER_BURST=1
+    (Modal secret/env) routes the whole render stage to the cpu=48 render_burst
+    container while the planner stays cheap. Default OFF → render_stage runs
+    IN-PROCESS exactly as today (byte-identical). Deployed-app-only: an ephemeral
+    `modal run` can only reach the DEPLOYED render_burst, so the flag stays OFF
+    there and the local path runs. Canonical value is asserted OFF in
+    validate_deploy until a post-cost-emergency canary flips it."""
+    return os.environ.get("PROMPTLY_RENDER_BURST", "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+
+
+def _drain_progressive_publisher(_prog_pub_cell):
+    """Terminal drain/cancel of the progressive publisher (Zac ruling 1b,
+    2026-07-25 — the long-clip race). Every preview input/output lives inside
+    work_dir, so the publisher must reach a terminal state BEFORE teardown.
+    Success path (finalize requested at mux time): a bounded drain lets the last
+    1-2 chunk transcodes finish (~20s each). Anything else — or a drain timeout —
+    is a deliberate cancel: the final is delivered (or the job failed), the
+    preview is moot, stamped superseded so a preview is never servable as a
+    terminal state.
+
+    EXTRACTED (inc2 Phase 1) so the ONE drain drives from BOTH sides of the
+    render-burst seam: the planner's handler.finally (a None-safe no-op when the
+    render ran in a burst — the planner's cell stays [None]) AND render_burst's
+    own finally, where the publisher actually lives under the split. Behaviour is
+    verbatim the pre-extraction inline block."""
+    try:
+        _prog_pub = _prog_pub_cell[0]
+        if _prog_pub is not None and not (
+                _prog_pub.finalized or _prog_pub.disabled or _prog_pub.inert):
+            if _prog_pub.finalize_requested:
+                if not _prog_pub.drain(timeout_s=120.0):
+                    _prog_pub.cancel("terminal_drain_timeout")
+                    _prog_pub.drain(timeout_s=10.0)
+            else:
+                _prog_pub.cancel("job_terminal_before_finalize")
+                _prog_pub.drain(timeout_s=10.0)
+    except Exception as _ts_err:
+        print(f"[progressive] terminal seam error (non-fatal): "
+              f"{type(_ts_err).__name__}: {_ts_err}", flush=True)
+
+
 def _fanout_s3_bucket():
     return (os.environ.get("S3_BUCKET_NAME")
             or os.environ.get("SUPABASE_S3_BUCKET") or "promptly-video-storage")
+
+
+def _stage_workdir_to_s3(work_dir, job_id):
+    """inc2 render-burst staging: tar the ENTIRE work_dir (normalized source +
+    B-roll + gen-scene assets — every planner-produced file the render stage
+    consumes; gen-scene is Nano-Banana-generated and NOT reproducible, so the
+    exact bytes must ride to the burst) and upload it ONCE to
+    s3://{bucket}/burst/{job_id}/work_dir.tar. Returns the S3 key. Raises on ANY
+    failure — the caller falls back to a LOCAL render so no job is lost to a
+    staging hiccup."""
+    import tarfile as _tarfile
+    if _aws_s3_client is None:
+        raise RuntimeError("AWS S3 client unavailable (render-burst needs the S3 round-trip)")
+    _bucket = _fanout_s3_bucket()
+    _wd = work_dir.rstrip("/")
+    _key = f"burst/{job_id}/work_dir.tar"
+    _tar_path = os.path.join(os.path.dirname(_wd) or "/tmp",
+                             f"_burst_{os.path.basename(_wd)}.tar")
+    _t0 = time.time()
+    try:
+        with _tarfile.open(_tar_path, "w") as _tf:
+            # arcname="." → the tar carries work_dir CONTENTS. The burst recreates
+            # the SAME absolute work_dir path and extracts here, so every embedded
+            # absolute path (source_path, output_path, broll_clips[*] locals) stays
+            # valid with ZERO rewriting.
+            _tf.add(_wd, arcname=".")
+        _sz = os.path.getsize(_tar_path)
+        _aws_s3_client.upload_file(_tar_path, _bucket, _key, Config=_S3_TRANSFER_CONFIG)
+        print(f"[render_burst] staged work_dir → s3://{_bucket}/{_key} "
+              f"({_sz/1024/1024:.1f}MB, {time.time()-_t0:.1f}s)", flush=True)
+        return _key
+    finally:
+        try:
+            os.remove(_tar_path)
+        except Exception:
+            pass
+
+
+def _extract_workdir_from_s3(s3_key, work_dir):
+    """Burst side of the inc2 staging: download the work_dir tar and extract it
+    into `work_dir`, recreated at the SAME absolute path the planner used (so all
+    embedded paths resolve). Raises on failure — the burst then fails loudly and
+    the planner emits its one terminal."""
+    import tarfile as _tarfile
+    if _aws_s3_client is None:
+        raise RuntimeError("AWS S3 client unavailable in render_burst")
+    _bucket = _fanout_s3_bucket()
+    _wd = work_dir.rstrip("/")
+    os.makedirs(_wd, exist_ok=True)
+    _tar_path = os.path.join("/tmp", f"_burst_dl_{os.path.basename(_wd)}.tar")
+    _t0 = time.time()
+    try:
+        _aws_s3_client.download_file(_bucket, s3_key, _tar_path, Config=_S3_TRANSFER_CONFIG)
+        with _tarfile.open(_tar_path, "r") as _tf:
+            _tf.extractall(_wd)  # trusted tar we authored; members are work_dir-relative
+        print(f"[render_burst] extracted work_dir from s3://{_bucket}/{s3_key} "
+              f"({time.time()-_t0:.1f}s)", flush=True)
+    finally:
+        try:
+            os.remove(_tar_path)
+        except Exception:
+            pass
+
+
+def _run_render_via_burst_or_local(
+        job_id, input_data, edit_plan, work_dir, source_path, output_path,
+        transcript, source_duration, app_url, broll_clips, upload_url,
+        _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
+        integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+        is_premium):
+    """inc2 Phase 1 render dispatch. Flag OFF (default) → run render_stage
+    IN-PROCESS, byte-identical to today. Flag ON → stage work_dir to S3 and run
+    render_stage on the cpu=48 render_burst container: the ProgressivePublisher's
+    whole lifecycle (create→stream→drain) lives in the burst, the QA-regen spend
+    rides back as a picklable delta folded into _rs_cost_cell, and any burst
+    FAILURE or DEATH (SIGKILL/OOM/preempt) PROPAGATES so handler's ONE existing
+    except/terminal classifies it exactly as a local render error would — no
+    second terminal emitter. A STAGING hiccup falls back to the local render
+    (a job is never lost to S3)."""
+    if not _render_burst_enabled():
+        return render_stage(
+            job_id, input_data, edit_plan, work_dir, source_path, output_path,
+            transcript, source_duration, app_url, broll_clips, upload_url,
+            _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
+            integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+        )
+    # ── render-burst path (DARK until a post-cost-emergency canary) ───────────
+    try:
+        _s3_key = _stage_workdir_to_s3(work_dir, job_id)
+    except Exception as _stage_err:
+        print(f"[render_burst] staging FAILED ({type(_stage_err).__name__}: "
+              f"{_stage_err}) — LOCAL render fallback", flush=True)
+        _record_divergence("render", {"stage": "stage_workdir",
+                                      "detail": str(_stage_err)[:300]},
+                           "render_burst_fallback", reason="stage_failed")
+        return render_stage(
+            job_id, input_data, edit_plan, work_dir, source_path, output_path,
+            transcript, source_duration, app_url, broll_clips, upload_url,
+            _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
+            integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+        )
+    _payload = {
+        "s3_workdir_key": _s3_key,
+        "job_id": job_id, "input_data": input_data, "edit_plan": edit_plan,
+        "work_dir": work_dir, "source_path": source_path, "output_path": output_path,
+        "transcript": transcript, "source_duration": source_duration,
+        "app_url": app_url, "broll_clips": broll_clips, "upload_url": upload_url,
+        "timings": _timings, "floor_state": _floor_state,
+        "route_premium": bool(route_premium), "is_premium": bool(is_premium),
+        "integrity_observe_only": bool(integrity_observe_only),
+        "render_est": _render_est,
+        "cost_seed_usd": (_cost_meter.total_usd() if _cost_meter is not None else 0.0),
+    }
+    import modal as _modal
+    _fn = _modal.Function.from_name("promptly-gpu-worker", "render_burst")
+    print(f"[render_burst] dispatch job={job_id} → cpu=48 burst (flag ON)", flush=True)
+    # .remote() BLOCKS. A burst that RAISES (render_stage error) or DIES
+    # (SIGKILL/OOM/preempt → Modal re-raises) propagates HERE unhandled, into
+    # handler's single except → classify_error → the ONE terminal. NOT swallowed.
+    _out = _fn.remote(_payload)
+    if not isinstance(_out, dict) or "rs" not in _out:
+        raise RuntimeError(
+            f"render_burst returned a malformed result ({type(_out).__name__}) — "
+            f"contract breach; failing to handler's one terminal")
+    _cd = _out.get("cost_delta") or [0.0, 0]
+    try:
+        _rs_cost_cell[0] = float(_cd[0]); _rs_cost_cell[1] = int(_cd[1])
+    except Exception:
+        pass
+    print(f"[render_burst] job={job_id} returned OK "
+          f"(qa_regen_cost=${_rs_cost_cell[0]:.4f})", flush=True)
+    return _out["rs"]
 
 
 def _fanout_prepare(stage_key, staged_public_paths, overlay_input_path,
@@ -34856,11 +35032,16 @@ def handler(job):
             raise _MinimalRouteSignal("plan_collapsed")
         _render_est = max(60.0, min(240.0, float(source_duration) * 3.0))
         _set_cpu_stage("render")
-        _rs = render_stage(
+        # inc2 Phase 1: DARK dispatch. Flag OFF → render_stage in-process (today,
+        # byte-identical). Flag ON → the whole stage runs on the cpu=48
+        # render_burst container; a burst failure/death propagates into the ONE
+        # terminal below, a staging hiccup falls back to a local render.
+        _rs = _run_render_via_burst_or_local(
             job_id, input_data, edit_plan, work_dir, source_path, output_path,
             transcript, source_duration, app_url, broll_clips, upload_url,
             _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
             integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+            is_premium,
         )
         edit_plan = _rs["edit_plan"]
         _timings = _rs["timings"]
@@ -35299,28 +35480,11 @@ def handler(job):
                 _cost_meter.log()
         if premium_ctx is not None:
             premium_ctx.shutdown()
-        # PROGRESSIVE TERMINAL SEAM (Zac ruling 1b, 2026-07-25 — the long-clip
-        # race): every preview input/output lives inside work_dir, so the
-        # publisher must reach a terminal state BEFORE teardown. Success path
-        # (finalize was requested at mux time): bounded drain lets the last
-        # 1-2 chunk transcodes finish cleanly (~20s each). Anything else — or
-        # a drain timeout — is a deliberate cancel: the final is delivered (or
-        # the job failed), the preview is moot, and the payload is stamped
-        # superseded so a preview is never servable as a terminal state.
-        try:
-            _prog_pub = _prog_pub_cell[0]
-            if _prog_pub is not None and not (
-                    _prog_pub.finalized or _prog_pub.disabled or _prog_pub.inert):
-                if _prog_pub.finalize_requested:
-                    if not _prog_pub.drain(timeout_s=120.0):
-                        _prog_pub.cancel("terminal_drain_timeout")
-                        _prog_pub.drain(timeout_s=10.0)
-                else:
-                    _prog_pub.cancel("job_terminal_before_finalize")
-                    _prog_pub.drain(timeout_s=10.0)
-        except Exception as _ts_err:
-            print(f"[progressive] terminal seam error (non-fatal): "
-                  f"{type(_ts_err).__name__}: {_ts_err}", flush=True)
+        # PROGRESSIVE TERMINAL SEAM (Zac ruling 1b) — drive the ONE extracted
+        # drain (_drain_progressive_publisher). Under the render-burst split this
+        # cell is [None] here (the publisher lived AND drained in the burst), so
+        # this is a None-safe no-op; in-process it drains exactly as before.
+        _drain_progressive_publisher(_prog_pub_cell)
         if work_dir:
             shutil.rmtree(work_dir, ignore_errors=True)
         # LEVER 4 lifecycle: delete the job's UPLOADED proxy reference (only

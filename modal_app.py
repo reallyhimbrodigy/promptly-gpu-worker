@@ -939,6 +939,113 @@ def render_chunk_fanout(s3_prefix: str, files_manifest: list, render_kind: str,
         return out
 
 
+# ── inc2 Phase 1: RENDER BURST (DARK behind PROMPTLY_RENDER_BURST) ─────────────
+# The whole render stage on a cpu=48 / 64 GiB burst while the planner
+# (run_pipeline_bg, ~380s of network-bound plan/normalize/Gemini-wait) stays
+# cheap. Recovers the ~+100-200s the emergency cpu 64→16 cut cost the render,
+# WITHOUT holding cpu=48 for the ~450s job. Runs handler.render_stage EXACTLY as
+# the in-process path would, after reconstituting the local work_dir (source +
+# B-roll + gen-scene — gen-scene is Nano-Banana-generated and NOT reproducible,
+# so the exact bytes ride over in the staged tar) and rebuilding the two live
+# objects the seam can't cross (premium_ctx + a seed-matched CostMeter, Zac
+# #1/#2). The ProgressivePublisher's WHOLE lifecycle lives here — create→stream
+# →drain in the finally (Zac #4, the one straddling piece). On render_stage
+# failure the exception PROPAGATES: Modal re-raises it in the planner, whose ONE
+# existing except/terminal classifies it exactly as a local render error — no
+# second terminal emitter — while this finally still drains the publisher so a
+# preview is never left servable as terminal.
+#
+# DEPLOYED-APP ONLY: handler reaches this via
+# modal.Function.from_name("promptly-gpu-worker", "render_burst"); an ephemeral
+# `modal run` exercises it only by calling the DEPLOYED function, so the flag
+# stays OFF there and the local path runs.
+#
+# cpu=48: render subprocess parallelism ≈ 5 overlay×6 + 4 micro×4 = ~46 threads
+# (Zac's call — 48 covers it, 64 wastes 33% of the dominant cost term; free-read
+# evidence: 4 real long renders peak 95-100% of the 32 cores they can see).
+# memory=65536 (64 GiB): 15.7 GiB measured peak (blur OFF) with headroom for a
+# smoothness-agent motion-blur flip (the blur A/B OOM'd at 32 GiB). DO NOT drop
+# below 49152 (48 GiB); validate_deploy guards it. App image + all 4 secrets
+# (promptly-secrets/cloudfront/gemini-vertex/lang-flags) are inherited app-wide.
+@app.function(
+    cpu=48, memory=65536, region="us", timeout=3000, retries=0,
+    volumes={"/prewarm": prewarm_volume},
+    # No enable_memory_snapshot: it is a no-op without @enter (handler imports
+    # in-body, per-invocation) and would only add os.environ-freeze surface to a
+    # money-path function whose render_stage reads live secret flags.
+)
+def render_burst(payload: dict) -> dict:
+    import sys as _sys, os as _os, shutil as _shutil
+    _sys.path.insert(0, "/")
+    import handler as _H
+    import premium as _premium
+    try:
+        _H._install_shutdown_handler()  # ledger-flush safety net on this container too
+    except Exception:
+        pass
+    _job_id = payload["job_id"]
+    _work_dir = payload["work_dir"]
+    # Module-global setup handler() does before render_stage in-process — set the
+    # same on the burst so the shutdown ledger + stage sampler bucket correctly.
+    try:
+        _H._ACTIVE_JOB_ID = _job_id
+    except Exception:
+        pass
+    try:
+        _H._set_cpu_stage("render")
+    except Exception:
+        pass
+    # 1. reconstitute the local work_dir (all planner media) at the SAME path so
+    #    every embedded absolute path in the render args resolves unchanged.
+    _H._extract_workdir_from_s3(payload["s3_workdir_key"], _work_dir)
+    # 2. rebuild the two live objects (Zac #1/#2): a seed-matched CostMeter (only
+    #    total_usd() is read inside render_stage) + a fresh PremiumContext (its
+    #    asset pool is lazy, so construction spawns NO threads). Both shut down
+    #    HERE — a ThreadPoolExecutor cannot cross a process boundary.
+    _cm = _premium.CostMeter(_job_id)
+    _seed = float(payload.get("cost_seed_usd") or 0.0)
+    if _seed:
+        _cm.add("_planner_seed", count=0, usd=_seed)
+    _premium_ctx = _premium.PremiumContext(
+        is_premium=bool(payload.get("is_premium")),
+        route_premium=bool(payload.get("route_premium")),
+        cost_meter=_cm,
+    )
+    _prog_pub_cell = [None]   # publisher created INSIDE render_stage, drained in this finally
+    _rs_cost_cell = [0.0, 0]  # QA-regen spend → returned as a picklable delta
+    try:
+        _rs = _H.render_stage(
+            _job_id, payload["input_data"], payload["edit_plan"], _work_dir,
+            payload["source_path"], payload["output_path"], payload["transcript"],
+            payload["source_duration"], payload["app_url"], payload["broll_clips"],
+            payload["upload_url"], payload["timings"], payload["floor_state"],
+            bool(payload.get("route_premium")), _premium_ctx, _cm,
+            bool(payload.get("integrity_observe_only")), payload.get("render_est"),
+            _prog_pub_cell, _rs_cost_cell,
+        )
+        # SUCCESS: return the picklable render result + the QA-regen cost delta.
+        # (No {"ok":...} envelope — a FAILURE raises and propagates, so a returned
+        # dict always means success; the planner folds cost_delta into its meter.)
+        return {"rs": _rs, "cost_delta": [float(_rs_cost_cell[0]), int(_rs_cost_cell[1])]}
+    finally:
+        # THE straddling lifecycle, moved WHOLE into the burst (Zac #4): drain +
+        # cancel the publisher on EVERY exit — success AND the raise path — so a
+        # preview is never left servable as a terminal state. Then tear down the
+        # reconstructed pool and the local work_dir.
+        try:
+            _H._drain_progressive_publisher(_prog_pub_cell)
+        except Exception as _de:
+            print(f"[render_burst] publisher drain error (non-fatal): {_de}", flush=True)
+        try:
+            _premium_ctx.shutdown()
+        except Exception:
+            pass
+        try:
+            _shutil.rmtree(_work_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
     timeout=3000,         # 50 min (raised 900->1800->3000; 3000 for 5-min support 2026-07-25) — matches run_pipeline_bg so the SYNC-fallback path (SPAWN_MODE=0) can also finish a 5-minute render. Under SPAWN_MODE=1 run_job returns in ms (it spawns run_pipeline_bg), so this cap binds only the sync fallback; kept in lockstep for correctness. Orchestrator runs init + audio + remotion + composite + upload; the Gemini client timeout is 480s (handler.py:_get_genai_client). Billing is per-active-second, so short jobs cost the same — the cap only bounds the tail. INVARIANT: content-studio reaper EXEC_WALL_MS must be >= this (>=3300s) at all times, raised FIRST.
