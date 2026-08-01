@@ -2070,8 +2070,31 @@ print("[startup] all import checks done", flush=True)
 # branch on these flags fall back to software decode/encode automatically.
 # The libcuda symlink + LD_LIBRARY_PATH fix that used to live here moved
 # to cuda_driver_setup.py and runs at the top of rife_normalize_remote.
-_HAS_NVENC = False
+_HAS_NVENC = False   # legacy constant (retained; the live check is _has_nvenc())
 _HAS_HWACCEL = False
+
+# B.2 (90s campaign, Zac 2026-08-01): STEP 0 confirmed our image's ffmpeg ALREADY
+# carries h264_nvenc + *_cuvid — no image rebuild needed. Enable NVENC at RUNTIME,
+# gated on an actual GPU being attached (nvidia-smi ok), so the current no-GPU
+# cpu=16 deploy stays on libx264 (byte-identical) and only a gpu="L4" render uses
+# the hardware encoder. Memoized (one detect per container).
+_NVENC_DETECTED = None
+def _has_nvenc():
+    global _NVENC_DETECTED
+    if _NVENC_DETECTED is None:
+        try:
+            _smi = subprocess.run(["nvidia-smi"], capture_output=True, timeout=5)
+            if _smi.returncode == 0:
+                _enc = subprocess.run(["ffmpeg", "-hide_banner", "-encoders"],
+                                      capture_output=True, text=True, timeout=10)
+                _NVENC_DETECTED = "h264_nvenc" in (_enc.stdout or "")
+            else:
+                _NVENC_DETECTED = False
+        except Exception:
+            _NVENC_DETECTED = False
+        if _NVENC_DETECTED:
+            print("[nvenc] GPU + h264_nvenc detected — hardware encode ENABLED", flush=True)
+    return _NVENC_DETECTED
 
 
 # Vulkan / NVIDIA-Chromium GPU rasterization is intentionally NOT pursued.
@@ -2096,7 +2119,7 @@ def get_encode_args(quality="high", threads=0):
     quality="high"     → final output (CQ 18 — maximum quality for social media)
     quality="lossless" → intermediate files (lossless preset)
     """
-    if _HAS_NVENC:
+    if _has_nvenc():
         if quality == "lossless":
             return ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "lossless"]
         else:
