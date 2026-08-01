@@ -9,6 +9,7 @@ import {
 } from "remotion";
 import { OffthreadVideo } from "remotion";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
+import { useResprungZooms } from "../shared/resprung-flag";
 import type { FocusWindowProps } from "../types";
 
 /**
@@ -27,6 +28,12 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const resprung = useResprungZooms();
+  // Re-sprung (Zac 2026-07-31): damping 24→19.5 (ζ 1.07→0.869), clamp OFF, mass
+  // untouched. natural peak ≈ 11.9 frames, held inside the 15-frame envelope.
+  const enterConfig = resprung
+    ? { damping: 19.5, mass: 0.7, stiffness: 180 }
+    : { damping: 24, mass: 0.7, stiffness: 180, overshootClamping: true };
 
   let active = false;
   let progress = 0;
@@ -49,12 +56,7 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
     const enterProgress = spring({
       frame: frame - eventStart,
       fps,
-      config: {
-        damping: 24,
-        mass: 0.7,
-        stiffness: 180,
-        overshootClamping: true,
-      },
+      config: enterConfig,
       durationInFrames: enterDuration,
     });
 

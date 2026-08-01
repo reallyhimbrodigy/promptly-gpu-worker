@@ -90,6 +90,7 @@ import {
 // system on one flag; migrated components read useMotionTokens(). GLIDE/
 // EASE_GLIDE/dur drive the token-ON b-roll path below.
 import { MotionTokensProvider, useMotionTokens } from "./motion-graphics/shared/motion-flag";
+import { ResprungZoomsProvider } from "./zoom/shared/resprung-flag";
 import { GLIDE, EASE_GLIDE, dur } from "./motion-graphics/shared/motion";
 
 // Flare motion blur (Workstream D2). Parallel dark flag to motionTokens.
@@ -909,6 +910,9 @@ export const PromptlyMicroSegments: React.FC<PromptlyMicroSegmentsProps> = ({
     // D2: this composition renders ONLY transitions + composite zoom moves —
     // every segment here IS motion — so the blur provider gates it too. OFF
     // (default) → MotionBlurWrap is a passthrough → byte-identical.
+    // ResprungZooms gates the SnapReframe/FocusWindow settle (default OFF →
+    // today's clamped pixels); the zoom clips mount below via ClipRenderer.
+    <ResprungZoomsProvider enabled={input.resprungZooms ?? false}>
     <MotionBlurProvider
       enabled={input.motionBlur ?? false}
       samples={input.motionBlurSamples}
@@ -938,6 +942,7 @@ export const PromptlyMicroSegments: React.FC<PromptlyMicroSegmentsProps> = ({
       ))}
     </AbsoluteFill>
     </MotionBlurProvider>
+    </ResprungZoomsProvider>
   );
 };
 

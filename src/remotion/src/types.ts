@@ -366,6 +366,14 @@ export interface PromptlyRenderInput {
    *  is a true A/B — see motion-graphics/shared/motion.ts. Never touches the
    *  caption text layer (FRAME-1-IS-FINAL). Worker sets it from MOTION_TOKENS. */
   motionTokens?: boolean;
+  /** Re-sprung zoom settle (Zac 2026-07-31). Absent/false = today's exact
+   *  pixels: SnapReframe/FocusWindow keep overshootClamping:true (the frozen
+   *  hard-stop "de-sprung" settle). true = clamp removed + damping lowered
+   *  (SnapReframe 28→22 ζ≈0.881, FocusWindow 24→19.5 ζ≈0.869; mass UNTOUCHED so
+   *  ω_n and speed are preserved) → smooth exponential settle, peak ≥9.6 frames
+   *  @30fps (above the stepped-render floor). ONE reversible flag, default OFF,
+   *  so the before/after is a true A/B. See zoom/shared/resprung-flag.tsx. */
+  resprungZooms?: boolean;
   /** Workstream D2 — MOTION BLUR. Absent/false = NO new motion blur added
    *  anywhere (byte-identical to pre-D2; the existing Lumen / generated-scene
    *  blur is on its OWN path and is unaffected by this flag). true = wrap
@@ -421,6 +429,10 @@ export interface PromptlyMicroSegmentsInput {
    *  segment here IS motion — so the flag threads here too. Absent/false =
    *  byte-identical. Overrides fall through to MOTION_BLUR_DEFAULTS. */
   motionBlur?: boolean;
+  /** Re-sprung zoom settle (see PromptlyRenderInput.resprungZooms). This is the
+   *  composition that mounts SnapReframe/FocusWindow via ClipRenderer, so the
+   *  flag threads here. Absent/false = today's clamped pixels. */
+  resprungZooms?: boolean;
   motionBlurSamples?: number;
   motionBlurShutterAngle?: number;
 }

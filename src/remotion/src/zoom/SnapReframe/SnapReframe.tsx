@@ -7,6 +7,7 @@ import {
 } from "remotion";
 import { Video } from "@remotion/media";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
+import { useResprungZooms } from "../shared/resprung-flag";
 import type { SnapReframeProps } from "../types";
 
 /**
@@ -21,6 +22,12 @@ export const SnapReframe: React.FC<SnapReframeProps> = ({
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  const resprung = useResprungZooms();
+  // Re-sprung (Zac 2026-07-31): damping 28→22 (ζ 1.12→0.881), clamp OFF, mass
+  // untouched. time-to-peak ≈ 9.6 frames @30fps (above the 8-frame floor).
+  const springConfig = resprung
+    ? { damping: 22, mass: 0.6, stiffness: 260 }
+    : { damping: 28, mass: 0.6, stiffness: 260, overshootClamping: true };
 
   let scale = 1;
   let originX = 0.5;
@@ -36,12 +43,7 @@ export const SnapReframe: React.FC<SnapReframeProps> = ({
     const zoomIn = spring({
       frame: frame - eventStart,
       fps,
-      config: {
-        damping: 28,
-        mass: 0.6,
-        stiffness: 260,
-        overshootClamping: true,
-      },
+      config: springConfig,
     });
 
     const zoomOut =
@@ -49,12 +51,7 @@ export const SnapReframe: React.FC<SnapReframeProps> = ({
         ? spring({
             frame: frame - eventEnd,
             fps,
-            config: {
-              damping: 28,
-              mass: 0.6,
-              stiffness: 260,
-              overshootClamping: true,
-            },
+            config: springConfig,
           })
         : 0;
 
