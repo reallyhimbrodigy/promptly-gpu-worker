@@ -739,6 +739,20 @@ def run_pipeline_bg(body: dict):
                     if _st not in ("pre_normalize", "fps_normalize", "gemini_plan", "render", "unknown") and _cs:
                         print(f"[cpu-util]   stage={_st:<14} peak={max(_cs):5.1f} mean={sum(_cs)/len(_cs):5.1f} cores "
                               f"~{len(_cs) * int(_SAMPLE_S)}s ({len(_cs)} samples)", flush=True)
+                # PERSIST per-stage cores to the result (Zac 2026-08-01): inc2 sizing
+                # (render_burst + the vidstab transform container) must come from
+                # ORGANIC data, so make the per-stage cores QUERYABLE (result.cpu_by_stage)
+                # instead of log-only. Telemetry, best-effort; render-inert.
+                try:
+                    if isinstance(result, dict):
+                        result["cpu_by_stage"] = {
+                            _st: {"peak": round(max(_cs), 1),
+                                  "mean": round(sum(_cs) / len(_cs), 1),
+                                  "n": len(_cs), "dur_s": len(_cs) * int(_SAMPLE_S)}
+                            for _st, _cs in _cpu_by_stage.items() if _cs}
+                        result["cpu_src"] = _src
+                except Exception:
+                    pass
         except Exception:
             pass
     # PRIMARY completion delivery — POST the full result (success payload OR the
