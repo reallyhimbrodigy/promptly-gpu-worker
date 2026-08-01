@@ -32494,8 +32494,24 @@ def handler(job):
             # score 6 still stabilizes. Borderline evidence pair (score ~2,
             # stabilized-vs-not) in the Review Queue; Zac's veto standing;
             # rollback = env 0.35, no deploy.
+            # VIDSTAB RIPPED OUT (Zac 2026-08-01, direct order). Evidence was
+            # sufficient: a shake-0.0 clip paid +102s for NOTHING (measured), it
+            # has crashed and shipped unstabilised with nobody noticing, phones
+            # already stabilise at capture, and the two-pass leg cannot run in
+            # parallel (it is the plan-phase pole in ~40% of jobs). Disabling it
+            # takes ~45s off the ~65% of renders above the old 5.0 threshold.
+            # The default threshold is raised to an effectively-infinite value so
+            # NO organic clip ever stabilises; the shake_score probe still runs
+            # (cheap, telemetry) and vidstab_test still forces it for an A/B.
+            # REVERSIBLE in one line: restore `or 5.0`. Guarded by validate_deploy
+            # (RULE-1: the disable must stay unless deliberately reverted).
             _SHAKE_STABILIZE_THRESHOLD = float(
-                os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 5.0)
+                os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 1e9)
+            # SECRET-INDEPENDENT clamp: force the threshold to effectively-infinite
+            # regardless of any LIVE PROMPTLY_VIDSTAB_THRESHOLD secret value, so the
+            # rip-out cannot be silently overridden by a stale secret set to 5.0.
+            # Reversible: delete this clamp line to restore env-driven behaviour.
+            _SHAKE_STABILIZE_THRESHOLD = max(_SHAKE_STABILIZE_THRESHOLD, 1e9)
             _needs_deshake = _shake_score >= _SHAKE_STABILIZE_THRESHOLD
             _vs_test = str(input_data.get("vidstab_test") or "").strip().lower()
             if _vs_test in ("on", "off"):

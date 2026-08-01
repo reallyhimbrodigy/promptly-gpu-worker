@@ -71,6 +71,15 @@ def _modal_syntax():
         ast.parse(f.read())
 
 
+@check("VIDSTAB RIP-OUT GUARD (Zac 2026-08-01, RULE-1): vidstab is disabled via a secret-independent clamp (_SHAKE_STABILIZE_THRESHOLD = max(..., 1e9)) so organic stabilisation NEVER fires regardless of any live PROMPTLY_VIDSTAB_THRESHOLD secret. FAILS if the clamp is removed — the rip-out cannot silently regress to always-on without a deliberate, reviewed revert.")
+def _vidstab_ripout_guard():
+    src = open("handler.py").read()
+    assert "max(_SHAKE_STABILIZE_THRESHOLD, 1e9)" in src, (
+        "vidstab rip-out clamp `max(_SHAKE_STABILIZE_THRESHOLD, 1e9)` missing — "
+        "organic stabilisation would re-enable. Restore the clamp or revert "
+        "deliberately (Zac 2026-08-01 ripped vidstab out).")
+
+
 @check("SOURCE_DURATION PERSIST GUARD (Zac 2026-08-01, RULE-1): source_duration_s must be NESTED inside the stage_timings dict, never a top-level result_payload key. content-studio strips unknown top-level result keys — a top-level source_duration_s persisted 0/62 on real traffic (same class as cpu_by_stage). stage_timings persists whole, so the field must ride inside it. This regex FAILS if source_duration_s appears as a top-level `\"source_duration_s\":` at result-payload indentation (12 spaces) rather than nested (16 spaces), catching a silent regression back to the stripped location.")
 def _source_duration_persist_guard():
     src = open("handler.py").read()
@@ -5475,11 +5484,15 @@ def _source_poll_fail_fast():
 @check("A-L2/CAUSE-3 LEVERS STAGED DARK (2026-07-25): (a) vidstab threshold env-tunable (PROMPTLY_VIDSTAB_THRESHOLD, default '' -> 0.35 = today, byte-identical) so the data-chosen recalibration slots in with no code change, + input_data.vidstab_test per-job override for Zac's stabilized-vs-not A/B pair; (b) delivery fps env-tunable (PROMPTLY_DELIVERY_FPS, default '' -> 60.0 = today's universal 60fps pipeline target) + input_data.delivery_fps_test for the 60-vs-30 phone-judged pair — SA-0 measured the render bucket 116-215s/chunk at 60 vs 17-52s at 30, but NOTHING flips on fps without Zac's ruling; (c) the A/B-lever inputs persist alongside stage_timings (shake_score, source_fps, target_fps) so the threshold choice and the 60fps-share answer become SQL queries. Defaults = today's exact behavior; overrides inert for real traffic (the app never sets them).")
 def _ab_levers_staged_dark():
     _h = open("handler.py").read()
-    # vidstab: env threshold defaulting to 0.35 + the per-job override
-    assert 'os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 5.0' in _h, \
-        "vidstab threshold: data-chosen 5.0 (2026-07-25 distribution; env rollback to 0.35)"
+    # vidstab: RIPPED OUT (Zac 2026-08-01) — default raised 5.0 -> 1e9 + a
+    # secret-independent clamp (enforced by the dedicated VIDSTAB RIP-OUT GUARD)
+    # so organic stabilisation never fires. The per-job vidstab_test override is
+    # KEPT for the A/B. (Evidence: shake-0 clip paid +102s for nothing; ships
+    # unstabilised on crash unnoticed; can't run in parallel.)
+    assert 'os.environ.get("PROMPTLY_VIDSTAB_THRESHOLD", "") or 1e9' in _h, \
+        "vidstab threshold default must be 1e9 (ripped out 2026-08-01; env rollback = restore 5.0)"
     assert 'input_data.get("vidstab_test")' in _h and '_vs_test in ("on", "off")' in _h, \
-        "vidstab A/B per-job override missing"
+        "vidstab A/B per-job override missing (kept for stabilized-vs-not A/B)"
     # fps: default 60 preserved; env + per-job override staged
     assert "_target_fps = 60.0" in _h, "the 60fps default must remain the baseline"
     assert 'os.environ.get("PROMPTLY_DELIVERY_FPS", "").strip()' in _h and \

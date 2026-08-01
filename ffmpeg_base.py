@@ -31,6 +31,7 @@ overlays B-roll.
 
 from typing import List, Dict, Optional, Tuple
 import math
+import os  # PROMPTLY_ZOOM_TBLEND gate (zoom motion-blur regression fix, Zac 2026-08-01)
 
 
 # ── Outro fade duration ─────────────────────────────────────────────────────
@@ -410,6 +411,20 @@ def _build_clip_segment_with_pad(
         zoom_filter = build_zoom_filter_chain(zoom, dur_frames, source_fps, canvas_w, canvas_h)
         if zoom_filter:
             filters.append(zoom_filter)
+            # ZOOM MOTION BLUR — the REGRESSION FIX (Zac 2026-08-01). The
+            # DELIVERY_FPS 60→30 flip (staged 2026-07-25) HALVED the per-frame
+            # scale samples on the FFmpeg scale-only zooms (SnapReframe/StepZoom/
+            # SmoothPush). Unlike MGs/transitions, these have NO Remotion alpha
+            # layer and thus NO motion blur to cover the widened gap — so the
+            # scale ramp now steps. tblend averages each frame with the previous
+            # (single-pass, scoped to zoom clips ONLY) → a motion smear that
+            # restores what 60fps was providing implicitly, at ~zero cost, while
+            # keeping the 30fps delivery cost saving. DARK (default 0) until the
+            # frame-diff A/B proves it smooths the zoom step (RULE 3 — never ship
+            # a fix not proven to differ); flip default to "1" + deploy to ship.
+            # The A/B harness sets PROMPTLY_ZOOM_TBLEND explicitly per arm.
+            if os.environ.get("PROMPTLY_ZOOM_TBLEND", "0").strip().lower() not in ("0", "false", "no", "off"):
+                filters.append("tblend=all_mode=average")
 
     filters.append(f"trim=end_frame={dur_frames}")
     filters.append("setpts=PTS-STARTPTS")
