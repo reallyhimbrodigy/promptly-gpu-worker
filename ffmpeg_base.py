@@ -419,12 +419,20 @@ def _build_clip_segment_with_pad(
             # scale ramp now steps. tblend averages each frame with the previous
             # (single-pass, scoped to zoom clips ONLY) → a motion smear that
             # restores what 60fps was providing implicitly, at ~zero cost, while
-            # keeping the 30fps delivery cost saving. DARK (default 0) until the
-            # frame-diff A/B proves it smooths the zoom step (RULE 3 — never ship
-            # a fix not proven to differ); flip default to "1" + deploy to ship.
-            # The A/B harness sets PROMPTLY_ZOOM_TBLEND explicitly per arm.
-            if os.environ.get("PROMPTLY_ZOOM_TBLEND", "0").strip().lower() not in ("0", "false", "no", "off"):
+            # keeping the 30fps delivery cost saving. Placement is on the BASE
+            # clip chain — BEFORE the Remotion overlay composite (build_final_
+            # filtergraph concats these to [base], THEN overlays captions/MGs on
+            # top) — so it CANNOT ghost captions/MGs (Zac's guard). DARK (default
+            # "off") until the frame-diff A/B proves it (RULE 3). Two modes:
+            #   tblend = 50/50 average of consecutive frames (max smear, softest)
+            #   tmix   = frames=3 weights "1 2 1" — current-frame-dominant, 3-frame
+            #            support, gentler + less sharpness loss than tblend (Zac).
+            # Flip the winner in as the default + deploy to ship.
+            _zblur = os.environ.get("PROMPTLY_ZOOM_BLUR", "off").strip().lower()
+            if _zblur == "tblend":
                 filters.append("tblend=all_mode=average")
+            elif _zblur == "tmix":
+                filters.append("tmix=frames=3:weights=1 2 1")
 
     filters.append(f"trim=end_frame={dur_frames}")
     filters.append("setpts=PTS-STARTPTS")
@@ -674,6 +682,18 @@ def build_final_filtergraph(
     #     for the overlay branch. Outro-fade math is unaffected (it uses
     #     chunk_global_start_frame against the base segment, not the
     #     overlay input).
+    #
+    # hqdn3d PLACEMENT A/B (Zac 2026-08-01): PROMPTLY_HQDN3D_MODE picks WHERE the
+    # temporal 6:6 denoise runs. "after" (today) denoises the flattened composite
+    # — INCLUDING captions/MGs, whose adjacent animation frames it can merge,
+    # reading as fewer positions ("low frame rate"). "before" denoises the BASE
+    # footage only (graphics untouched — the safe placement). "off" removes it.
+    # Dark by default (="after" = today's exact pixels) until the MG-entrance
+    # frame-diff A/B (RULE 3) picks the winner.
+    _hqdn3d_mode = os.environ.get("PROMPTLY_HQDN3D_MODE", "after").strip().lower()
+    if _hqdn3d_mode == "before":
+        parts.append(f"[{cur}]hqdn3d=1.5:1.5:6:6[{cur}_dn]")
+        cur = f"{cur}_dn"
     if overlay_input_idx is not None:
         _needs_global_overlay_trim = (
             chunk_global_start_frame is not None and not overlay_is_chunk_local
@@ -723,6 +743,8 @@ def build_final_filtergraph(
     # encode itself).
     parts.append(
         f"[composited]hqdn3d=1.5:1.5:6:6,format=yuv420p[final_v]"
+        if _hqdn3d_mode == "after"
+        else f"[composited]format=yuv420p[final_v]"  # "before" (base already denoised) or "off"
     )
 
     return ";".join(parts), ["final_v"]
