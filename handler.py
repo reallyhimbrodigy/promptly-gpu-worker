@@ -11308,7 +11308,7 @@ def _post_cuts_response_schema():
 
 
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
-                           recipe_deadline_s=None):
+                           recipe_deadline_s=None, media_res_override=None):
     """Second Gemini call: visual placement on the kept-only transcript.
 
     Deep-thinking budget. thinking_budget=24576 (lowered from a 60000 cap).
@@ -11388,7 +11388,8 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 # synthetic probe), so any real-footage output change is the
                 # signal this swap is testing for. FIX A (dark): LOW is ~66 vs
                 # ~258 tok/frame — the fps A/B pairs with this. Default MEDIUM.
-                media_resolution=(os.environ.get("PROMPTLY_MEDIA_RESOLUTION", "").strip()
+                media_resolution=(media_res_override
+                                  or os.environ.get("PROMPTLY_MEDIA_RESOLUTION", "").strip()
                                   or "MEDIA_RESOLUTION_MEDIUM"),
             ),
             system_instruction=system_instruction,
@@ -12102,6 +12103,8 @@ def generate_edit_gemini(
     recipe_deadline_s=None,
     density_override=False,
     density_variant=0,
+    sample_fps_override=None,
+    media_res_override=None,
 ):
     _pre_analysis = cached_response
 
@@ -12267,7 +12270,7 @@ def generate_edit_gemini(
     # timed, shot changes are detect_shot_changes — 18fps only feeds VISUAL grounding,
     # which 1-2fps carries. PROMPTLY_PROXY_SAMPLE_FPS lowers it (18->2 ~= 9x fewer
     # video tokens -> lower TTFB). Default 18 = byte-identical. A/B decides quality.
-    _sample_fps = int(os.environ.get("PROMPTLY_PROXY_SAMPLE_FPS", "18") or "18")
+    _sample_fps = int(sample_fps_override or os.environ.get("PROMPTLY_PROXY_SAMPLE_FPS", "18") or "18")
     _video_fps_meta = genai_types.VideoMetadata(fps=_sample_fps) if hasattr(genai_types, "VideoMetadata") else None
     _video_part_fallback = None
     if inline_video_bytes and video_reference_url:
@@ -12829,7 +12832,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         else:
             try:
                 try:
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override)
                 except Exception as _ref_err:
                     if (_video_part_fallback is None
                             or type(_ref_err).__name__ != "ClientError"):
@@ -12852,7 +12855,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         "video_reference_fallback", reason=str(_ref_err)[:180])
                     _video_part = _video_part_fallback
                     _video_part_fallback = None
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override)
             except Exception as _tx_err:
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the
@@ -30359,6 +30362,19 @@ def validate_handler(job):
 
         is_talking_head = _face_ratio >= FACE_THRESHOLD
         confidence = min(1.0, _face_ratio / FACE_THRESHOLD) if is_talking_head else min(1.0, (FACE_THRESHOLD - _face_ratio) / FACE_THRESHOLD)
+        # BLANKET UNBLOCK (Zac 2026-08-01): the detector fix failed twice (wrong
+        # field, then rotation-only) and every hour costs ~13 falsely-blocked
+        # users. FORCE the verdict true. SAFE because both halves are confirmed:
+        # the client (EditorView.swift:1262) only GATES dispatch on is_talking_head
+        # — it does NOT route or label on it — and the WORKER re-detects
+        # independently (handler.py:33228, needs BOTH low-face AND <10 words), so
+        # routing stays correct. This unblocks dispatch and changes nothing
+        # downstream. Reversible: PROMPTLY_VALIDATOR_FORCE_TH=0. The proper detector
+        # fix (rotation + the ffmpeg coded-dims distortion) lands after users are
+        # unblocked; _validator_face_signals stays wired for it.
+        if os.environ.get("PROMPTLY_VALIDATOR_FORCE_TH", "1").strip().lower() not in (
+                "0", "false", "no", "off"):
+            is_talking_head = True
 
         if not is_talking_head:
             # ADVISORY MODE (Zac P0 2026-07-31): this pre-dispatch gate was
@@ -33769,6 +33785,13 @@ def handler(job):
                     # burned_text_test / broll_gate_test). Inert for real traffic.
                     density_override=bool(input_data.get("density_test")),
                     density_variant=int(input_data.get("density_variant") or 0),
+                    # FIX A per-job A/B override (Zac 2026-08-01): PLAN_ONLY A/B
+                    # sweeps Gemini sample fps + media_resolution without a prod env
+                    # change. Inert for real traffic (absent → env → 18/MEDIUM).
+                    sample_fps_override=(int(input_data["proxy_sample_fps"])
+                                         if input_data.get("proxy_sample_fps") else None),
+                    media_res_override=(str(input_data["media_resolution"])
+                                        if input_data.get("media_resolution") else None),
                     # Workstream B: the source language for in-language editorial
                     # (flag-gated inside the prompt builder). _script is the
                     # dominant script computed at the coverage gate above.
@@ -33939,7 +33962,7 @@ def handler(job):
             # and skip render — a render-FREE planning A/B (e.g. the lean-schema
             # decision test). Full-fidelity signals (real transcribe/proxy/faces).
             # Off by default → byte-identical; never set on production traffic.
-            if os.environ.get("PROMPTLY_PLAN_ONLY", "").strip():
+            if os.environ.get("PROMPTLY_PLAN_ONLY", "").strip() or (input_data and input_data.get("plan_only")):
                 import json as _plj
                 try:
                     _plan_json = _plj.loads(_plj.dumps(edit_plan, default=str))
