@@ -5446,7 +5446,7 @@ def _source_poll_fail_fast():
     # the default (600) must be strictly under the run_pipeline_bg Modal timeout so the
     # clean UPLOAD_STALLED fires BEFORE the SIGKILL — the invariant that was violated
     _m = open("modal_app.py").read()
-    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=131072", _m)
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=65536", _m)
     assert _t, "run_pipeline_bg timeout not found in modal_app.py"
     assert 600 < int(_t.group(1)), \
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
@@ -6130,7 +6130,7 @@ def _recipe_wall_budget():
     assert _dl >= H._RECIPE_WALL_MIN_BUDGET_S >= 600.0, "budget floor must clear a clean pass's recipe-start"
     assert H._RECIPE_WALL_END_RESERVE_S >= 480.0, "tail reserve must absorb one 480s in-flight client-timeout"
     # _MODAL_FN_TIMEOUT_S must track the ACTUAL run_pipeline_bg timeout (drift guard)
-    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=131072", open("modal_app.py").read())
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=65536", open("modal_app.py").read())
     assert _t and int(_t.group(1)) == int(H._MODAL_FN_TIMEOUT_S), \
         f"_MODAL_FN_TIMEOUT_S ({H._MODAL_FN_TIMEOUT_S}) must match run_pipeline_bg timeout ({_t.group(1) if _t else '?'})"
     # wiring: threaded into the internal retry-stop, the repair loop-top, and the caller
