@@ -6647,6 +6647,10 @@ already follow) and return when the face leads again."""
             "for a camera move."
         )
 
+    # DWELL A/B (dark co-rider): swap OLD payoff prose → DWELL when enabled.
+    if _dwell_enabled():
+        system_instruction = _apply_dwell_swap(system_instruction)
+
     # FIX 3 (dark) — SCAFFOLD RELOCATION (Zac GO 2026-07-31). The lean response
     # schema carries no per-moment prose (what_i_saw / why_emphasis / what_lands /
     # viewer_feeling) and no per-cut reason — those were telemetry-only, and their
@@ -11158,6 +11162,42 @@ def _backfill_lean_fields(_parsed):
         if isinstance(_cr, dict):
             _cr.setdefault("reason", "")
     return _parsed
+
+
+def _dwell_enabled():
+    """DWELL A/B (co-rider through the PLAN_ONLY seam, Zac 2026-07-31). Swaps the
+    payoff commitment prose from the OLD 'slowest/deepest slow-arrival push' framing
+    to the DWELL framing (land-on-word + HOLD the landed peak; arrival speed free).
+    Prediction on record: OLD over-selects DepthPull/LetterboxPush for the payoff;
+    DWELL shifts punchier (SnapReframe/StepZoom/StagedPush). DARK; the plan-decision
+    A/B measures the payoff zoom-type distribution shift. Off = byte-identical."""
+    return os.environ.get("PROMPTLY_DWELL", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+# The DWELL prose swap (verbatim from db3213d) — 3 (OLD, DWELL) pairs, none of which
+# contain f-string interpolations, so they match the BUILT system_instruction. Each
+# is match-asserted at apply time: a mismatch RAISES (a silent no-op would fake a
+# null DWELL effect in the A/B).
+_DWELL_SWAPS = [
+    ("the slowest and deepest move of the video, holds to the end. THIS position fixes its register regardless of vibe — the slow commitment IS what makes the payoff bigger than every beat before it; a snap would read as just another mid_peak. This is the one place the moment outranks \"what feels punchy\": even a viral payoff commits. Any zoom in the seconds immediately after the payoff steps on the moment you just earned.",
+     "the deepest move of the video — its peak LANDS ON the payoff word and then DWELLS, holding the landed state through to the cut. The commitment IS the dwell, not the arrival speed: a move that holds its landed peak commits whether it arrived punchy or slow; one that cuts away the instant it lands does not, however slowly it came. THIS position fixes its register regardless of vibe — the held peak is what makes the payoff bigger than every beat before it. This is the one place the moment outranks \"what feels punchy\": even a viral payoff commits — by holding, not by slowing. Any zoom in the seconds immediately after the payoff steps on the moment you just earned; the dwell IS that moment, and it needs the held frame."),
+    ("the move is the slow committed push that begins gently and RESOLVES on the next cut — the lean-in mirrors how a listener leans toward something interesting; the cut snaps attention back. That push → cut release is the rhythm of pro short-form editing, and it is what makes the payoff read as a composed commitment rather than a scattered punch.",
+     "the move LANDS its peak on the payoff word and DWELLS there — holds the landed frame — then RESOLVES on the next cut; the hold is the lean-in a listener gives something interesting, and the cut snaps attention back. That land → dwell → cut release is the rhythm of pro short-form editing, and it is the DWELL — not a slow arrival — that makes the payoff read as a composed commitment rather than a scattered punch: a punchy arrival that then holds commits just as fully, while a beat that lands and cuts away instantly is the scattered punch at any arrival speed."),
+    ("a slow push landing INTO a tight cut is the canonical move for the payoff",
+     "the peak landing on the payoff word and HELD until that tight cut is the canonical move for the payoff"),
+]
+
+
+def _apply_dwell_swap(system_instruction):
+    """Swap OLD payoff prose → DWELL. Each pair MUST match exactly (raise otherwise)."""
+    for _old, _new in _DWELL_SWAPS:
+        if _old not in system_instruction:
+            raise RuntimeError("DWELL A/B: OLD payoff block not found verbatim — "
+                               f"prompt drifted; cannot A/B ({_old[:60]!r}...)")
+        system_instruction = system_instruction.replace(_old, _new, 1)
+    return system_instruction
 
 
 def _post_cuts_response_schema():
