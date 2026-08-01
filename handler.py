@@ -9626,6 +9626,27 @@ def _recipe_deadline_from(pipeline_start, duration):
         _RECIPE_WALL_MIN_BUDGET_S,
         _MODAL_FN_TIMEOUT_S - _render_reserve - _RECIPE_WALL_END_RESERVE_S,
     )
+    # FIX 1 — DEGEN LATENCY BUDGET (Zac GO 2026-07-31). The budget above only
+    # guards the Modal SIGKILL (~2250s for a 90s clip, floor 600s) — it never
+    # fires for the degen latency tail (organic edit_plan p90=490s, p95=533s,
+    # max=672s all sit UNDER it, so the re-roll chain compounds unbounded). This
+    # tightens the deadline to a LATENCY budget (below the 600s SIGKILL floor):
+    # past PROMPTLY_RECIPE_LATENCY_S seconds of pipeline wall-clock, stop
+    # re-rolling and take the deterministic safe edit rather than a 3rd/4th
+    # spiral. The recipe call runs in the mega-parallel block near pipeline_start,
+    # so this pipeline-anchored budget ≈ the edit_plan stage budget. Sized from
+    # the organic baseline (healthy p75 edit_plan ~296s; degen tail 490-672s) —
+    # ~300s bounds the tail while leaving p50 (155s) untouched; the A/B measures
+    # the safe-edit fallback rate at the chosen value. Default 0/unset = OFF →
+    # only the SIGKILL budget above applies → byte-identical to today.
+    _latency_s = os.environ.get("PROMPTLY_RECIPE_LATENCY_S", "").strip()
+    if _latency_s:
+        try:
+            _lat = float(_latency_s)
+            if _lat > 0:
+                _budget = min(_budget, _lat)
+        except (TypeError, ValueError):
+            pass
     return float(pipeline_start) + _budget
 _VAD_SILENCES_LAST: list = []    # v196 head-snap feed: silero silence regions
 # PACING BUDGET (Slice 3): per-job max-compression flag, RESET at every job
