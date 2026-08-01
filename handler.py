@@ -28802,6 +28802,19 @@ def _zero_reject_enabled(input_data=None):
 _MIN_MINIMAL_DURATION_S = 2.0
 
 
+def _hls_copy_enabled():
+    """FIX D (90s campaign, Zac 2026-08-01): the upload_export 77s is a 4-rendition
+    libx264 RE-ENCODE of the finished MP4. Progressive CONSUMES the HLS manifest
+    (preview publishes mid-render, terminal swaps the final ladder), so HLS
+    PACKAGING must stay — but the re-encode can go. When on, segment the finished
+    MP4 with -c COPY into a SINGLE 1080p rendition (~1s vs ~72s), master.m3u8 +
+    fMP4 segments preserved so the client swap still works. DARK; A/B + a real
+    client preview->final swap check before flip."""
+    return os.environ.get("PROMPTLY_HLS_COPY", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 def _encode_and_upload_hls(output_path, work_dir, upload_url, public_url):
     """HLS ladder encode + S3 upload for a delivered MP4 — module-scope so BOTH
     the talking-head tail (whose nested _upload_hls now delegates here) and the
@@ -28822,6 +28835,33 @@ def _encode_and_upload_hls(output_path, work_dir, upload_url, public_url):
     hls_dir = os.path.join(work_dir, "hls")
     os.makedirs(hls_dir, exist_ok=True)
     _hls_t0 = time.time()
+
+    if _hls_copy_enabled():
+        # FIX D (dark): single-rendition -c COPY — NO re-encode. The finished MP4
+        # is already the deliverable 1080p stream; copy its video+audio and
+        # CMAF-segment. Packaging identical (master.m3u8 + fMP4 seg), only the 4x
+        # libx264 pass removed. ~72s -> ~1s. Downstream upload/walk is unchanged.
+        _hls_copy_cmd = [   # NOT a ladder — single-rendition stream-copy segmentation
+            "ffmpeg", "-y", "-i", output_path,
+            "-map", "0:v:0", "-map", "0:a:0", "-c", "copy",
+            "-f", "hls",
+            "-hls_time", "4",
+            "-hls_list_size", "0",
+            "-hls_playlist_type", "vod",
+            "-hls_segment_type", "fmp4",
+            "-master_pl_name", "master.m3u8",
+            "-hls_segment_filename", os.path.join(hls_dir, "stream_%v", "seg_%d.m4s"),
+            "-var_stream_map", "v:0,a:0,name:1080p",
+            os.path.join(hls_dir, "stream_%v", "playlist.m3u8"),
+        ]
+        _hls_r = subprocess.run(_hls_copy_cmd, capture_output=True, text=True, timeout=600)
+        if _hls_r.returncode != 0:
+            raise RuntimeError(
+                f"HLS -c copy segmentation failed (rc={_hls_r.returncode}): "
+                f"{(_hls_r.stderr or '')[-1500:]}")
+        _hls_ladder_cmd = None   # signal: skip the re-encode ladder below
+    else:
+        _hls_ladder_cmd = True
 
     _hls_cmd = [
         "ffmpeg", "-y", "-i", output_path,
@@ -28866,12 +28906,15 @@ def _encode_and_upload_hls(output_path, work_dir, upload_url, public_url):
         "v:0,a:0,name:360p v:1,a:1,name:540p v:2,a:2,name:720p v:3,a:3,name:1080p",
         os.path.join(hls_dir, "stream_%v", "playlist.m3u8"),
     ]
-    _hls_r = subprocess.run(_hls_cmd, capture_output=True, text=True, timeout=600)
-    if _hls_r.returncode != 0:
-        raise RuntimeError(
-            f"HLS encode failed (rc={_hls_r.returncode}): "
-            f"{(_hls_r.stderr or '')[-1500:]}"
-        )
+    # Run the 4-rendition re-encode ONLY in ladder mode — copy mode already
+    # segmented above (the list build just above is a harmless no-op then).
+    if _hls_ladder_cmd:
+        _hls_r = subprocess.run(_hls_cmd, capture_output=True, text=True, timeout=600)
+        if _hls_r.returncode != 0:
+            raise RuntimeError(
+                f"HLS encode failed (rc={_hls_r.returncode}): "
+                f"{(_hls_r.stderr or '')[-1500:]}"
+            )
 
     base_key, _ = os.path.splitext(_aws_k)
     hls_prefix = f"{base_key}-hls"
