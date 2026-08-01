@@ -8698,6 +8698,12 @@ def _render_burst_dark():
         assert handler._render_burst_enabled() is True
         _os.environ["PROMPTLY_RENDER_BURST"] = "0"
         assert handler._render_burst_enabled() is False
+        # per-job canary override: render_burst_test forces the burst for ONE
+        # job without flipping the secret; a plain job stays OFF (inert traffic).
+        assert handler._render_burst_enabled({"render_burst_test": "1"}) is True, \
+            "render_burst_test per-job override must force the burst (canary handle)"
+        assert handler._render_burst_enabled({}) is False, \
+            "no override + flag unset → OFF (inert for real traffic)"
     finally:
         if _saved is None:
             _os.environ.pop("PROMPTLY_RENDER_BURST", None)
@@ -8711,7 +8717,7 @@ def _render_burst_dark():
         "the render dispatcher must exist"
     _disp = _h_src[_h_src.index("def _run_render_via_burst_or_local("):]
     _disp = _disp[:_disp.index("\ndef _fanout_prepare(")]
-    assert "if not _render_burst_enabled():" in _disp and "return render_stage(" in _disp, \
+    assert "if not _render_burst_enabled(input_data):" in _disp and "return render_stage(" in _disp, \
         "flag-OFF dispatch must return render_stage(...) unchanged (byte-identical)"
     assert "_rs = _run_render_via_burst_or_local(" in _h_src, \
         "the render seam must dispatch through _run_render_via_burst_or_local"

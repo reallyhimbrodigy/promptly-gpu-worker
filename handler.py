@@ -22792,14 +22792,21 @@ def _render_fanout_enabled():
     )
 
 
-def _render_burst_enabled():
+def _render_burst_enabled(input_data=None):
     """inc2 Phase 1 render-burst flag. DARK by default; PROMPTLY_RENDER_BURST=1
     (Modal secret/env) routes the whole render stage to the cpu=48 render_burst
     container while the planner stays cheap. Default OFF → render_stage runs
     IN-PROCESS exactly as today (byte-identical). Deployed-app-only: an ephemeral
     `modal run` can only reach the DEPLOYED render_burst, so the flag stays OFF
-    there and the local path runs. Canonical value is asserted OFF in
-    validate_deploy until a post-cost-emergency canary flips it."""
+    there and the local path runs.
+
+    PER-JOB CANARY HANDLE: input_data.render_burst_test=1 forces the burst for a
+    SINGLE job without flipping the secret for all traffic — the canary knob (the
+    zero_reject_test / progressive_test pattern), inert for real traffic."""
+    if isinstance(input_data, dict) and str(
+            input_data.get("render_burst_test") or "").strip().lower() in (
+            "1", "true", "on", "yes"):
+        return True
     return os.environ.get("PROMPTLY_RENDER_BURST", "").strip().lower() in (
         "1", "true", "on", "yes",
     )
@@ -22918,14 +22925,14 @@ def _run_render_via_burst_or_local(
     except/terminal classifies it exactly as a local render error would — no
     second terminal emitter. A STAGING hiccup falls back to the local render
     (a job is never lost to S3)."""
-    if not _render_burst_enabled():
+    if not _render_burst_enabled(input_data):
         return render_stage(
             job_id, input_data, edit_plan, work_dir, source_path, output_path,
             transcript, source_duration, app_url, broll_clips, upload_url,
             _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
             integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
         )
-    # ── render-burst path (DARK until a post-cost-emergency canary) ───────────
+    # ── render-burst path (DARK; per-job canary via render_burst_test) ────────
     try:
         _s3_key = _stage_workdir_to_s3(work_dir, job_id)
     except Exception as _stage_err:
