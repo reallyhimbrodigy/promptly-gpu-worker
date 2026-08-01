@@ -11095,7 +11095,12 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 # quality (every good recipe this session ran at ≤24576) and
                 # drove the model to spiral past its output budget into an
                 # empty response. Thinking LESS is the fix, not more time.
-                thinking_config=genai_types.ThinkingConfig(thinking_budget=24576),
+                thinking_config=genai_types.ThinkingConfig(
+                    # DARK A/B knob (Zac 2026-07-31): thinking_budget is a dial.
+                    # Default 24576 (byte-identical when unset). Lower = less
+                    # deliberation time AND — per the r=0.59 output-vs-wallclock
+                    # measurement — possibly less spiral/degen (60K drove spirals).
+                    thinking_budget=int(os.environ.get("PROMPTLY_POST_THINKING_BUDGET", "24576") or "24576")),
                 # MEDIUM (was LOW) — shipped as a production A/B. Measured
                 # token-identical to LOW on the 480p proxy (a no-op on the
                 # synthetic probe), so any real-footage output change is the
