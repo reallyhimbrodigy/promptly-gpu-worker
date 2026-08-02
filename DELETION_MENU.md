@@ -51,6 +51,36 @@ Ordered by tokens. **KEEP/CUT is my recommendation; the call is Zac's.**
 
 ---
 
+## ⛔ UPDATE 2026-08-02 — THE CUT CANDIDATES DO NOT SURVIVE THEIR OWN TEST
+
+Zac approved cutting #7, #8 and #12 (~1,362 tok) on the rationale *"an instrument
+the model never reaches for is a described capability that does not exist."* That
+is the right test. **All three groups fail it** — they are rare by design, not
+badly described. Checked before cutting; not cut.
+
+| # | verdict | evidence |
+|---|---|---|
+| 8 | **DO NOT CUT — rare by instruction** | StagedPush's own entry: *"THIS IS THE RESERVED MOVE — a chef's special technique, not an everyday tool. Use it at most on the ONE OR TWO biggest building moments; **most videos use it ZERO times**."* 3 uses / 709 plans is the prompt performing to spec. Also structurally gated: `ZOOM_ARC_HOMES` = **mid_peak only**, and it needs 2–3 *consecutive building* words. Its 455 tok vs peers' 73–99 is real, but the excess **is** the multi-word emission contract (`give ONE emphasis_moment the 2-3 word_indices IN ORDER`) plus misuse guards — no other zoom has that contract. |
+| 7 | **DO NOT CUT — content-gated** | Each of the five is gated by its own moment definition: imposter = voiced suspicion · wompwomp = failure-as-punchline · iphoneding = quoted notification · rizz = comedic flirt · awkward-moment = held cringe. Same gate class that spared TweetBubble/ChatThread/TikTokComment. Also **user-requestable by name** — `handler.py:16599-16609` maps "sad trombone" / "sus" / "cringe" → these sounds, so deleting them silently breaks an explicit user ask. |
+| 12 | **DISCRIMINATE, DON'T DELETE** | DepthPull (hook-only) and FocusWindow (mid_peak-only) are arc-narrow but *not* content-gated — the only genuine discrimination candidates here, and only 173 of the 1,362 tok. Deleting them concentrates the zoom mix against the **VARIETY rule (≤60%/category)** with SmoothPush already at 48.6%, and removing reachable instruments is the opposite of the pace goal. |
+
+**The defensible-deletion column goes from ~1,362 to ~0.**
+
+Combined with the four convergent compression measurements (caveman 1.29× ·
+classification 1.12× · WHY 1% · deletion 1.15×), the bottom line is that this
+prompt has **no significant slack in either direction**. It is ~40k tokens
+because that is what it carries.
+
+---
+
+## NEXT DISCRIMINATION TARGET — TEXT OVERLAYS
+
+897 tok. The registry has exactly **two** variants — `caption_match` and
+`sticky_note` — and usage is **244 vs 3**. Two instruments, one unreachable.
+Same defect as the six MG components, same fix, and it costs nothing to make.
+
+---
+
 ## THE ARITHMETIC ZAC NEEDS
 
 | | tok |
