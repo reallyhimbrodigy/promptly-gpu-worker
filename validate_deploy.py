@@ -71,6 +71,17 @@ def _modal_syntax():
         ast.parse(f.read())
 
 
+@check("INC2-TELEMETRY NEST GUARD (speed agent 2026-08-01, RULE-1): the cpu_by_stage / mem_by_stage sizing telemetry must be NESTED inside stage_timings (result.setdefault('stage_timings')), never a top-level result key — content-studio strips unknown top-level keys, so a top-level cpu_by_stage persisted 0/121 on real traffic (same class as source_duration). FAILS if it regresses to `result[\"cpu_by_stage\"] =`, which would make the inc2 burst-sizing data silently un-queryable again.")
+def _inc2_telemetry_nest_guard():
+    src = open("modal_app.py").read()
+    assert '_st_dict["cpu_by_stage"]' in src and '_st_dict["mem_by_stage"]' in src, (
+        "cpu_by_stage/mem_by_stage must be nested via _st_dict (result.setdefault('stage_timings')) "
+        "so they persist — the inc2 sizing telemetry")
+    assert 'result["cpu_by_stage"] =' not in src and 'result["mem_by_stage"] =' not in src, (
+        "cpu_by_stage/mem_by_stage found at TOP-LEVEL result — content-studio strips unknown "
+        "top-level keys (0/121 on traffic). Nest inside stage_timings instead.")
+
+
 @check("VIDSTAB RIP-OUT GUARD (Zac 2026-08-01, RULE-1): vidstab is disabled via a secret-independent clamp (_SHAKE_STABILIZE_THRESHOLD = max(..., 1e9)) so organic stabilisation NEVER fires regardless of any live PROMPTLY_VIDSTAB_THRESHOLD secret. FAILS if the clamp is removed — the rip-out cannot silently regress to always-on without a deliberate, reviewed revert.")
 def _vidstab_ripout_guard():
     src = open("handler.py").read()
@@ -5092,12 +5103,40 @@ def _micro_render_budget():
 
     # 5. arithmetic: the invariant must hold at every chunk size, and stay
     #    inside the 3000s Modal job budget.
-    _PLAIN, _CAP = 300, 600
+    # Read the LIVE constants out of handler rather than restating them, so a
+    # future raise (agent/speed raised these to 600/1500 on 2026-08-02) can
+    # never silently drift past this invariant.
+    _PLAIN = int(re.search(r"_PLAIN_CHUNK_TIMEOUT = (\d+)", _h).group(1))
+    _CAP = int(re.search(r"_OVERLAY_TIMEOUT_CAP = (\d+)", _h).group(1))
+    assert _CAP >= _PLAIN, "overlay cap must be >= its plain budget"
     for _f in (1, 150, 450, 900, 2250, 9000, 100000):
         _t = int(min(_CAP, max(_PLAIN, _f * (_PLAIN / 450.0))))
         _b, _fin = _t + 20, _t + 20 + 140
         assert _t < _b < _fin < 3000, f"budget ordering broken at {_f} frames: {_t}/{_b}/{_fin}"
-        assert _t >= 300, f"budget regressed below today's 300s at {_f} frames: {_t}"
+        assert _t >= _PLAIN, f"budget regressed below the plain budget at {_f} frames: {_t}"
+    # MICRO MUST NOT HAVE THE LOWER CEILING (Zac 2026-08-02): micro's chunk
+    # count was pinned at 4 while overlay's scaled, so micro carried the
+    # GROWING per-chunk load against the LOWER cap — backwards. Micro's cap
+    # tracks overlay's, and micro's chunk count now uses overlay's own rule.
+    assert "_MICRO_TIMEOUT_CAP = _OVERLAY_TIMEOUT_CAP" in _h, \
+        "micro's ceiling must track overlay's, never be a lower constant"
+    assert "_MICRO_CHUNK_COUNT = 4 if" not in _h, \
+        "micro chunk count must NOT be pinned at 4 (per-chunk load must stay bounded)"
+    assert "_MICRO_TAB_BUDGET" in _h and "_MICRO_TAB_BUDGET // max(1, len(_micro_ranges))" in _h, \
+        "unpinning must hold the Chrome tab budget constant (cpu=16 box)"
+
+
+@check("ORPHANED CERTS ARE RUN, NOT JUST COMMITTED (2026-08-02): test_render_ladder.py was PERMANENTLY RED at HEAD — it asserted the pre-LEVER-4 three-rung shape — and no runner invoked it, so the deploy gate's green never covered it. A red test nobody runs trains everyone to ignore red. These render error-path certs now execute INSIDE the gate: a failure here fails the deploy.")
+def _error_path_certs_actually_run():
+    import subprocess as _sp
+    import sys as _sys
+    for _cert in ("test_render_ladder.py", "test_remotion_timeout_forensics.py"):
+        assert os.path.exists(_cert), f"{_cert} missing from the repo"
+        _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
+        assert _r.returncode == 0, (
+            f"{_cert} FAILED (rc={_r.returncode}): "
+            f"{(_r.stdout or '')[-600:]}{(_r.stderr or '')[-400:]}"
+        )
 
 
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
@@ -5764,16 +5803,26 @@ def _progressive_terminal_seam():
         "render_stage must write the publisher INTO the cell at creation (exception-safe drain)"
     assert "_prog_pub = _prog_pub_cell[0]" in _h, \
         "the terminal seam must read the publisher from the cell before draining"
-    # the seam sits inside the terminal finally BEFORE work_dir teardown
+    # the seam sits inside the terminal finally BEFORE work_dir teardown. The
+    # drain-or-cancel logic is EXTRACTED into _drain_progressive_publisher (inc2
+    # render-burst: the ONE drain, shared by the planner's finally AND
+    # render_burst's own finally). So the finally must DRIVE it (the call)
+    # immediately before rmtree, and the extracted HELPER must carry the
+    # bounded-drain / deliberate-cancel law.
     _fin = _h.find("PROGRESSIVE TERMINAL SEAM (Zac ruling 1b")
     assert _fin != -1, "terminal seam block missing"
     _rm = _h.find("shutil.rmtree(work_dir, ignore_errors=True)", _fin)
     assert _rm != -1 and (_rm - _fin) < 2000, "the seam must run IMMEDIATELY before the terminal rmtree"
     _seam = _h[_fin:_rm]
-    assert "_prog_pub.finalize_requested" in _seam and "_prog_pub.drain(timeout_s=120.0)" in _seam \
-        and '_prog_pub.cancel("terminal_drain_timeout")' in _seam \
-        and '_prog_pub.cancel("job_terminal_before_finalize")' in _seam, \
-        "seam law: bounded drain on the finalize path; deliberate cancel otherwise"
+    assert "_drain_progressive_publisher(_prog_pub_cell)" in _seam, \
+        "the terminal finally must DRIVE the extracted drain immediately before the terminal rmtree"
+    _dh = _h.find("def _drain_progressive_publisher(")
+    assert _dh != -1, "the extracted drain helper must exist (shared by planner + render_burst finally)"
+    _dbody = _h[_dh:_dh + 1800]
+    assert "_prog_pub.finalize_requested" in _dbody and "_prog_pub.drain(timeout_s=120.0)" in _dbody \
+        and '_prog_pub.cancel("terminal_drain_timeout")' in _dbody \
+        and '_prog_pub.cancel("job_terminal_before_finalize")' in _dbody, \
+        "seam law: bounded drain on the finalize path; deliberate cancel otherwise (in the extracted helper)"
     # stamped payloads bypass the terminal fence; chunk payloads keep it
     assert 'if not (payload.get("final") or payload.get("superseded")):' in _h, \
         "_persist_preview: only stamped terminal payloads bypass the status fence"
@@ -8780,6 +8829,129 @@ def _fanout_dark():
         "teardown must list+delete the job's fanout prefix"
     assert '_FANOUT_S3_PREFIX_LAST["prefix"] = None' in _td[:2000], \
         "teardown must clear the prefix pointer (warm-container reuse)"
+
+
+@check("inc2 RENDER BURST (DARK, RULE-1): PROMPTLY_RENDER_BURST default OFF → render_stage runs IN-PROCESS byte-identical; the seam dispatches through _run_render_via_burst_or_local(..., is_premium); render_burst exists in modal_app pinned cpu=48 / memory>=49152 (48 GiB blur-OOM floor) / timeout=3000; the ProgressivePublisher drain (_drain_progressive_publisher) runs in render_burst's OWN finally (the one straddling lifecycle moved whole into the burst); the burst PROPAGATES failure (no {ok:False}/error-envelope swallow) so the planner's ONE existing terminal classifies it; a STAGING hiccup ledgers render_burst_fallback and runs the local render. FAILS if any of these regress — a burst that swallowed errors, dropped the drain, or shrank memory below the OOM floor would break the money path the instant the flag flips.")
+def _render_burst_dark():
+    import os as _os, ast as _ast
+    import handler
+    _h_src = open("handler.py").read()
+    _m_src = open("modal_app.py").read()
+
+    # 1. Flag default OFF — behavioral, env save/restore (mirror the fanout gate).
+    _saved = _os.environ.pop("PROMPTLY_RENDER_BURST", None)
+    try:
+        assert handler._render_burst_enabled() is False, \
+            "PROMPTLY_RENDER_BURST must default OFF"
+        _os.environ["PROMPTLY_RENDER_BURST"] = "1"
+        assert handler._render_burst_enabled() is True
+        _os.environ["PROMPTLY_RENDER_BURST"] = "0"
+        assert handler._render_burst_enabled() is False
+        # per-job canary override: render_burst_test forces the burst for ONE
+        # job without flipping the secret; a plain job stays OFF (inert traffic).
+        assert handler._render_burst_enabled({"render_burst_test": "1"}) is True, \
+            "render_burst_test per-job override must force the burst (canary handle)"
+        assert handler._render_burst_enabled({}) is False, \
+            "no override + flag unset → OFF (inert for real traffic)"
+    finally:
+        if _saved is None:
+            _os.environ.pop("PROMPTLY_RENDER_BURST", None)
+        else:
+            _os.environ["PROMPTLY_RENDER_BURST"] = _saved
+
+    # 2. Flag-OFF path is today's in-process render, byte-identical: the
+    # dispatcher's first act is `if not _render_burst_enabled(): return
+    # render_stage(...)`, and the seam calls the dispatcher (passing is_premium).
+    assert "def _run_render_via_burst_or_local(" in _h_src, \
+        "the render dispatcher must exist"
+    _disp = _h_src[_h_src.index("def _run_render_via_burst_or_local("):]
+    _disp = _disp[:_disp.index("\ndef _fanout_prepare(")]
+    assert "if not _render_burst_enabled(input_data):" in _disp and "return render_stage(" in _disp, \
+        "flag-OFF dispatch must return render_stage(...) unchanged (byte-identical)"
+    assert "_rs = _run_render_via_burst_or_local(" in _h_src, \
+        "the render seam must dispatch through _run_render_via_burst_or_local"
+    assert "integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,\n            is_premium,\n        )" in _h_src, \
+        "the seam must pass is_premium to the dispatcher (premium_ctx reconstruction)"
+
+    # 3. render_burst exists in modal_app with the pinned shape.
+    _tree = _ast.parse(_m_src)
+    _fn = next((_n for _n in _ast.walk(_tree)
+                if isinstance(_n, _ast.FunctionDef) and _n.name == "render_burst"), None)
+    assert _fn is not None, "modal_app.py must define render_burst"
+    assert _fn.decorator_list, "render_burst must be an @app.function"
+    _dec_src = _ast.get_source_segment(_m_src, _fn.decorator_list[0]) or ""
+    assert "cpu=48" in _dec_src, "render_burst must pin cpu=48 (Zac: 48 covers ~46 threads)"
+    assert "timeout=3000" in _dec_src, "render_burst timeout must match run_pipeline_bg (3000)"
+    import re as _re
+    _mm = _re.search(r"memory=(\d+)", _dec_src)
+    assert _mm and int(_mm.group(1)) >= 49152, \
+        "render_burst memory must be >= 49152 (48 GiB) — the blur A/B OOM'd at 32 GiB"
+
+    # 4. The publisher drain — the ONE straddling lifecycle — runs in render_burst's
+    # OWN finally, and the helper is shared (extracted, called BOTH sides).
+    _fn_src = _ast.get_source_segment(_m_src, _fn) or ""
+    assert "finally:" in _fn_src and "_drain_progressive_publisher(_prog_pub_cell)" in _fn_src, \
+        "render_burst must drain the publisher in its own finally (lifecycle moved into the burst)"
+    assert callable(getattr(handler, "_drain_progressive_publisher", None)), \
+        "the drain helper must be extracted + importable"
+    assert _h_src.count("def _drain_progressive_publisher(") == 1, \
+        "exactly one _drain_progressive_publisher definition (shared source of truth)"
+    assert "_drain_progressive_publisher(_prog_pub_cell)" in _h_src, \
+        "the planner's finally must drive the SAME extracted drain (None-safe under the split)"
+
+    # 5. PROPAGATE contract (Zac #4): the burst returns a success dict and RAISES
+    # on failure — it must NOT swallow render_stage errors into an {ok:False}/
+    # error envelope (that would need a second terminal emitter and hide the
+    # classification the planner's one terminal needs).
+    assert '"rs":' in _fn_src and '"cost_delta":' in _fn_src, \
+        "render_burst must return {rs, cost_delta} on success (picklable crossing)"
+    assert '"ok": False' not in _fn_src and '"ok":False' not in _fn_src, \
+        "render_burst must NOT return an {ok:False} envelope — failure PROPAGATES (one terminal)"
+    assert 'return {"error"' not in _fn_src, \
+        "render_burst must NOT swallow errors into a return — they propagate to the planner's terminal"
+
+    # 6. Staging: whole-work_dir tar (gen-scene determinism), and a staging hiccup
+    # falls back to the LOCAL render (a job is never lost to S3).
+    assert callable(getattr(handler, "_stage_workdir_to_s3", None)), \
+        "burst staging helper _stage_workdir_to_s3 must exist"
+    assert callable(getattr(handler, "_extract_workdir_from_s3", None)), \
+        "burst extract helper _extract_workdir_from_s3 must exist"
+    assert 'arcname="."' in _h_src, \
+        "staging must tar the whole work_dir CONTENTS (source + B-roll + gen-scene)"
+    assert '"render_burst_fallback"' in _disp and "return render_stage(" in _disp, \
+        "a staging failure must ledger render_burst_fallback and run the local render"
+
+
+@check("inc2 render_burst ENCODE-THREAD PIN (Zac 2026-08-01, RULE-1): every DELIVERED-OUTPUT / render-INPUT libx264 encode pins x264 threads to a fixed count (_X264_ENCODE_THREADS), NEVER x264-auto (threads=0). x264-auto picks ~cores*1.5 so the OUTPUT bytes depend on the MACHINE's core count, not the config — the render_burst at cpu=48 diverged from cpu=16 production (same class as the snapshot env-freeze), and it is also the ~0.99994 run-to-run 'x264 nondeterminism' cert_progressive documented. Gemini proxies (_proxy_venc) are exempt — analysed then discarded, never delivered. FAILS if any non-proxy libx264 lacks a threads= pin or the constant is 0/absent, so byte-identity stays a usable diagnostic on every future canary/A-B/cert.")
+def _x264_thread_pin():
+    _h = open("handler.py").read()
+    import re as _re
+    _m = _re.search(r"_X264_ENCODE_THREADS\s*=\s*(\d+)", _h)
+    assert _m and int(_m.group(1)) > 0, \
+        "_X264_ENCODE_THREADS must be defined as a fixed non-zero pin"
+    _idx = 0
+    _pinned = 0
+    _proxies = 0
+    while True:
+        _p = _h.find('"-c:v", "libx264"', _idx)
+        if _p == -1:
+            break
+        _idx = _p + 1
+        _before = _h[max(0, _p - 500):_p]
+        if "_proxy_venc" in _before:
+            _proxies += 1
+            continue  # Gemini analysis proxy — discarded, never delivered
+        _window = _h[_p:_p + 600]
+        assert ("_x264_threads" in _window) or \
+               ("threads={_X264_ENCODE_THREADS}" in _window), \
+            f"render-path libx264 at offset {_p} has no explicit x264 thread " \
+            f"pin — x264-auto is machine-dependent (breaks byte-identity)"
+        _pinned += 1
+    assert _pinned >= 6, \
+        f"expected >=6 pinned render-path libx264 encodes, found {_pinned}"
+    # the literal x264-auto pin must never reappear in an x264-params
+    assert "threads=0}" not in _h and 'threads=0"' not in _h, \
+        "no libx264 may pin x264-params threads=0 (that IS x264-auto)"
 
 
 print("\n[W3] Progressive delivery (DARK behind PROMPTLY_PROGRESSIVE)")

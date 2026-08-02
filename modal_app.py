@@ -775,16 +775,25 @@ def run_pipeline_bg(body: dict):
                 # instead of log-only. Telemetry, best-effort; render-inert.
                 try:
                     if isinstance(result, dict):
-                        result["cpu_by_stage"] = {
+                        # NEST inside stage_timings (speed agent 2026-08-01): content-studio
+                        # STRIPS unknown TOP-LEVEL result keys — cpu_by_stage/mem_by_stage
+                        # persisted 0/121 on real traffic exactly like source_duration did.
+                        # stage_timings persists whole, so the inc2-sizing telemetry rides
+                        # inside it and becomes queryable on ORGANIC traffic. Root cause
+                        # (content-studio silently dropping unknown top-level keys, twice
+                        # now) is flagged for the errors agent — nesting is the workaround.
+                        # validate_deploy asserts this nesting (RULE-1 guard).
+                        _st_dict = result.setdefault("stage_timings", {})
+                        _st_dict["cpu_by_stage"] = {
                             _st: {"peak": round(max(_cs), 1),
                                   "mean": round(sum(_cs) / len(_cs), 1),
                                   "n": len(_cs), "dur_s": len(_cs) * int(_SAMPLE_S)}
                             for _st, _cs in _cpu_by_stage.items() if _cs}
-                        result["cpu_src"] = _src
+                        _st_dict["cpu_src"] = _src
                         # PER-STAGE PEAK RSS (Zac 2026-08-01, the PRIORITY line —
                         # memory is 59% of the bill): sizes each inc2 container.
                         _MB = 1024 * 1024
-                        result["mem_by_stage"] = {
+                        _st_dict["mem_by_stage"] = {
                             _st: {"peak_mb": round(max(_ms) / _MB, 1),
                                   "mean_mb": round((sum(_ms) / len(_ms)) / _MB, 1),
                                   "n": len(_ms)}
@@ -928,6 +937,164 @@ def render_chunk_fanout(s3_prefix: str, files_manifest: list, render_kind: str,
         out["traceback"] = traceback.format_exc()[-1500:]
         out["seconds"] = round(time.time() - t0, 2)
         return out
+
+
+# ── inc2 Phase 1: RENDER BURST (DARK behind PROMPTLY_RENDER_BURST) ─────────────
+# The whole render stage on a cpu=48 / 64 GiB burst while the planner
+# (run_pipeline_bg, ~380s of network-bound plan/normalize/Gemini-wait) stays
+# cheap. Recovers the ~+100-200s the emergency cpu 64→16 cut cost the render,
+# WITHOUT holding cpu=48 for the ~450s job. Runs handler.render_stage EXACTLY as
+# the in-process path would, after reconstituting the local work_dir (source +
+# B-roll + gen-scene — gen-scene is Nano-Banana-generated and NOT reproducible,
+# so the exact bytes ride over in the staged tar) and rebuilding the two live
+# objects the seam can't cross (premium_ctx + a seed-matched CostMeter, Zac
+# #1/#2). The ProgressivePublisher's WHOLE lifecycle lives here — create→stream
+# →drain in the finally (Zac #4, the one straddling piece). On render_stage
+# failure the exception PROPAGATES: Modal re-raises it in the planner, whose ONE
+# existing except/terminal classifies it exactly as a local render error — no
+# second terminal emitter — while this finally still drains the publisher so a
+# preview is never left servable as terminal.
+#
+# DEPLOYED-APP ONLY: handler reaches this via
+# modal.Function.from_name("promptly-gpu-worker", "render_burst"); an ephemeral
+# `modal run` exercises it only by calling the DEPLOYED function, so the flag
+# stays OFF there and the local path runs.
+#
+# cpu=48: render subprocess parallelism ≈ 5 overlay×6 + 4 micro×4 = ~46 threads
+# (Zac's call — 48 covers it, 64 wastes 33% of the dominant cost term; free-read
+# evidence: 4 real long renders peak 95-100% of the 32 cores they can see).
+# memory=65536 (64 GiB): 15.7 GiB measured peak (blur OFF) with headroom for a
+# smoothness-agent motion-blur flip (the blur A/B OOM'd at 32 GiB). DO NOT drop
+# below 49152 (48 GiB); validate_deploy guards it. App image + all 4 secrets
+# (promptly-secrets/cloudfront/gemini-vertex/lang-flags) are inherited app-wide.
+@app.function(
+    cpu=48, memory=65536, region="us", timeout=3000, retries=0,
+    volumes={"/prewarm": prewarm_volume},
+    # No enable_memory_snapshot: it is a no-op without @enter (handler imports
+    # in-body, per-invocation) and would only add os.environ-freeze surface to a
+    # money-path function whose render_stage reads live secret flags.
+)
+def render_burst(payload: dict) -> dict:
+    import sys as _sys, os as _os, shutil as _shutil
+    _sys.path.insert(0, "/")
+    import handler as _H
+    import premium as _premium
+    try:
+        _H._install_shutdown_handler()  # ledger-flush safety net on this container too
+    except Exception:
+        pass
+    _job_id = payload["job_id"]
+    _work_dir = payload["work_dir"]
+    # Module-global setup handler() does before render_stage in-process — set the
+    # same on the burst so the shutdown ledger + stage sampler bucket correctly.
+    try:
+        _H._ACTIVE_JOB_ID = _job_id
+    except Exception:
+        pass
+    try:
+        _H._set_cpu_stage("render")
+    except Exception:
+        pass
+    # ── burst cpu/RSS sampler: confirms the cpu=48 / 64 GiB sizing on real burst
+    #    traffic (does the render plateau BELOW 48, or peg it and want more?).
+    #    Daemon, cgroup-read, log-only, render-inert. ──────────────────────────
+    import threading as _threading, time as _t2
+    _samp_stop = _threading.Event()
+    _cpu_s = []
+    _mem_s = []
+    _ncores = _os.cpu_count() or 0
+    def _rd_cpu():
+        try:
+            with open("/sys/fs/cgroup/cpu.stat") as _f:
+                for _ln in _f:
+                    if _ln.startswith("usage_usec"):
+                        return int(_ln.split()[1])
+        except Exception:
+            return None
+        return None
+    def _rd_mem():
+        try:
+            with open("/sys/fs/cgroup/memory.current") as _f:
+                return int(_f.read().strip())
+        except Exception:
+            return None
+    def _samp():
+        _lu = _rd_cpu(); _lt = _t2.monotonic()
+        while not _samp_stop.wait(3.0):
+            _nt = _t2.monotonic(); _nu = _rd_cpu()
+            if _nu is not None and _lu is not None and _nt > _lt:
+                _cpu_s.append((_nu - _lu) / ((_nt - _lt) * 1e6))
+            _lu, _lt = _nu, _nt
+            _m = _rd_mem()
+            if _m is not None:
+                _mem_s.append(_m)
+    _samp_t = _threading.Thread(target=_samp, daemon=True)
+    _samp_t.start()
+    # 1. reconstitute the local work_dir (all planner media) at the SAME path so
+    #    every embedded absolute path in the render args resolves unchanged.
+    _H._extract_workdir_from_s3(payload["s3_workdir_key"], _work_dir)
+    # 2. rebuild the two live objects (Zac #1/#2): a seed-matched CostMeter (only
+    #    total_usd() is read inside render_stage) + a fresh PremiumContext (its
+    #    asset pool is lazy, so construction spawns NO threads). Both shut down
+    #    HERE — a ThreadPoolExecutor cannot cross a process boundary.
+    _cm = _premium.CostMeter(_job_id)
+    _seed = float(payload.get("cost_seed_usd") or 0.0)
+    if _seed:
+        _cm.add("_planner_seed", count=0, usd=_seed)
+    _premium_ctx = _premium.PremiumContext(
+        is_premium=bool(payload.get("is_premium")),
+        route_premium=bool(payload.get("route_premium")),
+        cost_meter=_cm,
+    )
+    _prog_pub_cell = [None]   # publisher created INSIDE render_stage, drained in this finally
+    _rs_cost_cell = [0.0, 0]  # QA-regen spend → returned as a picklable delta
+    try:
+        _rs = _H.render_stage(
+            _job_id, payload["input_data"], payload["edit_plan"], _work_dir,
+            payload["source_path"], payload["output_path"], payload["transcript"],
+            payload["source_duration"], payload["app_url"], payload["broll_clips"],
+            payload["upload_url"], payload["timings"], payload["floor_state"],
+            bool(payload.get("route_premium")), _premium_ctx, _cm,
+            bool(payload.get("integrity_observe_only")), payload.get("render_est"),
+            _prog_pub_cell, _rs_cost_cell,
+        )
+        # SUCCESS: return the picklable render result + the QA-regen cost delta.
+        # (No {"ok":...} envelope — a FAILURE raises and propagates, so a returned
+        # dict always means success; the planner folds cost_delta into its meter.)
+        return {"rs": _rs, "cost_delta": [float(_rs_cost_cell[0]), int(_rs_cost_cell[1])]}
+    finally:
+        # burst sizing telemetry — peak/mean cores + peak RSS (confirms cpu=48 /
+        # 64 GiB against real render work).
+        _samp_stop.set()
+        try:
+            if _cpu_s:
+                _pk = max(_cpu_s); _mn = sum(_cpu_s) / len(_cpu_s)
+                print(f"[burst-cpu] job={_job_id} peak={_pk:.1f} mean={_mn:.1f} of "
+                      f"{_ncores} cores ({100 * _pk / max(1, _ncores):.0f}% peak, "
+                      f"{len(_cpu_s)} samples) — cpu=48 sizing check", flush=True)
+            if _mem_s:
+                _MB = 1024 * 1024
+                print(f"[burst-mem] job={_job_id} peak={max(_mem_s)/_MB:.0f}MB "
+                      f"mean={(sum(_mem_s)/len(_mem_s))/_MB:.0f}MB ({len(_mem_s)} "
+                      f"samples) — 64GiB sizing check", flush=True)
+        except Exception:
+            pass
+        # THE straddling lifecycle, moved WHOLE into the burst (Zac #4): drain +
+        # cancel the publisher on EVERY exit — success AND the raise path — so a
+        # preview is never left servable as a terminal state. Then tear down the
+        # reconstructed pool and the local work_dir.
+        try:
+            _H._drain_progressive_publisher(_prog_pub_cell)
+        except Exception as _de:
+            print(f"[render_burst] publisher drain error (non-fatal): {_de}", flush=True)
+        try:
+            _premium_ctx.shutdown()
+        except Exception:
+            pass
+        try:
+            _shutil.rmtree(_work_dir, ignore_errors=True)
+        except Exception:
+            pass
 
 
 # ── Web endpoint ───────────────────────────────────────────────────────────────

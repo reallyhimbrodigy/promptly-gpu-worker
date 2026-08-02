@@ -76,6 +76,15 @@ inflated by retries into an apparent outage.
 - **Never retry as an answer to failure** — root-cause and exterminate.
 - **$0.10/job** is the cost law. **90s end-to-end** is the latency law.
 - **Fail loudly to us, never to the user.**
+- **Render determinism (2026-08-01)**: the x264 encode thread count is PINNED
+  (`_X264_ENCODE_THREADS=48` in handler.py, never x264-auto — auto makes output
+  depend on the machine's core count). Renders are now **byte-identical on a
+  fixed plan across ANY cpu**. Byte-identity is the cert bar — any difference on
+  a fixed plan is a **DEFECT**, not variance. No PSNR/SSIM threshold for
+  fixed-plan A/Bs (this retires the old "x264 nondeterminism ~0.99994"
+  determinism-relative bar). A canary/harness that renders the pipeline MUST
+  mount the deployed app's FULL secret set (incl. `promptly-lang-flags`) — a
+  missing secret changes the render flags and confounds every comparison.
 
 ## Working agreement
 

@@ -2113,11 +2113,25 @@ def _has_nvenc():
 # Vulkan was supposed to help on top of that, not be load-bearing.
 
 
+# inc2 render_burst (Zac 2026-08-01): PIN the x264 encoder thread count. x264
+# auto (threads=0) picks ~min(cores*1.5, 128) → the OUTPUT bytes depend on the
+# MACHINE's core count, not the config (same class as the snapshot env-freeze),
+# so render_burst at cpu=48 diverged byte-for-byte from cpu=16 production.
+# Benchmark (cert_encode_threads_bench): 48 is FASTER than x264-auto on BOTH
+# boxes (cpu16→32 visible cores: 11.0s vs 14.2s; cpu48→64: 21.0s vs 26.9s — auto
+# over-threads) AND byte-deterministic AND byte-identical across cpu. A fixed
+# number — the highest that stays fast. NEVER 0 (validate_deploy asserts it).
+_X264_ENCODE_THREADS = 48
+
+
 def get_encode_args(quality="high", threads=0):
     """Return encoder args for FFmpeg. Uses NVENC when GPU is available.
 
     quality="high"     → final output (CQ 18 — maximum quality for social media)
     quality="lossless" → intermediate files (lossless preset)
+
+    threads: x264 encoder thread count. 0/None → the pinned _X264_ENCODE_THREADS.
+    NEVER x264-auto — that makes the output depend on the machine, not the config.
     """
     if _has_nvenc():
         if quality == "lossless":
@@ -2144,7 +2158,7 @@ def get_encode_args(quality="high", threads=0):
         # `lossless` intermediates stay on `ultrafast` since the quality
         # ceiling is already perfect (no loss) and the speed matters for
         # parallel render time.
-        _x264_threads = f"threads={threads}"
+        _x264_threads = f"threads={threads or _X264_ENCODE_THREADS}"
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                     "-fps_mode", "passthrough",
@@ -20546,6 +20560,8 @@ def _download_and_concat_sources(source_urls, dest_path, work_dir):
         "-filter_complex", _filter,
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        # inc2 render_burst: PIN x264 threads (never auto) — cpu-deterministic bytes.
+        "-x264-params", f"threads={_X264_ENCODE_THREADS}",
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart", "-y", dest_path,
     ]
@@ -22792,9 +22808,192 @@ def _render_fanout_enabled():
     )
 
 
+def _render_burst_enabled(input_data=None):
+    """inc2 Phase 1 render-burst flag. DARK by default; PROMPTLY_RENDER_BURST=1
+    (Modal secret/env) routes the whole render stage to the cpu=48 render_burst
+    container while the planner stays cheap. Default OFF → render_stage runs
+    IN-PROCESS exactly as today (byte-identical). Deployed-app-only: an ephemeral
+    `modal run` can only reach the DEPLOYED render_burst, so the flag stays OFF
+    there and the local path runs.
+
+    PER-JOB CANARY HANDLE: input_data.render_burst_test=1 forces the burst for a
+    SINGLE job without flipping the secret for all traffic — the canary knob (the
+    zero_reject_test / progressive_test pattern), inert for real traffic."""
+    if isinstance(input_data, dict) and str(
+            input_data.get("render_burst_test") or "").strip().lower() in (
+            "1", "true", "on", "yes"):
+        return True
+    return os.environ.get("PROMPTLY_RENDER_BURST", "").strip().lower() in (
+        "1", "true", "on", "yes",
+    )
+
+
+def _drain_progressive_publisher(_prog_pub_cell):
+    """Terminal drain/cancel of the progressive publisher (Zac ruling 1b,
+    2026-07-25 — the long-clip race). Every preview input/output lives inside
+    work_dir, so the publisher must reach a terminal state BEFORE teardown.
+    Success path (finalize requested at mux time): a bounded drain lets the last
+    1-2 chunk transcodes finish (~20s each). Anything else — or a drain timeout —
+    is a deliberate cancel: the final is delivered (or the job failed), the
+    preview is moot, stamped superseded so a preview is never servable as a
+    terminal state.
+
+    EXTRACTED (inc2 Phase 1) so the ONE drain drives from BOTH sides of the
+    render-burst seam: the planner's handler.finally (a None-safe no-op when the
+    render ran in a burst — the planner's cell stays [None]) AND render_burst's
+    own finally, where the publisher actually lives under the split. Behaviour is
+    verbatim the pre-extraction inline block."""
+    try:
+        _prog_pub = _prog_pub_cell[0]
+        if _prog_pub is not None and not (
+                _prog_pub.finalized or _prog_pub.disabled or _prog_pub.inert):
+            if _prog_pub.finalize_requested:
+                if not _prog_pub.drain(timeout_s=120.0):
+                    _prog_pub.cancel("terminal_drain_timeout")
+                    _prog_pub.drain(timeout_s=10.0)
+            else:
+                _prog_pub.cancel("job_terminal_before_finalize")
+                _prog_pub.drain(timeout_s=10.0)
+    except Exception as _ts_err:
+        print(f"[progressive] terminal seam error (non-fatal): "
+              f"{type(_ts_err).__name__}: {_ts_err}", flush=True)
+
+
 def _fanout_s3_bucket():
     return (os.environ.get("S3_BUCKET_NAME")
             or os.environ.get("SUPABASE_S3_BUCKET") or "promptly-video-storage")
+
+
+def _stage_workdir_to_s3(work_dir, job_id):
+    """inc2 render-burst staging: tar the ENTIRE work_dir (normalized source +
+    B-roll + gen-scene assets — every planner-produced file the render stage
+    consumes; gen-scene is Nano-Banana-generated and NOT reproducible, so the
+    exact bytes must ride to the burst) and upload it ONCE to
+    s3://{bucket}/burst/{job_id}/work_dir.tar. Returns the S3 key. Raises on ANY
+    failure — the caller falls back to a LOCAL render so no job is lost to a
+    staging hiccup."""
+    import tarfile as _tarfile
+    if _aws_s3_client is None:
+        raise RuntimeError("AWS S3 client unavailable (render-burst needs the S3 round-trip)")
+    _bucket = _fanout_s3_bucket()
+    _wd = work_dir.rstrip("/")
+    _key = f"burst/{job_id}/work_dir.tar"
+    _tar_path = os.path.join(os.path.dirname(_wd) or "/tmp",
+                             f"_burst_{os.path.basename(_wd)}.tar")
+    _t0 = time.time()
+    try:
+        with _tarfile.open(_tar_path, "w") as _tf:
+            # arcname="." → the tar carries work_dir CONTENTS. The burst recreates
+            # the SAME absolute work_dir path and extracts here, so every embedded
+            # absolute path (source_path, output_path, broll_clips[*] locals) stays
+            # valid with ZERO rewriting.
+            _tf.add(_wd, arcname=".")
+        _sz = os.path.getsize(_tar_path)
+        _aws_s3_client.upload_file(_tar_path, _bucket, _key, Config=_S3_TRANSFER_CONFIG)
+        print(f"[render_burst] staged work_dir → s3://{_bucket}/{_key} "
+              f"({_sz/1024/1024:.1f}MB, {time.time()-_t0:.1f}s)", flush=True)
+        return _key
+    finally:
+        try:
+            os.remove(_tar_path)
+        except Exception:
+            pass
+
+
+def _extract_workdir_from_s3(s3_key, work_dir):
+    """Burst side of the inc2 staging: download the work_dir tar and extract it
+    into `work_dir`, recreated at the SAME absolute path the planner used (so all
+    embedded paths resolve). Raises on failure — the burst then fails loudly and
+    the planner emits its one terminal."""
+    import tarfile as _tarfile
+    if _aws_s3_client is None:
+        raise RuntimeError("AWS S3 client unavailable in render_burst")
+    _bucket = _fanout_s3_bucket()
+    _wd = work_dir.rstrip("/")
+    os.makedirs(_wd, exist_ok=True)
+    _tar_path = os.path.join("/tmp", f"_burst_dl_{os.path.basename(_wd)}.tar")
+    _t0 = time.time()
+    try:
+        _aws_s3_client.download_file(_bucket, s3_key, _tar_path, Config=_S3_TRANSFER_CONFIG)
+        with _tarfile.open(_tar_path, "r") as _tf:
+            _tf.extractall(_wd)  # trusted tar we authored; members are work_dir-relative
+        print(f"[render_burst] extracted work_dir from s3://{_bucket}/{s3_key} "
+              f"({time.time()-_t0:.1f}s)", flush=True)
+    finally:
+        try:
+            os.remove(_tar_path)
+        except Exception:
+            pass
+
+
+def _run_render_via_burst_or_local(
+        job_id, input_data, edit_plan, work_dir, source_path, output_path,
+        transcript, source_duration, app_url, broll_clips, upload_url,
+        _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
+        integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+        is_premium):
+    """inc2 Phase 1 render dispatch. Flag OFF (default) → run render_stage
+    IN-PROCESS, byte-identical to today. Flag ON → stage work_dir to S3 and run
+    render_stage on the cpu=48 render_burst container: the ProgressivePublisher's
+    whole lifecycle (create→stream→drain) lives in the burst, the QA-regen spend
+    rides back as a picklable delta folded into _rs_cost_cell, and any burst
+    FAILURE or DEATH (SIGKILL/OOM/preempt) PROPAGATES so handler's ONE existing
+    except/terminal classifies it exactly as a local render error would — no
+    second terminal emitter. A STAGING hiccup falls back to the local render
+    (a job is never lost to S3)."""
+    if not _render_burst_enabled(input_data):
+        return render_stage(
+            job_id, input_data, edit_plan, work_dir, source_path, output_path,
+            transcript, source_duration, app_url, broll_clips, upload_url,
+            _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
+            integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+        )
+    # ── render-burst path (DARK; per-job canary via render_burst_test) ────────
+    try:
+        _s3_key = _stage_workdir_to_s3(work_dir, job_id)
+    except Exception as _stage_err:
+        print(f"[render_burst] staging FAILED ({type(_stage_err).__name__}: "
+              f"{_stage_err}) — LOCAL render fallback", flush=True)
+        _record_divergence("render", {"stage": "stage_workdir",
+                                      "detail": str(_stage_err)[:300]},
+                           "render_burst_fallback", reason="stage_failed")
+        return render_stage(
+            job_id, input_data, edit_plan, work_dir, source_path, output_path,
+            transcript, source_duration, app_url, broll_clips, upload_url,
+            _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
+            integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+        )
+    _payload = {
+        "s3_workdir_key": _s3_key,
+        "job_id": job_id, "input_data": input_data, "edit_plan": edit_plan,
+        "work_dir": work_dir, "source_path": source_path, "output_path": output_path,
+        "transcript": transcript, "source_duration": source_duration,
+        "app_url": app_url, "broll_clips": broll_clips, "upload_url": upload_url,
+        "timings": _timings, "floor_state": _floor_state,
+        "route_premium": bool(route_premium), "is_premium": bool(is_premium),
+        "integrity_observe_only": bool(integrity_observe_only),
+        "render_est": _render_est,
+        "cost_seed_usd": (_cost_meter.total_usd() if _cost_meter is not None else 0.0),
+    }
+    import modal as _modal
+    _fn = _modal.Function.from_name("promptly-gpu-worker", "render_burst")
+    print(f"[render_burst] dispatch job={job_id} → cpu=48 burst (flag ON)", flush=True)
+    # .remote() BLOCKS. A burst that RAISES (render_stage error) or DIES
+    # (SIGKILL/OOM/preempt → Modal re-raises) propagates HERE unhandled, into
+    # handler's single except → classify_error → the ONE terminal. NOT swallowed.
+    _out = _fn.remote(_payload)
+    if not isinstance(_out, dict) or "rs" not in _out:
+        raise RuntimeError(
+            f"render_burst returned a malformed result ({type(_out).__name__}) — "
+            f"contract breach; failing to handler's one terminal")
+    _cd = _out.get("cost_delta") or [0.0, 0]
+    try:
+        _rs_cost_cell[0] = float(_cd[0]); _rs_cost_cell[1] = int(_cd[1])
+    except Exception:
+        pass
+    print(f"[render_burst] job={job_id} returned OK "
+          f"(qa_regen_cost=${_rs_cost_cell[0]:.4f})", flush=True)
+    return _out["rs"]
 
 
 def _fanout_prepare(stage_key, staged_public_paths, overlay_input_path,
@@ -25641,6 +25840,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # `fast` + CRF 14 is a much better quality/speed tradeoff for
             # an intermediate that downstream depends on.
             "-c:v", "libx264", "-preset", "fast", "-crf", "14",
+            # inc2 render_burst: PIN x264 threads (never auto). Remotion reads
+            # this per-clip source frame-by-frame → thread-dependent bytes would
+            # decode to different frames and break final byte-identity across cpu.
+            "-x264-params", f"threads={_X264_ENCODE_THREADS}",
             "-pix_fmt", "yuv420p",
             "-g", str(_gop),
             "-keyint_min", str(_gop),
@@ -25861,7 +26064,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # — in particular the TimeoutExpired branch that owns the RENDER_FATAL
     # class — are unit-testable. It closed over nothing, so this is a pure
     # move. Local alias keeps every call site and the _fanout_render_chunks
-    # hand-off unchanged.
+    # hand-off unchanged. MERGE NOTE (agent/speed 704383c): speed raised this
+    # function's DEFAULT 300->600 because micro submitted without an explicit
+    # timeout; that default is carried on _remotion_subprocess, and micro now
+    # also passes its own computed budget, so the default is a fallback only.
     _run_remotion = _remotion_subprocess
 
     def _split_frames(total_frames: int, n_chunks: int) -> list:
@@ -25911,9 +26117,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # the unchanged 300s. Preferred over a blanket raise (wasteful on plain chunks)
     # or cutting samples (kills the smoothness the scene exists for).
     _SCENE_FRAME_MULT = 6             # matches CameraMotionBlur samples=6
-    _PLAIN_CHUNK_TIMEOUT = 300        # unchanged for scene-free chunks
+    _PLAIN_CHUNK_TIMEOUT = 600        # RAISED 300->600 (Zac P0 2026-08-02): a Pro/
+                                     # premium render on the heavy path can need
+                                     # >300s per chunk; dying at 300 -> RENDER_FATAL
+                                     # (1aa24c33 x5). A render that needs longer must
+                                     # FINISH — the degrade ladder already tried
+                                     # full+retry+stripped. Chunks run in PARALLEL so
+                                     # this is per-chunk wall, well under 3000s.
     _SEC_PER_SCENE_FRAME_EXTRA = 0.4  # per extra sample-frame the 6x multiplier adds
-    _OVERLAY_TIMEOUT_CAP = 600        # ceiling — render still fits the 900s job budget
+    _OVERLAY_TIMEOUT_CAP = 1500       # RAISED 600->1500 (Zac P0 2026-08-02): the
+                                     # 600 ceiling was sized for the OLD 900s job
+                                     # budget; the Modal wall is now 3000s
+                                     # (_MODAL_FN_TIMEOUT_S). A heavy scene chunk +
+                                     # composite/mux still fits well under 3000s
+                                     # (parallel chunks; ~1500 + ~200 tail). The
+                                     # reaper EXEC_WALL_MS is keyed to the UNCHANGED
+                                     # 3000s Modal timeout, so no reaper-first change.
     _scene_spans = [
         (int(_s.get("fromFrame") or 0),
          int(_s.get("fromFrame") or 0) + int(_s.get("durationInFrames") or 0))
@@ -26019,9 +26238,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # 0.667 s/frame). Micro simply gets the same allowance, floored at today's
     # 300s so nothing gets a SMALLER budget than before, and capped at the
     # same 600s ceiling overlay already uses.
-    _MICRO_SEC_PER_FRAME = _PLAIN_CHUNK_TIMEOUT / 450.0   # 0.667 — overlay's own rate
-    _MICRO_TIMEOUT_FLOOR = _PLAIN_CHUNK_TIMEOUT           # 300 — never below today
-    _MICRO_TIMEOUT_CAP = _OVERLAY_TIMEOUT_CAP             # 600 — overlay's own ceiling
+    _MICRO_SEC_PER_FRAME = _PLAIN_CHUNK_TIMEOUT / 450.0   # overlay's own rate, whatever it is
+    _MICRO_TIMEOUT_FLOOR = _PLAIN_CHUNK_TIMEOUT           # never below overlay's plain budget
+    _MICRO_TIMEOUT_CAP = _OVERLAY_TIMEOUT_CAP             # tracks overlay's ceiling (now 1500)
 
     def _micro_chunk_timeout(_fs, _fe):
         _frames = max(0, int(_fe) - int(_fs) + 1)
@@ -26037,10 +26256,44 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if micro_input is not None:
         _MICRO_CHUNK_THRESHOLD = 200
         _micro_total_frames = int(micro_input.get("totalDurationInFrames") or 0)
-        _MICRO_CHUNK_COUNT = 4 if _micro_total_frames >= _MICRO_CHUNK_THRESHOLD else 1
+        # ── UNPINNED (2026-08-02, Zac): micro chunk count now SCALES ─────────
+        # WHY IT WAS PINNED AT 4 (the comment above, verbatim in intent): it
+        # was a TAB BUDGET, not a load calculation — "4 micro chunks × 4 tabs
+        # each = 16 micro tabs. Combined with the 8×4 overlay chunks (32 tabs),
+        # total is 48 tabs sharing 64 vCPUs = 1.33 vCPU/tab." That budget was
+        # sized for a 64-vCPU container. The box is now cpu=16 (emergency cost
+        # cut 2026-07-30), so those same 48 tabs get 0.33 vCPU/tab — the pin's
+        # premise is gone, and it was never about micro's per-chunk workload.
+        #
+        # The consequence of pinning: overlay's chunk count scales with
+        # duration (min(8, frames//450)) so its per-chunk load is bounded,
+        # while micro's fixed 4 made micro frames-per-chunk grow linearly with
+        # source length — roughly 2× overlay's on a long source. That is
+        # backwards: the composition that reads source video heavily
+        # (OffthreadVideo seeking for transitions + complex zoom) carried the
+        # GROWING load against the LOWER ceiling, which is why 10 of the 13
+        # TimeoutExpired RENDER_FATALs were micro chunks.
+        #
+        # Unpinning uses overlay's own rule so per-chunk load stops growing —
+        # which is what makes the ceiling stop mattering, rather than chasing
+        # it upward. TAB-NEUTRAL by construction: concurrency is divided by
+        # the chunk count so micro still presents ~16 tabs total, exactly as
+        # the original budget intended. More chunks × fewer tabs each = same
+        # contention, bounded per-chunk work, more processes against Remotion's
+        # documented ~16-22fps per-instance ceiling (issue #4664).
+        _MICRO_TAB_BUDGET = 16
+        if _micro_total_frames >= _MICRO_CHUNK_THRESHOLD:
+            _MICRO_CHUNK_COUNT = min(
+                max(1, int(os.environ.get("PROMPTLY_RENDER_CHUNKS", "") or 8)),
+                max(1, int(_micro_total_frames) // _CHUNK_FRAMES),
+            )
+            _MICRO_CHUNK_COUNT = max(4, _MICRO_CHUNK_COUNT)  # never fewer than today
+        else:
+            _MICRO_CHUNK_COUNT = 1
         _micro_ranges = _split_frames(_micro_total_frames, _MICRO_CHUNK_COUNT)
         _micro_chunked = len(_micro_ranges) > 1
-        _MICRO_CONCURRENCY = 4 if _micro_chunked else _PER_CHUNK_CONCURRENCY
+        _MICRO_CONCURRENCY = (max(2, _MICRO_TAB_BUDGET // max(1, len(_micro_ranges)))
+                              if _micro_chunked else _PER_CHUNK_CONCURRENCY)
         if _micro_chunked:
             for _i, (_fs, _fe) in enumerate(_micro_ranges):
                 _chunk_path = os.path.join(work_dir, f"micro_chunk_{_i:02d}.mov")
@@ -26271,6 +26524,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 # maxrate bumped 18M → 24M to match the higher CRF target
                 # without bitrate clamping the cleanest frames.
                 "-c:v", "libx264", "-preset", "slow", "-crf", "16",
+                # inc2 render_burst: PIN x264 threads (never auto) — this is the
+                # ONE lossy encode that ships to the user; byte-identical across cpu.
+                "-x264-params", f"threads={_X264_ENCODE_THREADS}",
                 "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
                 "-maxrate", "24M", "-bufsize", "48M",
                 "-profile:v", "high", "-level:v", "4.1",
@@ -26832,6 +27088,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
              # Same settings the single-pass path uses — keeps output
              # quality identical regardless of which path produced it.
              "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+             # inc2 render_burst: PIN x264 threads (never auto) so the final
+             # delivered encode is byte-identical across cpu (cpu48 burst vs cpu16).
+             "-x264-params", f"threads={_X264_ENCODE_THREADS}",
              "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
              "-maxrate", "18M", "-bufsize", "36M",
              "-profile:v", "high", "-level:v", "4.1",
@@ -27335,7 +27594,7 @@ def _remotion_progress_digest(_stdout, cmd):
             f"{f' last_fps={_fps}' if _fps else ''}{_tail}")
 
 
-def _remotion_subprocess(label, cmd, timeout=300):
+def _remotion_subprocess(label, cmd, timeout=600):
     """Run ONE `node render-full.mjs` and return its elapsed seconds.
 
     MODULE-LEVEL on purpose: this is the render path's error surface, and a
@@ -33049,6 +33308,9 @@ def handler(job):
                  # iPhone HEVC sources transcoded to H.264 lose some quality
                  # at the codec switch; CRF 15 minimizes that loss.
                      "-c:v", "libx264", "-preset", "fast", "-crf", "15",
+                     # inc2 render_burst: PIN x264 threads (never auto) — this
+                     # normalized source feeds the render; cpu-deterministic bytes.
+                     "-x264-params", f"threads={_X264_ENCODE_THREADS}",
                      "-pix_fmt", "yuv420p",
                      # Tag output as BT.709 SDR tv-range explicitly. After the
                      # zscale tone-map above, the YUV samples are correct SDR
@@ -34140,7 +34402,21 @@ def handler(job):
                     _plan_json = _plj.loads(_plj.dumps(edit_plan, default=str))
                 except Exception as _ple:
                     _plan_json = {"_unserializable": f"{type(_ple).__name__}"}
-                return {"status": "plan_only", "job_id": job_id, "edit_plan": _plan_json}
+                # Emit the Gemini timing + output-token cost so a PLAN_ONLY A/B
+                # (LEAN_SCHEMA / thinking-budget arms) can score the OUTPUT lever
+                # directly — wall-clock is r=0.59 vs output tokens, so tokens are
+                # the number to move. Summed from _GEMINI_CALL_LOG (the return
+                # exits before _timings["gemini_call"] is assembled downstream).
+                _gcalls = [c for c in _GEMINI_CALL_LOG if isinstance(c, dict)]
+                _live = [c for c in _gcalls if not c.get("aborted")]
+                return {"status": "plan_only", "job_id": job_id, "edit_plan": _plan_json,
+                        "gemini_call_s": round(sum(c.get("total_s") or 0 for c in _live), 1),
+                        "gemini_output_tokens": sum(c.get("out_tok") or 0 for c in _live),
+                        "gemini_ttfb_s": round(sum(c.get("ttfb_s") or 0 for c in _live), 1),
+                        "gemini_n_calls": len(_live),
+                        "gemini_calls": [{"label": c.get("label"), "total_s": c.get("total_s"),
+                                          "out_tok": c.get("out_tok"), "aborted": c.get("aborted")}
+                                         for c in _gcalls]}
             # EDIT RATIONALE (2026-07-25): persist the user-facing "why" for the
             # client to display, alongside current_step/step_message. Additive +
             # fail-open; edit_plan carries edit_rationale via the PostCutPlan
@@ -35034,11 +35310,16 @@ def handler(job):
             raise _MinimalRouteSignal("plan_collapsed")
         _render_est = max(60.0, min(240.0, float(source_duration) * 3.0))
         _set_cpu_stage("render")
-        _rs = render_stage(
+        # inc2 Phase 1: DARK dispatch. Flag OFF → render_stage in-process (today,
+        # byte-identical). Flag ON → the whole stage runs on the cpu=48
+        # render_burst container; a burst failure/death propagates into the ONE
+        # terminal below, a staging hiccup falls back to a local render.
+        _rs = _run_render_via_burst_or_local(
             job_id, input_data, edit_plan, work_dir, source_path, output_path,
             transcript, source_duration, app_url, broll_clips, upload_url,
             _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
             integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+            is_premium,
         )
         edit_plan = _rs["edit_plan"]
         _timings = _rs["timings"]
@@ -35477,28 +35758,11 @@ def handler(job):
                 _cost_meter.log()
         if premium_ctx is not None:
             premium_ctx.shutdown()
-        # PROGRESSIVE TERMINAL SEAM (Zac ruling 1b, 2026-07-25 — the long-clip
-        # race): every preview input/output lives inside work_dir, so the
-        # publisher must reach a terminal state BEFORE teardown. Success path
-        # (finalize was requested at mux time): bounded drain lets the last
-        # 1-2 chunk transcodes finish cleanly (~20s each). Anything else — or
-        # a drain timeout — is a deliberate cancel: the final is delivered (or
-        # the job failed), the preview is moot, and the payload is stamped
-        # superseded so a preview is never servable as a terminal state.
-        try:
-            _prog_pub = _prog_pub_cell[0]
-            if _prog_pub is not None and not (
-                    _prog_pub.finalized or _prog_pub.disabled or _prog_pub.inert):
-                if _prog_pub.finalize_requested:
-                    if not _prog_pub.drain(timeout_s=120.0):
-                        _prog_pub.cancel("terminal_drain_timeout")
-                        _prog_pub.drain(timeout_s=10.0)
-                else:
-                    _prog_pub.cancel("job_terminal_before_finalize")
-                    _prog_pub.drain(timeout_s=10.0)
-        except Exception as _ts_err:
-            print(f"[progressive] terminal seam error (non-fatal): "
-                  f"{type(_ts_err).__name__}: {_ts_err}", flush=True)
+        # PROGRESSIVE TERMINAL SEAM (Zac ruling 1b) — drive the ONE extracted
+        # drain (_drain_progressive_publisher). Under the render-burst split this
+        # cell is [None] here (the publisher lived AND drained in the burst), so
+        # this is a None-safe no-op; in-process it drains exactly as before.
+        _drain_progressive_publisher(_prog_pub_cell)
         if work_dir:
             shutil.rmtree(work_dir, ignore_errors=True)
         # LEVER 4 lifecycle: delete the job's UPLOADED proxy reference (only
