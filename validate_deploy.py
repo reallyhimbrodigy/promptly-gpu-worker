@@ -4985,6 +4985,121 @@ def _render_fatal_env_class():
     assert os.path.exists("cert_remotion_env_app.py")
 
 
+@check("RENDER_FATAL TIMEOUT FORENSICS (2026-08-01): a `node render-full.mjs` subprocess timeout must never again reach the job row as a bare `TimeoutExpired: Command [...] timed out` with no evidence — 13 of 14 prod RENDER_FATALs (2026-07-25..08-01, 10 users) landed exactly that way while POSIX subprocess.run had the child's partial stdout/stderr attached to the exception the whole time, unread. RUNTIME-ASSERTED (not a source grep): _remotion_subprocess is actually timed out here and the raised error must carry composition label + how-far-it-got + budget INSIDE the first 300 chars, because the degrade ladder truncates the cause at [:300] and that is the only copy reaching result.error_detail (Modal's log buffer retains ~1h, always less than time-to-look). cert: test_remotion_timeout_forensics.py 19/19")
+def _render_fatal_timeout_forensics():
+    import subprocess as _sp
+    import sys as _sys
+    import tempfile as _tf
+    import handler
+    assert os.path.exists("test_remotion_timeout_forensics.py"), \
+        "forensics cert must ride the repo"
+    _fn = getattr(handler, "_remotion_subprocess", None)
+    assert callable(_fn), \
+        "_remotion_subprocess must stay MODULE-LEVEL — a nested closure cannot be tested"
+
+    # A child that reports progress like render-full.mjs, then outlives its budget.
+    _fd, _p = _tf.mkstemp(suffix=".py")
+    with os.fdopen(_fd, "w") as _f:
+        _f.write(
+            "import sys, time\n"
+            "print('[render-full] progress 20% rendered=450 encoded=441 "
+            "interval_render_fps=6.1', flush=True)\n"
+            "sys.stderr.write('warn noise\\n'); sys.stderr.flush()\n"
+            "time.sleep(600)\n"
+        )
+    _err = None
+    try:
+        _fn("micro-00", [_sys.executable, "-u", _p,
+                         "--frame-range", "0,2249", "--concurrency", "4"], timeout=2)
+    except Exception as _e:
+        _err = _e
+    finally:
+        os.unlink(_p)
+
+    assert _err is not None, "timeout must raise"
+    assert isinstance(_err, RuntimeError) and not isinstance(_err, _sp.TimeoutExpired), \
+        f"must re-raise as RuntimeError (stable shape for the ladder + classify_error), got {type(_err).__name__}"
+    assert isinstance(_err.__cause__, _sp.TimeoutExpired), \
+        "the original TimeoutExpired must stay chained as __cause__"
+
+    # ── the durability budget: only [:300] survives into result.error_detail ──
+    _head = str(_err)[:300]
+    assert "micro-00" in _head, f"composition label lost in truncation: {_head!r}"
+    assert "TIMEOUT" in _head.upper(), f"timeout verdict lost in truncation: {_head!r}"
+    assert "rendered=450" in _head, f"HOW FAR IT GOT lost in truncation: {_head!r}"
+    assert "/2250" in _head, f"frame-count denominator lost (progress with no denominator is not a result): {_head!r}"
+    assert "encoded=441" in _head, f"encoder progress lost in truncation: {_head!r}"
+    assert "budget" in _head.lower(), f"the exceeded budget must be named: {_head!r}"
+
+    # ── end-to-end: the ladder wrap must preserve BOTH the digest and routing ──
+    _laddered = (f"RENDER_FATAL after full + retry + stripped renders: "
+                 f"{type(_err).__name__}: {str(_err)[:300]}")
+    assert "rendered=450" in _laddered and "micro-00" in _laddered, \
+        f"digest did not survive the ladder wrap: {_laddered!r}"
+    assert handler.classify_error(RuntimeError(_laddered))["error_code"] == "RENDER_FATAL", \
+        "routing must be unchanged by the richer message"
+
+    # ── a render that never started is a DIFFERENT diagnosis, stated explicitly ──
+    _fd, _p = _tf.mkstemp(suffix=".py")
+    with os.fdopen(_fd, "w") as _f:
+        _f.write("import time\ntime.sleep(600)\n")
+    _err2 = None
+    try:
+        _fn("overlay-00", [_sys.executable, "-u", _p], timeout=2)
+    except Exception as _e:
+        _err2 = _e
+    finally:
+        os.unlink(_p)
+    assert _err2 is not None and "NO progress" in str(_err2)[:300], \
+        f"a child that never rendered a frame must say so (bundle/openBrowser death != slow render): {str(_err2)[:300]!r}"
+
+
+@check("MICRO RENDER BUDGET (2026-08-01, RENDER_FATAL mitigation): micro chunks were submitted with NO timeout argument and silently inherited _run_remotion's flat 300s default while overlay always passed a computed per-chunk budget — 10 of the 13 TimeoutExpired RENDER_FATALs in the 2026-07-25..08-01 window were a micro chunk (9 of them chunk 00), and the render stage on COMPLETED jobs runs p90=179s/p95=258s/max=633s (n=374), i.e. 300s sat INSIDE the success distribution. Micro now takes overlay's own per-frame rate (300s/450f), floored at today's 300s and capped at overlay's 600s. The waits that guard it are DERIVED from the budgets, never constants: a barrier shorter than the subprocess it waits on replaces the forensic render timeout with a bare concurrent.futures.TimeoutError.")
+def _micro_render_budget():
+    _h = open("handler.py").read()
+    _i = _h.index("_MICRO_SEC_PER_FRAME")
+    _j = _h.index("_micro_finalize_future.result(")
+    _blk = _h[_i:_j]
+
+    # 1. micro must never again inherit the default by omission
+    assert "_render_pool.submit(_run_remotion, _lbl, _cmd, _to)" in _blk, \
+        "micro submit must pass an EXPLICIT per-chunk budget (the bug was the omitted arg)"
+    assert "zip(micro_cmds, _micro_timeouts)" in _blk, \
+        "micro budgets must be zipped 1:1 with micro_cmds"
+    # every micro command must have a budget — chunked AND single-process
+    assert _blk.count("_micro_timeouts.append(") >= 2, \
+        "both the chunked and the unchunked micro path must append a budget"
+
+    # 2. the budget must SCALE with frames, not be a constant
+    assert "_frames * _MICRO_SEC_PER_FRAME" in _blk, \
+        "micro budget must scale with the chunk's frame count"
+    # 3. it must be floored at today's value — nothing may get a SMALLER budget
+    assert "_MICRO_TIMEOUT_FLOOR = _PLAIN_CHUNK_TIMEOUT" in _blk, \
+        "floor must be today's 300s so no render regresses"
+    assert "_MICRO_TIMEOUT_CAP = _OVERLAY_TIMEOUT_CAP" in _blk, \
+        "cap must track overlay's ceiling, not a fresh constant"
+
+    # 4. THE ORDERING INVARIANT: subprocess budget < barrier < finalize.
+    #    Derived, so raising a budget raises its guards automatically.
+    assert "_MICRO_BARRIER_S = (max(_micro_timeouts)" in _blk, \
+        "the micro barrier must be DERIVED from the chunk budgets"
+    assert "_MICRO_FINALIZE_S = _MICRO_BARRIER_S +" in _blk, \
+        "the finalize wait must be DERIVED from the barrier"
+    assert "timeout=_MICRO_BARRIER_S + _fanout_wait_extra" in _blk, \
+        "the per-chunk wait must use the derived barrier"
+    assert "timeout=320" not in _blk and "timeout=400 + _fanout_wait_extra" not in _h, \
+        "the old constant micro waits (320/400) must be gone"
+
+    # 5. arithmetic: the invariant must hold at every chunk size, and stay
+    #    inside the 3000s Modal job budget.
+    _PLAIN, _CAP = 300, 600
+    for _f in (1, 150, 450, 900, 2250, 9000, 100000):
+        _t = int(min(_CAP, max(_PLAIN, _f * (_PLAIN / 450.0))))
+        _b, _fin = _t + 20, _t + 20 + 140
+        assert _t < _b < _fin < 3000, f"budget ordering broken at {_f} frames: {_t}/{_b}/{_fin}"
+        assert _t >= 300, f"budget regressed below today's 300s at {_f} frames: {_t}"
+
+
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
 def _l1_no_audio_gate():
     import handler
@@ -8578,8 +8693,14 @@ def _fanout_dark():
     # is gated on the flag helper.
     assert "_render_pool.submit(_run_remotion, _lbl, _cmd, _to)" in _h_src, \
         "local overlay chunk dispatch (flag-off path) must survive unchanged"
-    assert "(_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd))" in _h_src, \
-        "local micro chunk dispatch (flag-off path) must survive unchanged"
+    # Micro dispatch now passes its EXPLICIT per-chunk budget `_to`. The old
+    # form pinned here was `(_lbl, _render_pool.submit(_run_remotion, _lbl,
+    # _cmd))` — the omitted timeout argument was itself the RENDER_FATAL bug
+    # (silent fallback to a flat 300s default while overlay passed a computed
+    # budget). The INTENT of this assertion — flag-off stays the local
+    # subprocess path, not a remote one — is unchanged and still pinned.
+    assert "(_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd, _to))" in _h_src, \
+        "local micro chunk dispatch (flag-off path) must stay local AND carry its explicit budget"
     assert "if _render_fanout_enabled() and _fanout_long_enough and (_overlay_chunked or _micro_chunked):" in _h_src, \
         "the fan-out prepare must be gated on the flag AND the length floor"
     # the cert-measured crossover: fan-out only where it strictly wins (30s

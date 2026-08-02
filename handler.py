@@ -25857,42 +25857,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # produced — deterministic output, no driver dependencies.
     _gl_mode = "swangle"
 
-    def _run_remotion(label, cmd, timeout=300):
-        _t0 = time.time()
-        _r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        _elapsed = time.time() - _t0
-        if _r.returncode != 0:
-            # Print the full stdout + stderr so the failure mode is debuggable
-            # (truncated tail-only logs hid the actual JS exception class and
-            # symbolicated stack frames in prior runs).
-            _stderr_full = _r.stderr or ""
-            _stdout_full = _r.stdout or ""
-            print(f"[{label}] ─── FULL STDOUT ───\n{_stdout_full}", flush=True)
-            print(f"[{label}] ─── FULL STDERR ───\n{_stderr_full}", flush=True)
-            # SIGNATURE-FIRST (W1-FIX-DEEP): the message must LEAD with the
-            # real fatal error, not whatever noise opens stderr. Remotion
-            # prints warnings (e.g. the cgroup "Detected differing memory
-            # amounts" block on Modal hosts) BEFORE the crash, and downstream
-            # truncation (degrade-ladder [:300], envelope sig [:200]) was
-            # keeping the warning and cutting the real error — job 7f09fe28
-            # was misfiled as a memory failure when the true cause was the
-            # browser-connect TimeoutError buried 450 chars in. Pull the LAST
-            # line-anchored *Error/Exception line (the thrown one) to the
-            # front; the stderr tail stays for context.
-            _err_lines = re.findall(
-                r"^[A-Za-z_.$]*(?:Error|Exception)\b.*", _stderr_full, re.M)
-            _salient = (_err_lines[-1].strip()[:400] + " ||| ") if _err_lines else ""
-            raise RuntimeError(
-                f"[{label}] Remotion render failed (rc={_r.returncode}) in "
-                f"{_elapsed:.1f}s: {_salient}{_stderr_full[-3000:]}"
-            )
-        # Surface render-fps lines for diagnostics.
-        if _r.stdout:
-            for _line in _r.stdout.split("\n"):
-                _ls = _line.strip()
-                if _ls.startswith("[render-full]") or _ls.startswith("[gpu-info]"):
-                    print(f"[{label}] {_ls}", flush=True)
-        return _elapsed
+    # Hoisted to module scope (_remotion_subprocess) so the render error paths
+    # — in particular the TimeoutExpired branch that owns the RENDER_FATAL
+    # class — are unit-testable. It closed over nothing, so this is a pure
+    # move. Local alias keeps every call site and the _fanout_render_chunks
+    # hand-off unchanged.
+    _run_remotion = _remotion_subprocess
 
     def _split_frames(total_frames: int, n_chunks: int) -> list:
         """Partition [0, total_frames) into n_chunks contiguous inclusive
@@ -26028,8 +25998,39 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Below ~200 frames of micro content (small renders with few
     # transitions / no complex zoom), the single-process path is faster
     # because per-chunk Remotion startup tax (~5-10s × N chunks) dominates.
+    # ── Micro chunk render budgets (2026-08-01, RENDER_FATAL mitigation) ─────
+    # Micro was the ONE render budget in this function that was a bare
+    # constant: overlay chunks get a computed per-chunk timeout, micro chunks
+    # were submitted with no timeout argument at all and silently took
+    # _run_remotion's flat 300s default. That constant never learned about the
+    # cpu 64→16 emergency cut (2026-07-30) — the chunk-planning comments above
+    # still reason about 64 vCPUs — and micro's chunk COUNT is pinned at 4
+    # regardless of duration while overlay's scales with it (~450f/chunk), so
+    # micro frames-per-chunk grows without bound against a fixed budget.
+    #
+    # Evidence: of the 14 RENDER_FATALs in the 2026-07-25..08-01 window, 13
+    # were a TimeoutExpired on this subprocess and 10 of those were a MICRO
+    # chunk (9 of them chunk 00). Meanwhile the render stage on COMPLETED jobs
+    # runs p90=179s / p95=258s / max=633s (n=374) — i.e. 300s sits inside the
+    # body of the success distribution, not beyond its tail.
+    #
+    # Per-frame allowance is NOT a new invention: it is the rate overlay
+    # already ships (its 300s plain budget over its ~450-frame chunk target =
+    # 0.667 s/frame). Micro simply gets the same allowance, floored at today's
+    # 300s so nothing gets a SMALLER budget than before, and capped at the
+    # same 600s ceiling overlay already uses.
+    _MICRO_SEC_PER_FRAME = _PLAIN_CHUNK_TIMEOUT / 450.0   # 0.667 — overlay's own rate
+    _MICRO_TIMEOUT_FLOOR = _PLAIN_CHUNK_TIMEOUT           # 300 — never below today
+    _MICRO_TIMEOUT_CAP = _OVERLAY_TIMEOUT_CAP             # 600 — overlay's own ceiling
+
+    def _micro_chunk_timeout(_fs, _fe):
+        _frames = max(0, int(_fe) - int(_fs) + 1)
+        return int(min(_MICRO_TIMEOUT_CAP,
+                       max(_MICRO_TIMEOUT_FLOOR, _frames * _MICRO_SEC_PER_FRAME)))
+
     micro_cmds: list = []
     micro_chunk_paths: list = []
+    _micro_timeouts: list = []
     _micro_chunked = False
     _micro_ranges: list = []  # rebound below; read by the A-L4 fan-out dispatch
     _MICRO_CONCURRENCY = _PER_CHUNK_CONCURRENCY  # re-bound below when chunked
@@ -26058,6 +26059,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                         "--concurrency", str(_MICRO_CONCURRENCY),
                     ],
                 ))
+                _micro_timeouts.append(_micro_chunk_timeout(_fs, _fe))
         else:
             # Single-process path for short micros where chunking would
             # cost more in startup tax than it saves in parallelism.
@@ -26073,6 +26075,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     "--concurrency", str(_MICRO_CONCURRENCY),
                 ],
             ))
+            # Unchunked micro renders the WHOLE timeline in one process — the
+            # budget must cover every frame, not a quarter of them.
+            _micro_timeouts.append(
+                _micro_chunk_timeout(0, max(0, int(_micro_total_frames) - 1)))
+    if any(_t > _MICRO_TIMEOUT_FLOOR for _t in _micro_timeouts):
+        print(f"[render] micro chunk budgets (frame-scaled): {_micro_timeouts}s "
+              f"(was a flat {_MICRO_TIMEOUT_FLOOR}s default)", flush=True)
 
     _render_t0 = time.time()
     _micro_descr = ""
@@ -26387,22 +26396,32 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # one future per chunk; chunks render in parallel and write to
     # micro_chunk_XX.mov. For single-process path, one future writes to
     # micro_video_path directly (matching the pre-chunking shape).
+    # Barriers DERIVED from the actual chunk budgets (see the comment at the
+    # micro budget block). A barrier shorter than the subprocess it waits on
+    # converts an honest, forensic render timeout into a bare TimeoutError.
+    _MICRO_BARRIER_S = (max(_micro_timeouts) if _micro_timeouts
+                        else _MICRO_TIMEOUT_FLOOR) + 20
+    _MICRO_FINALIZE_S = _MICRO_BARRIER_S + 140   # + the 120s concat + slack
     if _fanout_ctx is not None and _fanout_micro_active:
-        # Fan-out mirrors the overlay branch; 300 = _run_remotion's default
-        # timeout, so the per-chunk fallback behaves exactly like today.
+        # Fan-out mirrors the overlay branch, riding the same per-chunk budget.
         micro_futures = [
             (_lbl, _render_pool.submit(
-                _fanout_render_chunks, _fanout_ctx, "micro", _lbl, _cmd, 300,
+                _fanout_render_chunks, _fanout_ctx, "micro", _lbl, _cmd, _to,
                 micro_chunk_paths[_ci], _fs, _fe, _fs,
                 _MICRO_CONCURRENCY, _run_remotion,
             ))
-            for _ci, ((_lbl, _cmd), (_fs, _fe)) in enumerate(
-                zip(micro_cmds, _micro_ranges))
+            for _ci, ((_lbl, _cmd), _to, (_fs, _fe)) in enumerate(
+                zip(micro_cmds, _micro_timeouts, _micro_ranges))
         ]
     else:
+        # Explicit per-chunk budget — this call used to omit the argument and
+        # silently inherit _run_remotion's flat 300s default, which is the
+        # RENDER_FATAL class (10 of 13 timeouts in the 07-25..08-01 window
+        # were a micro chunk). Overlay has always passed its computed budget
+        # here; micro now does too.
         micro_futures = [
-            (_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd))
-            for _lbl, _cmd in micro_cmds
+            (_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd, _to))
+            for (_lbl, _cmd), _to in zip(micro_cmds, _micro_timeouts)
         ]
 
     # _micro_finalize_future: single shared barrier that waits for all
@@ -26418,8 +26437,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _t0 = time.time()
         _per_chunk: list = []
         for _mlbl, _mfut in micro_futures:
-            # +_fanout_wait_extra: 0 with the fan-out off (today's 320s).
-            _per_chunk.append((_mlbl, _mfut.result(timeout=320 + _fanout_wait_extra)))
+            # DERIVED, never a constant (+_fanout_wait_extra: 0 with fan-out
+            # off): this barrier must outlive the SLOWEST micro subprocess
+            # budget, or it fires first and the honest "[micro-NN] Remotion
+            # render TIMEOUT ... reached N%" is replaced by a bare
+            # concurrent.futures.TimeoutError with no forensics at all.
+            # Deriving it from _micro_timeouts makes that drift impossible —
+            # raising a chunk budget raises this wait with it.
+            _per_chunk.append(
+                (_mlbl, _mfut.result(timeout=_MICRO_BARRIER_S + _fanout_wait_extra)))
         if _micro_chunked:
             for _p in micro_chunk_paths:
                 if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
@@ -26482,7 +26508,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # future already resolved (Future caches → concat runs exactly
             # once across all chains).
             if _micro_finalize_future is not None:
-                _micro_finalize_future.result(timeout=400 + _fanout_wait_extra)
+                _micro_finalize_future.result(
+                    timeout=_MICRO_FINALIZE_S + _fanout_wait_extra)
             _cs, _ce = _composite_ranges[K]
             _cmd = _build_composite_cmd(
                 K, _cs, _ce, _composite_chunk_paths[K],
@@ -26599,9 +26626,17 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # Wait for all overlay chunk subprocesses (in input order — for chunked
     # mode each chunk lands in its own .mov; we concat them in order below).
     _overlay_chunk_elapsed = []
+    _OVERLAY_BARRIER_S = (max(_overlay_timeouts) if _overlay_timeouts
+                          else _PLAIN_CHUNK_TIMEOUT) + 20
     for _i, _f in enumerate(overlay_futures):
-        # +_fanout_wait_extra: 0 with the fan-out off (today's 320s).
-        _e = _f.result(timeout=320 + _fanout_wait_extra)
+        # DERIVED (+_fanout_wait_extra: 0 with the fan-out off). This was a
+        # flat 320s while _overlay_timeouts already scaled to 600s for
+        # scene-bearing chunks — so the cost-aware overlay budget was INERT
+        # above 320s: the barrier fired first and turned a granted 600s render
+        # into a bare concurrent.futures.TimeoutError. Same defect shape as the
+        # micro budget; fixed the same way, by deriving the wait from the
+        # budget it guards.
+        _e = _f.result(timeout=_OVERLAY_BARRIER_S + _fanout_wait_extra)
         _overlay_chunk_elapsed.append(_e)
         _label = overlay_cmds[_i][0]
         _path = _overlay_chunk_paths[_i] if _overlay_chunked else overlay_video_path
@@ -26612,7 +26647,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         )
     if _micro_finalize_future is not None:
         _micro_total_elapsed, _micro_per_chunk = _micro_finalize_future.result(
-            timeout=400 + _fanout_wait_extra)
+            timeout=_MICRO_FINALIZE_S + _fanout_wait_extra)
         if _micro_chunked:
             _micro_max = max(e for _, e in _micro_per_chunk)
             print(
@@ -27235,6 +27270,149 @@ def _ladder_input_sig(edit_plan, broll_clips):
         return hashlib.sha1(_blob.encode("utf-8", "ignore")).hexdigest()
     except Exception:
         return None
+
+
+def _decode_captured(_buf):
+    """Decode a captured subprocess stream that may be bytes OR str.
+
+    `subprocess.run(text=True)` decodes on the SUCCESS path, but on POSIX the
+    partial output attached to a TimeoutExpired is whatever `_communicate`
+    had accumulated — raw bytes, undecoded (CPython Popen._check_timeout joins
+    the byte chunks and hands them straight to the exception). So this path
+    must handle both.
+    """
+    if _buf is None:
+        return ""
+    if isinstance(_buf, bytes):
+        return _buf.decode("utf-8", "replace")
+    return str(_buf)
+
+
+# `[render-full] progress 20% rendered=450 encoded=441 interval_render_fps=6.1 ...`
+_RENDER_PROGRESS_RE = re.compile(
+    r"\[render-full\]\s+progress\s+(\d+)%\s+rendered=(\d+)\s+encoded=(\d+)"
+    r"(?:\s+interval_render_fps=([\d.]+))?"
+)
+
+
+def _remotion_progress_digest(_stdout, cmd):
+    """How far did this render actually get before the clock ran out?
+
+    Reads the LAST `[render-full] progress` line the child emitted and pairs it
+    with the chunk's total frame count (parsed from --frame-range) so the
+    result is a fraction, not a bare number. Deliberately SHORT: the degrade
+    ladder truncates the cause at [:300] and that truncated string is the only
+    copy that reaches `result.error_detail` (the Modal log buffer retains ~1h,
+    which is always less than the time-to-look). If the digest does not fit in
+    those 300 characters it does not exist.
+
+    "no progress line" is a genuinely different failure from "reached 20%" —
+    it means the child never got past bundle/openBrowser/selectComposition —
+    so it is stated explicitly rather than omitted.
+    """
+    _total = None
+    try:
+        _i = list(cmd).index("--frame-range")
+        _fs, _fe = str(cmd[_i + 1]).split(",")
+        _total = int(_fe) - int(_fs) + 1
+    except (ValueError, IndexError, TypeError):
+        _total = None
+    _conc = None
+    try:
+        _conc = str(cmd[list(cmd).index("--concurrency") + 1])
+    except (ValueError, IndexError, TypeError):
+        _conc = None
+    _tail = f" conc={_conc}" if _conc else ""
+
+    _m = list(_RENDER_PROGRESS_RE.finditer(_stdout or ""))
+    if not _m:
+        return (f"NO progress line — never began rendering frames "
+                f"(died in bundle/openBrowser/selectComposition)"
+                f"{f', {_total}f planned' if _total else ''}{_tail}")
+    _pct, _rend, _enc, _fps = _m[-1].groups()
+    return (f"reached {_pct}% rendered={_rend}"
+            f"{f'/{_total}' if _total else ''} encoded={_enc}"
+            f"{f' last_fps={_fps}' if _fps else ''}{_tail}")
+
+
+def _remotion_subprocess(label, cmd, timeout=300):
+    """Run ONE `node render-full.mjs` and return its elapsed seconds.
+
+    MODULE-LEVEL on purpose: this is the render path's error surface, and a
+    nested closure cannot be unit-tested. Pinned by
+    test_remotion_timeout_forensics.py. It closes over nothing — only `time`,
+    `subprocess` and `re` — so hoisting it out of the render body is
+    behaviour-identical.
+
+    THE TIMEOUT BRANCH (2026-08-01, RENDER_FATAL forensics)
+    -------------------------------------------------------
+    13 of the 14 prod RENDER_FATALs in the 2026-07-25..08-01 window were a
+    `TimeoutExpired` on this call, and every one reached the job row as a bare
+    `Command '[...]' timed out after 300 seconds` — no stdout, no stderr, no
+    idea how far the render got. That was not because the evidence was
+    unavailable: on POSIX `subprocess.run` attaches everything the child wrote
+    before the kill to `TimeoutExpired.stdout` / `.stderr`, and
+    `str(TimeoutExpired)` simply prints none of it. There was no `except`
+    clause here, so the object was garbage-collected unread. The evidence was
+    in memory the whole time.
+    """
+    _t0 = time.time()
+    try:
+        _r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as _te:
+        _elapsed = time.time() - _t0
+        _to_out = _decode_captured(getattr(_te, "stdout", None))
+        _to_err = _decode_captured(getattr(_te, "stderr", None))
+        # Full copies to container stdout for anyone watching live...
+        print(f"[{label}] ─── TIMEOUT PARTIAL STDOUT ───\n{_to_out}", flush=True)
+        print(f"[{label}] ─── TIMEOUT PARTIAL STDERR ───\n{_to_err}", flush=True)
+        # ...and a FRONT-LOADED digest for the durable copy. Everything that
+        # answers "which composition, how far, how fast, against what budget"
+        # must precede the stderr tail, because only the first 300 characters
+        # survive the ladder wrap into result.error_detail.
+        #
+        # Re-raised as RuntimeError (chaining the original) so the class keeps
+        # the same shape every other render failure has: the degrade ladder's
+        # `except Exception` and classify_error's RENDER_FATAL match are
+        # unchanged, and no caller has to know about TimeoutExpired.
+        raise RuntimeError(
+            f"[{label}] Remotion render TIMEOUT after {_elapsed:.1f}s "
+            f"(budget {timeout}s) — {_remotion_progress_digest(_to_out, cmd)}"
+            f" ||| {_to_err[-1200:]}"
+        ) from _te
+    _elapsed = time.time() - _t0
+    if _r.returncode != 0:
+        # Print the full stdout + stderr so the failure mode is debuggable
+        # (truncated tail-only logs hid the actual JS exception class and
+        # symbolicated stack frames in prior runs).
+        _stderr_full = _r.stderr or ""
+        _stdout_full = _r.stdout or ""
+        print(f"[{label}] ─── FULL STDOUT ───\n{_stdout_full}", flush=True)
+        print(f"[{label}] ─── FULL STDERR ───\n{_stderr_full}", flush=True)
+        # SIGNATURE-FIRST (W1-FIX-DEEP): the message must LEAD with the
+        # real fatal error, not whatever noise opens stderr. Remotion
+        # prints warnings (e.g. the cgroup "Detected differing memory
+        # amounts" block on Modal hosts) BEFORE the crash, and downstream
+        # truncation (degrade-ladder [:300], envelope sig [:200]) was
+        # keeping the warning and cutting the real error — job 7f09fe28
+        # was misfiled as a memory failure when the true cause was the
+        # browser-connect TimeoutError buried 450 chars in. Pull the LAST
+        # line-anchored *Error/Exception line (the thrown one) to the
+        # front; the stderr tail stays for context.
+        _err_lines = re.findall(
+            r"^[A-Za-z_.$]*(?:Error|Exception)\b.*", _stderr_full, re.M)
+        _salient = (_err_lines[-1].strip()[:400] + " ||| ") if _err_lines else ""
+        raise RuntimeError(
+            f"[{label}] Remotion render failed (rc={_r.returncode}) in "
+            f"{_elapsed:.1f}s: {_salient}{_stderr_full[-3000:]}"
+        )
+    # Surface render-fps lines for diagnostics.
+    if _r.stdout:
+        for _line in _r.stdout.split("\n"):
+            _ls = _line.strip()
+            if _ls.startswith("[render-full]") or _ls.startswith("[gpu-info]"):
+                print(f"[{label}] {_ls}", flush=True)
+    return _elapsed
 
 
 def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
