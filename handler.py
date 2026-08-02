@@ -31297,6 +31297,54 @@ def _set_cpu_stage(_name):
         pass
 
 
+_BUNDLE_FRESH_CHECKED = [False]
+
+
+def _assert_bundle_fresh():
+    """BUNDLE-FRESHNESS GUARD (Zac 2026-08-02): a Remotion TSX change ships INERT
+    if a redeploy reuses a cached /remotion/bundle without re-running prebundle.mjs
+    (SafeImg nearly shipped that way, and validate_deploy inspects only Python).
+    prebundle stamps a sha256 of the .ts/.tsx/.mjs source into bundle/.src_hash;
+    here we recompute it from the MOUNTED source and assert they match — a stale
+    bundle fails LOUD (a clear render error, not a silent wrong render / <Img>
+    hang). Runs once per warm container. Fail-open only when the stamp is absent
+    (local dev / a pre-guard bundle), never on a mismatch."""
+    if _BUNDLE_FRESH_CHECKED[0]:
+        return
+    _BUNDLE_FRESH_CHECKED[0] = True
+    try:
+        _stamp_path = "/remotion/bundle/.src_hash"
+        _src = "/remotion/src"
+        if not os.path.exists(_stamp_path) or not os.path.isdir(_src):
+            return  # no stamp (pre-guard bundle / local) — fail open, never on mismatch
+        _files = []
+        for _root, _dirs, _fs in os.walk(_src):
+            _dirs[:] = [_d for _d in _dirs if _d != "node_modules"]
+            for _f in _fs:
+                if _f.endswith((".ts", ".tsx", ".mjs")):
+                    _files.append(os.path.join(_root, _f))
+        _hh = hashlib.sha256()
+        for _p in sorted(_files):
+            _hh.update(_p[len(_src):].encode())
+            with open(_p, "rb") as _fh:
+                _hh.update(_fh.read())
+        _live = _hh.hexdigest()
+        _stamped = open(_stamp_path).read().strip()
+        if _live != _stamped:
+            raise RuntimeError(
+                f"STALE_BUNDLE: /remotion/bundle was NOT built from the deployed "
+                f"src/remotion (bundle sha256:{_stamped[:16]}… != source "
+                f"sha256:{_live[:16]}…). A TSX change shipped inert — redeploy so "
+                f"prebundle.mjs re-runs. Failing loud, not rendering a stale bundle.")
+        print(f"[bundle-fresh] OK — bundle built from live source "
+              f"(sha256:{_live[:16]}…)", flush=True)
+    except RuntimeError:
+        raise
+    except Exception as _e:
+        print(f"[bundle-fresh] check skipped ({type(_e).__name__}: {str(_e)[:120]})",
+              flush=True)
+
+
 def render_stage(
         job_id, input_data, edit_plan, work_dir, source_path, output_path,
         transcript, source_duration, app_url, broll_clips, upload_url,
@@ -31311,6 +31359,7 @@ def render_stage(
     finally folds into the meter once). _PROGRESSIVE_PUB stays a module global
     the render hooks read during the ladder."""
     global _PROGRESSIVE_PUB
+    _assert_bundle_fresh()   # STALE_BUNDLE guard — never render an inert TSX bundle
     _rs_seed = _cost_meter.total_usd() if _cost_meter is not None else 0.0
     _render_hb_stop = _start_progress_heartbeat(
         job_id, "render", 65, 90,

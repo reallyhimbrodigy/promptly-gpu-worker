@@ -7759,16 +7759,53 @@ def _safe_image_law():
     assert _re2.search(r"SAFE_IMG_TIMEOUT_MS\s*=\s*(\d+)", _txt), "SafeImg needs an explicit timeout"
     _t = int(_re2.search(r"SAFE_IMG_TIMEOUT_MS\s*=\s*(\d+)", _txt).group(1))
     assert _t < 30000, f"SAFE_IMG_TIMEOUT_MS={_t} must stay UNDER the 30000ms render timeout or it re-arms the hang"
-    _offenders = []
+    # The ROLE SPLIT is the load-bearing part: "degrade to nothing" is correct for
+    # DECORATION only. Primary media degraded to nothing renders a BLACK segment,
+    # which is what INTEGRITY_TRIP fires on — trading a hang for a black video
+    # that SHIPS. So primary must fail loudly instead.
+    assert 'role === "primary"' in _txt and "cancelRender" in _txt, \
+        "SafeImg must FAIL LOUDLY on primary media, never degrade it to black"
+    assert "[SAFEIMG]" in _txt, \
+        "SafeImg must emit a grep-stable [SAFEIMG] telemetry line — the Remotion " \
+        "layer is otherwise invisible and a silent degrade is unmeasurable"
+    _offenders, _roleless = [], []
     for _f in _g.glob(_os.path.join(_root, "**", "*.tsx"), recursive=True):
         if _os.path.basename(_f) == "SafeImg.tsx":
             continue
-        for _i, _ln in enumerate(open(_f, encoding="utf-8").read().splitlines(), 1):
+        _src2 = open(_f, encoding="utf-8").read()
+        for _i, _ln in enumerate(_src2.splitlines(), 1):
             if _re2.search(r"<Img\b", _ln) and not _ln.lstrip().startswith(("*", "//")):
                 _offenders.append(f"{_os.path.relpath(_f, _root)}:{_i}")
+        # every SafeImg element must declare its role explicitly
+        for _m in _re2.finditer(r"<SafeImg\b((?:[^>]|\n)*?)/?>", _src2):
+            if "role=" not in _m.group(1):
+                _roleless.append(_os.path.relpath(_f, _root))
     assert not _offenders, (
         "BARE <Img> found — use SafeImg so an unloadable asset degrades to no image "
         f"instead of hanging the render: {_offenders}")
+    assert not _roleless, (
+        "<SafeImg> without an explicit role= — decoration vs primary decides whether "
+        f"a failed asset ships black or fails loudly, and must never default: {sorted(set(_roleless))}")
+
+
+@check("BUNDLE-FRESHNESS GUARD (Zac 2026-08-02, RULE-1, forged from SafeImg nearly shipping inert): a Remotion TSX change ships DEAD if a redeploy reuses a cached bundle without re-running prebundle.mjs — the render then executes STALE compiled JS while the source (and every gate that reads the source) says the fix is present. This gate asserts the anti-inert mechanism is wired on BOTH ends: (1) prebundle.mjs fingerprints every src .ts/.tsx/.mjs into bundle/.src_hash at image-build time, and (2) handler.py defines _assert_bundle_fresh() AND calls it inside render_stage, so the FIRST real render recomputes the live-source hash and refuses (STALE_BUNDLE) if the deployed bundle wasn't built from the deployed source. Fail-open only when the stamp is absent (pre-fingerprint bundle), never on mismatch. One check closes the class forever: a TSX fix can no longer pass every source gate yet render from an old bundle.")
+def _bundle_freshness_guard():
+    import os as _os, re as _re3
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _pre = _os.path.join(_here, "src", "remotion", "prebundle.mjs")
+    assert _os.path.exists(_pre), "prebundle.mjs missing — the fingerprint producer is gone"
+    _ptxt = open(_pre, encoding="utf-8").read()
+    assert ".src_hash" in _ptxt and "createHash" in _ptxt and "writeFileSync" in _ptxt, \
+        "prebundle.mjs must sha256-fingerprint src/ into bundle/.src_hash at build time"
+    _htxt = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "def _assert_bundle_fresh(" in _htxt, \
+        "handler.py must define _assert_bundle_fresh() — the STALE_BUNDLE consumer"
+    assert ".src_hash" in _htxt and "STALE_BUNDLE" in _htxt, \
+        "_assert_bundle_fresh must read bundle/.src_hash and raise STALE_BUNDLE on mismatch"
+    # the guard is inert unless render_stage actually CALLS it before rendering
+    _rs = _re3.search(r"def render_stage\b.*?(?=\ndef _cost_meter_hard_stop|\ndef [a-z_]+\(|\Z)", _htxt, _re3.S)
+    assert _rs and "_assert_bundle_fresh()" in _rs.group(0), \
+        "render_stage must CALL _assert_bundle_fresh() — an uncalled guard never fires"
 
 
 @check("MG ATTACK TABLE ANTI-DRIFT (Zac 2026-07-28): _MG_ATTACK_MS is a MEASURED table (mg-attack-battery renders each MG entrance; the settle/container-arrival ms is read off the presence curve). Unlike _MG_VALUE_LAND_FRAMES — which the gate above pins to the TSX interpolate range it reads directly — a measured table cannot be re-derived from one readable constant, so it would rot silently the instant an entrance config changed, reintroducing the late-payoff bug invisibly. This gate fingerprints every MG entrance-timing primitive (useMGPhase curve, spring damping/mass/stiffness, enterFrames, ENTRANCE_FRAMES, interpolate/Sequence) and FAILS the deploy if it moves — forcing a battery re-measure. The SNAP/SETTLE/GLIDE motion-token work changes exactly these configs, so this is the guard that keeps the back-timing honest across it. It also asserts every battery-measured type carries a table entry, so a NEW component can't ship unmeasured.")

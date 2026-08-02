@@ -31,7 +31,7 @@ export const Avatar: React.FC<AvatarProps> = ({
           flexShrink: 0,
         }}
       >
-        <SafeImg
+        <SafeImg role="decoration" label="SpeechBubble.avatar"
           src={src}
           style={{
             width: "100%",
