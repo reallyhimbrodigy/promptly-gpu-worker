@@ -6857,6 +6857,42 @@ already follow) and return when the face leads again."""
             "for a camera move."
         )
 
+    # ORDER A/B (2026-08-02, DARK). Zac's attention theory: a prompt is not read
+    # end to end — the model weights what it reads unevenly, so POSITION matters
+    # independently of length. The sharpest test available: HARD CONSTRAINTS (the
+    # window rule, per-component rules, variety ceiling, density caps — the pace
+    # system) currently sits at 91.6% THROUGH THE PREFIX, buried inside the
+    # THUMBNAIL header span. It is the most decision-critical block in the prompt
+    # and it is read last. v2 moves it to immediately after the preamble.
+    #
+    # 100% LOSSLESS BY CONSTRUCTION, and asserted: the move is a pure permutation
+    # of lines. If the line multiset changes by even one line the swap RAISES
+    # rather than silently shipping a lossy reorder.
+    if os.environ.get("PROMPTLY_PROMPT_ORDER", "").strip() == "v2":
+        _blk_start = system_instruction.find(
+            "═══════════════════════════════════════════════════════════════════════════\n"
+            "HARD CONSTRAINTS — re-read this block before emitting the JSON")
+        _blk_end = system_instruction.find(
+            "═══════════════════════════════════════════════════════════════════════════\n"
+            "BEFORE EMITTING — two passes")
+        _dest = system_instruction.find("=== YOUR CUT PASS (cut_refinements) ===")
+        if _blk_start > 0 and _blk_end > _blk_start and 0 < _dest < _blk_start:
+            _blk = system_instruction[_blk_start:_blk_end]
+            _rest = system_instruction[:_blk_start] + system_instruction[_blk_end:]
+            _d2 = _rest.find("=== YOUR CUT PASS (cut_refinements) ===")
+            _reordered = _rest[:_d2] + _blk + _rest[_d2:]
+            _before = sorted(system_instruction.split("\n"))
+            _after = sorted(_reordered.split("\n"))
+            if _before != _after:
+                raise RuntimeError(
+                    "PROMPT_ORDER v2 is not a pure permutation — reorder aborted "
+                    f"({len(_before)} lines before, {len(_after)} after)")
+            system_instruction = _reordered
+            print("[prompt-order] v2: HARD CONSTRAINTS moved 91.6% -> ~12% "
+                  f"({len(_blk)} chars, line-multiset identical)", flush=True)
+        else:
+            raise RuntimeError("PROMPT_ORDER v2 markers not found — reorder aborted")
+
     # DWELL A/B (dark co-rider): swap OLD payoff prose → DWELL when enabled.
     if _dwell_enabled():
         system_instruction = _apply_dwell_swap(system_instruction)
@@ -11523,6 +11559,36 @@ def _post_cuts_response_schema():
     # FIX 3: strip the telemetry-only rationale prose (dark; the r=0.59 root lever).
     if _lean_schema_enabled():
         _s = _apply_lean_schema(_s)
+    # SCHEMA-BILLING PROBE (2026-08-02, DARK). The question "are response_schema
+    # tokens billed as input?" decides whether typing _MotionGraphic.props moves
+    # 1,269 tok out of the prompt for free or makes things worse — and the
+    # LEAN_SCHEMA arms could never answer it (they move the schema by 131 tok,
+    # under the 186-tok arm-to-arm noise). This pads the emitted schema by a
+    # KNOWN, MATERIAL amount using UNREFERENCED $defs: JSON Schema ignores them,
+    # constrained decoding cannot reach them, so generation is unchanged and the
+    # ONLY thing that moves is the schema's token count. Read prompt_token_count
+    # on the SECOND call (a schema change busts the Vertex cache key, so the
+    # first call reads 0 cached for the wrong reason). Default off -> the
+    # emitted schema is byte-identical.
+    _pad = os.environ.get("PROMPTLY_SCHEMA_PAD", "").strip()
+    if _pad:
+        try:
+            _n = int(_pad)
+        except ValueError:
+            _n = 0
+        if _n > 0:
+            _s.setdefault("$defs", {})
+            for _i in range(_n):
+                _s["$defs"][f"_ProbePad{_i:04d}"] = {
+                    "type": "object",
+                    "description": ("Inert probe padding: this definition is not "
+                                    "referenced by any property and cannot be "
+                                    "reached by constrained decoding."),
+                    "properties": {f"probe_field_{_j}": {
+                        "type": "string",
+                        "description": "inert padding field, never emitted"}
+                        for _j in range(6)},
+                }
     return _s
 
 
