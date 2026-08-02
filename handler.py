@@ -31724,6 +31724,31 @@ def render_stage(
     # (INTEGRITY_TRIP is in _OUTER_RESCUE_DENY). An instrument crash
     # inside the gate itself fails OPEN with a loud log line — a gate
     # bug must never eat a good render.
+    # Predeclared so the TRIP diagnostic below can reference it even when the
+    # try never reached its definition (an early _probe_full crash). The gate
+    # fails OPEN on an instrument crash, so that path sets clean=None and skips
+    # the trip branch — but a NameError there would turn a gate bug into a
+    # crash, which is exactly what the fail-open exists to prevent.
+    # Hoisted out of the try: these are pure edit_plan reads, and the TRIP
+    # diagnostic below must be able to call the mapper even if the gate's
+    # instrumentation crashed. Defining it inside the try made it
+    # possibly-undefined at the diagnostic — a gate bug becoming a NameError is
+    # exactly what the gate's fail-open exists to prevent.
+    _ig_cranges = edit_plan.get("_render_clip_output_ranges") or []
+    _ig_rcuts = edit_plan.get("_render_cuts") or []
+    _ig_tmaps = edit_plan.get("_render_clip_time_maps") or []
+
+    def _ig_out_to_src(t):
+        for _ci, _r in enumerate(_ig_cranges):
+            if _r["start"] - 1e-6 <= t <= _r["end"] + 1e-6:
+                if _ci < len(_ig_rcuts):
+                    _pbr = 1.0
+                    if _ci < len(_ig_tmaps):
+                        _pbr = float(_ig_tmaps[_ci].get("avg_speed") or 1.0)
+                    return (float(_ig_rcuts[_ci]["source_start"])
+                            + (t - _r["start"]) * _pbr)
+        return None
+
     try:
         probe_cache_clear(output_path)
         _ig_meta = _probe_full(output_path)
@@ -31736,21 +31761,6 @@ def render_stage(
         _ig_nb = int(_ig_v.get("nb_frames") or 0)
         _ig_fps = float(edit_plan.get("_render_fps") or 60.0)
         _ig_expected = int(edit_plan.get("_render_total_output_frames") or 0)
-        _ig_cranges = edit_plan.get("_render_clip_output_ranges") or []
-        _ig_rcuts = edit_plan.get("_render_cuts") or []
-        _ig_tmaps = edit_plan.get("_render_clip_time_maps") or []
-
-        def _ig_out_to_src(t):
-            for _ci, _r in enumerate(_ig_cranges):
-                if _r["start"] - 1e-6 <= t <= _r["end"] + 1e-6:
-                    if _ci < len(_ig_rcuts):
-                        _pbr = 1.0
-                        if _ci < len(_ig_tmaps):
-                            _pbr = float(_ig_tmaps[_ci].get("avg_speed") or 1.0)
-                        return (float(_ig_rcuts[_ci]["source_start"])
-                                + (t - _r["start"]) * _pbr)
-            return None
-
         _ig_verdict = _integrity_gate(
             output_path, _ig_vd, _ig_ad, _ig_expected, _ig_nb, _ig_fps,
             _build_integrity_masks(edit_plan),
@@ -31804,11 +31814,42 @@ def render_stage(
         except Exception as _ig_f_err:
             print(f"[integrity-gate] forensic preserve failed: "
                   f"{str(_ig_f_err)[:120]}", flush=True)
+        # ── WHY DIDN'T THE SOURCE-ECHO SAVE THIS? (2026-08-02) ──────────────
+        # The black check already has a discriminator (_ig_source_echo_black):
+        # output black whose mapped SOURCE window is also black is the user's
+        # own content and gets downgraded. It needs BOTH a readable source AND a
+        # working output->source mapping; when either is missing the echo is
+        # silently skipped and a faithful render of black footage trips as if we
+        # had produced the black ourselves.
+        #
+        # That is exactly what happened to job 0e794beb (2026-08-02): the source
+        # carries 7.97s of black across four spans, the mapped window is 2.4s
+        # black against a 1.93s output span (cover 2.4 >= the 0.60 threshold's
+        # 1.16s), so the echo WOULD have downgraded it — yet it tripped three
+        # times. The verdict JSON that says which precondition failed lives in
+        # S3, and the DB result carried NO integrity fields at all, so the
+        # question was unanswerable from the job row.
+        #
+        # Front-loaded so it survives the [:300] truncation into
+        # result.error_detail — the only durable copy.
+        _ig_why = ""
+        try:
+            _ig_black_spans = [t for t in _ig_verdict["trips"] if t["check"] == "black"]
+            if _ig_black_spans:
+                _b0 = (_ig_black_spans[0].get("spans") or [[None, None]])[0]
+                _src_ok = bool(source_path and os.path.exists(source_path))
+                _map0 = _ig_out_to_src(_b0[0]) if (_b0 and _b0[0] is not None) else None
+                _ndown = len(_ig_verdict["detail"].get("content_black_downgraded") or [])
+                _ig_why = (f" [echo: source={'Y' if _src_ok else 'MISSING'}"
+                           f" map={'%.2f' % _map0 if _map0 is not None else 'UNRESOLVED'}"
+                           f" downgraded={_ndown}]")
+        except Exception:
+            _ig_why = " [echo: diag-failed]"
         if integrity_observe_only:
             print("[integrity-gate] TRIP (observe-only — operator "
                   "fixture, delivering anyway)", flush=True)
         else:
-            raise RuntimeError(f"INTEGRITY_TRIP: {_ig_summary}")
+            raise RuntimeError(f"INTEGRITY_TRIP:{_ig_why} {_ig_summary}")
 
     send_progress(job_id, "thumbnail", 92, "Picking your cover frame", app_url)
     send_progress(job_id, "upload", 96, "Publishing to your library", app_url)

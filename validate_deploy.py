@@ -5280,6 +5280,33 @@ def _asr_scribe_routing():
             f"transcribe_scribe must emit {_f} — downstream reads all seven fields"
 
 
+@check("INTEGRITY_TRIP BLACK-ECHO DIAGNOSTIC (2026-08-02): the source-echo that downgrades user-content black (_ig_source_echo_black) needs BOTH a readable source AND a working output->source mapping; when either is missing it is skipped SILENTLY and a faithful render of black footage trips as if we produced the black. Job 0e794beb tripped 3x on a source carrying 7.97s of black across 4 spans — the mapped window is 2.4s black vs a 1.93s output span (cover 2.4 >= the 0.60 threshold's 1.16s), so the echo WOULD have downgraded it. Which precondition failed was unanswerable: the verdict JSON is in S3 and the DB result carried NO integrity fields. The trip message now front-loads source/map/downgraded so it survives the [:300] truncation into result.error_detail.")
+def _integrity_black_echo_diag():
+    import handler
+    _h = open("handler.py").read()
+    _i = _h.index("WHY DIDN'T THE SOURCE-ECHO SAVE THIS")
+    _j = _h.index("raise RuntimeError(f\"INTEGRITY_TRIP:", _i)
+    _blk = _h[_i:_j + 200]
+    # the three facts that identify the failing precondition
+    assert "source=" in _blk and "MISSING" in _blk, "must report whether the source was readable"
+    assert "map=" in _blk and "UNRESOLVED" in _blk, "must report whether out->src resolved"
+    assert "downgraded=" in _blk, "must report how many spans the echo downgraded"
+    # diagnostic must PRECEDE the span list, or [:300] can drop it on a long trip
+    assert _h.index("_ig_why", _i) < _h.index("_ig_summary", _j - 100), \
+        "the diagnostic must be front-loaded ahead of the span dump"
+    # a diag failure must never replace the trip itself
+    assert "diag-failed" in _blk, "the diagnostic must be try/except'd — it can never eat the trip"
+    # routing unchanged, and the diagnostic survives truncation
+    _msg = ("INTEGRITY_TRIP: [echo: source=MISSING map=UNRESOLVED downgraded=0] "
+            "black=[[20.466667, 22.4]], both_stream_hole=[[50.46075, 50.766667]]")
+    assert handler.classify_error(RuntimeError(_msg))["error_code"] == "INTEGRITY_TRIP"
+    assert "echo:" in _msg[:300] and "source=" in _msg[:300], "diagnostic must survive [:300]"
+    # the discriminator it diagnoses must still exist and still be wired
+    assert callable(getattr(handler, "_ig_source_echo_black", None))
+    assert "_ig_source_echo_black(" in _h and "out_to_src=_ig_out_to_src" in _h, \
+        "the source-echo must stay wired into the gate call"
+
+
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
 def _l1_no_audio_gate():
     import handler
