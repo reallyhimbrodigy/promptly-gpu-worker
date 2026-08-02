@@ -97,6 +97,11 @@ def query(hours: int = 24) -> dict:
     per_route = defaultdict(lambda: {"done": 0, "silent": 0})
     per_user = defaultdict(lambda: {"done": 0, "silent": 0})
     silent_rows, unreadable = [], 0
+    # HOURLY BUCKETS (Rule 5). A "post-deploy window" needs the deploy timestamp,
+    # and deploy truth is the speed agent's domain, not mine. Bucketing by hour
+    # lets the transition appear IN THE DATA instead of being assumed — and if it
+    # does not appear, that is a finding rather than a mis-cut window.
+    per_hour = defaultdict(lambda: {"done": 0, "silent": 0})
 
     for off in range(0, 20000, 1000):
         try:
@@ -126,16 +131,20 @@ def query(hours: int = 24) -> dict:
                 continue
             clips, n = _r
             uid = row.get("user_id") or "?"
+            hour = str(row.get("created_at") or "")[:13]
             per_route[route]["done"] += 1
             per_user[uid]["done"] += 1
+            per_hour[hour]["done"] += 1
             if n <= SILENT_THRESHOLD and clips <= 1:
                 per_route[route]["silent"] += 1
                 per_user[uid]["silent"] += 1
+                per_hour[hour]["silent"] += 1
                 silent_rows.append({"job": row.get("id"), "user": uid, "route": route,
                                     "at": row.get("created_at")})
     return {"hours": hours, "unreadable": unreadable,
             "per_route": {k: dict(v) for k, v in per_route.items()},
             "per_user": {k: dict(v) for k, v in per_user.items()},
+            "per_hour": {k: dict(v) for k, v in per_hour.items()},
             "silent_rows": silent_rows[:200]}
 
 
@@ -168,6 +177,16 @@ def main(hours: int = 24):
         rate = 100.0 * v["silent"] / max(1, v["done"])
         flag = "  <-- SILENT FAILURE CLASS" if rate >= 50 and v["silent"] else ""
         print(f"  {route[:23]:<24} {v['silent']:>7,} {v['done']:>7,} {rate:>6.1f}%{flag}")
+
+    ph = d.get("per_hour") or {}
+    if ph:
+        print("\nBY HOUR (UTC) — the transition should be visible here if Scribe is live")
+        print(f"  {'hour':<16} {'silent':>7} {'done':>6} {'rate':>7}")
+        for h in sorted(ph):
+            v = ph[h]
+            r = 100.0 * v["silent"] / max(1, v["done"])
+            bar = "#" * int(r / 5)
+            print(f"  {h:<16} {v['silent']:>7} {v['done']:>6} {r:>6.1f}%  {bar}")
 
     if d["unreadable"]:
         print(f"\n  ({d['unreadable']} completed jobs had an unreadable recipe — "

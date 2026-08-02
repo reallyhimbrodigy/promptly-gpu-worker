@@ -18,12 +18,12 @@ Columns: date · agent · app · what · tasks · container-seconds · $ · veri
 
 **prompt agent session total: ~$8.04 by the stated figures.**
 
-| 2026-08-02 | prompt | `query-silent-failures` ×2 | silent-failure detector — first run's threshold was wrong (see below), re-run after the fix | 2 CPU | ~$0.02 | yes (0 tasks) |
+| 2026-08-02 | prompt | `query-silent-failures` ×3 | silent-failure detector — first run's threshold was wrong (see below), re-run after the fix | 3 CPU | ~$0.03 | yes (0 tasks) |
 
 | 2026-08-02 | prompt | `cert-schema-billing` | schema-billing probe — **NEVER RAN**. `modal run` hung before app creation; no Modal app was registered and no container started. Killed. | 0 | 0 | **$0.00** | n/a |
 | 2026-08-02 | prompt | `plan-ab-reorder` | REORDER A/B (Zac GO): 3 arms x 16 clips, PLAN_ONLY, cpu=8/32GiB | 48 | ~14,400 est | ~$4 stated / budget $7 | yes (0 tasks) |
 
-**prompt agent session total: ~$12.06** (probe never ran = $0; reorder A/B ~$4). Explicit GO covered the
+**prompt agent session total: ~$12.07** (probe never ran = $0; reorder A/B ~$4). Explicit GO covered the
 detector; the probe is taken as covered by "these four are cheaper and more
 certain" contrasted against the HELD $10 A/B.
 
