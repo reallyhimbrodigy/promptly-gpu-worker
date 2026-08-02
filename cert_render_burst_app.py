@@ -46,9 +46,10 @@ AUDIO_KEY = "multilingual-cert/_bridge_regression/en.m4a"
 
 
 @app.function(secrets=SECRETS, timeout=4800, cpu=16, memory=65536)
-def run_case(dur: float = 20.0) -> dict:
+def run_case(dur: float = 20.0, run_id: str = "") -> dict:
     import copy
     import filecmp
+    import json
     import shutil
     import subprocess
     import tempfile
@@ -244,6 +245,12 @@ def run_case(dur: float = 20.0) -> dict:
         # reconstructed CostMeter seed / PremiumContext changing the budget gate
         # at handler:30841 shows as a different regen count, not pixel drift).
         out["ok"] = bool(cap["burst_vs_local_identical"]) and bool(cap["local_deterministic"])
+        print(f"[canary] VERDICT ok={out['ok']} burst==local="
+              f"{cap['burst_vs_local_identical']} local==local2="
+              f"{cap['local_deterministic']} psnr_bl={cap['psnr_burst_vs_local']} "
+              f"psnr_ll2={cap['psnr_local_vs_local2']} burst_s={cap['burst_secs']} "
+              f"local_s={cap['local_secs']} local2_s={cap['local2_secs']} "
+              f"sizes={out.get('sizes_mb')}", flush=True)
         return out
     except Exception as e:
         import traceback
@@ -251,6 +258,20 @@ def run_case(dur: float = 20.0) -> dict:
         out["traceback"] = traceback.format_exc()[-1800:]
         return out
     finally:
+        # Persist the verdict to a SURVIVING prefix (NOT base_key, which is deleted
+        # below) so a `modal run --detach` result is retrievable after the client
+        # disconnects — the first canary was cancelled mid-3rd-arm by exactly that
+        # disconnect, not a code fault.
+        if run_id:
+            try:
+                s3.put_object(Bucket=bucket,
+                              Key=f"cert/render_burst_results/{run_id}.json",
+                              Body=json.dumps(out).encode(),
+                              ContentType="application/json")
+                print(f"[canary] verdict → s3://{bucket}/cert/render_burst_results/"
+                      f"{run_id}.json", flush=True)
+            except Exception as _pe:
+                print(f"[canary] verdict persist FAILED: {_pe}", flush=True)
         # S3 hygiene — best-effort delete of the whole cert prefix.
         try:
             _objs = s3.list_objects_v2(Bucket=bucket, Prefix=base_key).get("Contents", [])
@@ -263,9 +284,9 @@ def run_case(dur: float = 20.0) -> dict:
 
 
 @app.local_entrypoint()
-def main(dur: float = 20.0):
+def main(dur: float = 20.0, run_id: str = ""):
     import json
-    r = run_case.remote(dur)
+    r = run_case.remote(dur, run_id)
     print("\n" + "=" * 70)
     print("inc2 render_burst CANARY")
     print("=" * 70)
