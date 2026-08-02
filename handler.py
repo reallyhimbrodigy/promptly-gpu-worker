@@ -10901,9 +10901,12 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
                 "total_s": round(_total, 1), "ttfb_s": round(_ttfb or 0.0, 1),
                 "out_tok": _eff_out, "aborted": bool(_aborted), "label": label,
                 "shape": (_shape_fire or {}).get("shape"),
-                # prompt/cached tokens so the uncached delta (prompt-cached, the
-                # per-call billed input incl. the response schema) is PERSISTED,
-                # not just printed — decides the prompt lever (relocation vs delete).
+                # INPUT-side accounting (2026-08-01). prompt/cached tokens so the
+                # uncached delta (prompt-cached, the per-call billed input incl.
+                # the response schema) is PERSISTED, not just printed — the only
+                # other way to read the prompt's real token cost was scraping Modal
+                # stdout inside its ~1h buffer. prompt-cached = the UNCACHED
+                # remainder, billed at full rate, the half no condensation touches.
                 "prompt_tok": getattr(_usage, "prompt_token_count", None) if _usage else None,
                 "cached_tok": getattr(_usage, "cached_content_token_count", None) if _usage else None,
             })
