@@ -5153,7 +5153,8 @@ def _error_path_certs_actually_run():
     import subprocess as _sp
     import sys as _sys
     for _cert in ("test_render_ladder.py", "test_remotion_timeout_forensics.py",
-                  "test_coverage_empty_transcript.py"):
+                  "test_coverage_empty_transcript.py",
+                  "test_asr_scribe_routing.py"):
         assert os.path.exists(_cert), f"{_cert} missing from the repo"
         _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
         assert _r.returncode == 0, (
@@ -5209,6 +5210,74 @@ def _coverage_empty_transcript_fails():
     assert _env.get("retryable") is True, _env
 
     assert os.path.exists("test_coverage_empty_transcript.py"), "cert must ride the repo"
+
+
+@check("LANGUAGE-ROUTED SCRIBE (2026-08-02, DARK behind PROMPTLY_ASR_SCRIBE): measured head-to-head on real prod audio, BOTH cohorts scored through handler's OWN _transcription_coverage_check, with Deepgram run on its EXACT production options (language=multi + 48kHz FLAC — an earlier control used detect_language=true, the config handler.py:3863 documents as returning 0 words on ~40% of non-English, and it had to be re-run). Failing set (TRANSCRIPTION_INCOMPLETE): deepgram 3/40 -> scribe 34/40. CONTROL set (currently SUCCEEDING, the no-regression proof): deepgram 32/40 -> scribe 39/40. Word timing vs an INDEPENDENT acoustic onset: 50.0ms -> 19-20ms. Scribe won in every language measured incl. English (18/22->20/22). Selection is MEASURED by the same gate that would reject the job, routing is an allowlist, and Deepgram has already returned before Scribe is called so an outage cannot cost a job. cert: test_asr_scribe_routing.py 14/14")
+def _asr_scribe_routing():
+    import handler
+    _src = open("handler.py").read()
+    assert os.path.exists("test_asr_scribe_routing.py"), "cert must ride the repo"
+    for _fn in ("transcribe_scribe", "_maybe_upgrade_transcript_scribe",
+                "_scribe_should_route", "_scribe_enabled", "_scribe_langs"):
+        assert callable(getattr(handler, _fn, None)), f"{_fn} missing"
+
+    _o_env = {k: os.environ.get(k) for k in
+              ("PROMPTLY_ASR_SCRIBE", "PROMPTLY_SCRIBE_LANGS", "ELEVENLABS_API_KEY")}
+
+    def _set(**kw):
+        for k, v in kw.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    try:
+        # 1. DARK BY DEFAULT — the flag must default OFF, whatever the key state
+        _set(PROMPTLY_ASR_SCRIBE=None, ELEVENLABS_API_KEY="k")
+        assert handler._scribe_enabled() is False, "PROMPTLY_ASR_SCRIBE must default OFF"
+        assert handler._scribe_should_route("hi") is False, "flag off must never route"
+
+        # 2. a key is REQUIRED — arming the flag without one must not route
+        _set(PROMPTLY_ASR_SCRIBE="1", ELEVENLABS_API_KEY=None)
+        assert handler._scribe_should_route("hi") is False, \
+            "no ELEVENLABS_API_KEY must not route (never call an engine we cannot reach)"
+
+        # 3. ALLOWLIST semantics, incl. the explicit widen-to-everything escape
+        _set(PROMPTLY_ASR_SCRIBE="1", ELEVENLABS_API_KEY="k", PROMPTLY_SCRIBE_LANGS="ml,ta")
+        assert handler._scribe_should_route("ml") is True
+        assert handler._scribe_should_route("hi") is False, "allowlist must exclude"
+        _set(PROMPTLY_SCRIBE_LANGS="*")
+        assert handler._scribe_should_route("ja") is True, "'*' must route everything"
+
+        # 4. FLAG-OFF INERTNESS at the call site: same object back, engine untouched
+        _set(PROMPTLY_ASR_SCRIBE=None)
+        _dg = {"words": [{"word": "a", "start": 0.0, "end": 0.1}], "detected_language": "hi"}
+        assert handler._maybe_upgrade_transcript_scribe(_dg, "/x.mp4", 10.0) is _dg, \
+            "flag off must return the EXACT Deepgram result (byte-identical pipeline)"
+
+        # 5. FAIL-SAFE: the upgrade raising must never cost a transcript we have
+        _set(PROMPTLY_ASR_SCRIBE="1", ELEVENLABS_API_KEY="k", PROMPTLY_SCRIBE_LANGS="hi")
+        _oc, _os_ = handler._transcription_coverage_check, handler.transcribe_scribe
+        try:
+            handler._transcription_coverage_check = lambda *a, **k: (False, {"unworded_frac": 0.9})
+            def _boom(*a, **k):
+                raise RuntimeError("SCRIBE_HTTP_500")
+            handler.transcribe_scribe = _boom
+            assert handler._maybe_upgrade_transcript_scribe(_dg, "/x.mp4", 10.0) is _dg, \
+                "a Scribe outage must leave today's behaviour, never fail the job"
+            # 6. MEASURED selection — a WORSE Scribe transcript must not be taken
+            handler.transcribe_scribe = lambda *a, **k: {
+                "words": [{"word": "b", "start": 0.0, "end": 0.1}], "detected_language": "hi"}
+            handler._transcription_coverage_check = (
+                lambda _p, w, _d: (False, {"unworded_frac": 0.4 if w is _dg["words"] else 0.9}))
+            assert handler._maybe_upgrade_transcript_scribe(_dg, "/x.mp4", 10.0) is _dg, \
+                "Scribe losing on coverage must leave Deepgram in place (not a blind swap)"
+        finally:
+            handler._transcription_coverage_check, handler.transcribe_scribe = _oc, _os_
+    finally:
+        for _k, _v in _o_env.items():
+            os.environ.pop(_k, None) if _v is None else os.environ.__setitem__(_k, _v)
+
+    # 7. the word CONTRACT — Scribe must fill every field Deepgram's parse emits
+    for _f in ("\"punctuated_word\"", "\"confidence\"", "\"speaker\"", "\"language\""):
+        assert _f in _src[_src.index("def transcribe_scribe"):_src.index("def transcribe_audio")], \
+            f"transcribe_scribe must emit {_f} — downstream reads all seven fields"
 
 
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")

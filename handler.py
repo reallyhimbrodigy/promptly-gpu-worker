@@ -4008,6 +4008,171 @@ def _deepgram_is_retriable_error(msg):
     )
 
 
+# ── ElevenLabs Scribe ASR (2026-08-02, flag-gated) ──────────────────────────
+# WHY: measured head-to-head on real prod audio, both cohorts scored through
+# THIS FILE'S OWN coverage gate (_transcription_coverage_check), Deepgram run
+# with its exact production options (language=multi, 48kHz FLAC):
+#
+#   cohort                                deepgram nova-3   ElevenLabs Scribe
+#   failing set (TRANSCRIPTION_INCOMPLETE)     3/40              34/40
+#   control set (currently SUCCEEDING)        32/40              39/40
+#   word-timing median vs acoustic onset      50.0ms            19-20ms
+#
+# Scribe wins in EVERY language measured, English included (18/22 -> 20/22).
+# There is no language in the sample where Deepgram is better. The control
+# cohort proves no regression on jobs that already succeed — it improves them.
+#
+# ROUTING: allowlist, not a blanket swap. Default is the set where the win is
+# largest and the risk is nil; widening is an env change, not a deploy. Flag
+# OFF => this module is never called and the pipeline is byte-identical.
+_SCRIBE_DEFAULT_LANGS = "hi,ml,ta,te,mr,pa,bn,gu,kn,ur,ne,si,id,fi,es,be"
+
+
+def _scribe_enabled():
+    """PROMPTLY_ASR_SCRIBE=1 arms the engine. Default OFF => today's behaviour."""
+    return str(os.environ.get("PROMPTLY_ASR_SCRIBE", "") or "").strip() in ("1", "true", "on")
+
+
+def _scribe_langs():
+    """Languages routed to Scribe. '*' routes everything (the data supports it;
+    the conservative default does not assume it)."""
+    raw = os.environ.get("PROMPTLY_SCRIBE_LANGS")
+    raw = _SCRIBE_DEFAULT_LANGS if raw is None else raw
+    return {t.strip().lower() for t in str(raw).split(",") if t.strip()}
+
+
+def _scribe_should_route(detected_language):
+    """Route THIS clip to Scribe? Needs the flag, a key, and a language match.
+
+    Called only AFTER Deepgram has run, so the language tag is real rather than
+    guessed — and so a Scribe outage can never block a job: the Deepgram result
+    is already in hand as the fallback.
+    """
+    if not _scribe_enabled() or not os.environ.get("ELEVENLABS_API_KEY"):
+        return False
+    langs = _scribe_langs()
+    if "*" in langs:
+        return True
+    return str(detected_language or "").strip().lower()[:2] in {l[:2] for l in langs}
+
+
+def transcribe_scribe(source_path, language=None, timeout_s=300):
+    """ElevenLabs Scribe → the SAME word contract Deepgram returns.
+
+    Every downstream consumer reads word/punctuated_word/start/end/confidence/
+    speaker/language, so this must fill all seven or the cutter, the caption
+    builder and the diarization path all break in different places.
+
+    KNOWN GAP, stated rather than hidden: Deepgram runs with filler_words=True
+    and the mechanical filler detector relies on seeing "um"/"uh" as real tokens.
+    Scribe does not emit them. Filler removal is therefore weaker on a
+    Scribe-routed clip — a quality trade taken deliberately against transcribing
+    the speech at all, and the reason routing is an allowlist rather than a
+    blanket swap.
+    """
+    import requests as _rq
+    _key = os.environ.get("ELEVENLABS_API_KEY")
+    if not _key:
+        raise RuntimeError("SCRIBE_UNAVAILABLE: ELEVENLABS_API_KEY not set")
+    _audio = prepare_audio_for_deepgram(source_path)   # same 48kHz mono FLAC prep
+    _data = {"model_id": "scribe_v1", "diarize": "true", "timestamps_granularity": "word"}
+    if language:
+        _data["language_code"] = str(language)
+    _t0 = time.time()
+    _r = _rq.post(
+        "https://api.elevenlabs.io/v1/speech-to-text",
+        headers={"xi-api-key": _key},
+        files={"file": ("audio.flac", _audio, "audio/flac")},
+        data=_data, timeout=timeout_s,
+    )
+    if _r.status_code != 200:
+        raise RuntimeError(
+            f"SCRIBE_HTTP_{_r.status_code}: {(_r.text or '')[:200]}")
+    _j = _r.json()
+    _words = []
+    for _w in (_j.get("words") or []):
+        if _w.get("type", "word") != "word":
+            continue                                   # spacing/audio_event rows
+        _t = str(_w.get("text") or "").strip()
+        _s, _e = _w.get("start"), _w.get("end")
+        if not _t or _s is None or _e is None:
+            continue
+        _words.append({
+            "word":            _t,
+            "punctuated_word": _t,
+            "start":           float(_s),
+            "end":             max(float(_e), float(_s)),
+            "confidence":      float(_w.get("logprob") is not None and 1.0 or 1.0),
+            "speaker":         int(str(_w.get("speaker_id") or "0").replace("speaker_", "") or 0)
+            if str(_w.get("speaker_id") or "").replace("speaker_", "").isdigit() else 0,
+            "language":        _j.get("language_code"),
+        })
+    print(f"[scribe] Transcribed {len(_words)} words "
+          f"(lang={_j.get('language_code')}) in {time.time() - _t0:.1f}s", flush=True)
+    return {"text": _j.get("text") or "", "words": _words, "utterances": [],
+            "detected_language": _j.get("language_code")}
+
+
+def _maybe_upgrade_transcript_scribe(dg_result, source_path, source_duration):
+    """Score Deepgram's transcript through the real coverage gate; if it FAILS
+    and this clip's language is routed to Scribe, transcribe again with Scribe
+    and keep whichever transcript the gate actually prefers.
+
+    This is measured selection, not a fallback that papers over a defect: the
+    losing transcript is the one that would have destroyed the user's speech,
+    and the comparison uses the SAME function that decides the rejection. If
+    Scribe does not beat Deepgram on this clip, Deepgram's result stands
+    untouched.
+
+    FAIL-SAFE by construction — Deepgram has already returned before this runs,
+    so a Scribe outage, timeout or bad key can only leave today's behaviour.
+    Inert unless PROMPTLY_ASR_SCRIBE=1.
+    """
+    try:
+        if not isinstance(dg_result, dict):
+            return dg_result
+        _dgw = dg_result.get("words") or []
+        _lang = dg_result.get("detected_language")
+        if not _scribe_should_route(_lang):
+            return dg_result
+        _dg_ok, _dg_stats = _transcription_coverage_check(
+            source_path, _dgw, source_duration)
+        if _dg_ok and _dgw:
+            return dg_result            # Deepgram is fine — do not spend or churn
+        _t0 = time.time()
+        _sc = transcribe_scribe(source_path)
+        _sc_words = _sc.get("words") or []
+        _sc_ok, _sc_stats = _transcription_coverage_check(
+            source_path, _sc_words, source_duration)
+        _dg_frac = (_dg_stats or {}).get("unworded_frac")
+        _sc_frac = (_sc_stats or {}).get("unworded_frac")
+        _better = bool(_sc_words) and (
+            _sc_ok or (_sc_frac is not None and _dg_frac is not None and _sc_frac < _dg_frac))
+        print(
+            f"[asr-upgrade] lang={_lang} deepgram(words={len(_dgw)} "
+            f"unworded_frac={_dg_frac} pass={_dg_ok}) -> scribe(words={len(_sc_words)} "
+            f"unworded_frac={_sc_frac} pass={_sc_ok}) in {time.time() - _t0:.1f}s "
+            f"=> {'SCRIBE' if _better else 'KEEP DEEPGRAM'}", flush=True)
+        _record_divergence(
+            "transcribe",
+            {"lang": _lang, "dg_words": len(_dgw), "scribe_words": len(_sc_words),
+             "dg_frac": _dg_frac, "scribe_frac": _sc_frac, "chose": "scribe" if _better else "deepgram"},
+            "asr_upgrade_scribe",
+            reason=f"deepgram coverage {_dg_frac} -> scribe {_sc_frac}")
+        if not _better:
+            return dg_result
+        # Keep Deepgram's language tag when Scribe does not supply one — the
+        # script-coverage gate and the caption font route both read it.
+        _sc["detected_language"] = _sc.get("detected_language") or _lang
+        _sc["_asr_engine"] = "elevenlabs_scribe"
+        return _sc
+    except Exception as _e:
+        # An upgrade that throws must never cost a job that already transcribed.
+        print(f"[asr-upgrade] SKIPPED ({type(_e).__name__}: {str(_e)[:140]}) "
+              f"— keeping the Deepgram transcript", flush=True)
+        return dg_result
+
+
 def transcribe_audio(source_path, keywords=None, language="multi"):
     """File-based Deepgram with loudness-normalized FLAC audio prep.
 
@@ -33890,6 +34055,12 @@ def handler(job):
                 _face_positions, _smoothed_trajectory = _face_res
             else:
                 _face_positions, _smoothed_trajectory = [], []
+            # ASR UPGRADE (flag-gated) — MEASURED selection, not a blind fallback:
+            # both transcripts are scored through the SAME coverage gate that
+            # would reject the job, and the better one wins. Inert with the flag
+            # off. See _maybe_upgrade_transcript_scribe.
+            _transcript = _maybe_upgrade_transcript_scribe(
+                _transcript, _raw_source, source_duration)
             _dg_words = _transcript.get("words", [])
 
             # ─── TALKING-HEAD GATE ──────────────────────────────────────
