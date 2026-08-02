@@ -8974,6 +8974,38 @@ def _fanout_dark():
         "teardown must clear the prefix pointer (warm-container reuse)"
 
 
+@check("DURABLE FAILURE CORPUS (Zac 2026-08-02, RULE-1): on any terminal failure OR silent completion the worker retains the EXACT source to a RETAINED prefix (failure-corpus/{class}/{job_id}) BEFORE the lifecycle purges work_dir — so every future fix is testable against the real input that broke (tonight's Scribe proof needed audio that survived only in one agent's local dir; luck, not process). FAILS if the helper is gone or either capture site is unwired — silently losing the evidence a closed class was closed on.")
+def _failure_corpus():
+    import handler
+    _h = open("handler.py").read()
+    assert callable(getattr(handler, "_capture_failure_corpus", None)), \
+        "the corpus helper _capture_failure_corpus must exist"
+    assert callable(getattr(handler, "_count_recipe_events", None)), \
+        "the event counter _count_recipe_events must exist (silent-completion signal)"
+    # fail-OPEN: the whole helper body is wrapped so a corpus write can never
+    # affect a job's outcome.
+    _fn = _h[_h.index("def _capture_failure_corpus("):]
+    _fn = _fn[:_fn.index("\ndef ")]
+    assert "try:" in _fn and "except Exception" in _fn, \
+        "corpus capture must be fail-open (wrapped) — never affect the job"
+    assert "failure-corpus/" in _fn, "corpus must write to the retained failure-corpus/ prefix"
+    # wired at BOTH sites: the terminal-failure path (keyed by error_code) and the
+    # silent-completion path (0 events, keyed SILENT).
+    assert 'classified.get("error_code"))' in _h and "_capture_failure_corpus(" in _h, \
+        "terminal-failure path must capture the source keyed by error_code"
+    assert '_count_recipe_events(sanitized_recipe) == 0' in _h and '"SILENT"' in _h, \
+        "silent-completion path must capture the source when the recipe has 0 events"
+    # the capture must precede the work_dir teardown — key it on source_path being
+    # read from the live locals at the failure site, not a post-cleanup path.
+    assert 'locals().get("source_path")' in _h, \
+        "capture must read the live source_path before work_dir is purged"
+    # counter reads BOTH recipe shapes (standard cuts/emphasis + caption-less plan)
+    _ce = _h[_h.index("def _count_recipe_events("):]
+    _ce = _ce[:_ce.index("\ndef ")]
+    assert '"cuts"' in _ce and 'recipe.get("plan")' in _ce, \
+        "event counter must read BOTH recipe shapes (standard + caption-less plan)"
+
+
 @check("inc2 RENDER BURST (DARK, RULE-1): PROMPTLY_RENDER_BURST default OFF → render_stage runs IN-PROCESS byte-identical; the seam dispatches through _run_render_via_burst_or_local(..., is_premium); render_burst exists in modal_app pinned cpu=48 / memory>=49152 (48 GiB blur-OOM floor) / timeout=3000; the ProgressivePublisher drain (_drain_progressive_publisher) runs in render_burst's OWN finally (the one straddling lifecycle moved whole into the burst); the burst PROPAGATES failure (no {ok:False}/error-envelope swallow) so the planner's ONE existing terminal classifies it; a STAGING hiccup ledgers render_burst_fallback and runs the local render. FAILS if any of these regress — a burst that swallowed errors, dropped the drain, or shrank memory below the OOM floor would break the money path the instant the flag flips.")
 def _render_burst_dark():
     import os as _os, ast as _ast

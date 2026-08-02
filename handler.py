@@ -32071,6 +32071,52 @@ def render_stage(
     }
 
 
+def _count_recipe_events(recipe):
+    """Countable visual events across BOTH recipe shapes. None = unreadable.
+    Mirrors query_silent_failures_app.count_events / the bleed-meter detector —
+    a completed job with 0 events delivered nothing."""
+    if not isinstance(recipe, dict):
+        return None
+    n = 0
+    n += len(recipe.get("cuts") or recipe.get("clips") or [])
+    for em in (recipe.get("emphasis_moments") or []):
+        if not isinstance(em, dict):
+            continue
+        if (em.get("zoom_effect") or {}).get("type"):
+            n += 1
+        if em.get("motion_graphic"):
+            n += 1
+    for k in ("motion_graphics", "caption_keywords", "transitions",
+              "tight_cut_overlays", "text_overlays", "broll_clips"):
+        n += len(recipe.get(k) or [])
+    _plan = recipe.get("plan")
+    if isinstance(_plan, dict):
+        n += len(_plan.get("clips") or []) + len(_plan.get("transitions") or [])
+    return n
+
+
+def _capture_failure_corpus(source_path, job_id, klass):
+    """DURABLE FAILURE CORPUS (Zac 2026-08-02): copy the exact source that broke
+    to a RETAINED prefix before the lifecycle purges it, so every future fix can
+    be re-tested against the real input. Tonight's Scribe proof needed audio that
+    survived only in one agent's local dir — luck, not process; this makes it
+    process. Fail-OPEN: a corpus write must never affect the job's outcome."""
+    try:
+        if not source_path or not os.path.exists(source_path) or not job_id:
+            return
+        if _aws_s3_client is None:
+            return
+        _bucket = os.environ.get("S3_BUCKET_NAME") or "promptly-video-storage"
+        _safe = "".join(c if (c.isalnum() or c in "-_") else "_"
+                        for c in str(klass or "UNKNOWN"))[:48]
+        _key = f"failure-corpus/{_safe}/{job_id}{os.path.splitext(source_path)[1] or '.mp4'}"
+        _aws_s3_client.upload_file(source_path, _bucket, _key)
+        print(f"[failure-corpus] retained {klass} source → s3://{_bucket}/{_key}", flush=True)
+    except Exception as _e:
+        print(f"[failure-corpus] capture skipped ({type(_e).__name__}: "
+              f"{str(_e)[:120]})", flush=True)
+
+
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
@@ -35929,6 +35975,15 @@ def handler(job):
         except Exception:
             pass
 
+        # DURABLE FAILURE CORPUS — SILENT completion: status=completed but the
+        # recipe carries ZERO countable events (the invisible class the daily
+        # [REPORT] detector surfaces). Retain the source before purge so the fix
+        # can be tested against the exact input that produced nothing. Fail-open.
+        try:
+            if _count_recipe_events(sanitized_recipe) == 0:
+                _capture_failure_corpus(locals().get("source_path"), job_id, "SILENT")
+        except Exception:
+            pass
         # Durable TERMINAL write (synchronous so it lands before return): complete.
         # Carries the floor markers (Part 3) so degradation-rate is a SQL
         # query over result jsonb, not a log grep.
@@ -36022,6 +36077,12 @@ def handler(job):
         _rescued = _outer_safe_rescue(job, input_data, classified, _rescue_state)
         if _rescued is not None:
             return _rescued
+        # DURABLE FAILURE CORPUS: a real terminal failure — retain the exact source
+        # before the finally purges work_dir, keyed by the error class, so this
+        # input can be re-run against any future fix. Fail-open.
+        _capture_failure_corpus(locals().get("source_path"),
+                                input_data.get("job_id"),
+                                classified.get("error_code"))
         # Durable TERMINAL write (synchronous): failed — so the bar shows a real
         # error state and the client stops polling, instead of freezing.
         # Credit ruling: designed rejections are free — the worker marks the
