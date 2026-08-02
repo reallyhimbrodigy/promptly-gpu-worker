@@ -8,6 +8,8 @@ import {
 } from "remotion";
 import { Video } from "@remotion/media";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
+import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
+import { cornerPx, planCappedRampIn, planCappedRelease } from "../shared/velocity-cap";
 import type { SmoothPushProps } from "../types";
 
 /**
@@ -22,7 +24,9 @@ export const SmoothPush: React.FC<SmoothPushProps> = ({
   punch,
 }) => {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames } = useVideoConfig();
+  const { fps, durationInFrames, width, height } = useVideoConfig();
+  // VELOCITY CAP (Zac 2026-08-01). OFF → today's exact cubic pixels.
+  const smooth = useSmoothGraphics();
   // PUNCH (ease-in) accelerates the push INTO the word so the impact lands ON the
   // onset frame (viral/punchy); the default GLIDE (ease-out) front-loads the motion
   // and settles gently on the word (calm/corporate). Only the ramp-IN ease changes;
@@ -53,35 +57,70 @@ export const SmoothPush: React.FC<SmoothPushProps> = ({
       });
     }
   } else {
+    // Tracks the previous event's finished frame so a capped ramp can only grow
+    // backwards into GENUINELY free time, never over its predecessor.
+    let prevEventEnd = 0;
     for (const event of events) {
       const targetScale = event.scale ?? 1.2;
       const eventStart = msToFramesFloor(event.startMs, fps);
       const eventEnd = msToFrames(event.startMs + event.durationMs, fps);
-
-      if (frame < eventStart || frame > eventEnd) continue;
-
       const eventDuration = eventEnd - eventStart;
       const rampIn = eventStart + Math.round(eventDuration * 0.35);
       const holdEnd = eventStart + Math.round(eventDuration * 0.6);
 
+      // VELOCITY CAP. The ramp LANDS on rampIn — peak-on-word is a product law
+      // (ZOOM_PEAK_REACH_MS back-times startMs for exactly this) — so it may
+      // only grow BACKWARDS into the gap after the previous event. The release
+      // is anchored at holdEnd and grows FORWARDS to the clip end; nothing is
+      // waiting on it, so that is the cheap direction.
+      const corner = cornerPx(width, height, event.originX ?? 0.5, event.originY ?? 0.5);
+      const capIn = smooth
+        ? planCappedRampIn({
+            fromScale: 1,
+            toScale: targetScale,
+            landFrame: rampIn,
+            earliestFrame: Math.min(prevEventEnd, eventStart),
+            authoredFrames: Math.max(1, rampIn - eventStart),
+            fps,
+            corner,
+          })
+        : null;
+      const capOut = smooth
+        ? planCappedRelease({
+            fromScale: capIn ? capIn.toScale : targetScale,
+            toScale: 1,
+            startFrame: holdEnd,
+            latestFrame: durationInFrames,
+            authoredFrames: Math.max(1, eventEnd - holdEnd),
+            fps,
+            corner,
+          })
+        : null;
+
+      const spanStart = capIn ? capIn.startFrame : eventStart;
+      const spanEnd = capOut ? capOut.endFrame : eventEnd;
+      prevEventEnd = spanEnd;
+      if (frame < spanStart || frame > spanEnd) continue;
+
+      const peakScale = capIn ? capIn.toScale : targetScale;
       let progress: number;
       if (frame < rampIn) {
-        progress = interpolate(frame, [eventStart, rampIn], [0, 1], {
-          easing: rampInEase,
+        progress = interpolate(frame, [spanStart, rampIn], [0, 1], {
+          easing: capIn ? capIn.easing : rampInEase,
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });
       } else if (frame < holdEnd) {
         progress = 1;
       } else {
-        progress = interpolate(frame, [holdEnd, eventEnd], [1, 0], {
-          easing: Easing.in(Easing.cubic),
+        progress = interpolate(frame, [holdEnd, spanEnd], [1, 0], {
+          easing: capOut ? capOut.easing : Easing.in(Easing.cubic),
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });
       }
 
-      scale = 1 + (targetScale - 1) * progress;
+      scale = 1 + (peakScale - 1) * progress;
       originX = event.originX ?? 0.5;
       originY = event.originY ?? 0.5;
     }

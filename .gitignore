@@ -32,6 +32,11 @@ src/remotion/public/overlay-cut-test-audio.wav
 # binary .mov + frame extracts (incl. 300MB+ files that exceed GitHub's 100MB
 # limit), regenerable from source. Never commit.
 src/remotion/out_editorialpop_test/
+# Zoom velocity-cap A/B arms (OFF/OFF2/CAP h264 + the constructed source
+# pattern) — large binaries, fully regenerable via velocity-cap-ab.mjs from a
+# PINNED seed, so the measurement reproduces without carrying the bytes.
+src/remotion/velocity-cap-out/
+src/remotion/public/vcap_pattern.mp4
 # Resolved system-prompt dumps — derived from handler.py's f-string for local
 # inspection only (regenerate via the extraction script); not source.
 post_cuts_system_prompt.txt

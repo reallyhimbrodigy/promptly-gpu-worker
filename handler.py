@@ -4609,12 +4609,13 @@ def measure_source_loudness(source_path):
     Returns dict with 'peak_db', 'rms_db', 'noise_floor_db' (all negative floats).
     """
     # astats gives us peak, RMS; we sample the first 60s to keep it fast.
-    # -vn (P0 fix, Zac 2026-08-01): AUDIO-only measurement — without -vn ffmpeg
-    # DECODES THE FULL VIDEO too, so a 100fps source is 6000 pointless frames of
-    # decode that blow the 30s timeout and fail the render with RENDER_FFMPEG
-    # (measure_source_loudness). -vn skips the video stream → sub-second at any
-    # fps. Pre-existing high-fps edge case (surfaced by a user's 100fps uploads),
-    # NOT the vidstab/tblend filtergraph work — the stderr named this line.
+    # -vn (P0 fix, Zac 2026-08-01): this is an AUDIO-only measurement, but
+    # without -vn ffmpeg DECODES THE FULL VIDEO too — on a 100fps source that is
+    # 6000 frames of pointless video decode, blowing the 30s timeout and failing
+    # the whole render with RENDER_FFMPEG (measure_source_loudness). -vn skips
+    # the video stream entirely so loudness stays sub-second at any fps. (Not a
+    # regression from tonight's filtergraph work — a pre-existing high-fps edge
+    # case a user's 100fps uploads surfaced.)
     cmd = [
         "ffmpeg", "-vn", "-i", source_path, "-t", "60",
         "-af", "astats=metadata=1:reset=0,ametadata=mode=print",
@@ -25573,6 +25574,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # captions.ai smoothness pair (Zac 2026-08-01).
     if os.environ.get("PROMPTLY_MOTION_TOKENS", "").strip().lower() in ("1", "true", "yes", "on"):
         overlay_input["motionTokens"] = True
+    # SMOOTH-GRAPHICS (Zac 2026-08-01): eased + ms-floored MG entrances/exits +
+    # b-roll fade. Emitted only when set → OFF render input is byte-identical.
+    if os.environ.get("PROMPTLY_SMOOTH_GRAPHICS", "").strip().lower() in ("1", "true", "yes", "on"):
+        overlay_input["smoothGraphics"] = True
     overlay_input_path = os.path.join(_stage_dir, "overlay_input.json")
     _validate_and_write_render_input(
         "overlay", overlay_input, _SchemaOverlayInput, overlay_input_path,
@@ -25697,6 +25702,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # own curve and are NOT reached by this flag — reported to Zac.
     if micro_input is not None and os.environ.get("PROMPTLY_RESPRUNG_ZOOMS", "").strip().lower() in ("1", "true", "yes", "on"):
         micro_input["resprungZooms"] = True
+    # SMOOTH-GRAPHICS on the MICRO leg too — the linear-crossfade transitions
+    # (LightLeak/CardSwipe/ZoomThrough/Stack/ShutterFlash) render here.
+    if micro_input is not None and os.environ.get("PROMPTLY_SMOOTH_GRAPHICS", "").strip().lower() in ("1", "true", "yes", "on"):
+        micro_input["smoothGraphics"] = True
     # AUDIT #5 (Zac 2026-07-12): instrument the MICRO leg — the render's heaviest
     # painter (measured 97.6s / 1.5GB on Zac's render, LONGER than the caption
     # overlay). Log WHICH composite-effect zoom types (FocusWindow/LetterboxPush/

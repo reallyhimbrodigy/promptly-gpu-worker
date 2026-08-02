@@ -8,6 +8,8 @@ import {
   OffthreadVideo,
 } from "remotion";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
+import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
+import { cornerPx, planCappedRampIn, planCappedRelease } from "../shared/velocity-cap";
 import type { LetterboxPushProps } from "../types";
 
 /**
@@ -24,7 +26,9 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
   punch,
 }) => {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames, height } = useVideoConfig();
+  const { fps, durationInFrames, width, height } = useVideoConfig();
+  // VELOCITY CAP (Zac 2026-08-01). OFF -> today's exact cubic pixels.
+  const smooth = useSmoothGraphics();
   // PUNCH (ease-in) lands the push impact ON the word; GLIDE (ease-out) is the
   // default gentle settle. Only the ramp-in ease changes. (Zac 2026-07-15)
   const rampInEase = punch ? Easing.in(Easing.cubic) : Easing.out(Easing.cubic);
@@ -55,34 +59,66 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
     }
     scale = 1 + 0.2 * barProgress;
   } else {
+    // Tracks the previous event's finished frame so a capped ramp can only grow
+    // backwards into GENUINELY free time, never over its predecessor.
+    let prevEventEnd = 0;
     for (const event of events) {
       const targetScale = event.scale ?? 1.2;
       const eventStart = msToFramesFloor(event.startMs, fps);
       const eventEnd = msToFrames(event.startMs + event.durationMs, fps);
-
-      if (frame < eventStart || frame > eventEnd) continue;
-
       const eventDuration = eventEnd - eventStart;
       const rampIn = eventStart + Math.round(eventDuration * 0.35);
       const holdEnd = eventStart + Math.round(eventDuration * 0.6);
 
+      // VELOCITY CAP. The ramp LANDS on rampIn (peak-on-word) so it grows only
+      // BACKWARDS; the release is anchored at holdEnd and grows FORWARDS. The
+      // bars ride barProgress, so they slow with the push and stay coherent.
+      const corner = cornerPx(width, height, event.originX ?? 0.5, event.originY ?? 0.5);
+      const capIn = smooth
+        ? planCappedRampIn({
+            fromScale: 1,
+            toScale: targetScale,
+            landFrame: rampIn,
+            earliestFrame: Math.min(prevEventEnd, eventStart),
+            authoredFrames: Math.max(1, rampIn - eventStart),
+            fps,
+            corner,
+          })
+        : null;
+      const capOut = smooth
+        ? planCappedRelease({
+            fromScale: capIn ? capIn.toScale : targetScale,
+            toScale: 1,
+            startFrame: holdEnd,
+            latestFrame: durationInFrames,
+            authoredFrames: Math.max(1, eventEnd - holdEnd),
+            fps,
+            corner,
+          })
+        : null;
+
+      const spanStart = capIn ? capIn.startFrame : eventStart;
+      const spanEnd = capOut ? capOut.endFrame : eventEnd;
+      prevEventEnd = spanEnd;
+      if (frame < spanStart || frame > spanEnd) continue;
+
       if (frame < rampIn) {
-        barProgress = interpolate(frame, [eventStart, rampIn], [0, 1], {
-          easing: rampInEase,
+        barProgress = interpolate(frame, [spanStart, rampIn], [0, 1], {
+          easing: capIn ? capIn.easing : rampInEase,
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });
       } else if (frame < holdEnd) {
         barProgress = 1;
       } else {
-        barProgress = interpolate(frame, [holdEnd, eventEnd], [1, 0], {
-          easing: Easing.in(Easing.cubic),
+        barProgress = interpolate(frame, [holdEnd, spanEnd], [1, 0], {
+          easing: capOut ? capOut.easing : Easing.in(Easing.cubic),
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });
       }
 
-      scale = 1 + (targetScale - 1) * barProgress;
+      scale = 1 + ((capIn ? capIn.toScale : targetScale) - 1) * barProgress;
       originX = event.originX ?? 0.5;
       originY = event.originY ?? 0.5;
     }

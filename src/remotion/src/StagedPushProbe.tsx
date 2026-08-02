@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, staticFile } from "remotion";
 import { StagedPush } from "./zoom/StagedPush/StagedPush";
+import { SmoothGraphicsProvider } from "./motion-graphics/shared/smooth-graphics-flag";
 import type { StagedPushEvent } from "./zoom/types";
 
 /**
@@ -11,6 +12,10 @@ import type { StagedPushEvent } from "./zoom/types";
  */
 export interface StagedPushProbeProps {
   events: StagedPushEvent[];
+  /** Drives the zoom VELOCITY CAP so an OFF/ON pair is renderable locally. */
+  smoothGraphics?: boolean;
+  /** Override the probe source (the A/B uses a CONSTRUCTED durable pattern). */
+  src?: string;
 }
 
 const DEFAULT_EVENTS: StagedPushEvent[] = [
@@ -25,10 +30,19 @@ const DEFAULT_EVENTS: StagedPushEvent[] = [
   },
 ];
 
-export const StagedPushProbe: React.FC<StagedPushProbeProps> = ({ events }) => {
+export const StagedPushProbe: React.FC<StagedPushProbeProps> = ({
+  events,
+  smoothGraphics,
+  src,
+}) => {
   return (
-    <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      <StagedPush src={staticFile("test_talking_head.mp4")} events={events ?? DEFAULT_EVENTS} />
-    </AbsoluteFill>
+    <SmoothGraphicsProvider enabled={smoothGraphics ?? false}>
+      <AbsoluteFill style={{ backgroundColor: "#000" }}>
+        <StagedPush
+          src={staticFile(src ?? "test_talking_head.mp4")}
+          events={events ?? DEFAULT_EVENTS}
+        />
+      </AbsoluteFill>
+    </SmoothGraphicsProvider>
   );
 };

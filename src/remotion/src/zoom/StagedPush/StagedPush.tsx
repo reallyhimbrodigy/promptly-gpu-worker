@@ -8,6 +8,8 @@ import {
 } from "remotion";
 import { Video } from "@remotion/media";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
+import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
+import { cornerPx, planCappedRampIn, planCappedRelease } from "../shared/velocity-cap";
 import type { StagedPushProps } from "../types";
 
 /**
@@ -34,7 +36,9 @@ import type { StagedPushProps } from "../types";
  */
 export const StagedPush: React.FC<StagedPushProps> = ({ src, events, style }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
+  const { fps, durationInFrames, width, height } = useVideoConfig();
+  // VELOCITY CAP (Zac 2026-08-01). OFF -> today's exact cubic pixels.
+  const smooth = useSmoothGraphics();
 
   let scale = 1;
   let originX = 0.5;
@@ -55,9 +59,49 @@ export const StagedPush: React.FC<StagedPushProps> = ({ src, events, style }) =>
     const first = st[0];
     const last = st[st.length - 1];
 
-    const beginF = first.peak - pushF; // the first push starts here (back-timed so peak = word)
+    // VELOCITY CAP. Every stage peak is nailed to its own word, so each push may
+    // only grow BACKWARDS into the hold that precedes it (stage 0 into the clip
+    // head). Solved cumulatively, because stage i's travel starts from whatever
+    // scale stage i-1 actually reached after ITS cap.
+    const corner = cornerPx(width, height, originX, originY);
+    const staged = st.map(() => ({ start: 0, scale: 1, easing: undefined as
+      ((t: number) => number) | undefined }));
+    let cum = 1;
+    for (let i = 0; i < st.length; i++) {
+      const c = smooth
+        ? planCappedRampIn({
+            fromScale: cum,
+            toScale: st[i].scale,
+            landFrame: st[i].peak,
+            earliestFrame: i === 0 ? 0 : st[i - 1].peak,
+            authoredFrames: pushF,
+            fps,
+            corner,
+          })
+        : null;
+      staged[i] = {
+        start: c ? c.startFrame : st[i].peak - pushF,
+        scale: c ? c.toScale : st[i].scale,
+        easing: c ? c.easing : undefined,
+      };
+      cum = staged[i].scale;
+    }
+    const lastScale = staged[staged.length - 1].scale;
+
+    const beginF = staged[0].start; // the first push starts here (back-timed so peak = word)
     const releaseStartF = last.peak + holdF;
-    const releaseEndF = releaseStartF + releaseF;
+    const capRelease = smooth
+      ? planCappedRelease({
+          fromScale: lastScale,
+          toScale: 1,
+          startFrame: releaseStartF,
+          latestFrame: durationInFrames,
+          authoredFrames: releaseF,
+          fps,
+          corner,
+        })
+      : null;
+    const releaseEndF = capRelease ? capRelease.endFrame : releaseStartF + releaseF;
 
     // outside this event's whole span → this event contributes nothing here
     const spanEndF = ev.cutTerminated ? releaseStartF : releaseEndF;
@@ -68,7 +112,7 @@ export const StagedPush: React.FC<StagedPushProps> = ({ src, events, style }) =>
     let resolved = false;
 
     for (let i = 0; i < st.length; i++) {
-      const pushStartF = st[i].peak - pushF;
+      const pushStartF = staged[i].start;
       if (frame < pushStartF) {
         // in the HOLD between the previous stage's peak and this stage's push
         s = prevScale;
@@ -76,28 +120,28 @@ export const StagedPush: React.FC<StagedPushProps> = ({ src, events, style }) =>
         break;
       }
       if (frame <= st[i].peak) {
-        // PUSHING into stage i: prevScale → st[i].scale, smooth-fast (ease-out cubic),
+        // PUSHING into stage i: prevScale → staged[i].scale, velocity-capped,
         // completing exactly on the word (frame === peak → progress 1)
-        s = interpolate(frame, [pushStartF, st[i].peak], [prevScale, st[i].scale], {
-          easing: Easing.out(Easing.cubic),
+        s = interpolate(frame, [pushStartF, st[i].peak], [prevScale, staged[i].scale], {
+          easing: staged[i].easing ?? Easing.out(Easing.cubic),
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });
         resolved = true;
         break;
       }
-      prevScale = st[i].scale; // passed this stage's peak; carry its scale forward
+      prevScale = staged[i].scale; // passed this stage's peak; carry its scale forward
     }
 
     if (!resolved) {
       // past the final peak: HOLD at full push, then adaptive release
       if (frame <= releaseStartF || ev.cutTerminated) {
         // hold at full push (and, if cut-terminated, stay there — the cut ends the clip)
-        s = last.scale;
+        s = lastScale;
       } else {
         // continuing: smooth MODERATE ease-out back toward baseline
-        s = interpolate(frame, [releaseStartF, releaseEndF], [last.scale, 1], {
-          easing: Easing.inOut(Easing.cubic),
+        s = interpolate(frame, [releaseStartF, releaseEndF], [lastScale, 1], {
+          easing: capRelease ? capRelease.easing : Easing.inOut(Easing.cubic),
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });

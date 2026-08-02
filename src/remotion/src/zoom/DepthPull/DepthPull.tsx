@@ -8,6 +8,8 @@ import {
 } from "remotion";
 import { Video } from "@remotion/media";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
+import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
+import { cornerPx, planCappedRampIn, planCappedRelease } from "../shared/velocity-cap";
 import type { DepthPullProps } from "../types";
 
 const BOKEH_ORBS = [
@@ -33,7 +35,9 @@ export const DepthPull: React.FC<DepthPullProps> = ({
   punch,
 }) => {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames } = useVideoConfig();
+  const { fps, durationInFrames, width, height } = useVideoConfig();
+  // VELOCITY CAP (Zac 2026-08-01). OFF -> today's exact cubic pixels.
+  const smooth = useSmoothGraphics();
   // PUNCH (ease-in) lands the push impact ON the word; GLIDE (ease-out) is the
   // default gentle settle. Only the ramp-in ease changes. (Zac 2026-07-15)
   const rampInEase = punch ? Easing.in(Easing.cubic) : Easing.out(Easing.cubic);
@@ -64,30 +68,65 @@ export const DepthPull: React.FC<DepthPullProps> = ({
       });
     }
   } else {
+    // Tracks the previous event's finished frame so a capped ramp can only grow
+    // backwards into GENUINELY free time, never over its predecessor.
+    let prevEventEnd = 0;
     for (const event of events) {
       const eventStart = msToFramesFloor(event.startMs, fps);
       const eventEnd = msToFrames(event.startMs + event.durationMs, fps);
-      if (frame < eventStart || frame > eventEnd) continue;
-
-      targetScale = event.scale ?? 1.15;
-      originX = event.originX ?? 0.5;
-      originY = event.originY ?? 0.45;
-
       const eventDuration = eventEnd - eventStart;
       const rampIn = eventStart + Math.round(eventDuration * 0.35);
       const holdEnd = eventStart + Math.round(eventDuration * 0.6);
+      const authoredScale = event.scale ?? 1.15;
+
+      // VELOCITY CAP. midScale rides zoomProgress at FULL amplitude (the 0.6x is
+      // the background parallax layer only), so the cap is solved against the
+      // full target. The ramp LANDS on rampIn (peak-on-word) and grows only
+      // BACKWARDS; the release grows FORWARDS to the clip end.
+      const corner = cornerPx(width, height, event.originX ?? 0.5, event.originY ?? 0.45);
+      const capIn = smooth
+        ? planCappedRampIn({
+            fromScale: 1,
+            toScale: authoredScale,
+            landFrame: rampIn,
+            earliestFrame: Math.min(prevEventEnd, eventStart),
+            authoredFrames: Math.max(1, rampIn - eventStart),
+            fps,
+            corner,
+          })
+        : null;
+      const capOut = smooth
+        ? planCappedRelease({
+            fromScale: capIn ? capIn.toScale : authoredScale,
+            toScale: 1,
+            startFrame: holdEnd,
+            latestFrame: durationInFrames,
+            authoredFrames: Math.max(1, eventEnd - holdEnd),
+            fps,
+            corner,
+          })
+        : null;
+
+      const spanStart = capIn ? capIn.startFrame : eventStart;
+      const spanEnd = capOut ? capOut.endFrame : eventEnd;
+      prevEventEnd = spanEnd;
+      if (frame < spanStart || frame > spanEnd) continue;
+
+      targetScale = capIn ? capIn.toScale : authoredScale;
+      originX = event.originX ?? 0.5;
+      originY = event.originY ?? 0.45;
 
       if (frame < rampIn) {
-        zoomProgress = interpolate(frame, [eventStart, rampIn], [0, 1], {
-          easing: rampInEase,
+        zoomProgress = interpolate(frame, [spanStart, rampIn], [0, 1], {
+          easing: capIn ? capIn.easing : rampInEase,
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });
       } else if (frame < holdEnd) {
         zoomProgress = 1;
       } else {
-        zoomProgress = interpolate(frame, [holdEnd, eventEnd], [1, 0], {
-          easing: Easing.in(Easing.cubic),
+        zoomProgress = interpolate(frame, [holdEnd, spanEnd], [1, 0], {
+          easing: capOut ? capOut.easing : Easing.in(Easing.cubic),
           extrapolateLeft: "clamp",
           extrapolateRight: "clamp",
         });
