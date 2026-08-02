@@ -74,13 +74,28 @@ export const CrossfadeZoom: React.FC<CrossfadeZoomProps> = ({
   const scaleA = interpolate(progress, [0, 1], [1, 1.12], { easing: ease, extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   const scaleB = interpolate(progress, [0, 1], [1.12, 1], { easing: ease, extrapolateLeft: "clamp", extrapolateRight: "clamp" });
 
-  // Survivor holds the window at full opacity — the transition becomes a cut.
+  // NO BACKDROP LEAK (Zac 2026-08-02). These layers are STACKED ALPHA, not
+  // additive — B renders UNDER A — so the black backdrop shows through by
+  //     leak = (1 - opacityA) * (1 - opacityB)
+  // The old ramps (A 1->0 over 0.1-0.7, B 0->1 over 0.3-0.9) leave a window
+  // where A is already gone and B is not yet full: at progress 0.8 that is
+  // 1.0 * 0.17 = 17% black bleeding through mid-transition, measured as a dip to
+  // min luma 20.0 — BELOW either degraded arm, and near the blackdetect floor
+  // the INTEGRITY_TRIP class fires on.
+  //
+  // Matching the two ramps (A = 1-t, B = t) does NOT fix it and is worth stating
+  // so it is not "fixed" that way later: under stacked alpha that leaks
+  // t*(1-t), which PEAKS at 25% at the midpoint — worse than today.
+  //
+  // The base layer is therefore held FULLY OPAQUE and the dissolve is carried by
+  // A alone, which makes the leak identically zero by construction rather than
+  // by two curves agreeing. Composite is opA*A + (1-opA)*B — a true cross
+  // dissolve. The scale ramps still carry the zoom feel, and the symmetric
+  // 0.1/0.9 window keeps the brief hold at each end.
   const opacityA = bLost
     ? 1
-    : interpolate(progress, [0.1, 0.7], [1, 0], { easing: ease, extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const opacityB = aLost
-    ? 1
-    : interpolate(progress, [0.3, 0.9], [0, 1], { easing: ease, extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+    : interpolate(progress, [0.1, 0.9], [1, 0], { easing: ease, extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const opacityB = 1;
 
   const mediaStyle: CSSProperties = {
     width: "100%",
