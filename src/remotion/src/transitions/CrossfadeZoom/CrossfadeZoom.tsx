@@ -7,6 +7,7 @@ import {
   Img,
 } from "remotion";
 import type { CrossfadeZoomProps } from "../types";
+import { SafeImg } from "../../SafeImg";
 
 const isImage = (src: string) => /\.(jpe?g|png|gif|webp|avif|bmp)$/i.test(src);
 
@@ -17,7 +18,7 @@ const MediaLayer: React.FC<{
   playbackRate?: number;
 }> = ({ src, style, startFrom, playbackRate }) =>
   isImage(src)
-    ? <Img src={src} style={style} />
+    ? <SafeImg src={src} style={style} />
     : <OffthreadVideo src={src} startFrom={startFrom} playbackRate={playbackRate} style={style} />;
 
 export const CrossfadeZoom: React.FC<CrossfadeZoomProps> = ({

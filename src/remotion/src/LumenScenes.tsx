@@ -11,6 +11,7 @@ import {
 } from "remotion";
 import { CameraMotionBlur } from "@remotion/motion-blur";
 import type { GeneratedSceneSpec } from "./types";
+import { SafeImg } from "./SafeImg";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LUMEN DESIGNED SCENES (Increment 3, Zac 2026-07-17) — the pivot.
@@ -335,7 +336,7 @@ const HeroObject: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
       {/* hero asset — alpha PNG floating with weight; drop-shadow seats it */}
       <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
         {spec.subject.imageUrl ? (
-          <Img
+          <SafeImg
             src={src(spec.subject.imageUrl)}
             style={{
               maxWidth: "64%",
@@ -421,7 +422,7 @@ const PhotoCard: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
                 boxShadow: `0 30px 80px rgba(0,0,0,0.55), 0 0 60px ${p.a}33`,
               }}
             >
-              <Img
+              <SafeImg
                 src={src(url)}
                 style={{ width: 430, height: 540, objectFit: "cover", borderRadius: 4, display: "block" }}
               />

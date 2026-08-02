@@ -11,6 +11,7 @@ import { msToFrames } from "../shared/timing";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { ChatMessage, ChatThreadProps } from "./types";
+import { SafeImg } from "../../SafeImg";
 
 
 const ENTRANCE_FRAMES = 5;
@@ -248,7 +249,7 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
           }}
         >
           {avatarSrc ? (
-            <Img
+            <SafeImg
               src={avatarSrc}
               style={{
                 width: "100%",

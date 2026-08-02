@@ -7408,6 +7408,30 @@ def _mg_entrance_fingerprint():
     return "sha256:" + _hl.sha256("\n====\n".join(_parts).encode("utf-8")).hexdigest()
 
 
+@check("SAFE IMAGE LAW (Zac 2026-08-02, RULE-1, forged from job 1047def9): a failed image must degrade to NO IMAGE, never to a dead render. Remotion's <Img> opens its OWN delayRender handle on mount, so one unreachable asset inside Chromium hangs the frame and kills the whole video (1047def9: two blob: <Img> handles open at frame 134, 30000ms timeout, rc=1; b8ab1276: same shape on the overlay leg at rendered=0). SafeImg probes the URL off-tree under an explicit sub-render-timeout and only then mounts <Img>, so an unloadable asset costs its own pixels and nothing else. This gate FAILS the deploy if a BARE <Img> reappears anywhere in the Remotion tree — the one way this class comes back.")
+def _safe_image_law():
+    import os as _os, re as _re2, glob as _g
+    _root = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "src", "remotion", "src")
+    _safe = _os.path.join(_root, "SafeImg.tsx")
+    assert _os.path.exists(_safe), "SafeImg.tsx is missing — the degrade path is gone"
+    _txt = open(_safe, encoding="utf-8").read()
+    assert "continueRender" in _txt and "delayRender" in _txt, \
+        "SafeImg must own a delayRender handle AND release it"
+    assert _re2.search(r"SAFE_IMG_TIMEOUT_MS\s*=\s*(\d+)", _txt), "SafeImg needs an explicit timeout"
+    _t = int(_re2.search(r"SAFE_IMG_TIMEOUT_MS\s*=\s*(\d+)", _txt).group(1))
+    assert _t < 30000, f"SAFE_IMG_TIMEOUT_MS={_t} must stay UNDER the 30000ms render timeout or it re-arms the hang"
+    _offenders = []
+    for _f in _g.glob(_os.path.join(_root, "**", "*.tsx"), recursive=True):
+        if _os.path.basename(_f) == "SafeImg.tsx":
+            continue
+        for _i, _ln in enumerate(open(_f, encoding="utf-8").read().splitlines(), 1):
+            if _re2.search(r"<Img\b", _ln) and not _ln.lstrip().startswith(("*", "//")):
+                _offenders.append(f"{_os.path.relpath(_f, _root)}:{_i}")
+    assert not _offenders, (
+        "BARE <Img> found — use SafeImg so an unloadable asset degrades to no image "
+        f"instead of hanging the render: {_offenders}")
+
+
 @check("MG ATTACK TABLE ANTI-DRIFT (Zac 2026-07-28): _MG_ATTACK_MS is a MEASURED table (mg-attack-battery renders each MG entrance; the settle/container-arrival ms is read off the presence curve). Unlike _MG_VALUE_LAND_FRAMES — which the gate above pins to the TSX interpolate range it reads directly — a measured table cannot be re-derived from one readable constant, so it would rot silently the instant an entrance config changed, reintroducing the late-payoff bug invisibly. This gate fingerprints every MG entrance-timing primitive (useMGPhase curve, spring damping/mass/stiffness, enterFrames, ENTRANCE_FRAMES, interpolate/Sequence) and FAILS the deploy if it moves — forcing a battery re-measure. The SNAP/SETTLE/GLIDE motion-token work changes exactly these configs, so this is the guard that keeps the back-timing honest across it. It also asserts every battery-measured type carries a table entry, so a NEW component can't ship unmeasured.")
 def _mg_attack_antidrift():
     import handler as _h
