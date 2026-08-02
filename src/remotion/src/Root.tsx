@@ -13,6 +13,7 @@ import { FitSpecimen } from "./FitSpecimen";
 import { MGAttackProbe } from "./MGAttackProbe";
 import { CaptionFadeProbe } from "./CaptionFadeProbe";
 import { StagedPushProbe } from "./StagedPushProbe";
+import { SmoothPushProbe } from "./SmoothPushProbe";
 import { ZoomEaseProbe } from "./ZoomEaseProbe";
 import { GenSceneProbe } from "./GenSceneProbe";
 
@@ -224,6 +225,24 @@ export const RemotionRoot: React.FC = () => {
               ],
               cutTerminated: false,
             },
+          ],
+        } as unknown as Record<string, unknown>}
+      />
+      {/* SmoothPushProbe30 — the velocity-cap pair on the zoom that ACTUALLY
+          SHIPS. SmoothPush is 48.6% of production zooms; StagedPush is 3 of
+          1,542, so this is the arm the flip decision rests on. 30fps because
+          per-frame displacement — the whole defect — halves at 60.
+          180f@30 = 6s. Driven by velocity-cap-ab.mjs. Not used in production. */}
+      <Composition
+        id="SmoothPushProbe30"
+        component={SmoothPushProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={30}
+        durationInFrames={180}
+        defaultProps={{
+          events: [
+            { startMs: 1600, durationMs: 1200, scale: 1.22, originX: 0.5, originY: 0.42 },
           ],
         } as unknown as Record<string, unknown>}
       />
