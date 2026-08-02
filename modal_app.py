@@ -608,6 +608,12 @@ secrets = [
     # To change one: `modal secret create promptly-lang-flags KEY=val … --force`
     # (include ALL keys — --force replaces), then redeploy. Never edit code/shell.
     modal.Secret.from_name("promptly-lang-flags"),
+    # promptly-elevenlabs — ELEVENLABS_API_KEY for the language-routed Scribe ASR
+    # upgrade (PROMPTLY_ASR_SCRIBE). Isolated as its own secret so the flags/creds
+    # secrets never get recreated just to carry it. Scribe runs ONLY when
+    # PROMPTLY_ASR_SCRIBE=1 AND this key is present (empty key => SCRIBE_UNAVAILABLE,
+    # Deepgram stands). Recovers the zero-word / TRANSCRIPTION_INCOMPLETE class.
+    modal.Secret.from_name("promptly-elevenlabs"),
 ]
 
 # ── App ────────────────────────────────────────────────────────────────────────
