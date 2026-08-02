@@ -249,7 +249,7 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
           }}
         >
           {avatarSrc ? (
-            <SafeImg
+            <SafeImg role="decoration" label="ChatThread.avatar"
               src={avatarSrc}
               style={{
                 width: "100%",

@@ -18,7 +18,7 @@ const MediaLayer: React.FC<{
   playbackRate?: number;
 }> = ({ src, style, startFrom, playbackRate }) =>
   isImage(src)
-    ? <SafeImg src={src} style={style} />
+    ? <SafeImg src={src} style={style} role="primary" label="CrossfadeZoom.media" />
     : <OffthreadVideo src={src} startFrom={startFrom} playbackRate={playbackRate} style={style} />;
 
 export const CrossfadeZoom: React.FC<CrossfadeZoomProps> = ({

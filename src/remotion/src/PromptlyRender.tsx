@@ -735,7 +735,7 @@ const GeneratedScene: React.FC<{ spec: GeneratedSceneSpec; fps: number }> = ({
   const subjectScale = (subject.scale || 1) * sc;
 
   const subjectInner = subject.imageUrl ? (
-    <SafeImg
+    <SafeImg role="decoration" label="GeneratedScene.subject"
       src={resolveSrc(subject.imageUrl)}
       style={
         fullFrame

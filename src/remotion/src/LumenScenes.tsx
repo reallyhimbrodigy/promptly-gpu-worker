@@ -336,7 +336,7 @@ const HeroObject: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
       {/* hero asset — alpha PNG floating with weight; drop-shadow seats it */}
       <AbsoluteFill style={{ justifyContent: "center", alignItems: "center" }}>
         {spec.subject.imageUrl ? (
-          <SafeImg
+          <SafeImg role="decoration" label="LumenScene.art"
             src={src(spec.subject.imageUrl)}
             style={{
               maxWidth: "64%",
@@ -422,7 +422,7 @@ const PhotoCard: React.FC<{ spec: GeneratedSceneSpec }> = ({ spec }) => {
                 boxShadow: `0 30px 80px rgba(0,0,0,0.55), 0 0 60px ${p.a}33`,
               }}
             >
-              <SafeImg
+              <SafeImg role="decoration" label="LumenScene.art"
                 src={src(url)}
                 style={{ width: 430, height: 540, objectFit: "cover", borderRadius: 4, display: "block" }}
               />
