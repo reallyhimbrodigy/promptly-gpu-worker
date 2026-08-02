@@ -63,7 +63,23 @@ def plan(src, lean, decor, dwell, punchy):
           "model":"flare","supports_progressive":False,"premium_pipeline_enabled":False}
     try: res=H.handler({"input":body})
     except Exception as e: return {"error":f"{type(e).__name__}: {str(e)[:150]}"}
-    return _dec((res or {}).get("edit_plan"))
+    out=_dec((res or {}).get("edit_plan"))
+    # COST/LATENCY of the planning call itself (Zac 2026-08-01): LEAN_SCHEMA is
+    # claimed as BOTH an input-cost and an output-latency lever, so both sides
+    # must be reported or the claim is untested. post-cuts only — the other
+    # Gemini calls are unchanged by these arms and would blur the read.
+    try:
+        pc=[c for c in H._GEMINI_CALL_LOG if "post" in (c.get("label") or "") and not c.get("aborted")]
+        if pc:
+            c=pc[-1]
+            out["gemini_call_s"]=c.get("total_s"); out["ttfb_s"]=c.get("ttfb_s")
+            out["out_tok"]=c.get("out_tok")
+            out["prompt_tok"]=c.get("prompt_tok"); out["cached_tok"]=c.get("cached_tok")
+            if c.get("prompt_tok") and c.get("cached_tok"):
+                out["uncached_tok"]=c["prompt_tok"]-c["cached_tok"]
+    except Exception:
+        pass
+    return out
 def _jac(x,y):
     sx,sy=set(x),set(y); return len(sx&sy)/max(1,len(sx|sy)) if (sx or sy) else 1.0
 def _means(rows):
@@ -86,7 +102,25 @@ def main():
     def dist(a,b): return round(sum(_jac(R[n][a]["em_words"],R[n][b]["em_words"]) for n in R if ok(R[n][a]) and ok(R[n][b]))/max(1,sum(1 for n in R if ok(R[n][a]) and ok(R[n][b]))),3)
     print("\n=== em-Jaccard vs control (noise=c-vs-c2) ===")
     for a in ("c2","lean","decor","dwell","punchy"): print(f"  {a:7}: {dist('c1',a)}")
+    print("\n=== COST + LATENCY per arm (post-cuts call) ===")
+    print(f"  {'arm':<9} {'gemini_s':>9} {'ttfb_s':>7} {'out_tok':>8} {'prompt_tok':>11} {'cached_tok':>11} {'UNCACHED':>9}  n")
+    for a in ("c1","lean","decor","dwell","punchy"):
+        rs=[R[n][a] for n in R if isinstance(R[n][a],dict) and R[n][a].get("gemini_call_s")]
+        if not rs: print(f"  {a:<9}  (no telemetry)"); continue
+        av=lambda k: round(sum(r.get(k) or 0 for r in rs)/len(rs),1)
+        print(f"  {('control' if a=='c1' else a):<9} {av('gemini_call_s'):>9} {av('ttfb_s'):>7} "
+              f"{av('out_tok'):>8,.0f} {av('prompt_tok'):>11,.0f} {av('cached_tok'):>11,.0f} "
+              f"{av('uncached_tok'):>9,.0f}  {len(rs)}")
+    print("\n  READ: if lean's prompt_tok drops vs control, response_schema tokens ARE")
+    print("  billed as input -> LEAN_SCHEMA is an input-cost lever too. If prompt_tok is")
+    print("  FLAT, the schema is not counted and the only win is output latency.")
+
     print("\n=== directional arm-means ===")
     for a in ("c1","lean","decor","dwell","punchy"):
         print(f"  {('control' if a=='c1' else a):8}: {json.dumps(_means([R[n][a] for n in R]))}")
-    open("/private/tmp/claude-501/-Users-zaclibman-promptly-gpu-worker-promptly-gpu-worker/e9b63b3b-7849-46b2-befa-856527c74120/scratchpad/plan_ab_propern.json","w").write(json.dumps(R,default=str))
+    _out="/private/tmp/claude-501/-Users-zaclibman-promptly-gpu-worker-promptly-prompt/52a12dcb-5435-4fe2-9813-8f9fb7279262/scratchpad/plan_ab_propern.json"
+    try:
+        os.makedirs(os.path.dirname(_out), exist_ok=True); open(_out,"w").write(json.dumps(R,default=str))
+        print(f"\nraw -> {_out}")
+    except Exception as _e:
+        print(f"\n(raw dump skipped: {_e})")

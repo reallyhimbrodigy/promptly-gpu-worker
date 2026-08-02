@@ -10696,6 +10696,16 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
                 "total_s": round(_total, 1), "ttfb_s": round(_ttfb or 0.0, 1),
                 "out_tok": _eff_out, "aborted": bool(_aborted), "label": label,
                 "shape": (_shape_fire or {}).get("shape"),
+                # INPUT-side accounting (2026-08-01). These two were computed and
+                # PRINTED but never recorded, so the only way to read the prompt's
+                # real token cost was scraping Modal stdout inside the ~1h buffer.
+                # prompt-cached = the UNCACHED remainder, billed at full rate, and
+                # it is the half no prompt condensation touches. Recording it makes
+                # the schema-vs-prose cost question answerable from any A/B run
+                # instead of from a log window that expires.
+                "prompt_tok": getattr(_usage, "prompt_token_count", None) if _usage else None,
+                "cached_tok": (getattr(_usage, "cached_content_token_count", None)
+                               if _usage else None),
             })
         except Exception:
             pass
