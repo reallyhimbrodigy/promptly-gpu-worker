@@ -18,11 +18,14 @@ Columns: date · agent · app · what · tasks · container-seconds · $ · veri
 
 **prompt agent session total: ~$8.04 by the stated figures.**
 
-### PROPOSED — NOT FIRED, awaiting explicit approval
+| 2026-08-02 | prompt | `query-silent-failures` ×2 | silent-failure detector — first run's threshold was wrong (see below), re-run after the fix | 2 CPU | ~$0.02 | yes (0 tasks) |
+
+**prompt agent session total: ~$8.06.** Explicit GO from Zac covered the detector.
+
+### PROPOSED — NOT FIRED
 
 | date | agent | app | what | est tasks | est $ | status |
 |---|---|---|---|---:|---:|---|
-| 2026-08-02 | prompt | `query-silent-failures` | the silent-failure detector, last 24h | 1 CPU | ~$0.01 | **HELD** |
 | 2026-08-02 | prompt | `plan-ab` 2-arm | re-audit the six discriminating FITS/FIGHTS | 32 | ~$3 | **HELD** |
 
 Both held because **Rule 8 caps an agent at $5/session without Zac saying so

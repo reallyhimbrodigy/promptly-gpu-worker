@@ -16,6 +16,8 @@ DESIGN NOTE THAT MATTERS — DO NOT COUNT VIA `cuts`
   silently skipped rather than flagged. Both recipe shapes are counted here:
     standard     -> cuts + zooms + MGs + caption emphases + transitions + overlays
     caption-less -> the HypePlan's clips + transitions
+  and the CLIP COUNT is tracked separately from editorial work, because one
+  uncut clip is a passthrough, not an edit.
   A job that yields no countable events under EITHER shape is the signal.
 
 CUTS (Rule 5 + Rule 7)
@@ -39,17 +41,26 @@ app = modal.App("query-silent-failures")
 image = modal.Image.debian_slim().pip_install("supabase")
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
 
-# A completed job scoring at or below this is "delivered nothing".
+# WHY A BARE `events == 0` TEST DOES NOT WORK (found on the first live run):
+# an uncut passthrough delivers ONE clip. That clip counts as an event, so the
+# job scores 1 and escapes a `== 0` test — the detector reported 0 silent
+# failures on a day when 82 of 180 completions were minimal_speech_uncut, the
+# exact class it was built for. Second blindness, same shape as the first.
+#
+# The honest predicate separates the CLIP LIST from EDITORIAL WORK:
+#   silent  iff  editorial_events == 0  AND  clips <= 1
+# A standard job with 8 cuts and nothing else is NOT silent — the cutting IS the
+# edit. A single clip spanning the source with no captions, no zooms, no
+# transitions IS the source handed back, whatever the route calls itself.
 SILENT_THRESHOLD = 0
 
 
 def count_events(rec):
-    """Visual events in a recipe, across BOTH recipe shapes. None = unreadable."""
+    """(clips, editorial_events) across BOTH recipe shapes. None = unreadable."""
     if not isinstance(rec, dict):
         return None
     n = 0
-    # ── standard editorial shape ─────────────────────────────────────────
-    n += len(rec.get("cuts") or rec.get("clips") or [])
+    clips = len(rec.get("cuts") or rec.get("clips") or [])
     for em in (rec.get("emphasis_moments") or []):
         if not isinstance(em, dict):
             continue
@@ -66,9 +77,9 @@ def count_events(rec):
     # ── caption-less shape: {route, reason, plan} where plan is a HypePlan ──
     plan = rec.get("plan")
     if isinstance(plan, dict):
-        n += len(plan.get("clips") or [])
+        clips += len(plan.get("clips") or [])
         n += len(plan.get("transitions") or [])
-    return n
+    return clips, n
 
 
 @app.function(image=image, secrets=SECRETS, timeout=900)
@@ -109,14 +120,15 @@ def query(hours: int = 24) -> dict:
             # standard editorial (verified in handler.py — the standard payload
             # carries no route key).
             route = res.get("route") or "standard"
-            n = count_events(res.get("edit_recipe"))
-            if n is None:
+            _r = count_events(res.get("edit_recipe"))
+            if _r is None:
                 unreadable += 1
                 continue
+            clips, n = _r
             uid = row.get("user_id") or "?"
             per_route[route]["done"] += 1
             per_user[uid]["done"] += 1
-            if n <= SILENT_THRESHOLD:
+            if n <= SILENT_THRESHOLD and clips <= 1:
                 per_route[route]["silent"] += 1
                 per_user[uid]["silent"] += 1
                 silent_rows.append({"job": row.get("id"), "user": uid, "route": route,
@@ -174,15 +186,24 @@ if __name__ == "__main__":
     capless_silent = {"route": "minimal_speech_uncut", "reason": "x", "plan": {"clips": []}}
     capless_ok = {"route": "hype", "reason": "x",
                   "plan": {"clips": [{}, {}], "transitions": [{}]}}
-    cases = [("standard with events", std_ok, 4),
-             ("caption-less UNCUT PASSTHROUGH", capless_silent, 0),
-             ("caption-less hype with clips", capless_ok, 3),
-             ("empty recipe", {}, 0),
+    passthrough = {"route": "minimal_speech_uncut", "reason": "x",
+                   "plan": {"clips": [{"start": 0, "end": 41.2}], "transitions": []}}
+    cuts_only = {"cuts": [{}, {}, {}, {}, {}, {}, {}, {}]}
+    cases = [("standard with events", std_ok, (2, 2)),
+             ("caption-less, no clips at all", capless_silent, (0, 0)),
+             ("caption-less ONE UNCUT CLIP <- the class", passthrough, (1, 0)),
+             ("caption-less hype with clips", capless_ok, (2, 1)),
+             ("standard, 8 cuts and nothing else", cuts_only, (8, 0)),
+             ("empty recipe", {}, (0, 0)),
              ("unreadable", None, None)]
     bad = 0
     for name, rec, want in cases:
         got = count_events(rec)
         ok = got == want
         bad += not ok
-        print(f"  {'PASS' if ok else 'FAIL'}  {name:<34} events={got} want={want}")
-    print(f"\n{'SELF-TEST OK' if not bad else f'{bad} FAILED'} — the counter sees both recipe shapes")
+        verdict = ""
+        if got and got is not None:
+            verdict = "  -> SILENT" if (got[1] <= 0 and got[0] <= 1) else "  -> ok"
+        print(f"  {'PASS' if ok else 'FAIL'}  {name:<40} (clips,editorial)={got}{verdict}")
+    print(f"\n{'SELF-TEST OK' if not bad else f'{bad} FAILED'} — one uncut clip now reads SILENT; "
+          f"8 cuts with no decoration does NOT")
