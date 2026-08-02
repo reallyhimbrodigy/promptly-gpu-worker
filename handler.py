@@ -26060,7 +26060,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # produced — deterministic output, no driver dependencies.
     _gl_mode = "swangle"
 
-    def _run_remotion(label, cmd, timeout=300):
+    def _run_remotion(label, cmd, timeout=600):  # default RAISED 300->600 (Zac P0
+        # 2026-08-02): micro chunks submit without an explicit timeout, so this
+        # default is their per-chunk render deadline; 300 killed heavy Pro renders
+        # (RENDER_FATAL). Overlay chunks pass their own computed _overlay_timeouts.
         _t0 = time.time()
         _r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
         _elapsed = time.time() - _t0
@@ -26144,9 +26147,22 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # the unchanged 300s. Preferred over a blanket raise (wasteful on plain chunks)
     # or cutting samples (kills the smoothness the scene exists for).
     _SCENE_FRAME_MULT = 6             # matches CameraMotionBlur samples=6
-    _PLAIN_CHUNK_TIMEOUT = 300        # unchanged for scene-free chunks
+    _PLAIN_CHUNK_TIMEOUT = 600        # RAISED 300->600 (Zac P0 2026-08-02): a Pro/
+                                     # premium render on the heavy path can need
+                                     # >300s per chunk; dying at 300 -> RENDER_FATAL
+                                     # (1aa24c33 x5). A render that needs longer must
+                                     # FINISH — the degrade ladder already tried
+                                     # full+retry+stripped. Chunks run in PARALLEL so
+                                     # this is per-chunk wall, well under 3000s.
     _SEC_PER_SCENE_FRAME_EXTRA = 0.4  # per extra sample-frame the 6x multiplier adds
-    _OVERLAY_TIMEOUT_CAP = 600        # ceiling — render still fits the 900s job budget
+    _OVERLAY_TIMEOUT_CAP = 1500       # RAISED 600->1500 (Zac P0 2026-08-02): the
+                                     # 600 ceiling was sized for the OLD 900s job
+                                     # budget; the Modal wall is now 3000s
+                                     # (_MODAL_FN_TIMEOUT_S). A heavy scene chunk +
+                                     # composite/mux still fits well under 3000s
+                                     # (parallel chunks; ~1500 + ~200 tail). The
+                                     # reaper EXEC_WALL_MS is keyed to the UNCHANGED
+                                     # 3000s Modal timeout, so no reaper-first change.
     _scene_spans = [
         (int(_s.get("fromFrame") or 0),
          int(_s.get("fromFrame") or 0) + int(_s.get("durationInFrames") or 0))
@@ -26624,8 +26640,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _t0 = time.time()
         _per_chunk: list = []
         for _mlbl, _mfut in micro_futures:
-            # +_fanout_wait_extra: 0 with the fan-out off (today's 320s).
-            _per_chunk.append((_mlbl, _mfut.result(timeout=320 + _fanout_wait_extra)))
+            # +_fanout_wait_extra: 0 with the fan-out off. RAISED 320->640 (Zac P0
+            # 2026-08-02): must exceed the micro chunk's 600s subprocess timeout.
+            _per_chunk.append((_mlbl, _mfut.result(timeout=640 + _fanout_wait_extra)))
         if _micro_chunked:
             for _p in micro_chunk_paths:
                 if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
@@ -26688,7 +26705,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # future already resolved (Future caches → concat runs exactly
             # once across all chains).
             if _micro_finalize_future is not None:
-                _micro_finalize_future.result(timeout=400 + _fanout_wait_extra)
+                # RAISED 400->720 (Zac P0 2026-08-02): finalize waits for all micro
+                # chunks (each now up to 600s, parallel) + concat (~120s).
+                _micro_finalize_future.result(timeout=720 + _fanout_wait_extra)
             _cs, _ce = _composite_ranges[K]
             _cmd = _build_composite_cmd(
                 K, _cs, _ce, _composite_chunk_paths[K],
@@ -34174,7 +34193,21 @@ def handler(job):
                     _plan_json = _plj.loads(_plj.dumps(edit_plan, default=str))
                 except Exception as _ple:
                     _plan_json = {"_unserializable": f"{type(_ple).__name__}"}
-                return {"status": "plan_only", "job_id": job_id, "edit_plan": _plan_json}
+                # Emit the Gemini timing + output-token cost so a PLAN_ONLY A/B
+                # (LEAN_SCHEMA / thinking-budget arms) can score the OUTPUT lever
+                # directly — wall-clock is r=0.59 vs output tokens, so tokens are
+                # the number to move. Summed from _GEMINI_CALL_LOG (the return
+                # exits before _timings["gemini_call"] is assembled downstream).
+                _gcalls = [c for c in _GEMINI_CALL_LOG if isinstance(c, dict)]
+                _live = [c for c in _gcalls if not c.get("aborted")]
+                return {"status": "plan_only", "job_id": job_id, "edit_plan": _plan_json,
+                        "gemini_call_s": round(sum(c.get("total_s") or 0 for c in _live), 1),
+                        "gemini_output_tokens": sum(c.get("out_tok") or 0 for c in _live),
+                        "gemini_ttfb_s": round(sum(c.get("ttfb_s") or 0 for c in _live), 1),
+                        "gemini_n_calls": len(_live),
+                        "gemini_calls": [{"label": c.get("label"), "total_s": c.get("total_s"),
+                                          "out_tok": c.get("out_tok"), "aborted": c.get("aborted")}
+                                         for c in _gcalls]}
             # EDIT RATIONALE (2026-07-25): persist the user-facing "why" for the
             # client to display, alongside current_step/step_message. Additive +
             # fail-open; edit_plan carries edit_rationale via the PostCutPlan
