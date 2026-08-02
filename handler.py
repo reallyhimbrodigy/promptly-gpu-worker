@@ -26423,7 +26423,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     _CHUNK_FRAMES = max(150, int(os.environ.get("PROMPTLY_CHUNK_FRAMES", "") or 450))
     _EFFECTIVE_CHUNKS = min(_RENDER_CHUNKS, max(1, int(total_output_frames) // _CHUNK_FRAMES))
     _OVERLAY_CHUNK_COUNT = _EFFECTIVE_CHUNKS if total_output_frames >= 300 else 1
-    _PER_CHUNK_CONCURRENCY = max(2, 32 // max(_OVERLAY_CHUNK_COUNT, 1)) \
+    # Chromium-tab budget across the parallel overlay chunks. Historically 32 —
+    # sized for a 64-vCPU box, but the render container has been cpu=16 since
+    # 2026-07-30, so 32 tabs / 16 vCPU = 2x oversubscription (and micro chunks
+    # push the peak higher), the leading suspect for a small chunk crawling at
+    # 0.3 fps into the 600s floor (RENDER_FATAL 2f07c37b). Env-tunable so the
+    # 48-tab measurement can A/B the budget against the ACTUAL cores; DARK
+    # default 32 = today's behaviour (unchanged until the measurement rules).
+    _TAB_BUDGET = int(os.environ.get("PROMPTLY_OVERLAY_TAB_BUDGET") or 32)
+    _PER_CHUNK_CONCURRENCY = max(2, _TAB_BUDGET // max(_OVERLAY_CHUNK_COUNT, 1)) \
         if _OVERLAY_CHUNK_COUNT > 1 else 8
     _overlay_ranges = _split_frames(int(total_output_frames), _OVERLAY_CHUNK_COUNT)
     _overlay_chunked = len(_overlay_ranges) > 1
