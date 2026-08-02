@@ -27,6 +27,7 @@ summed across agents.** That gap is what this file closes.
 | 2026-08-02 | smoothness | *(SmoothPush pair — local)* | 0 | 0 | $0.00 | $0.00 |
 | 2026-08-02 | smoothness | *(MG attack re-measure, both arms — local)* | 0 | 0 | $0.00 | $0.00 |
 | 2026-08-02 | smoothness | *(SafeImg + crossfade degrade proofs — local)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-02 | smoothness | *(MG frame-draw profile, 6 renders — local)* | 0 | 0 | $0.00 | $0.00 |
 
 ## Session notes
 
