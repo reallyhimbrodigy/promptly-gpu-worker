@@ -18285,7 +18285,21 @@ _MG_ATTACK_DEFAULT_MS = 150   # median settle — unmeasured / unknown types
 # 90% presence plateau EARLIER. That is the predicted early-landing effect, not
 # noise, and it is why this table cannot be carried across the flag.
 _MG_ATTACK_MS_SMOOTH = {
-    "PillMarquee": 133,
+    # simple pops -> settle. Every one is LONGER than its OFF value: the cap
+    # LENGTHENS a too-fast entrance, so the graphic ARRIVES LATER and the
+    # back-timing must pull it EARLIER by exactly this much or it lands late.
+    "IMessageBubble":   200,   # OFF  50
+    "InstagramComment": 217,   # OFF  50
+    "TikTokComment":    217,   # OFF  50
+    "TweetBubble":      217,   # OFF  50
+    "Stamp":            200,   # OFF  67
+    "Reticle":          100,   # OFF  83
+    "RecordingFrame":   233,   # OFF 133
+    "PillMarquee":      283,   # OFF 167 (the one useMGPhase enterProgress consumer)
+    # StatCard is capped too but needs NO override: it is SEQUENCED, so its table
+    # value is container-arrival min(hit, settle) = min(83, 400) = 83, and the
+    # cap moved neither. Its entrance motion did change (step audit 0.42 -> 0.22)
+    # — the container just still arrives on the same frame.
 }
 
 # ── Anti-drift fingerprint for the MEASURED attack table (Zac 2026-07-28) ─────
@@ -18305,12 +18319,13 @@ _MG_ATTACK_MS_SMOOTH = {
 #   node src/remotion/mg-attack-battery.mjs <out>
 #   python3 src/remotion/measure_mg_attack.py <out> 60   # reconcile _MG_ATTACK_MS
 #   → paste the fingerprint the gate prints into the constant below.
-# RE-MEASURED 2026-08-01 (not pasted): both arms re-rendered via
-# `node src/remotion/mg-attack-battery.mjs <out> [smooth]`. The OFF arm
-# reproduced all 24 entries EXACTLY (harness is deterministic; the table above
-# is not stale). The SMOOTH arm moved one entry -> _MG_ATTACK_MS_SMOOTH. The
-# fingerprint moved because useMGPhase gained Easing + the ms floor.
-_MG_ATTACK_FINGERPRINT = "sha256:fa9f3a2564a36a894834741d28b134157968828825fe14ab57d2c7ea2a7882bb"
+# RE-MEASURED 2026-08-02 (not pasted): both arms re-rendered at HEAD via
+# `node src/remotion/mg-attack-battery.mjs <out> [smooth]`, after the entrance
+# cap changed useMGPhase + 8 component springs. The OFF arm reproduced all 24
+# entries EXACTLY — which is also the proof that the dark flag does not leak:
+# every capped component is byte-identical with the flag off. The SMOOTH arm
+# moved 8 entries -> _MG_ATTACK_MS_SMOOTH above.
+_MG_ATTACK_FINGERPRINT = "sha256:473f635cd59b13fc5198dfe11055790943284144525170d4f82c195e3e160335"
 
 
 def _mg_attack_frames(mg_type, fps):
