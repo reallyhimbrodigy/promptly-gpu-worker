@@ -34164,6 +34164,17 @@ def handler(job):
             # off. See _maybe_upgrade_transcript_scribe.
             _transcript = _maybe_upgrade_transcript_scribe(
                 _transcript, _raw_source, source_duration)
+            # PROPAGATE the Scribe upgrade to the SHARED cache so EVERY consumer of
+            # _get_resolved_transcript() sees Scribe's recovered words — the
+            # Arabic-bridge and bilingual upgrades below already do this; Scribe
+            # was the ONE upgrade that didn't. Without it, Scribe recovered the
+            # transcript into a LOCAL variable while the pipeline's 0-words gate
+            # (which re-reads the cache) still saw Deepgram's 0 words and rejected
+            # the job — so the recovery delivered NOTHING end to end. Proven on
+            # 27b02576: Deepgram 0 -> Scribe 153, chose:scribe, yet the job died
+            # "No speech detected (0 words)". This one line closes it. [FIX]
+            with _refined_tx_lock:
+                _refined_tx_cache["value"] = _transcript
             _dg_words = _transcript.get("words", [])
 
             # ─── TALKING-HEAD GATE ──────────────────────────────────────

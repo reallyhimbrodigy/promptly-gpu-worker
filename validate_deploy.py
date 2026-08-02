@@ -5217,6 +5217,18 @@ def _asr_scribe_routing():
     import handler
     _src = open("handler.py").read()
     assert os.path.exists("test_asr_scribe_routing.py"), "cert must ride the repo"
+    # PROPAGATION GUARD (Zac 2026-08-02): the Scribe upgrade in handler() MUST
+    # write its result back to the shared transcript cache, exactly like the
+    # Arabic-bridge and bilingual upgrades. Without it, Scribe recovers the
+    # transcript into a LOCAL var while the pipeline's 0-words gate re-reads
+    # _get_resolved_transcript()'s raw cache (still Deepgram's 0 words) and
+    # rejects the job Scribe just fixed — the whole recovery does nothing end to
+    # end (proven on 27b02576: dg 0 -> scribe 153, chose:scribe, died "0 words").
+    _sc = _src[_src.index("_maybe_upgrade_transcript_scribe(\n                _transcript"):]
+    _sc = _sc[:_sc.index("TALKING-HEAD GATE")]
+    assert '_refined_tx_cache["value"] = _transcript' in _sc, \
+        ("the Scribe upgrade must propagate to _refined_tx_cache[\"value\"] so the "
+         "0-words gate and all other transcript consumers see the recovered words")
     for _fn in ("transcribe_scribe", "_maybe_upgrade_transcript_scribe",
                 "_scribe_should_route", "_scribe_enabled", "_scribe_langs"):
         assert callable(getattr(handler, _fn, None)), f"{_fn} missing"
