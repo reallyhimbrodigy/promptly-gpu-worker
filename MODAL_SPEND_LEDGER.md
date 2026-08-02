@@ -20,7 +20,8 @@ Columns: date · agent · app · what · tasks · container-seconds · $ · veri
 
 | 2026-08-02 | prompt | `query-silent-failures` ×2 | silent-failure detector — first run's threshold was wrong (see below), re-run after the fix | 2 CPU | ~$0.02 | yes (0 tasks) |
 
-| 2026-08-02 | prompt | `cert-schema-billing` | schema-billing probe: 4 sequential PLAN_ONLY runs on ONE clip (control x2, pad+5,214 tok x2), read prompt_token_count on the SECOND call after re-cache | 4 | ~1,200 est | ~$0.50 | pending |
+| 2026-08-02 | prompt | `cert-schema-billing` | schema-billing probe — **NEVER RAN**. `modal run` hung before app creation; no Modal app was registered and no container started. Killed. | 0 | 0 | **$0.00** | n/a |
+| 2026-08-02 | prompt | `plan-ab-reorder` | REORDER A/B (Zac GO): 3 arms x 16 clips, PLAN_ONLY, cpu=8/32GiB | 48 | ~14,400 est | ~$4 stated / **budget $7** | pending |
 
 **prompt agent session total: ~$8.56 if the probe runs.** Explicit GO covered the
 detector; the probe is taken as covered by "these four are cheaper and more
