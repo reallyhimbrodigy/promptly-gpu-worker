@@ -201,6 +201,32 @@ export const RemotionRoot: React.FC = () => {
           ],
         } as unknown as Record<string, unknown>}
       />
+      {/* StagedPushProbe30 — the SAME probe at the real DELIVERY format: 30fps.
+          The 60fps probe above is a look-at-it harness, but every smoothness
+          number must be read at 30fps, because per-frame displacement (the whole
+          defect) HALVES at 60 — measuring the cap on the 60fps probe understates
+          it by 2x. 150f@30 = 5s, the same 5 seconds as the probe above.
+          Driven by velocity-cap-ab.mjs. Not used in production. */}
+      <Composition
+        id="StagedPushProbe30"
+        component={StagedPushProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={30}
+        durationInFrames={150}
+        defaultProps={{
+          events: [
+            {
+              stages: [
+                { atMs: 1000, scale: 1.08 },
+                { atMs: 1800, scale: 1.16 },
+                { atMs: 2600, scale: 1.24 },
+              ],
+              cutTerminated: false,
+            },
+          ],
+        } as unknown as Record<string, unknown>}
+      />
       {/* ZoomEaseProbe — glide-vs-punch A/B (Zac 2026-07-15). SmoothPush ramp
           completing on a word at 2.0s (frame 120); green flash = the word onset.
           Render easeDir "out" (glide) vs "in" (punch) to compare. 240f@60 = 4s. */}

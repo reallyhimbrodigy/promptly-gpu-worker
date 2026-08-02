@@ -1,15 +1,23 @@
-// ZOOM VELOCITY CAP — local A/B, $0 Modal spend (this renders on the laptop).
+// ZOOM VELOCITY CAP — local A/B on REAL footage, $0 Modal spend (renders on the laptop).
 //
-// Three arms, because RULE 3 requires a pair PROVEN to differ AND a determinism
-// floor to prove the difference is the change and not the encoder:
+// Zac's ruling 2026-08-01: run OFF / CAP / CAP+BLUR, on a REAL talking head, and
+// produce consecutive-frame crops that read to his eye. SnapReframe (76.3 px/f)
+// and StepZoom (244.8 px/f) are NOT capped — punch-lands-on-the-moment makes that
+// velocity the point of them; they are blur candidates only.
+//
+// FOUR arms, because RULE 3 needs a determinism floor as well as a pair:
 //   OFF   — today's cubic StagedPush
-//   OFF2  — byte-identical repeat of OFF (the determinism baseline)
+//   OFF2  — byte-identical repeat of OFF (the determinism floor)
 //   CAP   — smoothGraphics ON (the velocity cap)
+//   BLUR  — CAP + CameraMotionBlur on the residual (samples=3, shutter=180)
+// CAP and BLUR differ by ONE flag, so the blur's contribution is isolated.
 //
-// The source is a CONSTRUCTED DURABLE pattern (seeded, band-limited noise held
-// STATIC), never user media — per the durable-sources law. Static is the point:
-// every pixel change between consecutive frames is then caused by the zoom and
-// nothing else, so per-frame MAD is a clean read on motion.
+// SOURCE: a PINNED 6s window of a real 1080x1920/30fps vertical talking head —
+// native resolution and native frame rate, so nothing is upscaled or resampled
+// and the judder measured is the renderer's, not a format conversion's.
+//
+// MEASURED AT 30fps (StagedPushProbe30), the delivery format. The 60fps probe
+// halves per-frame displacement and understates the whole defect by 2x.
 //
 // Usage: node velocity-cap-ab.mjs [outDir]
 import { bundle } from "@remotion/bundler";
@@ -24,43 +32,28 @@ const outDir = process.argv[2] || path.join(__dirname, "velocity-cap-out");
 fs.mkdirSync(outDir, { recursive: true });
 
 const PUBLIC = path.join(__dirname, "public");
-const SRC_NAME = "vcap_pattern.mp4";
+const SRC_NAME = "vcap_head.mp4";
 const SRC = path.join(PUBLIC, SRC_NAME);
+// PINNED fixture + window. Both are part of the measurement: change either and
+// the numbers below are not comparable.
+const SRC_MASTER = "/Users/zaclibman/content-studio/reference-videos/snaptik_7611180844715101470_hd.mp4";
+const SRC_START_S = 12;
+const SRC_DUR_S = 6;   // >= the 5s composition, so the source NEVER runs out
 
-// ── 1. Build the durable source (seeded => reproducible byte-for-byte) ───────
+const ff = (args) => execFileSync("ffmpeg", ["-y", "-loglevel", "error", ...args]);
+
 if (!fs.existsSync(SRC)) {
-  console.log("building constructed source…");
-  const png = path.join(outDir, "_pattern.png");
-  execFileSync("python3", ["-c", `
-import numpy as np, struct, zlib
-rng = np.random.default_rng(20260801)          # PINNED seed
-h, w = 1920, 1080
-n = rng.normal(0, 1, (h + 16, w + 16, 3))
-# cheap separable box blur x3 ~= gaussian: gives natural 1/f-ish spectrum instead
-# of white noise, so MAD tracks real-footage sensitivity rather than aliasing.
-for _ in range(3):
-    n = (n + np.roll(n, 1, 0) + np.roll(n, -1, 0)) / 3
-    n = (n + np.roll(n, 1, 1) + np.roll(n, -1, 1)) / 3
-n = n[8:8 + h, 8:8 + w]
-n = (n - n.min()) / (n.max() - n.min())
-img = (n * 255).astype(np.uint8)
-raw = b"".join(b"\\x00" + img[y].tobytes() for y in range(h))
-def chunk(t, d):
-    c = struct.pack(">I", len(d)) + t + d
-    return c + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
-png = (b"\\x89PNG\\r\\n\\x1a\\n"
-       + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
-       + chunk(b"IDAT", zlib.compress(raw, 6)) + chunk(b"IEND", b""))
-open(${JSON.stringify(png)}, "wb").write(png)
-`]);
-  execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-loop", "1", "-i", png,
-    "-t", "4", "-r", "30", "-c:v", "libx264", "-preset", "medium", "-crf", "12",
+  if (!fs.existsSync(SRC_MASTER)) {
+    console.error(`missing pinned master: ${SRC_MASTER}`);
+    process.exit(1);
+  }
+  console.log("cutting pinned 4s window from the real talking head…");
+  ff(["-ss", String(SRC_START_S), "-i", SRC_MASTER, "-t", String(SRC_DUR_S),
+    "-an", "-r", "30", "-c:v", "libx264", "-preset", "medium", "-crf", "14",
     "-pix_fmt", "yuv420p", "-x264-params", "threads=1", SRC]);
-  fs.rmSync(png, { force: true });
 }
 console.log(`source: ${SRC}`);
 
-// ── 2. Render the three arms ────────────────────────────────────────────────
 const EVENTS = [{
   stages: [
     { atMs: 1000, scale: 1.08 },
@@ -70,33 +63,45 @@ const EVENTS = [{
   cutTerminated: false,
 }];
 
+const ARMS = [
+  ["OFF", { smoothGraphics: false }],
+  ["OFF2", { smoothGraphics: false }],
+  ["CAP", { smoothGraphics: true }],
+  ["BLUR", { smoothGraphics: true, motionBlur: true, motionBlurSamples: 3, motionBlurShutterAngle: 180 }],
+];
+
 const bundled = await bundle({ entryPoint: path.join(__dirname, "src", "index.ts"), onProgress: () => {} });
-const ARMS = [["OFF", false], ["OFF2", false], ["CAP", true]];
 const files = {};
-for (const [name, smooth] of ARMS) {
-  const inputProps = { events: EVENTS, smoothGraphics: smooth, src: SRC_NAME };
+const renderMs = {};
+for (const [name, flags] of ARMS) {
+  const inputProps = { events: EVENTS, src: SRC_NAME, ...flags };
   const out = path.join(outDir, `${name}.mp4`);
-  const composition = await selectComposition({ serveUrl: bundled, id: "StagedPushProbe", inputProps });
+  const composition = await selectComposition({ serveUrl: bundled, id: "StagedPushProbe30", inputProps });
+  const t0 = Date.now();
   await renderMedia({
     composition, serveUrl: bundled, outputLocation: out, codec: "h264",
     inputProps, logLevel: "error", concurrency: 1,
   });
+  renderMs[name] = Date.now() - t0;
   files[name] = out;
-  console.log(`rendered ${name}`);
+  console.log(`rendered ${name}  (${(renderMs[name] / 1000).toFixed(1)}s)`);
 }
 
-// ── 3. Measure ──────────────────────────────────────────────────────────────
+// ── PSNR: prove the arms differ, against a determinism floor ────────────────
 const psnr = (a, b) => {
-  const o = execFileSync("ffmpeg", ["-i", files[a], "-i", files[b], "-lavfi", "psnr",
-    "-f", "null", "-"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  const m = /average:([0-9.]+|inf)/.exec(o);
+  const r = execFileSync("ffmpeg", ["-i", files[a], "-i", files[b], "-lavfi", "psnr",
+    "-f", "null", "-"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] })
+    + execFileSync("/bin/sh", ["-c",
+      `ffmpeg -i ${files[a]} -i ${files[b]} -lavfi psnr -f null - 2>&1 | tail -3`],
+      { encoding: "utf8" });
+  const m = /average:([0-9.]+|inf)/.exec(r);
   return m ? m[1] : "?";
 };
 
+// ── per-frame MAD (luma) ────────────────────────────────────────────────────
 const madSeries = (file) => {
   const dir = fs.mkdtempSync(path.join(outDir, "frames-"));
-  execFileSync("ffmpeg", ["-y", "-loglevel", "error", "-i", file,
-    "-vf", "format=gray", path.join(dir, "f%04d.pgm")]);
+  ff(["-i", file, "-vf", "format=gray", path.join(dir, "f%04d.pgm")]);
   const out = execFileSync("python3", ["-c", `
 import sys, glob, numpy as np
 def rd(p):
@@ -120,29 +125,58 @@ print(' '.join(f'{v:.3f}' for v in out))
 
 const stat = (s) => {
   const sorted = [...s].sort((a, b) => a - b);
-  return {
-    peak: Math.max(...s),
-    p95: sorted[Math.floor(sorted.length * 0.95)],
-    median: sorted[Math.floor(sorted.length * 0.5)],
-    over: s.filter((v) => v > 3).length,
-  };
+  return { peak: Math.max(...s), p95: sorted[Math.floor(sorted.length * 0.95)],
+    median: sorted[Math.floor(sorted.length * 0.5)] };
 };
 
-console.log("\n=== RULE 3: do the arms differ? (PSNR, inf = identical) ===");
-console.log(`  OFF vs OFF2 (determinism floor) : ${psnr("OFF", "OFF2")}`);
-console.log(`  OFF vs CAP  (the change)        : ${psnr("OFF", "CAP")}`);
+console.log("\n=== RULE 3: do the arms differ? (PSNR dB, inf = identical) ===");
+console.log(`  OFF  vs OFF2  determinism floor : ${psnr("OFF", "OFF2")}`);
+console.log(`  OFF  vs CAP   the cap           : ${psnr("OFF", "CAP")}`);
+console.log(`  CAP  vs BLUR  the blur alone    : ${psnr("CAP", "BLUR")}`);
 
-console.log("\n=== per-frame MAD (luma), static source => all motion is the zoom ===");
+console.log("\n=== per-frame MAD (luma) — REAL talking head, 1080x1920 @30fps ===");
 const rows = {};
-for (const k of ["OFF", "CAP"]) {
+for (const k of ["OFF", "CAP", "BLUR"]) {
   const s = madSeries(files[k]);
   rows[k] = s;
   const st = stat(s);
-  console.log(`  ${k.padEnd(4)} peak=${st.peak.toFixed(2)}  p95=${st.p95.toFixed(2)}  ` +
-    `median=${st.median.toFixed(2)}  frames>3=${st.over}/${s.length}`);
+  console.log(`  ${k.padEnd(5)} peak=${st.peak.toFixed(2)}  p95=${st.p95.toFixed(2)}  median=${st.median.toFixed(2)}`);
 }
 const top = (s) => [...s].sort((a, b) => b - a).slice(0, 8).map((v) => v.toFixed(1)).join(" ");
-console.log(`\n  OFF top8 MAD: ${top(rows.OFF)}`);
-console.log(`  CAP top8 MAD: ${top(rows.CAP)}`);
+for (const k of ["OFF", "CAP", "BLUR"]) console.log(`  ${k.padEnd(5)} top8: ${top(rows[k])}`);
+
+// ── consecutive-frame crops at the PEAK-MOTION frame ────────────────────────
+// Cropped far from the transform origin, where displacement is largest (it scales
+// with distance from the origin) and where the burned-in text gives hard edges:
+// clean edges + a big jump = temporal sampling; smeared = blur/encode.
+const peakFrame = rows.OFF.indexOf(Math.max(...rows.OFF)) + 1;
+const CROPS = [
+  { name: "topband", x: 300, y: 240, w: 480, h: 200 },  // hard-edged burned text
+  { name: "face", x: 300, y: 800, w: 480, h: 300 },     // glasses / eye detail
+];
+const cropDir = path.join(outDir, "crops");
+fs.mkdirSync(cropDir, { recursive: true });
+for (const c of CROPS) {
+  const tiles = [];
+  for (const k of ["OFF", "CAP", "BLUR"]) {
+    for (const off of [0, 1]) {
+      const n = peakFrame + off;
+      const t = path.join(cropDir, `_${k}_${c.name}_${off}.png`);
+      ff(["-i", files[k], "-vf",
+        `select=eq(n\\,${n}),crop=${c.w}:${c.h}:${c.x}:${c.y}`,
+        "-frames:v", "1", t]);
+      tiles.push(t);
+    }
+  }
+  const sheet = path.join(cropDir, `${c.name}_f${peakFrame}-${peakFrame + 1}.png`);
+  ff([...tiles.flatMap((t) => ["-i", t]),
+    "-filter_complex",
+    "[0:v][1:v]hstack[a];[2:v][3:v]hstack[b];[4:v][5:v]hstack[c];[a][b][c]vstack=inputs=3[o]",
+    "-map", "[o]", sheet]);
+  tiles.forEach((t) => fs.rmSync(t, { force: true }));
+  console.log(`crop sheet -> ${sheet}`);
+}
+console.log(`\npeak-motion frame in OFF = ${peakFrame} (rows: OFF / CAP / BLUR, cols: frame n | n+1)`);
+console.log("\n=== render cost (local, 150 frames @1080x1920/30) ===");
+for (const [k] of ARMS) console.log(`  ${k.padEnd(5)} ${(renderMs[k] / 1000).toFixed(1)}s`);
 fs.writeFileSync(path.join(outDir, "mad.json"), JSON.stringify(rows, null, 1));
-console.log(`\nwrote ${path.join(outDir, "mad.json")}`);
