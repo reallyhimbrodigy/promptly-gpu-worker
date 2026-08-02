@@ -32,6 +32,14 @@ summed across agents.** This file is the sum. Every agent appends before firing.
 | 00:04 | speed | worker deploy **v421** (66c1a91: TRANSCRIPTION_EMPTY + prompt −90 tok) — cached build 15.3s | **~$0.02** | — | ~$12–18 |
 | 00:1X (PRE-PRICED) | speed | inc2 render_burst **canary** @~50s: orchestrator cpu16/64Gi ~450s + burst sub cpu48/64Gi ~120s + 1 Gemini plan. Proves byte-identity (x264 pin now live) + net-faster before the flip | **~$0.35** | — | ~$12.4–18.4 |
 
+| date | agent | app | runs | container-s | $ this run | $ session total |
+|---|---|---|---|---|---|---|
+| 2026-08-01 | smoothness | *(none — all compute local)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-01 | smoothness | *(freeze-lifted batteries: NOT NEEDED)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-02 | smoothness | *(SmoothPush pair — local)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-02 | smoothness | *(MG attack re-measure, both arms — local)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-02 | smoothness | *(SafeImg + crossfade degrade proofs — local)* | 0 | 0 | $0.00 | $0.00 |
+
 **errors agent Modal session total: $0.00 — 0 renders fired, 0 container-seconds,
 0 apps created.**
 
