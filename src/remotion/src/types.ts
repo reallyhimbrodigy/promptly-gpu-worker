@@ -390,6 +390,12 @@ export interface PromptlyRenderInput {
    *  SPREAD only and costs nothing extra. */
   motionBlurSamples?: number;
   motionBlurShutterAngle?: number;
+  /** SMOOTH-GRAPHICS (Zac 2026-08-01). Absent/false = today's exact pixels
+   *  (fixed-frame, bare-linear entrances). true = eased curves over a ms
+   *  duration floor (~350-400ms) on MG entrances/exits (useMGPhase), the b-roll
+   *  fade, and the linear-crossfade transitions, so 4-8 frame animations stop
+   *  reading as "low frame rate." Worker sets it from PROMPTLY_SMOOTH_GRAPHICS. */
+  smoothGraphics?: boolean;
 }
 
 export interface PromptlyRenderProps {
@@ -435,6 +441,12 @@ export interface PromptlyMicroSegmentsInput {
   resprungZooms?: boolean;
   motionBlurSamples?: number;
   motionBlurShutterAngle?: number;
+  /** SMOOTH-GRAPHICS (Zac 2026-08-01). Absent/false = today's exact pixels
+   *  (fixed-frame, bare-linear entrances). true = eased curves over a ms
+   *  duration floor (~350-400ms) on MG entrances/exits (useMGPhase), the b-roll
+   *  fade, and the linear-crossfade transitions, so 4-8 frame animations stop
+   *  reading as "low frame rate." Worker sets it from PROMPTLY_SMOOTH_GRAPHICS. */
+  smoothGraphics?: boolean;
 }
 
 export interface PromptlyMicroSegmentsProps {

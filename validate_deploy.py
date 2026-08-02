@@ -1292,7 +1292,7 @@ def _zoom_spring_settle_corrected():
         handler.ZOOM_PEAK_REACH_MS["FocusWindow"] not in (234,), "the mis-computed spring settle must stay corrected"
 
 
-@check("ZOOM PUNCH vs GLIDE, vibe-gated (Zac 2026-07-15): a RAMP zoom (SmoothPush/LetterboxPush/DepthPull) PUNCHES (ease-in — impact ON the word) in a viral/punchy vibe, else GLIDES (ease-out — the restrained default settle). Same punchy-vs-calm register the vibe scopes for zoom TYPE/SFX/captions. Only the ramp types read it; the springs/StepZoom/StagedPush already land impact on the word. Deterministic + gate-pinned so viral=punch / others=glide can't silently flip.")
+@check("ZOOM PUNCH vs GLIDE, vibe-gated (Zac 2026-07-15): a RAMP zoom (SmoothPush/LetterboxPush/DepthPull) PUNCHES (ease-in — impact ON the word) in a viral/punchy vibe, else GLIDES (ease-out — the restrained default settle). Same punchy-vs-calm register the vibe scopes for zoom TYPE/SFX/captions. Only the ramp types read it; the springs/StepZoom/StagedPush already land impact on the word. Deterministic + gate-pinned so viral=punch / others=glide can't silently flip — INCLUDING under the zoom velocity cap, whose trapezoid carries the register as a SKEW (peak height = the cap, peak position = the vibe), so smoothing can never flatten punch into glide.")
 def _zoom_punch_vibe_gate():
     import handler as _h, render_schemas as _rs, os as _os
     # the classifier: PUNCH only for a clearly punchy/viral vibe
@@ -1317,7 +1317,14 @@ def _zoom_punch_vibe_gate():
         _t = open(_os.path.join(_zdir, _c, f"{_c}.tsx")).read()
         assert "const rampInEase = punch ? Easing.in(Easing.cubic) : Easing.out(Easing.cubic);" in _t, \
             f"{_c} must gate the ramp-in ease on punch (ease-in punch / ease-out glide)"
-        assert "easing: rampInEase," in _t, f"{_c} must USE rampInEase in the ramp-in interpolate"
+        # The register must survive BOTH ramp-in paths: the legacy cubic ease when
+        # uncapped, and the register-SKEWED trapezoid when the velocity cap is on.
+        # A symmetric trapezoid is neither punchy nor glidey, so capping without
+        # carrying the skew would silently DELETE the vibe register.
+        assert "easing: capIn ? capIn.easing : rampInEase," in _t, \
+            f"{_c} ramp-in must use the capped ease when capped, else rampInEase"
+        assert "skew: punch ? SKEW_PUNCH : SKEW_GLIDE," in _t, \
+            f"{_c} must carry the punch/glide register INTO the velocity cap"
     # non-ramp types must NOT gate ease on punch (they already land impact on the word)
     for _c in ("StepZoom", "SnapReframe", "FocusWindow"):
         _t = open(_os.path.join(_zdir, _c, f"{_c}.tsx")).read()

@@ -382,6 +382,9 @@ class PromptlyRenderInput(_RemotionModel):
     motionBlur: bool = False
     motionBlurSamples: Optional[int] = None
     motionBlurShutterAngle: Optional[int] = None
+    # SMOOTH-GRAPHICS (Zac 2026-08-01): eased + ms-floored entrances/exits/fades/
+    # transitions. Default off -> today's exact pixels. Mirrors types.ts.
+    smoothGraphics: bool = False
 
 
 # ── Micro-segments (discriminated by type) ─────────────────────────────────
@@ -409,5 +412,8 @@ class PromptlyMicroSegmentsInput(_RemotionModel):
     resprungZooms: bool = False
     motionBlurSamples: Optional[int] = None
     motionBlurShutterAngle: Optional[int] = None
+    # SMOOTH-GRAPHICS (Zac 2026-08-01): eased + ms-floored entrances/exits/fades/
+    # transitions. Default off -> today's exact pixels. Mirrors types.ts.
+    smoothGraphics: bool = False
 
 
