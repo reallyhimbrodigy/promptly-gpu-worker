@@ -4,8 +4,9 @@ Frame COUNT is not the defect; CONCENTRATION is. A 12-frame spring that does 60%
 of its travel in one frame reads worse than a 6-frame curve that spreads evenly.
 So this measures the MG analogue of the zoom's px/frame cap:
 
-    peak_step = the largest fraction of the entrance's total visual travel that
-                lands in ONE DELIVERED frame at 30fps.
+    peak_step = the largest fraction of the entrance's TOTAL TRAVEL (peak
+                presence minus starting presence) that lands in ONE DELIVERED
+                frame at 30fps.
     effective positions = 1 / peak_step. Below ~2 is the "low frame rate" read.
 
 Feed it the OFF-arm battery renders (60fps), which it decimates to the 30fps
@@ -40,11 +41,21 @@ for f in sorted(glob.glob(os.path.join(OUT, "*.mp4"))):
     if fr is None or fr.shape[0] < 8:
         continue
     pres = np.abs(fr - 128.0).mean(axis=(1, 2))
-    if float(np.median(pres[24:42])) < 0.02:
-        continue                                   # blank probe props
     p30 = pres[::2]                                # 60fps battery -> 30fps grid
-    steady = float(np.median(p30[12:21]))
-    d = np.abs(np.diff(p30[:24])) / max(steady, 1e-9)
+    if float(p30.max()) < 0.02:
+        continue                                   # blank probe props
+    # NORMALISE BY TOTAL TRAVEL, not by a mid-entrance "steady" sample. The
+    # earlier version sampled steady at 400-700ms, which lands INSIDE a long
+    # staged entrance and under-reads the plateau: StepDivider measured 0.198
+    # there vs 2.362 once settled, a 12x error that inflated its peak_step to
+    # 3.10 and made a marginal component look like the worst in the set. Against
+    # true travel it is 0.24. Reticle likewise fell 0.67 -> 0.25. Normalising by
+    # the full excursion is scale-free and immune to both build-up and decay.
+    travel = float(p30.max() - p30[0])
+    if travel <= 0:
+        continue
+    peak_i = int(p30.argmax())                     # entrance ends at the peak
+    d = np.abs(np.diff(p30[:max(4, peak_i + 1)])) / travel
     rows.append((key, float(d.max()), int((d > 0.02).sum())))
 
 print(f"{'component':<18}{'peak_step':>10}{'eff.pos':>9}{'span_f30':>10}")
