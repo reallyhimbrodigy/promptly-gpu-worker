@@ -28585,6 +28585,40 @@ def classify_error(e):
             retryable=True,
         )
 
+    # ── PROVENANCE GATE (2026-08-02): a RENDER failure is never a bad file ──
+    # The intake verdicts below (INVALID_FORMAT, WRONG_ORIENTATION, …) judge the
+    # USER'S upload. They match on substrings that also appear in our own
+    # renderer's stderr, and once we are inside the renderer the failure is OURS
+    # whatever text it happens to carry — the renderer's output is not evidence
+    # about the upload.
+    #
+    # Seven jobs across NINE users hit exactly that: render-full.mjs
+    # PromptlyMicroSegments failed rc=1 at `progress 0% rendered=0`, with
+    # fps_normalize already clean (15fps -> 30fps in 0.5-0.7s), and stderr
+    # containing "No video stream found". They were classified INVALID_FORMAT
+    # with retryable=False + requires_new_video=True — a DEAD END that told nine
+    # people their file was unreadable and asked them to shoot again, while
+    # making the class look like an input problem in every count. It sat
+    # unexamined from 07-30.
+    #
+    # Ordered ABOVE the intake block so provenance wins over substring. Falls
+    # through to the render classes below, which are retryable and honest.
+    _RENDER_STAGE_MARKERS = (
+        "render-full.mjs", "[hype-render]", "PromptlyMicroSegments",
+        "PromptlyOverlay", "Remotion render",
+    )
+    if any(_m in msg for _m in _RENDER_STAGE_MARKERS):
+        for _fatal in ("RENDER_FATAL", "INTEGRITY_TRIP", "CONTAINER_TEARDOWN",
+                       "PLATFORM_TIMEOUT"):
+            if _fatal in msg:
+                break                       # a named render class already owns it
+        else:
+            return _e(
+                "RENDER_REMOTION",
+                "We had trouble rendering your video. Please try again.",
+                retryable=True,
+            )
+
     # ── File / input problems — user must change the video ────────────
     if "No video stream found" in msg:
         return _e(

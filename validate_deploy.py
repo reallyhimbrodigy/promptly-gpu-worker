@@ -5154,7 +5154,8 @@ def _error_path_certs_actually_run():
     import sys as _sys
     for _cert in ("test_render_ladder.py", "test_remotion_timeout_forensics.py",
                   "test_coverage_empty_transcript.py",
-                  "test_asr_scribe_routing.py"):
+                  "test_asr_scribe_routing.py",
+                  "test_render_never_blames_user_file.py"):
         assert os.path.exists(_cert), f"{_cert} missing from the repo"
         _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
         assert _r.returncode == 0, (
@@ -5349,6 +5350,37 @@ def _hype_render_signature_first():
             f"{_sal}STDERR:\n{_stderr[-2000:]}\nSTDOUT:\n{_stdout[-1200:]}")
     assert "Timeout (30000ms)" in _new[:300], \
         f"the exception must survive the [:300] truncation: {_new[:300]!r}"
+
+
+@check("A RENDER FAILURE IS NEVER A BAD USER FILE (2026-08-02): the intake verdicts (INVALID_FORMAT/WRONG_ORIENTATION) judge the USER'S upload but match substrings that also appear in our own renderer's stderr. Seven jobs across NINE users died at `render-full.mjs PromptlyMicroSegments failed rc=1, progress 0% rendered=0` with fps_normalize already clean (15fps->30fps in 0.5-0.7s); their stderr carried 'No video stream found' and they were classified INVALID_FORMAT with retryable=False + requires_new_video=True — a DEAD END telling nine people their file was unreadable, and a class that looked like an input problem in every count since 07-30. A provenance gate now runs ABOVE the intake block so render-stage origin wins over substring. cert: test_render_never_blames_user_file.py 19/19")
+def _render_never_blames_user_file():
+    import handler
+    _h = open("handler.py").read()
+    # provenance must be decided BEFORE the intake verdicts, or the substring wins
+    assert _h.index("_RENDER_STAGE_MARKERS") < _h.index('if "No video stream found" in msg'), \
+        "the provenance gate must precede the intake block"
+    _prod = ("[hype-render] render-full.mjs PromptlyMicroSegments failed rc=1\n"
+             "STDOUT:\n[render-full] progress 0% rendered=0\nSTDERR:\nNo video stream found")
+    _e = handler.classify_error(RuntimeError(_prod))
+    assert _e["error_code"] != "INVALID_FORMAT", f"render failure blamed on the file: {_e}"
+    assert str(_e["error_code"]).startswith("RENDER"), _e
+    assert _e.get("retryable") is True, f"a render failure must not be a dead end: {_e}"
+    assert _e.get("requires_new_video") is not True, f"must not demand a new video: {_e}"
+    # every render-stage marker, not just the one we saw
+    for _m in ("render-full.mjs", "[hype-render]", "PromptlyMicroSegments",
+               "PromptlyOverlay", "Remotion render"):
+        _env = handler.classify_error(RuntimeError(f"{_m} boom: No video stream found"))
+        assert _env["error_code"] != "INVALID_FORMAT", f"{_m} still blamed on the file: {_env}"
+    # NOT over-corrected: a genuine intake verdict must survive, or a real
+    # bad-file class disappears into a retry loop
+    _intake = handler.classify_error(RuntimeError("No video stream found"))
+    assert _intake["error_code"] == "INVALID_FORMAT", _intake
+    assert _intake.get("requires_new_video") is True, _intake
+    # named render classes keep their own identity
+    for _msg, _code in (("RENDER_FATAL after full + retry + stripped renders: [micro-00] Remotion render failed", "RENDER_FATAL"),
+                        ("INTEGRITY_TRIP: black=[[1.0, 2.0]] from render-full.mjs", "INTEGRITY_TRIP")):
+        assert handler.classify_error(RuntimeError(_msg))["error_code"] == _code, _msg
+    assert os.path.exists("test_render_never_blames_user_file.py"), "cert must ride the repo"
 
 
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
