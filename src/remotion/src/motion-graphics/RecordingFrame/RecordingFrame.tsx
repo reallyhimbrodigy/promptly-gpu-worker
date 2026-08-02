@@ -7,6 +7,8 @@ import {
 } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
 import { useMGPhase } from "../shared/useMGPhase";
+import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
+import { cappedEntranceProgress } from "../shared/entrance-cap";
 import type {
   RecordingFrameAnnotation,
   RecordingFrameProps,
@@ -68,7 +70,11 @@ export const RecordingFrame: React.FC<RecordingFrameProps> = ({
 
   if (!visible) return null;
 
-  const enterOpacity = interpolate(localFrame, [0, 8], [0, 1], {
+  // ENTRANCE VELOCITY CAP (measured peak_step 0.36 => ~2.7 effective positions).
+  const smoothEntrance = useSmoothGraphics();
+  const enterOpacity = smoothEntrance
+    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: 8 })
+    : interpolate(localFrame, [0, 8], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });

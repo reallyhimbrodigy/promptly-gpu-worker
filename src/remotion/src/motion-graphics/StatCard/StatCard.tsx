@@ -1,9 +1,11 @@
 import React from "react";
-import { AbsoluteFill, interpolate } from "remotion";
+import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { StatCardProps } from "./types";
+import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
+import { cappedEntranceProgress } from "../shared/entrance-cap";
 
 
 const NUMBER_SIZE = 240;
@@ -45,6 +47,7 @@ export const StatCard: React.FC<StatCardProps> = ({
     undefined,
     "StatCard",
   );
+  const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 32, defaultExitFrames: 12 },
@@ -52,12 +55,19 @@ export const StatCard: React.FC<StatCardProps> = ({
 
   if (!visible) return null;
 
-  const numberEnterScale = interpolate(localFrame, [0, 8], [0.92, 1], {
+  // ENTRANCE VELOCITY CAP: an 8-FRAME range is fps-dependent (133ms at 60, 267ms
+  // at 30) and linear, so a quarter of the travel lands in one delivered frame
+  // (measured peak_step 0.46). cappedEntranceProgress is ms-based and profiled.
+  const smoothEntrance = useSmoothGraphics();
+  const enterP = cappedEntranceProgress({ localFrame, fps, authoredFrames: 8 });
+  const numberEnterScale = smoothEntrance
+    ? 0.92 + 0.08 * enterP
+    : interpolate(localFrame, [0, 8], [0.92, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,
   });
-  const numberFadeIn = interpolate(localFrame, [0, 8], [0, 1], {
+  const numberFadeIn = smoothEntrance ? enterP : interpolate(localFrame, [0, 8], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
