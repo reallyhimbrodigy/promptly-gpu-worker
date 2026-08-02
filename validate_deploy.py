@@ -5152,13 +5152,63 @@ def _micro_render_budget():
 def _error_path_certs_actually_run():
     import subprocess as _sp
     import sys as _sys
-    for _cert in ("test_render_ladder.py", "test_remotion_timeout_forensics.py"):
+    for _cert in ("test_render_ladder.py", "test_remotion_timeout_forensics.py",
+                  "test_coverage_empty_transcript.py"):
         assert os.path.exists(_cert), f"{_cert} missing from the repo"
         _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
         assert _r.returncode == 0, (
             f"{_cert} FAILED (rc={_r.returncode}): "
             f"{(_r.stdout or '')[-600:]}{(_r.stderr or '')[-400:]}"
         )
+
+
+@check("COVERAGE GATE FAIL-OPEN CLOSED (2026-08-02): `if _dur <= 0 or not words: return True` meant an EMPTY transcript PASSED the coverage gate — a total transcription failure scored as fine, which is why the class could not be counted. Proven by the ASR bake-off: Deepgram nova-3 returned ZERO words on 11 of 40 clips and all 11 passed the old gate, which also flattered the control mean 53.6%->73.9% by dropping its worst cases. Zero words is now a REJECT (TRANSCRIPTION_EMPTY) when VAD confirms speech, stays quiet on a genuinely silent clip (NO_SPEECH owns that), and STILL fails open wherever the gate cannot measure. cert: test_coverage_empty_transcript.py 14/14")
+def _coverage_empty_transcript_fails():
+    import handler
+    _o1, _o2 = handler._detect_silence_regions_vad, handler._vad_available
+
+    def _vad(sil, avail=True):
+        handler._detect_silence_regions_vad = lambda *a, **k: sil
+        handler._vad_available = lambda: avail
+
+    try:
+        # 1. zero words over VAD-confirmed speech -> REJECT (the fix)
+        _vad([(0.0, 0.5)])
+        _ok, _st = handler._transcription_coverage_check("/x.mp4", [], 10.0)
+        assert _ok is False, f"empty transcript over 9.5s of speech must REJECT: {_st}"
+        assert _st.get("unworded_frac") == 1.0, _st
+
+        # 2. genuinely silent clip -> NOT this class (NO_SPEECH owns it)
+        _vad([(0.0, 10.0)])
+        assert handler._transcription_coverage_check("/x.mp4", [], 10.0)[0] is True, \
+            "a silent clip must not become a coverage failure"
+
+        # 3. sub-floor speech -> no over-fire
+        _vad([(0.0, 9.0)])
+        assert handler._transcription_coverage_check("/x.mp4", [], 10.0)[0] is True, \
+            "1s of speech is under the 2.0s floor and must not fail a job"
+
+        # 4. THE [] AMBIGUITY: VAD ran + found no silence = continuous speech
+        #    (worst case) vs VAD unavailable = unmeasurable. Must differ.
+        _vad([], avail=True)
+        assert handler._transcription_coverage_check("/x.mp4", [], 10.0)[0] is False, \
+            "continuous speech with zero words is the WORST case and must REJECT"
+        _vad([], avail=False)
+        assert handler._transcription_coverage_check("/x.mp4", [], 10.0)[0] is True, \
+            "an unmeasurable gate must FAIL OPEN, never invent a verdict"
+    finally:
+        handler._detect_silence_regions_vad, handler._vad_available = _o1, _o2
+
+    # 5. unmeasurable duration -> fail-open, unchanged
+    assert handler._transcription_coverage_check("/x.mp4", [], 0.0)[0] is True
+
+    # 6. the class is routable and never blames the user for an engine failure
+    _env = handler.classify_error(RuntimeError("TRANSCRIPTION_EMPTY: 9.5s speech, 0 words"))
+    assert _env.get("error_code") == "TRANSCRIPTION_EMPTY", _env
+    assert _env.get("requires_new_video") is not True, _env
+    assert _env.get("retryable") is True, _env
+
+    assert os.path.exists("test_coverage_empty_transcript.py"), "cert must ride the repo"
 
 
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")

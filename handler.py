@@ -20738,6 +20738,21 @@ _COVERAGE_TAIL_KEEP_S = 0.5   # matches the cutter's _FINAL_TAIL_PAD_S: speech w
 _COVERAGE_MIN_INTERIOR_S = 1.5  # a contiguous interior untranscribed span ≥ this = reject-worthy (bad edit); edges have NO floor
 
 
+def _vad_available():
+    """Can Silero actually run? Distinguishes 'no silence found' from 'no VAD'.
+
+    _detect_silence_regions_vad returns [] for BOTH — continuous speech with no
+    gap >= 0.30s, and an unimportable silero_vad. The empty-transcript branch
+    must tell them apart: the first is the WORST case (all speech, no words),
+    the second is unmeasurable and has to fail open.
+    """
+    try:
+        import silero_vad  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
 def _transcription_coverage_check(source_path, words, source_duration):
     """Measure untranscribed VAD-speech the cutter would destroy or leave uncaptioned — the
     content-destruction signal. The output is assembled only from [first kept word .. last kept
@@ -20750,7 +20765,35 @@ def _transcription_coverage_check(source_path, words, source_duration):
     stats = {"unworded_speech_s": None, "unworded_frac": None, "vad_speech_s": None}
     try:
         _dur = float(source_duration or 0)
-        if _dur <= 0 or not words:
+        if _dur <= 0:
+            return True, stats          # unmeasurable — fail-open, unchanged
+        if not words:
+            # ── ZERO-WORD DEFECT (2026-08-02) ────────────────────────────────
+            # This used to be part of `if _dur <= 0 or not words: return True` —
+            # an EMPTY transcript passed the coverage gate. A total
+            # transcription failure scored as fine, which is precisely why the
+            # class was invisible: in the ASR bake-off Deepgram nova-3 returned
+            # zero words on 11 of 40 clips and all 11 passed today's gate (it
+            # also flattered the control's own mean coverage 53.6% -> 73.9% by
+            # dropping its worst cases out of the average).
+            #
+            # Zero words is a DEFECT only when there was speech to transcribe.
+            # A genuinely silent clip is NO_SPEECH's class, not this one, and a
+            # gate that cannot measure must never invent a verdict — so the
+            # fail-open survives wherever VAD is unavailable.
+            if not _vad_available():
+                return True, stats      # can't see -> can't judge
+            _sil0 = _detect_silence_regions_vad(source_path, min_silence_s=0.30)
+            _speech0 = max(0.0, _dur - sum(max(0.0, float(b) - float(a))
+                                           for a, b in (_sil0 or [])))
+            stats = {"unworded_speech_s": round(_speech0, 1),
+                     "unworded_frac": 1.0 if _speech0 > 0 else 0.0,
+                     "vad_speech_s": round(_speech0, 1),
+                     "empty_transcript": True}
+            # Same floor as the partial-coverage case: below it, a cough or a
+            # doorslam misread as speech must not fail a job.
+            if _speech0 >= _COVERAGE_MIN_UNWORDED_S:
+                return False, stats
             return True, stats
         silence = _detect_silence_regions_vad(source_path, min_silence_s=0.30)
         sil = sorted((float(a), float(b)) for a, b in silence)
@@ -28214,6 +28257,22 @@ def classify_error(e):
             "returning a cut-up edit, and your credit was returned.",
             retryable=False, new_video=True,
         )
+    # ── Engine returned an EMPTY transcript over real speech (2026-08-02) ──
+    # ORDERED BEFORE NO_SPEECH: the two are opposites and NO_SPEECH's substring
+    # does not appear here, but the distinction is the whole point. NO_SPEECH =
+    # the clip has no speech (the user's input). TRANSCRIPTION_EMPTY = the clip
+    # HAS VAD-confirmed speech and the ASR returned nothing (our engine failed).
+    # Never blames the user, never asks for a new video, and IS retryable — a
+    # re-run can hit a different engine/route. Previously this passed the
+    # coverage gate silently, which is why the class could not be counted.
+    if "TRANSCRIPTION_EMPTY" in msg:
+        return _e(
+            "TRANSCRIPTION_EMPTY",
+            "We couldn't transcribe the speech in this video — that's on us, not "
+            "your clip. Your credit was returned; please try again.",
+            retryable=True,
+        )
+
     if "NO_SPEECH" in msg:
         return _e(
             "NO_SPEECH",
