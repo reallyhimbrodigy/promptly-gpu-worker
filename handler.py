@@ -26430,7 +26430,15 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # 0.3 fps into the 600s floor (RENDER_FATAL 2f07c37b). Env-tunable so the
     # 48-tab measurement can A/B the budget against the ACTUAL cores; DARK
     # default 32 = today's behaviour (unchanged until the measurement rules).
-    _TAB_BUDGET = int(os.environ.get("PROMPTLY_OVERLAY_TAB_BUDGET") or 32)
+    # ADAPTIVE to the container's actual cores (Zac 2026-08-02): a HARDCODED
+    # budget is the silent-wrong-after-a-config-change class — 8 is optimal on
+    # the cpu=16 render container but would badly under-provision the cpu=48
+    # inc2 burst. Default = cores/2 (the MEASURED optimum on cpu=16: 8 tabs
+    # rendered 183s vs 243s@16 vs 303s@32 — fewer-than-cores beats the
+    # oversubscription), which yields 24 on the cpu=48 burst automatically. Env
+    # override stays for measurement/tuning.
+    _TAB_BUDGET = int(os.environ.get("PROMPTLY_OVERLAY_TAB_BUDGET")
+                      or max(4, (os.cpu_count() or 16) // 2))
     _PER_CHUNK_CONCURRENCY = max(2, _TAB_BUDGET // max(_OVERLAY_CHUNK_COUNT, 1)) \
         if _OVERLAY_CHUNK_COUNT > 1 else 8
     _overlay_ranges = _split_frames(int(total_output_frames), _OVERLAY_CHUNK_COUNT)
@@ -26608,7 +26616,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # the original budget intended. More chunks × fewer tabs each = same
         # contention, bounded per-chunk work, more processes against Remotion's
         # documented ~16-22fps per-instance ceiling (issue #4664).
-        _MICRO_TAB_BUDGET = 16
+        # ADAPTIVE to cores (Zac 2026-08-02): the failing chunks were MICRO
+        # (micro-02/03), and overlay(32)+micro(16) = the ~48 concurrent Chromium
+        # tabs on a 16-vCPU box. Scale to cores/2 like the overlay budget so the
+        # total drops to ~16 on cpu=16 (kills the contention that crawled micro to
+        # 0.3 fps) and rises to ~24 on the cpu=48 burst. Same env override.
+        _MICRO_TAB_BUDGET = int(os.environ.get("PROMPTLY_OVERLAY_TAB_BUDGET")
+                                or max(4, (os.cpu_count() or 16) // 2))
         if _micro_total_frames >= _MICRO_CHUNK_THRESHOLD:
             _MICRO_CHUNK_COUNT = min(
                 max(1, int(os.environ.get("PROMPTLY_RENDER_CHUNKS", "") or 8)),
