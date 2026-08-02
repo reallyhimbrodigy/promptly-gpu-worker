@@ -8993,6 +8993,27 @@ def _render_burst_dark():
     assert '"render_burst_fallback"' in _disp and "return render_stage(" in _disp, \
         "a staging failure must ledger render_burst_fallback and run the local render"
 
+    # 7. LENGTH FLOOR (Zac 2026-08-02, RULE-1): the burst's ~20s fixed overhead
+    # LOSES on the median (12s -17s, 30s -16.5s e2e) and wins only on the long
+    # tail (73s +209s), so the dispatcher fires the burst ONLY when projected
+    # OUTPUT clears an env-tunable floor (PROMPTLY_BURST_MIN_OUTPUT_S, default 45s
+    # output = the measured crossover, conservative); below it, it returns
+    # render_stage IN-PROCESS so the median stays fast. Keyed on projected OUTPUT
+    # (compute_effective_durations of the plan cuts), NOT source — output frames
+    # drive the chunk parallelism the cpu=48 win comes from. The per-job canary
+    # override MUST bypass the floor, or a short canary would route in-process and
+    # never exercise the burst it exists to prove byte-identical.
+    assert "PROMPTLY_BURST_MIN_OUTPUT_S" in _disp, \
+        "dispatcher must read the env-tunable length floor PROMPTLY_BURST_MIN_OUTPUT_S"
+    assert "or 45.0" in _disp, \
+        "length floor must default to 45s projected output (measured crossover, conservative)"
+    assert "compute_effective_durations" in _disp, \
+        "the floor must key on PROJECTED OUTPUT (compute_effective_durations of plan cuts), not source"
+    assert "_bf_proj_out < _bf_floor and not _bf_canary" in _disp, \
+        "below-floor jobs route in-process EXCEPT under the render_burst_test canary override"
+    assert 'input_data.get("render_burst_test")' in _disp, \
+        "the floor bypass must key on the render_burst_test canary handle (canary exercises the burst at any length)"
+
 
 @check("inc2 render_burst ENCODE-THREAD PIN (Zac 2026-08-01, RULE-1): every DELIVERED-OUTPUT / render-INPUT libx264 encode pins x264 threads to a fixed count (_X264_ENCODE_THREADS), NEVER x264-auto (threads=0). x264-auto picks ~cores*1.5 so the OUTPUT bytes depend on the MACHINE's core count, not the config — the render_burst at cpu=48 diverged from cpu=16 production (same class as the snapshot env-freeze), and it is also the ~0.99994 run-to-run 'x264 nondeterminism' cert_progressive documented. Gemini proxies (_proxy_venc) are exempt — analysed then discarded, never delivered. FAILS if any non-proxy libx264 lacks a threads= pin or the constant is 0/absent, so byte-identity stays a usable diagnostic on every future canary/A-B/cert.")
 def _x264_thread_pin():

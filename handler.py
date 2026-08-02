@@ -23049,6 +23049,35 @@ def _run_render_via_burst_or_local(
             _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
             integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
         )
+    # LENGTH FLOOR (Zac 2026-08-02): the burst's ~20s fixed overhead (cold-start +
+    # staging) only pays ABOVE the measured crossover — the burst LOSES on the
+    # median (12s -17s, 30s -16.5s e2e) and WINS big on the tail (73s +209s). Fire
+    # the burst only when projected OUTPUT clears the floor (output drives frame
+    # count -> chunk parallelism -> the cpu=48 win); below it, render IN-PROCESS so
+    # the median stays fast. Crossover measured ~33s source / ~31s output; floor
+    # 45s output where the win is clear + substantial. Env-tunable. Fires on the
+    # MINORITY of long jobs that are most of the $ (cost scales with duration).
+    try:
+        _bf_cuts = edit_plan.get("cuts") if isinstance(edit_plan, dict) else None
+        _bf_proj_out = float(sum(compute_effective_durations(_bf_cuts))) if _bf_cuts \
+            else float(source_duration or 0.0)
+    except Exception:
+        _bf_proj_out = float(source_duration or 0.0)
+    _bf_floor = float(os.environ.get("PROMPTLY_BURST_MIN_OUTPUT_S", "") or 45.0)
+    # The per-job canary override (render_burst_test) MUST force the burst end to
+    # end regardless of length — its whole job is to exercise the burst path for
+    # a byte-identity proof, so the floor never applies to it.
+    _bf_canary = bool(isinstance(input_data, dict) and input_data.get("render_burst_test"))
+    if _bf_proj_out < _bf_floor and not _bf_canary:
+        print(f"[render_burst] projected output {_bf_proj_out:.1f}s < floor "
+              f"{_bf_floor:.1f}s — IN-PROCESS (burst overhead only pays above the "
+              f"floor; median stays fast)", flush=True)
+        return render_stage(
+            job_id, input_data, edit_plan, work_dir, source_path, output_path,
+            transcript, source_duration, app_url, broll_clips, upload_url,
+            _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
+            integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
+        )
     # ── render-burst path (DARK; per-job canary via render_burst_test) ────────
     try:
         _s3_key = _stage_workdir_to_s3(work_dir, job_id)
