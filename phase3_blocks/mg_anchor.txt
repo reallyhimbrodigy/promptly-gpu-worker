@@ -1,0 +1,19 @@
+──────────────────────────────────────────
+ANCHOR GEOMETRY — keeping the face AND the MG visible
+──────────────────────────────────────────
+
+THE ANCHOR LAW — stated once, referenced below. Goal every time: viewer sees speaker AND MG simultaneously. **Anchor chosen AGAINST frame — graphic lands where face is not.** Read FACE VERTICAL ZONE signal, take band face isn't in — top/bottom per zone. On centered talking-head FACE FILLS CENTER BAND even when head-TOP reads "upper" in FACE VERTICAL ZONE (zone tracks top of head, not body) — so common talking-head default = **upper_third_safe**, clear gap above hair. Center belongs to graphic only when frame does: subject genuinely isn't in center band — wide/pulled-back shot, speaker off to one side, off-camera for window, deliberate full-screen takeover. Otherwise center = speaker; graphic covering person talking has deleted video's subject — graphic on face = most obviously-amateur thing edit can do. Place EMPTY SPACE: gap above head (upper), beside/below subject. Anchor names band component anchors to; component extends downward. Canvas bands: upper_third_safe ≈ y 120-600 · center ≈ y 600-1300 (face sits here on talking-head) · lower_third_safe ≈ y 1300-1700 (captions sit here).
+
+Component sizes:
+  • TOP-PINNED — Notification, StickyNotes, DropBanner, DropCard: ALWAYS render top band regardless of anchor (metaphor depends on it). Emit anchor "upper_third_safe" so spec matches reality.
+  • LARGE — IMessageBubble, ChatThread, RecordingFrame, PullQuote, EditorialQuote, SectionDivider, StepDivider: ≥half canvas height (divider/quote cards = full-frame takeover moments, captions rest for their window). LARGE resolve clear of visible face — render keeps person visible; B-roll window where face gone gives full upper third; smaller variant fits alongside face that stays.
+  • MEDIUM — TweetBubble, InstagramComment, TikTokComment, StatCard, RankedList, Timeline, TimelineRoadmap, Stamp, BarRace, MouseDrag: 25-40% canvas height. upper_third_safe works when face clearly center-or-lower; card touching face from above → use lower_third_safe with captions flipped top, or B-roll window.
+  • SMALL — AnnotationArrow, ProgressBar, Reticle, PillCluster: <20% canvas. Any anchor; upper_third_safe safe by construction.
+  • FULL-WIDTH — PillMarquee: edge-to-edge scrolling band; rides upper or lower band (emit upper_third_safe or lower_third_safe), stays clear of face like every other anchor.
+
+**Base layout — three component types live in three different bands so frame reads coherent, not scattered. STANDARD; deviate only when moment genuinely calls for it, know it's deliberate departure from default:**
+  • Captions live LOWER third (resting home).
+  • Text-overlays live UPPER third.
+  • Motion graphics **NEVER cover speaker's face** — placed by THE ANCHOR LAW above.
+
+Anchor preference, MG: 1) **upper_third_safe** — default · 2) **center** — only under THE ANCHOR LAW · 3) **lower_third_safe — LAST RESORT ONLY** (bottom MG forces captions off their lower-third home to top, scatters frame; genuinely footer-like content only, when upper and center both taken). MGs render horizontally centered — anchor enum vertical-only, so clearance comes from vertical band you pick. **Covering face never acceptable, pipeline GUARANTEES it — graphic whose band overlaps face relocated to clear band, structurally. Your anchor = authored intent; enforcement = floor.** Smaller variant when space tight, B-roll window when frame full. Clean speaker shot + coherent three-band layout = baseline render protects.
