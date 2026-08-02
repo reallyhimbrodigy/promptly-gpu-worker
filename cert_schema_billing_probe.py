@@ -33,6 +33,18 @@ import os
 import sys
 
 import modal
+
+# `import modal_app` runs BOTH locally (to build the image) and inside the
+# container at startup. It needs a path for each:
+#   "/"                -> where add_local_file mounts modal_app.py in the container
+#   the script's dir   -> where it lives locally
+# Both must be set at MODULE level, before the import — putting the container
+# path inside the function (as this file first did) is too late, because module
+# import happens at container startup. That is what killed the two earlier
+# invocations; they failed instantly rather than hanging, and the traceback went
+# into a piped tail. No Modal app was created and no container ran: $0.
+sys.path.insert(0, "/")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import modal_app
 
 image = modal_app.image.add_local_file("modal_app.py", "/modal_app.py")
