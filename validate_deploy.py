@@ -5319,6 +5319,38 @@ def _integrity_black_echo_diag():
         "the source-echo must stay wired into the gate call"
 
 
+@check("SIGNATURE-FIRST ON THE HYPE/MINIMAL RENDER BRIDGE (2026-08-02): hype_render._render_remotion opened its failure message with STDOUT, so the thrown exception sat ~700 chars in and the degrade ladder's [:300] truncation cut it off — job b8ab1276's durable error_detail ended at '[render-full] progress 0% rendered=0' and the real cause was unrecoverable from the job row. handler._remotion_subprocess has led with the real error since 2026-08-01; this was the one render call site still dumping stdout first. Both paths now pull the LAST line-anchored *Error/Exception line to the front.")
+def _hype_render_signature_first():
+    _src = open("hype_render.py").read()
+    _i = _src.index("def _render_remotion")
+    _j = _src.index("def render_hype")
+    _blk = _src[_i:_j]
+    assert "import re" in _src, "hype_render must import re for the signature extraction"
+    assert 'r"^[A-Za-z_.$]*(?:Error|Exception)\\b.*"' in _blk or "(?:Error|Exception)" in _blk, \
+        "must extract the thrown *Error/Exception line"
+    assert "_salient" in _blk, "the salient error must be pulled out"
+    # ORDERING IS THE WHOLE FIX: salient error, then STDERR, then STDOUT.
+    _msg = _blk[_blk.index("raise RuntimeError("):]
+    assert _msg.index("_salient") < _msg.index("STDERR"), "the error must precede STDERR"
+    assert _msg.index("STDERR") < _msg.index("STDOUT"), \
+        "STDOUT must come LAST — leading with it is exactly what truncated b8ab1276"
+    # and prove it end-to-end on b8ab1276's real shape
+    import re as _re
+    _stdout = ("[render-full] composition=PromptlyOverlay (ProRes 4444 alpha) frames 0-907, "
+               "0 caption pages, 8 MG, 0 text overlays, concurrency=8\n"
+               "[render-full] Using prebundle at /remotion/bundle\n"
+               "[render-full] Using build-time Chromium at /usr/local/bin/chrome-headless-shell\n"
+               "[render-full] Browser opened in 1.22s\n[render-full] progress 0% rendered=0")
+    _stderr = ("warning noise\nError: Timeout (30000ms) exceeded rendering the component at "
+               'frame 134. Open delayRender() handles: "1. Loading <Img> with src=blob:..."')
+    _el = _re.findall(r"^[A-Za-z_.$]*(?:Error|Exception)\b.*", _stderr, _re.M)
+    _sal = (_el[-1].strip()[:400] + " ||| ") if _el else ""
+    _new = (f"[hype-render] render-full.mjs PromptlyOverlay failed rc=1: "
+            f"{_sal}STDERR:\n{_stderr[-2000:]}\nSTDOUT:\n{_stdout[-1200:]}")
+    assert "Timeout (30000ms)" in _new[:300], \
+        f"the exception must survive the [:300] truncation: {_new[:300]!r}"
+
+
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
 def _l1_no_audio_gate():
     import handler

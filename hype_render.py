@@ -28,6 +28,7 @@ harness (hype_sample_app.py) and, later, a PROMPTLY_HYPE_MODE render branch.
 """
 import os
 import json
+import re
 import subprocess
 from typing import Optional
 
@@ -179,9 +180,25 @@ def _render_remotion(input_json_path: str, output_path: str, public_dir: str,
     print(f"[hype-render] remotion {composition}: {' '.join(cmd)}", flush=True)
     r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=1800)
     if r.returncode != 0 or not os.path.exists(output_path):
+        # SIGNATURE-FIRST (2026-08-02). This used to open with STDOUT, so the
+        # thrown exception sat ~700 chars in and the degrade ladder's [:300]
+        # truncation cut it off entirely: job b8ab1276's durable error_detail
+        # ended at "[render-full] progress 0% rendered=0" and the actual cause
+        # was never recoverable from the job row. handler._remotion_subprocess
+        # has led with the real error since 2026-08-01; this call site (the
+        # hype/minimal bridge) was the one still dumping stdout first.
+        #
+        # Pull the LAST line-anchored *Error/Exception line — the thrown one —
+        # to the front, exactly as the handler path does, so the first 300
+        # characters name the failure rather than the startup banner.
+        _stderr_full = r.stderr or ""
+        _stdout_full = r.stdout or ""
+        _err_lines = re.findall(
+            r"^[A-Za-z_.$]*(?:Error|Exception)\b.*", _stderr_full, re.M)
+        _salient = (_err_lines[-1].strip()[:400] + " ||| ") if _err_lines else ""
         raise RuntimeError(
-            f"[hype-render] render-full.mjs {composition} failed rc={r.returncode}\n"
-            f"STDOUT:\n{(r.stdout or '')[-1200:]}\nSTDERR:\n{(r.stderr or '')[-2000:]}"
+            f"[hype-render] render-full.mjs {composition} failed rc={r.returncode}: "
+            f"{_salient}STDERR:\n{_stderr_full[-2000:]}\nSTDOUT:\n{_stdout_full[-1200:]}"
         )
     return output_path
 
