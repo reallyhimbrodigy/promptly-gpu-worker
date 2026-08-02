@@ -1,0 +1,1930 @@
+{
+ "07bfa390": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 117.7
+  },
+  "elevenlabs_scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 117.7
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "english",
+   "n_words": 175,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 153,
+    "median_ms": 70.0,
+    "p90_ms": 160.0,
+    "within_50ms_pct": 40.5,
+    "matched_pct": 87.4
+   },
+   "dur": 117.7
+  }
+ },
+ "09c4fdd4": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 17,
+   "gate_pass": false,
+   "coverage_pct": 36.1,
+   "unworded_s": 47.0,
+   "vad_speech_s": 73.6,
+   "timing": {
+    "n": 16,
+    "median_ms": 41.1,
+    "p90_ms": 198.9,
+    "within_50ms_pct": 62.5,
+    "matched_pct": 94.1
+   },
+   "dur": 74.9
+  },
+  "elevenlabs_scribe": {
+   "lang": "tam",
+   "n_words": 254,
+   "gate_pass": true,
+   "coverage_pct": 99.6,
+   "unworded_s": 0.3,
+   "vad_speech_s": 73.6,
+   "timing": {
+    "n": 238,
+    "median_ms": 29.0,
+    "p90_ms": 149.0,
+    "within_50ms_pct": 62.6,
+    "matched_pct": 93.7
+   },
+   "dur": 74.9
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "tamil",
+   "n_words": 27,
+   "gate_pass": false,
+   "coverage_pct": 44.3,
+   "unworded_s": 41.0,
+   "vad_speech_s": 73.6,
+   "timing": {
+    "n": 27,
+    "median_ms": 40.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 55.6,
+    "matched_pct": 100.0
+   },
+   "dur": 74.9
+  }
+ },
+ "146d84ba": {
+  "deepgram_nova3": {
+   "lang": "id",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 20.3
+  },
+  "elevenlabs_scribe": {
+   "lang": "tam",
+   "n_words": 43,
+   "gate_pass": true,
+   "coverage_pct": 97.6,
+   "unworded_s": 0.4,
+   "vad_speech_s": 16.5,
+   "timing": {
+    "n": 43,
+    "median_ms": 10.0,
+    "p90_ms": 59.0,
+    "within_50ms_pct": 86.0,
+    "matched_pct": 100.0
+   },
+   "dur": 20.3
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "tamil",
+   "n_words": 11,
+   "gate_pass": false,
+   "coverage_pct": 6.1,
+   "unworded_s": 15.5,
+   "vad_speech_s": 16.5,
+   "timing": null,
+   "dur": 20.3
+  }
+ },
+ "24675dc0": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 190,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 46.0,
+   "timing": {
+    "n": 184,
+    "median_ms": 45.0,
+    "p90_ms": 125.0,
+    "within_50ms_pct": 53.3,
+    "matched_pct": 96.8
+   },
+   "dur": 47.2
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 194,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 46.0,
+   "timing": {
+    "n": 189,
+    "median_ms": 19.0,
+    "p90_ms": 120.0,
+    "within_50ms_pct": 72.0,
+    "matched_pct": 97.4
+   },
+   "dur": 47.2
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 177,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 46.0,
+   "timing": {
+    "n": 167,
+    "median_ms": 50.0,
+    "p90_ms": 140.0,
+    "within_50ms_pct": 49.1,
+    "matched_pct": 94.4
+   },
+   "dur": 47.2
+  }
+ },
+ "26f9e38d": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 45,
+   "gate_pass": false,
+   "coverage_pct": 80.9,
+   "unworded_s": 2.9,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 45,
+    "median_ms": 20.0,
+    "p90_ms": 110.0,
+    "within_50ms_pct": 73.3,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 56,
+   "gate_pass": true,
+   "coverage_pct": 99.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 55,
+    "median_ms": 19.0,
+    "p90_ms": 70.0,
+    "within_50ms_pct": 80.0,
+    "matched_pct": 98.2
+   },
+   "dur": 18.7
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 43,
+   "gate_pass": false,
+   "coverage_pct": 77.0,
+   "unworded_s": 3.5,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 43,
+    "median_ms": 30.0,
+    "p90_ms": 90.0,
+    "within_50ms_pct": 76.7,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  }
+ },
+ "27b02576": {
+  "deepgram_nova3": {
+   "lang": "es",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 100.3
+  },
+  "elevenlabs_scribe": {
+   "lang": "tel",
+   "n_words": 152,
+   "gate_pass": true,
+   "coverage_pct": 99.6,
+   "unworded_s": 0.3,
+   "vad_speech_s": 70.0,
+   "timing": {
+    "n": 82,
+    "median_ms": 69.0,
+    "p90_ms": 201.0,
+    "within_50ms_pct": 47.6,
+    "matched_pct": 53.9
+   },
+   "dur": 100.3
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "telugu",
+   "n_words": 9,
+   "gate_pass": false,
+   "coverage_pct": 19.0,
+   "unworded_s": 56.7,
+   "vad_speech_s": 70.0,
+   "timing": null,
+   "dur": 100.3
+  }
+ },
+ "2dac6281": {
+  "deepgram_nova3": {
+   "lang": "ja",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 13.6
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 6,
+   "gate_pass": false,
+   "coverage_pct": 23.7,
+   "unworded_s": 5.8,
+   "vad_speech_s": 7.6,
+   "timing": {
+    "n": 6,
+    "median_ms": 11.0,
+    "p90_ms": 50.0,
+    "within_50ms_pct": 83.3,
+    "matched_pct": 100.0
+   },
+   "dur": 13.6
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "javanese",
+   "n_words": 4,
+   "gate_pass": false,
+   "coverage_pct": 5.3,
+   "unworded_s": 7.2,
+   "vad_speech_s": 7.6,
+   "timing": null,
+   "dur": 13.6
+  }
+ },
+ "3a817ea0": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 199,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 43.1,
+   "timing": {
+    "n": 148,
+    "median_ms": 55.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 50.0,
+    "matched_pct": 74.4
+   },
+   "dur": 59.8
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 195,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 43.1,
+   "timing": {
+    "n": 160,
+    "median_ms": 49.0,
+    "p90_ms": 169.0,
+    "within_50ms_pct": 51.9,
+    "matched_pct": 82.1
+   },
+   "dur": 59.8
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 110,
+   "gate_pass": false,
+   "coverage_pct": 56.6,
+   "unworded_s": 18.7,
+   "vad_speech_s": 43.1,
+   "timing": {
+    "n": 79,
+    "median_ms": 70.0,
+    "p90_ms": 140.0,
+    "within_50ms_pct": 39.2,
+    "matched_pct": 71.8
+   },
+   "dur": 59.8
+  }
+ },
+ "3ab2afab": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 8.4
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 4,
+   "gate_pass": false,
+   "coverage_pct": 41.7,
+   "unworded_s": 2.1,
+   "vad_speech_s": 3.6,
+   "timing": null,
+   "dur": 8.4
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "english",
+   "n_words": 5,
+   "gate_pass": true,
+   "coverage_pct": 47.2,
+   "unworded_s": 1.9,
+   "vad_speech_s": 3.6,
+   "timing": null,
+   "dur": 8.4
+  }
+ },
+ "3d7f386b": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 271,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 79.9,
+   "timing": {
+    "n": 248,
+    "median_ms": 45.0,
+    "p90_ms": 170.0,
+    "within_50ms_pct": 54.4,
+    "matched_pct": 91.5
+   },
+   "dur": 81.6
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 272,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 79.9,
+   "timing": {
+    "n": 246,
+    "median_ms": 10.0,
+    "p90_ms": 129.0,
+    "within_50ms_pct": 72.8,
+    "matched_pct": 90.4
+   },
+   "dur": 81.6
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 95,
+   "gate_pass": false,
+   "coverage_pct": 31.3,
+   "unworded_s": 54.9,
+   "vad_speech_s": 79.9,
+   "timing": {
+    "n": 94,
+    "median_ms": 30.0,
+    "p90_ms": 80.0,
+    "within_50ms_pct": 58.5,
+    "matched_pct": 98.9
+   },
+   "dur": 81.6
+  }
+ },
+ "4b1d4161": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 376,
+   "gate_pass": true,
+   "coverage_pct": 98.5,
+   "unworded_s": 3.2,
+   "vad_speech_s": 209.2,
+   "timing": {
+    "n": 22,
+    "median_ms": 135.0,
+    "p90_ms": 185.0,
+    "within_50ms_pct": 9.1,
+    "matched_pct": 5.9
+   },
+   "dur": 230.2
+  },
+  "elevenlabs_scribe": {
+   "lang": "eng",
+   "n_words": 434,
+   "gate_pass": true,
+   "coverage_pct": 99.9,
+   "unworded_s": 0.2,
+   "vad_speech_s": 209.2,
+   "timing": {
+    "n": 28,
+    "median_ms": 60.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 50.0,
+    "matched_pct": 6.5
+   },
+   "dur": 230.2
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "english",
+   "n_words": 357,
+   "gate_pass": true,
+   "coverage_pct": 99.2,
+   "unworded_s": 1.6,
+   "vad_speech_s": 209.2,
+   "timing": {
+    "n": 16,
+    "median_ms": 140.0,
+    "p90_ms": 200.0,
+    "within_50ms_pct": 18.8,
+    "matched_pct": 4.5
+   },
+   "dur": 230.2
+  }
+ },
+ "4c822eb4": {
+  "deepgram_nova3": {
+   "lang": "tr",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 14.6
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 22,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.6,
+   "timing": {
+    "n": 5,
+    "median_ms": 50.0,
+    "p90_ms": 70.0,
+    "within_50ms_pct": 40.0,
+    "matched_pct": 22.7
+   },
+   "dur": 14.6
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "punjabi",
+   "n_words": 17,
+   "gate_pass": true,
+   "coverage_pct": 0.0,
+   "unworded_s": 0.6,
+   "vad_speech_s": 0.6,
+   "timing": null,
+   "dur": 14.6
+  }
+ },
+ "57e18fac": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 9,
+   "gate_pass": false,
+   "coverage_pct": 39.9,
+   "unworded_s": 8.6,
+   "vad_speech_s": 14.3,
+   "timing": {
+    "n": 6,
+    "median_ms": 110.0,
+    "p90_ms": 130.0,
+    "within_50ms_pct": 33.3,
+    "matched_pct": 66.7
+   },
+   "dur": 24.3
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 31,
+   "gate_pass": true,
+   "coverage_pct": 87.4,
+   "unworded_s": 1.8,
+   "vad_speech_s": 14.3,
+   "timing": {
+    "n": 19,
+    "median_ms": 31.0,
+    "p90_ms": 231.0,
+    "within_50ms_pct": 57.9,
+    "matched_pct": 61.3
+   },
+   "dur": 24.3
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 18,
+   "gate_pass": false,
+   "coverage_pct": 0.0,
+   "unworded_s": 14.3,
+   "vad_speech_s": 14.3,
+   "timing": null,
+   "dur": 24.3
+  }
+ },
+ "5f0b1525": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 32,
+   "gate_pass": false,
+   "coverage_pct": 39.3,
+   "unworded_s": 24.4,
+   "vad_speech_s": 40.2,
+   "timing": {
+    "n": 21,
+    "median_ms": 85.0,
+    "p90_ms": 235.0,
+    "within_50ms_pct": 23.8,
+    "matched_pct": 65.6
+   },
+   "dur": 50.8
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 88,
+   "gate_pass": false,
+   "coverage_pct": 87.3,
+   "unworded_s": 5.1,
+   "vad_speech_s": 40.2,
+   "timing": {
+    "n": 57,
+    "median_ms": 51.0,
+    "p90_ms": 221.0,
+    "within_50ms_pct": 49.1,
+    "matched_pct": 64.8
+   },
+   "dur": 50.8
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "nepali",
+   "n_words": 83,
+   "gate_pass": true,
+   "coverage_pct": 99.5,
+   "unworded_s": 0.2,
+   "vad_speech_s": 40.2,
+   "timing": {
+    "n": 54,
+    "median_ms": 90.0,
+    "p90_ms": 210.0,
+    "within_50ms_pct": 33.3,
+    "matched_pct": 65.1
+   },
+   "dur": 50.8
+  }
+ },
+ "62afc55a": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 227,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 50.2,
+   "timing": {
+    "n": 186,
+    "median_ms": 60.0,
+    "p90_ms": 195.0,
+    "within_50ms_pct": 47.8,
+    "matched_pct": 81.9
+   },
+   "dur": 59.7
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 223,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 50.2,
+   "timing": {
+    "n": 197,
+    "median_ms": 30.0,
+    "p90_ms": 160.0,
+    "within_50ms_pct": 57.9,
+    "matched_pct": 88.3
+   },
+   "dur": 59.7
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 216,
+   "gate_pass": false,
+   "coverage_pct": 87.6,
+   "unworded_s": 6.2,
+   "vad_speech_s": 50.2,
+   "timing": {
+    "n": 184,
+    "median_ms": 50.0,
+    "p90_ms": 180.0,
+    "within_50ms_pct": 47.8,
+    "matched_pct": 85.2
+   },
+   "dur": 59.7
+  }
+ },
+ "67c7c9f0": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 376,
+   "gate_pass": true,
+   "coverage_pct": 98.5,
+   "unworded_s": 3.2,
+   "vad_speech_s": 209.2,
+   "timing": {
+    "n": 22,
+    "median_ms": 135.0,
+    "p90_ms": 185.0,
+    "within_50ms_pct": 4.5,
+    "matched_pct": 5.9
+   },
+   "dur": 230.2
+  },
+  "elevenlabs_scribe": {
+   "lang": "eng",
+   "n_words": 433,
+   "gate_pass": true,
+   "coverage_pct": 99.9,
+   "unworded_s": 0.2,
+   "vad_speech_s": 209.2,
+   "timing": {
+    "n": 29,
+    "median_ms": 50.0,
+    "p90_ms": 230.0,
+    "within_50ms_pct": 48.3,
+    "matched_pct": 6.7
+   },
+   "dur": 230.2
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "english",
+   "n_words": 354,
+   "gate_pass": true,
+   "coverage_pct": 99.2,
+   "unworded_s": 1.6,
+   "vad_speech_s": 209.2,
+   "timing": {
+    "n": 20,
+    "median_ms": 110.0,
+    "p90_ms": 180.0,
+    "within_50ms_pct": 20.0,
+    "matched_pct": 5.6
+   },
+   "dur": 230.2
+  }
+ },
+ "781b39b8": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 76,
+   "gate_pass": false,
+   "coverage_pct": 81.5,
+   "unworded_s": 10.6,
+   "vad_speech_s": 57.4,
+   "timing": {
+    "n": 74,
+    "median_ms": 50.0,
+    "p90_ms": 155.0,
+    "within_50ms_pct": 47.3,
+    "matched_pct": 97.4
+   },
+   "dur": 63.4
+  },
+  "elevenlabs_scribe": {
+   "lang": "eng",
+   "n_words": 113,
+   "gate_pass": true,
+   "coverage_pct": 93.2,
+   "unworded_s": 3.9,
+   "vad_speech_s": 57.4,
+   "timing": {
+    "n": 107,
+    "median_ms": 11.0,
+    "p90_ms": 121.0,
+    "within_50ms_pct": 71.0,
+    "matched_pct": 94.7
+   },
+   "dur": 63.4
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "english",
+   "n_words": 107,
+   "gate_pass": true,
+   "coverage_pct": 92.7,
+   "unworded_s": 4.2,
+   "vad_speech_s": 57.4,
+   "timing": {
+    "n": 98,
+    "median_ms": 30.0,
+    "p90_ms": 160.0,
+    "within_50ms_pct": 61.2,
+    "matched_pct": 91.6
+   },
+   "dur": 63.4
+  }
+ },
+ "7961a245": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 199,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 43.1,
+   "timing": {
+    "n": 147,
+    "median_ms": 55.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 49.0,
+    "matched_pct": 73.9
+   },
+   "dur": 59.8
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 196,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 43.1,
+   "timing": {
+    "n": 160,
+    "median_ms": 49.0,
+    "p90_ms": 169.0,
+    "within_50ms_pct": 51.9,
+    "matched_pct": 81.6
+   },
+   "dur": 59.8
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 17,
+   "gate_pass": false,
+   "coverage_pct": 13.7,
+   "unworded_s": 37.2,
+   "vad_speech_s": 43.1,
+   "timing": {
+    "n": 10,
+    "median_ms": 50.0,
+    "p90_ms": 160.0,
+    "within_50ms_pct": 60.0,
+    "matched_pct": 58.8
+   },
+   "dur": 59.8
+  }
+ },
+ "7b25f517": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 46,
+   "gate_pass": false,
+   "coverage_pct": 73.3,
+   "unworded_s": 7.8,
+   "vad_speech_s": 29.2,
+   "timing": {
+    "n": 46,
+    "median_ms": 30.0,
+    "p90_ms": 60.0,
+    "within_50ms_pct": 80.4,
+    "matched_pct": 100.0
+   },
+   "dur": 29.4
+  },
+  "elevenlabs_scribe": {
+   "lang": "mal",
+   "n_words": 109,
+   "gate_pass": true,
+   "coverage_pct": 99.7,
+   "unworded_s": 0.1,
+   "vad_speech_s": 29.2,
+   "timing": {
+    "n": 109,
+    "median_ms": 20.0,
+    "p90_ms": 101.0,
+    "within_50ms_pct": 76.1,
+    "matched_pct": 100.0
+   },
+   "dur": 29.4
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "malayalam",
+   "n_words": 13,
+   "gate_pass": false,
+   "coverage_pct": 1.4,
+   "unworded_s": 28.8,
+   "vad_speech_s": 29.2,
+   "timing": null,
+   "dur": 29.4
+  }
+ },
+ "893d44c8": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 45,
+   "gate_pass": false,
+   "coverage_pct": 80.9,
+   "unworded_s": 2.9,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 45,
+    "median_ms": 20.0,
+    "p90_ms": 110.0,
+    "within_50ms_pct": 73.3,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 56,
+   "gate_pass": true,
+   "coverage_pct": 99.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 55,
+    "median_ms": 19.0,
+    "p90_ms": 70.0,
+    "within_50ms_pct": 80.0,
+    "matched_pct": 98.2
+   },
+   "dur": 18.7
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 43,
+   "gate_pass": false,
+   "coverage_pct": 77.0,
+   "unworded_s": 3.5,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 43,
+    "median_ms": 30.0,
+    "p90_ms": 90.0,
+    "within_50ms_pct": 76.7,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  }
+ },
+ "a14c47e0": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 4,
+   "gate_pass": false,
+   "coverage_pct": 75.7,
+   "unworded_s": 5.4,
+   "vad_speech_s": 22.2,
+   "timing": null,
+   "dur": 22.1
+  },
+  "elevenlabs_scribe": {
+   "lang": "mar",
+   "n_words": 74,
+   "gate_pass": true,
+   "coverage_pct": 99.5,
+   "unworded_s": 0.1,
+   "vad_speech_s": 22.2,
+   "timing": {
+    "n": 74,
+    "median_ms": 9.0,
+    "p90_ms": 109.0,
+    "within_50ms_pct": 79.7,
+    "matched_pct": 100.0
+   },
+   "dur": 22.1
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "marathi",
+   "n_words": 83,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 22.2,
+   "timing": {
+    "n": 82,
+    "median_ms": 50.0,
+    "p90_ms": 100.0,
+    "within_50ms_pct": 50.0,
+    "matched_pct": 98.8
+   },
+   "dur": 22.1
+  }
+ },
+ "a295dbc4": {
+  "deepgram_nova3": {
+   "lang": "id",
+   "n_words": 3,
+   "gate_pass": false,
+   "coverage_pct": 12.6,
+   "unworded_s": 9.7,
+   "vad_speech_s": 11.1,
+   "timing": null,
+   "dur": 22.1
+  },
+  "elevenlabs_scribe": {
+   "lang": "fil",
+   "n_words": 18,
+   "gate_pass": true,
+   "coverage_pct": 92.8,
+   "unworded_s": 0.8,
+   "vad_speech_s": 11.1,
+   "timing": {
+    "n": 14,
+    "median_ms": 21.0,
+    "p90_ms": 139.0,
+    "within_50ms_pct": 71.4,
+    "matched_pct": 77.8
+   },
+   "dur": 22.1
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "tagalog",
+   "n_words": 22,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 11.1,
+   "timing": {
+    "n": 8,
+    "median_ms": 80.0,
+    "p90_ms": 140.0,
+    "within_50ms_pct": 50.0,
+    "matched_pct": 36.4
+   },
+   "dur": 22.1
+  }
+ },
+ "a5240ea7": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 196,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 47.9,
+   "timing": {
+    "n": 146,
+    "median_ms": 80.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 32.9,
+    "matched_pct": 74.5
+   },
+   "dur": 51.5
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 197,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 47.9,
+   "timing": {
+    "n": 150,
+    "median_ms": 69.0,
+    "p90_ms": 189.0,
+    "within_50ms_pct": 46.0,
+    "matched_pct": 76.1
+   },
+   "dur": 51.5
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 198,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 47.9,
+   "timing": {
+    "n": 147,
+    "median_ms": 80.0,
+    "p90_ms": 200.0,
+    "within_50ms_pct": 27.2,
+    "matched_pct": 74.2
+   },
+   "dur": 51.5
+  }
+ },
+ "ad8f7115": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 102,
+   "gate_pass": false,
+   "coverage_pct": 74.7,
+   "unworded_s": 17.4,
+   "vad_speech_s": 68.8,
+   "timing": {
+    "n": 90,
+    "median_ms": 55.0,
+    "p90_ms": 165.0,
+    "within_50ms_pct": 47.8,
+    "matched_pct": 88.2
+   },
+   "dur": 73.4
+  },
+  "elevenlabs_scribe": {
+   "lang": "pan",
+   "n_words": 186,
+   "gate_pass": true,
+   "coverage_pct": 99.9,
+   "unworded_s": 0.1,
+   "vad_speech_s": 68.8,
+   "timing": {
+    "n": 165,
+    "median_ms": 19.0,
+    "p90_ms": 180.0,
+    "within_50ms_pct": 66.1,
+    "matched_pct": 88.7
+   },
+   "dur": 73.4
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "punjabi",
+   "n_words": 54,
+   "gate_pass": false,
+   "coverage_pct": 13.5,
+   "unworded_s": 59.5,
+   "vad_speech_s": 68.8,
+   "timing": {
+    "n": 30,
+    "median_ms": 10.0,
+    "p90_ms": 130.0,
+    "within_50ms_pct": 70.0,
+    "matched_pct": 55.6
+   },
+   "dur": 73.4
+  }
+ },
+ "aebffd26": {
+  "deepgram_nova3": {
+   "lang": "tr",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 24.9
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 28,
+   "gate_pass": true,
+   "coverage_pct": 93.1,
+   "unworded_s": 1.2,
+   "vad_speech_s": 17.5,
+   "timing": {
+    "n": 25,
+    "median_ms": 20.0,
+    "p90_ms": 170.0,
+    "within_50ms_pct": 72.0,
+    "matched_pct": 89.3
+   },
+   "dur": 24.9
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 2,
+   "gate_pass": false,
+   "coverage_pct": 4.0,
+   "unworded_s": 16.8,
+   "vad_speech_s": 17.5,
+   "timing": null,
+   "dur": 24.9
+  }
+ },
+ "bb30ffb8": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 199,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 43.1,
+   "timing": {
+    "n": 147,
+    "median_ms": 55.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 49.0,
+    "matched_pct": 73.9
+   },
+   "dur": 59.8
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 196,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 43.1,
+   "timing": {
+    "n": 160,
+    "median_ms": 49.0,
+    "p90_ms": 169.0,
+    "within_50ms_pct": 51.9,
+    "matched_pct": 81.6
+   },
+   "dur": 59.8
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 76,
+   "gate_pass": false,
+   "coverage_pct": 42.0,
+   "unworded_s": 25.0,
+   "vad_speech_s": 43.1,
+   "timing": {
+    "n": 42,
+    "median_ms": 60.0,
+    "p90_ms": 120.0,
+    "within_50ms_pct": 42.9,
+    "matched_pct": 55.3
+   },
+   "dur": 59.8
+  }
+ },
+ "bfcfb8fe": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 4,
+   "gate_pass": false,
+   "coverage_pct": 75.7,
+   "unworded_s": 5.4,
+   "vad_speech_s": 22.2,
+   "timing": null,
+   "dur": 22.1
+  },
+  "elevenlabs_scribe": {
+   "lang": "mar",
+   "n_words": 74,
+   "gate_pass": true,
+   "coverage_pct": 99.5,
+   "unworded_s": 0.1,
+   "vad_speech_s": 22.2,
+   "timing": {
+    "n": 74,
+    "median_ms": 9.0,
+    "p90_ms": 109.0,
+    "within_50ms_pct": 79.7,
+    "matched_pct": 100.0
+   },
+   "dur": 22.1
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "marathi",
+   "n_words": 83,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 22.2,
+   "timing": {
+    "n": 82,
+    "median_ms": 50.0,
+    "p90_ms": 100.0,
+    "within_50ms_pct": 53.7,
+    "matched_pct": 98.8
+   },
+   "dur": 22.1
+  }
+ },
+ "c39ba007": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 1,
+   "gate_pass": true,
+   "coverage_pct": 34.6,
+   "unworded_s": 1.7,
+   "vad_speech_s": 2.6,
+   "timing": null,
+   "dur": 5.1
+  },
+  "elevenlabs_scribe": {
+   "lang": "eng",
+   "n_words": 2,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 2.6,
+   "timing": null,
+   "dur": 5.1
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "malayalam",
+   "n_words": 1,
+   "gate_pass": true,
+   "coverage_pct": 76.9,
+   "unworded_s": 0.6,
+   "vad_speech_s": 2.6,
+   "timing": null,
+   "dur": 5.1
+  }
+ },
+ "c50203d2": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 38,
+   "gate_pass": false,
+   "coverage_pct": 80.0,
+   "unworded_s": 3.0,
+   "vad_speech_s": 15.0,
+   "timing": null,
+   "dur": 21.3
+  },
+  "elevenlabs_scribe": {
+   "lang": "eng",
+   "n_words": 39,
+   "gate_pass": false,
+   "coverage_pct": 81.3,
+   "unworded_s": 2.8,
+   "vad_speech_s": 15.0,
+   "timing": null,
+   "dur": 21.3
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "english",
+   "n_words": 38,
+   "gate_pass": false,
+   "coverage_pct": 80.7,
+   "unworded_s": 2.9,
+   "vad_speech_s": 15.0,
+   "timing": null,
+   "dur": 21.3
+  }
+ },
+ "cf6e9ebd": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 45,
+   "gate_pass": false,
+   "coverage_pct": 80.9,
+   "unworded_s": 2.9,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 45,
+    "median_ms": 20.0,
+    "p90_ms": 110.0,
+    "within_50ms_pct": 73.3,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 56,
+   "gate_pass": true,
+   "coverage_pct": 99.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 55,
+    "median_ms": 19.0,
+    "p90_ms": 70.0,
+    "within_50ms_pct": 80.0,
+    "matched_pct": 98.2
+   },
+   "dur": 18.7
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 43,
+   "gate_pass": false,
+   "coverage_pct": 77.0,
+   "unworded_s": 3.5,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 43,
+    "median_ms": 30.0,
+    "p90_ms": 90.0,
+    "within_50ms_pct": 76.7,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  }
+ },
+ "db318bff": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 9,
+   "gate_pass": false,
+   "coverage_pct": 17.6,
+   "unworded_s": 36.6,
+   "vad_speech_s": 44.4,
+   "timing": {
+    "n": 8,
+    "median_ms": 116.7,
+    "p90_ms": 193.3,
+    "within_50ms_pct": 37.5,
+    "matched_pct": 88.9
+   },
+   "dur": 45.1
+  },
+  "elevenlabs_scribe": {
+   "lang": "mal",
+   "n_words": 113,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 44.4,
+   "timing": {
+    "n": 100,
+    "median_ms": 39.0,
+    "p90_ms": 171.0,
+    "within_50ms_pct": 60.0,
+    "matched_pct": 88.5
+   },
+   "dur": 45.1
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "malayalam",
+   "n_words": 43,
+   "gate_pass": false,
+   "coverage_pct": 36.3,
+   "unworded_s": 28.3,
+   "vad_speech_s": 44.4,
+   "timing": {
+    "n": 31,
+    "median_ms": 30.0,
+    "p90_ms": 230.0,
+    "within_50ms_pct": 51.6,
+    "matched_pct": 72.1
+   },
+   "dur": 45.1
+  }
+ },
+ "dd09d0a6": {
+  "deepgram_nova3": {
+   "lang": "id",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 29.1
+  },
+  "elevenlabs_scribe": {
+   "lang": "tam",
+   "n_words": 16,
+   "gate_pass": true,
+   "coverage_pct": 98.1,
+   "unworded_s": 0.1,
+   "vad_speech_s": 5.3,
+   "timing": {
+    "n": 13,
+    "median_ms": 20.0,
+    "p90_ms": 81.0,
+    "within_50ms_pct": 69.2,
+    "matched_pct": 81.2
+   },
+   "dur": 29.1
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "tamil",
+   "n_words": 9,
+   "gate_pass": false,
+   "coverage_pct": 1.9,
+   "unworded_s": 5.2,
+   "vad_speech_s": 5.3,
+   "timing": null,
+   "dur": 29.1
+  }
+ },
+ "e2c367aa": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 45,
+   "gate_pass": false,
+   "coverage_pct": 80.9,
+   "unworded_s": 2.9,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 45,
+    "median_ms": 20.0,
+    "p90_ms": 110.0,
+    "within_50ms_pct": 73.3,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 56,
+   "gate_pass": true,
+   "coverage_pct": 99.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 55,
+    "median_ms": 19.0,
+    "p90_ms": 70.0,
+    "within_50ms_pct": 80.0,
+    "matched_pct": 98.2
+   },
+   "dur": 18.7
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 43,
+   "gate_pass": false,
+   "coverage_pct": 77.0,
+   "unworded_s": 3.5,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 43,
+    "median_ms": 30.0,
+    "p90_ms": 90.0,
+    "within_50ms_pct": 76.7,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  }
+ },
+ "e9cd6904": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 9,
+   "gate_pass": false,
+   "coverage_pct": 19.5,
+   "unworded_s": 30.1,
+   "vad_speech_s": 37.4,
+   "timing": {
+    "n": 5,
+    "median_ms": 190.4,
+    "p90_ms": 230.4,
+    "within_50ms_pct": 0.0,
+    "matched_pct": 55.6
+   },
+   "dur": 43.0
+  },
+  "elevenlabs_scribe": {
+   "lang": "mal",
+   "n_words": 85,
+   "gate_pass": true,
+   "coverage_pct": 99.5,
+   "unworded_s": 0.2,
+   "vad_speech_s": 37.4,
+   "timing": {
+    "n": 50,
+    "median_ms": 80.0,
+    "p90_ms": 209.0,
+    "within_50ms_pct": 42.0,
+    "matched_pct": 58.8
+   },
+   "dur": 43.0
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "malayalam",
+   "n_words": 7,
+   "gate_pass": false,
+   "coverage_pct": 5.1,
+   "unworded_s": 35.5,
+   "vad_speech_s": 37.4,
+   "timing": {
+    "n": 6,
+    "median_ms": 180.0,
+    "p90_ms": 180.0,
+    "within_50ms_pct": 0.0,
+    "matched_pct": 85.7
+   },
+   "dur": 43.0
+  }
+ },
+ "ea3e6d2d": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 26.7
+  },
+  "elevenlabs_scribe": {
+   "lang": "mal",
+   "n_words": 63,
+   "gate_pass": true,
+   "coverage_pct": 98.8,
+   "unworded_s": 0.3,
+   "vad_speech_s": 25.2,
+   "timing": {
+    "n": 62,
+    "median_ms": 29.0,
+    "p90_ms": 91.0,
+    "within_50ms_pct": 72.6,
+    "matched_pct": 98.4
+   },
+   "dur": 26.7
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "malayalam",
+   "n_words": 40,
+   "gate_pass": false,
+   "coverage_pct": 88.5,
+   "unworded_s": 2.9,
+   "vad_speech_s": 25.2,
+   "timing": {
+    "n": 39,
+    "median_ms": 40.0,
+    "p90_ms": 120.0,
+    "within_50ms_pct": 66.7,
+    "matched_pct": 97.5
+   },
+   "dur": 26.7
+  }
+ },
+ "edea9617": {
+  "deepgram_nova3": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 42.5
+  },
+  "elevenlabs_scribe": {
+   "lang": "tel",
+   "n_words": 66,
+   "gate_pass": true,
+   "coverage_pct": 94.8,
+   "unworded_s": 1.8,
+   "vad_speech_s": 34.6,
+   "timing": {
+    "n": 52,
+    "median_ms": 79.0,
+    "p90_ms": 181.0,
+    "within_50ms_pct": 38.5,
+    "matched_pct": 78.8
+   },
+   "dur": 42.5
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "telugu",
+   "n_words": 46,
+   "gate_pass": false,
+   "coverage_pct": 30.1,
+   "unworded_s": 24.2,
+   "vad_speech_s": 34.6,
+   "timing": {
+    "n": 11,
+    "median_ms": 60.0,
+    "p90_ms": 140.0,
+    "within_50ms_pct": 45.5,
+    "matched_pct": 23.9
+   },
+   "dur": 42.5
+  }
+ },
+ "ee7f07bc": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 45,
+   "gate_pass": false,
+   "coverage_pct": 80.9,
+   "unworded_s": 2.9,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 45,
+    "median_ms": 20.0,
+    "p90_ms": 110.0,
+    "within_50ms_pct": 73.3,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 56,
+   "gate_pass": true,
+   "coverage_pct": 99.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 55,
+    "median_ms": 19.0,
+    "p90_ms": 70.0,
+    "within_50ms_pct": 80.0,
+    "matched_pct": 98.2
+   },
+   "dur": 18.7
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 43,
+   "gate_pass": false,
+   "coverage_pct": 77.0,
+   "unworded_s": 3.5,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 43,
+    "median_ms": 30.0,
+    "p90_ms": 90.0,
+    "within_50ms_pct": 76.7,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  }
+ },
+ "f941243e": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 45,
+   "gate_pass": false,
+   "coverage_pct": 80.9,
+   "unworded_s": 2.9,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 45,
+    "median_ms": 20.0,
+    "p90_ms": 110.0,
+    "within_50ms_pct": 73.3,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 56,
+   "gate_pass": true,
+   "coverage_pct": 99.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 55,
+    "median_ms": 19.0,
+    "p90_ms": 70.0,
+    "within_50ms_pct": 80.0,
+    "matched_pct": 98.2
+   },
+   "dur": 18.7
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 43,
+   "gate_pass": false,
+   "coverage_pct": 77.0,
+   "unworded_s": 3.5,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 43,
+    "median_ms": 30.0,
+    "p90_ms": 90.0,
+    "within_50ms_pct": 76.7,
+    "matched_pct": 100.0
+   },
+   "dur": 18.7
+  }
+ },
+ "fe8b56f4": {
+  "deepgram_nova3": {
+   "lang": "hi",
+   "n_words": 272,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 79.9,
+   "timing": {
+    "n": 249,
+    "median_ms": 45.0,
+    "p90_ms": 170.0,
+    "within_50ms_pct": 54.6,
+    "matched_pct": 91.5
+   },
+   "dur": 81.6
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 272,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 79.9,
+   "timing": {
+    "n": 246,
+    "median_ms": 11.0,
+    "p90_ms": 129.0,
+    "within_50ms_pct": 73.2,
+    "matched_pct": 90.4
+   },
+   "dur": 81.6
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "hindi",
+   "n_words": 101,
+   "gate_pass": false,
+   "coverage_pct": 24.4,
+   "unworded_s": 60.4,
+   "vad_speech_s": 79.9,
+   "timing": {
+    "n": 92,
+    "median_ms": 50.0,
+    "p90_ms": 90.0,
+    "within_50ms_pct": 50.0,
+    "matched_pct": 91.1
+   },
+   "dur": 81.6
+  }
+ },
+ "ff981165": {
+  "deepgram_nova3": {
+   "lang": "es",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 22.8
+  },
+  "elevenlabs_scribe": {
+   "lang": "hin",
+   "n_words": 36,
+   "gate_pass": false,
+   "coverage_pct": 74.4,
+   "unworded_s": 5.3,
+   "vad_speech_s": 20.7,
+   "timing": {
+    "n": 12,
+    "median_ms": 10.0,
+    "p90_ms": 49.0,
+    "within_50ms_pct": 91.7,
+    "matched_pct": 33.3
+   },
+   "dur": 22.8
+  },
+  "gemini_audio": {
+   "error": "HTTPError: 401 Client Error: Unauthorized for url: https://generativelanguage.go"
+  },
+  "openai_whisper1": {
+   "lang": "punjabi",
+   "n_words": 16,
+   "gate_pass": false,
+   "coverage_pct": 4.8,
+   "unworded_s": 19.7,
+   "vad_speech_s": 20.7,
+   "timing": null,
+   "dur": 22.8
+  }
+ }
+}
