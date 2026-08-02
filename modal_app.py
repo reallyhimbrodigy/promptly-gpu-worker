@@ -8,8 +8,14 @@ import modal
 # Computed at deploy time (when `modal deploy` reads this file) and baked into
 # the image as env vars. The handler logs these on the first line of every job
 # so we can always answer "which build ran this render?" — no guessing about
-# warm-container code drift after a deploy. _BUILD_DIRTY is "1" if there are
-# uncommitted changes in the working tree at deploy time, "0" otherwise.
+# warm-container code drift after a deploy. _BUILD_DIRTY is "1" if any TRACKED
+# file is modified vs HEAD at deploy time (the actual reproducibility concern),
+# "0" otherwise. Untracked files are EXCLUDED (--untracked-files=no, Zac
+# 2026-08-02): the image mounts only specific add_local_file/dir paths (all
+# tracked), so untracked one-off *_app.py harness scripts never enter the image
+# and must not flag a reproducible deploy as dirty (they made v418 read b5f9f2b*
+# despite ZERO tracked drift). The flag now means "deployed code differs from a
+# committed HEAD", which is precisely what "not reproducible" means.
 def _git(*args):
     try:
         return subprocess.check_output(
@@ -21,7 +27,7 @@ def _git(*args):
         return ""
 
 _BUILD_SHA = _git("rev-parse", "HEAD") or "unknown"
-_BUILD_DIRTY = "1" if _git("status", "--porcelain") else "0"
+_BUILD_DIRTY = "1" if _git("status", "--porcelain", "--untracked-files=no") else "0"
 _BUILD_TS = str(int(time.time()))
 # Single-deployer protocol (directive #10): every deploy names its operator.
 # deploy.sh exports PROMPTLY_DEPLOYER (claude-code / codex / zac-manual);
