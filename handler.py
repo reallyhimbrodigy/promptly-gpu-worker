@@ -10309,6 +10309,22 @@ def _gemini_generate_with_cache(client, model_name, contents, base_config_kwargs
 _GEMINI_CALL_LOG = []
 
 
+def _gemini_token_summary():
+    """Aggregate per-call Gemini token cost from _GEMINI_CALL_LOG for PERSISTENCE
+    under stage_timings (Zac 2026-08-02). uncached_delta = prompt - cached = the
+    per-call BILLED input (incl. the response schema if uncached) — the number that
+    decides the prompt lever (relocation vs deletion). Printed but never stored
+    before this; would be the 3rd field lost to content-studio top-level stripping."""
+    _live = [c for c in _GEMINI_CALL_LOG if isinstance(c, dict) and not c.get("aborted")]
+    if not _live:
+        return None
+    _p = sum(c.get("prompt_tok") or 0 for c in _live)
+    _cch = sum(c.get("cached_tok") or 0 for c in _live)
+    return {"prompt": _p, "cached": _cch,
+            "output": sum(c.get("out_tok") or 0 for c in _live),
+            "uncached_delta": _p - _cch, "n_calls": len(_live)}
+
+
 # ── SHAPE-AWARE STREAM ABORT (DEGEN-LEVER-A, Zac ruling 1c part a, 2026-07-25) ─
 # The 16k-token cutoff below catches a spiral only after 144-247s of burn
 # (observed: d7ee9c05 146.9s/abort at ~109 tok/s; 7f1a1128 3 aborts/369.2s at
@@ -10710,6 +10726,11 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
                 "total_s": round(_total, 1), "ttfb_s": round(_ttfb or 0.0, 1),
                 "out_tok": _eff_out, "aborted": bool(_aborted), "label": label,
                 "shape": (_shape_fire or {}).get("shape"),
+                # prompt/cached tokens so the uncached delta (prompt-cached, the
+                # per-call billed input incl. the response schema) is PERSISTED,
+                # not just printed — decides the prompt lever (relocation vs delete).
+                "prompt_tok": getattr(_usage, "prompt_token_count", None) if _usage else None,
+                "cached_tok": getattr(_usage, "cached_content_token_count", None) if _usage else None,
             })
         except Exception:
             pass
@@ -35515,6 +35536,10 @@ def handler(job):
             "stage_timings": {
                 **{k: round(float(v), 1) for k, v in _timings.items()},
                 "source_duration_s": round(float(source_duration), 1) if source_duration else None,
+                # Gemini token cost NESTED (Zac 2026-08-02) — the 3rd field that
+                # would have been lost to content-studio top-level stripping. The
+                # uncached_delta (prompt-cached) decides the prompt lever.
+                "gemini_tokens": _gemini_token_summary(),
             },
             # W2: which stages ran/skipped and WHY (effort-proportional proof)
             "stage_manifest": _stage_manifest,

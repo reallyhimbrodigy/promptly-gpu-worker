@@ -111,6 +111,21 @@ def _source_duration_persist_guard():
         "inside the stage_timings dict instead.")
 
 
+@check("GEMINI_TOKENS PERSIST GUARD (Zac 2026-08-02, RULE-1): the gemini_tokens dict (prompt/cached/output + uncached_delta = prompt-cached, the number that decides the prompt lever) must be NESTED inside stage_timings, never a top-level result key — it is the 3RD field this class would strip (source_duration 0/62, cpu_by_stage 0/121). FAILS if gemini_tokens sits at top-level result-payload indent (12 spaces) instead of nested (16), or the _gemini_token_summary helper is gone.")
+def _gemini_tokens_persist_guard():
+    src = open("handler.py").read()
+    assert "def _gemini_token_summary" in src, \
+        "the _gemini_token_summary helper was dropped"
+    assert '"gemini_tokens"' in src, "gemini_tokens persistence missing entirely"
+    import re
+    top = re.search(r'\n {12}"gemini_tokens"\s*:', src)
+    nested = re.search(r'\n {16}"gemini_tokens"\s*:', src)
+    assert nested is not None, \
+        "gemini_tokens must be NESTED inside stage_timings (16-space indent)"
+    assert top is None, \
+        "gemini_tokens at TOP-LEVEL (12-space) — content-studio strips it; nest it"
+
+
 @check("DEPLOY-STATE GUARD (Zac 2026-08-01): a deploy must not DROP a commit already known live. deploy.sh records the last successfully-deployed HEAD in .last_deployed_commit; this FAILS if that commit is not an ancestor of the current HEAD — i.e. you are deploying from a stale branch/checkout that lost a live fix (the 4th deploy-state footgun today: stale server.js, fanout canonical, snapshot env-freeze, the 06:10 validator scare). FAIL-SAFE: passes silently if the file is absent (first deploy), empty, or the commit is unknown to this tree, so it can never wrongly block a legitimate deploy.")
 def _deploy_state_guard():
     import subprocess as _sp
