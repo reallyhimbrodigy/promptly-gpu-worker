@@ -71,6 +71,15 @@ type SafeImgProps = Omit<React.ComponentProps<typeof Img>, "src"> & {
   fallback?: React.ReactNode;
   /** Identifies the site in the [SAFEIMG] telemetry line. */
   label?: string;
+  /**
+   * PRIMARY media only. Supply this when the PARENT can still render a sensible
+   * frame without this asset (e.g. a crossfade holding its other layer). Given
+   * one, SafeImg reports the loss and draws nothing, and the parent compensates
+   * — the user gets a slightly wrong shot instead of no video. WITHOUT one,
+   * primary failure cancels the render, because nothing else can cover the frame
+   * and the only alternative is shipping black.
+   */
+  onUnavailable?: () => void;
 };
 
 export const SafeImg: React.FC<SafeImgProps> = ({
@@ -78,6 +87,7 @@ export const SafeImg: React.FC<SafeImgProps> = ({
   role,
   fallback = null,
   label,
+  onUnavailable,
   ...rest
 }) => {
   const [state, setState] = useState<"probing" | "ok" | "failed">("probing");
@@ -102,7 +112,16 @@ export const SafeImg: React.FC<SafeImgProps> = ({
         + `site=${site} reason=${reason} src=${String(src).slice(0, 120)}`,
       );
       if (next === "failed" && role === "primary") {
-        // PRIMARY media cannot degrade to nothing — that ships black. Fail named.
+        if (onUnavailable) {
+          // The parent can still paint this frame without us. Hand it over and
+          // draw nothing — a slightly wrong shot beats no video at all.
+          setState("failed");
+          continueRender(handle);
+          onUnavailable();
+          return;
+        }
+        // Nothing can cover this frame. Degrading to nothing would ship BLACK,
+        // so fail named instead.
         continueRender(handle);
         cancelRender(
           new Error(
@@ -144,7 +163,7 @@ export const SafeImg: React.FC<SafeImgProps> = ({
         continueRender(handle);
       }
     };
-  }, [src, handle, role, label]);
+  }, [src, handle, role, label, onUnavailable]);
 
   if (state === "probing") return null;
   if (state === "failed" || !src) return <>{fallback}</>;
