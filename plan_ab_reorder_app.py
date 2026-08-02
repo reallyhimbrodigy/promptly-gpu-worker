@@ -79,7 +79,17 @@ def _dec(plan):
             "emph_per25": round(25.0 * len(em) / dur, 2) if dur else None,
             "zoom_top_share": round(max(zc.values()) / max(1, sum(zc.values())), 3) if zc else None,
             "n_zoom_types": len(zc),
-            "em_words": sorted(str(m.get("word_index")) for m in em if m.get("word_index") is not None)}
+            # BUG FOUND ON THE FIRST RUN: emphasis moments carry `word_indices`
+            # (plural, a LIST — StagedPush needs 2-3 of them), not `word_index`.
+            # Reading the singular returned None for every moment, so em_words was
+            # empty on 48/48 results and _jac's both-empty branch returned 1.0 —
+            # which reads as PERFECT AGREEMENT and is actually NO DATA. Any
+            # similarity metric must assert it saw something.
+            "em_words": sorted({str(w) for m in em
+                                for w in (m.get("word_indices")
+                                          if isinstance(m.get("word_indices"), list)
+                                          else [m.get("word_index")])
+                                if w is not None})}
 
 @app.function(secrets=SECRETS, cpu=8.0, memory=32768, region="us", timeout=1800)
 def plan(src, order):
@@ -104,7 +114,9 @@ def plan(src, order):
 
 def _jac(x, y):
     sx, sy = set(x), set(y)
-    return len(sx & sy) / max(1, len(sx | sy)) if (sx or sy) else 1.0
+    if not sx and not sy:
+        return None      # NO DATA — never 1.0, which would read as agreement
+    return len(sx & sy) / max(1, len(sx | sy))
 
 @app.local_entrypoint()
 def main():
