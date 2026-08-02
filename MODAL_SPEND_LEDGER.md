@@ -18,6 +18,20 @@ Columns: date · agent · app · what · tasks · container-seconds · $ · veri
 
 **prompt agent session total: ~$8.04 by the stated figures.**
 
+### PROPOSED — NOT FIRED, awaiting explicit approval
+
+| date | agent | app | what | est tasks | est $ | status |
+|---|---|---|---|---:|---:|---|
+| 2026-08-02 | prompt | `query-silent-failures` | the silent-failure detector, last 24h | 1 CPU | ~$0.01 | **HELD** |
+| 2026-08-02 | prompt | `plan-ab` 2-arm | re-audit the six discriminating FITS/FIGHTS | 32 | ~$3 | **HELD** |
+
+Both held because **Rule 8 caps an agent at $5/session without Zac saying so
+explicitly, and I am already at $8.04.** The freeze was lifted for the speed
+agent (inc2, Gemini A/Bs) and the errors agent (Scribe) — not for me. Neither of
+these fires without a word from Zac, even though the first is a $0.01 read he
+asked for: the point of the rule is that the agent does not get to decide its own
+exception.
+
 ## Honest caveat on my own number — this is the Rule-8 gap in miniature
 
 The `$8` for the A/B is the estimate **written in the harness file's docstring**
