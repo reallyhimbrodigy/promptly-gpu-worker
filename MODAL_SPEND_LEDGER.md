@@ -20,7 +20,11 @@ Columns: date · agent · app · what · tasks · container-seconds · $ · veri
 
 | 2026-08-02 | prompt | `query-silent-failures` ×2 | silent-failure detector — first run's threshold was wrong (see below), re-run after the fix | 2 CPU | ~$0.02 | yes (0 tasks) |
 
-**prompt agent session total: ~$8.06.** Explicit GO from Zac covered the detector.
+| 2026-08-02 | prompt | `cert-schema-billing` | schema-billing probe: 4 sequential PLAN_ONLY runs on ONE clip (control x2, pad+5,214 tok x2), read prompt_token_count on the SECOND call after re-cache | 4 | ~1,200 est | ~$0.50 | pending |
+
+**prompt agent session total: ~$8.56 if the probe runs.** Explicit GO covered the
+detector; the probe is taken as covered by "these four are cheaper and more
+certain" contrasted against the HELD $10 A/B.
 
 ### PROPOSED — NOT FIRED
 
