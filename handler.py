@@ -2113,11 +2113,25 @@ def _has_nvenc():
 # Vulkan was supposed to help on top of that, not be load-bearing.
 
 
+# inc2 render_burst (Zac 2026-08-01): PIN the x264 encoder thread count. x264
+# auto (threads=0) picks ~min(cores*1.5, 128) → the OUTPUT bytes depend on the
+# MACHINE's core count, not the config (same class as the snapshot env-freeze),
+# so render_burst at cpu=48 diverged byte-for-byte from cpu=16 production.
+# Benchmark (cert_encode_threads_bench): 48 is FASTER than x264-auto on BOTH
+# boxes (cpu16→32 visible cores: 11.0s vs 14.2s; cpu48→64: 21.0s vs 26.9s — auto
+# over-threads) AND byte-deterministic AND byte-identical across cpu. A fixed
+# number — the highest that stays fast. NEVER 0 (validate_deploy asserts it).
+_X264_ENCODE_THREADS = 48
+
+
 def get_encode_args(quality="high", threads=0):
     """Return encoder args for FFmpeg. Uses NVENC when GPU is available.
 
     quality="high"     → final output (CQ 18 — maximum quality for social media)
     quality="lossless" → intermediate files (lossless preset)
+
+    threads: x264 encoder thread count. 0/None → the pinned _X264_ENCODE_THREADS.
+    NEVER x264-auto — that makes the output depend on the machine, not the config.
     """
     if _has_nvenc():
         if quality == "lossless":
@@ -2144,7 +2158,7 @@ def get_encode_args(quality="high", threads=0):
         # `lossless` intermediates stay on `ultrafast` since the quality
         # ceiling is already perfect (no loss) and the speed matters for
         # parallel render time.
-        _x264_threads = f"threads={threads}"
+        _x264_threads = f"threads={threads or _X264_ENCODE_THREADS}"
         if quality == "lossless":
             return ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                     "-fps_mode", "passthrough",
@@ -20546,6 +20560,8 @@ def _download_and_concat_sources(source_urls, dest_path, work_dir):
         "-filter_complex", _filter,
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        # inc2 render_burst: PIN x264 threads (never auto) — cpu-deterministic bytes.
+        "-x264-params", f"threads={_X264_ENCODE_THREADS}",
         "-c:a", "aac", "-b:a", "192k",
         "-movflags", "+faststart", "-y", dest_path,
     ]
@@ -25824,6 +25840,10 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             # `fast` + CRF 14 is a much better quality/speed tradeoff for
             # an intermediate that downstream depends on.
             "-c:v", "libx264", "-preset", "fast", "-crf", "14",
+            # inc2 render_burst: PIN x264 threads (never auto). Remotion reads
+            # this per-clip source frame-by-frame → thread-dependent bytes would
+            # decode to different frames and break final byte-identity across cpu.
+            "-x264-params", f"threads={_X264_ENCODE_THREADS}",
             "-pix_fmt", "yuv420p",
             "-g", str(_gop),
             "-keyint_min", str(_gop),
@@ -26445,6 +26465,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 # maxrate bumped 18M → 24M to match the higher CRF target
                 # without bitrate clamping the cleanest frames.
                 "-c:v", "libx264", "-preset", "slow", "-crf", "16",
+                # inc2 render_burst: PIN x264 threads (never auto) — this is the
+                # ONE lossy encode that ships to the user; byte-identical across cpu.
+                "-x264-params", f"threads={_X264_ENCODE_THREADS}",
                 "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
                 "-maxrate", "24M", "-bufsize", "48M",
                 "-profile:v", "high", "-level:v", "4.1",
@@ -26980,6 +27003,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
              # Same settings the single-pass path uses — keeps output
              # quality identical regardless of which path produced it.
              "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+             # inc2 render_burst: PIN x264 threads (never auto) so the final
+             # delivered encode is byte-identical across cpu (cpu48 burst vs cpu16).
+             "-x264-params", f"threads={_X264_ENCODE_THREADS}",
              "-fps_mode", "cfr", "-r", str(int(round(source_fps))),
              "-maxrate", "18M", "-bufsize", "36M",
              "-profile:v", "high", "-level:v", "4.1",
@@ -33054,6 +33080,9 @@ def handler(job):
                  # iPhone HEVC sources transcoded to H.264 lose some quality
                  # at the codec switch; CRF 15 minimizes that loss.
                      "-c:v", "libx264", "-preset", "fast", "-crf", "15",
+                     # inc2 render_burst: PIN x264 threads (never auto) — this
+                     # normalized source feeds the render; cpu-deterministic bytes.
+                     "-x264-params", f"threads={_X264_ENCODE_THREADS}",
                      "-pix_fmt", "yuv420p",
                      # Tag output as BT.709 SDR tv-range explicitly. After the
                      # zscale tone-map above, the YUV samples are correct SDR

@@ -8773,6 +8773,38 @@ def _render_burst_dark():
         "a staging failure must ledger render_burst_fallback and run the local render"
 
 
+@check("inc2 render_burst ENCODE-THREAD PIN (Zac 2026-08-01, RULE-1): every DELIVERED-OUTPUT / render-INPUT libx264 encode pins x264 threads to a fixed count (_X264_ENCODE_THREADS), NEVER x264-auto (threads=0). x264-auto picks ~cores*1.5 so the OUTPUT bytes depend on the MACHINE's core count, not the config — the render_burst at cpu=48 diverged from cpu=16 production (same class as the snapshot env-freeze), and it is also the ~0.99994 run-to-run 'x264 nondeterminism' cert_progressive documented. Gemini proxies (_proxy_venc) are exempt — analysed then discarded, never delivered. FAILS if any non-proxy libx264 lacks a threads= pin or the constant is 0/absent, so byte-identity stays a usable diagnostic on every future canary/A-B/cert.")
+def _x264_thread_pin():
+    _h = open("handler.py").read()
+    import re as _re
+    _m = _re.search(r"_X264_ENCODE_THREADS\s*=\s*(\d+)", _h)
+    assert _m and int(_m.group(1)) > 0, \
+        "_X264_ENCODE_THREADS must be defined as a fixed non-zero pin"
+    _idx = 0
+    _pinned = 0
+    _proxies = 0
+    while True:
+        _p = _h.find('"-c:v", "libx264"', _idx)
+        if _p == -1:
+            break
+        _idx = _p + 1
+        _before = _h[max(0, _p - 500):_p]
+        if "_proxy_venc" in _before:
+            _proxies += 1
+            continue  # Gemini analysis proxy — discarded, never delivered
+        _window = _h[_p:_p + 600]
+        assert ("_x264_threads" in _window) or \
+               ("threads={_X264_ENCODE_THREADS}" in _window), \
+            f"render-path libx264 at offset {_p} has no explicit x264 thread " \
+            f"pin — x264-auto is machine-dependent (breaks byte-identity)"
+        _pinned += 1
+    assert _pinned >= 6, \
+        f"expected >=6 pinned render-path libx264 encodes, found {_pinned}"
+    # the literal x264-auto pin must never reappear in an x264-params
+    assert "threads=0}" not in _h and 'threads=0"' not in _h, \
+        "no libx264 may pin x264-params threads=0 (that IS x264-auto)"
+
+
 print("\n[W3] Progressive delivery (DARK behind PROMPTLY_PROGRESSIVE)")
 
 
