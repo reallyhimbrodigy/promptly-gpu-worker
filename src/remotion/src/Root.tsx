@@ -14,6 +14,7 @@ import { MGAttackProbe } from "./MGAttackProbe";
 import { CaptionFadeProbe } from "./CaptionFadeProbe";
 import { StagedPushProbe } from "./StagedPushProbe";
 import { SmoothPushProbe } from "./SmoothPushProbe";
+import { CrossfadeProbe } from "./CrossfadeProbe";
 import { ZoomEaseProbe } from "./ZoomEaseProbe";
 import { GenSceneProbe } from "./GenSceneProbe";
 
@@ -227,6 +228,18 @@ export const RemotionRoot: React.FC = () => {
             },
           ],
         } as unknown as Record<string, unknown>}
+      />
+      {/* CrossfadeProbe — proves a crossfade with ONE unloadable image layer
+          still paints real frames (the survivor holds the window as a cut)
+          instead of going black. 60f@30 = 2s. Not used in production. */}
+      <Composition
+        id="CrossfadeProbe"
+        component={CrossfadeProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={30}
+        durationInFrames={60}
+        defaultProps={{ clipA: "vcap_A.png", clipB: "vcap_B.png" } as unknown as Record<string, unknown>}
       />
       {/* SmoothPushProbe30 — the velocity-cap pair on the zoom that ACTUALLY
           SHIPS. SmoothPush is 48.6% of production zooms; StagedPush is 3 of
