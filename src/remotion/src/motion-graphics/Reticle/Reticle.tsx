@@ -1,9 +1,11 @@
 import React from "react";
-import { AbsoluteFill, interpolate, interpolateColors } from "remotion";
+import { AbsoluteFill, interpolate, interpolateColors, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { ReticleProps } from "./types";
+import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
+import { cappedEntranceProgress } from "../shared/entrance-cap";
 
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
@@ -49,6 +51,7 @@ export const Reticle: React.FC<ReticleProps> = ({
     { anchor, offsetX, offsetY, scale },
     { anchor: "center" },
   );
+  const { fps } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 16, defaultExitFrames: 16 },
@@ -58,11 +61,21 @@ export const Reticle: React.FC<ReticleProps> = ({
 
   // Focus pull: brackets sweep inward from SPREAD0 → 0 with a slight inward
   // overshoot (easeOutBack pushes focus past 1), then settle exactly on the corners.
-  const focus = easeOutBack(clamp01(localFrame / LOCK));
+  // ENTRANCE VELOCITY CAP: easeOutBack OVERSHOOTS, which is precisely a velocity
+  // spike (measured peak_step 0.67 => ~1.5 effective positions, the worst in the
+  // set). OFF => today's exact overshoot.
+  const smoothEntrance = useSmoothGraphics();
+  const focus = smoothEntrance
+    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: LOCK })
+    : easeOutBack(clamp01(localFrame / LOCK));
   // Out = reverse focus-pull: brackets release back outward as the shot ends.
   const exitDefocus = easeOutCubic(exitProgress);
   const spread = (1 - focus) * SPREAD0 + exitDefocus * SPREAD0;
-  const bracketsOpacity = interpolate(localFrame, [0, 10], [0, 1], {
+  // The bracket OPACITY ramp dominates presence; capping only the focus pull
+  // left it at 0.71. Cap the appearing channel too.
+  const bracketsOpacity = smoothEntrance
+    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: 10 })
+    : interpolate(localFrame, [0, 10], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });

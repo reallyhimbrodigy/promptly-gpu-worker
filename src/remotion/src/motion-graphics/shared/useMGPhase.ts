@@ -1,6 +1,7 @@
 import { useCurrentFrame, useVideoConfig, interpolate, Easing } from "remotion";
 import { msToFrames } from "./timing";
 import { useSmoothGraphics } from "./smooth-graphics-flag";
+import { trapezoidEasing, MIN_BLEND_FRACTION } from "../../zoom/shared/velocity-cap";
 import type { MGPhaseState, MGTimingProps } from "./types";
 
 interface Options {
@@ -58,9 +59,11 @@ export function useMGPhase(
     {
       extrapolateLeft: "clamp",
       extrapolateRight: "clamp",
-      // ease-OUT: decelerate INTO the settled position (the "arrival").
-      // undefined = linear = today's exact behavior when smooth is OFF.
-      easing: smooth ? Easing.out(Easing.cubic) : undefined,
+      // TRAPEZOID, not ease-out cubic. Measured: ease-out cubic peaks at 3x the
+      // linear average ON THE FIRST FRAME, so it made its one consumer
+      // (PillMarquee) step WORSE, 0.30 -> 0.41 peak_step. Same finding as the
+      // zoom cap, same fix — one profile for all motion in this codebase.
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.25) : undefined,
     },
   );
 
@@ -71,8 +74,9 @@ export function useMGPhase(
     {
       extrapolateLeft: "clamp",
       extrapolateRight: "clamp",
-      // ease-IN: accelerate AWAY on departure.
-      easing: smooth ? Easing.in(Easing.cubic) : undefined,
+      // Departure: the same bounded-velocity profile, skewed late so the exit
+      // accelerates away rather than crawling off.
+      easing: smooth ? trapezoidEasing(MIN_BLEND_FRACTION, 0.75) : undefined,
     },
   );
 

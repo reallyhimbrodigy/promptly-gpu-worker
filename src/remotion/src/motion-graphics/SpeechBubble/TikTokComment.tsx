@@ -1,6 +1,8 @@
 import React from "react";
 import { AbsoluteFill, spring, useVideoConfig } from "remotion";
 import { SPRING_SNAPPY } from "../shared/springs";
+import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
+import { cappedEntranceProgress } from "../shared/entrance-cap";
 import { MG_FONTS } from "../shared/fonts";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
@@ -41,12 +43,20 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
 
   if (!visible) return null;
 
-  const enterProgress = spring({
+  // ENTRANCE VELOCITY CAP (Zac 2026-08-01). SPRING_SNAPPY over 12 frames dumps
+  // ~60% of the travel into ONE delivered frame (measured peak_step 0.61 => ~1.6
+  // effective positions) — the worst stepper in the MG set despite being one of
+  // the LONGEST entrances. OFF => today's exact spring.
+  const smoothEntrance = useSmoothGraphics();
+  const springProgress = spring({
     fps,
     frame: localFrame,
     config: SPRING_SNAPPY,
     durationInFrames: 12,
   });
+  const enterProgress = smoothEntrance
+    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: 12 })
+    : springProgress;
   const { transform, opacity } = composeBubbleTransform(
     enterProgress,
     exitProgress,

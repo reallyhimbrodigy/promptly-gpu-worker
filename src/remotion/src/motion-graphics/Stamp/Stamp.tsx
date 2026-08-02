@@ -4,6 +4,8 @@ import { MG_FONTS } from "../shared/fonts";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { StampFontKey, StampMark, StampProps, StampStyle } from "./types";
+import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
+import { cappedEntranceProgress } from "../shared/entrance-cap";
 
 
 const easeInCubic = (t: number): number => t * t * t;
@@ -128,14 +130,26 @@ export const Stamp: React.FC<StampProps> = (props) => {
   const restRot = rotation;
 
   // --- Bounce-in press: a springy scale settle (overshoots, then lands) ---
-  const press = spring({
+  // ENTRANCE VELOCITY CAP: this spring is UNDER-damped (damping 10 vs mass 0.8 /
+  // stiffness 150), so it bounces — and a bounce is a velocity spike (measured
+  // peak_step 0.62 => ~1.6 effective positions). OFF => today's exact bounce.
+  const smoothEntrance = useSmoothGraphics();
+  const pressSpring = spring({
     fps,
     frame: localFrame,
     config: { damping: 10, mass: 0.8, stiffness: 150 },
   });
+  const press = smoothEntrance
+    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: 12 })
+    : pressSpring;
   const appear = interpolate(press, [0, 1], [entryScale, 1.0]);
   const rotSettle = interpolate(press, [0, 1], [restRot - 4, restRot]);
-  const opacityIn = interpolate(localFrame, [0, 5], [0, 1], {
+  // The 5-frame OPACITY ramp — not the spring — is what the presence metric
+  // (and the eye) actually tracks: capping only the transform left peak_step
+  // unchanged at 0.62. Cap the channel that carries the appearance.
+  const opacityIn = smoothEntrance
+    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: 5 })
+    : interpolate(localFrame, [0, 5], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
