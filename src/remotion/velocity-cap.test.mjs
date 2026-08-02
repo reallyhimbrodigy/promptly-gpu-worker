@@ -14,6 +14,8 @@
  */
 import assert from "node:assert";
 import {
+  SKEW_GLIDE,
+  SKEW_PUNCH,
   PEAK_DISPLACEMENT_CAP_PX,
   MIN_BLEND_FRACTION,
   cornerPx,
@@ -59,7 +61,7 @@ const FPS = [30, 60];
 console.log("\nzoom velocity cap — Rule 1 gate\n");
 
 check("trapezoid easing hits both endpoints exactly", () => {
-  for (const beta of [0, 0.25, 1 / 3, 0.5]) {
+  for (const beta of [0, 0.5, 0.7, 1.0]) {
     const e = trapezoidEasing(beta);
     assert.ok(Math.abs(e(0) - 0) < 1e-12, `beta=${beta} e(0)=${e(0)}`);
     assert.ok(Math.abs(e(1) - 1) < 1e-12, `beta=${beta} e(1)=${e(1)}`);
@@ -67,7 +69,7 @@ check("trapezoid easing hits both endpoints exactly", () => {
 });
 
 check("trapezoid easing is monotonically non-decreasing", () => {
-  for (const beta of [0, 0.25, 1 / 3, 0.5]) {
+  for (const beta of [0, 0.5, 0.7, 1.0]) {
     const e = trapezoidEasing(beta);
     let prev = -Infinity;
     for (let i = 0; i <= 2000; i++) {
@@ -78,13 +80,13 @@ check("trapezoid easing is monotonically non-decreasing", () => {
   }
 });
 
-check("trapezoid peak velocity is 1/(1-beta) x linear, as designed", () => {
-  for (const beta of [0.25, 1 / 3, 0.4, 0.5]) {
+check("trapezoid peak velocity is 1/(1-b/2) x linear, as designed", () => {
+  for (const beta of [0.5, 0.7, 0.85, 1.0]) {
     const e = trapezoidEasing(beta);
     const N = 20000;
     let peak = 0;
     for (let i = 0; i < N; i++) peak = Math.max(peak, (e((i + 1) / N) - e(i / N)) * N);
-    const expect = 1 / (1 - beta);
+    const expect = 1 / (1 - beta / 2);
     assert.ok(Math.abs(peak - expect) < 0.01,
       `beta=${beta}: peak ${peak.toFixed(4)} != ${expect.toFixed(4)}`);
   }
@@ -190,6 +192,35 @@ check("the move has the SAME DURATION at 30 and 60 fps (CAP_REFERENCE_FPS)", () 
   const t60 = mk(60).frames / 60;
   assert.ok(Math.abs(t30 - t60) < 0.05,
     `ramp DURATION should match across fps: ${t30.toFixed(3)}s vs ${t60.toFixed(3)}s`);
+});
+
+check("SKEW preserves the punch/glide register at an UNCHANGED velocity ceiling", () => {
+  const N = 20000;
+  const peakOf = (e) => {
+    let p = 0;
+    for (let i = 0; i < N; i++) p = Math.max(p, (e((i + 1) / N) - e(i / N)) * N);
+    return p;
+  };
+  for (const b of [0.5, 0.7, 1.0]) {
+    const glide = trapezoidEasing(b, SKEW_GLIDE);
+    const punch = trapezoidEasing(b, SKEW_PUNCH);
+    // Same ceiling: peak velocity is set by the blend budget b ALONE, so the cap
+    // and the register are orthogonal knobs.
+    assert.ok(Math.abs(peakOf(glide) - peakOf(punch)) < 0.02,
+      `b=${b}: skew moved the PEAK (${peakOf(glide).toFixed(3)} vs ${peakOf(punch).toFixed(3)}) `
+      + "— cap and register must be independent");
+    // Where the energy SITS is the register. Position at mid-time is the robust
+    // read (the velocity plateau is flat, so argmax-of-velocity is numerically
+    // arbitrary): GLIDE has covered MORE than half the distance by half-time
+    // (front-loaded, decelerating into the word); PUNCH has covered LESS
+    // (back-loaded, accelerating into it).
+    assert.ok(glide(0.5) > 0.5 + 0.03,
+      `b=${b}: GLIDE must front-load — p(0.5)=${glide(0.5).toFixed(3)} should exceed 0.5`);
+    assert.ok(punch(0.5) < 0.5 - 0.03,
+      `b=${b}: PUNCH must back-load — p(0.5)=${punch(0.5).toFixed(3)} should be under 0.5`);
+    assert.ok(glide(0.5) > punch(0.5) + 0.1,
+      `b=${b}: glide and punch must be clearly distinct (${glide(0.5).toFixed(3)} vs ${punch(0.5).toFixed(3)})`);
+  }
 });
 
 console.log(`\n${passed} checks passed${process.exitCode ? " (with failures)" : ""}\n`);

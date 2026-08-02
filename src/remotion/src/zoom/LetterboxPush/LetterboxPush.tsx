@@ -9,7 +9,9 @@ import {
 } from "remotion";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
-import { cornerPx, planCappedRampIn, planCappedRelease } from "../shared/velocity-cap";
+import {
+  cornerPx, planCappedRampIn, planCappedRelease, SKEW_GLIDE, SKEW_PUNCH,
+} from "../shared/velocity-cap";
 import type { LetterboxPushProps } from "../types";
 
 /**
@@ -83,6 +85,9 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
             authoredFrames: Math.max(1, rampIn - eventStart),
             fps,
             corner,
+            // the vibe register, preserved under the cap (see velocity-cap.ts):
+            // PUNCH accelerates INTO the word, GLIDE decelerates into it.
+            skew: punch ? SKEW_PUNCH : SKEW_GLIDE,
           })
         : null;
       const capOut = smooth
@@ -94,6 +99,8 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
             authoredFrames: Math.max(1, eventEnd - holdEnd),
             fps,
             corner,
+            skew: SKEW_GLIDE,   // a release lands on nothing — it always glides
+
           })
         : null;
 

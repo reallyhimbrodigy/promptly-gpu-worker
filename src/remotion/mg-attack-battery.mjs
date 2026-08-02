@@ -1,7 +1,11 @@
 // WS1 MG entrance-arrival battery — bundle ONCE, renderMedia each MG type's
 // entrance to a small clip on a flat plate. measure_mg_attack.py then reads the
 // presence curve per clip and reports the visual-arrival (attack) ms per type.
-// Usage: node mg-attack-battery.mjs <outDir>
+// Usage: node mg-attack-battery.mjs <outDir> [smooth]
+// Passing "smooth" renders the SMOOTH-GRAPHICS arm (eased + ms-floored
+// entrances). That arm needs its OWN measured attack table, because easing
+// shifts time-to-peak even at an identical duration and the ms floor lengthens
+// short entrances outright -- a stale table would land every MG early.
 import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import path from "node:path";
@@ -10,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const outDir = process.argv[2] || path.join(__dirname, "mg-attack-out");
+const SMOOTH = (process.argv[3] || "").toLowerCase() === "smooth";
 fs.mkdirSync(outDir, { recursive: true });
 
 // Best-effort sample props per type (content is irrelevant to the ENTRANCE
@@ -51,10 +56,11 @@ let ok = 0, fail = 0;
 for (const [type, props] of Object.entries(TYPES)) {
   const out = path.join(outDir, `${type}.mp4`);
   try {
-    const composition = await selectComposition({ serveUrl: bundled, id: "MGAttackProbe", inputProps: { type, props } });
+    const inputProps = { type, props, smoothGraphics: SMOOTH };
+    const composition = await selectComposition({ serveUrl: bundled, id: "MGAttackProbe", inputProps });
     await renderMedia({
       composition, serveUrl: bundled, outputLocation: out, codec: "h264",
-      inputProps: { type, props },
+      inputProps,
       scale: 0.3,                 // timing is resolution-independent — render small + fast
       logLevel: "error",
       overwrite: true,
@@ -66,5 +72,5 @@ for (const [type, props] of Object.entries(TYPES)) {
     console.log(`MG_FAIL ${type} :: ${String(err).slice(0, 200)}`);
   }
 }
-console.log(`MG_BATTERY_DONE ok=${ok} fail=${fail} out=${outDir}`);
+console.log(`MG_BATTERY_DONE arm=${SMOOTH ? "SMOOTH" : "OFF"} ok=${ok} fail=${fail} out=${outDir}`);
 process.exit(0);

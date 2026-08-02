@@ -27,9 +27,14 @@
  * frame. Note that `Easing.inOut(Easing.cubic)` does NOT fix this — it also
  * peaks at 3x, it merely moves the peak to the middle (50.5 -> 46.6 px/f,
  * measured). What actually cuts peak velocity is a TRAPEZOIDAL profile: ramp
- * velocity up, cruise, ramp down, peak = 1/(1-beta) for blend fraction beta.
- * At beta=0.25 that is 1.333x instead of 3x — a 2.1x cut for free, with no
- * change to timing or amplitude.
+ * velocity up, cruise, ramp down, peak = 1/(1-b/2) for blend budget b.
+ * At b=0.5 that is 1.333x instead of 3x — a 2.3x cut for free, with no change
+ * to timing or amplitude.
+ *
+ * THE PUNCH/GLIDE REGISTER SURVIVES because b sets the peak and the SKEW sets
+ * only where that peak sits (SKEW_GLIDE = energy early / decelerate into the
+ * word; SKEW_PUNCH = energy late / accelerate into it). Cap and register are
+ * orthogonal knobs, so capping never silently flattens the vibe.
  *
  * THE THREE LEVERS, in the order we are willing to spend them:
  *   1. CURVE    — trapezoid instead of cubic. Free.
@@ -62,11 +67,12 @@ export const PEAK_DISPLACEMENT_CAP_PX = 11;
 export const CAP_REFERENCE_FPS = 30;
 
 /**
- * Never blend less than this fraction of the ramp. beta=0 is constant velocity
- * with a hard start and a hard stop — a velocity discontinuity at both ends,
- * which is the front-loading defect we are removing, not a fix for it.
+ * Never spend less than this blend budget (betaIn+betaOut). b=0 is constant
+ * velocity with a hard start and a hard stop — a velocity discontinuity at both
+ * ends, which is the front-loading defect we are removing, not a fix for it.
+ * b=0.5 -> peak velocity 1.333x linear; b=1.0 (fully triangular) -> 2x.
  */
-export const MIN_BLEND_FRACTION = 0.25;
+export const MIN_BLEND_FRACTION = 0.5;
 
 /** Distance from the transform origin to the farthest visible corner. */
 export function cornerPx(
@@ -82,26 +88,46 @@ export function cornerPx(
 }
 
 /**
- * Trapezoidal velocity profile as a Remotion easing (position, 0->1).
- * Velocity smoothsteps 0->1 over [0,beta], cruises, smoothsteps back to 0 over
- * [1-beta,1]. Peak velocity is exactly 1/(1-beta) x the linear average, and
- * velocity is ZERO at both endpoints — no slam-in, no slam-to-stop.
+ * The PUNCH-vs-GLIDE register, preserved under the cap.
+ *
+ * A SYMMETRIC trapezoid is neither punchy nor glidey, so capping naively would
+ * silently delete the vibe register (viral = PUNCH, accelerate INTO the word;
+ * everything else = GLIDE, decelerate into it). Skewing where the velocity peak
+ * SITS keeps the register at an unchanged velocity ceiling: the blend budget
+ * `b = betaIn + betaOut` alone sets peak velocity (k = 1/(1-b/2)), while the
+ * split between the two ends sets the feel. So the cap and the register are
+ * orthogonal — exactly what lets both be honoured at once.
  */
-export function trapezoidEasing(beta: number): (t: number) => number {
-  const b = Math.min(Math.max(beta, 0), 0.5);
+export const SKEW_GLIDE = 0.25;   // short ramp-up, long ramp-down: energy EARLY
+export const SKEW_PUNCH = 0.75;   // long ramp-up, short ramp-down: energy LATE
+export const SKEW_NEUTRAL = 0.5;
+
+/**
+ * Trapezoidal velocity profile as a Remotion easing (position, 0->1).
+ * Velocity smoothsteps 0->1 over [0,betaIn], cruises, smoothsteps back to 0 over
+ * [1-betaOut,1]. Peak velocity is exactly 1/(1-b/2) x the linear average with
+ * b = betaIn+betaOut, and velocity is ZERO at both endpoints — no slam-in, no
+ * slam-to-stop. `skew` splits b between the ends (see SKEW_* above); it changes
+ * WHERE the peak sits, never how high it is.
+ */
+export function trapezoidEasing(blend: number, skew: number = SKEW_NEUTRAL): (t: number) => number {
+  const b = Math.min(Math.max(blend, 0), 1);
   if (b <= 0) return (t) => Math.min(Math.max(t, 0), 1);
-  const k = 1 / (1 - b);
+  const w = Math.min(Math.max(skew, 0.05), 0.95);
+  const bIn = b * w;
+  const bOut = b * (1 - w);
+  const k = 1 / (1 - b / 2);
   return (tRaw) => {
     const t = Math.min(Math.max(tRaw, 0), 1);
-    if (t < b) {
-      const x = t / b;
-      return k * b * (x ** 3 - 0.5 * x ** 4);
+    if (t < bIn) {
+      const x = t / bIn;
+      return k * bIn * (x ** 3 - 0.5 * x ** 4);
     }
-    if (t <= 1 - b) {
-      return k * (b * 0.5 + (t - b));
+    if (t <= 1 - bOut) {
+      return k * (bIn * 0.5 + (t - bIn));
     }
-    const x = (1 - t) / b;
-    return 1 - k * b * (x ** 3 - 0.5 * x ** 4);
+    const x = (1 - t) / bOut;
+    return 1 - k * bOut * (x ** 3 - 0.5 * x ** 4);
   };
 }
 
@@ -130,8 +156,10 @@ function sampleRamp(
 export interface CappedRamp {
   /** Frames the move occupies, at the RENDER fps. */
   frames: number;
-  /** Blend fraction actually used. */
+  /** Blend budget actually used (betaIn+betaOut). */
   beta: number;
+  /** Register skew applied (SKEW_GLIDE / SKEW_PUNCH / SKEW_NEUTRAL). */
+  skew: number;
   /** Target scale after any amplitude surrender (lever 3). */
   toScale: number;
   /** The easing to hand to Remotion's interpolate(). */
@@ -151,6 +179,7 @@ interface PlanOpts {
   minFrames: number;
   corner: number;
   cap?: number;
+  skew?: number;
 }
 
 /**
@@ -165,18 +194,22 @@ function solve(opts: PlanOpts): CappedRamp {
   // (overlapping events, a zoom against the clip head). With no room to grow we
   // hold the authored length and fall through to lever 3 instead.
   const maxFrames = Math.max(minFrames, opts.maxFrames);
-  const betas = [0.5, 0.4, 1 / 3, 0.3, MIN_BLEND_FRACTION];
+  const skew = opts.skew ?? SKEW_NEUTRAL;
+  // Widest blend first = smoothest corners; fall back toward the C1 floor only
+  // as the cap demands. The register (skew) is held FIXED throughout, so a
+  // punchy zoom stays punchy at every blend the solver picks.
+  const betas = [1.0, 0.85, 0.7, 0.6, MIN_BLEND_FRACTION];
 
   for (let n = minFrames; n <= maxFrames; n++) {
     for (const beta of betas) {
-      const easing = trapezoidEasing(beta);
+      const easing = trapezoidEasing(beta, skew);
       const peak = peakDisplacementPx(
         sampleRamp(n, opts.fromScale, opts.toScale, easing),
         opts.corner,
       );
       if (peak <= cap) {
         return {
-          frames: n, beta, toScale: opts.toScale,
+          frames: n, beta, skew, toScale: opts.toScale,
           easing, peakPx: peak, amplitudeReduced: false,
         };
       }
@@ -185,7 +218,7 @@ function solve(opts: PlanOpts): CappedRamp {
 
   // Lever 3: out of headroom. Bisect the amplitude that fits at full length.
   const n = maxFrames;
-  const easing = trapezoidEasing(MIN_BLEND_FRACTION);
+  const easing = trapezoidEasing(MIN_BLEND_FRACTION, skew);
   let lo = opts.fromScale;
   let hi = opts.toScale;
   for (let i = 0; i < 40; i++) {
@@ -194,7 +227,7 @@ function solve(opts: PlanOpts): CappedRamp {
     if (peak <= cap) lo = mid; else hi = mid;
   }
   return {
-    frames: n, beta: MIN_BLEND_FRACTION, toScale: lo,
+    frames: n, beta: MIN_BLEND_FRACTION, skew, toScale: lo,
     easing, peakPx: peakDisplacementPx(sampleRamp(n, opts.fromScale, lo, easing), opts.corner),
     amplitudeReduced: Math.abs(lo - opts.toScale) > 1e-6,
   };
@@ -212,6 +245,7 @@ function solveAtReferenceFps(args: {
   fps: number;
   corner: number;
   cap?: number;
+  skew?: number;
 }): CappedRamp {
   const toRef = CAP_REFERENCE_FPS / args.fps;
   const r = solve({
@@ -221,6 +255,7 @@ function solveAtReferenceFps(args: {
     minFrames: Math.max(1, Math.round(args.authoredFrames * toRef)),
     corner: args.corner,
     cap: args.cap,
+    skew: args.skew,
   });
   return {
     ...r,
@@ -242,12 +277,14 @@ export function planCappedRampIn(args: {
   fps: number;
   corner: number;
   cap?: number;
+  /** SKEW_PUNCH / SKEW_GLIDE — the vibe register, preserved under the cap. */
+  skew?: number;
 }): CappedRamp & { startFrame: number } {
   const r = solveAtReferenceFps({
     fromScale: args.fromScale, toScale: args.toScale,
     spanFrames: Math.max(0, args.landFrame - args.earliestFrame),
     authoredFrames: args.authoredFrames, fps: args.fps,
-    corner: args.corner, cap: args.cap,
+    corner: args.corner, cap: args.cap, skew: args.skew,
   });
   return { ...r, startFrame: args.landFrame - r.frames };
 }
@@ -266,12 +303,14 @@ export function planCappedRelease(args: {
   fps: number;
   corner: number;
   cap?: number;
+  /** SKEW_PUNCH / SKEW_GLIDE — the vibe register, preserved under the cap. */
+  skew?: number;
 }): CappedRamp & { endFrame: number } {
   const r = solveAtReferenceFps({
     fromScale: args.fromScale, toScale: args.toScale,
     spanFrames: Math.max(0, args.latestFrame - args.startFrame),
     authoredFrames: args.authoredFrames, fps: args.fps,
-    corner: args.corner, cap: args.cap,
+    corner: args.corner, cap: args.cap, skew: args.skew,
   });
   return { ...r, endFrame: args.startFrame + r.frames };
 }

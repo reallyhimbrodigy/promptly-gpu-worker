@@ -18065,6 +18065,29 @@ _MG_ATTACK_MS = {
 }
 _MG_ATTACK_DEFAULT_MS = 150   # median settle — unmeasured / unknown types
 
+# ── SMOOTH-GRAPHICS arm deltas (RE-MEASURED Zac 2026-08-01) ──────────────────
+# Re-ran the battery on BOTH arms at 60fps after the useMGPhase easing + ms-floor
+# change (node mg-attack-battery.mjs <out> [smooth]).
+#
+# OFF arm reproduced all 24 measured entries EXACTLY — the harness is
+# deterministic and the table above is not stale for production.
+#
+# The SMOOTH arm moved exactly ONE entry, and the reason is the finding:
+# useMGPhase's enterProgress is consumed by exactly 1 of 25 components
+# (PillMarquee). The other 24 drive their entrance from a component-LOCAL
+# spring/interpolate that this hook never touches — 5 even compute their own
+# `enterProgress` local that shadows the hook's. (exitProgress is the opposite:
+# 25/25 read it, so the exit easing DOES reach every MG.) So the eased+floored
+# ENTRANCE is currently a 1-of-25 change, and the 4-8 frame entrances live in
+# those 19 local springs, not here.
+#
+# PillMarquee 167 -> 133: ease-out FRONT-LOADS, so a LONGER entrance reaches the
+# 90% presence plateau EARLIER. That is the predicted early-landing effect, not
+# noise, and it is why this table cannot be carried across the flag.
+_MG_ATTACK_MS_SMOOTH = {
+    "PillMarquee": 133,
+}
+
 # ── Anti-drift fingerprint for the MEASURED attack table (Zac 2026-07-28) ─────
 # _MG_ATTACK_MS is not a readable constant — it is the OUTPUT of rendering each
 # MG entrance (mg-attack-battery) and measuring settle/container-arrival. Unlike
@@ -18082,15 +18105,28 @@ _MG_ATTACK_DEFAULT_MS = 150   # median settle — unmeasured / unknown types
 #   node src/remotion/mg-attack-battery.mjs <out>
 #   python3 src/remotion/measure_mg_attack.py <out> 60   # reconcile _MG_ATTACK_MS
 #   → paste the fingerprint the gate prints into the constant below.
-_MG_ATTACK_FINGERPRINT = "sha256:655442e4378b8ab38e9d616cb52e9e699b44ca4b1bc226ff2b2f9a65579f90da"
+# RE-MEASURED 2026-08-01 (not pasted): both arms re-rendered via
+# `node src/remotion/mg-attack-battery.mjs <out> [smooth]`. The OFF arm
+# reproduced all 24 entries EXACTLY (harness is deterministic; the table above
+# is not stale). The SMOOTH arm moved one entry -> _MG_ATTACK_MS_SMOOTH. The
+# fingerprint moved because useMGPhase gained Easing + the ms floor.
+_MG_ATTACK_FINGERPRINT = "sha256:fa9f3a2564a36a894834741d28b134157968828825fe14ab57d2c7ea2a7882bb"
 
 
 def _mg_attack_frames(mg_type, fps):
     """Frames the MG's entrance takes to ARRIVE (settle for pops; container-
     arrival min(hit,settle) for sequenced types) — fromFrame is shifted this much
     earlier so the MG lands settled ON the anchor word. Unknown/blank-prop types
-    fall back to the median settle."""
-    return int(round(_MG_ATTACK_MS.get(mg_type, _MG_ATTACK_DEFAULT_MS) / 1000.0 * float(fps or 30)))
+    fall back to the median settle.
+
+    Reads the SMOOTH-GRAPHICS arm from the env, the same source of truth the
+    render input is built from, because an eased entrance ARRIVES at a different
+    time than a linear one at identical duration — back-timing off the wrong
+    table lands the MG early. Absent/off → the production table, byte-identical."""
+    _table = _MG_ATTACK_MS
+    if os.environ.get("PROMPTLY_SMOOTH_GRAPHICS", "").strip().lower() in ("1", "true", "yes", "on"):
+        _table = {**_MG_ATTACK_MS, **_MG_ATTACK_MS_SMOOTH}
+    return int(round(_table.get(mg_type, _MG_ATTACK_DEFAULT_MS) / 1000.0 * float(fps or 30)))
 
 
 # ── MG VALUE-LANDING table (FIX 2, Zac 2026-07-15) ───────────────────────────
