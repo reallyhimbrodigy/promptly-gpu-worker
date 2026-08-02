@@ -104,6 +104,7 @@ import {
   MotionBlurProvider,
   MotionBlurWrap,
 } from "./motion-graphics/shared/motion-blur";
+import { SafeImg } from "./SafeImg";
 
 // ─── Component maps ────────────────────────────────────────────────────────
 const CAPTION_MAP: Record<string, React.FC<any>> = {
@@ -734,7 +735,7 @@ const GeneratedScene: React.FC<{ spec: GeneratedSceneSpec; fps: number }> = ({
   const subjectScale = (subject.scale || 1) * sc;
 
   const subjectInner = subject.imageUrl ? (
-    <Img
+    <SafeImg
       src={resolveSrc(subject.imageUrl)}
       style={
         fullFrame

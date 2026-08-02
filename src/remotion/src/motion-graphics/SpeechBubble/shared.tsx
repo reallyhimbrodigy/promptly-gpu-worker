@@ -1,5 +1,6 @@
 import React from "react";
 import { Img } from "remotion";
+import { SafeImg } from "../../SafeImg";
 
 
 interface AvatarProps {
@@ -30,7 +31,7 @@ export const Avatar: React.FC<AvatarProps> = ({
           flexShrink: 0,
         }}
       >
-        <Img
+        <SafeImg
           src={src}
           style={{
             width: "100%",
