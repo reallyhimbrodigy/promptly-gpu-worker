@@ -31334,6 +31334,46 @@ def _set_cpu_stage(_name):
 _BUNDLE_FRESH_CHECKED = [False]
 
 
+_NR_MEM = {"peak": 0, "on": False, "started": False}
+def _nr_mem_start():
+    """NON-RENDER memory peak sampler (Zac 2026-08-02, inc2 burst gate). The burst
+    4x pays ONLY if run_pipeline_bg's memory (64 GiB, sized on the vidstab peak)
+    can DROP once render — the 15.7 GiB stage — moves to the cpu=48 burst. That
+    hinges on the NON-render peak, which is driven by vidstab and vidstab is
+    shake-gated (source-dependent). Sample cgroup memory.current from init to the
+    render dispatch (render hasn't run yet → this IS the non-render peak) and log
+    it per job, so the sizing decision comes off REAL traffic, not a guess."""
+    import threading as _th
+    _NR_MEM["peak"] = 0
+    _NR_MEM["on"] = True
+    if not _NR_MEM["started"]:
+        _NR_MEM["started"] = True
+        def _loop():
+            import time as _t
+            while True:
+                if _NR_MEM["on"]:
+                    try:
+                        with open("/sys/fs/cgroup/memory.current") as _f:
+                            _m = int(_f.read().strip())
+                        if _m > _NR_MEM["peak"]:
+                            _NR_MEM["peak"] = _m
+                    except Exception:
+                        pass
+                _t.sleep(1.5)
+        _th.Thread(target=_loop, daemon=True).start()
+
+
+def _nr_mem_report():
+    _NR_MEM["on"] = False
+    _MB = 1024 * 1024
+    _pk = _NR_MEM["peak"] / _MB
+    print(f"[nonrender-mem] peak={_pk:.0f}MB before render dispatch "
+          f"(run_pipeline_bg is sized 64GiB=65536MB; the burst flip can drop it "
+          f"to ~this + headroom — that delta IS the inc2 memory-time saving)",
+          flush=True)
+    return _NR_MEM["peak"]
+
+
 def _assert_bundle_fresh():
     """BUNDLE-FRESHNESS GUARD (Zac 2026-08-02): a Remotion TSX change ships INERT
     if a redeploy reuses a cached /remotion/bundle without re-running prebundle.mjs
@@ -34860,6 +34900,7 @@ def handler(job):
         _manifest("diarization", True,
                   "lazy: dispatched only if Deepgram detects 2+ speakers")
 
+        _nr_mem_start()   # inc2 burst gate: sample non-render memory peak → render dispatch
         mega_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
         future_normalize = mega_pool.submit(_do_normalize)
         future_transcribe = None if _skip_transcribe else mega_pool.submit(_do_transcribe)
@@ -35858,6 +35899,7 @@ def handler(job):
         # byte-identical). Flag ON → the whole stage runs on the cpu=48
         # render_burst container; a burst failure/death propagates into the ONE
         # terminal below, a staging hiccup falls back to a local render.
+        _nr_mem_report()   # non-render peak (render hasn't run yet) — the inc2 sizing number
         _rs = _run_render_via_burst_or_local(
             job_id, input_data, edit_plan, work_dir, source_path, output_path,
             transcript, source_duration, app_url, broll_clips, upload_url,
