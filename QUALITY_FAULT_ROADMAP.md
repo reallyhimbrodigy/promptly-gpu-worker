@@ -46,11 +46,25 @@ Video 01: bottom-centre → mid-frame → up beside her head → back to bottom,
 no scene change to justify any of it. Video 03: jumps to top for one word then
 back. The anchor is unstable within a single continuous shot.
 
-### 3. WE DO NOT REMOVE SOURCE TEXT, THEN WE STACK ON IT
-Video 05 has "Eid Mubarak 🥰🥰🥰" burned into the source for the entire clip and
-our captions sit underneath it. Video 00 has a decorative "Wednesday 1:30 PM"
-graphic parked mid-frame the whole time, colliding with the captions in nearly
-every frame. `source_text_regions` exists in the plan and did not act.
+### 3. SOURCE-TEXT HANDLING — **CORRECTED, I WAS TWO-THIRDS WRONG**
+I claimed `source_text_regions` "exists and did not act". It acts: **58 of 392
+plans (15%) report a non-empty band list**. Checking the specific videos:
+
+| video | observed | detector | verdict |
+|---|---|---|---|
+| 05 "Eid Mubarak" top | `['top']` | **FIRED** | worked — we used bottom, top was claimed |
+| 04 burned captions | `existing_caption_region: bottom`, `caption_style: none` | **FIRED** | worked — our caption track correctly suppressed |
+| 00 "Wednesday 1:30 PM" mid-frame | `[]` | **MISSED** | genuine miss — centre band reported clean |
+| 08 / 19 TikTok UI | key **absent** | **never ran** | light routes make no editorial call |
+
+So the real defects are narrower and different from what I wrote:
+**(a)** a detector MISS on a centre-band graphic (video 00), and
+**(b)** the light routes (`minimal`, `minimal_speech_uncut`, `hype`) never make an
+editorial planning call at all, so **competitor UI is invisible to the pipeline
+by construction** — no detector inside the plan can ever see it.
+
+That (b) is why the fix has to sit at **INTAKE, before routing**, not in the
+editorial prompt.
 
 ### 4. WE RETURN COMPETITOR UI
 Video 08 is a downloaded TikTok — heart / comment / bookmark / share rail down
