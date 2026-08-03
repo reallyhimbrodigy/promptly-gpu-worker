@@ -10888,6 +10888,14 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
             f"rate={_rate:.0f}tok/s)",
             flush=True,
         )
+        # ONE CLOCK: this Gemini call as an edit_plan child (each call its own span
+        # via the seq counter — surfaces a hidden 2nd call). Ends now, spans _total back.
+        try:
+            if _TL is not None:
+                _tl_gc = _TL.now()
+                _TL.add(f"gemini_call[{label or 'post'}]", _tl_gc - _total, _tl_gc, "edit_plan")
+        except Exception:
+            pass
         try:
             _GEMINI_CALL_LOG.append({
                 "total_s": round(_total, 1), "ttfb_s": round(_ttfb or 0.0, 1),
@@ -32521,6 +32529,12 @@ def render_stage(
                     print(f"[pipeline] format export failed (non-fatal): {fmt_err}", flush=True)
 
     _timings["upload_export"] = time.time() - t
+    try:
+        if _TL is not None:
+            _tl_ue = _TL.now()
+            _TL.add("upload_export", _tl_ue - _timings["upload_export"], _tl_ue, "job")
+    except Exception:
+        pass
     return {
         "edit_plan": edit_plan, "timings": _timings, "floor_state": _floor_state,
         "render_elapsed": render_elapsed, "output_size_mb": output_size_mb,
@@ -33200,6 +33214,12 @@ def handler(job):
             _dl_method = "s3-crt"
         size_mb = os.path.getsize(source_path) / (1024*1024)
         _timings["download"] = time.time() - t
+        try:
+            if _TL is not None:
+                _tl_dn = _TL.now()
+                _TL.add("download", _tl_dn - _timings["download"], _tl_dn, "job")
+        except Exception:
+            pass
         _throughput_mbs = size_mb / max(_timings["download"], 0.001)
         print(f"[pipeline] download complete: {size_mb:.1f}MB in {_timings['download']:.1f}s ({_dl_method}, {_throughput_mbs:.1f} MB/s)", flush=True)
 
@@ -34550,8 +34570,10 @@ def handler(job):
             # LEVER 4: one reference per job, derived as early as the proxy
             # exists. Client-proxy jobs reference the client's own object
             # (zero upload); otherwise one put_object here.
+            _tl_pu = _tl_start("proxy_upload", "edit_plan")
             _video_ref_url, _video_ref_uploaded_key = _ensure_proxy_reference(
                 input_data.get("job_id"), _proxy_bytes, proxy_video_url)
+            _tl_end(_tl_pu)
             if future_early_trend is not None:
                 try:
                     _trend = future_early_trend.result(timeout=10)
