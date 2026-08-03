@@ -4133,7 +4133,17 @@ def _maybe_upgrade_transcript_scribe(dg_result, source_path, source_duration):
             return dg_result
         _dgw = dg_result.get("words") or []
         _lang = dg_result.get("detected_language")
-        if not _scribe_should_route(_lang):
+        # ZERO-WORD BYPASS (Zac 2026-08-03): a "Transcribed 0 words" Deepgram
+        # result carries NO detected_language, so the language allowlist excludes
+        # EXACTLY the case Scribe exists to recover — it fired 0x on its own
+        # target while two 0-word events sat in the same logs. When Deepgram
+        # returned nothing, there is no language to gate on, so route to Scribe on
+        # the armed engine + key alone. A POPULATED transcript still honours the
+        # allowlist (it has a real language tag the routing was designed around).
+        if not _dgw:
+            if not _scribe_enabled() or not os.environ.get("ELEVENLABS_API_KEY"):
+                return dg_result
+        elif not _scribe_should_route(_lang):
             return dg_result
         _dg_ok, _dg_stats = _transcription_coverage_check(
             source_path, _dgw, source_duration)

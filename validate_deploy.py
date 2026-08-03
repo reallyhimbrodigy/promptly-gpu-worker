@@ -5262,6 +5262,30 @@ def _asr_scribe_routing():
         _set(PROMPTLY_SCRIBE_LANGS="*")
         assert handler._scribe_should_route("ja") is True, "'*' must route everything"
 
+        # 3b. ZERO-WORD BYPASS (Zac 2026-08-03): a "Transcribed 0 words" Deepgram
+        # result carries NO detected_language, so the restrictive allowlist
+        # (default hi,ml,ta,… — PROMPTLY_SCRIBE_LANGS unset in prod) excludes
+        # EXACTLY the case Scribe exists to recover. It fired 0x on its own target.
+        # A 0-word result must route to Scribe on the armed engine + key ALONE.
+        _set(PROMPTLY_ASR_SCRIBE="1", ELEVENLABS_API_KEY="k", PROMPTLY_SCRIBE_LANGS="ml,ta")
+        _called = {"scribe": False}
+        _oc0, _os0 = handler._transcription_coverage_check, handler.transcribe_scribe
+        try:
+            handler._transcription_coverage_check = lambda *a, **k: (False, {"unworded_frac": 1.0})
+            def _spy(*a, **k):
+                _called["scribe"] = True
+                return {"words": [{"word": "x", "start": 0.0, "end": 0.2}], "detected_language": "hi"}
+            handler.transcribe_scribe = _spy
+            handler._maybe_upgrade_transcript_scribe(
+                {"words": [], "detected_language": None}, "/x.mp4", 10.0)
+            assert _called["scribe"] is True, \
+                ("a 0-word Deepgram result MUST route to Scribe regardless of the "
+                 "language allowlist — that empty, language-less case is the exact "
+                 "class Scribe exists to recover, and gating it on langs made it "
+                 "fire 0x on its own target")
+        finally:
+            handler._transcription_coverage_check, handler.transcribe_scribe = _oc0, _os0
+
         # 4. FLAG-OFF INERTNESS at the call site: same object back, engine untouched
         _set(PROMPTLY_ASR_SCRIBE=None)
         _dg = {"words": [{"word": "a", "start": 0.0, "end": 0.1}], "detected_language": "hi"}
