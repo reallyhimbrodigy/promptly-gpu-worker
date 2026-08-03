@@ -76,6 +76,13 @@ export interface TransitionSpec {
   clipBStartFromFrames: number;
   clipAPlaybackRate: number;
   clipBPlaybackRate: number;
+  /** PER-LAYER PRE-EXTRACTED sources (Zac 2026-08-03). A transition reads one
+   *  file at TWO positions, which @remotion/media's <Video> thrashes on
+   *  (measured +26%); one small file per layer makes it -30%. Absent → the
+   *  renderer falls back to the whole source + trimBefore, i.e. today's
+   *  behaviour, so the TSX half is safe to ship before the staging half. */
+  clipASrc?: string;
+  clipBSrc?: string;
   direction?: "left" | "right" | "up" | "down";
   palette?: "warm" | "gold" | "cool" | "magenta";
   intensity?: number;

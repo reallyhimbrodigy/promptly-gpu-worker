@@ -189,8 +189,8 @@ const TransitionRenderer: React.FC<{
     return (
       <AbsoluteFill>
         <Video
-          src={sourceUrl}
-          trimBefore={transition.clipBStartFromFrames}
+          src={transition.clipBSrc ? resolveSrc(transition.clipBSrc) : sourceUrl}
+          trimBefore={transition.clipBSrc ? 0 : transition.clipBStartFromFrames}
           playbackRate={transition.clipBPlaybackRate}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
@@ -201,14 +201,15 @@ const TransitionRenderer: React.FC<{
     type: _t, afterClipIndex: _a, durationInFrames: _d,
     clipAStartFromFrames, clipBStartFromFrames,
     clipAPlaybackRate, clipBPlaybackRate,
+    clipASrc, clipBSrc,
     ...extraProps
   } = transition;
   return (
     <Comp
-      clipA={sourceUrl}
-      clipB={sourceUrl}
-      startFromA={clipAStartFromFrames}
-      startFromB={clipBStartFromFrames}
+      clipA={clipASrc ? resolveSrc(clipASrc) : sourceUrl}
+      clipB={clipBSrc ? resolveSrc(clipBSrc) : sourceUrl}
+      startFromA={clipASrc ? 0 : clipAStartFromFrames}
+      startFromB={clipBSrc ? 0 : clipBStartFromFrames}
       playbackRateA={clipAPlaybackRate}
       playbackRateB={clipBPlaybackRate}
       progress={progress}

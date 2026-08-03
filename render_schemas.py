@@ -150,6 +150,11 @@ class TransitionSpec(_RemotionModel):
     clipBStartFromFrames: int
     clipAPlaybackRate: float
     clipBPlaybackRate: float
+    # PER-LAYER PRE-EXTRACTED sources (Zac 2026-08-03). extra="forbid" means an
+    # unregistered field is REJECTED, not ignored — the exact way the motionTokens
+    # mirror silently blocked a shipped feature. Registered here deliberately.
+    clipASrc: Optional[str] = None
+    clipBSrc: Optional[str] = None
     direction: Optional[Literal["left", "right", "up", "down"]] = None
     palette: Optional[Literal["warm", "gold", "cool", "magenta"]] = None
     intensity: Optional[float] = None

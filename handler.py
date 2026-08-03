@@ -25732,6 +25732,67 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             flush=True,
         )
 
+    # ── TRANSITION LAYER PRE-EXTRACT (Zac 2026-08-03) ──────────────────────
+    # A transition reads ONE file at TWO positions — clipA is the outgoing shot,
+    # clipB the incoming one. @remotion/media's <Video> THRASHES on that shape:
+    # measured on CrossfadeZoom at 1080x1920/30fps, three runs per arm,
+    #   OffthreadVideo, one file two positions ...... 115.0 ms/frame (median)
+    #   media <Video>,  one file two positions ...... 144.9 ms/frame  (+26%)
+    #   media <Video>,  ONE FILE PER LAYER .......... 80.3 ms/frame   (-30%)
+    # Giving each layer its own small file collapses two read heads to one per
+    # file and turns the tag swap from a regression into the micro leg's lever.
+    #
+    # This mirrors the zoom pre-extract above EXACTLY, including the encoder
+    # params — the GOP/faststart settings there exist precisely because
+    # @remotion/media's WebCodecs decoder times out on short moov-at-tail clips,
+    # which is the same decoder these layers now use.
+    def _extract_one_transition(_trans):
+        _idx = int(_trans["afterClipIndex"])
+        _dur_frames_i = int(_trans["durationInFrames"])
+        _gop = max(1, int(round(source_fps)))
+        _logs = []
+        for _side in ("A", "B"):
+            _start_i = int(_trans[f"clip{_side}StartFromFrames"])
+            _pbr_f = float(_trans.get(f"clip{_side}PlaybackRate") or 1.0) or 1.0
+            _src_frames_needed = max(1, int(math.ceil((_dur_frames_i - 1) * _pbr_f)) + 1)
+            _src_end = _start_i + _src_frames_needed
+            if abs(_pbr_f - 1.0) < 1e-6:
+                _vf = f"trim=start_frame={_start_i}:end_frame={_src_end},setpts=PTS-STARTPTS"
+            else:
+                _vf = (f"trim=start_frame={_start_i}:end_frame={_src_end},"
+                       f"setpts=(PTS-STARTPTS)/{_pbr_f:.6f},fps={source_fps:g}")
+            _out_path = os.path.join(work_dir, f"trans_{_idx}_{_side}.mp4")
+            subprocess.run([
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", source_path, "-vf", _vf, "-frames:v", str(_dur_frames_i),
+                "-c:v", "libx264", "-preset", "fast", "-crf", "14",
+                "-pix_fmt", "yuv420p", "-g", str(_gop), "-keyint_min", str(_gop),
+                "-sc_threshold", "0", "-video_track_timescale", "90000",
+                "-movflags", "+faststart", "-an", _out_path,
+            ], check=True)
+            _trans[f"clip{_side}Src"] = _stage_file(_out_path)
+            _logs.append(f"{_side}=[{_start_i}..{_src_end})")
+        return (f"[transition-pre-extract] after_clip={_idx} type={_trans.get('type')} "
+                f"{' '.join(_logs)} -> {_trans.get('clipASrc')} / {_trans.get('clipBSrc')}")
+
+    _trans_to_extract = [
+        t for t in transitions_out
+        if t.get("clipAStartFromFrames") is not None
+        and t.get("clipBStartFromFrames") is not None
+    ]
+    if _trans_to_extract:
+        _t_trans_extract = time.time()
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=min(len(_trans_to_extract), 8)
+        ) as _trans_pool:
+            for _log_line in _trans_pool.map(_extract_one_transition, _trans_to_extract):
+                print(_log_line, flush=True)
+        print(
+            f"[transition-pre-extract] {len(_trans_to_extract)} transition(s) "
+            f"in {(time.time() - _t_trans_extract) * 1000:.0f}ms (parallel)",
+            flush=True,
+        )
+
     # PromptlyMicroSegments input — only the windows Remotion must render.
     # Each segment carries its own clip/transition spec; Python tracks a
     # parallel list of metadata (with _clipIndex / _afterClipIndex tags) so
