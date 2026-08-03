@@ -27,7 +27,9 @@ Columns: date · agent · app · what · tasks · container-seconds · $ · veri
 
 | 2026-08-02 | prompt | `cert-modality-read` | items 8+9: modality split + output tokens, 8 PLAN_ONLY runs | 8 | ~2,400 | ~$0.80 | yes (0 tasks) |
 
-**prompt agent session total: ~$12.88** (probe never ran = $0; reorder A/B ~$4). Explicit GO covered the
+| 2026-08-02 | prompt | `query-fit-audit` ×4 | over-firing audit + 2 shape diagnostics; result NOT trustworthy (see commit) | 4 | ~400 | ~$0.04 | yes (stopped) |
+
+**prompt agent session total: ~$12.92** (probe never ran = $0; reorder A/B ~$4). Explicit GO covered the
 detector; the probe is taken as covered by "these four are cheaper and more
 certain" contrasted against the HELD $10 A/B.
 
