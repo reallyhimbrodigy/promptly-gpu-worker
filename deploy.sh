@@ -28,6 +28,16 @@ echo "════════════════════════�
 # Override per-operator: PROMPTLY_DEPLOYER=codex ./deploy.sh (etc.)
 export PROMPTLY_DEPLOYER="${PROMPTLY_DEPLOYER:-claude-code}"
 echo "  deployer: $PROMPTLY_DEPLOYER"
+# DEPLOYING BRANCH (Zac 2026-08-03): the worker deploys from the WORKING TREE of
+# whatever branch is checked out — historically `zero-reject-routing`, NOT main.
+# A silent 447-commit main→branch gap cost hours today. Print it every run so a
+# gap can never open unnoticed, and keep main fast-forwarded to this branch.
+echo "  deploying from branch: $(git branch --show-current 2>/dev/null || echo '(detached)') @ $(git rev-parse --short HEAD 2>/dev/null)"
+if git rev-parse --verify main >/dev/null 2>&1 \
+   && [ "$(git rev-parse HEAD)" != "$(git rev-parse main)" ] \
+   && git merge-base --is-ancestor main HEAD 2>/dev/null; then
+    echo "  ⚠️  main is BEHIND this branch by $(git rev-list --count main..HEAD) commit(s) — it is stale; fast-forward + push it after this deploy."
+fi
 modal deploy modal_app.py
 
 # Deploy-state guard (Zac 2026-08-01): record the deployed HEAD so validate_deploy
