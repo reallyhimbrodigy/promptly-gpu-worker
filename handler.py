@@ -35306,6 +35306,9 @@ def handler(job):
                 _gcalls = [c for c in _GEMINI_CALL_LOG if isinstance(c, dict)]
                 _live = [c for c in _gcalls if not c.get("aborted")]
                 return {"status": "plan_only", "job_id": job_id, "edit_plan": _plan_json,
+                        # source_duration_s on the PLAN_ONLY return too (Zac 2026-08-03):
+                        # the two-term fit + 60s-source projection need it on EVERY path.
+                        "source_duration_s": round(float(source_duration), 1) if source_duration else None,
                         "gemini_call_s": round(sum(c.get("total_s") or 0 for c in _live), 1),
                         "gemini_output_tokens": sum(c.get("out_tok") or 0 for c in _live),
                         "gemini_ttfb_s": round(sum(c.get("ttfb_s") or 0 for c in _live), 1),
