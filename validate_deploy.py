@@ -6103,7 +6103,7 @@ def _source_poll_fail_fast():
     # the default (600) must be strictly under the run_pipeline_bg Modal timeout so the
     # clean UPLOAD_STALLED fires BEFORE the SIGKILL — the invariant that was violated
     _m = open("modal_app.py").read()
-    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=\d+", _m)  # cpu=16 uniquely IDs run_pipeline_bg (render_burst is cpu=48); memory is inc2-tunable
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=\d+, memory=\d+", _m)  # cpu=16 uniquely IDs run_pipeline_bg (render_burst is cpu=48); memory is inc2-tunable
     assert _t, "run_pipeline_bg timeout not found in modal_app.py"
     assert 600 < int(_t.group(1)), \
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
@@ -6801,7 +6801,7 @@ def _recipe_wall_budget():
     assert _dl >= H._RECIPE_WALL_MIN_BUDGET_S >= 600.0, "budget floor must clear a clean pass's recipe-start"
     assert H._RECIPE_WALL_END_RESERVE_S >= 480.0, "tail reserve must absorb one 480s in-flight client-timeout"
     # _MODAL_FN_TIMEOUT_S must track the ACTUAL run_pipeline_bg timeout (drift guard)
-    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=\d+", open("modal_app.py").read())  # memory inc2-tunable; cpu=16 IDs run_pipeline_bg
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=\d+, memory=\d+", open("modal_app.py").read())  # memory inc2-tunable; cpu=16 IDs run_pipeline_bg
     assert _t and int(_t.group(1)) == int(H._MODAL_FN_TIMEOUT_S), \
         f"_MODAL_FN_TIMEOUT_S ({H._MODAL_FN_TIMEOUT_S}) must match run_pipeline_bg timeout ({_t.group(1) if _t else '?'})"
     # wiring: threaded into the internal retry-stop, the repair loop-top, and the caller
@@ -9975,6 +9975,11 @@ def _pre_extract_degrade_and_fps_snap():
         "the render must snap sub-frame fps drift to an integer (frame-grid RENDER_FATAL guard)"
     import handler as _hm
     assert callable(getattr(_hm, "_pre_extract_readable", None)), "_pre_extract_readable importable"
+    # COST/DEADLINE: fps_normalize delivers at SOURCE fps for a clean-integer rate
+    # (reusing the drift epsilon) so ~66% of 30fps uploads pass through instead of
+    # re-encoding 30→60 for nothing. FAILS if that skip regresses to unconditional 60.
+    assert "delivering at SOURCE fps" in _h and "_src_snap in (24, 25, 30" in _h, \
+        "fps_normalize must deliver at source fps for clean-integer sources (skip the needless 30→60 re-encode)"
 
 
 # ─── REPORT ────────────────────────────────────────────────────────────

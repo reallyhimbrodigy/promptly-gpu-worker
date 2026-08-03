@@ -34351,6 +34351,24 @@ def handler(job):
                           flush=True)
                 elif _dfps_env:
                     _target_fps = float(_dfps_env)
+                else:
+                    # COST/DEADLINE (Zac 2026-08-03): DELIVER AT SOURCE FPS when the
+                    # source is ALREADY a clean integer rate (within the SAME
+                    # sub-frame drift epsilon the render fps-snap uses). ~66% of
+                    # uploads are already 30fps; forcing a 60fps target re-encoded
+                    # every one of them for NOTHING — 508s on 344797e9, and ~15 days
+                    # from the spend cap this is the difference between reaching
+                    # month-end and going offline. A VFR / non-integer source keeps
+                    # the 60fps default and re-encodes as before (it needs the pass).
+                    # PRIOR: 60fps "can't help fixed-frame MGs, +78s render" — the
+                    # quality this trades away is small. PROMPTLY_DELIVERY_FPS=60
+                    # restores universal-60.
+                    _src_snap = round(_r_val)
+                    if _src_snap in (24, 25, 30, 48, 50, 60) and abs(_r_val - _src_snap) < 0.01:
+                        _target_fps = float(_src_snap)
+                        print(f"[fps-normalize] delivering at SOURCE fps {_src_snap} "
+                              f"(clean integer rate → passthrough, skips a needless re-encode)",
+                              flush=True)
             except (TypeError, ValueError):
                 _target_fps = 60.0
             _timings["target_fps"] = _target_fps
