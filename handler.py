@@ -21656,6 +21656,33 @@ class RenderPreconditionError(ValueError):
     """
 
 
+# Failures that CANNOT depend on what we drew, recognised by MESSAGE because the
+# raiser is out of our reach (Remotion's own argv validation). The strip rung
+# removes motion graphics, overlays, transitions, TCOs, b-roll and generated
+# scenes — it does NOT change process arguments, the container's core count, or
+# the frame grid. A failure naming one of those is identical on every rung by
+# construction, so re-rendering into it is pure burn.
+#
+# Forged 2026-08-03 from job c9e980fe: "Maximum for --concurrency is 8 (number of
+# cores on this system)" failed rc=1 in 6.2s and did it again on the strip rung —
+# enhancements_dropped=[], zero render stage timings. cpu had been cut 16->8
+# (caa9fee) while _PER_CHUNK_CONCURRENCY still divided a hardcoded 32.
+#
+# ADD ONLY PLAN-INDEPENDENT SIGNATURES HERE. Anything stripping could plausibly
+# fix must keep riding the ladder — that is what the ladder is for.
+_LADDER_FAIL_FAST_SIGNATURES = (
+    "Maximum for --concurrency",        # argv vs the container's core count
+    "cannot share the frame grid",      # the audio/video contract
+)
+
+
+def _ladder_failure_is_plan_independent(err):
+    """True when stripping decorations provably cannot change this failure."""
+    if isinstance(err, RenderPreconditionError):
+        return True
+    return any(_s in str(err or "") for _s in _LADDER_FAIL_FAST_SIGNATURES)
+
+
 # The frame grid is a property of the OUTPUT, not the input (Zac 2026-08-03).
 _OUTPUT_GRID_SAMPLE_RATE = 48000
 
@@ -28715,22 +28742,39 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
             # renders: enhancements_dropped=[] and zero render stage timings on
             # all three rungs. Retrying it is not a net, it is 3x the burn for a
             # guaranteed-identical outcome. Fail fast.
-            if isinstance(_render_err, RenderPreconditionError):
+            if _ladder_failure_is_plan_independent(_render_err):
                 _record_divergence(
                     "render", {"rung": _rung}, "ladder_precondition_fail_fast",
                     reason=f"{type(_render_err).__name__}: {str(_render_err)[:120]}")
-                print(f"[render-degrade] rung={_rung} PRECONDITION — not retryable, "
-                      f"failing fast: {str(_render_err)[:200]}", flush=True)
+                print(f"[render-degrade] rung={_rung} PLAN-INDEPENDENT failure — "
+                      f"stripping cannot change it, failing fast: "
+                      f"{str(_render_err)[:200]}", flush=True)
                 raise
             # W1 ledger: the SAME failure signature on consecutive rungs
             # means the ladder is retrying an input-shape error it cannot
             # fix (929f9b48: CaptionStyle validation failed identically on
             # every rung). Observe-only — the weekly table names the class.
             _sig_rl = f"{type(_render_err).__name__}: {str(_render_err)[:200]}"
-            if _prev_sig_rl is not None and _sig_rl == _prev_sig_rl:
+            # `_rung < 2` is load-bearing: at the LAST rung the wrapper below is
+            # what stamps RENDER_FATAL, and classify_error keys on that string.
+            # Pre-empting it there turned a classified failure into UNKNOWN —
+            # caught by test_output_frame_grid G8. Stopping early only helps when
+            # a further rung actually remains.
+            if _rung < 2 and _prev_sig_rl is not None and _sig_rl == _prev_sig_rl:
+                # AND IT NOW STOPS (Zac 2026-08-03). This observed a repeated
+                # signature and did nothing — the ladder kept descending into a
+                # failure the previous rung had already proven it cannot fix.
+                # A rung that changed the plan and produced the BYTE-IDENTICAL
+                # error has demonstrated the failure is plan-independent; every
+                # remaining rung is guaranteed-identical burn. Backstop to the
+                # signature list above, for shapes we have not named yet.
                 _record_divergence(
                     "render", {"rung": _rung},
                     "ladder_identical_input_failure", reason=_sig_rl[:120])
+                print(f"[render-degrade] rung={_rung} IDENTICAL failure to the "
+                      f"previous rung despite a changed plan — the ladder cannot "
+                      f"fix this, failing fast: {_sig_rl[:160]}", flush=True)
+                raise
             _prev_sig_rl = _sig_rl
             if _rung >= 2:
                 raise RuntimeError(
@@ -28994,6 +29038,19 @@ def classify_error(e):
         return _e(
             "RENDER_FATAL",
             "Rendering failed even after a simplified retry — please run the job again.",
+            retryable=True,
+        )
+
+    # The audio/video frame-grid contract. Now that the ladder fails FAST on it
+    # (it cannot be fixed by stripping), the message no longer passes through the
+    # RENDER_FATAL wrapper — and without a branch here it classified as UNKNOWN,
+    # which is how a coded failure becomes an unowned one. Ours by definition:
+    # _output_frame_grid picks both sides of this pair, so reaching it means WE
+    # chose an incompatible target, never the user's file.
+    if "cannot share the frame grid" in msg:
+        return _e(
+            "RENDER_FATAL",
+            "Rendering failed on our side — please run the job again.",
             retryable=True,
         )
 

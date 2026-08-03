@@ -10052,16 +10052,40 @@ def _check_output_frame_grid():
     # THE LADDER MUST NOT RETRY A PRECONDITION. Without this the ladder burns
     # 3x the work for a guaranteed-identical outcome (observed: three rungs,
     # enhancements_dropped=[] and zero render stage timings on every one).
-    assert "isinstance(_render_err, RenderPreconditionError)" in _src, \
-        "the degrade ladder must fail fast on RenderPreconditionError, not re-render into it"
+    assert "_ladder_failure_is_plan_independent(_render_err)" in _src, \
+        "the degrade ladder must fail fast on plan-independent failures, not re-render into them"
     _lad = _src[_src.index("def _render_degrade_ladder"):]
     _lad = _lad[:_lad.index("_CHROME_PREWARM")]
     # Anchor on the rung-exhaustion raise, which is unique. ("if _rung >= 2:"
     # is NOT unique — it also guards the Lever-4 identical-input skip earlier in
     # the loop, and anchoring there compares against the wrong occurrence.)
-    assert (_lad.index("isinstance(_render_err, RenderPreconditionError)")
+    assert (_lad.index("_ladder_failure_is_plan_independent(_render_err)")
             < _lad.index("RENDER_FATAL after full + retry + stripped renders")), \
-        "the precondition fail-fast must precede the rung-exhaustion raise, or it never runs"
+        "the fail-fast must precede the rung-exhaustion raise, or it never runs"
+
+    # The concurrency shape that cost job c9e980fe two renders must be covered
+    # BY BEHAVIOUR, not just present as a string.
+    assert _h._ladder_failure_is_plan_independent(
+        RuntimeError("Error: Maximum for --concurrency is 8 (number of cores on this system)")), \
+        "an argv-vs-cores failure is plan-independent — stripping cannot change it"
+    # ...and the other direction: an ordinary drawing failure MUST still degrade,
+    # or the ladder stops being a net at all.
+    for _ord_msg in ("Compositor error: No video stream found in input file",
+                     "delayRender() timed out after 30000ms",
+                     "CaptionStyle validation failed"):
+        assert not _h._ladder_failure_is_plan_independent(RuntimeError(_ord_msg)), \
+            f"'{_ord_msg[:40]}' must keep riding the ladder — stripping may fix it"
+
+    # The identical-signature backstop must NOT pre-empt the final rung: that
+    # wrapper is what stamps RENDER_FATAL, and classify_error keys on it, so
+    # pre-empting turned a classified failure into UNKNOWN.
+    assert "_rung < 2 and _prev_sig_rl is not None" in _src, \
+        "the identical-signature stop must be guarded by _rung < 2 or it strips the RENDER_FATAL code"
+    # And the grid contract must classify to a real code, never UNKNOWN.
+    assert _h.classify_error(RuntimeError(
+        "sample_rate 44100 is not integer-divisible by fps 30.0003: audio and video "
+        "cannot share the frame grid")).get("error_code") == "RENDER_FATAL", \
+        "the frame-grid contract must classify to a coded error, not UNKNOWN"
     # ...and the ladder must still degrade for ordinary render errors.
     assert "render_stripped" in _lad, "the strip rung must survive — the ladder is not disabled"
 

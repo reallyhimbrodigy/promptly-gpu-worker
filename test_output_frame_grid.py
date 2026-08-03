@@ -143,6 +143,79 @@ check("decorations were actually stripped on the strip rung",
       plan2.get("motion_graphics") == [] and plan2.get("text_overlays") == [],
       f"mg={plan2.get('motion_graphics')} to={plan2.get('text_overlays')}")
 
+print("\n=== G9: a PLAN-INDEPENDENT failure fails fast even when it is not our type ===")
+# Job c9e980fe: `Maximum for --concurrency is 8 (number of cores on this system)`
+# is a RuntimeError raised inside Remotion's own argv validation. Stripping
+# decorations cannot change the process arguments or the container's core count,
+# so the ladder must not re-render into it. This is the case the TYPED fix alone
+# would have missed.
+check("concurrency-vs-cores is plan-independent",
+      H._ladder_failure_is_plan_independent(
+          RuntimeError("[overlay] Remotion render failed (rc=1): Error: "
+                       "Maximum for --concurrency is 8 (number of cores on this system)")))
+check("the frame-grid contract is plan-independent",
+      H._ladder_failure_is_plan_independent(
+          H.RenderPreconditionError("cannot share the frame grid")))
+check("a plain string match works on the raw message too",
+      H._ladder_failure_is_plan_independent(RuntimeError("... cannot share the frame grid ...")))
+
+# THE OTHER DIRECTION, and it is the load-bearing one: an ordinary drawing
+# failure must NOT be called plan-independent, or the ladder stops being a net.
+for _ordinary in (
+    RuntimeError("Compositor error: No video stream found in input file ...zoomclip..."),
+    RuntimeError("delayRender() timed out after 30000ms"),
+    RuntimeError("Error: Cannot read properties of undefined (reading 'width')"),
+    RuntimeError("TimeoutExpired: render exceeded budget"),
+    ValueError("CaptionStyle validation failed"),
+    RuntimeError(""), None,
+):
+    check(f"  ordinary failure keeps riding the ladder: {str(_ordinary)[:44]!r}",
+          not H._ladder_failure_is_plan_independent(_ordinary))
+
+_c2 = []
+
+
+def _boom_concurrency(cuts, broll):
+    _c2.append(1)
+    raise RuntimeError("[overlay] Remotion render failed (rc=1) in 6.2s: Error: "
+                       "Maximum for --concurrency is 8 (number of cores on this system)")
+
+
+plan3 = {"cuts": [{"start": 0.0, "end": 1.0}], "motion_graphics": [{"t": 1}],
+         "text_overlays": [], "transitions": [], "tight_cut_overlays": [],
+         "broll_clips": [], "generated_scenes": []}
+try:
+    H._render_degrade_ladder(_boom_concurrency, plan3, [], "/tmp/nonexistent_out3.mp4")
+    check("ladder fails fast on the concurrency error", False, "returned instead of raising")
+except Exception as e:
+    check("ladder fails fast on the concurrency error", "Maximum for --concurrency" in str(e),
+          f"{type(e).__name__}: {str(e)[:90]}")
+check("  and attempted the render ONCE, not twice (job c9e980fe burned two)",
+      len(_c2) == 1, f"attempted {len(_c2)}x")
+
+print("\n=== G10: the identical-signature backstop now STOPS instead of observing ===")
+# For shapes not on the signature list: a rung that CHANGED the plan and produced
+# a byte-identical error has proven the failure is plan-independent.
+_c3 = []
+
+
+def _boom_same(cuts, broll):
+    _c3.append(len(cuts))
+    # Not on the fail-fast list, and not our type — only the repeat reveals it.
+    raise RuntimeError("Some unnamed failure shape that stripping cannot fix")
+
+
+plan4 = {"cuts": [{"start": 0.0, "end": 1.0}], "motion_graphics": [{"t": 1}],
+         "text_overlays": [{"t": 1}], "transitions": [], "tight_cut_overlays": [],
+         "broll_clips": [], "generated_scenes": []}
+try:
+    H._render_degrade_ladder(_boom_same, plan4, [], "/tmp/nonexistent_out4.mp4")
+    check("ladder stops on a repeated signature", False, "returned instead of raising")
+except Exception as e:
+    check("ladder stops on a repeated signature", True, f"{type(e).__name__}")
+check("  the repeat was detected (ladder did not run a needless further rung)",
+      len(_c3) <= 2, f"attempted {len(_c3)}x")
+
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
 if FAIL:
     for f in FAIL:
