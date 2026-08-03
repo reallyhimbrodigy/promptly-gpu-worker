@@ -5980,7 +5980,7 @@ def _source_poll_fail_fast():
     # the default (600) must be strictly under the run_pipeline_bg Modal timeout so the
     # clean UPLOAD_STALLED fires BEFORE the SIGKILL — the invariant that was violated
     _m = open("modal_app.py").read()
-    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=65536", _m)
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=\d+", _m)  # cpu=16 uniquely IDs run_pipeline_bg (render_burst is cpu=48); memory is inc2-tunable
     assert _t, "run_pipeline_bg timeout not found in modal_app.py"
     assert 600 < int(_t.group(1)), \
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
@@ -6678,7 +6678,7 @@ def _recipe_wall_budget():
     assert _dl >= H._RECIPE_WALL_MIN_BUDGET_S >= 600.0, "budget floor must clear a clean pass's recipe-start"
     assert H._RECIPE_WALL_END_RESERVE_S >= 480.0, "tail reserve must absorb one 480s in-flight client-timeout"
     # _MODAL_FN_TIMEOUT_S must track the ACTUAL run_pipeline_bg timeout (drift guard)
-    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=65536", open("modal_app.py").read())
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=\d+", open("modal_app.py").read())  # memory inc2-tunable; cpu=16 IDs run_pipeline_bg
     assert _t and int(_t.group(1)) == int(H._MODAL_FN_TIMEOUT_S), \
         f"_MODAL_FN_TIMEOUT_S ({H._MODAL_FN_TIMEOUT_S}) must match run_pipeline_bg timeout ({_t.group(1) if _t else '?'})"
     # wiring: threaded into the internal retry-stop, the repair loop-top, and the caller
@@ -6945,6 +6945,7 @@ def _secret_canonical_values():
         "PROMPTLY_LANG_ROUTING": "1",  # TIER-1 STAGE A LIVE (Zac 2026-07-28 viral surge): on coverage failure, Gemini language-ID → Deepgram monolingual for the GRADUATED languages (PROMPTLY_ROUTE_LANGS, not pinned here — it grows per-script; Hindi certified first). Recovers coverage-fail non-English into native-caption deliveries instead of rejecting. Negative-control-gated (Gemini-ID, not acoustic). rollback = "0" here + secret
         "PROMPTLY_SMOOTH_GRAPHICS": "1",  # VELOCITY CAP LIVE (Zac 2026-08-02: watched CAP vs OFF and approved by eye — "CAP looked SOO smooth, OFF didn't"). Bounds peak per-frame travel to ONE governed quantity for zooms + MG entrances (11px zoom / 1/6 entrance step); entrances only LENGTHEN. OFF-code byte-identical so rollback = "0" here + secret + redeploy. BLUR stays OUT (Zac).
         "PROMPTLY_ASR_SCRIBE": "1",  # LANGUAGE-ROUTED SCRIBE LIVE (Zac 2026-08-02, overnight zero-errors): on a Deepgram transcript that FAILS the coverage gate, route ElevenLabs Scribe (needs promptly-elevenlabs/ELEVENLABS_API_KEY) and keep the better-coverage native transcript before rejecting — recovers the zero-word / TRANSCRIPTION_INCOMPLETE class (bake-off: deepgram 3/40 -> scribe 34/40 on the failing set; control 32->39, no regression). Deepgram runs first + unchanged so an outage can't cost a job. rollback = "0" here + secret + redeploy.
+        "PROMPTLY_RENDER_BURST": "1",  # inc2 FLIP LIVE (Zac GO 2026-08-02 naming the key): render_stage runs on the cpu=48 render_burst (16GiB blur-safe, was DARK/in-process). Enables run_pipeline_bg 64→24GiB (render no longer in-process here). A staging hiccup falls back to a local render + ledgers render_burst_fallback. rollback = "0" here + secret + redeploy (render returns in-process; RAISE run_pipeline_bg back to 48GiB FIRST or the fallback OOMs).
         "PROMPTLY_POST_THINKING_BUDGET": "2048",  # THINKING BUDGET FLIP LIVE (Zac GO 2026-08-02 naming the key): the critical-path editorial Gemini call (generate_edit_gemini / _post_cuts_response_schema, handler.py:11593 — the edit_plan "longest wait" at 34979) drops from 24576→2048 thinking tokens. A/B measured -29.5s wall (65.3s→35.8s, out_tok stable) AND lower Gemini API cost; budget=0 is SLOWER (model needs some thinking). Cuts the critical path directly (fps_normalize is overlapped/off-path, saves ~0). rollback = "24576" here + secret + redeploy.
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
