@@ -9872,8 +9872,13 @@ _REPAIR_MIN_HEADROOM_S = 180.0   # recipe repair re-ask allowance: a corrective
 # BEFORE the SIGKILL, instead of grinding into it. A clean single pass is
 # 135-337s and NEVER reaches the deadline; only a job already re-asking (i.e.
 # one that has failed ≥1 validation/transport attempt) can. Off ⇒ byte-identical.
-_MODAL_FN_TIMEOUT_S = 3000.0       # modal_app.py @app.cls / run_pipeline_bg timeout
-                                   # (raised 1800->3000 for 5-min support, 2026-07-25:
+_MODAL_FN_TIMEOUT_S = 1800.0       # STALL CAP (Zac GO 2026-08-03 PM): tracks the
+                                   # run_pipeline_bg/render_burst Modal timeout, lowered
+                                   # 3000->1800 to cap stall billing (30min not 50).
+                                   # The recipe wall-clock budget derives from this, so
+                                   # it MUST match the decorator (validate_deploy pins
+                                   # the pair) — else the recipe loop runs past the kill.
+                                   # PRIOR (raised 1800->3000 for 5-min support, 2026-07-25:
                                    #  a 300s source's render + recipe must fit under it;
                                    #  the reaper EXEC_WALL_MS stays >= this at all times)
                                    # — the hard SIGKILL wall we must land under.
@@ -27013,8 +27018,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
               flush=True)
         return 4
     _CONTAINER_CORES = _render_core_budget()
-    _TAB_BUDGET = int(os.environ.get("PROMPTLY_OVERLAY_TAB_BUDGET")
-                      or max(4, _CONTAINER_CORES // 2))
+    # DERIVE FROM THE CORE BUDGET, never a retired 64-vCPU constant (Zac 2026-08-03,
+    # #2 of the concurrency board): a stale PROMPTLY_OVERLAY_TAB_BUDGET=32 (sized for
+    # the old 64-vCPU box) oversubscribes a cpu=16 orchestrator — 32//2=16 tabs on
+    # 16 cores — which is the value that reached Remotion as 16/10 on the OLD
+    # containers before e1466d9 propagated. Cap the tab budget at the container's
+    # REAL cores so per-chunk concurrency lands near cores/2 (the measured optimum)
+    # and cannot exceed cores. The final min() clamp below is belt; this is suspenders.
+    _TAB_BUDGET = min(_CONTAINER_CORES,
+                      int(os.environ.get("PROMPTLY_OVERLAY_TAB_BUDGET")
+                          or max(4, _CONTAINER_CORES // 2)))
     # Clamp to _CONTAINER_CORES — Remotion rejects concurrency > cores (never > alloc).
     _PER_CHUNK_CONCURRENCY = min(_CONTAINER_CORES,
                                  max(2, _TAB_BUDGET // max(_OVERLAY_CHUNK_COUNT, 1))

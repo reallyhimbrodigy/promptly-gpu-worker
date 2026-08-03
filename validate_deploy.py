@@ -9564,8 +9564,17 @@ def _render_burst_dark():
     assert _fn.decorator_list, "render_burst must be an @app.function"
     _dec_src = _ast.get_source_segment(_m_src, _fn.decorator_list[0]) or ""
     assert "cpu=48" in _dec_src, "render_burst must pin cpu=48 (Zac: 48 covers ~46 threads)"
-    assert "timeout=3000" in _dec_src, "render_burst timeout must match run_pipeline_bg (3000)"
     import re as _re
+    # timeout must MATCH run_pipeline_bg (lockstep), not a hardcoded value — both
+    # dropped 3000->1800 for the stall cap (Zac 2026-08-03 PM); the pair moves together.
+    _rp = next((_n for _n in _ast.walk(_tree)
+                if isinstance(_n, _ast.FunctionDef) and _n.name == "run_pipeline_bg"), None)
+    _rp_dec = (_ast.get_source_segment(_m_src, _rp.decorator_list[0])
+               if _rp and _rp.decorator_list else "") or ""
+    _bt = _re.search(r"timeout=(\d+)", _dec_src)
+    _rpt = _re.search(r"timeout=(\d+)", _rp_dec)
+    assert _bt and _rpt and _bt.group(1) == _rpt.group(1), \
+        f"render_burst timeout must MATCH run_pipeline_bg (lockstep); got burst={_bt and _bt.group(1)} vs bg={_rpt and _rpt.group(1)}"
     _mm = _re.search(r"memory=(\d+)", _dec_src)
     assert _mm and int(_mm.group(1)) >= 49152, \
         "render_burst memory must be >= 49152 (48 GiB) — the blur A/B OOM'd at 32 GiB"
