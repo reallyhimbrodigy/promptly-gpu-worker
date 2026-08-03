@@ -31409,15 +31409,33 @@ def _nr_mem_start():
         _NR_MEM["started"] = True
         def _loop():
             import time as _t
+            # cgroup v2 first, then v1; /sys/fs/cgroup/memory.current returned 0
+            # in these containers (v1 path or nested cgroup), so fall back to the
+            # process RSS from /proc/self/status which is always readable.
+            _paths = ("/sys/fs/cgroup/memory.current",
+                      "/sys/fs/cgroup/memory/memory.usage_in_bytes")
             while True:
                 if _NR_MEM["on"]:
-                    try:
-                        with open("/sys/fs/cgroup/memory.current") as _f:
-                            _m = int(_f.read().strip())
-                        if _m > _NR_MEM["peak"]:
-                            _NR_MEM["peak"] = _m
-                    except Exception:
-                        pass
+                    _m = 0
+                    for _p in _paths:
+                        try:
+                            with open(_p) as _f:
+                                _m = int(_f.read().strip())
+                            if _m > 0:
+                                break
+                        except Exception:
+                            continue
+                    if _m == 0:
+                        try:
+                            with open("/proc/self/status") as _f:
+                                for _ln in _f:
+                                    if _ln.startswith("VmRSS:"):
+                                        _m = int(_ln.split()[1]) * 1024
+                                        break
+                        except Exception:
+                            pass
+                    if _m > _NR_MEM["peak"]:
+                        _NR_MEM["peak"] = _m
                 _t.sleep(1.5)
         _th.Thread(target=_loop, daemon=True).start()
 

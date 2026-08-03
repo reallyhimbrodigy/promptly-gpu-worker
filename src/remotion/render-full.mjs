@@ -352,7 +352,7 @@ if (_rmResult && Array.isArray(_rmResult.slowestFrames) && _rmResult.slowestFram
   const _mean = _ts.reduce((a, b) => a + b, 0) / _ts.length;
   const _spread = Math.max(..._ts) / Math.max(1, Math.min(..._ts));
   console.log(
-    `[render-full] SLOWEST_FRAMES ${composition} n=${_sf.length} mean=${_mean.toFixed(0)}ms ` +
+    `[render-full] SLOWEST_FRAMES ${compositionId} n=${_sf.length} mean=${_mean.toFixed(0)}ms ` +
     `max/min=${_spread.toFixed(1)}x ` +
     `(${_spread < 1.5 ? "UNIFORM→browser-overhead" : "CONCENTRATED→component-cost"}): ` +
     _sf.map((f) => `f${f.frame}=${f.time.toFixed(0)}ms`).join(" "),
