@@ -26886,10 +26886,44 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # rendered 183s vs 243s@16 vs 303s@32 — fewer-than-cores beats the
     # oversubscription), which yields 24 on the cpu=48 burst automatically. Env
     # override stays for measurement/tuning.
+    # CONTAINER CORES (Zac 2026-08-03, THIRD RENDER_FATAL — c9e980fe): os.cpu_count()
+    # returns the HOST core count on Modal, NOT the container's cpu allocation. The
+    # tab budget (cores/2) therefore over-counted (host ~48 → budget 24), and the
+    # chunked --concurrency it derived EXCEEDED the container's real cores. Remotion
+    # HARD-REJECTS concurrency > cores ("Maximum for --concurrency is 8 (number of
+    # cores on this system)") → RENDER_FATAL. Masked at cpu=16 (host//2 landed near
+    # the limit), the cpu 16→8 cost cut exposed it. Read the cgroup CPU QUOTA (the
+    # true Modal alloc: 8 on the orchestrator, 48 on render_burst) and CLAMP every
+    # concurrency to it, so no config/env/host change can ever exceed cores again.
+    def _container_cpu_cores():
+        try:
+            with open("/sys/fs/cgroup/cpu.max") as _f:          # cgroup v2
+                _parts = _f.read().split()
+            if len(_parts) >= 2 and _parts[0] != "max":
+                _c = int(float(_parts[0]) / float(_parts[1]))
+                if _c >= 1:
+                    return _c
+        except Exception:
+            pass
+        try:
+            with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as _f:   # cgroup v1
+                _q = int(_f.read().strip())
+            with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as _f:
+                _per = int(_f.read().strip())
+            if _q > 0 and _per > 0:
+                _c = int(_q / _per)
+                if _c >= 1:
+                    return _c
+        except Exception:
+            pass
+        return os.cpu_count() or 8
+    _CONTAINER_CORES = _container_cpu_cores()
     _TAB_BUDGET = int(os.environ.get("PROMPTLY_OVERLAY_TAB_BUDGET")
-                      or max(4, (os.cpu_count() or 16) // 2))
-    _PER_CHUNK_CONCURRENCY = max(2, _TAB_BUDGET // max(_OVERLAY_CHUNK_COUNT, 1)) \
-        if _OVERLAY_CHUNK_COUNT > 1 else 8
+                      or max(4, _CONTAINER_CORES // 2))
+    # Clamp to _CONTAINER_CORES — Remotion rejects concurrency > cores (never > alloc).
+    _PER_CHUNK_CONCURRENCY = min(_CONTAINER_CORES,
+                                 max(2, _TAB_BUDGET // max(_OVERLAY_CHUNK_COUNT, 1))
+                                 if _OVERLAY_CHUNK_COUNT > 1 else 8)
     _overlay_ranges = _split_frames(int(total_output_frames), _OVERLAY_CHUNK_COUNT)
     _overlay_chunked = len(_overlay_ranges) > 1
 
@@ -27071,7 +27105,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # total drops to ~16 on cpu=16 (kills the contention that crawled micro to
         # 0.3 fps) and rises to ~24 on the cpu=48 burst. Same env override.
         _MICRO_TAB_BUDGET = int(os.environ.get("PROMPTLY_OVERLAY_TAB_BUDGET")
-                                or max(4, (os.cpu_count() or 16) // 2))
+                                or max(4, _CONTAINER_CORES // 2))  # container cores, not host (see _container_cpu_cores)
         if _micro_total_frames >= _MICRO_CHUNK_THRESHOLD:
             _MICRO_CHUNK_COUNT = min(
                 max(1, int(os.environ.get("PROMPTLY_RENDER_CHUNKS", "") or 8)),
@@ -27082,8 +27116,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _MICRO_CHUNK_COUNT = 1
         _micro_ranges = _split_frames(_micro_total_frames, _MICRO_CHUNK_COUNT)
         _micro_chunked = len(_micro_ranges) > 1
-        _MICRO_CONCURRENCY = (max(2, _MICRO_TAB_BUDGET // max(1, len(_micro_ranges)))
-                              if _micro_chunked else _PER_CHUNK_CONCURRENCY)
+        _MICRO_CONCURRENCY = min(_CONTAINER_CORES,
+                                 (max(2, _MICRO_TAB_BUDGET // max(1, len(_micro_ranges)))
+                                  if _micro_chunked else _PER_CHUNK_CONCURRENCY))  # clamp: never > cores
         if _micro_chunked:
             for _i, (_fs, _fe) in enumerate(_micro_ranges):
                 _chunk_path = os.path.join(work_dir, f"micro_chunk_{_i:02d}.mov")
