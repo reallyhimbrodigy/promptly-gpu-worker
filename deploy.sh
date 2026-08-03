@@ -62,3 +62,31 @@ else
     printf '%s\n' "$AUTH_OUT" | grep -E 'AUTH_PING_DETAIL' | tail -1
     exit 1
 fi
+
+# Server→WORKER auth gate (Zac 2026-08-03): IF the run-job auth gate
+# (_require_worker_auth, keyed on MODAL_RUN_SECRET) is present in the image, PROVE
+# the server's own credential authenticates to the worker (non-403) BEFORE the
+# deploy completes. This is the exact check that would have caught v446, where the
+# gate 403'd every dispatch because no caller sent _worker_auth. INERT while the
+# gate is stashed (the grep finds nothing); activates the day it ships — and it
+# tests the REAL round-trip, not a cross-repo grep.
+if grep -q "_require_worker_auth" modal_app.py; then
+    echo ""
+    echo "════════════════════════════════════════════════════════════"
+    echo "  Run-job auth gate PRESENT — verifying server → worker auth"
+    echo "════════════════════════════════════════════════════════════"
+    set +e
+    RUN_OUT="$(modal run cert_run_auth_ping.py 2>&1)"
+    RUN_403="$(printf '%s\n' "$RUN_OUT" | grep -oE '"is_403": ?(true|false)' | grep -oE 'true|false' | tail -1)"
+    set -e
+    if [ "$RUN_403" = "true" ]; then
+        echo ""
+        echo "  🚨🚨 SERVER→WORKER AUTH 403 — the run-job gate rejects the server's MODAL_RUN_SECRET."
+        echo "     EVERY dispatch will 403 (this IS the v446 outage). FIX: reconcile MODAL_RUN_SECRET"
+        echo "     across Modal (promptly-secrets), Render, and the iOS callers, THEN re-deploy."
+        printf '%s\n' "$RUN_OUT" | grep -E 'RUN_AUTH_PING' | tail -1
+        exit 1
+    else
+        echo "  ✅ server→worker auth OK (non-403) — the run-job gate accepts the server credential."
+    fi
+fi
