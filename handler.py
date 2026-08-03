@@ -20464,6 +20464,33 @@ def _ig_probe_timestamps(path):
     }
 
 
+def _ig_window_is_frozen(source_path, src_s, src_e):
+    """Is [src_s, src_e] of the SOURCE frozen, by the gate's own standard?
+
+    Freeze twin of _ig_window_is_black: same command, pad and thresholds the
+    inline single-clip echo uses, factored out so the boundary-crossing path
+    can never drift from it. Unmeasurable returns False — we never downgrade
+    what we could not check.
+    """
+    _dur = max(0.0, float(src_e) - float(src_s))
+    if _dur <= 0:
+        return False
+    a, b = max(0.0, float(src_s) - 0.3), float(src_e) + 0.3
+    try:
+        p = subprocess.run(
+            ["ffmpeg", "-v", "info", "-ss", str(a), "-t", str(b - a),
+             "-i", source_path,
+             "-vf", "freezedetect=n=%ddB:d=%s" % (
+                 _IG_FREEZE_NOISE_DB, _IG_FREEZE_DETECT_S),
+             "-an", "-f", "null", "-"],
+            capture_output=True, text=True)
+    except Exception:
+        return False
+    _frz = _ig_parse_spans(p.stderr or "", r"freeze_start: ([\d.]+)",
+                           r"freeze_end: ([\d.]+)", b - a)
+    return sum(_fe - _fs for _fs, _fe in _frz) >= _dur * _IG_SOURCE_ECHO_COVER
+
+
 def _ig_source_echo(source_path, spans, out_to_src):
     """Content-stillness discriminator for residual freeze spans: a frozen
     OUTPUT span whose mapped SOURCE window is also frozen is source content
@@ -20477,8 +20504,35 @@ def _ig_source_echo(source_path, spans, out_to_src):
         except Exception:
             defects.append((s, e))
             continue
-        if src_s is None or src_e is None or src_e <= src_s:
-            defects.append((s, e))
+        if src_s is None or src_e is None:
+            defects.append((s, e))     # unmappable: fail closed, unchanged
+            continue
+        if src_e <= src_s:
+            # ── SPAN CROSSES A CUT — see _ig_source_echo_black for the full
+            # write-up; this is the same defect in the FREEZE discriminator.
+            # out_to_src maps each endpoint through whichever clip contains it,
+            # so a span straddling a cut resolves to DISCONTINUOUS source times
+            # and src_e <= src_s filed it as OUR defect without freezedetect
+            # ever running — a faithful render of the user's own STATIC footage
+            # then failed the gate. Job 7e8a303f tripped freeze=[[43.07,43.9]]
+            # on the same clip whose BLACK spans were proven to be source
+            # content (forced repro 017fa6d3).
+            #
+            # Same repair: the span covers TWO source windows, so check the one
+            # anchored at each endpoint and downgrade if EITHER is frozen.
+            # test_integrity_freeze_echo_boundary.py F2 is the guard that
+            # matters — crossing a cut over MOVING source must still trip.
+            _half = max(1e-3, (e - s) / 2.0)
+            for _ws, _we in ((src_s, src_s + _half),
+                             (max(0.0, src_e - _half), src_e)):
+                if _we <= _ws:
+                    continue
+                if _ig_window_is_frozen(source_path, _ws, _we):
+                    downgraded.append({"span": (s, e), "src": (_ws, _we),
+                                       "boundary_crossing": True})
+                    break
+            else:
+                defects.append((s, e))
             continue
         a, b = max(0.0, src_s - 0.3), src_e + 0.3
         p = subprocess.run(

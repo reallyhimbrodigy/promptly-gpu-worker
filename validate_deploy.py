@@ -5156,7 +5156,8 @@ def _error_path_certs_actually_run():
                   "test_coverage_empty_transcript.py",
                   "test_asr_scribe_routing.py",
                   "test_render_never_blames_user_file.py",
-                  "test_integrity_black_echo_boundary.py"):
+                  "test_integrity_black_echo_boundary.py",
+                  "test_integrity_freeze_echo_boundary.py"):
         assert os.path.exists(_cert), f"{_cert} missing from the repo"
         _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
         assert _r.returncode == 0, (
@@ -5432,6 +5433,61 @@ def _integrity_black_echo_boundary():
     _h = open("handler.py").read()
     assert "spans={','.join(_sp)}" in _h, "trip line must emit per-span start->end mappings"
     assert "(CUT)" in _h, "a boundary-crossing span must be marked in the trip line"
+
+
+@check("INTEGRITY_TRIP FREEZE ECHO — SAME CUT-CROSSING DEFECT AS BLACK (2026-08-02): _ig_source_echo carried the identical `src_e <= src_s -> defects` branch, so a freeze span straddling a backward cut was filed as OUR defect without freezedetect ever running — a faithful render of the user's own STATIC footage failed the gate. Job 7e8a303f tripped freeze=[[43.07,43.9]] on the same clip whose BLACK spans were proven source content by forced repro 017fa6d3. Same two-window repair. The guard that matters is the SECOND case: crossing a cut over MOVING source must still trip, because the freeze internals differ from black. cert: test_integrity_freeze_echo_boundary.py 9/9")
+def _integrity_freeze_echo_boundary():
+    import handler, os as _os, subprocess as _sp, tempfile as _tf
+    assert _os.path.exists("test_integrity_freeze_echo_boundary.py"), "cert must ride the repo"
+    assert callable(getattr(handler, "_ig_window_is_frozen", None)), \
+        "the crossing path must share ONE window check with the single-clip path"
+    _fd, _src = _tf.mkstemp(suffix="_frz.mp4"); _os.close(_fd)
+    try:
+        _sp.run(["ffmpeg", "-y", "-v", "error",
+                 "-f", "lavfi", "-i", "color=c=green:s=320x240:r=30:d=2",
+                 "-f", "lavfi", "-i", "nullsrc=s=320x240:r=30:d=2",
+                 "-filter_complex",
+                 "[1:v]geq=random(1)*255:128:128[n];[0:v][n]concat=n=2:v=1:a=0[v]",
+                 "-map", "[v]", "-pix_fmt", "yuv420p", _src],
+                capture_output=True, timeout=240)
+        assert _os.path.getsize(_src) > 500, "fixture build failed"
+
+        def _crossing(t):            # clip A then a BACKWARD cut into clip B
+            return 0.9 + t if t < 1.0 else t - 1.0
+
+        def _crossing_moving(t):     # both windows land in the NOISE half
+            return 2.4 + t if t < 1.0 else t + 1.4
+
+        # 1. THE FIX — crossing a cut over FROZEN source must downgrade
+        _d, _g = handler._ig_source_echo(_src, [(0.9, 1.1)], _crossing)
+        assert _g and not _d, f"boundary-crossing frozen source must downgrade: d={_d} g={_g}"
+        assert _g[0].get("boundary_crossing") is True, "must record why"
+
+        # 2. THE GUARD THAT MATTERS — crossing over MOVING source must STILL trip
+        _d2, _g2 = handler._ig_source_echo(_src, [(0.9, 1.1)], _crossing_moving)
+        assert _d2 and not _g2, \
+            f"crossing over MOVING source is a REAL defect and must trip: d={_d2} g={_g2}"
+
+        # 3. single-clip behaviour unchanged, both directions
+        _d3, _g3 = handler._ig_source_echo(_src, [(0.4, 1.4)], lambda t: t)
+        assert _g3 and not _d3, "single-clip frozen must still downgrade"
+        _d4, _g4 = handler._ig_source_echo(_src, [(2.4, 3.4)], lambda t: t)
+        assert _d4 and not _g4, "single-clip moving must still trip"
+
+        # 4. fail-closed on an unmappable endpoint
+        _d5, _g5 = handler._ig_source_echo(_src, [(0.4, 1.4)], lambda t: None)
+        assert _d5 and not _g5, "unmappable must stay a defect"
+    finally:
+        try: _os.unlink(_src)
+        except OSError: pass
+
+    # BOTH echoes must share the one-window-check shape — a future edit to one
+    # must not silently leave the other on the old branch again.
+    _h = open("handler.py").read()
+    assert _h.count("boundary_crossing") >= 2, \
+        "black AND freeze must both carry the crossing repair"
+    assert "if src_s is None or src_e is None or src_e <= src_s:" not in _h, \
+        "the collapsed branch that hid the crossing case must be gone from BOTH echoes"
 
 
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
