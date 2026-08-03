@@ -117,3 +117,69 @@ components in #6, and the fix is the same: discriminate or remove.
 **Blocked on:** #6's re-audit needs a 2-arm PLAN_ONLY run (~$3, priced in
 `MODAL_SPEND_LEDGER.md`) and Zac's approval under Rule 8. Everything else here
 is free and already done.
+
+---
+
+# REACHABILITY AUDIT — all families (2026-08-02)
+
+I counted every family in the original 709-plan audit. What I never did — the
+real gap — is apply the **content-gated vs discrimination-failure** test to
+anything but motion graphics. Applied everywhere:
+
+| family | state | verdict |
+|---|---|---|
+| **CAPTIONS** | all 10 fire (CleanCut 29% → TypewriterReveal 0.7%) | **HEALTHY — and the model to copy.** Caption styles discriminate on *concrete visual description* (colors, fonts, hex codes), not abstract tonal fitness. That is why this family works and MG's overlap cluster did not. |
+| **ZOOM** | all 7 fire; StagedPush 0.2%, DepthPull 0.5%, FocusWindow 0.6% | StagedPush **rare by instruction** ("most videos use it ZERO times"). DepthPull (hook-only) and FocusWindow (mid_peak-only) are arc-narrow, *not* content-gated — against 4 and 5 options at their arc homes they should land far above 1%. **Discrimination candidates.** |
+| **SFX** | 5 sounds under 30 uses | **Content-gated** (voiced suspicion, failure-as-punchline, quoted notification…) *and* user-requestable by name. Correctly rare. |
+| **OVERLAYS** | caption_match 244 vs sticky_note 3 | Content-gated **and** duplicated as an MG with no routing rule — fixed in `857713c`. |
+| **TRANSITIONS** | 25 across 709 plans | **UNREACHABLE — see below.** |
+
+## 🚩 Transitions: gated *and* under-steered, and only the first part is legitimate
+
+**The gate is real.** Seams are built from `scdet ∪ B-roll edges` — picture
+changes only. Measured on 50 runs: **41/50 plans have `shot_boundaries=0`** (82%)
+and **24/42 sub-call invocations get zero qualifying seams** (57%). Single-shot
+talking-head footage has no picture change, so no seam, so no transition. That
+correctly explains the ~405 plans that get zero.
+
+**It does not explain the rest.** When seams *are* offered the median is 6 per
+plan. Estimated 304 of 709 plans carry ≥1 seam ≈ 1,519 seam opportunities.
+Emitted: **25 = 1.6% conversion.**
+
+And the sub-call prompt explicitly instructs:
+
+> *"the restraint is in the COUNT (1-3, most cuts still play straight)"*
+
+1–3 across 304 seam-bearing plans is **304–912 transitions**. It delivers 25 —
+**12× to 36× below its own instruction.**
+
+**Mechanism, and it is the same shape as the six MG components:** the sub-call
+offers *"choose editorially among what is offered, **or choose the bare cut** —
+and say why, as a `bare_seams` entry."* Bare is a first-class, always-available
+option with a cheap justification path, competing against nine types that each
+have to be argued for. The model takes the free option ~98% of the time.
+
+**This lives in a prompt nobody has audited** — `_TRANSITIONS_SUBCALL_SYS`
+(~2,160 tok, `handler.py:10600`). Every audit run so far was on Call 2, and the
+transition catalogue is not even in Call 2: SEAM TREATMENTS says *"You do not
+emit them here."*
+
+## The density question, answered from the doctrine
+
+THE WINDOW RULE: *"~2-second windows. A window holds ONE dominant visual event —
+a zoom landing, B-roll entering, a transition firing, an MG dropping, an overlay
+revealing."* → ceiling **12.5 dominant events per 25s**.
+
+🚩 **"hype 15 vs standard 11" is not that denominator.** It counts cuts and
+caption emphases, which the window rule's own list excludes. Comparing 11 to 12.5
+compares two different metrics.
+
+With the doctrine's denominator (`window_load` = dominant / (duration/2)),
+measured on the same corpus: **standard 0.524, control replicate 0.440** — i.e.
+standard runs at **~48% of the ceiling**.
+
+**Answer: standard is deliberately restrained but is *not* at its cap.** It has
+roughly 2× headroom in dominant events before the window rule is violated. The
+binding constraint today is not the window rule — something upstream holds
+density at half the permitted level, and transitions running 12–36× under their
+own instruction is one concrete, measured piece of that gap.
