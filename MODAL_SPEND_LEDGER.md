@@ -25,7 +25,9 @@ Columns: date · agent · app · what · tasks · container-seconds · $ · veri
 
 | 2026-08-02 | prompt | `query-stage-decomp` | production stage_timings decomposition, CPU-only DB read | 1 | ~90 | ~$0.01 | yes (0 tasks) |
 
-**prompt agent session total: ~$12.08** (probe never ran = $0; reorder A/B ~$4). Explicit GO covered the
+| 2026-08-02 | prompt | `cert-modality-read` | items 8+9: modality split + output tokens, 8 PLAN_ONLY runs | 8 | ~2,400 | ~$0.80 | yes (0 tasks) |
+
+**prompt agent session total: ~$12.88** (probe never ran = $0; reorder A/B ~$4). Explicit GO covered the
 detector; the probe is taken as covered by "these four are cheaper and more
 certain" contrasted against the HELD $10 A/B.
 
