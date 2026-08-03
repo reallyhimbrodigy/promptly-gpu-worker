@@ -32,6 +32,47 @@ than anything else. They just don't come back to watch it.
 ⚠️ Caveat: these are client-fired analytics. A missing `result_viewed` is not
 proof of no view. But the direction is consistent across 1000 deliveries.
 
+## 🔑 THE WIDER GAP: 51% OF TRAFFIC GETS NO EDITORIAL ANALYSIS AT ALL
+
+Only `standard_editorial` makes an editorial planning call. Every plan marker
+fires 392/392 on it and **0 on every other route**:
+
+| route | n | source_text_regions | emphasis_moments | video_plan | caption_keywords |
+|---|---|---|---|---|---|
+| standard_editorial | 392 | 392 | 392 | 392 | 392 |
+| minimal_speech_uncut | 206 | 0 | 0 | 0 | 0 |
+| minimal | 158 | 0 | 0 | 0 | 0 |
+| moodreel | 140 | 0 | 0 | 0 | 0 |
+| hype | 12 | 0 | 0 | 0 | 0 |
+
+**Every prompt improvement, component fix, FITS/FIGHTS rewrite and detector
+reaches 39% of delivered jobs.** The 22 inherited prompt commits reach 39%.
+
+### Deliberate or evolved? BOTH — and the split is the point
+
+`route_reason` settles it:
+
+| route | reason | n | kind |
+|---|---|---|---|
+| minimal_speech_uncut | **transcription_incomplete** | 61 | **FAILURE** |
+| | no_speech_muted | 56 | content |
+| | too_short | 53 | content |
+| | **plan_collapsed** | 36 | **FAILURE** |
+| minimal | no_speech / muted | 109 | content |
+| | too_short | 35 | content |
+| | **plan_collapsed** | 9 | **FAILURE** |
+| moodreel | no_speech / not_talking_head / no_audio | 134 | content |
+
+**moodreel is the deliberate one and it works** — content-driven routing, and it
+has the best export rate of any route at 20.0%.
+
+**`minimal_speech_uncut` is the evolved one: 97 of 206 (47%) are FAILURES** —
+transcription we could not complete, or a plan that collapsed — dressed as a
+route. Those users did not upload "content that needs no editing". The pipeline
+failed and handed back their own footage, and it cost them a credit.
+
+**~106 of 1000 deliveries are pipeline failures delivered as products.**
+
 ## THE FAULTS, CLUSTERED (17 of 20 watched; the pattern saturated)
 
 ### 1. CAPTIONS ARE ONE WORD AT A TIME, AND TOO SMALL TO READ
