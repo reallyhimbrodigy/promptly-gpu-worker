@@ -21641,6 +21641,72 @@ def _refine_boundary_to_low_energy(
     return refined_sample / sample_rate
 
 
+class RenderPreconditionError(ValueError):
+    """A render contract that CANNOT be satisfied by degrading the plan.
+
+    The degrade ladder exists to drop decorations after a render crash. That
+    only helps when the failure depends on what we drew. A precondition failure
+    — the frame grid, the audio/video contract — is decided before a single
+    frame is drawn and is identical on every rung, so the ladder would burn
+    3x the work for a guaranteed-identical outcome (Zac 2026-08-03, from the
+    two RENDER_FATALs that hit our first paying subscriber 22 minutes apart:
+    enhancements_dropped=[] and zero render stage timings on every rung).
+
+    Raised for contract violations; the ladder re-raises it immediately.
+    """
+
+
+# The frame grid is a property of the OUTPUT, not the input (Zac 2026-08-03).
+_OUTPUT_GRID_SAMPLE_RATE = 48000
+
+
+def _output_frame_grid(probed_fps, probed_sample_rate=None):
+    """Derive the (fps, sample_rate) grid the render EMITS at.
+
+    THE BUG THIS KILLS. `source_fps` was ffprobe's `r_frame_rate` taken
+    verbatim. A microsecond-timebase container reports 1000000/33333 =
+    30.00030000300003, and 44100/30.0003 = 1469.9853 samples/frame, so
+    build_per_cut_audio's frame-grid check raised and the job died
+    RENDER_FATAL — an ordinary 44.1kHz ~30fps video turned into a terminal
+    error, which is a zero-reject violation.
+
+    WHY ROUNDING HERE IS NOT SYMPTOM-SNAPPING. We already emit on an integer
+    grid: the composite encoder writes `-r int(round(source_fps))` and sizes
+    its GOP the same way. Only the timeline and the audio builder used the
+    ragged probe, so the internal grid disagreed with the grid we actually
+    ship. This makes them agree. It is not a special case for 30.0003 — the
+    output rate is simply what we choose, and the source's rate is irrelevant
+    once normalised.
+
+    NO-OP FOR EVERY JOB THAT WORKS TODAY. A non-integral fps cannot pass the
+    existing grid check at all: 29.97 = 2997/100 needs a sample rate divisible
+    by 2997, and neither 44100 nor 48000 is. So every currently-succeeding job
+    already has an integral fps, for which round() changes nothing.
+
+    The sample rate is kept as probed WHEN it already shares the grid —
+    44100/30 = 1470 and 44100/60 = 735 are both exact, so the common phone
+    source needs no resample. Only a genuinely incompatible pair moves to
+    48000 (build_per_cut_audio extracts with `-ar`, so ffmpeg resamples).
+    """
+    try:
+        _f = float(probed_fps)
+    except (TypeError, ValueError):
+        _f = 30.0
+    if not (0.0 < _f <= 240.0):
+        _f = 30.0
+    grid_fps = int(round(_f)) or 30
+
+    try:
+        _sr = int(probed_sample_rate or 0)
+    except (TypeError, ValueError):
+        _sr = 0
+    if _sr > 0 and _sr % grid_fps == 0:
+        return grid_fps, _sr                      # already shares the grid
+    if _OUTPUT_GRID_SAMPLE_RATE % grid_fps == 0:
+        return grid_fps, _OUTPUT_GRID_SAMPLE_RATE  # resample to the house rate
+    return grid_fps, grid_fps * 1600               # exotic fps: build a grid that fits
+
+
 def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample_rate=48000, trans_slot_frames=None, per_cut_render_dur_frames=None, source_fps=60.0, trim_head_dur=None, trim_tail_dur=None, audio_stream_offset=0.0, removed_word_spans=None):
     """Build the per-cut audio track — COMPRESSION (overlap) transition model.
 
@@ -21694,7 +21760,12 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     _spf_float = sample_rate / float(source_fps)
     _spf = int(round(_spf_float))
     if abs(_spf_float - _spf) > 1e-9:
-        raise ValueError(
+        # RenderPreconditionError, not ValueError: this is decided before any
+        # frame is drawn and is identical on every ladder rung, so the ladder
+        # must fail fast instead of re-rendering into it twice more. Callers
+        # derive the pair from _output_frame_grid(), so reaching here means WE
+        # chose an incompatible target — never the user's file.
+        raise RenderPreconditionError(
             f"sample_rate {sample_rate} is not integer-divisible by fps "
             f"{source_fps} ({_spf_float} samples/frame): audio and video "
             f"cannot share the frame grid")
@@ -23799,29 +23870,32 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     try:
         if "/" in _src_fps_str:
             _num, _den = _src_fps_str.split("/")
-            source_fps = float(_num) / float(_den)
+            _probed_fps = float(_num) / float(_den)
         else:
-            source_fps = float(_src_fps_str)
+            _probed_fps = float(_src_fps_str)
     except Exception:
-        source_fps = 30.0
-    if source_fps <= 0 or source_fps > 240:
-        source_fps = 30.0
-    # TRUST THE NORMALISATION (Zac 2026-08-03): the render source has been through
-    # _do_fps_normalize, which re-encodes to an INTEGER fps. A probe reading
-    # 30.00030000300003 is container-timebase DRIFT, not a real fractional rate —
-    # and it breaks the audio/video frame grid downstream (sample_rate 44100 is
-    # not integer-divisible by 30.0003 → RENDER_FATAL, 2 jobs). Snap to the
-    # integer the normaliser produced when the drift is sub-frame-tiny (< 0.01);
-    # a genuinely fractional rate (e.g. 29.97, 0.03 off) is NOT snapped and, being
-    # normalised upstream, never reaches here un-integered anyway.
-    _fps_int = round(source_fps)
-    if _fps_int > 0 and abs(source_fps - _fps_int) < 0.01 and abs(source_fps - _fps_int) > 1e-9:
-        print(f"[render] fps timebase drift {source_fps:.6f} → snapped to {_fps_int} "
-              f"(the normalise target; avoids the frame-grid RENDER_FATAL)", flush=True)
-        source_fps = float(_fps_int)
-    print(f"[render] Unified source fps: {source_fps:.4f} (raw: {_src_fps_str})", flush=True)
+        _probed_fps = 30.0
+    # SUPERSEDES the <0.01 drift-snap (5223fe4). That snapped 30.0003 and
+    # explicitly declined 29.97 — "being normalised upstream, [it] never reaches
+    # here un-integered anyway" — which is not so: _do_fps_normalize canonicalizes
+    # AT SOURCE FPS and passthrough-SYMLINKS any source already 1080x1920 yuv420p
+    # h264 within 2% of target, so a 29.97 NTSC file arrives untouched. 29.97 =
+    # 2997/100 needs a sample rate divisible by 2997; neither 44100 nor 48000 is,
+    # so every one of them was still dying RENDER_FATAL. The grid below needs no
+    # epsilon at all.
 
-    sample_rate = probe_audio_sample_rate(source_path) or 48000
+    # THE FRAME GRID IS A PROPERTY OF THE OUTPUT, NOT THE INPUT (Zac 2026-08-03).
+    # We emit at a rate we choose — the composite encoder already writes
+    # `-r int(round(source_fps))` — so the timeline and the audio builder must
+    # use that same rate, not ffprobe's raw ratio. A microsecond-timebase
+    # container reports 1000000/33333 = 30.00030000300003; carrying that ragged
+    # value into build_per_cut_audio made 44100/30.0003 non-integral and killed
+    # the job RENDER_FATAL on an entirely ordinary source.
+    source_fps, sample_rate = _output_frame_grid(
+        _probed_fps, probe_audio_sample_rate(source_path))
+    print(f"[render] Output frame grid: {source_fps}fps @ {sample_rate}Hz "
+          f"({sample_rate // source_fps} samples/frame) "
+          f"— probed {_probed_fps:.6f} (raw: {_src_fps_str})", flush=True)
 
     # ── Build canonical time maps per cut (SSOT for video + audio) ──────────
     # No sub-clip splitting, no speed-curve interpolation. Each cut has a
@@ -28633,6 +28707,21 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
                 raise ContainerTeardownError(
                     f"{type(_render_err).__name__} during render"
                 ) from _render_err
+            # PRECONDITION FAILURES ARE NOT RETRYABLE (Zac 2026-08-03). The
+            # ladder drops decorations; that can only help when the failure
+            # depends on what we drew. A contract violation (the frame grid) is
+            # decided before any frame exists, so every rung hits it identically
+            # — proven on the two jobs that killed our first paying subscriber's
+            # renders: enhancements_dropped=[] and zero render stage timings on
+            # all three rungs. Retrying it is not a net, it is 3x the burn for a
+            # guaranteed-identical outcome. Fail fast.
+            if isinstance(_render_err, RenderPreconditionError):
+                _record_divergence(
+                    "render", {"rung": _rung}, "ladder_precondition_fail_fast",
+                    reason=f"{type(_render_err).__name__}: {str(_render_err)[:120]}")
+                print(f"[render-degrade] rung={_rung} PRECONDITION — not retryable, "
+                      f"failing fast: {str(_render_err)[:200]}", flush=True)
+                raise
             # W1 ledger: the SAME failure signature on consecutive rungs
             # means the ladder is retrying an input-shape error it cannot
             # fix (929f9b48: CaptionStyle validation failed identically on

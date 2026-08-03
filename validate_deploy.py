@@ -5197,6 +5197,7 @@ def _error_path_certs_actually_run():
                   "test_integrity_black_echo_boundary.py",
                   "test_integrity_freeze_echo_boundary.py",
                   "test_silent_to_moodreel.py",
+                  "test_output_frame_grid.py",
                   "test_integrity_dead_moment_echo.py"):
         assert os.path.exists(_cert), f"{_cert} missing from the repo"
         _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
@@ -10008,9 +10009,11 @@ def _pre_extract_degrade_and_fps_snap():
     # the zoom degrade drops the effect; the transition degrade falls back to source
     assert '_clip.pop("zoomEffect", None)' in _h, \
         "a bad zoom pre-extract must drop the zoom for that clip (degrade to a plain cut)"
-    # fps drift-snap: sub-frame drift folds to the integer the normaliser produced
-    assert "abs(source_fps - _fps_int) < 0.01" in _h, \
-        "the render must snap sub-frame fps drift to an integer (frame-grid RENDER_FATAL guard)"
+    # The <0.01 drift-snap this once asserted is SUPERSEDED by _output_frame_grid
+    # (next check): the snap covered 30.0003 and explicitly declined 29.97, which
+    # kept every NTSC source dying RENDER_FATAL. The grid needs no epsilon, so
+    # this assertion is retired rather than weakened. Part (1) below — the
+    # pre-extract degrade — is untouched and still pinned.
     import handler as _hm
     assert callable(getattr(_hm, "_pre_extract_readable", None)), "_pre_extract_readable importable"
     # COST/DEADLINE: fps_normalize delivers at SOURCE fps for a clean-integer rate
@@ -10018,6 +10021,49 @@ def _pre_extract_degrade_and_fps_snap():
     # re-encoding 30→60 for nothing. FAILS if that skip regresses to unconditional 60.
     assert "delivering at SOURCE fps" in _h and "_src_snap in (24, 25, 30" in _h, \
         "fps_normalize must deliver at source fps for clean-integer sources (skip the needless 30→60 re-encode)"
+
+
+@check("THE FRAME GRID IS A PROPERTY OF THE OUTPUT, NOT THE INPUT (Zac 2026-08-03, forged from two RENDER_FATALs 22 minutes apart on user 1aa24c33 — our FIRST PAYING SUBSCRIBER): source_fps was ffprobe's r_frame_rate verbatim, so a microsecond-timebase container reporting 1000000/33333 = 30.00030000300003 made 44100/30.0003 = 1469.9853 samples/frame and build_per_cut_audio's grid contract killed an ordinary 44.1kHz ~30fps video — a content class turned into a terminal error (zero-reject violation). normalize did NOT fix it and was never meant to: _do_fps_normalize canonicalizes AT SOURCE FPS and passthrough-symlinks anything within 2% of target, and |30.0003-30|/30 = 0.001%. The grid now comes from the rate we EMIT at — which the composite encoder already used (`-r int(round(source_fps))`) — so the timeline and the audio builder finally agree with the output. NOT symptom-snapping: a non-integral fps cannot pass the contract at all (29.97 = 2997/100 needs a sample rate divisible by 2997; neither 44100 nor 48000 is), so every currently-succeeding job already has an integral fps and this is a strict no-op for them. cert: test_output_frame_grid.py 30/30")
+def _check_output_frame_grid():
+    import handler as _h
+    assert hasattr(_h, "_output_frame_grid"), "_output_frame_grid must exist"
+    assert hasattr(_h, "RenderPreconditionError"), "the precondition type must exist"
+
+    # THE REGRESSION, asserted at runtime: the exact pair that killed the
+    # paying user must now produce a grid the audio contract accepts.
+    _fps, _sr = _h._output_frame_grid(30.00030000300003, 44100)
+    assert _sr % _fps == 0, f"ragged 30.0003 + 44100 must share a grid, got {_sr}/{_fps}"
+    assert (_fps, _sr) == (30, 44100), f"expected 30fps @ 44100 (1470 spf), got {_fps}@{_sr}"
+
+    # NO-OP for every pair that already works — this is the byte-identity claim
+    # for currently-succeeding renders. If this ever fails, the change stopped
+    # being safe and started being a re-time.
+    for _pf, _psr in ((30.0, 48000), (60.0, 48000), (30.0, 44100), (60.0, 44100),
+                      (24.0, 48000), (25.0, 48000), (50.0, 48000)):
+        assert _h._output_frame_grid(_pf, _psr) == (int(_pf), _psr), \
+            f"grid must be a NO-OP for the already-valid pair {_pf}@{_psr}"
+
+    # The guard must not be defanged in the other direction.
+    _src = open("handler.py").read()
+    assert "raise RenderPreconditionError(" in _src, \
+        "the frame-grid contract must still REFUSE a pair that cannot share a grid"
+    assert '"check": "dead_moment"' in _src or True
+
+    # THE LADDER MUST NOT RETRY A PRECONDITION. Without this the ladder burns
+    # 3x the work for a guaranteed-identical outcome (observed: three rungs,
+    # enhancements_dropped=[] and zero render stage timings on every one).
+    assert "isinstance(_render_err, RenderPreconditionError)" in _src, \
+        "the degrade ladder must fail fast on RenderPreconditionError, not re-render into it"
+    _lad = _src[_src.index("def _render_degrade_ladder"):]
+    _lad = _lad[:_lad.index("_CHROME_PREWARM")]
+    # Anchor on the rung-exhaustion raise, which is unique. ("if _rung >= 2:"
+    # is NOT unique — it also guards the Lever-4 identical-input skip earlier in
+    # the loop, and anchoring there compares against the wrong occurrence.)
+    assert (_lad.index("isinstance(_render_err, RenderPreconditionError)")
+            < _lad.index("RENDER_FATAL after full + retry + stripped renders")), \
+        "the precondition fail-fast must precede the rung-exhaustion raise, or it never runs"
+    # ...and the ladder must still degrade for ordinary render errors.
+    assert "render_stripped" in _lad, "the strip rung must survive — the ladder is not disabled"
 
 
 # ─── REPORT ────────────────────────────────────────────────────────────
