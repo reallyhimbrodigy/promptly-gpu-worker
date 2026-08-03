@@ -648,7 +648,7 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
     # 300s slack) or a healthy long render gets false-reaped mid-flight. Deploy the
     # reaper raise FIRST, this SECOND. Billing is per-active-second, so short jobs
     # (the common case) cost the same as before — the cap only bounds the tail.
-    timeout=1800, retries=0, cpu=16, memory=12288, region="us",  # STALL CAP (Zac GO 2026-08-03 PM): timeout 3000→1800. Nothing cancels a stalled spawn — the reaper only writes the DB row 5min AFTER Modal's own timeout kills the container, so a stall billed to the FULL 3000s (50min) ≈ $0.71-3/job (spawn-not-complete is the #1 wasted class, 1447s avg wall). 1800s (30min) is 1.43x the LONGEST legit render ever observed (MAX 1256s, p99 900s) + the 300s source cap bounds a 5-min-source render near 1200s, so it is safe against the ACTUAL distribution while cutting the worst case 50→30min (~40% of the waste). MEASURED RISK: watch PLATFORM_TIMEOUT reaps for wall≈1800s — if a legit render ever hits it we raise within a day. Watchdog (progress-aware, kills in minutes) + reaper-cancel are the real fix, next. PRIOR CPU-STARVATION CORRECTION: cpu 8→16. The 8 cut CRASHED completion 78.9%→35.7% (a 480p ultrafast proxy encode blew 30s — CPU starvation) and bought little: job compute was ALREADY ~$0.09 (at the law); the real gap is ~$87/day of NON-JOB warmup/prewarm/idle, which cpu never touched. Memory STAYS 12GiB (measured-safe 5.9-8.2GiB; memory-time is 59% of cost so it carries the bulk of the saving). NOTE: PROMPTLY_RENDER_CORE_BUDGET in the body MUST track this (validate_deploy pins the pair). PRIOR (reverted): cpu 16→8 (~15-20% off) + memory 24GiB→12GiB (~29%). cpu=8 was the SAFE cut: 60cef170 had normalize (149s) EXCEEDING edit_plan (147s) at cpu=16 — there was never slack for cpu=4, but at cpu=8 fps_normalize slows only ~1.5x and stays inside edit_plan on the 60s target. cpu=4 becomes safe ONLY once the fps_normalize SKIP lands (nothing then races edit_plan). memory 24GiB→12GiB. ~15 days to the $1500 cap (~Aug 18) then rendering goes OFFLINE; memory-time is 59% of $/job so this is ~29% off the total. SAFE: the staging-hiccup in-process-render fallback was DISARMED in v444 (it now RAISES, never render_stage), and the non-render peak is 5.9-8.2GiB (cgroup [nonrender-mem] on real traffic) → 12GiB = 1.5-2x headroom. ⚠️ RESIDUAL: sub-floor jobs (<45s output, below the burst floor) still render IN-PROCESS here — a heavy short render could approach 12GiB; WATCHED on real traffic (OOM = exit 137 → raise back to 16-18). inc2 MEMORY DROP (Zac GO 2026-08-02): 64GiB→24GiB, coupled to PROMPTLY_RENDER_BURST=1 LIVE. Render (incl. the >32GiB blur peak) now runs on the cpu=48 render_burst, so this orchestrator NO LONGER renders in-process — its floor is the NON-render peak, measured 5.4-5.9GiB (cgroup-sampled [nonrender-mem] on real v441 traffic), and 24GiB = 4x that with vidstab headroom (a 2.7x memory-time cut, the bulk of $0.41→$0.11). ⚠️ RESIDUAL OOM RISK: the render_burst STAGING-hiccup fallback renders IN-PROCESS here — a blur render on that RARE path would OOM at 24GiB; watched on first shaky/blur fallback. Tighten toward 12GiB only after shaky-job [nonrender-mem] samples confirm the vidstab peak. The old "48GiB floor" was the in-process-render floor and is retired by the burst move. PRIOR: 128GB→64GB on MEASURED 15.7GiB render peak. 3 real renders (incl. a 93s clip) peaked at 15.7GiB render-stage RSS (cgroup-sampled, memory_peak_measure_app) — 64GiB = 4x the measured peak and 2x the 32GB OOM point (blur A/B, a parallel/heavier case). Memory is 59% of $/job, so 128→64 ~halves the dominant term (~$0.355→~$0.25). OOM kills jobs, so sized on the measured number with generous headroom; do NOT drop below 48 (the 32GB OOM floor). PRIOR: EMERGENCY COST CUT (2026-07-30): cpu 64→16 ONLY, memory was UNCHANGED at 128GB. CPU is 77% of the bill ($1153 vs $347 mem) → cpu 64→16 = 4× on 77% with ZERO OOM risk. Memory 128→48GB (2.7× on 23%) is a SEPARATE cert-gated step — the blur A/B OOM'd at 32GB, so 48 is an untested guess between a known-fail and known-pass; step it down only after a real render certs it. retries 2→0: a failing job billed up to 3×; restore post-fix. The app hit the $1500 cap; Phase 1 inc2 (render_burst split) is not yet shipped, so this container held cpu=64/128GB for ~450s/job while only the render stage (~72s) needs the cores — and with PROMPTLY_RENDER_FANOUT=1 the heavy Remotion chunks already run on the cpu=16 render_chunk_fanout containers, so this box was mostly idle-waiting at cpu=64. ~4× cost cut now; render stage slower (~+100-200s, cpu-bound composite/HLS/exports), transcribe/plan/Gemini-wait unaffected (network-bound). 48GB floor: the blur A/B OOM'd at 32GB, so do NOT go lower. Restore/replace with the render_burst split (inc2). Prior A-L3 note: 8 chunks × 4 tabs = 32 tabs at cpu=64 was the platform max.
+    timeout=1200, retries=0, cpu=16, memory=12288, region="us",  # STALL CAP (Zac GO 2026-08-03 PM): timeout 3000→1800→1200. A 20-min render is one the user abandoned 17 min ago. Zac asked for 900 but the RECIPE WALL-CLOCK gate proves 900 is mathematically incompatible with the 300s source cap: a 300s source render reserve alone (duration*3=900s) consumes the whole 900 budget, leaving nothing for the recipe (min coherent timeout = 1140s = 600 floor + 540 reserve). 1200 is the coherent cut: serves the 30-200s target cleanly (a heavy 60s source ~590s render + ~600 recipe = 1190 < 1200), KILLS >~200s sources (the abandoned p99). Going to 900 needs the SOURCE CAP lowered (Zac #3) or the DURATION-PROPORTIONAL watchdog (~200s+10*source_s, the real fix, queued). PRIOR timeout 3000→1800. Nothing cancels a stalled spawn — the reaper only writes the DB row 5min AFTER Modal's own timeout kills the container, so a stall billed to the FULL 3000s (50min) ≈ $0.71-3/job (spawn-not-complete is the #1 wasted class, 1447s avg wall). 1800s (30min) is 1.43x the LONGEST legit render ever observed (MAX 1256s, p99 900s) + the 300s source cap bounds a 5-min-source render near 1200s, so it is safe against the ACTUAL distribution while cutting the worst case 50→30min (~40% of the waste). MEASURED RISK: watch PLATFORM_TIMEOUT reaps for wall≈1800s — if a legit render ever hits it we raise within a day. Watchdog (progress-aware, kills in minutes) + reaper-cancel are the real fix, next. PRIOR CPU-STARVATION CORRECTION: cpu 8→16. The 8 cut CRASHED completion 78.9%→35.7% (a 480p ultrafast proxy encode blew 30s — CPU starvation) and bought little: job compute was ALREADY ~$0.09 (at the law); the real gap is ~$87/day of NON-JOB warmup/prewarm/idle, which cpu never touched. Memory STAYS 12GiB (measured-safe 5.9-8.2GiB; memory-time is 59% of cost so it carries the bulk of the saving). NOTE: PROMPTLY_RENDER_CORE_BUDGET in the body MUST track this (validate_deploy pins the pair). PRIOR (reverted): cpu 16→8 (~15-20% off) + memory 24GiB→12GiB (~29%). cpu=8 was the SAFE cut: 60cef170 had normalize (149s) EXCEEDING edit_plan (147s) at cpu=16 — there was never slack for cpu=4, but at cpu=8 fps_normalize slows only ~1.5x and stays inside edit_plan on the 60s target. cpu=4 becomes safe ONLY once the fps_normalize SKIP lands (nothing then races edit_plan). memory 24GiB→12GiB. ~15 days to the $1500 cap (~Aug 18) then rendering goes OFFLINE; memory-time is 59% of $/job so this is ~29% off the total. SAFE: the staging-hiccup in-process-render fallback was DISARMED in v444 (it now RAISES, never render_stage), and the non-render peak is 5.9-8.2GiB (cgroup [nonrender-mem] on real traffic) → 12GiB = 1.5-2x headroom. ⚠️ RESIDUAL: sub-floor jobs (<45s output, below the burst floor) still render IN-PROCESS here — a heavy short render could approach 12GiB; WATCHED on real traffic (OOM = exit 137 → raise back to 16-18). inc2 MEMORY DROP (Zac GO 2026-08-02): 64GiB→24GiB, coupled to PROMPTLY_RENDER_BURST=1 LIVE. Render (incl. the >32GiB blur peak) now runs on the cpu=48 render_burst, so this orchestrator NO LONGER renders in-process — its floor is the NON-render peak, measured 5.4-5.9GiB (cgroup-sampled [nonrender-mem] on real v441 traffic), and 24GiB = 4x that with vidstab headroom (a 2.7x memory-time cut, the bulk of $0.41→$0.11). ⚠️ RESIDUAL OOM RISK: the render_burst STAGING-hiccup fallback renders IN-PROCESS here — a blur render on that RARE path would OOM at 24GiB; watched on first shaky/blur fallback. Tighten toward 12GiB only after shaky-job [nonrender-mem] samples confirm the vidstab peak. The old "48GiB floor" was the in-process-render floor and is retired by the burst move. PRIOR: 128GB→64GB on MEASURED 15.7GiB render peak. 3 real renders (incl. a 93s clip) peaked at 15.7GiB render-stage RSS (cgroup-sampled, memory_peak_measure_app) — 64GiB = 4x the measured peak and 2x the 32GB OOM point (blur A/B, a parallel/heavier case). Memory is 59% of $/job, so 128→64 ~halves the dominant term (~$0.355→~$0.25). OOM kills jobs, so sized on the measured number with generous headroom; do NOT drop below 48 (the 32GB OOM floor). PRIOR: EMERGENCY COST CUT (2026-07-30): cpu 64→16 ONLY, memory was UNCHANGED at 128GB. CPU is 77% of the bill ($1153 vs $347 mem) → cpu 64→16 = 4× on 77% with ZERO OOM risk. Memory 128→48GB (2.7× on 23%) is a SEPARATE cert-gated step — the blur A/B OOM'd at 32GB, so 48 is an untested guess between a known-fail and known-pass; step it down only after a real render certs it. retries 2→0: a failing job billed up to 3×; restore post-fix. The app hit the $1500 cap; Phase 1 inc2 (render_burst split) is not yet shipped, so this container held cpu=64/128GB for ~450s/job while only the render stage (~72s) needs the cores — and with PROMPTLY_RENDER_FANOUT=1 the heavy Remotion chunks already run on the cpu=16 render_chunk_fanout containers, so this box was mostly idle-waiting at cpu=64. ~4× cost cut now; render stage slower (~+100-200s, cpu-bound composite/HLS/exports), transcribe/plan/Gemini-wait unaffected (network-bound). 48GB floor: the blur A/B OOM'd at 32GB, so do NOT go lower. Restore/replace with the render_burst split (inc2). Prior A-L3 note: 8 chunks × 4 tabs = 32 tabs at cpu=64 was the platform max.
     scaledown_window=45,  # COST FIX-4 (2026-07-28): render-container idle. run_pipeline_bg (cpu=64) is spawned per job; at normal traffic (~1 job/30min) each job cold-starts anyway (gap >> scaledown), so the old 180s post-render idle bought ~ZERO reuse — pure cpu=64 idle bleed. 45s still catches spike back-to-back reuse while cutting the idle 4×. (Cold start pays the in-body handler import ~10-12s; snapshot is a no-op here without @enter — acceptable vs the bleed.)
     volumes={"/prewarm": prewarm_volume},
     enable_memory_snapshot=True,
@@ -1001,7 +1001,7 @@ def render_chunk_fanout(s3_prefix: str, files_manifest: list, render_kind: str,
 # below 49152 (48 GiB); validate_deploy guards it. App image + all 4 secrets
 # (promptly-secrets/cloudfront/gemini-vertex/lang-flags) are inherited app-wide.
 @app.function(
-    cpu=48, memory=65536, region="us", timeout=1800, retries=0,  # STALL CAP (Zac GO 2026-08-03 PM): 3000→1800, lockstep with run_pipeline_bg. The burst render stage maxed 586s on real traffic, so 1800s is 3x the observed ceiling — safe — while a stalled burst (cpu=48, ~$2.31 at 3000s) is capped at 30min. Watch PLATFORM_TIMEOUT for wall≈1800s.
+    cpu=48, memory=65536, region="us", timeout=1200, retries=0,  # STALL CAP (Zac GO 2026-08-03 PM): 3000→1800→900, lockstep with run_pipeline_bg. The burst render stage maxed 586s on real traffic, so 1800s is 3x the observed ceiling — safe — while a stalled burst (cpu=48, ~$2.31 at 3000s) is capped at 30min. Watch PLATFORM_TIMEOUT for wall≈1800s.
     volumes={"/prewarm": prewarm_volume},
     # No enable_memory_snapshot: it is a no-op without @enter (handler imports
     # in-body, per-invocation) and would only add os.environ-freeze surface to a
@@ -2383,6 +2383,10 @@ def cert_render_proof() -> list:
     import os, sys, subprocess, tempfile, uuid, time
     os.environ["JOB_STATUS_WRITES_ENABLED"] = ""   # no phantom video_jobs rows
     os.environ["APP_URL"] = ""                       # no progress/completion posts to prod
+    os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16" # FAITHFUL to run_pipeline_bg (cpu=16):
+    # without this the proof floors to 4 and renders at concurrency=2/chunk instead of the
+    # production 4/chunk (8 total = ~0.5/core optimum). The render logic is identical; only
+    # the tab budget differs, so it changes render SPEED, not correctness.
     sys.path.insert(0, "/")
     import handler
     s3 = handler._aws_s3_client
@@ -2437,6 +2441,75 @@ def cert_render_proof() -> list:
 def render_proof():
     import json
     print("PROOF_RESULTS " + json.dumps(cert_render_proof.remote(), indent=2))
+
+
+@app.function(cpu=16, memory=12288, region="us", timeout=1200, volumes={"/prewarm": prewarm_volume})
+def cert_burst_floor_ab() -> dict:
+    """BURST-FLOOR A/B (Zac 2026-08-03, the SLOPE lever): a 30s source rendered
+    IN-PROCESS (cpu=16, FAITHFUL budget=16 → concurrency 8) vs FORCED to the cpu=48
+    burst (PROMPTLY_BURST_MIN_OUTPUT_S=0). Reports wall · render_time · CORE-SECONDS
+    for each — does the burst finish far sooner at similar total compute? Target:
+    30s source → under 60s. Run: modal run modal_app.py::burst_ab. ~$0.25."""
+    import os, sys, subprocess, tempfile, uuid, time
+    os.environ["JOB_STATUS_WRITES_ENABLED"] = ""
+    os.environ["APP_URL"] = ""
+    os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16"   # faithful to run_pipeline_bg
+    sys.path.insert(0, "/")
+    import handler
+    s3 = handler._aws_s3_client
+    work = tempfile.mkdtemp()
+    face_p, audio_p = os.path.join(work, "face.mp4"), os.path.join(work, "en.m4a")
+    s3.download_file(_CERT_BUCKET, _CERT_FACE_KEY, face_p)
+    s3.download_file(_CERT_BUCKET, f"{_CERT_PREFIX}/_bridge_regression/en.m4a", audio_p)
+    src_p = os.path.join(work, "src30.mp4")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-stream_loop", "-1", "-i", face_p,
+                    "-stream_loop", "-1", "-i", audio_p, "-map", "0:v:0", "-map", "1:a:0",
+                    "-t", "30", "-r", "30", "-c:v", "libx264", "-preset", "veryfast",
+                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", src_p], check=True)
+    key = f"{_CERT_PREFIX}/_burst_ab/src30.mp4"
+    s3.upload_file(src_p, _CERT_BUCKET, key, ExtraArgs={"ContentType": "video/mp4"})
+    video_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{key}"
+
+    def _run(label, floor):
+        if floor is None:
+            os.environ.pop("PROMPTLY_BURST_MIN_OUTPUT_S", None)
+        else:
+            os.environ["PROMPTLY_BURST_MIN_OUTPUT_S"] = str(floor)
+        rk = f"{_CERT_PREFIX}/_burst_ab/{label}.mp4"
+        uu = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{rk}"
+        body = {"job_id": str(uuid.uuid4()), "video_url": video_url, "vibe": "viral",
+                "user_id": str(uuid.uuid4()), "upload_url": uu, "public_url": uu}
+        t0 = time.time()
+        try:
+            r = handler.handler({"input": body})
+        except Exception as e:
+            r = {"status": "exception", "error": f"{type(e).__name__}: {e}"}
+        wall = round(time.time() - t0, 1)
+        st = (r or {}).get("stage_timings") or {}
+        rt = (r or {}).get("render_time") or st.get("render")
+        went_burst = (floor == 0)
+        # core-seconds: the orchestrator (cpu=16) is held the whole wall; a burst
+        # render additionally holds cpu=48 for render_time (the double-pay).
+        core_s = wall * 16 + ((rt or 0) * 48 if went_burst else 0)
+        print(f"[burst-ab] {label}: status={(r or {}).get('status')} wall={wall}s "
+              f"render={rt}s core_s~{core_s:.0f} url={bool((r or {}).get('video_url'))} "
+              f"err={(r or {}).get('error') or (r or {}).get('user_message')}", flush=True)
+        return {"label": label, "path": "burst_cpu48" if went_burst else "in_process_cpu16",
+                "status": (r or {}).get("status"), "wall_s": wall, "render_time_s": rt,
+                "core_seconds": round(core_s), "url_ok": bool((r or {}).get("video_url"))}
+
+    inproc = _run("in_process_floor45", None)   # 30s output < 45 floor → in-process @ cpu=16
+    burst = _run("forced_burst_floor0", 0)       # floor 0 → forced to cpu=48 burst
+    return {"source": "30s @ 30fps (durable face+en speech)",
+            "in_process": inproc, "burst": burst,
+            "verdict": {"wall_faster_on_burst_s": round((inproc["wall_s"] or 0) - (burst["wall_s"] or 0), 1),
+                        "extra_core_seconds_on_burst": round((burst["core_seconds"] or 0) - (inproc["core_seconds"] or 0))}}
+
+
+@app.local_entrypoint()
+def burst_ab():
+    import json
+    print("BURST_AB " + json.dumps(cert_burst_floor_ab.remote(), indent=2))
 
 
 # ── ARABIC BRIDGE PERMANENT REGRESSION (Zac 2026-07-20) ──────────────────────

@@ -9872,9 +9872,9 @@ _REPAIR_MIN_HEADROOM_S = 180.0   # recipe repair re-ask allowance: a corrective
 # BEFORE the SIGKILL, instead of grinding into it. A clean single pass is
 # 135-337s and NEVER reaches the deadline; only a job already re-asking (i.e.
 # one that has failed ≥1 validation/transport attempt) can. Off ⇒ byte-identical.
-_MODAL_FN_TIMEOUT_S = 1800.0       # STALL CAP (Zac GO 2026-08-03 PM): tracks the
+_MODAL_FN_TIMEOUT_S = 1200.0       # STALL CAP (Zac GO 2026-08-03 PM): tracks the
                                    # run_pipeline_bg/render_burst Modal timeout, lowered
-                                   # 3000->1800 to cap stall billing (30min not 50).
+                                   # 3000->1800->1200 to cap stall billing (20min not 50); 900 was gate-blocked by the 300s source cap.
                                    # The recipe wall-clock budget derives from this, so
                                    # it MUST match the decorator (validate_deploy pins
                                    # the pair) — else the recipe loop runs past the kill.
