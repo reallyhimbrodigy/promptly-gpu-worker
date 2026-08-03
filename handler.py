@@ -23384,17 +23384,25 @@ def _run_render_via_burst_or_local(
     try:
         _s3_key = _stage_workdir_to_s3(work_dir, job_id)
     except Exception as _stage_err:
+        # FALLBACK DISARMED (Zac 2026-08-03, coupled to inc2 24GiB): the old
+        # behaviour rendered IN-PROCESS here on a staging hiccup. That was safe at
+        # 64GiB, but run_pipeline_bg is now 24GiB (render moved to the cpu=48
+        # burst), so a heavy/blur render (>32GiB peak) on this path would OOM —
+        # an UNCODED SIGKILL, the worst outcome. A staging failure is transient
+        # (S3 blip), so FAIL RETRYABLE instead: the retry re-dispatches to the
+        # burst (which has the memory) rather than betting the job on a 24GiB
+        # in-process render. Restore the local fallback only if run_pipeline_bg
+        # is raised back to >=48GiB.
         print(f"[render_burst] staging FAILED ({type(_stage_err).__name__}: "
-              f"{_stage_err}) — LOCAL render fallback", flush=True)
+              f"{_stage_err}) — FAIL RETRYABLE (no in-process render at 24GiB; retry re-dispatches to the burst)", flush=True)
         _record_divergence("render", {"stage": "stage_workdir",
                                       "detail": str(_stage_err)[:300]},
-                           "render_burst_fallback", reason="stage_failed")
-        return render_stage(
-            job_id, input_data, edit_plan, work_dir, source_path, output_path,
-            transcript, source_duration, app_url, broll_clips, upload_url,
-            _timings, _floor_state, route_premium, premium_ctx, _cost_meter,
-            integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
-        )
+                           "render_burst_staging_failed", reason="stage_failed_retryable")
+        raise RuntimeError(
+            f"RENDER_BURST_STAGING_FAILED (transient/retryable): work_dir staging "
+            f"to S3 failed ({type(_stage_err).__name__}: {str(_stage_err)[:200]}). "
+            f"NOT rendering in-process at 24GiB (OOM risk since inc2); the retry "
+            f"re-dispatches to the cpu=48 burst.") from _stage_err
     _payload = {
         "s3_workdir_key": _s3_key,
         "job_id": job_id, "input_data": input_data, "edit_plan": edit_plan,
@@ -30540,7 +30548,12 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         "stage_timings": {**{k: round(v, 1) for k, v in _mini_t.items()},
                           "hls": round(time.time() - _hls_t0, 1),
                           "total": round(time.time() - _t0, 1),
-                          "target_fps": _fps},
+                          "target_fps": _fps,
+                          # FIELD GAP CLOSED (Zac 2026-08-03): the light routes
+                          # (minimal/hype/moodreel) omitted source_duration_s, which
+                          # blocked every latency claim + the two-term fit on this
+                          # path. It's a fn param here; record it like the standard route.
+                          "source_duration_s": round(float(source_duration), 1) if source_duration else None},
         "output_size_mb": round(_out_mb, 1),
         "edit_recipe": {"route": _route_name, "reason": reason,
                         "plan": _plan.model_dump()},
