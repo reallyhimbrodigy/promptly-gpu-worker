@@ -10099,6 +10099,19 @@ def _check_output_frame_grid():
     assert "render_stripped" in _lad, "the strip rung must survive — the ladder is not disabled"
 
 
+@check("THREAD-POOL LEAK GUARD (Zac 2026-08-03): mega_pool (10 workers) + _early_pool were created per handler() invocation and not released on every path — _early_pool was 'let Python GC' (never shut down), so pools ACCUMULATED across warm-container reuse (the ThreadPoolExecutor-56/60 numbering) and left worker threads alive at container exit, which Modal waits up to 30s for on EVERY exit — a silent per-job billed tail. Both are now init'd to None at the top of handler() and released in its finally on every path (early return / raise / normal). FAILS if the None-init or the finally shutdown regresses.")
+def _thread_pool_leak_guard():
+    src = open("handler.py").read()
+    _h = src[src.index("def handler(job):"):]
+    assert "mega_pool = None" in _h and "_early_pool = None" in _h, \
+        "handler() must init mega_pool/_early_pool to None so the finally can release them on every path"
+    assert "_leak_pool.shutdown(wait=False" in _h, \
+        "handler()'s finally must shut down mega_pool/_early_pool (wait=False) so their threads cannot outlive the request"
+    # the shutdown must be reachable in the finally, i.e. AFTER the None-init and the loop over both pools
+    assert "for _leak_pool in (mega_pool, _early_pool)" in _h, \
+        "the finally must iterate BOTH pools (mega_pool + _early_pool) for release"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

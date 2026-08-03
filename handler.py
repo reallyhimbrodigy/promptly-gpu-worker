@@ -33243,6 +33243,14 @@ def handler(job):
     _cost_meter = None
     route_premium = False
     _premium_flag_on = False  # the premium_pipeline_enabled REQUEST (persisted per job, Wave-3)
+    # THREAD-POOL LEAK GUARD (Zac 2026-08-03): mega_pool (10 workers) and _early_pool
+    # (3 workers) are assigned mid-body; _early_pool was "let Python GC" (never shut
+    # down) so it ACCUMULATED across warm-container reuse — the ThreadPoolExecutor-56/60
+    # numbering — leaving 11 threads alive at container exit (Modal waits up to 30s per
+    # exit, a silent per-job billed tail). Init to None here so the finally can release
+    # BOTH on every path (early return / raise / normal), preventing the accumulation.
+    mega_pool = None
+    _early_pool = None
     # Outermost-rung eligibility state (P1a) — pre-initialized so the outer
     # except can ALWAYS read it. "ready" flips once transcript + prepared
     # source are both established in this scope; mode/dur recorded there too.
@@ -37349,6 +37357,19 @@ def handler(job):
                 _cost_meter.log()
         if premium_ctx is not None:
             premium_ctx.shutdown()
+        # THREAD-POOL LEAK GUARD (Zac 2026-08-03): release mega_pool/_early_pool on
+        # EVERY exit path so their worker threads cannot accumulate across warm-container
+        # reuse (the ThreadPoolExecutor-56/60 tail — up to 30s billed per exit). wait=False
+        # + cancel_futures drops pending work without blocking; an already-shut-down pool
+        # (mega_pool on the normal path) no-ops. Guarded so a partial-init job is safe.
+        for _leak_pool in (mega_pool, _early_pool):
+            if _leak_pool is not None:
+                try:
+                    _leak_pool.shutdown(wait=False, cancel_futures=True)
+                except TypeError:
+                    _leak_pool.shutdown(wait=False)   # py<3.9 has no cancel_futures
+                except Exception:
+                    pass
         # PROGRESSIVE TERMINAL SEAM (Zac ruling 1b) — drive the ONE extracted
         # drain (_drain_progressive_publisher). Under the render-burst split this
         # cell is [None] here (the publisher lived AND drained in the burst), so
