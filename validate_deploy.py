@@ -5158,7 +5158,8 @@ def _error_path_certs_actually_run():
                   "test_render_never_blames_user_file.py",
                   "test_integrity_black_echo_boundary.py",
                   "test_integrity_freeze_echo_boundary.py",
-                  "test_silent_to_moodreel.py"):
+                  "test_silent_to_moodreel.py",
+                  "test_integrity_dead_moment_echo.py"):
         assert os.path.exists(_cert), f"{_cert} missing from the repo"
         _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
         assert _r.returncode == 0, (
@@ -5540,6 +5541,52 @@ def _silent_to_moodreel():
     assert "or _silent_reroute)" in _h, "moodreel eligibility must include the re-route"
     assert "and not _silent_reroute)" in _h, \
         "_speech_bearing must exclude a re-routed clip or it falls back to uncut"
+
+
+@check("DEAD MOMENT ECHO + RENAME (2026-08-03): the gate measures silence INTERSECT (freeze UNION black) and called it `both_stream_hole` — a name that says a segment is MISSING when the detector measures that NOTHING IS HAPPENING. black and freeze were each source-echoed individually but the INTERSECTION never was: the only relief subtracted spans that had ALREADY cleared their trip floors and entered the echo, and the SILENCE half was never source-checked at all. Job 7e8a303f tripped freeze+black+hole on the very 96.2s clip whose 7.97s of black was PROVEN source content by forced repro 017fa6d3. Now: downgrade only when BOTH constituents echo (source silent AND source black-or-frozen); a LIVE source under a dead output is still our defect. Check renamed to `dead_moment`. cert: test_integrity_dead_moment_echo.py 9/9")
+def _integrity_dead_moment_echo():
+    import handler, os as _os, subprocess as _sp, tempfile as _tf
+    assert _os.path.exists("test_integrity_dead_moment_echo.py"), "cert must ride the repo"
+    for _fn in ("_ig_window_is_silent", "_ig_source_echo_hole"):
+        assert callable(getattr(handler, _fn, None)), f"{_fn} missing"
+    _h = open("handler.py").read()
+    assert '"check": "dead_moment"' in _h, "the check must be renamed"
+    assert '"check": "both_stream_hole"' not in _h, "the misleading name must be gone"
+    assert "_ig_source_echo_hole(source_path, holes, out_to_src)" in _h, \
+        "the intersection must actually be echoed, not just the constituents"
+
+    _fd, _src = _tf.mkstemp(suffix="_dead.mp4"); _os.close(_fd)
+    try:
+        _sp.run(["ffmpeg", "-y", "-v", "error",
+                 "-f", "lavfi", "-i", "color=c=black:s=320x240:r=30:d=2",
+                 "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono:d=2",
+                 "-f", "lavfi", "-i", "nullsrc=s=320x240:r=30:d=2",
+                 "-f", "lavfi", "-i", "sine=frequency=440:r=48000:d=2",
+                 "-filter_complex",
+                 "[2:v]geq=random(1)*255:128:128[n];"
+                 "[0:v][1:a][n][3:a]concat=n=2:v=1:a=1[v][a]",
+                 "-map", "[v]", "-map", "[a]", "-pix_fmt", "yuv420p", _src],
+                capture_output=True, timeout=300)
+        assert _os.path.getsize(_src) > 5000, "fixture build failed"
+        # 1. dead source -> downgraded
+        _d, _g = handler._ig_source_echo_hole(_src, [(0.4, 1.4)], lambda t: t)
+        assert _g and not _d, f"dead source moment must downgrade: d={_d} g={_g}"
+        # 2. THE GUARD — live source under a dead output is OUR defect
+        _d2, _g2 = handler._ig_source_echo_hole(_src, [(2.4, 3.4)], lambda t: t)
+        assert _d2 and not _g2, f"live source must still trip: d={_d2} g={_g2}"
+        # 3. one constituent alone is not enough
+        _d3, _g3 = handler._ig_source_echo_hole(_src, [(0.4, 1.0)], lambda t: t + 2.0)
+        assert _d3 and not _g3, "silent-but-live-video must still trip"
+        # 4. boundary crossing gets the same two-window treatment
+        _d4, _g4 = handler._ig_source_echo_hole(
+            _src, [(0.9, 1.1)], lambda t: 0.9 + t if t < 1.0 else t - 1.0)
+        assert _g4 and not _d4, "crossing a cut over a dead source must downgrade"
+        # 5. fail closed
+        _d5, _g5 = handler._ig_source_echo_hole(_src, [(0.4, 1.4)], lambda t: None)
+        assert _d5 and not _g5, "unmappable must stay a defect"
+    finally:
+        try: _os.unlink(_src)
+        except OSError: pass
 
 
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
@@ -5980,7 +6027,7 @@ def _integrity_source_echo_black():
     assert "blackdetect=d=%s:pix_th=%s" in _body and "source_path" in _body, \
         "source-echo-black must probe the SOURCE with blackdetect (else it can't distinguish echo from defect)"
     # wired into the gate: black_resid is downgraded, and holes covered by a source-echoed
-    # region are dropped (a source-echoed black+silent tail must not trip 'both_stream_hole')
+    # region are dropped (a source-echoed black+silent tail must not trip 'dead_moment')
     assert "black_resid, black_downgraded = _ig_source_echo_black(" in _h, \
         "black_resid must be source-echo-downgraded in _integrity_gate"
     assert "content_black_downgraded" in _h, "the verdict must record black downgrades (observability)"

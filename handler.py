@@ -20580,6 +20580,78 @@ def _ig_window_is_frozen(source_path, src_s, src_e):
     return sum(_fe - _fs for _fs, _fe in _frz) >= _dur * _IG_SOURCE_ECHO_COVER
 
 
+def _ig_window_is_silent(source_path, src_s, src_e):
+    """Is [src_s, src_e] of the SOURCE silent, by the gate's own standard?
+
+    Audio twin of _ig_window_is_black / _ig_window_is_frozen, same command and
+    thresholds the gate uses on the OUTPUT. Unmeasurable returns False — a
+    source with no audio stream at all is NOT evidence the moment is the user's.
+    """
+    _dur = max(0.0, float(src_e) - float(src_s))
+    if _dur <= 0:
+        return False
+    a, b = max(0.0, float(src_s) - 0.3), float(src_e) + 0.3
+    try:
+        p = subprocess.run(
+            ["ffmpeg", "-v", "info", "-ss", str(a), "-t", str(b - a),
+             "-i", source_path,
+             "-af", "silencedetect=n=%ddB:d=%s" % (
+                 _IG_SILENCE_DB, _IG_SILENCE_DETECT_S),
+             "-vn", "-f", "null", "-"],
+            capture_output=True, text=True)
+    except Exception:
+        return False
+    _sil = _ig_parse_spans(p.stderr or "", r"silence_start: ([-\d.]+)",
+                           r"silence_end: ([-\d.]+)", b - a)
+    return sum(_se - _ss for _ss, _se in _sil) >= _dur * _IG_SOURCE_ECHO_COVER
+
+
+def _ig_source_echo_hole(source_path, spans, out_to_src):
+    """DEAD-MOMENT discriminator: a moment that is dead in the SOURCE is the
+    user's own footage, not a hole we produced.
+
+    The gate measures silence INTERSECT (freeze UNION black) — "nothing is
+    happening", not "a segment is missing". black and freeze are each
+    source-echoed individually, but the INTERSECTION never was: the only relief
+    was subtracting spans that had ALREADY been downgraded, which requires them
+    to clear their trip floors first, and the SILENCE half was never checked
+    against the source at all. Job 7e8a303f tripped this on the very clip whose
+    black was proven to be source content.
+
+    Downgrade only when BOTH constituents echo: the source is silent there AND
+    the source is black or frozen there. A live source under a dead output is
+    our defect and still trips. Boundary-crossing spans get the same two-window
+    treatment as the black/freeze echoes.
+    """
+    defects, downgraded = [], []
+    for (s, e) in spans:
+        try:
+            src_s, src_e = out_to_src(s), out_to_src(e)
+        except Exception:
+            defects.append((s, e))
+            continue
+        if src_s is None or src_e is None:
+            defects.append((s, e))
+            continue
+        if src_e <= src_s:
+            _half = max(1e-3, (e - s) / 2.0)
+            _wins = ((src_s, src_s + _half), (max(0.0, src_e - _half), src_e))
+        else:
+            _wins = ((src_s, src_e),)
+        for _ws, _we in _wins:
+            if _we <= _ws:
+                continue
+            if (_ig_window_is_silent(source_path, _ws, _we)
+                    and (_ig_window_is_black(source_path, _ws, _we)
+                         or _ig_window_is_frozen(source_path, _ws, _we))):
+                downgraded.append({"span": (s, e), "src": (_ws, _we),
+                                   "source_dead": True})
+                break
+        else:
+            defects.append((s, e))
+    return defects, downgraded
+
+
 def _ig_source_echo(source_path, spans, out_to_src):
     """Content-stillness discriminator for residual freeze spans: a frozen
     OUTPUT span whose mapped SOURCE window is also frozen is source content
@@ -20892,6 +20964,14 @@ def _integrity_gate(output_path, v_dur, a_dur, expected_frames, nb_frames,
                  + [tuple(d["span"]) for d in black_downgraded])
         holes = [h for h in holes
                  if sum(e - s for (s, e) in _ig_subtract([h], _echo)) >= _IG_HOLE_TRIP_S]
+    # DEAD-MOMENT ECHO (2026-08-03): the subtraction above only relieves spans
+    # that ALREADY cleared their trip floors and entered the black/freeze echo.
+    # A short constituent below those floors never does, and the SILENCE half
+    # was never source-checked at all — so a moment that is dead in the user's
+    # own footage still tripped. Evaluate the intersection directly.
+    hole_downgraded = []
+    if holes and source_path and out_to_src:
+        holes, hole_downgraded = _ig_source_echo_hole(source_path, holes, out_to_src)
     ts = _ig_probe_timestamps(output_path)
 
     trips = []
@@ -20900,7 +20980,7 @@ def _integrity_gate(output_path, v_dur, a_dur, expected_frames, nb_frames,
     if black_resid:
         trips.append({"check": "black", "spans": black_resid})
     if holes:
-        trips.append({"check": "both_stream_hole", "spans": holes})
+        trips.append({"check": "dead_moment", "spans": holes})
     dur_delta = abs(float(v_dur or 0) - float(a_dur or 0))
     if v_dur and a_dur and dur_delta >= _IG_DUR_DELTA_TRIP_S:
         trips.append({"check": "av_duration_delta",
@@ -20924,6 +21004,7 @@ def _integrity_gate(output_path, v_dur, a_dur, expected_frames, nb_frames,
             "freeze_raw": freeze, "black_raw": black, "silence": silence,
             "content_stillness_downgraded": downgraded,
             "content_black_downgraded": black_downgraded,
+            "content_dead_moment_downgraded": hole_downgraded,
             "masks": {k: [(round(s, 3), round(e, 3)) for (s, e) in v]
                       for k, v in masks.items()},
             "timestamps": ts,

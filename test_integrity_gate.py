@@ -113,8 +113,8 @@ def main():
         check("0.6s black trips",
               any(t["check"] == "black" for t in v["trips"]), str(v["trips"]))
         v = gate(d, "hole_trip.mp4")
-        check("frozen+silent 0.8s trips both_stream_hole",
-              any(t["check"] == "both_stream_hole" for t in v["trips"]),
+        check("frozen+silent 0.8s trips dead_moment",
+              any(t["check"] == "dead_moment" for t in v["trips"]),
               str(v["trips"]))
         v = gate(d, "delta.mp4")
         check("0.6s A/V duration delta trips",
