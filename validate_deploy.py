@@ -5157,7 +5157,8 @@ def _error_path_certs_actually_run():
                   "test_asr_scribe_routing.py",
                   "test_render_never_blames_user_file.py",
                   "test_integrity_black_echo_boundary.py",
-                  "test_integrity_freeze_echo_boundary.py"):
+                  "test_integrity_freeze_echo_boundary.py",
+                  "test_silent_to_moodreel.py"):
         assert os.path.exists(_cert), f"{_cert} missing from the repo"
         _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
         assert _r.returncode == 0, (
@@ -5488,6 +5489,57 @@ def _integrity_freeze_echo_boundary():
         "black AND freeze must both carry the crossing repair"
     assert "if src_s is None or src_e is None or src_e <= src_s:" not in _h, \
         "the collapsed branch that hid the crossing case must be gone from BOTH echoes"
+
+
+@check("SILENT CLIPS GET AN EDIT, NOT THEIR OWN FOOTAGE BACK (2026-08-03, DARK behind PROMPTLY_SILENT_TO_MOODREEL): measured over 387 completions since 08-01 with editorial events = (segments-1) + decorations counted across BOTH recipe shapes — minimal_speech_uncut 141/141 silent (median 0 editorial), moodreel 73 jobs 1 silent (median 5), hype median 14, standard median 10. 143 of 387 (37%, 140 users) deliver ZERO editorial events and 141 are the uncut passthrough. A clip whose speech we could not READ but which VAD confirms carries NO speech is silent content and belongs in the mood-reel cut. THE GUARD: minimal_speech_uncut exists because build_minimal_plan cuts at MOTION PEAKS, which would chop the untranscribed speech it protects (Urdu-class law) — so re-routing requires POSITIVE VAD confirmation and every unmeasurable case stays uncut. cert: test_silent_to_moodreel.py 13/13")
+def _silent_to_moodreel():
+    import handler
+    _h = open("handler.py").read()
+    assert os.path.exists("test_silent_to_moodreel.py"), "cert must ride the repo"
+    for _fn in ("_silent_to_moodreel_enabled", "_vad_confirms_silence", "_silent_route_eligible"):
+        assert callable(getattr(handler, _fn, None)), f"{_fn} missing"
+
+    _o = os.environ.get("PROMPTLY_SILENT_TO_MOODREEL")
+    _o1, _o2 = handler._detect_silence_regions_vad, handler._vad_available
+
+    def _vad(sil, avail=True):
+        handler._detect_silence_regions_vad = lambda *a, **k: sil
+        handler._vad_available = lambda: avail
+    try:
+        # 1. DARK BY DEFAULT — flag off, nothing is ever re-routed
+        os.environ.pop("PROMPTLY_SILENT_TO_MOODREEL", None)
+        assert handler._silent_to_moodreel_enabled() is False
+        _vad([(0.0, 30.0)])
+        assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is False, \
+            "flag off must never re-route"
+
+        os.environ["PROMPTLY_SILENT_TO_MOODREEL"] = "1"
+        # 2. positive confirmation re-routes
+        assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is True
+        assert handler._silent_route_eligible("transcription_incomplete", "/x.mp4", 30.0) is True
+        # 3. THE GUARD — a clip WITH speech must never reach the motion-cut path
+        _vad([(0.0, 2.0)])          # 28s of speech in 30s
+        assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is False, \
+            "a speech-bearing clip must stay on the uncut route"
+        # 4. FAIL SAFE on every unmeasurable shape
+        _vad([], avail=False)
+        assert handler._vad_confirms_silence("/x.mp4", 30.0) is False, "VAD unavailable -> uncut"
+        _vad([], avail=True)        # [] also means 'continuous speech'
+        assert handler._vad_confirms_silence("/x.mp4", 30.0) is False, "[] ambiguity -> uncut"
+        _vad([(0.0, 30.0)])
+        assert handler._vad_confirms_silence("/x.mp4", 0.0) is False, "no duration -> uncut"
+        # 5. scope — duration verdicts are NOT silence verdicts
+        assert handler._silent_route_eligible("too_short", "/x.mp4", 30.0) is False
+    finally:
+        handler._detect_silence_regions_vad, handler._vad_available = _o1, _o2
+        os.environ.pop("PROMPTLY_SILENT_TO_MOODREEL", None) if _o is None else \
+            os.environ.__setitem__("PROMPTLY_SILENT_TO_MOODREEL", _o)
+
+    # wiring: the re-route must widen moodreel eligibility AND stop the clip
+    # falling back into the uncut path it is meant to replace
+    assert "or _silent_reroute)" in _h, "moodreel eligibility must include the re-route"
+    assert "and not _silent_reroute)" in _h, \
+        "_speech_bearing must exclude a re-routed clip or it falls back to uncut"
 
 
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")

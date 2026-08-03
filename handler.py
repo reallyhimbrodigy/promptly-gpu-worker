@@ -30226,6 +30226,74 @@ def _apply_motion_anchors(render_input, motion_curve, shot_changes, source_fps,
     return render_input
 
 
+# ── SILENT CLIPS DESERVE AN EDIT, NOT THEIR OWN FOOTAGE BACK (2026-08-03) ────
+# Measured over 387 completions since 08-01 (editorial events = (segments-1) +
+# decorations, counted across BOTH recipe shapes):
+#
+#   route                  n    silent   median editorial
+#   minimal_speech_uncut  141   141 100%        0
+#   moodreel               73     1   1%        5
+#   hype                    9     0   0%       14
+#   standard              143     1   1%       10
+#
+# 143 of 387 (37%, 140 distinct users) deliver ZERO editorial events, and 141
+# of those are minimal_speech_uncut — the route hands the user their footage
+# back untouched. moodreel produces a median of 5 on the same class of input,
+# needs no transcript, and already ships.
+#
+# THE GUARD. minimal_speech_uncut exists because build_minimal_plan cuts at
+# MOTION PEAKS (~2.5s), which would chop the untranscribed speech that route is
+# there to protect (the Urdu-class law: destroyed content is worse than an
+# honest failure). So re-routing is permitted ONLY when VAD positively confirms
+# there is no real speech — and every unmeasurable case stays uncut.
+_SILENT_ROUTE_SPEECH_FLOOR_S = 1.5    # VAD speech above this = a speaking clip
+_SILENT_ROUTE_REASONS = ("no_speech_muted", "transcription_incomplete")
+
+
+def _silent_to_moodreel_enabled():
+    """PROMPTLY_SILENT_TO_MOODREEL=1 arms the re-route. Default OFF => today's
+    routing, byte-identical."""
+    return str(os.environ.get("PROMPTLY_SILENT_TO_MOODREEL", "") or "").strip() \
+        in ("1", "true", "on", "yes")
+
+
+def _vad_confirms_silence(source_path, source_duration):
+    """Does VAD POSITIVELY confirm this clip carries no real speech?
+
+    Returns True only on a measured answer. Every uncertain case — no duration,
+    VAD unavailable, VAD raising, or VAD returning [] (which means BOTH 'no
+    silence gap found' i.e. continuous speech AND 'silero not importable') —
+    returns False, so the clip keeps the speech-preserving uncut route. The
+    asymmetry is deliberate: a wrong True chops a user's speech, a wrong False
+    only leaves today's behaviour.
+    """
+    try:
+        _dur = float(source_duration or 0)
+        if _dur <= 0 or not _vad_available():
+            return False
+        _sil = _detect_silence_regions_vad(source_path, min_silence_s=0.30)
+        if not _sil:
+            return False          # continuous speech OR unmeasurable — either way, no
+        _speech = max(0.0, _dur - sum(max(0.0, float(b) - float(a)) for a, b in _sil))
+        return _speech < _SILENT_ROUTE_SPEECH_FLOOR_S
+    except Exception:
+        return False
+
+
+def _silent_route_eligible(reason, source_path, source_duration):
+    """May this uncut-bound clip be re-routed to the mood-reel edit instead?
+
+    Only for reasons that mean 'we could not read the speech' — never for
+    too_short (a duration verdict) or plan/render collapse (where the clip may
+    well be speech-bearing and the uncut delivery is the honest floor).
+    """
+    if not _silent_to_moodreel_enabled():
+        return False
+    if reason not in _SILENT_ROUTE_REASONS:
+        return False
+    return _vad_confirms_silence(source_path, source_duration)
+
+
 def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
                           source_duration, app_url, reason, pipeline_start):
     """The MINIMAL editorial path: deterministic clean cuts + calm transitions,
@@ -30352,8 +30420,19 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     # deterministic minimal. no_audio clips qualify (no music needed).
     _moodreel_on = bool(input_data.get("moodreel_test")) or (
         os.environ.get("PROMPTLY_MOODREEL", "").strip().lower() in ("1", "true", "yes", "on"))
+    # SILENT-TO-MOODREEL (2026-08-03, flag-gated): a clip whose speech we could
+    # not READ, but which VAD confirms carries no speech at all, is silent
+    # content — it belongs in the mood-reel cut (median 5 editorial events),
+    # not the uncut passthrough (median 0). _silent_route_eligible is
+    # positive-confirmation only and fails safe to uncut. Flag OFF => this
+    # disjunct is always False and routing is byte-identical to today.
+    _silent_reroute = _silent_route_eligible(reason, source_path, _dur)
+    if _silent_reroute:
+        print(f"[silent-route] reason={reason} VAD-confirmed silent -> "
+              f"mood-reel edit instead of uncut passthrough", flush=True)
     if (_plan is None and _moodreel_on and _dur >= 8.0 and _mcurve
-            and reason in ("no_speech", "not_talking_head", "no_audio")):
+            and (reason in ("no_speech", "not_talking_head", "no_audio")
+                 or _silent_reroute)):
         try:
             import moodreel_editor as _mre2
             _sys_i, _user_c = _mre2.build_moodreel_prompt(
@@ -30397,7 +30476,13 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     # into the harmful motion-cut path — correctness rides entirely on this default,
     # with no interlock behind it. zero-reject is LIVE (PROMPTLY_ZERO_REJECT=1 since
     # 2026-07-25), so this is a REAL route reached in production, not a dark one.
-    _speech_bearing = reason not in ("no_speech", "no_audio", "not_talking_head")
+    # A VAD-confirmed-silent clip is NOT speech-bearing, whatever its reason
+    # said — otherwise it would fall straight back into the uncut path that the
+    # re-route above exists to replace. (If the moodreel attempt above failed
+    # for any reason, _plan is still None and this correctly keeps the uncut
+    # floor: we never leave a clip without a plan.)
+    _speech_bearing = (reason not in ("no_speech", "no_audio", "not_talking_head")
+                       and not _silent_reroute)
     if _plan is None and _speech_bearing:
         _plan = _me.HypePlan(
             clips=[_me.HypeClip(start_s=0.0, end_s=round(float(_dur), 3),
