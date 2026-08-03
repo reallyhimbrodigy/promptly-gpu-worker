@@ -32,7 +32,7 @@ than anything else. They just don't come back to watch it.
 ⚠️ Caveat: these are client-fired analytics. A missing `result_viewed` is not
 proof of no view. But the direction is consistent across 1000 deliveries.
 
-## THE FAULTS, CLUSTERED (7 videos watched closely so far)
+## THE FAULTS, CLUSTERED (17 of 20 watched; the pattern saturated)
 
 ### 1. CAPTIONS ARE ONE WORD AT A TIME, AND TOO SMALL TO READ
 Videos 00, 01, 05. Single words — "думать," / "माहिष्मती" / "ACNE," — in thin
@@ -63,12 +63,36 @@ frames there is no visible cut, no zoom, no reframe. Video 16 (minimal) has
 literally nothing added — no captions, no cuts — and that route exports at 3.8%.
 **Our edit is invisible on exactly the footage most users upload.**
 
-### 6. WHEN THE SOURCE IS RICH, THE PRODUCT IS GOOD
+### 6. TWO OF TWENTY WERE DELIVERED SIDEWAYS — 10%
+Videos 09 (lipstick tutorial) and 14 (apple picking) are rotated 90° for their
+entire duration. The subject's face is on its side. This is unmissable and
+unpostable, and it is the single most severe fault in the set. Note the known
+rotation fix was **validator-path only** — the render path still mishandles it.
+
+### 7. A TEXT OVERLAY THAT JUST REPEATS THE CAPTION
+Video 06: frame 1 shows "SMARTEST" as a top overlay while the caption underneath
+reads "workout"; frame 2 shows "WORKOUT" on top and "smartest" below. The
+overlay is echoing caption words, swapped. It costs a component slot and adds
+nothing.
+
+### 8. CAPTION TYPOGRAPHY CHANGES MID-VIDEO
+Video 02: Hindi captions render sans, but the embedded English words ("lift",
+"service", "suspension") come out in an ITALIC SERIF. Almost certainly a font
+fallback for Latin glyphs inside a Devanagari run. It reads as a mistake.
+
+### 9. THE SAME SOURCE, PROCESSED TWICE, RETURNED RAW BOTH TIMES
+Videos 08 and 19 are the same downloaded TikTok — one routed
+minimal_speech_uncut, one routed hype. Both came back with the competitor UI
+intact and effectively no edit. Two credits, two unpostable outputs.
+
+### 10. WHEN THE SOURCE IS RICH, THE PRODUCT IS GOOD
 Video 03 (varied scenes) and video 12 (property tour) look postable. Same
 pipeline. The difference is entirely the footage.
 
 ## WHAT THIS SUGGESTS THE ROADMAP IS
 
+0. **FIX ROTATION FIRST.** 10% of this sample shipped sideways. Nothing else on
+   this list matters if the video is on its side, and it needs no taste call.
 1. **Caption legibility and density is the highest-leverage fix** — it is the one
    thing on screen in every standard-editorial video, and it is currently
    unreadable in most of them.
