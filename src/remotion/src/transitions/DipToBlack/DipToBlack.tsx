@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, interpolate, Easing, OffthreadVideo } from "remotion";
+import { AbsoluteFill, interpolate, Easing } from "remotion";
+import { Video } from "@remotion/media";
 import type { DipToBlackProps } from "../types";
 
 export const DIP_TO_BLACK_PEAK_PROGRESS = 0.5;
@@ -57,9 +58,9 @@ export const DipToBlack: React.FC<DipToBlackProps> = ({
     <AbsoluteFill style={{ overflow: "hidden", background: "#000", ...style }}>
       {aOpacity > 0.01 && (
         <AbsoluteFill style={{ opacity: aOpacity, willChange: "opacity" }}>
-          <OffthreadVideo
+          <Video
             src={clipA}
-            startFrom={startFromA}
+            trimBefore={startFromA}
             playbackRate={playbackRateA}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
@@ -67,9 +68,9 @@ export const DipToBlack: React.FC<DipToBlackProps> = ({
       )}
       {bOpacity > 0.01 && (
         <AbsoluteFill style={{ opacity: bOpacity, willChange: "opacity" }}>
-          <OffthreadVideo
+          <Video
             src={clipB}
-            startFrom={startFromB}
+            trimBefore={startFromB}
             playbackRate={playbackRateB}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />

@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, interpolate, Easing, OffthreadVideo } from "remotion";
+import { AbsoluteFill, interpolate, Easing } from "remotion";
+import { Video } from "@remotion/media";
 import type { ZoomThroughProps } from "../types";
 
 export const ZoomThrough: React.FC<ZoomThroughProps> = ({
@@ -17,11 +18,11 @@ export const ZoomThrough: React.FC<ZoomThroughProps> = ({
   return (
     <AbsoluteFill style={{ overflow: "hidden", background: "#000", ...style }}>
       <AbsoluteFill style={{ transform: `scale(${scaleB})`, opacity: opacityB }}>
-        <OffthreadVideo src={clipB} startFrom={startFromB} playbackRate={playbackRateB} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <Video src={clipB} trimBefore={startFromB} playbackRate={playbackRateB} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </AbsoluteFill>
       {opacityA > 0.01 && (
         <AbsoluteFill style={{ transform: `scale(${scaleA})`, opacity: opacityA }}>
-          <OffthreadVideo src={clipA} startFrom={startFromA} playbackRate={playbackRateA} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <Video src={clipA} trimBefore={startFromA} playbackRate={playbackRateA} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
         </AbsoluteFill>
       )}
     </AbsoluteFill>

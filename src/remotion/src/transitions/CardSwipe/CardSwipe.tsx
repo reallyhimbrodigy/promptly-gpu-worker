@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, interpolate, Easing, OffthreadVideo } from "remotion";
+import { AbsoluteFill, interpolate, Easing } from "remotion";
+import { Video } from "@remotion/media";
 import type { CardSwipeProps } from "../types";
 
 export const CardSwipe: React.FC<CardSwipeProps> = ({
@@ -21,11 +22,11 @@ export const CardSwipe: React.FC<CardSwipeProps> = ({
   return (
     <AbsoluteFill style={{ overflow: "hidden", background: "#000", borderRadius: 0, ...style }}>
       <AbsoluteFill style={{ transform: `translateY(${translateB}px) scale(${scaleB})`, opacity: opacityB, borderRadius: 0 }}>
-        <OffthreadVideo src={clipB} startFrom={startFromB} playbackRate={playbackRateB} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 0 }} />
+        <Video src={clipB} trimBefore={startFromB} playbackRate={playbackRateB} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 0 }} />
       </AbsoluteFill>
       {opacityA > 0.01 && (
         <AbsoluteFill style={{ transform: `translateX(${translateA}%) rotate(${rotateA}deg) scale(${scaleA})`, opacity: opacityA, borderRadius: 0 }}>
-          <OffthreadVideo src={clipA} startFrom={startFromA} playbackRate={playbackRateA} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 0 }} />
+          <Video src={clipA} trimBefore={startFromA} playbackRate={playbackRateA} style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 0 }} />
         </AbsoluteFill>
       )}
     </AbsoluteFill>

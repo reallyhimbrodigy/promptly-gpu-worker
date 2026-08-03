@@ -3,9 +3,9 @@ import {
   AbsoluteFill,
   interpolate,
   Easing,
-  OffthreadVideo,
   cancelRender,
 } from "remotion";
+import { Video } from "@remotion/media";
 import type { CrossfadeZoomProps } from "../types";
 import { SafeImg } from "../../SafeImg";
 
@@ -14,11 +14,11 @@ const isImage = (src: string) => /\.(jpe?g|png|gif|webp|avif|bmp)$/i.test(src);
 const MediaLayer: React.FC<{
   src: string;
   style: CSSProperties;
-  startFrom?: number;
+  trimBefore?: number;
   playbackRate?: number;
   label: string;
   onUnavailable: () => void;
-}> = ({ src, style, startFrom, playbackRate, label, onUnavailable }) =>
+}> = ({ src, style, trimBefore, playbackRate, label, onUnavailable }) =>
   isImage(src) ? (
     <SafeImg
       src={src}
@@ -28,7 +28,7 @@ const MediaLayer: React.FC<{
       onUnavailable={onUnavailable}
     />
   ) : (
-    <OffthreadVideo src={src} startFrom={startFrom} playbackRate={playbackRate} style={style} />
+    <Video src={src} trimBefore={trimBefore} playbackRate={playbackRate} style={style} />
   );
 
 /**
@@ -108,7 +108,7 @@ export const CrossfadeZoom: React.FC<CrossfadeZoomProps> = ({
       {!bLost && (
         <AbsoluteFill style={{ transform: `scale(${scaleB})`, opacity: opacityB }}>
           <MediaLayer
-            src={clipB} startFrom={startFromB} playbackRate={playbackRateB}
+            src={clipB} trimBefore={startFromB} playbackRate={playbackRateB}
             style={mediaStyle} label="CrossfadeZoom.clipB" onUnavailable={loseB}
           />
         </AbsoluteFill>
@@ -116,7 +116,7 @@ export const CrossfadeZoom: React.FC<CrossfadeZoomProps> = ({
       {!aLost && opacityA > 0.01 && (
         <AbsoluteFill style={{ transform: `scale(${scaleA})`, opacity: opacityA }}>
           <MediaLayer
-            src={clipA} startFrom={startFromA} playbackRate={playbackRateA}
+            src={clipA} trimBefore={startFromA} playbackRate={playbackRateA}
             style={mediaStyle} label="CrossfadeZoom.clipA" onUnavailable={loseA}
           />
         </AbsoluteFill>

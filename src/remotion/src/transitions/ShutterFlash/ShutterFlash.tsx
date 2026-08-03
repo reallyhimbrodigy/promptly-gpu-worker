@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, interpolate, Easing, OffthreadVideo } from "remotion";
+import { AbsoluteFill, interpolate, Easing } from "remotion";
+import { Video } from "@remotion/media";
 import type { ShutterFlashProps } from "../types";
 
 export const SHUTTER_FLASH_PEAK_PROGRESS = 0.5;
@@ -142,9 +143,9 @@ export const ShutterFlash: React.FC<ShutterFlashProps> = ({
             willChange: "transform, filter",
           }}
         >
-          <OffthreadVideo
+          <Video
             src={clipA}
-            startFrom={startFromA}
+            trimBefore={startFromA}
             playbackRate={playbackRateA}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
@@ -161,9 +162,9 @@ export const ShutterFlash: React.FC<ShutterFlashProps> = ({
             willChange: "transform, filter",
           }}
         >
-          <OffthreadVideo
+          <Video
             src={clipB}
-            startFrom={startFromB}
+            trimBefore={startFromB}
             playbackRate={playbackRateB}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />

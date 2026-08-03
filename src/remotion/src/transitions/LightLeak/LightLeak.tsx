@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, interpolate, OffthreadVideo } from "remotion";
+import { AbsoluteFill, interpolate } from "remotion";
+import { Video } from "@remotion/media";
 import type { LightLeakProps } from "../types";
 
 export const LIGHT_LEAK_PEAK_PROGRESS = 0.5;
@@ -127,9 +128,9 @@ export const LightLeak: React.FC<LightLeakProps> = ({
     <AbsoluteFill style={{ overflow: "hidden", background: "#000", ...style }}>
       {/* Active clip — swap at the peak of the glow so the cut is invisible. */}
       <AbsoluteFill>
-        <OffthreadVideo
+        <Video
           src={showClipB ? clipB : clipA}
-          startFrom={showClipB ? startFromB : startFromA}
+          trimBefore={showClipB ? startFromB : startFromA}
           playbackRate={showClipB ? playbackRateB : playbackRateA}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />

@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, Audio, OffthreadVideo, Sequence, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame, useVideoConfig } from "remotion";
+import { Video } from "@remotion/media";
 import { OverlayCutEffect, type OverlayCutEffectType } from "./OverlayCutEffect";
 
 export interface OverlayCutTestProps {
@@ -12,7 +13,7 @@ export interface OverlayCutTestProps {
   /** Whether to play the test audio WAV. Same source across all three test
    *  renders → audio bit-identity verification works trivially. */
   withAudio: boolean;
-  /** If set, the test runs in REAL-FOOTAGE mode: an <OffthreadVideo> plays
+  /** If set, the test runs in REAL-FOOTAGE mode: an <Video> plays
    *  underneath instead of solid AbsoluteFills. The video at this URL must
    *  exist on staticFile() — copy a real talking-head clip into
    *  src/remotion/public/ and pass its filename here. */
@@ -76,9 +77,9 @@ export const OverlayCutTest: React.FC<OverlayCutTestProps> = ({
         <>
           <Sequence from={0} durationInFrames={120}>
             <AbsoluteFill>
-              <OffthreadVideo
+              <Video
                 src={staticFile(videoUrl)}
-                startFrom={clipAStartFrames}
+                trimBefore={clipAStartFrames}
                 playbackRate={1}
                 muted={true}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
@@ -87,9 +88,9 @@ export const OverlayCutTest: React.FC<OverlayCutTestProps> = ({
           </Sequence>
           <Sequence from={120} durationInFrames={120}>
             <AbsoluteFill>
-              <OffthreadVideo
+              <Video
                 src={staticFile(videoUrl)}
-                startFrom={clipBStartFrames}
+                trimBefore={clipBStartFrames}
                 playbackRate={1}
                 muted={true}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
