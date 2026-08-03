@@ -33632,6 +33632,19 @@ def handler(job):
             return result
 
         def _do_gemini_proxy():
+            # TIMELINE (Zac 2026-08-03, span the 53s edit_plan gap): proxy_encode
+            # is serial-BEFORE gemini_call — Gemini's inline call cannot start
+            # until the proxy bytes exist — so its wall-time sits on the edit_plan
+            # critical path. Wrap the impl in try/finally so EVERY return path
+            # (client proxy / prewarm-cache hit / on-server encode) is measured
+            # exactly once, no matter which one wins.
+            _pe_span = _tl_start("proxy_encode", "edit_plan")
+            try:
+                return _do_gemini_proxy_impl()
+            finally:
+                _tl_end(_pe_span)
+
+        def _do_gemini_proxy_impl():
             """Provide low-res video bytes for inline Gemini API call.
 
             Three paths, in priority order:
