@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, Easing, interpolate, OffthreadVideo } from "remotion";
+import { AbsoluteFill, Easing, interpolate } from "remotion";
+import { Video } from "@remotion/media";
 import type { StepPushProps } from "../types";
 
 export const STEP_PUSH_PEAK_PROGRESS = 0.5;
@@ -57,9 +58,9 @@ export const StepPush: React.FC<StepPushProps> = ({
           willChange: "transform",
         }}
       >
-        <OffthreadVideo
+        <Video
           src={clipA}
-          startFrom={startFromA}
+          trimBefore={startFromA}
           playbackRate={playbackRateA}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
@@ -93,9 +94,9 @@ export const StepPush: React.FC<StepPushProps> = ({
           willChange: "transform",
         }}
       >
-        <OffthreadVideo
+        <Video
           src={clipB}
-          startFrom={startFromB}
+          trimBefore={startFromB}
           playbackRate={playbackRateB}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />

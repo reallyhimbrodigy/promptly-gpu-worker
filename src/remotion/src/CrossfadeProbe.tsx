@@ -8,10 +8,9 @@ import { CrossfadeZoom } from "./transitions/CrossfadeZoom/CrossfadeZoom";
  * the composition. clipA/clipB are distinct SOLID COLOURS so the measured mean
  * channel says WHICH layer is on screen, and a black frame is unmistakable.
  */
-export const CrossfadeProbe: React.FC<{ clipA: string; clipB: string }> = ({
-  clipA,
-  clipB,
-}) => {
+export const CrossfadeProbe: React.FC<{
+  clipA: string; clipB: string; startFromA?: number; startFromB?: number;
+}> = ({ clipA, clipB, startFromA, startFromB }) => {
   const frame = useCurrentFrame();
   const { durationInFrames } = useVideoConfig();
   const progress = durationInFrames > 1 ? frame / (durationInFrames - 1) : 1;
@@ -22,6 +21,8 @@ export const CrossfadeProbe: React.FC<{ clipA: string; clipB: string }> = ({
         clipA={resolve(clipA)}
         clipB={resolve(clipB)}
         progress={progress}
+        startFromA={startFromA}
+        startFromB={startFromB}
       />
     </AbsoluteFill>
   );

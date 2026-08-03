@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, interpolate, Easing, OffthreadVideo } from "remotion";
+import { AbsoluteFill, interpolate, Easing } from "remotion";
+import { Video } from "@remotion/media";
 import type { StackProps } from "../types";
 
 /**
@@ -162,9 +163,9 @@ export const Stack: React.FC<StackProps> = ({
               : "none",
         }}
       >
-        <OffthreadVideo
+        <Video
           src={clipB}
-          startFrom={startFromB}
+          trimBefore={startFromB}
           playbackRate={playbackRateB}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
@@ -180,9 +181,9 @@ export const Stack: React.FC<StackProps> = ({
             boxShadow: `0 20px 60px rgba(0,0,0,${0.5 * (1 - slideProgress)})`,
           }}
         >
-          <OffthreadVideo
+          <Video
             src={clipA}
-            startFrom={startFromA}
+            trimBefore={startFromA}
             playbackRate={playbackRateA}
             style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />

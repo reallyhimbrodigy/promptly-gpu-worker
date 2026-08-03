@@ -15,6 +15,7 @@ import { CaptionFadeProbe } from "./CaptionFadeProbe";
 import { StagedPushProbe } from "./StagedPushProbe";
 import { SmoothPushProbe } from "./SmoothPushProbe";
 import { CrossfadeProbe } from "./CrossfadeProbe";
+import { ZoomTagProbe } from "./ZoomTagProbe";
 import { ZoomEaseProbe } from "./ZoomEaseProbe";
 import { GenSceneProbe } from "./GenSceneProbe";
 
@@ -227,6 +228,20 @@ export const RemotionRoot: React.FC = () => {
               cutTerminated: false,
             },
           ],
+        } as unknown as Record<string, unknown>}
+      />
+      {/* ZoomTagProbe — before/after for the OffthreadVideo -> @remotion/media
+          <Video> migration. 90f@30 = 3s. Not used in production. */}
+      <Composition
+        id="ZoomTagProbe"
+        component={ZoomTagProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={30}
+        durationInFrames={90}
+        defaultProps={{
+          component: "LetterboxPush",
+          events: [{ startMs: 400, durationMs: 1400, scale: 1.25, originX: 0.5, originY: 0.45 }],
         } as unknown as Record<string, unknown>}
       />
       {/* CrossfadeProbe — proves a crossfade with ONE unloadable image layer

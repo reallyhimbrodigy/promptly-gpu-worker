@@ -50,6 +50,19 @@ const VALID_COMPOSITIONS = new Set([
 ]);
 
 // ── CLI ────────────────────────────────────────────────────────────────────
+// ── ONE-CLOCK RENDER BRANCH (Zac 2026-08-02) ───────────────────────────────
+// Today's render numbers were five honest measurements that did NOT NEST, and
+// 130s once vanished inside a stage with no report showing a hole. So this leg
+// emits ONE structured line whose children RECONCILE TO THE PARENT BY
+// CONSTRUCTION: unaccounted_ms is computed as total minus the sum of the parts,
+// never asserted, so a hole cannot hide — it shows up as unaccounted growing.
+//   total_ms = bundle_ms + browser_ms + select_ms + render_ms + unaccounted_ms
+//   render_ms = frames_ms + stitch_ms
+// frames_ms ends when the LAST FRAME IS PAINTED; stitch_ms is the encode/mux
+// tail after that. They partition render_ms exactly (encode overlaps painting,
+// so a frames/encode split would NOT nest — this one does).
+const _CLK = { t0: Date.now(), bundle_ms: 0, browser_ms: 0, select_ms: 0,
+               render_ms: 0, frames_ms: 0, stitch_ms: 0, frames: 0 };
 const args = process.argv.slice(2);
 let inputPath = null;
 let outputPath = null;
@@ -162,6 +175,7 @@ if (existsSync(resolve(PREBUNDLE_DIR, "index.html"))) {
     entryPoint: resolve(__dirname, "src/index.ts"),
     webpackOverride: (config) => config,
   });
+  _CLK.bundle_ms = Date.now() - t0;
   console.log(`[render-full] Bundled in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }
 
@@ -202,6 +216,7 @@ const browser = await openBrowser("chrome", {
     disableWebSecurity: true,
   },
 });
+_CLK.browser_ms = Date.now() - tBrowser;
 console.log(`[render-full] Browser opened in ${((Date.now() - tBrowser) / 1000).toFixed(2)}s`);
 
 // ── Composition ────────────────────────────────────────────────────────────
@@ -213,10 +228,18 @@ const composition = await selectComposition({
   puppeteerInstance: browser,
   publicDir,
 });
+_CLK.select_ms = Date.now() - tComp;
 console.log(`[render-full] selectComposition: ${((Date.now() - tComp) / 1000).toFixed(2)}s (publicDir=${publicDir})`);
 
 // ── Render ─────────────────────────────────────────────────────────────────
 const tRender = Date.now();
+// Frames this PROCESS will paint — the chunk range when chunked, else the whole
+// composition. Wrong here and frames_ms/stitch_ms mis-split, so it is derived
+// from the same range the render is given rather than assumed.
+_CLK._expectedFrames = isChunked
+  ? (frameRangeEnd - frameRangeStart + 1)
+  : composition.durationInFrames;
+_CLK.frames = _CLK._expectedFrames;
 let lastPctLogged = -10;
 
 let _lastProgressTime = Date.now();
@@ -288,6 +311,11 @@ try {
   onProgress: (info) => {
     const { progress, encodedFrames, renderedFrames } = info || {};
     const now = Date.now();
+    // The instant the LAST frame is painted. Everything after is stitch/encode.
+    if (!_CLK._framesDoneAt && _CLK._expectedFrames
+        && (renderedFrames || 0) >= _CLK._expectedFrames) {
+      _CLK._framesDoneAt = now;
+    }
     const pct = Math.round((progress || 0) * 100);
     if (pct >= lastPctLogged + 10) {
       const elapsedSec = (now - _lastProgressTime) / 1000;
@@ -330,7 +358,30 @@ try {
   throw e;
 }
 
-const renderElapsed = (Date.now() - tRender) / 1000;
+const _tRenderEnd = Date.now();
+_CLK.render_ms = _tRenderEnd - tRender;
+// frames_ms ends at the last painted frame; stitch_ms is the tail after it.
+// If the boundary was never observed (very short renders emit no progress tick
+// past it), attribute the whole span to frames and leave stitch at 0 rather
+// than inventing a split.
+_CLK.frames_ms = _CLK._framesDoneAt ? (_CLK._framesDoneAt - tRender) : _CLK.render_ms;
+_CLK.stitch_ms = _CLK.render_ms - _CLK.frames_ms;
+{
+  const total = Date.now() - _CLK.t0;
+  const kids = _CLK.bundle_ms + _CLK.browser_ms + _CLK.select_ms + _CLK.render_ms;
+  const unaccounted = total - kids;
+  const perFrame = _CLK.frames > 0 ? (_CLK.frames_ms / _CLK.frames) : 0;
+  // ONE line, grep-stable, children reconciling to the parent BY CONSTRUCTION.
+  console.log(
+    `[RENDERCLOCK] leg=${compositionId}${isChunked ? `:${frameRangeStart}-${frameRangeEnd}` : ""} `
+    + `total_ms=${total} bundle_ms=${_CLK.bundle_ms} browser_ms=${_CLK.browser_ms} `
+    + `select_ms=${_CLK.select_ms} render_ms=${_CLK.render_ms} `
+    + `frames_ms=${_CLK.frames_ms} stitch_ms=${_CLK.stitch_ms} `
+    + `unaccounted_ms=${unaccounted} frames=${_CLK.frames} `
+    + `ms_per_frame=${perFrame.toFixed(1)}`,
+  );
+}
+const renderElapsed = (_tRenderEnd - tRender) / 1000;
 if (_intervalSamples.length) {
   const fpsList = _intervalSamples.map((s) => s.renderFps);
   const avg = fpsList.reduce((a, b) => a + b, 0) / fpsList.length;

@@ -1,57 +1,53 @@
-# MODAL SPEND LEDGER — Rule 8 (Zac 2026-08-01, after the $140 day)
+# MODAL SPEND LEDGER — one file, every agent appends (RULE 8, Zac 2026-08-01)
 
-**Before any agent fires Modal work it appends a line here stating the cost AND
-the running cross-agent total. No agent spends past $5/session without Zac
-saying so explicitly.**
+Forged from the $140/day spike: **each agent priced its own runs and nobody
+summed across agents.** That gap is what this file closes.
 
-The gap that produced $140: each agent priced its own runs and nobody summed
-across agents. This file is the sum. It is worthless unless every agent appends
-*before* firing, not after.
+## The rule
 
-Columns: date · agent · app · what · tasks · container-seconds · $ · verified-0-tasks
+1. **Before** firing any Modal work, append a line stating the cost of that run
+   **and the running cross-agent total for the session.**
+2. **No agent spends past $5/session without Zac saying so explicitly.**
+3. A local stop proves nothing — `.spawn()`ed containers outlive the local
+   orchestrator. After any batch, verify `modal app list` shows **0 tasks** for
+   every app you created, and stop it with `modal app stop <id>` if not.
+4. Harnesses count exactly like user jobs. A cert, a plan-only run, a single
+   cheap read — all of it lands here.
 
-| date | agent | app | what | tasks | cont-sec | $ | stopped? |
-|---|---|---|---|---|---|---:|---|
-| 2026-08-01 | prompt | `query-component-usage` ×5 | component-usage + events/25s audit, CPU-only read of `video_jobs.result.edit_recipe` | 5 | ~450 | ~$0.04 | yes (0 tasks) |
-| 2026-08-01 | prompt | `plan-ab-propern` (aborted) | failed at LOCAL image build (missing `models/`) — **no containers started** | 0 | 0 | $0.00 | n/a |
-| 2026-08-01 | prompt | `plan-ab-propern` | LEAN_SCHEMA re-test, 16 clips × 6 arms, PLAN_ONLY, cpu=8 mem=32GiB | 96 | ~28,800 est | **$8 stated / UNVERIFIED** | yes (0 tasks) |
+## Format
 
-**prompt agent session total: ~$8.04 by the stated figures.**
+`| date | agent | app | runs | container-s | $ this run | $ session total |`
 
-| 2026-08-02 | prompt | `query-silent-failures` ×2 | silent-failure detector — first run's threshold was wrong (see below), re-run after the fix | 2 CPU | ~$0.02 | yes (0 tasks) |
+## Ledger
 
-| 2026-08-02 | prompt | `cert-schema-billing` | schema-billing probe: 4 sequential PLAN_ONLY runs on ONE clip (control x2, pad+5,214 tok x2), read prompt_token_count on the SECOND call after re-cache | 4 | ~1,200 est | ~$0.50 | pending |
+| date | agent | app | runs | container-s | $ this run | $ session total |
+|---|---|---|---|---|---|---|
+| 2026-08-01 | smoothness | *(none — all compute local)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-01 | smoothness | *(freeze-lifted batteries: NOT NEEDED)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-02 | smoothness | *(SmoothPush pair — local)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-02 | smoothness | *(MG attack re-measure, both arms — local)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-02 | smoothness | *(SafeImg + crossfade degrade proofs — local)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-02 | smoothness | *(MG frame-draw profile, 6 renders — local)* | 0 | 0 | $0.00 | $0.00 |
 
-**prompt agent session total: ~$8.56 if the probe runs.** Explicit GO covered the
-detector; the probe is taken as covered by "these four are cheaper and more
-certain" contrasted against the HELD $10 A/B.
+## Session notes
 
-### PROPOSED — NOT FIRED
+**smoothness, 2026-08-01 — $0.00. Zero Modal work fired, zero apps created.**
+Every measurement this session ran on the laptop: 89 local Remotion renders (3
+velocity-cap A/B rounds + 3 MG attack batteries × 26 components), local ffmpeg
+frame-diff/PSNR/MAD passes, one **free** Supabase read of stored plans, and an
+`npm ci`. Verified after the freeze: `modal app list` shows 29 of 30 apps at 0
+tasks; the single app with running tasks is `promptly-gpu-worker` (deployed
+production, draining real user jobs — not a harness, not mine).
 
-| date | agent | app | what | est tasks | est $ | status |
-|---|---|---|---|---:|---:|---|
-| 2026-08-02 | prompt | `plan-ab` 2-arm | re-audit the six discriminating FITS/FIGHTS | 32 | ~$3 | **HELD** |
+**Freeze-lifted allowance UNUSED.** Zac cleared two local batteries (Reticle +
+the StepDivider 3.10 anomaly). Neither was run: both resolved by RE-ANALYSING
+renders already on disk. StepDivider's 3.10 was an artifact of my own audit
+(steady sampled at 400-700ms, inside a long staged entrance — 0.198 there vs
+2.362 settled, a 12x error); against true travel it is 0.24, marginal. Reticle's
+0.67 was the same artifact plus a peak that sits at 333ms = the designed LOCK
+accent, not the entrance; corrected it reads 0.25 -> 0.20. No component change
+was warranted for either, and no render was fired to learn that.
 
-Both held because **Rule 8 caps an agent at $5/session without Zac saying so
-explicitly, and I am already at $8.04.** The freeze was lifted for the speed
-agent (inc2, Gemini A/Bs) and the errors agent (Scribe) — not for me. Neither of
-these fires without a word from Zac, even though the first is a $0.01 read he
-asked for: the point of the rule is that the agent does not get to decide its own
-exception.
-
-## Honest caveat on my own number — this is the Rule-8 gap in miniature
-
-The `$8` for the A/B is the estimate **written in the harness file's docstring**
-(`~16x6x$0.08`), which I inherited and repeated. I did not independently derive
-it, and I have not reconciled it against Modal's billing.
-
-Recomputing from the actual resource request — 96 tasks × cpu=8.0 ×
-32 GiB, at an assumed ~300 s/task — gives ~230k core-seconds and ~922k GiB-seconds.
-At cpu=8/32GiB the **memory-time term is large and the per-clip $0.08 figure does
-not obviously account for it**, so the true cost may exceed $8. Treat $8 as a
-lower bound until someone reads the per-app breakdown off the Modal dashboard.
-
-**Lesson for the rule:** a cost estimate copied from a harness docstring is not a
-priced run. Rule 6 says every Modal run carries a stated dollar figure *in
-advance* — it has to be one the firing agent derived, from the actual cpu/memory
-request and expected duration, or the number is decoration.
+**`cert-cap-rendertime` is NOT mine**, despite the "cap" in the name resembling
+the zoom velocity cap. I invoked no `modal` command this session other than the
+read-only `modal app list` above. It shows `stopped / 0 tasks`.

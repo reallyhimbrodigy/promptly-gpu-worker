@@ -3,9 +3,9 @@ import {
   AbsoluteFill,
   Easing,
   interpolate,
-  OffthreadVideo,
   useVideoConfig,
 } from "remotion";
+import { Video } from "@remotion/media";
 import type { FilmStripProps } from "../types";
 
 export const FILM_STRIP_PEAK_PROGRESS = 0.5;
@@ -224,7 +224,7 @@ export const FilmStrip: React.FC<FilmStripProps> = ({
 
         <TileContainer
           src={clipB}
-          startFrom={startFromB}
+          trimBefore={startFromB}
           playbackRate={playbackRateB}
           left={bLeft}
           top={bTop}
@@ -238,7 +238,7 @@ export const FilmStrip: React.FC<FilmStripProps> = ({
 
         <TileContainer
           src={clipA}
-          startFrom={startFromA}
+          trimBefore={startFromA}
           playbackRate={playbackRateA}
           left={aLeft}
           top={aTop}
@@ -391,7 +391,7 @@ interface TileContainerProps {
   shadowOpacity: number;
   opacity?: number;
   filter?: string;
-  startFrom?: number;
+  trimBefore?: number;
   playbackRate?: number;
 }
 
@@ -406,7 +406,7 @@ const TileContainer: React.FC<TileContainerProps> = ({
   shadowOpacity,
   opacity = 1,
   filter,
-  startFrom,
+  trimBefore,
   playbackRate,
 }) => {
   return (
@@ -451,9 +451,9 @@ const TileContainer: React.FC<TileContainerProps> = ({
           ].join(", "),
         }}
       >
-        <OffthreadVideo
+        <Video
           src={src}
-          startFrom={startFrom}
+          trimBefore={trimBefore}
           playbackRate={playbackRate}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />

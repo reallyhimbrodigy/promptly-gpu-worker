@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, interpolate, Easing, OffthreadVideo } from "remotion";
+import { AbsoluteFill, interpolate, Easing } from "remotion";
+import { Video } from "@remotion/media";
 import type { SlideOverProps } from "../types";
 
 export const SlideOver: React.FC<SlideOverProps> = ({
@@ -19,10 +20,10 @@ export const SlideOver: React.FC<SlideOverProps> = ({
   return (
     <AbsoluteFill style={{ overflow: "hidden", background: "#000", ...style }}>
       <AbsoluteFill style={{ transform: `translateX(${translateA}%) scale(${scaleA})` }}>
-        <OffthreadVideo src={clipA} startFrom={startFromA} playbackRate={playbackRateA} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <Video src={clipA} trimBefore={startFromA} playbackRate={playbackRateA} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </AbsoluteFill>
       <AbsoluteFill style={{ transform: `translateX(${translateB}%)`, boxShadow: `${sign * -20}px 0 60px rgba(0,0,0,${shadowOpacity})` }}>
-        <OffthreadVideo src={clipB} startFrom={startFromB} playbackRate={playbackRateB} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <Video src={clipB} trimBefore={startFromB} playbackRate={playbackRateB} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </AbsoluteFill>
     </AbsoluteFill>
   );

@@ -7,7 +7,7 @@ import {
   Easing,
   spring,
 } from "remotion";
-import { OffthreadVideo } from "remotion";
+import { Video } from "@remotion/media";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import { useResprungZooms } from "../shared/resprung-flag";
 import type { FocusWindowProps } from "../types";
@@ -76,7 +76,7 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
   if (!active) {
     return (
       <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-        <OffthreadVideo
+        <Video
           src={src}
           style={{
             width: "100%",
@@ -94,7 +94,7 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <OffthreadVideo
+      <Video
         src={src}
         style={{
           width: "100%",
@@ -133,7 +133,7 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
             position: "relative",
           }}
         >
-          <OffthreadVideo
+          <Video
             src={src}
             style={{
               width: `${(1 / currentWindowScale) * 100}%`,

@@ -2,13 +2,13 @@ import React from "react";
 import {
   AbsoluteFill,
   Sequence,
-  OffthreadVideo,
   Img,
   staticFile,
   useCurrentFrame,
   interpolate,
   spring,
 } from "remotion";
+import { Video } from "@remotion/media";
 import { CameraMotionBlur } from "@remotion/motion-blur";
 import { LumenScene } from "./LumenScenes";
 import type {
@@ -165,9 +165,9 @@ const ClipRenderer: React.FC<{ clip: ClipSpec; sourceUrl: string }> = ({
   }
   return (
     <AbsoluteFill>
-      <OffthreadVideo
+      <Video
         src={sourceUrl}
-        startFrom={clip.startFromFrames}
+        trimBefore={clip.startFromFrames}
         playbackRate={clip.playbackRate}
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
       />
@@ -188,9 +188,9 @@ const TransitionRenderer: React.FC<{
   if (!Comp) {
     return (
       <AbsoluteFill>
-        <OffthreadVideo
-          src={sourceUrl}
-          startFrom={transition.clipBStartFromFrames}
+        <Video
+          src={transition.clipBSrc ? resolveSrc(transition.clipBSrc) : sourceUrl}
+          trimBefore={transition.clipBSrc ? 0 : transition.clipBStartFromFrames}
           playbackRate={transition.clipBPlaybackRate}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
@@ -201,14 +201,15 @@ const TransitionRenderer: React.FC<{
     type: _t, afterClipIndex: _a, durationInFrames: _d,
     clipAStartFromFrames, clipBStartFromFrames,
     clipAPlaybackRate, clipBPlaybackRate,
+    clipASrc, clipBSrc,
     ...extraProps
   } = transition;
   return (
     <Comp
-      clipA={sourceUrl}
-      clipB={sourceUrl}
-      startFromA={clipAStartFromFrames}
-      startFromB={clipBStartFromFrames}
+      clipA={clipASrc ? resolveSrc(clipASrc) : sourceUrl}
+      clipB={clipBSrc ? resolveSrc(clipBSrc) : sourceUrl}
+      startFromA={clipASrc ? 0 : clipAStartFromFrames}
+      startFromB={clipBSrc ? 0 : clipBStartFromFrames}
       playbackRateA={clipAPlaybackRate}
       playbackRateB={clipBPlaybackRate}
       progress={progress}
@@ -610,9 +611,9 @@ const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) =>
           transform: `scale(${scale})`,
         }}
       >
-        <OffthreadVideo
+        <Video
           src={resolvedSrc}
-          startFrom={startFromFrames}
+          trimBefore={startFromFrames}
           playbackRate={spec.playbackRate || 1.0}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />

@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill, OffthreadVideo, staticFile, useVideoConfig } from "remotion";
+import { AbsoluteFill, staticFile, useVideoConfig } from "remotion";
+import { Video } from "@remotion/media";
 import { GeneratedSceneLayer } from "./PromptlyRender";
 import type { GeneratedSceneSpec } from "./types";
 
@@ -27,7 +28,7 @@ export const GenSceneProbe: React.FC<GenSceneProbeProps> = ({ scenes, label, sou
   return (
     <AbsoluteFill style={{ backgroundColor: "#0c0c10" }}>
       {sourceSrc ? (
-        <OffthreadVideo
+        <Video
           src={/^[a-z][a-z0-9+.-]*:/i.test(sourceSrc) ? sourceSrc : staticFile(sourceSrc)}
           muted
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
