@@ -10945,6 +10945,18 @@ def _gemini_stream_with_cache(client, model_name, contents, base_config_kwargs,
                 # remainder, billed at full rate, the half no condensation touches.
                 "prompt_tok": getattr(_usage, "prompt_token_count", None) if _usage else None,
                 "cached_tok": getattr(_usage, "cached_content_token_count", None) if _usage else None,
+                # MODALITY SPLIT (2026-08-02). TTFB is 76% of the post-cuts call
+                # (45.9s of 60.4s, measured over 16 clips) and TTFB is prefill,
+                # which the UNCACHED input pays for — 12,765 tok on live traffic.
+                # The video part of that is the single biggest unmeasured input,
+                # and PROXY_SAMPLE_FPS halves it directly. usage_metadata already
+                # carries the per-modality breakdown; it was simply never read, so
+                # the video/text split had to be ASSUMED. Now it can be counted.
+                "modality": ([
+                    {"modality": str(getattr(_m, "modality", "")),
+                     "tokens": getattr(_m, "token_count", None)}
+                    for _m in (getattr(_usage, "prompt_tokens_details", None) or [])
+                ] if _usage else None),
             })
         except Exception:
             pass
