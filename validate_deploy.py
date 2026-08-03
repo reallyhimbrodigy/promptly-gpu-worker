@@ -7960,6 +7960,38 @@ def _safe_image_law():
         f"a failed asset ships black or fails loudly, and must never default: {sorted(set(_roleless))}")
 
 
+@check("ONE-CLOCK TIMELINE — THE INSTRUMENT CANNOT LIE (Zac 2026-08-02 'one clock', forged from the 130s that five incompatible stopwatches could not reconcile): the per-job wall-clock tree computes unaccounted = parent − union(children) EXACTLY, so union(children) + unaccounted == parent at every node and a hidden span is PRINTED as an explicit gap rather than absorbed silently. Behaviorally builds a synthetic tree (overlapping + sequential + tail gap) and FAILS the deploy if the invariant breaks by >1s, if 'parallel' is asserted rather than DERIVED from interval overlap, or if the instrument is not (a) instantiated per job at handler entry, (b) wired to the edit_plan + render parents, and (c) nested into stage_timings so content-studio's top-level key stripping cannot drop it. cert: test_one_clock_timeline.py")
+def _one_clock_timeline():
+    import os as _os2
+    from handler import _JobTimeline
+    # ── behavioral invariant: overlapping (parallel) + sequential + tail gap ──
+    tl = _JobTimeline(); tl.now = lambda: 150.0
+    tl.add("a", 0, 100, "job"); tl.add("b", 50, 120, "job"); tl.add("c", 130, 140, "job")
+    tr = tl.finalize()
+    _cov = round(tr["dur"] - tr["unaccounted"], 1)
+    assert abs(_cov + tr["unaccounted"] - tr["dur"]) < 1.0, \
+        "timeline invariant broken: union(children)+unaccounted must equal parent within 1s"
+    assert abs(tr["unaccounted"] - 20.0) < 1.0, \
+        f"a gap between/after children must surface as unaccounted, got {tr['unaccounted']}"
+    assert tr["parallel"] is True, "overlapping children must DERIVE parallel=True, not assert it"
+    tl2 = _JobTimeline(); tl2.now = lambda: 100.0
+    tl2.add("x", 0, 40, "job"); tl2.add("y", 40, 80, "job")
+    assert tl2.finalize()["parallel"] is False, "non-overlapping children must not be flagged parallel"
+    # a hidden 130s-shape gap under a parent must be VISIBLE
+    tl3 = _JobTimeline(); tl3.now = lambda: 200.0
+    tl3.add("edit_plan", 0, 189, "job"); tl3.add("gemini_call", 10, 70, "edit_plan")
+    _ep = next(c for c in tl3.finalize()["children"] if c["name"] == "edit_plan")
+    assert _ep["unaccounted"] > 120.0, "an unexplained span under a parent must print as a gap"
+    # ── wiring: instantiated, parents present, nested (survives stripping) ──
+    _h = open(_os2.path.join(_os2.path.dirname(_os2.path.abspath(__file__)), "handler.py"),
+              encoding="utf-8").read()
+    assert "_TL = _JobTimeline()" in _h, "timeline must be instantiated per job at handler entry"
+    assert '_tl_start("edit_plan"' in _h and '_tl_start("render"' in _h, \
+        "the edit_plan + render parents must be wired so other agents can attach children"
+    assert '"timeline": _tl_report()' in _h, \
+        "the tree must nest inside stage_timings (content-studio strips unknown top-level keys)"
+
+
 @check("BUNDLE-FRESHNESS GUARD (Zac 2026-08-02, RULE-1, forged from SafeImg nearly shipping inert): a Remotion TSX change ships DEAD if a redeploy reuses a cached bundle without re-running prebundle.mjs — the render then executes STALE compiled JS while the source (and every gate that reads the source) says the fix is present. This gate asserts the anti-inert mechanism is wired on BOTH ends: (1) prebundle.mjs fingerprints every src .ts/.tsx/.mjs into bundle/.src_hash at image-build time, and (2) handler.py defines _assert_bundle_fresh() AND calls it inside render_stage, so the FIRST real render recomputes the live-source hash and refuses (STALE_BUNDLE) if the deployed bundle wasn't built from the deployed source. Fail-open only when the stamp is absent (pre-fingerprint bundle), never on mismatch. One check closes the class forever: a TSX fix can no longer pass every source gate yet render from an old bundle.")
 def _bundle_freshness_guard():
     import os as _os, re as _re3

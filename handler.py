@@ -31505,6 +31505,130 @@ def _nr_mem_report():
     return _NR_MEM["peak"]
 
 
+class _JobTimeline:
+    """ONE hierarchical wall-clock timeline per job (Zac 2026-08-02 'one clock').
+    Every span is (name, parent, start, end) off a SINGLE monotonic source. A
+    parent's children may run in parallel, so the time its children COVER is the
+    UNION of their intervals — `unaccounted = parent_dur - union(children)` is
+    exact BY CONSTRUCTION and any gap is emitted as an explicit 'unaccounted'
+    child. No per-stage clocks, no asserted overlaps: the tree computes coverage.
+    Written into result['timeline'] so the number is PRODUCTION's, not a probe's.
+    SPEED owns the worker tree; errors/smoothness/prompt attach children to the
+    dispatch / render / edit_plan parents via _tl_add with this same clock."""
+    def __init__(self):
+        import threading as _th
+        self._t0 = time.monotonic()
+        self._spans = []          # {name, parent, start, end}
+        self._lock = _th.Lock()
+
+    def now(self):
+        return time.monotonic() - self._t0
+
+    def start(self, name, parent="job"):
+        s = {"name": name, "parent": parent, "start": self.now(), "end": None}
+        with self._lock:
+            self._spans.append(s)
+        return s
+
+    def end(self, s):
+        if s is not None and s.get("end") is None:
+            s["end"] = self.now()
+
+    def add(self, name, start, end, parent="job"):
+        """A span whose start/end were captured with THIS timeline's clock
+        (via .now()) — e.g. a child stage in another module."""
+        with self._lock:
+            self._spans.append({"name": str(name), "parent": str(parent),
+                                "start": float(start), "end": float(end)})
+
+    @staticmethod
+    def _union(intervals):
+        if not intervals:
+            return 0.0
+        ints = sorted(intervals)
+        cov = 0.0
+        cs, ce = ints[0]
+        for s, e in ints[1:]:
+            if s > ce:
+                cov += ce - cs
+                cs, ce = s, e
+            else:
+                ce = max(ce, e)
+        return cov + (ce - cs)
+
+    def finalize(self):
+        _end = self.now()
+        for s in self._spans:
+            if s["end"] is None:
+                s["end"] = _end
+        by_parent = {}
+        for s in self._spans:
+            by_parent.setdefault(s["parent"], []).append(s)
+
+        def _node(name, start, end):
+            dur = end - start
+            kids = sorted(by_parent.get(name, []), key=lambda k: k["start"])
+            cov = self._union([(k["start"], k["end"]) for k in kids])
+            unacc = round(max(0.0, dur - cov), 1)
+            node = {"name": name, "start": round(start, 1), "dur": round(dur, 1),
+                    "unaccounted": unacc,
+                    "children": [_node(k["name"], k["start"], k["end"]) for k in kids]}
+            # PARALLEL is DERIVED, never asserted: children cover less wall than
+            # they sum to iff they overlap.
+            if kids:
+                node["parallel"] = round(sum((k["end"] - k["start"]) for k in kids), 1) > round(cov, 1) + 0.5
+            return node
+
+        return _node("job", 0.0, _end)
+
+
+_TL = None   # per-job singleton, (re)created at handler entry
+
+
+def _tl_start(name, parent="job"):
+    return _TL.start(name, parent) if _TL is not None else None
+
+
+def _tl_end(s):
+    if _TL is not None:
+        _TL.end(s)
+
+
+def _tl_add(name, start, end, parent="job"):
+    if _TL is not None:
+        _TL.add(name, start, end, parent)
+
+
+def _tl_render(node, depth=0):
+    """ASCII tree with an explicit unaccounted line under any parent that has one."""
+    _pad = "  " * depth
+    _par = " ∥" if node.get("parallel") else ""
+    _lines = [f"{_pad}{node['name']:<20}{node['dur']:>7.1f}s{_par}"]
+    for _c in node.get("children", []):
+        _lines.extend(_tl_render(_c, depth + 1))
+    if node.get("unaccounted", 0) > 0.5 and node.get("children"):
+        _lines.append(f"{_pad}  {'unaccounted':<18}{node['unaccounted']:>7.1f}s  ← gap")
+    return _lines
+
+
+def _tl_report():
+    """Finalize the job timeline ONCE, print the ASCII tree (with explicit
+    'unaccounted' gaps), and return the tree for nesting in stage_timings."""
+    if _TL is None:
+        return None
+    try:
+        tree = _TL.finalize()
+    except Exception as _e:
+        print(f"[timeline] finalize failed ({type(_e).__name__}) — no tree this job", flush=True)
+        return None
+    try:
+        print("[timeline] ONE-CLOCK job tree (wall-clock s · ∥ parallel · gaps explicit):\n"
+              + "\n".join(_tl_render(tree)), flush=True)
+    except Exception:
+        pass
+    return tree
+
+
 def _assert_bundle_fresh():
     """BUNDLE-FRESHNESS GUARD (Zac 2026-08-02): a Remotion TSX change ships INERT
     if a redeploy reuses a cached /remotion/bundle without re-running prebundle.mjs
@@ -32455,8 +32579,9 @@ def _capture_failure_corpus(source_path, job_id, klass):
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
-    global _ACTIVE_JOB_ID
+    global _ACTIVE_JOB_ID, _TL
     _ACTIVE_JOB_ID = input_data.get("job_id")  # for the platform-shutdown ledger flush
+    _TL = _JobTimeline()   # ONE CLOCK: hierarchical wall-clock timeline for this job
     work_dir = None
     _prog_pub_cell = [None]  # 1-cell holder: render_stage writes the publisher here so the finally drains it even if render_stage raises
     _rs_cost_cell = [0.0, 0]  # (usd, count) QA-regen spend accumulated in render_stage; folded into the meter once (both paths) before the cost log
@@ -35124,8 +35249,10 @@ def handler(job):
 
         # Collect results — get edit_plan FIRST so we can start B-roll fetch early
         _mega_t0 = time.time()
+        _tl_edit = _tl_start("edit_plan", "job")  # prompt attaches proxy/gemini/qa children here
         if future_edit is not None:
             edit_plan = future_edit.result()  # critical path — longest wait (Gemini)
+            _tl_end(_tl_edit)
             # PLAN-ONLY test seam (dark, Zac 2026-07-31): return the finalized plan
             # and skip render — a render-FREE planning A/B (e.g. the lean-schema
             # decision test). Full-fidelity signals (real transcribe/proxy/faces).
@@ -36049,6 +36176,7 @@ def handler(job):
         # render_burst container; a burst failure/death propagates into the ONE
         # terminal below, a staging hiccup falls back to a local render.
         _nr_mem_report()   # non-render peak (render hasn't run yet) — the inc2 sizing number
+        _tl_render = _tl_start("render", "job")  # smoothness attaches base/overlay/micro/composite children
         _rs = _run_render_via_burst_or_local(
             job_id, input_data, edit_plan, work_dir, source_path, output_path,
             transcript, source_duration, app_url, broll_clips, upload_url,
@@ -36056,6 +36184,7 @@ def handler(job):
             integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,
             is_premium,
         )
+        _tl_end(_tl_render)
         edit_plan = _rs["edit_plan"]
         _timings = _rs["timings"]
         _floor_state = _rs["floor_state"]
@@ -36254,6 +36383,11 @@ def handler(job):
                 # would have been lost to content-studio top-level stripping. The
                 # uncached_delta (prompt-cached) decides the prompt lever.
                 "gemini_tokens": _gemini_token_summary(),
+                # ONE CLOCK (Zac 2026-08-02): hierarchical wall-clock tree with
+                # start/end/parent per span; unaccounted = parent − union(children)
+                # is exact, so any gap is VISIBLE not absorbed. Nested to survive
+                # content-studio's top-level key stripping, same as gemini_tokens.
+                "timeline": _tl_report(),
             },
             # W2: which stages ran/skipped and WHY (effort-proportional proof)
             "stage_manifest": _stage_manifest,
