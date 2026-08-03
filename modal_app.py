@@ -1138,12 +1138,18 @@ def render_burst(payload: dict) -> dict:
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
     timeout=3000,         # 50 min (raised 900->1800->3000; 3000 for 5-min support 2026-07-25) — matches run_pipeline_bg so the SYNC-fallback path (SPAWN_MODE=0) can also finish a 5-minute render. Under SPAWN_MODE=1 run_job returns in ms (it spawns run_pipeline_bg), so this cap binds only the sync fallback; kept in lockstep for correctness. Orchestrator runs init + audio + remotion + composite + upload; the Gemini client timeout is 480s (handler.py:_get_genai_client). Billing is per-active-second, so short jobs cost the same — the cap only bounds the tail. INVARIANT: content-studio reaper EXEC_WALL_MS must be >= this (>=3300s) at all times, raised FIRST.
-    scaledown_window=180, # 3 min — covers the warmup() (fired at upload-start) →
-                          # run_job gap so the FIRST render after idle hits a warm
-                          # container (no cold start), plus back-to-back jobs. At
-                          # A100 rates (~$2.78/hr, down from H100's $8.27) the
-                          # extra idle warmth is ~$0.12/render — cheap vs paying a
-                          # 15-30s cold start on the user's critical path.
+    scaledown_window=30,  # COST A/B (Zac GO 2026-08-03): WAS 180. warmup() exists
+                          # to buy dispatch latency, and THE FUNNEL PROVED LATENCY
+                          # DOES NOT CONVERT (the 240-400s wait bucket engaged MOST,
+                          # 21.3%, vs 8.4% under-60s). warmup is iOS-triggered per
+                          # OPEN, so it scales with 6,193 openers, NOT 235 jobs/day —
+                          # every open held a cpu=8/32GiB box idle 180s with no job
+                          # behind it, the shape of the ~$87/day non-job gap. Cutting
+                          # 180→30 kills ~6x of that idle tail. run_job dispatch
+                          # cold-starts more, but enable_memory_snapshot restores the
+                          # handler import instantly, so the ack slips only a few
+                          # seconds (never the job itself — it runs in run_pipeline_bg).
+                          # REVERT: restore 180 if the 24h invoice A/B shows no drop.
     # NO GPU — the orchestrator does NO GPU work on the critical path. NVENC +
     # CUDA decode are hardcoded off (_HAS_NVENC/_HAS_HWACCEL=False → CPU libx264
     # encode, CPU decode, CPU minterpolate); the Remotion render is Chromium-on-
@@ -1265,13 +1271,14 @@ class PromptlyWorker:
         app server at upload-start — mirrors PromptlyPrewarmWorker hiding the
         CPU prework behind the upload, but for the GPU render container.
         Idempotent and ~free; the value is the side effect of a warm container."""
-        cuda = False
-        try:
-            import torch
-            cuda = bool(torch.cuda.is_available())
-        except Exception:
-            pass
-        return {"ok": True, "warm": True, "cuda": cuda}
+        # COST A/B (Zac GO 2026-08-03): warmup is NEUTERED — it returns instantly
+        # instead of importing torch to probe a GPU this CPU-only container never
+        # has (always returned cuda=False after a ~1-2s import). The value warmup
+        # bought — a warm dispatcher for run_job — is deliberately abandoned (funnel
+        # proved dispatch latency does not convert); the scaledown_window cut on this
+        # class is the real lever. iOS still gets a 200, so no client change is
+        # needed. REVERT: restore the torch probe + scaledown=180 together.
+        return {"ok": True, "warm": False, "neutered_for_cost_ab": True}
 
 
 # ── Prewarm CPU worker (split off from the GPU render worker) ─────────────────
@@ -1284,8 +1291,13 @@ class PromptlyWorker:
 # few seconds of cold start is invisible.
 @app.cls(
     timeout=300,          # 5 min is plenty for an S3 download + Deepgram call
-    scaledown_window=600, # stay warm 10 min after last request; idles to zero after
-    cpu=8,                # enough to run boto3 CRT multipart + Deepgram in parallel
+    scaledown_window=30,  # COST A/B (Zac GO 2026-08-03): WAS 600 (10 min!). prewarm
+                          # writes the source to the PERSISTENT /prewarm VOLUME, so
+                          # the cache survives the container's death — cutting the
+                          # idle tail 600→30 keeps the download-caching benefit while
+                          # killing the 10-min idle bleed per upload. Paired with the
+                          # warmup scaledown cut (PromptlyWorker) as the non-job-spend
+                          # A/B. REVERT: restore 600 if the 24h invoice shows no drop.
     memory=4096,          # 4GB for in-flight download buffers + transcript JSON
     region="us-west",     # same region as the S3 bucket + render class
     volumes={"/prewarm": prewarm_volume},
