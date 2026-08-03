@@ -30716,18 +30716,25 @@ def send_progress(job_id, step, pct, message, app_url):
     threading.Thread(target=_fire, daemon=True).start()
 
 
-def _fire_render_alert(job_id, error_code, detail=None, duration_s=None, elapsed_s=None):
-    """Operational [ALERT] for a terminal REAL render failure (never a designed
-    rejection). Two independent legs, both best-effort and NON-blocking:
+def _fire_render_alert(job_id, error_code, detail=None, duration_s=None, elapsed_s=None,
+                       category="render", user_id=None):
+    """Operational [ALERT] for a terminal failure. Two independent legs, both
+    best-effort and NON-blocking:
       1. A loud, grep-stable `[ALERT]` log line — always emitted, so the signal
          survives even if the push channel is down (Modal logs carry it).
       2. A background POST to the app server's /api/internal/render-alert, which
          pushes to the founder's own device(s) (the cheapest reachable channel).
+    `category` groups the push (APNs threadId): 'render' = a REAL render failure
+    we can act on; 'intake' = the client-upload family (Zac 2026-08-03) which was
+    digest-only and invisible on the phone — now visible under its OWN collapsed
+    thread so a spike surfaces without per-job page spam. `user_id` rides into the
+    body so the alert names the affected user.
     A failed / crashing / no-op call must never touch the job's failure path —
     the user's error state and refund are already written by the caller."""
     # Leg 1 — always print, synchronous, cannot fail the caller.
     try:
-        print(f"[ALERT] render failure job={job_id} code={error_code}"
+        print(f"[ALERT] {category} failure job={job_id} code={error_code}"
+              + (f" user={user_id}" if user_id else "")
               + (f" dur={duration_s}s" if duration_s else "")
               + (f" elapsed={elapsed_s}s" if elapsed_s else "")
               + (f" detail={str(detail)[:200]}" if detail else ""), flush=True)
@@ -30749,7 +30756,8 @@ def _fire_render_alert(job_id, error_code, detail=None, duration_s=None, elapsed
                 f"{app_url}/api/internal/render-alert",
                 json={"job_id": job_id, "error_code": error_code,
                       "detail": (str(detail)[:500] if detail else None),
-                      "duration_s": duration_s, "elapsed_s": elapsed_s},
+                      "duration_s": duration_s, "elapsed_s": elapsed_s,
+                      "category": category, "user_id": user_id},
                 headers=headers,
                 timeout=5,
             )
@@ -36753,6 +36761,13 @@ def handler(job):
         if _page_operator:
             _fire_render_alert(input_data.get("job_id"), classified.get("error_code"),
                                detail=str(e))
+        elif classified.get("error_code") in _CLIENT_UPLOAD_CODES:
+            # Zac 2026-08-03: the client-upload family was digest-only and thus
+            # invisible on the phone (49 users / 2 days). Alert under its OWN
+            # collapsed 'intake' thread — visible spike, no per-job page spam.
+            _fire_render_alert(input_data.get("job_id"), classified.get("error_code"),
+                               detail=str(e), category="intake",
+                               user_id=input_data.get("user_id"))
         return {
             "error": classified["user_message"],     # legacy: human text
             "error_code": classified["error_code"],   # NEW: machine code
