@@ -23,7 +23,9 @@ Columns: date · agent · app · what · tasks · container-seconds · $ · veri
 | 2026-08-02 | prompt | `cert-schema-billing` | schema-billing probe — **NEVER RAN**. `modal run` hung before app creation; no Modal app was registered and no container started. Killed. | 0 | 0 | **$0.00** | n/a |
 | 2026-08-02 | prompt | `plan-ab-reorder` | REORDER A/B (Zac GO): 3 arms x 16 clips, PLAN_ONLY, cpu=8/32GiB | 48 | ~14,400 est | ~$4 stated / budget $7 | yes (0 tasks) |
 
-**prompt agent session total: ~$12.07** (probe never ran = $0; reorder A/B ~$4). Explicit GO covered the
+| 2026-08-02 | prompt | `query-stage-decomp` | production stage_timings decomposition, CPU-only DB read | 1 | ~90 | ~$0.01 | yes (0 tasks) |
+
+**prompt agent session total: ~$12.08** (probe never ran = $0; reorder A/B ~$4). Explicit GO covered the
 detector; the probe is taken as covered by "these four are cheaper and more
 certain" contrasted against the HELD $10 A/B.
 
