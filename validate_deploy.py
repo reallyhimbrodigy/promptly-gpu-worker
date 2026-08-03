@@ -7408,6 +7408,24 @@ def _mg_entrance_fingerprint():
     return "sha256:" + _hl.sha256("\n====\n".join(_parts).encode("utf-8")).hexdigest()
 
 
+@check("ONE-CLOCK RENDER BRANCH (Zac 2026-08-02, RULE-1): the render leg emits a single [RENDERCLOCK] line whose children RECONCILE TO THE PARENT BY CONSTRUCTION — total_ms = bundle+browser+select+render+unaccounted, and render_ms = frames_ms+stitch_ms. Forged because today's render numbers were five honest measurements that did not NEST, and 130s once vanished inside a stage with no report showing a hole. unaccounted_ms must be COMPUTED as total minus the parts, never asserted, so a hole cannot hide — it shows up as unaccounted growing. This gate fails the deploy if the line loses a field or if unaccounted stops being derived.")
+def _one_clock_render_branch():
+    import os as _os, re as _re2
+    _p = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                       "src", "remotion", "render-full.mjs")
+    _t = open(_p, encoding="utf-8").read()
+    assert "[RENDERCLOCK]" in _t, "render-full.mjs must emit the [RENDERCLOCK] line"
+    for _f in ("total_ms", "bundle_ms", "browser_ms", "select_ms", "render_ms",
+               "frames_ms", "stitch_ms", "unaccounted_ms", "frames=", "ms_per_frame"):
+        assert _f in _t, f"[RENDERCLOCK] lost its {_f} field — the branch no longer nests"
+    assert _re2.search(r"const\s+unaccounted\s*=\s*total\s*-\s*kids", _t), \
+        "unaccounted_ms must be COMPUTED as total minus the summed children, so a hole cannot hide"
+    assert _re2.search(r"const\s+kids\s*=\s*_CLK\.bundle_ms\s*\+\s*_CLK\.browser_ms\s*\+\s*_CLK\.select_ms\s*\+\s*_CLK\.render_ms", _t), \
+        "the children sum must include every child of the render leg"
+    assert "_CLK.stitch_ms = _CLK.render_ms - _CLK.frames_ms" in _t, \
+        "render_ms must partition into frames_ms + stitch_ms by construction"
+
+
 @check("SAFE IMAGE LAW (Zac 2026-08-02, RULE-1, forged from job 1047def9): a failed image must degrade to NO IMAGE, never to a dead render. Remotion's <Img> opens its OWN delayRender handle on mount, so one unreachable asset inside Chromium hangs the frame and kills the whole video (1047def9: two blob: <Img> handles open at frame 134, 30000ms timeout, rc=1; b8ab1276: same shape on the overlay leg at rendered=0). SafeImg probes the URL off-tree under an explicit sub-render-timeout and only then mounts <Img>, so an unloadable asset costs its own pixels and nothing else. This gate FAILS the deploy if a BARE <Img> reappears anywhere in the Remotion tree — the one way this class comes back.")
 def _safe_image_law():
     import os as _os, re as _re2, glob as _g
