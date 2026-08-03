@@ -26438,6 +26438,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                 "-i", source_path, "-vf", _vf, "-frames:v", str(_dur_frames_i),
                 "-c:v", "libx264", "-preset", "fast", "-crf", "14",
+                # inc2 render_burst: PIN x264 threads (never auto). This transition
+                # pre-extract feeds Remotion frame-by-frame, so thread-dependent
+                # bytes would decode to different frames and break byte-identity
+                # across cpu counts (cpu=48 burst vs cpu=16). Same pin as the
+                # per-clip pre-extract sibling above.
+                "-x264-params", f"threads={_X264_ENCODE_THREADS}",
                 "-pix_fmt", "yuv420p", "-g", str(_gop), "-keyint_min", str(_gop),
                 "-sc_threshold", "0", "-video_track_timescale", "90000",
                 "-movflags", "+faststart", "-an", _out_path,
