@@ -20135,6 +20135,36 @@ def _probe_full(file_path):
     return data
 
 
+def _pre_extract_readable(path):
+    """Probe a pre-extract (zoom/transition) intermediate BEFORE handing it to the
+    compositor. Returns True iff it carries a real video stream. A trim past the
+    source end emits a STREAM-LESS/empty mp4 that would otherwise only surface at
+    the compositor three ladder rungs later as 'No video stream found' — the exact
+    string that mislabeled the seven 15fps rendered=0 jobs as bad user files. The
+    CALLER DEGRADES on False (drops the effect for that clip); this never goes
+    fatal — one bad intermediate must not fail the whole render (Zac 2026-08-03)."""
+    try:
+        _sz = os.path.getsize(path)
+    except OSError:
+        _sz = 0
+    _has_v = False
+    try:
+        _p = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-select_streams", "v", "-show_entries",
+             "stream=codec_type", "-of", "json", path],
+            capture_output=True, text=True, timeout=10)
+        _st = (json.loads(_p.stdout or "{}").get("streams") or [])
+        _has_v = any(s.get("codec_type") == "video" for s in _st)
+    except Exception:
+        _has_v = False
+    _ok = _has_v and _sz >= 2048
+    if not _ok:
+        print(f"[pre-extract] UNREADABLE intermediate {os.path.basename(path)} "
+              f"(bytes={_sz} has_video={_has_v}) — caller will DEGRADE, not fail",
+              flush=True)
+    return _ok
+
+
 def probe_cache_clear(file_path=None):
     """Clear cache for a specific file (after re-encode) or all files."""
     if file_path:
@@ -23776,6 +23806,19 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         source_fps = 30.0
     if source_fps <= 0 or source_fps > 240:
         source_fps = 30.0
+    # TRUST THE NORMALISATION (Zac 2026-08-03): the render source has been through
+    # _do_fps_normalize, which re-encodes to an INTEGER fps. A probe reading
+    # 30.00030000300003 is container-timebase DRIFT, not a real fractional rate —
+    # and it breaks the audio/video frame grid downstream (sample_rate 44100 is
+    # not integer-divisible by 30.0003 → RENDER_FATAL, 2 jobs). Snap to the
+    # integer the normaliser produced when the drift is sub-frame-tiny (< 0.01);
+    # a genuinely fractional rate (e.g. 29.97, 0.03 off) is NOT snapped and, being
+    # normalised upstream, never reaches here un-integered anyway.
+    _fps_int = round(source_fps)
+    if _fps_int > 0 and abs(source_fps - _fps_int) < 0.01 and abs(source_fps - _fps_int) > 1e-9:
+        print(f"[render] fps timebase drift {source_fps:.6f} → snapped to {_fps_int} "
+              f"(the normalise target; avoids the frame-grid RENDER_FATAL)", flush=True)
+        source_fps = float(_fps_int)
     print(f"[render] Unified source fps: {source_fps:.4f} (raw: {_src_fps_str})", flush=True)
 
     sample_rate = probe_audio_sample_rate(source_path) or 48000
@@ -26471,6 +26514,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         ]
         _t_extract = time.time()
         subprocess.run(_extract_cmd, check=True)
+        # DEGRADE, NOT FATAL (Zac 2026-08-03): an intermediate is never handed over
+        # unprobed. A trim past the source end emits a STREAM-LESS mp4 that would
+        # only surface at the compositor three ladder-rungs later as "No video
+        # stream found" (job 26a05f5d; the exact string the seven 15fps rendered=0
+        # jobs died on). If the intermediate is unreadable, DROP the zoom for THIS
+        # clip — dropping zoomEffect + src falls it back to a plain cut from the
+        # original source — and ledger the defect loudly. One bad zoom must never
+        # fail the whole render.
+        if not _pre_extract_readable(_zoom_src_path):
+            _record_divergence(
+                "render",
+                {"clip": _clip.get("id"),
+                 "trim": [_start_frame_i, _src_end_frame], "pbr": round(_pbr_f, 3),
+                 "file": os.path.basename(_zoom_src_path)},
+                "zoom_pre_extract_degraded",
+                reason="pre-extract wrote a stream-less/unreadable file (trim past source)")
+            _clip.pop("zoomEffect", None)
+            _clip.pop("src", None)
+            return (f"[zoom-pre-extract] clip={_clip.get('id')} DEGRADED — stream-less "
+                    f"extract trim[{_start_frame_i}..{_src_end_frame}) past source; "
+                    f"rendered as a plain cut, no zoom")
         _clip["src"] = _stage_file(_zoom_src_path)
         _elapsed_ms = (time.time() - _t_extract) * 1000
         return (
@@ -26539,6 +26603,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 "-sc_threshold", "0", "-video_track_timescale", "90000",
                 "-movflags", "+faststart", "-an", _out_path,
             ], check=True)
+            # DEGRADE, NOT FATAL (Zac 2026-08-03): this transition pre-extract
+            # MIRRORS the zoom one (1958f2b), so it can emit the same stream-less
+            # mp4 that would die at the compositor three rungs later. Probe before
+            # handoff; if unreadable, leave clip{side}Src UNSET — the transition
+            # falls back to reading the original source at clip{side}StartFromFrames
+            # (the pre-1958f2b path: a slower @remotion/media read, but correct and
+            # timeline-neutral, since the pre-extract is purely a speed optimisation).
+            # Ledger the defect loudly; one bad layer must never fail the render.
+            if not _pre_extract_readable(_out_path):
+                _record_divergence(
+                    "render",
+                    {"after_clip": _idx, "side": _side,
+                     "trim": [_start_i, _src_end], "file": os.path.basename(_out_path)},
+                    "transition_pre_extract_degraded",
+                    reason="pre-extract wrote a stream-less/unreadable file (trim past source)")
+                _logs.append(f"{_side}=DEGRADED(src-fallback)")
+                continue
             _trans[f"clip{_side}Src"] = _stage_file(_out_path)
             _logs.append(f"{_side}=[{_start_i}..{_src_end})")
         return (f"[transition-pre-extract] after_clip={_idx} type={_trans.get('type')} "

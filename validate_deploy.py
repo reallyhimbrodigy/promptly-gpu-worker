@@ -9959,6 +9959,24 @@ def _language_wins_gate():
         "charwrapWord must iterate grapheme clusters, not code points"
 
 
+@check("PRE-EXTRACT DEGRADE + FPS-SNAP (Zac 2026-08-03, RULE-1, forged from 3 RENDER_FATALs post-1322059): (1) a zoom/transition pre-extract whose trim ran past the source emits a STREAM-LESS mp4 that only surfaced at the compositor three ladder-rungs later as 'No video stream found' — the exact string that mislabeled the seven 15fps rendered=0 jobs as bad user files. Both pre-extracts now PROBE the intermediate before handoff and DEGRADE (zoom → plain cut; transition → source-fallback), never fatal. (2) a probed r_frame_rate of 30.00030000300003 is timebase DRIFT that broke the audio/video frame grid (sample_rate 44100 not integer-divisible → 2 RENDER_FATALs); the render now snaps sub-frame drift to the integer the normaliser produced. This gate FAILS if either the degrade or the snap regresses to fatal/raw.")
+def _pre_extract_degrade_and_fps_snap():
+    _h = open("handler.py").read()
+    assert "def _pre_extract_readable(" in _h, "the pre-extract probe helper must exist"
+    assert _h.count("_pre_extract_readable(") >= 3, \
+        "both pre-extracts (zoom + transition) must PROBE before handoff (helper + 2 calls)"
+    assert "zoom_pre_extract_degraded" in _h and "transition_pre_extract_degraded" in _h, \
+        "both pre-extracts must DEGRADE (ledger a divergence), never raise fatal"
+    # the zoom degrade drops the effect; the transition degrade falls back to source
+    assert '_clip.pop("zoomEffect", None)' in _h, \
+        "a bad zoom pre-extract must drop the zoom for that clip (degrade to a plain cut)"
+    # fps drift-snap: sub-frame drift folds to the integer the normaliser produced
+    assert "abs(source_fps - _fps_int) < 0.01" in _h, \
+        "the render must snap sub-frame fps drift to an integer (frame-grid RENDER_FATAL guard)"
+    import handler as _hm
+    assert callable(getattr(_hm, "_pre_extract_readable", None)), "_pre_extract_readable importable"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
