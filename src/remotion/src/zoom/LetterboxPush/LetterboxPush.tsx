@@ -5,8 +5,8 @@ import {
   useVideoConfig,
   interpolate,
   Easing,
-  OffthreadVideo,
 } from "remotion";
+import { Video } from "@remotion/media";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
 import {
@@ -135,7 +135,7 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <OffthreadVideo
+      <Video
         src={src}
         style={{
           width: "100%",
@@ -161,7 +161,7 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
           overflow: "hidden",
         }}
       >
-        <OffthreadVideo
+        <Video
           src={src}
           style={{
             width: "100%",
