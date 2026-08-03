@@ -7219,6 +7219,29 @@ def _timeline_slice2_cutover():
     assert 'add_local_file("render_timeline.py"' in open("modal_app.py").read()
 
 
+@check("MODELS-NOT-SYMLINK LAW (Zac RULE-1, 2026-08-03, forged from the recurring 'Symlink loop from .../models' deploy death): `models/` is a GITIGNORED asset directory add_local_file-mounted into the image, but it was committed to HEAD as a self-referential symlink blob (the 4254ac7 clobber), so any `git checkout`/stash reverts the working tree to `models -> models` and `modal deploy` dies traversing the loop — while every source gate still passes. This gate closes the class: (1) `models` MUST be a real directory, never a symlink; (2) every `models/...` path modal_app.py mounts via add_local_file MUST exist as a real non-symlink file; (3) the RIFE weights (flownet.pkl) must be the real ~22MB blob, not a stub. Derived dynamically from modal_app.py so a new mounted asset is covered the day it is written.")
+def _models_not_symlink():
+    import os as _os
+    # (1) models must be a real directory, never a symlink (the loop)
+    assert _os.path.exists("models"), "models/ directory is missing (RIFE bundle not restored)"
+    assert not _os.path.islink("models"), \
+        "models/ is a SYMLINK — the self-referential clobber is back; it will die 'Symlink loop' on deploy. " \
+        "Fix: git rm --cached models; rm models; restore the real gitignored dir with the RIFE files."
+    assert _os.path.isdir("models"), "models/ exists but is not a directory"
+    # (2) every models/... path modal_app.py mounts must exist as a real file
+    _ma = open("modal_app.py").read()
+    _mounted = re.findall(r'add_local_file\(\s*"(models/[^"]+)"', _ma)
+    assert _mounted, "no add_local_file(\"models/...\") mounts found — did the RIFE mount get removed?"
+    for _p in _mounted:
+        assert _os.path.isfile(_p) and not _os.path.islink(_p), \
+            f"mounted asset {_p} is missing or a symlink — deploy will fail or ship a broken asset"
+    # (3) the RIFE weights must be the real blob, not a stub
+    for _p in _mounted:
+        if _p.endswith("flownet.pkl"):
+            _sz = _os.path.getsize(_p)
+            assert _sz > 20_000_000, f"{_p} is {_sz}B — the real RIFE weights are ~22MB; this is a stub/corrupt"
+
+
 @check("unification Slice 2: the tripwire — body + real-slot immovability enforced (STOP-and-report in code)")
 def _timeline_tripwire():
     _src = open("handler.py").read()
