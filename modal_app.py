@@ -1423,6 +1423,67 @@ class PromptlyDiagnoseUpload:
         return self._diagnose({"input": body})
 
 
+# ── Cancel a stranded FunctionCall ───────────────────────────────────────────
+# THE MONEY FIX (Zac 2026-08-03). A stalled job's container runs to Modal's own
+# 3000s timeout and bills the whole way: stalled rows show a median lifetime of
+# 3050s (started_at -> terminalized) against a 3000s function timeout, so the
+# reaper was recording a death that had already been paid for in full. At
+# ~$1.40/hr for the orchestrator that is ~$1.17 per stall, ~4/day, ~$140/month —
+# roughly twelve completed videos' worth of compute for nothing.
+#
+# The handle existed the whole time: dispatch retains the spawn's call_id. What
+# was missing is that content-studio has NO Modal credentials (it reaches Modal
+# only through MODAL_ENDPOINT_URL), so Node cannot call a cancel API itself.
+# This endpoint is the bridge — the worker is already inside Modal and can
+# resolve the FunctionCall directly.
+#
+# AUTH: the same MODAL_CALLBACK_SECRET the worker uses to POST completions back
+# to the server, compared with compare_digest. No new credential, and the
+# deploy-time auth ping already proves both sides agree on it. Fail CLOSED: an
+# unset secret rejects rather than allowing an open cancel endpoint.
+@app.function(
+    image=image,
+    secrets=[modal.Secret.from_name("promptly-secrets")],
+    cpu=0.25,
+    memory=512,
+    timeout=60,
+)
+@modal.fastapi_endpoint(method="POST")
+def cancel_call(body: dict):
+    """Terminate a spawned run_pipeline_bg call. Body: {call_id, secret}.
+
+    Idempotent by nature: cancelling an already-finished or already-cancelled
+    call is not an error, so the reaper can call this without first proving the
+    container is alive. Returns what happened rather than raising, because the
+    reaper MUST still write its terminal row even when the cancel fails.
+    """
+    import hmac as _hmac
+    import os as _os
+
+    _expected = _os.environ.get("MODAL_CALLBACK_SECRET", "")
+    _given = str((body or {}).get("secret") or "")
+    if not _expected or not _given or not _hmac.compare_digest(_given, _expected):
+        return {"ok": False, "error": "unauthorized"}
+
+    _call_id = str((body or {}).get("call_id") or "").strip()
+    if not _call_id:
+        return {"ok": False, "error": "call_id required"}
+
+    try:
+        _fc = modal.FunctionCall.from_id(_call_id)
+        # terminate_containers=True: without it the call is marked cancelled but
+        # the container keeps running to its timeout — which is the entire bill
+        # we are trying to stop.
+        _fc.cancel(terminate_containers=True)
+        print(f"[cancel-call] cancelled {_call_id} (containers terminated)", flush=True)
+        return {"ok": True, "call_id": _call_id, "cancelled": True}
+    except Exception as _e:
+        # An already-settled call is the common case and is NOT a failure.
+        print(f"[cancel-call] {_call_id} not cancelled: {type(_e).__name__}: {_e}", flush=True)
+        return {"ok": False, "call_id": _call_id, "cancelled": False,
+                "error": f"{type(_e).__name__}: {str(_e)[:200]}"}
+
+
 # ── RIFE GPU function ─────────────────────────────────────────────────────────
 # Stateless H100-backed function that the CPU orchestrator calls when a source
 # needs frame interpolation. Splitting RIFE off lets the orchestrator drop its
@@ -2309,6 +2370,73 @@ def cert_e2e():
         with open(os.path.join(cert_dir, f"{lang}.m4a"), "rb") as fh:
             b64 = base64.b64encode(fh.read()).decode()
         print("RESULT", cert_bridge_e2e.remote(lang, b64))
+
+
+@app.function(cpu=16, memory=12288, region="us", timeout=1800, volumes={"/prewarm": prewarm_volume})
+def cert_render_proof() -> list:
+    """4-SHAPE RENDER PROOF (Zac 2026-08-03): render each shape that was failing —
+    (A) concurrency band 30-60s/30fps/2-3 chunks, (B) 29.97 NTSC, (C) long→burst,
+    (D) short→in-process — on the LIVE code at cpu=16/12GiB. Durable face + en
+    speech, no DB rows, no prod callback. Reports status/url/seconds per shape.
+    Run: `modal run modal_app.py::render_proof` (ephemeral; dispatches to the
+    DEPLOYED render_burst via from_name). ~$0.40."""
+    import os, sys, subprocess, tempfile, uuid, time
+    os.environ["JOB_STATUS_WRITES_ENABLED"] = ""   # no phantom video_jobs rows
+    os.environ["APP_URL"] = ""                       # no progress/completion posts to prod
+    sys.path.insert(0, "/")
+    import handler
+    s3 = handler._aws_s3_client
+    work = tempfile.mkdtemp()
+    face_p = os.path.join(work, "face.mp4")
+    audio_p = os.path.join(work, "en.m4a")
+    s3.download_file(_CERT_BUCKET, _CERT_FACE_KEY, face_p)
+    s3.download_file(_CERT_BUCKET, f"{_CERT_PREFIX}/_bridge_regression/en.m4a", audio_p)
+    shapes = [
+        ("A_concurrency_band_45s_30fps", 45, "30"),
+        ("B_ntsc_29_97fps_35s", 35, "30000/1001"),
+        ("C_long_burst_90s", 90, "30"),
+        ("D_short_inprocess_18s", 18, "30"),
+    ]
+    out = []
+    for label, dur, fps in shapes:
+        src_p = os.path.join(work, f"{label}.mp4")
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
+                        "-stream_loop", "-1", "-i", face_p,
+                        "-stream_loop", "-1", "-i", audio_p,
+                        "-map", "0:v:0", "-map", "1:a:0", "-t", str(dur), "-r", fps,
+                        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+                        "-c:a", "aac", "-b:a", "128k", "-ar", "44100", src_p], check=True)
+        _built = subprocess.check_output(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+             "stream=r_frame_rate", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", src_p]).decode().strip().replace("\n", " ")
+        key = f"{_CERT_PREFIX}/_render_proof/{label}.mp4"
+        s3.upload_file(src_p, _CERT_BUCKET, key, ExtraArgs={"ContentType": "video/mp4"})
+        video_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{key}"
+        render_key = f"{_CERT_PREFIX}/_render_proof/{label}_render.mp4"
+        upload_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{render_key}"
+        body = {"job_id": str(uuid.uuid4()), "video_url": video_url, "vibe": "viral",
+                "user_id": str(uuid.uuid4()), "upload_url": upload_url, "public_url": upload_url}
+        t0 = time.time()
+        try:
+            r = handler.handler({"input": body})
+        except Exception as e:
+            r = {"status": "exception", "error": f"{type(e).__name__}: {e}"}
+        el = round(time.time() - t0, 1)
+        row = {"shape": label, "built_fps_dur": _built, "status": (r or {}).get("status"),
+               "url": (r or {}).get("video_url"), "route": (r or {}).get("route"),
+               "elapsed_s": el, "render_time_s": (r or {}).get("render_time"),
+               "error": (r or {}).get("error") or (r or {}).get("user_message")}
+        out.append(row)
+        print(f"[proof] {label}: status={row['status']} url={bool(row['url'])} "
+              f"route={row['route']} {el}s err={row['error']}", flush=True)
+    return out
+
+
+@app.local_entrypoint()
+def render_proof():
+    import json
+    print("PROOF_RESULTS " + json.dumps(cert_render_proof.remote(), indent=2))
 
 
 # ── ARABIC BRIDGE PERMANENT REGRESSION (Zac 2026-07-20) ──────────────────────
