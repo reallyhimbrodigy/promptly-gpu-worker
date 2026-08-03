@@ -817,21 +817,35 @@ def run_pipeline_bg(body: dict):
     # PRIMARY completion delivery — POST the full result (success payload OR the
     # classified error envelope) to the app server. Best-effort: a failed POST
     # falls back to the dispatch's Supabase recovery + the reaper.
+    _call_id = None
     try:
         _call_id = modal.current_function_call_id()
         _app_url = _os.environ.get("APP_URL", "").rstrip("/")
         _secret = _os.environ.get("MODAL_CALLBACK_SECRET", "")
         if _app_url and _call_id:
             import requests as _requests
-            _requests.post(
+            _cb_t0 = _time.time()
+            _cb_resp = _requests.post(
                 f"{_app_url}/api/modal-complete",
                 json={"call_id": _call_id, "job_id": body.get("job_id"), "result": result},
                 headers=({"X-Modal-Secret": _secret} if _secret else {}),
                 timeout=15,
             )
-            print(f"[run_pipeline_bg] completion POSTed call={_call_id} job={body.get('job_id')}", flush=True)
+            _cb_ms = int((_time.time() - _cb_t0) * 1000)
+            # STATUS + ELAPSED so the next double-loss NAMES its own cause (Zac
+            # 2026-08-03). The bare POST never raised on a 401/403/5xx or a slow
+            # 2xx — so "completion POSTed" could not tell delivered from rejected
+            # from reconciler-race. Now: status<300 = the server ACCEPTED it (any
+            # later double-loss on this job is a RACE/projection defect, NOT a
+            # delivery loss); a non-2xx names an auth/server reject on THIS leg.
+            # grep marker: [completion-post].
+            _cb_ok = 200 <= _cb_resp.status_code < 300
+            print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
+                  f"status={_cb_resp.status_code} ok={_cb_ok} elapsed_ms={_cb_ms}"
+                  + ("" if _cb_ok else f" REJECTED body={_cb_resp.text[:160]!r}"), flush=True)
     except Exception as _e:
-        print(f"[run_pipeline_bg] completion POST failed ({_e}) — dispatch fallback + reaper will settle", flush=True)
+        print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
+              f"EXCEPTION ({type(_e).__name__}: {_e}) — dispatch fallback + reaper will settle", flush=True)
     return result
 
 
