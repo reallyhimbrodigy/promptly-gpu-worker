@@ -20519,6 +20519,32 @@ def _ig_window_yavg(source_path, a, b):
         return None
 
 
+def _ig_window_is_black(source_path, src_s, src_e):
+    """Is [src_s, src_e] of the SOURCE black, by the gate's own standard?
+
+    Same ffmpeg command, pad and thresholds the inline single-clip echo uses —
+    factored out so the boundary-crossing path can never drift from it.
+    Unmeasurable returns False: we never downgrade what we could not check.
+    """
+    _dur = max(0.0, float(src_e) - float(src_s))
+    if _dur <= 0:
+        return False
+    a, b = max(0.0, float(src_s) - 0.3), float(src_e) + 0.3
+    try:
+        p = subprocess.run(
+            ["ffmpeg", "-v", "info", "-ss", str(a), "-t", str(b - a),
+             "-i", source_path,
+             "-vf", "blackdetect=d=%s:pix_th=%s" % (
+                 _IG_BLACK_DETECT_S, _IG_BLACK_PIX_TH),
+             "-an", "-f", "null", "-"],
+            capture_output=True, text=True)
+    except Exception:
+        return False
+    _blk = _ig_parse_spans(p.stderr or "", r"black_start:([\d.]+)",
+                           r"black_end:([\d.]+)", b - a)
+    return sum(_be - _bs for _bs, _be in _blk) >= _dur * _IG_SOURCE_ECHO_COVER
+
+
 def _ig_source_echo_black(source_path, spans, out_to_src):
     """Black-tail discriminator (mirror of _ig_source_echo, for BLACK): an OUTPUT
     black span whose mapped SOURCE window is ALSO black is source content — the
@@ -20545,8 +20571,41 @@ def _ig_source_echo_black(source_path, spans, out_to_src):
         except Exception:
             defects.append((s, e))
             continue
-        if src_s is None or src_e is None or src_e <= src_s:
-            defects.append((s, e))
+        if src_s is None or src_e is None:
+            defects.append((s, e))     # unmappable: fail closed, unchanged
+            continue
+        if src_e <= src_s:
+            # ── SPAN CROSSES A CUT (2026-08-02) ─────────────────────────────
+            # out_to_src maps an OUTPUT time through whichever clip contains
+            # it, so a span straddling a cut has its start in clip A and its
+            # end in clip B. Both resolve, but to DISCONTINUOUS source times,
+            # and whenever B starts earlier in the source than A (every
+            # reordering or backward cut) src_e <= src_s.
+            #
+            # This used to file the span as OUR defect WITHOUT ever looking at
+            # the source. Forced reproduction (job 017fa6d3, 2026-08-02) showed
+            # exactly that: source=Y, mapping resolved, FOUR spans downgraded,
+            # and two short survivors tripped anyway — even though the mapped
+            # window carries 0.6s of source black against a 0.14s requirement.
+            # The user's own black failed the gate purely because a cut ran
+            # through it. test_integrity_black_echo_boundary.py E2-vs-E3 pins
+            # it: identical span, identical source, crossing a cut is the ONLY
+            # difference between tripping and being downgraded.
+            #
+            # The span genuinely covers TWO source windows. Evaluate the one
+            # anchored at each endpoint and downgrade if EITHER is source black
+            # — what the viewer sees is the user's own footage either way.
+            _half = max(1e-3, (e - s) / 2.0)
+            for _ws, _we in ((src_s, src_s + _half),
+                             (max(0.0, src_e - _half), src_e)):
+                if _we <= _ws:
+                    continue
+                if _ig_window_is_black(source_path, _ws, _we):
+                    downgraded.append({"span": (s, e), "src": (_ws, _we),
+                                       "boundary_crossing": True})
+                    break
+            else:
+                defects.append((s, e))
             continue
         a, b = max(0.0, src_s - 0.3), src_e + 0.3
         p = subprocess.run(
@@ -31985,9 +32044,27 @@ def render_stage(
                 _src_ok = bool(source_path and os.path.exists(source_path))
                 _map0 = _ig_out_to_src(_b0[0]) if (_b0 and _b0[0] is not None) else None
                 _ndown = len(_ig_verdict["detail"].get("content_black_downgraded") or [])
+                # PER-SPAN MAPPINGS (2026-08-02): the aggregate counts said the
+                # echo "ran and downgraded 4", which was true and still left the
+                # question of WHY two survived. The answer was that survivors
+                # cross a cut (src_e <= src_s). Emit start->end mappings for the
+                # surviving spans so that distinction is readable from the job
+                # row instead of needing a fixture to prove it.
+                _sp = []
+                for _bs, _be in (_ig_black_spans[0].get("spans") or [])[:3]:
+                    try:
+                        _ms, _me = _ig_out_to_src(_bs), _ig_out_to_src(_be)
+                        _sp.append(
+                            f"{_bs:.2f}-{_be:.2f}->"
+                            f"{'?' if _ms is None else '%.2f' % _ms}/"
+                            f"{'?' if _me is None else '%.2f' % _me}"
+                            + ("(CUT)" if (_ms is not None and _me is not None
+                                           and _me <= _ms) else ""))
+                    except Exception:
+                        _sp.append(f"{_bs:.2f}-{_be:.2f}->err")
                 _ig_why = (f" [echo: source={'Y' if _src_ok else 'MISSING'}"
                            f" map={'%.2f' % _map0 if _map0 is not None else 'UNRESOLVED'}"
-                           f" downgraded={_ndown}]")
+                           f" downgraded={_ndown} spans={','.join(_sp)}]")
         except Exception:
             _ig_why = " [echo: diag-failed]"
         if integrity_observe_only:

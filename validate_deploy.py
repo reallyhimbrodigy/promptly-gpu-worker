@@ -5155,7 +5155,8 @@ def _error_path_certs_actually_run():
     for _cert in ("test_render_ladder.py", "test_remotion_timeout_forensics.py",
                   "test_coverage_empty_transcript.py",
                   "test_asr_scribe_routing.py",
-                  "test_render_never_blames_user_file.py"):
+                  "test_render_never_blames_user_file.py",
+                  "test_integrity_black_echo_boundary.py"):
         assert os.path.exists(_cert), f"{_cert} missing from the repo"
         _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
         assert _r.returncode == 0, (
@@ -5381,6 +5382,56 @@ def _render_never_blames_user_file():
                         ("INTEGRITY_TRIP: black=[[1.0, 2.0]] from render-full.mjs", "INTEGRITY_TRIP")):
         assert handler.classify_error(RuntimeError(_msg))["error_code"] == _code, _msg
     assert os.path.exists("test_render_never_blames_user_file.py"), "cert must ride the repo"
+
+
+@check("INTEGRITY_TRIP BLACK ECHO — A SPAN CROSSING A CUT MUST STILL BE SOURCE-CHECKED (2026-08-02): forced reproduction (job 017fa6d3) printed `[echo: source=Y map=29.92 downgraded=4]` — the echo RAN, the source was readable, the mapping resolved, four spans were downgraded, and two short ones tripped anyway. Cause: out_to_src maps each endpoint through whichever clip contains it, so a span straddling a cut resolves to DISCONTINUOUS source times and `src_e <= src_s` filed it as OUR defect WITHOUT ever running blackdetect — while the mapped window carried 0.6s of source black against a 0.14s requirement. A crossing span is now evaluated as the TWO source windows it covers and downgraded if EITHER is black. cert: test_integrity_black_echo_boundary.py 8/8 (E2-vs-E3: identical span, identical source, crossing the cut is the ONLY difference)")
+def _integrity_black_echo_boundary():
+    import handler, os as _os, subprocess as _sp, tempfile as _tf
+    assert _os.path.exists("test_integrity_black_echo_boundary.py"), "cert must ride the repo"
+    assert callable(getattr(handler, "_ig_window_is_black", None)), \
+        "the crossing path must share ONE window check with the single-clip path"
+    _fd, _src = _tf.mkstemp(suffix="_gate.mp4"); _os.close(_fd)
+    try:
+        _sp.run(["ffmpeg", "-y", "-v", "error",
+                 "-f", "lavfi", "-i", "color=c=black:s=320x240:r=30:d=2",
+                 "-f", "lavfi", "-i", "color=c=white:s=320x240:r=30:d=2",
+                 "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+                 "-map", "[v]", "-pix_fmt", "yuv420p", _src],
+                capture_output=True, timeout=180)
+        assert _os.path.getsize(_src) > 500, "fixture build failed"
+
+        def _crossing(t):        # clip A then a BACKWARD cut into clip B
+            return 0.9 + t if t < 1.0 else t - 1.0
+
+        # 1. THE FIX: crossing a cut over SOURCE BLACK must downgrade, not trip
+        _d, _g = handler._ig_source_echo_black(_src, [(0.9, 1.1)], _crossing)
+        assert _g and not _d, f"boundary-crossing source black must downgrade: d={_d} g={_g}"
+        assert _g[0].get("boundary_crossing") is True, "must record why it was downgraded"
+
+        # 2. NOT OVER-CORRECTED: crossing a cut over NON-black must still trip
+        def _crossing_white(t):
+            return 2.4 + t if t < 1.0 else t + 1.4
+        _d2, _g2 = handler._ig_source_echo_black(_src, [(0.9, 1.1)], _crossing_white)
+        assert _d2 and not _g2, f"crossing over WHITE source must still be our defect: d={_d2} g={_g2}"
+
+        # 3. single-clip paths unchanged, both directions
+        _d3, _g3 = handler._ig_source_echo_black(_src, [(0.4, 0.9)], lambda t: t)
+        assert _g3 and not _d3, "single-clip source black must still downgrade"
+        _d4, _g4 = handler._ig_source_echo_black(_src, [(2.4, 2.9)], lambda t: t)
+        assert _d4 and not _g4, "single-clip non-black must still trip"
+
+        # 4. fail-closed on an unmappable endpoint — never downgrade the unchecked
+        _d5, _g5 = handler._ig_source_echo_black(_src, [(0.4, 0.9)], lambda t: None)
+        assert _d5 and not _g5, "unmappable must stay a defect"
+    finally:
+        try: _os.unlink(_src)
+        except OSError: pass
+
+    # the trip line must carry per-span mappings so the job row can answer this
+    # without a fixture next time
+    _h = open("handler.py").read()
+    assert "spans={','.join(_sp)}" in _h, "trip line must emit per-span start->end mappings"
+    assert "(CUT)" in _h, "a boundary-crossing span must be marked in the trip line"
 
 
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")

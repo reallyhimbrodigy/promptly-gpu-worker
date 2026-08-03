@@ -40,8 +40,12 @@ summed across agents.** This file is the sum. Every agent appends before firing.
 | 2026-08-02 | smoothness | *(MG attack re-measure, both arms — local)* | 0 | 0 | $0.00 | $0.00 |
 | 2026-08-02 | smoothness | *(SafeImg + crossfade degrade proofs — local)* | 0 | 0 | $0.00 | $0.00 |
 
-**errors agent Modal session total: $0.00 — 0 renders fired, 0 container-seconds,
-0 apps created.**
+| 23:0x (08-02) | errors | **PRE-DECLARED, Rule 8.** 3 reproduction renders (INTEGRITY_TRIP black clip · 15fps INVALID_FORMAT · `<Img>` RENDER_FATAL) on prod-matched cpu=16/64GiB, to force the three diagnostics that are now live. Rate $0.001027/s → 300s=$0.92, 450s=$1.39, 900s(worst)=$2.77 | **ceiling $2.00** | ~$0.05 Gemini | **$2.00 Modal / $1.39 vendor** |
+
+**errors agent Modal session total: $0.00 spent, $2.00 DECLARED for the
+reproduction batch — 0 renders fired before this, 0 container-seconds, 0 apps
+created. Ceiling is under the $5/session limit; will report actuals and verify
+`modal app list` shows 0 tasks after.**
 
 **speed agent Modal session total: ~$12–18 (pre-freeze, estimate; exact = Modal
 dashboard) + ~$0.37 post-freeze (v421 deploy + inc2 canary, Zac-authorised inc2
