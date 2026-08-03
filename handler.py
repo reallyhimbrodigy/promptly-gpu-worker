@@ -26886,38 +26886,32 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # rendered 183s vs 243s@16 vs 303s@32 — fewer-than-cores beats the
     # oversubscription), which yields 24 on the cpu=48 burst automatically. Env
     # override stays for measurement/tuning.
-    # CONTAINER CORES (Zac 2026-08-03, THIRD RENDER_FATAL — c9e980fe): os.cpu_count()
-    # returns the HOST core count on Modal, NOT the container's cpu allocation. The
-    # tab budget (cores/2) therefore over-counted (host ~48 → budget 24), and the
-    # chunked --concurrency it derived EXCEEDED the container's real cores. Remotion
-    # HARD-REJECTS concurrency > cores ("Maximum for --concurrency is 8 (number of
-    # cores on this system)") → RENDER_FATAL. Masked at cpu=16 (host//2 landed near
-    # the limit), the cpu 16→8 cost cut exposed it. Read the cgroup CPU QUOTA (the
-    # true Modal alloc: 8 on the orchestrator, 48 on render_burst) and CLAMP every
-    # concurrency to it, so no config/env/host change can ever exceed cores again.
-    def _container_cpu_cores():
+    # RENDER CORE BUDGET (Zac 2026-08-03, THIRD RENDER_FATAL c9e980fe + the clamp
+    # that missed it): Remotion HARD-REJECTS --concurrency > cores ("Maximum for
+    # --concurrency is 8 (number of cores on this system)"). The number it enforces
+    # is the Modal cpu REQUEST — NOT any value Python can read. cert_core_probe
+    # PROVED a cpu=8 container reports 24 for sched_getaffinity, os.cpu_count AND
+    # the cfs_quota, while Remotion enforced 8; the first clamp read the cgroup (24)
+    # and so never clamped below the real limit. cgroup/affinity are therefore
+    # UNUSABLE here. The reliable source is PROMPTLY_RENDER_CORE_BUDGET, which each
+    # render function sets to its OWN cpu= (run_pipeline_bg=8, render_burst=48).
+    #   A PERFORMANCE HELPER MUST NEVER BE ABLE TO FAIL A RENDER (Zac's law): on any
+    # miss this returns a conservative floor of 4 (safe on every render container,
+    # never host cores, never 0/None) and logs loudly — never raises. Belt AND
+    # suspenders: _remotion_subprocess ALSO self-heals on Remotion's stated max, so
+    # even a wrong budget cannot fatal a render — it costs at most one fast retry.
+    def _render_core_budget():
         try:
-            with open("/sys/fs/cgroup/cpu.max") as _f:          # cgroup v2
-                _parts = _f.read().split()
-            if len(_parts) >= 2 and _parts[0] != "max":
-                _c = int(float(_parts[0]) / float(_parts[1]))
-                if _c >= 1:
-                    return _c
+            _v = int((os.environ.get("PROMPTLY_RENDER_CORE_BUDGET") or "").strip() or 0)
+            if _v >= 1:
+                return _v
         except Exception:
             pass
-        try:
-            with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as _f:   # cgroup v1
-                _q = int(_f.read().strip())
-            with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as _f:
-                _per = int(_f.read().strip())
-            if _q > 0 and _per > 0:
-                _c = int(_q / _per)
-                if _c >= 1:
-                    return _c
-        except Exception:
-            pass
-        return os.cpu_count() or 8
-    _CONTAINER_CORES = _container_cpu_cores()
+        print("[render-cores] PROMPTLY_RENDER_CORE_BUDGET unset/invalid → conservative "
+              "floor 4 (never host cores); render self-heals if Remotion caps lower",
+              flush=True)
+        return 4
+    _CONTAINER_CORES = _render_core_budget()
     _TAB_BUDGET = int(os.environ.get("PROMPTLY_OVERLAY_TAB_BUDGET")
                       or max(4, _CONTAINER_CORES // 2))
     # Clamp to _CONTAINER_CORES — Remotion rejects concurrency > cores (never > alloc).
@@ -28419,7 +28413,7 @@ def _remotion_progress_digest(_stdout, cmd):
             f"{f' last_fps={_fps}' if _fps else ''}{_tail}")
 
 
-def _remotion_subprocess(label, cmd, timeout=600):
+def _remotion_subprocess(label, cmd, timeout=600, _self_healed=False):
     """Run ONE `node render-full.mjs` and return its elapsed seconds.
 
     MODULE-LEVEL on purpose: this is the render path's error surface, and a
@@ -28483,6 +28477,32 @@ def _remotion_subprocess(label, cmd, timeout=600):
         # browser-connect TimeoutError buried 450 chars in. Pull the LAST
         # line-anchored *Error/Exception line (the thrown one) to the
         # front; the stderr tail stays for context.
+        # SELF-HEAL — the permanent kill for the --concurrency>cores class (Zac
+        # 2026-08-03): Remotion rejects an over-cores --concurrency with a message
+        # that STATES its own max, and that message is the ONLY reliable source of
+        # the limit (cert_core_probe: a cpu=8 box reports 24 for every Python core
+        # source, Remotion enforced 8). Re-run ONCE with the stated max so a
+        # performance parameter can NEVER fatal a render. Bounded: single heal
+        # (_self_healed guard), only on this exact precondition, only when the cmd
+        # actually carries --concurrency. This validates before rendering frames,
+        # so the failed attempt costs ~2-6s, not a whole render.
+        _cc = re.search(r"Maximum for --concurrency is (\d+)", _stderr_full)
+        if _cc and not _self_healed and "--concurrency" in cmd:
+            _cap = max(1, int(_cc.group(1)))
+            _idx = list(cmd).index("--concurrency") + 1
+            _healed = list(cmd)
+            _was = _healed[_idx]
+            _healed[_idx] = str(_cap)
+            print(f"[{label}] SELF-HEAL: Remotion caps --concurrency at {_cap} "
+                  f"(was {_was}); re-running once with {_cap} — a perf parameter "
+                  f"must never fail a render", flush=True)
+            try:
+                _record_divergence("render", {"was": _was, "capped_to": _cap},
+                                   "concurrency_self_heal",
+                                   reason="Remotion --concurrency > cores; re-ran at stated max")
+            except Exception:
+                pass
+            return _remotion_subprocess(label, _healed, timeout=timeout, _self_healed=True)
         _err_lines = re.findall(
             r"^[A-Za-z_.$]*(?:Error|Exception)\b.*", _stderr_full, re.M)
         _salient = (_err_lines[-1].strip()[:400] + " ||| ") if _err_lines else ""

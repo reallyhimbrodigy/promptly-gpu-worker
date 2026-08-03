@@ -126,22 +126,42 @@ def _gemini_tokens_persist_guard():
         "gemini_tokens at TOP-LEVEL (12-space) — content-studio strips it; nest it"
 
 
-@check("RENDER CONCURRENCY <= CONTAINER CORES (Zac 2026-08-03, RULE-1, THIRD RENDER_FATAL c9e980fe): Remotion HARD-REJECTS --concurrency > cores ('Maximum for --concurrency is 8 (number of cores on this system)'). os.cpu_count() returns the HOST core count on Modal, so deriving the overlay/micro tab budget from it over-counted; the cpu 16->8 cost cut then pushed --concurrency past the container's real 8 cores -> live RENDER_FATAL. The budget MUST read the cgroup CPU quota (_container_cpu_cores) and every --concurrency value MUST be min()-clamped to _CONTAINER_CORES. FAILS if the cgroup reader is gone, if any concurrency budget regresses to os.cpu_count(), or if either concurrency value is not clamped.")
-def _render_concurrency_core_clamp_guard():
+@check("RENDER CONCURRENCY NEVER FAILS A RENDER (Zac 2026-08-03, RULE-1, THIRD RENDER_FATAL c9e980fe + the clamp that missed it): Remotion HARD-REJECTS --concurrency > cores, and the enforced limit is the Modal cpu REQUEST, which Python CANNOT read — cert_core_probe proved a cpu=8 container reports 24 for sched_getaffinity, os.cpu_count AND cfs_quota. So the budget MUST come from PROMPTLY_RENDER_CORE_BUDGET (each render function declares its own cpu=), the helper MUST floor to a conservative 4 on any miss (never host cores, never raise), _remotion_subprocess MUST self-heal on Remotion's stated max, and each function's declared budget MUST equal its cpu=. FAILS if any of those regress.")
+def _render_concurrency_never_fails_guard():
     src = open("handler.py").read()
-    assert "def _container_cpu_cores" in src and "/sys/fs/cgroup/cpu.max" in src, (
-        "the _container_cpu_cores cgroup-quota reader is missing — the concurrency "
-        "budget would fall back to os.cpu_count() (HOST cores on Modal) and re-break "
-        "Remotion's --concurrency <= cores limit (RENDER_FATAL c9e980fe)")
-    assert "max(4, _CONTAINER_CORES // 2)" in src, (
-        "tab budget must derive from _CONTAINER_CORES // 2, not (os.cpu_count() or 16) // 2 "
-        "— os.cpu_count() reads the HOST cores on Modal, not the container allocation")
+    # 1. Budget comes from the reliable env, floors to 4, never host cores.
+    assert "PROMPTLY_RENDER_CORE_BUDGET" in src and "def _render_core_budget" in src, (
+        "_render_core_budget (reading PROMPTLY_RENDER_CORE_BUDGET) is gone — the "
+        "concurrency budget would fall back to an unreliable core count (a cpu=8 box "
+        "reports 24) and re-break Remotion's --concurrency<=cores limit")
+    assert "return 4" in src.split("def _render_core_budget", 1)[1][:600], (
+        "_render_core_budget must return a conservative floor (4) on a miss — a perf "
+        "helper must never raise or pass host cores into a render")
     assert "(os.cpu_count() or 16) // 2" not in src, (
-        "a concurrency tab budget still divides os.cpu_count() (HOST cores on Modal) — "
-        "this is exactly the third RENDER_FATAL (c9e980fe); use _CONTAINER_CORES")
+        "a concurrency tab budget still divides os.cpu_count() (HOST cores on Modal)")
     assert src.count("min(_CONTAINER_CORES,") >= 2, (
-        "both _PER_CHUNK_CONCURRENCY and _MICRO_CONCURRENCY must be min(_CONTAINER_CORES, …)-"
-        "clamped so --concurrency can never exceed the container's cores on any cpu setting")
+        "both _PER_CHUNK_CONCURRENCY and _MICRO_CONCURRENCY must stay min(_CONTAINER_CORES,…)-clamped")
+    # 2. The self-heal exists and is bounded.
+    assert "Maximum for --concurrency is" in src and "_self_healed=True" in src, (
+        "the _remotion_subprocess self-heal (re-run once at Remotion's stated max) is "
+        "missing — without it a wrong budget can still fatal a render")
+    # 3. Each render function declares a budget that EQUALS its cpu= (anti-drift).
+    msrc = open("modal_app.py").read()
+    import re as _re
+    for _fn in ("run_pipeline_bg", "render_burst"):
+        _i = msrc.index(f"def {_fn}(")
+        _dstart = msrc.rfind("@app.function", 0, _i)  # nearest decorator above the def
+        _decor = msrc[_dstart:_i]                      # ONLY this function's decorator block
+        _body = msrc[_i:_i + 2000]                     # the function head where the budget is set
+        # Match the REAL resource arg ("cpu=N, memory=…"), not the many cpu=NN
+        # mentions in the sizing comment (which never carry ", memory=").
+        _cpu = _re.findall(r"cpu=(\d+),\s*memory=", _decor)
+        _bud = _re.search(r'PROMPTLY_RENDER_CORE_BUDGET"\]\s*=\s*"(\d+)"', _body)
+        assert _cpu, f"{_fn}: no 'cpu=N, memory=' resource arg found in its @app.function decorator"
+        assert _bud, f"{_fn}: does not set PROMPTLY_RENDER_CORE_BUDGET in its body"
+        assert _bud.group(1) == _cpu[0], (
+            f"{_fn}: PROMPTLY_RENDER_CORE_BUDGET={_bud.group(1)} != cpu={_cpu[0]} — "
+            f"the render core budget drifted from the container's cpu allocation")
 
 
 @check("DEPLOY-STATE GUARD (Zac 2026-08-01): a deploy must not DROP a commit already known live. deploy.sh records the last successfully-deployed HEAD in .last_deployed_commit; this FAILS if that commit is not an ancestor of the current HEAD — i.e. you are deploying from a stale branch/checkout that lost a live fix (the 4th deploy-state footgun today: stale server.js, fanout canonical, snapshot env-freeze, the 06:10 validator scare). FAIL-SAFE: passes silently if the file is absent (first deploy), empty, or the commit is unknown to this tree, so it can never wrongly block a legitimate deploy.")

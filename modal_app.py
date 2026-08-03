@@ -657,6 +657,13 @@ def run_pipeline_bg(body: dict):
     import sys as _sys, os as _os
     _sys.path.insert(0, "/")
     import handler as _H
+    # RENDER CORE BUDGET = this function's Modal cpu= (Zac 2026-08-03, THIRD
+    # RENDER_FATAL): Remotion's --concurrency limit tracks the cpu REQUEST, which
+    # Python cannot read (cert_core_probe: a cpu=8 box reports 24 for every core
+    # source). Declare it so handler._render_core_budget clamps concurrency to the
+    # RIGHT number for in-process sub-floor renders here. MUST equal cpu= in this
+    # function's decorator — validate_deploy pins the pair.
+    _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "8"
     try:
         _H._install_shutdown_handler()  # Phase 1 safety net on this container too
     except Exception:
@@ -1005,6 +1012,11 @@ def render_burst(payload: dict) -> dict:
     _sys.path.insert(0, "/")
     import handler as _H
     import premium as _premium
+    # RENDER CORE BUDGET = this function's cpu= (Zac 2026-08-03; see run_pipeline_bg
+    # note). The burst renders at cpu=48, so its Remotion --concurrency limit is 48;
+    # declaring it lets the tab budget scale up here without exceeding the limit.
+    # MUST equal cpu= in this function's decorator — validate_deploy pins the pair.
+    _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "48"
     try:
         _H._install_shutdown_handler()  # ledger-flush safety net on this container too
     except Exception:
