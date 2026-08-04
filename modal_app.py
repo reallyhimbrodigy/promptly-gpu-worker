@@ -1291,21 +1291,17 @@ class PromptlyWorker:
 # few seconds of cold start is invisible.
 @app.cls(
     timeout=300,          # 5 min is plenty for an S3 download + Deepgram call
-    scaledown_window=30,  # SURGE CUT (Zac 2026-08-04): the Modal account container
-                          # limit is 100 and is now the BINDING constraint (~1000 users
-                          # overnight). The 600s hold consumed ~2.3 container-days/day of
-                          # that budget — at bursty surge volume that STARVES renders,
-                          # and a QUEUED render is worse than a COLD one. SEPARATE THE
-                          # TWO JOBS (Zac): container WARMTH (this scaledown) vs the
-                          # SPECULATIVE download+transcribe (the handler, unchanged). The
-                          # 43% hit is TIMING-bound (job vs the 45s prewarm work), NOT
-                          # warmth-bound (the 3-5s cold start barely shifts the hit
-                          # boundary) — so cutting 600→30 frees ~2.3 container-days with
-                          # only ~20s P50 cost, KEEPING the speculative-work value while
-                          # dropping the redundant hold. The volume cache persists across
-                          # container death regardless. RESTORE 600 only if the ceiling
-                          # is raised AND the timing race (dispatch beats the 45s prewarm)
-                          # is fixed by the job awaiting the in-flight prewarm.
+    scaledown_window=600, # REVERTED the surge-cut (Zac 2026-08-04): I cut this to 30
+                          # to 'free container budget' for the 100-ceiling — but the
+                          # ceiling was NEVER binding (utilisation was 7/100 = 7%). The
+                          # cut bought nothing and cost ~20s latency at the exact moment
+                          # 1,000 new users arrive, and a COLD first render is the worst
+                          # first impression for a brand-new user. The real case against
+                          # prewarm is the 43% hit rate (57% wasted download+transcribe)
+                          # — a COST argument for AFTER the surge, not a capacity one. No
+                          # capacity pressure justifies a colder first render. The durable
+                          # 43% fix is the timing race: have the job AWAIT the in-flight
+                          # prewarm instead of re-doing download+transcribe.
     memory=4096,          # 4GB for in-flight download buffers + transcript JSON
     region="us-west",     # same region as the S3 bucket + render class
     volumes={"/prewarm": prewarm_volume},

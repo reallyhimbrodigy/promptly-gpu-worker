@@ -10165,8 +10165,8 @@ def _prewarm_reenabled():
     # the speculative-work handler is unchanged. RESTORE 600 only with a raised
     # ceiling + the timing-race fix (job awaits the in-flight prewarm).
     _dec_block = _dec[_dec.rindex("@app.cls("):]
-    assert "scaledown_window=30" in _dec_block, \
-        "PromptlyPrewarmWorker scaledown must stay at the surge value (30) — the 600s hold starves renders on the 100-container ceiling"
+    assert "scaledown_window=600" in _dec_block, \
+        "PromptlyPrewarmWorker scaledown must stay 600 — capacity was never scarce (7/100); a cold first render is the worst impression for a new user"
     assert "volumes={\"/prewarm\": prewarm_volume}" in _dec_block, \
         "PromptlyPrewarmWorker must mount the /prewarm volume so its cache persists for the render job (speculative work kept)"
 
@@ -10396,6 +10396,30 @@ def _check_no_unknown_terminal():
         "the empty-output raise must name WHICH failure and the byte count"
     assert "Main render produced invalid output" not in _src, \
         "the unclassifiable string is back"
+
+
+@check("A SUB-CODE MUST MATCH THE FAILURE, NOT THE SUBSYSTEM (2026-08-03): the RENDER_REMOTION browser_launch sub-code matched the bare words 'chrome'/'Chromium', which appear in the SUCCESSFUL startup line every render emits ('Using build-time Chromium at /usr/local/bin/chrome-headless-shell'). Two jobs that logged 'Browser opened in 1.01s' were therefore labelled browser_launch. A WRONG sub-code is worse than `unclassified` — it sends the fix to the wrong subsystem with false confidence, which is the exact failure the sub-codes exist to end. This gate replays the real job text and asserts a healthy browser is NEVER classified as a launch failure.")
+def _check_subcode_matches_failure_not_subsystem():
+    import handler as _h
+    _HEALTHY = ("[hype-render] render-full.mjs PromptlyOverlay failed rc=1\nSTDOUT:\n"
+                "[render-full] Using build-time Chromium at /usr/local/bin/chrome-headless-shell "
+                "— skipping ensureBrowser\n[render-full] Browser opened in 1.01s\n"
+                "[render-full] selectComposition")
+    assert _h._error_subcode("RENDER_REMOTION", _HEALTHY) != "browser_launch", \
+        "a render whose browser opened fine must never be classified browser_launch"
+    # ...and a REAL launch failure must still be caught, or the fix just deletes
+    # the sub-code instead of correcting it.
+    for _real in ("Error: Failed to launch the browser process",
+                  "Could not find Chrome", "Target closed", "Protocol error"):
+        assert _h._error_subcode("RENDER_REMOTION", _real) == "browser_launch", \
+            f"a genuine launch failure must still classify: {_real!r}"
+    # no sub-code anywhere may key on a bare subsystem NAME
+    for _code, _entries in _h._ERROR_SUBCODES.items():
+        for _sub, _sigs in _entries:
+            for _sig in _sigs:
+                assert _sig.lower() not in ("chrome", "chromium", "ffmpeg", "remotion",
+                                            "deepgram", "gemini", "node"), \
+                    f"{_code}:{_sub} keys on the bare subsystem name {_sig!r} — that matches healthy logs too"
 
 
 # ─── REPORT ────────────────────────────────────────────────────────────
