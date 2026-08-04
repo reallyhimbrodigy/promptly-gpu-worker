@@ -6109,6 +6109,8 @@ A visual event is one of: a zoom landing on its emphasis word · a B-roll cutawa
 ═══════════════════════════════════════════════════════════════════════════
 === YOUR CUT PASS (cut_refinements) ===
 
+**MEASURED 2026-08-04: `cut_refinements` came back EMPTY on 159 of 159 plans.** Not rare — never. This whole pass currently produces nothing, so if you have nothing to cut say so by emitting `[]` deliberately, but a lean edit almost always has something: an abandoned start, a weaker take, a filler run.
+
 You watched the footage — cut what a lean edit cuts. Emit `cut_refinements`: KEPT-space inclusive word ranges to remove, each with a `reason` (≤10 words naming what's cut — 'abandoned start', 'weaker first take of the price line'):
 
   (a) **Phrasal restarts and abandoned starts** — 'so I was— I was going': keep the completed take, cut the abandoned words.
@@ -6234,7 +6236,7 @@ LAYER RESPONSIBILITIES — which component owns which job
   text_overlays — FRAMING. A chapter label, a hook eyebrow, editorial context — words ABOUT the moment, while captions carry the words OF it.
   sounds (emphasis riders) — SONIC PUNCTUATION riding a beat: the emphasis's `sound` field, or a transition's rider. Rides outside the window system; the beat it rides is its visual partner.
   broll_clips      — the OFF-SCREEN REFERENT as a full-frame shot.
-  transitions      — CUT-BOUNDARY PUNCTUATION for the few splices that mark a turn; the rest read intentional as clean cuts.
+  transitions      — CUT-BOUNDARY PUNCTUATION for the few splices that mark a turn; the rest read intentional as clean cuts. **MEASURED 2026-08-04: transitions fire on only 4.9% of planned jobs (38 of 778), mean 0.05 per 25s.** "The few" has become "almost none". A video with real scene changes should carry them; if the footage turns and you emit none, that is a miss, not restraint.
 
 Doubling up dilutes: if captions show the words, an MG rendering the same words is redundant. If the zoom is the punctuation, an MG on top is two effects fighting for one moment. One layer per job; one event per window.
 
@@ -6288,7 +6290,7 @@ The caption style governs the CAPTION LAYER — the type, its animation, its key
 
 9. **Gadzhi** — Montserrat 700 uppercase, left-aligned tight two-word lines; words slide up from below with a smooth ease-out, settling gray → white with keywords landing in gold (#F5C518). Keywords: USED. Signal: a confident, self-assured money-talk voice — hard uppercase, named numbers and money terms landing in gold. Fits: business/hustle and SMMA-style delivery; product pitches that name numbers, where figures and money terms suit the gold keyword treatment. Fights: warm serif registers; soft, gentle, or playful delivery, where the hard uppercase money-talk voice clashes.
 
-Keyword styles: Prime, Cove, Lumen, Pulse, Gadzhi. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut (still emit caption_keywords — they have narrative value — they just don't highlight).
+Keyword styles: Prime, Cove, Lumen, Pulse, Gadzhi — these are the ONLY styles that read `caption_keywords`. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut — for these, emit `caption_keywords: []`. Nothing downstream reads the field on these four styles (the renderer passes it only to the caption component, and theirs discards it), so words listed there are written and thrown away.
 
 ──────────────────────────────────────────
 CAPTION POSITION — collision procedure
@@ -6700,7 +6702,7 @@ notes         — string ≤50 words. Brief rationale.
 audio_denoise — bool. true when noise_floor > -40 dB.
 outro         — "none" | "fade_black" | "fade_white". "none" best for looping.
 aspect_ratio  — always "9:16".
-edit_rationale — string, 1-2 SENTENCES, written TO THE USER about THIS edit: why you cut where you did, the pacing you chose, the moments you leaned into. Plain and specific ("Tightened the intro and held on the reveal at 0:14 so the punchline lands"). Describe what the viewer SEES, in words the user would say — NEVER an internal component or style name (say "a quick punch-in on the reveal" or "captions that type on as you speak", not "StepZoom", "TypewriterReveal", or a caption-style name — those mean nothing to the user). If the material is thin (very short, low-energy, or little happens), SAY SO honestly and suggest recording a longer talking-head next time. Never generic — name a real choice.
+edit_rationale — string, 1-2 SENTENCES, written TO THE USER about THIS edit. **WRITE IT LAST, AFTER the arrays above are final, and describe ONLY what those arrays actually contain.** If broll_clips is empty you did not add a cutaway; if motion_graphics is empty you did not add a graphic; if text_overlays is empty there is no on-screen text; if transitions is empty there are no transitions. Naming one you did not emit tells the user the product does not know what it made — measured on real deliveries, 33 of the 53 rationales that mentioned b-roll sat on a plan with ZERO b-roll. Saying what you DIDN'T do is fine and often right ("kept it clean, no graphics"); claiming what isn't there is not. Cuts, pacing and emphasis are always present — lead with those. Content: why you cut where you did, the pacing you chose, the moments you leaned into. Plain and specific ("Tightened the intro and held on the reveal at 0:14 so the punchline lands"). Describe what the viewer SEES, in words the user would say — NEVER an internal component or style name (say "a quick punch-in on the reveal" or "captions that type on as you speak", not "StepZoom", "TypewriterReveal", or a caption-style name — those mean nothing to the user). If the material is thin (very short, low-energy, or little happens), SAY SO honestly and suggest recording a longer talking-head next time. Never generic — name a real choice.
 post_caption — string, ≤120 chars, user-facing: the ready-to-post caption for THIS video — one line in the speaker's own voice that sells the CONTENT (never the edit), plus 1-2 hashtags drawn from what the video is actually about ("Behind every launch is a spreadsheet nobody saw #startup #buildinpublic" — never "An edit with zooms and captions").
 post_hook — string, ≤60 chars, user-facing: the scroll-stopping first line for the post — the video's sharpest claim or question, in the speaker's own words. Plain text, no hashtags.
 
@@ -7132,6 +7134,8 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
         system_instruction += """
 
 GENERATED SCENES (premium) — a bespoke graphic, COMPOSED not pulled.
+**MEASURED 2026-08-04: `generated_scenes` fired on 0 of 778 planned jobs.** It has never once been used. Either this beat genuinely never applies — in which case leaving it empty is correct and expected — or it is being skipped for a reason the description above does not address.
+
 You may emit `generated_scenes`: full-frame composed takeover beats where a
 custom-made graphic serves the moment better than stock B-roll or a templated
 motion-graphic. A generated scene is a background WORLD (a gradient in the
@@ -11939,6 +11943,45 @@ def _apply_why_diet(schema):
     return schema
 
 
+# ── LEAN-SCHEMA A/B (Zac GO 2026-08-04, both arms together) ──────────────────
+# Arm 3 (PROMPTLY_LEAN_SCHEMA) removes the per-moment prose from the response
+# schema; arm 5 (PROMPTLY_LEAN_DECOR_GROUND) tells the model to justify the
+# decorative families in REASONING so they survive the removal. Arm 3 alone was
+# already run and text_overlays + sound_effects density DROPPED — arm 5 exists
+# precisely to fix that, so they ship TOGETHER or not at all.
+#
+# A REAL A/B, NOT A FLIP. A before/after window would be confounded by traffic
+# mix, time of day and every other change landing today, and tonight has already
+# produced two contaminated windows. The split is deterministic on job_id, so
+# both arms run CONCURRENTLY over the same population and the cut is clean.
+#
+# The env flags still win when set explicitly — that is the kill switch and the
+# way to force an arm for a cert.
+_LEAN_AB_SPLIT = 0.5
+
+
+def _lean_ab_arm():
+    """'lean' or 'control' for the job in flight, stable per job_id.
+
+    Deterministic so a retry of the same job lands in the same arm (a job that
+    flips arms between attempts would pollute both). Returns 'control' when
+    there is no job_id, so anything off the job path is unaffected.
+    """
+    _jid = str(_ACTIVE_JOB_ID or "")
+    if not _jid:
+        return "control"
+    _h = int(hashlib.sha1(_jid.encode("utf-8", "ignore")).hexdigest()[:8], 16)
+    return "lean" if (_h % 10000) < int(_LEAN_AB_SPLIT * 10000) else "control"
+
+
+def _lean_ab_active():
+    """True when this job is in the LEAN arm and no explicit override is set."""
+    for _k in ("PROMPTLY_LEAN_SCHEMA", "PROMPTLY_LEAN_DECOR_GROUND"):
+        if str(os.environ.get(_k, "") or "").strip():
+            return False          # an explicit setting means the A/B is not driving
+    return _lean_ab_arm() == "lean"
+
+
 def _lean_schema_enabled():
     """FIX 3 (degen bound, Zac GO 2026-07-31): the r=0.59 root lever. wall-clock is
     OUTPUT-bound (r=0.59) not thinking-bound (r=0.05), and the output is the
@@ -11952,9 +11995,11 @@ def _lean_schema_enabled():
     (functional: content gate + picker) and remove_words.reason (code-generated) are
     UNTOUCHED. DARK by default; the free plan-decision A/B decides if the scaffold
     was load-bearing before this ever ships."""
-    return os.environ.get("PROMPTLY_LEAN_SCHEMA", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    _v = str(os.environ.get("PROMPTLY_LEAN_SCHEMA", "") or "").strip().lower()
+    if _v:
+        return _v in ("1", "true", "on", "yes")
+    # unset => the A/B decides (Zac GO 2026-08-04)
+    return _lean_ab_active()
 
 
 def _lean_decor_ground_enabled():
@@ -11963,9 +12008,11 @@ def _lean_decor_ground_enabled():
     so the grounding preserves the decoration the removed viewer_feeling/what_lands
     prose used to justify. Only meaningful alongside PROMPTLY_LEAN_SCHEMA. Off =
     plain lean relocation."""
-    return os.environ.get("PROMPTLY_LEAN_DECOR_GROUND", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    _v = str(os.environ.get("PROMPTLY_LEAN_DECOR_GROUND", "") or "").strip().lower()
+    if _v:
+        return _v in ("1", "true", "on", "yes")
+    # unset => the A/B decides (Zac GO 2026-08-04)
+    return _lean_ab_active()
 
 
 # The telemetry-only rationale-prose fields removed by the lean schema, per def.
@@ -14513,9 +14560,17 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     f"{len(normalized_remove_words)} Gemini removals",
                     flush=True,
                 )
+                # TRUNCATE, NEVER PAD (Zac 2026-08-04). ONE ceiling here fixes
+                # all three boundary sites inside the cutter at once — the
+                # tail-pad cap (_cap = _vd), the word filter (_start < _vd) and
+                # the final per-clip clamp (e > _vd) — because every one of them
+                # is written against _vd. Passing the CONTENT duration instead of
+                # the container's claim is therefore the whole fix, not a patch
+                # at each site.
+                _content_vd = probe_content_duration(video_path, video_duration)
                 validated_cuts, _removed_word_indices, _removed_word_reasons = build_clips_from_words(
                     _dg_words, normalized_remove_words,
-                    video_duration=video_duration,
+                    video_duration=_content_vd,
                     vad_silences=list(_VAD_SILENCES_LAST),
                     max_compress=_PACING_MAX_COMPRESS,
                     within_clip_15ms=_WITHIN_CLIP_DEADAIR,
@@ -17205,7 +17260,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # predates the fix — ac9be3a2 hit it ~23h earlier — so it is
                     # not confirmed as a regression, but an unbounded extension is
                     # a defect whether or not it caused that trip.)
-                    _srcmax = float(duration or 0.0)
+                    # Same ceiling as the cutter: the CONTENT end, not the
+                    # container's claim. Snapping a boundary out to a word end
+                    # that the streams do not actually reach is how the tail gets
+                    # padded with a held frame over silence.
+                    _srcmax = float(probe_content_duration(video_path, duration) or 0.0)
                     if _srcmax > 0 and _fe > _srcmax:
                         # Cannot keep the word whole without running off the end,
                         # so drop it cleanly at its START — still never mid-word,
@@ -21152,6 +21211,82 @@ def probe_duration(file_path):
     return d
 
 
+_CONTENT_DUR_CACHE = {}
+
+
+def probe_content_duration(file_path, declared=None):
+    """TRUNCATE, NEVER PAD (Zac 2026-08-04).
+
+    probe_duration() returns the CONTAINER's declared duration first, and a
+    container routinely claims more than its streams actually carry. When the
+    timeline believes that number, it asks for frames the clip has no content
+    for and the encoder HOLDS THE LAST FRAME to fill the gap — which is exactly
+    the specimen behind both_stream_hole: 180 of 202 frames real, the final 22 a
+    frozen frame over silence at -60.4 dB against -16.5 dB for the rest, video
+    and audio padded to the same wrong length.
+
+    This returns the end of the REAL CONTENT — the last packet's presentation
+    time plus its own duration — taken as the MINIMUM across the video and audio
+    streams, because a hole in either one is a hole in the output. Same rule as
+    the stream-less pre-extract, differing only in degree: slightly over-running
+    pads a held frame, far over-running yields an empty file. One ceiling covers
+    both.
+
+    Reads only the last ~5s of packets (no decode) so it costs milliseconds.
+    Returns the declared duration unchanged if the probe cannot answer — this
+    may only ever SHORTEN a timeline, never lengthen one, and never fail a job.
+    """
+    _d = float(declared or 0.0) or float(probe_duration(file_path) or 0.0)
+    if _d <= 0:
+        return _d
+    _key = (file_path, round(_d, 3))
+    if _key in _CONTENT_DUR_CACHE:
+        return _CONTENT_DUR_CACHE[_key]
+    _ends = []
+    for _stream in ("v:0", "a:0"):
+        try:
+            _args = ["ffprobe", "-v", "error", "-select_streams", _stream,
+                     "-show_entries", "packet=pts_time,duration_time",
+                     "-of", "csv=p=0"]
+            if _d > 6.0:
+                _args += ["-read_intervals", f"{_d - 5.0:.3f}%+#100000"]
+            _args += [file_path]
+            _out = subprocess.run(_args, capture_output=True, text=True,
+                                  timeout=30).stdout
+            _last = None
+            for _line in _out.splitlines():
+                _parts = _line.strip().split(",")
+                if not _parts or not _parts[0]:
+                    continue
+                try:
+                    _pts = float(_parts[0])
+                except ValueError:
+                    continue
+                try:
+                    _pdur = float(_parts[1]) if len(_parts) > 1 and _parts[1] else 0.0
+                except ValueError:
+                    _pdur = 0.0
+                _end = _pts + max(0.0, _pdur)
+                if _last is None or _end > _last:
+                    _last = _end
+            if _last and _last > 0:
+                _ends.append(_last)
+        except Exception:
+            continue
+    if not _ends:
+        _CONTENT_DUR_CACHE[_key] = _d
+        return _d
+    _content = min(_ends)
+    # Only ever SHORTEN, and ignore sub-frame noise.
+    _out_val = _content if 0 < _content < _d - 0.02 else _d
+    if _out_val < _d:
+        print(f"[content-dur] container claims {_d:.3f}s, streams carry "
+              f"{_content:.3f}s -> timeline truncated to content "
+              f"(pad of {_d - _content:.3f}s prevented)", flush=True)
+    _CONTENT_DUR_CACHE[_key] = _out_val
+    return _out_val
+
+
 def probe_audio_sample_rate(file_path):
     data = _probe_full(file_path)
     for s in (data.get("streams") or []):
@@ -23506,6 +23641,78 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     flush=True,
                 )
                 raw_clips[-1]["padded_end"] = _new_end
+
+    # ── Step 4b: EDGE CONTENT PRESERVATION (Zac 2026-08-04) ───────────────
+    # THE SAME RULE THE URDU WORK ADOPTED, APPLIED AT THE EDGES. Interior spans
+    # that carry audio energy but no transcript words are never removed. The
+    # output envelope is [first kept word .. last kept word], so the EDGE version
+    # of that span — a music intro, ambience, a held shot, a title card before
+    # anyone speaks — is truncated away at any size, with no rule at all.
+    #
+    # Measured consequence: Spanish sits at 0.41 MEDIAN KEEP-RATIO with 53% of
+    # jobs losing more than half the video, and the coverage gate cannot see it
+    # because that gate counts untranscribed SPEECH and this material is not
+    # speech. This is half of the original "cuts out HALF the video" complaint.
+    #
+    # NO NEW THRESHOLD, deliberately. PROMPTLY_MIN_OUTPUT_RATIO already exists at
+    # max(20% of source, 1.5s) and is miscalibrated for exactly this class —
+    # 0.41 sails past a 20% floor, and raising it to 50% would fire on ~10% of
+    # good edits (census: good edits keep p50 93% / p10 51%). A second global
+    # ratio gate would be the same instrument with the same calibration problem.
+    # So the boundary here is the SILENCE DETECTION already computed and already
+    # passed into this function: extend the envelope outward to the nearest real
+    # silence, and no further. Content is kept because it is not silent, not
+    # because it cleared a percentage.
+    #
+    # FAIL-SAFE: with no silence data the extension does NOT run and behaviour is
+    # byte-identical to today. Unmeasurable must never mean "keep everything" —
+    # that would restore genuine dead air.
+    if raw_clips and (vad_silences or level_silences):
+        _sils = []
+        for _src in (vad_silences, level_silences):
+            for _sp in (_src or []):
+                try:
+                    _sils.append((float(_sp[0]), float(_sp[1])))
+                except (TypeError, ValueError, IndexError):
+                    pass
+        _sils.sort()
+        _lead_removed = any(idx < clips[0][0]["_word_index"] for idx in removed_indices) if clips else False
+        _tail_removed = any(idx > clips[-1][-1]["_word_index"] for idx in removed_indices) if clips else False
+        if _sils and clips and not _lead_removed:
+            _fs = float(raw_clips[0]["padded_start"])
+            _lead_bound = 0.0
+            for (_a, _b) in _sils:
+                if _b <= _fs + 1e-6:
+                    _lead_bound = max(_lead_bound, _b)
+            if _lead_bound < _fs - 1e-3:
+                print(f"[edge-keep] lead {_fs:.3f}→{_lead_bound:.3f}s "
+                      f"(+{_fs - _lead_bound:.2f}s of non-silent material kept)", flush=True)
+                _record_divergence(
+                    "cut_boundary",
+                    {"edge": "lead", "was_s": round(_fs, 3), "now_s": round(_lead_bound, 3)},
+                    "edge_content_preserved",
+                    reason="material before the first word carries content, not silence")
+                raw_clips[0]["padded_start"] = _lead_bound
+        if _sils and clips and not _tail_removed:
+            _le = float(raw_clips[-1]["padded_end"])
+            _tail_bound = None
+            for (_a, _b) in _sils:
+                if _a >= _le - 1e-6:
+                    _tail_bound = _a
+                    break
+            if _tail_bound is None and _vd > 0:
+                _tail_bound = _vd
+            if _vd > 0 and _tail_bound is not None:
+                _tail_bound = min(_tail_bound, _vd)
+            if _tail_bound is not None and _tail_bound > _le + 1e-3:
+                print(f"[edge-keep] tail {_le:.3f}→{_tail_bound:.3f}s "
+                      f"(+{_tail_bound - _le:.2f}s of non-silent material kept)", flush=True)
+                _record_divergence(
+                    "cut_boundary",
+                    {"edge": "tail", "was_s": round(_le, 3), "now_s": round(_tail_bound, 3)},
+                    "edge_content_preserved",
+                    reason="material after the last word carries content, not silence")
+                raw_clips[-1]["padded_end"] = _tail_bound
 
     # ── Step 4c: BETWEEN-WORDS GAP INVARIANT (within-clip dead-air) ──
     # THE INVARIANT (Zac 2026-07-09): the dead air in the OUTPUT between the last audible
@@ -27464,20 +27671,16 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _vf = (f"trim=start_frame={_start_i}:end_frame={_src_end},"
                        f"setpts=(PTS-STARTPTS)/{_pbr_f:.6f},fps={source_fps:g}")
             _out_path = os.path.join(work_dir, f"trans_{_idx}_{_side}.mp4")
-            # BOTH failure modes, from both branches (merged 2026-08-04):
-            #   smoothness — ffmpeg RAISES  -> degrade, never die
-            #   errors     — ffmpeg exits 0 but writes a STREAM-LESS file
-            #                (rc==0 is not success; that is the class that died
-            #                at the compositor three ladder rungs later)
             try:
                 subprocess.run([
                     "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
                     "-i", source_path, "-vf", _vf, "-frames:v", str(_dur_frames_i),
                     "-c:v", "libx264", "-preset", "fast", "-crf", "14",
-                    # inc2 render_burst: PIN x264 threads (never auto). This
-                    # transition pre-extract feeds Remotion frame-by-frame, so
-                    # thread-dependent bytes would decode to different frames and
-                    # break byte-identity across cpu counts (cpu=48 vs cpu=16).
+                    # inc2 render_burst: PIN x264 threads (never auto). This transition
+                    # pre-extract feeds Remotion frame-by-frame, so thread-dependent
+                    # bytes would decode to different frames and break byte-identity
+                    # across cpu counts (cpu=48 burst vs cpu=16). Same pin as the
+                    # per-clip pre-extract sibling above.
                     "-x264-params", f"threads={_X264_ENCODE_THREADS}",
                     "-pix_fmt", "yuv420p", "-g", str(_gop), "-keyint_min", str(_gop),
                     "-sc_threshold", "0", "-video_track_timescale", "90000",
@@ -27486,10 +27689,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             except Exception as _e:
                 # DEGRADE, NEVER DIE. This is a SPEED optimisation — the renderer
                 # falls back to the whole source + trimBefore when clip{Side}Src is
-                # absent, which is the pre-existing behaviour.
+                # absent, which is exactly the pre-existing behaviour. A failed
+                # extract must cost frames-per-second, never the user's video.
+                # (Same lesson as SafeImg: a failed asset degrades, it does not
+                # take the render with it.)
                 _trans.pop(f"clip{_side}Src", None)
                 _logs.append(f"{_side}=DEGRADED({type(_e).__name__})")
                 continue
+            # MERGE 2026-08-04: the two branches fixed DIFFERENT HALVES of this and
+            # both are required. The try/except above catches ffmpeg RAISING; the
+            # probe below catches ffmpeg SUCCEEDING and writing a stream-less file
+            # (rc==0 is not success — 91f0f8a). Dropping either half reopens a class.
+            #
+            # DEGRADE, NOT FATAL (Zac 2026-08-03): this transition pre-extract
+            # MIRRORS the zoom one (1958f2b), so it can emit the same stream-less
+            # mp4 that would die at the compositor three rungs later. Probe before
+            # handoff; if unreadable, leave clip{side}Src UNSET — the transition
+            # falls back to reading the original source at clip{side}StartFromFrames
+            # (the pre-1958f2b path: a slower @remotion/media read, but correct and
+            # timeline-neutral, since the pre-extract is purely a speed optimisation).
+            # Ledger the defect loudly; one bad layer must never fail the render.
             if not _pre_extract_readable(_out_path):
                 _record_divergence(
                     "render",
@@ -31112,13 +31331,108 @@ def _persist_step_token(job_id, step, message):
     threading.Thread(target=_w, daemon=True).start()
 
 
-def _persist_edit_rationale(job_id, rationale):
+# ── RATIONALE CLAIM AUDIT (Zac 2026-08-04) ───────────────────────────────────
+# The rationale is generated from the model's INTENT. Measured on 283 real
+# rationales, 33 of the 53 that mention b-roll (62.3%) sit on a plan with ZERO
+# broll_clips — and resolved_broll correlates PERFECTLY with the final field
+# (66/780 each), so nothing is dropped late. The model believes it made a
+# decision its own structured output never carried.
+#
+# TWO USES, AND THEY PULL IN OPPOSITE DIRECTIONS:
+#   FOR THE USER — never claim what did not render. "I added a cutaway" on a
+#   video with no cutaway tells them the product does not know what it made,
+#   which is worse than saying nothing.
+#   FOR US — every unsupported claim NAMES A COMPONENT THE MODEL WANTED AND DID
+#   NOT GET. That is the same gap as the six MG components that fired 0 of 709
+#   plans, and it is free: the data is already there. So the claims are STRIPPED
+#   from the user's copy and RECORDED for ours.
+_RATIONALE_CLAIMS = (
+    ("broll_clips", re.compile(r"\bb-?roll|cutaway|stock (?:footage|clip)", re.I)),
+    ("motion_graphics", re.compile(r"\bgraphic|stat ?card|banner|counter|ticker|badge|lower.?third", re.I)),
+    ("text_overlays", re.compile(r"\btext overlay|on-?screen text|title card", re.I)),
+    ("transitions", re.compile(r"\btransition|dissolve|cross.?fade|wipe", re.I)),
+)
+# NEGATION AND SOURCE-DESCRIPTION GUARD. My first measurement read 46.9% for
+# graphics and was WRONG: the regex counted "no distracting graphics or B-roll"
+# (a negation, and an accurate one) and "the original video already has burned-in
+# captions" (describing the SOURCE, not our edit). A claim-checker that strips
+# those would delete true sentences.
+_RATIONALE_NEGATED = re.compile(
+    r"\b(?:no|without|avoided|skipped|left out|kept .{0,20}free of|"
+    r"original|source|already (?:has|had)|existing|burned-?in)\b", re.I)
+
+
+def _split_rationale_sentences(text):
+    parts = re.split(r"(?<=[.!?।])\s+", str(text or "").strip())
+    return [p for p in parts if p.strip()]
+
+
+def audit_edit_rationale(rationale, edit_plan):
+    """Return (text_safe_for_the_user, [unsupported claims]).
+
+    Strips only the SENTENCES that claim a family the plan does not carry, so a
+    rationale that is 90% accurate keeps its 90%. Returns None for the text when
+    nothing survives — no rationale beats a false one.
+
+    ⚠️ COVERAGE LIMIT, stated rather than hidden: the patterns are English, and
+    rationales are written in the USER'S language (36% of ours are not English).
+    A Hindi rationale is therefore NOT audited — it passes through unchanged.
+    This never produces a FALSE STRIP, only a missed one, which is the correct
+    direction to fail. Extending it needs per-language patterns, not a
+    translation step.
+    """
+    _txt = str(rationale or "").strip()
+    if not _txt or not isinstance(edit_plan, dict):
+        return (_txt or None), []
+    _unsupported = []
+    _kept = []
+    for _sent in _split_rationale_sentences(_txt):
+        _bad = None
+        if not _RATIONALE_NEGATED.search(_sent):
+            for _fam, _pat in _RATIONALE_CLAIMS:
+                if _pat.search(_sent) and not (edit_plan.get(_fam) or []):
+                    _bad = _fam
+                    break
+        if _bad:
+            _unsupported.append({"family": _bad, "sentence": _sent[:160]})
+        else:
+            _kept.append(_sent)
+    return ((" ".join(_kept).strip() or None), _unsupported)
+
+
+def _persist_edit_rationale(job_id, rationale, edit_plan=None):
     """Durable write of the user-facing edit rationale to video_jobs.edit_rationale,
     alongside current_step/step_message. Additive narrative column ONLY — never
     touches status/progress/result. Daemon-threaded, fail-open, terminal-fenced.
     PostgREST silently drops writes to an unknown column, so this is a safe no-op
     until the migration adds edit_rationale (frontend owns the column + client read).
     Kill switch: PROMPTLY_RATIONALE_PERSIST=0."""
+    # FILTER FOR THE USER, REPORT FOR US (Zac 2026-08-04). A claim the plan does
+    # not carry is stripped from what the user reads, and recorded as a
+    # divergence for us — each one names a component the model WANTED and did
+    # not get, which is the same gap as the six MG components that fired 0 of
+    # 709 plans. Free instrument: the data was already being written, unchecked.
+    if isinstance(edit_plan, dict):
+        try:
+            _safe, _unsupported = audit_edit_rationale(rationale, edit_plan)
+            if _unsupported:
+                _record_divergence(
+                    "rationale",
+                    {"families": sorted({u["family"] for u in _unsupported}),
+                     "claims": [u["sentence"] for u in _unsupported][:3],
+                     "stripped": len(_unsupported)},
+                    "rationale_claimed_absent_family",
+                    final={"kept_chars": len(_safe or "")},
+                    reason=("the model described a decision its own plan does not "
+                            "carry — it wanted the component and did not get it"),
+                )
+                print(f"[rationale] stripped {len(_unsupported)} unsupported claim(s): "
+                      f"{sorted({u['family'] for u in _unsupported})}", flush=True)
+            rationale = _safe
+        except Exception as _ra_err:
+            # never let the audit cost the rationale
+            print(f"[rationale] audit skipped: {_ra_err}", flush=True)
+
     if supabase is None or not job_id or not rationale:
         return
     if os.environ.get("PROMPTLY_RATIONALE_PERSIST", "1").strip().lower() in (
@@ -31663,14 +31977,39 @@ def _apply_motion_anchors(render_input, motion_curve, shot_changes, source_fps,
 # honest failure). So re-routing is permitted ONLY when VAD positively confirms
 # there is no real speech — and every unmeasurable case stays uncut.
 _SILENT_ROUTE_SPEECH_FLOOR_S = 1.5    # VAD speech above this = a speaking clip
-_SILENT_ROUTE_REASONS = ("no_speech_muted", "transcription_incomplete")
+# too_short ADDED 2026-08-04 (Zac GO). It was excluded as "a duration verdict,
+# not a silence verdict" — but the verdict being about duration is not a reason
+# to skip the MODEL. A 5s clip VAD-confirms silent has cuts, pacing and emphasis
+# decisions available; the mood-reel floor (3.0s) is what bounds it now. Last of
+# the call-with-less-input cases: 170 jobs / 168 users. plan_collapsed stays OUT
+# — re-calling there is a RETRY, and the law forbids retry as an answer to
+# failure; the degeneration gets fixed instead.
+_SILENT_ROUTE_REASONS = ("no_speech_muted", "transcription_incomplete", "too_short")
 
 
 def _silent_to_moodreel_enabled():
-    """PROMPTLY_SILENT_TO_MOODREEL=1 arms the re-route. Default OFF => today's
-    routing, byte-identical."""
-    return str(os.environ.get("PROMPTLY_SILENT_TO_MOODREEL", "") or "").strip() \
-        in ("1", "true", "on", "yes")
+    """ARMED BY DEFAULT (Zac GO 2026-08-04, naming the key PROMPTLY_SILENT_TO_MOODREEL).
+
+    Was default OFF and had been since it was built — the Rule-2 shape exactly:
+    shipped, gate-green, doing nothing. Measured addressable set at the time of
+    the flip: 269 jobs / 260 USERS in 10 days, of which the minimal /
+    no_speech_muted arm exports at 3.4%.
+
+    ARMED IN CODE, NOT IN THE SECRET, DELIBERATELY. The operational flags live in
+    `promptly-lang-flags`, but that secret can only be changed with
+    `modal secret create … --force`, which REPLACES every key, and Modal exposes
+    no way to read the live keys back. The docs list six; the count has been
+    nine. Recreating it blind could silently drop a flag nobody can see —
+    PROMPTLY_SPAWN_MODE=1 among them, which must stay 1. This key is not in the
+    documented set, so the code default is what governs and nothing needs
+    clobbering.
+
+    Still a kill switch: PROMPTLY_SILENT_TO_MOODREEL=0 disarms it, and that WOULD
+    go in the secret (adding one key is the same --force risk, so only under a
+    real incident).
+    """
+    _v = str(os.environ.get("PROMPTLY_SILENT_TO_MOODREEL", "") or "").strip().lower()
+    return _v not in ("0", "false", "off", "no")
 
 
 def _vad_confirms_silence(source_path, source_duration):
@@ -31699,9 +32038,11 @@ def _vad_confirms_silence(source_path, source_duration):
 def _silent_route_eligible(reason, source_path, source_duration):
     """May this uncut-bound clip be re-routed to the mood-reel edit instead?
 
-    Only for reasons that mean 'we could not read the speech' — never for
-    too_short (a duration verdict) or plan/render collapse (where the clip may
-    well be speech-bearing and the uncut delivery is the honest floor).
+    For reasons that mean 'we could not read the speech', and — since 2026-08-04
+    — for too_short as well: a short clip is still a clip the model can compose,
+    and VAD confirmation is what makes it safe. NEVER for plan/render collapse,
+    where the clip may well be speech-bearing AND where re-calling the model
+    would be a retry.
     """
     if not _silent_to_moodreel_enabled():
         return False
@@ -31864,9 +32205,67 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     if _silent_reroute:
         print(f"[silent-route] reason={reason} VAD-confirmed silent -> "
               f"mood-reel edit instead of uncut passthrough", flush=True)
-    if (_plan is None and _moodreel_on and _dur >= 8.0 and _mcurve
-            and (reason in ("no_speech", "not_talking_head", "no_audio")
-                 or _silent_reroute)):
+    # WHICH GATE REJECTED? (Zac 2026-08-04, quality lane). Measured on 1,779
+    # completions: 158 jobs / 149 USERS with a silent reason fell through to
+    # `minimal`, which emits 0% cuts and 0% captions — we hand the upload back.
+    # The same silent reason routed to moodreel exports at 17.5% vs minimal's
+    # 8.2%. That gap is NOT attributable to the route (moodreel requires
+    # _mcurve, so it gets the MOVING footage and minimal gets the static — a
+    # content difference), but the construction failure is real either way:
+    # for silent, static or short content we currently make nothing.
+    #
+    # THE FIX IS BLOCKED ON NOT KNOWING WHICH CONDITION FIRED. Light routes
+    # persist no plan, so the duration and the motion-curve length are both
+    # unrecoverable after the fact — lowering the 8.0s threshold would be a
+    # guess. Record the gate outcome so the next read names the binding
+    # constraint instead.
+    _mr_eligible_reason = (reason in ("no_speech", "not_talking_head", "no_audio")
+                           or _silent_reroute)
+    if _plan is None and _mr_eligible_reason and not (
+            _moodreel_on and _dur >= 3.0):
+        _record_divergence(
+            "routing",
+            {"reason": str(reason), "duration_s": round(float(_dur or 0.0), 2),
+             "motion_windows": len(_mcurve or []),
+             "moodreel_enabled": bool(_moodreel_on),
+             "silent_reroute_armed": bool(_silent_to_moodreel_enabled())},
+            "moodreel_gate_rejected",
+            reason=("silent content could not take the mood-reel edit: "
+                    + ("flag off" if not _moodreel_on
+                       else f"duration {float(_dur or 0.0):.2f}s < 3.0s")),
+        )
+        print(f"[moodreel-gate] REJECTED reason={reason} dur={float(_dur or 0.0):.2f}s "
+              f"motion_windows={len(_mcurve or [])} enabled={bool(_moodreel_on)} "
+              f"silent_reroute_armed={bool(_silent_to_moodreel_enabled())} "
+              f"-> falling through to minimal (produces no cuts, no captions)",
+              flush=True)
+    # EVERY PATH CALLS THE MODEL (Zac ruling 2026-08-04): "Everything is SMARTLY
+    # ai generated and is ALWAYS tailored to what the user asks for." What varies
+    # is what the model is GIVEN — transcript or none, speech or silence — never
+    # whether it is asked at all.
+    #
+    # TWO CONDITIONS DELETED FROM THIS GATE, and neither was load-bearing:
+    #   `_mcurve`  — build_moodreel_prompt ALREADY handles an empty curve:
+    #                `curve = list(motion_curve or [])`, and extract_motion_curve
+    #                documents "every consumer falls back to even pacing on an
+    #                empty curve".
+    #                CORRECTION TO MY OWN FIRST CLAIM (measured, 2026-08-04): I
+    #                wrote that this blocked STATIC footage. It did not. A
+    #                perfectly still 12s clip yields a curve of TWELVE ZEROS, and
+    #                a non-empty list is truthy — so static content always
+    #                passed. `_mcurve` was falsy ONLY when the extractor ERRORED
+    #                and returned []. Removing it therefore helps extractor
+    #                failures, a rarer population than I claimed. The real
+    #                widening is the duration floor below.
+    #   `>= 8.0`   — an arbitrary floor, and THIS is the change that moves real
+    #                traffic. A mood reel needs two shots to exist, not eight
+    #                seconds; the product's only length law is the <2.0s
+    #                rejection. Lowered to 3.0s, which is two ~1.5s shots.
+    # The rejection record added above still reports whatever falls through, so
+    # this widening is measurable rather than assumed.
+    _MOODREEL_MIN_S = 3.0
+    if (_plan is None and _moodreel_on and _dur >= _MOODREEL_MIN_S
+            and _mr_eligible_reason):
         try:
             import moodreel_editor as _mre2
             _sys_i, _user_c = _mre2.build_moodreel_prompt(
@@ -31928,7 +32327,11 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "speech_preserved_single_clip",
             reason=f"speech-bearing '{reason}' -> one full-span clip (no motion cuts, speech preserved)")
     if _plan is None:
-        _plan = _me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve)
+        # THE USER'S WORDS REACH THIS PATH NOW (Zac 2026-08-04). It had no vibe
+        # parameter at all — 204 jobs / 188 users got pacing that never consulted
+        # a word they wrote.
+        _plan = _me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve,
+                                       vibe=input_data.get("vibe") or "")
     _mini_t["plan"] = time.time() - _t0 - _mini_t.get("normalize", 0)
     _ri = _he.project_hype_plan(
         _plan, source_url=os.path.basename(_canon), source_fps=_fps,
@@ -36728,7 +37131,12 @@ def handler(job):
                     "vad_speech_s": _bundle_cov.get("vad_speech_s"),
                     "words": len(_dg_words),
                 }
-                edit_plan["_lang_bundle"] = _lang_bundle  # flows into the success result payload
+                # Underscored so the RENDER can read it without the sanitizer
+                # persisting a duplicate — but that same underscore is why it
+                # never reached the DB on its own (0 of 3,000 rows). The
+                # persisted copy rides stage_timings.lang_bundle; this key is
+                # the in-process one and is NOT the persistence path.
+                edit_plan["_lang_bundle"] = _lang_bundle
                 _record_divergence("language_bundle", _lang_bundle, "lang_bundle",
                                    reason=str(_det_lang or _script or "?"))
             except Exception as _lbe:
@@ -37183,7 +37591,8 @@ def handler(job):
             # fail-open; edit_plan carries edit_rationale via the PostCutPlan
             # field-copy above (safe-edit / thin plans leave it None → no-op).
             if isinstance(edit_plan, dict):
-                _persist_edit_rationale(job_id, edit_plan.get("edit_rationale"))
+                _persist_edit_rationale(job_id, edit_plan.get("edit_rationale"),
+                                        edit_plan=edit_plan)
                 # S-PACKAGE: persist the posting substance at the same seam —
                 # the recipe just resolved, well before the terminal fence can
                 # race the write. edit_plan carries post_caption/post_hook via
@@ -38298,6 +38707,23 @@ def handler(job):
                 # would have been lost to content-studio top-level stripping. The
                 # uncached_delta (prompt-cached) decides the prompt lever.
                 "gemini_tokens": _gemini_token_summary(),
+                # LEAN-SCHEMA A/B ARM (Zac GO 2026-08-04). NESTED for the same
+                # reason as gemini_tokens — a top-level key is stripped by
+                # content-studio and the A/B would be unmeasurable, which is the
+                # exact failure this file keeps finding elsewhere (_lang_bundle
+                # 0/3000, vad_coverage, source_duration 0/149). An A/B whose arm
+                # is not persisted is not an A/B.
+                # LANGUAGE BUNDLE — detected_language + script + vad_coverage.
+                # Written to edit_plan["_lang_bundle"] at the coverage gate with a
+                # comment claiming it "flows into the success result payload". IT
+                # DOES NOT: the leading underscore is exactly what the recipe
+                # sanitizer strips, so it persisted on 0 of 3,000 rows and the
+                # Spanish keep-ratio question has been unanswerable ever since.
+                # Nested here for the same reason as gemini_tokens and lean_arm.
+                "lang_bundle": (edit_plan or {}).get("_lang_bundle"),
+                "lean_arm": _lean_ab_arm(),
+                "lean_schema_on": bool(_lean_schema_enabled()),
+                "lean_decor_ground_on": bool(_lean_decor_ground_enabled()),
                 # ONE CLOCK (Zac 2026-08-02): hierarchical wall-clock tree with
                 # start/end/parent per span; unaccounted = parent − union(children)
                 # is exact, so any gap is VISIBLE not absorbed. Nested to survive

@@ -5559,7 +5559,7 @@ def _integrity_freeze_echo_boundary():
         "the collapsed branch that hid the crossing case must be gone from BOTH echoes"
 
 
-@check("SILENT CLIPS GET AN EDIT, NOT THEIR OWN FOOTAGE BACK (2026-08-03, DARK behind PROMPTLY_SILENT_TO_MOODREEL): measured over 387 completions since 08-01 with editorial events = (segments-1) + decorations counted across BOTH recipe shapes — minimal_speech_uncut 141/141 silent (median 0 editorial), moodreel 73 jobs 1 silent (median 5), hype median 14, standard median 10. 143 of 387 (37%, 140 users) deliver ZERO editorial events and 141 are the uncut passthrough. A clip whose speech we could not READ but which VAD confirms carries NO speech is silent content and belongs in the mood-reel cut. THE GUARD: minimal_speech_uncut exists because build_minimal_plan cuts at MOTION PEAKS, which would chop the untranscribed speech it protects (Urdu-class law) — so re-routing requires POSITIVE VAD confirmation and every unmeasurable case stays uncut. cert: test_silent_to_moodreel.py 13/13")
+@check("SILENT CLIPS GET AN EDIT, NOT THEIR OWN FOOTAGE BACK (2026-08-03, DARK behind PROMPTLY_SILENT_TO_MOODREEL): measured over 387 completions since 08-01 with editorial events = (segments-1) + decorations counted across BOTH recipe shapes — minimal_speech_uncut 141/141 silent (median 0 editorial), moodreel 73 jobs 1 silent (median 5), hype median 14, standard median 10. 143 of 387 (37%, 140 users) deliver ZERO editorial events and 141 are the uncut passthrough. A clip whose speech we could not READ but which VAD confirms carries NO speech is silent content and belongs in the mood-reel cut. THE GUARD: minimal_speech_uncut exists because build_minimal_plan cuts at MOTION PEAKS, which would chop the untranscribed speech it protects (Urdu-class law) — so re-routing requires POSITIVE VAD confirmation and every unmeasurable case stays uncut. ARMED 2026-08-04 (Zac GO naming the key); addressable at the flip 269 jobs / 260 USERS. cert: test_silent_to_moodreel.py 18/18")
 def _silent_to_moodreel():
     import handler
     _h = open("handler.py").read()
@@ -5574,12 +5574,21 @@ def _silent_to_moodreel():
         handler._detect_silence_regions_vad = lambda *a, **k: sil
         handler._vad_available = lambda: avail
     try:
-        # 1. DARK BY DEFAULT — flag off, nothing is ever re-routed
+        # 1. ARMED BY DEFAULT (Zac GO 2026-08-04). Inverted from dark-by-default,
+        #    which is how this sat doing nothing from the day it shipped. The
+        #    KILL SWITCH is what gets asserted now — a flag whose off-state does
+        #    not actually disarm is decoration.
         os.environ.pop("PROMPTLY_SILENT_TO_MOODREEL", None)
-        assert handler._silent_to_moodreel_enabled() is False
+        assert handler._silent_to_moodreel_enabled() is True, \
+            "the re-route must be ARMED when unset — it was dark for weeks otherwise"
         _vad([(0.0, 30.0)])
+        assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is True, \
+            "unset must re-route a VAD-confirmed silent clip"
+
+        os.environ["PROMPTLY_SILENT_TO_MOODREEL"] = "0"
+        assert handler._silent_to_moodreel_enabled() is False
         assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is False, \
-            "flag off must never re-route"
+            "the kill switch must actually disarm the re-route"
 
         os.environ["PROMPTLY_SILENT_TO_MOODREEL"] = "1"
         # 2. positive confirmation re-routes
@@ -5597,7 +5606,13 @@ def _silent_to_moodreel():
         _vad([(0.0, 30.0)])
         assert handler._vad_confirms_silence("/x.mp4", 0.0) is False, "no duration -> uncut"
         # 5. scope — duration verdicts are NOT silence verdicts
-        assert handler._silent_route_eligible("too_short", "/x.mp4", 30.0) is False
+        # too_short JOINED the set 2026-08-04 (Zac GO) — a duration verdict is not
+        # a reason to skip the MODEL; VAD confirmation is still what makes it safe.
+        assert handler._silent_route_eligible("too_short", "/x.mp4", 30.0) is True
+        # plan_collapsed stays OUT and that is the property worth pinning:
+        # re-calling the model there is a RETRY, which the law forbids.
+        assert handler._silent_route_eligible("plan_collapsed", "/x.mp4", 30.0) is False, \
+            "plan_collapsed must never re-route — that would be a retry"
     finally:
         handler._detect_silence_regions_vad, handler._vad_available = _o1, _o2
         os.environ.pop("PROMPTLY_SILENT_TO_MOODREEL", None) if _o is None else \
@@ -6696,8 +6711,34 @@ def _moodreel_route_wiring():
     assert 'os.environ.get("PROMPTLY_MOODREEL", "")' in _body, "the Secret-canonical flag gates the route"
     assert 'reason in ("no_speech", "not_talking_head", "no_audio")' in _body, \
         "moodreel eligibility: the three caption-less reasons (no_audio qualifies — no music needed)"
-    assert "_moodreel_on and _dur >= 8.0 and _mcurve" in _body, \
-        "the 8s floor + curve-required guard (every Zac-approved sample was motion-anchored; no curve -> minimal)"
+    # SUPERSEDED 2026-08-04 by Zac's ruling: "Every raw video that is getting
+    # edited goes through a pipeline, not just a deterministic shitty edit."
+    # EVERY PATH CALLS THE MODEL; what varies is what it is GIVEN.
+    #
+    # The old guard required a motion curve and 8 seconds. The curve requirement
+    # was gratuitous — build_moodreel_prompt does `curve = list(motion_curve or [])`
+    # and extract_motion_curve documents that every consumer falls back to even
+    # pacing on an empty curve — so a static clip was denied a model call for a
+    # case the prompt was written to absorb.
+    #
+    # THE TENSION IS LARGELY CLOSED, and by measurement rather than argument: a
+    # perfectly still 12s clip yields a curve of TWELVE ZEROS, not an empty one,
+    # and a non-empty list is truthy — so STATIC silent footage was ALREADY
+    # reaching moodreel under the old gate and has been all along. On matched
+    # no-speech content moodreel exports at 17.5% against minimal's 8.2%.
+    # `_mcurve` was falsy only on EXTRACTOR ERROR. What is genuinely new is the
+    # 3-8s band opened by the duration floor, which is a length change, not a
+    # static-content one.
+    assert "_moodreel_on and _dur >= _MOODREEL_MIN_S" in _body, \
+        "every silent path must reach the model — the curve requirement is gone"
+    assert "_MOODREEL_MIN_S = 3.0" in _body, \
+        "the floor must be the two-shot minimum (3.0s), not the old arbitrary 8.0s"
+    # the curve is still PASSED to the prompt (it makes the reel better when it
+    # exists) — it must simply never again be REQUIRED to make the call.
+    assert "and _mcurve" not in _body, \
+        "the motion-curve requirement must not creep back into the routing condition"
+    assert "build_moodreel_prompt(\n" in _body or "_mcurve)" in _body, \
+        "the curve must still be PASSED — removing the requirement is not removing the signal"
     assert "build_moodreel_prompt(" in _body and "moodreel_fallback_minimal" in _body, \
         "doctrine prompt + the ledgered fail-safe to minimal"
     _mi = _body.find("_moodreel_on =")
@@ -6708,8 +6749,13 @@ def _moodreel_route_wiring():
         "moodreel must set its own rationale/capability_notes/pkg_fields — never the generic re-pace text"
     assert '"moodreel_plan"' in _body and '"motion_curve"' in _body, "stage_manifest names the moodreel stages"
     # PAIR2 B: the live call passes the curve
-    assert "_me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve)" in _body, \
+    # PAIR2 B still holds — the curve is still consumed. The call now ALSO carries
+    # the vibe (Zac 2026-08-04), so the assertion checks both rather than pinning
+    # the old exact-argument string.
+    assert "_me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve," in _body, \
         "PAIR2 B adopted: the live minimal call consumes the motion curve"
+    assert 'vibe=input_data.get("vibe")' in _body, \
+        "and it must carry the VIBE — this path could not read the user's words at all"
     # PAIR1 B: skip-trim is first-class in minimal_editor with the sampled constants
     _m = open("minimal_editor.py").read()
     assert "trim_lo: float = 0.4, trim_hi: float = 0.8" in _m, "the sampled skip-trim constants (pair 1 B as approved)"
@@ -6747,15 +6793,25 @@ def _edit_rationale_field():
     # persistence: narrative-only, terminal-fenced, wired at the recipe seam
     _i = _h.find("def _persist_edit_rationale")
     assert _i != -1, "the rationale persist helper must exist"
-    _body = _h[_i:_i + 1400]
+    # window widened 1400 -> 3400: the claim AUDIT (Zac 2026-08-04) now sits at
+    # the top of this function, which pushed the write past the old slice.
+    _body = _h[_i:_i + 3400]
     assert '"edit_rationale": _txt' in _body and 'supabase.table("video_jobs").update(' in _body, \
         "must write edit_rationale to video_jobs"
     assert '"status":' not in _body and '"progress":' not in _body and '"result":' not in _body, \
         "the rationale write must be narrative-only (no status/progress/result)"
     assert '"failed", "canceled", "completed"' in _body, "the rationale write must be terminal-fenced"
     assert 'PROMPTLY_RATIONALE_PERSIST' in _body, "kill switch required"
-    assert '_persist_edit_rationale(job_id, edit_plan.get("edit_rationale"))' in _h, \
+    assert '_persist_edit_rationale(job_id, edit_plan.get("edit_rationale"),' in _h, \
         "the pipeline must persist the rationale after the recipe resolves"
+    # AND IT MUST PASS THE PLAN (Zac 2026-08-04). Without it the claim audit is a
+    # no-op and the rationale goes to the user unchecked — measured at 33 of 53
+    # b-roll mentions sitting on a plan with ZERO broll_clips.
+    assert 'edit_plan=edit_plan)' in _h, \
+        "the persist call must pass the PLAN, or the claim audit cannot run"
+    assert 'rationale_claimed_absent_family' in _h, \
+        "unsupported claims must be RECORDED, not just stripped — each one names " \
+        "a component the model wanted and did not get"
 
 
 @check("POST PACKAGE (2026-07-25, S-PACKAGE): when a video completes the user receives substance — {edit_rationale, post_caption, post_hook} delivered as result.post_package on EVERY route + video_jobs.post_package jsonb. PostCutPlan grows two additive Optional fields schema-capped at token-generation (post_caption<=120 platform-ready caption with 1-2 hashtags; post_hook<=60 scroll-stopping first line). Latency guard measured BEFORE shipping: ~57 output tokens ~= 1.8s at the observed 32 tok/s marginal rate (2.5s at the 22.8 tok/s worst-case effective), under the 3-5s bar -> the ask ships in the planning call, render never delayed. Minimal/hype fill deterministic-honest values (route reason / measured beat BPM — no extra model calls). The persist helper imitates _persist_step_token: daemon-threaded, fail-open, terminal-fenced, narrative column ONLY, kill switch PROMPTLY_PACKAGE_PERSIST=0; PostgREST no-ops until the 219 client migration adds the column. Contract: POST_PACKAGE_CONTRACT.md.")
@@ -8109,6 +8165,271 @@ def _mg_entrance_fingerprint():
     return "sha256:" + _hl.sha256("\n====\n".join(_parts).encode("utf-8")).hexdigest()
 
 
+@check("CAPTION KEYWORD LIST ANTI-DRIFT (Zac 2026-08-04, RULE-1): the prompt tells Gemini which caption styles read `caption_keywords`, and _resolve_caption_extra_props decides which ones actually receive them. When those two disagree, Gemini writes words that nothing consumes — measured at 1,372 keywords across 267 real jobs before the fix. This gate derives the truth from the CODE map and asserts the PROMPT names exactly that set, so adding or removing keyword support in a component forces the prompt to change with it.")
+def _caption_keyword_list_matches_code():
+    import re as _re3
+    _src = open("handler.py").read()
+
+    # the code is the authority: which styles get a keyword prop at all
+    _m = _re3.search(r"simple_keyword_prop = \{(.*?)\}", _src, _re3.S)
+    assert _m, "simple_keyword_prop map is gone — the keyword routing lost its authority"
+    _code_styles = set(_re3.findall(r'"(\w+)"\s*:', _m.group(1)))
+    assert _code_styles, "simple_keyword_prop parsed empty"
+
+    # the prompt must name exactly that set
+    _p = _re3.search(r"Keyword styles: ([^.]+?) — these are the ONLY styles that read", _src)
+    assert _p, "the prompt no longer states which styles read caption_keywords"
+    _prompt_styles = {x.strip() for x in _p.group(1).split(",") if x.strip()}
+    assert _prompt_styles == _code_styles, (
+        f"prompt says {sorted(_prompt_styles)} but the code feeds {sorted(_code_styles)} — "
+        "one of them is lying to Gemini")
+
+    # and the ignoring styles must be told to emit nothing
+    assert "emit `caption_keywords: []`" in _src, \
+        "keyword-ignoring styles must be told to emit [] — otherwise Gemini writes " \
+        "words that no component reads (1,372 of them across 267 jobs)"
+
+
+@check("EDGE CONTENT IS NOT TRUNCATED (Zac 2026-08-04, RULE-1): the output envelope is [first kept word .. last kept word], so edge material carrying content but no words — a music intro, ambience, a held shot, a title card — was dropped at ANY size with no rule at all. Spanish sits at 0.41 MEDIAN keep-ratio, 53% of jobs losing over half the video, and the coverage gate cannot see it because that gate counts untranscribed SPEECH. This is the EDGE version of the rule the Urdu work already adopted for interior spans. Deliberately NO new threshold: PROMPTLY_MIN_OUTPUT_RATIO already exists at max(20%, 1.5s) and is miscalibrated for this class — 0.41 sails past 20%, and a 50% floor would fire on ~10% of good edits (good edits keep p50 93% / p10 51%). The boundary is the silence detection already computed. This gate pins the extension AND the fail-safe in both directions.")
+def _edge_content_not_truncated():
+    _src = open("handler.py").read()
+    assert "edge_content_preserved" in _src, \
+        "the edge-content rule is gone — silent-but-not-empty intros and outros " \
+        "are being deleted again"
+    assert "if raw_clips and (vad_silences or level_silences):" in _src, \
+        "the extension must be FAIL-SAFE: with no silence data it must not run, " \
+        "or unmeasurable becomes 'keep everything' and dead air comes back"
+    assert "not _lead_removed" in _src and "not _tail_removed" in _src, \
+        "a DELIBERATE removal at an edge must suppress the extension — otherwise " \
+        "the cutter replays speech the plan chose to cut"
+
+    # THE PREDICATE, BOTH DIRECTIONS. An extension that cannot extend proves
+    # nothing, and one that cannot STOP would restore genuine dead air.
+    def _lead(first_word_start, sils):
+        b = 0.0
+        for (x, y) in sorted(sils):
+            if y <= first_word_start + 1e-6:
+                b = max(b, y)
+        return b
+
+    def _tail(last_end, sils, vd):
+        for (x, y) in sorted(sils):
+            if x >= last_end - 1e-6:
+                return min(x, vd) if vd > 0 else x
+        return vd if vd > 0 else last_end
+
+    # a 6s music intro then speech: silence only at 0-0.2 => keep from 0.2
+    assert abs(_lead(6.0, [(0.0, 0.2)]) - 0.2) < 1e-9, \
+        "content before the first word must be KEPT back to the last real silence"
+    # genuine dead air 0-5.8 before speech at 6.0 => keep only from 5.8
+    assert abs(_lead(6.0, [(0.0, 5.8)]) - 5.8) < 1e-9, \
+        "genuine leading silence must still be CUT — the rule is not 'keep everything'"
+    # no silence at all before the word => keep from the top
+    assert _lead(6.0, [(9.0, 9.5)]) == 0.0, "no silence before => the whole lead is content"
+    # tail: outro music to the end, silence only after it
+    assert abs(_tail(20.0, [(28.0, 30.0)], 30.0) - 28.0) < 1e-9, \
+        "content after the last word must be KEPT up to the next real silence"
+    # tail: silence starts immediately => no extension
+    assert abs(_tail(20.0, [(20.0, 30.0)], 30.0) - 20.0) < 1e-9, \
+        "silence immediately after the last word must NOT be restored"
+    # never past the content end
+    assert _tail(20.0, [], 25.0) == 25.0, "the tail must clamp to the content duration"
+
+
+@check("vad_coverage REACHES THE DATABASE (Zac 2026-08-04, RULE-1): the three-field language bundle (detected_language + transcript_script + vad_coverage) was written to edit_plan[\"_lang_bundle\"] under a comment saying it \"flows into the success result payload\". It does not — the leading underscore is exactly what the recipe sanitizer strips, so it persisted on 0 of 3,000 rows. Spanish sits at 0.41 median keep-ratio with 53% of jobs losing more than half the video and the coverage gate demonstrably not firing; that question has been unanswerable because the field that would answer it was never stored. A field that exists and is never persisted is the same as no field at all.")
+def _lang_bundle_persisted():
+    _src = open("handler.py").read()
+    assert '"lang_bundle": (edit_plan or {}).get("_lang_bundle")' in _src, \
+        "the language bundle must be PERSISTED, not just written to edit_plan"
+    # it must ride INSIDE stage_timings — a top-level key is stripped downstream
+    _nested = any(
+        '"lang_bundle"' in _src[_i:_i + 3000]
+        for _i in range(len(_src)) if _src.startswith('"stage_timings": {', _i))
+    assert _nested, \
+        "lang_bundle must be NESTED in stage_timings, the same pattern gemini_tokens " \
+        "and lean_arm use — content-studio strips top-level keys"
+    # and the misleading comment must not come back
+    assert "_lang_bundle  # flows into the success result payload" not in _src, \
+        "that comment was FALSE for 3,000 rows — the underscore is what stripped it"
+    # the fields the Spanish question actually needs
+    for _f in ("vad_coverage_frac", "vad_coverage_unworded_s", "vad_speech_s"):
+        assert _f in _src, f"the bundle must still carry {_f}"
+
+
+@check("LEAN-SCHEMA A/B IS MEASURABLE (Zac GO 2026-08-04, both arms together, RULE-1): arm 3 removes the per-moment prose from the response schema (measured cost: what_i_saw declared 240 chars, EMITTED 16,111; wall-clock is output-bound r=0.59) and arm 5 makes the model justify the decorative families in reasoning so they survive the removal — arm 3 alone already ran and text_overlays + sound_effects density DROPPED, so they ship together or not at all. This gate asserts the split is DETERMINISTIC (a job that flips arms between retries pollutes both) and that the arm is PERSISTED where content-studio cannot strip it. An A/B whose arm is not persisted is not an A/B — this repo has _lang_bundle 0/3000, vad_coverage and source_duration 0/149 as precedent.")
+def _lean_ab_measurable():
+    _src = open("handler.py").read()
+    assert "def _lean_ab_arm(" in _src, "the A/B arm function is gone"
+    assert '"lean_arm": _lean_ab_arm()' in _src, \
+        "the arm must be PERSISTED or the A/B cannot be cut"
+    # it must ride INSIDE stage_timings, the dict that survives top-level stripping
+    # there are several stage_timings dicts (light routes build their own); the
+    # arm only needs to ride the STANDARD-EDITORIAL one, since the light routes
+    # never touch the editorial prompt this A/B changes.
+    _nested = any(
+        '"lean_arm"' in _src[_i:_i + 2500]
+        for _i in range(len(_src)) if _src.startswith('"stage_timings": {', _i))
+    assert _nested, \
+        "lean_arm must be NESTED in stage_timings — a top-level key is stripped by " \
+        "content-studio and the A/B would be silently unmeasurable"
+    assert "hashlib.sha1(_jid.encode" in _src, \
+        "the split must be a STABLE hash of job_id: a job that lands in a different " \
+        "arm on retry pollutes both arms"
+    assert "return _lean_ab_active()" in _src, \
+        "both flag readers must fall through to the A/B when the env is unset"
+    assert _src.count("return _lean_ab_active()") >= 2, \
+        "BOTH arms must be driven by the A/B — arm 3 without arm 5 is the " \
+        "configuration already measured to DROP decorative density"
+
+    # determinism + kill switch, exercised
+    import hashlib as _hl
+    def _arm(jid, split=0.5):
+        if not jid:
+            return "control"
+        _h = int(_hl.sha1(jid.encode("utf-8", "ignore")).hexdigest()[:8], 16)
+        return "lean" if (_h % 10000) < int(split * 10000) else "control"
+    assert _arm("abc-123") == _arm("abc-123"), "the same job must always get the same arm"
+    _n = sum(1 for i in range(2000) if _arm(f"job-{i}") == "lean")
+    assert 800 <= _n <= 1200, f"the 50/50 split is skewed: {_n}/2000 in the lean arm"
+    assert _arm("") == "control", "no job_id must mean control, never lean"
+
+
+@check("EVIDENCE RIDES THE RULE (Zac 2026-08-04): a rule with its measurement attached survives compression; a bare rule gets cut in a diet and nobody learns why it was there. Audited the editorial prompt: of 97 normative lines, 91 carry NO evidence — 17 of those are CONTRACT lines (user says X -> emit Y, where evidence would be meaningless) and 74 are EMPIRICAL claims (caps, densities, thresholds) that could simply be wrong and nobody would know. This gate pins the evidence onto the three instruments measured DEAD, so a diet cannot quietly drop the number that justifies deleting or fixing them.")
+def _evidence_rides_the_rule():
+    _src = open("handler.py").read()
+    for _needle, _what in (
+        ("`cut_refinements` came back EMPTY on 159 of 159 plans", "cut_refinements"),
+        ("`generated_scenes` fired on 0 of 778 planned jobs", "generated_scenes"),
+        ("transitions fire on only 4.9% of planned jobs (38 of 778)", "transitions"),
+    ):
+        assert _needle in _src, (
+            f"the measured fire-rate for {_what} was stripped from the prompt. That "
+            "number IS the delete-or-fix decision — without it the rule is just an "
+            "opinion and the next diet cuts it blind.")
+    # the rationale rule's evidence, added the same day for the same reason
+    assert "33 of the 53 rationales that mentioned" in _src, \
+        "the rationale rule must keep its measured consequence attached"
+    assert "1,372" in _src or "no component reads" in _src or "written and thrown away" in _src, \
+        "the caption-keyword rule must keep its evidence attached"
+
+
+@check("THE VIBE REACHES EVERY ROUTE (Zac ruling 2026-08-04: 'ALWAYS tailored to what the user asks for'): traced in code, `minimal` had NO vibe parameter — build_minimal_plan(_dur, fps, motion_curve) — so 204 jobs / 188 USERS received pacing that never consulted a word they wrote. standard_editorial, moodreel and hype all read it; minimal did not and minimal_speech_uncut makes no plan at all, together 628 jobs / 601 users / 35.3% of completions. This gate asserts the vibe is BOTH passed AND read, and that reading it actually changes the edit — a parameter that is accepted and ignored is the same as no parameter.")
+def _vibe_reaches_minimal():
+    _src = open("handler.py").read()
+    assert 'vibe=input_data.get("vibe")' in _src, \
+        "the minimal path must be PASSED the vibe"
+    _min = open("minimal_editor.py").read()
+    assert "def pace_from_vibe(" in _min, "minimal_editor must READ the vibe"
+    assert "target_clip_s = pace_from_vibe(vibe)" in _min, \
+        "the vibe must actually set the pace — an accepted-and-ignored parameter " \
+        "is the same as no parameter"
+
+    # AND IT MUST DISCRIMINATE. pacing/color_effect were convicted for being
+    # constants wearing a field's name; this must not join them.
+    import importlib
+    _me = importlib.import_module("minimal_editor")
+    importlib.reload(_me)
+    assert _me.pace_from_vibe("make it fast and viral") < _me.pace_from_vibe("slow cinematic"), \
+        "a fast vibe must cut faster than a slow one"
+    assert _me.pace_from_vibe("") == _me.pace_from_vibe(None) == 2.5, \
+        "silence on pace must change nothing (the old constant)"
+    assert _me.pace_from_vibe("fast but cinematic") == 1.6, \
+        "a vibe naming both registers is asking for energy with a look — fast wins"
+    _f = _me.build_minimal_plan(20.0, vibe="fast and punchy")
+    _s2 = _me.build_minimal_plan(20.0, vibe="slow cinematic")
+    assert len(_f.clips) > len(_s2.clips), \
+        f"the vibe must change the EDIT, not just a variable ({len(_f.clips)} vs {len(_s2.clips)})"
+
+
+@check("SILENT->MOODREEL IS ARMED (Zac GO 2026-08-04, naming PROMPTLY_SILENT_TO_MOODREEL, RULE-1): the re-route was BUILT AND DARK — default OFF since it shipped, the Rule-2 shape exactly. Addressable at the flip: 269 jobs / 260 USERS in 10 days, the minimal/no_speech_muted arm exporting at 3.4%. This gate asserts it stays ARMED BY DEFAULT and that the kill switch still works, in both directions — a default that silently reverts to OFF is how this sat dark for weeks.")
+def _silent_to_moodreel_armed():
+    _src = open("handler.py").read()
+    assert 'in ("1", "true", "on", "yes")' not in _src.split(
+        "def _silent_to_moodreel_enabled")[1][:1400], \
+        "the re-route is back to opt-IN (default OFF) — it was dark for weeks that way"
+    assert '_v not in ("0", "false", "off", "no")' in _src, \
+        "the re-route must be ARMED BY DEFAULT: unset => ON"
+
+    # THE PREDICATE, BOTH DIRECTIONS. A default-ON that cannot be turned off is
+    # not a flag, and a kill switch that does not kill is worse than none.
+    def _armed(v):
+        return str(v or "").strip().lower() not in ("0", "false", "off", "no")
+    assert _armed("") and _armed(None), "unset must be ARMED"
+    assert _armed("1") and _armed("true"), "explicit on must be armed"
+    assert not _armed("0") and not _armed("false") and not _armed("off"), \
+        "the kill switch must actually disarm it"
+    assert not _armed(" OFF "), "the kill switch must survive whitespace and case"
+
+    # and the resolved state has to be OBSERVABLE, because the live value of a
+    # flag that lives in code is otherwise unknowable from outside
+    assert '"silent_reroute_armed": bool(_silent_to_moodreel_enabled())' in _src, \
+        "the rejection record must carry the RESOLVED arm state — Modal exposes " \
+        "no way to read secret keys back, so this log line is the only way to " \
+        "confirm the flip actually took on real traffic"
+
+
+@check("MOODREEL GATE OBSERVABILITY (Zac 2026-08-04, RULE-1): 158 jobs / 149 USERS with a silent route_reason fell through to `minimal`, which emits 0% cuts and 0% captions — we hand the upload back. Which of the gate's conditions rejected them is UNRECOVERABLE after the fact, because light routes persist no plan: the duration and the motion-window count are both gone. Lowering the 8.0s threshold without that would be a guess. This gate pins the rejection record in place so the binding constraint can be read off real traffic.")
+def _moodreel_gate_observability():
+    _src = open("handler.py").read()
+    assert "moodreel_gate_rejected" in _src, \
+        "the moodreel gate no longer records WHY it rejected — the light-route " \
+        "fix goes back to guessing"
+    assert '"motion_windows": len(_mcurve or [])' in _src, \
+        "the rejection record must carry the motion-window COUNT: it is the " \
+        "condition that cannot be recovered from stored data afterwards"
+    assert '"duration_s": round(float(_dur or 0.0), 2)' in _src, \
+        "the rejection record must carry the DURATION — it is the other " \
+        "unrecoverable condition, and the 8.0s threshold is the suspect"
+    assert "_mr_eligible_reason" in _src, \
+        "the eligibility predicate must stay SHARED between the rejection record " \
+        "and the routing branch — two copies would drift and the record would lie"
+
+
+@check("TRUNCATE, NEVER PAD (Zac 2026-08-04, RULE-1): when the final boundary runs past what the streams actually carry, the timeline must shorten to the content — never ask for frames that do not exist. The forensic specimen behind both_stream_hole was 180 of 202 frames real, the final 22 a HELD FRAME over silence at -60.4 dB against -16.5 dB for the rest, video and audio padded to the same wrong length. Root cause: probe_duration() returns the CONTAINER's declared duration first, and a container routinely claims more than its streams carry. Same family as the stream-less pre-extract, differing only in degree — slightly over-running pads a held frame, far over-running yields an empty file. This gate pins the content ceiling at BOTH boundary sites and exercises the only-ever-shorten property in both directions.")
+def _truncate_never_pad():
+    _src = open("handler.py").read()
+    assert "def probe_content_duration(" in _src, \
+        "the content ceiling is gone — the timeline can pad past the streams again"
+    assert "video_duration=_content_vd" in _src, \
+        "the cutter must receive the CONTENT duration, not the container's claim: " \
+        "_vd is the single ceiling behind the tail-pad cap, the word filter AND the " \
+        "final per-clip clamp, so passing it wrong breaks all three at once"
+    assert "probe_content_duration(video_path, duration)" in _src, \
+        "the final-end snap must clamp to the CONTENT end too — snapping out to a " \
+        "word end the streams never reach is exactly how the tail gets padded"
+    assert "min(_ends)" in _src, \
+        "the ceiling must be the MINIMUM across video and audio: a hole in either " \
+        "stream is a hole in the output (both_stream_hole names both)"
+
+    # THE PROPERTY, BOTH DIRECTIONS. A ceiling that cannot shorten proves nothing,
+    # and one that can LENGTHEN would invent frames instead of dropping them.
+    def _ceiling(declared, v_end, a_end):
+        ends = [e for e in (v_end, a_end) if e and e > 0]
+        if not ends:
+            return declared
+        content = min(ends)
+        return content if 0 < content < declared - 0.02 else declared
+
+    # the specimen: container claims 6.733, streams carry 6.0 -> truncate
+    assert abs(_ceiling(6.733, 6.0, 6.0) - 6.0) < 1e-9, \
+        "must TRUNCATE to the content end (the 0.733s specimen hole)"
+    # one short stream is enough — both_stream_hole needs only one to run out
+    assert abs(_ceiling(6.733, 6.733, 6.0) - 6.0) < 1e-9, \
+        "a short AUDIO stream must truncate too — min across streams, not max"
+    assert abs(_ceiling(6.733, 6.0, 6.733) - 6.0) < 1e-9, \
+        "a short VIDEO stream must truncate too"
+    # NEVER LENGTHEN: a container that under-claims must be left alone, or the
+    # timeline would request frames beyond what it was built for.
+    assert abs(_ceiling(6.0, 9.9, 9.9) - 6.0) < 1e-9, \
+        "the ceiling may only ever SHORTEN — never extend a timeline"
+    # sub-frame noise must not churn every job
+    assert abs(_ceiling(6.000, 5.995, 5.995) - 6.0) < 1e-9, \
+        "sub-frame differences must be ignored (0.02s deadband)"
+    # unprobeable -> unchanged, never a failed job
+    assert abs(_ceiling(6.0, 0, 0) - 6.0) < 1e-9, \
+        "an unanswerable probe must degrade to the declared duration, never fail"
+
+
 @check("FINAL-END WORD INVARIANT (Zac 2026-08-03, RULE-1): a delivered video must never stop MID-WORD. Measured on real deliveries: 10 of 27 (37%) ended with the final cut landing strictly INSIDE a word the edit KEPT, 0.05-1.22s of speech still to come — and plan-sum == rendered-duration to within 0.01s, so it reached the user. The word-aligned cutter cannot produce this (padded_end = word_group[-1]['_end'], a word END by construction) and the tail-pad cannot rescue it (it only ever EXTENDS an already-aligned boundary), so the property is enforced on the FINAL cuts array where every path converges. This gate pins the enforcement in place AND exercises the predicate in BOTH directions — a check that cannot fail on a mid-word end proves nothing.")
 def _final_end_word_invariant():
     import re as _re2
@@ -8148,7 +8469,7 @@ def _final_end_word_invariant():
     # NEVER PAST THE SOURCE. An end beyond the available frames is how a trailing
     # both_stream_hole is manufactured, and the tail-pad beside this clamps to
     # _vd for the same reason.
-    assert "_srcmax = float(duration or 0.0)" in _src, \
+    assert "_srcmax = float(probe_content_duration(video_path, duration) or 0.0)" in _src, \
         "the snap must clamp to the SOURCE DURATION — an unbounded extension can " \
         "request frames that do not exist and trip a trailing both_stream_hole"
     assert "_fe = min(float(_hit.get(\"start\") or _fe0), _srcmax)" in _src, \
