@@ -11021,9 +11021,39 @@ def _check_private_clean_export():
     assert _i_prev != -1, "the preview seam is gone"
     assert _i_clean < _i_prev, \
         "the clean master must be secured before the public artifact is published"
-    # a failed export must NEVER fail a delivered render
-    assert "gate will fall back for this job" in _src, \
-        "a clean-export failure must degrade to NULL, never fail the render"
+    # A failed export must NEVER fail a delivered render, AND must never do it
+    # silently — a systematic upload failure would mint 100% free exports.
+    #
+    # ASSERT AGAINST PARSED STATE, NOT SOURCE TEXT (standing rule). The previous
+    # version of this assertion pinned the literal log line "gate will fall back
+    # for this job", so making the failure LOUDER broke the check that exists to
+    # keep the failure safe — a gate that fails when the code improves. Walk the
+    # AST instead: every `except` guarding an `exports/.../clean.mp4` upload must
+    # (a) set the key to None, (b) not re-raise, and (c) ledger a defect.
+    import ast as _ast
+    _tree = _ast.parse(_src)
+    _handlers = []
+    for _node in _ast.walk(_tree):
+        if not isinstance(_node, _ast.Try):
+            continue
+        _body_src = _ast.dump(_ast.Module(body=_node.body, type_ignores=[]))
+        if "clean.mp4" not in _ast.unparse(_ast.Module(body=_node.body, type_ignores=[])):
+            continue
+        for _h in _node.handlers:
+            _hsrc = _ast.unparse(_ast.Module(body=_h.body, type_ignores=[]))
+            _handlers.append(_hsrc)
+    assert len(_handlers) == 2, (
+        f"expected the clean-export upload to be guarded on BOTH routes "
+        f"(main + minimal/hype); found {len(_handlers)} guarded handler(s)")
+    for _hsrc in _handlers:
+        assert "= None" in _hsrc, \
+            "a clean-export failure must degrade the key to None, never leave it set"
+        assert not any(isinstance(_n, _ast.Raise) for _n in
+                       _ast.walk(_ast.parse(_hsrc))), \
+            "a clean-export failure must NEVER fail a delivered render"
+        assert "_ledger_defect" in _hsrc, (
+            "a clean-export failure must LEDGER A DEFECT — this is the last NULL "
+            "path left, and a silent one mints free exports (loud fail-safe law)")
     # the field must ride BOTH completion allowlists, or the gate cannot read it
     assert _src.count('"clean_export_key"') >= 4, \
         "clean_export_key must be on both completion writes AND both payloads"
@@ -11062,8 +11092,56 @@ def _check_no_short_token_source_assertions():
         + "; ".join(_bad[:6]))
 
 
+@check("AN OPTIONAL SIGNAL FAILING MUST NEVER BE FATAL (Zac 2026-08-04, RULE-1). Face positions and shot changes are INPUTS TO QUALITY, not preconditions for a video, but a timeout in either raised straight out of subprocess.run and terminalised the job as RENDER_FFMPEG. MEASURED on the 24h board: 6 of 18 render-class failures died in an analysis stage BEFORE a recipe existed to degrade (face-extract select=mod(n,180) x4, scdet x2) across 5 distinct users — the degrade ladder cannot reach any of them. This asserts the three optional signals stay wrapped, that the wrapper SWALLOWS and returns the typed default, and that it LEDGERS rather than degrading silently (loud fail-safe law). A required signal must never be added here.")
+def _optional_signals_never_fatal():
+    import handler as _h
+    for _name, _default in (("detect_face_positions_dense", []),
+                            ("detect_shot_changes", []),
+                            ("_validator_face_signals", (0, 0, 0.0))):
+        _fn = getattr(_h, _name, None)
+        assert _fn is not None, f"{_name} is gone"
+        # PARSED STATE, not source text: the decorator sets __wrapped__.
+        assert hasattr(_fn, "__wrapped__"), (
+            f"{_name} is NOT wrapped by @_optional_signal — a timeout in it "
+            f"would terminalise the job again")
+    # NEGATIVE CONTROL, run every deploy: a signal that raises must return the
+    # typed default, not propagate. Without this the decorator could be present
+    # and still re-raise, and the gate above would pass.
+    _boom = _h._optional_signal("gate_probe", list)(
+        lambda: (_ for _ in ()).throw(RuntimeError("synthetic")))
+    _got = _boom()
+    assert _got == [], f"wrapper must swallow and return the default, got {_got!r}"
+    _tup = _h._optional_signal("gate_probe2", lambda: (0, 0, 0.0))(
+        lambda: (_ for _ in ()).throw(TimeoutError("synthetic timeout")))
+    assert _tup() == (0, 0, 0.0), "typed default must survive a TimeoutError"
+    # POSITIVE CONTROL: a signal that SUCCEEDS must pass its value through
+    # untouched — a wrapper that swallowed everything would also pass the above.
+    assert _h._optional_signal("gate_probe3", list)(lambda: [1, 2])() == [1, 2], \
+        "the wrapper must not alter a successful signal"
+    # and it must be LOUD — degrade is allowed, silence is not
+    import inspect as _insp
+    _wsrc = _insp.getsource(_h._optional_signal)
+    assert "_ledger_defect" in _wsrc, \
+        "a degraded signal must ledger a defect — silent degrade is the banned shape"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
+# EVERY @check IN THIS FILE MUST ACTUALLY RUN (2026-08-04). The runner executes
+# checks as the module is imported top-to-bottom, so a @check appended BELOW this
+# line is defined and never called — it reports nothing and the total does not
+# move. That happened while writing the optional-signal gate: the check existed,
+# the file passed 349/349, and its own negative control passed too, because the
+# check was dead code. A gate that can be silently disabled by appending to the
+# file is not a gate. Count the decorators in the source and demand they match.
+_declared = open(__file__).read().count("\n@check(")
+_ran = len(_passed) + len(_failures)
+if _declared != _ran:
+    print(f"\n❌ GATE INTEGRITY: {_declared} @check declarations but only {_ran} ran — "
+          f"{_declared - _ran} check(s) are defined BELOW the runner and never execute. "
+          f"Move them above this block.")
+    sys.exit(1)
+
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
 print("=" * 64)
 
@@ -11077,3 +11155,4 @@ if _failures:
 else:
     print(f"\n✅ All {len(_passed)} checks passed. Safe to deploy.\n")
     sys.exit(0)
+

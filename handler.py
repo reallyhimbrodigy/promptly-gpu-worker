@@ -3302,6 +3302,46 @@ def _probe_weighted_timeout(source_path, base_s, ceiling_s):
         return int(base_s)
 
 
+def _optional_signal(name, default_factory):
+    """AN OPTIONAL SIGNAL FAILING MUST NEVER BE FATAL (Zac 2026-08-04).
+
+    Face positions and shot changes are INPUTS TO QUALITY, not preconditions for
+    a video. Today a timeout in either raises straight out of `subprocess.run`
+    and terminalises the job as RENDER_FFMPEG — the user gets nothing because we
+    could not work out where the faces were. Measured on 2026-08-04: 6 of the 18
+    render-class failures in 24h died in an analysis stage, before a recipe even
+    existed to degrade (face-extract `select=mod(n,180)` x4, `scdet` x2), across
+    5 distinct users.
+
+    This degrades the signal to "unavailable" and continues. It is NOT silent —
+    every degradation ledgers a defect so the root stays visible and countable
+    (routed, not suppressed), which is the same contract as the render ladder's
+    divergences. A signal that is genuinely required must NOT use this.
+
+    Pairs with the derived timeout (_core_scarcity_factor): that makes the budget
+    correct for the box, this makes exceeding it survivable.
+    """
+    def _wrap(fn):
+        def _inner(*a, **kw):
+            try:
+                return fn(*a, **kw)
+            except Exception as _e:                                # noqa: BLE001
+                try:
+                    _ledger_defect("optional_signal", name, _e)
+                except Exception:                                  # noqa: BLE001
+                    pass
+                print(f"[signal] {name} UNAVAILABLE ({type(_e).__name__}: "
+                      f"{str(_e)[:160]}) — continuing without it; this degrades "
+                      f"quality, it does not fail the render", flush=True)
+                return default_factory()
+        _inner.__name__ = getattr(fn, "__name__", name)
+        _inner.__doc__ = getattr(fn, "__doc__", None)
+        _inner.__wrapped__ = fn
+        return _inner
+    return _wrap
+
+
+@_optional_signal("face_positions_dense", list)
 def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, target_h=None):
     """
     Dense face detection using FFmpeg frame extraction + OpenCV DNN.
@@ -3979,6 +4019,7 @@ def _parse_scdet_output(stdout, stderr):
 _SCDET_SWEEP_THRESHOLD = 1.0
 
 
+@_optional_signal("shot_changes", list)
 def detect_shot_changes(source_path, threshold=7.0, out_scores=None):
     """Detect hard shot changes in the source video via ffmpeg's `scdet`
     (scene change detect) filter.
@@ -33318,6 +33359,7 @@ def _rotate_upright(frame, rot_cw):
     return frame
 
 
+@_optional_signal("validator_face_signals", lambda: (0, 0, 0.0))
 def _validator_face_signals(sample_path, every_n_frames=6):
     """YuNet + ffmpeg-upright face ratio for the VALIDATOR ONLY (Zac 2026-08-01).
     Replaces res10, which systematically failed on distant / non-frontal / darker-skin
