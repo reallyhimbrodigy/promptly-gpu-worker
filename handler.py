@@ -29388,7 +29388,16 @@ _ERROR_SUBCODES = {
         ("compositor", ("Compositor error",)),
         ("delay_render", ("delayRender()",)),
         ("oom", ("out of memory", "OOM", "Killed")),
-        ("browser_launch", ("Failed to launch", "chrome", "Chromium")),
+        # A SUB-CODE MUST MATCH THE FAILURE, NOT THE SUBSYSTEM (2026-08-03).
+        # "chrome"/"Chromium" matched the SUCCESSFUL startup line — every render
+        # logs "Using build-time Chromium at /usr/local/bin/chrome-headless-shell"
+        # — so two jobs that logged "Browser opened in 1.01s" were labelled
+        # browser_launch. A WRONG sub-code is worse than `unclassified`: it sends
+        # the fix to the wrong subsystem with false confidence. Only phrases that
+        # can appear exclusively in a launch FAILURE belong here.
+        ("browser_launch", ("Failed to launch", "Could not find Chrome",
+                            "browser has disconnected", "Target closed",
+                            "Protocol error", "Navigation timeout")),
     ),
     "RENDER_FFMPEG": (
         # Every RENDER_FFMPEG observed 07-31..08-04 was an ANALYSIS subprocess
@@ -29992,7 +30001,7 @@ def _job_status_enabled():
 
 
 def write_job_status(job_id, *, status=None, phase=None, progress=None, result=None,
-                     partial_state=None):
+                     partial_state=None, render_frames=None, progress_at=None):
     """Patch the durable video_jobs row. SYNCHRONOUS, fail-open, monotonic. No-op
     unless the flag is on. Terminal statuses (complete/failed/canceled/needs_input)
     always write; intermediate progress never regresses. NOTHING lands on a
@@ -30042,7 +30051,8 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
             else:
                 _JOB_PROGRESS_HW[job_id] = max(hw, progress)
         patch = {"updated_at": datetime.utcnow().isoformat()}
-        if status is None and phase is None and progress is None and result is None and partial_state is None:
+        if (status is None and phase is None and progress is None and result is None
+                and partial_state is None and render_frames is None and progress_at is None):
             return  # guard emptied the patch — nothing worth an UPDATE
         if status is not None:
             patch[status_col] = status
@@ -30050,6 +30060,15 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
             patch["phase"] = phase
         if progress is not None:
             patch["progress"] = progress
+        # WATCHDOG (Zac 2026-08-04): render_frames = the REAL rendered-frame count;
+        # progress_at = the timestamp of the LAST frame movement. progress_at is
+        # written ONLY when the caller confirms frames advanced, so a frozen render
+        # leaves it stale — the honest signal a progress-delta watchdog kills on
+        # (unlike updated_at, which the heartbeat keeps fresh even during a stall).
+        if render_frames is not None:
+            patch["render_frames"] = render_frames
+        if progress_at is not None:
+            patch["progress_at"] = progress_at
         if result is not None:
             patch["result"] = result
             # COPY-TRUTH MIRROR (2026-07-05): the failed-terminal patch carries
@@ -31838,6 +31857,71 @@ def _fire_render_alert(job_id, error_code, detail=None, duration_s=None, elapsed
         except Exception:
             pass
     threading.Thread(target=_fire, daemon=True).start()
+
+
+def _start_render_frame_watcher(job_id, work_dir, app_url, messages=None, interval_s=4.0):
+    """HONEST render progress from REAL frame counts + the progress-delta watchdog
+    signal (Zac 2026-08-04). Replaces the 4-second timer that faked smooth motion
+    on a frozen render — a bug in its own right: it lied to the user, blinded the
+    reaper (updated_at stayed fresh so the heartbeat lease never fired early), and
+    kept the client polling. Polls {work_dir}/*.progress.json (written by
+    render-full.mjs onProgress); on FRAME ADVANCE it writes the real progress +
+    render_frames + a fresh progress_at. When frames FREEZE it writes nothing, so
+    progress_at goes stale — the unambiguous zero-movement signal the server
+    watchdog kills on (regardless of how long the stage legitimately runs). The
+    bar now STOPS when the render stops. Returns a stop Event (.set() when done)."""
+    import threading as _th, glob as _glob, json as _json
+    _stop = _th.Event()
+    _state = {"frames": -1, "i": 0}
+    # Baseline: give the watchdog a start reference even before the first frame
+    # (bundle/openBrowser/selectComposition emit no frames — a legit ~10-30s gap
+    # the watchdog threshold must exceed).
+    try:
+        write_job_status(job_id, phase="render", progress=65, render_frames=0,
+                         progress_at=datetime.utcnow().isoformat())
+    except Exception:
+        pass
+
+    def _run():
+        while not _stop.wait(interval_s):
+            try:
+                _tot = 0
+                _exp = 0
+                _any = False
+                for _pf in _glob.glob(os.path.join(work_dir, "*.progress.json")):
+                    try:
+                        with open(_pf) as _f:
+                            _d = _json.load(_f)
+                        _tot += int(_d.get("renderedFrames") or 0)
+                        _exp += int(_d.get("expectedFrames") or 0)
+                        _any = True
+                    except Exception:
+                        continue
+                if not _any:
+                    continue  # pre-frame phase — no files yet, not a stall
+                if _tot > _state["frames"]:
+                    _state["frames"] = _tot
+                    _pct = 65
+                    if _exp > 0:
+                        _pct = min(89, int(65 + 25 * min(1.0, _tot / float(_exp))))
+                    _msg = None
+                    if messages:
+                        _msg = messages[_state["i"] % len(messages)]
+                        _state["i"] += 1
+                    try:
+                        write_job_status(job_id, phase="render", progress=_pct,
+                                         render_frames=_tot,
+                                         progress_at=datetime.utcnow().isoformat())
+                        if _msg and app_url:
+                            send_progress(job_id, "render", _pct, _msg, app_url)
+                    except Exception:
+                        pass
+                # else: frames FROZEN → write nothing → progress_at stales → watchdog
+            except Exception:
+                continue
+
+    _th.Thread(target=_run, daemon=True).start()
+    return _stop
 
 
 def _start_progress_heartbeat(
