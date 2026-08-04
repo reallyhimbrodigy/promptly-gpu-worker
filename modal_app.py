@@ -2446,10 +2446,12 @@ def render_proof():
 @app.function(cpu=16, memory=12288, region="us", timeout=1200, volumes={"/prewarm": prewarm_volume})
 def cert_burst_floor_ab() -> dict:
     """BURST-FLOOR A/B (Zac 2026-08-03, the SLOPE lever): a 30s source rendered
-    IN-PROCESS (cpu=16, FAITHFUL budget=16 → concurrency 8) vs FORCED to the cpu=48
-    burst (PROMPTLY_BURST_MIN_OUTPUT_S=0). Reports wall · render_time · CORE-SECONDS
-    for each — does the burst finish far sooner at similar total compute? Target:
-    30s source → under 60s. Run: modal run modal_app.py::burst_ab. ~$0.25."""
+    IN-PROCESS (cpu=16, FAITHFUL budget=16 → concurrency 8) vs FORCED to the cpu=32
+    burst (PROMPTLY_BURST_MIN_OUTPUT_S=0; burst cut 48→32 2026-08-03). Reports
+    wall · render_time · CORE-SECONDS for each — does the burst finish far sooner at
+    similar total compute? Target: 30s source → under 60s. The burst arm's
+    render_time is the cpu=32 datapoint to compare against the 95s cpu=48 baseline
+    (byfiv3qho). Run: modal run modal_app.py::burst_ab. ~$0.25."""
     import os, sys, subprocess, tempfile, uuid, time
     os.environ["JOB_STATUS_WRITES_ENABLED"] = ""
     os.environ["APP_URL"] = ""
@@ -2489,8 +2491,9 @@ def cert_burst_floor_ab() -> dict:
         rt = (r or {}).get("render_time") or st.get("render")
         went_burst = (floor == 0)
         # core-seconds: the orchestrator (cpu=16) is held the whole wall; a burst
-        # render additionally holds cpu=48 for render_time (the double-pay).
-        core_s = wall * 16 + ((rt or 0) * 48 if went_burst else 0)
+        # render additionally holds cpu=32 for render_time (the double-pay). 32
+        # tracks the render_burst decorator (cut 48→32, 2026-08-03).
+        core_s = wall * 16 + ((rt or 0) * 32 if went_burst else 0)
         print(f"[burst-ab] {label}: status={(r or {}).get('status')} wall={wall}s "
               f"render={rt}s core_s~{core_s:.0f} url={bool((r or {}).get('video_url'))} "
               f"err={(r or {}).get('error') or (r or {}).get('user_message')}", flush=True)
