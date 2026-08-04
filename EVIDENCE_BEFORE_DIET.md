@@ -75,3 +75,79 @@ cutting a measured one — the difference is only that nobody has looked yet.
 
 Regex classification over the editorial prompt span in `handler.py`, normative
 and evidence patterns as above. **Spend: zero.**
+
+---
+
+# RANKED BY "COULD THIS BE WHY THE OUTPUT IS THIN?"
+
+Zac: rank them, don't treat them uniformly — start with every density, cap and
+"at most" rule, because those can only ever reduce output.
+
+## THE SUPPRESSIVE SET: 16 matches, and 7 of them are ONE doctrine
+
+| # | rule | |
+|---|---|---|
+| 1 | **"A window holds at most one dominant event."** | the doctrine |
+| 2 | "one window carries one event" — stacked ⇒ keep one, drop the rest | restatement |
+| 3 | "One dominant thing at a time stays true everywhere" | restatement |
+| 4 | "Composed pairs are one event" | restatement |
+| 5 | **breather windows get ZERO events by design** | restatement |
+| 6 | "payoff_word_index — ONE peak only" | restatement |
+| 7 | "Doubling up dilutes… an MG on top is two effects fighting" | restatement |
+
+The other 9 matches are component descriptions ("Quintessence — ONE word at a
+time") that the pattern caught but which suppress nothing.
+
+**So the suppressive surface is not 16 rules. It is ONE doctrine stated seven
+times, with no evidence behind any of the seven.** A diet would compress the
+seven into one and change nothing, because the doctrine is the thing doing the
+work.
+
+## AND THE BLAME CANNOT BE PUT ON CODE — I CHECKED
+
+The obvious rebuttal is that density is culled downstream anyway, so the prompt
+is not the constraint. **That rebuttal is false for these families**, and this is
+the measurement that decides it:
+
+| family | code cap | what the PLAN actually emits | cap utilisation |
+|---|---|---|---|
+| **transitions** | `_TRANSITION_CAP_PER_30S = 4.0` | **0.06 per 30s** | **1.5%** |
+| motion_graphics | *no per-30s cap in code* | 0.82 per 30s | — |
+| text_overlays | *no per-30s cap in code* | 0.98 per 30s | — |
+| tight_cut_overlays | *no per-30s cap in code* | 0.79 per 30s | — |
+
+Transitions run at **one and a half percent** of the cap the code allows. Three
+successive culls exist (`drop_overlay_collision`, `drop_too_close` at 3.0s
+spacing, `drop_over_cap`) and **not one of them can be binding at 0.06/30s.**
+
+⚠️ Two scope limits, stated: the plan I measured is PRE-cull (`transitions_out`
+is built fresh at handler.py:25335, so the render never mutates the persisted
+plan) — so this is what Gemini emits, before any culling. And zooms/emphasis are
+NOT covered: `_VISUAL_REFRACTORY_S = 2.0` downgrades zooms for spacing, so that
+family may genuinely be code-bound, which matches the earlier E1 finding that the
+emphasis ceiling was architectural. **The claim here is only about transitions,
+MGs and overlays.**
+
+## THE COUNTER-EVIDENCE ALREADY ON THE BOARD
+
+MG density measured against Zac's own reference: **7.76 vs 16.7 per 25s — we cut
+at HALF his rate**, and 63% of standard-editorial jobs carry ZERO motion
+graphics. The only measurement bearing on the one-event doctrine points AGAINST
+it.
+
+## THE DELETE TEST IS THE RIGHT INSTRUMENT (Zac, item 2)
+
+Three for three so far: `pacing`, `color_effect` and the six MG components were
+all convicted by removal, not by argument. A rule whose removal changes nothing
+was never doing anything.
+
+**The test to run: remove the window doctrine — all seven statements — behind a
+dark variant, and measure events per 25s against control.** It is the highest-
+ranked bare rule on the board, the only counter-evidence available says it is
+too tight, and no code-side cap can absorb the result.
+
+Two outcomes, both worth having:
+- **density rises** → the doctrine was suppressing quality, and it has been
+  doing so on every standard-editorial job.
+- **density unchanged** → the doctrine is inert prose and the diet deletes seven
+  statements for free.
