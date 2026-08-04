@@ -4613,7 +4613,11 @@ def _terminal_telemetry_wiring():
     # one this check has always pinned; rfind targets it explicitly).
     _c = _src.rfind('status="completed", phase="Done"')
     assert _c != -1, "complete terminal write missing"
-    _win = _src[_c:_c + 2700]  # widened for 2b re-edit + S3-thumbnail + Wave-3 tier/model markers
+    # Widened for 2b re-edit + S3-thumbnail + Wave-3 tier/model markers, then
+    # again for the clean_export_key block (2026-08-04). A FIXED window over a
+    # growing dict is brittle by construction: adding a legitimate field pushed
+    # `vocab` past the end and failed a check about a field nobody touched.
+    _win = _src[_c:_c + 3400]
     assert "**_floor_markers(_floor_state)" in _win, "complete write lost floor markers"
     assert '"vocab": _vocab_markers(edit_plan)' in _win, "complete write lost vocab"
     # the minimal route's completed write carries ITS contract (route named so
@@ -9695,7 +9699,7 @@ def _render_burst_dark():
         "the floor bypass must key on the render_burst_test canary handle (canary exercises the burst at any length)"
 
 
-@check("inc2 render_burst ENCODE-THREAD PIN (Zac 2026-08-01, RULE-1): every DELIVERED-OUTPUT / render-INPUT libx264 encode pins x264 threads to a fixed count (_X264_ENCODE_THREADS), NEVER x264-auto (threads=0). x264-auto picks ~cores*1.5 so the OUTPUT bytes depend on the MACHINE's core count, not the config — the render_burst at cpu=48 diverged from cpu=16 production (same class as the snapshot env-freeze), and it is also the ~0.99994 run-to-run 'x264 nondeterminism' cert_progressive documented. Gemini proxies (_proxy_venc) are exempt — analysed then discarded, never delivered. FAILS if any non-proxy libx264 lacks a threads= pin or the constant is 0/absent, so byte-identity stays a usable diagnostic on every future canary/A-B/cert.")
+@check("inc2 render_burst ENCODE-THREAD PIN (Zac 2026-08-01, RULE-1): every DELIVERED-OUTPUT / render-INPUT libx264 encode pins x264 threads to a fixed count (_X264_ENCODE_THREADS), NEVER x264-auto (threads=0). x264-auto picks ~cores*1.5 so the OUTPUT bytes depend on the MACHINE's core count, not the config — the render_burst at cpu=48 diverged from cpu=16 production (same class as the snapshot env-freeze), and it is also the ~0.99994 run-to-run 'x264 nondeterminism' cert_progressive documented. Gemini proxies (_proxy_venc) are pinned SEPARATELY (_PROXY_X264_THREADS, see _proxy_x264_thread_pin below) — this check still skips them here because they are not delivered output, but the orchestrator split made even the discarded proxy's bytes cpu-dependent (it moves the planner cpu=16→4), so they now carry their own pin. FAILS if any non-proxy libx264 lacks a threads= pin or the constant is 0/absent, so byte-identity stays a usable diagnostic on every future canary/A-B/cert.")
 def _x264_thread_pin():
     _h = open("handler.py").read()
     import re as _re
@@ -9725,6 +9729,33 @@ def _x264_thread_pin():
     # the literal x264-auto pin must never reappear in an x264-params
     assert "threads=0}" not in _h and 'threads=0"' not in _h, \
         "no libx264 may pin x264-params threads=0 (that IS x264-auto)"
+
+
+@check("GEMINI-PROXY ENCODE-THREAD PIN (Zac 2026-08-04, RULE-1): the 480p/18fps Gemini proxy (_proxy_venc, libx264 ultrafast crf 30) now pins x264 threads to _PROXY_X264_THREADS, NEVER x264-auto (`-threads 0` global binds to DECODE; libx264's own default is auto = ~cores*1.5). 076afc3 exempted the proxy because it is 'analysed then discarded, never delivered' — that was safe ONLY while it always encoded on cpu=16. The orchestrator split drops the planner to cpu≈4, so the SAME source would encode to DIFFERENT proxy bytes at cpu=4 vs cpu=16, silently changing what Gemini watches. This pins it byte-identical across ANY planner cpu. Kept as its OWN constant (not _X264_ENCODE_THREADS) so render-core tuning can't retroactively shift Gemini's input. Proven by cert_proxy_thread_pin (unpinned enc=6 vs enc=24 DIFFER; pinned enc=48 IDENTICAL). FAILS if either proxy site loses the pin or the constant is 0/absent.")
+def _proxy_x264_thread_pin():
+    _h = open("handler.py").read()
+    import re as _re
+    _m = _re.search(r"_PROXY_X264_THREADS\s*=\s*(\d+)", _h)
+    assert _m and int(_m.group(1)) > 0, \
+        "_PROXY_X264_THREADS must be defined as a fixed non-zero pin"
+    # every libx264 encode PRECEDED by _proxy_venc must carry the proxy pin
+    _idx = 0
+    _proxy_pinned = 0
+    while True:
+        _p = _h.find('"-c:v", "libx264"', _idx)
+        if _p == -1:
+            break
+        _idx = _p + 1
+        _before = _h[max(0, _p - 500):_p]
+        if "_proxy_venc" not in _before:
+            continue  # render-path encode — covered by _x264_thread_pin above
+        _window = _h[_p:_p + 400]
+        assert "threads={_PROXY_X264_THREADS}" in _window, \
+            f"Gemini-proxy libx264 at offset {_p} has no _PROXY_X264_THREADS pin " \
+            f"— x264-auto makes the proxy cpu-dependent (shifts Gemini's input)"
+        _proxy_pinned += 1
+    assert _proxy_pinned == 2, \
+        f"expected exactly 2 pinned proxy libx264 encodes (prewarm + render-path), found {_proxy_pinned}"
 
 
 print("\n[W3] Progressive delivery (DARK behind PROMPTLY_PROGRESSIVE)")
@@ -10636,6 +10667,45 @@ def _check_one_output_resolver():
     assert "pick_playable_output" in _m, \
         "the matrix harness must resolve outputs through the shared helper"
     assert "promptly_output.py" in _m, "the helper must be mounted into the image"
+
+
+@check("PRIVATE CLEAN EXPORT (2026-08-04): the client saves rendered_video_url — a PUBLIC CloudFront URL — which makes the export paywall theatre, since anyone with the link has the clean file. The clean master now goes to a PRIVATE key first (exports/{job_id}/clean.mp4, NEVER under the public sources/{USER_ID}/ prefix) and the public URL is demoted to preview-only. Security will not arm the gate until it curls the clean key's public URL and gets 403. THE SPLIT IS BUILT FOR THE WATERMARK PASS: render -> clean master -> private key -> preview artifact -> public key; today the preview IS the clean file, and when the post-render ffmpeg overlay lands only `_preview_path` changes — the private upload, key contract and persisted field are untouched. clean_export_key rides the EXPLICIT allowlist on BOTH completion writes, which is the same shape that silently swallowed error_subcode until it was added by name.")
+def _check_private_clean_export():
+    _src = open("handler.py").read()
+    # the key contract, exactly as settled
+    assert 'f"exports/{_job_id_for_export}/clean.mp4"' in _src, \
+        "the clean master must go to exports/{job_id}/clean.mp4"
+    assert "sources/" not in _src.split('_clean_export_key = None')[1][:1200], \
+        "the clean export must never be written under the public sources/ prefix"
+    # NO public-read ACL on that upload — the whole point is that it is private
+    _blk = _src[_src.index('_clean_export_key = None'):]
+    _blk = _blk[:_blk.index('_preview_path = output_path')]
+    # Strip COMMENTS before checking — my first version matched the word "ACL"
+    # inside my own comment explaining that there is no ACL. Same class as the
+    # bare-substring status match.
+    _code_only = "\n".join(l for l in _blk.split("\n") if not l.strip().startswith("#"))
+    assert "public-read" not in _code_only and "ACL=" not in _code_only, \
+        "the clean export must carry no public ACL — the gate mints the only URL"
+    # the SPLIT seam must exist so the watermark pass drops in without rework
+    assert "_preview_path = output_path" in _src, \
+        "the public upload must go through a named preview seam, not output_path directly"
+    assert "_preview_path, _bucket, _key" in _src, \
+        "the PUBLIC upload must use the preview seam"
+    # the private upload must happen BEFORE the public one
+    # Use find(), not index(): a missing marker must fail with a REASON, not a
+    # bare ValueError that says nothing about what regressed.
+    _i_clean = _src.find('_clean_export_key = _ck')
+    _i_prev = _src.find('_preview_path = output_path')
+    assert _i_clean != -1, "the clean-export upload is gone — nothing writes the private key"
+    assert _i_prev != -1, "the preview seam is gone"
+    assert _i_clean < _i_prev, \
+        "the clean master must be secured before the public artifact is published"
+    # a failed export must NEVER fail a delivered render
+    assert "gate will fall back for this job" in _src, \
+        "a clean-export failure must degrade to NULL, never fail the render"
+    # the field must ride BOTH completion allowlists, or the gate cannot read it
+    assert _src.count('"clean_export_key"') >= 4, \
+        "clean_export_key must be on both completion writes AND both payloads"
 
 
 # ─── REPORT ────────────────────────────────────────────────────────────

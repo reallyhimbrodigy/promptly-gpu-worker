@@ -2123,6 +2123,19 @@ def _has_nvenc():
 # number — the highest that stays fast. NEVER 0 (validate_deploy asserts it).
 _X264_ENCODE_THREADS = 48
 
+# Gemini-proxy x264 thread pin — SEPARATE from the render pin ON PURPOSE.
+# The 480p/18fps proxy is "analysed then discarded, never delivered", so
+# 076afc3 exempted it from the render determinism pin. That exemption was safe
+# only while the proxy always encoded on the SAME cpu (cpu=16). The orchestrator
+# split drops the planner to cpu≈4, and x264-auto (`-threads 0`) sizes threads
+# from the MACHINE core count — so the same source would encode to DIFFERENT
+# proxy bytes at cpu=4 vs cpu=16, silently changing what Gemini watches. Pinning
+# the encoder thread count makes the proxy byte-identical across ANY planner cpu.
+# Kept as its OWN constant (not _X264_ENCODE_THREADS) so future render-core
+# tuning can never retroactively shift Gemini's input. validate_deploy asserts
+# both proxy sites carry this pin and that it is never 0.
+_PROXY_X264_THREADS = 48
+
 
 def get_encode_args(quality="high", threads=0):
     """Return encoder args for FFmpeg. Uses NVENC when GPU is available.
@@ -32155,6 +32168,13 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         # {edit_rationale, post_caption, post_hook} (POST_PACKAGE_CONTRACT.md).
         "post_package": _post_package,
         "video_url": _video_url,
+        # MINIMAL/HYPE ROUTE: renders through hype_render, which does not pass
+        # through the main upload block, so there is no private clean asset for
+        # these jobs yet. NULL is the honest value — the export gate falls back
+        # rather than signing a key that does not exist. Wiring the clean export
+        # into this route is the follow-up; fabricating a key here would make the
+        # gate 403 for every minimal-route user.
+        "clean_export_key": None,
     }
     if _hls_url:
         result_payload["hls_manifest_url"] = _hls_url
@@ -32165,6 +32185,9 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         result={
             "video_url": _video_url,
             "hls_manifest_url": _hls_url,
+            # See the note on the main completion write — this allowlist is the
+            # only thing the export gate can read.
+            "clean_export_key": None,   # see the note on result_payload above
             "edit_recipe": result_payload["edit_recipe"],
             "transcript": [],
             "render_version": RENDER_VERSION,
@@ -32632,7 +32655,8 @@ def prewarm_handler(job):
                 _proxy_venc = (
                     ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "32"]
                     if _HAS_NVENC else
-                    ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30"]
+                    ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+                     "-x264-params", f"threads={_PROXY_X264_THREADS}"]
                 )
                 _pr = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-threads", "0"] + _hw_dec + [
@@ -34010,9 +34034,56 @@ def render_stage(
                     f"Could not parse bucket/key from upload_url (neither AWS nor Supabase pattern matched): "
                     f"{upload_url[:120]}"
                 )
+        # ── PRIVATE CLEAN EXPORT ────────────────────────────────────────
+        # THE BYPASS THIS CLOSES: the client saves rendered_video_url, a PUBLIC
+        # CloudFront URL, which makes the export paywall theatre — anyone with
+        # the link has the clean file.
+        #
+        # The clean master goes to a PRIVATE key first. It is reachable only via
+        # a server-minted short-TTL signed URL (the export-gate endpoint, 212827d,
+        # whose own comment says it will repoint here). The public URL is demoted
+        # to preview-only.
+        #
+        # KEY CONTRACT (settled): exports/{job_id}/clean.mp4 — never under the
+        # public sources/{USER_ID}/ prefix. Security will not arm the gate until
+        # it curls the clean key's PUBLIC url and gets 403, so this must never be
+        # written anywhere world-readable.
+        #
+        # THE SPLIT, so the watermark pass drops in without rework:
+        #     render -> clean master -> [PRIVATE exports/{job}/clean.mp4]
+        #                            -> preview artifact -> [public _key]
+        # Today the preview IS the clean file (byte-identical upload). When the
+        # post-render ffmpeg overlay pass lands it produces a DIFFERENT local
+        # file and only `_preview_path` below changes — the private upload, the
+        # key contract and the persisted field all stay exactly as they are.
+        _clean_export_key = None
+        _job_id_for_export = str(input_data.get("job_id") or "").strip()
+        if _scheme == "aws" and _job_id_for_export:
+            try:
+                _ck = f"exports/{_job_id_for_export}/clean.mp4"
+                _client.upload_file(
+                    output_path, _bucket, _ck,
+                    # NO public-read ACL. The bucket/CloudFront origin must deny
+                    # anonymous reads on this prefix; the gate mints the only URL.
+                    ExtraArgs={"ContentType": "video/mp4"},
+                    Config=_S3_TRANSFER_CONFIG,
+                )
+                _clean_export_key = _ck
+                print(f"[export] clean master -> s3://{_bucket}/{_ck} (private)", flush=True)
+            except Exception as _ce:
+                # NEVER fail a delivered render over the export copy. A missing
+                # clean key means the gate falls back to today's behaviour for
+                # this job, which is exactly what a NULL clean_export_key means.
+                _clean_export_key = None
+                print(f"[export] clean master upload FAILED ({type(_ce).__name__}: {_ce}) "
+                      f"— gate will fall back for this job", flush=True)
+
+        # The PUBLIC artifact. `_preview_path` is the seam: today the clean
+        # master, later the watermarked overlay output.
+        _preview_path = output_path
         _ut0 = time.time()
         _client.upload_file(
-            output_path, _bucket, _key,
+            _preview_path, _bucket, _key,
             ExtraArgs={"ContentType": "video/mp4"},
             Config=_S3_TRANSFER_CONFIG,
         )
@@ -34028,6 +34099,12 @@ def render_stage(
             flush=True,
         )
         edit_plan["_rendered_video_url"] = _video_url
+        # Carried on the plan stash exactly like _rendered_video_url, because the
+        # result payload is assembled in a different scope. NULL is meaningful:
+        # it means "no private clean asset for this job", and the export gate must
+        # fall back to today's behaviour rather than mint a URL for a key that
+        # does not exist.
+        edit_plan["_clean_export_key"] = _clean_export_key
 
     def _extract_and_upload_cover():
         # Pick the visually best frame from the FINAL RENDERED OUTPUT around
@@ -35355,7 +35432,8 @@ def handler(job):
                 # at the client level (see _get_genai_client).
                 _proxy_venc = (["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "32"]
                                if _HAS_NVENC else
-                               ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30"])
+                               ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+                     "-x264-params", f"threads={_PROXY_X264_THREADS}"])
                 _hw_dec = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
                 # Audio: Opus mono @ 64kbps. Opus at 64k beats AAC at 96k for
                 # speech intelligibility AND prosodic detail (voice rise/drop,
@@ -38175,6 +38253,11 @@ def handler(job):
         result_payload = {
             "status": "success",
             "job_id": job_id,
+            # The private clean-export key, stashed on the plan by the render's
+            # upload step. Set HERE as well as on the DB write because the
+            # completion write reads it off this payload — without it the main
+            # path would persist NULL and the gate would fall back on every job.
+            "clean_export_key": (edit_plan or {}).get("_clean_export_key"),
             "render_time": round(render_elapsed, 1),
             "pipeline_time": round(_timings.get("total", 0), 1),
             # SA-0: full per-stage wall-clock decomposition (seconds).
@@ -38286,6 +38369,13 @@ def handler(job):
             result={
                 "video_url": result_payload.get("video_url"),
                 "hls_manifest_url": result_payload.get("hls_manifest_url"),
+                # PRIVATE CLEAN EXPORT KEY (2026-08-04). The export gate reads
+                # THIS field to mint its short-TTL signed URL. It must ride the
+                # explicit allowlist below — the same shape that silently
+                # swallowed error_subcode until it was added by name. NULL means
+                # "old job / no clean asset", and the gate falls back rather than
+                # signing a key that does not exist.
+                "clean_export_key": result_payload.get("clean_export_key"),
                 # RE-EDIT HYDRATION (2b): persist the tiny (~15KB measured) re-edit
                 # inputs here too, so a double-loss completion recovery (dispatch
                 # Supabase fallback) can still restore the Re-edit button — "no
