@@ -3073,6 +3073,62 @@ def detect_face_positions(video_path, sample_timestamps):
     return positions
 
 
+def _weighted_probe_timeout(nframes, res_factor, base_s, ceiling_s):
+    """Scale an ffmpeg PROBE subprocess timeout by the source's real decode
+    weight (frame count × resolution) so a legitimately heavy source gets the
+    CPU-decode time it needs, while a true hang on a light source still fails
+    fast. Pure math — see _probe_weighted_timeout for the metadata probe.
+
+    RENDER_FFMPEG timeout class (Zac 2026-08-03): 17 failures / 7 users were
+    HEAVY raw sources (14/17 >=60fps, 6 at 100fps) blowing a FIXED 30/60s probe
+    timeout across loudness/scdet/face/proxy. The probes were tuned for NVDEC
+    (face_dense literally decodes on `-hwaccel cuda`), but the render worker is
+    now CPU-only (A100->none), so CPU-decoding 6000 frames blows 30s. cacea1b
+    point-fixed only loudness (-vn); this scales the rest. base_s covers a 30fps
+    ~60s clip; +1s per ~100 decode-weighted frames beyond that, hard-capped so a
+    hang can never ride to the function wall."""
+    try:
+        n = max(1.0, float(nframes)) * max(1.0, float(res_factor))
+        scaled = float(base_s) + max(0.0, (n - 30.0 * 60.0)) / 100.0
+        return int(min(float(ceiling_s), max(float(base_s), scaled)))
+    except Exception:
+        return int(base_s)
+
+
+def _probe_weighted_timeout(source_path, base_s, ceiling_s):
+    """metadata-only ffprobe (r_frame_rate + WxH + duration — NEVER -count_frames,
+    which would DECODE) → scaled probe timeout. Fail-open to base_s on any error.
+    Parses POSITIONALLY: `-show_entries stream=r_frame_rate,width,height:format=duration`
+    with nk=1 emits, in order, r_frame_rate / width / height / duration."""
+    try:
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=r_frame_rate,width,height:format=duration",
+             "-of", "default=nw=1:nk=1", source_path],
+            capture_output=True, text=True, timeout=10,
+        )
+        _vals = [x for x in (r.stdout or "").splitlines() if x.strip()]
+        _fps, _w, _h, _dur = 30.0, 0, 0, 0.0
+        if _vals and "/" in _vals[0]:
+            _a, _b = _vals[0].split("/")
+            _fps = (float(_a) / float(_b)) if float(_b) else 30.0
+        def _int(i):
+            try: return int(float(_vals[i]))
+            except Exception: return 0
+        def _flt(i):
+            try: return float(_vals[i])
+            except Exception: return 0.0
+        if len(_vals) >= 4:
+            _w, _h, _dur = _int(1), _int(2), _flt(3)
+        elif len(_vals) >= 2:
+            _dur = _flt(len(_vals) - 1)
+        _nframes = _fps * max(_dur, 1.0)
+        _res_factor = ((_w * _h) / (1920.0 * 1080.0)) if (_w and _h) else 1.0
+        return _weighted_probe_timeout(_nframes, _res_factor, base_s, ceiling_s)
+    except Exception:
+        return int(base_s)
+
+
 def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, target_h=None):
     """
     Dense face detection using FFmpeg frame extraction + OpenCV DNN.
@@ -3129,6 +3185,13 @@ def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, tar
     _extract_dir = os.path.join(os.path.dirname(video_path) or "/tmp", "_face_frames")
     os.makedirs(_extract_dir, exist_ok=True)
     _hw_args = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
+    # RENDER_FFMPEG timeout fix (Zac 2026-08-03): select=mod DECODES every frame
+    # (only outputs 1/N), so a 100fps source CPU-decodes 6000 frames and blows a
+    # fixed 30s (worker is now CPU-only, no NVDEC). Scale by the real frame count
+    # already probed above. Normal 30fps clips stay at base 30s (no regression).
+    _face_to = _weighted_probe_timeout(
+        frame_count, (frame_w * frame_h) / (1920.0 * 1080.0) if (frame_w and frame_h) else 1.0,
+        30, 180)
     _extract_cmd = subprocess.run(
         ["ffmpeg", "-y", "-v", "warning"] + _hw_args + [
             "-i", video_path,
@@ -3136,7 +3199,7 @@ def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, tar
             "-vsync", "0", "-q:v", "2",
             os.path.join(_extract_dir, "face_%04d.jpg"),
         ],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, timeout=_face_to,
     )
     if _extract_cmd.returncode != 0:
         raise RuntimeError(
@@ -3785,7 +3848,11 @@ def detect_shot_changes(source_path, threshold=7.0, out_scores=None):
         "-vf", f"scdet=threshold={_SCDET_SWEEP_THRESHOLD}:sc_pass=1,metadata=print:file=-",
         "-f", "null", "-",
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    # RENDER_FFMPEG timeout fix (Zac 2026-08-03): scdet must decode every frame
+    # for scene detection; a 60fps source CPU-decodes 2× the frames and blew the
+    # fixed 60s. Scale by real source weight; normal 30fps clips stay at base 60s.
+    _scdet_to = _probe_weighted_timeout(source_path, 60, 240)
+    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=_scdet_to)
     detections = _parse_scdet_output(proc.stdout, proc.stderr)
 
     # Sweep log — one grep-stable line per detection. Score-tagged so we
@@ -3820,7 +3887,7 @@ def detect_shot_changes(source_path, threshold=7.0, out_scores=None):
             "-vf", f"scdet=threshold={threshold}:sc_pass=1,metadata=print:file=-",
             "-f", "null", "-",
         ]
-        proc_legacy = subprocess.run(cmd_legacy, capture_output=True, text=True, timeout=60)
+        proc_legacy = subprocess.run(cmd_legacy, capture_output=True, text=True, timeout=_scdet_to)
         legacy_detections = _parse_scdet_output(proc_legacy.stdout, proc_legacy.stderr)
         changes = sorted({t for t, _ in legacy_detections})
         # Legacy path recovered no usable scores → leave out_scores empty so
@@ -4955,7 +5022,11 @@ def measure_source_loudness(source_path):
         "-af", "astats=metadata=1:reset=0,ametadata=mode=print",
         "-f", "null", "-"
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    # RENDER_FFMPEG timeout fix (Zac 2026-08-03): -vn (cacea1b) skips video decode,
+    # but a container hiccup or a huge audio stream can still edge past a fixed 30s.
+    # Scale by source weight for belt-and-suspenders; normal clips stay at base 30s.
+    result = subprocess.run(cmd, capture_output=True, text=True,
+                            timeout=_probe_weighted_timeout(source_path, 30, 180))
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg loudness measurement failed: {(result.stderr or '')[-300:]}")
     stderr = result.stderr
@@ -29134,6 +29205,92 @@ def _log_intake_reject(reason, source_s=None, cap_s=None, **context):
               f"— reject proceeds", flush=True)
 
 
+# ── Terminal sub-codes: the ROOT under the label ────────────────────────────
+# Every entry was forged from a real job, not imagined. Ordered: first match
+# wins, so put the specific signature above the generic one.
+#
+# THE RULE FOR ADDING ONE: a sub-code names the MECHANISM, never the symptom.
+# "timeout" is a symptom shared by six unrelated causes; "analyze_shot_changes"
+# names which subprocess and therefore which budget is wrong.
+_ERROR_SUBCODES = {
+    "RENDER_FATAL": (
+        ("concurrency", ("Maximum for --concurrency",)),
+        ("frame_grid", ("cannot share the frame grid",)),
+        ("no_video_stream", ("No video stream found",)),
+        ("compositor", ("Compositor error",)),
+        ("delay_render", ("delayRender()",)),
+        ("render_timeout", ("Remotion render TIMEOUT", "TimeoutExpired")),
+        ("av_drift", ("|v-a|",)),
+        ("caption_schema", ("CaptionStyle",)),
+    ),
+    # RENDER_REMOTION is where a plan-independent render failure now lands: the
+    # ladder fails fast on it, so it never reaches the RENDER_FATAL wrapper.
+    "RENDER_REMOTION": (
+        ("concurrency", ("Maximum for --concurrency",)),
+        ("no_video_stream", ("No video stream found",)),
+        ("compositor", ("Compositor error",)),
+        ("delay_render", ("delayRender()",)),
+        ("oom", ("out of memory", "OOM", "Killed")),
+        ("browser_launch", ("Failed to launch", "chrome", "Chromium")),
+    ),
+    "RENDER_FFMPEG": (
+        # Every RENDER_FFMPEG observed 07-31..08-04 was an ANALYSIS subprocess
+        # hitting a fixed budget on a 4K HEVC source — nothing in the render.
+        # The label said "ffmpeg"; the cause is a per-stage timeout.
+        ("analyze_shot_changes", ("scdet",)),
+        ("analyze_face_detect", ("_face_frames", "select=not(mod")),
+        ("analyze_loudness", ("astats",)),
+        ("analyze_silence", ("silencedetect",)),
+        ("analyze_black", ("blackdetect",)),
+        ("analyze_freeze", ("freezedetect",)),
+        ("proxy_encode", ("gemini_proxy",)),
+        ("normalize", ("source_canonical", "fps_normalize")),
+        ("composite", ("concat", "-filter_complex")),
+    ),
+    "TRANSCRIPTION": (
+        ("keyterm_limit", ("Keyterm limit",)),
+        ("write_timeout", ("write operation timed out",)),
+        ("read_timeout", ("read operation timed out",)),
+        ("empty_transcript", ("0 words",)),
+    ),
+    "INTEGRITY_TRIP": (
+        ("dead_moment", ("dead_moment",)),
+        ("black", ("black",)),
+        ("freeze", ("freeze",)),
+    ),
+    "INVALID_FORMAT": (
+        ("proxy_encode_timeout", ("gemini_proxy",)),
+        ("no_video_stream", ("No video stream",)),
+    ),
+    "UPLOAD_NEVER_STARTED": (
+        ("source_absent", ("pre-spawn source gate",)),
+    ),
+    "DISPATCH_UNREACHABLE": (
+        ("never_spawned", ("NEVER_SPAWNED",)),
+        ("ran_and_lost", ("RAN_AND_LOST",)),
+    ),
+}
+
+
+def _error_subcode(code, msg):
+    """The mechanism under a terminal label. 'unclassified' is a FINDING.
+
+    A rising `unclassified` count for a code means a shape we have never named
+    is now firing — which is exactly the signal the label-only enumeration
+    could not produce. Never raises: a classifier that can break the error path
+    is worse than a coarse label.
+    """
+    try:
+        _m = str(msg or "")
+        for _sub, _sigs in _ERROR_SUBCODES.get(code, ()):
+            for _s in _sigs:
+                if _s in _m:
+                    return _sub
+        return "unclassified"
+    except Exception:
+        return "unclassified"
+
+
 def classify_error(e):
     """
     Convert a pipeline exception into structured error data for the iOS app.
@@ -29164,8 +29321,18 @@ def classify_error(e):
     msg_lower = msg.lower()
 
     def _e(code, message, retryable=True, new_video=False, vibe=False):
+        # EVERY TERMINAL CARRIES ITS ROOT (Zac 2026-08-03). The 40-code
+        # enumeration stopped at the LABEL, so "RENDER_FATAL x3" could not be
+        # counted by cause, ranked by wasted spend, or proven gone. Tonight
+        # RENDER_FATAL alone meant three unrelated defects (a bad --concurrency
+        # argument, the audio/video frame grid, a stream-less intermediate) and
+        # every RENDER_FFMPEG was an analysis-stage timeout rather than anything
+        # in the render. One choke point: every code returns through here.
+        _sub = _error_subcode(code, msg)
         return {
             "error_code": code,
+            "error_subcode": _sub,
+            "error_cause": f"{code}:{_sub}",
             "user_message": message,
             "retryable": retryable,
             "requires_new_video": new_video,
@@ -34490,12 +34657,17 @@ def handler(job):
                 # prompt explicitly tells Gemini to listen for. The previous
                 # AAC @ 48kbps smeared that texture. Modern ffmpeg writes
                 # Opus into MP4 natively; Gemini's MP4 ingestion accepts it.
+                # RENDER_FFMPEG timeout fix (Zac 2026-08-03): the proxy decodes the
+                # FULL source to emit an 18fps/480p copy; a 60fps/100fps or 4K source
+                # CPU-decodes far more and blew the fixed 30s (coded INVALID_FORMAT).
+                # Scale by real source weight; normal 30fps clips stay at base 30s.
                 _proxy_cmd = subprocess.run(
                     ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", _raw_source,
                      "-vf", "scale=480:-2,fps=18"] + _proxy_venc + [
                      "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      _proxy_path],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True,
+                    timeout=_probe_weighted_timeout(_raw_source, 30, 180),
                 )
                 if _proxy_cmd.returncode != 0 or not os.path.exists(_proxy_path):
                     raise RuntimeError(f"Gemini proxy encode failed: {(_proxy_cmd.stderr or '')[-300:]}")

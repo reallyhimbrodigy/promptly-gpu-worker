@@ -10140,6 +10140,33 @@ def _out_of_range_clip_clamp():
         "the flag must fire exactly when the clip's source window over-runs the source frame count"
 
 
+@check("RENDER_FFMPEG PROBE-TIMEOUT SCALING (Zac 2026-08-03, forged from 17 failures / 7 users): every RENDER_FFMPEG in the cohort was an ffmpeg PROBE subprocess `timed out after 30/60s` on a HEAVY raw source (14/17 >=60fps, 6 at 100fps). The probes were tuned for NVDEC decode but the worker is CPU-only (A100->none), so CPU-decoding 6000 frames blows a FIXED timeout. cacea1b point-fixed only loudness (-vn); this scales the REMAINING probes (scdet, face-extract, gemini-proxy, loudness-belt) by the source's real decode weight (frames x resolution) via a metadata-ONLY ffprobe (never -count_frames). Normal 30fps clips stay at base; heavy sources get proportional headroom, capped so a true hang still fails under the function wall. FAILS if the helper or any of the 4 scaled sites regress to a fixed timeout.")
+def _render_ffmpeg_probe_timeout_scaling():
+    src = open("handler.py").read()
+    assert "def _weighted_probe_timeout(" in src and "def _probe_weighted_timeout(" in src, \
+        "both the frame-weight math and the metadata-probe helper must exist"
+    assert "-count_frames" not in src or "NEVER -count_frames" in src, \
+        "the probe must be metadata-only — -count_frames would DECODE the whole source"
+    # the 4 heavy-decode probe sites must use the scaled timeout, not a fixed one
+    assert "timeout=_face_to" in src, "face-frame extraction must use the scaled timeout"
+    assert "timeout=_scdet_to" in src, "scdet (both cmd + legacy) must use the scaled timeout"
+    assert "_probe_weighted_timeout(source_path, 30, 180)" in src, "loudness astats must use the scaled timeout"
+    assert "_probe_weighted_timeout(_raw_source, 30, 180)" in src, "gemini proxy encode must use the scaled timeout"
+
+
+@check("PREWARM RE-ENABLED (Zac 2026-08-03 PM): the scaledown 600->30 A/B DID NOT SURVIVE — it doubled editorial latency (P50 300s vs the 120-180s law; 248 prewarm-frozen events/6h) because the prewarm container scaled to zero between uploads, so download+transcribe+audio+proxy (~150-200s) fell back onto the render's critical path. run_pipeline_bg mounts /prewarm and reads that cache, so a WARM prewarm container (scaledown 600) is what makes the hide-behind-upload work. Prewarm was NEVER the ~$56/day cost culprit (that is the orchestrator double-hold). FAILS if PromptlyPrewarmWorker regresses to a short scaledown that re-opens the latency doubling.")
+def _prewarm_reenabled():
+    src = open("modal_app.py").read()
+    _pw = src[src.index("class PromptlyPrewarmWorker"):]
+    _dec = src[:src.index("class PromptlyPrewarmWorker")]
+    # the decorator sits just above the class; pin its scaledown to the warm value
+    _dec_block = _dec[_dec.rindex("@app.cls("):]
+    assert "scaledown_window=600" in _dec_block, \
+        "PromptlyPrewarmWorker must keep scaledown_window=600 so prewarm stays warm and hides ~150-200s behind the upload"
+    assert "volumes={\"/prewarm\": prewarm_volume}" in _dec_block, \
+        "PromptlyPrewarmWorker must mount the /prewarm volume so its cache persists for the render job"
+
+
 @check("KEYTERM CAP + NEVER RETRY A 4xx (Zac 2026-08-03, forged from `DeepgramApiError: Keyterm limit exceeded (max 500 tokens)` killing a screenplay-length source): Deepgram caps `keyterm` at 500 TOKENS total and 400s the WHOLE request past it, so ~200 harvested proper nouns killed the job. _cap_keyterms drops screenplay scaffolding (FADE/INT/EXT/CUT/MONTAGE — Title-Case page furniture the proper-noun heuristic harvests but nobody speaks, so boosting it actively biases the recogniser) and truncates to a 450-token budget; the extractor now emits FREQUENCY-ORDERED so truncation sheds the rarest term rather than an arbitrary tail. SECOND BUG, same job: _deepgram_is_retriable_error matched a bare substring \"500\" — which appears in the phrase \"max 500 tokens\" — so a deterministic 400 was retried 3x, tripling the latency of a guaranteed failure. Status numbers are now word-boundary matched and deterministic signatures are checked FIRST.")
 def _check_keyterm_cap_and_4xx():
     import handler as _h
@@ -10218,6 +10245,55 @@ def _check_status_not_substring():
     # the Gemini deadline case its own docstring warns about
     assert _h._gemini_is_retriable_error("504 DEADLINE_EXCEEDED") is False, \
         "a deadline must fail fast — retrying compounds into the ~20-min hang that looks like a stuck job"
+
+
+@check("EVERY TERMINAL CARRIES ITS ROOT AS A SUB-CODE (Zac 2026-08-03, the change that ends the whack-a-mole): the 40-code enumeration stopped at the LABEL, so causes could not be counted, ranked by wasted spend, or proven gone. Tonight RENDER_FATAL alone meant THREE unrelated defects (a bad --concurrency argv, the audio/video frame grid, a stream-less zoomclip intermediate) and every single RENDER_FFMPEG was an ANALYSIS-stage timeout on a 4K HEVC source rather than anything in the render — the label actively misled. classify_error now emits error_subcode + error_cause through _e(), the one choke point every code returns from. Pinned against the exact messages from the real jobs, so a sub-code that stops matching its own founding failure fails the gate.")
+def _check_error_subcodes():
+    import handler as _h
+    assert hasattr(_h, "_error_subcode") and hasattr(_h, "_ERROR_SUBCODES")
+    # Forged from real jobs tonight — each string is the verbatim failure.
+    _REAL = [
+        ("[overlay] Remotion render failed (rc=1): Error: Maximum for --concurrency is 8 (number of cores on this system)",
+         "RENDER_REMOTION:concurrency"),
+        ("RENDER_FATAL after full + retry + stripped renders: ValueError: sample_rate 44100 is not integer-divisible by fps 30.0003 : audio and video cannot share the frame grid",
+         "RENDER_FATAL:frame_grid"),
+        ("RENDER_FATAL after full + retry + stripped renders: RuntimeError: Compositor error: No video stream found in input file zoomclip_clip-0.mp4",
+         "RENDER_FATAL:no_video_stream"),
+        ("Command '[ffmpeg -i src -an -vf scdet=threshold=1.0:sc_pass=1 -f null -]' timed out after 60 seconds",
+         "RENDER_FFMPEG:analyze_shot_changes"),
+        ("Command '[ffmpeg -y -i src -vf select=not(mod(n,180)),scale=960:540 /tmp/_face_frames/f.jpg]' timed out after 30 seconds",
+         "RENDER_FFMPEG:analyze_face_detect"),
+        ("Command '[ffmpeg -vn -i src -af astats=metadata=1 -f null -]' timed out after 30 seconds",
+         "RENDER_FFMPEG:analyze_loudness"),
+        ("Deepgram transcription failed after 3 attempts: DeepgramApiError: Keyterm limit exceeded (max 500 tokens)",
+         "TRANSCRIPTION:keyterm_limit"),
+        ("Deepgram transcription failed after 3 attempts: The write operation timed out",
+         "TRANSCRIPTION:write_timeout"),
+        ("Gemini proxy encode failed: gemini_proxy.mp4 timed out after 30 seconds",
+         "INVALID_FORMAT:proxy_encode_timeout"),
+    ]
+    _wrong = []
+    for _m, _want in _REAL:
+        _got = _h.classify_error(RuntimeError(_m)).get("error_cause")
+        if _got != _want:
+            _wrong.append(f"{_want} -> got {_got}")
+    assert not _wrong, ("a sub-code no longer matches the real job it was forged from: "
+                        + "; ".join(_wrong))
+
+    # EVERY code must carry the fields — _e is the single choke point, so a code
+    # that bypasses it would be invisible to every cause-cut we build on this.
+    for _m in ("INTEGRITY_TRIP dead_moment", "CLIP_TOO_SHORT", "NO_SPEECH", "junk"):
+        _r = _h.classify_error(RuntimeError(_m))
+        for _k in ("error_code", "error_subcode", "error_cause"):
+            assert _k in _r, f"'{_m}' envelope is missing {_k}"
+        assert _r["error_cause"] == f"{_r['error_code']}:{_r['error_subcode']}"
+
+    # An unnamed shape must say so rather than guess — a rising `unclassified`
+    # count IS the signal that a new mechanism is firing.
+    assert _h.classify_error(RuntimeError("totally novel junk")).get("error_subcode") == "unclassified"
+    # ...and the classifier must never raise, whatever it is handed.
+    for _weird in (None, 0, object(), Exception()):
+        _h.classify_error(_weird)
 
 
 # ─── REPORT ────────────────────────────────────────────────────────────
