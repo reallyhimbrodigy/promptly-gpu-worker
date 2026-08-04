@@ -6717,12 +6717,14 @@ def _moodreel_route_wiring():
     # pacing on an empty curve — so a static clip was denied a model call for a
     # case the prompt was written to absorb.
     #
-    # ⚠️ THE TENSION IS REAL AND IS RECORDED HERE RATHER THAN BURIED: the old
-    # assertion's reasoning was "every Zac-approved sample was motion-anchored".
-    # Mood-reel quality on STATIC silent footage is therefore NOT validated by
-    # the approved sample set. What would validate it: a watched pair on static
-    # silent sources, moodreel arm vs the deterministic arm. Until then this is
-    # shipped on Zac's explicit ruling, not on measured quality.
+    # THE TENSION IS LARGELY CLOSED, and by measurement rather than argument: a
+    # perfectly still 12s clip yields a curve of TWELVE ZEROS, not an empty one,
+    # and a non-empty list is truthy — so STATIC silent footage was ALREADY
+    # reaching moodreel under the old gate and has been all along. On matched
+    # no-speech content moodreel exports at 17.5% against minimal's 8.2%.
+    # `_mcurve` was falsy only on EXTRACTOR ERROR. What is genuinely new is the
+    # 3-8s band opened by the duration floor, which is a length change, not a
+    # static-content one.
     assert "_moodreel_on and _dur >= _MOODREEL_MIN_S" in _body, \
         "every silent path must reach the model — the curve requirement is gone"
     assert "_MOODREEL_MIN_S = 3.0" in _body, \

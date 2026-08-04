@@ -32011,12 +32011,18 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     #   `_mcurve`  — build_moodreel_prompt ALREADY handles an empty curve:
     #                `curve = list(motion_curve or [])`, and extract_motion_curve
     #                documents "every consumer falls back to even pacing on an
-    #                empty curve". So a static clip was being denied a model call
-    #                for a case the prompt was written to absorb. This is the
-    #                exact shape of the finding: silent + static footage got the
-    #                deterministic path and exports at 3.4%.
-    #   `>= 8.0`   — an arbitrary floor. A mood reel needs two shots to exist, not
-    #                eight seconds; the product's only length law is the <2.0s
+    #                empty curve".
+    #                CORRECTION TO MY OWN FIRST CLAIM (measured, 2026-08-04): I
+    #                wrote that this blocked STATIC footage. It did not. A
+    #                perfectly still 12s clip yields a curve of TWELVE ZEROS, and
+    #                a non-empty list is truthy — so static content always
+    #                passed. `_mcurve` was falsy ONLY when the extractor ERRORED
+    #                and returned []. Removing it therefore helps extractor
+    #                failures, a rarer population than I claimed. The real
+    #                widening is the duration floor below.
+    #   `>= 8.0`   — an arbitrary floor, and THIS is the change that moves real
+    #                traffic. A mood reel needs two shots to exist, not eight
+    #                seconds; the product's only length law is the <2.0s
     #                rejection. Lowered to 3.0s, which is two ~1.5s shots.
     # The rejection record added above still reports whatever falls through, so
     # this widening is measurable rather than assumed.
