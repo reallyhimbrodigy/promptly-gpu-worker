@@ -6701,8 +6701,32 @@ def _moodreel_route_wiring():
     assert 'os.environ.get("PROMPTLY_MOODREEL", "")' in _body, "the Secret-canonical flag gates the route"
     assert 'reason in ("no_speech", "not_talking_head", "no_audio")' in _body, \
         "moodreel eligibility: the three caption-less reasons (no_audio qualifies — no music needed)"
-    assert "_moodreel_on and _dur >= 8.0 and _mcurve" in _body, \
-        "the 8s floor + curve-required guard (every Zac-approved sample was motion-anchored; no curve -> minimal)"
+    # SUPERSEDED 2026-08-04 by Zac's ruling: "Every raw video that is getting
+    # edited goes through a pipeline, not just a deterministic shitty edit."
+    # EVERY PATH CALLS THE MODEL; what varies is what it is GIVEN.
+    #
+    # The old guard required a motion curve and 8 seconds. The curve requirement
+    # was gratuitous — build_moodreel_prompt does `curve = list(motion_curve or [])`
+    # and extract_motion_curve documents that every consumer falls back to even
+    # pacing on an empty curve — so a static clip was denied a model call for a
+    # case the prompt was written to absorb.
+    #
+    # ⚠️ THE TENSION IS REAL AND IS RECORDED HERE RATHER THAN BURIED: the old
+    # assertion's reasoning was "every Zac-approved sample was motion-anchored".
+    # Mood-reel quality on STATIC silent footage is therefore NOT validated by
+    # the approved sample set. What would validate it: a watched pair on static
+    # silent sources, moodreel arm vs the deterministic arm. Until then this is
+    # shipped on Zac's explicit ruling, not on measured quality.
+    assert "_moodreel_on and _dur >= _MOODREEL_MIN_S" in _body, \
+        "every silent path must reach the model — the curve requirement is gone"
+    assert "_MOODREEL_MIN_S = 3.0" in _body, \
+        "the floor must be the two-shot minimum (3.0s), not the old arbitrary 8.0s"
+    # the curve is still PASSED to the prompt (it makes the reel better when it
+    # exists) — it must simply never again be REQUIRED to make the call.
+    assert "and _mcurve" not in _body, \
+        "the motion-curve requirement must not creep back into the routing condition"
+    assert "build_moodreel_prompt(\n" in _body or "_mcurve)" in _body, \
+        "the curve must still be PASSED — removing the requirement is not removing the signal"
     assert "build_moodreel_prompt(" in _body and "moodreel_fallback_minimal" in _body, \
         "doctrine prompt + the ledgered fail-safe to minimal"
     _mi = _body.find("_moodreel_on =")
@@ -6713,8 +6737,13 @@ def _moodreel_route_wiring():
         "moodreel must set its own rationale/capability_notes/pkg_fields — never the generic re-pace text"
     assert '"moodreel_plan"' in _body and '"motion_curve"' in _body, "stage_manifest names the moodreel stages"
     # PAIR2 B: the live call passes the curve
-    assert "_me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve)" in _body, \
+    # PAIR2 B still holds — the curve is still consumed. The call now ALSO carries
+    # the vibe (Zac 2026-08-04), so the assertion checks both rather than pinning
+    # the old exact-argument string.
+    assert "_me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve," in _body, \
         "PAIR2 B adopted: the live minimal call consumes the motion curve"
+    assert 'vibe=input_data.get("vibe")' in _body, \
+        "and it must carry the VIBE — this path could not read the user's words at all"
     # PAIR1 B: skip-trim is first-class in minimal_editor with the sampled constants
     _m = open("minimal_editor.py").read()
     assert "trim_lo: float = 0.4, trim_hi: float = 0.8" in _m, "the sampled skip-trim constants (pair 1 B as approved)"
@@ -6752,15 +6781,25 @@ def _edit_rationale_field():
     # persistence: narrative-only, terminal-fenced, wired at the recipe seam
     _i = _h.find("def _persist_edit_rationale")
     assert _i != -1, "the rationale persist helper must exist"
-    _body = _h[_i:_i + 1400]
+    # window widened 1400 -> 3400: the claim AUDIT (Zac 2026-08-04) now sits at
+    # the top of this function, which pushed the write past the old slice.
+    _body = _h[_i:_i + 3400]
     assert '"edit_rationale": _txt' in _body and 'supabase.table("video_jobs").update(' in _body, \
         "must write edit_rationale to video_jobs"
     assert '"status":' not in _body and '"progress":' not in _body and '"result":' not in _body, \
         "the rationale write must be narrative-only (no status/progress/result)"
     assert '"failed", "canceled", "completed"' in _body, "the rationale write must be terminal-fenced"
     assert 'PROMPTLY_RATIONALE_PERSIST' in _body, "kill switch required"
-    assert '_persist_edit_rationale(job_id, edit_plan.get("edit_rationale"))' in _h, \
+    assert '_persist_edit_rationale(job_id, edit_plan.get("edit_rationale"),' in _h, \
         "the pipeline must persist the rationale after the recipe resolves"
+    # AND IT MUST PASS THE PLAN (Zac 2026-08-04). Without it the claim audit is a
+    # no-op and the rationale goes to the user unchecked — measured at 33 of 53
+    # b-roll mentions sitting on a plan with ZERO broll_clips.
+    assert 'edit_plan=edit_plan)' in _h, \
+        "the persist call must pass the PLAN, or the claim audit cannot run"
+    assert 'rationale_claimed_absent_family' in _h, \
+        "unsupported claims must be RECORDED, not just stripped — each one names " \
+        "a component the model wanted and did not get"
 
 
 @check("POST PACKAGE (2026-07-25, S-PACKAGE): when a video completes the user receives substance — {edit_rationale, post_caption, post_hook} delivered as result.post_package on EVERY route + video_jobs.post_package jsonb. PostCutPlan grows two additive Optional fields schema-capped at token-generation (post_caption<=120 platform-ready caption with 1-2 hashtags; post_hook<=60 scroll-stopping first line). Latency guard measured BEFORE shipping: ~57 output tokens ~= 1.8s at the observed 32 tok/s marginal rate (2.5s at the 22.8 tok/s worst-case effective), under the 3-5s bar -> the ask ships in the planning call, render never delayed. Minimal/hype fill deterministic-honest values (route reason / measured beat BPM — no extra model calls). The persist helper imitates _persist_step_token: daemon-threaded, fail-open, terminal-fenced, narrative column ONLY, kill switch PROMPTLY_PACKAGE_PERSIST=0; PostgREST no-ops until the 219 client migration adds the column. Contract: POST_PACKAGE_CONTRACT.md.")
@@ -8137,6 +8176,34 @@ def _caption_keyword_list_matches_code():
     assert "emit `caption_keywords: []`" in _src, \
         "keyword-ignoring styles must be told to emit [] — otherwise Gemini writes " \
         "words that no component reads (1,372 of them across 267 jobs)"
+
+
+@check("THE VIBE REACHES EVERY ROUTE (Zac ruling 2026-08-04: 'ALWAYS tailored to what the user asks for'): traced in code, `minimal` had NO vibe parameter — build_minimal_plan(_dur, fps, motion_curve) — so 204 jobs / 188 USERS received pacing that never consulted a word they wrote. standard_editorial, moodreel and hype all read it; minimal did not and minimal_speech_uncut makes no plan at all, together 628 jobs / 601 users / 35.3% of completions. This gate asserts the vibe is BOTH passed AND read, and that reading it actually changes the edit — a parameter that is accepted and ignored is the same as no parameter.")
+def _vibe_reaches_minimal():
+    _src = open("handler.py").read()
+    assert 'vibe=input_data.get("vibe")' in _src, \
+        "the minimal path must be PASSED the vibe"
+    _min = open("minimal_editor.py").read()
+    assert "def pace_from_vibe(" in _min, "minimal_editor must READ the vibe"
+    assert "target_clip_s = pace_from_vibe(vibe)" in _min, \
+        "the vibe must actually set the pace — an accepted-and-ignored parameter " \
+        "is the same as no parameter"
+
+    # AND IT MUST DISCRIMINATE. pacing/color_effect were convicted for being
+    # constants wearing a field's name; this must not join them.
+    import importlib
+    _me = importlib.import_module("minimal_editor")
+    importlib.reload(_me)
+    assert _me.pace_from_vibe("make it fast and viral") < _me.pace_from_vibe("slow cinematic"), \
+        "a fast vibe must cut faster than a slow one"
+    assert _me.pace_from_vibe("") == _me.pace_from_vibe(None) == 2.5, \
+        "silence on pace must change nothing (the old constant)"
+    assert _me.pace_from_vibe("fast but cinematic") == 1.6, \
+        "a vibe naming both registers is asking for energy with a look — fast wins"
+    _f = _me.build_minimal_plan(20.0, vibe="fast and punchy")
+    _s2 = _me.build_minimal_plan(20.0, vibe="slow cinematic")
+    assert len(_f.clips) > len(_s2.clips), \
+        f"the vibe must change the EDIT, not just a variable ({len(_f.clips)} vs {len(_s2.clips)})"
 
 
 @check("SILENT->MOODREEL IS ARMED (Zac GO 2026-08-04, naming PROMPTLY_SILENT_TO_MOODREEL, RULE-1): the re-route was BUILT AND DARK — default OFF since it shipped, the Rule-2 shape exactly. Addressable at the flip: 269 jobs / 260 USERS in 10 days, the minimal/no_speech_muted arm exporting at 3.4%. This gate asserts it stays ARMED BY DEFAULT and that the kill switch still works, in both directions — a default that silently reverts to OFF is how this sat dark for weeks.")

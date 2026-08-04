@@ -31112,13 +31112,108 @@ def _persist_step_token(job_id, step, message):
     threading.Thread(target=_w, daemon=True).start()
 
 
-def _persist_edit_rationale(job_id, rationale):
+# ── RATIONALE CLAIM AUDIT (Zac 2026-08-04) ───────────────────────────────────
+# The rationale is generated from the model's INTENT. Measured on 283 real
+# rationales, 33 of the 53 that mention b-roll (62.3%) sit on a plan with ZERO
+# broll_clips — and resolved_broll correlates PERFECTLY with the final field
+# (66/780 each), so nothing is dropped late. The model believes it made a
+# decision its own structured output never carried.
+#
+# TWO USES, AND THEY PULL IN OPPOSITE DIRECTIONS:
+#   FOR THE USER — never claim what did not render. "I added a cutaway" on a
+#   video with no cutaway tells them the product does not know what it made,
+#   which is worse than saying nothing.
+#   FOR US — every unsupported claim NAMES A COMPONENT THE MODEL WANTED AND DID
+#   NOT GET. That is the same gap as the six MG components that fired 0 of 709
+#   plans, and it is free: the data is already there. So the claims are STRIPPED
+#   from the user's copy and RECORDED for ours.
+_RATIONALE_CLAIMS = (
+    ("broll_clips", re.compile(r"\bb-?roll|cutaway|stock (?:footage|clip)", re.I)),
+    ("motion_graphics", re.compile(r"\bgraphic|stat ?card|banner|counter|ticker|badge|lower.?third", re.I)),
+    ("text_overlays", re.compile(r"\btext overlay|on-?screen text|title card", re.I)),
+    ("transitions", re.compile(r"\btransition|dissolve|cross.?fade|wipe", re.I)),
+)
+# NEGATION AND SOURCE-DESCRIPTION GUARD. My first measurement read 46.9% for
+# graphics and was WRONG: the regex counted "no distracting graphics or B-roll"
+# (a negation, and an accurate one) and "the original video already has burned-in
+# captions" (describing the SOURCE, not our edit). A claim-checker that strips
+# those would delete true sentences.
+_RATIONALE_NEGATED = re.compile(
+    r"\b(?:no|without|avoided|skipped|left out|kept .{0,20}free of|"
+    r"original|source|already (?:has|had)|existing|burned-?in)\b", re.I)
+
+
+def _split_rationale_sentences(text):
+    parts = re.split(r"(?<=[.!?।])\s+", str(text or "").strip())
+    return [p for p in parts if p.strip()]
+
+
+def audit_edit_rationale(rationale, edit_plan):
+    """Return (text_safe_for_the_user, [unsupported claims]).
+
+    Strips only the SENTENCES that claim a family the plan does not carry, so a
+    rationale that is 90% accurate keeps its 90%. Returns None for the text when
+    nothing survives — no rationale beats a false one.
+
+    ⚠️ COVERAGE LIMIT, stated rather than hidden: the patterns are English, and
+    rationales are written in the USER'S language (36% of ours are not English).
+    A Hindi rationale is therefore NOT audited — it passes through unchanged.
+    This never produces a FALSE STRIP, only a missed one, which is the correct
+    direction to fail. Extending it needs per-language patterns, not a
+    translation step.
+    """
+    _txt = str(rationale or "").strip()
+    if not _txt or not isinstance(edit_plan, dict):
+        return (_txt or None), []
+    _unsupported = []
+    _kept = []
+    for _sent in _split_rationale_sentences(_txt):
+        _bad = None
+        if not _RATIONALE_NEGATED.search(_sent):
+            for _fam, _pat in _RATIONALE_CLAIMS:
+                if _pat.search(_sent) and not (edit_plan.get(_fam) or []):
+                    _bad = _fam
+                    break
+        if _bad:
+            _unsupported.append({"family": _bad, "sentence": _sent[:160]})
+        else:
+            _kept.append(_sent)
+    return ((" ".join(_kept).strip() or None), _unsupported)
+
+
+def _persist_edit_rationale(job_id, rationale, edit_plan=None):
     """Durable write of the user-facing edit rationale to video_jobs.edit_rationale,
     alongside current_step/step_message. Additive narrative column ONLY — never
     touches status/progress/result. Daemon-threaded, fail-open, terminal-fenced.
     PostgREST silently drops writes to an unknown column, so this is a safe no-op
     until the migration adds edit_rationale (frontend owns the column + client read).
     Kill switch: PROMPTLY_RATIONALE_PERSIST=0."""
+    # FILTER FOR THE USER, REPORT FOR US (Zac 2026-08-04). A claim the plan does
+    # not carry is stripped from what the user reads, and recorded as a
+    # divergence for us — each one names a component the model WANTED and did
+    # not get, which is the same gap as the six MG components that fired 0 of
+    # 709 plans. Free instrument: the data was already being written, unchecked.
+    if isinstance(edit_plan, dict):
+        try:
+            _safe, _unsupported = audit_edit_rationale(rationale, edit_plan)
+            if _unsupported:
+                _record_divergence(
+                    "rationale",
+                    {"families": sorted({u["family"] for u in _unsupported}),
+                     "claims": [u["sentence"] for u in _unsupported][:3],
+                     "stripped": len(_unsupported)},
+                    "rationale_claimed_absent_family",
+                    final={"kept_chars": len(_safe or "")},
+                    reason=("the model described a decision its own plan does not "
+                            "carry — it wanted the component and did not get it"),
+                )
+                print(f"[rationale] stripped {len(_unsupported)} unsupported claim(s): "
+                      f"{sorted({u['family'] for u in _unsupported})}", flush=True)
+            rationale = _safe
+        except Exception as _ra_err:
+            # never let the audit cost the rationale
+            print(f"[rationale] audit skipped: {_ra_err}", flush=True)
+
     if supabase is None or not job_id or not rationale:
         return
     if os.environ.get("PROMPTLY_RATIONALE_PERSIST", "1").strip().lower() in (
@@ -31881,7 +31976,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     _mr_eligible_reason = (reason in ("no_speech", "not_talking_head", "no_audio")
                            or _silent_reroute)
     if _plan is None and _mr_eligible_reason and not (
-            _moodreel_on and _dur >= 8.0 and _mcurve):
+            _moodreel_on and _dur >= 3.0):
         _record_divergence(
             "routing",
             {"reason": str(reason), "duration_s": round(float(_dur or 0.0), 2),
@@ -31891,15 +31986,33 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "moodreel_gate_rejected",
             reason=("silent content could not take the mood-reel edit: "
                     + ("flag off" if not _moodreel_on
-                       else f"duration {float(_dur or 0.0):.2f}s < 8.0s" if _dur < 8.0
-                       else "no motion windows")),
+                       else f"duration {float(_dur or 0.0):.2f}s < 3.0s")),
         )
         print(f"[moodreel-gate] REJECTED reason={reason} dur={float(_dur or 0.0):.2f}s "
               f"motion_windows={len(_mcurve or [])} enabled={bool(_moodreel_on)} "
               f"silent_reroute_armed={bool(_silent_to_moodreel_enabled())} "
               f"-> falling through to minimal (produces no cuts, no captions)",
               flush=True)
-    if (_plan is None and _moodreel_on and _dur >= 8.0 and _mcurve
+    # EVERY PATH CALLS THE MODEL (Zac ruling 2026-08-04): "Everything is SMARTLY
+    # ai generated and is ALWAYS tailored to what the user asks for." What varies
+    # is what the model is GIVEN — transcript or none, speech or silence — never
+    # whether it is asked at all.
+    #
+    # TWO CONDITIONS DELETED FROM THIS GATE, and neither was load-bearing:
+    #   `_mcurve`  — build_moodreel_prompt ALREADY handles an empty curve:
+    #                `curve = list(motion_curve or [])`, and extract_motion_curve
+    #                documents "every consumer falls back to even pacing on an
+    #                empty curve". So a static clip was being denied a model call
+    #                for a case the prompt was written to absorb. This is the
+    #                exact shape of the finding: silent + static footage got the
+    #                deterministic path and exports at 3.4%.
+    #   `>= 8.0`   — an arbitrary floor. A mood reel needs two shots to exist, not
+    #                eight seconds; the product's only length law is the <2.0s
+    #                rejection. Lowered to 3.0s, which is two ~1.5s shots.
+    # The rejection record added above still reports whatever falls through, so
+    # this widening is measurable rather than assumed.
+    _MOODREEL_MIN_S = 3.0
+    if (_plan is None and _moodreel_on and _dur >= _MOODREEL_MIN_S
             and _mr_eligible_reason):
         try:
             import moodreel_editor as _mre2
@@ -31962,7 +32075,11 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "speech_preserved_single_clip",
             reason=f"speech-bearing '{reason}' -> one full-span clip (no motion cuts, speech preserved)")
     if _plan is None:
-        _plan = _me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve)
+        # THE USER'S WORDS REACH THIS PATH NOW (Zac 2026-08-04). It had no vibe
+        # parameter at all — 204 jobs / 188 users got pacing that never consulted
+        # a word they wrote.
+        _plan = _me.build_minimal_plan(_dur, fps=_fps, motion_curve=_mcurve,
+                                       vibe=input_data.get("vibe") or "")
     _mini_t["plan"] = time.time() - _t0 - _mini_t.get("normalize", 0)
     _ri = _he.project_hype_plan(
         _plan, source_url=os.path.basename(_canon), source_fps=_fps,
@@ -37108,7 +37225,8 @@ def handler(job):
             # fail-open; edit_plan carries edit_rationale via the PostCutPlan
             # field-copy above (safe-edit / thin plans leave it None → no-op).
             if isinstance(edit_plan, dict):
-                _persist_edit_rationale(job_id, edit_plan.get("edit_rationale"))
+                _persist_edit_rationale(job_id, edit_plan.get("edit_rationale"),
+                                        edit_plan=edit_plan)
                 # S-PACKAGE: persist the posting substance at the same seam —
                 # the recipe just resolved, well before the terminal fence can
                 # race the write. edit_plan carries post_caption/post_hook via
