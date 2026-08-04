@@ -6260,7 +6260,7 @@ The caption style governs the CAPTION LAYER — the type, its animation, its key
 
 9. **Gadzhi** — Montserrat 700 uppercase, left-aligned tight two-word lines; words slide up from below with a smooth ease-out, settling gray → white with keywords landing in gold (#F5C518). Keywords: USED. Signal: a confident, self-assured money-talk voice — hard uppercase, named numbers and money terms landing in gold. Fits: business/hustle and SMMA-style delivery; product pitches that name numbers, where figures and money terms suit the gold keyword treatment. Fights: warm serif registers; soft, gentle, or playful delivery, where the hard uppercase money-talk voice clashes.
 
-Keyword styles: Prime, Cove, Lumen, Pulse, Gadzhi. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut (still emit caption_keywords — they have narrative value — they just don't highlight).
+Keyword styles: Prime, Cove, Lumen, Pulse, Gadzhi — these are the ONLY styles that read `caption_keywords`. Keyword-ignoring: TypewriterReveal, Quintessence, TwoTone, CleanCut — for these, emit `caption_keywords: []`. Nothing downstream reads the field on these four styles (the renderer passes it only to the caption component, and theirs discards it), so words listed there are written and thrown away.
 
 ──────────────────────────────────────────
 CAPTION POSITION — collision procedure
@@ -31846,9 +31846,41 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     if _silent_reroute:
         print(f"[silent-route] reason={reason} VAD-confirmed silent -> "
               f"mood-reel edit instead of uncut passthrough", flush=True)
+    # WHICH GATE REJECTED? (Zac 2026-08-04, quality lane). Measured on 1,779
+    # completions: 158 jobs / 149 USERS with a silent reason fell through to
+    # `minimal`, which emits 0% cuts and 0% captions — we hand the upload back.
+    # The same silent reason routed to moodreel exports at 17.5% vs minimal's
+    # 8.2%. That gap is NOT attributable to the route (moodreel requires
+    # _mcurve, so it gets the MOVING footage and minimal gets the static — a
+    # content difference), but the construction failure is real either way:
+    # for silent, static or short content we currently make nothing.
+    #
+    # THE FIX IS BLOCKED ON NOT KNOWING WHICH CONDITION FIRED. Light routes
+    # persist no plan, so the duration and the motion-curve length are both
+    # unrecoverable after the fact — lowering the 8.0s threshold would be a
+    # guess. Record the gate outcome so the next read names the binding
+    # constraint instead.
+    _mr_eligible_reason = (reason in ("no_speech", "not_talking_head", "no_audio")
+                           or _silent_reroute)
+    if _plan is None and _mr_eligible_reason and not (
+            _moodreel_on and _dur >= 8.0 and _mcurve):
+        _record_divergence(
+            "routing",
+            {"reason": str(reason), "duration_s": round(float(_dur or 0.0), 2),
+             "motion_windows": len(_mcurve or []),
+             "moodreel_enabled": bool(_moodreel_on)},
+            "moodreel_gate_rejected",
+            reason=("silent content could not take the mood-reel edit: "
+                    + ("flag off" if not _moodreel_on
+                       else f"duration {float(_dur or 0.0):.2f}s < 8.0s" if _dur < 8.0
+                       else "no motion windows")),
+        )
+        print(f"[moodreel-gate] REJECTED reason={reason} dur={float(_dur or 0.0):.2f}s "
+              f"motion_windows={len(_mcurve or [])} enabled={bool(_moodreel_on)} "
+              f"-> falling through to minimal (produces no cuts, no captions)",
+              flush=True)
     if (_plan is None and _moodreel_on and _dur >= 8.0 and _mcurve
-            and (reason in ("no_speech", "not_talking_head", "no_audio")
-                 or _silent_reroute)):
+            and _mr_eligible_reason):
         try:
             import moodreel_editor as _mre2
             _sys_i, _user_c = _mre2.build_moodreel_prompt(

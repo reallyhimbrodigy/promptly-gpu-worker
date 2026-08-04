@@ -8105,6 +8105,48 @@ def _mg_entrance_fingerprint():
     return "sha256:" + _hl.sha256("\n====\n".join(_parts).encode("utf-8")).hexdigest()
 
 
+@check("CAPTION KEYWORD LIST ANTI-DRIFT (Zac 2026-08-04, RULE-1): the prompt tells Gemini which caption styles read `caption_keywords`, and _resolve_caption_extra_props decides which ones actually receive them. When those two disagree, Gemini writes words that nothing consumes — measured at 1,372 keywords across 267 real jobs before the fix. This gate derives the truth from the CODE map and asserts the PROMPT names exactly that set, so adding or removing keyword support in a component forces the prompt to change with it.")
+def _caption_keyword_list_matches_code():
+    import re as _re3
+    _src = open("handler.py").read()
+
+    # the code is the authority: which styles get a keyword prop at all
+    _m = _re3.search(r"simple_keyword_prop = \{(.*?)\}", _src, _re3.S)
+    assert _m, "simple_keyword_prop map is gone — the keyword routing lost its authority"
+    _code_styles = set(_re3.findall(r'"(\w+)"\s*:', _m.group(1)))
+    assert _code_styles, "simple_keyword_prop parsed empty"
+
+    # the prompt must name exactly that set
+    _p = _re3.search(r"Keyword styles: ([^.]+?) — these are the ONLY styles that read", _src)
+    assert _p, "the prompt no longer states which styles read caption_keywords"
+    _prompt_styles = {x.strip() for x in _p.group(1).split(",") if x.strip()}
+    assert _prompt_styles == _code_styles, (
+        f"prompt says {sorted(_prompt_styles)} but the code feeds {sorted(_code_styles)} — "
+        "one of them is lying to Gemini")
+
+    # and the ignoring styles must be told to emit nothing
+    assert "emit `caption_keywords: []`" in _src, \
+        "keyword-ignoring styles must be told to emit [] — otherwise Gemini writes " \
+        "words that no component reads (1,372 of them across 267 jobs)"
+
+
+@check("MOODREEL GATE OBSERVABILITY (Zac 2026-08-04, RULE-1): 158 jobs / 149 USERS with a silent route_reason fell through to `minimal`, which emits 0% cuts and 0% captions — we hand the upload back. Which of the gate's conditions rejected them is UNRECOVERABLE after the fact, because light routes persist no plan: the duration and the motion-window count are both gone. Lowering the 8.0s threshold without that would be a guess. This gate pins the rejection record in place so the binding constraint can be read off real traffic.")
+def _moodreel_gate_observability():
+    _src = open("handler.py").read()
+    assert "moodreel_gate_rejected" in _src, \
+        "the moodreel gate no longer records WHY it rejected — the light-route " \
+        "fix goes back to guessing"
+    assert '"motion_windows": len(_mcurve or [])' in _src, \
+        "the rejection record must carry the motion-window COUNT: it is the " \
+        "condition that cannot be recovered from stored data afterwards"
+    assert '"duration_s": round(float(_dur or 0.0), 2)' in _src, \
+        "the rejection record must carry the DURATION — it is the other " \
+        "unrecoverable condition, and the 8.0s threshold is the suspect"
+    assert "_mr_eligible_reason" in _src, \
+        "the eligibility predicate must stay SHARED between the rejection record " \
+        "and the routing branch — two copies would drift and the record would lie"
+
+
 @check("TRUNCATE, NEVER PAD (Zac 2026-08-04, RULE-1): when the final boundary runs past what the streams actually carry, the timeline must shorten to the content — never ask for frames that do not exist. The forensic specimen behind both_stream_hole was 180 of 202 frames real, the final 22 a HELD FRAME over silence at -60.4 dB against -16.5 dB for the rest, video and audio padded to the same wrong length. Root cause: probe_duration() returns the CONTAINER's declared duration first, and a container routinely claims more than its streams carry. Same family as the stream-less pre-extract, differing only in degree — slightly over-running pads a held frame, far over-running yields an empty file. This gate pins the content ceiling at BOTH boundary sites and exercises the only-ever-shorten property in both directions.")
 def _truncate_never_pad():
     _src = open("handler.py").read()
