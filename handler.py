@@ -29430,6 +29430,14 @@ _ERROR_SUBCODES = {
         ("normalize", ("source_canonical", "fps_normalize")),
         ("composite", ("concat", "-filter_complex")),
     ),
+    # 34 jobs / 24 users, ALL between 07-28 and 07-30 07:02Z and none since —
+    # the class Scribe + language routing were built for. It was the single
+    # largest `unclassified` bucket purely because it had no entry here, which
+    # made a 5-day-clean class look like an open unknown.
+    "TRANSCRIPTION_INCOMPLETE": (
+        ("untranscribed_speech", ("was not transcribed", "of the speech")),
+        ("no_speech_muted", ("no_speech_muted",)),
+    ),
     "TRANSCRIPTION": (
         ("keyterm_limit", ("Keyterm limit",)),
         ("write_timeout", ("write operation timed out",)),
