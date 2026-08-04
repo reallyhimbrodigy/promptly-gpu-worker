@@ -28454,6 +28454,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 f"Final concat+mux failed (rc={_am_r.returncode}): "
                 f"{(_am_r.stderr or '')[-1500:]}"
             )
+        # rc==0 IS NOT SUCCESS (2026-08-03, from re-running saved source
+        # 26a05f5d). ffmpeg exited 0 having written a 265-byte container — a
+        # header and no frames — and the failure only surfaced ~100 lines later
+        # at the generic output check, by which point the cause was gone and it
+        # classified as UNKNOWN. Mechanism (inferred, not observed): `-shortest`
+        # truncates every stream to the shortest input, so one zero-length input
+        # yields a valid empty file and a clean exit.
+        #
+        # Validate the artifact HERE, where the step that produced it is still
+        # named. A silent empty mux is the same class as a pre-extract emitting
+        # a stream-less file: the process said success, the artifact says
+        # otherwise, and the artifact is what matters.
+        _am_size = os.path.getsize(output_path) if os.path.exists(output_path) else -1
+        if _am_size < 100000:
+            raise RuntimeError(
+                f"RENDER_EMPTY_OUTPUT: final concat+mux exited 0 but wrote "
+                f"{'no file' if _am_size < 0 else f'only {_am_size} bytes'} "
+                f"(floor 100000) in {time.time() - _am_t0:.1f}s — inputs present "
+                f"but the mux produced no frames. ffmpeg stderr tail: "
+                f"{(_am_r.stderr or '')[-800:]}"
+            )
         _am_elapsed = time.time() - _am_t0
 
     _mux_elapsed = time.time() - _mux_t0
@@ -29327,6 +29348,9 @@ def _log_intake_reject(reason, source_s=None, cap_s=None, **context):
 # names which subprocess and therefore which budget is wrong.
 _ERROR_SUBCODES = {
     "RENDER_FATAL": (
+        # The mux step names itself, so an empty artifact is attributed to the
+        # step that produced it instead of the generic check 100 lines later.
+        ("empty_mux", ("RENDER_EMPTY_OUTPUT: final concat+mux exited 0",)),
         ("empty_output_missing", ("RENDER_EMPTY_OUTPUT: main render produced no usable file — MISSING",)),
         ("empty_output_stub", ("RENDER_EMPTY_OUTPUT",)),
         ("concurrency", ("Maximum for --concurrency",)),
