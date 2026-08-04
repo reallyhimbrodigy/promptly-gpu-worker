@@ -25762,16 +25762,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _vf = (f"trim=start_frame={_start_i}:end_frame={_src_end},"
                        f"setpts=(PTS-STARTPTS)/{_pbr_f:.6f},fps={source_fps:g}")
             _out_path = os.path.join(work_dir, f"trans_{_idx}_{_side}.mp4")
-            subprocess.run([
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-i", source_path, "-vf", _vf, "-frames:v", str(_dur_frames_i),
-                "-c:v", "libx264", "-preset", "fast", "-crf", "14",
-                "-pix_fmt", "yuv420p", "-g", str(_gop), "-keyint_min", str(_gop),
-                "-sc_threshold", "0", "-video_track_timescale", "90000",
-                "-movflags", "+faststart", "-an", _out_path,
-            ], check=True)
-            _trans[f"clip{_side}Src"] = _stage_file(_out_path)
-            _logs.append(f"{_side}=[{_start_i}..{_src_end})")
+            try:
+                subprocess.run([
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", source_path, "-vf", _vf, "-frames:v", str(_dur_frames_i),
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "14",
+                    "-pix_fmt", "yuv420p", "-g", str(_gop), "-keyint_min", str(_gop),
+                    "-sc_threshold", "0", "-video_track_timescale", "90000",
+                    "-movflags", "+faststart", "-an", _out_path,
+                ], check=True)
+                _trans[f"clip{_side}Src"] = _stage_file(_out_path)
+                _logs.append(f"{_side}=[{_start_i}..{_src_end})")
+            except Exception as _e:
+                # DEGRADE, NEVER DIE. This is a SPEED optimisation — the renderer
+                # falls back to the whole source + trimBefore when clip{Side}Src is
+                # absent, which is exactly the pre-existing behaviour. A failed
+                # extract must cost frames-per-second, never the user's video.
+                # (Same lesson as SafeImg: a failed asset degrades, it does not
+                # take the render with it.)
+                _trans.pop(f"clip{_side}Src", None)
+                _logs.append(f"{_side}=DEGRADED({type(_e).__name__})")
         return (f"[transition-pre-extract] after_clip={_idx} type={_trans.get('type')} "
                 f"{' '.join(_logs)} -> {_trans.get('clipASrc')} / {_trans.get('clipBSrc')}")
 
