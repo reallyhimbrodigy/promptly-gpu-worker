@@ -16496,6 +16496,23 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             break
                         _hit = _hit or _sw
                         _fe = float(_sw.get("end") or 0.0)
+                    # NEVER EXTEND PAST THE SOURCE. The tail-pad this sits beside
+                    # clamps to _vd for exactly this reason; the first version of
+                    # this snap did not, and an end beyond the available frames is
+                    # precisely how a TRAILING both_stream_hole is manufactured.
+                    # (Investigated after 5b3cc914 tripped both_stream_hole
+                    # [[6.0, 6.733333]] 4 minutes after this shipped. That CLASS
+                    # predates the fix — ac9be3a2 hit it ~23h earlier — so it is
+                    # not confirmed as a regression, but an unbounded extension is
+                    # a defect whether or not it caused that trip.)
+                    _srcmax = float(duration or 0.0)
+                    if _srcmax > 0 and _fe > _srcmax:
+                        # Cannot keep the word whole without running off the end,
+                        # so drop it cleanly at its START — still never mid-word,
+                        # and never past the source.
+                        _fe = min(float(_hit.get("start") or _fe0), _srcmax)
+                        if _fe <= _fe0:
+                            _fe = _fe0          # nothing safe to do; leave as-is
                     if _hit is not None and _fe > _fe0:
                         _lc["source_end"] = round(_fe, 4)
                         _record_divergence(

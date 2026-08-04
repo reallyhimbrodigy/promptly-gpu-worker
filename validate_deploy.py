@@ -7443,6 +7443,16 @@ def _final_end_word_invariant():
     assert _snap(1.85, _ov) == 2.4, "must snap from inside the last overlapping word"
     _gap = [{"start": 0.0, "end": 1.0}, {"start": 1.2, "end": 2.0}]
     assert _snap(1.1, _gap) == 1.1, "must LEAVE a correct gap-landing end untouched"
+
+    # NEVER PAST THE SOURCE. An end beyond the available frames is how a trailing
+    # both_stream_hole is manufactured, and the tail-pad beside this clamps to
+    # _vd for the same reason.
+    assert "_srcmax = float(duration or 0.0)" in _src, \
+        "the snap must clamp to the SOURCE DURATION — an unbounded extension can " \
+        "request frames that do not exist and trip a trailing both_stream_hole"
+    assert "_fe = min(float(_hit.get(\"start\") or _fe0), _srcmax)" in _src, \
+        "when the word end exceeds the source, drop the word at its START — still " \
+        "never mid-word, and never past the source"
     assert "_record_divergence" in _src.split("final_end_snapped_to_word_end")[0][-1200:], \
         "the snap must be RECORDED — a silent correction hides the rate"
 
