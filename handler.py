@@ -21665,11 +21665,21 @@ def _integrity_gate(output_path, v_dur, a_dur, expected_frames, nb_frames,
         holes, hole_downgraded = _ig_source_echo_hole(source_path, holes, out_to_src)
     ts = _ig_probe_timestamps(output_path)
 
+    # MASK COVERAGE, RECORDED (2026-08-04). A trip could not distinguish "there
+    # was no maskable transition here" from "the mask had no windows at all" —
+    # _build_integrity_masks reads _integrity_slot_ranges off the plan stash, and
+    # if that key is missing or empty EVERY masked type silently stops being
+    # masked while the gate still reads as working. That ambiguity blocked the
+    # INTEGRITY_TRIP:black investigation outright: DipToBlack is already in
+    # _IG_BLACK_MASK_TYPES, so a black trip means either a different stage or a
+    # mask that never ran, and nothing recorded which.
+    _mask_cov = {k: len(masks.get(k, []) or []) for k in ("freeze", "black", "hole")}
+
     trips = []
     if freeze_resid:
-        trips.append({"check": "freeze", "spans": freeze_resid})
+        trips.append({"check": "freeze", "spans": freeze_resid, "masks": _mask_cov})
     if black_resid:
-        trips.append({"check": "black", "spans": black_resid})
+        trips.append({"check": "black", "spans": black_resid, "masks": _mask_cov})
     if holes:
         trips.append({"check": "dead_moment", "spans": holes})
     dur_delta = abs(float(v_dur or 0) - float(a_dur or 0))
@@ -33795,6 +33805,12 @@ def render_stage(
         _ig_summary = ", ".join(
             t["check"] + "=" + json.dumps(t.get("spans") or t.get("delta_s")
                                           or t.get("nb_frames"))
+            # Mask coverage rides the summary so error_detail answers, without a
+            # re-run, whether the masks had any windows. masks=0/0/0 on a black
+            # trip means the plan stash was empty and NOTHING was masked — a
+            # different defect from a genuine unmasked hole.
+            + (f" masks={t['masks']['freeze']}/{t['masks']['black']}/{t['masks']['hole']}"
+               if isinstance(t.get("masks"), dict) else "")
             for t in _ig_verdict["trips"])
         print(f"[integrity-gate] TRIP {_ig_summary}", flush=True)
         try:

@@ -10515,6 +10515,23 @@ def _check_subcode_is_persisted():
         "error_cause must ride the same classified envelope as error_code"
 
 
+@check("A TRIP MUST SAY WHETHER ITS MASKS RAN (2026-08-04): _build_integrity_masks reads _integrity_slot_ranges off the plan stash — if that key is missing or empty, EVERY masked type silently stops being masked while the gate still reads as working. A black trip then cannot be told apart from a mask that never ran, and that ambiguity blocked the INTEGRITY_TRIP:black investigation outright: DipToBlack is ALREADY in _IG_BLACK_MASK_TYPES (350ms authored blackout vs the 200ms floor), so a surviving black span means either a different stage or an absent mask — and nothing recorded which. Coverage now rides both the trip dict and the summary string that lands in error_detail.")
+def _check_trip_records_mask_coverage():
+    _src = open("handler.py").read()
+    assert '_mask_cov = {k: len(masks.get(k, []) or [])' in _src, \
+        "the gate must compute mask coverage"
+    for _c in ('"check": "freeze", "spans": freeze_resid, "masks": _mask_cov',
+               '"check": "black", "spans": black_resid, "masks": _mask_cov'):
+        assert _c in _src, f"trip must carry its mask coverage: {_c[:40]}"
+    assert "masks={t['masks']['freeze']}/{t['masks']['black']}/{t['masks']['hole']}" in _src, \
+        "the summary that lands in error_detail must carry coverage, not just the dict"
+    # DipToBlack must STAY masked — re-adding it would be a silent no-op 'fix'
+    import handler as _h
+    assert "diptoblack" in _h._IG_BLACK_MASK_TYPES, \
+        "DipToBlack is an AUTHORED 350ms blackout; unmasking it trips every act-break"
+    assert "shutterflash" in _h._IG_BLACK_MASK_TYPES
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
