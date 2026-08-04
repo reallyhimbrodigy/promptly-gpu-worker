@@ -10348,6 +10348,27 @@ def _check_probe_budget_scales():
     assert _h._probe_weighted_timeout("/nonexistent-source.mp4", 60, 240) == 60
 
 
+@check("NO TERMINAL MAY LAND ON UNKNOWN (Zac's UNKNOWN=0 law, 2026-08-03): 'Main render produced invalid output' had NO branch in classify_error, so a render that produced no usable file surfaced as UNKNOWN:unclassified — an unowned, uncountable terminal. It also collapsed two different failures into one string: the file never appeared, versus it appeared as a stub. Now RENDER_EMPTY_OUTPUT with the byte count, classified RENDER_FATAL and split into empty_output_missing vs empty_output_stub so the two roots are counted apart. This gate asserts the CLASSIFICATION, because the raise alone would still have read as fixed while landing on UNKNOWN.")
+def _check_no_unknown_terminal():
+    import handler as _h
+    _MISSING = ("RENDER_EMPTY_OUTPUT: main render produced no usable file — "
+                "MISSING at /tmp/x/output.mp4")
+    _STUB = ("RENDER_EMPTY_OUTPUT: main render produced no usable file — "
+             "only 412 bytes (floor 100000) at /tmp/x/output.mp4")
+    for _m, _want in ((_MISSING, "RENDER_FATAL:empty_output_missing"),
+                      (_STUB, "RENDER_FATAL:empty_output_stub")):
+        _got = _h.classify_error(RuntimeError(_m)).get("error_cause")
+        assert _got == _want, f"expected {_want}, got {_got}"
+        assert _h.classify_error(RuntimeError(_m)).get("error_code") != "UNKNOWN", \
+            "a render terminal must never land on UNKNOWN"
+    # the raise itself must carry the evidence, not just the word 'invalid'
+    _src = open("handler.py").read()
+    assert "RENDER_EMPTY_OUTPUT" in _src and "floor 100000" in _src, \
+        "the empty-output raise must name WHICH failure and the byte count"
+    assert "Main render produced invalid output" not in _src, \
+        "the unclassifiable string is back"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

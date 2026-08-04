@@ -29270,6 +29270,8 @@ def _log_intake_reject(reason, source_s=None, cap_s=None, **context):
 # names which subprocess and therefore which budget is wrong.
 _ERROR_SUBCODES = {
     "RENDER_FATAL": (
+        ("empty_output_missing", ("RENDER_EMPTY_OUTPUT: main render produced no usable file — MISSING",)),
+        ("empty_output_stub", ("RENDER_EMPTY_OUTPUT",)),
         ("concurrency", ("Maximum for --concurrency",)),
         ("frame_grid", ("cannot share the frame grid",)),
         ("no_video_stream", ("No video stream found",)),
@@ -29472,6 +29474,16 @@ def classify_error(e):
 
     # ── Render ladder exhaustion (ordered before the greedy ffmpeg/render
     # matches — the wrapped cause text often contains those substrings) ──
+    # A render that produced no usable file. Distinct from RENDER_FATAL (the
+    # ladder terminal) because the ladder never ran: the check sits after
+    # parallel_render, so this raised OUTSIDE it and classified as UNKNOWN.
+    if "RENDER_EMPTY_OUTPUT" in msg:
+        return _e(
+            "RENDER_FATAL",
+            "Rendering failed on our side — please run the job again.",
+            retryable=True,
+        )
+
     if "RENDER_FATAL" in msg:
         return _e(
             "RENDER_FATAL",
@@ -32908,7 +32920,18 @@ def render_stage(
     print(f"[render] Encoding: {_enc_label}", flush=True)
     # Validate render output — single ffprobe for file check + duration extraction
     if not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
-        raise RuntimeError(f"Main render produced invalid output: {output_path}")
+        # SAY WHICH (2026-08-03). "invalid output" collapsed two different
+        # failures — the file never appeared, versus it appeared but is a stub —
+        # into one unclassifiable string, and classify_error had no branch for
+        # it at all, so this terminal surfaced as UNKNOWN. That is a UNKNOWN=0
+        # violation on its own, and it is the code a job lands on when a render
+        # dies without the ladder having raised.
+        _exists = os.path.exists(output_path)
+        _size = os.path.getsize(output_path) if _exists else -1
+        raise RuntimeError(
+            f"RENDER_EMPTY_OUTPUT: main render produced no usable file — "
+            f"{'MISSING' if not _exists else f'only {_size} bytes (floor 100000)'} "
+            f"at {output_path}")
     # Durable boundary: render complete (closes the heartbeat-only 90->92 gap
     # so a reconnect mid-finalize resumes correctly).
     _async_job_status(job_id, status="processing", phase="Finalizing", progress=95)
