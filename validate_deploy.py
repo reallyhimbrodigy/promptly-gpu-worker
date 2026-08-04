@@ -10591,6 +10591,35 @@ def _check_probe_slope_matters():
         "a JS TypeError inside a component must name itself, not read as unclassified"
 
 
+@check("A CONTAINER MAY DECLARE MORE DURATION THAN IT HAS FRAMES FOR (2026-08-04, found by the input matrix BEFORE any user hit it): the VFR cell declared r_frame_rate=30, avg_frame_rate=30 and duration=20.36s while carrying 352 frames = 11.73s of actual coverage. The render believed 20.36s, ran out of frames at 11.73s and HELD THE LAST FRAME for the remaining 8.6s — INTEGRITY_TRIP freeze spans beginning at 11.83s, exactly where the frames end. Same family as the zoomclip stream-less extract and the trailing pad: asking for range past available content. probe_duration now clamps to frame coverage, and ONLY on a large gap so rounding, a trailing partial GOP or a slightly-long audio track can never shorten a healthy edit. Phones produce VFR routinely.")
+def _check_frame_coverage_clamp():
+    import handler as _h
+    assert callable(getattr(_h, "_frame_coverage_s", None)), "the coverage helper must exist"
+    # THE CLAMP MUST BITE on an over-declaring container...
+    _over = {"format": {"duration": "20.36"},
+             "streams": [{"codec_type": "video", "nb_frames": "352",
+                          "avg_frame_rate": "30/1", "r_frame_rate": "30/1"}]}
+    _cov = _h._frame_coverage_s(_over)
+    assert _cov and abs(_cov - 11.733) < 0.05, f"coverage should be ~11.73s, got {_cov}"
+    # ...and MUST NOT bite on an honest one (this is the load-bearing direction:
+    # a clamp that fires on healthy sources would truncate real edits).
+    _ok = {"format": {"duration": "20.36"},
+           "streams": [{"codec_type": "video", "nb_frames": "611",
+                        "avg_frame_rate": "30/1", "r_frame_rate": "30/1"}]}
+    _c2 = _h._frame_coverage_s(_ok)
+    assert _c2 and (20.36 - _c2) <= _h._COVERAGE_CLAMP_MIN_GAP_S, \
+        f"an honest container must not be clamped (coverage {_c2} vs 20.36)"
+    # unknowable coverage must be silent, never a guess
+    for _blind in ({"streams": []},
+                   {"streams": [{"codec_type": "video", "nb_frames": "0", "avg_frame_rate": "30/1"}]},
+                   {"streams": [{"codec_type": "video", "nb_frames": "352", "avg_frame_rate": "0/0"}]}):
+        assert _h._frame_coverage_s(_blind) is None, \
+            "unknowable frame coverage must return None, never a fabricated duration"
+    # the thresholds must stay conservative
+    assert _h._COVERAGE_CLAMP_MIN_GAP_S >= 1.0 and _h._COVERAGE_CLAMP_MIN_FRAC >= 0.05, \
+        "a tight threshold would clamp healthy sources — the gap must stay material"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

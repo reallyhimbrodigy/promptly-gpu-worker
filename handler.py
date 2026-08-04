@@ -21072,23 +21072,71 @@ def _enrichment_opportunities(iq):
     return opps
 
 
+# A container may DECLARE more duration than it has frames for. Clamp only on a
+# gap this large so ordinary rounding, a trailing partial GOP, or an audio track
+# running slightly long can never shorten a healthy edit.
+_COVERAGE_CLAMP_MIN_GAP_S = 1.0
+_COVERAGE_CLAMP_MIN_FRAC = 0.10
+
+
+def _frame_coverage_s(data):
+    """Seconds the video stream actually has FRAMES for, or None if unknowable."""
+    try:
+        v = next((s for s in (data.get("streams") or [])
+                  if s.get("codec_type") == "video"), None)
+        if not v:
+            return None
+        nb = int(float(v.get("nb_frames") or 0))
+        if nb <= 0:
+            return None                       # container did not count them
+        rate = str(v.get("avg_frame_rate") or v.get("r_frame_rate") or "")
+        if "/" in rate:
+            n, d = rate.split("/")
+            fps = (float(n) / float(d)) if float(d) else 0.0
+        else:
+            fps = float(rate or 0)
+        return (nb / fps) if fps > 0 else None
+    except Exception:
+        return None
+
+
 def probe_duration(file_path):
     data = _probe_full(file_path)
     # Try format duration first, then video stream duration
+    d = 0.0
     try:
         d = float((data.get("format") or {}).get("duration") or 0)
-        if d > 0:
-            return d
     except Exception:
-        pass
-    for s in (data.get("streams") or []):
-        try:
-            d = float(s.get("duration") or 0)
-            if d > 0:
-                return d
-        except Exception:
-            continue
-    return None
+        d = 0.0
+    if d <= 0:
+        for s in (data.get("streams") or []):
+            try:
+                d = float(s.get("duration") or 0)
+                if d > 0:
+                    break
+            except Exception:
+                continue
+    if d <= 0:
+        return None
+
+    # FRAME-COVERAGE CLAMP (2026-08-04). A container can declare more duration
+    # than it holds frames for — VFR captures, screen recordings, and anything
+    # written with a dropped-frame filter. The matrix VFR cell declared
+    # r_frame_rate=30, avg_frame_rate=30 and duration=20.36s while carrying 352
+    # frames = 11.7s of coverage. The render believed 20.36s, ran out of frames
+    # at 11.7s, and HELD THE LAST FRAME for the remaining 8.6s — INTEGRITY_TRIP
+    # freeze spans starting at 11.83s, exactly where the frames end.
+    #
+    # Same family as the zoomclip stream-less extract and the trailing pad:
+    # asking for range past available content. Found by the input matrix before
+    # any user hit it, and phones produce VFR routinely.
+    _cov = _frame_coverage_s(data)
+    if (_cov and _cov > 0 and (d - _cov) > _COVERAGE_CLAMP_MIN_GAP_S
+            and (d - _cov) / d > _COVERAGE_CLAMP_MIN_FRAC):
+        print(f"[probe] duration clamped {d:.2f}s -> {_cov:.2f}s "
+              f"(container over-declares; frames cover only {_cov:.2f}s)", flush=True)
+        return _cov
+    return d
 
 
 def probe_audio_sample_rate(file_path):
