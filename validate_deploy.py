@@ -5555,7 +5555,7 @@ def _integrity_freeze_echo_boundary():
         "the collapsed branch that hid the crossing case must be gone from BOTH echoes"
 
 
-@check("SILENT CLIPS GET AN EDIT, NOT THEIR OWN FOOTAGE BACK (2026-08-03, DARK behind PROMPTLY_SILENT_TO_MOODREEL): measured over 387 completions since 08-01 with editorial events = (segments-1) + decorations counted across BOTH recipe shapes — minimal_speech_uncut 141/141 silent (median 0 editorial), moodreel 73 jobs 1 silent (median 5), hype median 14, standard median 10. 143 of 387 (37%, 140 users) deliver ZERO editorial events and 141 are the uncut passthrough. A clip whose speech we could not READ but which VAD confirms carries NO speech is silent content and belongs in the mood-reel cut. THE GUARD: minimal_speech_uncut exists because build_minimal_plan cuts at MOTION PEAKS, which would chop the untranscribed speech it protects (Urdu-class law) — so re-routing requires POSITIVE VAD confirmation and every unmeasurable case stays uncut. ARMED 2026-08-04 (Zac GO naming the key); addressable at the flip 269 jobs / 260 USERS. cert: test_silent_to_moodreel.py 16/16")
+@check("SILENT CLIPS GET AN EDIT, NOT THEIR OWN FOOTAGE BACK (2026-08-03, DARK behind PROMPTLY_SILENT_TO_MOODREEL): measured over 387 completions since 08-01 with editorial events = (segments-1) + decorations counted across BOTH recipe shapes — minimal_speech_uncut 141/141 silent (median 0 editorial), moodreel 73 jobs 1 silent (median 5), hype median 14, standard median 10. 143 of 387 (37%, 140 users) deliver ZERO editorial events and 141 are the uncut passthrough. A clip whose speech we could not READ but which VAD confirms carries NO speech is silent content and belongs in the mood-reel cut. THE GUARD: minimal_speech_uncut exists because build_minimal_plan cuts at MOTION PEAKS, which would chop the untranscribed speech it protects (Urdu-class law) — so re-routing requires POSITIVE VAD confirmation and every unmeasurable case stays uncut. ARMED 2026-08-04 (Zac GO naming the key); addressable at the flip 269 jobs / 260 USERS. cert: test_silent_to_moodreel.py 18/18")
 def _silent_to_moodreel():
     import handler
     _h = open("handler.py").read()
@@ -5602,7 +5602,13 @@ def _silent_to_moodreel():
         _vad([(0.0, 30.0)])
         assert handler._vad_confirms_silence("/x.mp4", 0.0) is False, "no duration -> uncut"
         # 5. scope — duration verdicts are NOT silence verdicts
-        assert handler._silent_route_eligible("too_short", "/x.mp4", 30.0) is False
+        # too_short JOINED the set 2026-08-04 (Zac GO) — a duration verdict is not
+        # a reason to skip the MODEL; VAD confirmation is still what makes it safe.
+        assert handler._silent_route_eligible("too_short", "/x.mp4", 30.0) is True
+        # plan_collapsed stays OUT and that is the property worth pinning:
+        # re-calling the model there is a RETRY, which the law forbids.
+        assert handler._silent_route_eligible("plan_collapsed", "/x.mp4", 30.0) is False, \
+            "plan_collapsed must never re-route — that would be a retry"
     finally:
         handler._detect_silence_regions_vad, handler._vad_available = _o1, _o2
         os.environ.pop("PROMPTLY_SILENT_TO_MOODREEL", None) if _o is None else \

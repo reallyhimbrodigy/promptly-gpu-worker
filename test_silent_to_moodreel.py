@@ -120,8 +120,12 @@ check("no_speech_muted + VAD silence -> eligible",
       H._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is True)
 check("transcription_incomplete + VAD silence -> eligible",
       H._silent_route_eligible("transcription_incomplete", "/x.mp4", 30.0) is True)
-check("too_short is NOT re-routed (duration, not silence)",
-      H._silent_route_eligible("too_short", "/x.mp4", 30.0) is False)
+# too_short JOINED the set 2026-08-04 (Zac GO): the verdict being about duration
+# is not a reason to skip the MODEL. VAD confirmation is still what makes it safe.
+check("too_short + VAD silence -> ELIGIBLE (Zac GO 2026-08-04)",
+      H._silent_route_eligible("too_short", "/x.mp4", 30.0) is True)
+check("plan_collapsed stays EXCLUDED — re-calling there is a RETRY",
+      H._silent_route_eligible("plan_collapsed", "/x.mp4", 30.0) is False)
 un()
 un = with_vad([(0.0, 2.0)])
 check("no_speech_muted WITH speech present -> NOT eligible",

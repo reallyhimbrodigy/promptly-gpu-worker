@@ -6672,7 +6672,7 @@ notes         — string ≤50 words. Brief rationale.
 audio_denoise — bool. true when noise_floor > -40 dB.
 outro         — "none" | "fade_black" | "fade_white". "none" best for looping.
 aspect_ratio  — always "9:16".
-edit_rationale — string, 1-2 SENTENCES, written TO THE USER about THIS edit: why you cut where you did, the pacing you chose, the moments you leaned into. Plain and specific ("Tightened the intro and held on the reveal at 0:14 so the punchline lands"). Describe what the viewer SEES, in words the user would say — NEVER an internal component or style name (say "a quick punch-in on the reveal" or "captions that type on as you speak", not "StepZoom", "TypewriterReveal", or a caption-style name — those mean nothing to the user). If the material is thin (very short, low-energy, or little happens), SAY SO honestly and suggest recording a longer talking-head next time. Never generic — name a real choice.
+edit_rationale — string, 1-2 SENTENCES, written TO THE USER about THIS edit. **WRITE IT LAST, AFTER the arrays above are final, and describe ONLY what those arrays actually contain.** If broll_clips is empty you did not add a cutaway; if motion_graphics is empty you did not add a graphic; if text_overlays is empty there is no on-screen text; if transitions is empty there are no transitions. Naming one you did not emit tells the user the product does not know what it made — measured on real deliveries, 33 of the 53 rationales that mentioned b-roll sat on a plan with ZERO b-roll. Saying what you DIDN'T do is fine and often right ("kept it clean, no graphics"); claiming what isn't there is not. Cuts, pacing and emphasis are always present — lead with those. Content: why you cut where you did, the pacing you chose, the moments you leaned into. Plain and specific ("Tightened the intro and held on the reveal at 0:14 so the punchline lands"). Describe what the viewer SEES, in words the user would say — NEVER an internal component or style name (say "a quick punch-in on the reveal" or "captions that type on as you speak", not "StepZoom", "TypewriterReveal", or a caption-style name — those mean nothing to the user). If the material is thin (very short, low-energy, or little happens), SAY SO honestly and suggest recording a longer talking-head next time. Never generic — name a real choice.
 post_caption — string, ≤120 chars, user-facing: the ready-to-post caption for THIS video — one line in the speaker's own voice that sells the CONTENT (never the edit), plus 1-2 hashtags drawn from what the video is actually about ("Behind every launch is a spreadsheet nobody saw #startup #buildinpublic" — never "An edit with zooms and captions").
 post_hook — string, ≤60 chars, user-facing: the scroll-stopping first line for the post — the video's sharpest claim or question, in the speaker's own words. Plain text, no hashtags.
 
@@ -31758,7 +31758,14 @@ def _apply_motion_anchors(render_input, motion_curve, shot_changes, source_fps,
 # honest failure). So re-routing is permitted ONLY when VAD positively confirms
 # there is no real speech — and every unmeasurable case stays uncut.
 _SILENT_ROUTE_SPEECH_FLOOR_S = 1.5    # VAD speech above this = a speaking clip
-_SILENT_ROUTE_REASONS = ("no_speech_muted", "transcription_incomplete")
+# too_short ADDED 2026-08-04 (Zac GO). It was excluded as "a duration verdict,
+# not a silence verdict" — but the verdict being about duration is not a reason
+# to skip the MODEL. A 5s clip VAD-confirms silent has cuts, pacing and emphasis
+# decisions available; the mood-reel floor (3.0s) is what bounds it now. Last of
+# the call-with-less-input cases: 170 jobs / 168 users. plan_collapsed stays OUT
+# — re-calling there is a RETRY, and the law forbids retry as an answer to
+# failure; the degeneration gets fixed instead.
+_SILENT_ROUTE_REASONS = ("no_speech_muted", "transcription_incomplete", "too_short")
 
 
 def _silent_to_moodreel_enabled():
@@ -31812,9 +31819,11 @@ def _vad_confirms_silence(source_path, source_duration):
 def _silent_route_eligible(reason, source_path, source_duration):
     """May this uncut-bound clip be re-routed to the mood-reel edit instead?
 
-    Only for reasons that mean 'we could not read the speech' — never for
-    too_short (a duration verdict) or plan/render collapse (where the clip may
-    well be speech-bearing and the uncut delivery is the honest floor).
+    For reasons that mean 'we could not read the speech', and — since 2026-08-04
+    — for too_short as well: a short clip is still a clip the model can compose,
+    and VAD confirmation is what makes it safe. NEVER for plan/render collapse,
+    where the clip may well be speech-bearing AND where re-calling the model
+    would be a retry.
     """
     if not _silent_to_moodreel_enabled():
         return False
