@@ -11127,6 +11127,38 @@ def _optional_signals_never_fatal():
 
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
+
+@check("THE MINIMAL/HYPE CANON MUST NOT BE STREAM-LESS (Zac 2026-08-04, RULE-1). 3 users in 24h hit 'No video stream found in input file minimal_canon.mp4', surfacing at Remotion as RENDER_REMOTION or RENDER_FATAL:canon_unreadable — 2d35f8e NAMED it and never cured it. ROOT: hype_render.normalize_source let ffmpeg AUTO-SELECT streams, and its _has_audio counted an iPhone Core Media Metadata track (classified audio, codec `none`) as real audio; handler.py learned this on 08-03 (14d758c) and this second copy never did. Fix = explicit -map 0:v:0 / -map 0:a:0?, codec-aware probes that reject `none`, and an artifact check AT THE PRODUCING STAGE (rc==0 is not success, 91f0f8a). Asserts all four, against parsed state.")
+def _hype_canon_not_streamless():
+    import hype_render as _hr
+    import inspect as _i
+    _src = _i.getsource(_hr.normalize_source)
+    assert '"-map", "0:v:0"' in _src, \
+        "normalize_source must name the video stream, never auto-select it"
+    assert '"0:a:0?"' in _src, \
+        "the audio map must be explicit AND optional (? so silent sources render)"
+    assert "RENDER_CANON_NO_VIDEO" in _src, \
+        "the producing stage must verify its own artifact, not hand a bad canon downstream"
+    # codec-aware, not index-aware: a `none` codec must not read as a stream
+    for _fn in (_hr._has_audio, _hr._has_video):
+        _fsrc = _i.getsource(_fn)
+        assert "codec_name" in _fsrc and '"none"' in _fsrc, (
+            f"{_fn.__name__} must read the CODEC and reject `none` — counting the "
+            f"stream index is what let the Core Media Metadata track through")
+    # BOTH DIRECTIONS, on real files built here: a real A/V clip must read true,
+    # a video-only clip must read audio=False, and a missing file must not crash.
+    import subprocess as _sp, tempfile as _tf, os as _os
+    _d = _tf.mkdtemp()
+    _av = _os.path.join(_d, "av.mp4")
+    _sp.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+             "-i", "testsrc=size=320x240:rate=30:duration=1", "-f", "lavfi",
+             "-i", "sine=frequency=440:duration=1", "-c:v", "libx264",
+             "-c:a", "aac", _av], check=True, capture_output=True)
+    assert _hr._has_video(_av) and _hr._has_audio(_av), "POSITIVE CONTROL failed"
+    assert _hr._has_video(_os.path.join(_d, "nope.mp4")) is False, \
+        "a missing file must read False, not raise"
+
+
 # EVERY @check IN THIS FILE MUST ACTUALLY RUN (2026-08-04). The runner executes
 # checks as the module is imported top-to-bottom, so a @check appended BELOW this
 # line is defined and never called — it reports nothing and the total does not

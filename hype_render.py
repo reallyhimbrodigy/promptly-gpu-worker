@@ -49,12 +49,35 @@ def _run(cmd, label, timeout=1800):
 
 
 def _has_audio(path: str) -> bool:
+    """True only for a DECODABLE audio stream.
+
+    An iPhone "Core Media Metadata" track is classified by ffmpeg as an AUDIO
+    stream with codec_name `none` — the live log reads
+    `[aist#0:2/none] Decoding requested, but no decoder found for: none`. Asking
+    only for the stream INDEX counts that track as audio, so normalize_source
+    then asks aac to encode a stream nothing can decode.
+
+    handler.py learned this on 2026-08-03 (14d758c) and this file did not — the
+    fix landed in one of the two copies. Read the codec, not the index.
+    """
     r = subprocess.run(
         ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries",
-         "stream=index", "-of", "csv=p=0", path],
+         "stream=codec_name", "-of", "csv=p=0", path],
         capture_output=True, text=True,
     )
-    return bool((r.stdout or "").strip())
+    return any(c.strip() and c.strip() != "none"
+               for c in (r.stdout or "").splitlines())
+
+
+def _has_video(path: str) -> bool:
+    """True only for a DECODABLE video stream — the canon's precondition."""
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v", "-show_entries",
+         "stream=codec_name", "-of", "csv=p=0", path],
+        capture_output=True, text=True,
+    )
+    return any(c.strip() and c.strip() != "none"
+               for c in (r.stdout or "").splitlines())
 
 
 # ── ingest: canonicalize the source to WxH@fps (build_final_filtergraph's
@@ -64,16 +87,36 @@ def normalize_source(src: str, out: str, fps: float, w: int = 1080, h: int = 192
     ingest so the composite filtergraph samples a clean, known-geometry source."""
     vf = (f"scale={w}:{h}:force_original_aspect_ratio=increase:flags=lanczos,"
           f"crop={w}:{h},fps={fps}")
+    # MAP EXPLICITLY, NEVER AUTO-SELECT (2026-08-04). Automatic stream selection
+    # picks ffmpeg's idea of the "best" stream, and iPhone sources carry tracks
+    # that confuse it — the Core Media Metadata track is reported as audio with
+    # codec `none`. Naming 0:v:0 and 0:a:0? removes the guess entirely; the `?`
+    # makes the audio map optional so a genuinely silent source still renders.
     cmd = ["ffmpeg", "-y", "-v", "warning", "-i", src,
+           "-map", "0:v:0",
            "-vf", vf, "-r", f"{fps:g}",
            "-c:v", "libx264", "-preset", "medium", "-crf", "16",
            "-pix_fmt", "yuv420p"]
     if _has_audio(src):
-        cmd += ["-c:a", "aac", "-b:a", "192k"]
+        cmd += ["-map", "0:a:0?", "-c:a", "aac", "-b:a", "192k"]
     else:
         cmd += ["-an"]
     cmd += [out]
     _run(cmd, "normalize-source")
+
+    # THE PRODUCING STAGE OWNS ITS OUTPUT. Three users in 24h hit
+    # "No video stream found in input file .../minimal_canon.mp4" — the failure
+    # surfaced at Remotion, several rungs downstream, as RENDER_REMOTION or
+    # RENDER_FATAL:canon_unreadable. Naming it there was a DETECTOR, not a cure.
+    # rc==0 is not success (91f0f8a): verify the artifact here, where the stage
+    # that wrote it can still say what it was given.
+    if not _has_video(out):
+        _sz = os.path.getsize(out) if os.path.exists(out) else -1
+        raise RuntimeError(
+            f"RENDER_CANON_NO_VIDEO: normalize-source exited 0 but wrote a canon "
+            f"with no decodable video stream "
+            f"({'missing' if _sz < 0 else f'{_sz} bytes'}) — "
+            f"src={os.path.basename(src)} fps={fps:g} {w}x{h}")
     return out
 
 
