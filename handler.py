@@ -2366,6 +2366,93 @@ def fetch_user_style_profile(user_id):
         return None
 
 
+# ─── EXPORT-WEIGHTED PROFILE (Zac 2026-08-03) ───────────────────────────────
+# The stored profile records what THIS PIPELINE CHOSE on every successful
+# render. That is our own output fed back to us as evidence about the user —
+# and 87% of delivered videos are never exported, 68% never even opened, so
+# "what we gave them" is not "what they liked".
+#
+# EXPORT IS THE ONLY ACT THE USER ACTUALLY TAKES. A profile built from the
+# videos they KEPT is genuine accepted taste. The export events already exist
+# (analytics_events.export_completed, props->>job_id), so this needs no new
+# instrumentation — only the join nobody had made.
+#
+# Falls back to the delivery-based profile when the user has fewer than
+# _EXPORT_PROFILE_MIN exports, and SAYS WHICH ONE IT USED in the block, because
+# a personalisation section that cannot tell you where its evidence came from
+# is how the pacing/color_effect falsehoods survived in the first place.
+_EXPORT_PROFILE_MIN = 2          # below this, exports are noise, not taste
+
+
+def fetch_exported_plans(user_id, limit=25):
+    """The edit plans of videos this user actually EXPORTED. [] when none."""
+    if supabase is None or not user_id:
+        return []
+    try:
+        ev = supabase.table("analytics_events") \
+            .select("props") \
+            .eq("event", "export_completed") \
+            .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
+            .limit(limit) \
+            .execute()
+        job_ids = []
+        for r in (ev.data or []):
+            jid = (r.get("props") or {}).get("job_id")
+            if jid and jid not in job_ids:
+                job_ids.append(jid)
+        if not job_ids:
+            print(f"[user-style] user={str(user_id)[:8]}… has NO exports — "
+                  f"falling back to the delivery-based profile", flush=True)
+            return []
+        jr = supabase.table("video_jobs") \
+            .select("id,edit_recipe") \
+            .in_("id", job_ids) \
+            .execute()
+        plans = []
+        for row in (jr.data or []):
+            er = row.get("edit_recipe") or {}
+            pl = er.get("plan") if isinstance(er.get("plan"), dict) else er
+            if isinstance(pl, dict) and pl:
+                plans.append(pl)
+        print(f"[user-style] EXPORT-WEIGHTED: {len(plans)} kept video(s) for "
+              f"user={str(user_id)[:8]}… (of {len(job_ids)} export events)", flush=True)
+        return plans
+    except Exception as e:
+        print(f"[user-style] export-weighted fetch failed ({e}) — "
+              f"falling back to the delivery-based profile", flush=True)
+        return []
+
+
+def build_profile_from_plans(plans):
+    """Counters in the SAME shape as the stored profile, but counted only over
+    plans the user KEPT. Same shape means format_user_style_section needs no
+    special case and the retired-type filter still applies."""
+    prof = {"caption_styles": {}, "transitions": {}, "text_overlay_variants": {},
+            "motion_graphics": {}, "zoom_types": {}, "recent_vibes": [],
+            "total_videos": len(plans)}
+
+    def bump(d, k):
+        if k:
+            d[str(k)] = round(float(d.get(str(k)) or 0) + 1.0, 3)
+
+    for pl in plans:
+        bump(prof["caption_styles"], pl.get("caption_style"))
+        for tr in (pl.get("transitions") or []):
+            if isinstance(tr, dict):
+                bump(prof["transitions"], tr.get("type"))
+        for tov in (pl.get("text_overlays") or []):
+            if isinstance(tov, dict):
+                bump(prof["text_overlay_variants"], tov.get("variant"))
+        for mg in (pl.get("motion_graphics") or []):
+            if isinstance(mg, dict):
+                bump(prof["motion_graphics"], mg.get("type"))
+        for em in (pl.get("_emphasis_moments") or pl.get("emphasis_moments") or []):
+            if isinstance(em, dict):
+                bump(prof["zoom_types"], (em.get("zoom_effect") or {}).get("type"))
+    return prof
+
+
 # ─── Platform style pulse (launch nudge · pre-freeze F2) ────────────────────
 #
 # Counter for day-one caption monoculture (burn-in F2: 3/3 fresh-history jobs
@@ -2596,7 +2683,19 @@ def check_concurrency_gate(user_id, job_id, tier=None):
     }
 
 
-def format_user_style_section(profile):
+_PROV_EXPORTED = """These are the categories from the videos this user actually KEPT — they
+exported them, which is the ONE act in the product that signals approval.
+This is real accepted taste. Weight it accordingly."""
+
+_PROV_DELIVERED = """These are the categories THIS PIPELINE CHOSE for their past videos — NOT
+choices the user made, and NOT evidence of approval: the user supplies a vibe,
+the system picks every caption style, transition, zoom and graphic, and most
+delivered videos are never exported. This user has too few exports to build a
+kept-video profile, so treat the list as WEAK — a record of what they have been
+given, never a reason to repeat it."""
+
+
+def format_user_style_section(profile, from_exports=False):
     """Render a prompt section from a fetched profile. Empty string if too thin."""
     if not isinstance(profile, dict):
         return ""
@@ -2656,16 +2755,14 @@ def format_user_style_section(profile):
     _avg_mg = float(profile.get("avg_mgs_per_video") or 0)
     _recent_vibes = profile.get("recent_vibes") or []
     _rv_tail = ", ".join(f'"{v}"' for v in _recent_vibes[-5:]) if _recent_vibes else "(none)"
+    _provenance = _PROV_EXPORTED if from_exports else _PROV_DELIVERED
+    _src_label = "from videos they KEPT" if from_exports else "from videos we DELIVERED"
 
     return f"""
 
-=== THIS USER'S PREFERRED STYLE (learned from their past {_total} videos) ===
+=== THIS USER'S STYLE ({_src_label} — {_total} video(s)) ===
 
-These are the categories THIS PIPELINE CHOSE for their past videos — NOT
-choices the user made. The user supplies a vibe; every caption style,
-transition, zoom and graphic below was selected by the system. Treat it as a
-record of what they have BEEN GIVEN — weak evidence of taste and NO evidence of
-approval, since most delivered videos are never exported. Recency-weighted counts — higher numbers = more frequent
+{_provenance} Recency-weighted counts — higher numbers = more frequent
 / more recent picks. Use these as TASTE signals about WHICH types to
 reach for, NOT as quantity targets.
 
@@ -5134,7 +5231,18 @@ def _build_post_cuts_prompt(
     _usr_block = ""
     _usp = dict(user_style_profile or {})
     if _usp and int(_usp.get("total_videos") or 0) >= 3:
-        _usr_block = format_user_style_section(_usp)
+        # Prefer taste built from videos the user KEPT over videos we merely
+        # delivered. Falls back silently to the delivered profile — and the
+        # block itself states which evidence it used.
+        # user_id is not a parameter here, but the profile ROW carries it as a
+        # column — so the join needs no signature change.
+        _uid = _usp.get("user_id")
+        _exported_plans = fetch_exported_plans(_uid) if _uid else []
+        if len(_exported_plans) >= _EXPORT_PROFILE_MIN:
+            _usr_block = format_user_style_section(
+                build_profile_from_plans(_exported_plans), from_exports=True)
+        else:
+            _usr_block = format_user_style_section(_usp)
 
     # Chronological caption-style rotation — independent of the
     # total_videos gate above. Empty list → empty string → no block leaked
