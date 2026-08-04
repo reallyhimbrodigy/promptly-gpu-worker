@@ -2624,8 +2624,20 @@ def format_user_style_section(profile):
             return "(no data)"
         return ", ".join(f"{k} ({v:.1f})" for k, v in items)
 
-    _caps = _fmt_top(_top_counts("caption_styles", 3))
-    _trans = _fmt_top(_top_counts("transitions", 3))
+    def _live_only(items, valid):
+        """Drop RETIRED component types before they are taught as taste.
+
+        Measured on 200 stored profiles (Zac 2026-08-03): 29 carried a motion
+        graphic that no longer exists — IconLabel x27, Toggle, NumberTicker —
+        plus StageZoom on 3 and the retired caption styles Passage,
+        EditorialPop and CinematicLetterpress on 6. One profile's ENTIRE caption
+        history was a single retired style. Teaching the model that a user
+        prefers a component the renderer cannot produce is a confident
+        falsehood that can only end in a wasted pick or a silent fallback."""
+        return [(k, v) for k, v in items if k in valid]
+
+    _caps = _fmt_top(_live_only(_top_counts("caption_styles", 6), VALID_CAPTION_STYLES)[:3])
+    _trans = _fmt_top(_live_only(_top_counts("transitions", 6), VALID_TRANSITION_TYPES)[:3])
     # PACING and COLOR EFFECTS are DELIBERATELY NOT SHOWN (Zac 2026-08-03).
     # Both are PYTHON CONSTANTS, not user choices, so presenting them as learned
     # taste was a FALSE SIGNAL about a specific user — the worst place to put one:
@@ -2638,8 +2650,8 @@ def format_user_style_section(profile):
     # irrelevant: delete. Restore either line only if the field becomes a real
     # per-user choice again.
     _tov = _fmt_top(_top_counts("text_overlay_variants", 3))
-    _mgs = _fmt_top(_top_counts("motion_graphics", 3))
-    _zooms = _fmt_top(_top_counts("zoom_types", 3))
+    _mgs = _fmt_top(_live_only(_top_counts("motion_graphics", 6), VALID_MG_TYPES)[:3])
+    _zooms = _fmt_top(_live_only(_top_counts("zoom_types", 6), VALID_ZOOM_TYPES)[:3])
     _avg_em = float(profile.get("avg_emphasis_per_30s") or 0)
     _avg_mg = float(profile.get("avg_mgs_per_video") or 0)
     _recent_vibes = profile.get("recent_vibes") or []
@@ -2649,9 +2661,11 @@ def format_user_style_section(profile):
 
 === THIS USER'S PREFERRED STYLE (learned from their past {_total} videos) ===
 
-These are the aesthetic CATEGORIES this user has accepted over time —
-which caption style they tend toward, which transition types, which zoom
-personalities. Recency-weighted counts — higher numbers = more frequent
+These are the categories THIS PIPELINE CHOSE for their past videos — NOT
+choices the user made. The user supplies a vibe; every caption style,
+transition, zoom and graphic below was selected by the system. Treat it as a
+record of what they have BEEN GIVEN — weak evidence of taste and NO evidence of
+approval, since most delivered videos are never exported. Recency-weighted counts — higher numbers = more frequent
 / more recent picks. Use these as TASTE signals about WHICH types to
 reach for, NOT as quantity targets.
 
