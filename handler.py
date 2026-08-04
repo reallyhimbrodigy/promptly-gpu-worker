@@ -2626,8 +2626,17 @@ def format_user_style_section(profile):
 
     _caps = _fmt_top(_top_counts("caption_styles", 3))
     _trans = _fmt_top(_top_counts("transitions", 3))
-    _pacing = _fmt_top(_top_counts("pacings", 3))
-    _color = _fmt_top(_top_counts("color_effects", 3))
+    # PACING and COLOR EFFECTS are DELIBERATELY NOT SHOWN (Zac 2026-08-03).
+    # Both are PYTHON CONSTANTS, not user choices, so presenting them as learned
+    # taste was a FALSE SIGNAL about a specific user — the worst place to put one:
+    #   pacing       hardcoded "fast" in the cuts layer -> 392/392 plans "fast",
+    #                including 7/7 "Professional corporate style"
+    #   color_effect force-set to None (the feature was removed) -> 392/392 None
+    # So every returning user was told "you prefer FAST pacing and no colour
+    # grade", whatever they had actually accepted. Code GUARANTEES both values,
+    # which by the prompt-delete test means the model's understanding of them is
+    # irrelevant: delete. Restore either line only if the field becomes a real
+    # per-user choice again.
     _tov = _fmt_top(_top_counts("text_overlay_variants", 3))
     _mgs = _fmt_top(_top_counts("motion_graphics", 3))
     _zooms = _fmt_top(_top_counts("zoom_types", 3))
@@ -2648,8 +2657,6 @@ reach for, NOT as quantity targets.
 
   Caption styles:         {_caps}
   Transitions:            {_trans}
-  Pacing:                 {_pacing}
-  Color effects:          {_color}
   Text overlay variants:  {_tov}
   Motion graphics:        {_mgs}
   Zoom types:             {_zooms}
