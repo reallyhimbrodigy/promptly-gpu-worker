@@ -10708,6 +10708,39 @@ def _check_private_clean_export():
         "clean_export_key must be on both completion writes AND both payloads"
 
 
+@check("ASSERTIONS MUST NOT MATCH SHORT TOKENS AGAINST RAW SOURCE (2026-08-04, the FOURTH instance of one class): \"500\" matched inside \"max 500 tokens\" and retried a deterministic 400 three times; \"chrome\"/\"Chromium\" matched the SUCCESSFUL startup line and mislabelled two healthy renders as browser_launch; .endswith('.mp4') matched a 0-byte HLS init.mp4 in three separate places, one of which wrote a bad URL into a user's row; and my own gate assertion matched \"ACL\" inside my own comment saying there is NO ACL. A short token proves nothing about CODE because it also appears in prose. This meta-check scans validate_deploy's own assertions and FAILS on any that match a token of 6 characters or fewer against unstripped source — the fix is to strip comments first (_code_only) or assert on parsed/live state instead.")
+def _check_no_short_token_source_assertions():
+    import re as _re
+    _own = open("validate_deploy.py").read().split("\n")
+    # Only flag `"<short>" in <rawsourcevar>` — a distinctive code expression is
+    # fine, a 6-char token is not.
+    # MATCH COMPLETE LITERALS, anchored. My first version was unanchored and
+    # captured the TAIL of longer literals — it flagged ': _gsi' out of
+    # '"sceneIndex": _gsi' and ':' out of '"audible_start":'. That is the same
+    # under-anchoring class it exists to catch, which is the fifth instance.
+    # `_h` is excluded: it is a MODULE in several checks (_h._EmphasisMoment
+    # .model_fields is parsed state, exactly what we want people to use).
+    _rx = _re.compile(r'''(['"])((?:(?!\1).)*)\1\s+(?:not\s+)?in\s+(_src|_blk|_win|_fn|_lad)\b''')
+    _bad = []
+    for _i, _ln in enumerate(_own, 1):
+        _t = _ln.strip()
+        if not _t.startswith("assert"):
+            continue
+        for _m in _rx.finditer(_t):
+            _tok = _m.group(2)
+            if len(_tok) > 6:
+                continue                      # a distinctive code fragment
+            # Only PROSE-LIKE tokens are dangerous: they can appear in comments.
+            # Punctuation/structure fragments (':', ',', '":') cannot be mistaken
+            # for prose and are always read inside a narrow extracted window.
+            if not _tok or not _re.fullmatch(r'[A-Za-z0-9_]+', _tok):
+                continue
+            _bad.append(f"line {_i}: {_tok!r} against {_m.group(3)}")
+    assert not _bad, (
+        "short-token assertions against raw source (they match COMMENTS too): "
+        + "; ".join(_bad[:6]))
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

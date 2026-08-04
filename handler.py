@@ -31983,11 +31983,37 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     if not upload_url:
         raise RuntimeError("No upload_url provided — Node dispatcher must pre-generate the presigned PUT URL")
     _aws_b, _aws_k = _parse_aws_s3_url(upload_url)
+    # PRIVATE CLEAN EXPORT — minimal/hype route. Same contract and same split as
+    # the main render path.
+    #
+    # WHY THIS ROUTE MATTERS MORE THAN THE OLD-JOB CASE: a NULL clean_export_key
+    # makes the gate 404 and the client falls back to saving the public URL. The
+    # old-job NULL is TEMPORAL and shrinks to nothing on its own; a NULL here is
+    # STRUCTURAL and never would — this route is roughly a third of traffic, so
+    # arming the gate while it persists NULL would let that third export free
+    # PERMANENTLY. The same 404 covers both, so nothing downstream can tell them
+    # apart. NULL must be impossible for new renders.
+    _clean_export_key = None
+    _jid_export = str(input_data.get("job_id") or "").strip()
+    if _aws_b and _aws_k and _aws_s3_client and _jid_export:
+        try:
+            _ck = f"exports/{_jid_export}/clean.mp4"
+            _aws_s3_client.upload_file(
+                output_path, _aws_b, _ck,
+                ExtraArgs={"ContentType": "video/mp4"}, Config=_S3_TRANSFER_CONFIG)
+            _clean_export_key = _ck
+            print(f"[export] clean master -> s3://{_aws_b}/{_ck} (private, minimal route)", flush=True)
+        except Exception as _ce:
+            _clean_export_key = None
+            print(f"[export] clean master upload FAILED ({type(_ce).__name__}: {_ce}) "
+                  f"— gate will fall back for this job", flush=True)
+    # The PUBLIC artifact. `_preview_path` is the seam the watermark pass takes.
+    _preview_path = output_path
     if _aws_b and _aws_k:
         if not _aws_s3_client:
             raise RuntimeError("AWS S3 client not initialized — cannot upload")
         _aws_s3_client.upload_file(
-            output_path, _aws_b, _aws_k,
+            _preview_path, _aws_b, _aws_k,
             ExtraArgs={"ContentType": "video/mp4"}, Config=_S3_TRANSFER_CONFIG)
     else:
         _sb_b, _sb_k = _parse_supabase_storage_url(upload_url)
@@ -31995,7 +32021,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             raise RuntimeError(
                 f"Could not parse bucket/key from upload_url: {upload_url[:120]}")
         _s3_client.upload_file(
-            output_path, _sb_b, _sb_k,
+            _preview_path, _sb_b, _sb_k,
             ExtraArgs={"ContentType": "video/mp4"}, Config=_S3_TRANSFER_CONFIG)
     _video_url = input_data.get("public_url") or upload_url.split("?")[0]
     _hls_url = None
@@ -32168,13 +32194,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         # {edit_rationale, post_caption, post_hook} (POST_PACKAGE_CONTRACT.md).
         "post_package": _post_package,
         "video_url": _video_url,
-        # MINIMAL/HYPE ROUTE: renders through hype_render, which does not pass
-        # through the main upload block, so there is no private clean asset for
-        # these jobs yet. NULL is the honest value — the export gate falls back
-        # rather than signing a key that does not exist. Wiring the clean export
-        # into this route is the follow-up; fabricating a key here would make the
-        # gate 403 for every minimal-route user.
-        "clean_export_key": None,
+        "clean_export_key": _clean_export_key,
     }
     if _hls_url:
         result_payload["hls_manifest_url"] = _hls_url
@@ -32187,7 +32207,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "hls_manifest_url": _hls_url,
             # See the note on the main completion write — this allowlist is the
             # only thing the export gate can read.
-            "clean_export_key": None,   # see the note on result_payload above
+            "clean_export_key": _clean_export_key,
             "edit_recipe": result_payload["edit_recipe"],
             "transcript": [],
             "render_version": RENDER_VERSION,
