@@ -10620,6 +10620,24 @@ def _check_frame_coverage_clamp():
         "a tight threshold would clamp healthy sources — the gap must stay material"
 
 
+@check("ONE RESOLVER FOR A JOB'S PLAYABLE OUTPUT (2026-08-04): the same probe bug was written TWICE in one night, both times reporting the pipeline as broken when it was fine. (1) ffprobe on a private S3 URL 403'd -> seven matrix cells read POOR and were one step from being reported as seven new classes. (2) Selecting the newest key ending in '.mp4' picked <job>-hls/stream_1080p/init.mp4 — a 0-BYTE HLS INIT SEGMENT beside the real 33.5MB render — and every cell read 0.0MB/0.00s again. promptly_output.pick_playable_output is the single way to resolve it: largest playable mp4, HLS artifacts excluded, order-independent (segments are written AFTER the deliverable, so 'newest' picks wrong by construction). cert: test_promptly_output.py 16/16 with positive AND negative controls.")
+def _check_one_output_resolver():
+    import promptly_output as _po
+    # NEGATIVE CONTROL: the exact object the second probe picked.
+    assert _po.is_playable_output("x/job-hls/stream_1080p/init.mp4", 0) is False
+    assert _po.is_playable_output("x/job-hls/stream_1080p/init.mp4", 99_000_000) is False, \
+        "an HLS artifact is never the deliverable, whatever its size"
+    assert _po.is_playable_output("x/job-hls/s/seg_0.m4s", 6_000_000) is False
+    assert _po.is_playable_output("x/job.mp4", 900) is False, "a stub is not playable"
+    # POSITIVE CONTROL: without this the helper could 'pass' by rejecting everything.
+    assert _po.is_playable_output("x/job.mp4", 35_000_000) is True
+    # the harnesses must USE it rather than re-matching .mp4 themselves
+    _m = open("cert_input_matrix.py").read()
+    assert "pick_playable_output" in _m, \
+        "the matrix harness must resolve outputs through the shared helper"
+    assert "promptly_output.py" in _m, "the helper must be mounted into the image"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

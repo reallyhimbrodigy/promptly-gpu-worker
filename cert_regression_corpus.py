@@ -31,7 +31,9 @@ sys.path.insert(0, "/")
 import modal  # noqa: E402
 import modal_app  # noqa: E402
 
-image = modal_app.image.add_local_file("modal_app.py", "/modal_app.py")
+image = (modal_app.image
+         .add_local_file("modal_app.py", "/modal_app.py")
+         .add_local_file("promptly_output.py", "/promptly_output.py"))
 app = modal.App("cert-regression-corpus", image=image)
 
 SECRETS = [
