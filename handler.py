@@ -29424,6 +29424,8 @@ _ERROR_SUBCODES = {
         ("analyze_silence", ("silencedetect",)),
         ("analyze_black", ("blackdetect",)),
         ("analyze_freeze", ("freezedetect",)),
+        ("audio_extract_stream_map", ("no decoder found for: none",
+                                      "audio_for_words", "Decoding requested, but no decoder")),
         ("proxy_encode", ("gemini_proxy",)),
         ("normalize", ("source_canonical", "fps_normalize")),
         ("composite", ("concat", "-filter_complex")),
@@ -34839,8 +34841,20 @@ def handler(job):
             send_progress(job_id, "transcribe", 10, "Transcribing every word", app_url)
             audio_path = os.path.join(work_dir, "audio_for_words.ogg")
             _audio_ext = subprocess.run(
+                # EXPLICIT STREAM MAP (2026-08-04). `-vn` drops video but ffmpeg
+                # still AUTO-SELECTS every remaining stream. An iPhone source
+                # carrying a "Core Media Metadata" track presents it as an audio
+                # stream with codec `none`, and ffmpeg dies with "Decoding
+                # requested, but no decoder found for: none" before writing a
+                # byte — job 09c8fa8f, a 7.1s 1920x1080 HEVC clip. A fixed
+                # assumption (take whatever streams exist) meeting an input shape
+                # nobody tested, which is every render class found today.
+                # -map 0:a:0? takes ONLY the first real audio stream; the `?`
+                # keeps a genuinely silent source falling through to the existing
+                # empty-file check instead of a hard map error.
                 ["ffmpeg", "-threads", "0", "-y", "-i", _raw_source,
-                 "-vn", "-c:a", "libopus", "-b:a", "32k", "-ar", "16000", "-ac", "1", audio_path],
+                 "-vn", "-dn", "-sn", "-map", "0:a:0?",
+                 "-c:a", "libopus", "-b:a", "32k", "-ar", "16000", "-ac", "1", audio_path],
                 capture_output=True, text=True, timeout=30,
             )
             if _audio_ext.returncode != 0:
