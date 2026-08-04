@@ -1,0 +1,4200 @@
+{
+ "007ba088": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 83,
+   "gate_pass": true,
+   "coverage_pct": 83.3,
+   "unworded_s": 0.2,
+   "vad_speech_s": 1.2,
+   "timing": {
+    "n": 79,
+    "median_ms": 41.0,
+    "p90_ms": 121.0,
+    "within_50ms_pct": 64.6,
+    "matched_pct": 95.2
+   },
+   "dur": 55.5
+  }
+ },
+ "00e0d0f7": {
+  "deepgram": {
+   "lang": "hi",
+   "n_words": 146,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 45.0,
+   "timing": {
+    "n": 139,
+    "median_ms": 65.0,
+    "p90_ms": 182.7,
+    "within_50ms_pct": 42.4,
+    "matched_pct": 95.2
+   },
+   "dur": 44.9
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 145,
+   "gate_pass": true,
+   "coverage_pct": 99.6,
+   "unworded_s": 0.2,
+   "vad_speech_s": 45.0,
+   "timing": {
+    "n": 135,
+    "median_ms": 19.0,
+    "p90_ms": 151.0,
+    "within_50ms_pct": 66.7,
+    "matched_pct": 93.1
+   },
+   "dur": 44.9
+  }
+ },
+ "02937bf1": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 18,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 17,
+    "median_ms": 41.0,
+    "p90_ms": 109.0,
+    "within_50ms_pct": 64.7,
+    "matched_pct": 94.4
+   },
+   "dur": 11.4
+  }
+ },
+ "02c8a0b1": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 31,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 16.8,
+   "timing": {
+    "n": 24,
+    "median_ms": 19.0,
+    "p90_ms": 200.0,
+    "within_50ms_pct": 75.0,
+    "matched_pct": 77.4
+   },
+   "dur": 19.8
+  }
+ },
+ "0363d63b": {
+  "deepgram": {
+   "lang": "id",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 41.8
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 71,
+   "gate_pass": true,
+   "coverage_pct": 99.7,
+   "unworded_s": 0.1,
+   "vad_speech_s": 28.6,
+   "timing": {
+    "n": 67,
+    "median_ms": 29.0,
+    "p90_ms": 121.0,
+    "within_50ms_pct": 70.1,
+    "matched_pct": 94.4
+   },
+   "dur": 41.8
+  }
+ },
+ "0441644f": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 18,
+   "gate_pass": false,
+   "coverage_pct": 67.9,
+   "unworded_s": 4.5,
+   "vad_speech_s": 14.0,
+   "timing": {
+    "n": 16,
+    "median_ms": 19.0,
+    "p90_ms": 159.0,
+    "within_50ms_pct": 62.5,
+    "matched_pct": 88.9
+   },
+   "dur": 19.7
+  }
+ },
+ "0542a88b": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 40.0
+  }
+ },
+ "069f43c9": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 14.9
+  }
+ },
+ "06c881a4": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 18,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.3,
+   "timing": {
+    "n": 13,
+    "median_ms": 41.0,
+    "p90_ms": 131.0,
+    "within_50ms_pct": 53.8,
+    "matched_pct": 72.2
+   },
+   "dur": 14.1
+  }
+ },
+ "08850b67": {
+  "scribe": {
+   "lang": "mal",
+   "n_words": 26,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 14.6,
+   "timing": {
+    "n": 26,
+    "median_ms": 11.0,
+    "p90_ms": 40.0,
+    "within_50ms_pct": 88.5,
+    "matched_pct": 100.0
+   },
+   "dur": 21.8
+  }
+ },
+ "0a1600c4": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 22,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 22,
+    "median_ms": 41.0,
+    "p90_ms": 120.0,
+    "within_50ms_pct": 68.2,
+    "matched_pct": 100.0
+   },
+   "dur": 22.6
+  }
+ },
+ "0a2ae685": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 40.0
+  }
+ },
+ "0a2d17a0": {
+  "scribe": {
+   "lang": "ita",
+   "n_words": 17,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 3.8,
+   "timing": {
+    "n": 17,
+    "median_ms": 59.0,
+    "p90_ms": 121.0,
+    "within_50ms_pct": 47.1,
+    "matched_pct": 100.0
+   },
+   "dur": 11.7
+  }
+ },
+ "0a2d612a": {
+  "scribe": {
+   "lang": "fil",
+   "n_words": 138,
+   "gate_pass": true,
+   "coverage_pct": 96.3,
+   "unworded_s": 2.2,
+   "vad_speech_s": 59.3,
+   "timing": {
+    "n": 75,
+    "median_ms": 29.0,
+    "p90_ms": 150.0,
+    "within_50ms_pct": 61.3,
+    "matched_pct": 54.3
+   },
+   "dur": 95.5
+  }
+ },
+ "0ba051ee": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 176,
+   "gate_pass": true,
+   "coverage_pct": 96.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 2.7,
+   "timing": {
+    "n": 175,
+    "median_ms": 29.0,
+    "p90_ms": 101.0,
+    "within_50ms_pct": 72.0,
+    "matched_pct": 99.4
+   },
+   "dur": 46.2
+  }
+ },
+ "0cbbe898": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 9.3
+  }
+ },
+ "0e30e422": {
+  "scribe": {
+   "lang": "fra",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 15.6
+  }
+ },
+ "0efcfa4b": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 17,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 14,
+    "median_ms": 21.0,
+    "p90_ms": 121.0,
+    "within_50ms_pct": 71.4,
+    "matched_pct": 82.4
+   },
+   "dur": 6.1
+  }
+ },
+ "0fa2d5c1": {
+  "scribe": {
+   "lang": "ceb",
+   "n_words": 8,
+   "gate_pass": false,
+   "coverage_pct": 38.5,
+   "unworded_s": 4.8,
+   "vad_speech_s": 7.8,
+   "timing": null,
+   "dur": 8.7
+  }
+ },
+ "11118053": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 70.4
+  }
+ },
+ "12e13926": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 32.7
+  }
+ },
+ "14c732f8": {
+  "deepgram": {
+   "lang": "hi",
+   "n_words": 111,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 45.3,
+   "timing": {
+    "n": 108,
+    "median_ms": 55.0,
+    "p90_ms": 165.0,
+    "within_50ms_pct": 48.1,
+    "matched_pct": 97.3
+   },
+   "dur": 56.5
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 112,
+   "gate_pass": true,
+   "coverage_pct": 99.6,
+   "unworded_s": 0.2,
+   "vad_speech_s": 45.3,
+   "timing": {
+    "n": 109,
+    "median_ms": 19.0,
+    "p90_ms": 149.0,
+    "within_50ms_pct": 67.9,
+    "matched_pct": 97.3
+   },
+   "dur": 56.5
+  }
+ },
+ "1555be06": {
+  "scribe": {
+   "lang": "mya",
+   "n_words": 43,
+   "gate_pass": false,
+   "coverage_pct": 59.5,
+   "unworded_s": 3.0,
+   "vad_speech_s": 7.4,
+   "timing": null,
+   "dur": 12.0
+  }
+ },
+ "164f22b3": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 146,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 57.7,
+   "timing": {
+    "n": 124,
+    "median_ms": 60.0,
+    "p90_ms": 180.0,
+    "within_50ms_pct": 42.7,
+    "matched_pct": 84.9
+   },
+   "dur": 71.5
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 146,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 57.7,
+   "timing": {
+    "n": 121,
+    "median_ms": 19.0,
+    "p90_ms": 121.0,
+    "within_50ms_pct": 69.4,
+    "matched_pct": 82.9
+   },
+   "dur": 71.5
+  }
+ },
+ "16ce2bc3": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 30,
+   "gate_pass": true,
+   "coverage_pct": 97.3,
+   "unworded_s": 0.2,
+   "vad_speech_s": 7.3,
+   "timing": {
+    "n": 30,
+    "median_ms": 9.0,
+    "p90_ms": 21.0,
+    "within_50ms_pct": 96.7,
+    "matched_pct": 100.0
+   },
+   "dur": 27.6
+  }
+ },
+ "1761fb5c": {
+  "scribe": {
+   "lang": "tel",
+   "n_words": 73,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 73,
+    "median_ms": 19.0,
+    "p90_ms": 50.0,
+    "within_50ms_pct": 89.0,
+    "matched_pct": 100.0
+   },
+   "dur": 63.6
+  }
+ },
+ "190be96f": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 12.0
+  }
+ },
+ "1a19a47c": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 103,
+   "gate_pass": false,
+   "coverage_pct": 86.1,
+   "unworded_s": 6.1,
+   "vad_speech_s": 43.8,
+   "timing": {
+    "n": 93,
+    "median_ms": 50.0,
+    "p90_ms": 155.0,
+    "within_50ms_pct": 47.3,
+    "matched_pct": 90.3
+   },
+   "dur": 102.2
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 157,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 43.8,
+   "timing": {
+    "n": 143,
+    "median_ms": 19.0,
+    "p90_ms": 121.0,
+    "within_50ms_pct": 67.1,
+    "matched_pct": 91.1
+   },
+   "dur": 102.2
+  }
+ },
+ "1aa6fed1": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 63,
+   "gate_pass": false,
+   "coverage_pct": 89.0,
+   "unworded_s": 3.0,
+   "vad_speech_s": 27.2,
+   "timing": {
+    "n": 28,
+    "median_ms": 101.0,
+    "p90_ms": 169.0,
+    "within_50ms_pct": 39.3,
+    "matched_pct": 44.4
+   },
+   "dur": 47.1
+  }
+ },
+ "1abc4aa0": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.0
+  }
+ },
+ "1ad34b55": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 30.4
+  }
+ },
+ "1b3a018e": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 5.6
+  }
+ },
+ "1cf4f07f": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 134,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 54.0,
+   "timing": {
+    "n": 27,
+    "median_ms": 118.0,
+    "p90_ms": 220.0,
+    "within_50ms_pct": 11.1,
+    "matched_pct": 20.1
+   },
+   "dur": 75.8
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 135,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 54.0,
+   "timing": {
+    "n": 26,
+    "median_ms": 31.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 53.8,
+    "matched_pct": 19.3
+   },
+   "dur": 75.8
+  }
+ },
+ "1ef235ed": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 17,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 16,
+    "median_ms": 30.0,
+    "p90_ms": 81.0,
+    "within_50ms_pct": 62.5,
+    "matched_pct": 94.1
+   },
+   "dur": 10.1
+  }
+ },
+ "20e040a6": {
+  "scribe": {
+   "lang": "mar",
+   "n_words": 59,
+   "gate_pass": true,
+   "coverage_pct": 92.1,
+   "unworded_s": 1.7,
+   "vad_speech_s": 21.5,
+   "timing": {
+    "n": 32,
+    "median_ms": 130.0,
+    "p90_ms": 221.0,
+    "within_50ms_pct": 31.2,
+    "matched_pct": 54.2
+   },
+   "dur": 43.4
+  }
+ },
+ "2103a83c": {
+  "deepgram": {
+   "lang": "ja",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 23.2
+  },
+  "scribe": {
+   "lang": "ben",
+   "n_words": 13,
+   "gate_pass": true,
+   "coverage_pct": 79.8,
+   "unworded_s": 1.8,
+   "vad_speech_s": 8.9,
+   "timing": {
+    "n": 11,
+    "median_ms": 19.0,
+    "p90_ms": 69.0,
+    "within_50ms_pct": 72.7,
+    "matched_pct": 84.6
+   },
+   "dur": 23.2
+  }
+ },
+ "220bb33a": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 309,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 77.4,
+   "timing": {
+    "n": 286,
+    "median_ms": 19.0,
+    "p90_ms": 141.0,
+    "within_50ms_pct": 66.8,
+    "matched_pct": 92.6
+   },
+   "dur": 81.5
+  }
+ },
+ "23932cb9": {
+  "scribe": {
+   "lang": "fil",
+   "n_words": 234,
+   "gate_pass": true,
+   "coverage_pct": 93.9,
+   "unworded_s": 5.4,
+   "vad_speech_s": 88.3,
+   "timing": {
+    "n": 184,
+    "median_ms": 21.0,
+    "p90_ms": 160.0,
+    "within_50ms_pct": 62.5,
+    "matched_pct": 78.6
+   },
+   "dur": 97.2
+  }
+ },
+ "23c5cd43": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 63,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 5.7,
+   "timing": {
+    "n": 52,
+    "median_ms": 29.0,
+    "p90_ms": 180.0,
+    "within_50ms_pct": 67.3,
+    "matched_pct": 82.5
+   },
+   "dur": 20.2
+  }
+ },
+ "242470b9": {
+  "scribe": {
+   "lang": "vie",
+   "n_words": 18,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 6.1,
+   "timing": {
+    "n": 18,
+    "median_ms": 41.0,
+    "p90_ms": 109.0,
+    "within_50ms_pct": 66.7,
+    "matched_pct": 100.0
+   },
+   "dur": 7.9
+  }
+ },
+ "26b98690": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 51.3
+  }
+ },
+ "287131c6": {
+  "deepgram": {
+   "lang": "id",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 7.3
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 6,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 5,
+    "median_ms": 31.0,
+    "p90_ms": 131.0,
+    "within_50ms_pct": 60.0,
+    "matched_pct": 83.3
+   },
+   "dur": 7.3
+  }
+ },
+ "28736c82": {
+  "scribe": {
+   "lang": "kor",
+   "n_words": 18,
+   "gate_pass": true,
+   "coverage_pct": 97.4,
+   "unworded_s": 0.1,
+   "vad_speech_s": 3.8,
+   "timing": {
+    "n": 18,
+    "median_ms": 29.0,
+    "p90_ms": 139.0,
+    "within_50ms_pct": 66.7,
+    "matched_pct": 100.0
+   },
+   "dur": 11.7
+  }
+ },
+ "291e653f": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 55,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 46.5,
+   "timing": {
+    "n": 55,
+    "median_ms": 10.0,
+    "p90_ms": 39.0,
+    "within_50ms_pct": 96.4,
+    "matched_pct": 100.0
+   },
+   "dur": 78.9
+  }
+ },
+ "2977482b": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 51,
+   "gate_pass": true,
+   "coverage_pct": 93.9,
+   "unworded_s": 0.7,
+   "vad_speech_s": 11.5,
+   "timing": {
+    "n": 51,
+    "median_ms": 20.0,
+    "p90_ms": 100.0,
+    "within_50ms_pct": 70.6,
+    "matched_pct": 100.0
+   },
+   "dur": 43.9
+  }
+ },
+ "297daa0c": {
+  "scribe": {
+   "lang": "spa",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 9.3
+  }
+ },
+ "2a9485d7": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 40.0
+  }
+ },
+ "2b7cd2d9": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 48.0
+  }
+ },
+ "2d6bfb9e": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 80.3
+  }
+ },
+ "2f5d20de": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.1
+  }
+ },
+ "30db9374": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 5.6
+  }
+ },
+ "30e156a2": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 22.2
+  }
+ },
+ "315d8e22": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 60,
+   "gate_pass": true,
+   "coverage_pct": 99.5,
+   "unworded_s": 0.1,
+   "vad_speech_s": 20.5,
+   "timing": {
+    "n": 58,
+    "median_ms": 46.3,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 55.2,
+    "matched_pct": 96.7
+   },
+   "dur": 23.4
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 59,
+   "gate_pass": true,
+   "coverage_pct": 99.5,
+   "unworded_s": 0.1,
+   "vad_speech_s": 20.5,
+   "timing": {
+    "n": 56,
+    "median_ms": 11.0,
+    "p90_ms": 151.0,
+    "within_50ms_pct": 82.1,
+    "matched_pct": 94.9
+   },
+   "dur": 23.4
+  }
+ },
+ "341f9563": {
+  "scribe": {
+   "lang": "pan",
+   "n_words": 21,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 21,
+    "median_ms": 1.0,
+    "p90_ms": 19.0,
+    "within_50ms_pct": 100.0,
+    "matched_pct": 100.0
+   },
+   "dur": 8.9
+  }
+ },
+ "377916d4": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 12.9
+  }
+ },
+ "37c9db97": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 12.5
+  }
+ },
+ "38265acf": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 25.4
+  }
+ },
+ "3b28d5b0": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 8.0
+  }
+ },
+ "3b389b80": {
+  "scribe": {
+   "lang": "tam",
+   "n_words": 11,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.3,
+   "timing": {
+    "n": 11,
+    "median_ms": 21.0,
+    "p90_ms": 59.0,
+    "within_50ms_pct": 81.8,
+    "matched_pct": 100.0
+   },
+   "dur": 32.0
+  }
+ },
+ "3be76573": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 63,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 5.7,
+   "timing": {
+    "n": 52,
+    "median_ms": 29.0,
+    "p90_ms": 180.0,
+    "within_50ms_pct": 67.3,
+    "matched_pct": 82.5
+   },
+   "dur": 20.2
+  }
+ },
+ "3dc8a582": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 36,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 36,
+    "median_ms": 29.0,
+    "p90_ms": 49.0,
+    "within_50ms_pct": 94.4,
+    "matched_pct": 100.0
+   },
+   "dur": 14.8
+  }
+ },
+ "3de806c4": {
+  "deepgram": {
+   "lang": "ru",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 16.4
+  },
+  "scribe": {
+   "lang": "spa",
+   "n_words": 24,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 6.9,
+   "timing": {
+    "n": 24,
+    "median_ms": 21.0,
+    "p90_ms": 69.0,
+    "within_50ms_pct": 75.0,
+    "matched_pct": 100.0
+   },
+   "dur": 16.4
+  }
+ },
+ "3df47df4": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 18.7
+  }
+ },
+ "3e01408c": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 1,
+   "gate_pass": false,
+   "coverage_pct": 6.4,
+   "unworded_s": 7.3,
+   "vad_speech_s": 7.8,
+   "timing": null,
+   "dur": 27.0
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 8,
+   "gate_pass": false,
+   "coverage_pct": 55.1,
+   "unworded_s": 3.5,
+   "vad_speech_s": 7.8,
+   "timing": {
+    "n": 7,
+    "median_ms": 21.0,
+    "p90_ms": 90.0,
+    "within_50ms_pct": 57.1,
+    "matched_pct": 87.5
+   },
+   "dur": 27.0
+  }
+ },
+ "3e07fe9d": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 74,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 74,
+    "median_ms": 9.0,
+    "p90_ms": 80.0,
+    "within_50ms_pct": 85.1,
+    "matched_pct": 100.0
+   },
+   "dur": 36.7
+  }
+ },
+ "3eda58e8": {
+  "scribe": {
+   "lang": "fra",
+   "n_words": 64,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 17.1,
+   "timing": {
+    "n": 64,
+    "median_ms": 19.0,
+    "p90_ms": 79.0,
+    "within_50ms_pct": 73.4,
+    "matched_pct": 100.0
+   },
+   "dur": 17.8
+  }
+ },
+ "3f59f0fa": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 26,
+   "gate_pass": true,
+   "coverage_pct": 83.1,
+   "unworded_s": 1.5,
+   "vad_speech_s": 8.9,
+   "timing": {
+    "n": 24,
+    "median_ms": 49.0,
+    "p90_ms": 121.0,
+    "within_50ms_pct": 54.2,
+    "matched_pct": 92.3
+   },
+   "dur": 10.9
+  }
+ },
+ "4030275a": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 14.3
+  }
+ },
+ "4033dca4": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.0
+  }
+ },
+ "43079b14": {
+  "scribe": {
+   "lang": "tam",
+   "n_words": 26,
+   "gate_pass": true,
+   "coverage_pct": 60.0,
+   "unworded_s": 0.4,
+   "vad_speech_s": 1.0,
+   "timing": {
+    "n": 24,
+    "median_ms": 10.0,
+    "p90_ms": 70.0,
+    "within_50ms_pct": 79.2,
+    "matched_pct": 92.3
+   },
+   "dur": 28.5
+  }
+ },
+ "46c39150": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 35,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 1.7,
+   "timing": {
+    "n": 33,
+    "median_ms": 31.0,
+    "p90_ms": 109.0,
+    "within_50ms_pct": 63.6,
+    "matched_pct": 94.3
+   },
+   "dur": 12.1
+  }
+ },
+ "48df360e": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 8,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.6,
+   "timing": {
+    "n": 7,
+    "median_ms": 19.0,
+    "p90_ms": 21.0,
+    "within_50ms_pct": 85.7,
+    "matched_pct": 87.5
+   },
+   "dur": 7.4
+  }
+ },
+ "4b56bddc": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 43,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 15.2,
+   "timing": {
+    "n": 41,
+    "median_ms": 29.0,
+    "p90_ms": 130.0,
+    "within_50ms_pct": 73.2,
+    "matched_pct": 95.3
+   },
+   "dur": 27.2
+  }
+ },
+ "4b6cbaa6": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 11.3
+  }
+ },
+ "4c059dd2": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 9.9
+  }
+ },
+ "4cbcff19": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 5.4
+  }
+ },
+ "4cfb73a6": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 5,
+   "gate_pass": false,
+   "coverage_pct": 41.2,
+   "unworded_s": 2.0,
+   "vad_speech_s": 3.4,
+   "timing": {
+    "n": 5,
+    "median_ms": 20.0,
+    "p90_ms": 120.0,
+    "within_50ms_pct": 60.0,
+    "matched_pct": 100.0
+   },
+   "dur": 6.5
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 4,
+   "gate_pass": true,
+   "coverage_pct": 50.0,
+   "unworded_s": 1.7,
+   "vad_speech_s": 3.4,
+   "timing": null,
+   "dur": 6.5
+  }
+ },
+ "4d733b6c": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 6.9
+  }
+ },
+ "4e005fe0": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 42,
+   "gate_pass": true,
+   "coverage_pct": 97.2,
+   "unworded_s": 0.2,
+   "vad_speech_s": 7.2,
+   "timing": {
+    "n": 29,
+    "median_ms": 20.0,
+    "p90_ms": 170.0,
+    "within_50ms_pct": 65.5,
+    "matched_pct": 69.0
+   },
+   "dur": 43.2
+  }
+ },
+ "5386971d": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 25,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 3.2,
+   "timing": {
+    "n": 25,
+    "median_ms": 20.0,
+    "p90_ms": 61.0,
+    "within_50ms_pct": 84.0,
+    "matched_pct": 100.0
+   },
+   "dur": 35.1
+  }
+ },
+ "53e60544": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 14.4
+  }
+ },
+ "545f406e": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 72,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 72,
+    "median_ms": 20.0,
+    "p90_ms": 91.0,
+    "within_50ms_pct": 75.0,
+    "matched_pct": 100.0
+   },
+   "dur": 17.9
+  }
+ },
+ "54e61dec": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 6.0
+  }
+ },
+ "55551563": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 5.0
+  }
+ },
+ "55ab1af2": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.7
+  }
+ },
+ "57385a84": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 48,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 48,
+    "median_ms": 11.0,
+    "p90_ms": 50.0,
+    "within_50ms_pct": 89.6,
+    "matched_pct": 100.0
+   },
+   "dur": 20.7
+  }
+ },
+ "58240196": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 71,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 66,
+    "median_ms": 40.0,
+    "p90_ms": 140.0,
+    "within_50ms_pct": 59.1,
+    "matched_pct": 93.0
+   },
+   "dur": 43.8
+  }
+ },
+ "59587200": {
+  "scribe": {
+   "lang": "mar",
+   "n_words": 277,
+   "gate_pass": true,
+   "coverage_pct": 98.0,
+   "unworded_s": 1.8,
+   "vad_speech_s": 89.2,
+   "timing": {
+    "n": 164,
+    "median_ms": 50.0,
+    "p90_ms": 189.0,
+    "within_50ms_pct": 50.6,
+    "matched_pct": 59.2
+   },
+   "dur": 99.7
+  }
+ },
+ "59a5957b": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 16.1
+  }
+ },
+ "5a02c1b6": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 30,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 30,
+    "median_ms": 11.0,
+    "p90_ms": 70.0,
+    "within_50ms_pct": 83.3,
+    "matched_pct": 100.0
+   },
+   "dur": 24.9
+  }
+ },
+ "5a863ce9": {
+  "scribe": {
+   "lang": "urd",
+   "n_words": 142,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.1,
+   "vad_speech_s": 46.9,
+   "timing": {
+    "n": 137,
+    "median_ms": 11.0,
+    "p90_ms": 100.0,
+    "within_50ms_pct": 76.6,
+    "matched_pct": 96.5
+   },
+   "dur": 54.3
+  }
+ },
+ "5b339b1c": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 89,
+   "gate_pass": true,
+   "coverage_pct": 99.7,
+   "unworded_s": 0.1,
+   "vad_speech_s": 29.0,
+   "timing": {
+    "n": 76,
+    "median_ms": 20.0,
+    "p90_ms": 161.0,
+    "within_50ms_pct": 67.1,
+    "matched_pct": 85.4
+   },
+   "dur": 31.7
+  }
+ },
+ "5b99cabb": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 40,
+   "gate_pass": true,
+   "coverage_pct": 90.4,
+   "unworded_s": 1.8,
+   "vad_speech_s": 18.8,
+   "timing": {
+    "n": 39,
+    "median_ms": 21.2,
+    "p90_ms": 111.2,
+    "within_50ms_pct": 64.1,
+    "matched_pct": 97.5
+   },
+   "dur": 20.1
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 50,
+   "gate_pass": true,
+   "coverage_pct": 99.5,
+   "unworded_s": 0.1,
+   "vad_speech_s": 18.8,
+   "timing": {
+    "n": 48,
+    "median_ms": 19.0,
+    "p90_ms": 110.0,
+    "within_50ms_pct": 72.9,
+    "matched_pct": 96.0
+   },
+   "dur": 20.1
+  }
+ },
+ "5decdf11": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 28,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 6.9,
+   "timing": {
+    "n": 25,
+    "median_ms": 30.0,
+    "p90_ms": 100.0,
+    "within_50ms_pct": 64.0,
+    "matched_pct": 89.3
+   },
+   "dur": 15.0
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 29,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 6.9,
+   "timing": {
+    "n": 28,
+    "median_ms": 11.0,
+    "p90_ms": 121.0,
+    "within_50ms_pct": 71.4,
+    "matched_pct": 96.6
+   },
+   "dur": 15.0
+  }
+ },
+ "5e85a61b": {
+  "deepgram": {
+   "lang": "hi",
+   "n_words": 92,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 31.1,
+   "timing": {
+    "n": 34,
+    "median_ms": 75.0,
+    "p90_ms": 220.0,
+    "within_50ms_pct": 32.4,
+    "matched_pct": 37.0
+   },
+   "dur": 33.6
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 92,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 31.1,
+   "timing": {
+    "n": 31,
+    "median_ms": 119.0,
+    "p90_ms": 221.0,
+    "within_50ms_pct": 32.3,
+    "matched_pct": 33.7
+   },
+   "dur": 33.6
+  }
+ },
+ "5efcadb3": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 12,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 12,
+    "median_ms": 21.0,
+    "p90_ms": 29.0,
+    "within_50ms_pct": 91.7,
+    "matched_pct": 100.0
+   },
+   "dur": 20.5
+  }
+ },
+ "6096b51c": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 44,
+   "gate_pass": true,
+   "coverage_pct": 96.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 2.7,
+   "timing": {
+    "n": 44,
+    "median_ms": 19.0,
+    "p90_ms": 39.0,
+    "within_50ms_pct": 88.6,
+    "matched_pct": 100.0
+   },
+   "dur": 23.5
+  }
+ },
+ "6280982d": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 9.2
+  }
+ },
+ "62bd2135": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 15,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 1.1,
+   "timing": {
+    "n": 15,
+    "median_ms": 19.0,
+    "p90_ms": 111.0,
+    "within_50ms_pct": 66.7,
+    "matched_pct": 100.0
+   },
+   "dur": 9.3
+  }
+ },
+ "63da85b7": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 55,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 54,
+    "median_ms": 21.0,
+    "p90_ms": 79.0,
+    "within_50ms_pct": 74.1,
+    "matched_pct": 98.2
+   },
+   "dur": 32.8
+  }
+ },
+ "63f85dee": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 16.3
+  }
+ },
+ "64a21b18": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 7.0
+  }
+ },
+ "6515580e": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.6
+  }
+ },
+ "66d392e1": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 8.5
+  }
+ },
+ "67f803b0": {
+  "deepgram": {
+   "lang": "hi",
+   "n_words": 48,
+   "gate_pass": false,
+   "coverage_pct": 85.4,
+   "unworded_s": 2.1,
+   "vad_speech_s": 14.4,
+   "timing": {
+    "n": 45,
+    "median_ms": 31.8,
+    "p90_ms": 120.0,
+    "within_50ms_pct": 62.2,
+    "matched_pct": 93.8
+   },
+   "dur": 16.2
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 46,
+   "gate_pass": true,
+   "coverage_pct": 98.6,
+   "unworded_s": 0.2,
+   "vad_speech_s": 14.4,
+   "timing": {
+    "n": 43,
+    "median_ms": 9.0,
+    "p90_ms": 79.0,
+    "within_50ms_pct": 81.4,
+    "matched_pct": 93.5
+   },
+   "dur": 16.2
+  }
+ },
+ "686f15a8": {
+  "deepgram": {
+   "lang": "et",
+   "n_words": 10,
+   "gate_pass": true,
+   "coverage_pct": 98.0,
+   "unworded_s": 0.1,
+   "vad_speech_s": 5.1,
+   "timing": {
+    "n": 10,
+    "median_ms": 10.0,
+    "p90_ms": 60.0,
+    "within_50ms_pct": 80.0,
+    "matched_pct": 100.0
+   },
+   "dur": 5.0
+  },
+  "scribe": {
+   "lang": "spa",
+   "n_words": 20,
+   "gate_pass": true,
+   "coverage_pct": 98.0,
+   "unworded_s": 0.1,
+   "vad_speech_s": 5.1,
+   "timing": {
+    "n": 20,
+    "median_ms": 20.0,
+    "p90_ms": 49.0,
+    "within_50ms_pct": 90.0,
+    "matched_pct": 100.0
+   },
+   "dur": 5.0
+  }
+ },
+ "68773443": {
+  "scribe": {
+   "lang": "ben",
+   "n_words": 26,
+   "gate_pass": true,
+   "coverage_pct": 96.0,
+   "unworded_s": 0.1,
+   "vad_speech_s": 2.5,
+   "timing": {
+    "n": 24,
+    "median_ms": 21.0,
+    "p90_ms": 61.0,
+    "within_50ms_pct": 83.3,
+    "matched_pct": 92.3
+   },
+   "dur": 15.0
+  }
+ },
+ "692668e7": {
+  "scribe": {
+   "lang": "mal",
+   "n_words": 116,
+   "gate_pass": true,
+   "coverage_pct": 99.6,
+   "unworded_s": 0.2,
+   "vad_speech_s": 45.2,
+   "timing": {
+    "n": 108,
+    "median_ms": 49.0,
+    "p90_ms": 169.0,
+    "within_50ms_pct": 51.9,
+    "matched_pct": 93.1
+   },
+   "dur": 46.1
+  }
+ },
+ "6aae8aec": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.0
+  }
+ },
+ "6aeafde2": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 11.4
+  }
+ },
+ "6c8e5422": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 26.3
+  }
+ },
+ "6c9f83d5": {
+  "deepgram": {
+   "lang": "hi",
+   "n_words": 55,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 18.0,
+   "timing": {
+    "n": 45,
+    "median_ms": 68.0,
+    "p90_ms": 172.0,
+    "within_50ms_pct": 42.2,
+    "matched_pct": 81.8
+   },
+   "dur": 19.6
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 53,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 18.0,
+   "timing": {
+    "n": 45,
+    "median_ms": 29.0,
+    "p90_ms": 141.0,
+    "within_50ms_pct": 62.2,
+    "matched_pct": 84.9
+   },
+   "dur": 19.6
+  }
+ },
+ "6d1954d4": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 6.3
+  }
+ },
+ "6e8afb16": {
+  "deepgram": {
+   "lang": "hi",
+   "n_words": 174,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 43.2,
+   "timing": {
+    "n": 160,
+    "median_ms": 50.0,
+    "p90_ms": 167.7,
+    "within_50ms_pct": 50.0,
+    "matched_pct": 92.0
+   },
+   "dur": 48.9
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 173,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 43.2,
+   "timing": {
+    "n": 162,
+    "median_ms": 21.0,
+    "p90_ms": 141.0,
+    "within_50ms_pct": 61.7,
+    "matched_pct": 93.6
+   },
+   "dur": 48.9
+  }
+ },
+ "6fa2b09b": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 7.4
+  }
+ },
+ "714cc112": {
+  "scribe": {
+   "lang": "ara",
+   "n_words": 85,
+   "gate_pass": true,
+   "coverage_pct": 98.4,
+   "unworded_s": 1.9,
+   "vad_speech_s": 119.8,
+   "timing": {
+    "n": 69,
+    "median_ms": 30.0,
+    "p90_ms": 200.0,
+    "within_50ms_pct": 66.7,
+    "matched_pct": 81.2
+   },
+   "dur": 138.9
+  }
+ },
+ "716b257c": {
+  "scribe": {
+   "lang": "tam",
+   "n_words": 29,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 29,
+    "median_ms": 11.0,
+    "p90_ms": 49.0,
+    "within_50ms_pct": 89.7,
+    "matched_pct": 100.0
+   },
+   "dur": 25.7
+  }
+ },
+ "719a99d5": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 11.2
+  }
+ },
+ "7213d007": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 30,
+   "gate_pass": true,
+   "coverage_pct": 99.0,
+   "unworded_s": 0.1,
+   "vad_speech_s": 10.5,
+   "timing": {
+    "n": 26,
+    "median_ms": 50.0,
+    "p90_ms": 130.0,
+    "within_50ms_pct": 53.8,
+    "matched_pct": 86.7
+   },
+   "dur": 14.0
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 29,
+   "gate_pass": true,
+   "coverage_pct": 99.0,
+   "unworded_s": 0.1,
+   "vad_speech_s": 10.5,
+   "timing": {
+    "n": 27,
+    "median_ms": 19.0,
+    "p90_ms": 59.0,
+    "within_50ms_pct": 81.5,
+    "matched_pct": 93.1
+   },
+   "dur": 14.0
+  }
+ },
+ "72aad128": {
+  "scribe": {
+   "lang": "ara",
+   "n_words": 56,
+   "gate_pass": true,
+   "coverage_pct": 99.7,
+   "unworded_s": 0.1,
+   "vad_speech_s": 29.8,
+   "timing": {
+    "n": 8,
+    "median_ms": 20.0,
+    "p90_ms": 151.0,
+    "within_50ms_pct": 62.5,
+    "matched_pct": 14.3
+   },
+   "dur": 34.0
+  }
+ },
+ "72f812fa": {
+  "deepgram": {
+   "lang": "ms",
+   "n_words": 42,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 14.7,
+   "timing": {
+    "n": 41,
+    "median_ms": 30.0,
+    "p90_ms": 90.0,
+    "within_50ms_pct": 70.7,
+    "matched_pct": 97.6
+   },
+   "dur": 15.9
+  },
+  "scribe": {
+   "lang": "ind",
+   "n_words": 42,
+   "gate_pass": true,
+   "coverage_pct": 99.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 14.7,
+   "timing": {
+    "n": 42,
+    "median_ms": 9.0,
+    "p90_ms": 59.0,
+    "within_50ms_pct": 81.0,
+    "matched_pct": 100.0
+   },
+   "dur": 15.9
+  }
+ },
+ "74bc3bd2": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.2
+  }
+ },
+ "7664bf7c": {
+  "scribe": {
+   "lang": "tel",
+   "n_words": 17,
+   "gate_pass": true,
+   "coverage_pct": 93.2,
+   "unworded_s": 0.5,
+   "vad_speech_s": 7.3,
+   "timing": {
+    "n": 17,
+    "median_ms": 1.0,
+    "p90_ms": 50.0,
+    "within_50ms_pct": 88.2,
+    "matched_pct": 100.0
+   },
+   "dur": 10.1
+  }
+ },
+ "769c12d8": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 6.7
+  }
+ },
+ "791727f0": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 15.1
+  }
+ },
+ "79c419d3": {
+  "scribe": {
+   "lang": "mal",
+   "n_words": 19,
+   "gate_pass": true,
+   "coverage_pct": 97.8,
+   "unworded_s": 0.2,
+   "vad_speech_s": 9.0,
+   "timing": {
+    "n": 19,
+    "median_ms": 19.0,
+    "p90_ms": 31.0,
+    "within_50ms_pct": 94.7,
+    "matched_pct": 100.0
+   },
+   "dur": 11.2
+  }
+ },
+ "7a004477": {
+  "scribe": {
+   "lang": "tel",
+   "n_words": 10,
+   "gate_pass": true,
+   "coverage_pct": 85.7,
+   "unworded_s": 0.5,
+   "vad_speech_s": 3.5,
+   "timing": {
+    "n": 10,
+    "median_ms": 21.0,
+    "p90_ms": 41.0,
+    "within_50ms_pct": 90.0,
+    "matched_pct": 100.0
+   },
+   "dur": 12.0
+  }
+ },
+ "7aeca686": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 25.0
+  }
+ },
+ "7b1d7c51": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 9.0
+  }
+ },
+ "7ce4dadf": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 5.2
+  }
+ },
+ "7f4fd672": {
+  "scribe": {
+   "lang": "nep",
+   "n_words": 16,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 4.5,
+   "timing": {
+    "n": 16,
+    "median_ms": 20.0,
+    "p90_ms": 39.0,
+    "within_50ms_pct": 93.8,
+    "matched_pct": 100.0
+   },
+   "dur": 12.9
+  }
+ },
+ "818882a6": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 14.0
+  }
+ },
+ "86232d1b": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 7.8
+  }
+ },
+ "86e5f28a": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 15.1
+  }
+ },
+ "877b11c2": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 9.6
+  }
+ },
+ "892f67ee": {
+  "scribe": {
+   "lang": "mal",
+   "n_words": 49,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 13.6,
+   "timing": {
+    "n": 28,
+    "median_ms": 30.0,
+    "p90_ms": 69.0,
+    "within_50ms_pct": 78.6,
+    "matched_pct": 57.1
+   },
+   "dur": 47.0
+  }
+ },
+ "898a8bf1": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 137,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 39.9,
+   "timing": {
+    "n": 134,
+    "median_ms": 61.0,
+    "p90_ms": 169.0,
+    "within_50ms_pct": 41.8,
+    "matched_pct": 97.8
+   },
+   "dur": 59.8
+  }
+ },
+ "89a48f9d": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 11.4
+  }
+ },
+ "89bd3c05": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 42.8
+  }
+ },
+ "8be052c1": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 6.2
+  }
+ },
+ "8e2cc49e": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 41,
+   "gate_pass": true,
+   "coverage_pct": 96.2,
+   "unworded_s": 0.3,
+   "vad_speech_s": 7.9,
+   "timing": {
+    "n": 40,
+    "median_ms": 21.0,
+    "p90_ms": 60.0,
+    "within_50ms_pct": 82.5,
+    "matched_pct": 97.6
+   },
+   "dur": 24.6
+  }
+ },
+ "8fc8eae8": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 14.7
+  }
+ },
+ "91bf6351": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 12,
+   "gate_pass": true,
+   "coverage_pct": 0.0,
+   "unworded_s": 0.1,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 11,
+    "median_ms": 29.0,
+    "p90_ms": 191.0,
+    "within_50ms_pct": 81.8,
+    "matched_pct": 91.7
+   },
+   "dur": 6.5
+  }
+ },
+ "925361dc": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 21.1
+  }
+ },
+ "927460b8": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 41,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 1.7,
+   "timing": {
+    "n": 41,
+    "median_ms": 30.0,
+    "p90_ms": 79.0,
+    "within_50ms_pct": 73.2,
+    "matched_pct": 100.0
+   },
+   "dur": 22.1
+  }
+ },
+ "93fea5fa": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 131,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 38.7,
+   "timing": {
+    "n": 108,
+    "median_ms": 70.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 38.9,
+    "matched_pct": 82.4
+   },
+   "dur": 42.8
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 135,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 38.7,
+   "timing": {
+    "n": 110,
+    "median_ms": 39.0,
+    "p90_ms": 171.0,
+    "within_50ms_pct": 57.3,
+    "matched_pct": 81.5
+   },
+   "dur": 42.8
+  }
+ },
+ "951b8c36": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 85.5
+  }
+ },
+ "95d950c1": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 14.5
+  }
+ },
+ "96bbe606": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 34.4
+  }
+ },
+ "985cc650": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.0
+  }
+ },
+ "9907f7b3": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 69.2
+  }
+ },
+ "995fedb5": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 30.0
+  }
+ },
+ "9b361e2a": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 117,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 30.5,
+   "timing": {
+    "n": 116,
+    "median_ms": 29.0,
+    "p90_ms": 129.0,
+    "within_50ms_pct": 67.2,
+    "matched_pct": 99.1
+   },
+   "dur": 39.5
+  }
+ },
+ "9b40e49e": {
+  "scribe": {
+   "lang": "fra",
+   "n_words": 3,
+   "gate_pass": true,
+   "coverage_pct": 92.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 1.3,
+   "timing": null,
+   "dur": 17.4
+  }
+ },
+ "9c296997": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.0
+  }
+ },
+ "9d67303f": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 14,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 1.0,
+   "timing": null,
+   "dur": 23.1
+  }
+ },
+ "9df6c366": {
+  "deepgram": {
+   "lang": "hi",
+   "n_words": 298,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 80.1,
+   "timing": {
+    "n": 297,
+    "median_ms": 30.0,
+    "p90_ms": 115.0,
+    "within_50ms_pct": 68.4,
+    "matched_pct": 99.7
+   },
+   "dur": 84.2
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 297,
+   "gate_pass": true,
+   "coverage_pct": 99.8,
+   "unworded_s": 0.2,
+   "vad_speech_s": 80.1,
+   "timing": {
+    "n": 295,
+    "median_ms": 20.0,
+    "p90_ms": 89.0,
+    "within_50ms_pct": 75.6,
+    "matched_pct": 99.3
+   },
+   "dur": 84.2
+  }
+ },
+ "a1e38092": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 21,
+   "gate_pass": false,
+   "coverage_pct": 85.8,
+   "unworded_s": 3.7,
+   "vad_speech_s": 26.1,
+   "timing": {
+    "n": 21,
+    "median_ms": 75.0,
+    "p90_ms": 175.0,
+    "within_50ms_pct": 38.1,
+    "matched_pct": 100.0
+   },
+   "dur": 26.6
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 94,
+   "gate_pass": true,
+   "coverage_pct": 99.2,
+   "unworded_s": 0.2,
+   "vad_speech_s": 26.1,
+   "timing": {
+    "n": 89,
+    "median_ms": 9.0,
+    "p90_ms": 161.0,
+    "within_50ms_pct": 70.8,
+    "matched_pct": 94.7
+   },
+   "dur": 26.6
+  }
+ },
+ "a408d34b": {
+  "scribe": {
+   "lang": "fil",
+   "n_words": 22,
+   "gate_pass": true,
+   "coverage_pct": 97.3,
+   "unworded_s": 0.4,
+   "vad_speech_s": 14.8,
+   "timing": {
+    "n": 16,
+    "median_ms": 79.0,
+    "p90_ms": 150.0,
+    "within_50ms_pct": 37.5,
+    "matched_pct": 72.7
+   },
+   "dur": 15.0
+  }
+ },
+ "a41276b2": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 50,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 13.1,
+   "timing": {
+    "n": 50,
+    "median_ms": 30.0,
+    "p90_ms": 160.0,
+    "within_50ms_pct": 58.0,
+    "matched_pct": 100.0
+   },
+   "dur": 28.9
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 50,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 13.1,
+   "timing": {
+    "n": 49,
+    "median_ms": 29.0,
+    "p90_ms": 141.0,
+    "within_50ms_pct": 69.4,
+    "matched_pct": 98.0
+   },
+   "dur": 28.9
+  }
+ },
+ "a4dfa92f": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 7.1
+  }
+ },
+ "a523db81": {
+  "scribe": {
+   "lang": "kor",
+   "n_words": 21,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 21,
+    "median_ms": 60.0,
+    "p90_ms": 130.0,
+    "within_50ms_pct": 47.6,
+    "matched_pct": 100.0
+   },
+   "dur": 19.4
+  }
+ },
+ "a85ca12b": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 11,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.3,
+   "timing": {
+    "n": 10,
+    "median_ms": 11.0,
+    "p90_ms": 110.0,
+    "within_50ms_pct": 70.0,
+    "matched_pct": 90.9
+   },
+   "dur": 6.4
+  }
+ },
+ "a8cc6d13": {
+  "scribe": {
+   "lang": "kan",
+   "n_words": 30,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.0,
+   "timing": {
+    "n": 30,
+    "median_ms": 19.0,
+    "p90_ms": 49.0,
+    "within_50ms_pct": 90.0,
+    "matched_pct": 100.0
+   },
+   "dur": 30.0
+  }
+ },
+ "a9b975a7": {
+  "scribe": {
+   "lang": "mal",
+   "n_words": 103,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 36.0,
+   "timing": {
+    "n": 100,
+    "median_ms": 29.0,
+    "p90_ms": 141.0,
+    "within_50ms_pct": 61.0,
+    "matched_pct": 97.1
+   },
+   "dur": 37.5
+  }
+ },
+ "aa532d7d": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 7.3
+  }
+ },
+ "aa636bab": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 8.4
+  }
+ },
+ "aa733822": {
+  "scribe": {
+   "lang": "rus",
+   "n_words": 12,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 12,
+    "median_ms": 10.0,
+    "p90_ms": 30.0,
+    "within_50ms_pct": 100.0,
+    "matched_pct": 100.0
+   },
+   "dur": 14.2
+  }
+ },
+ "ab9cee11": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 17.1
+  }
+ },
+ "ac2d123f": {
+  "scribe": {
+   "lang": "fil",
+   "n_words": 23,
+   "gate_pass": false,
+   "coverage_pct": 74.7,
+   "unworded_s": 4.0,
+   "vad_speech_s": 15.8,
+   "timing": {
+    "n": 9,
+    "median_ms": 79.0,
+    "p90_ms": 149.0,
+    "within_50ms_pct": 44.4,
+    "matched_pct": 39.1
+   },
+   "dur": 23.0
+  }
+ },
+ "ad2df587": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 9,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.4,
+   "timing": {
+    "n": 9,
+    "median_ms": 29.0,
+    "p90_ms": 40.0,
+    "within_50ms_pct": 88.9,
+    "matched_pct": 100.0
+   },
+   "dur": 5.4
+  }
+ },
+ "ae497676": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 51,
+   "gate_pass": true,
+   "coverage_pct": 80.0,
+   "unworded_s": 0.2,
+   "vad_speech_s": 1.0,
+   "timing": {
+    "n": 30,
+    "median_ms": 30.0,
+    "p90_ms": 69.0,
+    "within_50ms_pct": 73.3,
+    "matched_pct": 58.8
+   },
+   "dur": 80.2
+  }
+ },
+ "ae7b2e0d": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 97,
+   "gate_pass": true,
+   "coverage_pct": 95.2,
+   "unworded_s": 1.6,
+   "vad_speech_s": 33.1,
+   "timing": {
+    "n": 27,
+    "median_ms": 90.0,
+    "p90_ms": 185.0,
+    "within_50ms_pct": 29.6,
+    "matched_pct": 27.8
+   },
+   "dur": 74.5
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 102,
+   "gate_pass": true,
+   "coverage_pct": 98.8,
+   "unworded_s": 0.4,
+   "vad_speech_s": 33.1,
+   "timing": {
+    "n": 29,
+    "median_ms": 39.0,
+    "p90_ms": 161.0,
+    "within_50ms_pct": 55.2,
+    "matched_pct": 28.4
+   },
+   "dur": 74.5
+  }
+ },
+ "aec24bab": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 15.1
+  }
+ },
+ "b002148c": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 20,
+   "gate_pass": false,
+   "coverage_pct": 64.9,
+   "unworded_s": 2.6,
+   "vad_speech_s": 7.4,
+   "timing": {
+    "n": 18,
+    "median_ms": 31.0,
+    "p90_ms": 131.0,
+    "within_50ms_pct": 55.6,
+    "matched_pct": 90.0
+   },
+   "dur": 14.8
+  }
+ },
+ "b0f1d268": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.4
+  }
+ },
+ "b1b30df4": {
+  "deepgram": {
+   "lang": "hi",
+   "n_words": 94,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 22.6,
+   "timing": {
+    "n": 94,
+    "median_ms": 20.0,
+    "p90_ms": 60.0,
+    "within_50ms_pct": 84.0,
+    "matched_pct": 100.0
+   },
+   "dur": 22.6
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 95,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 22.6,
+   "timing": {
+    "n": 95,
+    "median_ms": 9.0,
+    "p90_ms": 51.0,
+    "within_50ms_pct": 87.4,
+    "matched_pct": 100.0
+   },
+   "dur": 22.6
+  }
+ },
+ "b5123fbe": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 66.5
+  }
+ },
+ "b6affc2d": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 7.2
+  }
+ },
+ "b78a03fc": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 11.8
+  }
+ },
+ "b89f01a1": {
+  "scribe": {
+   "lang": "tam",
+   "n_words": 242,
+   "gate_pass": true,
+   "coverage_pct": 99.9,
+   "unworded_s": 0.1,
+   "vad_speech_s": 103.8,
+   "timing": {
+    "n": 10,
+    "median_ms": 20.0,
+    "p90_ms": 40.0,
+    "within_50ms_pct": 90.0,
+    "matched_pct": 4.1
+   },
+   "dur": 115.0
+  }
+ },
+ "b8a0377a": {
+  "scribe": {
+   "lang": "pus",
+   "n_words": 13,
+   "gate_pass": true,
+   "coverage_pct": 95.5,
+   "unworded_s": 0.1,
+   "vad_speech_s": 2.2,
+   "timing": {
+    "n": 13,
+    "median_ms": 11.0,
+    "p90_ms": 41.0,
+    "within_50ms_pct": 84.6,
+    "matched_pct": 100.0
+   },
+   "dur": 13.8
+  }
+ },
+ "b9218183": {
+  "scribe": {
+   "lang": "fas",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 5.7
+  }
+ },
+ "b98e603d": {
+  "scribe": {
+   "lang": "mal",
+   "n_words": 282,
+   "gate_pass": true,
+   "coverage_pct": 99.9,
+   "unworded_s": 0.1,
+   "vad_speech_s": 105.5,
+   "timing": {
+    "n": 249,
+    "median_ms": 50.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 50.2,
+    "matched_pct": 88.3
+   },
+   "dur": 113.5
+  }
+ },
+ "b9b24cb6": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 18.1
+  }
+ },
+ "bf7ad015": {
+  "scribe": {
+   "lang": "fas",
+   "n_words": 23,
+   "gate_pass": true,
+   "coverage_pct": 99.1,
+   "unworded_s": 0.1,
+   "vad_speech_s": 10.6,
+   "timing": {
+    "n": 15,
+    "median_ms": 41.0,
+    "p90_ms": 160.0,
+    "within_50ms_pct": 60.0,
+    "matched_pct": 65.2
+   },
+   "dur": 20.9
+  }
+ },
+ "bf8d349f": {
+  "scribe": {
+   "lang": "pan",
+   "n_words": 33,
+   "gate_pass": true,
+   "coverage_pct": 62.5,
+   "unworded_s": 1.8,
+   "vad_speech_s": 4.8,
+   "timing": {
+    "n": 11,
+    "median_ms": 121.0,
+    "p90_ms": 219.0,
+    "within_50ms_pct": 27.3,
+    "matched_pct": 33.3
+   },
+   "dur": 16.7
+  }
+ },
+ "c0263050": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 16.4
+  }
+ },
+ "c0d7c7a4": {
+  "scribe": {
+   "lang": "fil",
+   "n_words": 20,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 1.3,
+   "timing": {
+    "n": 16,
+    "median_ms": 29.0,
+    "p90_ms": 140.0,
+    "within_50ms_pct": 62.5,
+    "matched_pct": 80.0
+   },
+   "dur": 14.1
+  }
+ },
+ "c2c50f60": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 8.2
+  }
+ },
+ "c3c260ff": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 6.3
+  }
+ },
+ "c63950a5": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 15.0
+  }
+ },
+ "c802bbb3": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 8.9
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 17,
+   "gate_pass": true,
+   "coverage_pct": 87.3,
+   "unworded_s": 0.8,
+   "vad_speech_s": 6.3,
+   "timing": {
+    "n": 16,
+    "median_ms": 11.0,
+    "p90_ms": 39.0,
+    "within_50ms_pct": 87.5,
+    "matched_pct": 94.1
+   },
+   "dur": 8.9
+  }
+ },
+ "c822f3bc": {
+  "scribe": {
+   "lang": "kan",
+   "n_words": 43,
+   "gate_pass": true,
+   "coverage_pct": 93.3,
+   "unworded_s": 1.0,
+   "vad_speech_s": 15.0,
+   "timing": {
+    "n": 32,
+    "median_ms": 61.0,
+    "p90_ms": 111.0,
+    "within_50ms_pct": 43.8,
+    "matched_pct": 74.4
+   },
+   "dur": 15.9
+  }
+ },
+ "c8eeccce": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 10,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 2.7,
+   "timing": {
+    "n": 10,
+    "median_ms": 140.0,
+    "p90_ms": 190.0,
+    "within_50ms_pct": 40.0,
+    "matched_pct": 100.0
+   },
+   "dur": 12.6
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 10,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 2.7,
+   "timing": {
+    "n": 10,
+    "median_ms": 29.0,
+    "p90_ms": 51.0,
+    "within_50ms_pct": 70.0,
+    "matched_pct": 100.0
+   },
+   "dur": 12.6
+  }
+ },
+ "c9866c4c": {
+  "scribe": {
+   "lang": "fil",
+   "n_words": 6,
+   "gate_pass": true,
+   "coverage_pct": 0.0,
+   "unworded_s": 0.1,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 6,
+    "median_ms": 21.0,
+    "p90_ms": 41.0,
+    "within_50ms_pct": 83.3,
+    "matched_pct": 100.0
+   },
+   "dur": 7.8
+  }
+ },
+ "c9ae4c07": {
+  "scribe": {
+   "lang": "tel",
+   "n_words": 6,
+   "gate_pass": true,
+   "coverage_pct": 33.3,
+   "unworded_s": 0.2,
+   "vad_speech_s": 0.3,
+   "timing": {
+    "n": 6,
+    "median_ms": 10.0,
+    "p90_ms": 19.0,
+    "within_50ms_pct": 83.3,
+    "matched_pct": 100.0
+   },
+   "dur": 10.6
+  }
+ },
+ "cb51a38e": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 40.5
+  }
+ },
+ "cb9507f3": {
+  "deepgram": {
+   "lang": "ru",
+   "n_words": 3,
+   "gate_pass": false,
+   "coverage_pct": 14.7,
+   "unworded_s": 15.7,
+   "vad_speech_s": 18.4,
+   "timing": null,
+   "dur": 22.6
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 58,
+   "gate_pass": true,
+   "coverage_pct": 99.5,
+   "unworded_s": 0.1,
+   "vad_speech_s": 18.4,
+   "timing": {
+    "n": 57,
+    "median_ms": 19.0,
+    "p90_ms": 79.0,
+    "within_50ms_pct": 86.0,
+    "matched_pct": 98.3
+   },
+   "dur": 22.6
+  }
+ },
+ "cc571a92": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 12.2
+  }
+ },
+ "cef05c67": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 69,
+   "gate_pass": true,
+   "coverage_pct": 77.8,
+   "unworded_s": 0.2,
+   "vad_speech_s": 0.9,
+   "timing": {
+    "n": 50,
+    "median_ms": 109.0,
+    "p90_ms": 230.0,
+    "within_50ms_pct": 34.0,
+    "matched_pct": 72.5
+   },
+   "dur": 22.7
+  }
+ },
+ "cfc21e79": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.9
+  }
+ },
+ "d338a296": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 22,
+   "gate_pass": false,
+   "coverage_pct": 88.0,
+   "unworded_s": 2.0,
+   "vad_speech_s": 16.7,
+   "timing": {
+    "n": 22,
+    "median_ms": 10.0,
+    "p90_ms": 21.0,
+    "within_50ms_pct": 90.9,
+    "matched_pct": 100.0
+   },
+   "dur": 20.9
+  }
+ },
+ "d35f58b8": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 17.5
+  }
+ },
+ "d71ee877": {
+  "scribe": {
+   "lang": "ckb",
+   "n_words": 276,
+   "gate_pass": true,
+   "coverage_pct": 99.9,
+   "unworded_s": 0.1,
+   "vad_speech_s": 97.4,
+   "timing": {
+    "n": 246,
+    "median_ms": 20.0,
+    "p90_ms": 140.0,
+    "within_50ms_pct": 72.8,
+    "matched_pct": 89.1
+   },
+   "dur": 119.5
+  }
+ },
+ "d7f1d97a": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 20,
+   "gate_pass": true,
+   "coverage_pct": 98.7,
+   "unworded_s": 0.1,
+   "vad_speech_s": 8.0,
+   "timing": {
+    "n": 15,
+    "median_ms": 80.0,
+    "p90_ms": 150.0,
+    "within_50ms_pct": 33.3,
+    "matched_pct": 75.0
+   },
+   "dur": 12.9
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 21,
+   "gate_pass": true,
+   "coverage_pct": 98.7,
+   "unworded_s": 0.1,
+   "vad_speech_s": 8.0,
+   "timing": {
+    "n": 16,
+    "median_ms": 9.0,
+    "p90_ms": 89.0,
+    "within_50ms_pct": 81.2,
+    "matched_pct": 76.2
+   },
+   "dur": 12.9
+  }
+ },
+ "dbc890d9": {
+  "scribe": {
+   "lang": "tam",
+   "n_words": 16,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.8,
+   "timing": {
+    "n": 16,
+    "median_ms": 21.0,
+    "p90_ms": 50.0,
+    "within_50ms_pct": 87.5,
+    "matched_pct": 100.0
+   },
+   "dur": 13.8
+  }
+ },
+ "dc8d1630": {
+  "scribe": {
+   "lang": "ben",
+   "n_words": 51,
+   "gate_pass": true,
+   "coverage_pct": 94.1,
+   "unworded_s": 1.2,
+   "vad_speech_s": 20.3,
+   "timing": {
+    "n": 37,
+    "median_ms": 29.0,
+    "p90_ms": 141.0,
+    "within_50ms_pct": 62.2,
+    "matched_pct": 72.5
+   },
+   "dur": 28.4
+  }
+ },
+ "dcaec32d": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 16,
+   "gate_pass": false,
+   "coverage_pct": 63.4,
+   "unworded_s": 2.6,
+   "vad_speech_s": 7.1,
+   "timing": {
+    "n": 16,
+    "median_ms": 61.0,
+    "p90_ms": 119.0,
+    "within_50ms_pct": 43.8,
+    "matched_pct": 100.0
+   },
+   "dur": 9.9
+  }
+ },
+ "e023bb3a": {
+  "deepgram": {
+   "lang": "de",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 15.4
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 45,
+   "gate_pass": true,
+   "coverage_pct": 99.1,
+   "unworded_s": 0.1,
+   "vad_speech_s": 10.7,
+   "timing": {
+    "n": 33,
+    "median_ms": 20.0,
+    "p90_ms": 159.0,
+    "within_50ms_pct": 60.6,
+    "matched_pct": 73.3
+   },
+   "dur": 15.4
+  }
+ },
+ "e1c7ffc8": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 15,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 0.1,
+   "timing": {
+    "n": 15,
+    "median_ms": 39.0,
+    "p90_ms": 159.0,
+    "within_50ms_pct": 60.0,
+    "matched_pct": 100.0
+   },
+   "dur": 10.4
+  }
+ },
+ "e348c812": {
+  "scribe": {
+   "lang": "tam",
+   "n_words": 16,
+   "gate_pass": false,
+   "coverage_pct": 47.8,
+   "unworded_s": 2.4,
+   "vad_speech_s": 4.6,
+   "timing": {
+    "n": 16,
+    "median_ms": 41.0,
+    "p90_ms": 141.0,
+    "within_50ms_pct": 56.2,
+    "matched_pct": 100.0
+   },
+   "dur": 36.3
+  }
+ },
+ "e38e32ff": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 5.2
+  }
+ },
+ "e3ff3405": {
+  "scribe": {
+   "lang": "mkd",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 29.7
+  }
+ },
+ "e55f17a0": {
+  "deepgram": {
+   "lang": "id",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.1
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 18,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 3.4,
+   "timing": {
+    "n": 18,
+    "median_ms": 10.0,
+    "p90_ms": 149.0,
+    "within_50ms_pct": 77.8,
+    "matched_pct": 100.0
+   },
+   "dur": 10.1
+  }
+ },
+ "e6de6ef4": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 71,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 3.0,
+   "timing": {
+    "n": 50,
+    "median_ms": 71.0,
+    "p90_ms": 210.0,
+    "within_50ms_pct": 42.0,
+    "matched_pct": 70.4
+   },
+   "dur": 33.7
+  }
+ },
+ "e83a8c84": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 130,
+   "gate_pass": false,
+   "coverage_pct": 84.1,
+   "unworded_s": 9.1,
+   "vad_speech_s": 57.2,
+   "timing": {
+    "n": 121,
+    "median_ms": 65.0,
+    "p90_ms": 170.0,
+    "within_50ms_pct": 40.5,
+    "matched_pct": 93.1
+   },
+   "dur": 60.0
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 171,
+   "gate_pass": true,
+   "coverage_pct": 99.7,
+   "unworded_s": 0.2,
+   "vad_speech_s": 57.2,
+   "timing": {
+    "n": 158,
+    "median_ms": 20.0,
+    "p90_ms": 169.0,
+    "within_50ms_pct": 70.3,
+    "matched_pct": 92.4
+   },
+   "dur": 60.0
+  }
+ },
+ "e8a4fe22": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 14.7
+  }
+ },
+ "e8d8d706": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 21,
+   "gate_pass": true,
+   "coverage_pct": 99.0,
+   "unworded_s": 0.1,
+   "vad_speech_s": 9.9,
+   "timing": {
+    "n": 17,
+    "median_ms": 20.0,
+    "p90_ms": 30.0,
+    "within_50ms_pct": 94.1,
+    "matched_pct": 81.0
+   },
+   "dur": 13.5
+  }
+ },
+ "e9a7afbd": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 59,
+   "gate_pass": true,
+   "coverage_pct": 90.2,
+   "unworded_s": 5.1,
+   "vad_speech_s": 52.1,
+   "timing": {
+    "n": 47,
+    "median_ms": 60.0,
+    "p90_ms": 175.0,
+    "within_50ms_pct": 34.0,
+    "matched_pct": 79.7
+   },
+   "dur": 56.6
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 160,
+   "gate_pass": true,
+   "coverage_pct": 99.6,
+   "unworded_s": 0.2,
+   "vad_speech_s": 52.1,
+   "timing": {
+    "n": 127,
+    "median_ms": 10.0,
+    "p90_ms": 149.0,
+    "within_50ms_pct": 74.0,
+    "matched_pct": 79.4
+   },
+   "dur": 56.6
+  }
+ },
+ "eaad6b8f": {
+  "scribe": {
+   "lang": "por",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 7.6
+  }
+ },
+ "f1b78f1a": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 56,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 27.0,
+   "timing": {
+    "n": 52,
+    "median_ms": 21.0,
+    "p90_ms": 51.0,
+    "within_50ms_pct": 86.5,
+    "matched_pct": 92.9
+   },
+   "dur": 35.0
+  }
+ },
+ "f56e5775": {
+  "scribe": {
+   "lang": "sh",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 23.6
+  }
+ },
+ "f6eee897": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 7.1
+  }
+ },
+ "f77f5266": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.4
+  }
+ },
+ "f85418d0": {
+  "scribe": {
+   "lang": "en",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 20.8
+  }
+ },
+ "fa12dbc9": {
+  "deepgram": {
+   "lang": "tr",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 10.8
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 18,
+   "gate_pass": true,
+   "coverage_pct": 88.1,
+   "unworded_s": 0.7,
+   "vad_speech_s": 5.9,
+   "timing": {
+    "n": 13,
+    "median_ms": 20.0,
+    "p90_ms": 191.0,
+    "within_50ms_pct": 61.5,
+    "matched_pct": 72.2
+   },
+   "dur": 10.8
+  }
+ },
+ "fa3efb69": {
+  "deepgram": {
+   "lang": "id",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 24.6
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 44,
+   "gate_pass": true,
+   "coverage_pct": 53.7,
+   "unworded_s": 1.9,
+   "vad_speech_s": 4.1,
+   "timing": {
+    "n": 41,
+    "median_ms": 49.0,
+    "p90_ms": 201.0,
+    "within_50ms_pct": 51.2,
+    "matched_pct": 93.2
+   },
+   "dur": 24.6
+  }
+ },
+ "fa680e84": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 54,
+   "gate_pass": true,
+   "coverage_pct": 99.3,
+   "unworded_s": 0.1,
+   "vad_speech_s": 14.1,
+   "timing": {
+    "n": 53,
+    "median_ms": 30.0,
+    "p90_ms": 120.0,
+    "within_50ms_pct": 60.4,
+    "matched_pct": 98.1
+   },
+   "dur": 14.8
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 54,
+   "gate_pass": true,
+   "coverage_pct": 98.6,
+   "unworded_s": 0.2,
+   "vad_speech_s": 14.1,
+   "timing": {
+    "n": 53,
+    "median_ms": 10.0,
+    "p90_ms": 119.0,
+    "within_50ms_pct": 83.0,
+    "matched_pct": 98.1
+   },
+   "dur": 14.8
+  }
+ },
+ "fb347bbd": {
+  "scribe": {
+   "lang": "pan",
+   "n_words": 71,
+   "gate_pass": true,
+   "coverage_pct": 99.4,
+   "unworded_s": 0.1,
+   "vad_speech_s": 17.8,
+   "timing": {
+    "n": 71,
+    "median_ms": 19.0,
+    "p90_ms": 110.0,
+    "within_50ms_pct": 76.1,
+    "matched_pct": 100.0
+   },
+   "dur": 22.5
+  }
+ },
+ "fcda2194": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 0,
+   "gate_pass": true,
+   "coverage_pct": null,
+   "unworded_s": null,
+   "vad_speech_s": null,
+   "timing": null,
+   "dur": 12.5
+  }
+ },
+ "fd97eb37": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 35,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 8.1,
+   "timing": {
+    "n": 35,
+    "median_ms": 20.0,
+    "p90_ms": 130.0,
+    "within_50ms_pct": 68.6,
+    "matched_pct": 100.0
+   },
+   "dur": 19.4
+  },
+  "scribe": {
+   "lang": "eng",
+   "n_words": 35,
+   "gate_pass": true,
+   "coverage_pct": 100,
+   "unworded_s": 0.0,
+   "vad_speech_s": 8.1,
+   "timing": {
+    "n": 34,
+    "median_ms": 19.0,
+    "p90_ms": 81.0,
+    "within_50ms_pct": 85.3,
+    "matched_pct": 97.1
+   },
+   "dur": 19.4
+  }
+ },
+ "fe2fe17b": {
+  "scribe": {
+   "lang": "hin",
+   "n_words": 19,
+   "gate_pass": true,
+   "coverage_pct": 97.1,
+   "unworded_s": 0.1,
+   "vad_speech_s": 3.4,
+   "timing": {
+    "n": 18,
+    "median_ms": 40.0,
+    "p90_ms": 109.0,
+    "within_50ms_pct": 66.7,
+    "matched_pct": 94.7
+   },
+   "dur": 15.0
+  }
+ },
+ "feaca8c9": {
+  "deepgram": {
+   "lang": "en",
+   "n_words": 29,
+   "gate_pass": false,
+   "coverage_pct": 81.5,
+   "unworded_s": 6.7,
+   "vad_speech_s": 36.2,
+   "timing": {
+    "n": 26,
+    "median_ms": 60.0,
+    "p90_ms": 120.0,
+    "within_50ms_pct": 42.3,
+    "matched_pct": 89.7
+   },
+   "dur": 40.2
+  },
+  "scribe": {
+   "lang": "hin",
+   "n_words": 114,
+   "gate_pass": true,
+   "coverage_pct": 99.7,
+   "unworded_s": 0.1,
+   "vad_speech_s": 36.2,
+   "timing": {
+    "n": 103,
+    "median_ms": 9.0,
+    "p90_ms": 131.0,
+    "within_50ms_pct": 76.7,
+    "matched_pct": 90.4
+   },
+   "dur": 40.2
+  }
+ },
+ "ff6b406e": {
+  "scribe": {
+   "lang": "eng",
+   "n_words": 18,
+   "gate_pass": true,
+   "coverage_pct": 98.2,
+   "unworded_s": 0.1,
+   "vad_speech_s": 5.7,
+   "timing": {
+    "n": 17,
+    "median_ms": 29.0,
+    "p90_ms": 99.0,
+    "within_50ms_pct": 76.5,
+    "matched_pct": 94.4
+   },
+   "dur": 6.1
+  }
+ }
+}

@@ -71,6 +71,17 @@ def _modal_syntax():
         ast.parse(f.read())
 
 
+@check("INC2-TELEMETRY NEST GUARD (speed agent 2026-08-01, RULE-1): the cpu_by_stage / mem_by_stage sizing telemetry must be NESTED inside stage_timings (result.setdefault('stage_timings')), never a top-level result key — content-studio strips unknown top-level keys, so a top-level cpu_by_stage persisted 0/121 on real traffic (same class as source_duration). FAILS if it regresses to `result[\"cpu_by_stage\"] =`, which would make the inc2 burst-sizing data silently un-queryable again.")
+def _inc2_telemetry_nest_guard():
+    src = open("modal_app.py").read()
+    assert '_st_dict["cpu_by_stage"]' in src and '_st_dict["mem_by_stage"]' in src, (
+        "cpu_by_stage/mem_by_stage must be nested via _st_dict (result.setdefault('stage_timings')) "
+        "so they persist — the inc2 sizing telemetry")
+    assert 'result["cpu_by_stage"] =' not in src and 'result["mem_by_stage"] =' not in src, (
+        "cpu_by_stage/mem_by_stage found at TOP-LEVEL result — content-studio strips unknown "
+        "top-level keys (0/121 on traffic). Nest inside stage_timings instead.")
+
+
 @check("VIDSTAB RIP-OUT GUARD (Zac 2026-08-01, RULE-1): vidstab is disabled via a secret-independent clamp (_SHAKE_STABILIZE_THRESHOLD = max(..., 1e9)) so organic stabilisation NEVER fires regardless of any live PROMPTLY_VIDSTAB_THRESHOLD secret. FAILS if the clamp is removed — the rip-out cannot silently regress to always-on without a deliberate, reviewed revert.")
 def _vidstab_ripout_guard():
     src = open("handler.py").read()
@@ -98,6 +109,59 @@ def _source_duration_persist_guard():
         "source_duration_s found at TOP-LEVEL result_payload indent (12 spaces) — "
         "content-studio strips unknown top-level keys (0/62 on traffic). Nest it "
         "inside the stage_timings dict instead.")
+
+
+@check("GEMINI_TOKENS PERSIST GUARD (Zac 2026-08-02, RULE-1): the gemini_tokens dict (prompt/cached/output + uncached_delta = prompt-cached, the number that decides the prompt lever) must be NESTED inside stage_timings, never a top-level result key — it is the 3RD field this class would strip (source_duration 0/62, cpu_by_stage 0/121). FAILS if gemini_tokens sits at top-level result-payload indent (12 spaces) instead of nested (16), or the _gemini_token_summary helper is gone.")
+def _gemini_tokens_persist_guard():
+    src = open("handler.py").read()
+    assert "def _gemini_token_summary" in src, \
+        "the _gemini_token_summary helper was dropped"
+    assert '"gemini_tokens"' in src, "gemini_tokens persistence missing entirely"
+    import re
+    top = re.search(r'\n {12}"gemini_tokens"\s*:', src)
+    nested = re.search(r'\n {16}"gemini_tokens"\s*:', src)
+    assert nested is not None, \
+        "gemini_tokens must be NESTED inside stage_timings (16-space indent)"
+    assert top is None, \
+        "gemini_tokens at TOP-LEVEL (12-space) — content-studio strips it; nest it"
+
+
+@check("RENDER CONCURRENCY NEVER FAILS A RENDER (Zac 2026-08-03, RULE-1, THIRD RENDER_FATAL c9e980fe + the clamp that missed it): Remotion HARD-REJECTS --concurrency > cores, and the enforced limit is the Modal cpu REQUEST, which Python CANNOT read — cert_core_probe proved a cpu=8 container reports 24 for sched_getaffinity, os.cpu_count AND cfs_quota. So the budget MUST come from PROMPTLY_RENDER_CORE_BUDGET (each render function declares its own cpu=), the helper MUST floor to a conservative 4 on any miss (never host cores, never raise), _remotion_subprocess MUST self-heal on Remotion's stated max, and each function's declared budget MUST equal its cpu=. FAILS if any of those regress.")
+def _render_concurrency_never_fails_guard():
+    src = open("handler.py").read()
+    # 1. Budget comes from the reliable env, floors to 4, never host cores.
+    assert "PROMPTLY_RENDER_CORE_BUDGET" in src and "def _render_core_budget" in src, (
+        "_render_core_budget (reading PROMPTLY_RENDER_CORE_BUDGET) is gone — the "
+        "concurrency budget would fall back to an unreliable core count (a cpu=8 box "
+        "reports 24) and re-break Remotion's --concurrency<=cores limit")
+    assert "return 4" in src.split("def _render_core_budget", 1)[1][:600], (
+        "_render_core_budget must return a conservative floor (4) on a miss — a perf "
+        "helper must never raise or pass host cores into a render")
+    assert "(os.cpu_count() or 16) // 2" not in src, (
+        "a concurrency tab budget still divides os.cpu_count() (HOST cores on Modal)")
+    assert src.count("min(_CONTAINER_CORES,") >= 2, (
+        "both _PER_CHUNK_CONCURRENCY and _MICRO_CONCURRENCY must stay min(_CONTAINER_CORES,…)-clamped")
+    # 2. The self-heal exists and is bounded.
+    assert "Maximum for --concurrency is" in src and "_self_healed=True" in src, (
+        "the _remotion_subprocess self-heal (re-run once at Remotion's stated max) is "
+        "missing — without it a wrong budget can still fatal a render")
+    # 3. Each render function declares a budget that EQUALS its cpu= (anti-drift).
+    msrc = open("modal_app.py").read()
+    import re as _re
+    for _fn in ("run_pipeline_bg", "render_burst"):
+        _i = msrc.index(f"def {_fn}(")
+        _dstart = msrc.rfind("@app.function", 0, _i)  # nearest decorator above the def
+        _decor = msrc[_dstart:_i]                      # ONLY this function's decorator block
+        _body = msrc[_i:_i + 2000]                     # the function head where the budget is set
+        # Match the REAL resource arg ("cpu=N, memory=…"), not the many cpu=NN
+        # mentions in the sizing comment (which never carry ", memory=").
+        _cpu = _re.findall(r"cpu=(\d+),\s*memory=", _decor)
+        _bud = _re.search(r'PROMPTLY_RENDER_CORE_BUDGET"\]\s*=\s*"(\d+)"', _body)
+        assert _cpu, f"{_fn}: no 'cpu=N, memory=' resource arg found in its @app.function decorator"
+        assert _bud, f"{_fn}: does not set PROMPTLY_RENDER_CORE_BUDGET in its body"
+        assert _bud.group(1) == _cpu[0], (
+            f"{_fn}: PROMPTLY_RENDER_CORE_BUDGET={_bud.group(1)} != cpu={_cpu[0]} — "
+            f"the render core budget drifted from the container's cpu allocation")
 
 
 @check("DEPLOY-STATE GUARD (Zac 2026-08-01): a deploy must not DROP a commit already known live. deploy.sh records the last successfully-deployed HEAD in .last_deployed_commit; this FAILS if that commit is not an ancestor of the current HEAD — i.e. you are deploying from a stale branch/checkout that lost a live fix (the 4th deploy-state footgun today: stale server.js, fanout canonical, snapshot env-freeze, the 06:10 validator scare). FAIL-SAFE: passes silently if the file is absent (first deploy), empty, or the commit is unknown to this tree, so it can never wrongly block a legitimate deploy.")
@@ -4992,6 +5056,602 @@ def _render_fatal_env_class():
     assert os.path.exists("cert_remotion_env_app.py")
 
 
+@check("RENDER_FATAL TIMEOUT FORENSICS (2026-08-01): a `node render-full.mjs` subprocess timeout must never again reach the job row as a bare `TimeoutExpired: Command [...] timed out` with no evidence — 13 of 14 prod RENDER_FATALs (2026-07-25..08-01, 10 users) landed exactly that way while POSIX subprocess.run had the child's partial stdout/stderr attached to the exception the whole time, unread. RUNTIME-ASSERTED (not a source grep): _remotion_subprocess is actually timed out here and the raised error must carry composition label + how-far-it-got + budget INSIDE the first 300 chars, because the degrade ladder truncates the cause at [:300] and that is the only copy reaching result.error_detail (Modal's log buffer retains ~1h, always less than time-to-look). cert: test_remotion_timeout_forensics.py 19/19")
+def _render_fatal_timeout_forensics():
+    import subprocess as _sp
+    import sys as _sys
+    import tempfile as _tf
+    import handler
+    assert os.path.exists("test_remotion_timeout_forensics.py"), \
+        "forensics cert must ride the repo"
+    _fn = getattr(handler, "_remotion_subprocess", None)
+    assert callable(_fn), \
+        "_remotion_subprocess must stay MODULE-LEVEL — a nested closure cannot be tested"
+
+    # A child that reports progress like render-full.mjs, then outlives its budget.
+    _fd, _p = _tf.mkstemp(suffix=".py")
+    with os.fdopen(_fd, "w") as _f:
+        _f.write(
+            "import sys, time\n"
+            "print('[render-full] progress 20% rendered=450 encoded=441 "
+            "interval_render_fps=6.1', flush=True)\n"
+            "sys.stderr.write('warn noise\\n'); sys.stderr.flush()\n"
+            "time.sleep(600)\n"
+        )
+    _err = None
+    try:
+        _fn("micro-00", [_sys.executable, "-u", _p,
+                         "--frame-range", "0,2249", "--concurrency", "4"], timeout=2)
+    except Exception as _e:
+        _err = _e
+    finally:
+        os.unlink(_p)
+
+    assert _err is not None, "timeout must raise"
+    assert isinstance(_err, RuntimeError) and not isinstance(_err, _sp.TimeoutExpired), \
+        f"must re-raise as RuntimeError (stable shape for the ladder + classify_error), got {type(_err).__name__}"
+    assert isinstance(_err.__cause__, _sp.TimeoutExpired), \
+        "the original TimeoutExpired must stay chained as __cause__"
+
+    # ── the durability budget: only [:300] survives into result.error_detail ──
+    _head = str(_err)[:300]
+    assert "micro-00" in _head, f"composition label lost in truncation: {_head!r}"
+    assert "TIMEOUT" in _head.upper(), f"timeout verdict lost in truncation: {_head!r}"
+    assert "rendered=450" in _head, f"HOW FAR IT GOT lost in truncation: {_head!r}"
+    assert "/2250" in _head, f"frame-count denominator lost (progress with no denominator is not a result): {_head!r}"
+    assert "encoded=441" in _head, f"encoder progress lost in truncation: {_head!r}"
+    assert "budget" in _head.lower(), f"the exceeded budget must be named: {_head!r}"
+
+    # ── end-to-end: the ladder wrap must preserve BOTH the digest and routing ──
+    _laddered = (f"RENDER_FATAL after full + retry + stripped renders: "
+                 f"{type(_err).__name__}: {str(_err)[:300]}")
+    assert "rendered=450" in _laddered and "micro-00" in _laddered, \
+        f"digest did not survive the ladder wrap: {_laddered!r}"
+    assert handler.classify_error(RuntimeError(_laddered))["error_code"] == "RENDER_FATAL", \
+        "routing must be unchanged by the richer message"
+
+    # ── a render that never started is a DIFFERENT diagnosis, stated explicitly ──
+    _fd, _p = _tf.mkstemp(suffix=".py")
+    with os.fdopen(_fd, "w") as _f:
+        _f.write("import time\ntime.sleep(600)\n")
+    _err2 = None
+    try:
+        _fn("overlay-00", [_sys.executable, "-u", _p], timeout=2)
+    except Exception as _e:
+        _err2 = _e
+    finally:
+        os.unlink(_p)
+    assert _err2 is not None and "NO progress" in str(_err2)[:300], \
+        f"a child that never rendered a frame must say so (bundle/openBrowser death != slow render): {str(_err2)[:300]!r}"
+
+
+@check("MICRO RENDER BUDGET (2026-08-01, RENDER_FATAL mitigation): micro chunks were submitted with NO timeout argument and silently inherited _run_remotion's flat 300s default while overlay always passed a computed per-chunk budget — 10 of the 13 TimeoutExpired RENDER_FATALs in the 2026-07-25..08-01 window were a micro chunk (9 of them chunk 00), and the render stage on COMPLETED jobs runs p90=179s/p95=258s/max=633s (n=374), i.e. 300s sat INSIDE the success distribution. Micro now takes overlay's own per-frame rate (300s/450f), floored at today's 300s and capped at overlay's 600s. The waits that guard it are DERIVED from the budgets, never constants: a barrier shorter than the subprocess it waits on replaces the forensic render timeout with a bare concurrent.futures.TimeoutError.")
+def _micro_render_budget():
+    _h = open("handler.py").read()
+    _i = _h.index("_MICRO_SEC_PER_FRAME")
+    _j = _h.index("_micro_finalize_future.result(")
+    _blk = _h[_i:_j]
+
+    # 1. micro must never again inherit the default by omission
+    assert "_render_pool.submit(_run_remotion, _lbl, _cmd, _to)" in _blk, \
+        "micro submit must pass an EXPLICIT per-chunk budget (the bug was the omitted arg)"
+    assert "zip(micro_cmds, _micro_timeouts)" in _blk, \
+        "micro budgets must be zipped 1:1 with micro_cmds"
+    # every micro command must have a budget — chunked AND single-process
+    assert _blk.count("_micro_timeouts.append(") >= 2, \
+        "both the chunked and the unchunked micro path must append a budget"
+
+    # 2. the budget must SCALE with frames, not be a constant
+    assert "_frames * _MICRO_SEC_PER_FRAME" in _blk, \
+        "micro budget must scale with the chunk's frame count"
+    # 3. it must be floored at today's value — nothing may get a SMALLER budget
+    assert "_MICRO_TIMEOUT_FLOOR = _PLAIN_CHUNK_TIMEOUT" in _blk, \
+        "floor must be today's 300s so no render regresses"
+    assert "_MICRO_TIMEOUT_CAP = _OVERLAY_TIMEOUT_CAP" in _blk, \
+        "cap must track overlay's ceiling, not a fresh constant"
+
+    # 4. THE ORDERING INVARIANT: subprocess budget < barrier < finalize.
+    #    Derived, so raising a budget raises its guards automatically.
+    assert "_MICRO_BARRIER_S = (max(_micro_timeouts)" in _blk, \
+        "the micro barrier must be DERIVED from the chunk budgets"
+    assert "_MICRO_FINALIZE_S = _MICRO_BARRIER_S +" in _blk, \
+        "the finalize wait must be DERIVED from the barrier"
+    assert "timeout=_MICRO_BARRIER_S + _fanout_wait_extra" in _blk, \
+        "the per-chunk wait must use the derived barrier"
+    assert "timeout=320" not in _blk and "timeout=400 + _fanout_wait_extra" not in _h, \
+        "the old constant micro waits (320/400) must be gone"
+
+    # 5. arithmetic: the invariant must hold at every chunk size, and stay
+    #    inside the 3000s Modal job budget.
+    # Read the LIVE constants out of handler rather than restating them, so a
+    # future raise (agent/speed raised these to 600/1500 on 2026-08-02) can
+    # never silently drift past this invariant.
+    _PLAIN = int(re.search(r"_PLAIN_CHUNK_TIMEOUT = (\d+)", _h).group(1))
+    _CAP = int(re.search(r"_OVERLAY_TIMEOUT_CAP = (\d+)", _h).group(1))
+    assert _CAP >= _PLAIN, "overlay cap must be >= its plain budget"
+    for _f in (1, 150, 450, 900, 2250, 9000, 100000):
+        _t = int(min(_CAP, max(_PLAIN, _f * (_PLAIN / 450.0))))
+        _b, _fin = _t + 20, _t + 20 + 140
+        assert _t < _b < _fin < 3000, f"budget ordering broken at {_f} frames: {_t}/{_b}/{_fin}"
+        assert _t >= _PLAIN, f"budget regressed below the plain budget at {_f} frames: {_t}"
+    # MICRO MUST NOT HAVE THE LOWER CEILING (Zac 2026-08-02): micro's chunk
+    # count was pinned at 4 while overlay's scaled, so micro carried the
+    # GROWING per-chunk load against the LOWER cap — backwards. Micro's cap
+    # tracks overlay's, and micro's chunk count now uses overlay's own rule.
+    assert "_MICRO_TIMEOUT_CAP = _OVERLAY_TIMEOUT_CAP" in _h, \
+        "micro's ceiling must track overlay's, never be a lower constant"
+    assert "_MICRO_CHUNK_COUNT = 4 if" not in _h, \
+        "micro chunk count must NOT be pinned at 4 (per-chunk load must stay bounded)"
+    assert "_MICRO_TAB_BUDGET" in _h and "_MICRO_TAB_BUDGET // max(1, len(_micro_ranges))" in _h, \
+        "unpinning must hold the Chrome tab budget constant (cpu=16 box)"
+
+
+@check("ORPHANED CERTS ARE RUN, NOT JUST COMMITTED (2026-08-02): test_render_ladder.py was PERMANENTLY RED at HEAD — it asserted the pre-LEVER-4 three-rung shape — and no runner invoked it, so the deploy gate's green never covered it. A red test nobody runs trains everyone to ignore red. These render error-path certs now execute INSIDE the gate: a failure here fails the deploy.")
+def _error_path_certs_actually_run():
+    import subprocess as _sp
+    import sys as _sys
+    for _cert in ("test_render_ladder.py", "test_remotion_timeout_forensics.py",
+                  "test_coverage_empty_transcript.py",
+                  "test_asr_scribe_routing.py",
+                  "test_render_never_blames_user_file.py",
+                  "test_integrity_black_echo_boundary.py",
+                  "test_integrity_freeze_echo_boundary.py",
+                  "test_silent_to_moodreel.py",
+                  "test_output_frame_grid.py",
+                  "test_integrity_dead_moment_echo.py"):
+        assert os.path.exists(_cert), f"{_cert} missing from the repo"
+        _r = _sp.run([_sys.executable, _cert], capture_output=True, text=True, timeout=300)
+        assert _r.returncode == 0, (
+            f"{_cert} FAILED (rc={_r.returncode}): "
+            f"{(_r.stdout or '')[-600:]}{(_r.stderr or '')[-400:]}"
+        )
+
+
+@check("COVERAGE GATE FAIL-OPEN CLOSED (2026-08-02): `if _dur <= 0 or not words: return True` meant an EMPTY transcript PASSED the coverage gate — a total transcription failure scored as fine, which is why the class could not be counted. Proven by the ASR bake-off: Deepgram nova-3 returned ZERO words on 11 of 40 clips and all 11 passed the old gate, which also flattered the control mean 53.6%->73.9% by dropping its worst cases. Zero words is now a REJECT (TRANSCRIPTION_EMPTY) when VAD confirms speech, stays quiet on a genuinely silent clip (NO_SPEECH owns that), and STILL fails open wherever the gate cannot measure. cert: test_coverage_empty_transcript.py 14/14")
+def _coverage_empty_transcript_fails():
+    import handler
+    _o1, _o2 = handler._detect_silence_regions_vad, handler._vad_available
+
+    def _vad(sil, avail=True):
+        handler._detect_silence_regions_vad = lambda *a, **k: sil
+        handler._vad_available = lambda: avail
+
+    try:
+        # 1. zero words over VAD-confirmed speech -> REJECT (the fix)
+        _vad([(0.0, 0.5)])
+        _ok, _st = handler._transcription_coverage_check("/x.mp4", [], 10.0)
+        assert _ok is False, f"empty transcript over 9.5s of speech must REJECT: {_st}"
+        assert _st.get("unworded_frac") == 1.0, _st
+
+        # 2. genuinely silent clip -> NOT this class (NO_SPEECH owns it)
+        _vad([(0.0, 10.0)])
+        assert handler._transcription_coverage_check("/x.mp4", [], 10.0)[0] is True, \
+            "a silent clip must not become a coverage failure"
+
+        # 3. sub-floor speech -> no over-fire
+        _vad([(0.0, 9.0)])
+        assert handler._transcription_coverage_check("/x.mp4", [], 10.0)[0] is True, \
+            "1s of speech is under the 2.0s floor and must not fail a job"
+
+        # 4. THE [] AMBIGUITY: VAD ran + found no silence = continuous speech
+        #    (worst case) vs VAD unavailable = unmeasurable. Must differ.
+        _vad([], avail=True)
+        assert handler._transcription_coverage_check("/x.mp4", [], 10.0)[0] is False, \
+            "continuous speech with zero words is the WORST case and must REJECT"
+        _vad([], avail=False)
+        assert handler._transcription_coverage_check("/x.mp4", [], 10.0)[0] is True, \
+            "an unmeasurable gate must FAIL OPEN, never invent a verdict"
+    finally:
+        handler._detect_silence_regions_vad, handler._vad_available = _o1, _o2
+
+    # 5. unmeasurable duration -> fail-open, unchanged
+    assert handler._transcription_coverage_check("/x.mp4", [], 0.0)[0] is True
+
+    # 6. the class is routable and never blames the user for an engine failure
+    _env = handler.classify_error(RuntimeError("TRANSCRIPTION_EMPTY: 9.5s speech, 0 words"))
+    assert _env.get("error_code") == "TRANSCRIPTION_EMPTY", _env
+    assert _env.get("requires_new_video") is not True, _env
+    assert _env.get("retryable") is True, _env
+
+    assert os.path.exists("test_coverage_empty_transcript.py"), "cert must ride the repo"
+
+
+@check("LANGUAGE-ROUTED SCRIBE (2026-08-02, DARK behind PROMPTLY_ASR_SCRIBE): measured head-to-head on real prod audio, BOTH cohorts scored through handler's OWN _transcription_coverage_check, with Deepgram run on its EXACT production options (language=multi + 48kHz FLAC — an earlier control used detect_language=true, the config handler.py:3863 documents as returning 0 words on ~40% of non-English, and it had to be re-run). Failing set (TRANSCRIPTION_INCOMPLETE): deepgram 3/40 -> scribe 34/40. CONTROL set (currently SUCCEEDING, the no-regression proof): deepgram 32/40 -> scribe 39/40. Word timing vs an INDEPENDENT acoustic onset: 50.0ms -> 19-20ms. Scribe won in every language measured incl. English (18/22->20/22). Selection is MEASURED by the same gate that would reject the job, routing is an allowlist, and Deepgram has already returned before Scribe is called so an outage cannot cost a job. cert: test_asr_scribe_routing.py 14/14")
+def _asr_scribe_routing():
+    import handler
+    _src = open("handler.py").read()
+    assert os.path.exists("test_asr_scribe_routing.py"), "cert must ride the repo"
+    # PROPAGATION GUARD (Zac 2026-08-02): the Scribe upgrade in handler() MUST
+    # write its result back to the shared transcript cache, exactly like the
+    # Arabic-bridge and bilingual upgrades. Without it, Scribe recovers the
+    # transcript into a LOCAL var while the pipeline's 0-words gate re-reads
+    # _get_resolved_transcript()'s raw cache (still Deepgram's 0 words) and
+    # rejects the job Scribe just fixed — the whole recovery does nothing end to
+    # end (proven on 27b02576: dg 0 -> scribe 153, chose:scribe, died "0 words").
+    _sc = _src[_src.index("_maybe_upgrade_transcript_scribe(\n                _transcript"):]
+    _sc = _sc[:_sc.index("TALKING-HEAD GATE")]
+    assert '_refined_tx_cache["value"] = _transcript' in _sc, \
+        ("the Scribe upgrade must propagate to _refined_tx_cache[\"value\"] so the "
+         "0-words gate and all other transcript consumers see the recovered words")
+    for _fn in ("transcribe_scribe", "_maybe_upgrade_transcript_scribe",
+                "_scribe_should_route", "_scribe_enabled", "_scribe_langs"):
+        assert callable(getattr(handler, _fn, None)), f"{_fn} missing"
+
+    _o_env = {k: os.environ.get(k) for k in
+              ("PROMPTLY_ASR_SCRIBE", "PROMPTLY_SCRIBE_LANGS", "ELEVENLABS_API_KEY")}
+
+    def _set(**kw):
+        for k, v in kw.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+    try:
+        # 1. DARK BY DEFAULT — the flag must default OFF, whatever the key state
+        _set(PROMPTLY_ASR_SCRIBE=None, ELEVENLABS_API_KEY="k")
+        assert handler._scribe_enabled() is False, "PROMPTLY_ASR_SCRIBE must default OFF"
+        assert handler._scribe_should_route("hi") is False, "flag off must never route"
+
+        # 2. a key is REQUIRED — arming the flag without one must not route
+        _set(PROMPTLY_ASR_SCRIBE="1", ELEVENLABS_API_KEY=None)
+        assert handler._scribe_should_route("hi") is False, \
+            "no ELEVENLABS_API_KEY must not route (never call an engine we cannot reach)"
+
+        # 3. ALLOWLIST semantics, incl. the explicit widen-to-everything escape
+        _set(PROMPTLY_ASR_SCRIBE="1", ELEVENLABS_API_KEY="k", PROMPTLY_SCRIBE_LANGS="ml,ta")
+        assert handler._scribe_should_route("ml") is True
+        assert handler._scribe_should_route("hi") is False, "allowlist must exclude"
+        _set(PROMPTLY_SCRIBE_LANGS="*")
+        assert handler._scribe_should_route("ja") is True, "'*' must route everything"
+
+        # 3b. ZERO-WORD BYPASS (Zac 2026-08-03): a "Transcribed 0 words" Deepgram
+        # result carries NO detected_language, so the restrictive allowlist
+        # (default hi,ml,ta,… — PROMPTLY_SCRIBE_LANGS unset in prod) excludes
+        # EXACTLY the case Scribe exists to recover. It fired 0x on its own target.
+        # A 0-word result must route to Scribe on the armed engine + key ALONE.
+        _set(PROMPTLY_ASR_SCRIBE="1", ELEVENLABS_API_KEY="k", PROMPTLY_SCRIBE_LANGS="ml,ta")
+        _called = {"scribe": False}
+        _oc0, _os0 = handler._transcription_coverage_check, handler.transcribe_scribe
+        try:
+            handler._transcription_coverage_check = lambda *a, **k: (False, {"unworded_frac": 1.0})
+            def _spy(*a, **k):
+                _called["scribe"] = True
+                return {"words": [{"word": "x", "start": 0.0, "end": 0.2}], "detected_language": "hi"}
+            handler.transcribe_scribe = _spy
+            handler._maybe_upgrade_transcript_scribe(
+                {"words": [], "detected_language": None}, "/x.mp4", 10.0)
+            assert _called["scribe"] is True, \
+                ("a 0-word Deepgram result MUST route to Scribe regardless of the "
+                 "language allowlist — that empty, language-less case is the exact "
+                 "class Scribe exists to recover, and gating it on langs made it "
+                 "fire 0x on its own target")
+        finally:
+            handler._transcription_coverage_check, handler.transcribe_scribe = _oc0, _os0
+
+        # 4. FLAG-OFF INERTNESS at the call site: same object back, engine untouched
+        _set(PROMPTLY_ASR_SCRIBE=None)
+        _dg = {"words": [{"word": "a", "start": 0.0, "end": 0.1}], "detected_language": "hi"}
+        assert handler._maybe_upgrade_transcript_scribe(_dg, "/x.mp4", 10.0) is _dg, \
+            "flag off must return the EXACT Deepgram result (byte-identical pipeline)"
+
+        # 5. FAIL-SAFE: the upgrade raising must never cost a transcript we have
+        _set(PROMPTLY_ASR_SCRIBE="1", ELEVENLABS_API_KEY="k", PROMPTLY_SCRIBE_LANGS="hi")
+        _oc, _os_ = handler._transcription_coverage_check, handler.transcribe_scribe
+        try:
+            handler._transcription_coverage_check = lambda *a, **k: (False, {"unworded_frac": 0.9})
+            def _boom(*a, **k):
+                raise RuntimeError("SCRIBE_HTTP_500")
+            handler.transcribe_scribe = _boom
+            assert handler._maybe_upgrade_transcript_scribe(_dg, "/x.mp4", 10.0) is _dg, \
+                "a Scribe outage must leave today's behaviour, never fail the job"
+            # 6. MEASURED selection — a WORSE Scribe transcript must not be taken
+            handler.transcribe_scribe = lambda *a, **k: {
+                "words": [{"word": "b", "start": 0.0, "end": 0.1}], "detected_language": "hi"}
+            handler._transcription_coverage_check = (
+                lambda _p, w, _d: (False, {"unworded_frac": 0.4 if w is _dg["words"] else 0.9}))
+            assert handler._maybe_upgrade_transcript_scribe(_dg, "/x.mp4", 10.0) is _dg, \
+                "Scribe losing on coverage must leave Deepgram in place (not a blind swap)"
+        finally:
+            handler._transcription_coverage_check, handler.transcribe_scribe = _oc, _os_
+    finally:
+        for _k, _v in _o_env.items():
+            os.environ.pop(_k, None) if _v is None else os.environ.__setitem__(_k, _v)
+
+    # 7. the word CONTRACT — Scribe must fill every field Deepgram's parse emits
+    for _f in ("\"punctuated_word\"", "\"confidence\"", "\"speaker\"", "\"language\""):
+        assert _f in _src[_src.index("def transcribe_scribe"):_src.index("def transcribe_audio")], \
+            f"transcribe_scribe must emit {_f} — downstream reads all seven fields"
+
+
+@check("INTEGRITY_TRIP BLACK-ECHO DIAGNOSTIC (2026-08-02): the source-echo that downgrades user-content black (_ig_source_echo_black) needs BOTH a readable source AND a working output->source mapping; when either is missing it is skipped SILENTLY and a faithful render of black footage trips as if we produced the black. Job 0e794beb tripped 3x on a source carrying 7.97s of black across 4 spans — the mapped window is 2.4s black vs a 1.93s output span (cover 2.4 >= the 0.60 threshold's 1.16s), so the echo WOULD have downgraded it. Which precondition failed was unanswerable: the verdict JSON is in S3 and the DB result carried NO integrity fields. The trip message now front-loads source/map/downgraded so it survives the [:300] truncation into result.error_detail.")
+def _integrity_black_echo_diag():
+    import handler
+    _h = open("handler.py").read()
+    _i = _h.index("WHY DIDN'T THE SOURCE-ECHO SAVE THIS")
+    _j = _h.index("raise RuntimeError(f\"INTEGRITY_TRIP:", _i)
+    _blk = _h[_i:_j + 200]
+    # the three facts that identify the failing precondition
+    assert "source=" in _blk and "MISSING" in _blk, "must report whether the source was readable"
+    assert "map=" in _blk and "UNRESOLVED" in _blk, "must report whether out->src resolved"
+    assert "downgraded=" in _blk, "must report how many spans the echo downgraded"
+    # diagnostic must PRECEDE the span list, or [:300] can drop it on a long trip
+    assert _h.index("_ig_why", _i) < _h.index("_ig_summary", _j - 100), \
+        "the diagnostic must be front-loaded ahead of the span dump"
+    # a diag failure must never replace the trip itself
+    assert "diag-failed" in _blk, "the diagnostic must be try/except'd — it can never eat the trip"
+    # routing unchanged, and the diagnostic survives truncation
+    _msg = ("INTEGRITY_TRIP: [echo: source=MISSING map=UNRESOLVED downgraded=0] "
+            "black=[[20.466667, 22.4]], both_stream_hole=[[50.46075, 50.766667]]")
+    assert handler.classify_error(RuntimeError(_msg))["error_code"] == "INTEGRITY_TRIP"
+    assert "echo:" in _msg[:300] and "source=" in _msg[:300], "diagnostic must survive [:300]"
+    # the discriminator it diagnoses must still exist and still be wired
+    assert callable(getattr(handler, "_ig_source_echo_black", None))
+    assert "_ig_source_echo_black(" in _h and "out_to_src=_ig_out_to_src" in _h, \
+        "the source-echo must stay wired into the gate call"
+
+
+@check("SIGNATURE-FIRST ON THE HYPE/MINIMAL RENDER BRIDGE (2026-08-02): hype_render._render_remotion opened its failure message with STDOUT, so the thrown exception sat ~700 chars in and the degrade ladder's [:300] truncation cut it off — job b8ab1276's durable error_detail ended at '[render-full] progress 0% rendered=0' and the real cause was unrecoverable from the job row. handler._remotion_subprocess has led with the real error since 2026-08-01; this was the one render call site still dumping stdout first. Both paths now pull the LAST line-anchored *Error/Exception line to the front.")
+def _hype_render_signature_first():
+    _src = open("hype_render.py").read()
+    _i = _src.index("def _render_remotion")
+    _j = _src.index("def render_hype")
+    _blk = _src[_i:_j]
+    assert "import re" in _src, "hype_render must import re for the signature extraction"
+    assert 'r"^[A-Za-z_.$]*(?:Error|Exception)\\b.*"' in _blk or "(?:Error|Exception)" in _blk, \
+        "must extract the thrown *Error/Exception line"
+    assert "_salient" in _blk, "the salient error must be pulled out"
+    # ORDERING IS THE WHOLE FIX: salient error, then STDERR, then STDOUT.
+    _msg = _blk[_blk.index("raise RuntimeError("):]
+    assert _msg.index("_salient") < _msg.index("STDERR"), "the error must precede STDERR"
+    assert _msg.index("STDERR") < _msg.index("STDOUT"), \
+        "STDOUT must come LAST — leading with it is exactly what truncated b8ab1276"
+    # and prove it end-to-end on b8ab1276's real shape
+    import re as _re
+    _stdout = ("[render-full] composition=PromptlyOverlay (ProRes 4444 alpha) frames 0-907, "
+               "0 caption pages, 8 MG, 0 text overlays, concurrency=8\n"
+               "[render-full] Using prebundle at /remotion/bundle\n"
+               "[render-full] Using build-time Chromium at /usr/local/bin/chrome-headless-shell\n"
+               "[render-full] Browser opened in 1.22s\n[render-full] progress 0% rendered=0")
+    _stderr = ("warning noise\nError: Timeout (30000ms) exceeded rendering the component at "
+               'frame 134. Open delayRender() handles: "1. Loading <Img> with src=blob:..."')
+    _el = _re.findall(r"^[A-Za-z_.$]*(?:Error|Exception)\b.*", _stderr, _re.M)
+    _sal = (_el[-1].strip()[:400] + " ||| ") if _el else ""
+    _new = (f"[hype-render] render-full.mjs PromptlyOverlay failed rc=1: "
+            f"{_sal}STDERR:\n{_stderr[-2000:]}\nSTDOUT:\n{_stdout[-1200:]}")
+    assert "Timeout (30000ms)" in _new[:300], \
+        f"the exception must survive the [:300] truncation: {_new[:300]!r}"
+
+
+@check("A RENDER FAILURE IS NEVER A BAD USER FILE (2026-08-02): the intake verdicts (INVALID_FORMAT/WRONG_ORIENTATION) judge the USER'S upload but match substrings that also appear in our own renderer's stderr. Seven jobs across NINE users died at `render-full.mjs PromptlyMicroSegments failed rc=1, progress 0% rendered=0` with fps_normalize already clean (15fps->30fps in 0.5-0.7s); their stderr carried 'No video stream found' and they were classified INVALID_FORMAT with retryable=False + requires_new_video=True — a DEAD END telling nine people their file was unreadable, and a class that looked like an input problem in every count since 07-30. A provenance gate now runs ABOVE the intake block so render-stage origin wins over substring. cert: test_render_never_blames_user_file.py 19/19")
+def _render_never_blames_user_file():
+    import handler
+    _h = open("handler.py").read()
+    # provenance must be decided BEFORE the intake verdicts, or the substring wins
+    assert _h.index("_RENDER_STAGE_MARKERS") < _h.index('if "No video stream found" in msg'), \
+        "the provenance gate must precede the intake block"
+    _prod = ("[hype-render] render-full.mjs PromptlyMicroSegments failed rc=1\n"
+             "STDOUT:\n[render-full] progress 0% rendered=0\nSTDERR:\nNo video stream found")
+    _e = handler.classify_error(RuntimeError(_prod))
+    assert _e["error_code"] != "INVALID_FORMAT", f"render failure blamed on the file: {_e}"
+    assert str(_e["error_code"]).startswith("RENDER"), _e
+    assert _e.get("retryable") is True, f"a render failure must not be a dead end: {_e}"
+    assert _e.get("requires_new_video") is not True, f"must not demand a new video: {_e}"
+    # every render-stage marker, not just the one we saw
+    for _m in ("render-full.mjs", "[hype-render]", "PromptlyMicroSegments",
+               "PromptlyOverlay", "Remotion render"):
+        _env = handler.classify_error(RuntimeError(f"{_m} boom: No video stream found"))
+        assert _env["error_code"] != "INVALID_FORMAT", f"{_m} still blamed on the file: {_env}"
+    # NOT over-corrected: a genuine intake verdict must survive, or a real
+    # bad-file class disappears into a retry loop
+    _intake = handler.classify_error(RuntimeError("No video stream found"))
+    assert _intake["error_code"] == "INVALID_FORMAT", _intake
+    assert _intake.get("requires_new_video") is True, _intake
+    # named render classes keep their own identity
+    for _msg, _code in (("RENDER_FATAL after full + retry + stripped renders: [micro-00] Remotion render failed", "RENDER_FATAL"),
+                        ("INTEGRITY_TRIP: black=[[1.0, 2.0]] from render-full.mjs", "INTEGRITY_TRIP")):
+        assert handler.classify_error(RuntimeError(_msg))["error_code"] == _code, _msg
+    assert os.path.exists("test_render_never_blames_user_file.py"), "cert must ride the repo"
+
+
+@check("INTEGRITY_TRIP BLACK ECHO — A SPAN CROSSING A CUT MUST STILL BE SOURCE-CHECKED (2026-08-02): forced reproduction (job 017fa6d3) printed `[echo: source=Y map=29.92 downgraded=4]` — the echo RAN, the source was readable, the mapping resolved, four spans were downgraded, and two short ones tripped anyway. Cause: out_to_src maps each endpoint through whichever clip contains it, so a span straddling a cut resolves to DISCONTINUOUS source times and `src_e <= src_s` filed it as OUR defect WITHOUT ever running blackdetect — while the mapped window carried 0.6s of source black against a 0.14s requirement. A crossing span is now evaluated as the TWO source windows it covers and downgraded if EITHER is black. cert: test_integrity_black_echo_boundary.py 8/8 (E2-vs-E3: identical span, identical source, crossing the cut is the ONLY difference)")
+def _integrity_black_echo_boundary():
+    import handler, os as _os, subprocess as _sp, tempfile as _tf
+    assert _os.path.exists("test_integrity_black_echo_boundary.py"), "cert must ride the repo"
+    assert callable(getattr(handler, "_ig_window_is_black", None)), \
+        "the crossing path must share ONE window check with the single-clip path"
+    _fd, _src = _tf.mkstemp(suffix="_gate.mp4"); _os.close(_fd)
+    try:
+        _sp.run(["ffmpeg", "-y", "-v", "error",
+                 "-f", "lavfi", "-i", "color=c=black:s=320x240:r=30:d=2",
+                 "-f", "lavfi", "-i", "color=c=white:s=320x240:r=30:d=2",
+                 "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]",
+                 "-map", "[v]", "-pix_fmt", "yuv420p", _src],
+                capture_output=True, timeout=180)
+        assert _os.path.getsize(_src) > 500, "fixture build failed"
+
+        def _crossing(t):        # clip A then a BACKWARD cut into clip B
+            return 0.9 + t if t < 1.0 else t - 1.0
+
+        # 1. THE FIX: crossing a cut over SOURCE BLACK must downgrade, not trip
+        _d, _g = handler._ig_source_echo_black(_src, [(0.9, 1.1)], _crossing)
+        assert _g and not _d, f"boundary-crossing source black must downgrade: d={_d} g={_g}"
+        assert _g[0].get("boundary_crossing") is True, "must record why it was downgraded"
+
+        # 2. NOT OVER-CORRECTED: crossing a cut over NON-black must still trip
+        def _crossing_white(t):
+            return 2.4 + t if t < 1.0 else t + 1.4
+        _d2, _g2 = handler._ig_source_echo_black(_src, [(0.9, 1.1)], _crossing_white)
+        assert _d2 and not _g2, f"crossing over WHITE source must still be our defect: d={_d2} g={_g2}"
+
+        # 3. single-clip paths unchanged, both directions
+        _d3, _g3 = handler._ig_source_echo_black(_src, [(0.4, 0.9)], lambda t: t)
+        assert _g3 and not _d3, "single-clip source black must still downgrade"
+        _d4, _g4 = handler._ig_source_echo_black(_src, [(2.4, 2.9)], lambda t: t)
+        assert _d4 and not _g4, "single-clip non-black must still trip"
+
+        # 4. fail-closed on an unmappable endpoint — never downgrade the unchecked
+        _d5, _g5 = handler._ig_source_echo_black(_src, [(0.4, 0.9)], lambda t: None)
+        assert _d5 and not _g5, "unmappable must stay a defect"
+    finally:
+        try: _os.unlink(_src)
+        except OSError: pass
+
+    # the trip line must carry per-span mappings so the job row can answer this
+    # without a fixture next time
+    _h = open("handler.py").read()
+    assert "spans={','.join(_sp)}" in _h, "trip line must emit per-span start->end mappings"
+    assert "(CUT)" in _h, "a boundary-crossing span must be marked in the trip line"
+
+
+@check("INTEGRITY_TRIP FREEZE ECHO — SAME CUT-CROSSING DEFECT AS BLACK (2026-08-02): _ig_source_echo carried the identical `src_e <= src_s -> defects` branch, so a freeze span straddling a backward cut was filed as OUR defect without freezedetect ever running — a faithful render of the user's own STATIC footage failed the gate. Job 7e8a303f tripped freeze=[[43.07,43.9]] on the same clip whose BLACK spans were proven source content by forced repro 017fa6d3. Same two-window repair. The guard that matters is the SECOND case: crossing a cut over MOVING source must still trip, because the freeze internals differ from black. cert: test_integrity_freeze_echo_boundary.py 9/9")
+def _integrity_freeze_echo_boundary():
+    import handler, os as _os, subprocess as _sp, tempfile as _tf
+    assert _os.path.exists("test_integrity_freeze_echo_boundary.py"), "cert must ride the repo"
+    assert callable(getattr(handler, "_ig_window_is_frozen", None)), \
+        "the crossing path must share ONE window check with the single-clip path"
+    _fd, _src = _tf.mkstemp(suffix="_frz.mp4"); _os.close(_fd)
+    try:
+        _sp.run(["ffmpeg", "-y", "-v", "error",
+                 "-f", "lavfi", "-i", "color=c=green:s=320x240:r=30:d=2",
+                 "-f", "lavfi", "-i", "nullsrc=s=320x240:r=30:d=2",
+                 "-filter_complex",
+                 "[1:v]geq=random(1)*255:128:128[n];[0:v][n]concat=n=2:v=1:a=0[v]",
+                 "-map", "[v]", "-pix_fmt", "yuv420p", _src],
+                capture_output=True, timeout=240)
+        assert _os.path.getsize(_src) > 500, "fixture build failed"
+
+        def _crossing(t):            # clip A then a BACKWARD cut into clip B
+            return 0.9 + t if t < 1.0 else t - 1.0
+
+        def _crossing_moving(t):     # both windows land in the NOISE half
+            return 2.4 + t if t < 1.0 else t + 1.4
+
+        # 1. THE FIX — crossing a cut over FROZEN source must downgrade
+        _d, _g = handler._ig_source_echo(_src, [(0.9, 1.1)], _crossing)
+        assert _g and not _d, f"boundary-crossing frozen source must downgrade: d={_d} g={_g}"
+        assert _g[0].get("boundary_crossing") is True, "must record why"
+
+        # 2. THE GUARD THAT MATTERS — crossing over MOVING source must STILL trip
+        _d2, _g2 = handler._ig_source_echo(_src, [(0.9, 1.1)], _crossing_moving)
+        assert _d2 and not _g2, \
+            f"crossing over MOVING source is a REAL defect and must trip: d={_d2} g={_g2}"
+
+        # 3. single-clip behaviour unchanged, both directions
+        _d3, _g3 = handler._ig_source_echo(_src, [(0.4, 1.4)], lambda t: t)
+        assert _g3 and not _d3, "single-clip frozen must still downgrade"
+        _d4, _g4 = handler._ig_source_echo(_src, [(2.4, 3.4)], lambda t: t)
+        assert _d4 and not _g4, "single-clip moving must still trip"
+
+        # 4. fail-closed on an unmappable endpoint
+        _d5, _g5 = handler._ig_source_echo(_src, [(0.4, 1.4)], lambda t: None)
+        assert _d5 and not _g5, "unmappable must stay a defect"
+    finally:
+        try: _os.unlink(_src)
+        except OSError: pass
+
+    # BOTH echoes must share the one-window-check shape — a future edit to one
+    # must not silently leave the other on the old branch again.
+    _h = open("handler.py").read()
+    assert _h.count("boundary_crossing") >= 2, \
+        "black AND freeze must both carry the crossing repair"
+    assert "if src_s is None or src_e is None or src_e <= src_s:" not in _h, \
+        "the collapsed branch that hid the crossing case must be gone from BOTH echoes"
+
+
+@check("SILENT CLIPS GET AN EDIT, NOT THEIR OWN FOOTAGE BACK (2026-08-03, DARK behind PROMPTLY_SILENT_TO_MOODREEL): measured over 387 completions since 08-01 with editorial events = (segments-1) + decorations counted across BOTH recipe shapes — minimal_speech_uncut 141/141 silent (median 0 editorial), moodreel 73 jobs 1 silent (median 5), hype median 14, standard median 10. 143 of 387 (37%, 140 users) deliver ZERO editorial events and 141 are the uncut passthrough. A clip whose speech we could not READ but which VAD confirms carries NO speech is silent content and belongs in the mood-reel cut. THE GUARD: minimal_speech_uncut exists because build_minimal_plan cuts at MOTION PEAKS, which would chop the untranscribed speech it protects (Urdu-class law) — so re-routing requires POSITIVE VAD confirmation and every unmeasurable case stays uncut. cert: test_silent_to_moodreel.py 13/13")
+def _silent_to_moodreel():
+    import handler
+    _h = open("handler.py").read()
+    assert os.path.exists("test_silent_to_moodreel.py"), "cert must ride the repo"
+    for _fn in ("_silent_to_moodreel_enabled", "_vad_confirms_silence", "_silent_route_eligible"):
+        assert callable(getattr(handler, _fn, None)), f"{_fn} missing"
+
+    _o = os.environ.get("PROMPTLY_SILENT_TO_MOODREEL")
+    _o1, _o2 = handler._detect_silence_regions_vad, handler._vad_available
+
+    def _vad(sil, avail=True):
+        handler._detect_silence_regions_vad = lambda *a, **k: sil
+        handler._vad_available = lambda: avail
+    try:
+        # 1. DARK BY DEFAULT — flag off, nothing is ever re-routed
+        os.environ.pop("PROMPTLY_SILENT_TO_MOODREEL", None)
+        assert handler._silent_to_moodreel_enabled() is False
+        _vad([(0.0, 30.0)])
+        assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is False, \
+            "flag off must never re-route"
+
+        os.environ["PROMPTLY_SILENT_TO_MOODREEL"] = "1"
+        # 2. positive confirmation re-routes
+        assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is True
+        assert handler._silent_route_eligible("transcription_incomplete", "/x.mp4", 30.0) is True
+        # 3. THE GUARD — a clip WITH speech must never reach the motion-cut path
+        _vad([(0.0, 2.0)])          # 28s of speech in 30s
+        assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is False, \
+            "a speech-bearing clip must stay on the uncut route"
+        # 4. FAIL SAFE on every unmeasurable shape
+        _vad([], avail=False)
+        assert handler._vad_confirms_silence("/x.mp4", 30.0) is False, "VAD unavailable -> uncut"
+        _vad([], avail=True)        # [] also means 'continuous speech'
+        assert handler._vad_confirms_silence("/x.mp4", 30.0) is False, "[] ambiguity -> uncut"
+        _vad([(0.0, 30.0)])
+        assert handler._vad_confirms_silence("/x.mp4", 0.0) is False, "no duration -> uncut"
+        # 5. scope — duration verdicts are NOT silence verdicts
+        assert handler._silent_route_eligible("too_short", "/x.mp4", 30.0) is False
+    finally:
+        handler._detect_silence_regions_vad, handler._vad_available = _o1, _o2
+        os.environ.pop("PROMPTLY_SILENT_TO_MOODREEL", None) if _o is None else \
+            os.environ.__setitem__("PROMPTLY_SILENT_TO_MOODREEL", _o)
+
+    # wiring: the re-route must widen moodreel eligibility AND stop the clip
+    # falling back into the uncut path it is meant to replace
+    assert "or _silent_reroute)" in _h, "moodreel eligibility must include the re-route"
+    assert "and not _silent_reroute)" in _h, \
+        "_speech_bearing must exclude a re-routed clip or it falls back to uncut"
+
+
+@check("DEAD MOMENT ECHO + RENAME (2026-08-03): the gate measures silence INTERSECT (freeze UNION black) and called it `both_stream_hole` — a name that says a segment is MISSING when the detector measures that NOTHING IS HAPPENING. black and freeze were each source-echoed individually but the INTERSECTION never was: the only relief subtracted spans that had ALREADY cleared their trip floors and entered the echo, and the SILENCE half was never source-checked at all. Job 7e8a303f tripped freeze+black+hole on the very 96.2s clip whose 7.97s of black was PROVEN source content by forced repro 017fa6d3. Now: downgrade only when BOTH constituents echo (source silent AND source black-or-frozen); a LIVE source under a dead output is still our defect. Check renamed to `dead_moment`. cert: test_integrity_dead_moment_echo.py 9/9")
+def _integrity_dead_moment_echo():
+    import handler, os as _os, subprocess as _sp, tempfile as _tf
+    assert _os.path.exists("test_integrity_dead_moment_echo.py"), "cert must ride the repo"
+    for _fn in ("_ig_window_is_silent", "_ig_source_echo_hole"):
+        assert callable(getattr(handler, _fn, None)), f"{_fn} missing"
+    _h = open("handler.py").read()
+    assert '"check": "dead_moment"' in _h, "the check must be renamed"
+    assert '"check": "both_stream_hole"' not in _h, "the misleading name must be gone"
+    assert "_ig_source_echo_hole(source_path, holes, out_to_src)" in _h, \
+        "the intersection must actually be echoed, not just the constituents"
+
+    _fd, _src = _tf.mkstemp(suffix="_dead.mp4"); _os.close(_fd)
+    try:
+        _sp.run(["ffmpeg", "-y", "-v", "error",
+                 "-f", "lavfi", "-i", "color=c=black:s=320x240:r=30:d=2",
+                 "-f", "lavfi", "-i", "anullsrc=r=48000:cl=mono:d=2",
+                 "-f", "lavfi", "-i", "nullsrc=s=320x240:r=30:d=2",
+                 "-f", "lavfi", "-i", "sine=frequency=440:r=48000:d=2",
+                 "-filter_complex",
+                 "[2:v]geq=random(1)*255:128:128[n];"
+                 "[0:v][1:a][n][3:a]concat=n=2:v=1:a=1[v][a]",
+                 "-map", "[v]", "-map", "[a]", "-pix_fmt", "yuv420p", _src],
+                capture_output=True, timeout=300)
+        assert _os.path.getsize(_src) > 5000, "fixture build failed"
+        # 1. dead source -> downgraded
+        _d, _g = handler._ig_source_echo_hole(_src, [(0.4, 1.4)], lambda t: t)
+        assert _g and not _d, f"dead source moment must downgrade: d={_d} g={_g}"
+        # 2. THE GUARD — live source under a dead output is OUR defect
+        _d2, _g2 = handler._ig_source_echo_hole(_src, [(2.4, 3.4)], lambda t: t)
+        assert _d2 and not _g2, f"live source must still trip: d={_d2} g={_g2}"
+        # 3. one constituent alone is not enough
+        _d3, _g3 = handler._ig_source_echo_hole(_src, [(0.4, 1.0)], lambda t: t + 2.0)
+        assert _d3 and not _g3, "silent-but-live-video must still trip"
+        # 4. boundary crossing gets the same two-window treatment
+        _d4, _g4 = handler._ig_source_echo_hole(
+            _src, [(0.9, 1.1)], lambda t: 0.9 + t if t < 1.0 else t - 1.0)
+        assert _g4 and not _d4, "crossing a cut over a dead source must downgrade"
+        # 5. fail closed
+        _d5, _g5 = handler._ig_source_echo_hole(_src, [(0.4, 1.4)], lambda t: None)
+        assert _d5 and not _g5, "unmappable must stay a defect"
+    finally:
+        try: _os.unlink(_src)
+        except OSError: pass
+
+
 @check("L1 wave: NO_AUDIO_TRACK intake gate — probe-time, fresh-only, fail-open, honest envelope, rescue-denied")
 def _l1_no_audio_gate():
     import handler
@@ -5430,7 +6090,7 @@ def _integrity_source_echo_black():
     assert "blackdetect=d=%s:pix_th=%s" in _body and "source_path" in _body, \
         "source-echo-black must probe the SOURCE with blackdetect (else it can't distinguish echo from defect)"
     # wired into the gate: black_resid is downgraded, and holes covered by a source-echoed
-    # region are dropped (a source-echoed black+silent tail must not trip 'both_stream_hole')
+    # region are dropped (a source-echoed black+silent tail must not trip 'dead_moment')
     assert "black_resid, black_downgraded = _ig_source_echo_black(" in _h, \
         "black_resid must be source-echo-downgraded in _integrity_gate"
     assert "content_black_downgraded" in _h, "the verdict must record black downgrades (observability)"
@@ -5482,7 +6142,7 @@ def _source_poll_fail_fast():
     # the default (600) must be strictly under the run_pipeline_bg Modal timeout so the
     # clean UPLOAD_STALLED fires BEFORE the SIGKILL — the invariant that was violated
     _m = open("modal_app.py").read()
-    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=65536", _m)
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=\d+, memory=\d+", _m)  # cpu=16 uniquely IDs run_pipeline_bg (render_burst is cpu=48); memory is inc2-tunable
     assert _t, "run_pipeline_bg timeout not found in modal_app.py"
     assert 600 < int(_t.group(1)), \
         f"source-poll default (600s) must be < run_pipeline_bg timeout ({_t.group(1)}s) so UPLOAD_STALLED beats the SIGKILL"
@@ -5656,16 +6316,26 @@ def _progressive_terminal_seam():
         "render_stage must write the publisher INTO the cell at creation (exception-safe drain)"
     assert "_prog_pub = _prog_pub_cell[0]" in _h, \
         "the terminal seam must read the publisher from the cell before draining"
-    # the seam sits inside the terminal finally BEFORE work_dir teardown
+    # the seam sits inside the terminal finally BEFORE work_dir teardown. The
+    # drain-or-cancel logic is EXTRACTED into _drain_progressive_publisher (inc2
+    # render-burst: the ONE drain, shared by the planner's finally AND
+    # render_burst's own finally). So the finally must DRIVE it (the call)
+    # immediately before rmtree, and the extracted HELPER must carry the
+    # bounded-drain / deliberate-cancel law.
     _fin = _h.find("PROGRESSIVE TERMINAL SEAM (Zac ruling 1b")
     assert _fin != -1, "terminal seam block missing"
     _rm = _h.find("shutil.rmtree(work_dir, ignore_errors=True)", _fin)
     assert _rm != -1 and (_rm - _fin) < 2000, "the seam must run IMMEDIATELY before the terminal rmtree"
     _seam = _h[_fin:_rm]
-    assert "_prog_pub.finalize_requested" in _seam and "_prog_pub.drain(timeout_s=120.0)" in _seam \
-        and '_prog_pub.cancel("terminal_drain_timeout")' in _seam \
-        and '_prog_pub.cancel("job_terminal_before_finalize")' in _seam, \
-        "seam law: bounded drain on the finalize path; deliberate cancel otherwise"
+    assert "_drain_progressive_publisher(_prog_pub_cell)" in _seam, \
+        "the terminal finally must DRIVE the extracted drain immediately before the terminal rmtree"
+    _dh = _h.find("def _drain_progressive_publisher(")
+    assert _dh != -1, "the extracted drain helper must exist (shared by planner + render_burst finally)"
+    _dbody = _h[_dh:_dh + 1800]
+    assert "_prog_pub.finalize_requested" in _dbody and "_prog_pub.drain(timeout_s=120.0)" in _dbody \
+        and '_prog_pub.cancel("terminal_drain_timeout")' in _dbody \
+        and '_prog_pub.cancel("job_terminal_before_finalize")' in _dbody, \
+        "seam law: bounded drain on the finalize path; deliberate cancel otherwise (in the extracted helper)"
     # stamped payloads bypass the terminal fence; chunk payloads keep it
     assert 'if not (payload.get("final") or payload.get("superseded")):' in _h, \
         "_persist_preview: only stamped terminal payloads bypass the status fence"
@@ -6170,7 +6840,7 @@ def _recipe_wall_budget():
     assert _dl >= H._RECIPE_WALL_MIN_BUDGET_S >= 600.0, "budget floor must clear a clean pass's recipe-start"
     assert H._RECIPE_WALL_END_RESERVE_S >= 480.0, "tail reserve must absorb one 480s in-flight client-timeout"
     # _MODAL_FN_TIMEOUT_S must track the ACTUAL run_pipeline_bg timeout (drift guard)
-    _t = _re.search(r"timeout=(\d+), retries=0, cpu=16, memory=65536", open("modal_app.py").read())
+    _t = _re.search(r"timeout=(\d+), retries=0, cpu=\d+, memory=\d+", open("modal_app.py").read())  # memory inc2-tunable; cpu=16 IDs run_pipeline_bg
     assert _t and int(_t.group(1)) == int(H._MODAL_FN_TIMEOUT_S), \
         f"_MODAL_FN_TIMEOUT_S ({H._MODAL_FN_TIMEOUT_S}) must match run_pipeline_bg timeout ({_t.group(1) if _t else '?'})"
     # wiring: threaded into the internal retry-stop, the repair loop-top, and the caller
@@ -6435,6 +7105,10 @@ def _secret_canonical_values():
         "PROMPTLY_BROLL_GATE": "1",   # B-roll content+safety gate LIVE (Zac "flip as ordered" 2026-07-26 after refined-gate cert 40% keep/60% reject, extinction guard passed): action-match + cutaway-window dense sampling; fail-closed to clean cuts; rollback = "0" here + secret + redeploy
         "PROMPTLY_COVERAGE_GATE": "1",  # TRANSCRIPTION-COVERAGE gate + bridge-selection LIVE (P0 content-destruction fix, Zac 2026-07-27; cert: Urdu delivers via multi 3.8s-unworded, truly-untranscribable refunds; E2E TRANSCRIPTION_INCOMPLETE+designed_rejection PASS; zero FP on clean corpus): VAD-speech-with-no-words > 2.0s/0.10 → coded error+refund; bridge keeps the better-coverage transcript; rollback = "0" here + secret + redeploy
         "PROMPTLY_LANG_ROUTING": "1",  # TIER-1 STAGE A LIVE (Zac 2026-07-28 viral surge): on coverage failure, Gemini language-ID → Deepgram monolingual for the GRADUATED languages (PROMPTLY_ROUTE_LANGS, not pinned here — it grows per-script; Hindi certified first). Recovers coverage-fail non-English into native-caption deliveries instead of rejecting. Negative-control-gated (Gemini-ID, not acoustic). rollback = "0" here + secret
+        "PROMPTLY_SMOOTH_GRAPHICS": "1",  # VELOCITY CAP LIVE (Zac 2026-08-02: watched CAP vs OFF and approved by eye — "CAP looked SOO smooth, OFF didn't"). Bounds peak per-frame travel to ONE governed quantity for zooms + MG entrances (11px zoom / 1/6 entrance step); entrances only LENGTHEN. OFF-code byte-identical so rollback = "0" here + secret + redeploy. BLUR stays OUT (Zac).
+        "PROMPTLY_ASR_SCRIBE": "1",  # LANGUAGE-ROUTED SCRIBE LIVE (Zac 2026-08-02, overnight zero-errors): on a Deepgram transcript that FAILS the coverage gate, route ElevenLabs Scribe (needs promptly-elevenlabs/ELEVENLABS_API_KEY) and keep the better-coverage native transcript before rejecting — recovers the zero-word / TRANSCRIPTION_INCOMPLETE class (bake-off: deepgram 3/40 -> scribe 34/40 on the failing set; control 32->39, no regression). Deepgram runs first + unchanged so an outage can't cost a job. rollback = "0" here + secret + redeploy.
+        "PROMPTLY_RENDER_BURST": "1",  # inc2 FLIP LIVE (Zac GO 2026-08-02 naming the key): render_stage runs on the cpu=48 render_burst (16GiB blur-safe, was DARK/in-process). Enables run_pipeline_bg 64→24GiB (render no longer in-process here). A staging hiccup FAILS RETRYABLE (render_burst_staging_failed) — the in-process fallback was disarmed because run_pipeline_bg is 24GiB. rollback = "0" here + secret + redeploy, but RAISE run_pipeline_bg back to 48GiB FIRST (else a real in-process render OOMs) AND re-arm the local fallback.
+        "PROMPTLY_POST_THINKING_BUDGET": "2048",  # THINKING BUDGET FLIP LIVE (Zac GO 2026-08-02 naming the key): the critical-path editorial Gemini call (generate_edit_gemini / _post_cuts_response_schema, handler.py:11593 — the edit_plan "longest wait" at 34979) drops from 24576→2048 thinking tokens. A/B measured -29.5s wall (65.3s→35.8s, out_tok stable) AND lower Gemini API cost; budget=0 is SLOWER (model needs some thinking). Cuts the critical path directly (fps_normalize is overlapped/off-path, saves ~0). rollback = "24576" here + secret + redeploy.
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that
@@ -6705,6 +7379,29 @@ def _timeline_slice2_cutover():
     # the Slice-1 shadow is retired (its census is filed)
     assert "[timeline-shadow]" not in _src, "the Slice-1 shadow must be removed post-cutover"
     assert 'add_local_file("render_timeline.py"' in open("modal_app.py").read()
+
+
+@check("MODELS-NOT-SYMLINK LAW (Zac RULE-1, 2026-08-03, forged from the recurring 'Symlink loop from .../models' deploy death): `models/` is a GITIGNORED asset directory add_local_file-mounted into the image, but it was committed to HEAD as a self-referential symlink blob (the 4254ac7 clobber), so any `git checkout`/stash reverts the working tree to `models -> models` and `modal deploy` dies traversing the loop — while every source gate still passes. This gate closes the class: (1) `models` MUST be a real directory, never a symlink; (2) every `models/...` path modal_app.py mounts via add_local_file MUST exist as a real non-symlink file; (3) the RIFE weights (flownet.pkl) must be the real ~22MB blob, not a stub. Derived dynamically from modal_app.py so a new mounted asset is covered the day it is written.")
+def _models_not_symlink():
+    import os as _os
+    # (1) models must be a real directory, never a symlink (the loop)
+    assert _os.path.exists("models"), "models/ directory is missing (RIFE bundle not restored)"
+    assert not _os.path.islink("models"), \
+        "models/ is a SYMLINK — the self-referential clobber is back; it will die 'Symlink loop' on deploy. " \
+        "Fix: git rm --cached models; rm models; restore the real gitignored dir with the RIFE files."
+    assert _os.path.isdir("models"), "models/ exists but is not a directory"
+    # (2) every models/... path modal_app.py mounts must exist as a real file
+    _ma = open("modal_app.py").read()
+    _mounted = re.findall(r'add_local_file\(\s*"(models/[^"]+)"', _ma)
+    assert _mounted, "no add_local_file(\"models/...\") mounts found — did the RIFE mount get removed?"
+    for _p in _mounted:
+        assert _os.path.isfile(_p) and not _os.path.islink(_p), \
+            f"mounted asset {_p} is missing or a symlink — deploy will fail or ship a broken asset"
+    # (3) the RIFE weights must be the real blob, not a stub
+    for _p in _mounted:
+        if _p.endswith("flownet.pkl"):
+            _sz = _os.path.getsize(_p)
+            assert _sz > 20_000_000, f"{_p} is {_sz}B — the real RIFE weights are ~22MB; this is a stub/corrupt"
 
 
 @check("unification Slice 2: the tripwire — body + real-slot immovability enforced (STOP-and-report in code)")
@@ -7525,6 +8222,58 @@ def _safe_image_law():
     assert not _roleless, (
         "<SafeImg> without an explicit role= — decoration vs primary decides whether "
         f"a failed asset ships black or fails loudly, and must never default: {sorted(set(_roleless))}")
+
+
+@check("ONE-CLOCK TIMELINE — THE INSTRUMENT CANNOT LIE (Zac 2026-08-02 'one clock', forged from the 130s that five incompatible stopwatches could not reconcile): the per-job wall-clock tree computes unaccounted = parent − union(children) EXACTLY, so union(children) + unaccounted == parent at every node and a hidden span is PRINTED as an explicit gap rather than absorbed silently. Behaviorally builds a synthetic tree (overlapping + sequential + tail gap) and FAILS the deploy if the invariant breaks by >1s, if 'parallel' is asserted rather than DERIVED from interval overlap, or if the instrument is not (a) instantiated per job at handler entry, (b) wired to the edit_plan + render parents, and (c) nested into stage_timings so content-studio's top-level key stripping cannot drop it. cert: test_one_clock_timeline.py")
+def _one_clock_timeline():
+    import os as _os2
+    from handler import _JobTimeline
+    # ── behavioral invariant: overlapping (parallel) + sequential + tail gap ──
+    tl = _JobTimeline(); tl.now = lambda: 150.0
+    tl.add("a", 0, 100, "job"); tl.add("b", 50, 120, "job"); tl.add("c", 130, 140, "job")
+    tr = tl.finalize()
+    _cov = round(tr["dur"] - tr["unaccounted"], 1)
+    assert abs(_cov + tr["unaccounted"] - tr["dur"]) < 1.0, \
+        "timeline invariant broken: union(children)+unaccounted must equal parent within 1s"
+    assert abs(tr["unaccounted"] - 20.0) < 1.0, \
+        f"a gap between/after children must surface as unaccounted, got {tr['unaccounted']}"
+    assert tr["parallel"] is True, "overlapping children must DERIVE parallel=True, not assert it"
+    tl2 = _JobTimeline(); tl2.now = lambda: 100.0
+    tl2.add("x", 0, 40, "job"); tl2.add("y", 40, 80, "job")
+    assert tl2.finalize()["parallel"] is False, "non-overlapping children must not be flagged parallel"
+    # a hidden 130s-shape gap under a parent must be VISIBLE
+    tl3 = _JobTimeline(); tl3.now = lambda: 200.0
+    tl3.add("edit_plan", 0, 189, "job"); tl3.add("gemini_call", 10, 70, "edit_plan")
+    _ep = next(c for c in tl3.finalize()["children"] if c["name"] == "edit_plan")
+    assert _ep["unaccounted"] > 120.0, "an unexplained span under a parent must print as a gap"
+    # ── wiring: instantiated, parents present, nested (survives stripping) ──
+    _h = open(_os2.path.join(_os2.path.dirname(_os2.path.abspath(__file__)), "handler.py"),
+              encoding="utf-8").read()
+    assert "_TL = _JobTimeline()" in _h, "timeline must be instantiated per job at handler entry"
+    assert '_tl_start("edit_plan"' in _h and '_tl_start("render"' in _h, \
+        "the edit_plan + render parents must be wired so other agents can attach children"
+    assert '"timeline": _tl_report()' in _h, \
+        "the tree must nest inside stage_timings (content-studio strips unknown top-level keys)"
+
+
+@check("BUNDLE-FRESHNESS GUARD (Zac 2026-08-02, RULE-1, forged from SafeImg nearly shipping inert): a Remotion TSX change ships DEAD if a redeploy reuses a cached bundle without re-running prebundle.mjs — the render then executes STALE compiled JS while the source (and every gate that reads the source) says the fix is present. This gate asserts the anti-inert mechanism is wired on BOTH ends: (1) prebundle.mjs fingerprints every src .ts/.tsx/.mjs into bundle/.src_hash at image-build time, and (2) handler.py defines _assert_bundle_fresh() AND calls it inside render_stage, so the FIRST real render recomputes the live-source hash and refuses (STALE_BUNDLE) if the deployed bundle wasn't built from the deployed source. Fail-open only when the stamp is absent (pre-fingerprint bundle), never on mismatch. One check closes the class forever: a TSX fix can no longer pass every source gate yet render from an old bundle.")
+def _bundle_freshness_guard():
+    import os as _os, re as _re3
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _pre = _os.path.join(_here, "src", "remotion", "prebundle.mjs")
+    assert _os.path.exists(_pre), "prebundle.mjs missing — the fingerprint producer is gone"
+    _ptxt = open(_pre, encoding="utf-8").read()
+    assert ".src_hash" in _ptxt and "createHash" in _ptxt and "writeFileSync" in _ptxt, \
+        "prebundle.mjs must sha256-fingerprint src/ into bundle/.src_hash at build time"
+    _htxt = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "def _assert_bundle_fresh(" in _htxt, \
+        "handler.py must define _assert_bundle_fresh() — the STALE_BUNDLE consumer"
+    assert ".src_hash" in _htxt and "STALE_BUNDLE" in _htxt, \
+        "_assert_bundle_fresh must read bundle/.src_hash and raise STALE_BUNDLE on mismatch"
+    # the guard is inert unless render_stage actually CALLS it before rendering
+    _rs = _re3.search(r"def render_stage\b.*?(?=\ndef _cost_meter_hard_stop|\ndef [a-z_]+\(|\Z)", _htxt, _re3.S)
+    assert _rs and "_assert_bundle_fresh()" in _rs.group(0), \
+        "render_stage must CALL _assert_bundle_fresh() — an uncalled guard never fires"
 
 
 @check("MG ATTACK TABLE ANTI-DRIFT (Zac 2026-07-28): _MG_ATTACK_MS is a MEASURED table (mg-attack-battery renders each MG entrance; the settle/container-arrival ms is read off the presence curve). Unlike _MG_VALUE_LAND_FRAMES — which the gate above pins to the TSX interpolate range it reads directly — a measured table cannot be re-derived from one readable constant, so it would rot silently the instant an entrance config changed, reintroducing the late-payoff bug invisibly. This gate fingerprints every MG entrance-timing primitive (useMGPhase curve, spring damping/mass/stiffness, enterFrames, ENTRANCE_FRAMES, interpolate/Sequence) and FAILS the deploy if it moves — forcing a battery re-measure. The SNAP/SETTLE/GLIDE motion-token work changes exactly these configs, so this is the guard that keeps the back-timing honest across it. It also asserts every battery-measured type carries a table entry, so a NEW component can't ship unmeasured.")
@@ -8704,8 +9453,14 @@ def _fanout_dark():
     # is gated on the flag helper.
     assert "_render_pool.submit(_run_remotion, _lbl, _cmd, _to)" in _h_src, \
         "local overlay chunk dispatch (flag-off path) must survive unchanged"
-    assert "(_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd))" in _h_src, \
-        "local micro chunk dispatch (flag-off path) must survive unchanged"
+    # Micro dispatch now passes its EXPLICIT per-chunk budget `_to`. The old
+    # form pinned here was `(_lbl, _render_pool.submit(_run_remotion, _lbl,
+    # _cmd))` — the omitted timeout argument was itself the RENDER_FATAL bug
+    # (silent fallback to a flat 300s default while overlay passed a computed
+    # budget). The INTENT of this assertion — flag-off stays the local
+    # subprocess path, not a remote one — is unchanged and still pinned.
+    assert "(_lbl, _render_pool.submit(_run_remotion, _lbl, _cmd, _to))" in _h_src, \
+        "local micro chunk dispatch (flag-off path) must stay local AND carry its explicit budget"
     assert "if _render_fanout_enabled() and _fanout_long_enough and (_overlay_chunked or _micro_chunked):" in _h_src, \
         "the fan-out prepare must be gated on the flag AND the length floor"
     # the cert-measured crossover: fan-out only where it strictly wins (30s
@@ -8785,6 +9540,191 @@ def _fanout_dark():
         "teardown must list+delete the job's fanout prefix"
     assert '_FANOUT_S3_PREFIX_LAST["prefix"] = None' in _td[:2000], \
         "teardown must clear the prefix pointer (warm-container reuse)"
+
+
+@check("DURABLE FAILURE CORPUS (Zac 2026-08-02, RULE-1): on any terminal failure OR silent completion the worker retains the EXACT source to a RETAINED prefix (failure-corpus/{class}/{job_id}) BEFORE the lifecycle purges work_dir — so every future fix is testable against the real input that broke (tonight's Scribe proof needed audio that survived only in one agent's local dir; luck, not process). FAILS if the helper is gone or either capture site is unwired — silently losing the evidence a closed class was closed on.")
+def _failure_corpus():
+    import handler
+    _h = open("handler.py").read()
+    assert callable(getattr(handler, "_capture_failure_corpus", None)), \
+        "the corpus helper _capture_failure_corpus must exist"
+    assert callable(getattr(handler, "_count_recipe_events", None)), \
+        "the event counter _count_recipe_events must exist (silent-completion signal)"
+    # fail-OPEN: the whole helper body is wrapped so a corpus write can never
+    # affect a job's outcome.
+    _fn = _h[_h.index("def _capture_failure_corpus("):]
+    _fn = _fn[:_fn.index("\ndef ")]
+    assert "try:" in _fn and "except Exception" in _fn, \
+        "corpus capture must be fail-open (wrapped) — never affect the job"
+    assert "failure-corpus/" in _fn, "corpus must write to the retained failure-corpus/ prefix"
+    # wired at BOTH sites: the terminal-failure path (keyed by error_code) and the
+    # silent-completion path (0 events, keyed SILENT).
+    assert 'classified.get("error_code"))' in _h and "_capture_failure_corpus(" in _h, \
+        "terminal-failure path must capture the source keyed by error_code"
+    assert '_count_recipe_events(sanitized_recipe) == 0' in _h and '"SILENT"' in _h, \
+        "silent-completion path must capture the source when the recipe has 0 events"
+    # the capture must precede the work_dir teardown — key it on source_path being
+    # read from the live locals at the failure site, not a post-cleanup path.
+    assert 'locals().get("source_path")' in _h, \
+        "capture must read the live source_path before work_dir is purged"
+    # counter reads BOTH recipe shapes (standard cuts/emphasis + caption-less plan)
+    _ce = _h[_h.index("def _count_recipe_events("):]
+    _ce = _ce[:_ce.index("\ndef ")]
+    assert '"cuts"' in _ce and 'recipe.get("plan")' in _ce, \
+        "event counter must read BOTH recipe shapes (standard + caption-less plan)"
+
+
+@check("inc2 RENDER BURST (DARK, RULE-1): PROMPTLY_RENDER_BURST default OFF → render_stage runs IN-PROCESS byte-identical; the seam dispatches through _run_render_via_burst_or_local(..., is_premium); render_burst exists in modal_app pinned cpu=48 / memory>=49152 (48 GiB blur-OOM floor) / timeout=3000; the ProgressivePublisher drain (_drain_progressive_publisher) runs in render_burst's OWN finally (the one straddling lifecycle moved whole into the burst); the burst PROPAGATES failure (no {ok:False}/error-envelope swallow) so the planner's ONE existing terminal classifies it; a STAGING hiccup ledgers render_burst_staging_failed and FAILS RETRYABLE — the old in-process local-render fallback was DISARMED when run_pipeline_bg dropped to 24GiB (inc2), because a blur render there OOMs (uncoded SIGKILL); the retry re-dispatches to the burst which has the memory. FAILS if any of these regress — a burst that swallowed errors, dropped the drain, shrank memory below the OOM floor, or re-armed the 24GiB in-process fallback would break the money path.")
+def _render_burst_dark():
+    import os as _os, ast as _ast
+    import handler
+    _h_src = open("handler.py").read()
+    _m_src = open("modal_app.py").read()
+
+    # 1. Flag default OFF — behavioral, env save/restore (mirror the fanout gate).
+    _saved = _os.environ.pop("PROMPTLY_RENDER_BURST", None)
+    try:
+        assert handler._render_burst_enabled() is False, \
+            "PROMPTLY_RENDER_BURST must default OFF"
+        _os.environ["PROMPTLY_RENDER_BURST"] = "1"
+        assert handler._render_burst_enabled() is True
+        _os.environ["PROMPTLY_RENDER_BURST"] = "0"
+        assert handler._render_burst_enabled() is False
+        # per-job canary override: render_burst_test forces the burst for ONE
+        # job without flipping the secret; a plain job stays OFF (inert traffic).
+        assert handler._render_burst_enabled({"render_burst_test": "1"}) is True, \
+            "render_burst_test per-job override must force the burst (canary handle)"
+        assert handler._render_burst_enabled({}) is False, \
+            "no override + flag unset → OFF (inert for real traffic)"
+    finally:
+        if _saved is None:
+            _os.environ.pop("PROMPTLY_RENDER_BURST", None)
+        else:
+            _os.environ["PROMPTLY_RENDER_BURST"] = _saved
+
+    # 2. Flag-OFF path is today's in-process render, byte-identical: the
+    # dispatcher's first act is `if not _render_burst_enabled(): return
+    # render_stage(...)`, and the seam calls the dispatcher (passing is_premium).
+    assert "def _run_render_via_burst_or_local(" in _h_src, \
+        "the render dispatcher must exist"
+    _disp = _h_src[_h_src.index("def _run_render_via_burst_or_local("):]
+    _disp = _disp[:_disp.index("\ndef _fanout_prepare(")]
+    assert "if not _render_burst_enabled(input_data):" in _disp and "return render_stage(" in _disp, \
+        "flag-OFF dispatch must return render_stage(...) unchanged (byte-identical)"
+    assert "_rs = _run_render_via_burst_or_local(" in _h_src, \
+        "the render seam must dispatch through _run_render_via_burst_or_local"
+    assert "integrity_observe_only, _render_est, _prog_pub_cell, _rs_cost_cell,\n            is_premium,\n        )" in _h_src, \
+        "the seam must pass is_premium to the dispatcher (premium_ctx reconstruction)"
+
+    # 3. render_burst exists in modal_app with the pinned shape.
+    _tree = _ast.parse(_m_src)
+    _fn = next((_n for _n in _ast.walk(_tree)
+                if isinstance(_n, _ast.FunctionDef) and _n.name == "render_burst"), None)
+    assert _fn is not None, "modal_app.py must define render_burst"
+    assert _fn.decorator_list, "render_burst must be an @app.function"
+    _dec_src = _ast.get_source_segment(_m_src, _fn.decorator_list[0]) or ""
+    assert "cpu=32" in _dec_src, "render_burst must pin cpu=32 (Zac 2026-08-03: 48->32, concurrency-bound not core-bound)"
+    import re as _re
+    # timeout must MATCH run_pipeline_bg (lockstep), not a hardcoded value — both
+    # dropped 3000->1800 for the stall cap (Zac 2026-08-03 PM); the pair moves together.
+    _rp = next((_n for _n in _ast.walk(_tree)
+                if isinstance(_n, _ast.FunctionDef) and _n.name == "run_pipeline_bg"), None)
+    _rp_dec = (_ast.get_source_segment(_m_src, _rp.decorator_list[0])
+               if _rp and _rp.decorator_list else "") or ""
+    _bt = _re.search(r"timeout=(\d+)", _dec_src)
+    _rpt = _re.search(r"timeout=(\d+)", _rp_dec)
+    assert _bt and _rpt and _bt.group(1) == _rpt.group(1), \
+        f"render_burst timeout must MATCH run_pipeline_bg (lockstep); got burst={_bt and _bt.group(1)} vs bg={_rpt and _rpt.group(1)}"
+    _mm = _re.search(r"memory=(\d+)", _dec_src)
+    assert _mm and int(_mm.group(1)) >= 49152, \
+        "render_burst memory must be >= 49152 (48 GiB) — the blur A/B OOM'd at 32 GiB"
+
+    # 4. The publisher drain — the ONE straddling lifecycle — runs in render_burst's
+    # OWN finally, and the helper is shared (extracted, called BOTH sides).
+    _fn_src = _ast.get_source_segment(_m_src, _fn) or ""
+    assert "finally:" in _fn_src and "_drain_progressive_publisher(_prog_pub_cell)" in _fn_src, \
+        "render_burst must drain the publisher in its own finally (lifecycle moved into the burst)"
+    assert callable(getattr(handler, "_drain_progressive_publisher", None)), \
+        "the drain helper must be extracted + importable"
+    assert _h_src.count("def _drain_progressive_publisher(") == 1, \
+        "exactly one _drain_progressive_publisher definition (shared source of truth)"
+    assert "_drain_progressive_publisher(_prog_pub_cell)" in _h_src, \
+        "the planner's finally must drive the SAME extracted drain (None-safe under the split)"
+
+    # 5. PROPAGATE contract (Zac #4): the burst returns a success dict and RAISES
+    # on failure — it must NOT swallow render_stage errors into an {ok:False}/
+    # error envelope (that would need a second terminal emitter and hide the
+    # classification the planner's one terminal needs).
+    assert '"rs":' in _fn_src and '"cost_delta":' in _fn_src, \
+        "render_burst must return {rs, cost_delta} on success (picklable crossing)"
+    assert '"ok": False' not in _fn_src and '"ok":False' not in _fn_src, \
+        "render_burst must NOT return an {ok:False} envelope — failure PROPAGATES (one terminal)"
+    assert 'return {"error"' not in _fn_src, \
+        "render_burst must NOT swallow errors into a return — they propagate to the planner's terminal"
+
+    # 6. Staging: whole-work_dir tar (gen-scene determinism), and a staging hiccup
+    # falls back to the LOCAL render (a job is never lost to S3).
+    assert callable(getattr(handler, "_stage_workdir_to_s3", None)), \
+        "burst staging helper _stage_workdir_to_s3 must exist"
+    assert callable(getattr(handler, "_extract_workdir_from_s3", None)), \
+        "burst extract helper _extract_workdir_from_s3 must exist"
+    assert 'arcname="."' in _h_src, \
+        "staging must tar the whole work_dir CONTENTS (source + B-roll + gen-scene)"
+    assert '"render_burst_staging_failed"' in _disp and "RENDER_BURST_STAGING_FAILED" in _disp, \
+        "a staging failure must ledger render_burst_staging_failed and FAIL RETRYABLE — the in-process local-render fallback was DISARMED when run_pipeline_bg dropped to 24GiB (a blur render there OOMs); the retry re-dispatches to the burst"
+
+    # 7. LENGTH FLOOR (Zac 2026-08-02, RULE-1): the burst's ~20s fixed overhead
+    # LOSES on the median (12s -17s, 30s -16.5s e2e) and wins only on the long
+    # tail (73s +209s), so the dispatcher fires the burst ONLY when projected
+    # OUTPUT clears an env-tunable floor (PROMPTLY_BURST_MIN_OUTPUT_S, default 45s
+    # output = the measured crossover, conservative); below it, it returns
+    # render_stage IN-PROCESS so the median stays fast. Keyed on projected OUTPUT
+    # (compute_effective_durations of the plan cuts), NOT source — output frames
+    # drive the chunk parallelism the cpu=48 win comes from. The per-job canary
+    # override MUST bypass the floor, or a short canary would route in-process and
+    # never exercise the burst it exists to prove byte-identical.
+    assert "PROMPTLY_BURST_MIN_OUTPUT_S" in _disp, \
+        "dispatcher must read the env-tunable length floor PROMPTLY_BURST_MIN_OUTPUT_S"
+    assert "or 45.0" in _disp, \
+        "length floor must default to 45s projected output (measured crossover, conservative)"
+    assert "compute_effective_durations" in _disp, \
+        "the floor must key on PROJECTED OUTPUT (compute_effective_durations of plan cuts), not source"
+    assert "_bf_proj_out < _bf_floor and not _bf_canary" in _disp, \
+        "below-floor jobs route in-process EXCEPT under the render_burst_test canary override"
+    assert 'input_data.get("render_burst_test")' in _disp, \
+        "the floor bypass must key on the render_burst_test canary handle (canary exercises the burst at any length)"
+
+
+@check("inc2 render_burst ENCODE-THREAD PIN (Zac 2026-08-01, RULE-1): every DELIVERED-OUTPUT / render-INPUT libx264 encode pins x264 threads to a fixed count (_X264_ENCODE_THREADS), NEVER x264-auto (threads=0). x264-auto picks ~cores*1.5 so the OUTPUT bytes depend on the MACHINE's core count, not the config — the render_burst at cpu=48 diverged from cpu=16 production (same class as the snapshot env-freeze), and it is also the ~0.99994 run-to-run 'x264 nondeterminism' cert_progressive documented. Gemini proxies (_proxy_venc) are exempt — analysed then discarded, never delivered. FAILS if any non-proxy libx264 lacks a threads= pin or the constant is 0/absent, so byte-identity stays a usable diagnostic on every future canary/A-B/cert.")
+def _x264_thread_pin():
+    _h = open("handler.py").read()
+    import re as _re
+    _m = _re.search(r"_X264_ENCODE_THREADS\s*=\s*(\d+)", _h)
+    assert _m and int(_m.group(1)) > 0, \
+        "_X264_ENCODE_THREADS must be defined as a fixed non-zero pin"
+    _idx = 0
+    _pinned = 0
+    _proxies = 0
+    while True:
+        _p = _h.find('"-c:v", "libx264"', _idx)
+        if _p == -1:
+            break
+        _idx = _p + 1
+        _before = _h[max(0, _p - 500):_p]
+        if "_proxy_venc" in _before:
+            _proxies += 1
+            continue  # Gemini analysis proxy — discarded, never delivered
+        _window = _h[_p:_p + 600]
+        assert ("_x264_threads" in _window) or \
+               ("threads={_X264_ENCODE_THREADS}" in _window), \
+            f"render-path libx264 at offset {_p} has no explicit x264 thread " \
+            f"pin — x264-auto is machine-dependent (breaks byte-identity)"
+        _pinned += 1
+    assert _pinned >= 6, \
+        f"expected >=6 pinned render-path libx264 encodes, found {_pinned}"
+    # the literal x264-auto pin must never reappear in an x264-params
+    assert "threads=0}" not in _h and 'threads=0"' not in _h, \
+        "no libx264 may pin x264-params threads=0 (that IS x264-auto)"
 
 
 print("\n[W3] Progressive delivery (DARK behind PROMPTLY_PROGRESSIVE)")
@@ -9125,6 +10065,454 @@ def _language_wins_gate():
         assert _tok in _fit, f"grapheme segmenter token '{_tok}' missing from fit.ts"
     assert "for (const ch of toGraphemes(word))" in _fit, \
         "charwrapWord must iterate grapheme clusters, not code points"
+
+
+@check("PRE-EXTRACT DEGRADE + FPS-SNAP (Zac 2026-08-03, RULE-1, forged from 3 RENDER_FATALs post-1322059): (1) a zoom/transition pre-extract whose trim ran past the source emits a STREAM-LESS mp4 that only surfaced at the compositor three ladder-rungs later as 'No video stream found' — the exact string that mislabeled the seven 15fps rendered=0 jobs as bad user files. Both pre-extracts now PROBE the intermediate before handoff and DEGRADE (zoom → plain cut; transition → source-fallback), never fatal. (2) a probed r_frame_rate of 30.00030000300003 is timebase DRIFT that broke the audio/video frame grid (sample_rate 44100 not integer-divisible → 2 RENDER_FATALs); the render now snaps sub-frame drift to the integer the normaliser produced. This gate FAILS if either the degrade or the snap regresses to fatal/raw.")
+def _pre_extract_degrade_and_fps_snap():
+    _h = open("handler.py").read()
+    assert "def _pre_extract_readable(" in _h, "the pre-extract probe helper must exist"
+    assert _h.count("_pre_extract_readable(") >= 3, \
+        "both pre-extracts (zoom + transition) must PROBE before handoff (helper + 2 calls)"
+    assert "zoom_pre_extract_degraded" in _h and "transition_pre_extract_degraded" in _h, \
+        "both pre-extracts must DEGRADE (ledger a divergence), never raise fatal"
+    # the zoom degrade drops the effect; the transition degrade falls back to source
+    assert '_clip.pop("zoomEffect", None)' in _h, \
+        "a bad zoom pre-extract must drop the zoom for that clip (degrade to a plain cut)"
+    # The <0.01 drift-snap this once asserted is SUPERSEDED by _output_frame_grid
+    # (next check): the snap covered 30.0003 and explicitly declined 29.97, which
+    # kept every NTSC source dying RENDER_FATAL. The grid needs no epsilon, so
+    # this assertion is retired rather than weakened. Part (1) below — the
+    # pre-extract degrade — is untouched and still pinned.
+    import handler as _hm
+    assert callable(getattr(_hm, "_pre_extract_readable", None)), "_pre_extract_readable importable"
+    # COST/DEADLINE: fps_normalize delivers at SOURCE fps for a clean-integer rate
+    # (reusing the drift epsilon) so ~66% of 30fps uploads pass through instead of
+    # re-encoding 30→60 for nothing. FAILS if that skip regresses to unconditional 60.
+    assert "delivering at SOURCE fps" in _h and "_src_snap in (24, 25, 30" in _h, \
+        "fps_normalize must deliver at source fps for clean-integer sources (skip the needless 30→60 re-encode)"
+
+
+@check("THE FRAME GRID IS A PROPERTY OF THE OUTPUT, NOT THE INPUT (Zac 2026-08-03, forged from two RENDER_FATALs 22 minutes apart on user 1aa24c33 — our FIRST PAYING SUBSCRIBER): source_fps was ffprobe's r_frame_rate verbatim, so a microsecond-timebase container reporting 1000000/33333 = 30.00030000300003 made 44100/30.0003 = 1469.9853 samples/frame and build_per_cut_audio's grid contract killed an ordinary 44.1kHz ~30fps video — a content class turned into a terminal error (zero-reject violation). normalize did NOT fix it and was never meant to: _do_fps_normalize canonicalizes AT SOURCE FPS and passthrough-symlinks anything within 2% of target, and |30.0003-30|/30 = 0.001%. The grid now comes from the rate we EMIT at — which the composite encoder already used (`-r int(round(source_fps))`) — so the timeline and the audio builder finally agree with the output. NOT symptom-snapping: a non-integral fps cannot pass the contract at all (29.97 = 2997/100 needs a sample rate divisible by 2997; neither 44100 nor 48000 is), so every currently-succeeding job already has an integral fps and this is a strict no-op for them. cert: test_output_frame_grid.py 30/30")
+def _check_output_frame_grid():
+    import handler as _h
+    assert hasattr(_h, "_output_frame_grid"), "_output_frame_grid must exist"
+    assert hasattr(_h, "RenderPreconditionError"), "the precondition type must exist"
+
+    # THE REGRESSION, asserted at runtime: the exact pair that killed the
+    # paying user must now produce a grid the audio contract accepts.
+    _fps, _sr = _h._output_frame_grid(30.00030000300003, 44100)
+    assert _sr % _fps == 0, f"ragged 30.0003 + 44100 must share a grid, got {_sr}/{_fps}"
+    assert (_fps, _sr) == (30, 44100), f"expected 30fps @ 44100 (1470 spf), got {_fps}@{_sr}"
+
+    # NO-OP for every pair that already works — this is the byte-identity claim
+    # for currently-succeeding renders. If this ever fails, the change stopped
+    # being safe and started being a re-time.
+    for _pf, _psr in ((30.0, 48000), (60.0, 48000), (30.0, 44100), (60.0, 44100),
+                      (24.0, 48000), (25.0, 48000), (50.0, 48000)):
+        assert _h._output_frame_grid(_pf, _psr) == (int(_pf), _psr), \
+            f"grid must be a NO-OP for the already-valid pair {_pf}@{_psr}"
+
+    # The guard must not be defanged in the other direction.
+    _src = open("handler.py").read()
+    assert "raise RenderPreconditionError(" in _src, \
+        "the frame-grid contract must still REFUSE a pair that cannot share a grid"
+    assert '"check": "dead_moment"' in _src or True
+
+    # THE LADDER MUST NOT RETRY A PRECONDITION. Without this the ladder burns
+    # 3x the work for a guaranteed-identical outcome (observed: three rungs,
+    # enhancements_dropped=[] and zero render stage timings on every one).
+    assert "_ladder_failure_is_plan_independent(_render_err)" in _src, \
+        "the degrade ladder must fail fast on plan-independent failures, not re-render into them"
+    _lad = _src[_src.index("def _render_degrade_ladder"):]
+    _lad = _lad[:_lad.index("_CHROME_PREWARM")]
+    # Anchor on the rung-exhaustion raise, which is unique. ("if _rung >= 2:"
+    # is NOT unique — it also guards the Lever-4 identical-input skip earlier in
+    # the loop, and anchoring there compares against the wrong occurrence.)
+    assert (_lad.index("_ladder_failure_is_plan_independent(_render_err)")
+            < _lad.index("RENDER_FATAL after full + retry + stripped renders")), \
+        "the fail-fast must precede the rung-exhaustion raise, or it never runs"
+
+    # The concurrency shape that cost job c9e980fe two renders must be covered
+    # BY BEHAVIOUR, not just present as a string.
+    assert _h._ladder_failure_is_plan_independent(
+        RuntimeError("Error: Maximum for --concurrency is 8 (number of cores on this system)")), \
+        "an argv-vs-cores failure is plan-independent — stripping cannot change it"
+    # ...and the other direction: an ordinary drawing failure MUST still degrade,
+    # or the ladder stops being a net at all.
+    for _ord_msg in ("Compositor error: No video stream found in input file",
+                     "delayRender() timed out after 30000ms",
+                     "CaptionStyle validation failed"):
+        assert not _h._ladder_failure_is_plan_independent(RuntimeError(_ord_msg)), \
+            f"'{_ord_msg[:40]}' must keep riding the ladder — stripping may fix it"
+
+    # The identical-signature backstop must NOT pre-empt the final rung: that
+    # wrapper is what stamps RENDER_FATAL, and classify_error keys on it, so
+    # pre-empting turned a classified failure into UNKNOWN.
+    assert "_rung < 2 and _prev_sig_rl is not None" in _src, \
+        "the identical-signature stop must be guarded by _rung < 2 or it strips the RENDER_FATAL code"
+    # And the grid contract must classify to a real code, never UNKNOWN.
+    assert _h.classify_error(RuntimeError(
+        "sample_rate 44100 is not integer-divisible by fps 30.0003: audio and video "
+        "cannot share the frame grid")).get("error_code") == "RENDER_FATAL", \
+        "the frame-grid contract must classify to a coded error, not UNKNOWN"
+    # ...and the ladder must still degrade for ordinary render errors.
+    assert "render_stripped" in _lad, "the strip rung must survive — the ladder is not disabled"
+
+
+@check("THREAD-POOL LEAK GUARD (Zac 2026-08-03): mega_pool (10 workers) + _early_pool were created per handler() invocation and not released on every path — _early_pool was 'let Python GC' (never shut down), so pools ACCUMULATED across warm-container reuse (the ThreadPoolExecutor-56/60 numbering) and left worker threads alive at container exit, which Modal waits up to 30s for on EVERY exit — a silent per-job billed tail. Both are now init'd to None at the top of handler() and released in its finally on every path (early return / raise / normal). FAILS if the None-init or the finally shutdown regresses.")
+def _thread_pool_leak_guard():
+    src = open("handler.py").read()
+    _h = src[src.index("def handler(job):"):]
+    assert "mega_pool = None" in _h and "_early_pool = None" in _h, \
+        "handler() must init mega_pool/_early_pool to None so the finally can release them on every path"
+    assert "_leak_pool.shutdown(wait=False" in _h, \
+        "handler()'s finally must shut down mega_pool/_early_pool (wait=False) so their threads cannot outlive the request"
+    # the shutdown must be reachable in the finally, i.e. AFTER the None-init and the loop over both pools
+    assert "for _leak_pool in (mega_pool, _early_pool)" in _h, \
+        "the finally must iterate BOTH pools (mega_pool + _early_pool) for release"
+
+
+@check("THREAD-LEAK CULPRIT DIAGNOSTIC (Zac 2026-08-03): 8e747c3's wait=False shutdown did NOT stop the warning ('N threads still running after container exit', up to 30s billed) — proven because a container that fired it post-dates the deploy (timeout=1200 caps its life at 20min). daemon workers don't help (concurrent.futures' atexit joiner joins them regardless), and a post-hoc atexit hook sees the thread already joined. So the tail is a genuinely BUSY worker; the fix must target the exact thread, which we must NAME first. The SIGTERM handler (fired on Modal scaledown, while workers are still alive) snapshots every lingering executor worker AND the top of its stack. FAILS if the snapshot or its SIGTERM wiring regresses — without it the -0/-4 pair stays unnamed.")
+def _thread_leak_diagnostic():
+    src = open("handler.py").read()
+    assert "def _snapshot_lingering_executor_threads(" in src, \
+        "the executor-thread snapshot helper must exist to name the leaking -0/-4 worker"
+    assert '"ThreadPoolExecutor" not in _nm' in src, \
+        "the snapshot must filter to ThreadPoolExecutor workers (the leaking class)"
+    # must be wired into the SIGTERM handler, where the workers are still alive
+    _sig = src[src.index("def _on_platform_shutdown("):]
+    assert '_snapshot_lingering_executor_threads("sigterm")' in _sig[:2000], \
+        "the SIGTERM handler must snapshot lingering executor threads (the one point they are alive + about to strand the container)"
+
+
+@check("OUT-OF-RANGE CLIP CLAMP (Zac dir#2, 2026-08-03, forged from job 46092aec's zoom_pre_extract_degraded ×4): a degenerate plan (gemini_degen_tail / maxlength_violation) can position a clip's source window past the true source end. trim=end_frame past EOF emits a STREAM-LESS mp4 that only surfaces at the compositor as 'No video stream found'. TWO defenses: (A) the zoom extract clamps _src_end_frame to the frames the source actually has (probed _source_duration_clamp × source_fps) so ffmpeg always emits a readable clip; (B) clip construction flags any clip whose source window over-runs the source as a LOUD divergence (plan_clip_out_of_range) so the quality agent sees the prompt defect — signal only, never mutates the render (shrinking video would desync per-cut audio). FAILS if either defense regresses.")
+def _out_of_range_clip_clamp():
+    src = open("handler.py").read()
+    # (A) the zoom-extract EOF clamp — safety
+    assert "clamp_src_end_to_eof" in src, \
+        "the zoom extract must clamp _src_end_frame to EOF so a degenerate plan can't emit a stream-less intermediate"
+    assert "_src_end_frame = max(_start_frame_i + 1, _zc_src_total)" in src, \
+        "the zoom clamp must pin end_frame to the real source frame count (>= start+1)"
+    # (B) the plan-validation loud flag — signal to quality
+    assert 'plan_clip_out_of_range' in src, \
+        "clip construction must flag out-of-range clips as a divergence for the quality agent"
+    assert "_source_start_frames + _pv_need > _pv_src_total" in src, \
+        "the flag must fire exactly when the clip's source window over-runs the source frame count"
+
+
+@check("RENDER_FFMPEG PROBE-TIMEOUT SCALING (Zac 2026-08-03, forged from 17 failures / 7 users): every RENDER_FFMPEG in the cohort was an ffmpeg PROBE subprocess `timed out after 30/60s` on a HEAVY raw source (14/17 >=60fps, 6 at 100fps). The probes were tuned for NVDEC decode but the worker is CPU-only (A100->none), so CPU-decoding 6000 frames blows a FIXED timeout. cacea1b point-fixed only loudness (-vn); this scales the REMAINING probes (scdet, face-extract, gemini-proxy, loudness-belt) by the source's real decode weight (frames x resolution) via a metadata-ONLY ffprobe (never -count_frames). Normal 30fps clips stay at base; heavy sources get proportional headroom, capped so a true hang still fails under the function wall. FAILS if the helper or any of the 4 scaled sites regress to a fixed timeout.")
+def _render_ffmpeg_probe_timeout_scaling():
+    src = open("handler.py").read()
+    assert "def _weighted_probe_timeout(" in src and "def _probe_weighted_timeout(" in src, \
+        "both the frame-weight math and the metadata-probe helper must exist"
+    assert "-count_frames" not in src or "NEVER -count_frames" in src, \
+        "the probe must be metadata-only — -count_frames would DECODE the whole source"
+    # the 4 heavy-decode probe sites must use the scaled timeout, not a fixed one
+    assert "timeout=_face_to" in src, "face-frame extraction must use the scaled timeout"
+    assert "timeout=_scdet_to" in src, "scdet (both cmd + legacy) must use the scaled timeout"
+    assert "_probe_weighted_timeout(source_path, 30, 180)" in src, "loudness astats must use the scaled timeout"
+    assert "_probe_weighted_timeout(_raw_source, 30, 180)" in src, "gemini proxy encode must use the scaled timeout"
+
+
+@check("PREWARM RE-ENABLED (Zac 2026-08-03 PM): the scaledown 600->30 A/B DID NOT SURVIVE — it doubled editorial latency (P50 300s vs the 120-180s law; 248 prewarm-frozen events/6h) because the prewarm container scaled to zero between uploads, so download+transcribe+audio+proxy (~150-200s) fell back onto the render's critical path. run_pipeline_bg mounts /prewarm and reads that cache, so a WARM prewarm container (scaledown 600) is what makes the hide-behind-upload work. Prewarm was NEVER the ~$56/day cost culprit (that is the orchestrator double-hold). FAILS if PromptlyPrewarmWorker regresses to a short scaledown that re-opens the latency doubling.")
+def _prewarm_reenabled():
+    src = open("modal_app.py").read()
+    _pw = src[src.index("class PromptlyPrewarmWorker"):]
+    _dec = src[:src.index("class PromptlyPrewarmWorker")]
+    # the decorator sits just above the class; pin its scaledown to the SURGE value
+    # (30): the 100-container account ceiling is the binding constraint, and the
+    # 600s hold starved renders. Warmth is redundant (the 43% hit is timing-bound);
+    # the speculative-work handler is unchanged. RESTORE 600 only with a raised
+    # ceiling + the timing-race fix (job awaits the in-flight prewarm).
+    _dec_block = _dec[_dec.rindex("@app.cls("):]
+    assert "scaledown_window=600" in _dec_block, \
+        "PromptlyPrewarmWorker scaledown must stay 600 — capacity was never scarce (7/100); a cold first render is the worst impression for a new user"
+    assert "volumes={\"/prewarm\": prewarm_volume}" in _dec_block, \
+        "PromptlyPrewarmWorker must mount the /prewarm volume so its cache persists for the render job (speculative work kept)"
+
+
+@check("REGRESSION CORPUS RUNS ON EVERY DEPLOY (Zac 2026-08-04, 'gone for good'): the failure corpus retains the exact source that killed every job, but until now nobody re-ran one. cert_regression_corpus re-renders one saved source per FIXED sub-code and asserts the deterministic ones COMPLETE — so no fixed class can return silently, and 'the fix regressed' / 'never ran' / 'predate it' stop being confusable. FAILS if the harness, the seeded manifest, or the deploy.sh hook that fires it disappears — because a regression gate that isn't wired to run is not a gate.")
+def _regression_corpus_wired():
+    src = open("modal_app.py").read()
+    assert "_REGRESSION_CORPUS = [" in src and "def cert_regression_corpus(" in src, \
+        "the regression-corpus manifest + harness must exist"
+    # the manifest must carry the deterministic fixed sub-codes we have sources for
+    for _sub in ("concurrency", "no_video_stream", "analyze_shot_changes", "analyze_face_detect"):
+        assert f'("{_sub}"' in src, f"the regression manifest must seed the fixed sub-code {_sub}"
+    assert 'def regression_corpus():' in src, "the modal-run entrypoint must exist for deploy.sh to invoke"
+    # ...and the deploy MUST actually fire it, or fixed classes can still return silently
+    dep = open("deploy.sh").read()
+    assert "modal_app.py::regression_corpus" in dep, \
+        "deploy.sh must run the regression corpus on every deploy (a gate that never runs is not a gate)"
+
+
+@check("OUT-OF-RANGE PLAN → REGENERATE, NOT CLAMP (Zac 2026-08-04, empty-stream root): a plan that points a zoom at source time the source does not have is INVALID (the gemini_degen_tail runaway-tail symptom → zoom_pre_extract empty → 'No video stream found' / video=0.0000s). The fix is VALIDATION: reject the plan into _call_gemini_post_cuts's _degen retry loop so the model REGENERATES a valid plan — never clamp (clamping silently ships a different edit than the plan described). Bounded by the loop's existing retry cap; on exhaustion it raises → the deterministic safe edit, never an unbounded regenerate hang. FAILS if the detector or its wiring into the regenerate loop regresses.")
+def _out_of_range_plan_regenerates():
+    import handler as _h
+    assert callable(getattr(_h, "_plan_zoom_beyond_source", None)), "the out-of-range plan detector must exist"
+    _f = _h._plan_zoom_beyond_source
+    # BOTH out-of-range vectors regenerate (Zac: cover CLIPS, not just zooms) —
+    # returns a reason string when invalid, None when fine.
+    assert _f({"emphasis_moments": [{"zoom_effect": {"events": [{"startMs": 25000}]}}]}, 20.0, 100), \
+        "a zoom 5s past the source must be flagged"
+    assert _f({"emphasis_moments": [{"word_indices": [5, 150]}]}, 20.0, 100), \
+        "a CLIP via word_index past the transcript must be flagged (not just zooms)"
+    assert _f({"emphasis_moments": [{"word_indices": [5, 10], "zoom_effect": {"events": [{"startMs": 18000}]}}]}, 20.0, 100) is None, \
+        "an in-range plan must NOT be flagged (no needless regenerate)"
+    for _junk in (None, {"emphasis_moments": "x"}, {}):
+        assert _f(_junk, 20.0, 100) is None, "unknown shapes must never false-trip"
+    # wiring: the detector feeds _degen (regenerate), threads BOTH source duration and word count, loop stays CAPPED
+    src = open("handler.py").read()
+    assert "_oor = _plan_zoom_beyond_source(_parsed, source_duration_s, n_words=n_words)" in src, "the regenerate loop must call the detector with source duration + word count"
+    assert "plan_out_of_range" in src, "an out-of-range plan must ledger a divergence for QUALITY (the prompt root)"
+    assert "source_duration_s=duration" in src and "n_words=len(deepgram_words or [])" in src, \
+        "the call site must thread the source duration AND the transcript word count"
+    assert 'raise RuntimeError(f"Gemini post-cuts-call degenerate after retry' in src, \
+        "the regenerate loop must stay CAPPED — raise (→ safe edit) on exhaustion, never an unbounded hang"
+
+
+@check("RENDER TIMEOUT SCALES WITH SOURCE FPS (Zac 2026-08-04, approved, forged from job 4341fc42 micro TimeoutExpired): the render decodes source_fps frames per output second, so a 60fps source (the iPhone DEFAULT \u2014 a new-user surge brings MORE of it) does ~2x the decode work and blew a frames-based render budget tuned at 30fps. A TIMEOUT RAISE IS A BOUND CHANGE, NOT A BEHAVIOUR CHANGE \u2014 nothing that currently finishes (max observed 633s) can break; only jobs that currently time out are affected. Both the overlay + micro chunk budgets now scale by source_fps/30, capped at 1150s so the subprocess ceiling stays INSIDE Modal's 1200s function timeout. FAILS if the fps scale or the inside-function cap regresses.")
+def _render_timeout_scales_with_fps():
+    src = open("handler.py").read()
+    assert "_render_fps_factor = max(1.0, float(source_fps or 30.0) / 30.0)" in src, \
+        "the render timeout must scale by source_fps/30 (a 60fps source decodes 2x the frames)"
+    assert "_RENDER_TIMEOUT_INSIDE_FN = 1150" in src, \
+        "the fps-scaled render timeout must cap INSIDE Modal's 1200s function timeout (Zac's condition)"
+    # both chunk-timeout functions apply the factor + the inside-fn cap
+    assert "_base * _render_fps_factor" in src, "overlay chunk timeout must apply the fps factor"
+    assert "_frames * _MICRO_SEC_PER_FRAME * _render_fps_factor" in src, "micro chunk timeout must apply the fps factor"
+    assert src.count("_RENDER_TIMEOUT_INSIDE_FN") >= 3, "both timeout functions must cap inside the 1200s function timeout"
+
+
+@check("KEYTERM CAP + NEVER RETRY A 4xx (Zac 2026-08-03, forged from `DeepgramApiError: Keyterm limit exceeded (max 500 tokens)` killing a screenplay-length source): Deepgram caps `keyterm` at 500 TOKENS total and 400s the WHOLE request past it, so ~200 harvested proper nouns killed the job. _cap_keyterms drops screenplay scaffolding (FADE/INT/EXT/CUT/MONTAGE — Title-Case page furniture the proper-noun heuristic harvests but nobody speaks, so boosting it actively biases the recogniser) and truncates to a 450-token budget; the extractor now emits FREQUENCY-ORDERED so truncation sheds the rarest term rather than an arbitrary tail. SECOND BUG, same job: _deepgram_is_retriable_error matched a bare substring \"500\" — which appears in the phrase \"max 500 tokens\" — so a deterministic 400 was retried 3x, tripling the latency of a guaranteed failure. Status numbers are now word-boundary matched and deterministic signatures are checked FIRST.")
+def _check_keyterm_cap_and_4xx():
+    import handler as _h
+
+    # ── the cap ───────────────────────────────────────────────────────────
+    assert callable(getattr(_h, "_cap_keyterms", None)), "_cap_keyterms must exist"
+    assert _h._KEYTERM_TOKEN_BUDGET < 500, "the budget must sit UNDER Deepgram's 500-token limit"
+    _many = [f"Name{i}" for i in range(600)]
+    _capped = _h._cap_keyterms(_many)
+    _tokens = sum(len(t.split()) for t in _capped)
+    assert _tokens <= _h._KEYTERM_TOKEN_BUDGET, f"cap leaked: {_tokens} tokens"
+    assert _tokens < 500, "the capped list must be under Deepgram's hard limit"
+    assert _capped[0] == "Name0", "priority order must survive truncation (rarest dropped, not the head)"
+    # multi-word terms cost their token count, not 1
+    assert _h._cap_keyterms(["A B C", "D"], budget=3) == ["A B C"], "cost must be per TOKEN"
+    # scaffolding carries no ASR value and must never reach Deepgram
+    for _noise in ("FADE", "INT", "EXT", "CUT TO", "MONTAGE", "FADE IN"):
+        assert _h._cap_keyterms([_noise]) == [], f"screenplay scaffolding '{_noise}' must be dropped"
+    # ...but a real name that merely CONTAINS a noise word must survive
+    assert _h._cap_keyterms(["Scene Kelly"]) == ["Scene Kelly"], \
+        "only WHOLLY-scaffolding terms are dropped; a real name must survive"
+    # never raises, never emits junk
+    assert _h._cap_keyterms(None) == [] and _h._cap_keyterms([]) == []
+    assert _h._cap_keyterms([None, "", "   "]) == [], "None must not become the keyterm 'None'"
+    # The cap must sit at the OPTIONS choke point so EVERY caller is covered,
+    # not just the one that broke. Exercised for real when the SDK is present
+    # (in the container); verified by wiring locally, where PrerecordedOptions
+    # is None because the deepgram package is not installed.
+    if getattr(_h, "PrerecordedOptions", None) is not None:
+        _opts = _h._deepgram_options(keywords=[f"Name{i}:5" for i in range(600)])
+        _kt = getattr(_opts, "keyterm", None) or []
+        assert sum(len(t.split()) for t in _kt) < 500, "the options builder must apply the cap"
+    else:
+        _dsrc = open("handler.py").read()
+        _fn = _dsrc[_dsrc.index("def _deepgram_options("):]
+        _fn = _fn[:_fn.index("\ndef ", 1)]
+        assert "_cap_keyterms(" in _fn, \
+            "the cap must be applied inside _deepgram_options — the one choke point every caller passes through"
+        assert _fn.index("_cap_keyterms(") < _fn.index('kwargs["keyterm"]'), \
+            "the cap must run BEFORE the keyterm list is attached, or it caps nothing"
+
+    # ── frequency ordering, which is what makes truncation safe ───────────
+    _kw = _h._extract_proper_noun_keywords("Rare Sarah Sarah Sarah Marcus Marcus")
+    assert _kw[0].startswith("Sarah") and _kw[1].startswith("Marcus"), \
+        f"keywords must be frequency-ordered so the cap drops the rarest, got {_kw[:3]}"
+
+    # ── never retry a 4xx, BOTH DIRECTIONS ────────────────────────────────
+    assert _h._deepgram_is_retriable_error(
+        "DeepgramApiError: Keyterm limit exceeded (max 500 tokens)") is False, \
+        "the keyterm 400 must NOT be retried — the '500' in it is a LIMIT, not a status"
+    for _det in ("400 Bad Request", "401 unauthorized", "404 not found", "invalid language"):
+        assert _h._deepgram_is_retriable_error(_det) is False, f"'{_det}' is deterministic"
+    for _tr in ("429 Too Many Requests", "rate limit exceeded", "500 Internal Server Error",
+                "502 Bad Gateway", "connection reset", "read timeout"):
+        assert _h._deepgram_is_retriable_error(_tr) is True, \
+            f"'{_tr}' IS transient and must still retry — the fix must not disable retries wholesale"
+
+
+@check("A NUMBER IN A MESSAGE IS NOT A STATUS CODE (Zac 2026-08-03, the SECOND instance of one defect): both retry classifiers matched bare substrings — `\"500\" in m` — so any error text merely containing 500 read as a transient 5xx. In Deepgram it turned `Keyterm limit exceeded (max 500 tokens)` (a deterministic 400) into three attempts. In Gemini the blast radius is worse: that function's own docstring says a wrongly-retried deadline compounds 4x into a ~20-min hang that LOOKS LIKE A STUCK JOB, which is an open unowned class. Word boundaries alone are NOT enough — the 500 in \"max 500 tokens\" is word-bounded — so status matching is unit-aware: a number followed by tokens/characters/ms/items/etc is a quantity, never a status.")
+def _check_status_not_substring():
+    import handler as _h
+    # Inspect CODE, not prose — the fix's own comment quotes the old pattern.
+    _code = "\n".join(l for l in open("handler.py").read().split("\n")
+                      if not l.lstrip().startswith("#"))
+    assert '"500" in m' not in _code, "a bare-substring status match has come back"
+    for _fn, _name in ((_h._gemini_is_retriable_error, "gemini"),
+                       (_h._deepgram_is_retriable_error, "deepgram")):
+        # a QUANTITY must never read as a status
+        for _q in ("max 500 tokens exceeded", "response exceeded 500 characters"):
+            assert _fn(_q) is False, f"{_name}: '{_q}' is a quantity, not a 5xx"
+        # ...and a real transient must STILL retry, or the fix disabled retries
+        for _t in ("500 Internal Server Error", "503 UNAVAILABLE", "connection reset"):
+            assert _fn(_t) is True, f"{_name}: '{_t}' is transient and must retry"
+        # ...and a deterministic client error must not
+        assert _fn("400 Bad Request") is False, f"{_name}: a 400 is deterministic"
+    # the Gemini deadline case its own docstring warns about
+    assert _h._gemini_is_retriable_error("504 DEADLINE_EXCEEDED") is False, \
+        "a deadline must fail fast — retrying compounds into the ~20-min hang that looks like a stuck job"
+
+
+@check("EVERY TERMINAL CARRIES ITS ROOT AS A SUB-CODE (Zac 2026-08-03, the change that ends the whack-a-mole): the 40-code enumeration stopped at the LABEL, so causes could not be counted, ranked by wasted spend, or proven gone. Tonight RENDER_FATAL alone meant THREE unrelated defects (a bad --concurrency argv, the audio/video frame grid, a stream-less zoomclip intermediate) and every single RENDER_FFMPEG was an ANALYSIS-stage timeout on a 4K HEVC source rather than anything in the render — the label actively misled. classify_error now emits error_subcode + error_cause through _e(), the one choke point every code returns from. Pinned against the exact messages from the real jobs, so a sub-code that stops matching its own founding failure fails the gate.")
+def _check_error_subcodes():
+    import handler as _h
+    assert hasattr(_h, "_error_subcode") and hasattr(_h, "_ERROR_SUBCODES")
+    # Forged from real jobs tonight — each string is the verbatim failure.
+    _REAL = [
+        ("[overlay] Remotion render failed (rc=1): Error: Maximum for --concurrency is 8 (number of cores on this system)",
+         "RENDER_REMOTION:concurrency"),
+        ("RENDER_FATAL after full + retry + stripped renders: ValueError: sample_rate 44100 is not integer-divisible by fps 30.0003 : audio and video cannot share the frame grid",
+         "RENDER_FATAL:frame_grid"),
+        ("RENDER_FATAL after full + retry + stripped renders: RuntimeError: Compositor error: No video stream found in input file zoomclip_clip-0.mp4",
+         "RENDER_FATAL:no_video_stream"),
+        ("Command '[ffmpeg -i src -an -vf scdet=threshold=1.0:sc_pass=1 -f null -]' timed out after 60 seconds",
+         "RENDER_FFMPEG:analyze_shot_changes"),
+        ("Command '[ffmpeg -y -i src -vf select=not(mod(n,180)),scale=960:540 /tmp/_face_frames/f.jpg]' timed out after 30 seconds",
+         "RENDER_FFMPEG:analyze_face_detect"),
+        ("Command '[ffmpeg -vn -i src -af astats=metadata=1 -f null -]' timed out after 30 seconds",
+         "RENDER_FFMPEG:analyze_loudness"),
+        ("Deepgram transcription failed after 3 attempts: DeepgramApiError: Keyterm limit exceeded (max 500 tokens)",
+         "TRANSCRIPTION:keyterm_limit"),
+        ("Deepgram transcription failed after 3 attempts: The write operation timed out",
+         "TRANSCRIPTION:write_timeout"),
+        ("Gemini proxy encode failed: gemini_proxy.mp4 timed out after 30 seconds",
+         "INVALID_FORMAT:proxy_encode_timeout"),
+    ]
+    _wrong = []
+    for _m, _want in _REAL:
+        _got = _h.classify_error(RuntimeError(_m)).get("error_cause")
+        if _got != _want:
+            _wrong.append(f"{_want} -> got {_got}")
+    assert not _wrong, ("a sub-code no longer matches the real job it was forged from: "
+                        + "; ".join(_wrong))
+
+    # EVERY code must carry the fields — _e is the single choke point, so a code
+    # that bypasses it would be invisible to every cause-cut we build on this.
+    for _m in ("INTEGRITY_TRIP dead_moment", "CLIP_TOO_SHORT", "NO_SPEECH", "junk"):
+        _r = _h.classify_error(RuntimeError(_m))
+        for _k in ("error_code", "error_subcode", "error_cause"):
+            assert _k in _r, f"'{_m}' envelope is missing {_k}"
+        assert _r["error_cause"] == f"{_r['error_code']}:{_r['error_subcode']}"
+
+    # An unnamed shape must say so rather than guess — a rising `unclassified`
+    # count IS the signal that a new mechanism is firing.
+    assert _h.classify_error(RuntimeError("totally novel junk")).get("error_subcode") == "unclassified"
+    # ...and the classifier must never raise, whatever it is handed.
+    for _weird in (None, 0, object(), Exception()):
+        _h.classify_error(_weird)
+
+
+@check("THE WEIGHTED PROBE BUDGET MUST ACTUALLY SCALE (errors agent 2026-08-03): _probe_weighted_timeout parsed ffprobe POSITIONALLY, assuming it echoed the requested order (r_frame_rate,width,height,duration). It does not — it emits the STREAM's own order: width,height,r_frame_rate,duration. So _vals[0]='2160' had no '/' and fps silently fell back to 30, and _int(2) on '60/1' raised and made height 0. res_factor collapsed to 1.0 and EVERY call returned base_s: the RENDER_FFMPEG:analyze_* fix was INERT while reading as shipped (60s computed where the truth is 90s on a 4K60 source). Now parsed by NAME from ffprobe -of json, which cannot be reordered. This gate asserts the SCALING, not the presence of the function — a fix that computes the base value on every input is indistinguishable from no fix at all.")
+def _check_probe_budget_scales():
+    import os as _os
+    import subprocess as _sp
+    import tempfile as _tf
+    import handler as _h
+    assert '"-of", "json"' in open("handler.py").read(), \
+        "the probe must parse ffprobe JSON, never positional output"
+    _fd, _p4k = _tf.mkstemp(suffix="_4k60.mp4"); _os.close(_fd)
+    try:
+        _sp.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                 "-i", "testsrc2=s=2160x3840:r=60:d=12", "-c:v", "libx264",
+                 "-preset", "ultrafast", "-pix_fmt", "yuv420p", _p4k],
+                capture_output=True, timeout=300)
+        # END-TO-END, because the arithmetic alone cannot catch a PARSE bug —
+        # that was the whole defect. 12s x 60fps x 4.0 = 2880 weighted frames,
+        # past the 1800 knee, so a correct parse MUST exceed base. Under the
+        # positional parse this read 30fps/height=0 and returned exactly base.
+        _big = _h._probe_weighted_timeout(_p4k, 60, 240)
+        assert _big > 60, (
+            f"the probe budget did not scale on a 4K60 source (got {_big}s, base 60s) — "
+            "the ffprobe parse is broken again and the analyze_* fix is inert")
+        assert _h._weighted_probe_timeout(60 * 20, 4.0, 60, 240) == 90, \
+            "4K60 20s must scale 60 -> 90s; a budget that never leaves base is an inert fix"
+        assert _h._weighted_probe_timeout(30 * 60, 1.0, 60, 240) == 60, \
+            "a 1080p30 60s clip must stay at base"
+        assert _h._weighted_probe_timeout(60 * 600, 4.0, 60, 240) == 240, \
+            "the ceiling must still bound a hang"
+        # ...and the NAMED parse must recover fps/res that the positional one lost
+        assert _big >= 60, "fail-open floor is base_s"
+    finally:
+        try: _os.unlink(_p4k)
+        except OSError: pass
+    # unreadable source must fail OPEN, never raise into the analysis path
+    assert _h._probe_weighted_timeout("/nonexistent-source.mp4", 60, 240) == 60
+
+
+@check("NO TERMINAL MAY LAND ON UNKNOWN (Zac's UNKNOWN=0 law, 2026-08-03): 'Main render produced invalid output' had NO branch in classify_error, so a render that produced no usable file surfaced as UNKNOWN:unclassified — an unowned, uncountable terminal. It also collapsed two different failures into one string: the file never appeared, versus it appeared as a stub. Now RENDER_EMPTY_OUTPUT with the byte count, classified RENDER_FATAL and split into empty_output_missing vs empty_output_stub so the two roots are counted apart. This gate asserts the CLASSIFICATION, because the raise alone would still have read as fixed while landing on UNKNOWN.")
+def _check_no_unknown_terminal():
+    import handler as _h
+    _MISSING = ("RENDER_EMPTY_OUTPUT: main render produced no usable file — "
+                "MISSING at /tmp/x/output.mp4")
+    _STUB = ("RENDER_EMPTY_OUTPUT: main render produced no usable file — "
+             "only 412 bytes (floor 100000) at /tmp/x/output.mp4")
+    for _m, _want in ((_MISSING, "RENDER_FATAL:empty_output_missing"),
+                      (_STUB, "RENDER_FATAL:empty_output_stub")):
+        _got = _h.classify_error(RuntimeError(_m)).get("error_cause")
+        assert _got == _want, f"expected {_want}, got {_got}"
+        assert _h.classify_error(RuntimeError(_m)).get("error_code") != "UNKNOWN", \
+            "a render terminal must never land on UNKNOWN"
+    # the raise itself must carry the evidence, not just the word 'invalid'
+    _src = open("handler.py").read()
+    assert "RENDER_EMPTY_OUTPUT" in _src and "floor 100000" in _src, \
+        "the empty-output raise must name WHICH failure and the byte count"
+    assert "Main render produced invalid output" not in _src, \
+        "the unclassifiable string is back"
+
+
+@check("A SUB-CODE MUST MATCH THE FAILURE, NOT THE SUBSYSTEM (2026-08-03): the RENDER_REMOTION browser_launch sub-code matched the bare words 'chrome'/'Chromium', which appear in the SUCCESSFUL startup line every render emits ('Using build-time Chromium at /usr/local/bin/chrome-headless-shell'). Two jobs that logged 'Browser opened in 1.01s' were therefore labelled browser_launch. A WRONG sub-code is worse than `unclassified` — it sends the fix to the wrong subsystem with false confidence, which is the exact failure the sub-codes exist to end. This gate replays the real job text and asserts a healthy browser is NEVER classified as a launch failure.")
+def _check_subcode_matches_failure_not_subsystem():
+    import handler as _h
+    _HEALTHY = ("[hype-render] render-full.mjs PromptlyOverlay failed rc=1\nSTDOUT:\n"
+                "[render-full] Using build-time Chromium at /usr/local/bin/chrome-headless-shell "
+                "— skipping ensureBrowser\n[render-full] Browser opened in 1.01s\n"
+                "[render-full] selectComposition")
+    assert _h._error_subcode("RENDER_REMOTION", _HEALTHY) != "browser_launch", \
+        "a render whose browser opened fine must never be classified browser_launch"
+    # ...and a REAL launch failure must still be caught, or the fix just deletes
+    # the sub-code instead of correcting it.
+    for _real in ("Error: Failed to launch the browser process",
+                  "Could not find Chrome", "Target closed", "Protocol error"):
+        assert _h._error_subcode("RENDER_REMOTION", _real) == "browser_launch", \
+            f"a genuine launch failure must still classify: {_real!r}"
+    # no sub-code anywhere may key on a bare subsystem NAME
+    for _code, _entries in _h._ERROR_SUBCODES.items():
+        for _sub, _sigs in _entries:
+            for _sig in _sigs:
+                assert _sig.lower() not in ("chrome", "chromium", "ffmpeg", "remotion",
+                                            "deepgram", "gemini", "node"), \
+                    f"{_code}:{_sub} keys on the bare subsystem name {_sig!r} — that matches healthy logs too"
+
+
+@check("THE SUB-CODE MUST REACH THE DATABASE (2026-08-04): classify_error emitted error_subcode/error_cause from ca6133c, but the TERMINAL WRITE copies an explicit key allowlist and never included them — so all 15 failures in a 2h window stored the LABEL only, and reading the board meant re-deriving every cause from error_detail by hand. A field that exists and is never persisted is the same as no field at all, which is precisely the class sub-codes were built to end. This gate asserts the WRITE, not the classifier: the classifier was already correct and the board was still unreadable.")
+def _check_subcode_is_persisted():
+    _src = open("handler.py").read()
+    # EVERY terminal write, not just the one I happened to anchor on. There are
+    # two, and the first attempt at this gate found only the second — the same
+    # class of miss it exists to catch.
+    _sites = [i for i in range(len(_src))
+              if _src.startswith('status="failed", phase="Something went wrong"', i)]
+    assert len(_sites) >= 2, f"expected >=2 terminal writes, found {len(_sites)}"
+    for _i in _sites:
+        _blk = _src[_i:_i + 2600]
+        assert '"error_subcode"' in _blk and '"error_cause"' in _blk, (
+            "a terminal write persists no sub-code — the classifier emitting it is "
+            "not enough, the ROW is what anyone else can read")
+    # and it must be copied from the classifier, never recomputed at the write
+    _cls = _src[_sites[-1]:_sites[-1] + 2600]
+    assert _cls.index('"error_code": classified.get("error_code")') < _cls.index('"error_cause"'), \
+        "error_cause must ride the same classified envelope as error_code"
 
 
 # ─── REPORT ────────────────────────────────────────────────────────────

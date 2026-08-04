@@ -43,3 +43,48 @@ src/remotion/public/vcap_head.mp4
 post_cuts_system_prompt.txt
 promptly_gemini_system_prompt.txt
 .worktrees
+
+# Untracked one-off `modal run` harness/probe scripts (Zac 2026-08-02 deploy hygiene):
+# keep the deploy tree clean so modal app history reads no '*'. Tracked harnesses
+# (cert_render_burst_app.py, plan_decision_ab_app.py, etc.) are unaffected — .gitignore
+# only ignores UNTRACKED matches. New keepers: git add -f.
+analytics_build_split_app.py
+analytics_rejections_app.py
+cert_delivery_fps_pair_app.py
+cert_fps_media_ab_app.py
+cert_shutter_matrix_app.py
+cert_smooth_easing_app.py
+cert_smoothness_pair_app.py
+cert_tblend_zoom_app.py
+cert_vidstab_pair_app.py
+cert_vidstab_shaky_app.py
+corrected_hourly_read_app.py
+face_investigate_app.py
+face_parity_app.py
+face_ratio_dist_app.py
+face_ratio_verify_app.py
+find_shaky_clip_app.py
+hls_copy_gate_app.py
+hls_flip_watch_app.py
+incident_blindspot_app.py
+incident_followup_app.py
+incident_pull_app.py
+l4_nvenc_clean_app.py
+memory_peak_measure_app.py
+proxy_rotation_test_app.py
+query_fixed_overhead_app.py
+render_fatal_trace_app.py
+rotation_reader_test_app.py
+s3_sample_discover_app.py
+s3_sample_view_app.py
+scoreboard_app.py
+shake_neutrality_test_app.py
+snapshot_gpu_restore_test_app.py
+traffic_audit_app.py
+validate_denominator_app.py
+validator_contradiction_app.py
+verify_deploy_worked_app.py
+watch_routed_jobs_app.py
+yunet_dist_app.py
+cert_cap_rendertime_app.py
+cert_dwell_pair_app.py

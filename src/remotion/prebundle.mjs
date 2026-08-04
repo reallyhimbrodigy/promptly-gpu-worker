@@ -18,6 +18,8 @@
 import { bundle } from "@remotion/bundler";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
+import { createHash } from "crypto";
+import { readFileSync, writeFileSync, readdirSync, statSync } from "fs";
 import { mkdirSync } from "fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -86,3 +88,25 @@ const bundleLocation = await bundle({
 
 const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 console.log(`[prebundle] Done in ${elapsed}s → ${bundleLocation}`);
+
+// BUNDLE-FRESHNESS FINGERPRINT (Zac 2026-08-02): a TSX change ships INERT if a
+// redeploy reuses a cached bundle without re-running this prebundle — SafeImg
+// itself nearly shipped that way. Hash every .ts/.tsx/.mjs under src/ and stamp
+// it into the built bundle; the worker asserts at startup that the DEPLOYED
+// bundle carries the hash of the DEPLOYED source. Mismatch = stale bundle =
+// loud failure, never a silent inert render.
+function _srcFiles(dir) {
+  let out = [];
+  for (const e of readdirSync(dir)) {
+    const p = resolve(dir, e);
+    if (statSync(p).isDirectory()) { if (e !== "node_modules") out = out.concat(_srcFiles(p)); }
+    else if (/\.(tsx?|mjs)$/.test(e)) out.push(p);
+  }
+  return out;
+}
+const _srcDir = resolve(__dirname, "src");
+const _h = createHash("sha256");
+for (const f of _srcFiles(_srcDir).sort()) { _h.update(f.slice(_srcDir.length)); _h.update(readFileSync(f)); }
+const _hash = _h.digest("hex");
+writeFileSync(resolve(BUNDLE_DIR, ".src_hash"), _hash);
+console.log(`[prebundle] src fingerprint sha256:${_hash.slice(0, 16)}… → bundle/.src_hash`);

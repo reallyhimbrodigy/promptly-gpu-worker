@@ -247,8 +247,9 @@ let _lastRenderedFrames = 0;
 let _lastEncodedFrames = 0;
 const _intervalSamples = [];
 
+let _rmResult = null;
 try {
-  await renderMedia({
+  _rmResult = await renderMedia({
   serveUrl: bundleLocation,
   composition,
   // Codec selection by composition:
@@ -388,6 +389,24 @@ if (_intervalSamples.length) {
   const max = Math.max(...fpsList);
   console.log(
     `[render-full] render-fps over time: avg=${avg.toFixed(1)} min=${min.toFixed(1)} max=${max.toFixed(1)} (${_intervalSamples.length} samples)`,
+  );
+}
+// SLOWEST_FRAMES profile (Zac 2026-08-02): renderMedia returns the 10 slowest
+// frames with their render times — free, built in. It settles the whole profile
+// question per pass: times UNIFORM across frames => browser / frame-draw
+// overhead (fix: GPU gl=angle-egl + one-browser-many-passes); times
+// CONCENTRATED on specific frames => the MG components ON those frames are the
+// cost (fix: precompute the static shadows/gradients/blurs). Logged grep-stable.
+if (_rmResult && Array.isArray(_rmResult.slowestFrames) && _rmResult.slowestFrames.length) {
+  const _sf = _rmResult.slowestFrames;
+  const _ts = _sf.map((f) => f.time);
+  const _mean = _ts.reduce((a, b) => a + b, 0) / _ts.length;
+  const _spread = Math.max(..._ts) / Math.max(1, Math.min(..._ts));
+  console.log(
+    `[render-full] SLOWEST_FRAMES ${compositionId} n=${_sf.length} mean=${_mean.toFixed(0)}ms ` +
+    `max/min=${_spread.toFixed(1)}x ` +
+    `(${_spread < 1.5 ? "UNIFORM→browser-overhead" : "CONCENTRATED→component-cost"}): ` +
+    _sf.map((f) => `f${f.frame}=${f.time.toFixed(0)}ms`).join(" "),
   );
 }
 try {

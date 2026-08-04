@@ -2,6 +2,19 @@
 
 These apply to every task, every agent, every commit. They are not advice.
 
+## Rule 0 — The worker deploys from `zero-reject-routing`, NOT `main`
+
+`deploy.sh` runs `modal deploy modal_app.py` against the **working tree of the
+checked-out branch**, which is **`zero-reject-routing`**. For a long time `main`
+sat **447 commits behind** the deployed branch — a *dead main* — and multiple
+investigations wasted hours checking it as if it were live. **Never treat
+origin/main as the source of truth for what is running.** To read what is
+deployed, check `zero-reject-routing` (or the `.last_deployed_commit` file), and
+verify **function presence in the running image** (grep the deployed bundle),
+never a branch or a SHA. `main` is kept fast-forwarded to `zero-reject-routing`
+after every deploy; if `deploy.sh` prints that main is behind, fast-forward and
+push it. (content-studio is separate: it *does* deploy from `main` via Render.)
+
 ## Rule 1 — Every fix ships with a check that makes its regression impossible
 
 Not a comment. Not a note in a report. A gate assertion, a fingerprint, a cert,
@@ -76,6 +89,15 @@ inflated by retries into an apparent outage.
 - **Never retry as an answer to failure** — root-cause and exterminate.
 - **$0.10/job** is the cost law. **90s end-to-end** is the latency law.
 - **Fail loudly to us, never to the user.**
+- **Render determinism (2026-08-01)**: the x264 encode thread count is PINNED
+  (`_X264_ENCODE_THREADS=48` in handler.py, never x264-auto — auto makes output
+  depend on the machine's core count). Renders are now **byte-identical on a
+  fixed plan across ANY cpu**. Byte-identity is the cert bar — any difference on
+  a fixed plan is a **DEFECT**, not variance. No PSNR/SSIM threshold for
+  fixed-plan A/Bs (this retires the old "x264 nondeterminism ~0.99994"
+  determinism-relative bar). A canary/harness that renders the pipeline MUST
+  mount the deployed app's FULL secret set (incl. `promptly-lang-flags`) — a
+  missing secret changes the render flags and confounds every comparison.
 
 ## Working agreement
 
