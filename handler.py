@@ -31667,10 +31667,28 @@ _SILENT_ROUTE_REASONS = ("no_speech_muted", "transcription_incomplete")
 
 
 def _silent_to_moodreel_enabled():
-    """PROMPTLY_SILENT_TO_MOODREEL=1 arms the re-route. Default OFF => today's
-    routing, byte-identical."""
-    return str(os.environ.get("PROMPTLY_SILENT_TO_MOODREEL", "") or "").strip() \
-        in ("1", "true", "on", "yes")
+    """ARMED BY DEFAULT (Zac GO 2026-08-04, naming the key PROMPTLY_SILENT_TO_MOODREEL).
+
+    Was default OFF and had been since it was built — the Rule-2 shape exactly:
+    shipped, gate-green, doing nothing. Measured addressable set at the time of
+    the flip: 269 jobs / 260 USERS in 10 days, of which the minimal /
+    no_speech_muted arm exports at 3.4%.
+
+    ARMED IN CODE, NOT IN THE SECRET, DELIBERATELY. The operational flags live in
+    `promptly-lang-flags`, but that secret can only be changed with
+    `modal secret create … --force`, which REPLACES every key, and Modal exposes
+    no way to read the live keys back. The docs list six; the count has been
+    nine. Recreating it blind could silently drop a flag nobody can see —
+    PROMPTLY_SPAWN_MODE=1 among them, which must stay 1. This key is not in the
+    documented set, so the code default is what governs and nothing needs
+    clobbering.
+
+    Still a kill switch: PROMPTLY_SILENT_TO_MOODREEL=0 disarms it, and that WOULD
+    go in the secret (adding one key is the same --force risk, so only under a
+    real incident).
+    """
+    _v = str(os.environ.get("PROMPTLY_SILENT_TO_MOODREEL", "") or "").strip().lower()
+    return _v not in ("0", "false", "off", "no")
 
 
 def _vad_confirms_silence(source_path, source_duration):
@@ -31868,7 +31886,8 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "routing",
             {"reason": str(reason), "duration_s": round(float(_dur or 0.0), 2),
              "motion_windows": len(_mcurve or []),
-             "moodreel_enabled": bool(_moodreel_on)},
+             "moodreel_enabled": bool(_moodreel_on),
+             "silent_reroute_armed": bool(_silent_to_moodreel_enabled())},
             "moodreel_gate_rejected",
             reason=("silent content could not take the mood-reel edit: "
                     + ("flag off" if not _moodreel_on
@@ -31877,6 +31896,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         )
         print(f"[moodreel-gate] REJECTED reason={reason} dur={float(_dur or 0.0):.2f}s "
               f"motion_windows={len(_mcurve or [])} enabled={bool(_moodreel_on)} "
+              f"silent_reroute_armed={bool(_silent_to_moodreel_enabled())} "
               f"-> falling through to minimal (produces no cuts, no captions)",
               flush=True)
     if (_plan is None and _moodreel_on and _dur >= 8.0 and _mcurve

@@ -58,9 +58,12 @@ def with_vad(silence, available=True):
     return restore
 
 
-print("=== M0: the flag is DARK by default ===")
+print("=== M0: the flag is ARMED by default (Zac GO 2026-08-04) ===")
 r = env(PROMPTLY_SILENT_TO_MOODREEL=None)
-check("default OFF", H._silent_to_moodreel_enabled() is False)
+check("default ARMED (unset => ON)", H._silent_to_moodreel_enabled() is True)
+r()
+r = env(PROMPTLY_SILENT_TO_MOODREEL="0")
+check("explicit 0 disarms", H._silent_to_moodreel_enabled() is False)
 r()
 
 print("\n=== M1: VAD confirms silence -> eligible ===")
@@ -126,13 +129,32 @@ check("no_speech_muted WITH speech present -> NOT eligible",
 un()
 r2()
 
-print("\n=== M7: flag OFF -> nothing is ever eligible ===")
+# ARMED BY DEFAULT (Zac GO 2026-08-04, naming PROMPTLY_SILENT_TO_MOODREEL). The
+# contract INVERTED: unset used to mean OFF, which is how this sat dark from the
+# day it shipped. Unset now means ARMED; only an explicit "0"/"false"/"off"
+# disarms it. The protective property is unchanged and still asserted — a disarm
+# must actually disarm, or the kill switch is decoration.
+print("\n=== M7: unset -> ARMED; explicit 0 -> disarmed ===")
 r3 = env(PROMPTLY_SILENT_TO_MOODREEL=None)
 un = with_vad([(0.0, 30.0)])
-check("flag off -> no re-route even on a fully silent clip",
-      H._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is False)
+check("UNSET -> re-route IS armed on a fully silent clip",
+      H._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is True)
 un()
 r3()
+
+r4 = env(PROMPTLY_SILENT_TO_MOODREEL="0")
+un = with_vad([(0.0, 30.0)])
+check("kill switch 0 -> no re-route even on a fully silent clip",
+      H._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is False)
+un()
+r4()
+
+r5 = env(PROMPTLY_SILENT_TO_MOODREEL="off")
+un = with_vad([(0.0, 30.0)])
+check("kill switch 'off' -> disarmed too",
+      H._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is False)
+un()
+r5()
 
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
 if FAIL:

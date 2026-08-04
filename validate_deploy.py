@@ -5555,7 +5555,7 @@ def _integrity_freeze_echo_boundary():
         "the collapsed branch that hid the crossing case must be gone from BOTH echoes"
 
 
-@check("SILENT CLIPS GET AN EDIT, NOT THEIR OWN FOOTAGE BACK (2026-08-03, DARK behind PROMPTLY_SILENT_TO_MOODREEL): measured over 387 completions since 08-01 with editorial events = (segments-1) + decorations counted across BOTH recipe shapes — minimal_speech_uncut 141/141 silent (median 0 editorial), moodreel 73 jobs 1 silent (median 5), hype median 14, standard median 10. 143 of 387 (37%, 140 users) deliver ZERO editorial events and 141 are the uncut passthrough. A clip whose speech we could not READ but which VAD confirms carries NO speech is silent content and belongs in the mood-reel cut. THE GUARD: minimal_speech_uncut exists because build_minimal_plan cuts at MOTION PEAKS, which would chop the untranscribed speech it protects (Urdu-class law) — so re-routing requires POSITIVE VAD confirmation and every unmeasurable case stays uncut. cert: test_silent_to_moodreel.py 13/13")
+@check("SILENT CLIPS GET AN EDIT, NOT THEIR OWN FOOTAGE BACK (2026-08-03, DARK behind PROMPTLY_SILENT_TO_MOODREEL): measured over 387 completions since 08-01 with editorial events = (segments-1) + decorations counted across BOTH recipe shapes — minimal_speech_uncut 141/141 silent (median 0 editorial), moodreel 73 jobs 1 silent (median 5), hype median 14, standard median 10. 143 of 387 (37%, 140 users) deliver ZERO editorial events and 141 are the uncut passthrough. A clip whose speech we could not READ but which VAD confirms carries NO speech is silent content and belongs in the mood-reel cut. THE GUARD: minimal_speech_uncut exists because build_minimal_plan cuts at MOTION PEAKS, which would chop the untranscribed speech it protects (Urdu-class law) — so re-routing requires POSITIVE VAD confirmation and every unmeasurable case stays uncut. ARMED 2026-08-04 (Zac GO naming the key); addressable at the flip 269 jobs / 260 USERS. cert: test_silent_to_moodreel.py 16/16")
 def _silent_to_moodreel():
     import handler
     _h = open("handler.py").read()
@@ -5570,12 +5570,21 @@ def _silent_to_moodreel():
         handler._detect_silence_regions_vad = lambda *a, **k: sil
         handler._vad_available = lambda: avail
     try:
-        # 1. DARK BY DEFAULT — flag off, nothing is ever re-routed
+        # 1. ARMED BY DEFAULT (Zac GO 2026-08-04). Inverted from dark-by-default,
+        #    which is how this sat doing nothing from the day it shipped. The
+        #    KILL SWITCH is what gets asserted now — a flag whose off-state does
+        #    not actually disarm is decoration.
         os.environ.pop("PROMPTLY_SILENT_TO_MOODREEL", None)
-        assert handler._silent_to_moodreel_enabled() is False
+        assert handler._silent_to_moodreel_enabled() is True, \
+            "the re-route must be ARMED when unset — it was dark for weeks otherwise"
         _vad([(0.0, 30.0)])
+        assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is True, \
+            "unset must re-route a VAD-confirmed silent clip"
+
+        os.environ["PROMPTLY_SILENT_TO_MOODREEL"] = "0"
+        assert handler._silent_to_moodreel_enabled() is False
         assert handler._silent_route_eligible("no_speech_muted", "/x.mp4", 30.0) is False, \
-            "flag off must never re-route"
+            "the kill switch must actually disarm the re-route"
 
         os.environ["PROMPTLY_SILENT_TO_MOODREEL"] = "1"
         # 2. positive confirmation re-routes
@@ -8128,6 +8137,33 @@ def _caption_keyword_list_matches_code():
     assert "emit `caption_keywords: []`" in _src, \
         "keyword-ignoring styles must be told to emit [] — otherwise Gemini writes " \
         "words that no component reads (1,372 of them across 267 jobs)"
+
+
+@check("SILENT->MOODREEL IS ARMED (Zac GO 2026-08-04, naming PROMPTLY_SILENT_TO_MOODREEL, RULE-1): the re-route was BUILT AND DARK — default OFF since it shipped, the Rule-2 shape exactly. Addressable at the flip: 269 jobs / 260 USERS in 10 days, the minimal/no_speech_muted arm exporting at 3.4%. This gate asserts it stays ARMED BY DEFAULT and that the kill switch still works, in both directions — a default that silently reverts to OFF is how this sat dark for weeks.")
+def _silent_to_moodreel_armed():
+    _src = open("handler.py").read()
+    assert 'in ("1", "true", "on", "yes")' not in _src.split(
+        "def _silent_to_moodreel_enabled")[1][:1400], \
+        "the re-route is back to opt-IN (default OFF) — it was dark for weeks that way"
+    assert '_v not in ("0", "false", "off", "no")' in _src, \
+        "the re-route must be ARMED BY DEFAULT: unset => ON"
+
+    # THE PREDICATE, BOTH DIRECTIONS. A default-ON that cannot be turned off is
+    # not a flag, and a kill switch that does not kill is worse than none.
+    def _armed(v):
+        return str(v or "").strip().lower() not in ("0", "false", "off", "no")
+    assert _armed("") and _armed(None), "unset must be ARMED"
+    assert _armed("1") and _armed("true"), "explicit on must be armed"
+    assert not _armed("0") and not _armed("false") and not _armed("off"), \
+        "the kill switch must actually disarm it"
+    assert not _armed(" OFF "), "the kill switch must survive whitespace and case"
+
+    # and the resolved state has to be OBSERVABLE, because the live value of a
+    # flag that lives in code is otherwise unknowable from outside
+    assert '"silent_reroute_armed": bool(_silent_to_moodreel_enabled())' in _src, \
+        "the rejection record must carry the RESOLVED arm state — Modal exposes " \
+        "no way to read secret keys back, so this log line is the only way to " \
+        "confirm the flip actually took on real traffic"
 
 
 @check("MOODREEL GATE OBSERVABILITY (Zac 2026-08-04, RULE-1): 158 jobs / 149 USERS with a silent route_reason fell through to `minimal`, which emits 0% cuts and 0% captions — we hand the upload back. Which of the gate's conditions rejected them is UNRECOVERABLE after the fact, because light routes persist no plan: the duration and the motion-window count are both gone. Lowering the 8.0s threshold without that would be a guess. This gate pins the rejection record in place so the binding constraint can be read off real traffic.")
