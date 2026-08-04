@@ -11915,6 +11915,45 @@ def _apply_why_diet(schema):
     return schema
 
 
+# ── LEAN-SCHEMA A/B (Zac GO 2026-08-04, both arms together) ──────────────────
+# Arm 3 (PROMPTLY_LEAN_SCHEMA) removes the per-moment prose from the response
+# schema; arm 5 (PROMPTLY_LEAN_DECOR_GROUND) tells the model to justify the
+# decorative families in REASONING so they survive the removal. Arm 3 alone was
+# already run and text_overlays + sound_effects density DROPPED — arm 5 exists
+# precisely to fix that, so they ship TOGETHER or not at all.
+#
+# A REAL A/B, NOT A FLIP. A before/after window would be confounded by traffic
+# mix, time of day and every other change landing today, and tonight has already
+# produced two contaminated windows. The split is deterministic on job_id, so
+# both arms run CONCURRENTLY over the same population and the cut is clean.
+#
+# The env flags still win when set explicitly — that is the kill switch and the
+# way to force an arm for a cert.
+_LEAN_AB_SPLIT = 0.5
+
+
+def _lean_ab_arm():
+    """'lean' or 'control' for the job in flight, stable per job_id.
+
+    Deterministic so a retry of the same job lands in the same arm (a job that
+    flips arms between attempts would pollute both). Returns 'control' when
+    there is no job_id, so anything off the job path is unaffected.
+    """
+    _jid = str(_ACTIVE_JOB_ID or "")
+    if not _jid:
+        return "control"
+    _h = int(hashlib.sha1(_jid.encode("utf-8", "ignore")).hexdigest()[:8], 16)
+    return "lean" if (_h % 10000) < int(_LEAN_AB_SPLIT * 10000) else "control"
+
+
+def _lean_ab_active():
+    """True when this job is in the LEAN arm and no explicit override is set."""
+    for _k in ("PROMPTLY_LEAN_SCHEMA", "PROMPTLY_LEAN_DECOR_GROUND"):
+        if str(os.environ.get(_k, "") or "").strip():
+            return False          # an explicit setting means the A/B is not driving
+    return _lean_ab_arm() == "lean"
+
+
 def _lean_schema_enabled():
     """FIX 3 (degen bound, Zac GO 2026-07-31): the r=0.59 root lever. wall-clock is
     OUTPUT-bound (r=0.59) not thinking-bound (r=0.05), and the output is the
@@ -11928,9 +11967,11 @@ def _lean_schema_enabled():
     (functional: content gate + picker) and remove_words.reason (code-generated) are
     UNTOUCHED. DARK by default; the free plan-decision A/B decides if the scaffold
     was load-bearing before this ever ships."""
-    return os.environ.get("PROMPTLY_LEAN_SCHEMA", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    _v = str(os.environ.get("PROMPTLY_LEAN_SCHEMA", "") or "").strip().lower()
+    if _v:
+        return _v in ("1", "true", "on", "yes")
+    # unset => the A/B decides (Zac GO 2026-08-04)
+    return _lean_ab_active()
 
 
 def _lean_decor_ground_enabled():
@@ -11939,9 +11980,11 @@ def _lean_decor_ground_enabled():
     so the grounding preserves the decoration the removed viewer_feeling/what_lands
     prose used to justify. Only meaningful alongside PROMPTLY_LEAN_SCHEMA. Off =
     plain lean relocation."""
-    return os.environ.get("PROMPTLY_LEAN_DECOR_GROUND", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
+    _v = str(os.environ.get("PROMPTLY_LEAN_DECOR_GROUND", "") or "").strip().lower()
+    if _v:
+        return _v in ("1", "true", "on", "yes")
+    # unset => the A/B decides (Zac GO 2026-08-04)
+    return _lean_ab_active()
 
 
 # The telemetry-only rationale-prose fields removed by the lean schema, per def.
@@ -38345,6 +38388,15 @@ def handler(job):
                 # would have been lost to content-studio top-level stripping. The
                 # uncached_delta (prompt-cached) decides the prompt lever.
                 "gemini_tokens": _gemini_token_summary(),
+                # LEAN-SCHEMA A/B ARM (Zac GO 2026-08-04). NESTED for the same
+                # reason as gemini_tokens — a top-level key is stripped by
+                # content-studio and the A/B would be unmeasurable, which is the
+                # exact failure this file keeps finding elsewhere (_lang_bundle
+                # 0/3000, vad_coverage, source_duration 0/149). An A/B whose arm
+                # is not persisted is not an A/B.
+                "lean_arm": _lean_ab_arm(),
+                "lean_schema_on": bool(_lean_schema_enabled()),
+                "lean_decor_ground_on": bool(_lean_decor_ground_enabled()),
                 # ONE CLOCK (Zac 2026-08-02): hierarchical wall-clock tree with
                 # start/end/parent per span; unaccounted = parent − union(children)
                 # is exact, so any gap is VISIBLE not absorbed. Nested to survive

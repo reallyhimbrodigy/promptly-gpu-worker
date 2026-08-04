@@ -8186,6 +8186,44 @@ def _caption_keyword_list_matches_code():
         "words that no component reads (1,372 of them across 267 jobs)"
 
 
+@check("LEAN-SCHEMA A/B IS MEASURABLE (Zac GO 2026-08-04, both arms together, RULE-1): arm 3 removes the per-moment prose from the response schema (measured cost: what_i_saw declared 240 chars, EMITTED 16,111; wall-clock is output-bound r=0.59) and arm 5 makes the model justify the decorative families in reasoning so they survive the removal — arm 3 alone already ran and text_overlays + sound_effects density DROPPED, so they ship together or not at all. This gate asserts the split is DETERMINISTIC (a job that flips arms between retries pollutes both) and that the arm is PERSISTED where content-studio cannot strip it. An A/B whose arm is not persisted is not an A/B — this repo has _lang_bundle 0/3000, vad_coverage and source_duration 0/149 as precedent.")
+def _lean_ab_measurable():
+    _src = open("handler.py").read()
+    assert "def _lean_ab_arm(" in _src, "the A/B arm function is gone"
+    assert '"lean_arm": _lean_ab_arm()' in _src, \
+        "the arm must be PERSISTED or the A/B cannot be cut"
+    # it must ride INSIDE stage_timings, the dict that survives top-level stripping
+    # there are several stage_timings dicts (light routes build their own); the
+    # arm only needs to ride the STANDARD-EDITORIAL one, since the light routes
+    # never touch the editorial prompt this A/B changes.
+    _nested = any(
+        '"lean_arm"' in _src[_i:_i + 2500]
+        for _i in range(len(_src)) if _src.startswith('"stage_timings": {', _i))
+    assert _nested, \
+        "lean_arm must be NESTED in stage_timings — a top-level key is stripped by " \
+        "content-studio and the A/B would be silently unmeasurable"
+    assert "hashlib.sha1(_jid.encode" in _src, \
+        "the split must be a STABLE hash of job_id: a job that lands in a different " \
+        "arm on retry pollutes both arms"
+    assert "return _lean_ab_active()" in _src, \
+        "both flag readers must fall through to the A/B when the env is unset"
+    assert _src.count("return _lean_ab_active()") >= 2, \
+        "BOTH arms must be driven by the A/B — arm 3 without arm 5 is the " \
+        "configuration already measured to DROP decorative density"
+
+    # determinism + kill switch, exercised
+    import hashlib as _hl
+    def _arm(jid, split=0.5):
+        if not jid:
+            return "control"
+        _h = int(_hl.sha1(jid.encode("utf-8", "ignore")).hexdigest()[:8], 16)
+        return "lean" if (_h % 10000) < int(split * 10000) else "control"
+    assert _arm("abc-123") == _arm("abc-123"), "the same job must always get the same arm"
+    _n = sum(1 for i in range(2000) if _arm(f"job-{i}") == "lean")
+    assert 800 <= _n <= 1200, f"the 50/50 split is skewed: {_n}/2000 in the lean arm"
+    assert _arm("") == "control", "no job_id must mean control, never lean"
+
+
 @check("EVIDENCE RIDES THE RULE (Zac 2026-08-04): a rule with its measurement attached survives compression; a bare rule gets cut in a diet and nobody learns why it was there. Audited the editorial prompt: of 97 normative lines, 91 carry NO evidence — 17 of those are CONTRACT lines (user says X -> emit Y, where evidence would be meaningless) and 74 are EMPIRICAL claims (caps, densities, thresholds) that could simply be wrong and nobody would know. This gate pins the evidence onto the three instruments measured DEAD, so a diet cannot quietly drop the number that justifies deleting or fixing them.")
 def _evidence_rides_the_rule():
     _src = open("handler.py").read()
