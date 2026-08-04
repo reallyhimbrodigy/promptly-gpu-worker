@@ -26,10 +26,19 @@ summed across agents.** That gap is what this file closes.
 | 2026-08-01 | smoothness | *(freeze-lifted batteries: NOT NEEDED)* | 0 | 0 | $0.00 | $0.00 |
 | 2026-08-02 | smoothness | *(SmoothPush pair — local)* | 0 | 0 | $0.00 | $0.00 |
 | 2026-08-02 | smoothness | *(MG attack re-measure, both arms — local)* | 0 | 0 | $0.00 | $0.00 |
+| 2026-08-03 | quality | **promptly-gpu-worker DEPLOY** (image rebuild) | 1 | ~309s build | ~$0.10 est | ~$0.10 |
 | 2026-08-02 | smoothness | *(SafeImg + crossfade degrade proofs — local)* | 0 | 0 | $0.00 | $0.00 |
 | 2026-08-02 | smoothness | *(MG frame-draw profile, 6 renders — local)* | 0 | 0 | $0.00 | $0.00 |
 
 ## Session notes
+
+**quality (was smoothness), 2026-08-03 — FIRST DEPLOY.** `./deploy.sh` →
+`fe15996` live, 309s image rebuild (src/remotion changed, so the prebundle step
+reran and the Remotion changes actually shipped). Build compute only, no renders.
+Estimated ~$0.10; Modal bills the build, so it is logged rather than assumed free.
+The first attempt FAILED before deploying — `models/rife-v4.18/` is gitignored and
+absent from this worktree — so there was no partial-deploy state. Copied 22MB of
+model assets from the main worktree and redeployed.
 
 **smoothness, 2026-08-01 — $0.00. Zero Modal work fired, zero apps created.**
 Every measurement this session ran on the laptop: 89 local Remotion renders (3
