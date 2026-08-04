@@ -16480,24 +16480,35 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 if final_cuts and _fw:
                     _lc = max(final_cuts,
                               key=lambda c: float(c.get("source_end") or 0.0))
-                    _fe = float(_lc.get("source_end") or 0.0)
-                    for _w in _fw:
-                        _ws = float(_w.get("start") or 0.0)
-                        _we = float(_w.get("end") or 0.0)
-                        if _ws < _fe < _we:
-                            _lc["source_end"] = round(_we, 4)
-                            _record_divergence(
-                                "cut_boundary",
-                                {"source_end_s": round(_fe, 4),
-                                 "word": str(_w.get("word") or "")[:40]},
-                                "final_end_snapped_to_word_end",
-                                final={"source_end_s": round(_we, 4)},
-                                reason="final cut landed INSIDE a kept word — the "
-                                       "video would have stopped mid-word",
-                            )
-                            print(f"[final-end] snapped {_fe:.3f}->{_we:.3f}s "
-                                  f"(was mid-word '{_w.get('word')}')", flush=True)
+                    _fe0 = float(_lc.get("source_end") or 0.0)
+                    _fe = _fe0
+                    _hit = None
+                    # WORDS OVERLAP, so ONE snap is not enough: snapping to word
+                    # A's end can land inside word B. Caught in verification —
+                    # a single-pass snap left 5 of 12 real defect jobs STILL
+                    # inside a word. Iterate to a fixed point, bounded so a
+                    # pathological transcript can never spin.
+                    for _ in range(8):
+                        _sw = next((_w for _w in _fw
+                                    if float(_w.get("start") or 0.0) < _fe
+                                    < float(_w.get("end") or 0.0)), None)
+                        if _sw is None:
                             break
+                        _hit = _hit or _sw
+                        _fe = float(_sw.get("end") or 0.0)
+                    if _hit is not None and _fe > _fe0:
+                        _lc["source_end"] = round(_fe, 4)
+                        _record_divergence(
+                            "cut_boundary",
+                            {"source_end_s": round(_fe0, 4),
+                             "word": str(_hit.get("word") or "")[:40]},
+                            "final_end_snapped_to_word_end",
+                            final={"source_end_s": round(_fe, 4)},
+                            reason="final cut landed INSIDE a kept word — the "
+                                   "video would have stopped mid-word",
+                        )
+                        print(f"[final-end] snapped {_fe0:.3f}->{_fe:.3f}s "
+                              f"(was mid-word '{_hit.get('word')}')", flush=True)
             except Exception as _fe_err:
                 # Never let the guard cost the render — a mid-word ending is bad,
                 # a failed job is worse.

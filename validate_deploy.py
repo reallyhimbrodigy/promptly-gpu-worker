@@ -7414,11 +7414,35 @@ def _final_end_word_invariant():
     _src = open("handler.py").read()
     assert "final_end_snapped_to_word_end" in _src, \
         "the final-end invariant is gone — videos can stop mid-word again"
-    assert _re2.search(r"if _ws < _fe < _we:", _src), \
-        "the invariant must test STRICTLY INSIDE (_ws < end < _we); a <= test would " \
-        "snap on boundaries that are already correct"
-    assert '_lc["source_end"] = round(_we, 4)' in _src, \
+    assert _re2.search(r'float\(_w\.get\("start"\) or 0\.0\) < _fe\s*\n?\s*< float\(_w\.get\("end"\) or 0\.0\)', _src), \
+        "the invariant must test STRICTLY INSIDE (start < end < end); a <= test would " \
+        "snap boundaries that are already correct"
+    assert "<=" not in _re2.search(r"_sw = next\((.*?)\), None\)", _src, _re2.S).group(1), \
+        "the straddle test must stay STRICT — no <= creeping in"
+    assert '_lc["source_end"] = round(_fe, 4)' in _src, \
         "must snap OUTWARD to the word END — keeping the word whole is the fix"
+    assert "for _ in range(8):" in _src, \
+        "the snap must iterate to a FIXED POINT: words OVERLAP, so snapping to one " \
+        "word's end can land inside the next. Verified on real data — a single-pass " \
+        "snap left 5 of 12 defect jobs still mid-word; the fixed point cleared 73/73."
+
+    # the fixed-point property itself, on OVERLAPPING words — the case a
+    # single-pass snap silently fails.
+    def _snap(end, words):
+        for _ in range(8):
+            sw = next((w for w in words if w["start"] < end < w["end"]), None)
+            if sw is None:
+                return end
+            end = sw["end"]
+        return end
+    _ov = [{"start": 0.0, "end": 1.0}, {"start": 0.9, "end": 1.8},
+           {"start": 1.7, "end": 2.4}]
+    assert _snap(0.5, _ov) == 2.4, "must chain through OVERLAPPING words to a clean edge"
+    assert not any(w["start"] < _snap(0.5, _ov) < w["end"] for w in _ov), \
+        "the fixed point must not land inside any word"
+    assert _snap(1.85, _ov) == 2.4, "must snap from inside the last overlapping word"
+    _gap = [{"start": 0.0, "end": 1.0}, {"start": 1.2, "end": 2.0}]
+    assert _snap(1.1, _gap) == 1.1, "must LEAVE a correct gap-landing end untouched"
     assert "_record_divergence" in _src.split("final_end_snapped_to_word_end")[0][-1200:], \
         "the snap must be RECORDED — a silent correction hides the rate"
 
