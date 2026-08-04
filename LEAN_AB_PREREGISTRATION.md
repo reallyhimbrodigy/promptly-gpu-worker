@@ -171,3 +171,63 @@ met its N, naming the one that has not.
 same quantity. **The A/B reads the stage, since that is what the prose change
 touches** — the whole-job figure would dilute the effect with stages the change
 cannot reach.
+
+
+---
+
+# AMENDED — the null, stated properly; and export is the wrong instrument
+
+## 1. THE COMBINED STATISTIC, NOT THREE EYEBALLED NULLS
+
+Stouffer over the three duration strata:
+
+| | z | two-sided p |
+|---|---|---|
+| unweighted | **−1.231** | 0.218 |
+| √n-weighted | **−1.245** | 0.213 |
+
+Same conclusion, firmer ground: **no detectable relationship between decoration
+density and export.** Reporting three separate nulls understated it — this is one
+test at n=861, not three inconclusive ones.
+
+## 2. EXPORT CANNOT PRICE QUALITY, AND THAT CHANGES THE RULE
+
+The correction I should have made myself: **export already returned three nulls
+on caption legibility** — style, keyword-highlighting and font size — for a
+defect established as REAL by eye in the twenty-video review. An instrument that
+cannot detect a known-real quality defect yields **uninformative nulls, not
+evidence of absence.** 87% of deliveries are never exported and 68% never opened;
+the signal is swamped before it reaches the metric.
+
+So I wrote "density is defended by Zac's eye, not the funnel" and then let the
+funnel set the boundary widths anyway. That is the same mistake in a different
+place.
+
+**AMENDED RULE — the boundaries stay, their authority does not:**
+
+| combined decoration vs control | decision |
+|---|---|
+| better than −5% | **SHIP.** Decoration preserved; wall-clock is free. |
+| −5% to −15% | **INDIFFERENCE ZONE** — ship if wall-clock improves ≥20%, else revert. Heuristic only. |
+| **worse than −15%** | **WATCHED PAIR BEFORE ANY DECISION** — not an automatic revert. |
+
+The last row is the change. Past the indifference zone the funnel has nothing to
+say, so the decision routes to the only instrument with a track record on
+quality: a watched pair, same source, both arms, frame-diffed, against the
+**7.76-vs-16.7 reference that is Zac's own**. Revert-or-ship is then his call on
+what he sees, not mine on a z-score that cannot see it.
+
+The −5% / −15% widths remain as a **shipping heuristic** — they are how I decide
+whether to spend his attention, which is exactly what a funnel metric is good
+for. They are not evidence about quality.
+
+## 3. CO-LANDING CHANGES ARE ABSORBED BY DESIGN
+
+The job_id-hash split means every concurrent change — including the proxy-encoder
+thread pin the speed lane is about to land, which shifts proxy bytes once for
+every job — hits **both arms simultaneously**. That is added variance, not bias,
+so it inflates the N I already budgeted rather than corrupting the comparison.
+
+**I will note speed's deploy timestamp in the read-out and will not wait for it.**
+A serial before/after design would have had to; the concurrent one does not, and
+that is the whole reason it was built this way.
