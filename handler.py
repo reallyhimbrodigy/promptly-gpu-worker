@@ -32032,7 +32032,15 @@ def prewarm_handler(job):
                      "-vf", "scale=480:-2,fps=18"] + _proxy_venc + [
                      "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      proxy_cache],
-                    capture_output=True, text=True, timeout=60,
+                    capture_output=True, text=True,
+                    # Decode-weighted, like the render-path proxy encode
+                    # (handler.py ~34726). A FIXED 60s is the same bug the
+                    # analysis budgets had: this decodes the FULL raw source, so
+                    # 4K60 costs ~4x a 1080p30 clip of the same length. A fixed
+                    # budget here silently kills the prewarm cache, which then
+                    # forces the render path to redo the encode it was meant to
+                    # have ready.
+                    timeout=_probe_weighted_timeout(source_cache, 60, 240),
                 )
                 if _pr.returncode == 0 and os.path.exists(proxy_cache) and os.path.getsize(proxy_cache) > 1024:
                     _px_mb = os.path.getsize(proxy_cache) / (1024 * 1024)
