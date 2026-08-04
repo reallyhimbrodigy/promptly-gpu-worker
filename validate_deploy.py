@@ -8231,6 +8231,47 @@ def _edge_content_not_truncated():
     # never past the content end
     assert _tail(20.0, [], 25.0) == 25.0, "the tail must clamp to the content duration"
 
+    # ── THE ASYMMETRY (Zac 2026-08-04), and the corpus behind it ──────────
+    # Split over 532 real jobs:
+    #   HEAD p50 0.16s p90 1.92s p99  9.2s max 20.3s   33% of the extension
+    #   TAIL p50 0.45s p90 4.46s p99 17.5s max 32.8s   67%
+    # The tail is outro material. The HEAD delays the hook — the highest-leverage
+    # second in short-form — and a p99 of 9.2s of runway before anyone speaks is a
+    # defect, not a repair. Nearly free for the class this exists to fix: Spanish's
+    # median gain is 1.88s tail vs 0.56s head, so 77% of its recovery survives.
+    assert "_HEAD_EXTEND_CAP_S = _FINAL_TAIL_PAD_S" in _src, \
+        "the head extension must be CAPPED, and at the existing 0.5s release pad " \
+        "rather than a new number — an uncapped head seats the hook behind runway"
+    assert "_lead_bound = max(_lead_bound, _fs - _HEAD_EXTEND_CAP_S)" in _src, \
+        "the head cap must actually bind the lead bound"
+
+    def _lead_capped(first_word_start, sils, cap=0.5):
+        return max(_lead(first_word_start, sils), first_word_start - cap)
+
+    # A CORPUS GATE, NOT A CORPUS STEP. The cutter owns this product's worst
+    # blast radius — the Urdu content destruction — and the check that cleared
+    # this change ran AFTER it deployed. That was luck. These are the real
+    # distribution's shapes, frozen so a regression cannot pass.
+    # (source-shape, first_word_s, sils, expected head kept)
+    for _label, _fw, _sils_c, _want in (
+        ("es median   (head 0.56 tail 1.88)", 0.56, [(0.0, 0.0)], 0.06),
+        ("en p90      (head 1.61)",           1.61, [(0.0, 0.0)], 1.11),
+        ("hi p99-ish  (head 9.2)",            9.20, [(0.0, 0.0)], 8.70),
+        ("worst case  (head 20.3)",          20.30, [(0.0, 0.0)], 19.80),
+    ):
+        _kept = _fw - _lead_capped(_fw, _sils_c)
+        assert abs(_kept - min(_fw, 0.5)) < 1e-9, \
+            f"{_label}: head extension must never exceed 0.5s, got {_kept:.2f}s"
+        assert _lead_capped(_fw, _sils_c) >= _want - 1e-9, \
+            f"{_label}: the head must not run further back than the cap allows"
+    # and a genuinely short head is kept WHOLE — the cap must not become a floor
+    assert abs(_lead_capped(0.20, [(0.0, 0.0)]) - 0.0) < 1e-9, \
+        "a 0.20s head is inside the cap and must be kept whole, not trimmed to it"
+    # the TAIL stays uncapped — that is the half that carries the Spanish recovery
+    assert "_HEAD_EXTEND_CAP_S" not in _src.split("_le = float(raw_clips[-1]")[1][:900], \
+        "the TAIL must stay uncapped — 67% of the extension and 77% of Spanish's " \
+        "recovery live there"
+
 
 @check("vad_coverage REACHES THE DATABASE (Zac 2026-08-04, RULE-1): the three-field language bundle (detected_language + transcript_script + vad_coverage) was written to edit_plan[\"_lang_bundle\"] under a comment saying it \"flows into the success result payload\". It does not — the leading underscore is exactly what the recipe sanitizer strips, so it persisted on 0 of 3,000 rows. Spanish sits at 0.41 median keep-ratio with 53% of jobs losing more than half the video and the coverage gate demonstrably not firing; that question has been unanswerable because the field that would answer it was never stored. A field that exists and is never persisted is the same as no field at all.")
 def _lang_bundle_persisted():

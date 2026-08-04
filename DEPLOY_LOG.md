@@ -35,3 +35,22 @@ to have died AT OR AFTER the deploy instant.
 3. `6b3ece7`, `c830895`, `baac8aa`, `8bb72c7` were each individually justified
    and collectively indefensible. The merge was genuinely urgent; the other
    three were not, and could have ridden with it.
+
+## FOR THE SPEED LANE — output duration rose, and it is not a regression
+
+`199c686` (edge content preservation, live 2026-08-04) can only INCREASE output
+duration. Measured over 532 real jobs as an upper bound:
+
+| | p50 | p90 | p99 | max |
+|---|---|---|---|---|
+| added seconds | **+0.9s** | **+6.3s** | **+20.6s** | **+44.8s** |
+| ...of which HEAD | +0.16s | +1.92s | +9.2s | +20.3s |
+| ...of which TAIL | +0.45s | +4.46s | +17.5s | +32.8s |
+
+**Concentrated on long sources** — the median job barely moves; the tail of the
+distribution is where the seconds are. `a8e0d0f` then capped the HEAD at 0.5s,
+which removes roughly a third of the increase.
+
+**So render-time movement in the next window has a known non-regression cause.**
+Longer output = more frames = more render. If render p50 rises by ~1s and p99 by
+~15-20s, that is this change, not a fault. Anything larger is not.

@@ -23592,12 +23592,28 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
         _sils.sort()
         _lead_removed = any(idx < clips[0][0]["_word_index"] for idx in removed_indices) if clips else False
         _tail_removed = any(idx > clips[-1][-1]["_word_index"] for idx in removed_indices) if clips else False
+        # ASYMMETRIC BY MEASUREMENT (Zac 2026-08-04). Splitting the extension:
+        #   HEAD  p50 0.16s  p90 1.92s  p99  9.2s  max 20.3s   33% of the total
+        #   TAIL  p50 0.45s  p90 4.46s  p99 17.5s  max 32.8s   67%
+        # The tail is outro material and extending it is plausibly good. The HEAD
+        # delays the hook, which is the highest-leverage second in short-form — a
+        # p99 of 9.2s of dead runway before anyone speaks is a product defect, not
+        # a repair. And the asymmetry is nearly free for the class this exists to
+        # fix: Spanish's median gain is 1.88s tail against 0.56s head, so 77% of
+        # its recovery is on the side we keep.
+        #
+        # THE BOUND IS NOT A NEW NUMBER: it is _FINAL_TAIL_PAD_S, the 0.5s release
+        # pad the tail already uses, applied to the other edge. Enough to recover
+        # a clipped first-word onset or an in-breath; not enough to seat the hook
+        # behind a runway.
+        _HEAD_EXTEND_CAP_S = _FINAL_TAIL_PAD_S
         if _sils and clips and not _lead_removed:
             _fs = float(raw_clips[0]["padded_start"])
             _lead_bound = 0.0
             for (_a, _b) in _sils:
                 if _b <= _fs + 1e-6:
                     _lead_bound = max(_lead_bound, _b)
+            _lead_bound = max(_lead_bound, _fs - _HEAD_EXTEND_CAP_S)
             if _lead_bound < _fs - 1e-3:
                 print(f"[edge-keep] lead {_fs:.3f}→{_lead_bound:.3f}s "
                       f"(+{_fs - _lead_bound:.2f}s of non-silent material kept)", flush=True)
@@ -23605,7 +23621,8 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     "cut_boundary",
                     {"edge": "lead", "was_s": round(_fs, 3), "now_s": round(_lead_bound, 3)},
                     "edge_content_preserved",
-                    reason="material before the first word carries content, not silence")
+                    reason="material before the first word carries content, not silence "
+                           "(capped at the 0.5s release pad — the head delays the hook)")
                 raw_clips[0]["padded_start"] = _lead_bound
         if _sils and clips and not _tail_removed:
             _le = float(raw_clips[-1]["padded_end"])
