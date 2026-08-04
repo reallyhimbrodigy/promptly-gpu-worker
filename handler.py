@@ -16456,6 +16456,53 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                "the timeline without self-reporting")
             except Exception as _usa_err:
                 print(f"[divergence] split-registry check error: {_usa_err}", flush=True)
+            # ── FINAL-END WORD INVARIANT (Zac 2026-08-03) ──────────────────
+            # MEASURED: 10 of 27 delivered videos (37%) ended MID-WORD — the
+            # final cut landing strictly inside a word the edit KEPT, with
+            # 0.05-1.22s of speech still to come. Verified against the render:
+            # plan sum == rendered duration to within 0.01s on every sampled
+            # job, so this reaches the user. Zac heard it before we measured it.
+            #
+            # The word-aligned cutter CANNOT produce this — it sets
+            # padded_end = word_group[-1]["_end"] (~line 22124), a word END by
+            # construction, and the tail-pad then extends 0.5s past it (the
+            # clean cohort shows exactly that -0.50s signature). These ends came
+            # from somewhere else, and the tail-pad cannot rescue them because
+            # it only ever EXTENDS an already-aligned boundary.
+            #
+            # So enforce the property directly on the FINAL array, where every
+            # path converges: an end may sit before a word, after a word, or at
+            # the true video end — never strictly INSIDE one. Snap outward to
+            # the word's end (keep the word whole) since the speech was audible
+            # and abandoning a half-word is the defect being fixed.
+            try:
+                _fw = edit_plan.get("_deepgram_words") or []
+                if final_cuts and _fw:
+                    _lc = max(final_cuts,
+                              key=lambda c: float(c.get("source_end") or 0.0))
+                    _fe = float(_lc.get("source_end") or 0.0)
+                    for _w in _fw:
+                        _ws = float(_w.get("start") or 0.0)
+                        _we = float(_w.get("end") or 0.0)
+                        if _ws < _fe < _we:
+                            _lc["source_end"] = round(_we, 4)
+                            _record_divergence(
+                                "cut_boundary",
+                                {"source_end_s": round(_fe, 4),
+                                 "word": str(_w.get("word") or "")[:40]},
+                                "final_end_snapped_to_word_end",
+                                final={"source_end_s": round(_we, 4)},
+                                reason="final cut landed INSIDE a kept word — the "
+                                       "video would have stopped mid-word",
+                            )
+                            print(f"[final-end] snapped {_fe:.3f}->{_we:.3f}s "
+                                  f"(was mid-word '{_w.get('word')}')", flush=True)
+                            break
+            except Exception as _fe_err:
+                # Never let the guard cost the render — a mid-word ending is bad,
+                # a failed job is worse.
+                print(f"[final-end] invariant check skipped: {_fe_err}", flush=True)
+
             edit_plan["cuts"] = final_cuts
             for _legacy_field in (
                 "teal_orange", "beat_sync", "video_profile", "frame_layout",
