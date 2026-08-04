@@ -3216,7 +3216,22 @@ def _weighted_probe_timeout(nframes, res_factor, base_s, ceiling_s):
     hang can never ride to the function wall."""
     try:
         n = max(1.0, float(nframes)) * max(1.0, float(res_factor))
-        scaled = float(base_s) + max(0.0, (n - 30.0 * 60.0)) / 100.0
+        # SLOPE CORRECTED (2026-08-04). The old slope was +1s per 100 weighted
+        # frames BEYOND a 1800 knee, which is far too shallow: a 16s 4K HEVC
+        # clip (474 frames x 4.0 res = 1895 weighted) earned +0.95s — a 60s
+        # budget — and scdet timed out at exactly 60s (job 479dcef0, 08-04
+        # 14:27Z). Fixing the ffprobe PARSE made res_factor real; this makes it
+        # MATTER. 4x the pixels at ~2x the decode cost cannot be worth one
+        # second.
+        #
+        # A TIMEOUT IS A SAFETY NET, NOT A TARGET: a larger budget costs nothing
+        # unless the process actually hangs, while a tight one kills legitimate
+        # work. So scale generously from the first frame — no knee — and let the
+        # ceiling bound a genuine hang.
+        #   1080p30 60s  (1800 weighted) -> 60 + 90  = 150s
+        #   4K30   16s   (1895 weighted) -> 60 + 95  = 155s   (was 60s)
+        #   4K60   60s  (14400 weighted) -> ceiling
+        scaled = float(base_s) + n * 0.05
         return int(min(float(ceiling_s), max(float(base_s), scaled)))
     except Exception:
         return int(base_s)
@@ -29696,6 +29711,12 @@ _ERROR_SUBCODES = {
         ("no_video_stream", ("No video stream found",)),
         ("compositor", ("Compositor error",)),
         ("delay_render", ("delayRender()",)),
+        # A JS TypeError inside a Remotion component — job 22070e6d, 08-04
+        # 09:12Z: "Cannot read properties of undefined (reading 'split')" in
+        # PromptlyOverlay. A component fault, not a browser or argv fault, and
+        # it read as `unclassified` because nothing named the shape.
+        ("component_crash", ("Cannot read properties of undefined",
+                             "is not a function", "SymbolicateableError [TypeError]")),
         ("oom", ("out of memory", "OOM", "Killed")),
         # A SUB-CODE MUST MATCH THE FAILURE, NOT THE SUBSYSTEM (2026-08-03).
         # "chrome"/"Chromium" matched the SUCCESSFUL startup line — every render

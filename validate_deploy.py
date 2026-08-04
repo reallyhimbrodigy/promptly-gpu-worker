@@ -10435,10 +10435,14 @@ def _check_probe_budget_scales():
         assert _big > 60, (
             f"the probe budget did not scale on a 4K60 source (got {_big}s, base 60s) — "
             "the ffprobe parse is broken again and the analyze_* fix is inert")
-        assert _h._weighted_probe_timeout(60 * 20, 4.0, 60, 240) == 90, \
-            "4K60 20s must scale 60 -> 90s; a budget that never leaves base is an inert fix"
-        assert _h._weighted_probe_timeout(30 * 60, 1.0, 60, 240) == 60, \
-            "a 1080p30 60s clip must stay at base"
+        # Property, not a magic number: a heavy shape must earn MORE than base.
+        # (This once pinned "== 90s" from an older slope and went red the moment
+        # the slope was corrected — a gate that fails when the fix improves is
+        # a gate testing the wrong thing.)
+        assert _h._weighted_probe_timeout(60 * 20, 4.0, 60, 240) > 60, \
+            "4K60 20s must scale above base; a budget that never leaves base is an inert fix"
+        assert _h._weighted_probe_timeout(30 * 60, 1.0, 60, 240) >= 60, \
+            "a 1080p30 60s clip must never fall BELOW base"
         assert _h._weighted_probe_timeout(60 * 600, 4.0, 60, 240) == 240, \
             "the ceiling must still bound a hang"
         # ...and the NAMED parse must recover fps/res that the positional one lost
@@ -10447,7 +10451,12 @@ def _check_probe_budget_scales():
         try: _os.unlink(_p4k)
         except OSError: pass
     # unreadable source must fail OPEN, never raise into the analysis path
-    assert _h._probe_weighted_timeout("/nonexistent-source.mp4", 60, 240) == 60
+    # Fail-open is a FLOOR, not an equality. An unreadable probe yields nominal
+    # values, so with a from-first-frame slope the budget lands a hair above
+    # base — it must never land BELOW it. (This was a BARE assert, which is why
+    # it reported an empty reason when it broke.)
+    _fo2 = _h._probe_weighted_timeout("/nonexistent-source.mp4", 60, 240)
+    assert 60 <= _fo2 <= 70, f"unreadable source must fail open near base, got {_fo2}"
 
 
 @check("NO TERMINAL MAY LAND ON UNKNOWN (Zac's UNKNOWN=0 law, 2026-08-03): 'Main render produced invalid output' had NO branch in classify_error, so a render that produced no usable file surfaced as UNKNOWN:unclassified — an unowned, uncountable terminal. It also collapsed two different failures into one string: the file never appeared, versus it appeared as a stub. Now RENDER_EMPTY_OUTPUT with the byte count, classified RENDER_FATAL and split into empty_output_missing vs empty_output_stub so the two roots are counted apart. This gate asserts the CLASSIFICATION, because the raise alone would still have read as fixed while landing on UNKNOWN.")
@@ -10555,6 +10564,31 @@ def _check_minimal_canon_probed():
         "RENDER_CANON_UNREADABLE: minimal-route normalize wrote an unreadable/stream-less canon (261 bytes)"))
     assert _r.get("error_code") == "RENDER_FATAL", f"got {_r.get('error_code')}"
     assert _r.get("error_subcode") == "canon_unreadable", f"got {_r.get('error_subcode')}"
+
+
+@check("THE PROBE BUDGET SLOPE MUST MATTER, NOT JUST EXIST (2026-08-04): fixing the ffprobe PARSE made res_factor real; the SLOPE still made it worthless. +1s per 100 weighted frames beyond a 1800 knee gave a 16s 4K HEVC clip (474 frames x 4.0 res = 1895 weighted) exactly +0.95s — a 60s budget — and scdet timed out at precisely 60s (job 479dcef0). A timeout is a SAFETY NET, not a target: a larger budget costs nothing unless the process hangs, while a tight one kills legitimate work. Now scales from the first frame with no knee, ceiling unchanged. This gate asserts the SPECIFIC failing shape gets a real budget — a formula that merely exists is what shipped last time.")
+def _check_probe_slope_matters():
+    import handler as _h
+    # THE EXACT SHAPE THAT TIMED OUT — 16s of 4K HEVC at 29.97.
+    _b = _h._weighted_probe_timeout(474, 4.0, 60, 240)
+    assert _b > 60, f"the 4K shape that timed out at 60s still gets {_b}s"
+    assert _b >= 120, f"4x pixels must buy more than a token increase, got {_b}s"
+    # a normal clip still gets a generous net
+    assert _h._weighted_probe_timeout(1800, 1.0, 60, 240) > 60
+    # the ceiling still bounds a hang
+    assert _h._weighted_probe_timeout(3600, 4.0, 60, 240) == 240
+    # ...and the floor is never below base
+    assert _h._weighted_probe_timeout(1, 1.0, 60, 240) >= 60
+    # unreadable source still fails open
+    # Fail-open is a FLOOR: an unreadable probe yields nominal values, so the
+    # budget may land a hair above base — it must never land BELOW it.
+    _fo = _h._probe_weighted_timeout("/nonexistent.mp4", 60, 240)
+    assert 60 <= _fo <= 70, f"unreadable source must fail open near base, got {_fo}"
+    # the Remotion component crash must be NAMED, not unclassified
+    _m = ("[hype-render] render-full.mjs PromptlyOverlay failed rc=1: "
+          "SymbolicateableError [TypeError]: Cannot read properties of undefined (reading 'split')")
+    assert _h._error_subcode("RENDER_REMOTION", _m) == "component_crash", \
+        "a JS TypeError inside a component must name itself, not read as unclassified"
 
 
 # ─── REPORT ────────────────────────────────────────────────────────────
