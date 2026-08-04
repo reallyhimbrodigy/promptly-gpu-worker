@@ -10112,6 +10112,64 @@ def _thread_pool_leak_guard():
         "the finally must iterate BOTH pools (mega_pool + _early_pool) for release"
 
 
+@check("KEYTERM CAP + NEVER RETRY A 4xx (Zac 2026-08-03, forged from `DeepgramApiError: Keyterm limit exceeded (max 500 tokens)` killing a screenplay-length source): Deepgram caps `keyterm` at 500 TOKENS total and 400s the WHOLE request past it, so ~200 harvested proper nouns killed the job. _cap_keyterms drops screenplay scaffolding (FADE/INT/EXT/CUT/MONTAGE — Title-Case page furniture the proper-noun heuristic harvests but nobody speaks, so boosting it actively biases the recogniser) and truncates to a 450-token budget; the extractor now emits FREQUENCY-ORDERED so truncation sheds the rarest term rather than an arbitrary tail. SECOND BUG, same job: _deepgram_is_retriable_error matched a bare substring \"500\" — which appears in the phrase \"max 500 tokens\" — so a deterministic 400 was retried 3x, tripling the latency of a guaranteed failure. Status numbers are now word-boundary matched and deterministic signatures are checked FIRST.")
+def _check_keyterm_cap_and_4xx():
+    import handler as _h
+
+    # ── the cap ───────────────────────────────────────────────────────────
+    assert callable(getattr(_h, "_cap_keyterms", None)), "_cap_keyterms must exist"
+    assert _h._KEYTERM_TOKEN_BUDGET < 500, "the budget must sit UNDER Deepgram's 500-token limit"
+    _many = [f"Name{i}" for i in range(600)]
+    _capped = _h._cap_keyterms(_many)
+    _tokens = sum(len(t.split()) for t in _capped)
+    assert _tokens <= _h._KEYTERM_TOKEN_BUDGET, f"cap leaked: {_tokens} tokens"
+    assert _tokens < 500, "the capped list must be under Deepgram's hard limit"
+    assert _capped[0] == "Name0", "priority order must survive truncation (rarest dropped, not the head)"
+    # multi-word terms cost their token count, not 1
+    assert _h._cap_keyterms(["A B C", "D"], budget=3) == ["A B C"], "cost must be per TOKEN"
+    # scaffolding carries no ASR value and must never reach Deepgram
+    for _noise in ("FADE", "INT", "EXT", "CUT TO", "MONTAGE", "FADE IN"):
+        assert _h._cap_keyterms([_noise]) == [], f"screenplay scaffolding '{_noise}' must be dropped"
+    # ...but a real name that merely CONTAINS a noise word must survive
+    assert _h._cap_keyterms(["Scene Kelly"]) == ["Scene Kelly"], \
+        "only WHOLLY-scaffolding terms are dropped; a real name must survive"
+    # never raises, never emits junk
+    assert _h._cap_keyterms(None) == [] and _h._cap_keyterms([]) == []
+    assert _h._cap_keyterms([None, "", "   "]) == [], "None must not become the keyterm 'None'"
+    # The cap must sit at the OPTIONS choke point so EVERY caller is covered,
+    # not just the one that broke. Exercised for real when the SDK is present
+    # (in the container); verified by wiring locally, where PrerecordedOptions
+    # is None because the deepgram package is not installed.
+    if getattr(_h, "PrerecordedOptions", None) is not None:
+        _opts = _h._deepgram_options(keywords=[f"Name{i}:5" for i in range(600)])
+        _kt = getattr(_opts, "keyterm", None) or []
+        assert sum(len(t.split()) for t in _kt) < 500, "the options builder must apply the cap"
+    else:
+        _dsrc = open("handler.py").read()
+        _fn = _dsrc[_dsrc.index("def _deepgram_options("):]
+        _fn = _fn[:_fn.index("\ndef ", 1)]
+        assert "_cap_keyterms(" in _fn, \
+            "the cap must be applied inside _deepgram_options — the one choke point every caller passes through"
+        assert _fn.index("_cap_keyterms(") < _fn.index('kwargs["keyterm"]'), \
+            "the cap must run BEFORE the keyterm list is attached, or it caps nothing"
+
+    # ── frequency ordering, which is what makes truncation safe ───────────
+    _kw = _h._extract_proper_noun_keywords("Rare Sarah Sarah Sarah Marcus Marcus")
+    assert _kw[0].startswith("Sarah") and _kw[1].startswith("Marcus"), \
+        f"keywords must be frequency-ordered so the cap drops the rarest, got {_kw[:3]}"
+
+    # ── never retry a 4xx, BOTH DIRECTIONS ────────────────────────────────
+    assert _h._deepgram_is_retriable_error(
+        "DeepgramApiError: Keyterm limit exceeded (max 500 tokens)") is False, \
+        "the keyterm 400 must NOT be retried — the '500' in it is a LIMIT, not a status"
+    for _det in ("400 Bad Request", "401 unauthorized", "404 not found", "invalid language"):
+        assert _h._deepgram_is_retriable_error(_det) is False, f"'{_det}' is deterministic"
+    for _tr in ("429 Too Many Requests", "rate limit exceeded", "500 Internal Server Error",
+                "502 Bad Gateway", "connection reset", "read timeout"):
+        assert _h._deepgram_is_retriable_error(_tr) is True, \
+            f"'{_tr}' IS transient and must still retry — the fix must not disable retries wholesale"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

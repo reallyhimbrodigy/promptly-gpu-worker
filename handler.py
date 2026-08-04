@@ -3845,6 +3845,69 @@ def prepare_audio_for_deepgram(source_path: str) -> bytes:
     return proc.stdout
 
 
+# Deepgram caps `keyterm` at 500 TOKENS in total — not 500 terms — and rejects
+# the whole request with a 400 when it is exceeded, killing the job. A
+# screenplay-length source produced ~200 keyterms and blew it (Zac 2026-08-03).
+# 450 leaves margin for Deepgram's tokenizer counting differently from a naive
+# whitespace split (hyphenates, apostrophes).
+_KEYTERM_TOKEN_BUDGET = 450
+
+# Screenplay scaffolding. These are Title-Case, so the proper-noun heuristic
+# harvests them from any script-formatted source, and they carry ZERO ASR value:
+# they are page furniture, not spoken words. Dropping them is both the cheapest
+# way under the cap and a quality improvement — boosting "INT" biases the
+# recogniser toward a token nobody says.
+_KEYTERM_NOISE = frozenset({
+    "fade", "in", "out", "int", "ext", "scene", "montage", "cut", "to",
+    "continued", "cont", "dissolve", "smash", "match", "angle", "on", "insert",
+    "flashback", "intercut", "beat", "pause", "later", "day", "night",
+    "morning", "evening", "afternoon", "continuous", "moments", "sequence",
+    "title", "card", "credits", "over", "black", "end", "the", "of", "and",
+    "vo", "os", "cont'd", "supered", "pov", "closeup", "close", "wide", "est",
+})
+
+
+def _cap_keyterms(terms, budget=_KEYTERM_TOKEN_BUDGET):
+    """Drop screenplay noise, then cap the list under Deepgram's token budget.
+
+    ORDER IS PRIORITY: callers pass terms most-valuable-first (the extractor
+    sorts by frequency), so truncation sheds the rarest terms rather than an
+    arbitrary tail. Deduplicates case-insensitively — a script repeats character
+    names constantly, and duplicates burn the budget for no boost at all.
+
+    Never raises and never returns None: a keyterm list is an optimisation, and
+    losing it must never cost the transcript.
+    """
+    out, used, seen = [], 0, set()
+    for t in (terms or []):
+        if t is None:
+            continue          # str(None) is "None" — a real term we would boost for
+        term = str(t).strip()
+        if not term:
+            continue
+        parts = [p for p in term.split() if p]
+        if not parts:
+            continue
+        # Wholly-scaffolding terms carry no ASR value ("FADE IN", "INT", "CUT TO").
+        if all(p.strip(".,:'-").lower() in _KEYTERM_NOISE for p in parts):
+            continue
+        key = term.lower()
+        if key in seen:
+            continue
+        cost = len(parts)
+        if cost > budget:           # a single absurd term must not wedge the loop
+            continue
+        if used + cost > budget:
+            break
+        seen.add(key)
+        out.append(term)
+        used += cost
+    if terms and len(out) < len([t for t in terms if str(t).strip()]):
+        print(f"[deepgram] keyterms capped: {len(terms)} -> {len(out)} "
+              f"({used}/{budget} tokens; Deepgram rejects >500 with a 400)", flush=True)
+    return out
+
+
 def _deepgram_options(keywords=None, language="multi"):
     """Deepgram Nova-3 transcription options.
 
@@ -3886,6 +3949,7 @@ def _deepgram_options(keywords=None, language="multi"):
             term = str(k).split(":", 1)[0].strip()
             if term:
                 _terms.append(term)
+        _terms = _cap_keyterms(_terms)
         if _terms:
             kwargs["keyterm"] = _terms
     return PrerecordedOptions(**kwargs)
@@ -3913,8 +3977,14 @@ def _extract_proper_noun_keywords(text):
         "Viral", "Engaging", "Video", "Edit", "Edits", "Editing", "Clip",
         "Short", "Shorts", "Reel", "Reels", "TikTok",
     })
-    out = []
-    seen = set()
+    # FREQUENCY-ORDERED (2026-08-03). A screenplay-length source yields ~200
+    # proper nouns and blows Deepgram's 500-token keyterm cap, so _cap_keyterms
+    # truncates — and truncation is only safe if the list is priority-ordered.
+    # A name said forty times is worth boosting; one said once is noise, and
+    # under a fixed budget it should be the first thing dropped. Ties keep
+    # first-appearance order so the result stays deterministic.
+    counts = {}
+    order = {}
     for tok in str(text).split():
         # Strip surrounding punctuation, keep the lemma.
         clean = "".join(ch for ch in tok if ch.isalpha() or ch == "-")
@@ -3924,11 +3994,13 @@ def _extract_proper_noun_keywords(text):
             continue
         if clean in _COMMON_TITLECASE:
             continue
-        if clean.lower() in seen:
-            continue
-        seen.add(clean.lower())
-        out.append(f"{clean}:5")
-    return out
+        key = clean.lower()
+        if key not in counts:
+            counts[key] = 0
+            order[key] = (len(order), clean)
+        counts[key] += 1
+    ranked = sorted(order, key=lambda k: (-counts[k], order[k][0]))
+    return [f"{order[k][1]}:5" for k in ranked]
 
 
 
@@ -3997,14 +4069,41 @@ def _parse_deepgram_response(resp):
             "detected_language": _detected_lang}
 
 
+# Deepgram client errors that are DETERMINISTIC: the same request will fail the
+# same way forever, so a retry is pure waste and delays a guaranteed failure by
+# 3x (Zac 2026-08-03, from `DeepgramApiError: Keyterm limit exceeded (max 500
+# tokens)` burning three attempts).
+_DG_DETERMINISTIC_SIGNATURES = (
+    "keyterm limit", "exceeded", "not supported", "unsupported",
+    "invalid", "malformed", "must be", "payload_error", "bad request",
+)
+
+
 def _deepgram_is_retriable_error(msg):
-    """Classify a Deepgram error message as retriable (rate limits, 5xx, network)."""
+    """Classify a Deepgram error as retriable (rate limits, 5xx, network).
+
+    THE BUG THIS FIXES was a bare substring match on "500". The keyterm error
+    reads "Keyterm limit exceeded (max 500 tokens)" — the 500 is the LIMIT, not
+    a status code — so a deterministic 400 was classified retriable and retried
+    three times. Status-like numbers are now matched on word boundaries AND the
+    deterministic signatures are checked first, so a message that merely
+    mentions a number cannot masquerade as a transient failure.
+    """
     m = str(msg)
-    return (
-        "429" in m or "rate" in m.lower() or
-        "500" in m or "502" in m or "503" in m or "504" in m or
-        "timeout" in m.lower() or "connection" in m.lower() or
-        "temporarily" in m.lower()
+    low = m.lower()
+    # 429 is the ONE retriable 4xx.
+    if re.search(r"\b429\b", m) or "rate limit" in low or "too many requests" in low:
+        return True
+    # Deterministic client errors: never retry. Checked BEFORE any number match,
+    # because their text routinely contains numbers ("max 500 tokens").
+    if any(s in low for s in _DG_DETERMINISTIC_SIGNATURES):
+        return False
+    if re.search(r"\b4\d\d\b", m):
+        return False
+    return bool(
+        re.search(r"\b5\d\d\b", m)
+        or "timeout" in low or "timed out" in low
+        or "connection" in low or "temporarily" in low
     )
 
 
