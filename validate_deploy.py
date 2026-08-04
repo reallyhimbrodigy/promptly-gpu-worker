@@ -8186,6 +8186,52 @@ def _caption_keyword_list_matches_code():
         "words that no component reads (1,372 of them across 267 jobs)"
 
 
+@check("EDGE CONTENT IS NOT TRUNCATED (Zac 2026-08-04, RULE-1): the output envelope is [first kept word .. last kept word], so edge material carrying content but no words — a music intro, ambience, a held shot, a title card — was dropped at ANY size with no rule at all. Spanish sits at 0.41 MEDIAN keep-ratio, 53% of jobs losing over half the video, and the coverage gate cannot see it because that gate counts untranscribed SPEECH. This is the EDGE version of the rule the Urdu work already adopted for interior spans. Deliberately NO new threshold: PROMPTLY_MIN_OUTPUT_RATIO already exists at max(20%, 1.5s) and is miscalibrated for this class — 0.41 sails past 20%, and a 50% floor would fire on ~10% of good edits (good edits keep p50 93% / p10 51%). The boundary is the silence detection already computed. This gate pins the extension AND the fail-safe in both directions.")
+def _edge_content_not_truncated():
+    _src = open("handler.py").read()
+    assert "edge_content_preserved" in _src, \
+        "the edge-content rule is gone — silent-but-not-empty intros and outros " \
+        "are being deleted again"
+    assert "if raw_clips and (vad_silences or level_silences):" in _src, \
+        "the extension must be FAIL-SAFE: with no silence data it must not run, " \
+        "or unmeasurable becomes 'keep everything' and dead air comes back"
+    assert "not _lead_removed" in _src and "not _tail_removed" in _src, \
+        "a DELIBERATE removal at an edge must suppress the extension — otherwise " \
+        "the cutter replays speech the plan chose to cut"
+
+    # THE PREDICATE, BOTH DIRECTIONS. An extension that cannot extend proves
+    # nothing, and one that cannot STOP would restore genuine dead air.
+    def _lead(first_word_start, sils):
+        b = 0.0
+        for (x, y) in sorted(sils):
+            if y <= first_word_start + 1e-6:
+                b = max(b, y)
+        return b
+
+    def _tail(last_end, sils, vd):
+        for (x, y) in sorted(sils):
+            if x >= last_end - 1e-6:
+                return min(x, vd) if vd > 0 else x
+        return vd if vd > 0 else last_end
+
+    # a 6s music intro then speech: silence only at 0-0.2 => keep from 0.2
+    assert abs(_lead(6.0, [(0.0, 0.2)]) - 0.2) < 1e-9, \
+        "content before the first word must be KEPT back to the last real silence"
+    # genuine dead air 0-5.8 before speech at 6.0 => keep only from 5.8
+    assert abs(_lead(6.0, [(0.0, 5.8)]) - 5.8) < 1e-9, \
+        "genuine leading silence must still be CUT — the rule is not 'keep everything'"
+    # no silence at all before the word => keep from the top
+    assert _lead(6.0, [(9.0, 9.5)]) == 0.0, "no silence before => the whole lead is content"
+    # tail: outro music to the end, silence only after it
+    assert abs(_tail(20.0, [(28.0, 30.0)], 30.0) - 28.0) < 1e-9, \
+        "content after the last word must be KEPT up to the next real silence"
+    # tail: silence starts immediately => no extension
+    assert abs(_tail(20.0, [(20.0, 30.0)], 30.0) - 20.0) < 1e-9, \
+        "silence immediately after the last word must NOT be restored"
+    # never past the content end
+    assert _tail(20.0, [], 25.0) == 25.0, "the tail must clamp to the content duration"
+
+
 @check("vad_coverage REACHES THE DATABASE (Zac 2026-08-04, RULE-1): the three-field language bundle (detected_language + transcript_script + vad_coverage) was written to edit_plan[\"_lang_bundle\"] under a comment saying it \"flows into the success result payload\". It does not — the leading underscore is exactly what the recipe sanitizer strips, so it persisted on 0 of 3,000 rows. Spanish sits at 0.41 median keep-ratio with 53% of jobs losing more than half the video and the coverage gate demonstrably not firing; that question has been unanswerable because the field that would answer it was never stored. A field that exists and is never persisted is the same as no field at all.")
 def _lang_bundle_persisted():
     _src = open("handler.py").read()

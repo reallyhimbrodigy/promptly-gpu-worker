@@ -23556,6 +23556,78 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                 )
                 raw_clips[-1]["padded_end"] = _new_end
 
+    # ── Step 4b: EDGE CONTENT PRESERVATION (Zac 2026-08-04) ───────────────
+    # THE SAME RULE THE URDU WORK ADOPTED, APPLIED AT THE EDGES. Interior spans
+    # that carry audio energy but no transcript words are never removed. The
+    # output envelope is [first kept word .. last kept word], so the EDGE version
+    # of that span — a music intro, ambience, a held shot, a title card before
+    # anyone speaks — is truncated away at any size, with no rule at all.
+    #
+    # Measured consequence: Spanish sits at 0.41 MEDIAN KEEP-RATIO with 53% of
+    # jobs losing more than half the video, and the coverage gate cannot see it
+    # because that gate counts untranscribed SPEECH and this material is not
+    # speech. This is half of the original "cuts out HALF the video" complaint.
+    #
+    # NO NEW THRESHOLD, deliberately. PROMPTLY_MIN_OUTPUT_RATIO already exists at
+    # max(20% of source, 1.5s) and is miscalibrated for exactly this class —
+    # 0.41 sails past a 20% floor, and raising it to 50% would fire on ~10% of
+    # good edits (census: good edits keep p50 93% / p10 51%). A second global
+    # ratio gate would be the same instrument with the same calibration problem.
+    # So the boundary here is the SILENCE DETECTION already computed and already
+    # passed into this function: extend the envelope outward to the nearest real
+    # silence, and no further. Content is kept because it is not silent, not
+    # because it cleared a percentage.
+    #
+    # FAIL-SAFE: with no silence data the extension does NOT run and behaviour is
+    # byte-identical to today. Unmeasurable must never mean "keep everything" —
+    # that would restore genuine dead air.
+    if raw_clips and (vad_silences or level_silences):
+        _sils = []
+        for _src in (vad_silences, level_silences):
+            for _sp in (_src or []):
+                try:
+                    _sils.append((float(_sp[0]), float(_sp[1])))
+                except (TypeError, ValueError, IndexError):
+                    pass
+        _sils.sort()
+        _lead_removed = any(idx < clips[0][0]["_word_index"] for idx in removed_indices) if clips else False
+        _tail_removed = any(idx > clips[-1][-1]["_word_index"] for idx in removed_indices) if clips else False
+        if _sils and clips and not _lead_removed:
+            _fs = float(raw_clips[0]["padded_start"])
+            _lead_bound = 0.0
+            for (_a, _b) in _sils:
+                if _b <= _fs + 1e-6:
+                    _lead_bound = max(_lead_bound, _b)
+            if _lead_bound < _fs - 1e-3:
+                print(f"[edge-keep] lead {_fs:.3f}→{_lead_bound:.3f}s "
+                      f"(+{_fs - _lead_bound:.2f}s of non-silent material kept)", flush=True)
+                _record_divergence(
+                    "cut_boundary",
+                    {"edge": "lead", "was_s": round(_fs, 3), "now_s": round(_lead_bound, 3)},
+                    "edge_content_preserved",
+                    reason="material before the first word carries content, not silence")
+                raw_clips[0]["padded_start"] = _lead_bound
+        if _sils and clips and not _tail_removed:
+            _le = float(raw_clips[-1]["padded_end"])
+            _tail_bound = None
+            for (_a, _b) in _sils:
+                if _a >= _le - 1e-6:
+                    _tail_bound = _a
+                    break
+            if _tail_bound is None and _vd > 0:
+                _tail_bound = _vd
+            if _vd > 0 and _tail_bound is not None:
+                _tail_bound = min(_tail_bound, _vd)
+            if _tail_bound is not None and _tail_bound > _le + 1e-3:
+                print(f"[edge-keep] tail {_le:.3f}→{_tail_bound:.3f}s "
+                      f"(+{_tail_bound - _le:.2f}s of non-silent material kept)", flush=True)
+                _record_divergence(
+                    "cut_boundary",
+                    {"edge": "tail", "was_s": round(_le, 3), "now_s": round(_tail_bound, 3)},
+                    "edge_content_preserved",
+                    reason="material after the last word carries content, not silence")
+                raw_clips[-1]["padded_end"] = _tail_bound
+
     # ── Step 4c: BETWEEN-WORDS GAP INVARIANT (within-clip dead-air) ──
     # THE INVARIANT (Zac 2026-07-09): the dead air in the OUTPUT between the last audible
     # sample of word N and the first audible sample of word N+1 is EXACTLY _BETWEEN_WORD_GAP_S.
