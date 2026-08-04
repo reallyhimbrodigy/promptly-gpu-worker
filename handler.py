@@ -27478,12 +27478,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _n += _hi - _lo
         return _n
 
+    # SOURCE-FPS RENDER-TIMEOUT SCALE (Zac 2026-08-04, approved): the render decodes
+    # source_fps frames per output second, so a 60fps source (the iPhone DEFAULT —
+    # a new-user surge brings MORE of it) does ~2x the decode work per output frame
+    # and blows a frames-based budget tuned at 30fps (job 4341fc42: micro
+    # TimeoutExpired). A TIMEOUT RAISE IS A BOUND CHANGE, NOT A BEHAVIOUR CHANGE —
+    # nothing that currently finishes (max observed 633s) can break; only jobs that
+    # currently time out are affected. Scale by source_fps/30; cap at 1150s so the
+    # subprocess ceiling stays INSIDE Modal's 1200s function timeout (Zac's condition).
+    _render_fps_factor = max(1.0, float(source_fps or 30.0) / 30.0)
+    _RENDER_TIMEOUT_INSIDE_FN = 1150   # < the 1200s Modal function timeout
+
     def _overlay_chunk_timeout(_fs, _fe):
         _sf = _scene_frames_in(_fs, _fe)
         if _sf <= 0:
-            return _PLAIN_CHUNK_TIMEOUT
-        _extra = _sf * (_SCENE_FRAME_MULT - 1) * _SEC_PER_SCENE_FRAME_EXTRA
-        return int(min(_OVERLAY_TIMEOUT_CAP, _PLAIN_CHUNK_TIMEOUT + _extra))
+            _base = _PLAIN_CHUNK_TIMEOUT
+        else:
+            _base = _PLAIN_CHUNK_TIMEOUT + _sf * (_SCENE_FRAME_MULT - 1) * _SEC_PER_SCENE_FRAME_EXTRA
+        return int(min(_OVERLAY_TIMEOUT_CAP, _RENDER_TIMEOUT_INSIDE_FN, _base * _render_fps_factor))
 
     _overlay_chunk_paths: list = []
     overlay_cmds: list = []
@@ -27574,8 +27586,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     def _micro_chunk_timeout(_fs, _fe):
         _frames = max(0, int(_fe) - int(_fs) + 1)
-        return int(min(_MICRO_TIMEOUT_CAP,
-                       max(_MICRO_TIMEOUT_FLOOR, _frames * _MICRO_SEC_PER_FRAME)))
+        # fps-scale the frames-based term (Zac 2026-08-04): a 60fps source decodes
+        # 2x the source frames — job 4341fc42's micro TimeoutExpired. Floor unscaled
+        # (a tiny render never needs more); cap INSIDE the 1200s function timeout.
+        return int(min(_MICRO_TIMEOUT_CAP, _RENDER_TIMEOUT_INSIDE_FN,
+                       max(_MICRO_TIMEOUT_FLOOR, _frames * _MICRO_SEC_PER_FRAME * _render_fps_factor)))
 
     micro_cmds: list = []
     micro_chunk_paths: list = []

@@ -10211,6 +10211,19 @@ def _out_of_range_plan_regenerates():
         "the regenerate loop must stay CAPPED — raise (→ safe edit) on exhaustion, never an unbounded hang"
 
 
+@check("RENDER TIMEOUT SCALES WITH SOURCE FPS (Zac 2026-08-04, approved, forged from job 4341fc42 micro TimeoutExpired): the render decodes source_fps frames per output second, so a 60fps source (the iPhone DEFAULT \u2014 a new-user surge brings MORE of it) does ~2x the decode work and blew a frames-based render budget tuned at 30fps. A TIMEOUT RAISE IS A BOUND CHANGE, NOT A BEHAVIOUR CHANGE \u2014 nothing that currently finishes (max observed 633s) can break; only jobs that currently time out are affected. Both the overlay + micro chunk budgets now scale by source_fps/30, capped at 1150s so the subprocess ceiling stays INSIDE Modal's 1200s function timeout. FAILS if the fps scale or the inside-function cap regresses.")
+def _render_timeout_scales_with_fps():
+    src = open("handler.py").read()
+    assert "_render_fps_factor = max(1.0, float(source_fps or 30.0) / 30.0)" in src, \
+        "the render timeout must scale by source_fps/30 (a 60fps source decodes 2x the frames)"
+    assert "_RENDER_TIMEOUT_INSIDE_FN = 1150" in src, \
+        "the fps-scaled render timeout must cap INSIDE Modal's 1200s function timeout (Zac's condition)"
+    # both chunk-timeout functions apply the factor + the inside-fn cap
+    assert "_base * _render_fps_factor" in src, "overlay chunk timeout must apply the fps factor"
+    assert "_frames * _MICRO_SEC_PER_FRAME * _render_fps_factor" in src, "micro chunk timeout must apply the fps factor"
+    assert src.count("_RENDER_TIMEOUT_INSIDE_FN") >= 3, "both timeout functions must cap inside the 1200s function timeout"
+
+
 @check("KEYTERM CAP + NEVER RETRY A 4xx (Zac 2026-08-03, forged from `DeepgramApiError: Keyterm limit exceeded (max 500 tokens)` killing a screenplay-length source): Deepgram caps `keyterm` at 500 TOKENS total and 400s the WHOLE request past it, so ~200 harvested proper nouns killed the job. _cap_keyterms drops screenplay scaffolding (FADE/INT/EXT/CUT/MONTAGE — Title-Case page furniture the proper-noun heuristic harvests but nobody speaks, so boosting it actively biases the recogniser) and truncates to a 450-token budget; the extractor now emits FREQUENCY-ORDERED so truncation sheds the rarest term rather than an arbitrary tail. SECOND BUG, same job: _deepgram_is_retriable_error matched a bare substring \"500\" — which appears in the phrase \"max 500 tokens\" — so a deterministic 400 was retried 3x, tripling the latency of a guaranteed failure. Status numbers are now word-boundary matched and deterministic signatures are checked FIRST.")
 def _check_keyterm_cap_and_4xx():
     import handler as _h

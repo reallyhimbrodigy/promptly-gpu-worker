@@ -112,7 +112,11 @@ echo "════════════════════════�
 echo "  Regression corpus — spawning the fixed-defect re-render (self-alerts)"
 echo "════════════════════════════════════════════════════════════"
 set +e
-modal run modal_app.py::regression_corpus 2>&1 | grep -E "REGRESSION_CORPUS|spawned"
+if [ -n "$PROMPTLY_SKIP_REGRESSION" ]; then
+    echo "  regression corpus SKIPPED (PROMPTLY_SKIP_REGRESSION set - zero discretionary spend during surge)"
+else
+    modal run modal_app.py::regression_corpus 2>&1 | grep -E "REGRESSION_CORPUS|spawned"
+fi
 set -e
 echo "  ▶ spawned — verdict in Modal logs ([REGRESSION-CORPUS] ALL GREEN / REGRESSED:);"
 echo "     a REGRESSED fires an [ALERT] + owner push, so it can't go unread"
