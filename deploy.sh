@@ -100,3 +100,20 @@ if grep -q "_require_worker_auth" modal_app.py; then
         echo "  ✅ server→worker auth OK (non-403) — the run-job gate accepts the server credential."
     fi
 fi
+
+# ── REGRESSION CORPUS (Zac 2026-08-04, "gone for good") ──────────────────────
+# Re-render one saved source per FIXED sub-code and assert it still COMPLETES, so
+# no fixed class can return silently. Dispatched ASYNC (Modal-side) so it never
+# blocks the deploy loop; its container renders + asserts independently. The
+# grep-stable `[REGRESSION-CORPUS] REGRESSED:` line lands in Modal logs — a
+# regression there means the input that once broke a fixed class breaks it again.
+# ~$0.10-0.15/source. (nohup so it survives this shell's exit; the .remote() runs
+# on Modal, its logs are captured regardless of this local process.)
+echo ""
+echo "════════════════════════════════════════════════════════════"
+echo "  Regression corpus — re-rendering the fixed-defect sources (async)"
+echo "════════════════════════════════════════════════════════════"
+REG_LOG="/tmp/promptly_regression_$(git rev-parse --short HEAD 2>/dev/null || date +%s).log"
+nohup modal run modal_app.py::regression_corpus > "$REG_LOG" 2>&1 &
+echo "  ▶ dispatched — grep '[REGRESSION-CORPUS]' in $REG_LOG (and Modal logs)"
+echo "     a REGRESSED line = a fix silently returned; ALL GREEN = every fixed class still fixed"

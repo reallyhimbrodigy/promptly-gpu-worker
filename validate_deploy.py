@@ -10167,6 +10167,21 @@ def _prewarm_reenabled():
         "PromptlyPrewarmWorker must mount the /prewarm volume so its cache persists for the render job"
 
 
+@check("REGRESSION CORPUS RUNS ON EVERY DEPLOY (Zac 2026-08-04, 'gone for good'): the failure corpus retains the exact source that killed every job, but until now nobody re-ran one. cert_regression_corpus re-renders one saved source per FIXED sub-code and asserts the deterministic ones COMPLETE — so no fixed class can return silently, and 'the fix regressed' / 'never ran' / 'predate it' stop being confusable. FAILS if the harness, the seeded manifest, or the deploy.sh hook that fires it disappears — because a regression gate that isn't wired to run is not a gate.")
+def _regression_corpus_wired():
+    src = open("modal_app.py").read()
+    assert "_REGRESSION_CORPUS = [" in src and "def cert_regression_corpus(" in src, \
+        "the regression-corpus manifest + harness must exist"
+    # the manifest must carry the deterministic fixed sub-codes we have sources for
+    for _sub in ("concurrency", "no_video_stream", "analyze_shot_changes", "analyze_face_detect"):
+        assert f'("{_sub}"' in src, f"the regression manifest must seed the fixed sub-code {_sub}"
+    assert 'def regression_corpus():' in src, "the modal-run entrypoint must exist for deploy.sh to invoke"
+    # ...and the deploy MUST actually fire it, or fixed classes can still return silently
+    dep = open("deploy.sh").read()
+    assert "modal_app.py::regression_corpus" in dep, \
+        "deploy.sh must run the regression corpus on every deploy (a gate that never runs is not a gate)"
+
+
 @check("KEYTERM CAP + NEVER RETRY A 4xx (Zac 2026-08-03, forged from `DeepgramApiError: Keyterm limit exceeded (max 500 tokens)` killing a screenplay-length source): Deepgram caps `keyterm` at 500 TOKENS total and 400s the WHOLE request past it, so ~200 harvested proper nouns killed the job. _cap_keyterms drops screenplay scaffolding (FADE/INT/EXT/CUT/MONTAGE — Title-Case page furniture the proper-noun heuristic harvests but nobody speaks, so boosting it actively biases the recogniser) and truncates to a 450-token budget; the extractor now emits FREQUENCY-ORDERED so truncation sheds the rarest term rather than an arbitrary tail. SECOND BUG, same job: _deepgram_is_retriable_error matched a bare substring \"500\" — which appears in the phrase \"max 500 tokens\" — so a deterministic 400 was retried 3x, tripling the latency of a guaranteed failure. Status numbers are now word-boundary matched and deterministic signatures are checked FIRST.")
 def _check_keyterm_cap_and_4xx():
     import handler as _h

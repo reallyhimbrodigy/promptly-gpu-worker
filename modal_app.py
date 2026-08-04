@@ -2520,6 +2520,82 @@ def burst_ab():
     print("BURST_AB " + json.dumps(cert_burst_floor_ab.remote(), indent=2))
 
 
+# ── REGRESSION CORPUS (Zac 2026-08-04, "gone for good") ──────────────────────
+# The failure corpus retains the exact source that killed every job. This RE-RUNS
+# one saved source per FIXED sub-code on every deploy and asserts it now COMPLETES
+# — so no fixed class can ever return silently, and "the fix regressed" / "the fix
+# never ran" / "these predate it" stop being confusable. ~$0.10-0.15/source.
+#
+# The manifest is sub_code -> the corpus key of a source that once reproduced it.
+# Grows as the corpus captures the missing ones. write_timeout is a NETWORK
+# transient (not source-deterministic), so it is tracked but NOT asserted-fatal.
+# Sources live under s3://{_CERT_BUCKET}/failure-corpus/{CODE}/{job_id}.mp4.
+_REGRESSION_CORPUS = [
+    # sub_code, corpus_key, deterministic (assert completes) or advisory
+    ("concurrency",          "failure-corpus/RENDER_FATAL/20682270-1566-452a-9fe7-d5de8e3b6d67.mp4", True),
+    ("no_video_stream",      "failure-corpus/RENDER_FATAL/26a05f5d-596b-42cf-8f01-6b89bbc25985.mp4", True),
+    ("analyze_shot_changes", "failure-corpus/RENDER_FFMPEG/41403891-1953-4a5b-85a6-e247eb9932bd.mp4", True),
+    ("analyze_face_detect",  "failure-corpus/RENDER_FFMPEG/dc48a05a-9ef4-431c-a711-050de7fdec71.mp4", True),
+    ("write_timeout",        "failure-corpus/TRANSCRIPTION/94306a2e-85e0-484c-b71a-6f85af57c242.mp4", False),
+    # TODO seed as the corpus captures them: frame_grid, analyze_loudness, keyterm_limit
+]
+
+
+@app.function(image=image, secrets=[modal.Secret.from_name("promptly-secrets")],
+              cpu=16, memory=12288, region="us", timeout=1800,
+              volumes={"/prewarm": prewarm_volume})
+def cert_regression_corpus() -> dict:
+    """Render every _REGRESSION_CORPUS source through the real handler and assert
+    the deterministic ones COMPLETE (status=success + a video_url). Returns per
+    sub-code {status, ok}. Run: modal run modal_app.py::regression_corpus."""
+    import os as _os, sys as _sys, uuid as _uuid, time as _time
+    _os.environ["JOB_STATUS_WRITES_ENABLED"] = ""   # never touch prod rows
+    _os.environ["APP_URL"] = ""
+    _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16"
+    _sys.path.insert(0, "/")
+    import handler
+    results = {}
+    for _sub, _key, _deterministic in _REGRESSION_CORPUS:
+        _video_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{_key}"
+        _jid = str(_uuid.uuid4())
+        _rk = f"{_CERT_PREFIX}/_regression/{_sub}.mp4"
+        _uu = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{_rk}"
+        _body = {"job_id": _jid, "video_url": _video_url, "vibe": "viral",
+                 "user_id": str(_uuid.uuid4()), "upload_url": _uu, "public_url": _uu}
+        _t0 = _time.time()
+        try:
+            _r = handler.handler({"input": _body})
+        except Exception as _e:
+            _r = {"status": "exception", "error": f"{type(_e).__name__}: {_e}"}
+        _status = (_r or {}).get("status")
+        _has_video = bool((_r or {}).get("video_url"))
+        _code = (_r or {}).get("error_code")
+        _ok = (_status == "success" and _has_video) or (not _deterministic and _code != _sub)
+        results[_sub] = {"status": _status, "error_code": _code, "video": _has_video,
+                         "wall_s": round(_time.time() - _t0, 1), "deterministic": _deterministic, "ok": _ok}
+        _tag = "PASS" if _ok else "FAIL"
+        print(f"[REGRESSION-CORPUS] {_tag} sub_code={_sub} status={_status} code={_code} "
+              f"video={_has_video} wall={results[_sub]['wall_s']}s"
+              + ("" if _deterministic else " (advisory — network-transient)"), flush=True)
+    # _ok already folds in determinism (advisory sources pass unless they
+    # reproduce their EXACT sub-code), so a not-ok entry is a real regression.
+    _fatal = [s for s, v in results.items() if not v["ok"]]
+    _all_ok = len(_fatal) == 0
+    print(f"[REGRESSION-CORPUS] {'ALL GREEN' if _all_ok else 'REGRESSED: ' + ','.join(_fatal)} "
+          f"({sum(1 for v in results.values() if v['ok'])}/{len(results)} ok)", flush=True)
+    return {"all_ok": _all_ok, "regressed": _fatal, "results": results}
+
+
+@app.local_entrypoint()
+def regression_corpus():
+    import json, sys as _sys
+    _out = cert_regression_corpus.remote()
+    print("REGRESSION_CORPUS " + json.dumps(_out, indent=2))
+    # non-zero exit on a deterministic regression so deploy.sh can gate/alert
+    if not _out.get("all_ok"):
+        _sys.exit(1)
+
+
 # ── ARABIC BRIDGE PERMANENT REGRESSION (Zac 2026-07-20) ──────────────────────
 # "A detector that was once proven must stay proven." The clips live durably in
 # S3, so `modal run modal_app.py::cert_bridge_regression_run` re-verifies the
