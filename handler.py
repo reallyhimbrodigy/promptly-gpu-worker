@@ -36850,7 +36850,12 @@ def handler(job):
                     "vad_speech_s": _bundle_cov.get("vad_speech_s"),
                     "words": len(_dg_words),
                 }
-                edit_plan["_lang_bundle"] = _lang_bundle  # flows into the success result payload
+                # Underscored so the RENDER can read it without the sanitizer
+                # persisting a duplicate — but that same underscore is why it
+                # never reached the DB on its own (0 of 3,000 rows). The
+                # persisted copy rides stage_timings.lang_bundle; this key is
+                # the in-process one and is NOT the persistence path.
+                edit_plan["_lang_bundle"] = _lang_bundle
                 _record_divergence("language_bundle", _lang_bundle, "lang_bundle",
                                    reason=str(_det_lang or _script or "?"))
             except Exception as _lbe:
@@ -38394,6 +38399,14 @@ def handler(job):
                 # exact failure this file keeps finding elsewhere (_lang_bundle
                 # 0/3000, vad_coverage, source_duration 0/149). An A/B whose arm
                 # is not persisted is not an A/B.
+                # LANGUAGE BUNDLE — detected_language + script + vad_coverage.
+                # Written to edit_plan["_lang_bundle"] at the coverage gate with a
+                # comment claiming it "flows into the success result payload". IT
+                # DOES NOT: the leading underscore is exactly what the recipe
+                # sanitizer strips, so it persisted on 0 of 3,000 rows and the
+                # Spanish keep-ratio question has been unanswerable ever since.
+                # Nested here for the same reason as gemini_tokens and lean_arm.
+                "lang_bundle": (edit_plan or {}).get("_lang_bundle"),
                 "lean_arm": _lean_ab_arm(),
                 "lean_schema_on": bool(_lean_schema_enabled()),
                 "lean_decor_ground_on": bool(_lean_decor_ground_enabled()),

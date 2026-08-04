@@ -8186,6 +8186,26 @@ def _caption_keyword_list_matches_code():
         "words that no component reads (1,372 of them across 267 jobs)"
 
 
+@check("vad_coverage REACHES THE DATABASE (Zac 2026-08-04, RULE-1): the three-field language bundle (detected_language + transcript_script + vad_coverage) was written to edit_plan[\"_lang_bundle\"] under a comment saying it \"flows into the success result payload\". It does not — the leading underscore is exactly what the recipe sanitizer strips, so it persisted on 0 of 3,000 rows. Spanish sits at 0.41 median keep-ratio with 53% of jobs losing more than half the video and the coverage gate demonstrably not firing; that question has been unanswerable because the field that would answer it was never stored. A field that exists and is never persisted is the same as no field at all.")
+def _lang_bundle_persisted():
+    _src = open("handler.py").read()
+    assert '"lang_bundle": (edit_plan or {}).get("_lang_bundle")' in _src, \
+        "the language bundle must be PERSISTED, not just written to edit_plan"
+    # it must ride INSIDE stage_timings — a top-level key is stripped downstream
+    _nested = any(
+        '"lang_bundle"' in _src[_i:_i + 3000]
+        for _i in range(len(_src)) if _src.startswith('"stage_timings": {', _i))
+    assert _nested, \
+        "lang_bundle must be NESTED in stage_timings, the same pattern gemini_tokens " \
+        "and lean_arm use — content-studio strips top-level keys"
+    # and the misleading comment must not come back
+    assert "_lang_bundle  # flows into the success result payload" not in _src, \
+        "that comment was FALSE for 3,000 rows — the underscore is what stripped it"
+    # the fields the Spanish question actually needs
+    for _f in ("vad_coverage_frac", "vad_coverage_unworded_s", "vad_speech_s"):
+        assert _f in _src, f"the bundle must still carry {_f}"
+
+
 @check("LEAN-SCHEMA A/B IS MEASURABLE (Zac GO 2026-08-04, both arms together, RULE-1): arm 3 removes the per-moment prose from the response schema (measured cost: what_i_saw declared 240 chars, EMITTED 16,111; wall-clock is output-bound r=0.59) and arm 5 makes the model justify the decorative families in reasoning so they survive the removal — arm 3 alone already ran and text_overlays + sound_effects density DROPPED, so they ship together or not at all. This gate asserts the split is DETERMINISTIC (a job that flips arms between retries pollutes both) and that the arm is PERSISTED where content-studio cannot strip it. An A/B whose arm is not persisted is not an A/B — this repo has _lang_bundle 0/3000, vad_coverage and source_duration 0/149 as precedent.")
 def _lean_ab_measurable():
     _src = open("handler.py").read()
