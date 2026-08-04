@@ -8186,6 +8186,25 @@ def _caption_keyword_list_matches_code():
         "words that no component reads (1,372 of them across 267 jobs)"
 
 
+@check("EVIDENCE RIDES THE RULE (Zac 2026-08-04): a rule with its measurement attached survives compression; a bare rule gets cut in a diet and nobody learns why it was there. Audited the editorial prompt: of 97 normative lines, 91 carry NO evidence — 17 of those are CONTRACT lines (user says X -> emit Y, where evidence would be meaningless) and 74 are EMPIRICAL claims (caps, densities, thresholds) that could simply be wrong and nobody would know. This gate pins the evidence onto the three instruments measured DEAD, so a diet cannot quietly drop the number that justifies deleting or fixing them.")
+def _evidence_rides_the_rule():
+    _src = open("handler.py").read()
+    for _needle, _what in (
+        ("`cut_refinements` came back EMPTY on 159 of 159 plans", "cut_refinements"),
+        ("`generated_scenes` fired on 0 of 778 planned jobs", "generated_scenes"),
+        ("transitions fire on only 4.9% of planned jobs (38 of 778)", "transitions"),
+    ):
+        assert _needle in _src, (
+            f"the measured fire-rate for {_what} was stripped from the prompt. That "
+            "number IS the delete-or-fix decision — without it the rule is just an "
+            "opinion and the next diet cuts it blind.")
+    # the rationale rule's evidence, added the same day for the same reason
+    assert "33 of the 53 rationales that mentioned" in _src, \
+        "the rationale rule must keep its measured consequence attached"
+    assert "1,372" in _src or "no component reads" in _src or "written and thrown away" in _src, \
+        "the caption-keyword rule must keep its evidence attached"
+
+
 @check("THE VIBE REACHES EVERY ROUTE (Zac ruling 2026-08-04: 'ALWAYS tailored to what the user asks for'): traced in code, `minimal` had NO vibe parameter — build_minimal_plan(_dur, fps, motion_curve) — so 204 jobs / 188 USERS received pacing that never consulted a word they wrote. standard_editorial, moodreel and hype all read it; minimal did not and minimal_speech_uncut makes no plan at all, together 628 jobs / 601 users / 35.3% of completions. This gate asserts the vibe is BOTH passed AND read, and that reading it actually changes the edit — a parameter that is accepted and ignored is the same as no parameter.")
 def _vibe_reaches_minimal():
     _src = open("handler.py").read()

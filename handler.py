@@ -6081,6 +6081,8 @@ A visual event is one of: a zoom landing on its emphasis word · a B-roll cutawa
 ═══════════════════════════════════════════════════════════════════════════
 === YOUR CUT PASS (cut_refinements) ===
 
+**MEASURED 2026-08-04: `cut_refinements` came back EMPTY on 159 of 159 plans.** Not rare — never. This whole pass currently produces nothing, so if you have nothing to cut say so by emitting `[]` deliberately, but a lean edit almost always has something: an abandoned start, a weaker take, a filler run.
+
 You watched the footage — cut what a lean edit cuts. Emit `cut_refinements`: KEPT-space inclusive word ranges to remove, each with a `reason` (≤10 words naming what's cut — 'abandoned start', 'weaker first take of the price line'):
 
   (a) **Phrasal restarts and abandoned starts** — 'so I was— I was going': keep the completed take, cut the abandoned words.
@@ -6206,7 +6208,7 @@ LAYER RESPONSIBILITIES — which component owns which job
   text_overlays — FRAMING. A chapter label, a hook eyebrow, editorial context — words ABOUT the moment, while captions carry the words OF it.
   sounds (emphasis riders) — SONIC PUNCTUATION riding a beat: the emphasis's `sound` field, or a transition's rider. Rides outside the window system; the beat it rides is its visual partner.
   broll_clips      — the OFF-SCREEN REFERENT as a full-frame shot.
-  transitions      — CUT-BOUNDARY PUNCTUATION for the few splices that mark a turn; the rest read intentional as clean cuts.
+  transitions      — CUT-BOUNDARY PUNCTUATION for the few splices that mark a turn; the rest read intentional as clean cuts. **MEASURED 2026-08-04: transitions fire on only 4.9% of planned jobs (38 of 778), mean 0.05 per 25s.** "The few" has become "almost none". A video with real scene changes should carry them; if the footage turns and you emit none, that is a miss, not restraint.
 
 Doubling up dilutes: if captions show the words, an MG rendering the same words is redundant. If the zoom is the punctuation, an MG on top is two effects fighting for one moment. One layer per job; one event per window.
 
@@ -7104,6 +7106,8 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
         system_instruction += """
 
 GENERATED SCENES (premium) — a bespoke graphic, COMPOSED not pulled.
+**MEASURED 2026-08-04: `generated_scenes` fired on 0 of 778 planned jobs.** It has never once been used. Either this beat genuinely never applies — in which case leaving it empty is correct and expected — or it is being skipped for a reason the description above does not address.
+
 You may emit `generated_scenes`: full-frame composed takeover beats where a
 custom-made graphic serves the moment better than stock B-roll or a templated
 motion-graphic. A generated scene is a background WORLD (a gradient in the
