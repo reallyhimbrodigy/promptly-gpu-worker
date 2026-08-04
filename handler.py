@@ -2192,6 +2192,49 @@ _ACTIVE_JOB_ID = None
 _SHUTDOWN_HANDLER_INSTALLED = False
 
 
+# ── THREAD-LEAK DIAGNOSTIC (Zac 2026-08-03) ──────────────────────────────────
+# 8e747c3 shut mega_pool/_early_pool with wait=False on every exit, yet the
+# warning ("N threads still running after container exit", up to 30s billed per
+# exit) KEPT FIRING on a container that provably post-dates the deploy. We proved
+# WHY the obvious fixes fail: shutdown(wait=False) only SIGNALS (never joins), and
+# daemon workers don't help either — concurrent.futures registers its own joiner
+# (_python_exit) that joins every worker in _threads_queues REGARDLESS of daemon
+# flag, and it runs BEFORE any atexit hook (so a post-hoc hook sees the thread
+# already joined). So the 30s tail can only be a genuinely BUSY worker blocked in
+# a call that won't return. To fix the RIGHT thread we must NAME it: enumerate
+# lingering executor workers AND the top of each stack (what it is blocked on) at
+# the ONE point they are still alive AND about to strand the container — the
+# SIGTERM handler Modal fires on scaledown/preempt. One prod occurrence names the
+# -0/-4 pair for good; the fix then targets that thread's abandonment precisely.
+def _snapshot_lingering_executor_threads(where):
+    try:
+        import sys as _sys
+        frames = _sys._current_frames()
+        alive = []
+        for _t in threading.enumerate():
+            _nm = getattr(_t, "name", "") or ""
+            if not _t.is_alive() or "ThreadPoolExecutor" not in _nm:
+                continue
+            _top = "?"
+            try:
+                _f = frames.get(_t.ident)
+                if _f is not None:
+                    _co = _f.f_code
+                    _top = f"{_co.co_filename.split('/')[-1]}:{_f.f_lineno} in {_co.co_name}()"
+            except Exception:
+                pass
+            alive.append(f"{_nm} @ {_top}")
+        if alive:
+            print(
+                f"[thread-leak-diag/{where}] {len(alive)} executor worker(s) still "
+                f"alive (job={_ACTIVE_JOB_ID}) — each strands the container up to 30s: "
+                + " | ".join(alive),
+                flush=True,
+            )
+    except Exception:
+        pass
+
+
 def _kill_render_children():
     """Best-effort kill of this container's Remotion/Chromium render children by
     scanning /proc (dependency-free — no psutil/pkill). Only ever called from the
@@ -2221,6 +2264,9 @@ def _on_platform_shutdown(signum, frame):
     except Exception:
         pass
     _kill_render_children()
+    # Name any executor worker that is about to strand this container (the -0/-4
+    # thread-leak): runs while they are still alive, before Modal's grace join.
+    _snapshot_lingering_executor_threads("sigterm")
     try:
         if _ACTIVE_JOB_ID:
             _flush_divergence_ledger(_ACTIVE_JOB_ID)
@@ -24518,6 +24564,24 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             flush=True,
         )
         _dur_frames = _per_cut_render_dur_frames[i]
+        # PLAN-VALIDATION OUT-OF-RANGE FLAG (Zac dir#2, 2026-08-03): a degenerate
+        # plan (gemini_degen_tail / maxlength_violation) can position a clip's
+        # source window past the true source end. The zoom-extract clamp above and
+        # the render_stage _rv<1.0 backstop keep the RENDER safe, but the ROOT is a
+        # prompt defect — flag it LOUDLY (grep '[divergence] plan_clip_out_of_range')
+        # so the quality agent sees which plans over-run the source. Signal only:
+        # does not mutate the render (shrinking video here would desync per-cut audio,
+        # which is built from the same source range and is already short).
+        if _source_duration_clamp > 0:
+            _pv_need = max(1, int(math.ceil((_dur_frames - 1) * _pbr)) + 1)
+            _pv_src_total = int(math.floor(_source_duration_clamp * source_fps))
+            if _pv_src_total > 0 and _source_start_frames + _pv_need > _pv_src_total:
+                _record_divergence(
+                    "plan_clip_out_of_range", i, "flag_for_quality",
+                    reason=(f"clip {i} source window [{_source_start_frames}, "
+                            f"{_source_start_frames + _pv_need}) exceeds source frames "
+                            f"{_pv_src_total} — degenerate plan over-ran the source"),
+                )
         _orig_idx = rc.get("_original_idx")
         _clip_id_parts = [
             "clip",
@@ -26675,6 +26739,25 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # source intervals at source_fps; +1 for fencepost.
         _src_frames_needed = max(1, int(math.ceil((_dur_frames_i - 1) * _pbr_f)) + 1)
         _src_end_frame = _start_frame_i + _src_frames_needed
+        # OUT-OF-RANGE CLAMP (Zac dir#2, 2026-08-03): a degenerate plan
+        # (gemini_degen_tail / maxlength_violation) can place this zoom's source
+        # window past EOF. trim=end_frame past the source end emits a STREAM-LESS
+        # mp4 (zoom_pre_extract_degraded ×4 on job 46092aec) that only surfaces at
+        # the compositor as "No video stream found". Clamp end_frame to the frames
+        # the source actually has so ffmpeg emits a VALID (if 1-2f shorter) clip.
+        # _source_duration_clamp is probed once at function entry (24199); source_fps
+        # is the enclosing scope's. Belt for the plan-validation flag below.
+        if _source_duration_clamp > 0:
+            _zc_src_total = int(math.floor(_source_duration_clamp * source_fps))
+            if _zc_src_total > 0 and _src_end_frame > _zc_src_total:
+                _record_divergence(
+                    "zoom_clip", _clip.get("id"), "clamp_src_end_to_eof",
+                    final=_zc_src_total,
+                    reason=(f"zoom src end_frame={_src_end_frame} > source frames "
+                            f"{_zc_src_total} (degenerate plan over-ran source); "
+                            f"clamped to keep the intermediate readable"),
+                )
+                _src_end_frame = max(_start_frame_i + 1, _zc_src_total)
         if abs(_pbr_f - 1.0) < 1e-6:
             _vf = (
                 f"trim=start_frame={_start_frame_i}:end_frame={_src_end_frame},"

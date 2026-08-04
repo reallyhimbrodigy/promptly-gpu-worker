@@ -10112,6 +10112,34 @@ def _thread_pool_leak_guard():
         "the finally must iterate BOTH pools (mega_pool + _early_pool) for release"
 
 
+@check("THREAD-LEAK CULPRIT DIAGNOSTIC (Zac 2026-08-03): 8e747c3's wait=False shutdown did NOT stop the warning ('N threads still running after container exit', up to 30s billed) — proven because a container that fired it post-dates the deploy (timeout=1200 caps its life at 20min). daemon workers don't help (concurrent.futures' atexit joiner joins them regardless), and a post-hoc atexit hook sees the thread already joined. So the tail is a genuinely BUSY worker; the fix must target the exact thread, which we must NAME first. The SIGTERM handler (fired on Modal scaledown, while workers are still alive) snapshots every lingering executor worker AND the top of its stack. FAILS if the snapshot or its SIGTERM wiring regresses — without it the -0/-4 pair stays unnamed.")
+def _thread_leak_diagnostic():
+    src = open("handler.py").read()
+    assert "def _snapshot_lingering_executor_threads(" in src, \
+        "the executor-thread snapshot helper must exist to name the leaking -0/-4 worker"
+    assert '"ThreadPoolExecutor" not in _nm' in src, \
+        "the snapshot must filter to ThreadPoolExecutor workers (the leaking class)"
+    # must be wired into the SIGTERM handler, where the workers are still alive
+    _sig = src[src.index("def _on_platform_shutdown("):]
+    assert '_snapshot_lingering_executor_threads("sigterm")' in _sig[:2000], \
+        "the SIGTERM handler must snapshot lingering executor threads (the one point they are alive + about to strand the container)"
+
+
+@check("OUT-OF-RANGE CLIP CLAMP (Zac dir#2, 2026-08-03, forged from job 46092aec's zoom_pre_extract_degraded ×4): a degenerate plan (gemini_degen_tail / maxlength_violation) can position a clip's source window past the true source end. trim=end_frame past EOF emits a STREAM-LESS mp4 that only surfaces at the compositor as 'No video stream found'. TWO defenses: (A) the zoom extract clamps _src_end_frame to the frames the source actually has (probed _source_duration_clamp × source_fps) so ffmpeg always emits a readable clip; (B) clip construction flags any clip whose source window over-runs the source as a LOUD divergence (plan_clip_out_of_range) so the quality agent sees the prompt defect — signal only, never mutates the render (shrinking video would desync per-cut audio). FAILS if either defense regresses.")
+def _out_of_range_clip_clamp():
+    src = open("handler.py").read()
+    # (A) the zoom-extract EOF clamp — safety
+    assert "clamp_src_end_to_eof" in src, \
+        "the zoom extract must clamp _src_end_frame to EOF so a degenerate plan can't emit a stream-less intermediate"
+    assert "_src_end_frame = max(_start_frame_i + 1, _zc_src_total)" in src, \
+        "the zoom clamp must pin end_frame to the real source frame count (>= start+1)"
+    # (B) the plan-validation loud flag — signal to quality
+    assert 'plan_clip_out_of_range' in src, \
+        "clip construction must flag out-of-range clips as a divergence for the quality agent"
+    assert "_source_start_frames + _pv_need > _pv_src_total" in src, \
+        "the flag must fire exactly when the clip's source window over-runs the source frame count"
+
+
 @check("KEYTERM CAP + NEVER RETRY A 4xx (Zac 2026-08-03, forged from `DeepgramApiError: Keyterm limit exceeded (max 500 tokens)` killing a screenplay-length source): Deepgram caps `keyterm` at 500 TOKENS total and 400s the WHOLE request past it, so ~200 harvested proper nouns killed the job. _cap_keyterms drops screenplay scaffolding (FADE/INT/EXT/CUT/MONTAGE — Title-Case page furniture the proper-noun heuristic harvests but nobody speaks, so boosting it actively biases the recogniser) and truncates to a 450-token budget; the extractor now emits FREQUENCY-ORDERED so truncation sheds the rarest term rather than an arbitrary tail. SECOND BUG, same job: _deepgram_is_retriable_error matched a bare substring \"500\" — which appears in the phrase \"max 500 tokens\" — so a deterministic 400 was retried 3x, tripling the latency of a guaranteed failure. Status numbers are now word-boundary matched and deterministic signatures are checked FIRST.")
 def _check_keyterm_cap_and_4xx():
     import handler as _h
