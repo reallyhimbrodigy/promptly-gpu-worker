@@ -1291,18 +1291,21 @@ class PromptlyWorker:
 # few seconds of cold start is invisible.
 @app.cls(
     timeout=300,          # 5 min is plenty for an S3 download + Deepgram call
-    scaledown_window=600, # RE-ENABLED (Zac 2026-08-03 PM): the 30s A/B DID NOT SURVIVE.
-                          # It doubled editorial latency (P50 300s / mean 389s vs the
-                          # 120-180s law; 248 prewarm-frozen events in 6h). The volume
-                          # cache persists, but with a 30s idle the prewarm container
-                          # scales to zero between uploads → each prewarm cold-starts
-                          # and often does NOT finish download+transcribe+audio+proxy
-                          # before the render job reads /prewarm → cache MISS → those
-                          # ~150-200s run INLINE on the critical path. 600 keeps the
-                          # container warm so prewarm completes and the job hits the
-                          # cache. Prewarm was NEVER the ~$56/day cost culprit (that is
-                          # the orchestrator double-hold, ORCHESTRATOR_SPLIT_PLAN.md).
-                          # A doubled wait on every job is a PRODUCT change, not a knob.
+    scaledown_window=30,  # SURGE CUT (Zac 2026-08-04): the Modal account container
+                          # limit is 100 and is now the BINDING constraint (~1000 users
+                          # overnight). The 600s hold consumed ~2.3 container-days/day of
+                          # that budget — at bursty surge volume that STARVES renders,
+                          # and a QUEUED render is worse than a COLD one. SEPARATE THE
+                          # TWO JOBS (Zac): container WARMTH (this scaledown) vs the
+                          # SPECULATIVE download+transcribe (the handler, unchanged). The
+                          # 43% hit is TIMING-bound (job vs the 45s prewarm work), NOT
+                          # warmth-bound (the 3-5s cold start barely shifts the hit
+                          # boundary) — so cutting 600→30 frees ~2.3 container-days with
+                          # only ~20s P50 cost, KEEPING the speculative-work value while
+                          # dropping the redundant hold. The volume cache persists across
+                          # container death regardless. RESTORE 600 only if the ceiling
+                          # is raised AND the timing race (dispatch beats the 45s prewarm)
+                          # is fixed by the job awaiting the in-flight prewarm.
     memory=4096,          # 4GB for in-flight download buffers + transcript JSON
     region="us-west",     # same region as the S3 bucket + render class
     volumes={"/prewarm": prewarm_volume},

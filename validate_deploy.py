@@ -10159,12 +10159,16 @@ def _prewarm_reenabled():
     src = open("modal_app.py").read()
     _pw = src[src.index("class PromptlyPrewarmWorker"):]
     _dec = src[:src.index("class PromptlyPrewarmWorker")]
-    # the decorator sits just above the class; pin its scaledown to the warm value
+    # the decorator sits just above the class; pin its scaledown to the SURGE value
+    # (30): the 100-container account ceiling is the binding constraint, and the
+    # 600s hold starved renders. Warmth is redundant (the 43% hit is timing-bound);
+    # the speculative-work handler is unchanged. RESTORE 600 only with a raised
+    # ceiling + the timing-race fix (job awaits the in-flight prewarm).
     _dec_block = _dec[_dec.rindex("@app.cls("):]
-    assert "scaledown_window=600" in _dec_block, \
-        "PromptlyPrewarmWorker must keep scaledown_window=600 so prewarm stays warm and hides ~150-200s behind the upload"
+    assert "scaledown_window=30" in _dec_block, \
+        "PromptlyPrewarmWorker scaledown must stay at the surge value (30) — the 600s hold starves renders on the 100-container ceiling"
     assert "volumes={\"/prewarm\": prewarm_volume}" in _dec_block, \
-        "PromptlyPrewarmWorker must mount the /prewarm volume so its cache persists for the render job"
+        "PromptlyPrewarmWorker must mount the /prewarm volume so its cache persists for the render job (speculative work kept)"
 
 
 @check("REGRESSION CORPUS RUNS ON EVERY DEPLOY (Zac 2026-08-04, 'gone for good'): the failure corpus retains the exact source that killed every job, but until now nobody re-ran one. cert_regression_corpus re-renders one saved source per FIXED sub-code and asserts the deterministic ones COMPLETE — so no fixed class can return silently, and 'the fix regressed' / 'never ran' / 'predate it' stop being confusable. FAILS if the harness, the seeded manifest, or the deploy.sh hook that fires it disappears — because a regression gate that isn't wired to run is not a gate.")
