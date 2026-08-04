@@ -91,3 +91,83 @@ That check runs at the first read-out, before any density or latency claim.
 - arm balance outside 45/55 at n≥400/arm (design broken)
 - combined decoration below −15% at the 14-day read (worse than the margin)
 - any completion-rate move off baseline (the same tripwire the speed lane is on)
+
+
+---
+
+# CORRECTED — the exchange rate, and a margin that can actually pass
+
+My first pass declined to state an exchange rate ("quality wins over speed, so
+there isn't one") and then set a −10% margin anyway. That was incoherent: arm 5's
+own expected performance is ~−10%, so the test was built unable to pass. Fixed.
+
+## THE QUERY ON THE AUG-1 NUMBERS
+
+**They are not on record in this repo.** The only trace is arm 5's own commit
+(`44f606b`, 2026-07-31), which says the change exists so that *"the **proper-n
+re-run** can test whether density recovers"* — the author already treated the
+original as underpowered. I therefore hold the 0.36 / 1.93 figures as
+**reported-but-unverified here**, and if the source read has a large N on record
+that supersedes this.
+
+## THE EXCHANGE RATE, MEASURED RATHER THAN ASSERTED
+
+Both quantities convert to one currency — export. Measured on 918 planned jobs
+since 2026-07-20:
+
+| decoration density /25s | n | export |
+|---|---|---|
+| Q1 0.0–3.7 | 229 | 17.5% |
+| Q2 3.7–6.8 | 229 | **21.4%** |
+| Q3 6.8–11.5 | 229 | 17.0% |
+| Q4 11.5–57.7 | 231 | **13.0%** |
+
+Raw, that says *more decoration exports worse* — which would argue for cutting
+density, the opposite of the 7.76-vs-16.7 concern. **It is confounded**: duration
+drives density and export together. Controlling for output duration:
+
+| output duration | n | low-density half | high-density half | delta | z |
+|---|---|---|---|---|---|
+| 0–20s | 509 | 14.6% | 12.2% | −2.4pt | −0.80 |
+| 20–35s | 218 | 24.8% | 22.0% | −2.8pt | −0.48 |
+| 35–60s | 134 | 23.9% | 17.9% | −6.0pt | −0.85 |
+
+**Consistently negative, never significant.** So:
+
+> **THE EXCHANGE RATE IS: decoration density has no export consequence this
+> corpus can detect. One second of wall-clock is worth an unbounded amount of
+> density in funnel terms — and zero in taste terms, because density is
+> defended by Zac's eye (half his reference rate), not by the funnel.**
+
+That is the honest rate, and it is why "any drop = revert" is wrong: a −10%
+density move has no measurable cost to the business, while wall-clock has a
+standing 90s law and a $0.10/job cost law.
+
+## THE CORRECTED DECISION RULE
+
+| combined decoration vs control | decision |
+|---|---|
+| **better than −5%** | **SHIP.** Decoration preserved; wall-clock is free. |
+| **−5% to −15%** | **INDIFFERENCE ZONE.** No detectable funnel cost in this range, so wall-clock decides: ship if it improves **≥20%**, otherwise revert. |
+| **worse than −15%** | **REVERT** regardless of wall-clock. Beyond what Zac's eye tolerates given we are already at half his reference. |
+
+The 20% wall-clock bar is deliberately high: p50 321.7s against a 90s law means
+small savings do not change the product, so only a real move buys any density.
+
+## N THRESHOLDS — UNCHANGED, AND THEY DO NOT SHARE A CLOCK
+
+| read-out | metric | cv | N/arm | ETA |
+|---|---|---|---|---|
+| density decision | combined decoration, −10% | 0.88 | **1,207** | ~30 days |
+| density early-revert | combined decoration, −15% | 0.88 | 537 | ~14 days |
+| wall-clock | −10% | 0.53 | **438** | ~11 days |
+
+⚠️ **Density resolving does NOT license a wall-clock call, or the reverse.** They
+are separate thresholds on separate variances and I will report whichever has
+met its N, naming the one that has not.
+
+⚠️ The brief's `gemini_call` wall-clock (p50 82.6 / p90 194.6) is a *stage*; mine
+(p50 321.7 / p90 656.8) is whole-job. Both are legitimate and they are not the
+same quantity. **The A/B reads the stage, since that is what the prose change
+touches** — the whole-job figure would dilute the effect with stages the change
+cannot reach.
