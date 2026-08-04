@@ -11913,7 +11913,7 @@ def _post_cuts_response_schema():
 
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
                            recipe_deadline_s=None, media_res_override=None,
-                           source_duration_s=None):
+                           source_duration_s=None, n_words=None):
     """Second Gemini call: visual placement on the kept-only transcript.
 
     Deep-thinking budget. thinking_budget=24576 (lowered from a 60000 cap).
@@ -12163,17 +12163,15 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             # loop's own retry cap; on exhaustion it raises → deterministic safe
             # edit (a delivered simpler video), never an unbounded regenerate hang.
             if _degen is None:
-                _oor_t = _plan_zoom_beyond_source(_parsed, source_duration_s)
-                if _oor_t is not None:
-                    _degen = (f"out-of-range plan: a zoom references source "
-                              f"t={_oor_t:.1f}s past the {float(source_duration_s or 0):.1f}s "
-                              f"source — INVALID plan, regenerating")
+                _oor = _plan_zoom_beyond_source(_parsed, source_duration_s, n_words=n_words)
+                if _oor is not None:
+                    _degen = f"out-of-range plan ({_oor}) — INVALID plan, regenerating"
                     _record_divergence(
                         "recipe_transport",
-                        {"class": "out-of-range plan (runaway tail)",
-                         "zoom_t_s": round(_oor_t, 2), "source_s": round(float(source_duration_s or 0), 2)},
+                        {"class": "out-of-range plan (runaway tail)", "detail": str(_oor)[:120],
+                         "source_s": round(float(source_duration_s or 0), 2)},
                         "plan_out_of_range",
-                        reason="zoom source time past EOF — regenerating (root: gemini_degen_tail, QUALITY owns the prompt)")
+                        reason="plan references source past EOF — regenerating (root: gemini_degen_tail, QUALITY owns the prompt)")
             if _degen is None:
                 return _parsed
         # Degenerate. Log a BOUNDED snippet (never the full 64K spiral) and
@@ -12713,37 +12711,57 @@ def _reedit_normalize_raw_sfx(emphasis_moments, sound_effects_in):
     return out
 
 
-def _plan_zoom_beyond_source(_plan, source_dur_s):
-    """The offending absolute source time (seconds) if any zoom event in the plan
-    references source time PAST the source end — else None. A plan that points a
-    zoom at time the source does not have is INVALID (a Gemini runaway-tail
-    symptom: the exact class behind zoom_pre_extract_degraded ×4 → empty video /
-    'No video stream found'). Zac 2026-08-04: VALIDATION REJECTS an out-of-range
-    plan and REGENERATES it — clamping would silently deliver a different edit.
+def _plan_zoom_beyond_source(_plan, source_dur_s, n_words=None):
+    """A short reason string if the plan references source the source does not
+    have — else None. A plan that points ANY element past the end is INVALID (a
+    Gemini runaway-tail symptom: the class behind zoom_pre_extract_degraded ×4 →
+    empty video / 'No video stream found'). Zac 2026-08-04: VALIDATION REJECTS an
+    out-of-range plan and REGENERATES it — clamping would silently deliver a
+    different edit.
 
-    Defensive: an unknown/partial shape never false-positives; only a startMs
-    clearly past the end (>0.5s margin, so a zoom that merely ends near EOF is
-    fine) counts. Zoom startMs are ABSOLUTE source milliseconds (same convention
-    render_multi_clip projects against)."""
-    if not source_dur_s or source_dur_s <= 0 or not isinstance(_plan, dict):
+    Covers BOTH out-of-range vectors, not just the symptom that fired:
+      • ZOOMS — zoom_effect.events[].startMs is ABSOLUTE source ms; a start past
+        EOF (>0.5s margin so a zoom merely ending near EOF is fine) is invalid.
+      • CLIPS — the cuts are word-index-based (build_clips_from_words clamps word
+        times to video_duration), so a clip can only run past the source via a
+        word_index the transcript does not have. When n_words is known, an
+        emphasis word_index >= n_words is that same out-of-range shape and also
+        regenerates (instead of the later hard raise → safe edit).
+
+    Defensive: an unknown/partial shape never false-positives."""
+    if not isinstance(_plan, dict):
         return None
-    _limit_ms = float(source_dur_s) * 1000.0 + 500.0
     try:
-        for _em in (_plan.get("emphasis_moments") or []):
-            if not isinstance(_em, dict):
-                continue
-            _ze = _em.get("zoom_effect")
-            if not isinstance(_ze, dict):
-                continue
-            for _ev in (_ze.get("events") or []):
-                if not isinstance(_ev, dict):
+        _ems = _plan.get("emphasis_moments") or []
+        # CLIPS via word indices (bounded by the transcript the plan was built on)
+        if isinstance(n_words, int) and n_words > 0:
+            for _em in _ems:
+                if not isinstance(_em, dict):
                     continue
-                try:
-                    _start = float(_ev.get("startMs") or 0.0)
-                except (TypeError, ValueError):
+                for _wi in (_em.get("word_indices") or []):
+                    try:
+                        if int(_wi) >= n_words:
+                            return f"word_index {int(_wi)} >= {n_words} words (clip past source)"
+                    except (TypeError, ValueError):
+                        continue
+        # ZOOMS via absolute source ms
+        if source_dur_s and source_dur_s > 0:
+            _limit_ms = float(source_dur_s) * 1000.0 + 500.0
+            for _em in _ems:
+                if not isinstance(_em, dict):
                     continue
-                if _start > _limit_ms:
-                    return _start / 1000.0
+                _ze = _em.get("zoom_effect")
+                if not isinstance(_ze, dict):
+                    continue
+                for _ev in (_ze.get("events") or []):
+                    if not isinstance(_ev, dict):
+                        continue
+                    try:
+                        _start = float(_ev.get("startMs") or 0.0)
+                    except (TypeError, ValueError):
+                        continue
+                    if _start > _limit_ms:
+                        return f"zoom startMs t={_start/1000.0:.1f}s past {float(source_dur_s):.1f}s source"
     except Exception:
         return None
     return None
@@ -13493,7 +13511,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         else:
             try:
                 try:
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []))
                 except Exception as _ref_err:
                     if (_video_part_fallback is None
                             or type(_ref_err).__name__ != "ClientError"):
@@ -13516,7 +13534,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         "video_reference_fallback", reason=str(_ref_err)[:180])
                     _video_part = _video_part_fallback
                     _video_part_fallback = None
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []))
             except Exception as _tx_err:
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the

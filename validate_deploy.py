@@ -10186,18 +10186,23 @@ def _regression_corpus_wired():
 def _out_of_range_plan_regenerates():
     import handler as _h
     assert callable(getattr(_h, "_plan_zoom_beyond_source", None)), "the out-of-range plan detector must exist"
-    # behavioral: out-of-range regenerates, in-range does not, defensive shapes never false-trip
-    _oor = {"emphasis_moments": [{"zoom_effect": {"events": [{"startMs": 25000}]}}]}
-    assert _h._plan_zoom_beyond_source(_oor, 20.0) == 25.0, "a zoom 5s past the source must be flagged"
-    assert _h._plan_zoom_beyond_source({"emphasis_moments": [{"zoom_effect": {"events": [{"startMs": 18000}]}}]}, 20.0) is None, \
-        "an in-range zoom must NOT be flagged (no needless regenerate)"
+    _f = _h._plan_zoom_beyond_source
+    # BOTH out-of-range vectors regenerate (Zac: cover CLIPS, not just zooms) —
+    # returns a reason string when invalid, None when fine.
+    assert _f({"emphasis_moments": [{"zoom_effect": {"events": [{"startMs": 25000}]}}]}, 20.0, 100), \
+        "a zoom 5s past the source must be flagged"
+    assert _f({"emphasis_moments": [{"word_indices": [5, 150]}]}, 20.0, 100), \
+        "a CLIP via word_index past the transcript must be flagged (not just zooms)"
+    assert _f({"emphasis_moments": [{"word_indices": [5, 10], "zoom_effect": {"events": [{"startMs": 18000}]}}]}, 20.0, 100) is None, \
+        "an in-range plan must NOT be flagged (no needless regenerate)"
     for _junk in (None, {"emphasis_moments": "x"}, {}):
-        assert _h._plan_zoom_beyond_source(_junk, 20.0) is None, "unknown shapes must never false-trip"
-    # wiring: the detector feeds _degen (regenerate), the call threads source duration, and the loop stays CAPPED (raises on exhaustion)
+        assert _f(_junk, 20.0, 100) is None, "unknown shapes must never false-trip"
+    # wiring: the detector feeds _degen (regenerate), threads BOTH source duration and word count, loop stays CAPPED
     src = open("handler.py").read()
-    assert "_oor_t = _plan_zoom_beyond_source(_parsed, source_duration_s)" in src, "the regenerate loop must call the detector"
+    assert "_oor = _plan_zoom_beyond_source(_parsed, source_duration_s, n_words=n_words)" in src, "the regenerate loop must call the detector with source duration + word count"
     assert "plan_out_of_range" in src, "an out-of-range plan must ledger a divergence for QUALITY (the prompt root)"
-    assert "source_duration_s=duration" in src, "the call site must thread the source duration into the post-cuts call"
+    assert "source_duration_s=duration" in src and "n_words=len(deepgram_words or [])" in src, \
+        "the call site must thread the source duration AND the transcript word count"
     assert 'raise RuntimeError(f"Gemini post-cuts-call degenerate after retry' in src, \
         "the regenerate loop must stay CAPPED — raise (→ safe edit) on exhaustion, never an unbounded hang"
 
