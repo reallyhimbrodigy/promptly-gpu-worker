@@ -1291,13 +1291,18 @@ class PromptlyWorker:
 # few seconds of cold start is invisible.
 @app.cls(
     timeout=300,          # 5 min is plenty for an S3 download + Deepgram call
-    scaledown_window=30,  # COST A/B (Zac GO 2026-08-03): WAS 600 (10 min!). prewarm
-                          # writes the source to the PERSISTENT /prewarm VOLUME, so
-                          # the cache survives the container's death — cutting the
-                          # idle tail 600→30 keeps the download-caching benefit while
-                          # killing the 10-min idle bleed per upload. Paired with the
-                          # warmup scaledown cut (PromptlyWorker) as the non-job-spend
-                          # A/B. REVERT: restore 600 if the 24h invoice shows no drop.
+    scaledown_window=600, # RE-ENABLED (Zac 2026-08-03 PM): the 30s A/B DID NOT SURVIVE.
+                          # It doubled editorial latency (P50 300s / mean 389s vs the
+                          # 120-180s law; 248 prewarm-frozen events in 6h). The volume
+                          # cache persists, but with a 30s idle the prewarm container
+                          # scales to zero between uploads → each prewarm cold-starts
+                          # and often does NOT finish download+transcribe+audio+proxy
+                          # before the render job reads /prewarm → cache MISS → those
+                          # ~150-200s run INLINE on the critical path. 600 keeps the
+                          # container warm so prewarm completes and the job hits the
+                          # cache. Prewarm was NEVER the ~$56/day cost culprit (that is
+                          # the orchestrator double-hold, ORCHESTRATOR_SPLIT_PLAN.md).
+                          # A doubled wait on every job is a PRODUCT change, not a knob.
     memory=4096,          # 4GB for in-flight download buffers + transcript JSON
     region="us-west",     # same region as the S3 bucket + render class
     volumes={"/prewarm": prewarm_volume},
