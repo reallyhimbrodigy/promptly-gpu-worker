@@ -77,3 +77,56 @@ on all 600 rows). Mid-word = final cut's `source_end` strictly inside a word's
 ⚠️ Only standard-editorial jobs store a transcript, so this is measured where one
 exists. `vad_coverage` is NOT persisted in `result` on any sampled row — cut 3
 of the four could not be run.
+
+---
+
+# CORRECTION (2026-08-03, after Zac's caveat 3): SPANISH IS NOT DROPOUT
+
+I claimed "half the video has no transcribed words at all" and implied a
+transcription failure. Checking WHERE the missing time sits refutes that.
+
+| lang | n | LEADING | TRAILING | INTERIOR gaps | total missing |
+|---|---|---|---|---|---|
+| hi | 48 | 0.01 | 0.02 | **0.06** | 0.08 |
+| en | 36 | 0.01 | 0.03 | **0.09** | 0.13 |
+| **es** | 5 | **0.15** | **0.31** | **0.05** | 0.51 |
+
+Spanish's missing 51% is **46% at the EDGES** and only **5% interior** — a lower
+interior gap than English. Widened on the metric that needs no
+`source_duration_s`:
+
+| lang | n | gap frac of span | largest gap | words/sec in span |
+|---|---|---|---|---|
+| hi | 235 | 0.043 | 0.024 | 2.63 |
+| en | 161 | 0.079 | 0.025 | 2.49 |
+| **es** | 12 | 0.104 | **0.021** | **2.59** |
+| ru | 5 | **0.281** | **0.096** | **1.63** |
+
+**Within the speech span Spanish is normal** — same word density, same largest
+gap, no dropout. The words are not missing; there is no speech there. Spanish
+clips carry long non-speech heads and tails.
+
+**The claim downgrades** from *"transcription destroys Spanish content"* to
+*"these clips are ~46% non-speech at the edges and we drop it"*. Whether that is
+correct (silence, rightly trimmed) or destruction (music/visuals the user wanted)
+is exactly what VAD answers.
+
+**RUSSIAN is the one that still looks like real dropout** — 0.281 gap fraction,
+0.096 largest gap, 1.63 words/sec, all ~3× worse than every other language.
+n=5, so a lead, not a finding.
+
+## THE BLOCKER IS WORSE THAN "NOT PERSISTED"
+
+`vad_coverage` **is** computed. `handler.py:33918` builds the three-field
+language bundle — `detected_language`, `transcript_script`,
+`vad_coverage_frac`, `vad_speech_s` — and its own comment says coverage
+*"previously lived ONLY inside the coverage-gate trigger, unqueryable"* and that
+the bundle *"flows into the success result payload"*.
+
+**It does not. 0 of 3000 stored rows contain `_lang_bundle` or `vad_coverage`.**
+It is written to `edit_plan` at line 33926 and **read by nothing** — grep returns
+three hits, all writes. The plan is finalised ~17,000 lines earlier, so the
+mutation almost certainly lands after the recipe has been persisted.
+
+A feature built to make coverage queryable, which left it unqueryable, and whose
+comment asserts a data flow nobody verified.
