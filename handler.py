@@ -17174,7 +17174,18 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
                 continue
             _mt = str(_mg.get("type") or "")
             if _mt not in VALID_MG_TYPES:
-                continue   # render_only graceful type-drop also catches this
+                # render_only graceful type-drop also catches this. The drop is
+                # SAFE (the renderer never sees it, and MG_MAP is null-guarded
+                # anyway) but it was SILENT — and on a RE-EDIT that is a
+                # component the user asked to keep, vanishing without a trace.
+                # Record it so the rate is countable. (Zac 2026-08-03.)
+                _record_divergence(
+                    "motion_graphic", {"type": _mt, "index": _i},
+                    "dropped_unknown_type",
+                    reason="type not in VALID_MG_TYPES — retired component, or a "
+                           "stored plan that predates its removal",
+                )
+                continue
             _props = _mg.get("props") or {}
             if not _props:
                 _record_divergence(
