@@ -32408,8 +32408,16 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             print(f"[export] clean master -> s3://{_aws_b}/{_ck} (private, minimal route)", flush=True)
         except Exception as _ce:
             _clean_export_key = None
-            print(f"[export] clean master upload FAILED ({type(_ce).__name__}: {_ce}) "
-                  f"— gate will fall back for this job", flush=True)
+            # LOUD FAIL-SAFE LAW. This is the LAST path that can still produce a
+            # NULL clean_export_key on a new render, and a NULL is a FREE EXPORT:
+            # the gate 404s and the client falls back to saving the public URL.
+            # A systematic failure here (creds, bucket policy, a renamed prefix)
+            # would convert to 100% free exports with nothing reporting it —
+            # degrade is allowed, silence is not.
+            _ledger_defect("clean_export_upload", "minimal_route_upload", _ce,
+                           job_id=input_data.get("job_id"))
+            print(f"[export] DEFECT clean master upload FAILED "
+                  f"({type(_ce).__name__}: {_ce}) — this job exports FREE", flush=True)
     # The PUBLIC artifact. `_preview_path` is the seam the watermark pass takes.
     _preview_path = output_path
     if _aws_b and _aws_k:
@@ -34498,8 +34506,16 @@ def render_stage(
                 # clean key means the gate falls back to today's behaviour for
                 # this job, which is exactly what a NULL clean_export_key means.
                 _clean_export_key = None
-                print(f"[export] clean master upload FAILED ({type(_ce).__name__}: {_ce}) "
-                      f"— gate will fall back for this job", flush=True)
+                # LOUD FAIL-SAFE LAW. This is the LAST path that can still produce a
+                # NULL clean_export_key on a new render, and a NULL is a FREE EXPORT:
+                # the gate 404s and the client falls back to saving the public URL.
+                # A systematic failure here (creds, bucket policy, a renamed prefix)
+                # would convert to 100% free exports with nothing reporting it —
+                # degrade is allowed, silence is not.
+                _ledger_defect("clean_export_upload", "main_render_upload", _ce,
+                               job_id=input_data.get("job_id"))
+                print(f"[export] DEFECT clean master upload FAILED "
+                      f"({type(_ce).__name__}: {_ce}) — this job exports FREE", flush=True)
 
         # The PUBLIC artifact. `_preview_path` is the seam: today the clean
         # master, later the watermarked overlay output.

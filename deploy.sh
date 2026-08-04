@@ -38,6 +38,16 @@ if git rev-parse --verify main >/dev/null 2>&1 \
    && git merge-base --is-ancestor main HEAD 2>/dev/null; then
     echo "  ⚠️  main is BEHIND this branch by $(git rev-list --count main..HEAD) commit(s) — it is stale; fast-forward + push it after this deploy."
 fi
+# NO-REGRESS GATE (2026-08-04). The `.last_deployed_commit` guard below is
+# written into the DEPLOYING checkout, so each agent's copy records only their
+# own last deploy and is structurally blind to everyone else's. Twice in 16
+# hours two agents' branches diverged and the later deploy silently reverted the
+# earlier one's shipped fixes — v512 dropped clean_export_key on both routes,
+# RENDER_CANON_UNREADABLE and the VFR clamp, and four completions ran on the
+# reverted image before a DB read noticed. This asks MODAL what is actually live
+# and refuses a deploy that would drop any of it.
+python3 predeploy_no_regress.py
+
 modal deploy modal_app.py
 
 # Deploy-state guard (Zac 2026-08-01): record the deployed HEAD so validate_deploy
