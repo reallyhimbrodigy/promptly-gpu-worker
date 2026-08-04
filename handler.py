@@ -2490,10 +2490,19 @@ def fetch_platform_style_pulse():
             .limit(_PLATFORM_PULSE_WINDOW * 4)
             .execute()
         )
+        # RETIRED-NAME GUARD (Zac 2026-08-03). This window is STORED HISTORY —
+        # rows outlive the code that wrote them — and it is read straight back
+        # into the prompt as a nudge. A style retired after these rows landed
+        # would be recommended to the model as a platform trend it cannot
+        # render. Same class as the user-profile drift (IconLabel x27,
+        # Passage/EditorialPop/CinematicLetterpress), which is why the same
+        # filter belongs on every accumulating store that feeds a prompt.
+        # Currently latent — the live 50-row window is clean — so this is a
+        # guard, not a repair.
         styles = []
         for row in (result.data or []):
             s = (row or {}).get("caption_style")
-            if s and s != "none":
+            if s and s != "none" and s in VALID_CAPTION_STYLES:
                 styles.append(str(s))
             if len(styles) >= _PLATFORM_PULSE_WINDOW:
                 break
@@ -6538,6 +6547,40 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
             k: v for k, v in prior_plan.items()
             if not (isinstance(k, str) and k.startswith("_"))
         }
+        # RETIRED-NAME GUARD (Zac 2026-08-03). A prior plan is STORED HISTORY
+        # and is injected here as the SOFT DEFAULT — the strongest position in
+        # the prompt. A plan written before a component was retired would hand
+        # the model a starting state containing something the renderer can no
+        # longer produce, and "keep what wasn't addressed" would preserve it.
+        # Drop those entries rather than ask the model to reason about them.
+        _dropped_stale = []
+        _mgs_prior = _sanitized_prior.get("motion_graphics")
+        if isinstance(_mgs_prior, list):
+            _kept = []
+            for _m in _mgs_prior:
+                _t = _m.get("type") if isinstance(_m, dict) else None
+                if _t and _t not in VALID_MG_TYPES:
+                    _dropped_stale.append(_t)
+                else:
+                    _kept.append(_m)
+            _sanitized_prior["motion_graphics"] = _kept
+        _cs_prior = _sanitized_prior.get("caption_style")
+        if _cs_prior and _cs_prior not in VALID_CAPTION_STYLES and _cs_prior != "none":
+            _dropped_stale.append(_cs_prior)
+            _sanitized_prior.pop("caption_style", None)
+        _tr_prior = _sanitized_prior.get("transitions")
+        if isinstance(_tr_prior, list):
+            _keptt = []
+            for _tr in _tr_prior:
+                _t = _tr.get("type") if isinstance(_tr, dict) else None
+                if _t and _t not in VALID_TRANSITION_TYPES:
+                    _dropped_stale.append(_t)
+                else:
+                    _keptt.append(_tr)
+            _sanitized_prior["transitions"] = _keptt
+        if _dropped_stale:
+            print(f"[guided-redraft] dropped RETIRED component(s) from the prior "
+                  f"plan before injection: {sorted(set(_dropped_stale))}", flush=True)
         _direction = str(prior_plan_change_request or "").strip()
         _direction_line = (
             f"USER'S DIRECTION FOR THIS REDRAFT: {_direction}\n\n"
