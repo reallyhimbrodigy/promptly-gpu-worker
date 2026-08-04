@@ -34160,7 +34160,12 @@ def handler(job):
         if _mode_input_error:
             write_job_status(
                 job_id, status="failed", phase="Something went wrong",
+                # Hand-built envelope, so it needs the root stamped explicitly —
+                # this write never passes through classify_error, which is how a
+                # terminal ends up carrying a label and nothing else.
                 result={"error_code": "MISSING_FIELDS",
+                        "error_subcode": "mode_input_missing",
+                        "error_cause": "MISSING_FIELDS:mode_input_missing",
                         "user_message": "This edit request was missing its plan or change details — please try again.",
                         "retryable": True},
             )
@@ -37940,6 +37945,15 @@ def handler(job):
             input_data.get("job_id"), status="failed", phase="Something went wrong",
             result={
                 "error_code": classified.get("error_code"),
+                # THE ROOT, PERSISTED (2026-08-04). classify_error has emitted
+                # error_subcode/error_cause since ca6133c, but this write copies
+                # an explicit key allowlist and never included them — so every
+                # terminal row carried the LABEL only, and reading the board
+                # still meant re-deriving each cause from error_detail by hand.
+                # A field that exists and is never populated is the same as no
+                # field at all; the whole point was to make causes queryable.
+                "error_subcode": classified.get("error_subcode"),
+                "error_cause": classified.get("error_cause"),
                 "user_message": classified.get("user_message"),
                 "retryable": classified.get("retryable"),
                 "designed_rejection": _designed_reject,

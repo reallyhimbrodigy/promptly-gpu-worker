@@ -10422,6 +10422,26 @@ def _check_subcode_matches_failure_not_subsystem():
                     f"{_code}:{_sub} keys on the bare subsystem name {_sig!r} — that matches healthy logs too"
 
 
+@check("THE SUB-CODE MUST REACH THE DATABASE (2026-08-04): classify_error emitted error_subcode/error_cause from ca6133c, but the TERMINAL WRITE copies an explicit key allowlist and never included them — so all 15 failures in a 2h window stored the LABEL only, and reading the board meant re-deriving every cause from error_detail by hand. A field that exists and is never persisted is the same as no field at all, which is precisely the class sub-codes were built to end. This gate asserts the WRITE, not the classifier: the classifier was already correct and the board was still unreadable.")
+def _check_subcode_is_persisted():
+    _src = open("handler.py").read()
+    # EVERY terminal write, not just the one I happened to anchor on. There are
+    # two, and the first attempt at this gate found only the second — the same
+    # class of miss it exists to catch.
+    _sites = [i for i in range(len(_src))
+              if _src.startswith('status="failed", phase="Something went wrong"', i)]
+    assert len(_sites) >= 2, f"expected >=2 terminal writes, found {len(_sites)}"
+    for _i in _sites:
+        _blk = _src[_i:_i + 2600]
+        assert '"error_subcode"' in _blk and '"error_cause"' in _blk, (
+            "a terminal write persists no sub-code — the classifier emitting it is "
+            "not enough, the ROW is what anyone else can read")
+    # and it must be copied from the classifier, never recomputed at the write
+    _cls = _src[_sites[-1]:_sites[-1] + 2600]
+    assert _cls.index('"error_code": classified.get("error_code")') < _cls.index('"error_cause"'), \
+        "error_cause must ride the same classified envelope as error_code"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
