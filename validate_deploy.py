@@ -10311,6 +10311,43 @@ def _check_error_subcodes():
         _h.classify_error(_weird)
 
 
+@check("THE WEIGHTED PROBE BUDGET MUST ACTUALLY SCALE (errors agent 2026-08-03): _probe_weighted_timeout parsed ffprobe POSITIONALLY, assuming it echoed the requested order (r_frame_rate,width,height,duration). It does not — it emits the STREAM's own order: width,height,r_frame_rate,duration. So _vals[0]='2160' had no '/' and fps silently fell back to 30, and _int(2) on '60/1' raised and made height 0. res_factor collapsed to 1.0 and EVERY call returned base_s: the RENDER_FFMPEG:analyze_* fix was INERT while reading as shipped (60s computed where the truth is 90s on a 4K60 source). Now parsed by NAME from ffprobe -of json, which cannot be reordered. This gate asserts the SCALING, not the presence of the function — a fix that computes the base value on every input is indistinguishable from no fix at all.")
+def _check_probe_budget_scales():
+    import os as _os
+    import subprocess as _sp
+    import tempfile as _tf
+    import handler as _h
+    assert '"-of", "json"' in open("handler.py").read(), \
+        "the probe must parse ffprobe JSON, never positional output"
+    _fd, _p4k = _tf.mkstemp(suffix="_4k60.mp4"); _os.close(_fd)
+    try:
+        _sp.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+                 "-i", "testsrc2=s=2160x3840:r=60:d=12", "-c:v", "libx264",
+                 "-preset", "ultrafast", "-pix_fmt", "yuv420p", _p4k],
+                capture_output=True, timeout=300)
+        # END-TO-END, because the arithmetic alone cannot catch a PARSE bug —
+        # that was the whole defect. 12s x 60fps x 4.0 = 2880 weighted frames,
+        # past the 1800 knee, so a correct parse MUST exceed base. Under the
+        # positional parse this read 30fps/height=0 and returned exactly base.
+        _big = _h._probe_weighted_timeout(_p4k, 60, 240)
+        assert _big > 60, (
+            f"the probe budget did not scale on a 4K60 source (got {_big}s, base 60s) — "
+            "the ffprobe parse is broken again and the analyze_* fix is inert")
+        assert _h._weighted_probe_timeout(60 * 20, 4.0, 60, 240) == 90, \
+            "4K60 20s must scale 60 -> 90s; a budget that never leaves base is an inert fix"
+        assert _h._weighted_probe_timeout(30 * 60, 1.0, 60, 240) == 60, \
+            "a 1080p30 60s clip must stay at base"
+        assert _h._weighted_probe_timeout(60 * 600, 4.0, 60, 240) == 240, \
+            "the ceiling must still bound a hang"
+        # ...and the NAMED parse must recover fps/res that the positional one lost
+        assert _big >= 60, "fail-open floor is base_s"
+    finally:
+        try: _os.unlink(_p4k)
+        except OSError: pass
+    # unreadable source must fail OPEN, never raise into the analysis path
+    assert _h._probe_weighted_timeout("/nonexistent-source.mp4", 60, 240) == 60
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")

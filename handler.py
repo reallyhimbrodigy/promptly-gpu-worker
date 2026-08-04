@@ -3104,27 +3104,45 @@ def _probe_weighted_timeout(source_path, base_s, ceiling_s):
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=r_frame_rate,width,height:format=duration",
-             "-of", "default=nw=1:nk=1", source_path],
+             "-of", "json", source_path],
             capture_output=True, text=True, timeout=10,
         )
-        _vals = [x for x in (r.stdout or "").splitlines() if x.strip()]
+        # PARSED BY NAME, NOT POSITION (errors agent 2026-08-03). The positional
+        # version assumed ffprobe echoed the requested order (r_frame_rate, width,
+        # height, duration). It does not — it emits the STREAM's own field order,
+        # which is width, height, r_frame_rate, duration. So on every source:
+        #   _vals[0]="2160" has no "/" -> fps silently fell back to 30
+        #   _int(2) on "60/1" -> float("60/1") raises -> height became 0
+        #   -> res_factor 1.0, nframes 600 instead of 1200x4.0
+        # The budget therefore NEVER scaled: every call returned base_s, and the
+        # RENDER_FFMPEG:analyze_* fix was inert while reading as shipped. On a 4K60
+        # 20s source it computed 60s where the truth is 90s.
+        # A JSON parse cannot be reordered, and the ceiling still bounds a hang.
         _fps, _w, _h, _dur = 30.0, 0, 0, 0.0
-        if _vals and "/" in _vals[0]:
-            _a, _b = _vals[0].split("/")
+        _j = json.loads(r.stdout or "{}")
+        _st = (_j.get("streams") or [{}])[0]
+        _rate = str(_st.get("r_frame_rate") or "")
+        if "/" in _rate:
+            _a, _b = _rate.split("/")
             _fps = (float(_a) / float(_b)) if float(_b) else 30.0
-        def _int(i):
-            try: return int(float(_vals[i]))
-            except Exception: return 0
-        def _flt(i):
-            try: return float(_vals[i])
-            except Exception: return 0.0
-        if len(_vals) >= 4:
-            _w, _h, _dur = _int(1), _int(2), _flt(3)
-        elif len(_vals) >= 2:
-            _dur = _flt(len(_vals) - 1)
+        elif _rate:
+            _fps = float(_rate)
+        _w = int(_st.get("width") or 0)
+        _h = int(_st.get("height") or 0)
+        _dur = float((_j.get("format") or {}).get("duration") or 0.0)
         _nframes = _fps * max(_dur, 1.0)
         _res_factor = ((_w * _h) / (1920.0 * 1080.0)) if (_w and _h) else 1.0
-        return _weighted_probe_timeout(_nframes, _res_factor, base_s, ceiling_s)
+        _budget = _weighted_probe_timeout(_nframes, _res_factor, base_s, ceiling_s)
+        # ANNOUNCE THE BUDGET (errors agent 2026-08-03). The scaling was silent,
+        # so the fix for the RENDER_FFMPEG:analyze_* class could not be observed
+        # running — only inferred from the absence of failures, which is exactly
+        # the evidence that cannot distinguish "fixed" from "never exercised".
+        # One grep-stable line, emitted only when scaling actually applied.
+        if _budget > int(base_s):
+            print(f"[probe budget] {int(_fps)}fps {_w}x{_h} {_dur:.0f}s "
+                  f"(res_factor {_res_factor:.1f}x) -> {_budget}s "
+                  f"(base {int(base_s)}s, ceiling {int(ceiling_s)}s)", flush=True)
+        return _budget
     except Exception:
         return int(base_s)
 
