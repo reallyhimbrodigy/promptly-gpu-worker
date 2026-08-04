@@ -184,7 +184,7 @@ Stouffer over the three duration strata:
 | | z | two-sided p |
 |---|---|---|
 | unweighted | **−1.231** | 0.218 |
-| √n-weighted | **−1.245** | 0.213 |
+| √n-weighted | **−1.192** | 0.233 |
 
 Same conclusion, firmer ground: **no detectable relationship between decoration
 density and export.** Reporting three separate nulls understated it — this is one
