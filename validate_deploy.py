@@ -9563,7 +9563,7 @@ def _render_burst_dark():
     assert _fn is not None, "modal_app.py must define render_burst"
     assert _fn.decorator_list, "render_burst must be an @app.function"
     _dec_src = _ast.get_source_segment(_m_src, _fn.decorator_list[0]) or ""
-    assert "cpu=48" in _dec_src, "render_burst must pin cpu=48 (Zac: 48 covers ~46 threads)"
+    assert "cpu=32" in _dec_src, "render_burst must pin cpu=32 (Zac 2026-08-03: 48->32, concurrency-bound not core-bound)"
     import re as _re
     # timeout must MATCH run_pipeline_bg (lockstep), not a hardcoded value — both
     # dropped 3000->1800 for the stall cap (Zac 2026-08-03 PM); the pair moves together.

@@ -689,7 +689,7 @@ def run_pipeline_bg(body: dict):
     _cpu_stop = _threading.Event()
     _ncores = _os.cpu_count() or 0
 
-    # CGROUP MEMORY accounting (Zac 2026-08-01: memory is 59% of the bill, so inc2
+    # CGROUP MEMORY accounting (Zac 2026-08-01; CORRECTED 2026-08-03 from the billing page: CPU is 67% of the bill, MEMORY 33% — memory is the MINOR dimension, cpu is the lever. inc2
     # is sized on per-stage PEAK RSS, not cores). Read the container's CHARGED memory
     # (cgroup v2 memory.current; v1 memory.usage_in_bytes) — the number that counts
     # toward the OOM limit. Bucket per stage; the per-stage PEAK sizes each inc2
@@ -810,7 +810,7 @@ def run_pipeline_bg(body: dict):
                             for _st, _cs in _cpu_by_stage.items() if _cs}
                         _st_dict["cpu_src"] = _src
                         # PER-STAGE PEAK RSS (Zac 2026-08-01, the PRIORITY line —
-                        # memory is 59% of the bill): sizes each inc2 container.
+                        # cpu is 67% / memory 33% of the bill, billing page 2026-08-03): sizes each inc2 container.
                         _MB = 1024 * 1024
                         _st_dict["mem_by_stage"] = {
                             _st: {"peak_mb": round(max(_ms) / _MB, 1),
@@ -1001,7 +1001,7 @@ def render_chunk_fanout(s3_prefix: str, files_manifest: list, render_kind: str,
 # below 49152 (48 GiB); validate_deploy guards it. App image + all 4 secrets
 # (promptly-secrets/cloudfront/gemini-vertex/lang-flags) are inherited app-wide.
 @app.function(
-    cpu=48, memory=65536, region="us", timeout=1200, retries=0,  # STALL CAP (Zac GO 2026-08-03 PM): 3000→1800→900, lockstep with run_pipeline_bg. The burst render stage maxed 586s on real traffic, so 1800s is 3x the observed ceiling — safe — while a stalled burst (cpu=48, ~$2.31 at 3000s) is capped at 30min. Watch PLATFORM_TIMEOUT for wall≈1800s.
+    cpu=32, memory=65536, region="us", timeout=1200, retries=0,  # BURST CPU CUT (Zac GO 2026-08-03 PM): cpu 48→32. CPU is 67% of the bill (billing page) and the render is CONCURRENCY-bound, not core-bound — the burst A/B (byfiv3qho) showed the micro leg stuck at 0.8 fps (concurrency-2/chunk) regardless of cores, so 48 cores were never used. 32 cuts the top cost dimension ~33% with minimal speed loss (measured 48 vs 32). Memory STAYS 64GiB (blur peak >32GiB). PRIOR: STALL CAP 3000→1800→900, lockstep with run_pipeline_bg. The burst render stage maxed 586s on real traffic. The burst render stage maxed 586s on real traffic, so 1800s is 3x the observed ceiling — safe — while a stalled burst (cpu=48, ~$2.31 at 3000s) is capped at 30min. Watch PLATFORM_TIMEOUT for wall≈1800s.
     volumes={"/prewarm": prewarm_volume},
     # No enable_memory_snapshot: it is a no-op without @enter (handler imports
     # in-body, per-invocation) and would only add os.environ-freeze surface to a
@@ -1016,7 +1016,7 @@ def render_burst(payload: dict) -> dict:
     # note). The burst renders at cpu=48, so its Remotion --concurrency limit is 48;
     # declaring it lets the tab budget scale up here without exceeding the limit.
     # MUST equal cpu= in this function's decorator — validate_deploy pins the pair.
-    _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "48"
+    _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "32"
     try:
         _H._install_shutdown_handler()  # ledger-flush safety net on this container too
     except Exception:
