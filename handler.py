@@ -4423,14 +4423,42 @@ def transcribe_audio(source_path, keywords=None, language="multi"):
     else:
         print(f"[deepgram] Sending {len(audio_bytes) / 1024:.0f}KB FLAC audio", flush=True)
     options = _deepgram_options(keywords=keywords, language=language)
+    # EXPLICIT, PAYLOAD-SCALED TIMEOUT (Zac 2026-08-03, TRANSCRIPTION:write_timeout
+    # — 3 of 5 Deepgram failures). The call carried NO timeout, so the SDK default
+    # governed. The failure is "The WRITE operation timed out": that is the upload
+    # of the FLAC body failing, not the ASR being slow — and a fixed default write
+    # budget cannot be right for a payload that scales with source length.
+    #
+    # An unset network timeout is a defect on its own terms, so this stands
+    # regardless. THE CAUSAL CLAIM IS INFERENCE until the next occurrence: the
+    # size + elapsed are now logged on every failure precisely so the next one
+    # proves or refutes it rather than being re-argued.
+    _dg_timeout = None
+    try:
+        import httpx as _httpx
+        _mb = max(1.0, len(audio_bytes) / (1024.0 * 1024.0))
+        _dg_timeout = _httpx.Timeout(
+            connect=15.0,
+            write=max(90.0, 30.0 * _mb),   # generous per MB of upload
+            read=300.0,                    # ASR itself; unchanged in spirit
+            pool=15.0,
+        )
+    except Exception:
+        _dg_timeout = None
     _t0 = time.time()
     last_err = None
     for attempt in range(3):
         try:
-            resp = dg.listen.prerecorded.v("1").transcribe_file(
-                {"buffer": audio_bytes, "mimetype": "audio/flac"},
-                options,
-            )
+            _tf = dg.listen.prerecorded.v("1").transcribe_file
+            try:
+                resp = _tf(
+                    {"buffer": audio_bytes, "mimetype": "audio/flac"},
+                    options,
+                    **({"timeout": _dg_timeout} if _dg_timeout is not None else {}),
+                )
+            except TypeError:
+                # An SDK build that does not accept `timeout` must still work.
+                resp = _tf({"buffer": audio_bytes, "mimetype": "audio/flac"}, options)
             result = _parse_deepgram_response(resp)
             print(f"[metric] stage_duration stage=transcribe_file duration_ms={int((time.time()-_t0)*1000)} attempt={attempt+1}", flush=True)
             return result
@@ -4442,7 +4470,17 @@ def transcribe_audio(source_path, keywords=None, language="multi"):
                 time.sleep(backoff)
                 continue
             break
-    raise RuntimeError(f"Deepgram transcription failed after 3 attempts: {last_err}") from last_err
+    # THE EVIDENCE THE NEXT OCCURRENCE NEEDS. A bare "write operation timed out"
+    # cannot distinguish a too-small budget from a genuinely dead socket; the
+    # payload size and the elapsed time can. Carried in the message so it lands
+    # in the job's error_detail, not just in logs nobody retains.
+    _payload_mb = len(audio_bytes) / (1024.0 * 1024.0)
+    _elapsed = time.time() - _t0
+    raise RuntimeError(
+        f"Deepgram transcription failed after 3 attempts "
+        f"(payload {_payload_mb:.1f}MB, {_elapsed:.1f}s elapsed, "
+        f"write budget {getattr(_dg_timeout, 'write', 'sdk-default')}): {last_err}"
+    ) from last_err
 
 
 def _detect_nonenglish_speech(source_path):
