@@ -11912,7 +11912,8 @@ def _post_cuts_response_schema():
 
 
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
-                           recipe_deadline_s=None, media_res_override=None):
+                           recipe_deadline_s=None, media_res_override=None,
+                           source_duration_s=None):
     """Second Gemini call: visual placement on the kept-only transcript.
 
     Deep-thinking budget. thinking_budget=24576 (lowered from a 60000 cap).
@@ -12153,6 +12154,26 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                     )
             # Guarded: the outcome-gate (enforce mode) may have set _degen after
             # the salvage — if so, do NOT return; fall through to the retry below.
+            # OUT-OF-RANGE PLAN → REGENERATE (Zac 2026-08-04, empty-stream root):
+            # a plan that points a zoom at source time the source does not have is
+            # INVALID (the gemini_degen_tail runaway-tail symptom → zoom_pre_extract
+            # empty → 'No video stream found' / video=0.0000s). REJECT it into this
+            # same _degen retry loop so the model REGENERATES a valid plan — never
+            # clamp (clamping silently delivers a different edit). Bounded by the
+            # loop's own retry cap; on exhaustion it raises → deterministic safe
+            # edit (a delivered simpler video), never an unbounded regenerate hang.
+            if _degen is None:
+                _oor_t = _plan_zoom_beyond_source(_parsed, source_duration_s)
+                if _oor_t is not None:
+                    _degen = (f"out-of-range plan: a zoom references source "
+                              f"t={_oor_t:.1f}s past the {float(source_duration_s or 0):.1f}s "
+                              f"source — INVALID plan, regenerating")
+                    _record_divergence(
+                        "recipe_transport",
+                        {"class": "out-of-range plan (runaway tail)",
+                         "zoom_t_s": round(_oor_t, 2), "source_s": round(float(source_duration_s or 0), 2)},
+                        "plan_out_of_range",
+                        reason="zoom source time past EOF — regenerating (root: gemini_degen_tail, QUALITY owns the prompt)")
             if _degen is None:
                 return _parsed
         # Degenerate. Log a BOUNDED snippet (never the full 64K spiral) and
@@ -12690,6 +12711,42 @@ def _reedit_normalize_raw_sfx(emphasis_moments, sound_effects_in):
         out.append({"word_index": _wii, "sound": _e.get("sound"),
                     "why": _e.get("why") if isinstance(_e.get("why"), str) else None})
     return out
+
+
+def _plan_zoom_beyond_source(_plan, source_dur_s):
+    """The offending absolute source time (seconds) if any zoom event in the plan
+    references source time PAST the source end — else None. A plan that points a
+    zoom at time the source does not have is INVALID (a Gemini runaway-tail
+    symptom: the exact class behind zoom_pre_extract_degraded ×4 → empty video /
+    'No video stream found'). Zac 2026-08-04: VALIDATION REJECTS an out-of-range
+    plan and REGENERATES it — clamping would silently deliver a different edit.
+
+    Defensive: an unknown/partial shape never false-positives; only a startMs
+    clearly past the end (>0.5s margin, so a zoom that merely ends near EOF is
+    fine) counts. Zoom startMs are ABSOLUTE source milliseconds (same convention
+    render_multi_clip projects against)."""
+    if not source_dur_s or source_dur_s <= 0 or not isinstance(_plan, dict):
+        return None
+    _limit_ms = float(source_dur_s) * 1000.0 + 500.0
+    try:
+        for _em in (_plan.get("emphasis_moments") or []):
+            if not isinstance(_em, dict):
+                continue
+            _ze = _em.get("zoom_effect")
+            if not isinstance(_ze, dict):
+                continue
+            for _ev in (_ze.get("events") or []):
+                if not isinstance(_ev, dict):
+                    continue
+                try:
+                    _start = float(_ev.get("startMs") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if _start > _limit_ms:
+                    return _start / 1000.0
+    except Exception:
+        return None
+    return None
 
 
 def generate_edit_gemini(
@@ -13436,7 +13493,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         else:
             try:
                 try:
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration)
                 except Exception as _ref_err:
                     if (_video_part_fallback is None
                             or type(_ref_err).__name__ != "ClientError"):
@@ -13459,7 +13516,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         "video_reference_fallback", reason=str(_ref_err)[:180])
                     _video_part = _video_part_fallback
                     _video_part_fallback = None
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration)
             except Exception as _tx_err:
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the

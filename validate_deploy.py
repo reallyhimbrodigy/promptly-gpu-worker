@@ -10182,6 +10182,26 @@ def _regression_corpus_wired():
         "deploy.sh must run the regression corpus on every deploy (a gate that never runs is not a gate)"
 
 
+@check("OUT-OF-RANGE PLAN → REGENERATE, NOT CLAMP (Zac 2026-08-04, empty-stream root): a plan that points a zoom at source time the source does not have is INVALID (the gemini_degen_tail runaway-tail symptom → zoom_pre_extract empty → 'No video stream found' / video=0.0000s). The fix is VALIDATION: reject the plan into _call_gemini_post_cuts's _degen retry loop so the model REGENERATES a valid plan — never clamp (clamping silently ships a different edit than the plan described). Bounded by the loop's existing retry cap; on exhaustion it raises → the deterministic safe edit, never an unbounded regenerate hang. FAILS if the detector or its wiring into the regenerate loop regresses.")
+def _out_of_range_plan_regenerates():
+    import handler as _h
+    assert callable(getattr(_h, "_plan_zoom_beyond_source", None)), "the out-of-range plan detector must exist"
+    # behavioral: out-of-range regenerates, in-range does not, defensive shapes never false-trip
+    _oor = {"emphasis_moments": [{"zoom_effect": {"events": [{"startMs": 25000}]}}]}
+    assert _h._plan_zoom_beyond_source(_oor, 20.0) == 25.0, "a zoom 5s past the source must be flagged"
+    assert _h._plan_zoom_beyond_source({"emphasis_moments": [{"zoom_effect": {"events": [{"startMs": 18000}]}}]}, 20.0) is None, \
+        "an in-range zoom must NOT be flagged (no needless regenerate)"
+    for _junk in (None, {"emphasis_moments": "x"}, {}):
+        assert _h._plan_zoom_beyond_source(_junk, 20.0) is None, "unknown shapes must never false-trip"
+    # wiring: the detector feeds _degen (regenerate), the call threads source duration, and the loop stays CAPPED (raises on exhaustion)
+    src = open("handler.py").read()
+    assert "_oor_t = _plan_zoom_beyond_source(_parsed, source_duration_s)" in src, "the regenerate loop must call the detector"
+    assert "plan_out_of_range" in src, "an out-of-range plan must ledger a divergence for QUALITY (the prompt root)"
+    assert "source_duration_s=duration" in src, "the call site must thread the source duration into the post-cuts call"
+    assert 'raise RuntimeError(f"Gemini post-cuts-call degenerate after retry' in src, \
+        "the regenerate loop must stay CAPPED — raise (→ safe edit) on exhaustion, never an unbounded hang"
+
+
 @check("KEYTERM CAP + NEVER RETRY A 4xx (Zac 2026-08-03, forged from `DeepgramApiError: Keyterm limit exceeded (max 500 tokens)` killing a screenplay-length source): Deepgram caps `keyterm` at 500 TOKENS total and 400s the WHOLE request past it, so ~200 harvested proper nouns killed the job. _cap_keyterms drops screenplay scaffolding (FADE/INT/EXT/CUT/MONTAGE — Title-Case page furniture the proper-noun heuristic harvests but nobody speaks, so boosting it actively biases the recogniser) and truncates to a 450-token budget; the extractor now emits FREQUENCY-ORDERED so truncation sheds the rarest term rather than an arbitrary tail. SECOND BUG, same job: _deepgram_is_retriable_error matched a bare substring \"500\" — which appears in the phrase \"max 500 tokens\" — so a deterministic 400 was retried 3x, tripling the latency of a guaranteed failure. Status numbers are now word-boundary matched and deterministic signatures are checked FIRST.")
 def _check_keyterm_cap_and_4xx():
     import handler as _h
