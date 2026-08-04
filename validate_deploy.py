@@ -8105,6 +8105,66 @@ def _mg_entrance_fingerprint():
     return "sha256:" + _hl.sha256("\n====\n".join(_parts).encode("utf-8")).hexdigest()
 
 
+@check("FINAL-END WORD INVARIANT (Zac 2026-08-03, RULE-1): a delivered video must never stop MID-WORD. Measured on real deliveries: 10 of 27 (37%) ended with the final cut landing strictly INSIDE a word the edit KEPT, 0.05-1.22s of speech still to come — and plan-sum == rendered-duration to within 0.01s, so it reached the user. The word-aligned cutter cannot produce this (padded_end = word_group[-1]['_end'], a word END by construction) and the tail-pad cannot rescue it (it only ever EXTENDS an already-aligned boundary), so the property is enforced on the FINAL cuts array where every path converges. This gate pins the enforcement in place AND exercises the predicate in BOTH directions — a check that cannot fail on a mid-word end proves nothing.")
+def _final_end_word_invariant():
+    import re as _re2
+    _src = open("handler.py").read()
+    assert "final_end_snapped_to_word_end" in _src, \
+        "the final-end invariant is gone — videos can stop mid-word again"
+    assert _re2.search(r'float\(_w\.get\("start"\) or 0\.0\) < _fe\s*\n?\s*< float\(_w\.get\("end"\) or 0\.0\)', _src), \
+        "the invariant must test STRICTLY INSIDE (start < end < end); a <= test would " \
+        "snap boundaries that are already correct"
+    assert "<=" not in _re2.search(r"_sw = next\((.*?)\), None\)", _src, _re2.S).group(1), \
+        "the straddle test must stay STRICT — no <= creeping in"
+    assert '_lc["source_end"] = round(_fe, 4)' in _src, \
+        "must snap OUTWARD to the word END — keeping the word whole is the fix"
+    assert "for _ in range(8):" in _src, \
+        "the snap must iterate to a FIXED POINT: words OVERLAP, so snapping to one " \
+        "word's end can land inside the next. Verified on real data — a single-pass " \
+        "snap left 5 of 12 defect jobs still mid-word; the fixed point cleared 73/73."
+
+    # the fixed-point property itself, on OVERLAPPING words — the case a
+    # single-pass snap silently fails.
+    def _snap(end, words):
+        for _ in range(8):
+            sw = next((w for w in words if w["start"] < end < w["end"]), None)
+            if sw is None:
+                return end
+            end = sw["end"]
+        return end
+    _ov = [{"start": 0.0, "end": 1.0}, {"start": 0.9, "end": 1.8},
+           {"start": 1.7, "end": 2.4}]
+    assert _snap(0.5, _ov) == 2.4, "must chain through OVERLAPPING words to a clean edge"
+    assert not any(w["start"] < _snap(0.5, _ov) < w["end"] for w in _ov), \
+        "the fixed point must not land inside any word"
+    assert _snap(1.85, _ov) == 2.4, "must snap from inside the last overlapping word"
+    _gap = [{"start": 0.0, "end": 1.0}, {"start": 1.2, "end": 2.0}]
+    assert _snap(1.1, _gap) == 1.1, "must LEAVE a correct gap-landing end untouched"
+
+    # NEVER PAST THE SOURCE. An end beyond the available frames is how a trailing
+    # both_stream_hole is manufactured, and the tail-pad beside this clamps to
+    # _vd for the same reason.
+    assert "_srcmax = float(duration or 0.0)" in _src, \
+        "the snap must clamp to the SOURCE DURATION — an unbounded extension can " \
+        "request frames that do not exist and trip a trailing both_stream_hole"
+    assert "_fe = min(float(_hit.get(\"start\") or _fe0), _srcmax)" in _src, \
+        "when the word end exceeds the source, drop the word at its START — still " \
+        "never mid-word, and never past the source"
+    assert "_record_divergence" in _src.split("final_end_snapped_to_word_end")[0][-1200:], \
+        "the snap must be RECORDED — a silent correction hides the rate"
+
+    # BOTH DIRECTIONS. The predicate is the whole fix, so exercise it.
+    def _lands_inside(end, words):
+        return any(float(w["start"]) < end < float(w["end"]) for w in words)
+    _w = [{"start": 0.0, "end": 1.0}, {"start": 1.2, "end": 2.0}]
+    assert _lands_inside(1.5, _w), "must DETECT an end strictly inside a word"
+    assert _lands_inside(0.5, _w), "must DETECT an end inside the first word"
+    assert not _lands_inside(1.1, _w), "must NOT fire in the gap between words"
+    assert not _lands_inside(2.0, _w), "must NOT fire exactly ON a word end"
+    assert not _lands_inside(0.0, _w), "must NOT fire exactly ON a word start"
+    assert not _lands_inside(2.5, _w), "must NOT fire past the last word (tail-pad)"
+
+
 @check("ONE-CLOCK RENDER BRANCH (Zac 2026-08-02, RULE-1): the render leg emits a single [RENDERCLOCK] line whose children RECONCILE TO THE PARENT BY CONSTRUCTION — total_ms = bundle+browser+select+render+unaccounted, and render_ms = frames_ms+stitch_ms. Forged because today's render numbers were five honest measurements that did not NEST, and 130s once vanished inside a stage with no report showing a hole. unaccounted_ms must be COMPUTED as total minus the parts, never asserted, so a hole cannot hide — it shows up as unaccounted growing. This gate fails the deploy if the line loses a field or if unaccounted stops being derived.")
 def _one_clock_render_branch():
     import os as _os, re as _re2

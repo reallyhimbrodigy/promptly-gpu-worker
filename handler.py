@@ -2426,6 +2426,93 @@ def fetch_user_style_profile(user_id):
         return None
 
 
+# ─── EXPORT-WEIGHTED PROFILE (Zac 2026-08-03) ───────────────────────────────
+# The stored profile records what THIS PIPELINE CHOSE on every successful
+# render. That is our own output fed back to us as evidence about the user —
+# and 87% of delivered videos are never exported, 68% never even opened, so
+# "what we gave them" is not "what they liked".
+#
+# EXPORT IS THE ONLY ACT THE USER ACTUALLY TAKES. A profile built from the
+# videos they KEPT is genuine accepted taste. The export events already exist
+# (analytics_events.export_completed, props->>job_id), so this needs no new
+# instrumentation — only the join nobody had made.
+#
+# Falls back to the delivery-based profile when the user has fewer than
+# _EXPORT_PROFILE_MIN exports, and SAYS WHICH ONE IT USED in the block, because
+# a personalisation section that cannot tell you where its evidence came from
+# is how the pacing/color_effect falsehoods survived in the first place.
+_EXPORT_PROFILE_MIN = 2          # below this, exports are noise, not taste
+
+
+def fetch_exported_plans(user_id, limit=25):
+    """The edit plans of videos this user actually EXPORTED. [] when none."""
+    if supabase is None or not user_id:
+        return []
+    try:
+        ev = supabase.table("analytics_events") \
+            .select("props") \
+            .eq("event", "export_completed") \
+            .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
+            .limit(limit) \
+            .execute()
+        job_ids = []
+        for r in (ev.data or []):
+            jid = (r.get("props") or {}).get("job_id")
+            if jid and jid not in job_ids:
+                job_ids.append(jid)
+        if not job_ids:
+            print(f"[user-style] user={str(user_id)[:8]}… has NO exports — "
+                  f"falling back to the delivery-based profile", flush=True)
+            return []
+        jr = supabase.table("video_jobs") \
+            .select("id,edit_recipe") \
+            .in_("id", job_ids) \
+            .execute()
+        plans = []
+        for row in (jr.data or []):
+            er = row.get("edit_recipe") or {}
+            pl = er.get("plan") if isinstance(er.get("plan"), dict) else er
+            if isinstance(pl, dict) and pl:
+                plans.append(pl)
+        print(f"[user-style] EXPORT-WEIGHTED: {len(plans)} kept video(s) for "
+              f"user={str(user_id)[:8]}… (of {len(job_ids)} export events)", flush=True)
+        return plans
+    except Exception as e:
+        print(f"[user-style] export-weighted fetch failed ({e}) — "
+              f"falling back to the delivery-based profile", flush=True)
+        return []
+
+
+def build_profile_from_plans(plans):
+    """Counters in the SAME shape as the stored profile, but counted only over
+    plans the user KEPT. Same shape means format_user_style_section needs no
+    special case and the retired-type filter still applies."""
+    prof = {"caption_styles": {}, "transitions": {}, "text_overlay_variants": {},
+            "motion_graphics": {}, "zoom_types": {}, "recent_vibes": [],
+            "total_videos": len(plans)}
+
+    def bump(d, k):
+        if k:
+            d[str(k)] = round(float(d.get(str(k)) or 0) + 1.0, 3)
+
+    for pl in plans:
+        bump(prof["caption_styles"], pl.get("caption_style"))
+        for tr in (pl.get("transitions") or []):
+            if isinstance(tr, dict):
+                bump(prof["transitions"], tr.get("type"))
+        for tov in (pl.get("text_overlays") or []):
+            if isinstance(tov, dict):
+                bump(prof["text_overlay_variants"], tov.get("variant"))
+        for mg in (pl.get("motion_graphics") or []):
+            if isinstance(mg, dict):
+                bump(prof["motion_graphics"], mg.get("type"))
+        for em in (pl.get("_emphasis_moments") or pl.get("emphasis_moments") or []):
+            if isinstance(em, dict):
+                bump(prof["zoom_types"], (em.get("zoom_effect") or {}).get("type"))
+    return prof
+
+
 # ─── Platform style pulse (launch nudge · pre-freeze F2) ────────────────────
 #
 # Counter for day-one caption monoculture (burn-in F2: 3/3 fresh-history jobs
@@ -2463,10 +2550,19 @@ def fetch_platform_style_pulse():
             .limit(_PLATFORM_PULSE_WINDOW * 4)
             .execute()
         )
+        # RETIRED-NAME GUARD (Zac 2026-08-03). This window is STORED HISTORY —
+        # rows outlive the code that wrote them — and it is read straight back
+        # into the prompt as a nudge. A style retired after these rows landed
+        # would be recommended to the model as a platform trend it cannot
+        # render. Same class as the user-profile drift (IconLabel x27,
+        # Passage/EditorialPop/CinematicLetterpress), which is why the same
+        # filter belongs on every accumulating store that feeds a prompt.
+        # Currently latent — the live 50-row window is clean — so this is a
+        # guard, not a repair.
         styles = []
         for row in (result.data or []):
             s = (row or {}).get("caption_style")
-            if s and s != "none":
+            if s and s != "none" and s in VALID_CAPTION_STYLES:
                 styles.append(str(s))
             if len(styles) >= _PLATFORM_PULSE_WINDOW:
                 break
@@ -2656,7 +2752,19 @@ def check_concurrency_gate(user_id, job_id, tier=None):
     }
 
 
-def format_user_style_section(profile):
+_PROV_EXPORTED = """These are the categories from the videos this user actually KEPT — they
+exported them, which is the ONE act in the product that signals approval.
+This is real accepted taste. Weight it accordingly."""
+
+_PROV_DELIVERED = """These are the categories THIS PIPELINE CHOSE for their past videos — NOT
+choices the user made, and NOT evidence of approval: the user supplies a vibe,
+the system picks every caption style, transition, zoom and graphic, and most
+delivered videos are never exported. This user has too few exports to build a
+kept-video profile, so treat the list as WEAK — a record of what they have been
+given, never a reason to repeat it."""
+
+
+def format_user_style_section(profile, from_exports=False):
     """Render a prompt section from a fetched profile. Empty string if too thin."""
     if not isinstance(profile, dict):
         return ""
@@ -2684,32 +2792,51 @@ def format_user_style_section(profile):
             return "(no data)"
         return ", ".join(f"{k} ({v:.1f})" for k, v in items)
 
-    _caps = _fmt_top(_top_counts("caption_styles", 3))
-    _trans = _fmt_top(_top_counts("transitions", 3))
-    _pacing = _fmt_top(_top_counts("pacings", 3))
-    _color = _fmt_top(_top_counts("color_effects", 3))
+    def _live_only(items, valid):
+        """Drop RETIRED component types before they are taught as taste.
+
+        Measured on 200 stored profiles (Zac 2026-08-03): 29 carried a motion
+        graphic that no longer exists — IconLabel x27, Toggle, NumberTicker —
+        plus StageZoom on 3 and the retired caption styles Passage,
+        EditorialPop and CinematicLetterpress on 6. One profile's ENTIRE caption
+        history was a single retired style. Teaching the model that a user
+        prefers a component the renderer cannot produce is a confident
+        falsehood that can only end in a wasted pick or a silent fallback."""
+        return [(k, v) for k, v in items if k in valid]
+
+    _caps = _fmt_top(_live_only(_top_counts("caption_styles", 6), VALID_CAPTION_STYLES)[:3])
+    _trans = _fmt_top(_live_only(_top_counts("transitions", 6), VALID_TRANSITION_TYPES)[:3])
+    # PACING and COLOR EFFECTS are DELIBERATELY NOT SHOWN (Zac 2026-08-03).
+    # Both are PYTHON CONSTANTS, not user choices, so presenting them as learned
+    # taste was a FALSE SIGNAL about a specific user — the worst place to put one:
+    #   pacing       hardcoded "fast" in the cuts layer -> 392/392 plans "fast",
+    #                including 7/7 "Professional corporate style"
+    #   color_effect force-set to None (the feature was removed) -> 392/392 None
+    # So every returning user was told "you prefer FAST pacing and no colour
+    # grade", whatever they had actually accepted. Code GUARANTEES both values,
+    # which by the prompt-delete test means the model's understanding of them is
+    # irrelevant: delete. Restore either line only if the field becomes a real
+    # per-user choice again.
     _tov = _fmt_top(_top_counts("text_overlay_variants", 3))
-    _mgs = _fmt_top(_top_counts("motion_graphics", 3))
-    _zooms = _fmt_top(_top_counts("zoom_types", 3))
+    _mgs = _fmt_top(_live_only(_top_counts("motion_graphics", 6), VALID_MG_TYPES)[:3])
+    _zooms = _fmt_top(_live_only(_top_counts("zoom_types", 6), VALID_ZOOM_TYPES)[:3])
     _avg_em = float(profile.get("avg_emphasis_per_30s") or 0)
     _avg_mg = float(profile.get("avg_mgs_per_video") or 0)
     _recent_vibes = profile.get("recent_vibes") or []
     _rv_tail = ", ".join(f'"{v}"' for v in _recent_vibes[-5:]) if _recent_vibes else "(none)"
+    _provenance = _PROV_EXPORTED if from_exports else _PROV_DELIVERED
+    _src_label = "from videos they KEPT" if from_exports else "from videos we DELIVERED"
 
     return f"""
 
-=== THIS USER'S PREFERRED STYLE (learned from their past {_total} videos) ===
+=== THIS USER'S STYLE ({_src_label} — {_total} video(s)) ===
 
-These are the aesthetic CATEGORIES this user has accepted over time —
-which caption style they tend toward, which transition types, which zoom
-personalities. Recency-weighted counts — higher numbers = more frequent
+{_provenance} Recency-weighted counts — higher numbers = more frequent
 / more recent picks. Use these as TASTE signals about WHICH types to
 reach for, NOT as quantity targets.
 
   Caption styles:         {_caps}
   Transitions:            {_trans}
-  Pacing:                 {_pacing}
-  Color effects:          {_color}
   Text overlay variants:  {_tov}
   Motion graphics:        {_mgs}
   Zoom types:             {_zooms}
@@ -5574,7 +5701,18 @@ def _build_post_cuts_prompt(
     _usr_block = ""
     _usp = dict(user_style_profile or {})
     if _usp and int(_usp.get("total_videos") or 0) >= 3:
-        _usr_block = format_user_style_section(_usp)
+        # Prefer taste built from videos the user KEPT over videos we merely
+        # delivered. Falls back silently to the delivered profile — and the
+        # block itself states which evidence it used.
+        # user_id is not a parameter here, but the profile ROW carries it as a
+        # column — so the join needs no signature change.
+        _uid = _usp.get("user_id")
+        _exported_plans = fetch_exported_plans(_uid) if _uid else []
+        if len(_exported_plans) >= _EXPORT_PROFILE_MIN:
+            _usr_block = format_user_style_section(
+                build_profile_from_plans(_exported_plans), from_exports=True)
+        else:
+            _usr_block = format_user_style_section(_usp)
 
     # Chronological caption-style rotation — independent of the
     # total_videos gate above. Empty list → empty string → no block leaked
@@ -6871,6 +7009,40 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
             k: v for k, v in prior_plan.items()
             if not (isinstance(k, str) and k.startswith("_"))
         }
+        # RETIRED-NAME GUARD (Zac 2026-08-03). A prior plan is STORED HISTORY
+        # and is injected here as the SOFT DEFAULT — the strongest position in
+        # the prompt. A plan written before a component was retired would hand
+        # the model a starting state containing something the renderer can no
+        # longer produce, and "keep what wasn't addressed" would preserve it.
+        # Drop those entries rather than ask the model to reason about them.
+        _dropped_stale = []
+        _mgs_prior = _sanitized_prior.get("motion_graphics")
+        if isinstance(_mgs_prior, list):
+            _kept = []
+            for _m in _mgs_prior:
+                _t = _m.get("type") if isinstance(_m, dict) else None
+                if _t and _t not in VALID_MG_TYPES:
+                    _dropped_stale.append(_t)
+                else:
+                    _kept.append(_m)
+            _sanitized_prior["motion_graphics"] = _kept
+        _cs_prior = _sanitized_prior.get("caption_style")
+        if _cs_prior and _cs_prior not in VALID_CAPTION_STYLES and _cs_prior != "none":
+            _dropped_stale.append(_cs_prior)
+            _sanitized_prior.pop("caption_style", None)
+        _tr_prior = _sanitized_prior.get("transitions")
+        if isinstance(_tr_prior, list):
+            _keptt = []
+            for _tr in _tr_prior:
+                _t = _tr.get("type") if isinstance(_tr, dict) else None
+                if _t and _t not in VALID_TRANSITION_TYPES:
+                    _dropped_stale.append(_t)
+                else:
+                    _keptt.append(_tr)
+            _sanitized_prior["transitions"] = _keptt
+        if _dropped_stale:
+            print(f"[guided-redraft] dropped RETIRED component(s) from the prior "
+                  f"plan before injection: {sorted(set(_dropped_stale))}", flush=True)
         _direction = str(prior_plan_change_request or "").strip()
         _direction_line = (
             f"USER'S DIRECTION FOR THIS REDRAFT: {_direction}\n\n"
@@ -16956,6 +17128,102 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                "the timeline without self-reporting")
             except Exception as _usa_err:
                 print(f"[divergence] split-registry check error: {_usa_err}", flush=True)
+            # ── FINAL-END WORD INVARIANT (Zac 2026-08-03) ──────────────────
+            # MEASURED: 10 of 27 delivered videos (37%) ended MID-WORD — the
+            # final cut landing strictly inside a word the edit KEPT, with
+            # 0.05-1.22s of speech still to come. Verified against the render:
+            # plan sum == rendered duration to within 0.01s on every sampled
+            # job, so this reaches the user. Zac heard it before we measured it.
+            #
+            # The word-aligned cutter CANNOT produce this — it sets
+            # padded_end = word_group[-1]["_end"] (~line 22124), a word END by
+            # construction, and the tail-pad then extends 0.5s past it (the
+            # clean cohort shows exactly that -0.50s signature). These ends came
+            # from somewhere else, and the tail-pad cannot rescue them because
+            # it only ever EXTENDS an already-aligned boundary.
+            #
+            # So enforce the property directly on the FINAL array, where every
+            # path converges: an end may sit before a word, after a word, or at
+            # the true video end — never strictly INSIDE one. Snap outward to
+            # the word's end (keep the word whole) since the speech was audible
+            # and abandoning a half-word is the defect being fixed.
+            try:
+                _fw = edit_plan.get("_deepgram_words") or []
+                if final_cuts and _fw:
+                    _lc = max(final_cuts,
+                              key=lambda c: float(c.get("source_end") or 0.0))
+                    _fe0 = float(_lc.get("source_end") or 0.0)
+                    _fe = _fe0
+                    _hit = None
+                    # WORDS OVERLAP, so ONE snap is not enough: snapping to word
+                    # A's end can land inside word B. Caught in verification —
+                    # a single-pass snap left 5 of 12 real defect jobs STILL
+                    # inside a word. Iterate to a fixed point, bounded so a
+                    # pathological transcript can never spin.
+                    for _ in range(8):
+                        _sw = next((_w for _w in _fw
+                                    if float(_w.get("start") or 0.0) < _fe
+                                    < float(_w.get("end") or 0.0)), None)
+                        if _sw is None:
+                            break
+                        _hit = _hit or _sw
+                        _fe = float(_sw.get("end") or 0.0)
+                    # NEVER EXTEND PAST THE SOURCE. The tail-pad this sits beside
+                    # clamps to _vd for exactly this reason; the first version of
+                    # this snap did not, and an end beyond the available frames is
+                    # precisely how a TRAILING both_stream_hole is manufactured.
+                    # (Investigated after 5b3cc914 tripped both_stream_hole
+                    # [[6.0, 6.733333]] 4 minutes after this shipped. That CLASS
+                    # predates the fix — ac9be3a2 hit it ~23h earlier — so it is
+                    # not confirmed as a regression, but an unbounded extension is
+                    # a defect whether or not it caused that trip.)
+                    _srcmax = float(duration or 0.0)
+                    if _srcmax > 0 and _fe > _srcmax:
+                        # Cannot keep the word whole without running off the end,
+                        # so drop it cleanly at its START — still never mid-word,
+                        # and never past the source.
+                        _fe = min(float(_hit.get("start") or _fe0), _srcmax)
+                        if _fe <= _fe0:
+                            _fe = _fe0          # nothing safe to do; leave as-is
+                    if _hit is not None and _fe > _fe0:
+                        _lc["source_end"] = round(_fe, 4)
+                        _record_divergence(
+                            "cut_boundary",
+                            {"source_end_s": round(_fe0, 4),
+                             "word": str(_hit.get("word") or "")[:40]},
+                            "final_end_snapped_to_word_end",
+                            final={"source_end_s": round(_fe, 4)},
+                            reason="final cut landed INSIDE a kept word — the "
+                                   "video would have stopped mid-word",
+                        )
+                        print(f"[final-end] snapped {_fe0:.3f}->{_fe:.3f}s "
+                              f"(was mid-word '{_hit.get('word')}')", flush=True)
+                    # LIVE PROOF SAID THIS DID NOT TAKE (Zac 2026-08-04). Four of
+                    # ten deliveries in the 27 minutes after 8360a93 still ended
+                    # mid-word, and replaying this same snap on their PERSISTED
+                    # transcript says it should have moved them. The block is not
+                    # behind a conditional (AST-checked) and _deepgram_words was
+                    # populated (caption_segments/sfx/emphasis all derive from it
+                    # and all fired), so the snap ran and found no straddle in the
+                    # list it was given — while the list we PERSIST shows one.
+                    # That is a two-lists problem, and guessing which is wrong is
+                    # how the last three false starts happened. So: say so, out
+                    # loud, on every job. UNCONDITIONAL — a diagnostic that only
+                    # prints on the bad path cannot prove the good path.
+                    if _hit is None and final_cuts:
+                        _near = min(
+                            (abs(float(_w.get("end") or 0.0) - _fe0) for _w in _fw),
+                            default=None)
+                        print(
+                            f"[final-end] no straddle: end={_fe0:.4f} words={len(_fw)} "
+                            f"nearest_word_end_delta="
+                            + (f"{_near:.4f}" if _near is not None else "n/a"),
+                            flush=True)
+            except Exception as _fe_err:
+                # Never let the guard cost the render — a mid-word ending is bad,
+                # a failed job is worse.
+                print(f"[final-end] invariant check skipped: {_fe_err}", flush=True)
+
             edit_plan["cuts"] = final_cuts
             for _legacy_field in (
                 "teal_orange", "beat_sync", "video_profile", "frame_layout",
@@ -17674,7 +17942,18 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
                 continue
             _mt = str(_mg.get("type") or "")
             if _mt not in VALID_MG_TYPES:
-                continue   # render_only graceful type-drop also catches this
+                # render_only graceful type-drop also catches this. The drop is
+                # SAFE (the renderer never sees it, and MG_MAP is null-guarded
+                # anyway) but it was SILENT — and on a RE-EDIT that is a
+                # component the user asked to keep, vanishing without a trace.
+                # Record it so the rate is countable. (Zac 2026-08-03.)
+                _record_divergence(
+                    "motion_graphic", {"type": _mt, "index": _i},
+                    "dropped_unknown_type",
+                    reason="type not in VALID_MG_TYPES — retired component, or a "
+                           "stored plan that predates its removal",
+                )
+                continue
             _props = _mg.get("props") or {}
             if not _props:
                 _record_divergence(
@@ -27099,28 +27378,32 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _vf = (f"trim=start_frame={_start_i}:end_frame={_src_end},"
                        f"setpts=(PTS-STARTPTS)/{_pbr_f:.6f},fps={source_fps:g}")
             _out_path = os.path.join(work_dir, f"trans_{_idx}_{_side}.mp4")
-            subprocess.run([
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-i", source_path, "-vf", _vf, "-frames:v", str(_dur_frames_i),
-                "-c:v", "libx264", "-preset", "fast", "-crf", "14",
-                # inc2 render_burst: PIN x264 threads (never auto). This transition
-                # pre-extract feeds Remotion frame-by-frame, so thread-dependent
-                # bytes would decode to different frames and break byte-identity
-                # across cpu counts (cpu=48 burst vs cpu=16). Same pin as the
-                # per-clip pre-extract sibling above.
-                "-x264-params", f"threads={_X264_ENCODE_THREADS}",
-                "-pix_fmt", "yuv420p", "-g", str(_gop), "-keyint_min", str(_gop),
-                "-sc_threshold", "0", "-video_track_timescale", "90000",
-                "-movflags", "+faststart", "-an", _out_path,
-            ], check=True)
-            # DEGRADE, NOT FATAL (Zac 2026-08-03): this transition pre-extract
-            # MIRRORS the zoom one (1958f2b), so it can emit the same stream-less
-            # mp4 that would die at the compositor three rungs later. Probe before
-            # handoff; if unreadable, leave clip{side}Src UNSET — the transition
-            # falls back to reading the original source at clip{side}StartFromFrames
-            # (the pre-1958f2b path: a slower @remotion/media read, but correct and
-            # timeline-neutral, since the pre-extract is purely a speed optimisation).
-            # Ledger the defect loudly; one bad layer must never fail the render.
+            # BOTH failure modes, from both branches (merged 2026-08-04):
+            #   smoothness — ffmpeg RAISES  -> degrade, never die
+            #   errors     — ffmpeg exits 0 but writes a STREAM-LESS file
+            #                (rc==0 is not success; that is the class that died
+            #                at the compositor three ladder rungs later)
+            try:
+                subprocess.run([
+                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                    "-i", source_path, "-vf", _vf, "-frames:v", str(_dur_frames_i),
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "14",
+                    # inc2 render_burst: PIN x264 threads (never auto). This
+                    # transition pre-extract feeds Remotion frame-by-frame, so
+                    # thread-dependent bytes would decode to different frames and
+                    # break byte-identity across cpu counts (cpu=48 vs cpu=16).
+                    "-x264-params", f"threads={_X264_ENCODE_THREADS}",
+                    "-pix_fmt", "yuv420p", "-g", str(_gop), "-keyint_min", str(_gop),
+                    "-sc_threshold", "0", "-video_track_timescale", "90000",
+                    "-movflags", "+faststart", "-an", _out_path,
+                ], check=True)
+            except Exception as _e:
+                # DEGRADE, NEVER DIE. This is a SPEED optimisation — the renderer
+                # falls back to the whole source + trimBefore when clip{Side}Src is
+                # absent, which is the pre-existing behaviour.
+                _trans.pop(f"clip{_side}Src", None)
+                _logs.append(f"{_side}=DEGRADED({type(_e).__name__})")
+                continue
             if not _pre_extract_readable(_out_path):
                 _record_divergence(
                     "render",
