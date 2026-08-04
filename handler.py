@@ -14485,9 +14485,17 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     f"{len(normalized_remove_words)} Gemini removals",
                     flush=True,
                 )
+                # TRUNCATE, NEVER PAD (Zac 2026-08-04). ONE ceiling here fixes
+                # all three boundary sites inside the cutter at once — the
+                # tail-pad cap (_cap = _vd), the word filter (_start < _vd) and
+                # the final per-clip clamp (e > _vd) — because every one of them
+                # is written against _vd. Passing the CONTENT duration instead of
+                # the container's claim is therefore the whole fix, not a patch
+                # at each site.
+                _content_vd = probe_content_duration(video_path, video_duration)
                 validated_cuts, _removed_word_indices, _removed_word_reasons = build_clips_from_words(
                     _dg_words, normalized_remove_words,
-                    video_duration=video_duration,
+                    video_duration=_content_vd,
                     vad_silences=list(_VAD_SILENCES_LAST),
                     max_compress=_PACING_MAX_COMPRESS,
                     within_clip_15ms=_WITHIN_CLIP_DEADAIR,
@@ -17177,7 +17185,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # predates the fix — ac9be3a2 hit it ~23h earlier — so it is
                     # not confirmed as a regression, but an unbounded extension is
                     # a defect whether or not it caused that trip.)
-                    _srcmax = float(duration or 0.0)
+                    # Same ceiling as the cutter: the CONTENT end, not the
+                    # container's claim. Snapping a boundary out to a word end
+                    # that the streams do not actually reach is how the tail gets
+                    # padded with a held frame over silence.
+                    _srcmax = float(probe_content_duration(video_path, duration) or 0.0)
                     if _srcmax > 0 and _fe > _srcmax:
                         # Cannot keep the word whole without running off the end,
                         # so drop it cleanly at its START — still never mid-word,
@@ -21074,6 +21086,82 @@ def probe_duration(file_path):
         except Exception:
             continue
     return None
+
+
+_CONTENT_DUR_CACHE = {}
+
+
+def probe_content_duration(file_path, declared=None):
+    """TRUNCATE, NEVER PAD (Zac 2026-08-04).
+
+    probe_duration() returns the CONTAINER's declared duration first, and a
+    container routinely claims more than its streams actually carry. When the
+    timeline believes that number, it asks for frames the clip has no content
+    for and the encoder HOLDS THE LAST FRAME to fill the gap — which is exactly
+    the specimen behind both_stream_hole: 180 of 202 frames real, the final 22 a
+    frozen frame over silence at -60.4 dB against -16.5 dB for the rest, video
+    and audio padded to the same wrong length.
+
+    This returns the end of the REAL CONTENT — the last packet's presentation
+    time plus its own duration — taken as the MINIMUM across the video and audio
+    streams, because a hole in either one is a hole in the output. Same rule as
+    the stream-less pre-extract, differing only in degree: slightly over-running
+    pads a held frame, far over-running yields an empty file. One ceiling covers
+    both.
+
+    Reads only the last ~5s of packets (no decode) so it costs milliseconds.
+    Returns the declared duration unchanged if the probe cannot answer — this
+    may only ever SHORTEN a timeline, never lengthen one, and never fail a job.
+    """
+    _d = float(declared or 0.0) or float(probe_duration(file_path) or 0.0)
+    if _d <= 0:
+        return _d
+    _key = (file_path, round(_d, 3))
+    if _key in _CONTENT_DUR_CACHE:
+        return _CONTENT_DUR_CACHE[_key]
+    _ends = []
+    for _stream in ("v:0", "a:0"):
+        try:
+            _args = ["ffprobe", "-v", "error", "-select_streams", _stream,
+                     "-show_entries", "packet=pts_time,duration_time",
+                     "-of", "csv=p=0"]
+            if _d > 6.0:
+                _args += ["-read_intervals", f"{_d - 5.0:.3f}%+#100000"]
+            _args += [file_path]
+            _out = subprocess.run(_args, capture_output=True, text=True,
+                                  timeout=30).stdout
+            _last = None
+            for _line in _out.splitlines():
+                _parts = _line.strip().split(",")
+                if not _parts or not _parts[0]:
+                    continue
+                try:
+                    _pts = float(_parts[0])
+                except ValueError:
+                    continue
+                try:
+                    _pdur = float(_parts[1]) if len(_parts) > 1 and _parts[1] else 0.0
+                except ValueError:
+                    _pdur = 0.0
+                _end = _pts + max(0.0, _pdur)
+                if _last is None or _end > _last:
+                    _last = _end
+            if _last and _last > 0:
+                _ends.append(_last)
+        except Exception:
+            continue
+    if not _ends:
+        _CONTENT_DUR_CACHE[_key] = _d
+        return _d
+    _content = min(_ends)
+    # Only ever SHORTEN, and ignore sub-frame noise.
+    _out_val = _content if 0 < _content < _d - 0.02 else _d
+    if _out_val < _d:
+        print(f"[content-dur] container claims {_d:.3f}s, streams carry "
+              f"{_content:.3f}s -> timeline truncated to content "
+              f"(pad of {_d - _content:.3f}s prevented)", flush=True)
+    _CONTENT_DUR_CACHE[_key] = _out_val
+    return _out_val
 
 
 def probe_audio_sample_rate(file_path):

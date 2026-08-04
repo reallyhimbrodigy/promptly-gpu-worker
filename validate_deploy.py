@@ -8105,6 +8105,51 @@ def _mg_entrance_fingerprint():
     return "sha256:" + _hl.sha256("\n====\n".join(_parts).encode("utf-8")).hexdigest()
 
 
+@check("TRUNCATE, NEVER PAD (Zac 2026-08-04, RULE-1): when the final boundary runs past what the streams actually carry, the timeline must shorten to the content — never ask for frames that do not exist. The forensic specimen behind both_stream_hole was 180 of 202 frames real, the final 22 a HELD FRAME over silence at -60.4 dB against -16.5 dB for the rest, video and audio padded to the same wrong length. Root cause: probe_duration() returns the CONTAINER's declared duration first, and a container routinely claims more than its streams carry. Same family as the stream-less pre-extract, differing only in degree — slightly over-running pads a held frame, far over-running yields an empty file. This gate pins the content ceiling at BOTH boundary sites and exercises the only-ever-shorten property in both directions.")
+def _truncate_never_pad():
+    _src = open("handler.py").read()
+    assert "def probe_content_duration(" in _src, \
+        "the content ceiling is gone — the timeline can pad past the streams again"
+    assert "video_duration=_content_vd" in _src, \
+        "the cutter must receive the CONTENT duration, not the container's claim: " \
+        "_vd is the single ceiling behind the tail-pad cap, the word filter AND the " \
+        "final per-clip clamp, so passing it wrong breaks all three at once"
+    assert "probe_content_duration(video_path, duration)" in _src, \
+        "the final-end snap must clamp to the CONTENT end too — snapping out to a " \
+        "word end the streams never reach is exactly how the tail gets padded"
+    assert "min(_ends)" in _src, \
+        "the ceiling must be the MINIMUM across video and audio: a hole in either " \
+        "stream is a hole in the output (both_stream_hole names both)"
+
+    # THE PROPERTY, BOTH DIRECTIONS. A ceiling that cannot shorten proves nothing,
+    # and one that can LENGTHEN would invent frames instead of dropping them.
+    def _ceiling(declared, v_end, a_end):
+        ends = [e for e in (v_end, a_end) if e and e > 0]
+        if not ends:
+            return declared
+        content = min(ends)
+        return content if 0 < content < declared - 0.02 else declared
+
+    # the specimen: container claims 6.733, streams carry 6.0 -> truncate
+    assert abs(_ceiling(6.733, 6.0, 6.0) - 6.0) < 1e-9, \
+        "must TRUNCATE to the content end (the 0.733s specimen hole)"
+    # one short stream is enough — both_stream_hole needs only one to run out
+    assert abs(_ceiling(6.733, 6.733, 6.0) - 6.0) < 1e-9, \
+        "a short AUDIO stream must truncate too — min across streams, not max"
+    assert abs(_ceiling(6.733, 6.0, 6.733) - 6.0) < 1e-9, \
+        "a short VIDEO stream must truncate too"
+    # NEVER LENGTHEN: a container that under-claims must be left alone, or the
+    # timeline would request frames beyond what it was built for.
+    assert abs(_ceiling(6.0, 9.9, 9.9) - 6.0) < 1e-9, \
+        "the ceiling may only ever SHORTEN — never extend a timeline"
+    # sub-frame noise must not churn every job
+    assert abs(_ceiling(6.000, 5.995, 5.995) - 6.0) < 1e-9, \
+        "sub-frame differences must be ignored (0.02s deadband)"
+    # unprobeable -> unchanged, never a failed job
+    assert abs(_ceiling(6.0, 0, 0) - 6.0) < 1e-9, \
+        "an unanswerable probe must degrade to the declared duration, never fail"
+
+
 @check("FINAL-END WORD INVARIANT (Zac 2026-08-03, RULE-1): a delivered video must never stop MID-WORD. Measured on real deliveries: 10 of 27 (37%) ended with the final cut landing strictly INSIDE a word the edit KEPT, 0.05-1.22s of speech still to come — and plan-sum == rendered-duration to within 0.01s, so it reached the user. The word-aligned cutter cannot produce this (padded_end = word_group[-1]['_end'], a word END by construction) and the tail-pad cannot rescue it (it only ever EXTENDS an already-aligned boundary), so the property is enforced on the FINAL cuts array where every path converges. This gate pins the enforcement in place AND exercises the predicate in BOTH directions — a check that cannot fail on a mid-word end proves nothing.")
 def _final_end_word_invariant():
     import re as _re2
@@ -8144,7 +8189,7 @@ def _final_end_word_invariant():
     # NEVER PAST THE SOURCE. An end beyond the available frames is how a trailing
     # both_stream_hole is manufactured, and the tail-pad beside this clamps to
     # _vd for the same reason.
-    assert "_srcmax = float(duration or 0.0)" in _src, \
+    assert "_srcmax = float(probe_content_duration(video_path, duration) or 0.0)" in _src, \
         "the snap must clamp to the SOURCE DURATION — an unbounded extension can " \
         "request frames that do not exist and trip a trailing both_stream_hole"
     assert "_fe = min(float(_hit.get(\"start\") or _fe0), _srcmax)" in _src, \
