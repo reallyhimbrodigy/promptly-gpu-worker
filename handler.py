@@ -16526,6 +16526,27 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         )
                         print(f"[final-end] snapped {_fe0:.3f}->{_fe:.3f}s "
                               f"(was mid-word '{_hit.get('word')}')", flush=True)
+                    # LIVE PROOF SAID THIS DID NOT TAKE (Zac 2026-08-04). Four of
+                    # ten deliveries in the 27 minutes after 8360a93 still ended
+                    # mid-word, and replaying this same snap on their PERSISTED
+                    # transcript says it should have moved them. The block is not
+                    # behind a conditional (AST-checked) and _deepgram_words was
+                    # populated (caption_segments/sfx/emphasis all derive from it
+                    # and all fired), so the snap ran and found no straddle in the
+                    # list it was given — while the list we PERSIST shows one.
+                    # That is a two-lists problem, and guessing which is wrong is
+                    # how the last three false starts happened. So: say so, out
+                    # loud, on every job. UNCONDITIONAL — a diagnostic that only
+                    # prints on the bad path cannot prove the good path.
+                    if _hit is None and final_cuts:
+                        _near = min(
+                            (abs(float(_w.get("end") or 0.0) - _fe0) for _w in _fw),
+                            default=None)
+                        print(
+                            f"[final-end] no straddle: end={_fe0:.4f} words={len(_fw)} "
+                            f"nearest_word_end_delta="
+                            + (f"{_near:.4f}" if _near is not None else "n/a"),
+                            flush=True)
             except Exception as _fe_err:
                 # Never let the guard cost the render — a mid-word ending is bad,
                 # a failed job is worse.
