@@ -36956,9 +36956,27 @@ def handler(job):
                   "lazy: dispatched only if Deepgram detects 2+ speakers")
 
         _nr_mem_start()   # inc2 burst gate: sample non-render memory peak → render dispatch
+        # LONG-POLE INSTRUMENT (Zac 2026-08-04, the free read before the analysis
+        # split): time each mega_pool task so Increment 2 moves ONLY the CPU-bound
+        # subset to cpu=8. If transcribe (Deepgram, network) is the long pole, moving
+        # the whole pool would hold cpu=8 idle on a network wait and erode the
+        # $75/day — so the split must keep transcribe/trend/user_style on the planner.
+        # Measurement-only: wraps each task with a wall-clock timer, logged at pool
+        # teardown. NO behavior change (the wrapper just calls the same fn).
+        _pool_timings = {}
+
+        def _timed(_name, _fn):
+            def _tw(*_a, **_k):
+                _pt0 = time.time()
+                try:
+                    return _fn(*_a, **_k)
+                finally:
+                    _pool_timings[_name] = round(time.time() - _pt0, 1)
+            return _tw
+
         mega_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-        future_normalize = mega_pool.submit(_do_normalize)
-        future_transcribe = None if _skip_transcribe else mega_pool.submit(_do_transcribe)
+        future_normalize = mega_pool.submit(_timed("normalize", _do_normalize))
+        future_transcribe = None if _skip_transcribe else mega_pool.submit(_timed("transcribe", _do_transcribe))
         # pyannote speaker diarization is now LAZILY dispatched from inside
         # `_get_resolved_transcript()` — only after Deepgram returns and only
         # if Deepgram detected 2+ speakers. The vast majority of uploads
@@ -36966,21 +36984,21 @@ def handler(job):
         # those wastes ~10-15s of GPU compute and contends for resources
         # with fps_normalize / RIFE. See the gated-dispatch block in
         # _get_resolved_transcript above for the speaker-count logic.
-        future_gemini_proxy = None if _skip_proxy else mega_pool.submit(_do_gemini_proxy)
-        future_trend = None if _skip_trend else mega_pool.submit(_do_trend_context)
-        future_loudness = mega_pool.submit(_do_loudness)
-        future_shot_changes = mega_pool.submit(_do_shot_changes)
-        future_vocal_emphasis = mega_pool.submit(_do_vocal_emphasis)
+        future_gemini_proxy = None if _skip_proxy else mega_pool.submit(_timed("gemini_proxy", _do_gemini_proxy))
+        future_trend = None if _skip_trend else mega_pool.submit(_timed("trend", _do_trend_context))
+        future_loudness = mega_pool.submit(_timed("loudness", _do_loudness))
+        future_shot_changes = mega_pool.submit(_timed("shot_changes", _do_shot_changes))
+        future_vocal_emphasis = mega_pool.submit(_timed("vocal_emphasis", _do_vocal_emphasis))
         # Shake probe runs early (own future) so the input-quality pass can read
         # it pre-recipe; _do_fps_normalize reuses the same cached score.
-        future_shake = mega_pool.submit(_do_shake_probe)
-        future_exposure = mega_pool.submit(_do_exposure_probe)
-        future_fps_normalize = mega_pool.submit(_do_fps_normalize)
+        future_shake = mega_pool.submit(_timed("shake_probe", _do_shake_probe))
+        future_exposure = mega_pool.submit(_timed("exposure_probe", _do_exposure_probe))
+        future_fps_normalize = mega_pool.submit(_timed("fps_normalize", _do_fps_normalize))
         # Per-user style profile — fetched in parallel with everything else; read
         # inside _do_edit_recipe_overlapped so it arrives before Gemini is called.
         # Skip in render_only (plan is deterministic from the provided edit_plan).
         future_user_style = (
-            None if _skip_edit_gen else mega_pool.submit(fetch_user_style_profile, user_id)
+            None if _skip_edit_gen else mega_pool.submit(_timed("user_style", fetch_user_style_profile), user_id)
         )
         # Platform-wide style pulse (F2 launch nudge) — same pattern as the
         # per-user profile: parallel fetch, read just before the Gemini call,
@@ -36991,7 +37009,7 @@ def handler(job):
         # Edit recipe waits on transcript + upload + face/signals internally — skipped entirely in render_only
         future_edit = None if _skip_edit_gen else mega_pool.submit(_do_edit_recipe_overlapped)
         # Face detection runs directly on raw source (no normalize dependency)
-        future_faces = mega_pool.submit(_do_face_detect_overlapped)
+        future_faces = mega_pool.submit(_timed("faces", _do_face_detect_overlapped))
 
         # ── EditPolicy resolve (Phase 2 · Step 1: flag-gated, NO consumer yet) ──
         # Flag is per-job (input_data["edit_policy_enabled"]) OR global env
@@ -37729,6 +37747,16 @@ def handler(job):
         # r_frame_rate (preserved at the source's native rate — 30, 24,
         # 60, etc.) and all frame-count math becomes exact.
         source_path = future_fps_normalize.result()
+        # LONG-POLE readout (Zac 2026-08-04): by here every mega_pool task has
+        # finished (faces "finished long before" per the note below), so the timing
+        # map is complete. Sorted desc so the long pole is first — CPU-bound long
+        # pole → move the whole subset; transcribe (network) long pole → keep it on
+        # the planner and cross only the CPU tasks.
+        try:
+            _lp = sorted(_pool_timings.items(), key=lambda _x: -_x[1])
+            print(f"[long-pole] mega_pool per-task durations (s): {_lp}", flush=True)
+        except Exception:
+            pass
         # Collect face trajectory: render_multi_clip uses it for face-aware
         # MG placement (re-routing center anchors when the speaker's face
         # would be covered). Detection finished long before we got here
