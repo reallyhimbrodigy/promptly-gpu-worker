@@ -9706,11 +9706,31 @@ def _gemini_is_retriable_error(msg):
     that trips Modal's 900s timeout and looks like a STUCK job. Fail fast and
     surface instead. (Also not retriable: bad request, cache-miss, auth, schema.)"""
     m = str(msg).lower()
-    return (
-        "429" in m or "resource_exhausted" in m or "rate limit" in m or
-        "quota" in m or "500" in m or "502" in m or "503" in m or
-        "unavailable" in m or "overloaded" in m or
-        "connection" in m or "temporarily" in m
+    # WORD-BOUNDARY STATUS MATCHING (Zac 2026-08-03). This read `"500" in m`,
+    # so ANY message whose text merely contains 500 — "max 500 tokens", "500
+    # characters", "500ms" — was classified transient and retried up to 4x. The
+    # identical bug in the Deepgram classifier turned a deterministic 400 into
+    # three attempts; here the blast radius is worse, because this function's own
+    # docstring explains that a wrongly-retried deadline "compounds into a ~20-min
+    # hang ... and looks like a STUCK job". A number inside a message is not a
+    # status code.
+    # A number followed by a UNIT is a quantity, not a status code. "max 500
+    # tokens", "500 characters", "503 ms" must never read as 5xx. Word boundaries
+    # alone do NOT catch this — the 500 in "max 500 tokens" is word-bounded.
+    _NOT_A_STATUS = (r"(?!\s*(?:tokens?|characters?|chars?|bytes?|kb|mb|ms|"
+                     r"milliseconds?|seconds?|secs?|items?|words?|results?|rows?|"
+                     r"requests?|frames?))")
+    if re.search(r"\b(?:400|401|403|404|409|422)\b" + _NOT_A_STATUS, m):
+        return False                       # deterministic client errors
+    if any(_s in m for _s in ("deadline", "bad request", "invalid", "not found",
+                              "unauthorized", "permission", "schema")):
+        return False                       # named non-retriable classes
+    return bool(
+        re.search(r"\b429\b", m) or "resource_exhausted" in m or "rate limit" in m
+        or "quota" in m
+        or re.search(r"\b(?:500|502|503)\b" + _NOT_A_STATUS, m)
+        or "unavailable" in m or "overloaded" in m
+        or "connection" in m or "temporarily" in m
     )
 
 

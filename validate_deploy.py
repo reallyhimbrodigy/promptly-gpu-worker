@@ -10198,6 +10198,28 @@ def _check_keyterm_cap_and_4xx():
             f"'{_tr}' IS transient and must still retry — the fix must not disable retries wholesale"
 
 
+@check("A NUMBER IN A MESSAGE IS NOT A STATUS CODE (Zac 2026-08-03, the SECOND instance of one defect): both retry classifiers matched bare substrings — `\"500\" in m` — so any error text merely containing 500 read as a transient 5xx. In Deepgram it turned `Keyterm limit exceeded (max 500 tokens)` (a deterministic 400) into three attempts. In Gemini the blast radius is worse: that function's own docstring says a wrongly-retried deadline compounds 4x into a ~20-min hang that LOOKS LIKE A STUCK JOB, which is an open unowned class. Word boundaries alone are NOT enough — the 500 in \"max 500 tokens\" is word-bounded — so status matching is unit-aware: a number followed by tokens/characters/ms/items/etc is a quantity, never a status.")
+def _check_status_not_substring():
+    import handler as _h
+    # Inspect CODE, not prose — the fix's own comment quotes the old pattern.
+    _code = "\n".join(l for l in open("handler.py").read().split("\n")
+                      if not l.lstrip().startswith("#"))
+    assert '"500" in m' not in _code, "a bare-substring status match has come back"
+    for _fn, _name in ((_h._gemini_is_retriable_error, "gemini"),
+                       (_h._deepgram_is_retriable_error, "deepgram")):
+        # a QUANTITY must never read as a status
+        for _q in ("max 500 tokens exceeded", "response exceeded 500 characters"):
+            assert _fn(_q) is False, f"{_name}: '{_q}' is a quantity, not a 5xx"
+        # ...and a real transient must STILL retry, or the fix disabled retries
+        for _t in ("500 Internal Server Error", "503 UNAVAILABLE", "connection reset"):
+            assert _fn(_t) is True, f"{_name}: '{_t}' is transient and must retry"
+        # ...and a deterministic client error must not
+        assert _fn("400 Bad Request") is False, f"{_name}: a 400 is deterministic"
+    # the Gemini deadline case its own docstring warns about
+    assert _h._gemini_is_retriable_error("504 DEADLINE_EXCEEDED") is False, \
+        "a deadline must fail fast — retrying compounds into the ~20-min hang that looks like a stuck job"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
