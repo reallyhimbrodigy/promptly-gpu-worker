@@ -29676,6 +29676,7 @@ _ERROR_SUBCODES = {
     "RENDER_FATAL": (
         # The mux step names itself, so an empty artifact is attributed to the
         # step that produced it instead of the generic check 100 lines later.
+        ("canon_unreadable", ("RENDER_CANON_UNREADABLE",)),
         ("empty_mux", ("RENDER_EMPTY_OUTPUT: final concat+mux exited 0",)),
         ("empty_output_missing", ("RENDER_EMPTY_OUTPUT: main render produced no usable file — MISSING",)),
         ("empty_output_stub", ("RENDER_EMPTY_OUTPUT",)),
@@ -29903,6 +29904,13 @@ def classify_error(e):
     # A render that produced no usable file. Distinct from RENDER_FATAL (the
     # ladder terminal) because the ladder never ran: the check sits after
     # parallel_render, so this raised OUTSIDE it and classified as UNKNOWN.
+    if "RENDER_CANON_UNREADABLE" in msg:
+        return _e(
+            "RENDER_FATAL",
+            "Rendering failed on our side — please run the job again.",
+            retryable=True,
+        )
+
     if "RENDER_EMPTY_OUTPUT" in msg:
         return _e(
             "RENDER_FATAL",
@@ -31648,6 +31656,24 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     # 1. Canonicalize (1080x1920 portrait @30fps — the bridge's contract).
     _canon = os.path.join(work_dir, "minimal_canon.mp4")
     _hr.normalize_source(source_path, _canon, _fps)
+    # PROBE THE ARTIFACT (2026-08-04). normalize_source runs ffmpeg and returns
+    # the path — it never checks what it wrote. A stream-less minimal_canon.mp4
+    # therefore travelled all the way to Remotion and died at the compositor as
+    # "No video stream found in input file .../minimal_canon.mp4" (2 users,
+    # 08-04 03:06 and 03:59), where the message names the wrong subsystem and
+    # the producing stage is already out of scope.
+    #
+    # Same rule as the final concat+mux and both pre-extracts: rc==0 is not
+    # success, the ARTIFACT is. Unlike those, there is nothing to degrade TO
+    # here — minimal_canon IS the render source — so this fails loudly with a
+    # coded error naming the stage instead of a compositor error naming Remotion.
+    if not _pre_extract_readable(_canon):
+        _sz = os.path.getsize(_canon) if os.path.exists(_canon) else -1
+        raise RuntimeError(
+            f"RENDER_CANON_UNREADABLE: minimal-route normalize wrote an "
+            f"unreadable/stream-less canon "
+            f"({'missing' if _sz < 0 else f'{_sz} bytes'}) — "
+            f"src={os.path.basename(source_path)} fps={_fps:g}")
     _mini_t["normalize"] = time.time() - _t0
     _dur = 0.0
     try:

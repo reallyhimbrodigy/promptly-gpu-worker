@@ -10532,6 +10532,31 @@ def _check_trip_records_mask_coverage():
     assert "shutterflash" in _h._IG_BLACK_MASK_TYPES
 
 
+@check("THE MINIMAL-ROUTE CANON IS PROBED BEFORE HANDOFF (2026-08-04): hype_render.normalize_source runs ffmpeg and returns the path — it never checks what it wrote. A stream-less minimal_canon.mp4 therefore reached Remotion and died at the compositor as 'No video stream found in input file .../minimal_canon.mp4' (2 users, 08-04), a message that names the wrong subsystem while the producing stage is already out of scope. The TRUNCATE CLAMP DOES NOT COVER THIS — canon is not a trim-range extract, it is a full re-encode. Same rule as the final concat+mux and both pre-extracts: rc==0 is not success, the ARTIFACT is. Unlike those there is nothing to degrade to (canon IS the render source), so it fails loudly with a coded error naming the stage.")
+def _check_minimal_canon_probed():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert "_pre_extract_readable(_canon)" in _src, \
+        "the minimal-route canon must be probed before handoff"
+    # ...and the probe must be LIVE. Asserting the call text alone is the same
+    # hole the bug had: a short-circuited guard keeps every position assertion
+    # green while nothing is actually checked.
+    assert "    if not _pre_extract_readable(_canon):" in _src, \
+        "the canon probe has been short-circuited or reshaped — it must guard directly"
+    _i = _src.index('_hr.normalize_source(source_path, _canon, _fps)')
+    _j = _src.index('_pre_extract_readable(_canon)')
+    assert _j > _i, "the probe must come AFTER normalize_source writes it"
+    # ...and BEFORE anything consumes the canon (the duration probe is first).
+    _k = _src.index('"-of", "csv=p=0", _canon')
+    assert _j < _k, "the probe must precede the first consumer of the canon"
+    assert "RENDER_CANON_UNREADABLE" in _src, "the failure must name the stage"
+    # the terminal must be CODED, never UNKNOWN
+    _r = _h.classify_error(RuntimeError(
+        "RENDER_CANON_UNREADABLE: minimal-route normalize wrote an unreadable/stream-less canon (261 bytes)"))
+    assert _r.get("error_code") == "RENDER_FATAL", f"got {_r.get('error_code')}"
+    assert _r.get("error_subcode") == "canon_unreadable", f"got {_r.get('error_subcode')}"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
