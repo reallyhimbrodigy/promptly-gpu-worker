@@ -2549,8 +2549,13 @@ def cert_regression_corpus() -> dict:
     the deterministic ones COMPLETE (status=success + a video_url). Returns per
     sub-code {status, ok}. Run: modal run modal_app.py::regression_corpus."""
     import os as _os, sys as _sys, uuid as _uuid, time as _time
+    # Capture the real APP_URL + secret BEFORE prod-isolating the render, so a
+    # REGRESSED verdict can fire a LOUD owner alert (a gate whose failure goes
+    # unread is not a gate — Zac 2026-08-04).
+    _real_app_url = (_os.environ.get("APP_URL") or "").rstrip("/")
+    _cb_secret = _os.environ.get("MODAL_CALLBACK_SECRET") or ""
     _os.environ["JOB_STATUS_WRITES_ENABLED"] = ""   # never touch prod rows
-    _os.environ["APP_URL"] = ""
+    _os.environ["APP_URL"] = ""                     # prod-isolate the render
     _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16"
     _sys.path.insert(0, "/")
     import handler
@@ -2570,12 +2575,25 @@ def cert_regression_corpus() -> dict:
         _status = (_r or {}).get("status")
         _has_video = bool((_r or {}).get("video_url"))
         _code = (_r or {}).get("error_code")
-        _ok = (_status == "success" and _has_video) or (not _deterministic and _code != _sub)
-        results[_sub] = {"status": _status, "error_code": _code, "video": _has_video,
-                         "wall_s": round(_time.time() - _t0, 1), "deterministic": _deterministic, "ok": _ok}
+        _subc = (_r or {}).get("error_subcode")
+        # A deterministic entry PASSES if it now renders clean (success+video) OR it
+        # cleanly REJECTS for a DIFFERENT named reason — its original defect is gone.
+        # It FAILS if it still dies as its founding sub-code, OR as UNKNOWN (masking a
+        # class is itself a defect — the UNKNOWN=0 law). Advisory entries (network-
+        # transient) pass unless they reproduce their EXACT sub-code.
+        _rendered = (_status == "success" and _has_video)
+        _clean_reject = (_status not in (None, "exception") and _code not in (None, "UNKNOWN")
+                         and _subc != _sub)
+        if _deterministic:
+            _ok = _rendered or _clean_reject
+        else:
+            _ok = _rendered or (_subc != _sub and _code != "UNKNOWN")
+        results[_sub] = {"status": _status, "error_code": _code, "error_subcode": _subc,
+                         "video": _has_video, "wall_s": round(_time.time() - _t0, 1),
+                         "deterministic": _deterministic, "ok": _ok}
         _tag = "PASS" if _ok else "FAIL"
         print(f"[REGRESSION-CORPUS] {_tag} sub_code={_sub} status={_status} code={_code} "
-              f"video={_has_video} wall={results[_sub]['wall_s']}s"
+              f"subcode={_subc} video={_has_video} wall={results[_sub]['wall_s']}s"
               + ("" if _deterministic else " (advisory — network-transient)"), flush=True)
     # _ok already folds in determinism (advisory sources pass unless they
     # reproduce their EXACT sub-code), so a not-ok entry is a real regression.
@@ -2583,15 +2601,51 @@ def cert_regression_corpus() -> dict:
     _all_ok = len(_fatal) == 0
     print(f"[REGRESSION-CORPUS] {'ALL GREEN' if _all_ok else 'REGRESSED: ' + ','.join(_fatal)} "
           f"({sum(1 for v in results.values() if v['ok'])}/{len(results)} ok)", flush=True)
+    # DURABILITY (Zac 2026-08-04): a REGRESSED verdict must be impossible to miss.
+    # Leg 1 — a loud grep-stable [ALERT] line (always lands in Modal logs). Leg 2 —
+    # a SYNCHRONOUS owner push (not the daemon-thread variant, which a cert
+    # container exiting on return would cut off). Both best-effort; never raise.
+    if _fatal:
+        try:
+            print(f"[ALERT] render failure job=regression-corpus code=REGRESSION_CORPUS "
+                  f"detail=fixed classes REGRESSED on deploy: {','.join(_fatal)}", flush=True)
+        except Exception:
+            pass
+        if _real_app_url:
+            try:
+                import requests as _rq
+                _rq.post(
+                    f"{_real_app_url}/api/internal/render-alert",
+                    json={"job_id": "regression-corpus", "error_code": "REGRESSION_CORPUS",
+                          "detail": f"fixed classes REGRESSED on deploy: {','.join(_fatal)}",
+                          "category": "render"},
+                    headers=({"X-Modal-Secret": _cb_secret} if _cb_secret else {}),
+                    timeout=8,
+                )
+            except Exception:
+                pass
     return {"all_ok": _all_ok, "regressed": _fatal, "results": results}
 
 
 @app.local_entrypoint()
 def regression_corpus():
+    # SPAWN, not remote (Zac 2026-08-04): a .remote() dies with the local process,
+    # so a detached nohup was the only way to not block the deploy — and its result
+    # went unread. .spawn() dispatches to Modal and returns immediately; the
+    # container renders, asserts, and SELF-ALERTS on REGRESSED (loud [ALERT] + owner
+    # push), outliving this process. deploy.sh no longer needs nohup. The verdict
+    # lives in Modal logs ([REGRESSION-CORPUS] / [ALERT]) regardless of this shell.
+    _fc = cert_regression_corpus.spawn()
+    print(f"REGRESSION_CORPUS spawned call={_fc.object_id} — "
+          f"grep [REGRESSION-CORPUS]/[ALERT] in Modal logs for the verdict")
+
+
+@app.local_entrypoint()
+def regression_corpus_sync():
+    # Blocking variant for manual runs — waits + non-zero exits on a regression.
     import json, sys as _sys
     _out = cert_regression_corpus.remote()
     print("REGRESSION_CORPUS " + json.dumps(_out, indent=2))
-    # non-zero exit on a deterministic regression so deploy.sh can gate/alert
     if not _out.get("all_ok"):
         _sys.exit(1)
 
