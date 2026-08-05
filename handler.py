@@ -36489,6 +36489,13 @@ def handler(job):
                 return subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-threads", "0",
                      "-i", _raw_source,
+                     # FIFTH copy of the metadata-track class (2026-08-04). With
+                     # auto stream selection AND `-c:a copy` below, ffmpeg copies
+                     # whatever it picks as audio straight into mp4 — and an
+                     # iPhone Core Media Metadata track (codec `none`) is not a
+                     # codec mp4 can hold: "not currently supported in
+                     # container". Name the streams instead of guessing.
+                     "-map", "0:v:0", "-map", "0:a:0?",
                      "-vf", _vf_chain,
                  # CRF 15 (was 18) — this is the INTERMEDIATE that feeds every
                  # downstream step (per-cut renders, composite, HLS). Bumping
