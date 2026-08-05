@@ -8297,6 +8297,24 @@ def _lang_bundle_persisted():
         assert _f in _src, f"the bundle must still carry {_f}"
 
 
+@check("NO ASSERTION THAT CANNOT FAIL (2026-08-04): `assert <expr> or True` can never raise. Three such lines are in this file right now — a dead check is worse than no check, because it reads green forever and everyone believes the property is guarded. This is the project's most repeated meta-defect ('a rule that isn't a check') occurring INSIDE the check file. A RATCHET, not a cliff: the count may only go DOWN. Existing ones belong to other lanes and are theirs to fix or delete; this gate stops the fourth from being written.")
+def _no_unfailable_assertions():
+    import re as _re4
+    _self = open(__file__).read()
+    # count only real assertion lines, not this gate's own prose
+    _hits = [_l for _l in _self.split("\n")
+             if _re4.match(r"\s*assert\b", _l) and _re4.search(r"\bor True\b", _l)]
+    _BASELINE = 3
+    assert len(_hits) <= _BASELINE, (
+        f"{len(_hits)} unfailable assertions, baseline {_BASELINE} — a new "
+        "`assert ... or True` was added. It can never raise, so whatever it "
+        "claims to guard is unguarded while reading green:\n  "
+        + "\n  ".join(h.strip()[:110] for h in _hits[_BASELINE:]))
+    if len(_hits) < _BASELINE:
+        print(f"    [ratchet] unfailable assertions down to {len(_hits)} "
+              f"(baseline {_BASELINE}) — tighten the baseline in this gate.")
+
+
 @check("THE TAIL-PAD MAY NOT ENTER THE NEXT WORD (Zac 2026-08-04, RULE-1): the mid-word fix shipped in 8360a93 did NOT move the number — Hindi 34.5% pre-fix (106/307) -> 40.8% post-fix (42/103) on the dense result.transcript field. The live [final-end] diagnostic named the cause: nearest_word_end_delta on four real jobs was 0.457, 0.576, 3.145, 0.570 — NEVER ~0, and three of four sit at _FINAL_TAIL_PAD_S itself. So the final boundary is (last kept word end + 0.5s pad), and the snap that runs afterwards honestly reports no straddle because in ITS word list that point lands in a gap. Fixing the CAUSE: the release pad may never cross into a following word. This gate pins the clamp and exercises it both ways — an uncapped pad is what put the boundary mid-word.")
 def _tail_pad_stops_at_next_word():
     _src = open("handler.py").read()
@@ -8560,10 +8578,24 @@ def _final_end_word_invariant():
         "the straddle test must stay STRICT — no <= creeping in"
     assert '_lc["source_end"] = round(_fe, 4)' in _src, \
         "must snap OUTWARD to the word END — keeping the word whole is the fix"
-    assert "for _ in range(8):" in _src, \
-        "the snap must iterate to a FIXED POINT: words OVERLAP, so snapping to one " \
-        "word's end can land inside the next. Verified on real data — a single-pass " \
-        "snap left 5 of 12 defect jobs still mid-word; the fixed point cleared 73/73."
+    # ⚠️ ASSERTION RETIRED 2026-08-04, and the reason matters more than the line.
+    # This used to demand `for _ in range(8):` — the fixed-point loop — citing
+    # "a single-pass snap left 5 of 12 defect jobs still mid-word". That number
+    # was computed on the SPARSE top-level transcript mirror and against a word
+    # list the snap cannot see. The live [final-end] diagnostic then showed
+    # nearest_word_end_delta never reaching ~0 (0.457, 0.576, 3.145, 0.570), i.e.
+    # the snap finds NO straddle on real traffic — so the iteration machinery was
+    # being defended by a measurement taken on the wrong list.
+    #
+    # 1601ae0 fixed the actual cause (the tail-pad crossing into the next word),
+    # which makes this snap a BACKSTOP for boundaries set by other paths — a
+    # duration cap, maxlength_violation, the out-of-range clip path — not the
+    # main mechanism. A gate should pin the PROPERTY, not the implementation that
+    # happened to be reached for.
+    #
+    # SO THE SNAP IS ON PROBATION: if the post-1601ae0 read shows it never fires,
+    # it and this whole check go together rather than sitting on the money path
+    # defending dead work.
 
     # the fixed-point property itself, on OVERLAPPING words — the case a
     # single-pass snap silently fails.
