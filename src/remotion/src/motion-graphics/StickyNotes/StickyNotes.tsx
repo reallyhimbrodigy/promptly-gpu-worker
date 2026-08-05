@@ -13,6 +13,7 @@ import {
   canvasMeasurer,
   CHARWRAP_FALLBACK_STYLE,
 } from "../../captions/shared/fit";
+import { asText } from "../../shared/asText";
 
 // F4 width-fit guarantee (sticky_note text overlay): the note is a FIXED
 // square, so the fit is two-axis — the longest word must fit the inner
@@ -30,7 +31,7 @@ function fitStickyNote(
   const font = { fontFamily, fontWeight: 400 };
   const inner = noteSize - 20 - 8; // padding(10x2) + breathing room
   const vBudget = inner - 30; // marker glyph / underline allowance
-  const words = text.split(/\s+/).filter(Boolean);
+  const words = asText(text).split(/\s+/).filter(Boolean);
   if (words.length === 0) return { scale: 1, floored: false };
   for (let s = 1; s >= STICKY_FIT_FLOOR - 1e-6; s -= 0.05) {
     const size = noteFontSize * s;

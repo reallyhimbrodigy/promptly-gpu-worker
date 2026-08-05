@@ -4,6 +4,7 @@ import { MG_FONTS } from "../shared/fonts";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { EditorialQuoteProps } from "./types";
+import { asText } from "../../shared/asText";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 const clamp = (x: number, lo: number, hi: number): number =>
@@ -45,7 +46,7 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
   );
 
   const words = useMemo(
-    () => text.trim().split(/\s+/).filter(Boolean),
+    () => asText(text).trim().split(/\s+/).filter(Boolean),
     [text],
   );
 

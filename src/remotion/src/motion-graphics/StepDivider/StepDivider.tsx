@@ -4,6 +4,7 @@ import { MG_FONTS } from "../shared/fonts";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { StepDividerFontKey, StepDividerProps } from "./types";
+import { asText } from "../../shared/asText";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 const easeInOutCubic = (t: number): number =>
@@ -68,7 +69,7 @@ export const StepDivider: React.FC<StepDividerProps> = ({
   const steps = Math.max(1, totalSteps);
   const cur = Math.max(1, Math.min(step, steps));
   const holding = phase === "holding";
-  const lines = title.split("\n");
+  const lines = asText(title).split("\n");
 
   const exitFade = interpolate(exitProgress, [0, 0.7], [1, 0], {
     extrapolateLeft: "clamp",

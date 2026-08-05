@@ -8297,6 +8297,41 @@ def _lang_bundle_persisted():
         assert _f in _src, f"the bundle must still carry {_f}"
 
 
+@check("A MISSING STRING MUST NOT KILL THE RENDER (RENDER_REMOTION:component_crash, job 22070e6d — PromptlyOverlay, `.split` of undefined): every one of these props is typed `text: string` / `title: string` / `caption: string`, so TypeScript says they cannot be undefined. They arrive as JSON from Gemini via Python, where VERTEX OMITS OPTIONAL FIELDS ENTIRELY, and TS types are erased at runtime — so the renderer trusts a guarantee nothing enforces and the whole video dies for one absent string. Same lesson as SafeImg and the crossfade survivor: a missing asset DEGRADES, it does not take the render with it. This gate pins the coercion at every site that splits a model-supplied string.")
+def _missing_string_does_not_kill_render():
+    import os as _os, re as _re5
+    _root = "src/remotion/src"
+    if not _os.path.isdir(_root):
+        return                      # remotion tree absent in this checkout
+    _helper = _os.path.join(_root, "shared", "asText.ts")
+    assert _os.path.exists(_helper), \
+        "shared/asText.ts is gone — the optional-omission crash class reopens"
+
+    # every .split( on a model-supplied string must go through asText
+    _bad = []
+    for _dir, _, _files in _os.walk(_root):
+        for _fn in _files:
+            if not _fn.endswith((".ts", ".tsx")):
+                continue
+            if "Probe" in _fn or "Specimen" in _fn or _fn.endswith(".test.ts"):
+                continue
+            _p = _os.path.join(_dir, _fn)
+            for _i, _line in enumerate(open(_p, encoding="utf-8").read().split("\n"), 1):
+                _m = _re5.search(r"\b(\w+(?:\.\w+)*)\s*(?:\.trim\(\))?\.split\(", _line)
+                if not _m:
+                    continue
+                _subj = _m.group(1)
+                # literals, locals and already-coerced values are fine
+                if _subj.startswith(("asText", '"', "'")) or "asText(" in _line:
+                    continue
+                if _subj in ("x", "hex", "s", "str", "raw", "id", "key", "name", "path"):
+                    continue
+                _bad.append(f"{_p}:{_i}  {_line.strip()[:90]}")
+    assert not _bad, (
+        "unguarded .split on a model-supplied string — Vertex omits optional "
+        "fields, so this is a live render-killer:\n  " + "\n  ".join(_bad[:8]))
+
+
 @check("NO ASSERTION THAT CANNOT FAIL (2026-08-04): `assert <expr> or True` can never raise. Three such lines are in this file right now — a dead check is worse than no check, because it reads green forever and everyone believes the property is guarded. This is the project's most repeated meta-defect ('a rule that isn't a check') occurring INSIDE the check file. A RATCHET, not a cliff: the count may only go DOWN. Existing ones belong to other lanes and are theirs to fix or delete; this gate stops the fourth from being written.")
 def _no_unfailable_assertions():
     import re as _re4

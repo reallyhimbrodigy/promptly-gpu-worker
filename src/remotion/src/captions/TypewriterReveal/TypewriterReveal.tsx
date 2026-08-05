@@ -14,6 +14,7 @@ import { msToFrames } from "../shared/timing";
 import { boundedFade } from "../shared/fadeTiming";
 import { getCaptionPositionStyle } from "../shared/captionPosition";
 import { fitScale, CHARWRAP_FALLBACK_STYLE } from "../shared/fit";
+import { asText } from "../../shared/asText";
 
 function resolveScheme(
   scheme: TypewriterRevealProps["scheme"],
@@ -110,7 +111,7 @@ const TypewriterPage: React.FC<{
   // the floor the container gets overflowWrap:anywhere (per-char spans give
   // CSS clean break points).
   const fit = fitScale(
-    text
+    asText(text)
       .split(/\s+/)
       .filter(Boolean)
       .map((w) => ({
@@ -188,7 +189,7 @@ const TypewriterPage: React.FC<{
           ...(fit.floored ? CHARWRAP_FALLBACK_STYLE : {}),
         }}
       >
-        {text.split("").map((char, i) => {
+        {asText(text).split("").map((char, i) => {
           const isRevealed = i <= lastRevealedIdx;
           const isCursorPos = i === lastRevealedIdx + 1;
 

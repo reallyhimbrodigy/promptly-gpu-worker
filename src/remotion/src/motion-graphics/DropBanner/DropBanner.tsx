@@ -3,6 +3,7 @@ import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { DropBannerPoint, DropBannerProps } from "./types";
+import { asText } from "../../shared/asText";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 const clamp01 = (t: number): number => Math.max(0, Math.min(1, t));
@@ -251,7 +252,7 @@ export const DropBanner: React.FC<DropBannerProps> = ({
   // --- Caption slides: one per point, word-by-word grey -> black ---
   const captionSlides = points.map((pt, k) => {
     const captionStart = FIRST_SCROLL + k * STEP + SETTLE;
-    const words = pt.caption.split(" ");
+    const words = asText(pt.caption).split(" ");
     return (
       <div
         key={`pt-${k}`}

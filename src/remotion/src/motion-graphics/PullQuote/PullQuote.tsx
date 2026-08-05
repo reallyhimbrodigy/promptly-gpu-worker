@@ -4,6 +4,7 @@ import { MG_FONTS } from "../shared/fonts";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { PullQuoteFontKey, PullQuoteProps } from "./types";
+import { asText } from "../../shared/asText";
 
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
@@ -94,7 +95,7 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   );
 
   const words = useMemo(
-    () => text.trim().split(/\s+/).filter(Boolean),
+    () => asText(text).trim().split(/\s+/).filter(Boolean),
     [text],
   );
 

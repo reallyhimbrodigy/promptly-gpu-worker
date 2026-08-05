@@ -4,6 +4,7 @@ import { MG_FONTS } from "../shared/fonts";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { SectionDividerFontKey, SectionDividerProps } from "./types";
+import { asText } from "../../shared/asText";
 
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
@@ -75,7 +76,7 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
   const isSerif = fontKey === "dmSerifDisplay" || fontKey === "playfairDisplay";
   const titleLineHeight = isSerif ? 1.08 : 1.0;
   const isLeft = align === "left";
-  const lines = title.split("\n");
+  const lines = asText(title).split("\n");
   const holding = phase === "holding";
 
   // --- Scrim ---
