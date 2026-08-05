@@ -56,6 +56,24 @@ modal deploy modal_app.py
 git rev-parse HEAD > .last_deployed_commit 2>/dev/null || true
 echo "  recorded deployed commit: $(cat .last_deployed_commit 2>/dev/null)"
 
+# POST-DEPLOY TOCTOU GUARD (Zac 2026-08-04). The predeploy_no_regress gate above
+# is a POINT-IN-TIME check: a concurrent lane can deploy in the window between it
+# and `modal deploy`, and the last deploy wins — exactly the race that dropped
+# clean_export_key twice. Prevention cannot win that race; DETECTION can. Re-run
+# the guard now, against what Modal reports live AFTER our deploy: a non-zero delta
+# means a concurrent deploy raced us and live diverged from what we just shipped
+# (ours may have dropped theirs, or theirs superseded ours). Loud + non-zero exit
+# so the race can never pass unnoticed the way v512 did.
+echo "  [post-deploy] TOCTOU re-check against live..."
+if ! python3 predeploy_no_regress.py; then
+    echo "  🚨 POST-DEPLOY REGRESSION — a concurrent deploy raced this one; live and the"
+    echo "     shipped tree diverged. RECONCILE NOW: git merge the live commit, re-verify"
+    echo "     predeploy delta is zero, redeploy. (Propose to Errors: wire sendOwnerAlert here"
+    echo "     in the canonical deploy.sh so every lane pages on this, not just prints.)"
+    exit 1
+fi
+echo "  [post-deploy] TOCTOU clean — no concurrent deploy dropped identifiers."
+
 # Post-deploy AUTH PING (Zac 2026-08-03): prove the just-deployed worker can
 # AUTHENTICATE to the server. A MODAL_CALLBACK_SECRET mismatch degraded SILENTLY
 # into the recovery path for HOURS tonight (every completion 401'd, all recovered
