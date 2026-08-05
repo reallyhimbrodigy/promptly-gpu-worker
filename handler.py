@@ -23699,6 +23699,30 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     _cap = min(_cap, max(_cur_end, _next_rm_start - 0.01))
                 except Exception:
                     pass
+            # THE PAD IS WHAT LANDS MID-WORD (Zac 2026-08-04, from the live
+            # [final-end] diagnostic). Four real samples of
+            # nearest_word_end_delta: 0.457, 0.576, 3.145, 0.570 — never ~0, and
+            # three of four sit at ~0.5s, which is THIS CONSTANT. So the final
+            # boundary is (last kept word end + tail pad), and the snap that runs
+            # afterwards correctly reports "no straddle" because in ITS list that
+            # point falls in a GAP. The persisted transcript disagrees, which is
+            # why the mid-word rate did not move: Hindi 34.5% pre-fix -> 40.8%
+            # post-fix on n=103.
+            #
+            # Fix the CAUSE rather than snapping after it: the pad may never
+            # cross INTO a following word. If 0.5s of release would enter the
+            # next word, stop at that word's start — the release is a decay tail,
+            # not a licence to clip the next syllable.
+            _next_word_start = None
+            for _w in (deepgram_words or []):
+                try:
+                    _ws = float(_w.get("start") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if _ws >= _cur_end - 1e-6:
+                    _next_word_start = _ws if _next_word_start is None else min(_next_word_start, _ws)
+            if _next_word_start is not None:
+                _cap = min(_cap, _next_word_start)
             _new_end = min(_cur_end + _FINAL_TAIL_PAD_S, _cap)
             if _new_end > _cur_end:
                 print(

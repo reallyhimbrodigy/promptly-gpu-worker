@@ -8297,6 +8297,38 @@ def _lang_bundle_persisted():
         assert _f in _src, f"the bundle must still carry {_f}"
 
 
+@check("THE TAIL-PAD MAY NOT ENTER THE NEXT WORD (Zac 2026-08-04, RULE-1): the mid-word fix shipped in 8360a93 did NOT move the number — Hindi 34.5% pre-fix (106/307) -> 40.8% post-fix (42/103) on the dense result.transcript field. The live [final-end] diagnostic named the cause: nearest_word_end_delta on four real jobs was 0.457, 0.576, 3.145, 0.570 — NEVER ~0, and three of four sit at _FINAL_TAIL_PAD_S itself. So the final boundary is (last kept word end + 0.5s pad), and the snap that runs afterwards honestly reports no straddle because in ITS word list that point lands in a gap. Fixing the CAUSE: the release pad may never cross into a following word. This gate pins the clamp and exercises it both ways — an uncapped pad is what put the boundary mid-word.")
+def _tail_pad_stops_at_next_word():
+    _src = open("handler.py").read()
+    assert "_next_word_start" in _src, \
+        "the tail-pad no longer stops at the next word — the mid-word class reopens"
+    assert "_cap = min(_cap, _next_word_start)" in _src, \
+        "the next-word bound must actually tighten the cap"
+
+    # THE PREDICATE, BOTH DIRECTIONS. A pad that can never apply is not a fix —
+    # it exists because the final word loses its audible release.
+    def _pad(cur_end, vd, next_ws, pad=0.5):
+        cap = vd if vd > 0 else cur_end + pad
+        if next_ws is not None:
+            cap = min(cap, next_ws)
+        return min(cur_end + pad, cap)
+
+    # a real gap after the last word: the full release applies
+    assert abs(_pad(10.0, 30.0, 12.0) - 10.5) < 1e-9, \
+        "with room after the last word the full 0.5s release must still apply"
+    # the next word starts 0.2s later: stop there, do NOT clip into it
+    assert abs(_pad(10.0, 30.0, 10.2) - 10.2) < 1e-9, \
+        "the pad must stop at the next word's START, never inside it"
+    # next word starts immediately: no pad at all
+    assert abs(_pad(10.0, 30.0, 10.0) - 10.0) < 1e-9, \
+        "a word starting immediately leaves no room for release"
+    # nothing after: the source end still bounds it
+    assert abs(_pad(10.0, 10.3, None) - 10.3) < 1e-9, \
+        "the content end must still bound the pad when no word follows"
+    # and the pad may never SHORTEN the clip
+    assert _pad(10.0, 30.0, 12.0) >= 10.0, "the pad must never move the end backwards"
+
+
 @check("HINGLISH IS NOT ENGLISH (Zac 2026-08-04, RULE-1): _is_english_word gates the English-tuned structural cut detectors — reduplication, false-start hyphen, retake stem. The language TAG is necessary but NOT SUFFICIENT: a Devanagari word tagged 'en' passed it, which is the Hinglish population, and an UNSET tag passed it too — so on a single-language route (Hindi is 51% of the transcript cohort) EVERY word read as English-eligible and English heuristics ran over Hindi text, deleting real words. Script check added: non-Latin means not-English regardless of tag. Latin-1 accents stay eligible by SCRIPT because Spanish and French are excluded by their TAG — excluding them by script would be the wrong instrument.")
 def _hinglish_is_not_english():
     _src = open("handler.py").read()
