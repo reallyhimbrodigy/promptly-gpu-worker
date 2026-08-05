@@ -4154,7 +4154,7 @@ def prepare_audio_for_deepgram(source_path: str) -> bytes:
     """
     cmd = [
         "ffmpeg", "-v", "error", "-threads", "0",
-        "-i", source_path,
+        "-i", source_path, "-map", "0:a:0?",
         "-vn", "-ac", "1", "-ar", "48000",
         "-c:a", "flac", "-compression_level", "5",
         "-f", "flac", "-",
@@ -5270,7 +5270,7 @@ def measure_source_loudness(source_path):
     # regression from tonight's filtergraph work — a pre-existing high-fps edge
     # case a user's 100fps uploads surfaced.)
     cmd = [
-        "ffmpeg", "-vn", "-i", source_path, "-t", "60",
+        "ffmpeg", "-vn", "-i", source_path, "-map", "0:a:0?", "-t", "60",
         "-af", "astats=metadata=1:reset=0,ametadata=mode=print",
         "-f", "null", "-"
     ]
@@ -5325,7 +5325,7 @@ def detect_vocal_emphasis(source_path, max_peaks=20):
 
     # Extract mono audio at 16kHz as PCM (fast, low-disk).
     cmd = [
-        "ffmpeg", "-i", source_path, "-vn",
+        "ffmpeg", "-i", source_path, "-map", "0:a:0?", "-vn",
         "-f", "f32le", "-ac", "1", "-ar", "16000", "-",
     ]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -8707,7 +8707,7 @@ def _detect_silence_regions_vad(
         _ext = subprocess.run(
             [
                 "ffmpeg", "-y", "-loglevel", "error",
-                "-i", source_path,
+                "-i", source_path, "-map", "0:a:0?",
                 "-vn", "-ar", "16000", "-ac", "1",
                 "-f", "wav", tmp_wav,
             ],
@@ -8888,7 +8888,7 @@ def diarize_with_pyannote(source_path: str) -> list:
         _ext = subprocess.run(
             [
                 "ffmpeg", "-y", "-loglevel", "error",
-                "-i", source_path,
+                "-i", source_path, "-map", "0:a:0?",
                 "-vn", "-ar", "16000", "-ac", "1",
                 "-f", "wav", tmp_wav,
             ],
@@ -21537,7 +21537,7 @@ def _ig_window_is_silent(source_path, src_s, src_e):
     try:
         p = subprocess.run(
             ["ffmpeg", "-v", "info", "-ss", str(a), "-t", str(b - a),
-             "-i", source_path,
+             "-i", source_path, "-map", "0:a:0?",
              "-af", "silencedetect=n=%ddB:d=%s" % (
                  _IG_SILENCE_DB, _IG_SILENCE_DETECT_S),
              "-vn", "-f", "null", "-"],
@@ -22728,7 +22728,7 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     else:
         _ext = subprocess.run(
             ["ffmpeg", "-y", "-v", "error",
-             "-i", source_path, "-vn",
+             "-i", source_path, "-map", "0:a:0?", "-vn",
              "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
              full_src_wav],
             capture_output=True, text=True, timeout=120,
@@ -25054,7 +25054,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if not (os.path.exists(_refinement_audio_path) and os.path.getsize(_refinement_audio_path) > 1024):
         _refine_ext = subprocess.run(
             ["ffmpeg", "-y", "-v", "error",
-             "-i", source_path, "-vn",
+             "-i", source_path, "-map", "0:a:0?", "-vn",
              "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
              _refinement_audio_path],
             capture_output=True, text=True, timeout=180,
@@ -33092,7 +33092,7 @@ def prewarm_handler(job):
                 _audio_t0 = time.time()
                 _ar = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error",
-                     "-i", source_cache, "-vn",
+                     "-i", source_cache, "-map", "0:a:0?", "-vn",
                      "-acodec", "pcm_s16le", "-ar", str(_audio_rate), "-ac", "1",
                      audio_cache],
                     capture_output=True, text=True, timeout=120,
