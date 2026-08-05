@@ -21292,8 +21292,30 @@ def probe_content_duration(file_path, declared=None):
             if _d > 6.0:
                 _args += ["-read_intervals", f"{_d - 5.0:.3f}%+#100000"]
             _args += [file_path]
-            _out = subprocess.run(_args, capture_output=True, text=True,
-                                  timeout=30).stdout
+            # THREE-VALUED, NOT TWO (2026-08-04). rc was never checked here, so
+            # a probe that FAILED PART-WAY (non-zero rc with partial stdout)
+            # produced a short `_last`, and this function would truncate a real
+            # timeline to it. That is silent content destruction wearing the
+            # costume of a legitimate clamp — indistinguishable in the log from
+            # the pad it exists to prevent. The docstring already promised
+            # "returns the declared duration unchanged if the probe cannot
+            # answer"; the code could not tell CANNOT-ANSWER from ANSWERED-SHORT.
+            #   rc == 0, packets  -> MEASURED (may shorten)
+            #   rc == 0, no rows  -> ABSENT   (stream not in the file; skip)
+            #   rc != 0           -> FAILED   (abstain entirely — see below)
+            _proc = subprocess.run(_args, capture_output=True, text=True,
+                                   timeout=30)
+            if _proc.returncode != 0:
+                # A failed stream probe must not merely be skipped: we cannot
+                # know whether the stream we failed to read was the SHORTER one,
+                # and min() over the survivors would then over-truncate. Abstain
+                # from the whole clamp — only ever shorten on complete evidence.
+                print(f"[content-dur] probe FAILED on {_stream} "
+                      f"(rc={_proc.returncode}) — abstaining from the clamp; "
+                      f"declared {_d:.3f}s kept", flush=True)
+                _CONTENT_DUR_CACHE[_key] = _d
+                return _d
+            _out = _proc.stdout
             _last = None
             for _line in _out.splitlines():
                 _parts = _line.strip().split(",")

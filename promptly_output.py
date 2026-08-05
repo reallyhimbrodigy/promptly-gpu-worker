@@ -114,3 +114,96 @@ def probe_playable(s3, bucket, key, ffprobe_timeout=240):
         "has_audio": bool(aud),
         "size": int(fmt.get("size") or 0),
     }
+
+
+# ── THREE-VALUED PROBE CONTRACT ─────────────────────────────────────────────
+# MEASURED / ABSENT / FAILED — and FAILED is never expressible as a number.
+#
+# Every probe collapse this project has suffered is the same shape: a probe
+# fails, its empty stdout parses to zero, and a caller reads that zero as a
+# measurement. Four instances, one root:
+#   1. ffprobe 403 on a private S3 object -> "all zeros" -> seven matrix cells
+#      reported broken when they were fine.
+#   2. probe_playable ignoring returncode -> a real 4.27s / 128-frame render
+#      reported as a 0-frame empty deliverable, which put the whole
+#      completion-rate denominator in doubt for an afternoon.
+#   3. probe_content_duration ignoring returncode -> a partial read could
+#      truncate a REAL timeline to the short value, silent content destruction
+#      wearing the costume of a legitimate clamp.
+#   4. .endswith('.mp4') picking a 0-byte init.mp4 -> the same "confident wrong
+#      number" failure in the resolver rather than the probe.
+#
+# The fix is not per-site vigilance; it is making the wrong shape unsayable.
+# ABSENT means the file genuinely lacks that stream/field (a legitimate input to
+# a decision). FAILED means we do not know, and a caller that treats it as a
+# number is a bug. Callers MUST branch on .failed before reading .value.
+
+class ProbeResult:
+    """MEASURED / ABSENT / FAILED. `.value` raises unless MEASURED."""
+
+    __slots__ = ("state", "_value", "detail")
+
+    def __init__(self, state, value=None, detail=""):
+        self.state = state           # "measured" | "absent" | "failed"
+        self._value = value
+        self.detail = detail
+
+    @property
+    def measured(self):
+        return self.state == "measured"
+
+    @property
+    def absent(self):
+        return self.state == "absent"
+
+    @property
+    def failed(self):
+        return self.state == "failed"
+
+    @property
+    def value(self):
+        if self.state != "measured":
+            raise ValueError(
+                f"probe is {self.state.upper()}, not a measurement "
+                f"({self.detail}) — branch on .failed/.absent, or call "
+                f".or_default(x) to state the fallback EXPLICITLY")
+        return self._value
+
+    def or_default(self, default):
+        """The ONLY way to get a number out of a non-measurement, and it forces
+        the caller to name the fallback at the call site."""
+        return self._value if self.state == "measured" else default
+
+    def __repr__(self):
+        return f"ProbeResult({self.state}, {self._value!r})"
+
+
+def probe_field(args, parse=float, timeout=60):
+    """Run an ffprobe argv and return a ProbeResult — never a bare number.
+
+    rc != 0            -> FAILED (stderr retained)
+    rc == 0, no output -> ABSENT
+    rc == 0, unparsable-> FAILED (not zero!)
+    """
+    import subprocess
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except Exception as e:                                        # noqa: BLE001
+        return ProbeResult("failed", None, f"{type(e).__name__}: {e}"[:200])
+    if r.returncode != 0:
+        return ProbeResult("failed", None,
+                           f"rc={r.returncode}: {(r.stderr or '').strip()[-160:]}")
+    out = (r.stdout or "").strip()
+    if not out:
+        return ProbeResult("absent", None, "probe returned no rows")
+    try:
+        # `-of csv=p=0` emits a trailing comma per row; strip separators
+        # before parsing. Note this raised rather than returning 0 the first
+        # time it met one — which is the contract behaving correctly.
+        _tok = out.splitlines()[0].strip().rstrip(",").strip()
+        if not _tok or _tok.upper() == "N/A":
+            return ProbeResult("absent", None, "field present but N/A")
+        return ProbeResult("measured", parse(_tok))
+    except Exception as e:                                        # noqa: BLE001
+        return ProbeResult("failed", None,
+                           f"unparsable {out[:40]!r}: {type(e).__name__}")
