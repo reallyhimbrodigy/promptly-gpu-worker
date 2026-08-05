@@ -2202,6 +2202,7 @@ _overlay_chunk_procs = []
 # and now names the class PLATFORM_TIMEOUT. Best-effort throughout; re-raises the
 # default handler so the container still exits promptly.
 _ACTIVE_JOB_ID = None
+_DEGEN_RETRIES = 0
 _SHUTDOWN_HANDLER_INSTALLED = False
 
 
@@ -9334,6 +9335,13 @@ def detect_filler(words: list) -> list:
     return out
 
 
+# Anything beyond Latin + Latin-Extended-A/B is a different script. Devanagari
+# (U+0900-097F), Arabic, Cyrillic, CJK, Thai, Hebrew all sit above U+024F;
+# Latin-1 accents do not, so accented European text stays English-eligible by
+# SCRIPT and is excluded by its language TAG instead.
+_NON_LATIN_SCRIPT_RE = re.compile(r"[^\u0000-\u024F\u2000-\u206F]")
+
+
 def _is_english_word(w: dict) -> bool:
     """The per-word language tag (Deepgram language=multi) decides whether the
     English-shaped structural detectors are allowed to earn a cut. 'en'/'en-US'
@@ -9347,9 +9355,25 @@ def _is_english_word(w: dict) -> bool:
     heuristics are English-tuned. Firing them on non-English text deletes real
     words. Fewer cuts is the safe direction — a non-English tag skips the cut,
     never the reverse. English words inside a code-switched (multi) clip are
-    tagged 'en' and STILL get cut. (Zac 2026-07-28.)"""
+    tagged 'en' and STILL get cut. (Zac 2026-07-28.)
+
+        SCRIPT-CHECKED TOO (Zac 2026-08-04): the tag is NECESSARY BUT NOT SUFFICIENT.
+    A Devanagari word tagged 'en' passes the tag test — that is the HINGLISH
+    population, and it is not an edge case. Worse, an UNSET tag also passes, so on
+    a single-language route (Hindi is 51% of the transcript cohort) every word
+    reads as English-eligible and the English-tuned reduplication / false-start /
+    retake heuristics run over Hindi text and delete real words.
+
+    So: non-Latin characters mean NOT English regardless of the tag. Latin-1
+    accents (é, ñ, ü) stay eligible by script — Spanish and French are excluded by
+    their TAG, and excluding them by script would be the wrong instrument.
+    Fewer cuts remains the safe direction.
+    """
     lg = str((w or {}).get("language") or "").split("-")[0].lower()
-    return lg == "" or lg == "en"
+    if not (lg == "" or lg == "en"):
+        return False
+    return not _NON_LATIN_SCRIPT_RE.search(
+        str((w or {}).get("punctuated_word") or (w or {}).get("word") or ""))
 
 
 def detect_false_start(words: list) -> list:
@@ -12492,6 +12516,7 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             raise RuntimeError(f"Gemini post-cuts-call degenerate after retry: {_degen}")
         if _attempt >= 2:
             _degen_extra_used += 1
+            globals().__setitem__('_DEGEN_RETRIES', globals().get('_DEGEN_RETRIES', 0) + 1)
             _record_divergence(
                 "recipe_transport",
                 {"attempt": _attempt, "class": str(_degen)[:80]},
@@ -34866,6 +34891,13 @@ def _capture_failure_corpus(source_path, job_id, klass):
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
+    # DEGEN COUNT PER JOB (Zac 2026-08-04). The degeneration spiral lives in the
+    # `why` field, and PROMPTLY_LEAN_SCHEMA strips exactly that field — so the
+    # A/B already running is a free test of whether the prompt change fixes a 22%
+    # degeneration rate. It only works if the rate is CUTTABLE BY ARM, and
+    # degen_retry goes to the divergence ledger, which is not queryable.
+    global _DEGEN_RETRIES
+    _DEGEN_RETRIES = 0
     global _ACTIVE_JOB_ID, _TL
     _ACTIVE_JOB_ID = input_data.get("job_id")  # for the platform-shutdown ledger flush
     _TL = _JobTimeline()   # ONE CLOCK: hierarchical wall-clock timeline for this job
@@ -38814,6 +38846,7 @@ def handler(job):
                 # Spanish keep-ratio question has been unanswerable ever since.
                 # Nested here for the same reason as gemini_tokens and lean_arm.
                 "lang_bundle": (edit_plan or {}).get("_lang_bundle"),
+                "degen_retries": int(globals().get("_DEGEN_RETRIES", 0) or 0),
                 "lean_arm": _lean_ab_arm(),
                 "lean_schema_on": bool(_lean_schema_enabled()),
                 "lean_decor_ground_on": bool(_lean_decor_ground_enabled()),

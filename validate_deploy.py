@@ -8297,6 +8297,50 @@ def _lang_bundle_persisted():
         assert _f in _src, f"the bundle must still carry {_f}"
 
 
+@check("HINGLISH IS NOT ENGLISH (Zac 2026-08-04, RULE-1): _is_english_word gates the English-tuned structural cut detectors — reduplication, false-start hyphen, retake stem. The language TAG is necessary but NOT SUFFICIENT: a Devanagari word tagged 'en' passed it, which is the Hinglish population, and an UNSET tag passed it too — so on a single-language route (Hindi is 51% of the transcript cohort) EVERY word read as English-eligible and English heuristics ran over Hindi text, deleting real words. Script check added: non-Latin means not-English regardless of tag. Latin-1 accents stay eligible by SCRIPT because Spanish and French are excluded by their TAG — excluding them by script would be the wrong instrument.")
+def _hinglish_is_not_english():
+    _src = open("handler.py").read()
+    assert "_NON_LATIN_SCRIPT_RE" in _src, "the script check is gone — Hinglish reads as English again"
+    assert "_NON_LATIN_SCRIPT_RE.search(" in _src, "the script check must be APPLIED, not just defined"
+
+    import ast as _ast, re as _re
+    _tree = _ast.parse(_src)
+    _ns = {"re": _re}
+    _body = [n for n in _tree.body
+             if (isinstance(n, _ast.FunctionDef) and n.name == "_is_english_word")
+             or (isinstance(n, _ast.Assign)
+                 and any(getattr(t, "id", "") == "_NON_LATIN_SCRIPT_RE" for t in n.targets))]
+    exec(compile(_ast.fix_missing_locations(_ast.Module(body=_body, type_ignores=[])),
+                 "<gate>", "exec"), _ns)
+    _f = _ns["_is_english_word"]
+
+    # BOTH DIRECTIONS. A gate that only rejects would delete English cuts too.
+    assert _f({"word": "hello", "language": "en"}) is True, "English must stay eligible"
+    assert _f({"word": "hello", "language": ""}) is True, "unset tag + Latin stays eligible"
+    assert _f({"word": "caf\u00e9", "language": "en"}) is True, \
+        "Latin-1 accents must stay eligible by SCRIPT — the TAG excludes es/fr"
+    assert _f({"word": "\u0928\u092e\u0938\u094d\u0924\u0947", "language": "en"}) is False, \
+        "HINGLISH: Devanagari tagged 'en' must NOT be English-eligible"
+    assert _f({"word": "\u0928\u092e\u0938\u094d\u0924\u0947", "language": ""}) is False, \
+        "the UNSET-tag hole is the bigger one — a Hindi single-language route " \
+        "passed every word as English"
+    assert _f({"word": "\u0645\u0631\u062d\u0628\u0627", "language": ""}) is False, \
+        "Arabic with an unset tag must not be English-eligible"
+    assert _f({"word": "jalan", "language": "id"}) is False, "a non-en TAG still excludes"
+
+
+@check("DEGENERATION RATE IS CUTTABLE BY A/B ARM (Zac 2026-08-04, RULE-1): the degeneration spiral lives in the `why` field and PROMPTLY_LEAN_SCHEMA strips exactly that field, so the A/B already running is a free test of whether the prompt change fixes a 22% degeneration rate that the worker cannot fix without a 6-10h build. It only works if the rate can be cut BY ARM — and degen_retry went only to the divergence ledger, which is not queryable. This gate pins the per-job counter and its persistence beside lean_arm.")
+def _degen_cuttable_by_arm():
+    _src = open("handler.py").read()
+    assert '"degen_retries": int(globals().get("_DEGEN_RETRIES", 0) or 0)' in _src, \
+        "the degen count must be PERSISTED or the third A/B metric cannot be read"
+    assert "_DEGEN_RETRIES = 0" in _src, "the counter must RESET per job, or it accumulates across a warm container"
+    _nested = any('"degen_retries"' in _src[_i:_i + 3000]
+                  for _i in range(len(_src)) if _src.startswith('"stage_timings": {', _i))
+    assert _nested, "degen_retries must be NESTED in stage_timings beside lean_arm — " \
+        "a top-level key is stripped by content-studio"
+
+
 @check("LEAN-SCHEMA A/B IS MEASURABLE (Zac GO 2026-08-04, both arms together, RULE-1): arm 3 removes the per-moment prose from the response schema (measured cost: what_i_saw declared 240 chars, EMITTED 16,111; wall-clock is output-bound r=0.59) and arm 5 makes the model justify the decorative families in reasoning so they survive the removal — arm 3 alone already ran and text_overlays + sound_effects density DROPPED, so they ship together or not at all. This gate asserts the split is DETERMINISTIC (a job that flips arms between retries pollutes both) and that the arm is PERSISTED where content-studio cannot strip it. An A/B whose arm is not persisted is not an A/B — this repo has _lang_bundle 0/3000, vad_coverage and source_duration 0/149 as precedent.")
 def _lean_ab_measurable():
     _src = open("handler.py").read()
