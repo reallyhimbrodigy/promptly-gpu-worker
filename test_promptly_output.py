@@ -100,11 +100,17 @@ try:
         @staticmethod
         def generate_presigned_url(*a, **k):
             return "https://example.invalid/x.mp4"
+
+        @staticmethod
+        def download_file(_b, _k, dest):
+            # a real download that yields a file ffprobe will reject
+            with open(dest, "wb") as fh:
+                fh.write(b"not a video")
     _res = P.probe_playable(_S3P, "b", "k")
 finally:
     _sp.run = _real_run
 check("a non-zero ffprobe is an ERROR, not zeros", "error" in _res, f"got {_res}")
-check("  and it names the cause", "403" in str(_res.get("error", "")), f"got {_res}")
+check("  and it names the cause", "rc=" in str(_res.get("error", "")), f"got {_res}")
 check("  and it does NOT claim has_video=False",
       _res.get("has_video") is None,
       "reporting has_video=False on a FAILED probe is what caused the misread")

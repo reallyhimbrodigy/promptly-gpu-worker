@@ -74,13 +74,28 @@ def probe_playable(s3, bucket, key, ffprobe_timeout=240):
     {"error": ...}. Callers assert on these; this function never decides.
     """
     import json
+    import os
     import subprocess
-    url = presign(s3, bucket, key)
+    import tempfile
+    # DOWNLOAD, DO NOT STREAM (2026-08-04). ffprobe in the worker image is built
+    # WITHOUT https protocol support — probing a presigned URL returns
+    # "Protocol not found" (rc=1), which the pre-returncode version silently
+    # rendered as has_video=False / frames=0 / duration=0. So this probe could
+    # NEVER have worked over a URL in-container, and every `well=` verdict it
+    # produced from one was unearned. boto3 is already required here to list the
+    # prefix; use it to fetch the bytes and probe a local file, which removes
+    # the protocol dependency entirely rather than hoping for a better build.
+    _tmpd = tempfile.mkdtemp()
+    _local = os.path.join(_tmpd, "probe_target.mp4")
+    try:
+        s3.download_file(bucket, key, _local)
+    except Exception as e:                                        # noqa: BLE001
+        return {"error": f"download for probe failed: {type(e).__name__}: {e}"[:200]}
     try:
         r = subprocess.run(
             ["ffprobe", "-v", "error", "-show_entries",
              "stream=codec_type,nb_frames:format=duration,size",
-             "-of", "json", url],
+             "-of", "json", _local],
             capture_output=True, text=True, timeout=ffprobe_timeout)
         # A FAILED PROBE IS AN ERROR, NEVER A CONFIDENT ZERO. Without this,
         # ffprobe exiting non-zero (a 403 on a private object, a dead presign,
