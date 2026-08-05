@@ -28,6 +28,13 @@ echo "════════════════════════�
 # Override per-operator: PROMPTLY_DEPLOYER=codex ./deploy.sh (etc.)
 export PROMPTLY_DEPLOYER="${PROMPTLY_DEPLOYER:-claude-code}"
 echo "  deployer: $PROMPTLY_DEPLOYER"
+# NO-REGRESS GATE (added by the errors lane, 2026-08-04). Asks MODAL what is
+# actually live and refuses a deploy that would drop any of it. The
+# .last_deployed_commit guard cannot see another lane's deploy -- it is a
+# git-tracked file, so each worktree records only its own line. That blindness
+# is how v512 silently reverted clean_export_key on both routes.
+python3 predeploy_no_regress.py
+
 modal deploy modal_app.py
 
 # Deploy-state guard (Zac 2026-08-01): record the deployed HEAD so validate_deploy
