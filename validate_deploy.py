@@ -11125,6 +11125,31 @@ def _optional_signals_never_fatal():
         "a degraded signal must ledger a defect — silent degrade is the banned shape"
 
 
+@check("DERIVED PROBE TIMEOUT — CORE-AWARE (Zac 2026-08-04, RULE-1, derive-don't-hardcode): _weighted_probe_timeout — the chokepoint every analysis probe funnels through (face-extract calls it DIRECT; scdet/proxy/loudness via _probe_weighted_timeout) — scales base+ceiling by _core_scarcity_factor BEFORE the decode-weight math. The orchestrator split drops the planner cpu, and a core-BLIND budget would let a pool-contended probe spuriously fire (the fixed-30s crash that took completion 78.9->35.7% at cpu=8; MEASURED cert_cpu4_analysis_timing: proxy 2.8s isolated -> 13.1s under the concurrent pool at cpu=4). This is the 'budget correct for the box' half that pairs with _optional_signals_never_fatal ('exceeding it non-fatal'). Factor is 1.0 at cpu>=16 so today is BYTE-IDENTICAL; 2x at cpu=8, 4x at cpu=4, never <1.0, derived from PROMPTLY_RENDER_CORE_BUDGET (os.cpu_count can't read the Modal allocation). FAILS if the factor regresses or _weighted_probe_timeout stops applying it.")
+def _core_aware_probe_timeout():
+    import handler
+    f = getattr(handler, "_core_scarcity_factor", None)
+    assert callable(f), "_core_scarcity_factor must be defined"
+    assert abs(f(16) - 1.0) < 1e-9, "cpu>=16 factor must be 1.0 (byte-identical today)"
+    assert abs(f(8) - 2.0) < 1e-9 and abs(f(4) - 4.0) < 1e-9, "cpu=8->2x, cpu=4->4x"
+    assert f(32) == 1.0 and f(0) == 16.0, "never shrink below 1.0; clamp 0 (no div-by-zero)"
+    _src = open("handler.py").read()
+    import re as _re
+    _m = _re.search(r"def _weighted_probe_timeout.*?except Exception:", _src, _re.S)
+    assert _m and "_core_scarcity_factor" in _m.group(0), \
+        "_weighted_probe_timeout must scale its budget by _core_scarcity_factor"
+
+
+@check("PREWARM HIT/MISS PERSISTED + NESTED (Zac 2026-08-04, RULE-1): the [metric] prewarm_hit lines were LOG-ONLY — the 6th never-persisted telemetry field (after cpu_by_stage, source_duration, gemini_tokens, vad_coverage, _lang_bundle). It is now written into _timings['prewarm'] (source/transcript hit+hinted), which rides result.stage_timings WHOLE past content-studio's top-level-key strip, so the prewarm cost/benefit decision is re-checkable on organic traffic every window with no special log pull. FAILS if the write disappears or regresses to a top-level result key (which content-studio would strip, the exact class that hid the other five).")
+def _prewarm_hit_persisted():
+    _src = open("handler.py").read()
+    assert '_timings["prewarm"] = {' in _src, \
+        "prewarm hit/miss must be persisted into _timings['prewarm'] (nested in stage_timings)"
+    import re as _re
+    assert not _re.search(r'result\[["\']prewarm["\']\]\s*=', _src), \
+        "prewarm must nest in stage_timings, never a top-level result key (content-studio strips those)"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
 

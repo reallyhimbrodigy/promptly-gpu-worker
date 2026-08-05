@@ -3213,6 +3213,29 @@ def detect_face_positions(video_path, sample_timestamps):
     return positions
 
 
+def _core_scarcity_factor(cores=None):
+    """Timeout multiplier for running on FEWER cores than the base calibration (16).
+
+    The probe budgets were tuned on the cpu=16 planner; a smaller planner decodes
+    slower AND is mega-pool-contended (MEASURED cert_cpu4_analysis_timing: the 480p
+    proxy stretches 2.8s isolated -> 13.1s under the concurrent pool at cpu=4). The
+    orchestrator split drops the planner cpu, so a core-BLIND budget would let the
+    pool-contended proxy/loudness/scdet/face probes spuriously fire — the fixed-30s
+    crash that took completion 78.9%->35.7% at cpu=8. Derive-don't-hardcode: `cores`
+    from PROMPTLY_RENDER_CORE_BUDGET (the Modal cpu=; os.cpu_count can't read the
+    allocation — cert_core_probe). 1.0 at >=16 (today BYTE-IDENTICAL), 2x at cpu=8,
+    4x at cpu=4, NEVER <1.0. This is the "budget correct for the box" half that the
+    survivable-degradation wrap's docstring pairs with (that makes exceeding it
+    non-fatal; this makes exceeding it rarer)."""
+    if cores is None:
+        cores = os.environ.get("PROMPTLY_RENDER_CORE_BUDGET", "16") or "16"
+    try:
+        _c = int(cores)
+    except (TypeError, ValueError):
+        _c = 16
+    return max(1.0, 16.0 / max(1, _c))
+
+
 def _weighted_probe_timeout(nframes, res_factor, base_s, ceiling_s):
     """Scale an ffmpeg PROBE subprocess timeout by the source's real decode
     weight (frame count × resolution) so a legitimately heavy source gets the
@@ -3227,6 +3250,15 @@ def _weighted_probe_timeout(nframes, res_factor, base_s, ceiling_s):
     point-fixed only loudness (-vn); this scales the rest. base_s covers a 30fps
     ~60s clip; +1s per ~100 decode-weighted frames beyond that, hard-capped so a
     hang can never ride to the function wall."""
+    # CORE-AWARE (Zac 2026-08-04): scale base + ceiling by core scarcity BEFORE the
+    # decode-weight math, so a smaller planner (orchestrator split) can't spuriously
+    # time out a pool-contended probe. 1.0 at cpu>=16 = today byte-identical. This is
+    # the common chokepoint: covers face-extract (_weighted_probe_timeout DIRECT) and
+    # scdet/proxy/loudness (via _probe_weighted_timeout). Scaled before the try so the
+    # except fallback (int(base_s)) is core-aware too.
+    _cf = _core_scarcity_factor()
+    base_s = float(base_s) * _cf
+    ceiling_s = float(ceiling_s) * _cf
     try:
         n = max(1.0, float(nframes)) * max(1.0, float(res_factor))
         # SLOPE CORRECTED (2026-08-04). The old slope was +1s per 100 weighted
@@ -35288,6 +35320,22 @@ def handler(job):
             print(f"[metric] prewarm_hit kind=transcript job={job_id}", flush=True)
         elif not provided_transcript and mode in ("full", "reinterpret", "guided_redraft"):
             print(f"[metric] prewarm_miss kind=transcript job={job_id} hinted={_hint_transcript_cached}", flush=True)
+
+        # PERSIST prewarm hit/miss into stage_timings (Zac 2026-08-04): the
+        # [metric] prewarm_hit lines above were LOG-ONLY — the 6th never-persisted
+        # telemetry field on this project (after cpu_by_stage, source_duration,
+        # gemini_tokens, vad_coverage, _lang_bundle). Nesting into _timings — which
+        # rides result.stage_timings WHOLE, past content-studio's top-level-key
+        # strip — makes the prewarm cost/benefit decision re-checkable on ORGANIC
+        # traffic indefinitely, no special log pull, so the hit rate answers itself
+        # every window. NO try/except: these are pre-computed bools written into a
+        # live dict; a silent-swallow is the exact pattern that hid the other five.
+        _timings["prewarm"] = {
+            "source_hit": bool(_has_cached_source),
+            "transcript_hit": bool(_has_cached_transcript),
+            "source_hinted": bool(_hint_source_cached),
+            "transcript_hinted": bool(_hint_transcript_cached),
+        }
 
         # Only emit the `download` token on a true cache miss — a cached copy
         # resolves in <100ms and would flash the UI label for no reason.
