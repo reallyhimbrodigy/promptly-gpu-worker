@@ -4613,7 +4613,11 @@ def _terminal_telemetry_wiring():
     # one this check has always pinned; rfind targets it explicitly).
     _c = _src.rfind('status="completed", phase="Done"')
     assert _c != -1, "complete terminal write missing"
-    _win = _src[_c:_c + 2700]  # widened for 2b re-edit + S3-thumbnail + Wave-3 tier/model markers
+    # Widened for 2b re-edit + S3-thumbnail + Wave-3 tier/model markers, then
+    # again for the clean_export_key block (2026-08-04). A FIXED window over a
+    # growing dict is brittle by construction: adding a legitimate field pushed
+    # `vocab` past the end and failed a check about a field nobody touched.
+    _win = _src[_c:_c + 3400]
     assert "**_floor_markers(_floor_state)" in _win, "complete write lost floor markers"
     assert '"vocab": _vocab_markers(edit_plan)' in _win, "complete write lost vocab"
     # the minimal route's completed write carries ITS contract (route named so
@@ -10057,7 +10061,7 @@ def _render_burst_dark():
         "the floor bypass must key on the render_burst_test canary handle (canary exercises the burst at any length)"
 
 
-@check("inc2 render_burst ENCODE-THREAD PIN (Zac 2026-08-01, RULE-1): every DELIVERED-OUTPUT / render-INPUT libx264 encode pins x264 threads to a fixed count (_X264_ENCODE_THREADS), NEVER x264-auto (threads=0). x264-auto picks ~cores*1.5 so the OUTPUT bytes depend on the MACHINE's core count, not the config — the render_burst at cpu=48 diverged from cpu=16 production (same class as the snapshot env-freeze), and it is also the ~0.99994 run-to-run 'x264 nondeterminism' cert_progressive documented. Gemini proxies (_proxy_venc) are exempt — analysed then discarded, never delivered. FAILS if any non-proxy libx264 lacks a threads= pin or the constant is 0/absent, so byte-identity stays a usable diagnostic on every future canary/A-B/cert.")
+@check("inc2 render_burst ENCODE-THREAD PIN (Zac 2026-08-01, RULE-1): every DELIVERED-OUTPUT / render-INPUT libx264 encode pins x264 threads to a fixed count (_X264_ENCODE_THREADS), NEVER x264-auto (threads=0). x264-auto picks ~cores*1.5 so the OUTPUT bytes depend on the MACHINE's core count, not the config — the render_burst at cpu=48 diverged from cpu=16 production (same class as the snapshot env-freeze), and it is also the ~0.99994 run-to-run 'x264 nondeterminism' cert_progressive documented. Gemini proxies (_proxy_venc) are pinned SEPARATELY (_PROXY_X264_THREADS, see _proxy_x264_thread_pin below) — this check still skips them here because they are not delivered output, but the orchestrator split made even the discarded proxy's bytes cpu-dependent (it moves the planner cpu=16→4), so they now carry their own pin. FAILS if any non-proxy libx264 lacks a threads= pin or the constant is 0/absent, so byte-identity stays a usable diagnostic on every future canary/A-B/cert.")
 def _x264_thread_pin():
     _h = open("handler.py").read()
     import re as _re
@@ -10087,6 +10091,33 @@ def _x264_thread_pin():
     # the literal x264-auto pin must never reappear in an x264-params
     assert "threads=0}" not in _h and 'threads=0"' not in _h, \
         "no libx264 may pin x264-params threads=0 (that IS x264-auto)"
+
+
+@check("GEMINI-PROXY ENCODE-THREAD PIN (Zac 2026-08-04, RULE-1): the 480p/18fps Gemini proxy (_proxy_venc, libx264 ultrafast crf 30) now pins x264 threads to _PROXY_X264_THREADS, NEVER x264-auto (`-threads 0` global binds to DECODE; libx264's own default is auto = ~cores*1.5). 076afc3 exempted the proxy because it is 'analysed then discarded, never delivered' — that was safe ONLY while it always encoded on cpu=16. The orchestrator split drops the planner to cpu≈4, so the SAME source would encode to DIFFERENT proxy bytes at cpu=4 vs cpu=16, silently changing what Gemini watches. This pins it byte-identical across ANY planner cpu. Kept as its OWN constant (not _X264_ENCODE_THREADS) so render-core tuning can't retroactively shift Gemini's input. Proven by cert_proxy_thread_pin (unpinned enc=6 vs enc=24 DIFFER; pinned enc=48 IDENTICAL). FAILS if either proxy site loses the pin or the constant is 0/absent.")
+def _proxy_x264_thread_pin():
+    _h = open("handler.py").read()
+    import re as _re
+    _m = _re.search(r"_PROXY_X264_THREADS\s*=\s*(\d+)", _h)
+    assert _m and int(_m.group(1)) > 0, \
+        "_PROXY_X264_THREADS must be defined as a fixed non-zero pin"
+    # every libx264 encode PRECEDED by _proxy_venc must carry the proxy pin
+    _idx = 0
+    _proxy_pinned = 0
+    while True:
+        _p = _h.find('"-c:v", "libx264"', _idx)
+        if _p == -1:
+            break
+        _idx = _p + 1
+        _before = _h[max(0, _p - 500):_p]
+        if "_proxy_venc" not in _before:
+            continue  # render-path encode — covered by _x264_thread_pin above
+        _window = _h[_p:_p + 400]
+        assert "threads={_PROXY_X264_THREADS}" in _window, \
+            f"Gemini-proxy libx264 at offset {_p} has no _PROXY_X264_THREADS pin " \
+            f"— x264-auto makes the proxy cpu-dependent (shifts Gemini's input)"
+        _proxy_pinned += 1
+    assert _proxy_pinned == 2, \
+        f"expected exactly 2 pinned proxy libx264 encodes (prewarm + render-path), found {_proxy_pinned}"
 
 
 print("\n[W3] Progressive delivery (DARK behind PROMPTLY_PROGRESSIVE)")
@@ -10797,10 +10828,14 @@ def _check_probe_budget_scales():
         assert _big > 60, (
             f"the probe budget did not scale on a 4K60 source (got {_big}s, base 60s) — "
             "the ffprobe parse is broken again and the analyze_* fix is inert")
-        assert _h._weighted_probe_timeout(60 * 20, 4.0, 60, 240) == 90, \
-            "4K60 20s must scale 60 -> 90s; a budget that never leaves base is an inert fix"
-        assert _h._weighted_probe_timeout(30 * 60, 1.0, 60, 240) == 60, \
-            "a 1080p30 60s clip must stay at base"
+        # Property, not a magic number: a heavy shape must earn MORE than base.
+        # (This once pinned "== 90s" from an older slope and went red the moment
+        # the slope was corrected — a gate that fails when the fix improves is
+        # a gate testing the wrong thing.)
+        assert _h._weighted_probe_timeout(60 * 20, 4.0, 60, 240) > 60, \
+            "4K60 20s must scale above base; a budget that never leaves base is an inert fix"
+        assert _h._weighted_probe_timeout(30 * 60, 1.0, 60, 240) >= 60, \
+            "a 1080p30 60s clip must never fall BELOW base"
         assert _h._weighted_probe_timeout(60 * 600, 4.0, 60, 240) == 240, \
             "the ceiling must still bound a hang"
         # ...and the NAMED parse must recover fps/res that the positional one lost
@@ -10809,7 +10844,12 @@ def _check_probe_budget_scales():
         try: _os.unlink(_p4k)
         except OSError: pass
     # unreadable source must fail OPEN, never raise into the analysis path
-    assert _h._probe_weighted_timeout("/nonexistent-source.mp4", 60, 240) == 60
+    # Fail-open is a FLOOR, not an equality. An unreadable probe yields nominal
+    # values, so with a from-first-frame slope the budget lands a hair above
+    # base — it must never land BELOW it. (This was a BARE assert, which is why
+    # it reported an empty reason when it broke.)
+    _fo2 = _h._probe_weighted_timeout("/nonexistent-source.mp4", 60, 240)
+    assert 60 <= _fo2 <= 70, f"unreadable source must fail open near base, got {_fo2}"
 
 
 @check("NO TERMINAL MAY LAND ON UNKNOWN (Zac's UNKNOWN=0 law, 2026-08-03): 'Main render produced invalid output' had NO branch in classify_error, so a render that produced no usable file surfaced as UNKNOWN:unclassified — an unowned, uncountable terminal. It also collapsed two different failures into one string: the file never appeared, versus it appeared as a stub. Now RENDER_EMPTY_OUTPUT with the byte count, classified RENDER_FATAL and split into empty_output_missing vs empty_output_stub so the two roots are counted apart. This gate asserts the CLASSIFICATION, because the raise alone would still have read as fixed while landing on UNKNOWN.")
@@ -10877,8 +10917,304 @@ def _check_subcode_is_persisted():
         "error_cause must ride the same classified envelope as error_code"
 
 
+@check("A TRIP MUST SAY WHETHER ITS MASKS RAN (2026-08-04): _build_integrity_masks reads _integrity_slot_ranges off the plan stash — if that key is missing or empty, EVERY masked type silently stops being masked while the gate still reads as working. A black trip then cannot be told apart from a mask that never ran, and that ambiguity blocked the INTEGRITY_TRIP:black investigation outright: DipToBlack is ALREADY in _IG_BLACK_MASK_TYPES (350ms authored blackout vs the 200ms floor), so a surviving black span means either a different stage or an absent mask — and nothing recorded which. Coverage now rides both the trip dict and the summary string that lands in error_detail.")
+def _check_trip_records_mask_coverage():
+    _src = open("handler.py").read()
+    assert '_mask_cov = {k: len(masks.get(k, []) or [])' in _src, \
+        "the gate must compute mask coverage"
+    for _c in ('"check": "freeze", "spans": freeze_resid, "masks": _mask_cov',
+               '"check": "black", "spans": black_resid, "masks": _mask_cov'):
+        assert _c in _src, f"trip must carry its mask coverage: {_c[:40]}"
+    assert "masks={t['masks']['freeze']}/{t['masks']['black']}/{t['masks']['hole']}" in _src, \
+        "the summary that lands in error_detail must carry coverage, not just the dict"
+    # DipToBlack must STAY masked — re-adding it would be a silent no-op 'fix'
+    import handler as _h
+    assert "diptoblack" in _h._IG_BLACK_MASK_TYPES, \
+        "DipToBlack is an AUTHORED 350ms blackout; unmasking it trips every act-break"
+    assert "shutterflash" in _h._IG_BLACK_MASK_TYPES
+
+
+@check("THE MINIMAL-ROUTE CANON IS PROBED BEFORE HANDOFF (2026-08-04): hype_render.normalize_source runs ffmpeg and returns the path — it never checks what it wrote. A stream-less minimal_canon.mp4 therefore reached Remotion and died at the compositor as 'No video stream found in input file .../minimal_canon.mp4' (2 users, 08-04), a message that names the wrong subsystem while the producing stage is already out of scope. The TRUNCATE CLAMP DOES NOT COVER THIS — canon is not a trim-range extract, it is a full re-encode. Same rule as the final concat+mux and both pre-extracts: rc==0 is not success, the ARTIFACT is. Unlike those there is nothing to degrade to (canon IS the render source), so it fails loudly with a coded error naming the stage.")
+def _check_minimal_canon_probed():
+    import handler as _h
+    _src = open("handler.py").read()
+    assert "_pre_extract_readable(_canon)" in _src, \
+        "the minimal-route canon must be probed before handoff"
+    # ...and the probe must be LIVE. Asserting the call text alone is the same
+    # hole the bug had: a short-circuited guard keeps every position assertion
+    # green while nothing is actually checked.
+    assert "    if not _pre_extract_readable(_canon):" in _src, \
+        "the canon probe has been short-circuited or reshaped — it must guard directly"
+    _i = _src.index('_hr.normalize_source(source_path, _canon, _fps)')
+    _j = _src.index('_pre_extract_readable(_canon)')
+    assert _j > _i, "the probe must come AFTER normalize_source writes it"
+    # ...and BEFORE anything consumes the canon (the duration probe is first).
+    _k = _src.index('"-of", "csv=p=0", _canon')
+    assert _j < _k, "the probe must precede the first consumer of the canon"
+    assert "RENDER_CANON_UNREADABLE" in _src, "the failure must name the stage"
+    # the terminal must be CODED, never UNKNOWN
+    _r = _h.classify_error(RuntimeError(
+        "RENDER_CANON_UNREADABLE: minimal-route normalize wrote an unreadable/stream-less canon (261 bytes)"))
+    assert _r.get("error_code") == "RENDER_FATAL", f"got {_r.get('error_code')}"
+    assert _r.get("error_subcode") == "canon_unreadable", f"got {_r.get('error_subcode')}"
+
+
+@check("THE PROBE BUDGET SLOPE MUST MATTER, NOT JUST EXIST (2026-08-04): fixing the ffprobe PARSE made res_factor real; the SLOPE still made it worthless. +1s per 100 weighted frames beyond a 1800 knee gave a 16s 4K HEVC clip (474 frames x 4.0 res = 1895 weighted) exactly +0.95s — a 60s budget — and scdet timed out at precisely 60s (job 479dcef0). A timeout is a SAFETY NET, not a target: a larger budget costs nothing unless the process hangs, while a tight one kills legitimate work. Now scales from the first frame with no knee, ceiling unchanged. This gate asserts the SPECIFIC failing shape gets a real budget — a formula that merely exists is what shipped last time.")
+def _check_probe_slope_matters():
+    import handler as _h
+    # THE EXACT SHAPE THAT TIMED OUT — 16s of 4K HEVC at 29.97.
+    _b = _h._weighted_probe_timeout(474, 4.0, 60, 240)
+    assert _b > 60, f"the 4K shape that timed out at 60s still gets {_b}s"
+    assert _b >= 120, f"4x pixels must buy more than a token increase, got {_b}s"
+    # a normal clip still gets a generous net
+    assert _h._weighted_probe_timeout(1800, 1.0, 60, 240) > 60
+    # the ceiling still bounds a hang
+    assert _h._weighted_probe_timeout(3600, 4.0, 60, 240) == 240
+    # ...and the floor is never below base
+    assert _h._weighted_probe_timeout(1, 1.0, 60, 240) >= 60
+    # unreadable source still fails open
+    # Fail-open is a FLOOR: an unreadable probe yields nominal values, so the
+    # budget may land a hair above base — it must never land BELOW it.
+    _fo = _h._probe_weighted_timeout("/nonexistent.mp4", 60, 240)
+    assert 60 <= _fo <= 70, f"unreadable source must fail open near base, got {_fo}"
+    # the Remotion component crash must be NAMED, not unclassified
+    _m = ("[hype-render] render-full.mjs PromptlyOverlay failed rc=1: "
+          "SymbolicateableError [TypeError]: Cannot read properties of undefined (reading 'split')")
+    assert _h._error_subcode("RENDER_REMOTION", _m) == "component_crash", \
+        "a JS TypeError inside a component must name itself, not read as unclassified"
+
+
+@check("A CONTAINER MAY DECLARE MORE DURATION THAN IT HAS FRAMES FOR (2026-08-04, found by the input matrix BEFORE any user hit it): the VFR cell declared r_frame_rate=30, avg_frame_rate=30 and duration=20.36s while carrying 352 frames = 11.73s of actual coverage. The render believed 20.36s, ran out of frames at 11.73s and HELD THE LAST FRAME for the remaining 8.6s — INTEGRITY_TRIP freeze spans beginning at 11.83s, exactly where the frames end. Same family as the zoomclip stream-less extract and the trailing pad: asking for range past available content. probe_duration now clamps to frame coverage, and ONLY on a large gap so rounding, a trailing partial GOP or a slightly-long audio track can never shorten a healthy edit. Phones produce VFR routinely.")
+def _check_frame_coverage_clamp():
+    import handler as _h
+    assert callable(getattr(_h, "_frame_coverage_s", None)), "the coverage helper must exist"
+    # THE CLAMP MUST BITE on an over-declaring container...
+    _over = {"format": {"duration": "20.36"},
+             "streams": [{"codec_type": "video", "nb_frames": "352",
+                          "avg_frame_rate": "30/1", "r_frame_rate": "30/1"}]}
+    _cov = _h._frame_coverage_s(_over)
+    assert _cov and abs(_cov - 11.733) < 0.05, f"coverage should be ~11.73s, got {_cov}"
+    # ...and MUST NOT bite on an honest one (this is the load-bearing direction:
+    # a clamp that fires on healthy sources would truncate real edits).
+    _ok = {"format": {"duration": "20.36"},
+           "streams": [{"codec_type": "video", "nb_frames": "611",
+                        "avg_frame_rate": "30/1", "r_frame_rate": "30/1"}]}
+    _c2 = _h._frame_coverage_s(_ok)
+    assert _c2 and (20.36 - _c2) <= _h._COVERAGE_CLAMP_MIN_GAP_S, \
+        f"an honest container must not be clamped (coverage {_c2} vs 20.36)"
+    # unknowable coverage must be silent, never a guess
+    for _blind in ({"streams": []},
+                   {"streams": [{"codec_type": "video", "nb_frames": "0", "avg_frame_rate": "30/1"}]},
+                   {"streams": [{"codec_type": "video", "nb_frames": "352", "avg_frame_rate": "0/0"}]}):
+        assert _h._frame_coverage_s(_blind) is None, \
+            "unknowable frame coverage must return None, never a fabricated duration"
+    # the thresholds must stay conservative
+    assert _h._COVERAGE_CLAMP_MIN_GAP_S >= 1.0 and _h._COVERAGE_CLAMP_MIN_FRAC >= 0.05, \
+        "a tight threshold would clamp healthy sources — the gap must stay material"
+
+
+@check("ONE RESOLVER FOR A JOB'S PLAYABLE OUTPUT (2026-08-04): the same probe bug was written TWICE in one night, both times reporting the pipeline as broken when it was fine. (1) ffprobe on a private S3 URL 403'd -> seven matrix cells read POOR and were one step from being reported as seven new classes. (2) Selecting the newest key ending in '.mp4' picked <job>-hls/stream_1080p/init.mp4 — a 0-BYTE HLS INIT SEGMENT beside the real 33.5MB render — and every cell read 0.0MB/0.00s again. promptly_output.pick_playable_output is the single way to resolve it: largest playable mp4, HLS artifacts excluded, order-independent (segments are written AFTER the deliverable, so 'newest' picks wrong by construction). cert: test_promptly_output.py 16/16 with positive AND negative controls.")
+def _check_one_output_resolver():
+    import promptly_output as _po
+    # NEGATIVE CONTROL: the exact object the second probe picked.
+    assert _po.is_playable_output("x/job-hls/stream_1080p/init.mp4", 0) is False
+    assert _po.is_playable_output("x/job-hls/stream_1080p/init.mp4", 99_000_000) is False, \
+        "an HLS artifact is never the deliverable, whatever its size"
+    assert _po.is_playable_output("x/job-hls/s/seg_0.m4s", 6_000_000) is False
+    assert _po.is_playable_output("x/job.mp4", 900) is False, "a stub is not playable"
+    # POSITIVE CONTROL: without this the helper could 'pass' by rejecting everything.
+    assert _po.is_playable_output("x/job.mp4", 35_000_000) is True
+    # the harnesses must USE it rather than re-matching .mp4 themselves
+    _m = open("cert_input_matrix.py").read()
+    assert "pick_playable_output" in _m, \
+        "the matrix harness must resolve outputs through the shared helper"
+    assert "promptly_output.py" in _m, "the helper must be mounted into the image"
+
+
+@check("PRIVATE CLEAN EXPORT (2026-08-04): the client saves rendered_video_url — a PUBLIC CloudFront URL — which makes the export paywall theatre, since anyone with the link has the clean file. The clean master now goes to a PRIVATE key first (exports/{job_id}/clean.mp4, NEVER under the public sources/{USER_ID}/ prefix) and the public URL is demoted to preview-only. Security will not arm the gate until it curls the clean key's public URL and gets 403. THE SPLIT IS BUILT FOR THE WATERMARK PASS: render -> clean master -> private key -> preview artifact -> public key; today the preview IS the clean file, and when the post-render ffmpeg overlay lands only `_preview_path` changes — the private upload, key contract and persisted field are untouched. clean_export_key rides the EXPLICIT allowlist on BOTH completion writes, which is the same shape that silently swallowed error_subcode until it was added by name.")
+def _check_private_clean_export():
+    _src = open("handler.py").read()
+    # the key contract, exactly as settled
+    assert 'f"exports/{_job_id_for_export}/clean.mp4"' in _src, \
+        "the clean master must go to exports/{job_id}/clean.mp4"
+    assert "sources/" not in _src.split('_clean_export_key = None')[1][:1200], \
+        "the clean export must never be written under the public sources/ prefix"
+    # NO public-read ACL on that upload — the whole point is that it is private
+    _blk = _src[_src.index('_clean_export_key = None'):]
+    _blk = _blk[:_blk.index('_preview_path = output_path')]
+    # Strip COMMENTS before checking — my first version matched the word "ACL"
+    # inside my own comment explaining that there is no ACL. Same class as the
+    # bare-substring status match.
+    _code_only = "\n".join(l for l in _blk.split("\n") if not l.strip().startswith("#"))
+    assert "public-read" not in _code_only and "ACL=" not in _code_only, \
+        "the clean export must carry no public ACL — the gate mints the only URL"
+    # the SPLIT seam must exist so the watermark pass drops in without rework
+    assert "_preview_path = output_path" in _src, \
+        "the public upload must go through a named preview seam, not output_path directly"
+    assert "_preview_path, _bucket, _key" in _src, \
+        "the PUBLIC upload must use the preview seam"
+    # the private upload must happen BEFORE the public one
+    # Use find(), not index(): a missing marker must fail with a REASON, not a
+    # bare ValueError that says nothing about what regressed.
+    _i_clean = _src.find('_clean_export_key = _ck')
+    _i_prev = _src.find('_preview_path = output_path')
+    assert _i_clean != -1, "the clean-export upload is gone — nothing writes the private key"
+    assert _i_prev != -1, "the preview seam is gone"
+    assert _i_clean < _i_prev, \
+        "the clean master must be secured before the public artifact is published"
+    # A failed export must NEVER fail a delivered render, AND must never do it
+    # silently — a systematic upload failure would mint 100% free exports.
+    #
+    # ASSERT AGAINST PARSED STATE, NOT SOURCE TEXT (standing rule). The previous
+    # version of this assertion pinned the literal log line "gate will fall back
+    # for this job", so making the failure LOUDER broke the check that exists to
+    # keep the failure safe — a gate that fails when the code improves. Walk the
+    # AST instead: every `except` guarding an `exports/.../clean.mp4` upload must
+    # (a) set the key to None, (b) not re-raise, and (c) ledger a defect.
+    import ast as _ast
+    _tree = _ast.parse(_src)
+    _handlers = []
+    for _node in _ast.walk(_tree):
+        if not isinstance(_node, _ast.Try):
+            continue
+        _body_src = _ast.dump(_ast.Module(body=_node.body, type_ignores=[]))
+        if "clean.mp4" not in _ast.unparse(_ast.Module(body=_node.body, type_ignores=[])):
+            continue
+        for _h in _node.handlers:
+            _hsrc = _ast.unparse(_ast.Module(body=_h.body, type_ignores=[]))
+            _handlers.append(_hsrc)
+    assert len(_handlers) == 2, (
+        f"expected the clean-export upload to be guarded on BOTH routes "
+        f"(main + minimal/hype); found {len(_handlers)} guarded handler(s)")
+    for _hsrc in _handlers:
+        assert "= None" in _hsrc, \
+            "a clean-export failure must degrade the key to None, never leave it set"
+        assert not any(isinstance(_n, _ast.Raise) for _n in
+                       _ast.walk(_ast.parse(_hsrc))), \
+            "a clean-export failure must NEVER fail a delivered render"
+        assert "_ledger_defect" in _hsrc, (
+            "a clean-export failure must LEDGER A DEFECT — this is the last NULL "
+            "path left, and a silent one mints free exports (loud fail-safe law)")
+    # the field must ride BOTH completion allowlists, or the gate cannot read it
+    assert _src.count('"clean_export_key"') >= 4, \
+        "clean_export_key must be on both completion writes AND both payloads"
+
+
+@check("ASSERTIONS MUST NOT MATCH SHORT TOKENS AGAINST RAW SOURCE (2026-08-04, the FOURTH instance of one class): \"500\" matched inside \"max 500 tokens\" and retried a deterministic 400 three times; \"chrome\"/\"Chromium\" matched the SUCCESSFUL startup line and mislabelled two healthy renders as browser_launch; .endswith('.mp4') matched a 0-byte HLS init.mp4 in three separate places, one of which wrote a bad URL into a user's row; and my own gate assertion matched \"ACL\" inside my own comment saying there is NO ACL. A short token proves nothing about CODE because it also appears in prose. This meta-check scans validate_deploy's own assertions and FAILS on any that match a token of 6 characters or fewer against unstripped source — the fix is to strip comments first (_code_only) or assert on parsed/live state instead.")
+def _check_no_short_token_source_assertions():
+    import re as _re
+    _own = open("validate_deploy.py").read().split("\n")
+    # Only flag `"<short>" in <rawsourcevar>` — a distinctive code expression is
+    # fine, a 6-char token is not.
+    # MATCH COMPLETE LITERALS, anchored. My first version was unanchored and
+    # captured the TAIL of longer literals — it flagged ': _gsi' out of
+    # '"sceneIndex": _gsi' and ':' out of '"audible_start":'. That is the same
+    # under-anchoring class it exists to catch, which is the fifth instance.
+    # `_h` is excluded: it is a MODULE in several checks (_h._EmphasisMoment
+    # .model_fields is parsed state, exactly what we want people to use).
+    _rx = _re.compile(r'''(['"])((?:(?!\1).)*)\1\s+(?:not\s+)?in\s+(_src|_blk|_win|_fn|_lad)\b''')
+    _bad = []
+    for _i, _ln in enumerate(_own, 1):
+        _t = _ln.strip()
+        if not _t.startswith("assert"):
+            continue
+        for _m in _rx.finditer(_t):
+            _tok = _m.group(2)
+            if len(_tok) > 6:
+                continue                      # a distinctive code fragment
+            # Only PROSE-LIKE tokens are dangerous: they can appear in comments.
+            # Punctuation/structure fragments (':', ',', '":') cannot be mistaken
+            # for prose and are always read inside a narrow extracted window.
+            if not _tok or not _re.fullmatch(r'[A-Za-z0-9_]+', _tok):
+                continue
+            _bad.append(f"line {_i}: {_tok!r} against {_m.group(3)}")
+    assert not _bad, (
+        "short-token assertions against raw source (they match COMMENTS too): "
+        + "; ".join(_bad[:6]))
+
+
+@check("AN OPTIONAL SIGNAL FAILING MUST NEVER BE FATAL (Zac 2026-08-04, RULE-1). Face positions and shot changes are INPUTS TO QUALITY, not preconditions for a video, but a timeout in either raised straight out of subprocess.run and terminalised the job as RENDER_FFMPEG. MEASURED on the 24h board: 6 of 18 render-class failures died in an analysis stage BEFORE a recipe existed to degrade (face-extract select=mod(n,180) x4, scdet x2) across 5 distinct users — the degrade ladder cannot reach any of them. This asserts the three optional signals stay wrapped, that the wrapper SWALLOWS and returns the typed default, and that it LEDGERS rather than degrading silently (loud fail-safe law). A required signal must never be added here.")
+def _optional_signals_never_fatal():
+    import handler as _h
+    for _name, _default in (("detect_face_positions_dense", []),
+                            ("detect_shot_changes", []),
+                            ("_validator_face_signals", (0, 0, 0.0))):
+        _fn = getattr(_h, _name, None)
+        assert _fn is not None, f"{_name} is gone"
+        # PARSED STATE, not source text: the decorator sets __wrapped__.
+        assert hasattr(_fn, "__wrapped__"), (
+            f"{_name} is NOT wrapped by @_optional_signal — a timeout in it "
+            f"would terminalise the job again")
+    # NEGATIVE CONTROL, run every deploy: a signal that raises must return the
+    # typed default, not propagate. Without this the decorator could be present
+    # and still re-raise, and the gate above would pass.
+    _boom = _h._optional_signal("gate_probe", list)(
+        lambda: (_ for _ in ()).throw(RuntimeError("synthetic")))
+    _got = _boom()
+    assert _got == [], f"wrapper must swallow and return the default, got {_got!r}"
+    _tup = _h._optional_signal("gate_probe2", lambda: (0, 0, 0.0))(
+        lambda: (_ for _ in ()).throw(TimeoutError("synthetic timeout")))
+    assert _tup() == (0, 0, 0.0), "typed default must survive a TimeoutError"
+    # POSITIVE CONTROL: a signal that SUCCEEDS must pass its value through
+    # untouched — a wrapper that swallowed everything would also pass the above.
+    assert _h._optional_signal("gate_probe3", list)(lambda: [1, 2])() == [1, 2], \
+        "the wrapper must not alter a successful signal"
+    # and it must be LOUD — degrade is allowed, silence is not
+    import inspect as _insp
+    _wsrc = _insp.getsource(_h._optional_signal)
+    assert "_ledger_defect" in _wsrc, \
+        "a degraded signal must ledger a defect — silent degrade is the banned shape"
+
+
 # ─── REPORT ────────────────────────────────────────────────────────────
 print(f"\n{'=' * 64}")
+
+@check("THE MINIMAL/HYPE CANON MUST NOT BE STREAM-LESS (Zac 2026-08-04, RULE-1). 3 users in 24h hit 'No video stream found in input file minimal_canon.mp4', surfacing at Remotion as RENDER_REMOTION or RENDER_FATAL:canon_unreadable — 2d35f8e NAMED it and never cured it. ROOT: hype_render.normalize_source let ffmpeg AUTO-SELECT streams, and its _has_audio counted an iPhone Core Media Metadata track (classified audio, codec `none`) as real audio; handler.py learned this on 08-03 (14d758c) and this second copy never did. Fix = explicit -map 0:v:0 / -map 0:a:0?, codec-aware probes that reject `none`, and an artifact check AT THE PRODUCING STAGE (rc==0 is not success, 91f0f8a). Asserts all four, against parsed state.")
+def _hype_canon_not_streamless():
+    import hype_render as _hr
+    import inspect as _i
+    _src = _i.getsource(_hr.normalize_source)
+    assert '"-map", "0:v:0"' in _src, \
+        "normalize_source must name the video stream, never auto-select it"
+    assert '"0:a:0?"' in _src, \
+        "the audio map must be explicit AND optional (? so silent sources render)"
+    assert "RENDER_CANON_NO_VIDEO" in _src, \
+        "the producing stage must verify its own artifact, not hand a bad canon downstream"
+    # codec-aware, not index-aware: a `none` codec must not read as a stream
+    for _fn in (_hr._has_audio, _hr._has_video):
+        _fsrc = _i.getsource(_fn)
+        assert "codec_name" in _fsrc and '"none"' in _fsrc, (
+            f"{_fn.__name__} must read the CODEC and reject `none` — counting the "
+            f"stream index is what let the Core Media Metadata track through")
+    # BOTH DIRECTIONS, on real files built here: a real A/V clip must read true,
+    # a video-only clip must read audio=False, and a missing file must not crash.
+    import subprocess as _sp, tempfile as _tf, os as _os
+    _d = _tf.mkdtemp()
+    _av = _os.path.join(_d, "av.mp4")
+    _sp.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+             "-i", "testsrc=size=320x240:rate=30:duration=1", "-f", "lavfi",
+             "-i", "sine=frequency=440:duration=1", "-c:v", "libx264",
+             "-c:a", "aac", _av], check=True, capture_output=True)
+    assert _hr._has_video(_av) and _hr._has_audio(_av), "POSITIVE CONTROL failed"
+    assert _hr._has_video(_os.path.join(_d, "nope.mp4")) is False, \
+        "a missing file must read False, not raise"
+
+
+# EVERY @check IN THIS FILE MUST ACTUALLY RUN (2026-08-04). The runner executes
+# checks as the module is imported top-to-bottom, so a @check appended BELOW this
+# line is defined and never called — it reports nothing and the total does not
+# move. That happened while writing the optional-signal gate: the check existed,
+# the file passed 349/349, and its own negative control passed too, because the
+# check was dead code. A gate that can be silently disabled by appending to the
+# file is not a gate. Count the decorators in the source and demand they match.
+_declared = open(__file__).read().count("\n@check(")
+_ran = len(_passed) + len(_failures)
+if _declared != _ran:
+    print(f"\n❌ GATE INTEGRITY: {_declared} @check declarations but only {_ran} ran — "
+          f"{_declared - _ran} check(s) are defined BELOW the runner and never execute. "
+          f"Move them above this block.")
+    sys.exit(1)
+
 print(f"RESULTS: {len(_passed)} passed, {len(_failures)} failed")
 print("=" * 64)
 
@@ -10892,3 +11228,4 @@ if _failures:
 else:
     print(f"\n✅ All {len(_passed)} checks passed. Safe to deploy.\n")
     sys.exit(0)
+

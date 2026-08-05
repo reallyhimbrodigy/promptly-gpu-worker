@@ -817,10 +817,24 @@ def run_pipeline_bg(body: dict):
                                   "mean_mb": round((sum(_ms) / len(_ms)) / _MB, 1),
                                   "n": len(_ms)}
                             for _st, _ms in _mem_by_stage.items() if _ms}
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                        # FAIL-LOUD (Zac 2026-08-04): a measurement that ships,
+                        # verifies as deployed, and writes ZERO rows silently is the
+                        # exact silent-failure pattern. Log what we wrote + the result
+                        # shape, so a 0-row instrument screams — AND reveals whether the
+                        # DELIVERED completion carries a DIFFERENT stage_timings than the
+                        # one we just wrote into (the suspected root of 0/125 on traffic).
+                        _peak_all = max((max(_ms) for _ms in _mem_by_stage.values() if _ms),
+                                        default=0) / _MB
+                        print(f"[mem-instrument] WROTE telemetry: {len(_mem_by_stage)} stage(s), "
+                              f"peak_rss={_peak_all:.1f}MiB, cpu_src={_src}, "
+                              f"result_top_keys={list(result.keys())[:14]}, "
+                              f"has_output_key={'output' in result}", flush=True)
+                except Exception as _mem_e:
+                    print(f"[mem-instrument] persist FAILED — telemetry LOST: "
+                          f"{type(_mem_e).__name__}: {_mem_e}", flush=True)
+        except Exception as _mem_outer_e:
+            print(f"[mem-instrument] outer telemetry block FAILED: "
+                  f"{type(_mem_outer_e).__name__}: {_mem_outer_e}", flush=True)
     # PRIMARY completion delivery — POST the full result (success payload OR the
     # classified error envelope) to the app server. Best-effort: a failed POST
     # falls back to the dispatch's Supabase recovery + the reaper.

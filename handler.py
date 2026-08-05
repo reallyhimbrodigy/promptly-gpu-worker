@@ -2123,6 +2123,19 @@ def _has_nvenc():
 # number — the highest that stays fast. NEVER 0 (validate_deploy asserts it).
 _X264_ENCODE_THREADS = 48
 
+# Gemini-proxy x264 thread pin — SEPARATE from the render pin ON PURPOSE.
+# The 480p/18fps proxy is "analysed then discarded, never delivered", so
+# 076afc3 exempted it from the render determinism pin. That exemption was safe
+# only while the proxy always encoded on the SAME cpu (cpu=16). The orchestrator
+# split drops the planner to cpu≈4, and x264-auto (`-threads 0`) sizes threads
+# from the MACHINE core count — so the same source would encode to DIFFERENT
+# proxy bytes at cpu=4 vs cpu=16, silently changing what Gemini watches. Pinning
+# the encoder thread count makes the proxy byte-identical across ANY planner cpu.
+# Kept as its OWN constant (not _X264_ENCODE_THREADS) so future render-core
+# tuning can never retroactively shift Gemini's input. validate_deploy asserts
+# both proxy sites carry this pin and that it is never 0.
+_PROXY_X264_THREADS = 48
+
 
 def get_encode_args(quality="high", threads=0):
     """Return encoder args for FFmpeg. Uses NVENC when GPU is available.
@@ -3216,7 +3229,22 @@ def _weighted_probe_timeout(nframes, res_factor, base_s, ceiling_s):
     hang can never ride to the function wall."""
     try:
         n = max(1.0, float(nframes)) * max(1.0, float(res_factor))
-        scaled = float(base_s) + max(0.0, (n - 30.0 * 60.0)) / 100.0
+        # SLOPE CORRECTED (2026-08-04). The old slope was +1s per 100 weighted
+        # frames BEYOND a 1800 knee, which is far too shallow: a 16s 4K HEVC
+        # clip (474 frames x 4.0 res = 1895 weighted) earned +0.95s — a 60s
+        # budget — and scdet timed out at exactly 60s (job 479dcef0, 08-04
+        # 14:27Z). Fixing the ffprobe PARSE made res_factor real; this makes it
+        # MATTER. 4x the pixels at ~2x the decode cost cannot be worth one
+        # second.
+        #
+        # A TIMEOUT IS A SAFETY NET, NOT A TARGET: a larger budget costs nothing
+        # unless the process actually hangs, while a tight one kills legitimate
+        # work. So scale generously from the first frame — no knee — and let the
+        # ceiling bound a genuine hang.
+        #   1080p30 60s  (1800 weighted) -> 60 + 90  = 150s
+        #   4K30   16s   (1895 weighted) -> 60 + 95  = 155s   (was 60s)
+        #   4K60   60s  (14400 weighted) -> ceiling
+        scaled = float(base_s) + n * 0.05
         return int(min(float(ceiling_s), max(float(base_s), scaled)))
     except Exception:
         return int(base_s)
@@ -3274,6 +3302,46 @@ def _probe_weighted_timeout(source_path, base_s, ceiling_s):
         return int(base_s)
 
 
+def _optional_signal(name, default_factory):
+    """AN OPTIONAL SIGNAL FAILING MUST NEVER BE FATAL (Zac 2026-08-04).
+
+    Face positions and shot changes are INPUTS TO QUALITY, not preconditions for
+    a video. Today a timeout in either raises straight out of `subprocess.run`
+    and terminalises the job as RENDER_FFMPEG — the user gets nothing because we
+    could not work out where the faces were. Measured on 2026-08-04: 6 of the 18
+    render-class failures in 24h died in an analysis stage, before a recipe even
+    existed to degrade (face-extract `select=mod(n,180)` x4, `scdet` x2), across
+    5 distinct users.
+
+    This degrades the signal to "unavailable" and continues. It is NOT silent —
+    every degradation ledgers a defect so the root stays visible and countable
+    (routed, not suppressed), which is the same contract as the render ladder's
+    divergences. A signal that is genuinely required must NOT use this.
+
+    Pairs with the derived timeout (_core_scarcity_factor): that makes the budget
+    correct for the box, this makes exceeding it survivable.
+    """
+    def _wrap(fn):
+        def _inner(*a, **kw):
+            try:
+                return fn(*a, **kw)
+            except Exception as _e:                                # noqa: BLE001
+                try:
+                    _ledger_defect("optional_signal", name, _e)
+                except Exception:                                  # noqa: BLE001
+                    pass
+                print(f"[signal] {name} UNAVAILABLE ({type(_e).__name__}: "
+                      f"{str(_e)[:160]}) — continuing without it; this degrades "
+                      f"quality, it does not fail the render", flush=True)
+                return default_factory()
+        _inner.__name__ = getattr(fn, "__name__", name)
+        _inner.__doc__ = getattr(fn, "__doc__", None)
+        _inner.__wrapped__ = fn
+        return _inner
+    return _wrap
+
+
+@_optional_signal("face_positions_dense", list)
 def detect_face_positions_dense(video_path, every_n_frames=5, target_w=None, target_h=None):
     """
     Dense face detection using FFmpeg frame extraction + OpenCV DNN.
@@ -3951,6 +4019,7 @@ def _parse_scdet_output(stdout, stderr):
 _SCDET_SWEEP_THRESHOLD = 1.0
 
 
+@_optional_signal("shot_changes", list)
 def detect_shot_changes(source_path, threshold=7.0, out_scores=None):
     """Detect hard shot changes in the source video via ffmpeg's `scdet`
     (scene change detect) filter.
@@ -4085,7 +4154,7 @@ def prepare_audio_for_deepgram(source_path: str) -> bytes:
     """
     cmd = [
         "ffmpeg", "-v", "error", "-threads", "0",
-        "-i", source_path,
+        "-i", source_path, "-map", "0:a:0?",
         "-vn", "-ac", "1", "-ar", "48000",
         "-c:a", "flac", "-compression_level", "5",
         "-f", "flac", "-",
@@ -5201,7 +5270,7 @@ def measure_source_loudness(source_path):
     # regression from tonight's filtergraph work — a pre-existing high-fps edge
     # case a user's 100fps uploads surfaced.)
     cmd = [
-        "ffmpeg", "-vn", "-i", source_path, "-t", "60",
+        "ffmpeg", "-vn", "-i", source_path, "-map", "0:a:0?", "-t", "60",
         "-af", "astats=metadata=1:reset=0,ametadata=mode=print",
         "-f", "null", "-"
     ]
@@ -5256,7 +5325,7 @@ def detect_vocal_emphasis(source_path, max_peaks=20):
 
     # Extract mono audio at 16kHz as PCM (fast, low-disk).
     cmd = [
-        "ffmpeg", "-i", source_path, "-vn",
+        "ffmpeg", "-i", source_path, "-map", "0:a:0?", "-vn",
         "-f", "f32le", "-ac", "1", "-ar", "16000", "-",
     ]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -8638,7 +8707,7 @@ def _detect_silence_regions_vad(
         _ext = subprocess.run(
             [
                 "ffmpeg", "-y", "-loglevel", "error",
-                "-i", source_path,
+                "-i", source_path, "-map", "0:a:0?",
                 "-vn", "-ar", "16000", "-ac", "1",
                 "-f", "wav", tmp_wav,
             ],
@@ -8819,7 +8888,7 @@ def diarize_with_pyannote(source_path: str) -> list:
         _ext = subprocess.run(
             [
                 "ffmpeg", "-y", "-loglevel", "error",
-                "-i", source_path,
+                "-i", source_path, "-map", "0:a:0?",
                 "-vn", "-ar", "16000", "-ac", "1",
                 "-f", "wav", tmp_wav,
             ],
@@ -21116,23 +21185,71 @@ def _enrichment_opportunities(iq):
     return opps
 
 
+# A container may DECLARE more duration than it has frames for. Clamp only on a
+# gap this large so ordinary rounding, a trailing partial GOP, or an audio track
+# running slightly long can never shorten a healthy edit.
+_COVERAGE_CLAMP_MIN_GAP_S = 1.0
+_COVERAGE_CLAMP_MIN_FRAC = 0.10
+
+
+def _frame_coverage_s(data):
+    """Seconds the video stream actually has FRAMES for, or None if unknowable."""
+    try:
+        v = next((s for s in (data.get("streams") or [])
+                  if s.get("codec_type") == "video"), None)
+        if not v:
+            return None
+        nb = int(float(v.get("nb_frames") or 0))
+        if nb <= 0:
+            return None                       # container did not count them
+        rate = str(v.get("avg_frame_rate") or v.get("r_frame_rate") or "")
+        if "/" in rate:
+            n, d = rate.split("/")
+            fps = (float(n) / float(d)) if float(d) else 0.0
+        else:
+            fps = float(rate or 0)
+        return (nb / fps) if fps > 0 else None
+    except Exception:
+        return None
+
+
 def probe_duration(file_path):
     data = _probe_full(file_path)
     # Try format duration first, then video stream duration
+    d = 0.0
     try:
         d = float((data.get("format") or {}).get("duration") or 0)
-        if d > 0:
-            return d
     except Exception:
-        pass
-    for s in (data.get("streams") or []):
-        try:
-            d = float(s.get("duration") or 0)
-            if d > 0:
-                return d
-        except Exception:
-            continue
-    return None
+        d = 0.0
+    if d <= 0:
+        for s in (data.get("streams") or []):
+            try:
+                d = float(s.get("duration") or 0)
+                if d > 0:
+                    break
+            except Exception:
+                continue
+    if d <= 0:
+        return None
+
+    # FRAME-COVERAGE CLAMP (2026-08-04). A container can declare more duration
+    # than it holds frames for — VFR captures, screen recordings, and anything
+    # written with a dropped-frame filter. The matrix VFR cell declared
+    # r_frame_rate=30, avg_frame_rate=30 and duration=20.36s while carrying 352
+    # frames = 11.7s of coverage. The render believed 20.36s, ran out of frames
+    # at 11.7s, and HELD THE LAST FRAME for the remaining 8.6s — INTEGRITY_TRIP
+    # freeze spans starting at 11.83s, exactly where the frames end.
+    #
+    # Same family as the zoomclip stream-less extract and the trailing pad:
+    # asking for range past available content. Found by the input matrix before
+    # any user hit it, and phones produce VFR routinely.
+    _cov = _frame_coverage_s(data)
+    if (_cov and _cov > 0 and (d - _cov) > _COVERAGE_CLAMP_MIN_GAP_S
+            and (d - _cov) / d > _COVERAGE_CLAMP_MIN_FRAC):
+        print(f"[probe] duration clamped {d:.2f}s -> {_cov:.2f}s "
+              f"(container over-declares; frames cover only {_cov:.2f}s)", flush=True)
+        return _cov
+    return d
 
 
 _CONTENT_DUR_CACHE = {}
@@ -21420,7 +21537,7 @@ def _ig_window_is_silent(source_path, src_s, src_e):
     try:
         p = subprocess.run(
             ["ffmpeg", "-v", "info", "-ss", str(a), "-t", str(b - a),
-             "-i", source_path,
+             "-i", source_path, "-map", "0:a:0?",
              "-af", "silencedetect=n=%ddB:d=%s" % (
                  _IG_SILENCE_DB, _IG_SILENCE_DETECT_S),
              "-vn", "-f", "null", "-"],
@@ -21800,11 +21917,21 @@ def _integrity_gate(output_path, v_dur, a_dur, expected_frames, nb_frames,
         holes, hole_downgraded = _ig_source_echo_hole(source_path, holes, out_to_src)
     ts = _ig_probe_timestamps(output_path)
 
+    # MASK COVERAGE, RECORDED (2026-08-04). A trip could not distinguish "there
+    # was no maskable transition here" from "the mask had no windows at all" —
+    # _build_integrity_masks reads _integrity_slot_ranges off the plan stash, and
+    # if that key is missing or empty EVERY masked type silently stops being
+    # masked while the gate still reads as working. That ambiguity blocked the
+    # INTEGRITY_TRIP:black investigation outright: DipToBlack is already in
+    # _IG_BLACK_MASK_TYPES, so a black trip means either a different stage or a
+    # mask that never ran, and nothing recorded which.
+    _mask_cov = {k: len(masks.get(k, []) or []) for k in ("freeze", "black", "hole")}
+
     trips = []
     if freeze_resid:
-        trips.append({"check": "freeze", "spans": freeze_resid})
+        trips.append({"check": "freeze", "spans": freeze_resid, "masks": _mask_cov})
     if black_resid:
-        trips.append({"check": "black", "spans": black_resid})
+        trips.append({"check": "black", "spans": black_resid, "masks": _mask_cov})
     if holes:
         trips.append({"check": "dead_moment", "spans": holes})
     dur_delta = abs(float(v_dur or 0) - float(a_dur or 0))
@@ -22601,7 +22728,7 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     else:
         _ext = subprocess.run(
             ["ffmpeg", "-y", "-v", "error",
-             "-i", source_path, "-vn",
+             "-i", source_path, "-map", "0:a:0?", "-vn",
              "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
              full_src_wav],
             capture_output=True, text=True, timeout=120,
@@ -24944,7 +25071,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if not (os.path.exists(_refinement_audio_path) and os.path.getsize(_refinement_audio_path) > 1024):
         _refine_ext = subprocess.run(
             ["ffmpeg", "-y", "-v", "error",
-             "-i", source_path, "-vn",
+             "-i", source_path, "-map", "0:a:0?", "-vn",
              "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
              _refinement_audio_path],
             capture_output=True, text=True, timeout=180,
@@ -29902,6 +30029,7 @@ _ERROR_SUBCODES = {
     "RENDER_FATAL": (
         # The mux step names itself, so an empty artifact is attributed to the
         # step that produced it instead of the generic check 100 lines later.
+        ("canon_unreadable", ("RENDER_CANON_UNREADABLE",)),
         ("empty_mux", ("RENDER_EMPTY_OUTPUT: final concat+mux exited 0",)),
         ("empty_output_missing", ("RENDER_EMPTY_OUTPUT: main render produced no usable file — MISSING",)),
         ("empty_output_stub", ("RENDER_EMPTY_OUTPUT",)),
@@ -29921,6 +30049,12 @@ _ERROR_SUBCODES = {
         ("no_video_stream", ("No video stream found",)),
         ("compositor", ("Compositor error",)),
         ("delay_render", ("delayRender()",)),
+        # A JS TypeError inside a Remotion component — job 22070e6d, 08-04
+        # 09:12Z: "Cannot read properties of undefined (reading 'split')" in
+        # PromptlyOverlay. A component fault, not a browser or argv fault, and
+        # it read as `unclassified` because nothing named the shape.
+        ("component_crash", ("Cannot read properties of undefined",
+                             "is not a function", "SymbolicateableError [TypeError]")),
         ("oom", ("out of memory", "OOM", "Killed")),
         # A SUB-CODE MUST MATCH THE FAILURE, NOT THE SUBSYSTEM (2026-08-03).
         # "chrome"/"Chromium" matched the SUCCESSFUL startup line — every render
@@ -30129,6 +30263,13 @@ def classify_error(e):
     # A render that produced no usable file. Distinct from RENDER_FATAL (the
     # ladder terminal) because the ladder never ran: the check sits after
     # parallel_render, so this raised OUTSIDE it and classified as UNKNOWN.
+    if "RENDER_CANON_UNREADABLE" in msg:
+        return _e(
+            "RENDER_FATAL",
+            "Rendering failed on our side — please run the job again.",
+            retryable=True,
+        )
+
     if "RENDER_EMPTY_OUTPUT" in msg:
         return _e(
             "RENDER_FATAL",
@@ -31996,6 +32137,24 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     # 1. Canonicalize (1080x1920 portrait @30fps — the bridge's contract).
     _canon = os.path.join(work_dir, "minimal_canon.mp4")
     _hr.normalize_source(source_path, _canon, _fps)
+    # PROBE THE ARTIFACT (2026-08-04). normalize_source runs ffmpeg and returns
+    # the path — it never checks what it wrote. A stream-less minimal_canon.mp4
+    # therefore travelled all the way to Remotion and died at the compositor as
+    # "No video stream found in input file .../minimal_canon.mp4" (2 users,
+    # 08-04 03:06 and 03:59), where the message names the wrong subsystem and
+    # the producing stage is already out of scope.
+    #
+    # Same rule as the final concat+mux and both pre-extracts: rc==0 is not
+    # success, the ARTIFACT is. Unlike those, there is nothing to degrade TO
+    # here — minimal_canon IS the render source — so this fails loudly with a
+    # coded error naming the stage instead of a compositor error naming Remotion.
+    if not _pre_extract_readable(_canon):
+        _sz = os.path.getsize(_canon) if os.path.exists(_canon) else -1
+        raise RuntimeError(
+            f"RENDER_CANON_UNREADABLE: minimal-route normalize wrote an "
+            f"unreadable/stream-less canon "
+            f"({'missing' if _sz < 0 else f'{_sz} bytes'}) — "
+            f"src={os.path.basename(source_path)} fps={_fps:g}")
     _mini_t["normalize"] = time.time() - _t0
     _dur = 0.0
     try:
@@ -32285,11 +32444,45 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
     if not upload_url:
         raise RuntimeError("No upload_url provided — Node dispatcher must pre-generate the presigned PUT URL")
     _aws_b, _aws_k = _parse_aws_s3_url(upload_url)
+    # PRIVATE CLEAN EXPORT — minimal/hype route. Same contract and same split as
+    # the main render path.
+    #
+    # WHY THIS ROUTE MATTERS MORE THAN THE OLD-JOB CASE: a NULL clean_export_key
+    # makes the gate 404 and the client falls back to saving the public URL. The
+    # old-job NULL is TEMPORAL and shrinks to nothing on its own; a NULL here is
+    # STRUCTURAL and never would — this route is roughly a third of traffic, so
+    # arming the gate while it persists NULL would let that third export free
+    # PERMANENTLY. The same 404 covers both, so nothing downstream can tell them
+    # apart. NULL must be impossible for new renders.
+    _clean_export_key = None
+    _jid_export = str(input_data.get("job_id") or "").strip()
+    if _aws_b and _aws_k and _aws_s3_client and _jid_export:
+        try:
+            _ck = f"exports/{_jid_export}/clean.mp4"
+            _aws_s3_client.upload_file(
+                output_path, _aws_b, _ck,
+                ExtraArgs={"ContentType": "video/mp4"}, Config=_S3_TRANSFER_CONFIG)
+            _clean_export_key = _ck
+            print(f"[export] clean master -> s3://{_aws_b}/{_ck} (private, minimal route)", flush=True)
+        except Exception as _ce:
+            _clean_export_key = None
+            # LOUD FAIL-SAFE LAW. This is the LAST path that can still produce a
+            # NULL clean_export_key on a new render, and a NULL is a FREE EXPORT:
+            # the gate 404s and the client falls back to saving the public URL.
+            # A systematic failure here (creds, bucket policy, a renamed prefix)
+            # would convert to 100% free exports with nothing reporting it —
+            # degrade is allowed, silence is not.
+            _ledger_defect("clean_export_upload", "minimal_route_upload", _ce,
+                           job_id=input_data.get("job_id"))
+            print(f"[export] DEFECT clean master upload FAILED "
+                  f"({type(_ce).__name__}: {_ce}) — this job exports FREE", flush=True)
+    # The PUBLIC artifact. `_preview_path` is the seam the watermark pass takes.
+    _preview_path = output_path
     if _aws_b and _aws_k:
         if not _aws_s3_client:
             raise RuntimeError("AWS S3 client not initialized — cannot upload")
         _aws_s3_client.upload_file(
-            output_path, _aws_b, _aws_k,
+            _preview_path, _aws_b, _aws_k,
             ExtraArgs={"ContentType": "video/mp4"}, Config=_S3_TRANSFER_CONFIG)
     else:
         _sb_b, _sb_k = _parse_supabase_storage_url(upload_url)
@@ -32297,7 +32490,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             raise RuntimeError(
                 f"Could not parse bucket/key from upload_url: {upload_url[:120]}")
         _s3_client.upload_file(
-            output_path, _sb_b, _sb_k,
+            _preview_path, _sb_b, _sb_k,
             ExtraArgs={"ContentType": "video/mp4"}, Config=_S3_TRANSFER_CONFIG)
     _video_url = input_data.get("public_url") or upload_url.split("?")[0]
     _hls_url = None
@@ -32470,6 +32663,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         # {edit_rationale, post_caption, post_hook} (POST_PACKAGE_CONTRACT.md).
         "post_package": _post_package,
         "video_url": _video_url,
+        "clean_export_key": _clean_export_key,
     }
     if _hls_url:
         result_payload["hls_manifest_url"] = _hls_url
@@ -32480,6 +32674,9 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         result={
             "video_url": _video_url,
             "hls_manifest_url": _hls_url,
+            # See the note on the main completion write — this allowlist is the
+            # only thing the export gate can read.
+            "clean_export_key": _clean_export_key,
             "edit_recipe": result_payload["edit_recipe"],
             "transcript": [],
             "render_version": RENDER_VERSION,
@@ -32912,7 +33109,7 @@ def prewarm_handler(job):
                 _audio_t0 = time.time()
                 _ar = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error",
-                     "-i", source_cache, "-vn",
+                     "-i", source_cache, "-map", "0:a:0?", "-vn",
                      "-acodec", "pcm_s16le", "-ar", str(_audio_rate), "-ac", "1",
                      audio_cache],
                     capture_output=True, text=True, timeout=120,
@@ -32947,7 +33144,8 @@ def prewarm_handler(job):
                 _proxy_venc = (
                     ["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "32"]
                     if _HAS_NVENC else
-                    ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30"]
+                    ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+                     "-x264-params", f"threads={_PROXY_X264_THREADS}"]
                 )
                 _pr = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-threads", "0"] + _hw_dec + [
@@ -33178,6 +33376,7 @@ def _rotate_upright(frame, rot_cw):
     return frame
 
 
+@_optional_signal("validator_face_signals", lambda: (0, 0, 0.0))
 def _validator_face_signals(sample_path, every_n_frames=6):
     """YuNet + ffmpeg-upright face ratio for the VALIDATOR ONLY (Zac 2026-08-01).
     Replaces res10, which systematically failed on distant / non-frontal / darker-skin
@@ -34215,6 +34414,12 @@ def render_stage(
         _ig_summary = ", ".join(
             t["check"] + "=" + json.dumps(t.get("spans") or t.get("delta_s")
                                           or t.get("nb_frames"))
+            # Mask coverage rides the summary so error_detail answers, without a
+            # re-run, whether the masks had any windows. masks=0/0/0 on a black
+            # trip means the plan stash was empty and NOTHING was masked — a
+            # different defect from a genuine unmasked hole.
+            + (f" masks={t['masks']['freeze']}/{t['masks']['black']}/{t['masks']['hole']}"
+               if isinstance(t.get("masks"), dict) else "")
             for t in _ig_verdict["trips"])
         print(f"[integrity-gate] TRIP {_ig_summary}", flush=True)
         try:
@@ -34319,9 +34524,64 @@ def render_stage(
                     f"Could not parse bucket/key from upload_url (neither AWS nor Supabase pattern matched): "
                     f"{upload_url[:120]}"
                 )
+        # ── PRIVATE CLEAN EXPORT ────────────────────────────────────────
+        # THE BYPASS THIS CLOSES: the client saves rendered_video_url, a PUBLIC
+        # CloudFront URL, which makes the export paywall theatre — anyone with
+        # the link has the clean file.
+        #
+        # The clean master goes to a PRIVATE key first. It is reachable only via
+        # a server-minted short-TTL signed URL (the export-gate endpoint, 212827d,
+        # whose own comment says it will repoint here). The public URL is demoted
+        # to preview-only.
+        #
+        # KEY CONTRACT (settled): exports/{job_id}/clean.mp4 — never under the
+        # public sources/{USER_ID}/ prefix. Security will not arm the gate until
+        # it curls the clean key's PUBLIC url and gets 403, so this must never be
+        # written anywhere world-readable.
+        #
+        # THE SPLIT, so the watermark pass drops in without rework:
+        #     render -> clean master -> [PRIVATE exports/{job}/clean.mp4]
+        #                            -> preview artifact -> [public _key]
+        # Today the preview IS the clean file (byte-identical upload). When the
+        # post-render ffmpeg overlay pass lands it produces a DIFFERENT local
+        # file and only `_preview_path` below changes — the private upload, the
+        # key contract and the persisted field all stay exactly as they are.
+        _clean_export_key = None
+        _job_id_for_export = str(input_data.get("job_id") or "").strip()
+        if _scheme == "aws" and _job_id_for_export:
+            try:
+                _ck = f"exports/{_job_id_for_export}/clean.mp4"
+                _client.upload_file(
+                    output_path, _bucket, _ck,
+                    # NO public-read ACL. The bucket/CloudFront origin must deny
+                    # anonymous reads on this prefix; the gate mints the only URL.
+                    ExtraArgs={"ContentType": "video/mp4"},
+                    Config=_S3_TRANSFER_CONFIG,
+                )
+                _clean_export_key = _ck
+                print(f"[export] clean master -> s3://{_bucket}/{_ck} (private)", flush=True)
+            except Exception as _ce:
+                # NEVER fail a delivered render over the export copy. A missing
+                # clean key means the gate falls back to today's behaviour for
+                # this job, which is exactly what a NULL clean_export_key means.
+                _clean_export_key = None
+                # LOUD FAIL-SAFE LAW. This is the LAST path that can still produce a
+                # NULL clean_export_key on a new render, and a NULL is a FREE EXPORT:
+                # the gate 404s and the client falls back to saving the public URL.
+                # A systematic failure here (creds, bucket policy, a renamed prefix)
+                # would convert to 100% free exports with nothing reporting it —
+                # degrade is allowed, silence is not.
+                _ledger_defect("clean_export_upload", "main_render_upload", _ce,
+                               job_id=input_data.get("job_id"))
+                print(f"[export] DEFECT clean master upload FAILED "
+                      f"({type(_ce).__name__}: {_ce}) — this job exports FREE", flush=True)
+
+        # The PUBLIC artifact. `_preview_path` is the seam: today the clean
+        # master, later the watermarked overlay output.
+        _preview_path = output_path
         _ut0 = time.time()
         _client.upload_file(
-            output_path, _bucket, _key,
+            _preview_path, _bucket, _key,
             ExtraArgs={"ContentType": "video/mp4"},
             Config=_S3_TRANSFER_CONFIG,
         )
@@ -34337,6 +34597,12 @@ def render_stage(
             flush=True,
         )
         edit_plan["_rendered_video_url"] = _video_url
+        # Carried on the plan stash exactly like _rendered_video_url, because the
+        # result payload is assembled in a different scope. NULL is meaningful:
+        # it means "no private clean asset for this job", and the export gate must
+        # fall back to today's behaviour rather than mint a URL for a key that
+        # does not exist.
+        edit_plan["_clean_export_key"] = _clean_export_key
 
     def _extract_and_upload_cover():
         # Pick the visually best frame from the FINAL RENDERED OUTPUT around
@@ -35664,7 +35930,8 @@ def handler(job):
                 # at the client level (see _get_genai_client).
                 _proxy_venc = (["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "32"]
                                if _HAS_NVENC else
-                               ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30"])
+                               ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+                     "-x264-params", f"threads={_PROXY_X264_THREADS}"])
                 _hw_dec = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
                 # Audio: Opus mono @ 64kbps. Opus at 64k beats AAC at 96k for
                 # speech intelligibility AND prosodic detail (voice rise/drop,
@@ -35677,7 +35944,18 @@ def handler(job):
                 # CPU-decodes far more and blew the fixed 30s (coded INVALID_FORMAT).
                 # Scale by real source weight; normal 30fps clips stay at base 30s.
                 _proxy_cmd = subprocess.run(
+                    # MAP EXPLICITLY (2026-08-04). THIRD copy of the Core Media
+                    # Metadata class, found by the cert_input_matrix cell built
+                    # to test the SECOND one. An iPhone metadata track is
+                    # classified as audio with codec `none`, so auto stream
+                    # selection hands libopus a stream nothing can decode:
+                    # "[aist#0:2/none] Decoding requested, but no decoder found
+                    # for: none". 14d758c fixed audio extraction, 5f19901 fixed
+                    # hype_render's canon, and this encode still had it — the
+                    # whole job died at the Gemini proxy. `?` on the audio map
+                    # keeps genuinely silent sources working.
                     ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", _raw_source,
+                     "-map", "0:v:0", "-map", "0:a:0?",
                      "-vf", "scale=480:-2,fps=18"] + _proxy_venc + [
                      "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      _proxy_path],
@@ -36228,6 +36506,13 @@ def handler(job):
                 return subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-threads", "0",
                      "-i", _raw_source,
+                     # FIFTH copy of the metadata-track class (2026-08-04). With
+                     # auto stream selection AND `-c:a copy` below, ffmpeg copies
+                     # whatever it picks as audio straight into mp4 — and an
+                     # iPhone Core Media Metadata track (codec `none`) is not a
+                     # codec mp4 can hold: "not currently supported in
+                     # container". Name the streams instead of guessing.
+                     "-map", "0:v:0", "-map", "0:a:0?",
                      "-vf", _vf_chain,
                  # CRF 15 (was 18) — this is the INTERMEDIATE that feeds every
                  # downstream step (per-cut renders, composite, HLS). Bumping
@@ -37270,9 +37555,27 @@ def handler(job):
                   "lazy: dispatched only if Deepgram detects 2+ speakers")
 
         _nr_mem_start()   # inc2 burst gate: sample non-render memory peak → render dispatch
+        # LONG-POLE INSTRUMENT (Zac 2026-08-04, the free read before the analysis
+        # split): time each mega_pool task so Increment 2 moves ONLY the CPU-bound
+        # subset to cpu=8. If transcribe (Deepgram, network) is the long pole, moving
+        # the whole pool would hold cpu=8 idle on a network wait and erode the
+        # $75/day — so the split must keep transcribe/trend/user_style on the planner.
+        # Measurement-only: wraps each task with a wall-clock timer, logged at pool
+        # teardown. NO behavior change (the wrapper just calls the same fn).
+        _pool_timings = {}
+
+        def _timed(_name, _fn):
+            def _tw(*_a, **_k):
+                _pt0 = time.time()
+                try:
+                    return _fn(*_a, **_k)
+                finally:
+                    _pool_timings[_name] = round(time.time() - _pt0, 1)
+            return _tw
+
         mega_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-        future_normalize = mega_pool.submit(_do_normalize)
-        future_transcribe = None if _skip_transcribe else mega_pool.submit(_do_transcribe)
+        future_normalize = mega_pool.submit(_timed("normalize", _do_normalize))
+        future_transcribe = None if _skip_transcribe else mega_pool.submit(_timed("transcribe", _do_transcribe))
         # pyannote speaker diarization is now LAZILY dispatched from inside
         # `_get_resolved_transcript()` — only after Deepgram returns and only
         # if Deepgram detected 2+ speakers. The vast majority of uploads
@@ -37280,21 +37583,21 @@ def handler(job):
         # those wastes ~10-15s of GPU compute and contends for resources
         # with fps_normalize / RIFE. See the gated-dispatch block in
         # _get_resolved_transcript above for the speaker-count logic.
-        future_gemini_proxy = None if _skip_proxy else mega_pool.submit(_do_gemini_proxy)
-        future_trend = None if _skip_trend else mega_pool.submit(_do_trend_context)
-        future_loudness = mega_pool.submit(_do_loudness)
-        future_shot_changes = mega_pool.submit(_do_shot_changes)
-        future_vocal_emphasis = mega_pool.submit(_do_vocal_emphasis)
+        future_gemini_proxy = None if _skip_proxy else mega_pool.submit(_timed("gemini_proxy", _do_gemini_proxy))
+        future_trend = None if _skip_trend else mega_pool.submit(_timed("trend", _do_trend_context))
+        future_loudness = mega_pool.submit(_timed("loudness", _do_loudness))
+        future_shot_changes = mega_pool.submit(_timed("shot_changes", _do_shot_changes))
+        future_vocal_emphasis = mega_pool.submit(_timed("vocal_emphasis", _do_vocal_emphasis))
         # Shake probe runs early (own future) so the input-quality pass can read
         # it pre-recipe; _do_fps_normalize reuses the same cached score.
-        future_shake = mega_pool.submit(_do_shake_probe)
-        future_exposure = mega_pool.submit(_do_exposure_probe)
-        future_fps_normalize = mega_pool.submit(_do_fps_normalize)
+        future_shake = mega_pool.submit(_timed("shake_probe", _do_shake_probe))
+        future_exposure = mega_pool.submit(_timed("exposure_probe", _do_exposure_probe))
+        future_fps_normalize = mega_pool.submit(_timed("fps_normalize", _do_fps_normalize))
         # Per-user style profile — fetched in parallel with everything else; read
         # inside _do_edit_recipe_overlapped so it arrives before Gemini is called.
         # Skip in render_only (plan is deterministic from the provided edit_plan).
         future_user_style = (
-            None if _skip_edit_gen else mega_pool.submit(fetch_user_style_profile, user_id)
+            None if _skip_edit_gen else mega_pool.submit(_timed("user_style", fetch_user_style_profile), user_id)
         )
         # Platform-wide style pulse (F2 launch nudge) — same pattern as the
         # per-user profile: parallel fetch, read just before the Gemini call,
@@ -37305,7 +37608,7 @@ def handler(job):
         # Edit recipe waits on transcript + upload + face/signals internally — skipped entirely in render_only
         future_edit = None if _skip_edit_gen else mega_pool.submit(_do_edit_recipe_overlapped)
         # Face detection runs directly on raw source (no normalize dependency)
-        future_faces = mega_pool.submit(_do_face_detect_overlapped)
+        future_faces = mega_pool.submit(_timed("faces", _do_face_detect_overlapped))
 
         # ── EditPolicy resolve (Phase 2 · Step 1: flag-gated, NO consumer yet) ──
         # Flag is per-job (input_data["edit_policy_enabled"]) OR global env
@@ -38044,6 +38347,16 @@ def handler(job):
         # r_frame_rate (preserved at the source's native rate — 30, 24,
         # 60, etc.) and all frame-count math becomes exact.
         source_path = future_fps_normalize.result()
+        # LONG-POLE readout (Zac 2026-08-04): by here every mega_pool task has
+        # finished (faces "finished long before" per the note below), so the timing
+        # map is complete. Sorted desc so the long pole is first — CPU-bound long
+        # pole → move the whole subset; transcribe (network) long pole → keep it on
+        # the planner and cross only the CPU tasks.
+        try:
+            _lp = sorted(_pool_timings.items(), key=lambda _x: -_x[1])
+            print(f"[long-pole] mega_pool per-task durations (s): {_lp}", flush=True)
+        except Exception:
+            pass
         # Collect face trajectory: render_multi_clip uses it for face-aware
         # MG placement (re-routing center anchors when the speaker's face
         # would be covered). Detection finished long before we got here
@@ -38462,6 +38775,11 @@ def handler(job):
         result_payload = {
             "status": "success",
             "job_id": job_id,
+            # The private clean-export key, stashed on the plan by the render's
+            # upload step. Set HERE as well as on the DB write because the
+            # completion write reads it off this payload — without it the main
+            # path would persist NULL and the gate would fall back on every job.
+            "clean_export_key": (edit_plan or {}).get("_clean_export_key"),
             "render_time": round(render_elapsed, 1),
             "pipeline_time": round(_timings.get("total", 0), 1),
             # SA-0: full per-stage wall-clock decomposition (seconds).
@@ -38590,6 +38908,13 @@ def handler(job):
             result={
                 "video_url": result_payload.get("video_url"),
                 "hls_manifest_url": result_payload.get("hls_manifest_url"),
+                # PRIVATE CLEAN EXPORT KEY (2026-08-04). The export gate reads
+                # THIS field to mint its short-TTL signed URL. It must ride the
+                # explicit allowlist below — the same shape that silently
+                # swallowed error_subcode until it was added by name. NULL means
+                # "old job / no clean asset", and the gate falls back rather than
+                # signing a key that does not exist.
+                "clean_export_key": result_payload.get("clean_export_key"),
                 # RE-EDIT HYDRATION (2b): persist the tiny (~15KB measured) re-edit
                 # inputs here too, so a double-loss completion recovery (dispatch
                 # Supabase fallback) can still restore the Re-edit button — "no

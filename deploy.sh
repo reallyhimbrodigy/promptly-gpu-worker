@@ -38,6 +38,16 @@ if git rev-parse --verify main >/dev/null 2>&1 \
    && git merge-base --is-ancestor main HEAD 2>/dev/null; then
     echo "  ⚠️  main is BEHIND this branch by $(git rev-list --count main..HEAD) commit(s) — it is stale; fast-forward + push it after this deploy."
 fi
+# NO-REGRESS GATE (2026-08-04). The `.last_deployed_commit` guard below is
+# written into the DEPLOYING checkout, so each agent's copy records only their
+# own last deploy and is structurally blind to everyone else's. Twice in 16
+# hours two agents' branches diverged and the later deploy silently reverted the
+# earlier one's shipped fixes — v512 dropped clean_export_key on both routes,
+# RENDER_CANON_UNREADABLE and the VFR clamp, and four completions ran on the
+# reverted image before a DB read noticed. This asks MODAL what is actually live
+# and refuses a deploy that would drop any of it.
+python3 predeploy_no_regress.py
+
 modal deploy modal_app.py
 
 # Deploy-state guard (Zac 2026-08-01): record the deployed HEAD so validate_deploy
@@ -45,6 +55,40 @@ modal deploy modal_app.py
 # means we only reach here on a SUCCESSFUL deploy.
 git rev-parse HEAD > .last_deployed_commit 2>/dev/null || true
 echo "  recorded deployed commit: $(cat .last_deployed_commit 2>/dev/null)"
+
+# POST-DEPLOY TOCTOU GUARD (Zac 2026-08-04). The predeploy_no_regress gate above
+# is a POINT-IN-TIME check: a concurrent lane can deploy in the window between it
+# and `modal deploy`, and the last deploy wins — exactly the race that dropped
+# clean_export_key twice. Prevention cannot win that race; DETECTION can. Re-run
+# the guard now, against what Modal reports live AFTER our deploy: a non-zero delta
+# means a concurrent deploy raced us and live diverged from what we just shipped
+# (ours may have dropped theirs, or theirs superseded ours). Loud + non-zero exit
+# so the race can never pass unnoticed the way v512 did.
+echo "  [post-deploy] TOCTOU re-check against live..."
+if ! python3 predeploy_no_regress.py; then
+    echo "  🚨 POST-DEPLOY REGRESSION — a concurrent deploy raced this one; live and the"
+    echo "     shipped tree diverged. RECONCILE NOW: git merge the live commit, re-verify"
+    echo "     predeploy delta is zero, redeploy."
+    # PAGE, DON'T PRINT (Errors, wiring Speed's deferred ask). A printed warning
+    # is read only by whoever is watching this terminal; v512 dropped
+    # clean_export_key on both routes and went unseen for 70 minutes. The local
+    # shell has no MODAL_CALLBACK_SECRET, so fire from inside Modal where the
+    # deployed secret set is mounted — same trick as the auth ping. Never let the
+    # alert itself abort the reconcile message.
+    set +e
+    ALERT_OUT="$(modal run cert_deploy_alert.py --detail \
+        "deploy race: $(git rev-parse --short HEAD) shipped, live diverged — reconcile" 2>&1)"
+    ALERT_STATUS="$(printf '%s\n' "$ALERT_OUT" | grep -oE 'DEPLOY_ALERT_STATUS=[-0-9]+' | cut -d= -f2 | tail -1)"
+    set -e
+    if [ "$ALERT_STATUS" = "202" ] || [ "$ALERT_STATUS" = "200" ]; then
+        echo "     📟 owner paged (DEPLOY_RACE, status=$ALERT_STATUS)."
+    else
+        echo "     ⚠️  owner page FAILED (status=${ALERT_STATUS:-unknown}) — this finding is"
+        echo "        terminal-only. Tell the team by hand."
+    fi
+    exit 1
+fi
+echo "  [post-deploy] TOCTOU clean — no concurrent deploy dropped identifiers."
 
 # Post-deploy AUTH PING (Zac 2026-08-03): prove the just-deployed worker can
 # AUTHENTICATE to the server. A MODAL_CALLBACK_SECRET mismatch degraded SILENTLY
