@@ -35927,7 +35927,18 @@ def handler(job):
                 # CPU-decodes far more and blew the fixed 30s (coded INVALID_FORMAT).
                 # Scale by real source weight; normal 30fps clips stay at base 30s.
                 _proxy_cmd = subprocess.run(
+                    # MAP EXPLICITLY (2026-08-04). THIRD copy of the Core Media
+                    # Metadata class, found by the cert_input_matrix cell built
+                    # to test the SECOND one. An iPhone metadata track is
+                    # classified as audio with codec `none`, so auto stream
+                    # selection hands libopus a stream nothing can decode:
+                    # "[aist#0:2/none] Decoding requested, but no decoder found
+                    # for: none". 14d758c fixed audio extraction, 5f19901 fixed
+                    # hype_render's canon, and this encode still had it — the
+                    # whole job died at the Gemini proxy. `?` on the audio map
+                    # keeps genuinely silent sources working.
                     ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", _raw_source,
+                     "-map", "0:v:0", "-map", "0:a:0?",
                      "-vf", "scale=480:-2,fps=18"] + _proxy_venc + [
                      "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      _proxy_path],
