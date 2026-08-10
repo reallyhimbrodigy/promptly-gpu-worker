@@ -12,6 +12,16 @@ construction cannot detect a WORSE plan. Every editorial defect in this
 codebase's history (payoff-zoom enum 0/253, six MGs unreachable 0/709) was a
 plan-level distribution collapse — exactly what this differ measures.
 
+Two capture kinds (see golden_freeze_app.py):
+  * "editorial"   — the PLAN_ONLY seam return; judged on family presence,
+                    density bands, moment-class placement, obedience,
+                    structural sanity against the PostCutPlan vocabulary.
+  * "light_route" — moodreel/minimal/hype/minimal_speech_uncut captured at the
+                    hype_render.render_hype boundary; judged on the ROUTE
+                    DECISION (reason) + coarse render_input shape. A route
+                    flip is a RED: an editorial source silently rerouting to
+                    moodreel is family death en masse.
+
 Zero Modal, zero Gemini, zero network. Python 3.9-compatible (modal CLI runs
 3.9 — no X|Y unions here).
 
@@ -21,10 +31,6 @@ Usage:
       --manifest golden/manifest.json [--out report.json]
   python3 harness_plan_diff.py baseline --golden golden/plans \
       --manifest golden/manifest.json [--out golden/baseline_report.json]
-
-Input file shape: either a raw PLAN_ONLY seam return
-({"status": "plan_only", "edit_plan": {...}, "source_duration_s": ...}) or a
-bare edit_plan dict. Light-route captures use {"route": "...", "plan": {...}}.
 
 Frozen enums below are the reference behavior at live commit 1601ae0 — they
 are the GOLDEN's vocabulary, deliberately not imported from handler.py (the
@@ -91,27 +97,41 @@ VERDICT_ORDER = {"GREEN": 0, "YELLOW": 1, "RED": 2}
 
 
 # ---------------------------------------------------------------------------
-# Plan loading + metric extraction
+# Run loading
 # ---------------------------------------------------------------------------
-def load_plan_file(path):
-    """Returns (plan_dict_or_None, meta) — meta carries route/duration if the
-    file is a seam return or light-route capture rather than a bare plan."""
+def load_run_file(path):
+    """Returns a run record {"kind": ..., "m": metrics} or None (unusable).
+
+    Accepts three shapes:
+      * golden_freeze_app.py capture: {"kind": "editorial"|"light_route"|...,
+        "capture": {...}}
+      * raw PLAN_ONLY seam return: {"status": "plan_only", "edit_plan": ...}
+      * bare edit_plan dict
+    """
     with open(path) as f:
         raw = json.load(f)
-    meta = {}
     if not isinstance(raw, dict):
-        return None, meta
+        return {"kind": "editorial",
+                "m": extract_metrics(None, None)}  # structural fail inside
+    if "kind" in raw and "capture" in raw:
+        cap = raw.get("capture") or {}
+        if raw["kind"] == "editorial":
+            return {"kind": "editorial",
+                    "m": extract_metrics(cap.get("edit_plan"),
+                                         cap.get("source_duration_s"))}
+        if raw["kind"] == "light_route":
+            return {"kind": "light_route", "m": extract_light_metrics(cap)}
+        # error / unexpected_return / spawn_error — structurally bad run
+        m = extract_metrics(None, None)
+        m["structural_fails"] = ["capture kind %r: %s"
+                                 % (raw["kind"],
+                                    str(cap.get("error", ""))[:200])]
+        return {"kind": "broken", "m": m}
     if "edit_plan" in raw:  # PLAN_ONLY seam return [CODE] handler.py:37727
-        meta["route"] = "editorial"
-        meta["source_duration_s"] = raw.get("source_duration_s")
-        plan = raw.get("edit_plan")
-        return (plan if isinstance(plan, dict) else None), meta
-    if "route" in raw and "plan" in raw:  # light-route capture
-        meta["route"] = raw.get("route")
-        meta["source_duration_s"] = raw.get("source_duration_s")
-        plan = raw.get("plan")
-        return (plan if isinstance(plan, dict) else None), meta
-    return raw, meta
+        return {"kind": "editorial",
+                "m": extract_metrics(raw.get("edit_plan"),
+                                     raw.get("source_duration_s"))}
+    return {"kind": "editorial", "m": extract_metrics(raw, None)}
 
 
 def _as_list(x):
@@ -119,8 +139,8 @@ def _as_list(x):
 
 
 def extract_metrics(plan, duration_s):
-    """One run's plan -> flat metric dict. Never raises on malformed input —
-    structural problems land in metrics['structural_fails']."""
+    """One editorial run's plan -> flat metric dict. Never raises on malformed
+    input — structural problems land in metrics['structural_fails']."""
     m = {
         "counts": {f: 0 for f in FAMILIES},
         "dist": {"arc_position": {}, "zoom_type": {}, "arc_zoom_pair": {},
@@ -128,7 +148,6 @@ def extract_metrics(plan, duration_s):
                  "transition_type": {}, "sound": {}},
         "structural_fails": [],
         "structural_warns": [],
-        "density": {},
     }
 
     def bump(dist, key):
@@ -170,21 +189,20 @@ def extract_metrics(plan, duration_s):
         wi = e.get("word_indices")
         if wi is not None and (not isinstance(wi, list) or
                                any(not isinstance(w, int) or w < 0 for w in wi)):
-            m["structural_fails"].append("emphasis word_indices not non-negative ints: %r" % (wi,))
+            m["structural_fails"].append(
+                "emphasis word_indices not non-negative ints: %r" % (wi,))
         z = e.get("zoom_effect")
         if isinstance(z, dict):
             m["counts"]["zooms"] += 1
             ztype, arc = z.get("type"), z.get("arc_position")
             if ztype is not None and ztype not in ZOOM_TYPES:
                 m["structural_fails"].append("unknown zoom type %r" % ztype)
-            else:
-                if ztype:
-                    bump("zoom_type", ztype)
+            elif ztype:
+                bump("zoom_type", ztype)
             if arc is not None and arc not in ARC_POSITIONS:
                 m["structural_fails"].append("unknown arc_position %r" % arc)
-            else:
-                if arc:
-                    bump("arc_position", arc)
+            elif arc:
+                bump("arc_position", arc)
             if ztype in ZOOM_TYPES and arc in ARC_POSITIONS:
                 bump("arc_zoom_pair", "%s:%s" % (arc, ztype))
                 # Sayability is a recipe_eval WARN in prod [CODE] handler.py:858-861
@@ -249,22 +267,47 @@ def extract_metrics(plan, duration_s):
             if isinstance(seg, dict):
                 pos = seg.get("position")
                 if pos is not None and pos not in ARC_POSITIONS:
-                    m["structural_fails"].append("unknown arc_segment position %r" % pos)
+                    m["structural_fails"].append(
+                        "unknown arc_segment position %r" % pos)
     elif vp is not None:
         m["structural_fails"].append("video_plan is not a dict")
 
-    minutes = (duration_s / 60.0) if duration_s else None
-    if minutes and minutes > 0:
-        m["density"] = {f: m["counts"][f] / minutes for f in FAMILIES}
+    return m
+
+
+def extract_light_metrics(capture):
+    """Light-route capture -> {reason, shape counts}. Coarse by design: the
+    render_input converges three different route editors; the differ judges
+    the ROUTE DECISION hard and the plan shape softly."""
+    m = {"reason": capture.get("route_reason"),
+         "counts": {}, "keys": [],
+         "structural_fails": [], "structural_warns": []}
+    ri = capture.get("render_input")
+    if not isinstance(ri, dict) or not ri:
+        m["structural_fails"].append("light-route render_input empty or not a dict")
+        return m
+    m["keys"] = sorted(ri.keys())
+    for k, v in ri.items():
+        if isinstance(v, list):
+            m["counts"][k] = len(v)
     return m
 
 
 # ---------------------------------------------------------------------------
 # Envelope
 # ---------------------------------------------------------------------------
+def _count_band(vals):
+    lo, hi = min(vals), max(vals)
+    spread = max(1, hi - lo)
+    # 3 runs under-sample the true variance; pad by the observed spread (>=1)
+    # on both sides, and never demand a negative floor.
+    return {"lo": max(0, lo - spread), "hi": hi + spread, "observed": vals}
+
+
 def build_envelope(runs_by_source, manifest):
-    """runs_by_source: {source_id: [metrics, ...]} (goldens, >=1 run each).
-    Returns the envelope: per-source count bands + corpus-level class support."""
+    """runs_by_source: {source_id: [run_record, ...]} (goldens, >=1 run each).
+    Returns the envelope: per-source kind/reason sets + count bands +
+    corpus-level class support (editorial runs only)."""
     env = {"per_source": {}, "corpus": {
         "family_sources": {f: set() for f in FAMILIES},
         "class_sources": {d: {} for d in ("arc_position", "zoom_type",
@@ -274,28 +317,34 @@ def build_envelope(runs_by_source, manifest):
         "n_sources": len(runs_by_source),
     }}
     for sid, runs in runs_by_source.items():
-        bands = {}
-        for f in FAMILIES:
-            vals = [r["counts"][f] for r in runs]
-            lo, hi = min(vals), max(vals)
-            spread = max(1, hi - lo)
-            # 3 runs under-sample the true variance; pad by the observed
-            # spread (>=1) on both sides, and never demand a negative floor.
-            bands[f] = {"lo": max(0, lo - spread), "hi": hi + spread,
-                        "observed": vals}
-        env["per_source"][sid] = {
-            "bands": bands,
-            "fired": {f: any(r["counts"][f] > 0 for r in runs) for f in FAMILIES},
-            "always_fired": {f: all(r["counts"][f] > 0 for r in runs) for f in FAMILIES},
-            "n_runs": len(runs),
-        }
-        for f in FAMILIES:
-            if any(r["counts"][f] > 0 for r in runs):
-                env["corpus"]["family_sources"][f].add(sid)
-        for dist, table in env["corpus"]["class_sources"].items():
-            for r in runs:
-                for cls in r["dist"][dist]:
-                    table.setdefault(cls, set()).add(sid)
+        ed = [r["m"] for r in runs if r["kind"] == "editorial"]
+        li = [r["m"] for r in runs if r["kind"] == "light_route"]
+        src_env = {"kinds": sorted({r["kind"] for r in runs}),
+                   "n_runs": len(runs)}
+        if ed:
+            src_env["bands"] = {f: _count_band([m["counts"][f] for m in ed])
+                                for f in FAMILIES}
+            src_env["fired"] = {f: any(m["counts"][f] > 0 for m in ed)
+                                for f in FAMILIES}
+            src_env["always_fired"] = {f: all(m["counts"][f] > 0 for m in ed)
+                                       for f in FAMILIES}
+            for f in FAMILIES:
+                if src_env["fired"][f]:
+                    env["corpus"]["family_sources"][f].add(sid)
+            for dist, table in env["corpus"]["class_sources"].items():
+                for m in ed:
+                    for cls in m["dist"][dist]:
+                        table.setdefault(cls, set()).add(sid)
+        if li:
+            src_env["light_reasons"] = sorted(
+                {m["reason"] for m in li if m["reason"]})
+            keys = set()
+            for m in li:
+                keys.update(m["counts"])
+            src_env["light_bands"] = {
+                k: _count_band([m["counts"].get(k, 0) for m in li])
+                for k in sorted(keys)}
+        env["per_source"][sid] = src_env
     return env
 
 
@@ -311,8 +360,7 @@ def _item(items, level, dimension, detail, source_id=None):
 
 def diff(env, cand_by_source, manifest):
     """Compare candidate runs against the golden envelope.
-    Every evaluated dimension is counted; verdict = worst item level.
-    Returns the machine-readable report dict."""
+    Every evaluated dimension is counted; verdict = worst item level."""
     items = []
     dims_total = 0
     obedience_by_source = {}
@@ -331,57 +379,98 @@ def diff(env, cand_by_source, manifest):
         if sid not in env["per_source"]:
             dims_total += 1
             _item(items, "YELLOW", "coverage",
-                  "candidate source not in golden corpus (ignored by bands)", sid)
+                  "candidate source not in golden corpus (no envelope)", sid)
             continue
         e = env["per_source"][sid]
 
-        # structural: every candidate run must be structurally sound
+        # route kind: a candidate run kind outside the golden kind set is a
+        # route FLIP — family death en masse for that source.
         dims_total += 1
-        fails = [f for r in runs for f in r["structural_fails"]]
-        if fails:
+        golden_kinds = set(e["kinds"])
+        cand_kinds = {r["kind"] for r in runs}
+        flipped = cand_kinds - golden_kinds
+        if "broken" in cand_kinds:
             _item(items, "RED", "structural",
-                  "; ".join(sorted(set(fails))[:6]), sid)
-        warns = [w for r in runs for w in r["structural_warns"]]
-        if warns and not fails:
-            _item(items, "YELLOW", "structural-warn",
-                  "; ".join(sorted(set(warns))[:4]), sid)
+                  "; ".join(sorted({f for r in runs if r["kind"] == "broken"
+                                    for f in r["m"]["structural_fails"]})[:4]), sid)
+        elif flipped:
+            _item(items, "RED", "route-flip",
+                  "candidate kind(s) %s but golden kind(s) %s"
+                  % (sorted(flipped), e["kinds"]), sid)
 
-        # density bands per family
-        for f in FAMILIES:
-            band = e["bands"][f]
+        ed = [r["m"] for r in runs if r["kind"] == "editorial"]
+        li = [r["m"] for r in runs if r["kind"] == "light_route"]
+
+        if ed and "bands" in e:
+            # structural: every candidate editorial run must be sound
             dims_total += 1
-            vals = [r["counts"][f] for r in runs]
-            out = [v for v in vals if v < band["lo"] or v > band["hi"]]
-            if not out:
-                continue
-            # total per-source loss of an always-firing family is stronger
-            # than a band miss, but still per-source: YELLOW (corpus-level
-            # death below is the RED).
-            _item(items, "YELLOW", "density",
-                  "%s count %r outside golden band [%d,%d] (golden runs %r)"
-                  % (f, vals, band["lo"], band["hi"], band["observed"]), sid)
+            fails = [f for m in ed for f in m["structural_fails"]]
+            if fails:
+                _item(items, "RED", "structural",
+                      "; ".join(sorted(set(fails))[:6]), sid)
+            warns = [w for m in ed for w in m["structural_warns"]]
+            if warns and not fails:
+                _item(items, "YELLOW", "structural-warn",
+                      "; ".join(sorted(set(warns))[:4]), sid)
 
-        # obedience markers (explicit vibe asks)
-        for marker in obedience_by_source.get(sid, []):
+            # density bands per family
+            for f in FAMILIES:
+                band = e["bands"][f]
+                dims_total += 1
+                vals = [m["counts"][f] for m in ed]
+                out = [v for v in vals if v < band["lo"] or v > band["hi"]]
+                if out:
+                    _item(items, "YELLOW", "density",
+                          "%s count %r outside golden band [%d,%d] (golden runs %r)"
+                          % (f, vals, band["lo"], band["hi"], band["observed"]),
+                          sid)
+
+            # obedience markers (explicit vibe asks)
+            for marker in obedience_by_source.get(sid, []):
+                dims_total += 1
+                ok, golden_ok, desc = _eval_marker(marker, ed, e)
+                if not golden_ok:
+                    _item(items, "YELLOW", "obedience",
+                          "golden itself does not satisfy marker %s — excluded"
+                          % desc, sid)
+                elif not ok:
+                    _item(items, "RED", "obedience",
+                          "candidate misses marker %s that every golden run satisfied"
+                          % desc, sid)
+
+        if li and "light_reasons" in e:
             dims_total += 1
-            ok, golden_ok, desc = _eval_marker(marker, runs, e)
-            if not golden_ok:
-                _item(items, "YELLOW", "obedience",
-                      "golden itself does not satisfy marker %s — excluded" % desc, sid)
-            elif not ok:
-                _item(items, "RED", "obedience",
-                      "candidate misses marker %s that every golden run satisfied" % desc, sid)
+            golden_reasons = set(e["light_reasons"])
+            cand_reasons = {m["reason"] for m in li if m["reason"]}
+            stray = cand_reasons - golden_reasons
+            if stray:
+                _item(items, "RED", "route-flip",
+                      "light-route reason(s) %s not in golden reason set %s"
+                      % (sorted(stray), sorted(golden_reasons)), sid)
+            dims_total += 1
+            fails = [f for m in li for f in m["structural_fails"]]
+            if fails:
+                _item(items, "RED", "structural",
+                      "; ".join(sorted(set(fails))[:4]), sid)
+            for k, band in e.get("light_bands", {}).items():
+                dims_total += 1
+                vals = [m["counts"].get(k, 0) for m in li]
+                out = [v for v in vals if v < band["lo"] or v > band["hi"]]
+                if out:
+                    _item(items, "YELLOW", "density",
+                          "light %s count %r outside golden band [%d,%d]"
+                          % (k, vals, band["lo"], band["hi"]), sid)
 
-    # --- corpus-level dimensions -----------------------------------------
+    # --- corpus-level dimensions (editorial vocabulary) -------------------
     cand_family_sources = {f: set() for f in FAMILIES}
     cand_class_sources = {d: {} for d in env["corpus"]["class_sources"]}
     for sid, runs in cand_by_source.items():
-        for f in FAMILIES:
-            if any(r["counts"][f] > 0 for r in runs):
-                cand_family_sources[f].add(sid)
-        for dist in cand_class_sources:
-            for r in runs:
-                for cls in r["dist"][dist]:
+        for m in (r["m"] for r in runs if r["kind"] == "editorial"):
+            for f in FAMILIES:
+                if m["counts"][f] > 0:
+                    cand_family_sources[f].add(sid)
+            for dist in cand_class_sources:
+                for cls in m["dist"][dist]:
                     cand_class_sources[dist].setdefault(cls, set()).add(sid)
 
     for f in FAMILIES:
@@ -392,12 +481,11 @@ def diff(env, cand_by_source, manifest):
                   "family %s fired on %d/%d golden sources but 0 candidate sources"
                   % (f, len(g), env["corpus"]["n_sources"]))
         elif len(g) >= DEATH_MIN_SOURCES:
-            gshare = len(g)
             cshare = len(cand_family_sources[f])
-            if cshare < gshare * 0.5:
+            if cshare < len(g) * 0.5:
                 _item(items, "YELLOW", "family-drift",
                       "family %s fired on %d golden sources but only %d candidate sources"
-                      % (f, gshare, cshare))
+                      % (f, len(g), cshare))
 
     for dist, table in env["corpus"]["class_sources"].items():
         for cls, srcs in sorted(table.items()):
@@ -427,27 +515,27 @@ def diff(env, cand_by_source, manifest):
     }
 
 
-def _eval_marker(marker, cand_runs, env_src):
+def _eval_marker(marker, ed_metrics, env_src):
     """Returns (candidate_ok, golden_ok, description). golden_ok is derived
     from the envelope's fired/always_fired tables where possible."""
     kind = marker.get("check")
     if kind == "family_min":
         fam, lo = marker["family"], int(marker.get("min", 1))
         desc = "family_min(%s>=%d)" % (fam, lo)
-        golden_ok = env_src["always_fired"].get(fam, False) if lo > 0 else True
-        ok = all(r["counts"].get(fam, 0) >= lo for r in cand_runs)
+        golden_ok = env_src.get("always_fired", {}).get(fam, False) if lo > 0 else True
+        ok = all(m["counts"].get(fam, 0) >= lo for m in ed_metrics)
         return ok, golden_ok, desc
     if kind == "class_present":
         dist, value = marker["dist"], marker["value"]
         desc = "class_present(%s=%s)" % (dist, value)
         golden_ok = bool(marker.get("golden_satisfies", True))
-        ok = all(value in r["dist"].get(dist, {}) for r in cand_runs)
+        ok = all(value in m["dist"].get(dist, {}) for m in ed_metrics)
         return ok, golden_ok, desc
     if kind == "family_absent":
         fam = marker["family"]
         desc = "family_absent(%s)" % fam
-        golden_ok = not env_src["fired"].get(fam, False)
-        ok = all(r["counts"].get(fam, 0) == 0 for r in cand_runs)
+        golden_ok = not env_src.get("fired", {}).get(fam, False)
+        ok = all(m["counts"].get(fam, 0) == 0 for m in ed_metrics)
         return ok, golden_ok, desc
     return False, False, "unknown-marker(%r)" % (kind,)
 
@@ -457,10 +545,7 @@ def _eval_marker(marker, cand_runs, env_src):
 # ---------------------------------------------------------------------------
 def load_run_dir(root, manifest):
     """golden/plans layout: <root>/<source_id>/run*.json ->
-    {source_id: [metrics...]}. Duration comes from the run file when the seam
-    recorded it, else from the manifest."""
-    durations = {s["id"]: s.get("duration_s")
-                 for s in manifest.get("sources", [])}
+    {source_id: [run_record...]}."""
     out = {}
     if not os.path.isdir(root):
         raise FileNotFoundError("run dir missing: %s" % root)
@@ -470,11 +555,8 @@ def load_run_dir(root, manifest):
             continue
         runs = []
         for fn in sorted(os.listdir(sdir)):
-            if not fn.endswith(".json"):
-                continue
-            plan, meta = load_plan_file(os.path.join(sdir, fn))
-            dur = meta.get("source_duration_s") or durations.get(sid)
-            runs.append(extract_metrics(plan, dur))
+            if fn.endswith(".json"):
+                runs.append(load_run_file(os.path.join(sdir, fn)))
         if runs:
             out[sid] = runs
     return out
@@ -514,7 +596,7 @@ def _fixture_plan(seed, payoff=True, mg=True, styles=("Prime", "Gadzhi")):
              "duration": 2.2, "viewer_feeling": "whoa",
              "zoom_effect": {"type": "SmoothPush", "arc_position": "mid_peak"},
              "sound": "popsfx"})
-    plan = {
+    return {
         "video_identity": "fixture",
         "video_plan": {"what_happens": "x", "hook_word_index": 0,
                        "payoff_word_index": 11, "close_word_index": 20,
@@ -542,32 +624,43 @@ def _fixture_plan(seed, payoff=True, mg=True, styles=("Prime", "Gadzhi")):
         "outro": "none",
         "aspect_ratio": "9:16",
     }
-    return plan
 
 
-def _fixture_corpus(n_sources=5, payoff=True, mg=True):
+def _ed_run(seed, **kw):
+    return {"kind": "editorial",
+            "m": extract_metrics(_fixture_plan(seed, **kw), 60.0)}
+
+
+def _light_run(reason="no_speech", n_clips=4):
+    cap = {"route_reason": reason,
+           "render_input": {"clips": [{"s": i} for i in range(n_clips)],
+                            "transitions": [{"t": 1}], "fps": 30}}
+    return {"kind": "light_route", "m": extract_light_metrics(cap)}
+
+
+def _fixture_corpus(payoff=True, mg=True, light_reason="no_speech"):
     out = {}
-    for i in range(n_sources):
-        sid = "src%02d" % i
-        runs = []
-        for seed in range(3):
-            plan = _fixture_plan(seed + i, payoff=payoff, mg=mg)
-            runs.append(extract_metrics(plan, 60.0))
-        out[sid] = runs
+    for i in range(5):  # 5 editorial sources
+        out["src%02d" % i] = [_ed_run(s + i, payoff=payoff, mg=mg)
+                              for s in range(3)]
+    for i in range(3):  # 3 light-route sources
+        out["lite%02d" % i] = [_light_run(light_reason, 3 + (s % 2))
+                               for s in range(3)]
     return out
 
 
 def self_test(verbose=False):
     """Non-vacuity built in: a clean candidate must be GREEN, and each planted
     defect class must go RED. Raises AssertionError on any miss."""
-    manifest = {"sources": [
-        {"id": "src%02d" % i, "duration_s": 60.0} for i in range(5)]}
+    manifest = {"sources": (
+        [{"id": "src%02d" % i, "duration_s": 60.0} for i in range(5)] +
+        [{"id": "lite%02d" % i, "duration_s": 30.0} for i in range(3)])}
     manifest["sources"][0]["obedience"] = [
         {"check": "family_min", "family": "motion_graphics", "min": 1}]
     golden = _fixture_corpus()
     env = build_envelope(golden, manifest)
 
-    # 1. clean candidate (goldens vs themselves) -> GREEN
+    # 1. clean candidate (same distribution) -> GREEN
     r = diff(env, _fixture_corpus(), manifest)
     assert r["verdict"] == "GREEN", "clean candidate not GREEN: %r" % (r["items"][:3],)
     assert r["defect_rate"] == 0.0
@@ -577,7 +670,7 @@ def self_test(verbose=False):
     r = diff(env, _fixture_corpus(payoff=False), manifest)
     assert r["verdict"] == "RED", "payoff death not RED"
     assert any(i["dimension"] == "class-death" and "payoff" in i["detail"]
-               for i in r["items"]), "payoff class-death not itemized: %r" % (r["items"][:5],)
+               for i in r["items"]), "payoff class-death not itemized"
 
     # 3. family death: MGs zeroed everywhere -> family-death RED
     #    (obedience marker on src00 also fires)
@@ -590,7 +683,7 @@ def self_test(verbose=False):
 
     # 4. structural fail: corrupt plan -> RED
     bad = _fixture_corpus()
-    bad["src01"] = [extract_metrics({"garbage": True}, 60.0)]
+    bad["src01"] = [{"kind": "editorial", "m": extract_metrics({"garbage": True}, 60.0)}]
     r = diff(env, bad, manifest)
     assert r["verdict"] == "RED", "structural corruption not RED"
     assert any(i["dimension"] == "structural" for i in r["items"])
@@ -599,7 +692,7 @@ def self_test(verbose=False):
     drift = _fixture_corpus()
     p = _fixture_plan(0)
     p["emphasis_moments"][0]["zoom_effect"]["type"] = "MegaZoom"
-    drift["src02"] = [extract_metrics(p, 60.0)]
+    drift["src02"] = [{"kind": "editorial", "m": extract_metrics(p, 60.0)}]
     r = diff(env, drift, manifest)
     assert r["verdict"] == "RED", "unknown enum not RED"
 
@@ -615,20 +708,55 @@ def self_test(verbose=False):
     dense = _fixture_corpus()
     p = _fixture_plan(0)
     p["broll_clips"] = p["broll_clips"] * 9
-    dense["src04"] = [extract_metrics(p, 60.0) for _ in range(3)]
+    dense["src04"] = [{"kind": "editorial", "m": extract_metrics(p, 60.0)}
+                      for _ in range(3)]
     r = diff(env, dense, manifest)
     assert r["verdict"] in ("YELLOW", "RED"), "density blowout stayed GREEN"
     assert any(i["dimension"] == "density" for i in r["items"])
 
-    # 8. envelope tolerance: natural 3-run variance must NOT false-alarm —
-    #    already covered by (1), but assert bands are non-degenerate too.
+    # 8. route KIND flip: editorial source now light-routes -> RED
+    flip = _fixture_corpus()
+    flip["src00"] = [_light_run("not_talking_head", 4)]
+    r = diff(env, flip, manifest)
+    assert r["verdict"] == "RED", "kind flip not RED"
+    assert any(i["dimension"] == "route-flip" and i.get("source_id") == "src00"
+               for i in r["items"]), "kind flip not itemized"
+
+    # 9. light-route REASON flip -> RED
+    reason_flip = _fixture_corpus()
+    reason_flip["lite00"] = [_light_run("render_collapsed", 3)]
+    r = diff(env, reason_flip, manifest)
+    assert r["verdict"] == "RED", "reason flip not RED"
+    assert any(i["dimension"] == "route-flip" and i.get("source_id") == "lite00"
+               for i in r["items"]), "reason flip not itemized"
+
+    # 10. broken capture (error kind) -> RED
+    broken = _fixture_corpus()
+    broken["lite01"] = [load_run_record_from_dict(
+        {"kind": "error", "capture": {"error": "boom"}})]
+    r = diff(env, broken, manifest)
+    assert r["verdict"] == "RED", "broken capture not RED"
+
+    # 11. envelope tolerance: bands are non-degenerate
     b = env["per_source"]["src00"]["bands"]["emphasis"]
     assert b["hi"] > b["lo"], "degenerate band"
 
     if verbose:
-        print("self-test: 8/8 defect classes behave (GREEN stays green, "
+        print("self-test: 11/11 defect classes behave (GREEN stays green, "
               "planted defects go RED)")
     return True
+
+
+def load_run_record_from_dict(raw):
+    """Test helper mirroring load_run_file's shape handling."""
+    import tempfile
+    with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+        json.dump(raw, f)
+        path = f.name
+    try:
+        return load_run_file(path)
+    finally:
+        os.unlink(path)
 
 
 # ---------------------------------------------------------------------------
