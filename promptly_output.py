@@ -82,7 +82,21 @@ def probe_playable(s3, bucket, key, ffprobe_timeout=240):
              "stream=codec_type,nb_frames:format=duration,size",
              "-of", "json", url],
             capture_output=True, text=True, timeout=ffprobe_timeout)
+        # A FAILED PROBE IS AN ERROR, NEVER A CONFIDENT ZERO. Without this,
+        # ffprobe exiting non-zero (a 403 on a private object, a dead presign,
+        # a network blip) leaves stdout empty, json.loads("{}") yields no
+        # streams, and this returned has_video=False / frames=0 / duration=0 as
+        # a SUCCESSFUL result. The caller then reports a healthy render as an
+        # empty deliverable. That misread cost a full re-examination of the
+        # completion-rate denominator on 2026-08-04, and it is the same class as
+        # the session's first probe failure (403 -> all zeros).
+        if r.returncode != 0:
+            return {"error": f"ffprobe rc={r.returncode}: "
+                             f"{(r.stderr or '').strip()[-200:]}"}
         j = json.loads(r.stdout or "{}")
+        if not (j.get("streams") or []):
+            return {"error": "ffprobe returned no streams — treat as UNKNOWN, "
+                             "not as an empty file"}
     except Exception as e:                                        # noqa: BLE001
         return {"error": f"{type(e).__name__}: {e}"[:200]}
     streams = j.get("streams") or []

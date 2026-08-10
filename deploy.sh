@@ -68,8 +68,24 @@ echo "  [post-deploy] TOCTOU re-check against live..."
 if ! python3 predeploy_no_regress.py; then
     echo "  🚨 POST-DEPLOY REGRESSION — a concurrent deploy raced this one; live and the"
     echo "     shipped tree diverged. RECONCILE NOW: git merge the live commit, re-verify"
-    echo "     predeploy delta is zero, redeploy. (Propose to Errors: wire sendOwnerAlert here"
-    echo "     in the canonical deploy.sh so every lane pages on this, not just prints.)"
+    echo "     predeploy delta is zero, redeploy."
+    # PAGE, DON'T PRINT (Errors, wiring Speed's deferred ask). A printed warning
+    # is read only by whoever is watching this terminal; v512 dropped
+    # clean_export_key on both routes and went unseen for 70 minutes. The local
+    # shell has no MODAL_CALLBACK_SECRET, so fire from inside Modal where the
+    # deployed secret set is mounted — same trick as the auth ping. Never let the
+    # alert itself abort the reconcile message.
+    set +e
+    ALERT_OUT="$(modal run cert_deploy_alert.py --detail \
+        "deploy race: $(git rev-parse --short HEAD) shipped, live diverged — reconcile" 2>&1)"
+    ALERT_STATUS="$(printf '%s\n' "$ALERT_OUT" | grep -oE 'DEPLOY_ALERT_STATUS=[-0-9]+' | cut -d= -f2 | tail -1)"
+    set -e
+    if [ "$ALERT_STATUS" = "202" ] || [ "$ALERT_STATUS" = "200" ]; then
+        echo "     📟 owner paged (DEPLOY_RACE, status=$ALERT_STATUS)."
+    else
+        echo "     ⚠️  owner page FAILED (status=${ALERT_STATUS:-unknown}) — this finding is"
+        echo "        terminal-only. Tell the team by hand."
+    fi
     exit 1
 fi
 echo "  [post-deploy] TOCTOU clean — no concurrent deploy dropped identifiers."

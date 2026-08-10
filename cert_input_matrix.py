@@ -57,6 +57,20 @@ MATRIX = [
      "why": "intra-frame 10-bit 422 — a codec the h264 assumptions never meet"},
     {"cell": "VFR", "src": "m_vfr.mp4",
      "why": "variable frame rate — r_frame_rate lies about the real cadence"},
+    # THE REAL iPhone SOURCE, not a synthesised imitation. Its Core Media
+    # Metadata track is classified by ffmpeg as an AUDIO stream with codec
+    # `none` ("[aist#0:2/none] Decoding requested, but no decoder found for:
+    # none"). It killed audio extraction on 08-04 (job 09c8fa8f, fixed in
+    # handler.py by 14d758c) and the SAME shape survived in hype_render.py
+    # until 5f19901, where it is the inferred cause of the stream-less
+    # minimal_canon that cost 3 users. That fix is STRUCTURAL AND UNREPRODUCED;
+    # this cell is what converts it to tested. Routed through the minimal/hype
+    # path because that is where the canon is built.
+    {"cell": "iphone-coremedia", "src": None,
+     "url": f"https://{BUCKET}.s3.amazonaws.com/failure-corpus/RENDER_FFMPEG/"
+            "09c8fa8f-1937-4702-b322-73402b4869d7.mp4",
+     "why": "iPhone Core Media Metadata track — an AUDIO stream with codec "
+            "`none` that no decoder can open; breaks auto stream selection"},
 ]
 
 
@@ -79,7 +93,8 @@ def run_cell(cell: dict) -> dict:
     key = f"matrix-20260804/out/{cell['cell']}/{job_id}.mp4"
     url = f"https://{BUCKET}.s3.amazonaws.com/{key}"
     body = {
-        "job_id": job_id, "video_url": f"{BASE}/{cell['src']}",
+        "job_id": job_id,
+        "video_url": cell.get("url") or f"{BASE}/{cell['src']}",
         "vibe": "Clean and engaging edit",
         "user_id": "00000000-0000-0000-0000-0000000000ee",
         "upload_url": url, "public_url": url,
@@ -146,7 +161,14 @@ def run_cell(cell: dict) -> dict:
 @app.local_entrypoint()
 def main():
     import json
-    results = list(run_cell.map(MATRIX))
+    # ONE-CELL MODE: a single new shape costs ~1/9th of the sweep. Rule 8 —
+    # never spend the whole matrix to test one cell.
+    _only = os.environ.get("MATRIX_CELL", "").strip()
+    _cells = [c for c in MATRIX if c["cell"] == _only] if _only else MATRIX
+    assert _cells, f"MATRIX_CELL={_only!r} matches no cell"
+    if _only:
+        print(f"ONE-CELL MODE: {_only}")
+    results = list(run_cell.map(_cells))
     print("\n" + "=" * 96)
     bad = []
     for r in sorted(results, key=lambda x: x["cell"]):

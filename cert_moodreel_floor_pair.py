@@ -18,6 +18,11 @@ difference is `moodreel_test`, which is exactly the gate the floor change opened
 Run:  modal run cert_moodreel_floor_pair.py
 """
 import os
+import sys
+# MUST precede `import modal_app`: the container re-imports THIS FILE at module
+# level from /root, where modal_app is not on the path — the first run died with
+# ModuleNotFoundError for exactly this. The working certs all carry this line.
+sys.path.insert(0, "/")
 
 import modal
 import modal_app
@@ -103,9 +108,16 @@ def run_arm(arm: dict) -> dict:
 @app.local_entrypoint()
 def main():
     import json
+    # START MARKER (Zac 2026-08-04). The first run of this harness died silently:
+    # `modal run`'s client was killed when the call was backgrounded, the ephemeral
+    # app sat at 0 tasks, and the output file stayed empty — which from outside is
+    # INDISTINGUISHABLE from a slow render. A harness that can die without saying
+    # anything cannot be trusted to report a null. Marker first, always.
+    print("[floor-pair] STARTED — dispatching 2 arms", flush=True)
     arms = [{"name": "A_moodreel", "moodreel": True},
             {"name": "B_minimal", "moodreel": False}]
     results = list(run_arm.map(arms))
+    print(f"[floor-pair] RETURNED {len(results)} arm result(s)", flush=True)
     print("\n============ 3-8s FLOOR PAIR ============")
     for r in results:
         print(json.dumps(r, indent=2, default=str))

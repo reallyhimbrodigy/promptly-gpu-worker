@@ -2202,6 +2202,7 @@ _overlay_chunk_procs = []
 # and now names the class PLATFORM_TIMEOUT. Best-effort throughout; re-raises the
 # default handler so the container still exits promptly.
 _ACTIVE_JOB_ID = None
+_DEGEN_RETRIES = 0
 _SHUTDOWN_HANDLER_INSTALLED = False
 
 
@@ -4186,7 +4187,7 @@ def prepare_audio_for_deepgram(source_path: str) -> bytes:
     """
     cmd = [
         "ffmpeg", "-v", "error", "-threads", "0",
-        "-i", source_path,
+        "-i", source_path, "-map", "0:a:0?",
         "-vn", "-ac", "1", "-ar", "48000",
         "-c:a", "flac", "-compression_level", "5",
         "-f", "flac", "-",
@@ -5302,7 +5303,7 @@ def measure_source_loudness(source_path):
     # regression from tonight's filtergraph work — a pre-existing high-fps edge
     # case a user's 100fps uploads surfaced.)
     cmd = [
-        "ffmpeg", "-vn", "-i", source_path, "-t", "60",
+        "ffmpeg", "-vn", "-i", source_path, "-map", "0:a:0?", "-t", "60",
         "-af", "astats=metadata=1:reset=0,ametadata=mode=print",
         "-f", "null", "-"
     ]
@@ -5357,7 +5358,7 @@ def detect_vocal_emphasis(source_path, max_peaks=20):
 
     # Extract mono audio at 16kHz as PCM (fast, low-disk).
     cmd = [
-        "ffmpeg", "-i", source_path, "-vn",
+        "ffmpeg", "-i", source_path, "-map", "0:a:0?", "-vn",
         "-f", "f32le", "-ac", "1", "-ar", "16000", "-",
     ]
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -8739,7 +8740,7 @@ def _detect_silence_regions_vad(
         _ext = subprocess.run(
             [
                 "ffmpeg", "-y", "-loglevel", "error",
-                "-i", source_path,
+                "-i", source_path, "-map", "0:a:0?",
                 "-vn", "-ar", "16000", "-ac", "1",
                 "-f", "wav", tmp_wav,
             ],
@@ -8920,7 +8921,7 @@ def diarize_with_pyannote(source_path: str) -> list:
         _ext = subprocess.run(
             [
                 "ffmpeg", "-y", "-loglevel", "error",
-                "-i", source_path,
+                "-i", source_path, "-map", "0:a:0?",
                 "-vn", "-ar", "16000", "-ac", "1",
                 "-f", "wav", tmp_wav,
             ],
@@ -9366,6 +9367,13 @@ def detect_filler(words: list) -> list:
     return out
 
 
+# Anything beyond Latin + Latin-Extended-A/B is a different script. Devanagari
+# (U+0900-097F), Arabic, Cyrillic, CJK, Thai, Hebrew all sit above U+024F;
+# Latin-1 accents do not, so accented European text stays English-eligible by
+# SCRIPT and is excluded by its language TAG instead.
+_NON_LATIN_SCRIPT_RE = re.compile(r"[^\u0000-\u024F\u2000-\u206F]")
+
+
 def _is_english_word(w: dict) -> bool:
     """The per-word language tag (Deepgram language=multi) decides whether the
     English-shaped structural detectors are allowed to earn a cut. 'en'/'en-US'
@@ -9379,9 +9387,25 @@ def _is_english_word(w: dict) -> bool:
     heuristics are English-tuned. Firing them on non-English text deletes real
     words. Fewer cuts is the safe direction — a non-English tag skips the cut,
     never the reverse. English words inside a code-switched (multi) clip are
-    tagged 'en' and STILL get cut. (Zac 2026-07-28.)"""
+    tagged 'en' and STILL get cut. (Zac 2026-07-28.)
+
+        SCRIPT-CHECKED TOO (Zac 2026-08-04): the tag is NECESSARY BUT NOT SUFFICIENT.
+    A Devanagari word tagged 'en' passes the tag test — that is the HINGLISH
+    population, and it is not an edge case. Worse, an UNSET tag also passes, so on
+    a single-language route (Hindi is 51% of the transcript cohort) every word
+    reads as English-eligible and the English-tuned reduplication / false-start /
+    retake heuristics run over Hindi text and delete real words.
+
+    So: non-Latin characters mean NOT English regardless of the tag. Latin-1
+    accents (é, ñ, ü) stay eligible by script — Spanish and French are excluded by
+    their TAG, and excluding them by script would be the wrong instrument.
+    Fewer cuts remains the safe direction.
+    """
     lg = str((w or {}).get("language") or "").split("-")[0].lower()
-    return lg == "" or lg == "en"
+    if not (lg == "" or lg == "en"):
+        return False
+    return not _NON_LATIN_SCRIPT_RE.search(
+        str((w or {}).get("punctuated_word") or (w or {}).get("word") or ""))
 
 
 def detect_false_start(words: list) -> list:
@@ -12524,6 +12548,7 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             raise RuntimeError(f"Gemini post-cuts-call degenerate after retry: {_degen}")
         if _attempt >= 2:
             _degen_extra_used += 1
+            globals().__setitem__('_DEGEN_RETRIES', globals().get('_DEGEN_RETRIES', 0) + 1)
             _record_divergence(
                 "recipe_transport",
                 {"attempt": _attempt, "class": str(_degen)[:80]},
@@ -21569,7 +21594,7 @@ def _ig_window_is_silent(source_path, src_s, src_e):
     try:
         p = subprocess.run(
             ["ffmpeg", "-v", "info", "-ss", str(a), "-t", str(b - a),
-             "-i", source_path,
+             "-i", source_path, "-map", "0:a:0?",
              "-af", "silencedetect=n=%ddB:d=%s" % (
                  _IG_SILENCE_DB, _IG_SILENCE_DETECT_S),
              "-vn", "-f", "null", "-"],
@@ -22760,7 +22785,7 @@ def build_per_cut_audio(source_path, cuts, effective_durations, work_dir, sample
     else:
         _ext = subprocess.run(
             ["ffmpeg", "-y", "-v", "error",
-             "-i", source_path, "-vn",
+             "-i", source_path, "-map", "0:a:0?", "-vn",
              "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
              full_src_wav],
             capture_output=True, text=True, timeout=120,
@@ -23706,6 +23731,30 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     _cap = min(_cap, max(_cur_end, _next_rm_start - 0.01))
                 except Exception:
                     pass
+            # THE PAD IS WHAT LANDS MID-WORD (Zac 2026-08-04, from the live
+            # [final-end] diagnostic). Four real samples of
+            # nearest_word_end_delta: 0.457, 0.576, 3.145, 0.570 — never ~0, and
+            # three of four sit at ~0.5s, which is THIS CONSTANT. So the final
+            # boundary is (last kept word end + tail pad), and the snap that runs
+            # afterwards correctly reports "no straddle" because in ITS list that
+            # point falls in a GAP. The persisted transcript disagrees, which is
+            # why the mid-word rate did not move: Hindi 34.5% pre-fix -> 40.8%
+            # post-fix on n=103.
+            #
+            # Fix the CAUSE rather than snapping after it: the pad may never
+            # cross INTO a following word. If 0.5s of release would enter the
+            # next word, stop at that word's start — the release is a decay tail,
+            # not a licence to clip the next syllable.
+            _next_word_start = None
+            for _w in (deepgram_words or []):
+                try:
+                    _ws = float(_w.get("start") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if _ws >= _cur_end - 1e-6:
+                    _next_word_start = _ws if _next_word_start is None else min(_next_word_start, _ws)
+            if _next_word_start is not None:
+                _cap = min(_cap, _next_word_start)
             _new_end = min(_cur_end + _FINAL_TAIL_PAD_S, _cap)
             if _new_end > _cur_end:
                 print(
@@ -23751,12 +23800,28 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
         _sils.sort()
         _lead_removed = any(idx < clips[0][0]["_word_index"] for idx in removed_indices) if clips else False
         _tail_removed = any(idx > clips[-1][-1]["_word_index"] for idx in removed_indices) if clips else False
+        # ASYMMETRIC BY MEASUREMENT (Zac 2026-08-04). Splitting the extension:
+        #   HEAD  p50 0.16s  p90 1.92s  p99  9.2s  max 20.3s   33% of the total
+        #   TAIL  p50 0.45s  p90 4.46s  p99 17.5s  max 32.8s   67%
+        # The tail is outro material and extending it is plausibly good. The HEAD
+        # delays the hook, which is the highest-leverage second in short-form — a
+        # p99 of 9.2s of dead runway before anyone speaks is a product defect, not
+        # a repair. And the asymmetry is nearly free for the class this exists to
+        # fix: Spanish's median gain is 1.88s tail against 0.56s head, so 77% of
+        # its recovery is on the side we keep.
+        #
+        # THE BOUND IS NOT A NEW NUMBER: it is _FINAL_TAIL_PAD_S, the 0.5s release
+        # pad the tail already uses, applied to the other edge. Enough to recover
+        # a clipped first-word onset or an in-breath; not enough to seat the hook
+        # behind a runway.
+        _HEAD_EXTEND_CAP_S = _FINAL_TAIL_PAD_S
         if _sils and clips and not _lead_removed:
             _fs = float(raw_clips[0]["padded_start"])
             _lead_bound = 0.0
             for (_a, _b) in _sils:
                 if _b <= _fs + 1e-6:
                     _lead_bound = max(_lead_bound, _b)
+            _lead_bound = max(_lead_bound, _fs - _HEAD_EXTEND_CAP_S)
             if _lead_bound < _fs - 1e-3:
                 print(f"[edge-keep] lead {_fs:.3f}→{_lead_bound:.3f}s "
                       f"(+{_fs - _lead_bound:.2f}s of non-silent material kept)", flush=True)
@@ -23764,7 +23829,8 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     "cut_boundary",
                     {"edge": "lead", "was_s": round(_fs, 3), "now_s": round(_lead_bound, 3)},
                     "edge_content_preserved",
-                    reason="material before the first word carries content, not silence")
+                    reason="material before the first word carries content, not silence "
+                           "(capped at the 0.5s release pad — the head delays the hook)")
                 raw_clips[0]["padded_start"] = _lead_bound
         if _sils and clips and not _tail_removed:
             _le = float(raw_clips[-1]["padded_end"])
@@ -25086,7 +25152,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if not (os.path.exists(_refinement_audio_path) and os.path.getsize(_refinement_audio_path) > 1024):
         _refine_ext = subprocess.run(
             ["ffmpeg", "-y", "-v", "error",
-             "-i", source_path, "-vn",
+             "-i", source_path, "-map", "0:a:0?", "-vn",
              "-acodec", "pcm_s16le", "-ar", str(sample_rate), "-ac", "1",
              _refinement_audio_path],
             capture_output=True, text=True, timeout=180,
@@ -33124,7 +33190,7 @@ def prewarm_handler(job):
                 _audio_t0 = time.time()
                 _ar = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error",
-                     "-i", source_cache, "-vn",
+                     "-i", source_cache, "-map", "0:a:0?", "-vn",
                      "-acodec", "pcm_s16le", "-ar", str(_audio_rate), "-ac", "1",
                      audio_cache],
                     capture_output=True, text=True, timeout=120,
@@ -34881,6 +34947,13 @@ def _capture_failure_corpus(source_path, job_id, klass):
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
+    # DEGEN COUNT PER JOB (Zac 2026-08-04). The degeneration spiral lives in the
+    # `why` field, and PROMPTLY_LEAN_SCHEMA strips exactly that field — so the
+    # A/B already running is a free test of whether the prompt change fixes a 22%
+    # degeneration rate. It only works if the rate is CUTTABLE BY ARM, and
+    # degen_retry goes to the divergence ledger, which is not queryable.
+    global _DEGEN_RETRIES
+    _DEGEN_RETRIES = 0
     global _ACTIVE_JOB_ID, _TL
     _ACTIVE_JOB_ID = input_data.get("job_id")  # for the platform-shutdown ledger flush
     _TL = _JobTimeline()   # ONE CLOCK: hierarchical wall-clock timeline for this job
@@ -35975,7 +36048,18 @@ def handler(job):
                 # CPU-decodes far more and blew the fixed 30s (coded INVALID_FORMAT).
                 # Scale by real source weight; normal 30fps clips stay at base 30s.
                 _proxy_cmd = subprocess.run(
+                    # MAP EXPLICITLY (2026-08-04). THIRD copy of the Core Media
+                    # Metadata class, found by the cert_input_matrix cell built
+                    # to test the SECOND one. An iPhone metadata track is
+                    # classified as audio with codec `none`, so auto stream
+                    # selection hands libopus a stream nothing can decode:
+                    # "[aist#0:2/none] Decoding requested, but no decoder found
+                    # for: none". 14d758c fixed audio extraction, 5f19901 fixed
+                    # hype_render's canon, and this encode still had it — the
+                    # whole job died at the Gemini proxy. `?` on the audio map
+                    # keeps genuinely silent sources working.
                     ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", _raw_source,
+                     "-map", "0:v:0", "-map", "0:a:0?",
                      "-vf", "scale=480:-2,fps=18"] + _proxy_venc + [
                      "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
                      _proxy_path],
@@ -36526,6 +36610,13 @@ def handler(job):
                 return subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-threads", "0",
                      "-i", _raw_source,
+                     # FIFTH copy of the metadata-track class (2026-08-04). With
+                     # auto stream selection AND `-c:a copy` below, ffmpeg copies
+                     # whatever it picks as audio straight into mp4 — and an
+                     # iPhone Core Media Metadata track (codec `none`) is not a
+                     # codec mp4 can hold: "not currently supported in
+                     # container". Name the streams instead of guessing.
+                     "-map", "0:v:0", "-map", "0:a:0?",
                      "-vf", _vf_chain,
                  # CRF 15 (was 18) — this is the INTERMEDIATE that feeds every
                  # downstream step (per-cut renders, composite, HLS). Bumping
@@ -38827,6 +38918,7 @@ def handler(job):
                 # Spanish keep-ratio question has been unanswerable ever since.
                 # Nested here for the same reason as gemini_tokens and lean_arm.
                 "lang_bundle": (edit_plan or {}).get("_lang_bundle"),
+                "degen_retries": int(globals().get("_DEGEN_RETRIES", 0) or 0),
                 "lean_arm": _lean_ab_arm(),
                 "lean_schema_on": bool(_lean_schema_enabled()),
                 "lean_decor_ground_on": bool(_lean_decor_ground_enabled()),

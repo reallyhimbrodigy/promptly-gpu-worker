@@ -8235,6 +8235,47 @@ def _edge_content_not_truncated():
     # never past the content end
     assert _tail(20.0, [], 25.0) == 25.0, "the tail must clamp to the content duration"
 
+    # ── THE ASYMMETRY (Zac 2026-08-04), and the corpus behind it ──────────
+    # Split over 532 real jobs:
+    #   HEAD p50 0.16s p90 1.92s p99  9.2s max 20.3s   33% of the extension
+    #   TAIL p50 0.45s p90 4.46s p99 17.5s max 32.8s   67%
+    # The tail is outro material. The HEAD delays the hook — the highest-leverage
+    # second in short-form — and a p99 of 9.2s of runway before anyone speaks is a
+    # defect, not a repair. Nearly free for the class this exists to fix: Spanish's
+    # median gain is 1.88s tail vs 0.56s head, so 77% of its recovery survives.
+    assert "_HEAD_EXTEND_CAP_S = _FINAL_TAIL_PAD_S" in _src, \
+        "the head extension must be CAPPED, and at the existing 0.5s release pad " \
+        "rather than a new number — an uncapped head seats the hook behind runway"
+    assert "_lead_bound = max(_lead_bound, _fs - _HEAD_EXTEND_CAP_S)" in _src, \
+        "the head cap must actually bind the lead bound"
+
+    def _lead_capped(first_word_start, sils, cap=0.5):
+        return max(_lead(first_word_start, sils), first_word_start - cap)
+
+    # A CORPUS GATE, NOT A CORPUS STEP. The cutter owns this product's worst
+    # blast radius — the Urdu content destruction — and the check that cleared
+    # this change ran AFTER it deployed. That was luck. These are the real
+    # distribution's shapes, frozen so a regression cannot pass.
+    # (source-shape, first_word_s, sils, expected head kept)
+    for _label, _fw, _sils_c, _want in (
+        ("es median   (head 0.56 tail 1.88)", 0.56, [(0.0, 0.0)], 0.06),
+        ("en p90      (head 1.61)",           1.61, [(0.0, 0.0)], 1.11),
+        ("hi p99-ish  (head 9.2)",            9.20, [(0.0, 0.0)], 8.70),
+        ("worst case  (head 20.3)",          20.30, [(0.0, 0.0)], 19.80),
+    ):
+        _kept = _fw - _lead_capped(_fw, _sils_c)
+        assert abs(_kept - min(_fw, 0.5)) < 1e-9, \
+            f"{_label}: head extension must never exceed 0.5s, got {_kept:.2f}s"
+        assert _lead_capped(_fw, _sils_c) >= _want - 1e-9, \
+            f"{_label}: the head must not run further back than the cap allows"
+    # and a genuinely short head is kept WHOLE — the cap must not become a floor
+    assert abs(_lead_capped(0.20, [(0.0, 0.0)]) - 0.0) < 1e-9, \
+        "a 0.20s head is inside the cap and must be kept whole, not trimmed to it"
+    # the TAIL stays uncapped — that is the half that carries the Spanish recovery
+    assert "_HEAD_EXTEND_CAP_S" not in _src.split("_le = float(raw_clips[-1]")[1][:900], \
+        "the TAIL must stay uncapped — 67% of the extension and 77% of Spanish's " \
+        "recovery live there"
+
 
 @check("vad_coverage REACHES THE DATABASE (Zac 2026-08-04, RULE-1): the three-field language bundle (detected_language + transcript_script + vad_coverage) was written to edit_plan[\"_lang_bundle\"] under a comment saying it \"flows into the success result payload\". It does not — the leading underscore is exactly what the recipe sanitizer strips, so it persisted on 0 of 3,000 rows. Spanish sits at 0.41 median keep-ratio with 53% of jobs losing more than half the video and the coverage gate demonstrably not firing; that question has been unanswerable because the field that would answer it was never stored. A field that exists and is never persisted is the same as no field at all.")
 def _lang_bundle_persisted():
@@ -8254,6 +8295,82 @@ def _lang_bundle_persisted():
     # the fields the Spanish question actually needs
     for _f in ("vad_coverage_frac", "vad_coverage_unworded_s", "vad_speech_s"):
         assert _f in _src, f"the bundle must still carry {_f}"
+
+
+@check("THE TAIL-PAD MAY NOT ENTER THE NEXT WORD (Zac 2026-08-04, RULE-1): the mid-word fix shipped in 8360a93 did NOT move the number — Hindi 34.5% pre-fix (106/307) -> 40.8% post-fix (42/103) on the dense result.transcript field. The live [final-end] diagnostic named the cause: nearest_word_end_delta on four real jobs was 0.457, 0.576, 3.145, 0.570 — NEVER ~0, and three of four sit at _FINAL_TAIL_PAD_S itself. So the final boundary is (last kept word end + 0.5s pad), and the snap that runs afterwards honestly reports no straddle because in ITS word list that point lands in a gap. Fixing the CAUSE: the release pad may never cross into a following word. This gate pins the clamp and exercises it both ways — an uncapped pad is what put the boundary mid-word.")
+def _tail_pad_stops_at_next_word():
+    _src = open("handler.py").read()
+    assert "_next_word_start" in _src, \
+        "the tail-pad no longer stops at the next word — the mid-word class reopens"
+    assert "_cap = min(_cap, _next_word_start)" in _src, \
+        "the next-word bound must actually tighten the cap"
+
+    # THE PREDICATE, BOTH DIRECTIONS. A pad that can never apply is not a fix —
+    # it exists because the final word loses its audible release.
+    def _pad(cur_end, vd, next_ws, pad=0.5):
+        cap = vd if vd > 0 else cur_end + pad
+        if next_ws is not None:
+            cap = min(cap, next_ws)
+        return min(cur_end + pad, cap)
+
+    # a real gap after the last word: the full release applies
+    assert abs(_pad(10.0, 30.0, 12.0) - 10.5) < 1e-9, \
+        "with room after the last word the full 0.5s release must still apply"
+    # the next word starts 0.2s later: stop there, do NOT clip into it
+    assert abs(_pad(10.0, 30.0, 10.2) - 10.2) < 1e-9, \
+        "the pad must stop at the next word's START, never inside it"
+    # next word starts immediately: no pad at all
+    assert abs(_pad(10.0, 30.0, 10.0) - 10.0) < 1e-9, \
+        "a word starting immediately leaves no room for release"
+    # nothing after: the source end still bounds it
+    assert abs(_pad(10.0, 10.3, None) - 10.3) < 1e-9, \
+        "the content end must still bound the pad when no word follows"
+    # and the pad may never SHORTEN the clip
+    assert _pad(10.0, 30.0, 12.0) >= 10.0, "the pad must never move the end backwards"
+
+
+@check("HINGLISH IS NOT ENGLISH (Zac 2026-08-04, RULE-1): _is_english_word gates the English-tuned structural cut detectors — reduplication, false-start hyphen, retake stem. The language TAG is necessary but NOT SUFFICIENT: a Devanagari word tagged 'en' passed it, which is the Hinglish population, and an UNSET tag passed it too — so on a single-language route (Hindi is 51% of the transcript cohort) EVERY word read as English-eligible and English heuristics ran over Hindi text, deleting real words. Script check added: non-Latin means not-English regardless of tag. Latin-1 accents stay eligible by SCRIPT because Spanish and French are excluded by their TAG — excluding them by script would be the wrong instrument.")
+def _hinglish_is_not_english():
+    _src = open("handler.py").read()
+    assert "_NON_LATIN_SCRIPT_RE" in _src, "the script check is gone — Hinglish reads as English again"
+    assert "_NON_LATIN_SCRIPT_RE.search(" in _src, "the script check must be APPLIED, not just defined"
+
+    import ast as _ast, re as _re
+    _tree = _ast.parse(_src)
+    _ns = {"re": _re}
+    _body = [n for n in _tree.body
+             if (isinstance(n, _ast.FunctionDef) and n.name == "_is_english_word")
+             or (isinstance(n, _ast.Assign)
+                 and any(getattr(t, "id", "") == "_NON_LATIN_SCRIPT_RE" for t in n.targets))]
+    exec(compile(_ast.fix_missing_locations(_ast.Module(body=_body, type_ignores=[])),
+                 "<gate>", "exec"), _ns)
+    _f = _ns["_is_english_word"]
+
+    # BOTH DIRECTIONS. A gate that only rejects would delete English cuts too.
+    assert _f({"word": "hello", "language": "en"}) is True, "English must stay eligible"
+    assert _f({"word": "hello", "language": ""}) is True, "unset tag + Latin stays eligible"
+    assert _f({"word": "caf\u00e9", "language": "en"}) is True, \
+        "Latin-1 accents must stay eligible by SCRIPT — the TAG excludes es/fr"
+    assert _f({"word": "\u0928\u092e\u0938\u094d\u0924\u0947", "language": "en"}) is False, \
+        "HINGLISH: Devanagari tagged 'en' must NOT be English-eligible"
+    assert _f({"word": "\u0928\u092e\u0938\u094d\u0924\u0947", "language": ""}) is False, \
+        "the UNSET-tag hole is the bigger one — a Hindi single-language route " \
+        "passed every word as English"
+    assert _f({"word": "\u0645\u0631\u062d\u0628\u0627", "language": ""}) is False, \
+        "Arabic with an unset tag must not be English-eligible"
+    assert _f({"word": "jalan", "language": "id"}) is False, "a non-en TAG still excludes"
+
+
+@check("DEGENERATION RATE IS CUTTABLE BY A/B ARM (Zac 2026-08-04, RULE-1): the degeneration spiral lives in the `why` field and PROMPTLY_LEAN_SCHEMA strips exactly that field, so the A/B already running is a free test of whether the prompt change fixes a 22% degeneration rate that the worker cannot fix without a 6-10h build. It only works if the rate can be cut BY ARM — and degen_retry went only to the divergence ledger, which is not queryable. This gate pins the per-job counter and its persistence beside lean_arm.")
+def _degen_cuttable_by_arm():
+    _src = open("handler.py").read()
+    assert '"degen_retries": int(globals().get("_DEGEN_RETRIES", 0) or 0)' in _src, \
+        "the degen count must be PERSISTED or the third A/B metric cannot be read"
+    assert "_DEGEN_RETRIES = 0" in _src, "the counter must RESET per job, or it accumulates across a warm container"
+    _nested = any('"degen_retries"' in _src[_i:_i + 3000]
+                  for _i in range(len(_src)) if _src.startswith('"stage_timings": {', _i))
+    assert _nested, "degen_retries must be NESTED in stage_timings beside lean_arm — " \
+        "a top-level key is stripped by content-studio"
 
 
 @check("LEAN-SCHEMA A/B IS MEASURABLE (Zac GO 2026-08-04, both arms together, RULE-1): arm 3 removes the per-moment prose from the response schema (measured cost: what_i_saw declared 240 chars, EMITTED 16,111; wall-clock is output-bound r=0.59) and arm 5 makes the model justify the decorative families in reasoning so they survive the removal — arm 3 alone already ran and text_overlays + sound_effects density DROPPED, so they ship together or not at all. This gate asserts the split is DETERMINISTIC (a job that flips arms between retries pollutes both) and that the arm is PERSISTED where content-studio cannot strip it. An A/B whose arm is not persisted is not an A/B — this repo has _lang_bundle 0/3000, vad_coverage and source_duration 0/149 as precedent.")

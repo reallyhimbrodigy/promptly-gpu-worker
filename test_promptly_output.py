@@ -77,8 +77,36 @@ for bad in (None, "", "x/job.MP4x", "x/job.mov"):
     check(f"  rejects {bad!r}", P.is_playable_output(bad, 9_000_000) is False)
 check("uppercase .MP4 accepted", P.is_playable_output("x/JOB.MP4", 9_000_000) is True)
 
+
+print("\n=== A FAILED PROBE MUST NOT READ AS AN EMPTY FILE ===")
+# The 2026-08-04 misread: ffprobe exits non-zero, stdout is empty, and the old
+# code returned has_video=False/frames=0/duration=0 as a SUCCESS — reporting a
+# real 4.27s h264+aac render as a 0-frame empty deliverable.
+import subprocess as _sp
+_real_run = _sp.run
+
+
+def _fake_run(cmd, **kw):
+    class _R:
+        returncode = 1
+        stdout = ""
+        stderr = "HTTP error 403 Forbidden"
+    return _R()
+
+
+_sp.run = _fake_run
+try:
+    class _S3P:
+        @staticmethod
+        def generate_presigned_url(*a, **k):
+            return "https://example.invalid/x.mp4"
+    _res = P.probe_playable(_S3P, "b", "k")
+finally:
+    _sp.run = _real_run
+check("a non-zero ffprobe is an ERROR, not zeros", "error" in _res, f"got {_res}")
+check("  and it names the cause", "403" in str(_res.get("error", "")), f"got {_res}")
+check("  and it does NOT claim has_video=False",
+      _res.get("has_video") is None,
+      "reporting has_video=False on a FAILED probe is what caused the misread")
 print(f"\n{len(PASS)} passed, {len(FAIL)} failed")
-if FAIL:
-    for f in FAIL:
-        print(f"  FAILED: {f}")
 sys.exit(1 if FAIL else 0)
