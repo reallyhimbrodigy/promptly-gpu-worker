@@ -190,6 +190,19 @@ def _deploy_state_guard():
         f"rm .last_deployed_commit and re-run.")
 
 
+@check("LAST-DEPLOYED-COMMIT MUST STAY UNTRACKED (TRUTH 2026-08-09, RULE-1): .last_deployed_commit is a per-checkout LOCAL cache of what Modal last reported live; a git-TRACKED copy rides branches between lanes and lies (it recorded v510 in one checkout while live was v521 — 11 deploys stale — because every lane's copy only sees its OWN deploys). deploy.sh now writes it from `modal app history` and it is gitignored; this FAILS if anyone re-tracks it, which would silently restore the structurally-blind state. Cross-lane deploy truth is `modal app history promptly-gpu-worker`, nothing else.")
+def _last_deployed_commit_untracked():
+    import subprocess as _sp
+    _r = _sp.run(["git", "ls-files", "--", ".last_deployed_commit"],
+                 capture_output=True, text=True)
+    if _r.returncode != 0:
+        return  # git unavailable — fail-safe pass
+    assert not _r.stdout.strip(), (
+        ".last_deployed_commit is git-TRACKED again — a tracked copy is blind to "
+        "other lanes' deploys (the v510-vs-v521 lie). git rm --cached it; deploy.sh "
+        "writes it locally from `modal app history`.")
+
+
 @check("no UnboundLocalError via static analysis (pyflakes)")
 def _pyflakes_check():
     # pyflakes catches: name X assigned but never used / referenced before

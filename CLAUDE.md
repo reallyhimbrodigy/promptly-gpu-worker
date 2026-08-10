@@ -2,18 +2,30 @@
 
 These apply to every task, every agent, every commit. They are not advice.
 
-## Rule 0 — The worker deploys from `zero-reject-routing`, NOT `main`
+## Rule 0 — ONE deploy lineage: `zero-reject-routing`, and only TRUTH deploys
 
-`deploy.sh` runs `modal deploy modal_app.py` against the **working tree of the
-checked-out branch**, which is **`zero-reject-routing`**. For a long time `main`
-sat **447 commits behind** the deployed branch — a *dead main* — and multiple
-investigations wasted hours checking it as if it were live. **Never treat
-origin/main as the source of truth for what is running.** To read what is
-deployed, check `zero-reject-routing` (or the `.last_deployed_commit` file), and
-verify **function presence in the running image** (grep the deployed bundle),
-never a branch or a SHA. `main` is kept fast-forwarded to `zero-reject-routing`
-after every deploy; if `deploy.sh` prints that main is behind, fast-forward and
-push it. (content-studio is separate: it *does* deploy from `main` via Render.)
+**Canonical worker deploy branch: `zero-reject-routing`** (reconciled
+2026-08-09: `agent/smoothness` — which carried the live image v521 = `1601ae0`
+— was merged in at `d9c6e4d`, so the live commit is an ancestor of this branch
+and every deploy from it). The live commit being an ancestor of the deploying
+HEAD is now ENFORCED by `predeploy_no_regress.py` — a deploy from any forked
+branch fails the gate (`PROMPTLY_ALLOW_ROLLBACK=1` is the only, deliberate,
+per-run exception).
+
+**The only cross-lane deploy truth is `modal app history promptly-gpu-worker`.**
+`.last_deployed_commit` is an UNTRACKED per-checkout cache written from that
+history by `deploy.sh`; it must never be git-tracked again (validate_deploy
+check `_last_deployed_commit_untracked` enforces this). To read what is
+deployed, ask Modal, then verify **function presence in the running image**
+(grep the deployed bundle) — never trust a branch name or a SHA alone.
+
+**Only the TRUTH lane runs `deploy.sh` or pushes a deploy branch.** Every other
+lane commits to its `lane/<name>` branch and files a deploy request with TRUTH
+(see `LANE_OWNERSHIP.md`). `main` is a read-only fast-forward mirror of
+`zero-reject-routing`, kept current after every deploy; **never treat
+origin/main as the source of truth for what is running** (it once sat 447
+commits behind — a *dead main* — and cost hours of misdirected investigation).
+(content-studio is separate: it *does* deploy from `main` via Render.)
 
 ## Rule 1 — Every fix ships with a check that makes its regression impossible
 

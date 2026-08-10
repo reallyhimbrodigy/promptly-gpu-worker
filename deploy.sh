@@ -50,11 +50,18 @@ python3 predeploy_no_regress.py
 
 modal deploy modal_app.py
 
-# Deploy-state guard (Zac 2026-08-01): record the deployed HEAD so validate_deploy
-# fails a LATER deploy that would drop a commit already known live. `set -e` above
-# means we only reach here on a SUCCESSFUL deploy.
-git rev-parse HEAD > .last_deployed_commit 2>/dev/null || true
-echo "  recorded deployed commit: $(cat .last_deployed_commit 2>/dev/null)"
+# Deploy-state guard (Zac 2026-08-01; reworked TRUTH 2026-08-09): record the
+# deployed commit AS MODAL REPORTS IT, not `git rev-parse HEAD`. The file is a
+# LOCAL, UNTRACKED cache for validate_deploy's stale-branch guard — a git-TRACKED
+# copy rides branches and lies to every other lane (it recorded v510 while live
+# was v521). `modal app history promptly-gpu-worker` is the only cross-lane truth.
+LIVE_SHA="$(python3 -c 'import predeploy_no_regress as p; s, v = p.live_commit(); print(s or "")' 2>/dev/null)"
+if [ -n "$LIVE_SHA" ]; then
+    echo "$LIVE_SHA" > .last_deployed_commit
+else
+    git rev-parse HEAD > .last_deployed_commit 2>/dev/null || true
+fi
+echo "  recorded deployed commit (from modal app history): $(cat .last_deployed_commit 2>/dev/null)"
 
 # POST-DEPLOY TOCTOU GUARD (Zac 2026-08-04). The predeploy_no_regress gate above
 # is a POINT-IN-TIME check: a concurrent lane can deploy in the window between it

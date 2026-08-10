@@ -124,6 +124,21 @@ def main():
         print("  deploy CANNOT be checked for reverts. Push it, then re-run.")
         return 1
 
+    # LINEAGE CHECK (TRUTH 2026-08-09). The surface diff below catches DROPPED
+    # identifiers, but two diverged branches with identical handler surfaces
+    # still fork the lineage — the state that produced the v512 race in the
+    # first place. The live commit must be an ANCESTOR of what deploys next, so
+    # there is exactly one deploy lineage. A deliberate rollback is the only
+    # exception: set PROMPTLY_ALLOW_ROLLBACK=1 (loud, per-run).
+    import os as _os
+    anc = _sh(["git", "merge-base", "--is-ancestor", sha, "HEAD"])
+    if anc.returncode != 0 and not _os.environ.get("PROMPTLY_ALLOW_ROLLBACK"):
+        print(f"NO-REGRESS: FAIL — live commit {sha[:7]} (deploy {ver}) is NOT an ancestor of HEAD.")
+        print("  This deploy would FORK the deploy lineage — the exact two-lane divergence")
+        print(f"  that produced v512. Merge the live commit first:  git merge {sha[:7]}")
+        print("  (Deliberate rollback: PROMPTLY_ALLOW_ROLLBACK=1 ./deploy.sh)")
+        return 1
+
     live_defs, live_lits = live
     my_defs, my_lits = surface_in_worktree()
     allow = set(INTENTIONAL_REMOVALS)
