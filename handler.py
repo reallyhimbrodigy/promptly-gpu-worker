@@ -37483,12 +37483,55 @@ def handler(job):
                         flush=True,
                     )
                     _recipe_policy = None
+                # ── ADAPTER CONTRACT (LANE-SEAM Step 1, DARK behind
+                # PROMPTLY_ADAPTER_V1 / input_data.adapter_v1_test). The
+                # single-video path routes through adapter_contract as
+                # adapter #1: build the normalized envelope from the exact
+                # values below, read the core inputs back OUT of it. The
+                # mapping is an identity carrier (same objects back —
+                # certified by cert_adapter_contract.py), so ON is
+                # plan-identical; OFF never touches the module. New alias
+                # names on purpose: rebinding the closure vars would make
+                # them function-local and break earlier reads even flag-off.
+                _seam_video_path, _seam_vibe = _raw_source, vibe
+                _seam_duration, _seam_words = source_duration, _dg_words
+                try:
+                    import adapter_contract as _adc
+                    if _adc.enabled(input_data):
+                        _seam_env = _adc.adapt_single_video(
+                            user_text=vibe,
+                            attachments=[_adc.FootageRef(
+                                local_path=_raw_source,
+                                kind="video",
+                                duration_s=source_duration,
+                                source_url=(str(input_data.get("video_url")
+                                                or "") or None),
+                            )],
+                            user_context={"job_id": job_id, "mode": mode},
+                            word_timings=_dg_words,
+                        )
+                        (_seam_video_path, _seam_vibe, _seam_duration,
+                         _seam_words) = _adc.core_inputs(_seam_env)
+                        print("[adapter-v1] single_video envelope routed "
+                              f"(refs=1, words={len(_seam_words or [])})",
+                              flush=True)
+                except Exception as _adc_err:
+                    # LOUD fail-safe law: degrade to the raw path, never
+                    # silently — a missing mount is a ledgered defect.
+                    print(f"[adapter-v1] contract route failed "
+                          f"({type(_adc_err).__name__}: {_adc_err}) — "
+                          "raw path", flush=True)
+                    if isinstance(_adc_err, ImportError):
+                        _ledger_defect("missing_module", "adapter_contract",
+                                       _adc_err, job_id=job_id)
+                    _seam_video_path, _seam_vibe = _raw_source, vibe
+                    _seam_duration, _seam_words = source_duration, _dg_words
                 return generate_edit_gemini(
-                    video_path=_raw_source,
-                    vibe=vibe,
-                    duration=source_duration,
+                    video_path=_seam_video_path,
+                    vibe=_seam_vibe,
+                    duration=_seam_duration,
                     trend_context=_trend,
-                    deepgram_words=_dg_words,
+                    deepgram_words=_seam_words,
                     shot_changes=_shots,
                     shot_change_scores=_shot_change_scores,
                     vocal_emphasis=_vocal,
