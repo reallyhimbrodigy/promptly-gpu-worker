@@ -95,3 +95,5 @@ up. The per-app breakdown is on Modal and is the speed agent's to read.
 Nothing this session needed pixels that were not already sitting in a delivered
 video I could download.
 | 2026-08-09 | harness | golden-freeze SMOKE (2 PLAN_ONLY captures, no render possible) | 2 | est ~500 | ~$0.20 est | ~$0.20 |
+| 2026-08-09 | harness | golden-freeze SMOKE retry x2 (ClientError diagnosis) | 2 | ~30 | ~$0.02 est | ~$0.22 |
+| 2026-08-09 | harness | golden-freeze RECONCILE: 2 smokes ran 31 fn-s total; both hit Vertex 403 dunning-deny (safe_edit fallback) — freeze BLOCKED, capture quarantined | 0 | 31 | actual ~$0.05 | ~$0.22 booked / ~$0.05 actual |

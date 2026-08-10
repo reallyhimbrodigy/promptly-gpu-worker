@@ -29,13 +29,11 @@ import json
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, "/")  # in-container: modal_app.py is mounted at /modal_app.py
 import modal  # noqa: E402
 import modal_app  # noqa: E402
 
-image = modal_app.image.add_local_file(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "modal_app.py"),
-    "/modal_app.py")
+image = modal_app.image.add_local_file("modal_app.py", "/modal_app.py")
 app = modal.App("golden-freeze", image=image)
 
 # The FULL deployed secret set — a missing secret changes flags and confounds
@@ -149,7 +147,18 @@ def freeze(source: dict, run_idx: int) -> dict:
         out["capture"] = {"error": f"{type(err).__name__}: {str(err)[:400]}",
                           "trace": traceback.format_exc()[-2000:]}
     out["elapsed_s"] = round(time.time() - t0, 1)
-    out["log_tail"] = buf.getvalue()[-1500:]
+    log = buf.getvalue()
+    out["log_tail"] = log[-1500:]
+    err_lines = [ln for ln in log.splitlines()
+                 if any(t in ln.lower() for t in
+                        ("error", "exception", "clienterror", "vertex",
+                         "traceback", "429", "403", "400", "transport"))]
+    out["log_errors"] = err_lines[-60:]
+    try:
+        out["gemini_call_log"] = json.loads(
+            json.dumps(list(getattr(H, "_GEMINI_CALL_LOG", [])), default=str))
+    except Exception:
+        pass
     return out
 
 
