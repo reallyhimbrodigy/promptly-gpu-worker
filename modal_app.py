@@ -1607,6 +1607,44 @@ def rife_normalize_remote(source_bytes: bytes, target_fps: int, warmup: bool = F
             return f.read()
 
 
+# ── Canonical flag values — the janitor's daily drift sentinel reads these ────
+# (TRUTH 2026-08-09.) MIRROR of validate_deploy.py's CANON: validate_deploy has
+# an equality gate that FAILS any deploy where the two dicts differ, so they
+# cannot drift apart. Before this, secret-vs-canon drift was caught only at the
+# NEXT deploy — days away — and a wrong value (SPAWN_MODE=0) served traffic the
+# whole time. The daily prewarm_janitor container mounts the live secret set, so
+# comparing its env against this dict is a CONTINUOUS drift check at zero extra
+# spend. To change a flag value: update the secret AND both canon dicts together,
+# then redeploy (a secret flip is not live until a redeploy — memory-snapshot law).
+_CANON_FLAGS = {
+    "PROMPTLY_SPAWN_MODE": "1",
+    "PROMPTLY_OUTCOME_GATE": "shadow",
+    "PROMPTLY_LEVER3": "1",
+    "PROMPTLY_EDIT_IN_LANGUAGE": "1",
+    "PROMPTLY_SCRIPT_DENYLIST": "",
+    "PROMPTLY_PLAN_CAPTURE": "",
+    "PROMPTLY_BURNED_TEXT": "1",
+    "PROMPTLY_ZERO_REJECT": "1",
+    "PROMPTLY_WHY_DIET": "1",
+    "PROMPTLY_DELIVERY_FPS": "30",
+    "PROMPTLY_RENDER_FANOUT": "0",
+    "PROMPTLY_HYPE_MODE": "1",
+    "PROMPTLY_SHAPE_ABORT": "1",
+    "PROMPTLY_MOODREEL": "1",
+    "PROMPTLY_HQ_RESAMPLE": "1",
+    "PROMPTLY_BROLL_GATE": "1",
+    "PROMPTLY_COVERAGE_GATE": "1",
+    "PROMPTLY_LANG_ROUTING": "1",
+    "PROMPTLY_ROUTE_LANGS": "hi,bn,ta,te,mr,gu,kn,ur,ar,id",
+    "PROMPTLY_MOTION_BLUR": "1",
+    "PROMPTLY_MIN_OUTPUT_RATIO": "0.20",
+    "PROMPTLY_CAPTION_ALIGN": "1",
+    "PROMPTLY_SMOOTH_GRAPHICS": "1",
+    "PROMPTLY_ASR_SCRIBE": "1",
+    "PROMPTLY_POST_THINKING_BUDGET": "2048",
+    "PROMPTLY_RENDER_BURST": "1",
+}
+
 # ── Prewarm cache janitor ──────────────────────────────────────────────────────
 # Runs daily. Walks the volume, deletes any prewarm cache entry older than 48h.
 # Prevents the volume from growing unbounded → protects against Modal Volume
@@ -1681,6 +1719,38 @@ def prewarm_janitor():
         f"freed={freed_mb:.1f}MB errors={errors} ttl={TTL_SECONDS}s",
         flush=True,
     )
+
+    # ── FLAG-DRIFT SENTINEL (TRUTH 2026-08-09) — a GATE riding the janitor, not
+    # behavior: this container mounts the live promptly-lang-flags secret, so its
+    # env vs _CANON_FLAGS is exactly the check validate_deploy runs at deploy
+    # time, now CONTINUOUS (daily) instead of only at the next deploy. Drift
+    # pages the owner via the same [ALERT] + render-alert legs as the regression
+    # corpus. Best-effort: must never affect the janitor's own result.
+    try:
+        import json as _json
+        import requests as _rq
+        _drift = {k: {"live": os.environ.get(k), "canon": v}
+                  for k, v in _CANON_FLAGS.items() if os.environ.get(k) != v}
+        if _drift:
+            _detail = f"live secret drifted from canon: {_json.dumps(_drift)}"
+            print(f"[FLAG-DRIFT] DRIFTED {_json.dumps(_drift)}", flush=True)
+            print(f"[ALERT] render failure job=flag-drift-sentinel code=FLAG_DRIFT "
+                  f"detail={_detail}", flush=True)
+            _app_url = (os.environ.get("APP_URL") or "").rstrip("/")
+            _cb = os.environ.get("MODAL_CALLBACK_SECRET") or ""
+            if _app_url:
+                _rq.post(
+                    f"{_app_url}/api/internal/render-alert",
+                    json={"job_id": "flag-drift-sentinel", "error_code": "FLAG_DRIFT",
+                          "detail": _detail, "category": "render"},
+                    headers=({"X-Modal-Secret": _cb} if _cb else {}),
+                    timeout=8,
+                )
+        else:
+            print(f"[FLAG-DRIFT] none — {len(_CANON_FLAGS)} flags match canon", flush=True)
+    except Exception as _e:
+        print(f"[FLAG-DRIFT] sentinel errored (janitor unaffected): {_e}", flush=True)
+
     return {"deleted": deleted_count, "bytes_freed": bytes_freed, "errors": errors}
 
 

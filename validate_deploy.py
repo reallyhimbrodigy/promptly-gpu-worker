@@ -7182,6 +7182,15 @@ def _secret_canonical_values():
         "PROMPTLY_ASR_SCRIBE": "1",  # LANGUAGE-ROUTED SCRIBE LIVE (Zac 2026-08-02, overnight zero-errors): on a Deepgram transcript that FAILS the coverage gate, route ElevenLabs Scribe (needs promptly-elevenlabs/ELEVENLABS_API_KEY) and keep the better-coverage native transcript before rejecting — recovers the zero-word / TRANSCRIPTION_INCOMPLETE class (bake-off: deepgram 3/40 -> scribe 34/40 on the failing set; control 32->39, no regression). Deepgram runs first + unchanged so an outage can't cost a job. rollback = "0" here + secret + redeploy.
         "PROMPTLY_RENDER_BURST": "1",  # inc2 FLIP LIVE (Zac GO 2026-08-02 naming the key): render_stage runs on the cpu=48 render_burst (16GiB blur-safe, was DARK/in-process). Enables run_pipeline_bg 64→24GiB (render no longer in-process here). A staging hiccup FAILS RETRYABLE (render_burst_staging_failed) — the in-process fallback was disarmed because run_pipeline_bg is 24GiB. rollback = "0" here + secret + redeploy, but RAISE run_pipeline_bg back to 48GiB FIRST (else a real in-process render OOMs) AND re-arm the local fallback.
         "PROMPTLY_POST_THINKING_BUDGET": "2048",  # THINKING BUDGET FLIP LIVE (Zac GO 2026-08-02 naming the key): the critical-path editorial Gemini call (generate_edit_gemini / _post_cuts_response_schema, handler.py:11593 — the edit_plan "longest wait" at 34979) drops from 24576→2048 thinking tokens. A/B measured -29.5s wall (65.3s→35.8s, out_tok stable) AND lower Gemini API cost; budget=0 is SLOWER (model needs some thinking). Cuts the critical path directly (fps_normalize is overlapped/off-path, saves ~0). rollback = "24576" here + secret + redeploy.
+        # ── The 4 formerly-UNPINNED keys (TRUTH 2026-08-09, values from the live
+        # readback that day). Unpinned = drift invisible until someone looks; these
+        # were the only live flags the sweep could silently regress. Growing
+        # ROUTE_LANGS is a per-script graduation decision: update it here AND in
+        # the secret together, like every other canonical value.
+        "PROMPTLY_ROUTE_LANGS": "hi,bn,ta,te,mr,gu,kn,ur,ar,id",  # Tier-1 graduated scripts (Hindi first, Arabic 2026-07-20, +id)
+        "PROMPTLY_MOTION_BLUR": "1",       # motion-blur path LIVE per readback 2026-08-09
+        "PROMPTLY_MIN_OUTPUT_RATIO": "0.20",  # output-ratio floor: reject below 20% of source
+        "PROMPTLY_CAPTION_ALIGN": "1",     # caption alignment path LIVE per readback 2026-08-09
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that
@@ -7209,6 +7218,40 @@ def _secret_canonical_values():
         "value (SPAWN_MODE=0 re-opens the ASGI-starvation class). Fix: reset the "
         "secret to canonical (modal secret create promptly-lang-flags --from-json "
         "<canonical> --force), then redeploy.")
+
+
+@check("FLAG-DRIFT SENTINEL WIRED + CANON MIRRORS EQUAL (TRUTH 2026-08-09, RULE-1): secret-vs-canon drift used to be caught only at the NEXT deploy — days away. The daily prewarm_janitor now compares its live env against modal_app.py's _CANON_FLAGS and pages on drift ([FLAG-DRIFT] + [ALERT] + render-alert POST). That only works if (a) the sentinel stays in the janitor and (b) modal_app's _CANON_FLAGS stays EQUAL to this file's CANON — two copies that drift apart would alert on the wrong values or never alert. This ast-compares the dicts and greps the sentinel's three legs; FAILS on any divergence or removal.")
+def _flag_drift_sentinel_wired():
+    import ast as _ast
+
+    def _dict_named(path, name):
+        tree = _ast.parse(open(path).read())
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Assign):
+                for t in node.targets:
+                    if isinstance(t, _ast.Name) and t.id == name:
+                        return _ast.literal_eval(node.value)
+        return None
+
+    _mirror = _dict_named("modal_app.py", "_CANON_FLAGS")
+    assert _mirror is not None, (
+        "_CANON_FLAGS is gone from modal_app.py — the daily flag-drift sentinel "
+        "has nothing to compare against; continuous drift detection is dead")
+    _canon = _dict_named("validate_deploy.py", "CANON")
+    assert _canon is not None, "CANON dict not found in validate_deploy.py (ast)"
+    _diff = {k: (_canon.get(k), _mirror.get(k))
+             for k in set(_canon) | set(_mirror) if _canon.get(k) != _mirror.get(k)}
+    assert not _diff, (
+        f"CANON (validate_deploy.py) and _CANON_FLAGS (modal_app.py) DIVERGED: {_diff}. "
+        "Update both together — they are one canonical value set with two readers "
+        "(deploy-time gate + daily sentinel).")
+    _m = open("modal_app.py").read()
+    _jan = _m.split("def prewarm_janitor(", 1)[1].split("\n@app.", 1)[0]
+    for _leg in ("[FLAG-DRIFT]", "_CANON_FLAGS", "FLAG_DRIFT", "render-alert"):
+        assert _leg in _jan, (
+            f"flag-drift sentinel leg {_leg!r} missing from prewarm_janitor — the "
+            "continuous drift check was removed or de-fanged; drift would again be "
+            "invisible until the next deploy")
 
 
 @check("Reliability Phase 1: platform-shutdown handler kills render children + flushes ledger on SIGTERM with NO terminal write (retry-safe); installed from worker startup; PLATFORM_TIMEOUT class = retryable, rescue-denied, alerts (not designed-silent)")
