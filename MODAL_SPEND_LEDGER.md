@@ -94,3 +94,4 @@ up. The per-app breakdown is on Modal and is the speed agent's to read.
 
 Nothing this session needed pixels that were not already sitting in a delivered
 video I could download.
+| 2026-08-09 | harness | golden-freeze SMOKE (2 PLAN_ONLY captures, no render possible) | 2 | est ~500 | ~$0.20 est | ~$0.20 |
