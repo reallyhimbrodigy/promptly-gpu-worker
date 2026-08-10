@@ -2548,7 +2548,7 @@ def fetch_platform_style_pulse():
     if supabase is None:
         return None
     try:
-        table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+        table = os.environ.get("PROMPTLY_JOB_TABLE") or "video_jobs"
         # Arrow-path select pulls just the nested string (PostgREST names the
         # column after the last path element). Over-fetch 4× the window, then
         # keep the newest rows that actually carry vocab (older builds wrote
@@ -2634,7 +2634,7 @@ def fetch_platform_style_pulse():
 # limit (Modal's natural concurrency handles capacity). The table/column for
 # this is also env-driven so we don't break if your existing job-status
 # schema doesn't match a guessed default:
-#   PROMPTLY_JOB_TABLE        (default: "jobs")
+#   PROMPTLY_JOB_TABLE        (default: "video_jobs" — the real table; "jobs" does not exist)
 #   PROMPTLY_JOB_USER_COLUMN  (default: "user_id")
 #   PROMPTLY_JOB_STATUS_COLUMN (default: "status")
 #   PROMPTLY_JOB_ACTIVE_STATUSES (default: "queued,running,processing")
@@ -2700,7 +2700,7 @@ def count_user_active_jobs(user_id, current_job_id):
     """
     if supabase is None or not user_id:
         return 0
-    table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+    table = os.environ.get("PROMPTLY_JOB_TABLE") or "video_jobs"
     user_col = os.environ.get("PROMPTLY_JOB_USER_COLUMN") or "user_id"
     status_col = os.environ.get("PROMPTLY_JOB_STATUS_COLUMN") or "status"
     try:
@@ -30757,7 +30757,14 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
     # terminal result payload (floor markers + vocab) never landed. One
     # vocabulary everywhere; no both-spellings tax.
     _terminal = status in ("completed", "failed", "canceled", "needs_input")
-    table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+    # Default video_jobs (lane/delivery 2026-08-10): the real table. The old
+    # default "jobs" pointed at a table that does not exist — PostgREST 404s and
+    # the fail-open catch swallowed it — so this entire durable layer was one
+    # unset env var away from silently writing NOTHING. Prod sets
+    # PROMPTLY_JOB_TABLE=video_jobs today (observed live: phase/result land on
+    # video_jobs rows); the code default now matches reality instead of
+    # depending on it.
+    table = os.environ.get("PROMPTLY_JOB_TABLE") or "video_jobs"
     status_col = os.environ.get("PROMPTLY_JOB_STATUS_COLUMN") or "status"
     if progress is not None:
         try:
@@ -31220,7 +31227,7 @@ def read_job_status(job_id):
     video_jobs directly; this exists if a worker-side read is ever preferred.)"""
     if supabase is None or not job_id:
         return {"status": "unknown"}
-    table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+    table = os.environ.get("PROMPTLY_JOB_TABLE") or "video_jobs"
     try:
         r = (supabase.table(table)
              .select("status,phase,progress,result,partial_state,updated_at")
@@ -34976,6 +34983,24 @@ def handler(job):
         job_id    = input_data["job_id"]
         video_url = input_data["video_url"]
 
+        # WORKER-RAN SIGNAL (lane/delivery 2026-08-10): stamp worker_started_at
+        # the moment a worker actually picks the job up. started_at stamps the
+        # dispatch ATTEMPT server-side, so "did a worker ever run?" was
+        # unanswerable per-row and every completion denominator was ambiguous
+        # (the 1,121-job dispatch-404 outage read as jobs that "started").
+        # ISOLATED single-column write, deliberately NOT via write_job_status:
+        # PostgREST bounces a whole patch when ANY column is missing, and this
+        # column ships ahead of its migration (20260810_completion_delivery.sql)
+        # — isolated, a missing column no-ops THIS write and nothing else.
+        # Best-effort, never gates the render.
+        try:
+            if supabase is not None and _job_status_enabled():
+                supabase.table(os.environ.get("PROMPTLY_JOB_TABLE") or "video_jobs").update(
+                    {"worker_started_at": datetime.utcnow().isoformat()}
+                ).eq("id", job_id).execute()
+        except Exception as _ws_e:
+            print(f"[job-status] worker_started_at stamp soft-failed job={job_id}: {_ws_e}", flush=True)
+
         # ── Tier gate (multi-clip premium feature) ───────────────────────
         # The frontend is the primary gate (only premium users can pick
         # multiple files at the upload UI). This is the defense-in-depth
@@ -36968,6 +36993,18 @@ def handler(job):
                 _refined_tx_cache["value"] = _t
                 return _t
 
+        # LANG-BUNDLE CHANNEL (lane/delivery 2026-08-10, the 0/218 root cause):
+        # the bundle is computed INSIDE _do_edit_recipe_overlapped, which runs on
+        # a mega_pool THREAD while the main thread is still waiting at
+        # future_edit.result() — so the closure name `edit_plan` it used to write
+        # to was NOT YET BOUND in the enclosing scope. Every single job raised
+        # NameError inside the bundle's try/except and printed "[lang-bundle]
+        # persist failed (NameError) — non-fatal": nested correctly in
+        # stage_timings, null on 218/218. This holder exists BEFORE the thread
+        # starts, so the write can never hit an unbound name again; the result
+        # build reads it directly.
+        _lang_bundle_holder = {}
+
         def _do_edit_recipe_overlapped():
             """Start Gemini as soon as transcript + proxy + trend + audio + face signals are ready.
             Transcript may come from the early_pool URL-based Deepgram call (ran in parallel
@@ -37280,12 +37317,11 @@ def handler(job):
                     "vad_speech_s": _bundle_cov.get("vad_speech_s"),
                     "words": len(_dg_words),
                 }
-                # Underscored so the RENDER can read it without the sanitizer
-                # persisting a duplicate — but that same underscore is why it
-                # never reached the DB on its own (0 of 3,000 rows). The
-                # persisted copy rides stage_timings.lang_bundle; this key is
-                # the in-process one and is NOT the persistence path.
-                edit_plan["_lang_bundle"] = _lang_bundle
+                # Holder, NOT edit_plan: this thread runs BEFORE the enclosing
+                # scope binds edit_plan (future_edit.result() awaits US), so the
+                # old `edit_plan["_lang_bundle"] = ...` was an unbound-name
+                # NameError on EVERY job — swallowed below, null on 218/218.
+                _lang_bundle_holder["value"] = _lang_bundle
                 _record_divergence("language_bundle", _lang_bundle, "lang_bundle",
                                    reason=str(_det_lang or _script or "?"))
             except Exception as _lbe:
@@ -38863,13 +38899,14 @@ def handler(job):
                 # 0/3000, vad_coverage, source_duration 0/149). An A/B whose arm
                 # is not persisted is not an A/B.
                 # LANGUAGE BUNDLE — detected_language + script + vad_coverage.
-                # Written to edit_plan["_lang_bundle"] at the coverage gate with a
-                # comment claiming it "flows into the success result payload". IT
-                # DOES NOT: the leading underscore is exactly what the recipe
-                # sanitizer strips, so it persisted on 0 of 3,000 rows and the
-                # Spanish keep-ratio question has been unanswerable ever since.
-                # Nested here for the same reason as gemini_tokens and lean_arm.
-                "lang_bundle": (edit_plan or {}).get("_lang_bundle"),
+                # Read from _lang_bundle_holder (lane/delivery 2026-08-10): the
+                # old edit_plan["_lang_bundle"] read was null on 218/218 because
+                # the WRITE side NameError'd on every job (the bundle thread ran
+                # before the enclosing scope bound edit_plan — see the holder's
+                # comment at its definition). Holder is plumbed thread→result
+                # directly; empty dict → None for re-edit/resume paths that skip
+                # the overlapped recipe, same as before.
+                "lang_bundle": _lang_bundle_holder.get("value"),
                 "degen_retries": int(globals().get("_DEGEN_RETRIES", 0) or 0),
                 "lean_arm": _lean_ab_arm(),
                 "lean_schema_on": bool(_lean_schema_enabled()),
