@@ -570,6 +570,10 @@ image = (
     # jobs too) precisely so a missing mount surfaces as a ledgered defect on
     # day one instead of at flip time — the progressive_publish lesson.
     .add_local_file("adapter_contract.py", "/adapter_contract.py")
+    # LANE-SEAM (DARK behind PROMPTLY_UNIFIED_CORE): guidance profiles + the
+    # unified-core composition seam. Same unconditional-import mount law.
+    .add_local_file("guidance_registry.py", "/guidance_registry.py")
+    .add_local_file("unified_core.py", "/unified_core.py")
     .add_local_file("progressive_publish.py", "/progressive_publish.py")  # W3 previews (DARK) — the cert-found gap: wiring shipped, module didn't
     # recipe_eval.py was missing from this list since the eval was first
     # wired — handler.py imports it at runtime via `from recipe_eval

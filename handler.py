@@ -13097,6 +13097,7 @@ def generate_edit_gemini(
     density_variant=0,
     sample_fps_override=None,
     media_res_override=None,
+    guidance_profiles=None,
 ):
     _pre_analysis = cached_response
 
@@ -13212,6 +13213,17 @@ def generate_edit_gemini(
         density_override=density_override,
         density_variant=density_variant,
     )
+    # ── UNIFIED CORE (LANE-SEAM Step 2, DARK): additive guidance profiles.
+    # guidance_profiles is None on every call unless the PROMPTLY_UNIFIED_CORE
+    # selection at the call site armed it — None composes NOTHING (this block
+    # is a no-op and post_sys is the same object). When set, profiles append
+    # AFTER the base system instruction (cache-prefix law asserted inside
+    # compose), and a contradictory stack raises HERE, before any model call.
+    if guidance_profiles:
+        import unified_core as _ucore
+        post_sys = _ucore.compose_system_instruction(post_sys, guidance_profiles)
+        print(f"[unified-core] profiles composed: {list(guidance_profiles)}",
+              flush=True)
     if prior_plan:
         print(
             f"[generate-edit] GUIDED REDRAFT — prior plan injected "
@@ -37526,12 +37538,36 @@ def handler(job):
                                        _adc_err, job_id=job_id)
                     _seam_video_path, _seam_vibe = _raw_source, vibe
                     _seam_duration, _seam_words = source_duration, _dg_words
+                # ── UNIFIED CORE selection (LANE-SEAM Step 2, DARK behind
+                # PROMPTLY_UNIFIED_CORE / input_data.unified_core_test). This
+                # main path IS the full editorial route (lean routes exited
+                # via _MinimalRouteSignal long before here), so the stack is
+                # ("premium_full",) — the EMPTY additive profile — and ON is
+                # byte-identical by construction (cert_unified_core.py). The
+                # import is unconditional for the same mount-law reason as
+                # adapter_contract above.
+                _seam_profiles = None
+                try:
+                    import unified_core as _uc
+                    if _uc.enabled(input_data):
+                        _seam_profiles = _uc.select_stack("full")
+                        print(f"[unified-core] route=full "
+                              f"stack={_seam_profiles}", flush=True)
+                except Exception as _uc_err:
+                    print(f"[unified-core] selection failed "
+                          f"({type(_uc_err).__name__}: {_uc_err}) — "
+                          "no profiles", flush=True)
+                    if isinstance(_uc_err, ImportError):
+                        _ledger_defect("missing_module", "unified_core",
+                                       _uc_err, job_id=job_id)
+                    _seam_profiles = None
                 return generate_edit_gemini(
                     video_path=_seam_video_path,
                     vibe=_seam_vibe,
                     duration=_seam_duration,
                     trend_context=_trend,
                     deepgram_words=_seam_words,
+                    guidance_profiles=_seam_profiles,
                     shot_changes=_shots,
                     shot_change_scores=_shot_change_scores,
                     vocal_emphasis=_vocal,
