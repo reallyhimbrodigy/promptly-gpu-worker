@@ -54,3 +54,26 @@ which removes roughly a third of the increase.
 **So render-time movement in the next window has a known non-regression cause.**
 Longer output = more frames = more render. If render p50 rises by ~1s and p99 by
 ~15-20s, that is this change, not a fault. Anything larger is not.
+
+---
+
+# TRUTH-owned deploy queue (standing, from 2026-08-09)
+
+**Only the TRUTH lane deploys — both repos.** Queue rules: one deploy at a
+time · quiet window (Modal tasks polled; every deploy orphans in-flight jobs,
+so batch + announce + attribute) · validate gate green · predeploy_no_regress
+green (incl. lineage ancestry) · diff-vs-ownership check (`LANE_OWNERSHIP.md`)
+· secret readback after every worker deploy · entry here (who, what, sha,
+version).
+
+## Queue
+
+| # | lane | branch @ sha | what | status |
+|---|---|---|---|---|
+| 0 | TRUTH | zero-reject-routing @ 3a00caa | RECONCILIATION: merge live v521 lineage (d9c6e4d) + deploy-truth semantics (8ee0e30) + CANON pinning & drift sentinel (3a00caa). Delta vs live = cff8ccd (byte-identical at cpu≥16) + daily drift sentinel. | WAITING for quiet window (Sat-evening traffic 6–11 tasks) |
+| 1 | smoothness | agent/smoothness @ d9543d6 | 2 held-out commits past live: 8dd3954 (gate retire — validate_deploy portion partially superseded by TRUTH untracking .last_deployed_commit), d9543d6 (component_crash: Vertex-omitted optional string, asText guard across 9 components — REAL crash fix). | queued after #0 verifies no-op |
+
+## Deploys
+
+| when (UTC) | who | sha | version | carried | window/orphans |
+|---|---|---|---|---|---|
