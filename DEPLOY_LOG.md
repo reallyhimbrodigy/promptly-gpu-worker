@@ -68,10 +68,27 @@ version).
 
 ## Queue
 
+Every package below was **conflict-tested against the reconciled branch on
+2026-08-09 22:0x** [MEASURED]: all merge clean, and none except JUDGE touches a
+TRUTH-owned file (JUDGE's is a declared `render.yaml` cron append at EOF, which
+composes with TRUTH's `buildCommand` hunk at line 4).
+
+### Worker queue
+
+| # | lane | branch @ sha | what | ownership | merge test | status |
+|---|---|---|---|---|---|---|
+| W0 | TRUTH | zero-reject-routing @ 4c4ead8 | RECONCILIATION: live v521 lineage (d9c6e4d) + deploy-truth semantics (8ee0e30) + CANON pinning & drift sentinel (3a00caa) + STATE_AUDIT. Delta vs live = `cff8ccd` (byte-identical at cpu≥16) + the daily drift sentinel. | — | — | **WAITING for quiet window** (traffic 6–11 tasks all evening) |
+| W1 | DELIVERY | lane/delivery @ 31c2dd7 | completion-POST retry+backoff w/ persisted reason, `"jobs"`-default landmine fix ×5 + cert, lang_bundle NameError, `worker_started_at`. handler.py + modal_app.py only. | ✅ clean | ✅ 0 conflicts | after W0 verifies no-op |
+| W2 | HARNESS | lane/harness @ d098f48 | merge `golden/validate_deploy_addition.py` into validate_deploy.py (staged as a separate file with placement notes — correct discipline). | ✅ clean | ✅ 0 conflicts | **GATED**: HARNESS says do not merge until `golden/plans/` is frozen; freeze needs Vertex, which needs the billing fix |
+| W3 | SEAM | lane/seam @ e6ab8f1 | 4 dark flags (adapter/unified-core/surgical-v2), 3 certs, flags OFF. | ✅ clean | ✅ 0 conflicts | after W1; CANON registration needs an owner GO naming the new keys (secret-auth law) |
+| W4 | smoothness | agent/smoothness @ d9543d6 | held-out past-live commits: 8dd3954 (gate retire, partly superseded), d9543d6 (**real crash fix** — Vertex-omitted optional string, asText guard ×9 components). | — | — | ride with W1 |
+
+### content-studio queue
+
 | # | lane | branch @ sha | what | status |
 |---|---|---|---|---|
-| 0 | TRUTH | zero-reject-routing @ 3a00caa | RECONCILIATION: merge live v521 lineage (d9c6e4d) + deploy-truth semantics (8ee0e30) + CANON pinning & drift sentinel (3a00caa). Delta vs live = cff8ccd (byte-identical at cpu≥16) + daily drift sentinel. | WAITING for quiet window (Sat-evening traffic 6–11 tasks) |
-| 1 | smoothness | agent/smoothness @ d9543d6 | 2 held-out commits past live: 8dd3954 (gate retire — validate_deploy portion partially superseded by TRUTH untracking .last_deployed_commit), d9543d6 (component_crash: Vertex-omitted optional string, asText guard across 9 components — REAL crash fix). | queued after #0 verifies no-op |
+| C0 | TRUTH + JUDGE | lane/truth @ 499511d + lane/judge @ 84f8244 | **batched**: gate wiring (Render build + blocking CI) + CHECKOUTS/LANE_OWNERSHIP/DEPLOY_LOG/OWNER_ACTIONS/sentinel spec, plus JUDGE's 5 scripts, 2 migrations, daily-scoreboard cron. Batched because both carry **zero request-path runtime risk** and their watches are independent (gate = build log; JUDGE = the 15:00 UTC row) — one orphan window instead of two. | WAITING for quiet window |
+| C1 | DELIVERY | lane/delivery @ 88e412c | server.js +140, dispatch-to-modal.js +145, modal-webhook, 75s durable poller, `completion_delivery` migration, RC `/sync` probe. **Deployed alone** — it is the only package that changes the request path, and its 48h watch must not be confounded. | after C0 |
 
 ## Deploys
 
