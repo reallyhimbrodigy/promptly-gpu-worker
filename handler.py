@@ -17516,19 +17516,26 @@ _REEDIT_LAYERS = ("captions", "cuts", "emphasis", "sounds", "broll",
                   "pacing", "vibe")
 
 
-def _plan_diff_ops_schema():
+def _plan_diff_ops_schema(surgical_v2=False):
     """The response schema for generate_plan_diff (rider 3: the echo gets a
     REAL schema). Flat by design: op values ride as JSON-encoded strings
     (value_json) — no free-form Dict inside the grammar (the props-Dict
     lesson: unconstrained interiors are both the grammar hog and the
     degeneration surface). Classifier-first: the field ORDER puts the
-    classification block ahead of the ops."""
+    classification block ahead of the ops.
+
+    surgical_v2 (LANE-SEAM Step 3, dark): when OFF, caption_text_overrides is
+    STRIPPED from the list_key enum — a flag-off model structurally cannot
+    emit the new op, so flag-off behavior is byte-identical."""
+    _lks = set(_DIFF_LIST_ANCHORS)
+    if not surgical_v2:
+        _lks.discard("caption_text_overrides")
     _op = {"type": "object", "properties": {
         "op": {"type": "string",
                "enum": ["set", "clear_list", "remove", "replace", "add",
                         "set_field"]},
         "list_key": {"type": "string",
-                     "enum": sorted(_DIFF_LIST_ANCHORS) + list(_REEDIT_SET_SCALARS)},
+                     "enum": sorted(_lks) + list(_REEDIT_SET_SCALARS)},
         "anchor": {"type": "string", "maxLength": 48},
         "field": {"type": "string", "maxLength": 64},
         "value_json": {"type": "string", "maxLength": 2400}},
@@ -18214,7 +18221,8 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
     return _applied
 
 
-def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None):
+def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
+                       surgical_v2=False):
     """Call Gemini to produce a new plan from (old_plan, change_request).
 
     Returns a dict with keys: classification, new_plan, fused_vibe,
@@ -18235,6 +18243,15 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         raise RuntimeError("generate_plan_diff: old_plan must be a dict")
     if not change_request or not isinstance(change_request, str):
         raise RuntimeError("generate_plan_diff: change_request is required")
+    # LANE-SEAM Step 3: the surgical-op teaching text + validators live in
+    # surgical_ops.py so prompt and enforcement version together. Import is
+    # unconditional (mount law); a missing mount ledgers and rides the
+    # caller's degrade-to-reinterpret rail — a paid re-edit never hard-fails.
+    try:
+        import surgical_ops as _surgical_ops
+    except ImportError as _so_err:
+        _ledger_defect("missing_module", "surgical_ops", _so_err)
+        raise
 
     # Instrument 1: the unambiguous category-off / style-swap never pays a
     # model call — the same engine EditPolicy trusts applies it directly.
@@ -18322,9 +18339,11 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "      → append a new emphasis_moment with word_indices=[K], a zoom_effect of the inferred\n"
         "        type (default SmoothPush if unspecified, with the payoff matched to its arc role),\n"
         "        and a matching key_moment in video_plan.\n"
-        "  • 'add a transition at the chapter break' / 'add a DipToBlack after the setup'\n"
-        "      → transitions are authored in the dedicated seam pass — not addable here;\n"
-        "        acknowledge the ask in notes and leave the plan's transitions untouched.\n"
+        # LANE-SEAM Step 3 (dark): with surgical_v2 ON the transition-add hole
+        # closes and the caption-spelling op is taught; OFF keeps the refusal
+        # verbatim — byte-identical prompt text.
+        + (_surgical_ops.TRANSITION_ADD_BULLET + _surgical_ops.CAPTION_TEXT_BULLET
+           if surgical_v2 else _surgical_ops.TRANSITION_REFUSAL_BULLET) +
         "  • 'add a tight_cut_overlay at K' / 'add a LightLeak at the pivot'\n"
         "      → append a new tight_cut_overlays entry with after_word_index at the named cut\n"
         "        (the pipeline validates it sits on a real tight boundary). Overlays carry\n"
@@ -18452,6 +18471,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         "  • replace — swap ONE anchored entry wholesale (value_json = the full new entry). Reach for set_field first; replace only when the user asked for a different entry.\n"
         "  • add — append a new entry (value_json = the full entry object).\n\n"
         "value_json is ALWAYS a JSON-encoded STRING (e.g. \"null\", \"\\\"CleanCut\\\"\", \"{\\\"word_indices\\\": [40], ...}\").\n\n"
+        + (_surgical_ops.OPS_VOCAB_ADDENDUM if surgical_v2 else "") +
         "Emit classification FIRST, then scope, then ops:\n"
         "  classification — tweak | guided_redraft | reinterpret | needs_clarification (same meanings as above)\n"
         "  layers_in_scope — which layers the request touches (captions, cuts, emphasis, sounds, broll, motion_graphics, text_overlays, transitions, pacing, vibe)\n"
@@ -18477,7 +18497,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
             response_mime_type="application/json",
             # Rider 3: the echo has a REAL schema — the model CANNOT emit a
             # plan; it can only name ops. Transport-probed.
-            response_json_schema=_plan_diff_ops_schema(),
+            response_json_schema=_plan_diff_ops_schema(surgical_v2=surgical_v2),
             # HIGH thinking so the model actually reasons about whether the
             # request maps to a tweak / guided_redraft / reinterpret /
             # clarification and picks the right surgical edit. The prior
@@ -18509,6 +18529,32 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None)
         if _op_failed and not _applied:
             raise RuntimeError(
                 f"plan-diff ops all failed to apply: {_op_failed[:3]}")
+        # LANE-SEAM Step 3 — deterministic post-model enforcement (obedience
+        # law: the model proposes, code disposes). Runs UNCONDITIONALLY —
+        # both validators no-op when the plan gained nothing new, so flag-off
+        # output is byte-identical by construction. Every drop carries an
+        # honest user-facing note; a silently-dropped ask is the exact
+        # failure the fulfillment judge counts.
+        _dgw_all = (transcript or {}).get("words") or []
+        _surg_notes, _ = _surgical_ops.validate_added_transitions(
+            new_plan, sanitized_old_plan, _dgw_all,
+            TRANSITION_DURATION_FRAMES)
+        if new_plan.get(_surgical_ops.CAPTION_TEXT_LIST_KEY) is not None:
+            _cto_valid, _cto_rejected = _surgical_ops.validate_caption_overrides(
+                new_plan.get(_surgical_ops.CAPTION_TEXT_LIST_KEY), _dgw_all)
+            new_plan[_surgical_ops.CAPTION_TEXT_LIST_KEY] = _cto_valid
+            for _bad, _why in _cto_rejected:
+                _surg_notes.append(
+                    "the caption spelling change couldn't be applied: %s" % _why)
+        if _surg_notes:
+            parsed["human_summary"] = (
+                str(parsed.get("human_summary") or "").rstrip(". ")
+                + " (note: " + "; ".join(_surg_notes[:3]) + ")")
+            _record_divergence(
+                "reedit", {"notes": _surg_notes[:5]},
+                "surgical_op_enforcement", reason=str(change_request)[:140])
+            print(f"[plan-diff] surgical enforcement: {_surg_notes[:3]}",
+                  flush=True)
         parsed["new_plan"] = new_plan   # the MERGED plan is the tweak's output
         # changed_fields DERIVED from the ops (never trusted from prose)
         parsed["changed_fields"] = sorted({str(_o.get("list_key"))
@@ -18626,6 +18672,13 @@ _DIFF_LIST_ANCHORS = {
     "caption_position_changes": lambda e: (
         e.get("word_index")
         if isinstance(e, dict) else None
+    ),
+    # LANE-SEAM Step 3 (dark behind PROMPTLY_SURGICAL_V2): the persistent
+    # caption spelling map [{"find","replace"}]. The applicator gains the
+    # capability unconditionally; the SCHEMA ENUM excludes this key when the
+    # flag is off, so a flag-off model structurally cannot emit it.
+    "caption_text_overrides": lambda e: (
+        e.get("find") if isinstance(e, dict) else None
     ),
 }
 
@@ -35591,11 +35644,22 @@ def handler(job):
         if mode == "tweak":
             send_progress(job_id, "plan_diff", 10, "Figuring out exactly what to change...", app_url)
             try:
+                # LANE-SEAM Step 3 (dark): surgical_v2 arms the transition-add
+                # + caption-spelling ops for THIS diff. Helper lives in
+                # surgical_ops (imported inside generate_plan_diff too; a
+                # missing mount ledgers there). Fail-closed to False — the
+                # flag can never widen the vocabulary by accident.
+                try:
+                    import surgical_ops as _sops_flag
+                    _surgical_v2 = _sops_flag.enabled(input_data)
+                except ImportError:
+                    _surgical_v2 = False
                 diff = generate_plan_diff(
                     old_plan=provided_plan,
                     change_request=change_request,
                     old_vibe=old_vibe or vibe,
                     transcript=provided_transcript,
+                    surgical_v2=_surgical_v2,
                 )
             except Exception as _pd_err:
                 # RE-EDIT RESILIENCE (Zac 2026-07-28, CRITICAL #3): a surgical plan-diff that
@@ -38558,6 +38622,19 @@ def handler(job):
         # from the user's ask as a LITERAL caption-text override (the caption builder
         # applies it deterministically — no Gemini drift). "spell Blue filter as Blufilter".
         edit_plan["_caption_text_overrides"] = _parse_caption_text_overrides(_reedit_intent_text)
+        # LANE-SEAM Step 3: persistent plan-level overrides (the tweak op,
+        # validated against the transcript at diff time) merge UNDER the
+        # freshly-typed parse — this render's literal ask wins on conflict.
+        # No-op for every plan without the key (all pre-Step-3 plans), so
+        # flag-off is byte-identical.
+        try:
+            import surgical_ops as _sops_merge
+            _plan_ov = _sops_merge.overrides_dict_from_plan(edit_plan)
+            if _plan_ov:
+                _plan_ov.update(edit_plan.get("_caption_text_overrides") or {})
+                edit_plan["_caption_text_overrides"] = _plan_ov
+        except ImportError as _sops_err:
+            _ledger_defect("missing_module", "surgical_ops", _sops_err)
         # USER OBEDIENCE: an explicit "captions at the bottom" is a HARD position lock
         # every caption inherits for the whole video (above the default, Gemini, AND
         # the overlay/composer force-flips — the drift the user saw "toward the end").

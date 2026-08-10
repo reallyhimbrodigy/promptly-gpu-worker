@@ -574,6 +574,9 @@ image = (
     # unified-core composition seam. Same unconditional-import mount law.
     .add_local_file("guidance_registry.py", "/guidance_registry.py")
     .add_local_file("unified_core.py", "/unified_core.py")
+    # LANE-SEAM (DARK behind PROMPTLY_SURGICAL_V2): tweak-op teaching text +
+    # deterministic validators for caption-spelling / add-transition ops.
+    .add_local_file("surgical_ops.py", "/surgical_ops.py")
     .add_local_file("progressive_publish.py", "/progressive_publish.py")  # W3 previews (DARK) — the cert-found gap: wiring shipped, module didn't
     # recipe_eval.py was missing from this list since the eval was first
     # wired — handler.py imports it at runtime via `from recipe_eval
