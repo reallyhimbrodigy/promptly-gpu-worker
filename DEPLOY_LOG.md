@@ -90,6 +90,49 @@ composes with TRUTH's `buildCommand` hunk at line 4).
 | C0 | TRUTH + JUDGE | lane/truth @ 499511d + lane/judge @ 84f8244 | **batched**: gate wiring (Render build + blocking CI) + CHECKOUTS/LANE_OWNERSHIP/DEPLOY_LOG/OWNER_ACTIONS/sentinel spec, plus JUDGE's 5 scripts, 2 migrations, daily-scoreboard cron. Batched because both carry **zero request-path runtime risk** and their watches are independent (gate = build log; JUDGE = the 15:00 UTC row) — one orphan window instead of two. | WAITING for quiet window |
 | C1 | DELIVERY | lane/delivery @ 88e412c | server.js +140, dispatch-to-modal.js +145, modal-webhook, 75s durable poller, `completion_delivery` migration, RC `/sync` probe. **Deployed alone** — it is the only package that changes the request path, and its 48h watch must not be confounded. | after C0 |
 
+## BLOCKED — 2026-08-10 06:25Z, W0 deploy attempt
+
+`./deploy.sh` was **denied by the Claude Code permission classifier** before any
+execution. Verified no partial deploy: live is still **v521 = `1601ae0`**
+[MEASURED, `modal app history`] and no-regress is still green. Not worked
+around — invoking `modal deploy modal_app.py` directly would bypass the very
+gates deploy.sh exists to run (validate, no-regress, post-deploy TOCTOU
+re-check, auth ping).
+
+**Unblock:** owner adds a Bash permission rule for `./deploy.sh` (worker) and
+`git push origin main` (content-studio). Everything else is staged and green;
+each deploy is then a single command.
+
+### Quiet-window finding — the task-count signal was a FALSE blocker [MEASURED]
+
+`modal app list` showed 6–11 "tasks" continuously for 3+ hours, which would
+have blocked deploys indefinitely. The DB says otherwise: **0 in-flight user
+jobs**. Over the trailing 6h there were 69 job rows, every one terminal
+(`completed` 61 / `failed` 7 / `canceled` 1) — no non-terminal row exists.
+Probe proven non-vacuous before the zero was trusted (the standing
+probe-collapse rule), and `completed_at` is NULL on failed rows, so
+"no completed_at" must never be read as "in flight" — that exact contamination
+inflated an earlier orphan count from 7 to 51.
+
+The Modal tasks are **prewarm + persistent FastAPI endpoint containers**.
+Prewarm fires while the user is mid-upload, *before* a job row exists, so
+container count is not a measure of user work at risk.
+
+**Standing rule for this queue: the quiet-window gate is the DB in-flight
+count, not the Modal task count.** Probe: `scratchpad/inflight.js`.
+
+### Ready-to-fire (all pre-checks green as of 06:24Z)
+
+| # | command | pre-checks |
+|---|---|---|
+| W0 | `PROMPTLY_DEPLOYER=truth-lane PROMPTLY_SKIP_REGRESSION=1 ./deploy.sh` | validate 358/358 ✅ · no-regress ✅ · in-flight **0** ✅ · tree clean ✅ |
+| C0 | merge `lane/truth` + `lane/judge` → `main`, push | merges clean ✅ · 20/20 smokes ✅ · CI red proven ✅ |
+
+**Why `PROMPTLY_SKIP_REGRESSION=1` on W0:** the zero-spend rule, and the
+regression corpus makes Gemini calls that would 403 during the active Vertex
+outage — it would fire a **false** `REGRESSED` page at the owner. Re-enable on
+the first deploy after billing is restored.
+
 ## Deploys
 
 | when (UTC) | who | sha | version | carried | window/orphans |
