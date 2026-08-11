@@ -203,6 +203,26 @@ def _last_deployed_commit_untracked():
         "writes it locally from `modal app history`.")
 
 
+@check("QUIET-WINDOW GATE WIRED + NON-VACUOUS (Zac's ruling 2026-08-11, RULE-1): the quiet window is ZERO IN-FLIGHT USER JOBS per the DB probe, NOT zero Modal tasks — `modal app list` counts prewarm + persistent fastapi_endpoint containers (prewarm fires while the user is mid-upload, BEFORE a job row exists) and read 6-11 'tasks' for 3+ hours against a MEASURED zero in-flight, which would have blocked the deploy queue indefinitely. This asserts deploy.sh still RUNS preflight_quiet_window.py, that the probe still refuses to call a zero 'quiet' without seeing recent rows (the non-vacuity leg — a probe matching nothing returns a confident zero, this repo's most expensive recurring bug class), and that it still treats processing/pending/queued as in-flight. Without this the rule decays back into a comment.")
+def _quiet_window_gate_wired():
+    _d = open("deploy.sh").read()
+    assert "preflight_quiet_window.py" in _d, (
+        "deploy.sh no longer runs preflight_quiet_window.py — the quiet-window "
+        "rule is back to being remembered instead of enforced, and a deploy can "
+        "again orphan live user renders")
+    assert os.path.exists("preflight_quiet_window.py"), \
+        "preflight_quiet_window.py is missing but deploy.sh calls it — deploy would die"
+    _p = open("preflight_quiet_window.py").read()
+    for _tok in ("processing", "pending", "queued"):
+        assert f'"{_tok}"' in _p, (
+            f"the in-flight status set lost '{_tok}' — live user work in that "
+            "state would read as quiet and get orphaned")
+    assert "vacuous" in _p and "recent" in _p, (
+        "the NON-VACUITY leg is gone: the probe must prove it can see recent "
+        "rows before a zero in-flight reading is believed. A silent-zero probe "
+        "is how this codebase has repeatedly shipped confident false negatives.")
+
+
 @check("no UnboundLocalError via static analysis (pyflakes)")
 def _pyflakes_check():
     # pyflakes catches: name X assigned but never used / referenced before

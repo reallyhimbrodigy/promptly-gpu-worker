@@ -66,6 +66,26 @@ green (incl. lineage ancestry) · diff-vs-ownership check (`LANE_OWNERSHIP.md`)
 · secret readback after every worker deploy · entry here (who, what, sha,
 version).
 
+## Standing rules — codified 2026-08-11 (Zac's rulings)
+
+1. **Quiet window = ZERO IN-FLIGHT USER JOBS by the DB probe, not zero Modal
+   tasks.** `modal app list` counts prewarm + persistent fastapi_endpoint
+   containers; prewarm fires while the user is mid-upload, *before* a job row
+   exists. It showed 6-11 "tasks" for 3+ hours against a measured **0**
+   in-flight and would have blocked the queue indefinitely. Now EXECUTABLE, not
+   remembered: `deploy.sh` runs `preflight_quiet_window.py` first (exit 1 BUSY /
+   2 UNKNOWN), and validate_deploy check `_quiet_window_gate_wired` fails any
+   deploy that unwires it. A zero is only believed if the probe can also see
+   recent rows — the non-vacuity leg.
+2. **`PROMPTLY_SKIP_REGRESSION` is outage-only.** Legitimate solely while Vertex
+   403s (the corpus's Gemini calls would fail spuriously and fire a FALSE
+   `REGRESSED` page). The moment the owner confirms GCP billing, the regression
+   corpus is the **FIRST verification run, before any further worker deploy.**
+3. **Drain order once the deploy permission lands:** W0 reconciliation (must
+   verify behaviourally no-op) → DELIVERY worker rebased (+ W4, the named crash
+   fix) → SEAM full package, both halves together. One at a time, each with its
+   watch.
+
 ## Queue
 
 Every package below was **conflict-tested against the reconciled branch on
@@ -81,7 +101,32 @@ composes with TRUTH's `buildCommand` hunk at line 4).
 | W1 | DELIVERY | lane/delivery @ 31c2dd7 | completion-POST retry+backoff w/ persisted reason, `"jobs"`-default landmine fix ×5 + cert, lang_bundle NameError, `worker_started_at`. handler.py + modal_app.py only. | ✅ clean | ✅ 0 conflicts | after W0 verifies no-op |
 | W2 | HARNESS | lane/harness @ d098f48 | merge `golden/validate_deploy_addition.py` into validate_deploy.py (staged as a separate file with placement notes — correct discipline). | ✅ clean | ✅ 0 conflicts | **GATED**: HARNESS says do not merge until `golden/plans/` is frozen; freeze needs Vertex, which needs the billing fix |
 | W3 | SEAM | lane/seam @ e6ab8f1 | 4 dark flags (adapter/unified-core/surgical-v2), 3 certs, flags OFF. | ✅ clean | ✅ 0 conflicts | after W1; CANON registration needs an owner GO naming the new keys (secret-auth law) |
-| W4 | smoothness | agent/smoothness @ d9543d6 | held-out past-live commits: 8dd3954 (gate retire, partly superseded), d9543d6 (**real crash fix** — Vertex-omitted optional string, asText guard ×9 components). | — | — | ride with W1 |
+| W4 | smoothness | agent/smoothness @ `d9543d6` | **THE HELD-OUT CRASH FIX — named per Zac 2026-08-11, to ship with W1.** See the block below. | — | — | ride with W1 |
+
+#### W4 — what the held-out commit is, and why it was held
+
+**`d9543d6` — "component_crash: a missing string killed the whole render —
+Vertex omits optional fields and TypeScript cannot see it."**
+
+- **What it fixes:** Vertex AI **omits optional fields** rather than sending
+  them null (the standing optional-omission crash class). When an optional
+  string was absent, a Remotion component threw and **the entire render died** —
+  one missing string, whole job lost. The fix adds a shared `asText.ts` coercion
+  and applies it across **9 components** (TypewriterReveal, DropBanner, DropCard,
+  EditorialQuote, PullQuote, SectionDivider, StepDivider, StickyNotes) plus
+  `PromptlyRender.tsx`, and ships its own `validate_deploy.py` assertion.
+- **Why it was held (2026-08-09):** it sits **past the live image** on
+  `agent/smoothness`. The reconciliation deploy (W0) had to be verifiable as a
+  **behavioural no-op** — that is the entire point of W0. Folding a real
+  render-behaviour fix into it would have destroyed that property and left us
+  unable to tell a reconciliation problem from a component-fix problem. So it
+  was held **explicitly and in writing**, never dropped.
+- **Its sibling `8dd3954`** (retires a gate assertion + touches
+  `.last_deployed_commit`) is **partly superseded** — TRUTH untracked that file
+  on 2026-08-09, so only its gate-assertion half still applies. Review that half
+  on merge rather than taking it wholesale.
+- **Risk note:** this is a *real* runtime change to render components, so it
+  must NOT ride W0. It ships with W1 and carries W1's watch.
 
 ### content-studio queue
 

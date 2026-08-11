@@ -7,6 +7,19 @@ set -e
 
 cd "$(dirname "$0")"
 
+# ── QUIET WINDOW (Zac's ruling 2026-08-11) ───────────────────────────────────
+# THE QUIET WINDOW IS ZERO IN-FLIGHT USER JOBS PER THE DB PROBE — **NOT** ZERO
+# MODAL TASKS. `modal app list` counts prewarm + persistent fastapi_endpoint
+# containers, and prewarm fires while the user is still mid-upload, BEFORE a job
+# row exists; it read 6-11 "tasks" for 3+ hours against a measured ZERO in-flight
+# jobs and would have blocked the whole deploy queue indefinitely. The probe
+# refuses to call a zero "quiet" unless it can also see recent rows (non-vacuity).
+# Runs FIRST because it is the cheapest gate and the one that protects users.
+echo "════════════════════════════════════════════════════════════"
+echo "  Quiet window — in-flight USER JOBS (db), not modal tasks"
+echo "════════════════════════════════════════════════════════════"
+python3 preflight_quiet_window.py
+
 echo "════════════════════════════════════════════════════════════"
 echo "  Pre-deploy validation"
 echo "════════════════════════════════════════════════════════════"
@@ -162,9 +175,17 @@ echo ""
 echo "════════════════════════════════════════════════════════════"
 echo "  Regression corpus — spawning the fixed-defect re-render (self-alerts)"
 echo "════════════════════════════════════════════════════════════"
+# SKIP RULE (Zac's ruling 2026-08-11): PROMPTLY_SKIP_REGRESSION is legitimate
+# ONLY for the Vertex-outage window — during the 403 the corpus's Gemini calls
+# fail spuriously and page the owner with a FALSE `REGRESSED` alert. The moment
+# the owner confirms GCP billing is restored, the corpus is the FIRST
+# verification run, BEFORE any further worker deploy. It is not a standing
+# convenience flag.
 set +e
 if [ -n "$PROMPTLY_SKIP_REGRESSION" ]; then
-    echo "  regression corpus SKIPPED (PROMPTLY_SKIP_REGRESSION set - zero discretionary spend during surge)"
+    echo "  regression corpus SKIPPED (PROMPTLY_SKIP_REGRESSION set)"
+    echo "  ⚠️  legitimate ONLY during the Vertex outage. Post-billing-fix the corpus"
+    echo "     runs FIRST, before any further worker deploy (Zac 2026-08-11)."
 else
     modal run modal_app.py::regression_corpus 2>&1 | grep -E "REGRESSION_CORPUS|spawned"
 fi
