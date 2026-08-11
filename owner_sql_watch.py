@@ -64,6 +64,17 @@ def probe(url, key):
         ("table  public.daily_scoreboard", "daily_scoreboard?select=day&limit=1"),
         ("column video_jobs.completion_delivery", "video_jobs?select=completion_delivery&limit=1"),
         ("column video_jobs.worker_started_at", "video_jobs?select=worker_started_at&limit=1"),
+        # ── 02: daily_scoreboard v2. Migration 01 created the table at JUDGE's
+        # shape THAT DAY; these five landed in later JUDGE commits and were never
+        # in a RUN NOW file. The cron therefore writes rows that silently lose
+        # exactly the fields worth reading — outage days, the purchase funnel,
+        # active Pro subs. A scoreboard that runs is not a scoreboard that
+        # answers. All five verified ABSENT by probe 2026-08-12.
+        ("column daily_scoreboard.active_pro_subs", "daily_scoreboard?select=active_pro_subs&limit=1"),
+        ("column daily_scoreboard.outage", "daily_scoreboard?select=outage&limit=1"),
+        ("column daily_scoreboard.outage_note", "daily_scoreboard?select=outage_note&limit=1"),
+        ("column daily_scoreboard.sentinel", "daily_scoreboard?select=sentinel&limit=1"),
+        ("column daily_scoreboard.purchase_funnel", "daily_scoreboard?select=purchase_funnel&limit=1"),
     ):
         try:
             _get(url, key, path)
@@ -100,14 +111,25 @@ def main():
         print("OWNER-SQL WATCH: UNKNOWN — at least one probe could not run. Not flipping.")
         return 2
 
-    applied = all(res.values())
+    # PER-ENTRY, never all-or-nothing (2026-08-12). With only entry 01 in the
+    # folder, `all(res.values())` was the same thing as "01 applied". Adding 02's
+    # columns made that read "01 still PENDING" while 01's four objects were
+    # green — an applied migration reported as un-applied, which is the failure
+    # mode this watcher exists to prevent, pointed at itself.
+    entries = {
+        "01": [k for k in res if not k.startswith("column daily_scoreboard.")],
+        "02": [k for k in res if k.startswith("column daily_scoreboard.")],
+    }
+    status = {e: all(res[k] for k in keys) for e, keys in entries.items() if keys}
     n_flowing, sample = instrument_flowing(url, key)
 
-    if not applied:
-        print("OWNER-SQL WATCH: entry 01 still PENDING.")
+    for e, ok in sorted(status.items()):
+        missing = [k.split(".")[-1] for k in entries[e] if not res[k]]
+        print(f"OWNER-SQL WATCH: entry {e} "
+              + ("objects ALL PRESENT -> APPLIED." if ok
+                 else f"still PENDING — missing: {', '.join(missing)}"))
+    if not status.get("01"):
         return 1
-
-    print("OWNER-SQL WATCH: entry 01 objects ALL PRESENT -> APPLIED.")
     if n_flowing:
         print(f"  instrument FLOWING: {n_flowing} row(s) with completion_delivery set "
               f"(e.g. {sample[:3]}) -> DELIVERY's 48h watch clock STARTS NOW.")
@@ -122,13 +144,23 @@ def main():
             print(f"  ! could not open the Desktop file ({e})")
             return 0
         today = datetime.date.today().isoformat()
-        new = re.sub(r"\|\s*\*\*PENDING\*\*\s*\|",
-                     f"| **APPLIED** ({today}) |", doc, count=1)
-        if new != doc:
-            open(DESKTOP_FILE, "w").write(new)
-            print(f"  Desktop _STATUS.md: entry 01 flipped PENDING -> APPLIED ({today}).")
+        # Flip only the rows whose entry actually probed APPLIED. A blanket
+        # first-PENDING substitution would mark 02 applied because 01 is.
+        changed = []
+        for _e, _ok in sorted(status.items()):
+            if not _ok:
+                continue
+            _pat = re.compile(r"(\|\s*" + re.escape(_e) + r"\s*\|[^\n]*?\|\s*)\*\*PENDING\*\*(\s*\|)")
+            doc2 = _pat.sub(rf"\g<1>**APPLIED** ({today})\g<2>", doc, count=1)
+            if doc2 != doc:
+                doc = doc2
+                changed.append(_e)
+        if changed:
+            open(DESKTOP_FILE, "w").write(doc)
+            print(f"  Desktop _STATUS.md: entr{'y' if len(changed)==1 else 'ies'} "
+                  f"{', '.join(changed)} flipped PENDING -> APPLIED ({today}).")
         else:
-            print("  Desktop _STATUS.md: already APPLIED, nothing to change.")
+            print("  Desktop _STATUS.md: nothing to flip (already APPLIED, or still pending).")
     return 0
 
 
