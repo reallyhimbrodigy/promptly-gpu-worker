@@ -227,6 +227,51 @@ the first deploy after billing is restored.
 
 | 2026-08-11 17:21Z | TRUTH | `935b89a` (content-studio main) | Render autoDeploy | **C2**: docs only — the gate-receipt request filed to DELIVERY. Held ~20min from its original slot because a user job was in flight; pushed when `preflight_quiet_window.py` returned OK. Live sha-verified in ~80s. | in-flight at T-0: **0** [MEASURED] → **0 orphans** |
 
+| 2026-08-11 18:01Z | TRUTH | `9ee9e6d` | **v522** | **W0 RECONCILIATION** — one worker deploy lineage at last; deploy-truth semantics; CANON 26/26 + drift sentinel | in-flight 0 → **0 orphans** |
+| 2026-08-11 18:29Z | TRUTH | `f0b0c0c` | **v523** | **W1 + W4** — DELIVERY worker (completion-POST retry, `"jobs"` landmine ×5, lang_bundle NameError, worker_started_at) + the held-out component-crash fix (`asText` ×9 components) | in-flight 0 → **0 orphans** |
+| 2026-08-11 18:36Z | TRUTH | `c008aed` | **v524** | **SEAM worker** (3 dark seams: adapter / unified-core / surgical-v2) | in-flight 0 → **0 orphans** |
+| 2026-08-11 18:41Z | TRUTH | `df62d2b` | **v525** | **SEAM worker current** (+MG_OBEY, CAPTION_TRANSLATE, UPSCALE_NEGOTIATE — SEAM had advanced past the branch I first merged) | in-flight 0 → **0 orphans** |
+| 2026-08-11 18:42Z | TRUTH | `fd0b9e1` (cs) | Render | **SEAM content-studio** — chat-actions route + the one-line mount | in-flight 0 → **0 orphans** |
+
+### Phase A verification [MEASURED]
+
+- **Every worker deploy**: post-deploy TOCTOU no-regress green, auth-ping 200,
+  `.last_deployed_commit` written from `modal app history`. `main`
+  fast-forwarded after each.
+- **CS deploys** sha-verified live via `/api/health` `rev`; gate 22/22 smokes.
+- **Dark-deploy pass condition met**: `POST /api/chat/actions` returns **404**
+  on production with the flag unset — the route does not exist to any client.
+- **All 6 SEAM flags verified to default ABSENT=dark**, and no secret was
+  touched. CANON registration deliberately deferred: CANON is compared against
+  the LIVE secret readback, so adding keys the secret lacks would fail the gate
+  on every deploy for every lane. The keys join CANON at flip time, with the
+  secret change, on an owner GO naming them.
+
+### Gates that did real work this session (not rubber stamps)
+
+1. `predeploy_no_regress` fired on `_lang_bundle` vanishing → verified against
+   both trees, confirmed DELIVERY's deliberate rename, documented in
+   `INTENTIONAL_REMOVALS`. **Not forced.**
+2. Two lang_bundle checks failed → they had been **green for weeks while the
+   field was null on 218/218 jobs**, asserting a mechanism that did not work.
+   Repointed at the working chain + a negative assert.
+3. `_plan_diff_add_vocabulary` failed on SEAM's merge → verified
+   `TRANSITION_REFUSAL_BULLET` is **byte-identical** to the old inline text,
+   then made the check *stronger* (both flag arms).
+4. The quiet-window gate blocked three deploy attempts on live user jobs and
+   released each time on its own terms.
+
+### W1 watch — INCONCLUSIVE, and honestly so
+
+`lang_bundle` is **still null** on the first post-v523 completion. That does
+**not** falsify the fix: the job took `minimal_speech_uncut` /
+`transcription_incomplete`, a light route that exits *before* the coverage gate
+where the bundle is computed — its `stage_timings` carries no `lang_bundle` key
+at all. The correct cohort is **standard-editorial jobs reaching the coverage
+gate**, and the Vertex outage has eliminated that cohort entirely. **Re-run this
+watch after billing is restored.** Reported as inconclusive rather than as
+either a pass or a regression.
+
 ### C1 verification [MEASURED]
 
 - **Live sha match** in 40s: `/api/health` `rev` = `8f54923…` = pushed `main`.
