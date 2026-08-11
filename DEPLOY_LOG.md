@@ -361,6 +361,30 @@ expose it on `/api/health` beside `rev`, so "did the build gate run" becomes a
 permanent `curl`, exactly as `rev` made "is prod running my commit" a permanent
 `curl`. Until that ships, this stays an owner eyeball.
 
+### ✅ MIGRATION 01 APPLIED — 2026-08-11 19:49Z, detected automatically
+
+The owner ran `2026-08-11 — RUN NOW — 01 …sql` from the Desktop folder. **No
+paste-back**: `owner_sql_watch.py` probed, found all four objects, and flipped
+`_STATUS.md` to APPLIED by itself.
+
+- `public.fulfillment_scores` ✅ · `public.daily_scoreboard` ✅ ·
+  `video_jobs.completion_delivery` ✅ · `video_jobs.worker_started_at` ✅
+- **Instrument FLOWING, not merely created** [MEASURED]: first stamped row at
+  19:49:55Z (`completion_delivery='reconciler'`). DDL running and an instrument
+  working are different claims; this is the second one.
+
+**DELIVERY's 48h watch clock STARTED 2026-08-11 19:49Z.**
+
+**Clean cohort — stated before any number is reported:** jobs that **SETTLE at
+or after 19:49Z**. Of 177 terminal jobs today, 176 carry NULL simply because the
+column did not exist when they settled. Those are **not misses** and counting
+them would repeat the exact contamination that once inflated an orphan count
+from 7 to 51. Watch armed on the clean cohort only.
+
+Watching for: `fallback_timer` → ~0, p99 leaving the ~900s wall, and zero
+recurrence of the "trouble reaching the render service" class now that the hang
+fix (v526) and both DELIVERY halves are live.
+
 ### Open watches
 
 | watch | owner | condition | due |
