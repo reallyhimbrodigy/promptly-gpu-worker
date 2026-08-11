@@ -225,6 +225,8 @@ the first deploy after billing is restored.
 
 | 2026-08-11 16:57Z | TRUTH | `8f54923` (content-studio main) | Render autoDeploy | **C1**: DELIVERY — durable-row 75s poll (missed callback now costs ≤75s, not 900), every settle path names itself in `completion_delivery`, orphan-callback handling, RC `/sync` project probe, additive migration, new smoke | in-flight at T-0: **0** [MEASURED] → **0 orphans** |
 
+| 2026-08-11 17:21Z | TRUTH | `935b89a` (content-studio main) | Render autoDeploy | **C2**: docs only — the gate-receipt request filed to DELIVERY. Held ~20min from its original slot because a user job was in flight; pushed when `preflight_quiet_window.py` returned OK. Live sha-verified in ~80s. | in-flight at T-0: **0** [MEASURED] → **0 orphans** |
+
 ### C1 verification [MEASURED]
 
 - **Live sha match** in 40s: `/api/health` `rev` = `8f54923…` = pushed `main`.
