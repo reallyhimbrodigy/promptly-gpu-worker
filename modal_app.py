@@ -836,8 +836,18 @@ def run_pipeline_bg(body: dict):
             print(f"[mem-instrument] outer telemetry block FAILED: "
                   f"{type(_mem_outer_e).__name__}: {_mem_outer_e}", flush=True)
     # PRIMARY completion delivery — POST the full result (success payload OR the
-    # classified error envelope) to the app server. Best-effort: a failed POST
-    # falls back to the dispatch's Supabase recovery + the reaper.
+    # classified error envelope) to the app server.
+    # RETRY + PERSISTED REASON (lane/delivery 2026-08-10): the POST used to fire
+    # ONCE, best-effort, and a miss cost the user the full 15-min fallback wall
+    # (41 completed jobs settled at e2e≈900s in the Aug-2..9 week; the Aug-3
+    # secret-flip burst alone 401'd 27 of them). Now: up to 4 attempts with
+    # 5/15/45s backoff (65s worst-case container tail, ~$0.02, only ever paid on
+    # a FAILING path), and when ALL attempts fail the REASON (status codes /
+    # exception types per attempt) is merged durably into video_jobs.result
+    # .callback_post — so the next miss names its own mechanism from a DB query
+    # instead of a Modal-log archaeology dig. The durable row + the dispatcher's
+    # early poll + the 15-min timer remain the recovery layers.
+    # grep marker: [completion-post].
     _call_id = None
     try:
         _call_id = modal.current_function_call_id()
@@ -845,25 +855,66 @@ def run_pipeline_bg(body: dict):
         _secret = _os.environ.get("MODAL_CALLBACK_SECRET", "")
         if _app_url and _call_id:
             import requests as _requests
-            _cb_t0 = _time.time()
-            _cb_resp = _requests.post(
-                f"{_app_url}/api/modal-complete",
-                json={"call_id": _call_id, "job_id": body.get("job_id"), "result": result},
-                headers=({"X-Modal-Secret": _secret} if _secret else {}),
-                timeout=15,
-            )
-            _cb_ms = int((_time.time() - _cb_t0) * 1000)
-            # STATUS + ELAPSED so the next double-loss NAMES its own cause (Zac
-            # 2026-08-03). The bare POST never raised on a 401/403/5xx or a slow
-            # 2xx — so "completion POSTed" could not tell delivered from rejected
-            # from reconciler-race. Now: status<300 = the server ACCEPTED it (any
-            # later double-loss on this job is a RACE/projection defect, NOT a
-            # delivery loss); a non-2xx names an auth/server reject on THIS leg.
-            # grep marker: [completion-post].
-            _cb_ok = 200 <= _cb_resp.status_code < 300
-            print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
-                  f"status={_cb_resp.status_code} ok={_cb_ok} elapsed_ms={_cb_ms}"
-                  + ("" if _cb_ok else f" REJECTED body={_cb_resp.text[:160]!r}"), flush=True)
+            _cb_ok = False
+            _cb_attempts = []
+            for _cb_i, _cb_delay in enumerate((0, 5, 15, 45)):
+                if _cb_delay:
+                    _time.sleep(_cb_delay)
+                _cb_t0 = _time.time()
+                try:
+                    _cb_resp = _requests.post(
+                        f"{_app_url}/api/modal-complete",
+                        json={"call_id": _call_id, "job_id": body.get("job_id"), "result": result},
+                        headers=({"X-Modal-Secret": _secret} if _secret else {}),
+                        timeout=15,
+                    )
+                    _cb_ms = int((_time.time() - _cb_t0) * 1000)
+                    # status<300 = the server ACCEPTED it (any later double-loss
+                    # on this job is a RACE/projection defect, NOT a delivery
+                    # loss); a non-2xx names an auth/server reject on THIS leg.
+                    _cb_ok = 200 <= _cb_resp.status_code < 300
+                    print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
+                          f"attempt={_cb_i + 1} status={_cb_resp.status_code} ok={_cb_ok} elapsed_ms={_cb_ms}"
+                          + ("" if _cb_ok else f" REJECTED body={_cb_resp.text[:160]!r}"), flush=True)
+                    _cb_attempts.append({"status": _cb_resp.status_code, "ms": _cb_ms})
+                    if _cb_ok:
+                        break
+                except Exception as _cbe:
+                    _cb_ms = int((_time.time() - _cb_t0) * 1000)
+                    print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
+                          f"attempt={_cb_i + 1} EXCEPTION ({type(_cbe).__name__}: {_cbe}) elapsed_ms={_cb_ms}",
+                          flush=True)
+                    _cb_attempts.append(
+                        {"exception": f"{type(_cbe).__name__}: {str(_cbe)[:120]}", "ms": _cb_ms})
+            if not _cb_ok:
+                print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
+                      f"ALL {len(_cb_attempts)} attempts FAILED — durable row + dispatch nets settle; "
+                      f"persisting the reason", flush=True)
+                # Merge the per-attempt reasons into the job's durable result so
+                # the miss mechanism is QUERYABLE (result->callback_post). The
+                # worker's own terminal write long landed; the server tail can't
+                # be running (its trigger — this POST — just failed), so the
+                # read-merge-write races nothing that matters on this rare path.
+                try:
+                    _sb = getattr(_H, "supabase", None)
+                    _jid = body.get("job_id")
+                    if _sb is not None and _jid:
+                        _rows = _sb.table("video_jobs").select("result").eq("id", _jid).execute()
+                        _data = getattr(_rows, "data", None) or []
+                        _cur = (_data[0] or {}).get("result") if _data else None
+                        if not isinstance(_cur, dict):
+                            _cur = {}
+                        _cur["callback_post"] = {
+                            "delivered": False,
+                            "attempts": _cb_attempts,
+                            "at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
+                        }
+                        _sb.table("video_jobs").update({"result": _cur}).eq("id", _jid).execute()
+                        print(f"[completion-post] failure reason persisted to "
+                              f"result.callback_post job={_jid}", flush=True)
+                except Exception as _pe:
+                    print(f"[completion-post] failure-persist FAILED "
+                          f"({type(_pe).__name__}: {_pe}) — logs only", flush=True)
     except Exception as _e:
         print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
               f"EXCEPTION ({type(_e).__name__}: {_e}) — dispatch fallback + reaper will settle", flush=True)
@@ -2061,7 +2112,7 @@ def probe_partial_state():
         sys.path.insert(0, "/")
     import handler
     sb = handler.supabase
-    table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
+    table = os.environ.get("PROMPTLY_JOB_TABLE") or "video_jobs"
     report = {"table": table}
     if sb is None:
         report["error"] = "supabase client not configured on worker"
