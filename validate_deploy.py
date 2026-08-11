@@ -223,6 +223,33 @@ def _quiet_window_gate_wired():
         "is how this codebase has repeatedly shipped confident false negatives.")
 
 
+@check("SEAM DARK SEAMS STAY DARK + WIRED (lane 5, merged by TRUTH 2026-08-11, RULE-1): runs SEAM's three offline certs — cert_adapter_contract (5), cert_unified_core (8), cert_surgical_ops (6) — inside the deploy gate. They assert flag-OFF byte-identity (the prompt-byte fingerprint, the identity-carrier adapter, the empty premium profile, the schema-enum exclusion), that each module is MOUNTED into the image and imported unconditionally (the progressive_publish lesson: wiring shipped, module didn't), and that no flag defaults ON. Zero network, zero Modal, zero Gemini. If any seam silently arms itself, or a mount is dropped, the deploy fails here rather than at flip time.")
+def _seam_dark_certs():
+    import subprocess as _sp
+    _here = os.path.dirname(os.path.abspath(__file__))
+    for _cert, _expect in (("cert_adapter_contract.py", "5/5"),
+                           ("cert_unified_core.py", "8/8"),
+                           ("cert_surgical_ops.py", "6/6")):
+        assert os.path.exists(os.path.join(_here, _cert)), \
+            f"{_cert} is missing — a SEAM dark seam lost its cert"
+        _r = _sp.run([sys.executable, os.path.join(_here, _cert)],
+                     capture_output=True, text=True, timeout=300, cwd=_here)
+        assert _r.returncode == 0, (
+            f"{_cert} FAILED — a dark seam is not dark, or its wiring/mount "
+            f"regressed:\n{(_r.stdout or '')[-700:]}{(_r.stderr or '')[-300:]}")
+        assert _expect in (_r.stdout or ""), (
+            f"{_cert} did not report {_expect} — assertion count changed; a "
+            f"check may have been dropped rather than fixed:\n{(_r.stdout or '')[-400:]}")
+    # No SEAM flag may default ON: absent env must read dark.
+    for _mod, _flag in (("adapter_contract.py", "PROMPTLY_ADAPTER_V1"),
+                        ("unified_core.py", "PROMPTLY_UNIFIED_CORE"),
+                        ("surgical_ops.py", "PROMPTLY_SURGICAL_V2")):
+        _s = open(os.path.join(_here, _mod)).read()
+        assert f'os.environ.get("{_flag}", "")' in _s, (
+            f"{_mod}: {_flag} no longer defaults to ABSENT=dark. A dark seam that "
+            f"defaults ON ships itself without an owner GO.")
+
+
 @check("no UnboundLocalError via static analysis (pyflakes)")
 def _pyflakes_check():
     # pyflakes catches: name X assigned but never used / referenced before
@@ -3305,8 +3332,24 @@ def _plan_diff_add_vocabulary():
     # generate_plan_diff must contain canonical ADD examples for every
     # supported component type. Catches the regression where someone
     # refactors and drops the ADD section.
+    # MECHANISM UPDATED 2026-08-11 (SEAM merge, by TRUTH). The transition bullet
+    # now lives in surgical_ops as a flag-selected constant
+    # (TRANSITION_REFUSAL_BULLET when PROMPTLY_SURGICAL_V2 is off /
+    # TRANSITION_ADD_BULLET when on) rather than inline in this function, so a
+    # getsource() grep alone no longer sees it. VERIFIED before accepting:
+    # TRANSITION_REFUSAL_BULLET is BYTE-IDENTICAL to the old inline text, so the
+    # prompt Gemini receives is unchanged — only the grep target moved.
+    # The check is now STRONGER: it asserts the vocabulary reaches the composed
+    # prompt in BOTH flag states, so a future edit cannot teach ADD in one arm
+    # and silently drop it in the other.
     import inspect, handler
     src = inspect.getsource(handler.generate_plan_diff)
+    try:
+        import surgical_ops as _so
+        _off = src + _so.TRANSITION_REFUSAL_BULLET
+        _on = src + _so.TRANSITION_ADD_BULLET + _so.CAPTION_TEXT_BULLET + _so.OPS_VOCAB_ADDENDUM
+    except ImportError:  # module gone => the seam is unmounted; other checks catch it
+        _off = _on = src
     required = [
         "add a zoom on word",         # emphasis_moments add
         "add a transition",           # transitions add
@@ -3316,12 +3359,14 @@ def _plan_diff_add_vocabulary():
         "add a text overlay",         # text_overlays add
         "add an SFX",                 # sound_effects add
     ]
-    missing = [phrase for phrase in required if phrase not in src]
-    assert not missing, (
-        f"generate_plan_diff is missing ADD examples for: {missing}. "
-        f"Layer 1 documented these to teach Gemini that ADD is a valid tweak "
-        f"operation across every component type. Restore them."
-    )
+    for _arm, _text in (("flag-OFF", _off), ("flag-ON (surgical_v2)", _on)):
+        missing = [phrase for phrase in required if phrase not in _text]
+        assert not missing, (
+            f"generate_plan_diff is missing ADD examples for: {missing} in the "
+            f"{_arm} composition. Layer 1 documented these to teach Gemini that "
+            f"ADD is a valid tweak operation across every component type. "
+            f"Restore them."
+        )
 
 
 @check("generate_plan_diff prompt documents ordinal + temporal + word-based references")
