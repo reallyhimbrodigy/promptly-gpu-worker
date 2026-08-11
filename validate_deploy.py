@@ -7291,6 +7291,86 @@ def _secret_canonical_values():
         "<canonical> --force), then redeploy.")
 
 
+@check("NO UNREGISTERED LIVE FLAG (2026-08-11, RULE-1, forged from finding 5 of them at once): the canonical-values check above asserts CANON is a SUBSET of the live secret — it can only catch a registered key going wrong. It is blind in the other direction, so a key present in the live secret but absent from CANON is watched by NOTHING: not this gate, not the daily flag-drift sentinel, not the readback. Measured 2026-08-11: the secret held 31 keys, CANON 26, and the five strangers were live production values — PROMPTLY_HLS_COPY=1 (a filing was about to 'flip' it ON, i.e. a no-op reported as a win), PROMPTLY_MEDIA_RESOLUTION=MEDIA_RESOLUTION_LOW and PROMPTLY_PROXY_SAMPLE_FPS=2 (two levers LAUNCH_DAY §6 explicitly rules INCONCLUSIVE, DO NOT FLIP — already set), PROMPTLY_SILENT_TO_MOODREEL=1, PROMPTLY_STRUCTURE_ABORT=1. This asserts the OTHER direction: every live PROMPTLY_* key must be registered in CANON (asserted value) or CANON_PENDING (live, unasserted, decision filed with the owner and named here). A new stranger fails the deploy. Nothing about production can be live and unnamed.")
+def _no_unregistered_live_flags():
+    import subprocess as _sub, json as _json, os as _os, ast as _ast
+
+    def _declared_canon_keys():
+        """Keys CANON asserts, read from this file's own source via ast.
+
+        Deliberately NOT a second hand-maintained copy of the list — the exact
+        defect being closed here is a list that silently lagged reality. Nested
+        because @check runs its function at decoration time, so a module-level
+        helper defined further down does not exist yet.
+        """
+        for _n in _ast.walk(_ast.parse(open(__file__, encoding="utf-8").read())):
+            if isinstance(_n, _ast.Assign) and any(
+                    getattr(t, "id", None) == "CANON" for t in _n.targets):
+                return [k.value for k in _n.value.keys if isinstance(k, _ast.Constant)]
+        raise AssertionError("CANON dict not found in validate_deploy.py (ast) — the "
+                             "unregistered-flag gate cannot know what is registered.")
+
+    # LIVE, UNREGISTERED, DECISION PENDING WITH THE OWNER. Being here is not
+    # approval — it is the opposite: a key is listed here precisely because its
+    # live value is not yet a decision anyone recorded. Each line names what has
+    # to happen to retire it. Moving a key to CANON asserts its value forever
+    # after; that is a production decision and rides the owner's GO naming it.
+    CANON_PENDING = {
+        # Owner GO on file naming the key (LANE4_FLIP_HLS_COPY.md, 2026-08-11)
+        # and it wants exactly this value — but the filing believed it was OFF,
+        # so the GO was for a flip that had already happened. Retire by
+        # confirming the intent, then move to CANON.
+        "PROMPTLY_HLS_COPY": "1",
+        # ⚠️ CONTRADICTS LAUNCH_DAY §6: "INCONCLUSIVE, do not flip. Both A/B arms
+        # fell to safe_edit_fallback during the outage, so the lever's own leg
+        # never ran." Both are live anyway. They change what Gemini SEES, and
+        # quality wins over speed by standing law — so this is the owner's call
+        # to confirm or revert, not a gate's to canonize. Retire by decision.
+        "PROMPTLY_MEDIA_RESOLUTION": "MEDIA_RESOLUTION_LOW",
+        "PROMPTLY_PROXY_SAMPLE_FPS": "2",
+        # Route/abort flags consistent with shipped, certified features; never
+        # written down. Retire by confirming and moving to CANON.
+        "PROMPTLY_SILENT_TO_MOODREEL": "1",
+        "PROMPTLY_STRUCTURE_ABORT": "1",
+    }
+    _script = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                            "secret_flags_readback.py")
+    try:
+        _r = _sub.run(["modal", "run", _script], capture_output=True, text=True, timeout=300)
+    except _sub.TimeoutExpired:
+        assert False, ("could not enumerate promptly-lang-flags — `modal run "
+                       "secret_flags_readback.py` timed out (>300s). Deploy blocked.")
+    _out = (_r.stdout or "") + "\n" + (_r.stderr or "")
+    _line = next((l for l in _out.splitlines() if l.startswith("READBACK ")), None)
+    assert _line, ("could not enumerate promptly-lang-flags — no READBACK line. "
+                   f"Deploy blocked.\n--- output tail ---\n{_out[-800:]}")
+    _actual = _json.loads(_line[len("READBACK "):])
+
+    # The readback ENUMERATES the container's PROMPTLY_* env (it no longer
+    # reports a hardcoded list), so this sees keys nobody declared anywhere.
+    # "<UNSET>" means declared-but-absent: not a live key, so not a stranger.
+    _live = {k for k, v in _actual.items() if v != "<UNSET>"}
+    _known = set(_declared_canon_keys()) | set(CANON_PENDING)
+    _strangers = sorted(_live - _known)
+    assert not _strangers, (
+        f"UNREGISTERED live flag(s) in promptly-lang-flags: {_strangers}. "
+        f"Live values: { {k: _actual[k] for k in _strangers} }. A flag that is live "
+        "and unregistered is watched by nothing — no gate, no drift sentinel, no "
+        "readback — and a filing can then propose 'flipping' something already on. "
+        "Fix: add it to CANON (asserting its value, with the owner's GO naming the "
+        "key) or to CANON_PENDING here (recording that the decision is open, and why).")
+
+    # A CANON_PENDING key whose live value moved is still drift — pending means
+    # "no decision yet", never "unwatched".
+    _moved = {k: {"got": _actual.get(k), "was": v}
+              for k, v in CANON_PENDING.items()
+              if k in _live and _actual.get(k) != v}
+    assert not _moved, (
+        f"CANON_PENDING flag(s) CHANGED VALUE under us: {_json.dumps(_moved)}. "
+        "Pending means the decision is open, not that the value may drift. "
+        "Confirm the change was deliberate, then update this dict or CANON.")
+
+
 @check("FLAG-DRIFT SENTINEL WIRED + CANON MIRRORS EQUAL (TRUTH 2026-08-09, RULE-1): secret-vs-canon drift used to be caught only at the NEXT deploy — days away. The daily prewarm_janitor now compares its live env against modal_app.py's _CANON_FLAGS and pages on drift ([FLAG-DRIFT] + [ALERT] + render-alert POST). That only works if (a) the sentinel stays in the janitor and (b) modal_app's _CANON_FLAGS stays EQUAL to this file's CANON — two copies that drift apart would alert on the wrong values or never alert. This ast-compares the dicts and greps the sentinel's three legs; FAILS on any divergence or removal.")
 def _flag_drift_sentinel_wired():
     import ast as _ast
