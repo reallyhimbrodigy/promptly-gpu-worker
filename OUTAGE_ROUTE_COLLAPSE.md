@@ -34,6 +34,29 @@ cinematic mood-reel replaced by the minimal route.
 The substitution is near-exact: `minimal` rose from 4–8/day pre-outage to
 40–100/day after. Moodreel's traffic is landing in minimal.
 
+## Provenance — HARNESS found this on day one
+
+**Credit where it belongs: LANE 2 / HARNESS detected the outage on 2026-08-09**,
+while building the golden corpus, and wrote it up as freeze precondition #1
+[CODE](golden/README.md:70):
+
+> *"**Vertex must be healthy.** 2026-08-09: a GCP billing dunning-denial made
+> 100% of editorial jobs silently fall back to `safe_edit` — a freeze that day
+> would have canonized fallback plans. Before freezing, run one smoke capture
+> and assert `gemini_n_calls > 0` in the output."*
+
+That is the finding, two days before this document. A quality harness caught a
+live production outage *before it was even finished*, and stopped itself from
+freezing a corpus of degraded plans.
+
+**What this document adds** is only the other half: that the degradation is
+**still running three days later**, and its size in routes and users. HARNESS
+named the cause; this names the ongoing blast radius.
+
+It also resolves my vacuous-probe confusion: HARNESS's `gemini_n_calls` lives in
+the **harness capture output**, not in `video_jobs.result` — which is exactly
+why searching the DB for it returned a meaningless zero.
+
 ## Mechanism [INFERRED, consistent with every measurement]
 
 `PROMPTLY_MOODREEL="1"` and `PROMPTLY_HYPE_MODE="1"` are both **live and

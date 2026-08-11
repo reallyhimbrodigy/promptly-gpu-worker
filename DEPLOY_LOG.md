@@ -77,11 +77,25 @@ version).
    2 UNKNOWN), and validate_deploy check `_quiet_window_gate_wired` fails any
    deploy that unwires it. A zero is only believed if the probe can also see
    recent rows — the non-vacuity leg.
-2. **`PROMPTLY_SKIP_REGRESSION` is outage-only.** Legitimate solely while Vertex
+2. **NO ZERO IS BELIEVED UNTIL THE SAME PROBE FIRES ON THE KNOWN-BAD
+   WINDOW.** (Zac 2026-08-11 — promoted to a standing law for **every lane**,
+   not just deploys.) A probe that matches nothing returns a confident zero that
+   is indistinguishable from good news. This has now bitten repeatedly: during
+   the outage investigation, searching `video_jobs.result` for
+   `safe_edit_fallback` AND for `gemini_n_calls` both returned clean zeros —
+   and both markers appear in **no window at all**, including the known-bad one
+   (they live in the HARNESS capture output, not the DB). The rule is
+   mechanical: before reporting any zero, re-run the identical probe against a
+   window where the thing is KNOWN to be present. If it does not fire there,
+   the zero is VACUOUS and means nothing. Enforced in code for the deploy gate
+   by `preflight_quiet_window.py` (refuses to call a zero "quiet" unless it can
+   also see recent rows) and asserted by validate_deploy `_quiet_window_gate_wired`.
+
+3. **`PROMPTLY_SKIP_REGRESSION` is outage-only.** Legitimate solely while Vertex
    403s (the corpus's Gemini calls would fail spuriously and fire a FALSE
    `REGRESSED` page). The moment the owner confirms GCP billing, the regression
    corpus is the **FIRST verification run, before any further worker deploy.**
-3. **Drain order once the deploy permission lands:** W0 reconciliation (must
+4. **Drain order once the deploy permission lands:** W0 reconciliation (must
    verify behaviourally no-op) → DELIVERY worker rebased (+ W4, the named crash
    fix) → SEAM full package, both halves together. One at a time, each with its
    watch.
@@ -125,6 +139,14 @@ Vertex omits optional fields and TypeScript cannot see it."**
   `.last_deployed_commit`) is **partly superseded** — TRUTH untracked that file
   on 2026-08-09, so only its gate-assertion half still applies. Review that half
   on merge rather than taking it wholesale.
+- **⚠️ ITS CRASH CLASS REACTIVATES THE MOMENT GEMINI RETURNS** (Zac
+  2026-08-11). The bug is *caused by Vertex omitting optional fields*. While
+  Vertex is 403ing, no Gemini response is produced, so the class is **dormant —
+  masked by the outage, not fixed**. Restoring billing re-arms it on live
+  traffic. **Therefore W1 (carrying W4) follows the billing fix IMMEDIATELY
+  once the permission rule lands** — the window between "Gemini returns" and
+  "W4 is live" is a window in which one missing optional string can again kill
+  a whole render.
 - **Risk note:** this is a *real* runtime change to render components, so it
   must NOT ride W0. It ships with W1 and carries W1's watch.
 
@@ -225,6 +247,29 @@ the first deploy after billing is restored.
   is fine, and all changes are "inert-negative (worst case = today's
   behavior)". The CS half is the safety net, so it is the more valuable half to
   have live first.
+
+### ANSWERED EXACTLY, per Zac's ask 2026-08-11 — the Render half is NOT confirmed
+
+**Q: did TRUTH ever confirm the Render `buildCommand` gate actually armed, and
+that JUDGE's `daily-scoreboard` cron service exists?**
+
+**A: NO. Both are [UNKNOWN] and both are still on the owner's list.** Stated
+plainly so the board is exact:
+
+| thing | status | why it is unknown |
+|---|---|---|
+| CI smoke gate | ✅ **CONFIRMED ARMED** [MEASURED] | ran **green on the real deploy commit** `99cf92d` AND proven **red** on a broken invariant (scratch PR #2). Both directions. |
+| Render `buildCommand` gate | ❌ **[UNKNOWN]** | the build succeeded — but that is equally consistent with Render still using the OLD buildCommand. Blueprint changes can need a manual sync (this repo has a prior "blueprint sync failed" incident on env vars). No Render API key on this machine → cannot read the build log. |
+| JUDGE `daily-scoreboard` cron service | ❌ **[UNKNOWN]** | same blueprint-sync question. It is a NEW service in `render.yaml`. It leaves no DB trace either way right now, because both its tables are un-migrated, so it would fall back to a JSONL file on Render's ephemeral disk. **Absence of evidence here is not evidence of absence.** |
+
+I attempted to make this self-proving without crossing lanes and could not:
+there is no served static directory on `main` (`public/` does not exist there),
+so a build-written receipt has nothing to serve it. **The durable fix is filed
+to DELIVERY** (they own `server.js` handlers) as
+`reports/REQUEST_DELIVERY_GATE_RECEIPT.md`: have the build write a receipt and
+expose it on `/api/health` beside `rev`, so "did the build gate run" becomes a
+permanent `curl`, exactly as `rev` made "is prod running my commit" a permanent
+`curl`. Until that ships, this stays an owner eyeball.
 
 ### Open watches
 
