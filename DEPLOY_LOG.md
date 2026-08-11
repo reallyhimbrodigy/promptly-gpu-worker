@@ -430,9 +430,33 @@ that never synced, in which case **the 24 safety smokes are gating nothing on
 Render** and only GitHub CI is real; (b) build-time writes do not reach the
 runtime filesystem, in which case the receipt is the wrong instrument.
 
-`c071508` ships the discriminator: an npm `postinstall` marker, which fires on
+`c071508` shipped the discriminator: an npm `postinstall` marker, which fires on
 **any** `npm install` including the old un-synced command.
-`gate null + build null` ⇒ (b). `gate null + build PRESENT` ⇒ (a), decisively.
+
+### 🔴 ANSWERED — the Render buildCommand gate is **NOT ARMED**. [MEASURED]
+
+```
+GET /api/health  (rev c071508, 23:12Z)
+  "gate":  null
+  "build": {"at":"2026-08-11T23:12:44.936Z","node":"v20.20.2"}
+```
+
+`build` present ⇒ `npm install` ran on this build, **and** build-time writes DO
+survive into the runtime filesystem. `gate` absent from the SAME directory on
+the SAME build ⇒ `node validate_deploy.js` **never ran**. (It cannot have run
+and failed: a failed gate fails the build, and this build shipped.)
+
+**The live Render service is not running `render.yaml`'s `buildCommand`. The 25
+safety smokes are gating NOTHING on Render — only GitHub CI is real.** Every
+"the gate blocks the Render build" claim in this estate is false, and has been
+since the gate was wired on 2026-08-09.
+
+**OWNER ACTION:** in the Render dashboard, set the `promptly` service's build
+command to `npm install --omit=dev && node validate_deploy.js` (or trigger a
+blueprint re-sync). Verified by one curl afterwards: `.gate` must go non-null
+with `total=25`. This is the standing [UNKNOWN] from the C1 report, now closed
+as a **NO** — and it stayed open for two days precisely because it decayed to an
+owner build-log eyeball. It is a `curl` from now on.
 
 ### 🔴 P0 — 9 USERS TOLD A FINISHED RENDER FAILED. TRUTH's open watch is RED.
 
