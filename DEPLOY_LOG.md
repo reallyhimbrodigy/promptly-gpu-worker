@@ -272,6 +272,44 @@ gate**, and the Vertex outage has eliminated that cohort entirely. **Re-run this
 watch after billing is restored.** Reported as inconclusive rather than as
 either a pass or a regression.
 
+### ⚠️ FINDING for DELIVERY — the missed-callback class RECURRED with only the CS half live
+
+**2 jobs / 2 distinct users** (lead with users, Rule 7), 2026-08-11:
+
+| job | created | died | outcome |
+|---|---|---|---|
+| `34729736` | 18:09:24Z | 18:24:32Z | failed + **refunded**, `hls_manifest_url` present |
+| `d3517793` | 18:12:19Z | 18:27:23Z | failed + **refunded**, no artifacts |
+
+Both were observed BY ME, live, at `progress: 100, current_step: complete,
+status: processing` — the worker had finished. Both then sat ~15 minutes (the
+fallback timer), and were terminalised as **failed** with the user-facing
+*"We had trouble reaching the render service."* Both were auto-refunded, so
+this is not silent loss — but two users were told their finished video failed.
+
+**Attribution — these are NOT deploy orphans** [MEASURED]: created *after*
+v522 (18:01) and died *before* v523 (18:29). They died of the missed-callback
+class itself, in the window between deploys.
+
+**The uncomfortable part:** C1 — DELIVERY's durable-row 75s poller, whose whole
+purpose is "a missed callback now costs ≤75s, not 900" — **was already live**
+(deployed 16:57Z) and did not save either job. Either the poller does not cover
+this path, or it failed silently. The worker half (W1, completion-POST retry
+with backoff) only went live at 18:29Z, *after* both died, so the pair was
+never tested together until now.
+
+**WATCH (open):** does this class recur on jobs created after **18:29Z**, now
+that both halves are live? Query:
+```sql
+select id, created_at, updated_at, error_message
+from video_jobs
+where status='failed' and created_at > '2026-08-11T18:29:00Z'
+  and error_message ilike '%trouble reaching the render service%';
+```
+Expected with both halves live: **zero**. Any hit is a DELIVERY defect to file,
+not a deploy artifact. (The `completion_delivery` column would name the settle
+path directly — another reason the migration matters.)
+
 ### C1 verification [MEASURED]
 
 - **Live sha match** in 40s: `/api/health` `rev` = `8f54923…` = pushed `main`.
