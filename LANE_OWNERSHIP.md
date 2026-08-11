@@ -36,10 +36,21 @@ The same map is published in both repos (`promptly-gpu-worker` and
 
 ## Owner-gated SQL — one permanent home, routed through TRUTH
 
-**`~/Desktop/Promptly Reports/OWNER_SQL.md` is the single permanent home for
-every piece of SQL the owner must run by hand** (Zac's rule, 2026-08-11). It
-carries a status table (date · purpose · owning lane · PENDING/APPLIED) and one
-idempotent copy-paste block per entry with its own verification query.
+**`~/Desktop/Promptly Reports/` is the single permanent home for every piece of
+SQL the owner must run by hand** (Zac's rule, 2026-08-11).
+
+**The `.sql` files there are PURE RUNNABLE SQL.** Their entire contents must be
+exactly and only what gets pasted into the Supabase SQL editor: select-all →
+copy → paste → Run, zero editing. No markdown, no headers, no status tables, no
+code fences, no prose. Context goes in `--` comment lines only, kept minimal.
+Verification queries live at the tail as runnable SQL. Files are named `.sql`
+and **numbered in run order** (`01`, `02`, …).
+
+**All status lives OUTSIDE the paste files** — `_STATUS.md` beside them carries
+the date · purpose · owning lane · PENDING/APPLIED table. Never inside a `.sql`.
+
+Enforced by `owner_sql_paste_safety.py`: markdown-artifact scan + a real
+Postgres-dialect parse (sqlglot) of every `.sql` in the folder.
 
 Rules TRUTH enforces:
 

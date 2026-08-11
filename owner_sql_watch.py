@@ -1,8 +1,10 @@
 """DETECT an owner SQL apply, flip PENDING -> APPLIED, and start the clocks.
 
-Zac's rule (2026-08-11): the Desktop file `Promptly Reports/OWNER_SQL.md` is the
-single permanent home for every piece of SQL he must run by hand, and **he never
-pastes anything back**. So detection is OUR job, not his.
+Zac's rule (2026-08-11): `~/Desktop/Promptly Reports/` holds the SQL he runs by
+hand. The `.sql` files there are PURE runnable SQL — select-all, copy, paste,
+Run, zero editing — so no status text may live inside them. All status lives in
+`_STATUS.md` beside them, which is what this script rewrites. He never pastes
+anything back, so detection is OUR job, not his.
 
 This probes for the actual objects. A status only flips on a PROBE — never on a
 claim, never on a paste-back, never on "it looked like it worked".
@@ -25,7 +27,7 @@ import sys
 import urllib.error
 import urllib.request
 
-DESKTOP_FILE = "/Users/zaclibman/Desktop/Promptly Reports/OWNER_SQL.md"
+DESKTOP_FILE = "/Users/zaclibman/Desktop/Promptly Reports/_STATUS.md"
 ENV_FILE = "/Users/zaclibman/content-studio/.env.local"
 
 
@@ -102,10 +104,10 @@ def main():
     n_flowing, sample = instrument_flowing(url, key)
 
     if not applied:
-        print("OWNER-SQL WATCH: entry 1 still PENDING.")
+        print("OWNER-SQL WATCH: entry 01 still PENDING.")
         return 1
 
-    print("OWNER-SQL WATCH: entry 1 objects ALL PRESENT -> APPLIED.")
+    print("OWNER-SQL WATCH: entry 01 objects ALL PRESENT -> APPLIED.")
     if n_flowing:
         print(f"  instrument FLOWING: {n_flowing} row(s) with completion_delivery set "
               f"(e.g. {sample[:3]}) -> DELIVERY's 48h watch clock STARTS NOW.")
@@ -124,9 +126,9 @@ def main():
                      f"| **APPLIED** ({today}) |", doc, count=1)
         if new != doc:
             open(DESKTOP_FILE, "w").write(new)
-            print(f"  Desktop OWNER_SQL.md: entry 1 flipped PENDING -> APPLIED ({today}).")
+            print(f"  Desktop _STATUS.md: entry 01 flipped PENDING -> APPLIED ({today}).")
         else:
-            print("  Desktop OWNER_SQL.md: already APPLIED, nothing to change.")
+            print("  Desktop _STATUS.md: already APPLIED, nothing to change.")
     return 0
 
 
