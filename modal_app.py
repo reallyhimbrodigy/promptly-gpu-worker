@@ -565,6 +565,18 @@ image = (
     .add_local_file("minimal_editor.py", "/minimal_editor.py")
     .add_local_file("moodreel_editor.py", "/moodreel_editor.py")
     .add_local_file("hype_render.py", "/hype_render.py")
+    # LANE-SEAM (DARK behind PROMPTLY_ADAPTER_V1): the input-adapter contract.
+    # handler.py imports it at the recipe call site UNCONDITIONALLY (flag-off
+    # jobs too) precisely so a missing mount surfaces as a ledgered defect on
+    # day one instead of at flip time — the progressive_publish lesson.
+    .add_local_file("adapter_contract.py", "/adapter_contract.py")
+    # LANE-SEAM (DARK behind PROMPTLY_UNIFIED_CORE): guidance profiles + the
+    # unified-core composition seam. Same unconditional-import mount law.
+    .add_local_file("guidance_registry.py", "/guidance_registry.py")
+    .add_local_file("unified_core.py", "/unified_core.py")
+    # LANE-SEAM (DARK behind PROMPTLY_SURGICAL_V2): tweak-op teaching text +
+    # deterministic validators for caption-spelling / add-transition ops.
+    .add_local_file("surgical_ops.py", "/surgical_ops.py")
     .add_local_file("progressive_publish.py", "/progressive_publish.py")  # W3 previews (DARK) — the cert-found gap: wiring shipped, module didn't
     # recipe_eval.py was missing from this list since the eval was first
     # wired — handler.py imports it at runtime via `from recipe_eval
