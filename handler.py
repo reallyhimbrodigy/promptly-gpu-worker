@@ -24362,6 +24362,7 @@ _RENDER_TRANSIENT_KEYS = {
     "_audio_stream_offset", "_broll_output_ranges", "_caption_band_luma",
     "_caption_text_overrides",  # re-parsed from the vibe every render (user spelling)
     "_caption_position_lock",   # re-parsed from the vibe every render (user position lock)
+    "_caption_translate_target",  # re-parsed from the vibe every render (LANE-SEAM, dark)
     "_face_trajectory", "_generated_subjects", "_integrity_fullmg_ranges",
     "_integrity_slot_ranges", "_projected_words", "_render_clip_output_ranges",
     "_render_clip_time_maps", "_render_cuts", "_render_effective_durations",
@@ -26224,6 +26225,52 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             position_boundaries_sec=sorted(set(_position_boundaries_out_sec)),
             clip_boundaries_sec=sorted(set(_clip_boundaries_out_sec)),
         )
+        # ── CAPTION TRANSLATION (LANE-SEAM, DARK behind PROMPTLY_CAPTION_
+        # TRANSLATE). Runs AFTER pagination so page windows/boundaries are
+        # preserved exactly; FULL-OR-NOTHING (patchy captions are a defect —
+        # any failure keeps the ORIGINAL captions and ledgers loudly, the
+        # delivered video is never half-translated). The transient target is
+        # set only when the flag is on AND the user explicitly asked, so this
+        # whole block is a no-op on today's traffic.
+        _ct_target = edit_plan.get("_caption_translate_target")
+        if _ct_target and caption_pages:
+            try:
+                import caption_translate as _ctr2
+
+                def _ct_call(_texts, _lang):
+                    _sys_p, _user_p = _ctr2.build_translation_prompt(_texts, _lang)
+                    _resp = _get_genai_client().models.generate_content(
+                        model=GEMINI_MODEL, contents=[_user_p],
+                        config=genai_types.GenerateContentConfig(
+                            system_instruction=_sys_p, temperature=0.2,
+                            response_mime_type="application/json",
+                            response_json_schema={"type": "array",
+                                                  "items": {"type": "string"}},
+                            thinking_config=genai_types.ThinkingConfig(
+                                thinking_budget=0)))
+                    return json.loads(_resp.text)
+
+                caption_pages, _ct_meta = _ctr2.translate_pages(
+                    caption_pages, _ct_target, _ct_call)
+                if _ct_meta.get("ok"):
+                    _record_divergence(
+                        "caption",
+                        {"target": _ct_target, "n_pages": _ct_meta["n_pages"]},
+                        "caption_translated", reason="explicit user ask")
+                    print(f"[caption-translate] {_ct_meta['n_pages']} pages "
+                          f"-> {_ct_target}", flush=True)
+                else:
+                    _record_divergence(
+                        "caption",
+                        {"target": _ct_target,
+                         "reason": _ct_meta.get("reason")},
+                        "caption_translate_failed",
+                        reason="original captions kept (full-or-nothing)")
+                    print(f"[caption-translate] FAILED "
+                          f"({_ct_meta.get('reason')}) — original captions "
+                          "kept", flush=True)
+            except ImportError as _ctr2_err:
+                _ledger_defect("missing_module", "caption_translate", _ctr2_err)
     if not caption_position_segments_out:
         # The validator guarantees at least one segment covering [0, duration].
         # If projection produced nothing, it means total_output_frames is 0.
@@ -38704,6 +38751,17 @@ def handler(job):
         # every caption inherits for the whole video (above the default, Gemini, AND
         # the overlay/composer force-flips — the drift the user saw "toward the end").
         edit_plan["_caption_position_lock"] = _parse_caption_position_lock(_reedit_intent_text)
+        # LANE-SEAM (DARK behind PROMPTLY_CAPTION_TRANSLATE): an explicit
+        # caption-translation ask ("captions in hindi", "translate to
+        # spanish") parses to a transient target the caption build consumes.
+        # Flag off ⇒ the key is never set ⇒ byte-identical.
+        try:
+            import caption_translate as _ctr
+            if _ctr.enabled(input_data):
+                edit_plan[_ctr.TRANSIENT_KEY] = _ctr.parse_target_language(
+                    _reedit_intent_text)
+        except ImportError as _ctr_err:
+            _ledger_defect("missing_module", "caption_translate", _ctr_err)
         edit_plan["_source_path"] = source_path
         # Record what reframe filter was applied at ingest for downstream
         # face-coordinate mapping. The render pipeline no longer reads this
