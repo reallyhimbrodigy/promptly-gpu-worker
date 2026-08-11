@@ -36,7 +36,23 @@ import sys
 
 # Intentional deletions: "symbol": "why it went, and what replaced it".
 # An entry here is a claim that the removal was deliberate and reviewed.
-INTENTIONAL_REMOVALS = {}
+INTENTIONAL_REMOVALS = {
+    # W1/DELIVERY 2026-08-11, reviewed by TRUTH against both trees before allowing.
+    # The gate fired on this and it was RIGHT to: a live identifier vanished.
+    # Verified deliberate, not an accidental drop.
+    #   LIVE (v522 9ee9e6d): edit_plan["_lang_bundle"] = _lang_bundle   (write)
+    #                        (edit_plan or {}).get("_lang_bundle")      (read)
+    #   The write ran on the recipe THREAD before the enclosing scope had bound
+    #   `edit_plan` -> NameError on EVERY job, swallowed, so the read returned
+    #   null 218/218 times.
+    #   NOW: `_lang_bundle_holder = {}` is bound BEFORE the thread starts, the
+    #   thread writes _lang_bundle_holder["value"], and the consumer reads
+    #   _lang_bundle_holder.get("value"). The quoted dict KEY "_lang_bundle" is
+    #   therefore gone by design; the variable _lang_bundle still exists.
+    "_lang_bundle": "W1/DELIVERY: dict-key channel replaced by _lang_bundle_holder "
+                    "(the key write was an unbound-name NameError on every job, "
+                    "null 218/218). Variable retained; only the quoted key is gone.",
+}
 
 APP = "promptly-gpu-worker"
 

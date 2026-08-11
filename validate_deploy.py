@@ -7311,7 +7311,14 @@ def _language_bundle():
     assert '_record_divergence("language_bundle"' in _h, "the bundle must be persisted on every job"
     assert '"detected_language": _det_lang' in _h and '"transcript_script": str(_script)' in _h \
         and '"vad_coverage_unworded_s"' in _h, "bundle must carry all three fields"
-    assert 'edit_plan["_lang_bundle"] = _lang_bundle' in _h, "bundle must flow into the success result payload"
+    # MECHANISM UPDATED 2026-08-11 (W1/DELIVERY, merged by TRUTH): the bundle now
+    # flows via _lang_bundle_holder, a channel bound BEFORE the recipe thread.
+    # The old edit_plan dict-key write NameError'd on that thread every job, so
+    # this assertion was green while the field was null 218/218. Same intent,
+    # now enforced against a mechanism that actually reaches the payload — see
+    # _lang_bundle_persisted for the full producer/consumer chain.
+    assert '_lang_bundle_holder["value"] = _lang_bundle' in _h, \
+        "bundle must flow into the success result payload (via the pre-thread holder)"
     assert "_cov_ok, _cov = _bundle_cov_ok, _bundle_cov" in _h, \
         "the coverage gate must REUSE the bundle's coverage (computed once, no double VAD)"
     assert "detected_language=_det_lang)  # by-language reject reporting" in _h, \
@@ -8356,8 +8363,25 @@ def _edge_content_not_truncated():
 @check("vad_coverage REACHES THE DATABASE (Zac 2026-08-04, RULE-1): the three-field language bundle (detected_language + transcript_script + vad_coverage) was written to edit_plan[\"_lang_bundle\"] under a comment saying it \"flows into the success result payload\". It does not — the leading underscore is exactly what the recipe sanitizer strips, so it persisted on 0 of 3,000 rows. Spanish sits at 0.41 median keep-ratio with 53% of jobs losing more than half the video and the coverage gate demonstrably not firing; that question has been unanswerable because the field that would answer it was never stored. A field that exists and is never persisted is the same as no field at all.")
 def _lang_bundle_persisted():
     _src = open("handler.py").read()
-    assert '"lang_bundle": (edit_plan or {}).get("_lang_bundle")' in _src, \
-        "the language bundle must be PERSISTED, not just written to edit_plan"
+    # MECHANISM UPDATED 2026-08-11 (W1/DELIVERY, merged by TRUTH). The old
+    # assertion pinned the edit_plan["_lang_bundle"] dict-key channel. That
+    # channel was itself broken: the write ran on the recipe THREAD before the
+    # enclosing scope bound `edit_plan`, raising an unbound-name NameError that
+    # was swallowed on EVERY job — so the field read null 218/218 even after
+    # this check went green. The check was passing on a mechanism that did not
+    # work, which is the exact failure mode this file exists to prevent.
+    # The intent is UNCHANGED and now actually enforced: the bundle must be
+    # read from a channel bound BEFORE the thread, and must reach the payload.
+    assert "_lang_bundle_holder = {}" in _src, \
+        "the pre-thread holder is gone — the bundle write would again run against " \
+        "an unbound `edit_plan` and NameError on every job (null 218/218)"
+    assert '_lang_bundle_holder["value"] = _lang_bundle' in _src, \
+        "nothing writes the bundle into the holder — the producer half is gone"
+    assert '"lang_bundle": _lang_bundle_holder.get("value")' in _src, \
+        "the language bundle must be PERSISTED into the result payload from the " \
+        "holder — a write nobody reads is the same as no field at all"
+    assert 'edit_plan["_lang_bundle"] = _lang_bundle' not in _src, \
+        "the broken dict-key channel is back; it NameErrors on the recipe thread"
     # it must ride INSIDE stage_timings — a top-level key is stripped downstream
     _nested = any(
         '"lang_bundle"' in _src[_i:_i + 3000]
