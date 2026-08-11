@@ -229,7 +229,10 @@ def _seam_dark_certs():
     _here = os.path.dirname(os.path.abspath(__file__))
     for _cert, _expect in (("cert_adapter_contract.py", "5/5"),
                            ("cert_unified_core.py", "8/8"),
-                           ("cert_surgical_ops.py", "6/6")):
+                           ("cert_surgical_ops.py", "6/6"),
+                           ("cert_mg_obey.py", "4/4"),
+                           ("cert_caption_translate.py", "5/5"),
+                           ("cert_upscale_negotiate.py", "4/4")):
         assert os.path.exists(os.path.join(_here, _cert)), \
             f"{_cert} is missing — a SEAM dark seam lost its cert"
         _r = _sp.run([sys.executable, os.path.join(_here, _cert)],
@@ -243,7 +246,10 @@ def _seam_dark_certs():
     # No SEAM flag may default ON: absent env must read dark.
     for _mod, _flag in (("adapter_contract.py", "PROMPTLY_ADAPTER_V1"),
                         ("unified_core.py", "PROMPTLY_UNIFIED_CORE"),
-                        ("surgical_ops.py", "PROMPTLY_SURGICAL_V2")):
+                        ("surgical_ops.py", "PROMPTLY_SURGICAL_V2"),
+                        ("handler.py", "PROMPTLY_MG_OBEY"),
+                        ("caption_translate.py", "PROMPTLY_CAPTION_TRANSLATE"),
+                        ("handler.py", "PROMPTLY_UPSCALE_NEGOTIATE")):
         _s = open(os.path.join(_here, _mod)).read()
         assert f'os.environ.get("{_flag}", "")' in _s, (
             f"{_mod}: {_flag} no longer defaults to ABSENT=dark. A dark seam that "
