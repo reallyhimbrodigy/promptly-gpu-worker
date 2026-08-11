@@ -58,6 +58,7 @@ import {
   Gadzhi,
 } from "./captions";
 import { pagesDirection } from "./captions/shared/direction";
+import { asText } from "./shared/asText";
 
 // Transitions — all 12
 import {
@@ -374,7 +375,7 @@ const buildOverlayPage = (
   fps: number,
 ): TikTokPageLike => {
   const tokens: TikTokPageLike["tokens"] = [];
-  const words = text.trim().split(/\s+/).filter(Boolean);
+  const words = asText(text).trim().split(/\s+/).filter(Boolean);
   if (!words.length) {
     return { text: "", startMs: 0, durationMs: 0, tokens: [] };
   }
