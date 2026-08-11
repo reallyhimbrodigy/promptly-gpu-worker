@@ -392,3 +392,106 @@ fix (v526) and both DELIVERY halves are live.
 | DELIVERY delivery-mix | TRUTH | `completion_delivery=fallback_timer` → ~0; p99 leaves the ~900s wall | 48h **after the migration lands** (blocked: column does not exist) |
 | JUDGE daily row | TRUTH | a row lands in `daily_scoreboard` (JSONL fallback retired) | first 15:00Z run **after** migrations are applied |
 | C0 no-regress | TRUTH | no scoreboard movement attributable to C0 (it carries zero request-path runtime change) | 24h |
+
+---
+
+## 2026-08-11 20:00Z / 22:2xZ — BUILDER: C2 shipped, and a P0 confirmed on the way
+
+Two content-studio deploys (`e6fb291`, `c071508`), zero worker deploys. Worker
+stays at **v526 / `cba0f6d`**.
+
+### C2 shipped — the blocker was real, and there was a second one under it
+
+`BLOCKER_C2_EXPORT_FFMPEG.md` was correct: `__smoke_export_watermark.js` shelled
+to ffmpeg with no presence check, inside `render.yaml`'s `buildCommand`, so
+ENOENT would have blocked **every future content-studio deploy**. Fixed as
+filed — probe, `SKIP(no-ffmpeg)`, exit 0.
+[MEASURED both directions] `FFMPEG_PATH=/nonexistent` → was exit 1 "spawnSync
+ffmpeg ENOENT"; now exit 0, 21/22 + `skipped:["export_watermark"]`. Guard NOT
+weakened: watermark asset removed with ffmpeg present still exits 1.
+
+**Second defect, unfiled:** `lib/gate-receipt.js` shipped as a **reader with no
+writer** — `validate_deploy.js` was byte-identical to `main`, nothing emitted
+`.gate_receipt.json`. `/api/health .gate` would have read `null` forever, and
+`null` means "this build never ran the gate". The instrument built to close the
+"did the Render buildCommand arm?" [UNKNOWN] would have shipped stuck in its own
+alarm state. Writer added; `clearGateReceipt` first so a failed build can never
+serve the last build's pass; SKIPs recorded by name so a skip cannot read as a
+pass at flip time.
+
+### ⚠️ FINDING — `/api/health .gate` came back **null** on `e6fb291` [MEASURED]
+
+`render.yaml` declares `buildCommand: npm install --omit=dev && node
+validate_deploy.js` on a `runtime: node` service (not Docker, so buildCommand
+applies). The deploy shipped, so the command succeeded — yet no receipt exists
+at runtime. Two candidate meanings, opposite responses, and **I am not asserting
+either**: (a) the live service is not running that buildCommand — a blueprint
+that never synced, in which case **the 24 safety smokes are gating nothing on
+Render** and only GitHub CI is real; (b) build-time writes do not reach the
+runtime filesystem, in which case the receipt is the wrong instrument.
+
+`c071508` ships the discriminator: an npm `postinstall` marker, which fires on
+**any** `npm install` including the old un-synced command.
+`gate null + build null` ⇒ (b). `gate null + build PRESENT` ⇒ (a), decisively.
+
+### 🔴 P0 — 9 USERS TOLD A FINISHED RENDER FAILED. TRUTH's open watch is RED.
+
+`b384e1c` opened: *"does this class recur on jobs created after 18:29Z, now that
+both halves are live? Expected: zero. Any hit is a DELIVERY defect."*
+
+**Clean cohort** — jobs created ≥ 18:29:00Z (both DELIVERY halves live; v526
+hang fix live 19:32Z). Stated before the numbers, per Rule 5.
+
+| | |
+|---|---|
+| terminal jobs | 34 / **32 users** |
+| "trouble reaching the render service" | 11 jobs / **11 users** |
+| …of those, **render actually FINISHED** (`progress=100` + `current_step='complete'`) | 9 jobs / **9 USERS** |
+| **rate** | **9 of 32 users = 28%** (9/34 jobs = 26.5%) |
+
+Every one failed **15m04s** after creation — the fallback timer, to the second.
+Window 18:44Z → 22:04Z and still open at the time of writing. Lead with users
+(Rule 7): **9 lost users**, not 9 failures.
+
+**Mechanism confirmed, n=4 jobs, 100% consistent.** Every occurrence after the
+diagnostic went live fired `terminal_flip_lost` **twice** with
+`mechanism='zero_rows_nonterminal'` — never `complete_step_bad_pct`. Twice
+because the worker retries once and **both attempts lose the transition**. The
+completed-status patch matches **0 rows** against
+`.not('status','in',(completed,failed,canceled,needs_input))` on a row whose
+status reads `processing`.
+
+Neither the hang fix (v526) nor DELIVERY's 75s poller nor the completion-POST
+retry saves these. **This is not a deploy orphan** — the jobs are created and
+die between deploys, on the fixed image.
+
+### Why `c071508` and not a fix yet
+
+"Zero rows" is still **three** faults with three different responses, and the
+update's `error` was being **discarded** — so a failed write and a genuine
+zero-match were the same observation. `c071508` captures the error and
+classifies: `update_error` / `lost_race_benign` / `row_still_nonterminal`
+(unreadable resolves to the **defect**, never the reassuring case). Root-causing
+before that lands would be inference, which is what this class has already cost
+three rounds of.
+
+**WATCH (open, ~20 min to first data):** `analytics_events.terminal_flip_lost`
+→ `props.cause`.
+`row_still_nonterminal` ⇒ fix the predicate · `update_error` ⇒ fix the write
+(`err_code` rides the event) · `lost_race_benign` ⇒ the class is smaller than it
+looks and the count needs re-cutting.
+
+**Also in cohort:** 4 jobs = *"The video didn't reach us — pick it again"* (the
+UNS class, B1).
+
+**Also [MEASURED]:** `completion_delivery` is stamped `reconciler` on the 3
+completions since the migration but is **NULL on all 3 failures** — so
+DELIVERY's delivery-mix instrument cannot see the very failures it most needs to
+name. n=6, small; flagged, not concluded.
+
+### Gate + window, both deploys
+
+24/24 then 25/25 smokes green on the exact deploy commit. `preflight_quiet_window.py`
+QUIET (0 in-flight, probe non-vacuous) before each merge; one merge was **held
+~40 min** on a BUSY window rather than overriding. `PROMPTLY_ALLOW_BUSY_DEPLOY`
+unused.
