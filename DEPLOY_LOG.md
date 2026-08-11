@@ -88,7 +88,7 @@ composes with TRUTH's `buildCommand` hunk at line 4).
 | # | lane | branch @ sha | what | status |
 |---|---|---|---|---|
 | C0 ✅ DEPLOYED 16:42Z | TRUTH + JUDGE | lane/truth + lane/judge → main @ 99cf92d | **batched**: gate wiring (Render build + blocking CI) + CHECKOUTS/LANE_OWNERSHIP/DEPLOY_LOG/OWNER_ACTIONS/sentinel spec, plus JUDGE's 5 scripts, 2 migrations, daily-scoreboard cron. Batched because both carry **zero request-path runtime risk** and their watches are independent (gate = build log; JUDGE = the 15:00 UTC row) — one orphan window instead of two. | WAITING for quiet window |
-| C1 | DELIVERY | lane/delivery @ 88e412c | server.js +140, dispatch-to-modal.js +145, modal-webhook, 75s durable poller, `completion_delivery` migration, RC `/sync` probe. **Deployed alone** — it is the only package that changes the request path, and its 48h watch must not be confounded. | after C0 |
+| C1 ✅ DEPLOYED 16:57Z | DELIVERY | lane/delivery → main @ 8f54923 | server.js +140, dispatch-to-modal.js +145, modal-webhook, 75s durable poller, `completion_delivery` migration, RC `/sync` probe. **Deployed alone** — it is the only package that changes the request path, and its 48h watch must not be confounded. | after C0 |
 
 ## BLOCKED — 2026-08-10 06:25Z, W0 deploy attempt
 
@@ -156,9 +156,29 @@ the first deploy after billing is restored.
 - Same open question for JUDGE's new `daily-scoreboard` cron service — a
   blueprint addition, so it may need the same sync.
 
+| 2026-08-11 16:57Z | TRUTH | `8f54923` (content-studio main) | Render autoDeploy | **C1**: DELIVERY — durable-row 75s poll (missed callback now costs ≤75s, not 900), every settle path names itself in `completion_delivery`, orphan-callback handling, RC `/sync` project probe, additive migration, new smoke | in-flight at T-0: **0** [MEASURED] → **0 orphans** |
+
+### C1 verification [MEASURED]
+
+- **Live sha match** in 40s: `/api/health` `rev` = `8f54923…` = pushed `main`.
+- **CI green** on the deploy commit; gate ran **20/20** smokes (19 + DELIVERY's
+  new `__smoke_completion_delivery.js`).
+- **Migration NOT yet applied** — confirmed directly: a query on
+  `completion_delivery` returns *"column does not exist"*. This is the designed
+  state (DELIVERY: *"no writes break if it's late"*), and jobs kept completing
+  across the deploy [MEASURED: 9 completed / 1 failed / 1 processing in the
+  surrounding window]. **Until the migration lands, the delivery-mechanism
+  instrument writes nothing — the 48h watch cannot start.**
+- Deployed **without** its worker half (W1), which is permission-blocked.
+  DELIVERY's own handoff says the two halves are independent and either order
+  is fine, and all changes are "inert-negative (worst case = today's
+  behavior)". The CS half is the safety net, so it is the more valuable half to
+  have live first.
+
 ### Open watches
 
 | watch | owner | condition | due |
 |---|---|---|---|
+| DELIVERY delivery-mix | TRUTH | `completion_delivery=fallback_timer` → ~0; p99 leaves the ~900s wall | 48h **after the migration lands** (blocked: column does not exist) |
 | JUDGE daily row | TRUTH | a row lands in `daily_scoreboard` (JSONL fallback retired) | first 15:00Z run **after** migrations are applied |
 | C0 no-regress | TRUTH | no scoreboard movement attributable to C0 (it carries zero request-path runtime change) | 24h |
