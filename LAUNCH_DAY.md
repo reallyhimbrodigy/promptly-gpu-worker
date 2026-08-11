@@ -226,6 +226,66 @@ per-lever request:
 
 ---
 
+### Step 6b — MG_OBEY: the 3-arm cert runs BEFORE its flip
+
+`PROMPTLY_MG_OBEY` does not ride the ordinary flip lane — it has a purpose-built
+A/B. Run `cert_mg_honoring_planonly_app.py`: three arms on the SAME source,
+captured at `render_multi_clip` (bail before render), one of which is
+`ask_obey` with `PROMPTLY_MG_OBEY=1` — the dark directive arm. Measures
+standalone `motion_graphics[]` count + types + whys per arm.
+
+Flip only if the obey arm honours the ask **without** the density collapse the
+MG diagnosis named. RED ⇒ **hold the flag**, per the hold rule; the rest of the
+cascade proceeds. (Prerequisite: Vertex healthy — the arms are PLAN_ONLY Gemini
+calls, so this is meaningless during the outage.)
+
+### Step 6c — PAYWALL ORDER — **BLOCKED pending DELIVERY's answer**
+
+DELIVERY's open question (`IOS_FINAL_BUILD.md` §6): *are the package/plan
+positions hardcoded inside `TrialWallView` / `PaywallView`, or do those views
+already render the RC offering's order?*
+
+- **If hardcoded** → the order must move to a server/RC-driven source (the RC
+  offering's package sequence is the natural one), so it is reorderable **from
+  the RC dashboard with no build**. That is an iOS build item, and it gates
+  this step.
+- **If the views already render the offering order** → this is a **no-op**;
+  DELIVERY documents it and the step closes.
+
+**TRUTH does not guess which.** The step stays BLOCKED until DELIVERY answers,
+and it never blocks the rest of the cascade. The *initial* order is Zac's taste
+call at ship time; the engineering item is only "order comes from config, not
+code." Context for that call [MEASURED 2026-08-10]: every weekly subscriber to
+date cancelled inside week 1.
+
+Acceptance (from DELIVERY's list): *paywall order changes from the RC dashboard
+(or config) without a build — or the no-op is documented.*
+
+### Step 6d — EXPORT FLAGS — DELIVERY's four-step order, exactly
+
+Each step is its **own deploy, verified** — never batched:
+
+1. **Server code deploys dark** (`lane/delivery-2`). Nothing changes.
+2. **Owner ships the iOS build** with §1–3. Nothing changes — the server still
+   501s.
+3. **`EXPORT_GATE_ENABLED=1`** → the wall arms for new-build users only. Old
+   builds keep the fallback until they upgrade (**known and accepted decay** —
+   not a defect to chase).
+4. **`EXPORT_WATERMARK_ENABLED=1`** → free-quota exports watermark.
+
+Deliberately NOT built: watermark-instead-of-402 beyond quota — a taste call
+for Zac, one env value away if wanted.
+
+**Verification, both required:** `gate_probe` fires in both directions on every
+deploy, and `analytics_events.export_watermark_failed` must stay at **0** — any
+row means a free export silently shipped clean, which is a defect, not a
+degrade.
+
+Note: step 3 and step 4 are flag flips and therefore need the owner's GO naming
+each key, like every other flip in this cascade.
+
+---
+
 ## STEP 7 — SIX-DEMO VALIDATION (SEAM's script; TRUTH schedules)
 
 ```bash
