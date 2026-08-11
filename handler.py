@@ -298,6 +298,71 @@ def _broll_request_directive(vibe):
     )
 
 
+# ── MG user-ask obedience (LANE-SEAM MG diagnosis, DARK behind PROMPTLY_MG_OBEY) ──
+# JUDGE 2026-08-10: motion_graphics is the #1 concrete silent drop (224/359
+# asks = 62%), and 309 preset taps LITERALLY name motion graphics. B-roll asks
+# have an obedience directive spliced into USER INSTRUCTIONS; transitions got a
+# measured anti-restraint counterweight (the 4.9% line); MG asks have NEITHER —
+# they compete unaided with the restraint doctrine and every per-type earn-gate.
+# This is the H1 fix ARM for the PLAN_ONLY confirmation (cert_mg_honoring_
+# planonly_app.py) — dark until that A/B and the differ say it helps.
+
+_MG_ASK_RE = re.compile(
+    r"\bmotion\s+graphics?\b"
+    r"|\b(?:add|with|include|use|put|want|more|some)\b[^.!?\n]{0,40}?"
+    r"\b(?:graphics?|animations?|infographics?|pop[- ]?ups?|stat\s*cards?)\b",
+    re.IGNORECASE)
+# Negation window: a preceding no/without/don't/remove/less kills the match —
+# negatives belong to _parse_off_features (the deterministic strip), never here.
+_MG_NEG_RE = re.compile(
+    r"\b(?:no|without|don'?t|dont|remove|less|fewer|zero)\b[^.!?\n]{0,32}$",
+    re.IGNORECASE)
+
+
+def _mg_obey_enabled():
+    """DARK by default. PROMPTLY_MG_OBEY=1 arms the MG user-ask directive —
+    env-only (the PLAN_ONLY cert app sets it per-arm in its own container)."""
+    return os.environ.get("PROMPTLY_MG_OBEY", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _parse_mg_requests(text):
+    """True when the vibe/change_request EXPLICITLY asks for motion graphics.
+    High precision, mirroring _parse_broll_requests: 'motion graphics' anywhere
+    counts (the 309-tap preset says exactly this); bare component nouns count
+    only behind a positive verb; a negation in the preceding window never
+    matches (negatives ride _parse_off_features)."""
+    _t = str(text or "")
+    for m in _MG_ASK_RE.finditer(_t):
+        if _MG_NEG_RE.search(_t[:m.start()]):
+            continue
+        return True
+    return False
+
+
+def _mg_request_directive(vibe):
+    """Prompt block armed ONLY when (flag on AND the user explicitly asked for
+    MGs) — otherwise "" and the prompt is byte-identical. Overrides the
+    abstention default while leaving the earn-gates in charge of WHICH type
+    and WHERE; an empty answer must become an honest note, never silence."""
+    if not _mg_obey_enabled() or not _parse_mg_requests(vibe):
+        return ""
+    return (
+        "\n**REQUIRED MOTION GRAPHICS (user request — OBEY):** the user explicitly "
+        "asked for motion graphics. The component gates below still decide WHICH "
+        "type each moment earns and WHERE it sits — but \"none\" is no longer an "
+        "acceptable answer while qualifying moments exist. Find the strongest 2-4 "
+        "moments in this video and give each the component its shape asks for "
+        "(a quoted number → StatCard; an enumerated set → RankedList/PillCluster; "
+        "a real quoted message → its card; otherwise the quietest type that fits "
+        "the vibe). Emitting zero motion graphics on this video is a FAILURE to "
+        "obey unless the footage genuinely offers no qualifying moment — and in "
+        "that case you MUST say so in `notes` so the user hears why, never "
+        "silence.\n"
+    )
+
+
 # ── THE HONESTY MECHANISM (Zac 2026-07-13, Gap 3 Item 2) — never silent-drop ──────
 # When the user asks for a capability the pipeline UNDERSTANDS but genuinely can't do
 # yet, surface it ("Promptly doesn't support X yet") instead of silently dropping it.
@@ -325,6 +390,59 @@ _UNSUPPORTED_CAPABILITIES = [
         r"\b(generat\w*\s+(?:an?\s+|the\s+)?(?:ai\s+)?(?:image|images|picture|scene|photo|visual)|"
         r"ai[\s-]?generat\w*|create an image of|dream up (?:a|the)|imagine a scene|midjourney|dall[\s-]?e)\b", re.I)),
 ]
+
+
+# ── Upscale honest negotiation (LANE-SEAM, DARK behind PROMPTLY_UPSCALE_
+# NEGOTIATE). The single biggest generative-bucket ask [JUDGE 2026-08-10:
+# 195× 4K/8K/HD/upscale/clarity] is neither built nor on the unsupported
+# list, so it drops with NO note. This is the honesty half: detect the ask
+# with high precision and NEGOTIATE — name the limit truthfully, name what
+# was delivered, name why it serves the destination. Precision over recall:
+# bare "quality" never matches ("make a high quality edit" is a STYLE ask);
+# only unambiguous resolution tokens and resolution-verb pairs fire.
+_UPSCALE_ASK_RE = re.compile(
+    r"\b(?:4\s*k|8\s*k|2160p|1440p|uhd|ultra\s*hd)\b"
+    r"|\b(?:upscale|up-?res|super[- ]?resolution)\b"
+    r"|\b(?:in|to|into)\s+hd\b"
+    r"|\b(?:make|turn|convert|render|export)\b[^.!?\n]{0,32}?\bhd\b"
+    r"|\b(?:enhance|improve|increase|boost|sharpen)\b[^.!?\n]{0,24}?"
+    r"\b(?:resolution|clarity|sharpness)\b",
+    re.IGNORECASE)
+_UPSCALE_NEG_RE = re.compile(
+    r"\b(?:no|without|don'?t|dont|not)\b[^.!?\n]{0,24}$", re.IGNORECASE)
+
+# Truthful by the render contract: output is canonical 1080x1920 (the
+# PromptlyRenderInput canvas); major short-form feeds serve 1080p. Never
+# claim native-resolution passthrough — that would be false for 4K sources.
+_UPSCALE_NEGOTIATION_NOTE = (
+    "True 4K/8K upscaling isn't in Promptly yet — your edit is delivered at "
+    "1080p, the resolution TikTok, Reels, and Shorts actually serve, so it "
+    "will look exactly as sharp in the feed. When upscaling lands, your "
+    "existing edits can be re-rendered at the higher resolution."
+)
+
+
+def _upscale_negotiate_enabled(input_data=None):
+    """DARK by default. PROMPTLY_UPSCALE_NEGOTIATE=1 arms the negotiation
+    note globally; input_data.upscale_negotiate_test is the per-job override
+    for the pre-flip cert (burned_text_test pattern — inert for traffic)."""
+    if input_data and input_data.get("upscale_negotiate_test"):
+        return True
+    return os.environ.get("PROMPTLY_UPSCALE_NEGOTIATE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _parse_upscale_request(text):
+    """True when the user explicitly asks for resolution/quality upscaling
+    ("Trun in to 4k", "8k", "make video HD", "upscale this", "enhance the
+    resolution"). Negation-guarded; bare style words never match."""
+    _t = str(text or "")
+    for m in _UPSCALE_ASK_RE.finditer(_t):
+        if _UPSCALE_NEG_RE.search(_t[:m.start()]):
+            continue
+        return True
+    return False
 
 
 def _parse_unsupported_requests(text):
@@ -6096,7 +6214,7 @@ USER INSTRUCTIONS — READ FIRST, OBEY ABSOLUTELY
 ═══════════════════════════════════════════════════════════════════════════
 
 The user's vibe (in the USER message under "The user wants:") is your DIRECTOR speaking. Take it LITERALLY. Everything else in this prompt is fallback behavior for atmospheric vibes ("viral", "punchy", "story-driven"). The moment the vibe contains a SPECIFIC include/exclude instruction, that instruction OVERRIDES every default. A polished video that ignored the user's stated preferences is the worst possible outcome — far worse than a sparse video that did what they asked.
-{_broll_request_directive(vibe)}
+{_broll_request_directive(vibe)}{_mg_request_directive(vibe)}
 Exact mappings:
 
   • **"no captions" / "don't add captions" / "without subtitles"** → `caption_style: "none"`, `caption_keywords: []`, `caption_position_changes: []`
@@ -24329,6 +24447,7 @@ _RENDER_TRANSIENT_KEYS = {
     "_audio_stream_offset", "_broll_output_ranges", "_caption_band_luma",
     "_caption_text_overrides",  # re-parsed from the vibe every render (user spelling)
     "_caption_position_lock",   # re-parsed from the vibe every render (user position lock)
+    "_caption_translate_target",  # re-parsed from the vibe every render (LANE-SEAM, dark)
     "_face_trajectory", "_generated_subjects", "_integrity_fullmg_ranges",
     "_integrity_slot_ranges", "_projected_words", "_render_clip_output_ranges",
     "_render_clip_time_maps", "_render_cuts", "_render_effective_durations",
@@ -26191,6 +26310,52 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             position_boundaries_sec=sorted(set(_position_boundaries_out_sec)),
             clip_boundaries_sec=sorted(set(_clip_boundaries_out_sec)),
         )
+        # ── CAPTION TRANSLATION (LANE-SEAM, DARK behind PROMPTLY_CAPTION_
+        # TRANSLATE). Runs AFTER pagination so page windows/boundaries are
+        # preserved exactly; FULL-OR-NOTHING (patchy captions are a defect —
+        # any failure keeps the ORIGINAL captions and ledgers loudly, the
+        # delivered video is never half-translated). The transient target is
+        # set only when the flag is on AND the user explicitly asked, so this
+        # whole block is a no-op on today's traffic.
+        _ct_target = edit_plan.get("_caption_translate_target")
+        if _ct_target and caption_pages:
+            try:
+                import caption_translate as _ctr2
+
+                def _ct_call(_texts, _lang):
+                    _sys_p, _user_p = _ctr2.build_translation_prompt(_texts, _lang)
+                    _resp = _get_genai_client().models.generate_content(
+                        model=GEMINI_MODEL, contents=[_user_p],
+                        config=genai_types.GenerateContentConfig(
+                            system_instruction=_sys_p, temperature=0.2,
+                            response_mime_type="application/json",
+                            response_json_schema={"type": "array",
+                                                  "items": {"type": "string"}},
+                            thinking_config=genai_types.ThinkingConfig(
+                                thinking_budget=0)))
+                    return json.loads(_resp.text)
+
+                caption_pages, _ct_meta = _ctr2.translate_pages(
+                    caption_pages, _ct_target, _ct_call)
+                if _ct_meta.get("ok"):
+                    _record_divergence(
+                        "caption",
+                        {"target": _ct_target, "n_pages": _ct_meta["n_pages"]},
+                        "caption_translated", reason="explicit user ask")
+                    print(f"[caption-translate] {_ct_meta['n_pages']} pages "
+                          f"-> {_ct_target}", flush=True)
+                else:
+                    _record_divergence(
+                        "caption",
+                        {"target": _ct_target,
+                         "reason": _ct_meta.get("reason")},
+                        "caption_translate_failed",
+                        reason="original captions kept (full-or-nothing)")
+                    print(f"[caption-translate] FAILED "
+                          f"({_ct_meta.get('reason')}) — original captions "
+                          "kept", flush=True)
+            except ImportError as _ctr2_err:
+                _ledger_defect("missing_module", "caption_translate", _ctr2_err)
     if not caption_position_segments_out:
         # The validator guarantees at least one segment covering [0, duration].
         # If projection produced nothing, it means total_output_frames is 0.
@@ -38723,6 +38888,17 @@ def handler(job):
         # every caption inherits for the whole video (above the default, Gemini, AND
         # the overlay/composer force-flips — the drift the user saw "toward the end").
         edit_plan["_caption_position_lock"] = _parse_caption_position_lock(_reedit_intent_text)
+        # LANE-SEAM (DARK behind PROMPTLY_CAPTION_TRANSLATE): an explicit
+        # caption-translation ask ("captions in hindi", "translate to
+        # spanish") parses to a transient target the caption build consumes.
+        # Flag off ⇒ the key is never set ⇒ byte-identical.
+        try:
+            import caption_translate as _ctr
+            if _ctr.enabled(input_data):
+                edit_plan[_ctr.TRANSIENT_KEY] = _ctr.parse_target_language(
+                    _reedit_intent_text)
+        except ImportError as _ctr_err:
+            _ledger_defect("missing_module", "caption_translate", _ctr_err)
         edit_plan["_source_path"] = source_path
         # Record what reframe filter was applied at ingest for downstream
         # face-coordinate mapping. The render pipeline no longer reads this
@@ -39021,6 +39197,22 @@ def handler(job):
         # with no honest note. The honesty guarantee must hold on re-edits too (CRITICAL #4).
         _honesty_intent_text = f"{vibe or ''} . {change_request}".strip(" .") if change_request else vibe
         _capability_notes = _parse_unsupported_requests(_honesty_intent_text)
+        # ── UPSCALE HONEST NEGOTIATION (LANE-SEAM, DARK behind
+        # PROMPTLY_UPSCALE_NEGOTIATE). 195 asks say 4K/8K/HD/upscale [JUDGE
+        # 2026-08-10] and every one drops silently — upscale is not on the
+        # unsupported list, so no note fires. The negotiation note names the
+        # limit truthfully (delivery is 1080x1920 by the render contract),
+        # names what WAS delivered, and why that serves the destination —
+        # never a bare "can't". Counted via divergence so the demand and the
+        # note-coverage are measurable. Flag off ⇒ byte-identical.
+        if _upscale_negotiate_enabled(input_data) and \
+                _parse_upscale_request(_honesty_intent_text):
+            _capability_notes.append(_UPSCALE_NEGOTIATION_NOTE)
+            _record_divergence(
+                "honesty", {"ask": "upscale",
+                            "text": str(_honesty_intent_text)[:120]},
+                "upscale_negotiated",
+                reason="explicit resolution/upscale ask → honest negotiation note")
         _requested_broll = _parse_broll_requests(vibe)
         if _requested_broll:
             _resolved_kw = " ".join(str(_e.get("keyword") or "") for _e in resolved_broll_out).lower()

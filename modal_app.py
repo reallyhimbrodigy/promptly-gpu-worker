@@ -577,6 +577,10 @@ image = (
     # LANE-SEAM (DARK behind PROMPTLY_SURGICAL_V2): tweak-op teaching text +
     # deterministic validators for caption-spelling / add-transition ops.
     .add_local_file("surgical_ops.py", "/surgical_ops.py")
+    # LANE-SEAM (DARK behind PROMPTLY_CAPTION_TRANSLATE): caption-page
+    # translation — parser + full-or-nothing page rebuild (pure; the Gemini
+    # closure lives in handler's build-site touchpoint).
+    .add_local_file("caption_translate.py", "/caption_translate.py")
     .add_local_file("progressive_publish.py", "/progressive_publish.py")  # W3 previews (DARK) — the cert-found gap: wiring shipped, module didn't
     # recipe_eval.py was missing from this list since the eval was first
     # wired — handler.py imports it at runtime via `from recipe_eval
