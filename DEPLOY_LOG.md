@@ -87,7 +87,7 @@ composes with TRUTH's `buildCommand` hunk at line 4).
 
 | # | lane | branch @ sha | what | status |
 |---|---|---|---|---|
-| C0 | TRUTH + JUDGE | lane/truth @ 499511d + lane/judge @ 84f8244 | **batched**: gate wiring (Render build + blocking CI) + CHECKOUTS/LANE_OWNERSHIP/DEPLOY_LOG/OWNER_ACTIONS/sentinel spec, plus JUDGE's 5 scripts, 2 migrations, daily-scoreboard cron. Batched because both carry **zero request-path runtime risk** and their watches are independent (gate = build log; JUDGE = the 15:00 UTC row) — one orphan window instead of two. | WAITING for quiet window |
+| C0 ✅ DEPLOYED 16:42Z | TRUTH + JUDGE | lane/truth + lane/judge → main @ 99cf92d | **batched**: gate wiring (Render build + blocking CI) + CHECKOUTS/LANE_OWNERSHIP/DEPLOY_LOG/OWNER_ACTIONS/sentinel spec, plus JUDGE's 5 scripts, 2 migrations, daily-scoreboard cron. Batched because both carry **zero request-path runtime risk** and their watches are independent (gate = build log; JUDGE = the 15:00 UTC row) — one orphan window instead of two. | WAITING for quiet window |
 | C1 | DELIVERY | lane/delivery @ 88e412c | server.js +140, dispatch-to-modal.js +145, modal-webhook, 75s durable poller, `completion_delivery` migration, RC `/sync` probe. **Deployed alone** — it is the only package that changes the request path, and its 48h watch must not be confounded. | after C0 |
 
 ## BLOCKED — 2026-08-10 06:25Z, W0 deploy attempt
@@ -137,3 +137,28 @@ the first deploy after billing is restored.
 
 | when (UTC) | who | sha | version | carried | window/orphans |
 |---|---|---|---|---|---|
+| 2026-08-11 16:42Z | TRUTH | `99cf92d` (content-studio main) | Render autoDeploy | **C0**: gate wiring (Render buildCommand + blocking CI) + LANE_OWNERSHIP/CHECKOUTS/DEPLOY_LOG/OWNER_ACTIONS/sentinel-spec, **batched with JUDGE** (5 scripts, 2 additive migrations, daily-scoreboard cron) | in-flight user jobs at T-0: **0** [MEASURED] → **0 orphans** |
+
+### C0 verification [MEASURED]
+
+- **Deployed sha matches exactly**: `/api/health` `rev` =
+  `99cf92dc9fd1bb761dfa5e9a645526b7037e939e` = pushed `main`. Not "pushed" —
+  *observed running in prod*.
+- **CI gate armed and green on the real deploy commit**: the step
+  `Safety smokes (validate_deploy.js) — blocking` = **success**. Combined with
+  the earlier demonstrated **red** (scratch PR #2 broke the GLOBAL_HALT surge
+  floor → that exact step failed), the CI half is proven in both directions.
+- **Render build half: [UNKNOWN].** The build succeeded, but that is equally
+  consistent with Render still using the OLD `buildCommand` (blueprint changes
+  can need a manual sync — this repo has a prior "blueprint sync failed"
+  incident on env vars). No Render API key on this machine, so I cannot read
+  the build log. Owner: confirm one line, `OWNER_ACTIONS.md` item 4.
+- Same open question for JUDGE's new `daily-scoreboard` cron service — a
+  blueprint addition, so it may need the same sync.
+
+### Open watches
+
+| watch | owner | condition | due |
+|---|---|---|---|
+| JUDGE daily row | TRUTH | a row lands in `daily_scoreboard` (JSONL fallback retired) | first 15:00Z run **after** migrations are applied |
+| C0 no-regress | TRUTH | no scoreboard movement attributable to C0 (it carries zero request-path runtime change) | 24h |
