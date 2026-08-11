@@ -298,6 +298,71 @@ def _broll_request_directive(vibe):
     )
 
 
+# ── MG user-ask obedience (LANE-SEAM MG diagnosis, DARK behind PROMPTLY_MG_OBEY) ──
+# JUDGE 2026-08-10: motion_graphics is the #1 concrete silent drop (224/359
+# asks = 62%), and 309 preset taps LITERALLY name motion graphics. B-roll asks
+# have an obedience directive spliced into USER INSTRUCTIONS; transitions got a
+# measured anti-restraint counterweight (the 4.9% line); MG asks have NEITHER —
+# they compete unaided with the restraint doctrine and every per-type earn-gate.
+# This is the H1 fix ARM for the PLAN_ONLY confirmation (cert_mg_honoring_
+# planonly_app.py) — dark until that A/B and the differ say it helps.
+
+_MG_ASK_RE = re.compile(
+    r"\bmotion\s+graphics?\b"
+    r"|\b(?:add|with|include|use|put|want|more|some)\b[^.!?\n]{0,40}?"
+    r"\b(?:graphics?|animations?|infographics?|pop[- ]?ups?|stat\s*cards?)\b",
+    re.IGNORECASE)
+# Negation window: a preceding no/without/don't/remove/less kills the match —
+# negatives belong to _parse_off_features (the deterministic strip), never here.
+_MG_NEG_RE = re.compile(
+    r"\b(?:no|without|don'?t|dont|remove|less|fewer|zero)\b[^.!?\n]{0,32}$",
+    re.IGNORECASE)
+
+
+def _mg_obey_enabled():
+    """DARK by default. PROMPTLY_MG_OBEY=1 arms the MG user-ask directive —
+    env-only (the PLAN_ONLY cert app sets it per-arm in its own container)."""
+    return os.environ.get("PROMPTLY_MG_OBEY", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _parse_mg_requests(text):
+    """True when the vibe/change_request EXPLICITLY asks for motion graphics.
+    High precision, mirroring _parse_broll_requests: 'motion graphics' anywhere
+    counts (the 309-tap preset says exactly this); bare component nouns count
+    only behind a positive verb; a negation in the preceding window never
+    matches (negatives ride _parse_off_features)."""
+    _t = str(text or "")
+    for m in _MG_ASK_RE.finditer(_t):
+        if _MG_NEG_RE.search(_t[:m.start()]):
+            continue
+        return True
+    return False
+
+
+def _mg_request_directive(vibe):
+    """Prompt block armed ONLY when (flag on AND the user explicitly asked for
+    MGs) — otherwise "" and the prompt is byte-identical. Overrides the
+    abstention default while leaving the earn-gates in charge of WHICH type
+    and WHERE; an empty answer must become an honest note, never silence."""
+    if not _mg_obey_enabled() or not _parse_mg_requests(vibe):
+        return ""
+    return (
+        "\n**REQUIRED MOTION GRAPHICS (user request — OBEY):** the user explicitly "
+        "asked for motion graphics. The component gates below still decide WHICH "
+        "type each moment earns and WHERE it sits — but \"none\" is no longer an "
+        "acceptable answer while qualifying moments exist. Find the strongest 2-4 "
+        "moments in this video and give each the component its shape asks for "
+        "(a quoted number → StatCard; an enumerated set → RankedList/PillCluster; "
+        "a real quoted message → its card; otherwise the quietest type that fits "
+        "the vibe). Emitting zero motion graphics on this video is a FAILURE to "
+        "obey unless the footage genuinely offers no qualifying moment — and in "
+        "that case you MUST say so in `notes` so the user hears why, never "
+        "silence.\n"
+    )
+
+
 # ── THE HONESTY MECHANISM (Zac 2026-07-13, Gap 3 Item 2) — never silent-drop ──────
 # When the user asks for a capability the pipeline UNDERSTANDS but genuinely can't do
 # yet, surface it ("Promptly doesn't support X yet") instead of silently dropping it.
@@ -6064,7 +6129,7 @@ USER INSTRUCTIONS — READ FIRST, OBEY ABSOLUTELY
 ═══════════════════════════════════════════════════════════════════════════
 
 The user's vibe (in the USER message under "The user wants:") is your DIRECTOR speaking. Take it LITERALLY. Everything else in this prompt is fallback behavior for atmospheric vibes ("viral", "punchy", "story-driven"). The moment the vibe contains a SPECIFIC include/exclude instruction, that instruction OVERRIDES every default. A polished video that ignored the user's stated preferences is the worst possible outcome — far worse than a sparse video that did what they asked.
-{_broll_request_directive(vibe)}
+{_broll_request_directive(vibe)}{_mg_request_directive(vibe)}
 Exact mappings:
 
   • **"no captions" / "don't add captions" / "without subtitles"** → `caption_style: "none"`, `caption_keywords: []`, `caption_position_changes: []`
