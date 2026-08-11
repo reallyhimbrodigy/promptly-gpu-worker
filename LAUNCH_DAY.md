@@ -13,6 +13,21 @@ payments land → route-recovery check (1 traffic hour) → freeze (old arch, fl
 
 ---
 
+## DOCUMENT OWNERSHIP — docs carry ownership like code
+
+This file is **canonical** and supersedes `IGNITION_DAY_RUNBOOK.md` (removed)
+and the co-owned draft on `lane/harness` (redirected to here). Section
+ownership is **hard**: edits to a section go through its owner's lane; the
+other co-owner reviews, never rewrites.
+
+| section | owner |
+|---|---|
+| Risk line, Steps 0–3, 6–7, abort matrix, standing rules | **TRUTH** |
+| **Step 4–5 Freeze and differ** | **HARNESS** (lane/harness) — reproduced VERBATIM from `8daeab4` §1 |
+| Step 6 flip order | **TRUTH**, SEAM consulted |
+
+---
+
 ## ⚠️ THE ONE RISK LINE — read before starting
 
 **The compressed window has no iteration slack.** There is no room to tune a
@@ -104,62 +119,79 @@ or `REGRESSED:` — a REGRESSED self-alerts to the owner.
 
 ---
 
-## STEP 4 — FREEZE THE GOLDENS: OLD ARCHITECTURE, FLAGS OFF (HARNESS, ~$4–6.5)
+## STEPS 4–5 — FREEZE AND DIFFER — **HARNESS-owned, verbatim from `8daeab4` §1**
 
-The goldens must capture **today's known-good behaviour** — the old
-architecture with every SEAM flag OFF — because the differ's entire value is
-judging the candidate against *what was true*.
+> Reproduced without edit. TRUTH does not rewrite this section; corrections
+> go through lane/harness. TRUTH's only addition is the merge note at the end.
 
-```bash
-cd .worktrees/lane-harness      # worktree pinned to the commit being frozen
-modal run golden_freeze_app.py --runs 3 --out golden/plans
-```
+## §1 Freeze and differ — HARNESS-owned
 
-HARNESS's own preconditions, all of which are theirs to run:
-1. **Vertex healthy** — one smoke capture asserting `gemini_n_calls > 0`
-   *before* freezing. Step 2 above is the coarse version; this is the fine one.
-2. Run from the worktree pinned to the frozen commit (the image bundles that
-   working tree's `handler.py`).
-3. `models/` must exist in the worktree (untracked; copy from the main checkout).
-4. Ledger the batch in `MODAL_SPEND_LEDGER.md`; verify `modal app list` shows
-   **0 tasks** afterwards (`.spawn()`ed containers outlive the local run).
+HARNESS is first in the water. Nothing in §2/§3 starts until the freeze is
+committed and the baseline is GREEN.
 
-3 runs per source, because plan generation is stochastic — a single golden
-would false-alarm constantly. 25 sources, route-stratified, Hindi-weighted.
+### Preconditions (all four, no exceptions)
 
-**Re-freezing is a deliberate act, never automatic** — only after a change is
-approved as *better*, with the owner's sign-off recorded in the commit that
-replaces `golden/plans/`. A casually re-frozen golden is a deleted tripwire.
+1. **Vertex healthy** — the editorial smoke must show `gemini_n_calls > 0`
+   AND `arc_position` present on zoom claims. (2026-08-08→? dunning outage:
+   100% of editorial plans were `safe_edit` fallbacks; a freeze then would
+   have canonized fallback behavior. The smoke assert is proven to RED on
+   the stored outage-era capture.)
+2. **moodreel + hype alive** — their route-builder markers must fire on the
+   route smokes. As of 2026-08-11 both routes sit at exactly 0 completions
+   for 3 days, unresolved; this is the tripwire.
+3. Run from the `lane/harness` worktree (image bundles the tree == the
+   commit being frozen; base 1601ae0) with `models/` present.
+4. Ledger line before each spend batch (`MODAL_SPEND_LEDGER.md`).
 
-When the freeze completes, TRUTH merges
-`golden/validate_deploy_addition.py` into `validate_deploy.py` (paste **above**
-the GATE INTEGRITY runner block — a `@check` below it is dead code and breaks
-the declared==ran counter) and deploys on a quiet window.
-
----
-
-## STEP 5 — PER-ROUTE DIFFER (SEAM + HARNESS, ~$0.10/run, ≤$10 pre-approved)
-
-One route at a time: hype → moodreel → minimal → minimal_speech_uncut, then
-the editorial/premium arm.
+### T-0 sequence
 
 ```bash
-modal run golden_freeze_app.py --runs 3 --out /tmp/candidate/plans   # candidate, flags ON for that route
-python3 harness_plan_diff.py diff --golden golden/plans \
-    --candidate /tmp/candidate/plans --manifest golden/manifest.json \
-    --out /tmp/candidate/report.json
+cd .worktrees/lane-harness
+bash golden/ignite.sh --smoke    # 3 priced health smokes, ~$0.06
+bash golden/ignite.sh            # full freeze 25x3 (~$4.50-6.50, cap $8)
+                                 #   -> cert_golden_output.py -> baseline GREEN
 ```
 
-**Verdicts:** `GREEN` = the corpus saw no regression (**not** proof of
-improvement). `YELLOW` = read the itemised drift and decide deliberately.
-`RED` = do not flip.
+Then, in order: `modal app list` = 0 → ledger actuals → commit
+`golden/plans/` + `golden/baseline_report.json` → the three forced-failure
+proofs (Step 4: corrupt a golden → RED; disable a family in a scratch
+branch → RED; schema-violating plan → RED) → hand
+`golden/validate_deploy_addition.py` to TRUTH's merge queue (it fails loudly
+on an unfrozen corpus by design — merge only after this sequence).
 
-**THE HOLD RULE (the risk line, applied):** RED or a missed obedience marker ⇒
-that route's flag stays **OFF**, it is recorded in `DEPLOY_LOG.md`, and the
-cascade **continues with the other routes**. No tuning inside the window.
+### The abort rule
 
-Premium is byte-identical by construction (cert_unified_core), so its differ
-run is a confirmation, not a risk.
+> One standing caution for ignition day: if the moodreel/hype smoke REDs, do
+> not partial-freeze around it — 8 of 25 sources are light-route, and
+> freezing them mid-extinction would canonize the wrong routing. The runbook
+> aborts whole, by design.
+
+The same whole-or-nothing applies to every gate in `ignite.sh`: a failed
+precondition aborts ignition entirely; there is no "freeze what's healthy."
+
+### Differ SLA (opens at freeze commit)
+
+- **SEAM / DELIVERY candidates: judged same-few-hours.** The candidate diff
+  is offline and free once their captures exist:
+  `python3 harness_plan_diff.py diff --golden golden/plans --candidate <dir>
+  --manifest golden/manifest.json`
+- SEAM tweak-op captures land in `golden/tweaks/<case_id>.json` (contract in
+  the manifest), judged via
+  `python3 harness_plan_diff.py tweak-judge --manifest golden/manifest.json
+  --captures golden/tweaks`.
+- Verdict semantics on launch day: **RED = no flip.** YELLOW = itemized
+  drift, flip only with a deliberate, recorded decision. GREEN = the corpus
+  saw no regression (not proof of improvement).
+- Re-freeze is a deliberate act with Zac's sign-off recorded in the commit
+  that replaces `golden/plans/` — never automatic, never same-day-casual.
+
+**TRUTH's handoff note (not part of HARNESS's section):** when the freeze
+sequence completes, TRUTH merges `golden/validate_deploy_addition.py` into
+`validate_deploy.py` — pasted **above** the GATE INTEGRITY runner block, since
+a `@check` below it is dead code and breaks the declared==ran counter — then
+deploys on a quiet window. **THE HOLD RULE applies to the differ verdicts
+above:** a RED route keeps its flag OFF, is recorded in `DEPLOY_LOG.md`, and
+the cascade continues with the other routes. No tuning inside the window.
 
 ---
 
