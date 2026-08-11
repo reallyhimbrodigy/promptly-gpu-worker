@@ -392,6 +392,59 @@ _UNSUPPORTED_CAPABILITIES = [
 ]
 
 
+# ── Upscale honest negotiation (LANE-SEAM, DARK behind PROMPTLY_UPSCALE_
+# NEGOTIATE). The single biggest generative-bucket ask [JUDGE 2026-08-10:
+# 195× 4K/8K/HD/upscale/clarity] is neither built nor on the unsupported
+# list, so it drops with NO note. This is the honesty half: detect the ask
+# with high precision and NEGOTIATE — name the limit truthfully, name what
+# was delivered, name why it serves the destination. Precision over recall:
+# bare "quality" never matches ("make a high quality edit" is a STYLE ask);
+# only unambiguous resolution tokens and resolution-verb pairs fire.
+_UPSCALE_ASK_RE = re.compile(
+    r"\b(?:4\s*k|8\s*k|2160p|1440p|uhd|ultra\s*hd)\b"
+    r"|\b(?:upscale|up-?res|super[- ]?resolution)\b"
+    r"|\b(?:in|to|into)\s+hd\b"
+    r"|\b(?:make|turn|convert|render|export)\b[^.!?\n]{0,32}?\bhd\b"
+    r"|\b(?:enhance|improve|increase|boost|sharpen)\b[^.!?\n]{0,24}?"
+    r"\b(?:resolution|clarity|sharpness)\b",
+    re.IGNORECASE)
+_UPSCALE_NEG_RE = re.compile(
+    r"\b(?:no|without|don'?t|dont|not)\b[^.!?\n]{0,24}$", re.IGNORECASE)
+
+# Truthful by the render contract: output is canonical 1080x1920 (the
+# PromptlyRenderInput canvas); major short-form feeds serve 1080p. Never
+# claim native-resolution passthrough — that would be false for 4K sources.
+_UPSCALE_NEGOTIATION_NOTE = (
+    "True 4K/8K upscaling isn't in Promptly yet — your edit is delivered at "
+    "1080p, the resolution TikTok, Reels, and Shorts actually serve, so it "
+    "will look exactly as sharp in the feed. When upscaling lands, your "
+    "existing edits can be re-rendered at the higher resolution."
+)
+
+
+def _upscale_negotiate_enabled(input_data=None):
+    """DARK by default. PROMPTLY_UPSCALE_NEGOTIATE=1 arms the negotiation
+    note globally; input_data.upscale_negotiate_test is the per-job override
+    for the pre-flip cert (burned_text_test pattern — inert for traffic)."""
+    if input_data and input_data.get("upscale_negotiate_test"):
+        return True
+    return os.environ.get("PROMPTLY_UPSCALE_NEGOTIATE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _parse_upscale_request(text):
+    """True when the user explicitly asks for resolution/quality upscaling
+    ("Trun in to 4k", "8k", "make video HD", "upscale this", "enhance the
+    resolution"). Negation-guarded; bare style words never match."""
+    _t = str(text or "")
+    for m in _UPSCALE_ASK_RE.finditer(_t):
+        if _UPSCALE_NEG_RE.search(_t[:m.start()]):
+            continue
+        return True
+    return False
+
+
 def _parse_unsupported_requests(text):
     """User asks the pipeline understands but can't fulfill YET → honest surfacing
     strings, deduped in order. The trust fix: the user always knows done-or-can't,
@@ -39060,6 +39113,22 @@ def handler(job):
         # with no honest note. The honesty guarantee must hold on re-edits too (CRITICAL #4).
         _honesty_intent_text = f"{vibe or ''} . {change_request}".strip(" .") if change_request else vibe
         _capability_notes = _parse_unsupported_requests(_honesty_intent_text)
+        # ── UPSCALE HONEST NEGOTIATION (LANE-SEAM, DARK behind
+        # PROMPTLY_UPSCALE_NEGOTIATE). 195 asks say 4K/8K/HD/upscale [JUDGE
+        # 2026-08-10] and every one drops silently — upscale is not on the
+        # unsupported list, so no note fires. The negotiation note names the
+        # limit truthfully (delivery is 1080x1920 by the render contract),
+        # names what WAS delivered, and why that serves the destination —
+        # never a bare "can't". Counted via divergence so the demand and the
+        # note-coverage are measurable. Flag off ⇒ byte-identical.
+        if _upscale_negotiate_enabled(input_data) and \
+                _parse_upscale_request(_honesty_intent_text):
+            _capability_notes.append(_UPSCALE_NEGOTIATION_NOTE)
+            _record_divergence(
+                "honesty", {"ask": "upscale",
+                            "text": str(_honesty_intent_text)[:120]},
+                "upscale_negotiated",
+                reason="explicit resolution/upscale ask → honest negotiation note")
         _requested_broll = _parse_broll_requests(vibe)
         if _requested_broll:
             _resolved_kw = " ".join(str(_e.get("keyword") or "") for _e in resolved_broll_out).lower()
