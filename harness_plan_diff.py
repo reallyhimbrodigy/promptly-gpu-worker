@@ -276,10 +276,11 @@ def extract_metrics(plan, duration_s):
 
 
 def extract_light_metrics(capture):
-    """Light-route capture -> {reason, shape counts}. Coarse by design: the
-    render_input converges three different route editors; the differ judges
-    the ROUTE DECISION hard and the plan shape softly."""
+    """Light-route capture -> {reason, route markers, shape counts}. Coarse by
+    design: the render_input converges three different route editors; the
+    differ judges the ROUTE DECISION hard and the plan shape softly."""
     m = {"reason": capture.get("route_reason"),
+         "route_markers": sorted(capture.get("route_markers") or []),
          "counts": {}, "keys": [],
          "structural_fails": [], "structural_warns": []}
     ri = capture.get("render_input")
@@ -338,6 +339,8 @@ def build_envelope(runs_by_source, manifest):
         if li:
             src_env["light_reasons"] = sorted(
                 {m["reason"] for m in li if m["reason"]})
+            src_env["light_markers"] = sorted(
+                {mk for m in li for mk in m.get("route_markers", [])})
             keys = set()
             for m in li:
                 keys.update(m["counts"])
@@ -447,6 +450,18 @@ def diff(env, cand_by_source, manifest):
                 _item(items, "RED", "route-flip",
                       "light-route reason(s) %s not in golden reason set %s"
                       % (sorted(stray), sorted(golden_reasons)), sid)
+            golden_markers = set(e.get("light_markers", []))
+            if golden_markers:
+                dims_total += 1
+                cand_markers = {mk for m in li
+                                for mk in m.get("route_markers", [])}
+                stray_m = cand_markers - golden_markers
+                dead_m = golden_markers - cand_markers
+                if stray_m or dead_m:
+                    _item(items, "RED", "route-flip",
+                          "route builders drifted: golden %s vs candidate %s "
+                          "(the moodreel/hype-extinction class)"
+                          % (sorted(golden_markers), sorted(cand_markers)), sid)
             dims_total += 1
             fails = [f for m in li for f in m["structural_fails"]]
             if fails:
@@ -541,6 +556,92 @@ def _eval_marker(marker, ed_metrics, env_src):
 
 
 # ---------------------------------------------------------------------------
+# Tweak-case judging (SEAM Step-3 surgical ops — SEAM_OBEDIENCE_CASES_FOR_HARNESS.md)
+# ---------------------------------------------------------------------------
+# Capture contract (SEAM produces these, flag-on and flag-off arms):
+#   {"kind": "tweak", "case_id": "<manifest case_id>", "capture": {
+#      "classification": "tweak" | "needs_clarification" | ...,
+#      "new_plan": {...},          # the post-ops plan
+#      "human_summary": "...",     # user-facing note channel
+#      "flag_on": true|false}}
+def _entry_in_list(plan, path, entry):
+    lst = plan.get(path) if isinstance(plan, dict) else None
+    if not isinstance(lst, list):
+        return False
+    for it in lst:
+        if isinstance(it, dict) and all(it.get(k) == v for k, v in entry.items()):
+            return True
+    return False
+
+
+def judge_tweak_cases(manifest, captures_dir):
+    """Judge SEAM tweak-op captures against the manifest's tweak_cases specs.
+    Returns (items, dims_total). Every case is one dimension; a missing
+    capture is a RED (green cannot be claimed on an unexercised case)."""
+    items = []
+    dims = 0
+    for case in manifest.get("tweak_cases", []):
+        cid = case["case_id"]
+        dims += 1
+        path = os.path.join(captures_dir, cid + ".json")
+        if not os.path.isfile(path):
+            _item(items, "RED", "tweak-coverage",
+                  "no capture for tweak case", cid)
+            continue
+        try:
+            with open(path) as f:
+                raw = json.load(f)
+            assert raw.get("kind") == "tweak", "kind=%r" % raw.get("kind")
+            cap = raw.get("capture") or {}
+        except Exception as e:
+            _item(items, "RED", "structural",
+                  "tweak capture unreadable: %s" % e, cid)
+            continue
+        exp = case.get("expect", {})
+        plan = cap.get("new_plan") or {}
+        notes = " ".join(str(cap.get(k) or "") for k in
+                         ("human_summary", "notes")).lower()
+
+        want_cls = exp.get("classification")
+        if want_cls and cap.get("classification") != want_cls:
+            _item(items, "RED", "tweak-obedience",
+                  "classified %r, expected %r"
+                  % (cap.get("classification"), want_cls), cid)
+            continue
+
+        spec = exp.get("plan_list_contains")
+        if spec:
+            if _entry_in_list(plan, spec["path"], spec["entry"]):
+                pass  # GREEN
+            else:
+                probe = str(list(spec["entry"].values())[0]).lower()
+                if probe in notes:
+                    _item(items, "RED", "tweak-obedience",
+                          "%s entry %r dropped WITH a note — still RED: the "
+                          "find is transcript-guaranteed"
+                          % (spec["path"], spec["entry"]), cid)
+                else:
+                    _item(items, "RED", "tweak-obedience",
+                          "%s entry %r absent with NO note — the silent-drop "
+                          "class" % (spec["path"], spec["entry"]), cid)
+
+        spec = exp.get("plan_list_absent")
+        if spec:
+            present = _entry_in_list(plan, spec["path"], spec["entry"])
+            need_note = exp.get("note_required_containing")
+            if present:
+                _item(items, "RED", "tweak-obedience",
+                      "%s gained forbidden entry %r (squeezed-transition / "
+                      "dark-flag-leak class)" % (spec["path"], spec["entry"]),
+                      cid)
+            elif need_note and need_note.lower() not in notes:
+                _item(items, "RED", "tweak-obedience",
+                      "entry correctly absent but human_summary lacks the "
+                      "%r note — silent absence" % need_note, cid)
+    return items, dims
+
+
+# ---------------------------------------------------------------------------
 # Directory loading
 # ---------------------------------------------------------------------------
 def load_run_dir(root, manifest):
@@ -631,8 +732,8 @@ def _ed_run(seed, **kw):
             "m": extract_metrics(_fixture_plan(seed, **kw), 60.0)}
 
 
-def _light_run(reason="no_speech", n_clips=4):
-    cap = {"route_reason": reason,
+def _light_run(reason="no_speech", n_clips=4, markers=("moodreel",)):
+    cap = {"route_reason": reason, "route_markers": list(markers),
            "render_input": {"clips": [{"s": i} for i in range(n_clips)],
                             "transitions": [{"t": 1}], "fps": 30}}
     return {"kind": "light_route", "m": extract_light_metrics(cap)}
@@ -741,8 +842,71 @@ def self_test(verbose=False):
     b = env["per_source"]["src00"]["bands"]["emphasis"]
     assert b["hi"] > b["lo"], "degenerate band"
 
+    # 12. route-BUILDER marker drift (moodreel/hype-extinction class) -> RED
+    ext = _fixture_corpus()
+    ext["lite00"] = [_light_run("no_speech", 3, markers=("minimal",))]
+    r = diff(env, ext, manifest)
+    assert r["verdict"] == "RED", "marker drift not RED"
+    assert any(i["dimension"] == "route-flip" and "builders drifted" in i["detail"]
+               for i in r["items"]), "marker drift not itemized"
+
+    # 13-17. tweak-case judge (SEAM surgical ops)
+    import shutil
+    import tempfile
+    tdir = tempfile.mkdtemp(prefix="tweakjudge")
+    tmf = {"tweak_cases": [
+        {"case_id": "T_ov", "expect": {
+            "classification": "tweak",
+            "plan_list_contains": {"path": "caption_text_overrides",
+                                   "entry": {"find": "devil",
+                                             "replace": "devyl"}}}},
+        {"case_id": "T_neg", "expect": {
+            "plan_list_absent": {"path": "transitions",
+                                 "entry": {"after_word_index": 36,
+                                           "type": "CrossfadeZoom"}},
+            "note_required_containing": "skip"}},
+    ]}
+
+    def _w(cid, cap):
+        with open(os.path.join(tdir, cid + ".json"), "w") as f:
+            json.dump({"kind": "tweak", "case_id": cid, "capture": cap}, f)
+
+    try:
+        # 13. correct captures -> zero items
+        _w("T_ov", {"classification": "tweak", "flag_on": True,
+                    "new_plan": {"caption_text_overrides":
+                                 [{"find": "devil", "replace": "devyl"}]}})
+        _w("T_neg", {"classification": "tweak", "flag_on": True,
+                     "new_plan": {"transitions": []},
+                     "human_summary": "skipped rather than squeezed"})
+        it, dims = judge_tweak_cases(tmf, tdir)
+        assert not it and dims == 2, "clean tweak captures not GREEN: %r" % it
+        # 14. silent drop -> RED
+        _w("T_ov", {"classification": "tweak", "flag_on": True,
+                    "new_plan": {"caption_text_overrides": []}})
+        it, _ = judge_tweak_cases(tmf, tdir)
+        assert any("silent-drop" in i["detail"] for i in it), "silent drop missed"
+        # 15. squeezed transition present -> RED
+        _w("T_neg", {"classification": "tweak", "flag_on": True,
+                     "new_plan": {"transitions": [{"after_word_index": 36,
+                                                   "type": "CrossfadeZoom"}]},
+                     "human_summary": "added it anyway"})
+        it, _ = judge_tweak_cases(tmf, tdir)
+        assert any("squeezed" in i["detail"] for i in it), "squeeze missed"
+        # 16. correctly absent but NO note -> RED
+        _w("T_neg", {"classification": "tweak", "flag_on": True,
+                     "new_plan": {"transitions": []}, "human_summary": ""})
+        it, _ = judge_tweak_cases(tmf, tdir)
+        assert any("silent absence" in i["detail"] for i in it), "silent absence missed"
+        # 17. missing capture -> RED coverage
+        os.unlink(os.path.join(tdir, "T_neg.json"))
+        it, _ = judge_tweak_cases(tmf, tdir)
+        assert any(i["dimension"] == "tweak-coverage" for i in it), "missing capture missed"
+    finally:
+        shutil.rmtree(tdir, ignore_errors=True)
+
     if verbose:
-        print("self-test: 11/11 defect classes behave (GREEN stays green, "
+        print("self-test: 17/17 defect classes behave (GREEN stays green, "
               "planted defects go RED)")
     return True
 
@@ -773,6 +937,13 @@ def main(argv=None):
         p.add_argument("--out")
         if name == "diff":
             p.add_argument("--candidate", required=True)
+            p.add_argument("--tweak-captures",
+                           help="dir of SEAM tweak-op captures to judge "
+                                "against manifest tweak_cases")
+    tj = sub.add_parser("tweak-judge")
+    tj.add_argument("--manifest", required=True)
+    tj.add_argument("--captures", required=True)
+    tj.add_argument("--out")
     args = ap.parse_args(argv)
 
     if args.cmd == "self-test":
@@ -780,11 +951,38 @@ def main(argv=None):
         print("PASS")
         return 0
 
+    if args.cmd == "tweak-judge":
+        with open(args.manifest) as f:
+            manifest = json.load(f)
+        items, dims = judge_tweak_cases(manifest, args.captures)
+        verdict = "RED" if items else "GREEN"
+        report = {"verdict": verdict, "dims_total": dims,
+                  "dims_red": len(items), "items": items}
+        if args.out:
+            with open(args.out, "w") as f:
+                json.dump(report, f, indent=2, sort_keys=True)
+                f.write("\n")
+        print("TWEAK VERDICT: %s (%d red of %d cases)"
+              % (verdict, len(items), dims))
+        for i in items:
+            print("  [%s] %s %s: %s" % (i["level"], i["dimension"],
+                                        i.get("source_id", ""), i["detail"]))
+        return 0 if verdict == "GREEN" else 1
+
     manifest = load_manifest(args.manifest)
     golden = load_run_dir(args.golden, manifest)
     env = build_envelope(golden, manifest)
     cand = golden if args.cmd == "baseline" else load_run_dir(args.candidate, manifest)
     report = diff(env, cand, manifest)
+    if getattr(args, "tweak_captures", None):
+        titems, tdims = judge_tweak_cases(manifest, args.tweak_captures)
+        report["items"].extend(titems)
+        report["dims_total"] += tdims
+        report["dims_red"] += sum(1 for i in titems if i["level"] == "RED")
+        if report["dims_red"]:
+            report["verdict"] = "RED"
+        report["defect_rate"] = (report["dims_red"] / report["dims_total"]
+                                 if report["dims_total"] else 0.0)
     report["golden_sources"] = len(golden)
     report["candidate_sources"] = len(cand)
     text = json.dumps(report, indent=2, sort_keys=True)

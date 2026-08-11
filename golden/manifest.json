@@ -447,5 +447,119 @@
       "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/3e8c4921-b155-4c52-87fe-d8aad29dc1f6/1786182799550-A508793F-153B-413B-BAE0-E2075750F521_L0_001.mp4"
     }
   ],
+  "tweak_capture_contract": "SEAM produces golden/tweaks/<case_id>.json per case: {kind:'tweak',case_id,capture:{classification,new_plan,human_summary,flag_on}}; judge with: python3 harness_plan_diff.py tweak-judge --manifest golden/manifest.json --captures golden/tweaks",
+  "tweak_cases": [
+    {
+      "adaptation": "SEAM's literal find-word 'rise' appears in NO golden transcript [MEASURED 12/12]; bound to once-occurring transcript word 'devil' (same op class, transcript-guaranteed find)",
+      "case_id": "S3A_caption_override",
+      "expect": {
+        "classification": "tweak",
+        "plan_list_contains": {
+          "entry": {
+            "find": "devil",
+            "replace": "devyl"
+          },
+          "path": "caption_text_overrides"
+        }
+      },
+      "parent_id": "editorial_eng_fa3efb69",
+      "payload": {
+        "change_request": "change 'devil' to 'devyl'",
+        "mode": "tweak",
+        "surgical_v2_test": true
+      },
+      "spec_origin": "SEAM_OBEDIENCE_CASES_FOR_HARNESS.md case S3-A"
+    },
+    {
+      "case_id": "S3A_flag_off",
+      "expect": {
+        "plan_list_absent": {
+          "entry": {
+            "find": "devil",
+            "replace": "devyl"
+          },
+          "path": "caption_text_overrides"
+        }
+      },
+      "parent_id": "editorial_eng_fa3efb69",
+      "payload": {
+        "change_request": "change 'devil' to 'devyl'",
+        "mode": "tweak"
+      },
+      "spec_origin": "SEAM case S3-A flag-off byte-identity arm"
+    },
+    {
+      "binding": {
+        "after_word_index": 36,
+        "gap_ms": 585,
+        "note": "gap 585ms fits DipToBlack (350ms) [MEASURED from parent plan cuts + Deepgram words]",
+        "seam_cut_idx": 3,
+        "word": "back"
+      },
+      "case_id": "S3B_add_transition",
+      "expect": {
+        "classification": "tweak",
+        "plan_list_contains": {
+          "entry": {
+            "after_word_index": 36,
+            "type": "DipToBlack"
+          },
+          "path": "transitions"
+        }
+      },
+      "parent_id": "editorial_eng_a41276b2",
+      "payload": {
+        "change_request": "add a DipToBlack after 'back'",
+        "mode": "tweak",
+        "surgical_v2_test": true
+      },
+      "spec_origin": "SEAM case S3-B"
+    },
+    {
+      "binding": {
+        "after_word_index": 36,
+        "gap_ms": 585,
+        "needs_ms": 800,
+        "note": "same seam: 585ms < CrossfadeZoom natural 800ms \u2014 must be skipped WITH note",
+        "word": "back"
+      },
+      "case_id": "S3B_neg_squeeze",
+      "expect": {
+        "note_required_containing": "skip",
+        "plan_list_absent": {
+          "entry": {
+            "after_word_index": 36,
+            "type": "CrossfadeZoom"
+          },
+          "path": "transitions"
+        }
+      },
+      "parent_id": "editorial_eng_a41276b2",
+      "payload": {
+        "change_request": "add a CrossfadeZoom after 'back'",
+        "mode": "tweak",
+        "surgical_v2_test": true
+      },
+      "spec_origin": "SEAM case S3-B negative twin (natural-duration law)"
+    },
+    {
+      "case_id": "S3B_flag_off",
+      "expect": {
+        "plan_list_absent": {
+          "entry": {
+            "after_word_index": 36,
+            "type": "DipToBlack"
+          },
+          "path": "transitions"
+        }
+      },
+      "parent_id": "editorial_eng_a41276b2",
+      "payload": {
+        "change_request": "add a DipToBlack after 'back'",
+        "mode": "tweak"
+      },
+      "spec_origin": "SEAM case S3-B flag-off byte-identity arm"
+    }
+  ],
   "version": 1
 }

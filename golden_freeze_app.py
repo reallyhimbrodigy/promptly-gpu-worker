@@ -63,13 +63,31 @@ def freeze(source: dict, run_idx: int) -> dict:
     sys.path.insert(0, "/")
     import handler as H
     import hype_render as _hr
+    import minimal_editor as _mini_ed
+    import moodreel_editor as _mood_ed
+    import hype_editor as _hype_ed
 
     class _NoRenderCapture(BaseException):
         """Raised at any render boundary; carries the route's plan."""
         def __init__(self, kind, payload):
             self.kind, self.payload = kind, payload
 
-    captured = {"minimal_reason": None}
+    captured = {"minimal_reason": None, "route_markers": []}
+
+    # Route-editor spies: which route BUILDER actually ran. This is the
+    # moodreel/hype-extinction tripwire — a moodreel-manifest source whose
+    # capture lacks the "moodreel" marker means the route silently died
+    # (exactly 0 moodreel+hype completions for 3 days as of 2026-08-11).
+    def _mark(name, fn):
+        def _spy(*a, **k):
+            if name not in captured["route_markers"]:
+                captured["route_markers"].append(name)
+            return fn(*a, **k)
+        return _spy
+
+    _mini_ed.build_minimal_plan = _mark("minimal", _mini_ed.build_minimal_plan)
+    _mood_ed.build_moodreel_prompt = _mark("moodreel", _mood_ed.build_moodreel_prompt)
+    _hype_ed.build_hype_prompt = _mark("hype", _hype_ed.build_hype_prompt)
 
     _orig_minimal = H._run_minimal_pipeline
 
@@ -141,6 +159,7 @@ def freeze(source: dict, run_idx: int) -> dict:
             payload = {"_unserializable": type(ser).__name__}
         out["capture"] = payload
         out["capture"]["route_reason"] = captured.get("minimal_reason")
+        out["capture"]["route_markers"] = captured.get("route_markers")
         out["capture"]["source_duration_s"] = captured.get("minimal_duration_s")
     except Exception as err:
         out["kind"] = "error"

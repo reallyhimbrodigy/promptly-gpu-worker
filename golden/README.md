@@ -65,6 +65,39 @@ that replaces `golden/plans/` (include: what changed, why it is better, Zac's
 approval date). The differ judges against what WAS true — that is its entire
 value; a casually re-frozen golden is a deleted tripwire.
 
+## Ignition (one command)
+
+```bash
+bash golden/ignite.sh --smoke   # 3 priced health smokes only (~$0.06)
+bash golden/ignite.sh           # smokes -> freeze -> cert -> handoff steps
+```
+
+The three smokes gate the freeze: (1) editorial `gemini_n_calls > 0` AND
+`arc_position` present (else moment-class is vacuous), (2) moodreel builder
+marker fires, (3) hype builder marker fires — (2)+(3) are the tripwire for the
+moodreel/hype extinction (exactly 0 completions for 3 days as of 2026-08-11,
+unresolved). Each assert is proven non-vacuous: the editorial check REDs on
+the stored outage-era capture.
+
+## SEAM tweak cases (Step-3 surgical ops)
+
+`manifest.json → tweak_cases` holds 5 bound cases (S3-A caption override
+devil→devyl on `editorial_eng_fa3efb69` — SEAM's literal word "rise" appears
+in no golden transcript, adaptation recorded; S3-B DipToBlack after word 36
+"back" on `editorial_eng_a41276b2`, seam gap 585ms; the CrossfadeZoom
+negative twin on the same seam, 585ms < 800ms natural; two flag-off
+byte-identity arms). SEAM produces one capture per case into
+`golden/tweaks/<case_id>.json` per the `tweak_capture_contract` in the
+manifest, then:
+
+```bash
+python3 harness_plan_diff.py tweak-judge \
+    --manifest golden/manifest.json --captures golden/tweaks
+```
+
+Silent-drop, squeezed-transition, silent-absence, dark-flag-leak, and
+missing-capture all RED (self-test classes 13-17).
+
 ## Freeze preconditions (learned the hard way)
 
 1. **Vertex must be healthy.** 2026-08-09: a GCP billing dunning-denial made
