@@ -2001,7 +2001,24 @@ try:
         or os.environ.get("SUPABASE_KEY")
     )
     if supabase_url and supabase_key:
-        supabase = create_client(supabase_url, supabase_key)
+        # HARD TIMEOUTS (lane/delivery 2026-08-11, the stuck-job watch): the
+        # default postgrest client can block INDEFINITELY on a wedged socket.
+        # Every write_job_status call runs UNDER _JOB_STATUS_LOCK, so ONE hung
+        # .execute() silently freezes every later durable write in the process
+        # — no error, no log — and a handler blocked in its terminal write
+        # never returns, so the completion POST never fires and the container
+        # bills to its full 1200s timeout. (2026-08-11: two jobs completed at
+        # the worker, rows frozen mid-write with zero failure logs — the
+        # signature of a hang, not an error.) 15s bounds any single call; the
+        # fail-open catch turns a hang into a LOGGED failure.
+        try:
+            from supabase.lib.client_options import ClientOptions
+            supabase = create_client(
+                supabase_url, supabase_key,
+                options=ClientOptions(postgrest_client_timeout=15))
+        except Exception as _co_e:
+            print(f"[startup] supabase ClientOptions timeout unavailable ({_co_e}) — default client", flush=True)
+            supabase = create_client(supabase_url, supabase_key)
         print("[startup] supabase OK", flush=True)
     else:
         print("[startup] supabase unavailable: missing env", flush=True)
@@ -31090,8 +31107,21 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
             # resume run's writes, and a terminal re-write stays legal. Zero
             # matched rows = the fence declining (logged; that log IS the proof
             # in the cancel-run redux).
+            _wjs_t0 = time.time()
             _resp = supabase.table(table).update(patch).eq("id", job_id).not_.in_(
                 status_col, ("failed", "canceled")).execute()
+            _wjs_ms = int((time.time() - _wjs_t0) * 1000)
+            # WEDGE DETECTOR (2026-08-11): this call holds _JOB_STATUS_LOCK — a
+            # slow one delays EVERY later durable write in the process. Terminal
+            # writes always log their outcome (the stuck-job class was invisible
+            # precisely because a lost terminal write left no line at all).
+            if _wjs_ms > 5000:
+                print(f"[job-status] SLOW write job={job_id} {_wjs_ms}ms under the lock "
+                      f"patch_keys={sorted(patch.keys())} — wedge risk", flush=True)
+            if _terminal:
+                print(f"[job-status] terminal write job={job_id} status={patch.get(status_col)} "
+                      f"matched={len(getattr(_resp, 'data', None) or [])} elapsed_ms={_wjs_ms} "
+                      f"result_bytes={len(str(patch.get('result') or ''))}", flush=True)
             if not (getattr(_resp, "data", None) or []):
                 print(f"[job-status] fence declined job={job_id} "
                       f"patch_keys={sorted(patch.keys())} matched=0", flush=True)
