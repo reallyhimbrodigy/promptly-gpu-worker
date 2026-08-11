@@ -169,6 +169,12 @@ the first deploy after billing is restored.
   across the deploy [MEASURED: 9 completed / 1 failed / 1 processing in the
   surrounding window]. **Until the migration lands, the delivery-mechanism
   instrument writes nothing — the 48h watch cannot start.**
+- **REAL-TRAFFIC PROOF**: the first job created after the deploy **completed
+  in 41s e2e** [MEASURED] — a delivery observed end-to-end on the new server
+  code, not merely a service that boots.
+- **Migration path re-confirmed absent**: probed for a SQL-executing RPC
+  (`exec_sql`/`execute_sql`/`sql`/`run_sql`) — all 404. Third independent
+  confirmation that DDL is owner-only.
 - Deployed **without** its worker half (W1), which is permission-blocked.
   DELIVERY's own handoff says the two halves are independent and either order
   is fine, and all changes are "inert-negative (worst case = today's
