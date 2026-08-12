@@ -696,3 +696,62 @@ re-opened**, which is the owner's success metric and needs no new instrument.
   `UNIFIED_CORE`, `SURGICAL_V2`, `CAPTION_TRANSLATE`.
 
 **No new instruments, no new watches.** Launch-ready.
+
+---
+
+## 2026-08-12 05:41Z — v528 @ `c159056`. Build list EMPTY. Holding at launch-ready.
+
+UPSCALE v1 deployed on the first quiet window (9 checks / ~6 min wait; 0
+in-flight, probe non-vacuous). Gate 367/367 · no-regress OK (409 live functions,
+1851 identifiers — up from 403/1844) · TOCTOU clean · auth-ping 200. Clean tree,
+no dirty marker.
+
+### ✅ THE ROOT FIX IS PROVEN ON REAL TRAFFIC
+
+Clean cohort — jobs SETTLING at or after **v527 (00:30Z)**, the deploy that made
+the completion POST carry the deliverable URL. n=36 terminal.
+
+| | |
+|---|---|
+| `completion_delivery='repair'` | **0** |
+| told a finished render failed (`progress=100`+`complete`+failed) | **0** |
+| `terminal_flip_lost` events | **0** |
+
+Before v527 the class fired roughly every 20 minutes and cost **9 users / 32
+(28%)** in a single evening, every one at exactly 15m04s. After it: nothing,
+across 36 terminal jobs. **The repair has not had to fire once** — which is the
+correct outcome for a safety net whose root has been closed, and is exactly the
+tripwire the owner set.
+
+Delivery mix on the cohort: `reconciler` 28 · NULL 8.
+
+### Residual failures, named (8 of 36)
+
+- **6 × UNS** *"The video didn't reach us"* — B1, mechanism named
+  (`reports/UNS_MECHANISM.md`): a single non-resumable PUT dying at byte ~zero.
+  Server half is intact and pinned; the cure is client-side, **225 item 7**.
+- **2 × DISPATCH_UNREACHABLE** — and with the half-landed count at 0, these are
+  the TRUE residual (renders that genuinely never completed), matching the ~2
+  users/day figure measured when 86% of that label turned out to be the
+  write-loss class wearing the wrong name.
+
+### Live state — everything dark
+
+Live secret: **31 keys**. All nine capability flags **ABSENT**:
+`COMPONENT_OBEY` · `ADAPTER_V1` · `UPSCALE_V1` · `UPSCALE_NEGOTIATE` ·
+`MG_OBEY` · `UNIFIED_CORE` · `SURGICAL_V2` · `CAPTION_TRANSLATE` ·
+`CHAT_ACTIONS`.
+
+The three ruled levers hold: `HLS_COPY='1'` (kept on the owner's GO),
+`MEDIA_RESOLUTION=''` and `PROXY_SAMPLE_FPS=''` (reverted to defaults).
+
+### Standing tripwires — no new instruments, no new watches
+
+1. **`completion_delivery='repair'` > 0 on a post-v527 job ⇒ the root re-opened.**
+   Currently 0/36.
+2. **Every flag stays dark until the owner names it.** The
+   NO-UNREGISTERED-LIVE-FLAG gate check (363) fails any deploy where a live key
+   is neither in CANON nor CANON_PENDING, so a flag cannot arm unnoticed.
+
+Worker **v528** · content-studio **`206cbca`** · gates **367** / **28**.
+Nothing queued. Holding.
