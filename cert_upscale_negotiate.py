@@ -19,6 +19,7 @@ locally is not possible); extraction failure = gate failure.
 Run: python3 cert_upscale_negotiate.py   (exit 0 = PASS)
 """
 
+import json
 import os
 import re
 import sys
@@ -54,7 +55,12 @@ def _extract_block():
     # those names; the cert never CALLS it (cert_upscale_v1.py owns the real
     # pass), it only needs the block to compile.
     import subprocess as _sp
-    ns = {"re": re, "os": os, "subprocess": _sp, "print": print,
+    # MUSIC v1 (2026-08-12) added module-level constants ahead of the upscale
+    # predicates, and _MUSIC_DIR resolves __file__ — which an exec'd block does
+    # not have. Supply the module's own globals it legitimately needs; the block
+    # is compiled, never called, so this only has to let it EXIST.
+    ns = {"re": re, "os": os, "subprocess": _sp, "print": print, "json": json,
+          "__file__": os.path.join(HERE, "handler.py"),
           "_X264_ENCODE_THREADS": 48}
     exec(compile(block, "handler.py<upscale>", "exec"), ns)
     return ns

@@ -9046,6 +9046,37 @@ def _completion_post_carries_url():
         'edit_plan["_rendered_video_url"]).')
 
 
+@check("PAYOFF ARMS 6+7 STAY DARK AND STAY VALID (2026-08-12, RULE-1): 0 punchy payoffs in 253 chances is NOT a bug — it is the system obeying the owner's own twice-expressed ruling (handler.py doctrine line + the payoff prose). Arm 6 widens the zoom enum; its own pre-registered read says a null there is INCONCLUSIVE because the prose still forbids what the enum now allows, so a null could be obeyance rather than judgement. Arm 7 widens the enum AND neutralises the prose, which is the only configuration in which 'never picked' is a real confirmation. This runs cert_payoff_arms.py to protect the VALIDITY of that test: control byte-identical, arm 6 ADDS rather than replaces, arm 7 implies arm 6, the prose swap NEUTRALISES without ever advocating a snap (advocacy would measure the new instruction instead of the model's taste), the swap target exists VERBATIM in the real prompt (non-circular — otherwise arm 7 raises at ignition when there is no time to debug), a drifted prompt RAISES rather than silently no-opping (a faked null reads as 'the model agrees with the ruling', the most expensive wrong conclusion here), and the two prose arms cannot run together and quietly measure neither.")
+def _payoff_arms_cert():
+    import subprocess as _sub, os as _os, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _env = dict(_os.environ)
+    for _k in ("PROMPTLY_PAYOFF_PUNCHY", "PROMPTLY_PAYOFF_OPEN", "PROMPTLY_DWELL"):
+        _env.pop(_k, None)
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_payoff_arms.py")],
+                  capture_output=True, text=True, timeout=600, env=_env, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0 and "ALL PASS" in _out, (
+        "cert_payoff_arms FAILED — the payoff A/B is not a valid test.\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1500:])
+
+
+@check("MUSIC v1: A PLACEHOLDER CAN NEVER REACH A USER, AND THE DUCK IS REAL (2026-08-12, RULE-1): 72 recorded asks for background music. Every bed in assets/music/ is a SYNTHESIZED PLACEHOLDER marked deliverable:false, and bed selection refuses anything not explicitly deliverable — so flipping PROMPTLY_MUSIC_V1 today delivers NO music and emits the honest note instead. The audio a user receives is gated on the owner's licensing pick, not on a flag, and a placeholder can only reach a user by someone editing a licence record. Runs cert_music_v1.py with REAL ffmpeg: the ask detector is negation-guarded, the placeholder library is refused, no-fit yields the honest note, and the sidechain duck is MEASURED on a rendered mix — bed audible when alone, and adding under 1.5 dB over speech-only when the voice is present. The bed is loudness-normalised (loudnorm I=-28) rather than gain-scaled, because a relative volume multiplies whatever the track was mastered at: the first build did that and produced an inaudible -57.8 dBFS bed that a one-sided assertion still called green. The audibility floor is asserted in BOTH directions for exactly that reason.")
+def _music_v1_cert():
+    import subprocess as _sub, os as _os, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _env = dict(_os.environ)
+    _env.pop("PROMPTLY_MUSIC_V1", None)
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_music_v1.py")],
+                  capture_output=True, text=True, timeout=900, env=_env, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    if "SKIP(no-ffmpeg)" in _out and _r.returncode == 0:
+        return
+    assert _r.returncode == 0 and "ALL PASS" in _out, (
+        "cert_music_v1 FAILED — a placeholder bed may be deliverable, or the duck is not real.\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1500:])
+
+
 @check("UPSCALE v1: THE NOTE FOLLOWS THE ARTIFACT, NEVER THE INTENT (2026-08-12, RULE-1). 195 asks say 4K/8K/HD/upscale [JUDGE 2026-08-10] and 100% dropped; the negotiation shipped the honesty and this is the half that makes the answer a yes. The thing that must be certified is NOT 'does ffmpeg run' — it is that the user's note is derived from the produced ARTIFACT and never from the intent. Promising 4K because we tried is the exact dishonesty the negotiation exists to end, and it is the one failure mode that would make this capability worse than not shipping it. Runs cert_upscale_v1.py: dark by default, a real 1080x1920 fixture through the real pass producing a verified 2160x3840 file WITH audio, the delivered note explicitly disclaiming invented detail (a resample is not super-resolution), and every failure path — missing/empty/corrupt source, timeout — returning None so the honest 'not yet' note is what the user reads. rc==0 is not success: the output is probed for real dimensions and a non-trivial size before it is called delivered. Threads pinned so the derivative is byte-identical. Runs ONLY on an explicit ask, so the $0.10/job law is untouched for everyone who did not ask. No Modal, no Gemini, no network; SKIPs loudly on a box without ffmpeg rather than failing the build.")
 def _upscale_v1_cert():
     import subprocess as _sub, os as _os, sys as _sys

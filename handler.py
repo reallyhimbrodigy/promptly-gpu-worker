@@ -699,6 +699,144 @@ def _parse_upscale_request(text):
     return False
 
 
+# ── BACKGROUND MUSIC v1 (DARK behind PROMPTLY_MUSIC_V1, 2026-08-12) ──────────
+# 72 recorded asks for background music, and nothing transforms the perceived
+# quality of short-form like a bed under the voice. It sits on the
+# _UNSUPPORTED_CAPABILITIES list today, which is honest but is an apology.
+#
+# THE SAFETY PROPERTY THAT LETS THIS LIVE IN THE REPO BEHIND A FLAG:
+# every track in assets/music/ is a SYNTHESIZED PLACEHOLDER, and the manifest
+# marks each `deliverable: false`. _music_pick_bed REFUSES any track that is not
+# explicitly deliverable, so flipping PROMPTLY_MUSIC_V1 today delivers NO music
+# and emits the honest note instead. The mechanism is fully exercised; the audio
+# a user receives is gated on the owner's licensing pick, not on a flag. A
+# placeholder can never reach a user by accident, only by someone editing a
+# licence record — which the deploy gate asserts against.
+#
+# THE VOLUME LAW, stated as numbers so it is arguable rather than vibes:
+#   bed target       -28 LUFS integrated (absolute) — present, never competing
+#   duck under speech -14 dB further (0.02 linear) — the voice is the product
+#   attack/release    20ms / 400ms — fast enough to clear a word onset, slow
+#                     enough that the bed does not pump between words
+# The bed is ducked by SIDECHAIN off the speech itself, not by a static
+# schedule: a schedule drifts the moment a cut moves, and the whole point of the
+# shared-clock law is that we do not keep two clocks for one thing.
+
+_MUSIC_BED_LUFS = -28.0          # bed target, ABSOLUTE (loudnorm I=), not relative gain
+_MUSIC_BED_DBFS = -20.0          # legacy reference for the ducked ceiling
+_MUSIC_DUCK_DB = -14.0           # additional attenuation under speech
+_MUSIC_ATTACK_MS = 20
+_MUSIC_RELEASE_MS = 400
+_MUSIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "music")
+
+_MUSIC_ASK_RE = re.compile(
+    r"\b(?:add|include|put|overlay|with|lay|drop|throw|want|need)\b[^.!?\n]{0,32}?"
+    r"\b(?:music|soundtrack|song|score|backing\s+track|background\s+music)\b"
+    r"|\bbackground\s+music\b|\bmusic\s+(?:bed|under|behind)\b",
+    re.IGNORECASE)
+_MUSIC_NEG_RE = re.compile(
+    r"\b(?:no|without|don'?t|dont|remove|not|mute)\b[^.!?\n]{0,24}$", re.IGNORECASE)
+
+
+def _music_v1_enabled(input_data=None):
+    """DARK by default. Independent of the honesty note: the note must keep
+    firing while this is off, or an ask goes silent."""
+    if input_data and input_data.get("music_v1_test"):
+        return True
+    return os.environ.get("PROMPTLY_MUSIC_V1", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _parse_music_request(text):
+    """True when the user explicitly asks for a music bed. Negation-guarded —
+    'no music' is a NEGATIVE and belongs to the deterministic strip, never here."""
+    _t = str(text or "")
+    for _m in _MUSIC_ASK_RE.finditer(_t):
+        if _MUSIC_NEG_RE.search(_t[:_m.start()]):
+            continue
+        return True
+    return False
+
+
+def _music_load_manifest(music_dir=None):
+    """The library, or [] when there isn't one. Never raises — a missing or
+    malformed manifest means 'no fit', which is an honest note, not a failure."""
+    _d = music_dir or _MUSIC_DIR
+    try:
+        with open(os.path.join(_d, "manifest.json"), encoding="utf-8") as _f:
+            _m = json.load(_f)
+        return _m.get("tracks") or []
+    except Exception:
+        return []
+
+
+def _music_pick_bed(vibe, music_dir=None):
+    """Choose a DELIVERABLE bed whose mood matches the vibe. Returns the track
+    dict or None.
+
+    THE REFUSAL IS THE POINT. A track is eligible only when `deliverable` is
+    exactly True AND its file exists. Placeholders (deliverable:false) are
+    therefore invisible to delivery no matter what the flag says, and 'no
+    eligible track' resolves to the honest note rather than to silence or to
+    shipping unlicensed audio."""
+    _tracks = [t for t in _music_load_manifest(music_dir)
+               if isinstance(t, dict) and t.get("deliverable") is True
+               and os.path.exists(os.path.join(music_dir or _MUSIC_DIR, str(t.get("file") or "")))]
+    if not _tracks:
+        return None
+    _v = str(vibe or "").lower()
+    for _t in _tracks:                      # a named mood in the vibe wins
+        for _mood in (_t.get("mood") or []):
+            if str(_mood).lower() in _v:
+                return _t
+    return _tracks[0]                       # otherwise the library's first bed
+
+
+def _music_filter_chain(music_label="1:a", speech_label="0:a", out_label="amixed"):
+    """The ffmpeg filter that puts a bed under a voice.
+
+    Sidechain, not a schedule: the duck follows the ACTUAL speech envelope, so it
+    stays correct when a cut moves. A static duck schedule would be a second
+    clock over the same audio — the class the shared-clock law exists to stop.
+
+    The speech is split because it is needed twice: once as the sidechain KEY
+    and once as the thing being mixed. Reusing one label silently produces an
+    empty stream in ffmpeg's graph."""
+    _duck_ratio = 20
+    # LOUDNESS-NORMALISED, NOT GAIN-SCALED. A relative `volume=` multiplies
+    # whatever the track already had, so a bed's real level depends on how hot
+    # the source file was mastered — and a library of licensed tracks will vary
+    # by 20 dB. The first build did exactly that and produced a bed at -57.8
+    # dBFS: inaudible, i.e. the feature shipping as a no-op that every test
+    # still passed. loudnorm targets an ABSOLUTE integrated loudness, so every
+    # track in any library lands at the same place under the voice.
+    return (
+        f"[{speech_label}]asplit=2[sc][sp];"
+        f"[{music_label}]loudnorm=I={_MUSIC_BED_LUFS}:TP=-2:LRA=7,"
+        f"aloop=loop=-1:size=2e9[bed];"
+        f"[bed][sc]sidechaincompress=threshold=0.03:ratio={_duck_ratio}:"
+        f"attack={_MUSIC_ATTACK_MS}:release={_MUSIC_RELEASE_MS}:makeup=1[ducked];"
+        f"[sp][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[{out_label}]"
+    )
+
+
+_MUSIC_NO_FIT_NOTE = (
+    "You asked for background music — Promptly doesn't have a music library it "
+    "can licence to you yet, so this edit ships without a bed rather than with "
+    "music we don't have the rights to hand you."
+)
+
+
+def _music_note(delivered, track=None):
+    """One place decides which truth the user hears — derived from whether a bed
+    was actually mixed, never from the ask. Same law as the upscale note."""
+    if delivered and track:
+        return (f"You asked for background music — added a bed ({track.get('id')}) "
+                "under your audio, ducked automatically so your voice stays on top.")
+    return _MUSIC_NO_FIT_NOTE
+
+
 def _parse_unsupported_requests(text):
     """User asks the pipeline understands but can't fulfill YET → honest surfacing
     strings, deduped in order. The trust fix: the user always knows done-or-can't,
@@ -7846,6 +7984,16 @@ already follow) and return when the face leads again."""
     if _dwell_enabled():
         system_instruction = _apply_dwell_swap(system_instruction)
 
+    # ARM 7 (dark): neutralise the payoff register prose — the clean test of
+    # payoff purity. Mutually exclusive with DWELL by construction: both rewrite
+    # the same payoff block, so running them together would measure neither.
+    if _payoff_open_enabled():
+        if _dwell_enabled():
+            raise RuntimeError(
+                "PROMPTLY_PAYOFF_OPEN and PROMPTLY_DWELL both rewrite the payoff "
+                "prose — running both measures neither arm. Enable exactly one.")
+        system_instruction = _apply_payoff_open_swap(system_instruction)
+
     # FIX 3 (dark) — SCAFFOLD RELOCATION (Zac GO 2026-07-31). The lean response
     # schema carries no per-moment prose (what_i_saw / why_emphasis / what_lands /
     # viewer_feeling) and no per-cut reason — those were telemetry-only, and their
@@ -12350,7 +12498,9 @@ def _zoom_claim_variants():
         _types = ZOOM_ARC_HOMES[_pos]
         # 6th arm (dark): ADD SnapReframe as a payoff OPTION so the model can choose
         # punch at the payoff (structurally unreachable today). Off = byte-identical.
-        if _pos == "payoff" and _payoff_punchy_enabled():
+        # Arm 7 IMPLIES arm 6: widening the enum alone is not the clean test, so
+        # PROMPTLY_PAYOFF_OPEN also opens the enum.
+        if _pos == "payoff" and (_payoff_punchy_enabled() or _payoff_open_enabled()):
             _types = tuple(_types) + ("SnapReframe",)
         _props = {"arc_position": {"type": "string", "enum": [_pos]},
                   "type": {"type": "string", "enum": sorted(_types)}}
@@ -12583,6 +12733,92 @@ def _apply_dwell_swap(system_instruction):
         if _old not in system_instruction:
             raise RuntimeError("DWELL A/B: OLD payoff block not found verbatim — "
                                f"prompt drifted; cannot A/B ({_old[:60]!r}...)")
+        system_instruction = system_instruction.replace(_old, _new, 1)
+    return system_instruction
+
+
+# ── ARM 7 — THE CLEAN TEST OF PAYOFF PURITY (2026-08-12) ─────────────────────
+# Arm 6 (_payoff_punchy_enabled) widens the ENUM so a punchy payoff becomes
+# sayable. Its own pre-registered read says a null result there is INCONCLUSIVE,
+# not a confirmation, and names exactly why:
+#
+#   "the base payoff prose still tells the model 'a snap reads as just another
+#    mid_peak', so a null may be OBEYANCE, not judgement. The clean test of
+#    payoff-purity is a 7th arm with BOTH the enum widened AND the payoff prose
+#    neutralised."
+#
+# This is that arm. It implies arm 6 (widening the enum alone is not the test),
+# so PROMPTLY_PAYOFF_OPEN=1 turns BOTH on.
+#
+# WHY IT IS BUILT NOW rather than after arm 6 returns null: the arm-6 docstring
+# says "built ONLY if arm 6 comes back null", and arm 6 has never run — the A/B
+# has no data at all. Waiting would make ignition SERIAL: run arm 6, read it,
+# build arm 7, find another window, run again. Both arms dark costs nothing
+# until they are run, and having both lets ONE differ pass separate obeyance
+# from judgement. That is a scheduling change, not a change to the ruling.
+#
+# NEUTRALISED, NOT REVERSED — the distinction is the whole validity of the test.
+# The swap REMOVES the prohibition ("a snap would read as just another
+# mid_peak", the register-fixing) and KEEPS the requirement (the payoff is the
+# biggest moment and must commit). It never tells the model to be punchy. A
+# prose that argued FOR a snap would just measure the new instruction instead of
+# the model's taste, which is the same defect in the opposite direction.
+#
+# WHAT THE OWNER'S RULING IS, stated plainly because this arm exists to test it
+# and must not misrepresent it: payoff purity is HIS, twice-expressed
+# [CODE handler.py:1215 doctrine line; :6997 prompt prose], and it is coherent —
+# "the slow commitment IS what makes the payoff bigger than every beat before
+# it." 0/253 is not evidence of a bug. It is evidence the rule is being obeyed.
+# This arm does not overturn anything; it produces the pixels his ruling should
+# stand or fall on.
+
+_PAYOFF_OPEN_SWAPS = [
+    # The prose that fixes the register. Neutralised: commitment stays, the
+    # no-snap prohibition and the register-fixing go.
+    ("payoff → COMMITMENT: the slowest and deepest move of the video, holds to the end. "
+     "THIS position fixes its register regardless of vibe — the slow commitment IS what "
+     "makes the payoff bigger than every beat before it; a snap would read as just "
+     "another mid_peak. This is the one place the moment outranks \"what feels punchy\": "
+     "even a viral payoff commits.",
+     "payoff → COMMITMENT: the deepest and most committed move of the video, holds to "
+     "the end. What makes the payoff bigger than every beat before it is the COMMITMENT "
+     "— the depth of the move and the hold that follows it. Choose the register the "
+     "moment and the vibe actually ask for."),
+]
+
+
+def _payoff_open_enabled():
+    """ARM 7 (dark): enum widened AND payoff prose neutralised — the clean test.
+
+    Implies arm 6: this returns True only for its own flag, and the caller ORs
+    the two, so PROMPTLY_PAYOFF_OPEN=1 widens the enum as well. Off =
+    byte-identical (no swap attempted, enum untouched).
+
+    PRE-REGISTERED READ, fixed before any data exists:
+      * a punchy payoff IS picked  -> payoff purity was OBEYANCE, not the
+        model's judgement. Report which beats picked it, render the pairs, and
+        the owner rules on PIXELS — never on this flag.
+      * still NEVER picked, prose neutral and enum open -> the model agrees with
+        the ruling on its own. That is a real CONFIRMATION, which arm 6 alone
+        could never produce.
+      * picked but the pairs read WORSE -> the ruling is vindicated on pixels,
+        which is the strongest possible outcome for it.
+    No outcome here changes anything by itself. It produces the evidence."""
+    return os.environ.get("PROMPTLY_PAYOFF_OPEN", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _apply_payoff_open_swap(system_instruction):
+    """Neutralise the payoff register prose. RAISES on drift, exactly like the
+    DWELL swap: a silent no-op would fake a null result, and a faked null here
+    would read as 'the model agrees with the ruling' — the most expensive wrong
+    conclusion this arm can produce."""
+    for _old, _new in _PAYOFF_OPEN_SWAPS:
+        if _old not in system_instruction:
+            raise RuntimeError(
+                "PAYOFF_OPEN A/B: payoff prose not found verbatim — prompt drifted; "
+                f"cannot A/B ({_old[:60]!r}...)")
         system_instruction = system_instruction.replace(_old, _new, 1)
     return system_instruction
 
