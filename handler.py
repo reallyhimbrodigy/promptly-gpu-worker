@@ -560,6 +560,122 @@ _UPSCALE_NEGOTIATION_NOTE = (
 )
 
 
+# ── UPSCALE v1 — THE SUBSTANCE BEHIND THE NEGOTIATION (2026-08-12) ───────────
+# The negotiation note above is honest but it is an apology: "not in Promptly
+# yet". 195 asks, 100% dropped. This is the half that makes the answer a YES.
+#
+# WHAT IT IS: a local ffmpeg enhance pass on the finished master —
+# lanczos to 2160x3840 (exactly 2x the 1080x1920 render canvas, so no
+# resampling artefacts from a non-integer factor) plus a light unsharp. No
+# Gemini, no model, no second render. It is a DERIVATIVE EXPORT the user asked
+# for, exactly like the watermark pass — the single-pass law governs RENDERS,
+# not derivatives of a finished one.
+#
+# WHAT IT IS NOT: super-resolution. It cannot invent detail that was never
+# captured, and the note must never imply it does. A 1080p source scaled to 4K
+# is a genuinely larger, cleanly-resampled file — which is what "export at 4K"
+# means to a user shipping to a 4K-capable feed — and saying more than that
+# would be the same dishonesty the negotiation exists to end.
+#
+# COST DISCIPLINE: it runs ONLY on an explicit ask (195 of ~2,200 jobs), never
+# by default, so the $0.10/job law is untouched for everyone who did not ask.
+# Bounded by its own timeout, and a failure NEVER costs the delivered video —
+# it degrades to the original negotiation note, which was already true.
+#
+# DETERMINISM: threads pinned to _X264_ENCODE_THREADS like every other encode
+# here, so the artefact is byte-identical on a fixed input across any cpu.
+
+_UPSCALE_V1_W, _UPSCALE_V1_H = 2160, 3840        # 2x the 1080x1920 canvas
+_UPSCALE_V1_TIMEOUT_S = 600
+
+
+def _upscale_v1_enabled(input_data=None):
+    """DARK by default. PROMPTLY_UPSCALE_V1=1 arms the real pass.
+
+    Independent of PROMPTLY_UPSCALE_NEGOTIATE: the negotiation can ship alone
+    (honest apology), but the pass must never ship without it, because the note
+    is what tells the user the 4K file exists."""
+    if input_data and input_data.get("upscale_v1_test"):
+        return True
+    return os.environ.get("PROMPTLY_UPSCALE_V1", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _upscale_to_4k(src_path, out_path, timeout_s=_UPSCALE_V1_TIMEOUT_S):
+    """Lanczos 2x + light unsharp to 2160x3840. Returns out_path or None.
+
+    NEVER raises: this runs after a delivered render, and an enhance pass that
+    can fail a finished video would be a defect far worse than the ask it
+    serves. rc==0 is not success — the ARTIFACT is (the law that produced the
+    canon/concat/extract artifact checks), so the output is probed for a real
+    video stream and a non-trivial size before it is called delivered."""
+    try:
+        if not src_path or not os.path.exists(src_path):
+            return None
+        _vf = (f"scale={_UPSCALE_V1_W}:{_UPSCALE_V1_H}:flags=lanczos,"
+               "unsharp=luma_msize_x=5:luma_msize_y=5:luma_amount=0.6")
+        _cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", src_path,
+            "-vf", _vf,
+            # Same idiom as every other render-path encode here
+            # (-x264-params threads=N), not ffmpeg's -threads: the deploy gate's
+            # byte-identity check recognises this form, and matching the
+            # codebase beats widening a safety guard to fit new code.
+            "-c:v", "libx264", "-preset", "medium", "-crf", "18",
+            "-x264-params", f"threads={_X264_ENCODE_THREADS}",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "copy",
+            "-movflags", "+faststart",
+            out_path,
+        ]
+        _r = subprocess.run(_cmd, capture_output=True, timeout=timeout_s)
+        if _r.returncode != 0:
+            print(f"[upscale-v1] ffmpeg rc={_r.returncode}: "
+                  f"{(_r.stderr or b'')[-300:]!r}", flush=True)
+            return None
+        # ARTIFACT CHECK — rc==0 is not success.
+        if not os.path.exists(out_path) or os.path.getsize(out_path) < 100_000:
+            print("[upscale-v1] output missing or stub — not delivered", flush=True)
+            return None
+        _probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width,height", "-of", "csv=p=0", out_path],
+            capture_output=True, timeout=60)
+        _dims = (_probe.stdout or b"").decode().strip()
+        if not _dims.startswith(f"{_UPSCALE_V1_W},{_UPSCALE_V1_H}"):
+            print(f"[upscale-v1] wrong dimensions {_dims!r} — not delivered", flush=True)
+            return None
+        return out_path
+    except subprocess.TimeoutExpired:
+        print(f"[upscale-v1] timed out after {timeout_s}s — delivering 1080p", flush=True)
+        return None
+    except Exception as _e:
+        print(f"[upscale-v1] failed ({type(_e).__name__}: {_e}) — delivering 1080p",
+              flush=True)
+        return None
+
+
+# The note the user reads when the 4K file EXISTS. Truthful about what was and
+# was not done: a cleanly resampled larger file, not invented detail.
+_UPSCALE_DELIVERED_NOTE = (
+    "You asked for 4K — your edit is also exported at 2160x3840 alongside the "
+    "1080p version. It is a clean high-quality resample of your footage, not "
+    "invented detail: it will look its best on a 4K-capable screen, and the "
+    "1080p file is what TikTok, Reels and Shorts actually serve."
+)
+
+
+def _upscale_note(delivered):
+    """One place decides which truth the user hears.
+
+    delivered=True only when the artifact was produced AND verified. The note
+    is derived from the RESULT, never from the intent — promising 4K because we
+    tried is the exact failure this whole capability is meant to end."""
+    return _UPSCALE_DELIVERED_NOTE if delivered else _UPSCALE_NEGOTIATION_NOTE
+
+
 def _upscale_negotiate_enabled(input_data=None):
     """DARK by default. PROMPTLY_UPSCALE_NEGOTIATE=1 arms the negotiation
     note globally; input_data.upscale_negotiate_test is the per-job override
@@ -39424,12 +39540,51 @@ def handler(job):
         # note-coverage are measurable. Flag off ⇒ byte-identical.
         if _upscale_negotiate_enabled(input_data) and \
                 _parse_upscale_request(_honesty_intent_text):
-            _capability_notes.append(_UPSCALE_NEGOTIATION_NOTE)
+            # UPSCALE v1 (2026-08-12): when the real pass is armed, RUN it and
+            # let the ARTIFACT choose the note. A note derived from the intent
+            # would promise 4K because we tried — the exact dishonesty this
+            # capability exists to end. Only on an explicit ask, so the
+            # $0.10/job law is untouched for everyone who did not ask.
+            _upscale_key = None
+            _upscale_delivered = False
+            if _upscale_v1_enabled(input_data):
+                try:
+                    _up_out = os.path.join(work_dir, "upscaled_4k.mp4")
+                    _up_t0 = time.time()
+                    if _upscale_to_4k(output_path, _up_out):
+                        # Same private-export prefix and uploader as the clean
+                        # master, so the 4K file inherits its access model
+                        # rather than inventing a second one.
+                        # Bucket/key derived HERE from upload_url — _aws_b/_aws_k
+                        # are locals of the other routes' functions, not of this
+                        # one. pyflakes caught the borrow before it shipped.
+                        _up_b, _up_k = _parse_aws_s3_url(upload_url)
+                        if _up_b and _aws_s3_client:
+                            _upscale_key = f"exports/{job_id}/upscaled_4k.mp4"
+                            _aws_s3_client.upload_file(
+                                _up_out, _up_b, _upscale_key,
+                                ExtraArgs={"ContentType": "video/mp4"},
+                                Config=_S3_TRANSFER_CONFIG)
+                            _upscale_delivered = True
+                            print(f"[upscale-v1] delivered s3://{_up_b}/{_upscale_key} "
+                                  f"in {time.time() - _up_t0:.1f}s", flush=True)
+                        else:
+                            print("[upscale-v1] no S3 target — 4K made but not "
+                                  "deliverable; falling back to the honest note", flush=True)
+                    if _upscale_delivered and isinstance(edit_plan, dict):
+                        edit_plan["_upscale_4k_key"] = _upscale_key
+                except Exception as _up_e:
+                    print(f"[upscale-v1] wiring failed (non-fatal): {_up_e}", flush=True)
+                if not _upscale_delivered:
+                    _upscale_key = None
+            _capability_notes.append(_upscale_note(_upscale_delivered))
             _record_divergence(
                 "honesty", {"ask": "upscale",
                             "text": str(_honesty_intent_text)[:120]},
-                "upscale_negotiated",
-                reason="explicit resolution/upscale ask → honest negotiation note")
+                "upscale_delivered" if _upscale_delivered else "upscale_negotiated",
+                reason=("explicit resolution/upscale ask → 4K export delivered"
+                        if _upscale_delivered
+                        else "explicit resolution/upscale ask → honest negotiation note"))
         _requested_broll = _parse_broll_requests(vibe)
         if _requested_broll:
             _resolved_kw = " ".join(str(_e.get("keyword") or "") for _e in resolved_broll_out).lower()
@@ -39485,6 +39640,12 @@ def handler(job):
             # completion write reads it off this payload — without it the main
             # path would persist NULL and the gate would fall back on every job.
             "clean_export_key": (edit_plan or {}).get("_clean_export_key"),
+            # UPSCALE v1: the 4K derivative's private key. Rides the EXPLICIT
+            # allowlist by name — the same shape that silently swallowed
+            # error_subcode until it was added. NULL means "not asked for, or
+            # the pass did not deliver", and the note the user reads is derived
+            # from the same fact.
+            "upscale_4k_key": (edit_plan or {}).get("_upscale_4k_key"),
             "render_time": round(render_elapsed, 1),
             "pipeline_time": round(_timings.get("total", 0), 1),
             # SA-0: full per-stage wall-clock decomposition (seconds).
@@ -39622,6 +39783,7 @@ def handler(job):
                 # "old job / no clean asset", and the gate falls back rather than
                 # signing a key that does not exist.
                 "clean_export_key": result_payload.get("clean_export_key"),
+                "upscale_4k_key": result_payload.get("upscale_4k_key"),
                 # RE-EDIT HYDRATION (2b): persist the tiny (~15KB measured) re-edit
                 # inputs here too, so a double-loss completion recovery (dispatch
                 # Supabase fallback) can still restore the Re-edit button — "no

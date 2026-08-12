@@ -40,10 +40,22 @@ def _extract_block():
         src = f.read()
     start = src.index("_UPSCALE_ASK_RE = re.compile(")
     tail = src[start:]
+    # UPSCALE v1 (2026-08-12) landed _upscale_v1_enabled / _upscale_to_4k /
+    # _upscale_note between the regexes and the negotiation predicates. The
+    # extractor stops at the first def OUTSIDE this allowlist, so the new
+    # functions have to be named here or the block truncates and every lookup
+    # below KeyErrors. (Same breakage cert_mg_obey hit when COMPONENT_OBEY
+    # landed — this extraction style is load-bearing and brittle by design.)
     m = re.search(r"\ndef (?!_upscale_negotiate_enabled|"
-                  r"_parse_upscale_request)", tail)
+                  r"_parse_upscale_request|_upscale_v1_enabled|"
+                  r"_upscale_to_4k|_upscale_note)", tail)
     block = tail[:m.start()] if m else tail
-    ns = {"re": re, "os": os}
+    # _upscale_to_4k shells out and pins threads, so the exec namespace needs
+    # those names; the cert never CALLS it (cert_upscale_v1.py owns the real
+    # pass), it only needs the block to compile.
+    import subprocess as _sp
+    ns = {"re": re, "os": os, "subprocess": _sp, "print": print,
+          "_X264_ENCODE_THREADS": 48}
     exec(compile(block, "handler.py<upscale>", "exec"), ns)
     return ns
 
@@ -111,10 +123,20 @@ def _wiring():
     i_touch = h.index("_upscale_negotiate_enabled(input_data)")
     assert i_touch > i_parse, \
         "negotiation touchpoint no longer follows the unsupported-notes parse"
-    assert "_capability_notes.append(_UPSCALE_NEGOTIATION_NOTE)" in h, \
+    # UPSCALE v1 (2026-08-12) replaced the unconditional append with one that
+    # asks _upscale_note() which truth to tell. The GUARANTEE is unchanged and
+    # stronger: a note still lands on every ask, and now it is derived from the
+    # produced ARTIFACT rather than from the intent. Asserting the old literal
+    # would have pinned the weaker version forever.
+    assert "_capability_notes.append(_upscale_note(" in h, \
         "the note no longer lands in capability_notes"
+    assert "_upscale_note(_upscale_delivered)" in h, \
+        ("the note is no longer derived from whether the 4K file was actually "
+         "delivered — a note chosen from the INTENT promises 4K because we tried")
     assert '"upscale_negotiated"' in h, \
         "the upscale_negotiated divergence (the demand counter) is gone"
+    assert '"upscale_delivered"' in h, \
+        "the upscale_delivered divergence is gone — delivered and negotiated must be counted apart"
 
 
 def main():

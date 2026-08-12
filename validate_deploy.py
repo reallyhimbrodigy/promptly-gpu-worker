@@ -9046,6 +9046,23 @@ def _completion_post_carries_url():
         'edit_plan["_rendered_video_url"]).')
 
 
+@check("UPSCALE v1: THE NOTE FOLLOWS THE ARTIFACT, NEVER THE INTENT (2026-08-12, RULE-1). 195 asks say 4K/8K/HD/upscale [JUDGE 2026-08-10] and 100% dropped; the negotiation shipped the honesty and this is the half that makes the answer a yes. The thing that must be certified is NOT 'does ffmpeg run' — it is that the user's note is derived from the produced ARTIFACT and never from the intent. Promising 4K because we tried is the exact dishonesty the negotiation exists to end, and it is the one failure mode that would make this capability worse than not shipping it. Runs cert_upscale_v1.py: dark by default, a real 1080x1920 fixture through the real pass producing a verified 2160x3840 file WITH audio, the delivered note explicitly disclaiming invented detail (a resample is not super-resolution), and every failure path — missing/empty/corrupt source, timeout — returning None so the honest 'not yet' note is what the user reads. rc==0 is not success: the output is probed for real dimensions and a non-trivial size before it is called delivered. Threads pinned so the derivative is byte-identical. Runs ONLY on an explicit ask, so the $0.10/job law is untouched for everyone who did not ask. No Modal, no Gemini, no network; SKIPs loudly on a box without ffmpeg rather than failing the build.")
+def _upscale_v1_cert():
+    import subprocess as _sub, os as _os, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _env = dict(_os.environ)
+    for _k in ("PROMPTLY_UPSCALE_V1", "PROMPTLY_UPSCALE_NEGOTIATE"):
+        _env.pop(_k, None)   # the cert owns its arms; a leaked flag makes dark dishonest
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_upscale_v1.py")],
+                  capture_output=True, text=True, timeout=900, env=_env, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    if "SKIP(no-ffmpeg)" in _out and _r.returncode == 0:
+        return   # no ffmpeg on this box: recorded, not a build failure (C2's lesson)
+    assert _r.returncode == 0 and "ALL PASS" in _out, (
+        "cert_upscale_v1 FAILED — the upscale note may not match what was produced.\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1500:])
+
+
 @check("ADAPTER #2 (MULTI_CLIP) RESOLVES TO ONE VIDEO ON ONE CLOCK (2026-08-12, RULE-1): 'combine my clips' is top-tier demand and fully buildable without Gemini, and the socket was frozen in adapter_contract.py BEFORE the capability existed so the build could be checked against a written contract instead of a memory of one. The law that matters is the clock: N clips resolve to ONE stitched video, and word timings are re-clocked onto that timeline as a SINGLE index space, so a plan's word indices mean exactly what they mean on adapter #1. A second clock here is the class the shared-clock law exists to prevent and would stay invisible until captions drifted on the second clip. Runs cert_multi_clip.py in the gate: structural refusal (0/1 attachments, no path, unmeasured duration, non-parallel word lists), all N refs kept in timeline order with roles and provenance, the caller's FootageRefs NOT mutated, a SILENT clip still advancing the offset (dropping its time slides every later word early — the off-by-a-clip drift), summed duration, a loud refusal when concat has not run, and adapter #1's identity guarantee intact. Zero network, zero Modal, zero Gemini.")
 def _multi_clip_cert():
     import subprocess as _sub, os as _os, sys as _sys
