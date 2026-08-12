@@ -519,3 +519,103 @@ name. n=6, small; flagged, not concluded.
 QUIET (0 in-flight, probe non-vacuous) before each merge; one merge was **held
 ~40 min** on a BUSY window rather than overriding. `PROMPTLY_ALLOW_BUSY_DEPLOY`
 unused.
+
+---
+
+## 2026-08-12 00:10Z — BUILDER: the repair SAVED A USER live; the true root is fixed and BLOCKED on permission
+
+### ✅ THE REPAIR WORKED ON REAL TRAFFIC [MEASURED, watched end to end]
+
+Job `72435e45` (1 user), created 23:54:23Z, wedged at the exact signature
+(`progress=100` / `current_step='complete'` / `status='processing'`). Watched it
+live across its 900s fallback:
+
+```
+00:07:46  status=processing  delivery=None     url=—
+00:09:16  status=processing  delivery=None     url=—
+00:10:01  status=completed   delivery=repair   url=YES     <-- SAVED
+```
+
+Under yesterday's code that user gets *"We had trouble reaching the render
+service"* and a refund for a video that exists. Instead they got the video.
+**1 user saved, observed, not inferred.** `completion_delivery='repair'` is the
+countable proof, exactly as designed.
+
+### 🔬 THE TRUE ROOT — one side read a field the other never wrote
+
+content-studio's fast-path completion write has ALWAYS read
+`body.videoUrl || body.video_url || body.rendered_video_url` [CODE
+server.js:2115]. `send_progress` has ALWAYS posted exactly
+`{job_id, step, pct, message}` [CODE handler.py] — **no URL, ever, including at
+`step='complete'`**.
+
+`video_jobs` carries a CHECK constraint refusing `status='completed'` with no
+deliverable URL (23514 — and it is RIGHT to). So **the fast-path write could
+never satisfy that constraint on its own.** It only ever succeeded when the
+worker's own durable `write_job_status` had already landed the URL. The entire
+completion path has been a **race between two channels, only one of which
+carries the deliverable.** When the durable write was late or lost — the
+postgrest hang bounded in v526, or the in-process projection tail that does not
+survive a restart [CODE lib/completion-reconcile.js] — 23514 refused, the row
+stuck, and ~900s later the user was told their finished video failed.
+
+**Fix at the source:** `send_progress(..., video_url=)` puts the URL in the body
+under the exact key the server already reads, so the fast path writes URL and
+terminal TOGETHER. Both call sites pass a real URL: minimal → `_video_url`;
+talking-head → `edit_plan["_rendered_video_url"]` (**not**
+`result_payload["video_url"]`, which is assigned ~200 lines *after* the call and
+would have sent `None`, changing nothing).
+
+Rule 1 — **gate check 364**, both known-bads fired [MEASURED]: drop `video_url`
+from one `complete` call site → FAIL naming the line; rename the body key to
+`videoURL` → FAIL ("a renamed key reopens the class silently — the POST still
+200s and the field is dropped"). 364 passed / 0 failed with the fix in.
+
+### 🟡 DISPATCH_UNREACHABLE — named. It is this bug wearing the wrong label.
+
+All 25 jobs carry ONE identical detail, 100%: `"dispatch threw: spawned job did
+not complete; reaper will terminalize"` — a **fallback string** used when
+`r.error || r.user_message || row?.error_message` are all empty [CODE
+dispatch-to-modal.js:657]. `httpStatus: null` on all 25. It is not a
+reach-the-render-service failure at all.
+
+| today 2026-08-11 | jobs | users |
+|---|---|---|
+| failing users | — | 40 |
+| DISPATCH_UNREACHABLE | 14 | **14 = 35% of failing users** |
+| …render actually **FINISHED** | 12 | **12 (86%)** |
+| …genuinely never completed | **2** | **2** |
+
+Since 08-06: 25 jobs / 23 users, 48% half-landed. **The class is not rising —
+the write-loss class spiked and inflated it.** The copy blames the render
+service while the render service worked and our own row-write hit 23514. The
+root fix removes ~86% of it; the true residual is **2 users** and flat. No copy
+change made: the label should stop appearing on its own, and that is the watch.
+
+### ⛔ BLOCKED — both worker production actions denied by the permission classifier
+
+Everything is gated, committed and pushed; the window was **open** at the
+attempt. Two commands remain, and neither can run from here:
+
+```
+PROMPTLY_SKIP_REGRESSION=1 PROMPTLY_DEPLOYER=truth-lane ./deploy.sh
+python3 secret_flip.py --key PROMPTLY_PROXY_SAMPLE_FPS --value '' --apply
+python3 secret_flip.py --key PROMPTLY_MEDIA_RESOLUTION  --value '' --apply
+```
+
+`PROMPTLY_SKIP_REGRESSION` is legitimate here and only here: Vertex is still
+down (zero Gemini calls since 08-09), so the corpus would page the owner with a
+FALSE `REGRESSED` (Zac's ruling 2026-08-11). Worker HEAD `dd2dcfb`, gate
+**364/364**, `predeploy_no_regress` unrun (it runs inside deploy.sh).
+
+The secret revert rides this same deploy the moment permission lands — one
+deploy, not two.
+
+### Watches open
+
+| watch | condition | note |
+|---|---|---|
+| `completion_delivery='repair'` share | → ~0 after the worker deploy | **repair firing = the root re-opened.** Non-zero today is expected and correct: the root fix is not deployed yet |
+| `terminal_flip_lost` `props.cause` | → no `update_error`/23514 | the classifier that named this |
+| DISPATCH_UNREACHABLE users/day | → ~2 (the true residual) | 14 today, 86% of it the write-loss class |
+| `/api/health` `.gate` | still **null**, `.build` present | Render is NOT running the declared buildCommand — owner action, unchanged |
