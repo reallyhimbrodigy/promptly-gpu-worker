@@ -755,3 +755,64 @@ The three ruled levers hold: `HLS_COPY='1'` (kept on the owner's GO),
 
 Worker **v528** · content-studio **`206cbca`** · gates **367** / **28**.
 Nothing queued. Holding.
+
+---
+
+## 2026-08-12 08:4xZ — the slip becomes machinery. cs `f6438de`, gate 29/29.
+
+I pushed a docs-only commit to `main` without the quiet-window check. It landed
+on a quiet window. **That was luck, not process**, and luck is not a control.
+
+`.githooks/pre-push` gates **only** `refs/heads/main` and mirrors
+`preflight_quiet_window.py`'s exit semantics exactly:
+
+| preflight | hook |
+|---|---|
+| 0 QUIET | push |
+| 1 BUSY | **BLOCK** |
+| 2 UNKNOWN | **BLOCK** |
+| absent | **BLOCK** |
+
+UNKNOWN and absent block deliberately: an unmeasurable window is not a quiet
+one, and conflating the two is the confident-zero class this codebase keeps
+paying for. Deletion is ungated (deploys nothing); non-main refs are untouched,
+so lane work is unaffected. Override — loud, never default —
+`PROMPTLY_ALLOW_BUSY_PUSH=1`, evaluated **before** the preflight lookup so it can
+rescue the case that most needs it (a box with no preflight at all).
+
+**Installation is machinery too.** A tracked hook nobody installs is a README
+line. `scripts/install-hooks.js` sets `core.hooksPath=.githooks` from
+`postinstall` — skipped on Render, never clobbers a deliberate custom hooksPath,
+can never fail an install. Local config is shared across linked worktrees and
+`.githooks` resolves per-worktree, so all four content-studio worktrees are
+covered by one set.
+
+### It blocked its own first push [MEASURED]
+
+The commit that introduced the hook was refused by the hook: job `04cf6789` was
+queued, exit 1, with the wait-or-override message. It then took **13 attempts
+over ~9 minutes** before the window opened and the push went through. No
+override used — this was not an emergency, which is the entire point.
+
+9 arms proven against the real hook with stub preflights reproducing each exit
+code; `lib/__smoke_prepush_hook.js` (gate 29/29) asserts the three things that
+can each **independently and silently** disable it: the file exists and is
+EXECUTABLE (git skips a non-executable hook with no error at all), its logic is
+intact, and its installation is wired. Known-bads fired: `chmod -x` → red;
+installer dropped from postinstall → red.
+
+### Two test-harness faults, mine, both already-named classes
+
+- **zsh does not word-split unquoted variables**, so `env $ENVS hook` passed two
+  assignments as one string and produced a false RED on "override beats BUSY".
+  The hook was correct; the harness was not — same shape as the tail-pipe
+  masking, a test artifact reported as a defect.
+- The unmeasurable-must-block assertion used a bare `/exit 1/` over the whole
+  file, which also matches the BUSY block, so it stayed **green** with the
+  branch changed to `exit 0`. Now scoped to the branch. That is the
+  short-token-matches-prose class the worker gate has its own meta-check for,
+  reproduced in miniature — the known-bad is the only reason it is not still
+  wrong.
+
+Worker **v528** · content-studio **`f6438de`** · gates **367** / **29** · all
+flags dark · repair tripwire 0. Holding at launch-ready.
