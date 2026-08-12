@@ -211,7 +211,12 @@ Order, one at a time, each on a quiet window:
 4. `PROMPTLY_MG_OBEY`
 5. `PROMPTLY_CAPTION_TRANSLATE`
 6. `PROMPTLY_UPSCALE_NEGOTIATE`
-7. `PROMPTLY_CHAT_ACTIONS` — **only after the iOS router change ships**
+7. `PROMPTLY_CHAT_ACTIONS` — **FLIPS AT LAUNCH** (changed 2026-08-12, see
+   §BUILD 225 below). It no longer waits on the iOS router: that item moved
+   to 226, and 224/225 clients never call `/api/chat/actions` at all, so the
+   flip is invisible to every client in users' hands. The acceptance script
+   exercises it on launch day, and it is already live the day 226 arrives —
+   no second flip, no second window.
 
 Watch per flip: 24h JUDGE scoreboard. For anything claiming to be dark, the
 pass condition is **zero scoreboard movement**.
@@ -266,7 +271,8 @@ Acceptance (from DELIVERY's list): *paywall order changes from the RC dashboard
 Each step is its **own deploy, verified** — never batched:
 
 1. **Server code deploys dark** (`lane/delivery-2`). Nothing changes.
-2. **Owner ships the iOS build** with §1–3. Nothing changes — the server still
+2. **Owner ships build 225** (which carries the export client half). Nothing
+   changes on this step — the server still
    501s.
 3. **`EXPORT_GATE_ENABLED=1`** → the wall arms for new-build users only. Old
    builds keep the fallback until they upgrade (**known and accepted decay** —
@@ -313,6 +319,53 @@ with a real bearer, so quotas and gates hit exactly as production), and
 Source must be a **constructed durable** asset, never user media.
 
 ---
+
+## BUILD 225 — WHAT IT ACTUALLY CONTAINS (recorded 2026-08-12)
+
+`IOS_FINAL_BUILD.md` was frozen with seven items. The build the owner is
+actually shipping is **not all seven**, and the difference changes one flip.
+Recorded here because the flip cascade above must be read against what is really
+in users' hands, not against the spec's wish list.
+
+| item | in 225? | note |
+|---|---|---|
+| 1 — chat router unification | ❌ **226** | the change that makes `/api/chat/actions` reachable |
+| 2 — UI trio | ✅ | |
+| 3 — export gate client half | ✅ | unblocks the export flips |
+| 4 — stop warmup on editor-open | ✅ | |
+| 5 — `rc_identify` retry | ✅ **pre-existing** | already in the tree; nothing to build |
+| 6 — paywall order | ✅ | |
+| 7 — upload leg | ⚠️ **telemetry only** | `upload_attempt` emission ships; the resumable/multipart transfer does NOT |
+
+### The two 226 items
+
+1. **Chat router unification** (item 1) — until it ships, no client calls
+   `/api/chat/actions`.
+2. **The upload leg's substance** (item 7) — resumable/multipart transfer +
+   background `URLSession`. 225 ships only its telemetry.
+
+### What that means, flip by flip
+
+- **`PROMPTLY_CHAT_ACTIONS` FLIPS AT LAUNCH.** Its old gate ("only after the iOS
+  router ships") was written when the router was in 225. With the router in 226
+  the gate would strand a certified capability behind a build that does not
+  exist yet — for no safety gain, because **224 and 225 clients never call the
+  endpoint**, so an armed flag is invisible to every client in users' hands. The
+  acceptance script (demo 1–2) exercises it on launch day against the real
+  endpoint with a real bearer, which is the only exercise it needs. Flipping now
+  also means 226 arrives **already live** — no second flip, no second quiet
+  window, no gap where the client is ready and the server is not.
+- **Export flags wait for 225 to be in USERS' HANDS**, then run DELIVERY's
+  four-step order unchanged. Item 3 is in 225, so the sequence is real; the
+  known-and-accepted decay stands (old builds keep the public-save fallback
+  until they upgrade).
+- **The UNS class is NOT closed by 225.** Item 7 ships telemetry only, so the
+  mechanism — a single non-resumable PUT dying at byte ~zero, 720 users since
+  08-06 — persists until 226. What 225 buys is the missing measurement:
+  `upload_attempt` has fired **0 times** to date, and with it the class can
+  finally be banded by file size, which is the one question the evidence cannot
+  currently answer. Do not read a flat UNS rate after 225 as a failed fix —
+  nothing was fixed; an instrument was added.
 
 ## ABORT / HOLD MATRIX
 
