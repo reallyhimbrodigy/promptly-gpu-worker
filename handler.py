@@ -33038,16 +33038,38 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "post_package": result_payload.get("post_package"),
         },
     )
-    send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
+    send_progress(job_id, "complete", 100, "Your video is ready!", app_url,
+                  video_url=_video_url)
     print(f"[minimal-route] DONE route={_route_name} job={job_id} {time.time() - _t0:.1f}s "
           f"clips={len(_plan.clips)} trans={len(_plan.transitions)} "
           f"hls={'yes' if _hls_url else 'no'}", flush=True)
     return result_payload
 
 
-def send_progress(job_id, step, pct, message, app_url):
+def send_progress(job_id, step, pct, message, app_url, video_url=None):
     """
     POST progress update to the JS server. Fire-and-forget in background thread.
+
+    `video_url` CLOSES THE URL-LESS COMPLETION CLASS (2026-08-12). The server has
+    always read `body.videoUrl || body.video_url || body.rendered_video_url`
+    [CODE content-studio server.js:2115] and this POST has never sent any of
+    them — a seam where one side read a field the other never wrote.
+
+    The consequence was not cosmetic. `video_jobs` carries a CHECK constraint
+    that refuses `status='completed'` with no deliverable URL (23514, and it is
+    RIGHT to). So the server's fast-path completion write could never satisfy it
+    on its own; it only ever succeeded when the worker's OWN durable
+    write_job_status had already landed the URL. Those two race, and when the
+    durable write is late or lost the fast path fails 23514, the row stays
+    non-terminal, and ~900s later the dispatch fallback tells the user their
+    finished video failed. [MEASURED 2026-08-11] 9 users / 32 in one evening;
+    S3 held a playable render for 10/10 probed.
+
+    Sending the URL here makes the fast path able to write URL + terminal
+    TOGETHER — satisfying the constraint at the real completion instead of
+    depending on a race, and independent of the in-process projection seam that
+    does not survive a restart [CODE content-studio lib/completion-reconcile.js].
+
     Never blocks the main pipeline — progress updates are best-effort only.
     """
     # Durable persistence (flag-gated, fail-open, async) — independent of the
@@ -33071,9 +33093,15 @@ def send_progress(job_id, step, pct, message, app_url):
             _secret = os.environ.get("MODAL_CALLBACK_SECRET", "")
             if _secret:
                 headers["X-Modal-Secret"] = _secret
+            _body = {"job_id": job_id, "step": step, "pct": pct, "message": message}
+            # Only when we actually have one. Sending video_url=None would be
+            # indistinguishable from not sending it, but an empty string would
+            # read as a deliverable to a truthy check on the far side.
+            if video_url:
+                _body["video_url"] = video_url
             requests.post(
                 f"{app_url}/api/modal-progress",
-                json={"job_id": job_id, "step": step, "pct": pct, "message": message},
+                json=_body,
                 headers=headers,
                 timeout=3,
             )
@@ -39146,7 +39174,11 @@ def handler(job):
             flush=True,
         )
 
-        send_progress(job_id, "complete", 100, "Your video is ready!", app_url)
+        # edit_plan["_rendered_video_url"] is set at the upload (well before
+        # here); result_payload["video_url"] is only assigned further down, so
+        # reading THAT would send None and change nothing.
+        send_progress(job_id, "complete", 100, "Your video is ready!", app_url,
+                      video_url=(edit_plan or {}).get("_rendered_video_url"))
 
         # ── Build resolved_broll for persistence ──────────────────────────
         # After a live B-roll pick, fetch_broll_clip mutates each broll_entry in-place

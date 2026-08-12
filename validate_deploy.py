@@ -8996,6 +8996,54 @@ def _one_clock_timeline():
         "the tree must nest inside stage_timings (content-studio strips unknown top-level keys)"
 
 
+@check("COMPLETION POST CARRIES THE DELIVERABLE URL (2026-08-12, RULE-1, forged from 9 users in one evening): video_jobs has a CHECK constraint refusing status='completed' with no deliverable URL (23514 — and it is RIGHT to). content-studio's fast-path completion write has ALWAYS read body.videoUrl || body.video_url || body.rendered_video_url (server.js:2115), and send_progress never sent any of them: one side read a field the other never wrote. So that write could only ever satisfy the constraint when the worker's OWN durable write_job_status had already landed the URL — a race. When the durable write was late or lost, 23514 refused, the row stayed non-terminal, and ~900s later the dispatch fallback told the user their finished video FAILED while S3 held the render (10/10 probed, 7.5-42 MB). This asserts the seam stays closed on the worker side: send_progress takes video_url, puts it in the POST body under the exact key the server reads, and BOTH 'complete' call sites pass a real URL expression. A future edit that drops the kwarg, renames the body key, or adds a third completion site that forgets it fails here instead of costing users a finished video.")
+def _completion_post_carries_url():
+    import ast as _ast
+    _src = open("handler.py", encoding="utf-8").read()
+    _tree = _ast.parse(_src)
+
+    _fn = next((n for n in _ast.walk(_tree)
+                if isinstance(n, _ast.FunctionDef) and n.name == "send_progress"), None)
+    assert _fn is not None, "send_progress is gone from handler.py"
+    _args = [a.arg for a in _fn.args.args] + [a.arg for a in _fn.args.kwonlyargs]
+    assert "video_url" in _args, (
+        "send_progress lost its `video_url` parameter — the completion POST can no "
+        "longer carry a deliverable, so every fast-path completion write goes back to "
+        "failing 23514 and racing the durable write.")
+
+    # The body key must be EXACTLY what the server reads. A rename here is
+    # silent: the POST still succeeds, the field is simply ignored forever.
+    _seg = "\n".join(_src.splitlines()[_fn.lineno - 1:_fn.end_lineno])
+    assert '_body["video_url"] = video_url' in _seg, (
+        'send_progress must put the URL in the POST body under the key "video_url" '
+        "(server.js:2115 reads videoUrl / video_url / rendered_video_url). A renamed "
+        "key reopens the class silently — the POST still 200s and the field is dropped.")
+    assert "if video_url:" in _seg, (
+        "the URL must ride only when truthy — an empty string reads as a deliverable "
+        "to the server's truthy check and would satisfy 23514 with nothing behind it.")
+
+    # EVERY completion call site must pass one. This is the leg that a future
+    # third route would otherwise forget.
+    _sites = [n for n in _ast.walk(_tree)
+              if isinstance(n, _ast.Call)
+              and getattr(n.func, "id", None) == "send_progress"
+              and any(isinstance(a, _ast.Constant) and a.value == "complete" for a in n.args)]
+    assert len(_sites) >= 2, (
+        f"expected at least 2 send_progress(...,'complete',...) call sites, found "
+        f"{len(_sites)} — a completion path was removed or renamed; re-verify this gate "
+        "still covers the live ones.")
+    _missing = [s.lineno for s in _sites
+                if not any(k.arg == "video_url" and not (
+                    isinstance(k.value, _ast.Constant) and not k.value.value)
+                    for k in s.keywords)]
+    assert not _missing, (
+        f"send_progress(...,'complete',...) at handler.py line(s) {_missing} does NOT pass "
+        "a video_url. That completion write cannot satisfy the 23514 constraint and will "
+        "hand the job to the ~900s fallback, which tells the user their finished video "
+        "failed. Pass the route's real URL (_video_url, or "
+        'edit_plan["_rendered_video_url"]).')
+
+
 @check("BUNDLE-FRESHNESS GUARD (Zac 2026-08-02, RULE-1, forged from SafeImg nearly shipping inert): a Remotion TSX change ships DEAD if a redeploy reuses a cached bundle without re-running prebundle.mjs — the render then executes STALE compiled JS while the source (and every gate that reads the source) says the fix is present. This gate asserts the anti-inert mechanism is wired on BOTH ends: (1) prebundle.mjs fingerprints every src .ts/.tsx/.mjs into bundle/.src_hash at image-build time, and (2) handler.py defines _assert_bundle_fresh() AND calls it inside render_stage, so the FIRST real render recomputes the live-source hash and refuses (STALE_BUNDLE) if the deployed bundle wasn't built from the deployed source. Fail-open only when the stamp is absent (pre-fingerprint bundle), never on mismatch. One check closes the class forever: a TSX fix can no longer pass every source gate yet render from an old bundle.")
 def _bundle_freshness_guard():
     import os as _os, re as _re3
