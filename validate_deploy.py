@@ -7262,6 +7262,13 @@ def _secret_canonical_values():
         "PROMPTLY_MOTION_BLUR": "1",       # motion-blur path LIVE per readback 2026-08-09
         "PROMPTLY_MIN_OUTPUT_RATIO": "0.20",  # output-ratio floor: reject below 20% of source
         "PROMPTLY_CAPTION_ALIGN": "1",     # caption alignment path LIVE per readback 2026-08-09
+        # ── THE THREE LEVER KEYS, DECIDED 2026-08-12 (owner ruling: date them;
+        # long-lived => keep + register as-is; recent => revert to defaults).
+        # They lived in CANON_PENDING for exactly one day, which is what
+        # CANON_PENDING is for — it is a decision queue, not a parking lot.
+        "PROMPTLY_HLS_COPY": "1",         # KEEP. Owner GO on file naming the key (LANE4_FLIP_HLS_COPY.md) and wanting exactly this value; the filing's "currently off" was an assumption (it measured key NAMES, "values not read"). Its 77s->1s signature is unreadable while the premium routes are extinct, so this is registered on the GO, not on a measurement, and the post-launch A/B stands.
+        "PROMPTLY_MEDIA_RESOLUTION": "",  # REVERTED to default MEDIA_RESOLUTION_MEDIUM. Dated RECENT by fingerprint: Gemini uncached tokens sit flat at 14-16.5k p50 across Aug 2-8 with NO ~9x drop anywhere, and from Aug 9 there are no Gemini calls at all (Vertex outage) — so it was set inside the window where its own effect is unobservable. LAUNCH_DAY §6 rules it "INCONCLUSIVE, do not flip"; it changes what Gemini SEES, and quality wins over speed. Empty restores MEDIUM [CODE handler.py:12476].
+        "PROMPTLY_PROXY_SAMPLE_FPS": "",  # REVERTED to default 18. Same dating and the same reason; 18->2 is ~9x fewer video tokens, i.e. ~9x less visual grounding. Empty restores 18 [CODE handler.py:13444].
     }
     # Secrets are opaque to the SDK — the ONLY way to read a value is inside a
     # container that has it attached. secret_flags_readback.py does exactly that
@@ -7316,20 +7323,10 @@ def _no_unregistered_live_flags():
     # to happen to retire it. Moving a key to CANON asserts its value forever
     # after; that is a production decision and rides the owner's GO naming it.
     CANON_PENDING = {
-        # Owner GO on file naming the key (LANE4_FLIP_HLS_COPY.md, 2026-08-11)
-        # and it wants exactly this value — but the filing believed it was OFF,
-        # so the GO was for a flip that had already happened. Retire by
-        # confirming the intent, then move to CANON.
-        "PROMPTLY_HLS_COPY": "1",
-        # ⚠️ CONTRADICTS LAUNCH_DAY §6: "INCONCLUSIVE, do not flip. Both A/B arms
-        # fell to safe_edit_fallback during the outage, so the lever's own leg
-        # never ran." Both are live anyway. They change what Gemini SEES, and
-        # quality wins over speed by standing law — so this is the owner's call
-        # to confirm or revert, not a gate's to canonize. Retire by decision.
-        "PROMPTLY_MEDIA_RESOLUTION": "MEDIA_RESOLUTION_LOW",
-        "PROMPTLY_PROXY_SAMPLE_FPS": "2",
-        # Route/abort flags consistent with shipped, certified features; never
-        # written down. Retire by confirming and moving to CANON.
+        # Route/abort flags consistent with shipped, certified features and
+        # never written down anywhere. NOT part of the three lever keys the
+        # owner ruled on 2026-08-12. Retire by confirming the intent and moving
+        # each into CANON above.
         "PROMPTLY_SILENT_TO_MOODREEL": "1",
         "PROMPTLY_STRUCTURE_ABORT": "1",
     }

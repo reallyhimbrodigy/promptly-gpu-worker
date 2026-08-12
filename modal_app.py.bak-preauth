@@ -565,22 +565,6 @@ image = (
     .add_local_file("minimal_editor.py", "/minimal_editor.py")
     .add_local_file("moodreel_editor.py", "/moodreel_editor.py")
     .add_local_file("hype_render.py", "/hype_render.py")
-    # LANE-SEAM (DARK behind PROMPTLY_ADAPTER_V1): the input-adapter contract.
-    # handler.py imports it at the recipe call site UNCONDITIONALLY (flag-off
-    # jobs too) precisely so a missing mount surfaces as a ledgered defect on
-    # day one instead of at flip time — the progressive_publish lesson.
-    .add_local_file("adapter_contract.py", "/adapter_contract.py")
-    # LANE-SEAM (DARK behind PROMPTLY_UNIFIED_CORE): guidance profiles + the
-    # unified-core composition seam. Same unconditional-import mount law.
-    .add_local_file("guidance_registry.py", "/guidance_registry.py")
-    .add_local_file("unified_core.py", "/unified_core.py")
-    # LANE-SEAM (DARK behind PROMPTLY_SURGICAL_V2): tweak-op teaching text +
-    # deterministic validators for caption-spelling / add-transition ops.
-    .add_local_file("surgical_ops.py", "/surgical_ops.py")
-    # LANE-SEAM (DARK behind PROMPTLY_CAPTION_TRANSLATE): caption-page
-    # translation — parser + full-or-nothing page rebuild (pure; the Gemini
-    # closure lives in handler's build-site touchpoint).
-    .add_local_file("caption_translate.py", "/caption_translate.py")
     .add_local_file("progressive_publish.py", "/progressive_publish.py")  # W3 previews (DARK) — the cert-found gap: wiring shipped, module didn't
     # recipe_eval.py was missing from this list since the eval was first
     # wired — handler.py imports it at runtime via `from recipe_eval
@@ -664,7 +648,7 @@ prewarm_volume = modal.Volume.from_name("promptly-prewarm-cache", create_if_miss
     # 300s slack) or a healthy long render gets false-reaped mid-flight. Deploy the
     # reaper raise FIRST, this SECOND. Billing is per-active-second, so short jobs
     # (the common case) cost the same as before — the cap only bounds the tail.
-    timeout=1200, retries=0, cpu=16, memory=12288, region="us",  # STALL CAP (Zac GO 2026-08-03 PM): timeout 3000→1800→1200. A 20-min render is one the user abandoned 17 min ago. Zac asked for 900 but the RECIPE WALL-CLOCK gate proves 900 is mathematically incompatible with the 300s source cap: a 300s source render reserve alone (duration*3=900s) consumes the whole 900 budget, leaving nothing for the recipe (min coherent timeout = 1140s = 600 floor + 540 reserve). 1200 is the coherent cut: serves the 30-200s target cleanly (a heavy 60s source ~590s render + ~600 recipe = 1190 < 1200), KILLS >~200s sources (the abandoned p99). Going to 900 needs the SOURCE CAP lowered (Zac #3) or the DURATION-PROPORTIONAL watchdog (~200s+10*source_s, the real fix, queued). PRIOR timeout 3000→1800. Nothing cancels a stalled spawn — the reaper only writes the DB row 5min AFTER Modal's own timeout kills the container, so a stall billed to the FULL 3000s (50min) ≈ $0.71-3/job (spawn-not-complete is the #1 wasted class, 1447s avg wall). 1800s (30min) is 1.43x the LONGEST legit render ever observed (MAX 1256s, p99 900s) + the 300s source cap bounds a 5-min-source render near 1200s, so it is safe against the ACTUAL distribution while cutting the worst case 50→30min (~40% of the waste). MEASURED RISK: watch PLATFORM_TIMEOUT reaps for wall≈1800s — if a legit render ever hits it we raise within a day. Watchdog (progress-aware, kills in minutes) + reaper-cancel are the real fix, next. PRIOR CPU-STARVATION CORRECTION: cpu 8→16. The 8 cut CRASHED completion 78.9%→35.7% (a 480p ultrafast proxy encode blew 30s — CPU starvation) and bought little: job compute was ALREADY ~$0.09 (at the law); the real gap is ~$87/day of NON-JOB warmup/prewarm/idle, which cpu never touched. Memory STAYS 12GiB (measured-safe 5.9-8.2GiB; memory-time is 59% of cost so it carries the bulk of the saving). NOTE: PROMPTLY_RENDER_CORE_BUDGET in the body MUST track this (validate_deploy pins the pair). PRIOR (reverted): cpu 16→8 (~15-20% off) + memory 24GiB→12GiB (~29%). cpu=8 was the SAFE cut: 60cef170 had normalize (149s) EXCEEDING edit_plan (147s) at cpu=16 — there was never slack for cpu=4, but at cpu=8 fps_normalize slows only ~1.5x and stays inside edit_plan on the 60s target. cpu=4 becomes safe ONLY once the fps_normalize SKIP lands (nothing then races edit_plan). memory 24GiB→12GiB. ~15 days to the $1500 cap (~Aug 18) then rendering goes OFFLINE; memory-time is 59% of $/job so this is ~29% off the total. SAFE: the staging-hiccup in-process-render fallback was DISARMED in v444 (it now RAISES, never render_stage), and the non-render peak is 5.9-8.2GiB (cgroup [nonrender-mem] on real traffic) → 12GiB = 1.5-2x headroom. ⚠️ RESIDUAL: sub-floor jobs (<45s output, below the burst floor) still render IN-PROCESS here — a heavy short render could approach 12GiB; WATCHED on real traffic (OOM = exit 137 → raise back to 16-18). inc2 MEMORY DROP (Zac GO 2026-08-02): 64GiB→24GiB, coupled to PROMPTLY_RENDER_BURST=1 LIVE. Render (incl. the >32GiB blur peak) now runs on the cpu=48 render_burst, so this orchestrator NO LONGER renders in-process — its floor is the NON-render peak, measured 5.4-5.9GiB (cgroup-sampled [nonrender-mem] on real v441 traffic), and 24GiB = 4x that with vidstab headroom (a 2.7x memory-time cut, the bulk of $0.41→$0.11). ⚠️ RESIDUAL OOM RISK: the render_burst STAGING-hiccup fallback renders IN-PROCESS here — a blur render on that RARE path would OOM at 24GiB; watched on first shaky/blur fallback. Tighten toward 12GiB only after shaky-job [nonrender-mem] samples confirm the vidstab peak. The old "48GiB floor" was the in-process-render floor and is retired by the burst move. PRIOR: 128GB→64GB on MEASURED 15.7GiB render peak. 3 real renders (incl. a 93s clip) peaked at 15.7GiB render-stage RSS (cgroup-sampled, memory_peak_measure_app) — 64GiB = 4x the measured peak and 2x the 32GB OOM point (blur A/B, a parallel/heavier case). Memory is 59% of $/job, so 128→64 ~halves the dominant term (~$0.355→~$0.25). OOM kills jobs, so sized on the measured number with generous headroom; do NOT drop below 48 (the 32GB OOM floor). PRIOR: EMERGENCY COST CUT (2026-07-30): cpu 64→16 ONLY, memory was UNCHANGED at 128GB. CPU is 77% of the bill ($1153 vs $347 mem) → cpu 64→16 = 4× on 77% with ZERO OOM risk. Memory 128→48GB (2.7× on 23%) is a SEPARATE cert-gated step — the blur A/B OOM'd at 32GB, so 48 is an untested guess between a known-fail and known-pass; step it down only after a real render certs it. retries 2→0: a failing job billed up to 3×; restore post-fix. The app hit the $1500 cap; Phase 1 inc2 (render_burst split) is not yet shipped, so this container held cpu=64/128GB for ~450s/job while only the render stage (~72s) needs the cores — and with PROMPTLY_RENDER_FANOUT=1 the heavy Remotion chunks already run on the cpu=16 render_chunk_fanout containers, so this box was mostly idle-waiting at cpu=64. ~4× cost cut now; render stage slower (~+100-200s, cpu-bound composite/HLS/exports), transcribe/plan/Gemini-wait unaffected (network-bound). 48GB floor: the blur A/B OOM'd at 32GB, so do NOT go lower. Restore/replace with the render_burst split (inc2). Prior A-L3 note: 8 chunks × 4 tabs = 32 tabs at cpu=64 was the platform max.
+    timeout=3000, retries=0, cpu=16, memory=24576, region="us",  # inc2 MEMORY DROP (Zac GO 2026-08-02): 64GiB→24GiB, coupled to PROMPTLY_RENDER_BURST=1 LIVE. Render (incl. the >32GiB blur peak) now runs on the cpu=48 render_burst, so this orchestrator NO LONGER renders in-process — its floor is the NON-render peak, measured 5.4-5.9GiB (cgroup-sampled [nonrender-mem] on real v441 traffic), and 24GiB = 4x that with vidstab headroom (a 2.7x memory-time cut, the bulk of $0.41→$0.11). ⚠️ RESIDUAL OOM RISK: the render_burst STAGING-hiccup fallback renders IN-PROCESS here — a blur render on that RARE path would OOM at 24GiB; watched on first shaky/blur fallback. Tighten toward 12GiB only after shaky-job [nonrender-mem] samples confirm the vidstab peak. The old "48GiB floor" was the in-process-render floor and is retired by the burst move. PRIOR: 128GB→64GB on MEASURED 15.7GiB render peak. 3 real renders (incl. a 93s clip) peaked at 15.7GiB render-stage RSS (cgroup-sampled, memory_peak_measure_app) — 64GiB = 4x the measured peak and 2x the 32GB OOM point (blur A/B, a parallel/heavier case). Memory is 59% of $/job, so 128→64 ~halves the dominant term (~$0.355→~$0.25). OOM kills jobs, so sized on the measured number with generous headroom; do NOT drop below 48 (the 32GB OOM floor). PRIOR: EMERGENCY COST CUT (2026-07-30): cpu 64→16 ONLY, memory was UNCHANGED at 128GB. CPU is 77% of the bill ($1153 vs $347 mem) → cpu 64→16 = 4× on 77% with ZERO OOM risk. Memory 128→48GB (2.7× on 23%) is a SEPARATE cert-gated step — the blur A/B OOM'd at 32GB, so 48 is an untested guess between a known-fail and known-pass; step it down only after a real render certs it. retries 2→0: a failing job billed up to 3×; restore post-fix. The app hit the $1500 cap; Phase 1 inc2 (render_burst split) is not yet shipped, so this container held cpu=64/128GB for ~450s/job while only the render stage (~72s) needs the cores — and with PROMPTLY_RENDER_FANOUT=1 the heavy Remotion chunks already run on the cpu=16 render_chunk_fanout containers, so this box was mostly idle-waiting at cpu=64. ~4× cost cut now; render stage slower (~+100-200s, cpu-bound composite/HLS/exports), transcribe/plan/Gemini-wait unaffected (network-bound). 48GB floor: the blur A/B OOM'd at 32GB, so do NOT go lower. Restore/replace with the render_burst split (inc2). Prior A-L3 note: 8 chunks × 4 tabs = 32 tabs at cpu=64 was the platform max.
     scaledown_window=45,  # COST FIX-4 (2026-07-28): render-container idle. run_pipeline_bg (cpu=64) is spawned per job; at normal traffic (~1 job/30min) each job cold-starts anyway (gap >> scaledown), so the old 180s post-render idle bought ~ZERO reuse — pure cpu=64 idle bleed. 45s still catches spike back-to-back reuse while cutting the idle 4×. (Cold start pays the in-body handler import ~10-12s; snapshot is a no-op here without @enter — acceptable vs the bleed.)
     volumes={"/prewarm": prewarm_volume},
     enable_memory_snapshot=True,
@@ -673,13 +657,6 @@ def run_pipeline_bg(body: dict):
     import sys as _sys, os as _os
     _sys.path.insert(0, "/")
     import handler as _H
-    # RENDER CORE BUDGET = this function's Modal cpu= (Zac 2026-08-03, THIRD
-    # RENDER_FATAL): Remotion's --concurrency limit tracks the cpu REQUEST, which
-    # Python cannot read (cert_core_probe: a cpu=8 box reports 24 for every core
-    # source). Declare it so handler._render_core_budget clamps concurrency to the
-    # RIGHT number for in-process sub-floor renders here. MUST equal cpu= in this
-    # function's decorator — validate_deploy pins the pair.
-    _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16"  # tracks cpu=16 (CPU-starvation correction 2026-08-03 PM); validate_deploy pins budget==cpu
     try:
         _H._install_shutdown_handler()  # Phase 1 safety net on this container too
     except Exception:
@@ -705,7 +682,7 @@ def run_pipeline_bg(body: dict):
     _cpu_stop = _threading.Event()
     _ncores = _os.cpu_count() or 0
 
-    # CGROUP MEMORY accounting (Zac 2026-08-01; CORRECTED 2026-08-03 from the billing page: CPU is 67% of the bill, MEMORY 33% — memory is the MINOR dimension, cpu is the lever. inc2
+    # CGROUP MEMORY accounting (Zac 2026-08-01: memory is 59% of the bill, so inc2
     # is sized on per-stage PEAK RSS, not cores). Read the container's CHARGED memory
     # (cgroup v2 memory.current; v1 memory.usage_in_bytes) — the number that counts
     # toward the OOM limit. Bucket per stage; the per-stage PEAK sizes each inc2
@@ -826,114 +803,35 @@ def run_pipeline_bg(body: dict):
                             for _st, _cs in _cpu_by_stage.items() if _cs}
                         _st_dict["cpu_src"] = _src
                         # PER-STAGE PEAK RSS (Zac 2026-08-01, the PRIORITY line —
-                        # cpu is 67% / memory 33% of the bill, billing page 2026-08-03): sizes each inc2 container.
+                        # memory is 59% of the bill): sizes each inc2 container.
                         _MB = 1024 * 1024
                         _st_dict["mem_by_stage"] = {
                             _st: {"peak_mb": round(max(_ms) / _MB, 1),
                                   "mean_mb": round((sum(_ms) / len(_ms)) / _MB, 1),
                                   "n": len(_ms)}
                             for _st, _ms in _mem_by_stage.items() if _ms}
-                        # FAIL-LOUD (Zac 2026-08-04): a measurement that ships,
-                        # verifies as deployed, and writes ZERO rows silently is the
-                        # exact silent-failure pattern. Log what we wrote + the result
-                        # shape, so a 0-row instrument screams — AND reveals whether the
-                        # DELIVERED completion carries a DIFFERENT stage_timings than the
-                        # one we just wrote into (the suspected root of 0/125 on traffic).
-                        _peak_all = max((max(_ms) for _ms in _mem_by_stage.values() if _ms),
-                                        default=0) / _MB
-                        print(f"[mem-instrument] WROTE telemetry: {len(_mem_by_stage)} stage(s), "
-                              f"peak_rss={_peak_all:.1f}MiB, cpu_src={_src}, "
-                              f"result_top_keys={list(result.keys())[:14]}, "
-                              f"has_output_key={'output' in result}", flush=True)
-                except Exception as _mem_e:
-                    print(f"[mem-instrument] persist FAILED — telemetry LOST: "
-                          f"{type(_mem_e).__name__}: {_mem_e}", flush=True)
-        except Exception as _mem_outer_e:
-            print(f"[mem-instrument] outer telemetry block FAILED: "
-                  f"{type(_mem_outer_e).__name__}: {_mem_outer_e}", flush=True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
     # PRIMARY completion delivery — POST the full result (success payload OR the
-    # classified error envelope) to the app server.
-    # RETRY + PERSISTED REASON (lane/delivery 2026-08-10): the POST used to fire
-    # ONCE, best-effort, and a miss cost the user the full 15-min fallback wall
-    # (41 completed jobs settled at e2e≈900s in the Aug-2..9 week; the Aug-3
-    # secret-flip burst alone 401'd 27 of them). Now: up to 4 attempts with
-    # 5/15/45s backoff (65s worst-case container tail, ~$0.02, only ever paid on
-    # a FAILING path), and when ALL attempts fail the REASON (status codes /
-    # exception types per attempt) is merged durably into video_jobs.result
-    # .callback_post — so the next miss names its own mechanism from a DB query
-    # instead of a Modal-log archaeology dig. The durable row + the dispatcher's
-    # early poll + the 15-min timer remain the recovery layers.
-    # grep marker: [completion-post].
-    _call_id = None
+    # classified error envelope) to the app server. Best-effort: a failed POST
+    # falls back to the dispatch's Supabase recovery + the reaper.
     try:
         _call_id = modal.current_function_call_id()
         _app_url = _os.environ.get("APP_URL", "").rstrip("/")
         _secret = _os.environ.get("MODAL_CALLBACK_SECRET", "")
         if _app_url and _call_id:
             import requests as _requests
-            _cb_ok = False
-            _cb_attempts = []
-            for _cb_i, _cb_delay in enumerate((0, 5, 15, 45)):
-                if _cb_delay:
-                    _time.sleep(_cb_delay)
-                _cb_t0 = _time.time()
-                try:
-                    _cb_resp = _requests.post(
-                        f"{_app_url}/api/modal-complete",
-                        json={"call_id": _call_id, "job_id": body.get("job_id"), "result": result},
-                        headers=({"X-Modal-Secret": _secret} if _secret else {}),
-                        timeout=15,
-                    )
-                    _cb_ms = int((_time.time() - _cb_t0) * 1000)
-                    # status<300 = the server ACCEPTED it (any later double-loss
-                    # on this job is a RACE/projection defect, NOT a delivery
-                    # loss); a non-2xx names an auth/server reject on THIS leg.
-                    _cb_ok = 200 <= _cb_resp.status_code < 300
-                    print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
-                          f"attempt={_cb_i + 1} status={_cb_resp.status_code} ok={_cb_ok} elapsed_ms={_cb_ms}"
-                          + ("" if _cb_ok else f" REJECTED body={_cb_resp.text[:160]!r}"), flush=True)
-                    _cb_attempts.append({"status": _cb_resp.status_code, "ms": _cb_ms})
-                    if _cb_ok:
-                        break
-                except Exception as _cbe:
-                    _cb_ms = int((_time.time() - _cb_t0) * 1000)
-                    print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
-                          f"attempt={_cb_i + 1} EXCEPTION ({type(_cbe).__name__}: {_cbe}) elapsed_ms={_cb_ms}",
-                          flush=True)
-                    _cb_attempts.append(
-                        {"exception": f"{type(_cbe).__name__}: {str(_cbe)[:120]}", "ms": _cb_ms})
-            if not _cb_ok:
-                print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
-                      f"ALL {len(_cb_attempts)} attempts FAILED — durable row + dispatch nets settle; "
-                      f"persisting the reason", flush=True)
-                # Merge the per-attempt reasons into the job's durable result so
-                # the miss mechanism is QUERYABLE (result->callback_post). The
-                # worker's own terminal write long landed; the server tail can't
-                # be running (its trigger — this POST — just failed), so the
-                # read-merge-write races nothing that matters on this rare path.
-                try:
-                    _sb = getattr(_H, "supabase", None)
-                    _jid = body.get("job_id")
-                    if _sb is not None and _jid:
-                        _rows = _sb.table("video_jobs").select("result").eq("id", _jid).execute()
-                        _data = getattr(_rows, "data", None) or []
-                        _cur = (_data[0] or {}).get("result") if _data else None
-                        if not isinstance(_cur, dict):
-                            _cur = {}
-                        _cur["callback_post"] = {
-                            "delivered": False,
-                            "attempts": _cb_attempts,
-                            "at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
-                        }
-                        _sb.table("video_jobs").update({"result": _cur}).eq("id", _jid).execute()
-                        print(f"[completion-post] failure reason persisted to "
-                              f"result.callback_post job={_jid}", flush=True)
-                except Exception as _pe:
-                    print(f"[completion-post] failure-persist FAILED "
-                          f"({type(_pe).__name__}: {_pe}) — logs only", flush=True)
+            _requests.post(
+                f"{_app_url}/api/modal-complete",
+                json={"call_id": _call_id, "job_id": body.get("job_id"), "result": result},
+                headers=({"X-Modal-Secret": _secret} if _secret else {}),
+                timeout=15,
+            )
+            print(f"[run_pipeline_bg] completion POSTed call={_call_id} job={body.get('job_id')}", flush=True)
     except Exception as _e:
-        print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
-              f"EXCEPTION ({type(_e).__name__}: {_e}) — dispatch fallback + reaper will settle", flush=True)
+        print(f"[run_pipeline_bg] completion POST failed ({_e}) — dispatch fallback + reaper will settle", flush=True)
     return result
 
 
@@ -1082,7 +980,7 @@ def render_chunk_fanout(s3_prefix: str, files_manifest: list, render_kind: str,
 # below 49152 (48 GiB); validate_deploy guards it. App image + all 4 secrets
 # (promptly-secrets/cloudfront/gemini-vertex/lang-flags) are inherited app-wide.
 @app.function(
-    cpu=32, memory=65536, region="us", timeout=1200, retries=0,  # BURST CPU CUT (Zac GO 2026-08-03 PM): cpu 48→32. CPU is 67% of the bill (billing page) and the render is CONCURRENCY-bound, not core-bound — the burst A/B (byfiv3qho) showed the micro leg stuck at 0.8 fps (concurrency-2/chunk) regardless of cores, so 48 cores were never used. 32 cuts the top cost dimension ~33% with minimal speed loss (measured 48 vs 32). Memory STAYS 64GiB (blur peak >32GiB). PRIOR: STALL CAP 3000→1800→900, lockstep with run_pipeline_bg. The burst render stage maxed 586s on real traffic. The burst render stage maxed 586s on real traffic, so 1800s is 3x the observed ceiling — safe — while a stalled burst (cpu=48, ~$2.31 at 3000s) is capped at 30min. Watch PLATFORM_TIMEOUT for wall≈1800s.
+    cpu=48, memory=65536, region="us", timeout=3000, retries=0,
     volumes={"/prewarm": prewarm_volume},
     # No enable_memory_snapshot: it is a no-op without @enter (handler imports
     # in-body, per-invocation) and would only add os.environ-freeze surface to a
@@ -1093,11 +991,6 @@ def render_burst(payload: dict) -> dict:
     _sys.path.insert(0, "/")
     import handler as _H
     import premium as _premium
-    # RENDER CORE BUDGET = this function's cpu= (Zac 2026-08-03; see run_pipeline_bg
-    # note). The burst renders at cpu=48, so its Remotion --concurrency limit is 48;
-    # declaring it lets the tab budget scale up here without exceeding the limit.
-    # MUST equal cpu= in this function's decorator — validate_deploy pins the pair.
-    _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "32"
     try:
         _H._install_shutdown_handler()  # ledger-flush safety net on this container too
     except Exception:
@@ -1219,18 +1112,12 @@ def render_burst(payload: dict) -> dict:
 # ── Web endpoint ───────────────────────────────────────────────────────────────
 @app.cls(
     timeout=3000,         # 50 min (raised 900->1800->3000; 3000 for 5-min support 2026-07-25) — matches run_pipeline_bg so the SYNC-fallback path (SPAWN_MODE=0) can also finish a 5-minute render. Under SPAWN_MODE=1 run_job returns in ms (it spawns run_pipeline_bg), so this cap binds only the sync fallback; kept in lockstep for correctness. Orchestrator runs init + audio + remotion + composite + upload; the Gemini client timeout is 480s (handler.py:_get_genai_client). Billing is per-active-second, so short jobs cost the same — the cap only bounds the tail. INVARIANT: content-studio reaper EXEC_WALL_MS must be >= this (>=3300s) at all times, raised FIRST.
-    scaledown_window=30,  # COST A/B (Zac GO 2026-08-03): WAS 180. warmup() exists
-                          # to buy dispatch latency, and THE FUNNEL PROVED LATENCY
-                          # DOES NOT CONVERT (the 240-400s wait bucket engaged MOST,
-                          # 21.3%, vs 8.4% under-60s). warmup is iOS-triggered per
-                          # OPEN, so it scales with 6,193 openers, NOT 235 jobs/day —
-                          # every open held a cpu=8/32GiB box idle 180s with no job
-                          # behind it, the shape of the ~$87/day non-job gap. Cutting
-                          # 180→30 kills ~6x of that idle tail. run_job dispatch
-                          # cold-starts more, but enable_memory_snapshot restores the
-                          # handler import instantly, so the ack slips only a few
-                          # seconds (never the job itself — it runs in run_pipeline_bg).
-                          # REVERT: restore 180 if the 24h invoice A/B shows no drop.
+    scaledown_window=180, # 3 min — covers the warmup() (fired at upload-start) →
+                          # run_job gap so the FIRST render after idle hits a warm
+                          # container (no cold start), plus back-to-back jobs. At
+                          # A100 rates (~$2.78/hr, down from H100's $8.27) the
+                          # extra idle warmth is ~$0.12/render — cheap vs paying a
+                          # 15-30s cold start on the user's critical path.
     # NO GPU — the orchestrator does NO GPU work on the critical path. NVENC +
     # CUDA decode are hardcoded off (_HAS_NVENC/_HAS_HWACCEL=False → CPU libx264
     # encode, CPU decode, CPU minterpolate); the Remotion render is Chromium-on-
@@ -1352,14 +1239,13 @@ class PromptlyWorker:
         app server at upload-start — mirrors PromptlyPrewarmWorker hiding the
         CPU prework behind the upload, but for the GPU render container.
         Idempotent and ~free; the value is the side effect of a warm container."""
-        # COST A/B (Zac GO 2026-08-03): warmup is NEUTERED — it returns instantly
-        # instead of importing torch to probe a GPU this CPU-only container never
-        # has (always returned cuda=False after a ~1-2s import). The value warmup
-        # bought — a warm dispatcher for run_job — is deliberately abandoned (funnel
-        # proved dispatch latency does not convert); the scaledown_window cut on this
-        # class is the real lever. iOS still gets a 200, so no client change is
-        # needed. REVERT: restore the torch probe + scaledown=180 together.
-        return {"ok": True, "warm": False, "neutered_for_cost_ab": True}
+        cuda = False
+        try:
+            import torch
+            cuda = bool(torch.cuda.is_available())
+        except Exception:
+            pass
+        return {"ok": True, "warm": True, "cuda": cuda}
 
 
 # ── Prewarm CPU worker (split off from the GPU render worker) ─────────────────
@@ -1372,17 +1258,8 @@ class PromptlyWorker:
 # few seconds of cold start is invisible.
 @app.cls(
     timeout=300,          # 5 min is plenty for an S3 download + Deepgram call
-    scaledown_window=600, # REVERTED the surge-cut (Zac 2026-08-04): I cut this to 30
-                          # to 'free container budget' for the 100-ceiling — but the
-                          # ceiling was NEVER binding (utilisation was 7/100 = 7%). The
-                          # cut bought nothing and cost ~20s latency at the exact moment
-                          # 1,000 new users arrive, and a COLD first render is the worst
-                          # first impression for a brand-new user. The real case against
-                          # prewarm is the 43% hit rate (57% wasted download+transcribe)
-                          # — a COST argument for AFTER the surge, not a capacity one. No
-                          # capacity pressure justifies a colder first render. The durable
-                          # 43% fix is the timing race: have the job AWAIT the in-flight
-                          # prewarm instead of re-doing download+transcribe.
+    scaledown_window=600, # stay warm 10 min after last request; idles to zero after
+    cpu=8,                # enough to run boto3 CRT multipart + Deepgram in parallel
     memory=4096,          # 4GB for in-flight download buffers + transcript JSON
     region="us-west",     # same region as the S3 bucket + render class
     volumes={"/prewarm": prewarm_volume},
@@ -1508,67 +1385,6 @@ class PromptlyDiagnoseUpload:
         return self._diagnose({"input": body})
 
 
-# ── Cancel a stranded FunctionCall ───────────────────────────────────────────
-# THE MONEY FIX (Zac 2026-08-03). A stalled job's container runs to Modal's own
-# 3000s timeout and bills the whole way: stalled rows show a median lifetime of
-# 3050s (started_at -> terminalized) against a 3000s function timeout, so the
-# reaper was recording a death that had already been paid for in full. At
-# ~$1.40/hr for the orchestrator that is ~$1.17 per stall, ~4/day, ~$140/month —
-# roughly twelve completed videos' worth of compute for nothing.
-#
-# The handle existed the whole time: dispatch retains the spawn's call_id. What
-# was missing is that content-studio has NO Modal credentials (it reaches Modal
-# only through MODAL_ENDPOINT_URL), so Node cannot call a cancel API itself.
-# This endpoint is the bridge — the worker is already inside Modal and can
-# resolve the FunctionCall directly.
-#
-# AUTH: the same MODAL_CALLBACK_SECRET the worker uses to POST completions back
-# to the server, compared with compare_digest. No new credential, and the
-# deploy-time auth ping already proves both sides agree on it. Fail CLOSED: an
-# unset secret rejects rather than allowing an open cancel endpoint.
-@app.function(
-    image=image,
-    secrets=[modal.Secret.from_name("promptly-secrets")],
-    cpu=0.25,
-    memory=512,
-    timeout=60,
-)
-@modal.fastapi_endpoint(method="POST")
-def cancel_call(body: dict):
-    """Terminate a spawned run_pipeline_bg call. Body: {call_id, secret}.
-
-    Idempotent by nature: cancelling an already-finished or already-cancelled
-    call is not an error, so the reaper can call this without first proving the
-    container is alive. Returns what happened rather than raising, because the
-    reaper MUST still write its terminal row even when the cancel fails.
-    """
-    import hmac as _hmac
-    import os as _os
-
-    _expected = _os.environ.get("MODAL_CALLBACK_SECRET", "")
-    _given = str((body or {}).get("secret") or "")
-    if not _expected or not _given or not _hmac.compare_digest(_given, _expected):
-        return {"ok": False, "error": "unauthorized"}
-
-    _call_id = str((body or {}).get("call_id") or "").strip()
-    if not _call_id:
-        return {"ok": False, "error": "call_id required"}
-
-    try:
-        _fc = modal.FunctionCall.from_id(_call_id)
-        # terminate_containers=True: without it the call is marked cancelled but
-        # the container keeps running to its timeout — which is the entire bill
-        # we are trying to stop.
-        _fc.cancel(terminate_containers=True)
-        print(f"[cancel-call] cancelled {_call_id} (containers terminated)", flush=True)
-        return {"ok": True, "call_id": _call_id, "cancelled": True}
-    except Exception as _e:
-        # An already-settled call is the common case and is NOT a failure.
-        print(f"[cancel-call] {_call_id} not cancelled: {type(_e).__name__}: {_e}", flush=True)
-        return {"ok": False, "call_id": _call_id, "cancelled": False,
-                "error": f"{type(_e).__name__}: {str(_e)[:200]}"}
-
-
 # ── RIFE GPU function ─────────────────────────────────────────────────────────
 # Stateless H100-backed function that the CPU orchestrator calls when a source
 # needs frame interpolation. Splitting RIFE off lets the orchestrator drop its
@@ -1674,53 +1490,6 @@ def rife_normalize_remote(source_bytes: bytes, target_fps: int, warmup: bool = F
             return f.read()
 
 
-# ── Canonical flag values — the janitor's daily drift sentinel reads these ────
-# (TRUTH 2026-08-09.) MIRROR of validate_deploy.py's CANON: validate_deploy has
-# an equality gate that FAILS any deploy where the two dicts differ, so they
-# cannot drift apart. Before this, secret-vs-canon drift was caught only at the
-# NEXT deploy — days away — and a wrong value (SPAWN_MODE=0) served traffic the
-# whole time. The daily prewarm_janitor container mounts the live secret set, so
-# comparing its env against this dict is a CONTINUOUS drift check at zero extra
-# spend. To change a flag value: update the secret AND both canon dicts together,
-# then redeploy (a secret flip is not live until a redeploy — memory-snapshot law).
-_CANON_FLAGS = {
-    "PROMPTLY_SPAWN_MODE": "1",
-    "PROMPTLY_OUTCOME_GATE": "shadow",
-    "PROMPTLY_LEVER3": "1",
-    "PROMPTLY_EDIT_IN_LANGUAGE": "1",
-    "PROMPTLY_SCRIPT_DENYLIST": "",
-    "PROMPTLY_PLAN_CAPTURE": "",
-    "PROMPTLY_BURNED_TEXT": "1",
-    "PROMPTLY_ZERO_REJECT": "1",
-    "PROMPTLY_WHY_DIET": "1",
-    "PROMPTLY_DELIVERY_FPS": "30",
-    "PROMPTLY_RENDER_FANOUT": "0",
-    "PROMPTLY_HYPE_MODE": "1",
-    "PROMPTLY_SHAPE_ABORT": "1",
-    "PROMPTLY_MOODREEL": "1",
-    "PROMPTLY_HQ_RESAMPLE": "1",
-    "PROMPTLY_BROLL_GATE": "1",
-    "PROMPTLY_COVERAGE_GATE": "1",
-    "PROMPTLY_LANG_ROUTING": "1",
-    "PROMPTLY_ROUTE_LANGS": "hi,bn,ta,te,mr,gu,kn,ur,ar,id",
-    "PROMPTLY_MOTION_BLUR": "1",
-    "PROMPTLY_MIN_OUTPUT_RATIO": "0.20",
-    "PROMPTLY_CAPTION_ALIGN": "1",
-    "PROMPTLY_SMOOTH_GRAPHICS": "1",
-    "PROMPTLY_ASR_SCRIBE": "1",
-    "PROMPTLY_POST_THINKING_BUDGET": "2048",
-    "PROMPTLY_RENDER_BURST": "1",
-    # THE THREE LEVER KEYS, DECIDED 2026-08-12. Mirrors validate_deploy.CANON
-    # exactly (a gate ast-compares the two dicts; two copies that drift would
-    # alert on the wrong values or never alert). HLS_COPY kept on the owner's GO;
-    # MEDIA_RESOLUTION and PROXY_SAMPLE_FPS reverted to their defaults after
-    # being dated RECENT — set inside the Vertex outage, where their own effect
-    # on Gemini tokens is unobservable, against LAUNCH_DAY §6's "do not flip".
-    "PROMPTLY_HLS_COPY": "1",
-    "PROMPTLY_MEDIA_RESOLUTION": "",
-    "PROMPTLY_PROXY_SAMPLE_FPS": "",
-}
-
 # ── Prewarm cache janitor ──────────────────────────────────────────────────────
 # Runs daily. Walks the volume, deletes any prewarm cache entry older than 48h.
 # Prevents the volume from growing unbounded → protects against Modal Volume
@@ -1795,38 +1564,6 @@ def prewarm_janitor():
         f"freed={freed_mb:.1f}MB errors={errors} ttl={TTL_SECONDS}s",
         flush=True,
     )
-
-    # ── FLAG-DRIFT SENTINEL (TRUTH 2026-08-09) — a GATE riding the janitor, not
-    # behavior: this container mounts the live promptly-lang-flags secret, so its
-    # env vs _CANON_FLAGS is exactly the check validate_deploy runs at deploy
-    # time, now CONTINUOUS (daily) instead of only at the next deploy. Drift
-    # pages the owner via the same [ALERT] + render-alert legs as the regression
-    # corpus. Best-effort: must never affect the janitor's own result.
-    try:
-        import json as _json
-        import requests as _rq
-        _drift = {k: {"live": os.environ.get(k), "canon": v}
-                  for k, v in _CANON_FLAGS.items() if os.environ.get(k) != v}
-        if _drift:
-            _detail = f"live secret drifted from canon: {_json.dumps(_drift)}"
-            print(f"[FLAG-DRIFT] DRIFTED {_json.dumps(_drift)}", flush=True)
-            print(f"[ALERT] render failure job=flag-drift-sentinel code=FLAG_DRIFT "
-                  f"detail={_detail}", flush=True)
-            _app_url = (os.environ.get("APP_URL") or "").rstrip("/")
-            _cb = os.environ.get("MODAL_CALLBACK_SECRET") or ""
-            if _app_url:
-                _rq.post(
-                    f"{_app_url}/api/internal/render-alert",
-                    json={"job_id": "flag-drift-sentinel", "error_code": "FLAG_DRIFT",
-                          "detail": _detail, "category": "render"},
-                    headers=({"X-Modal-Secret": _cb} if _cb else {}),
-                    timeout=8,
-                )
-        else:
-            print(f"[FLAG-DRIFT] none — {len(_CANON_FLAGS)} flags match canon", flush=True)
-    except Exception as _e:
-        print(f"[FLAG-DRIFT] sentinel errored (janitor unaffected): {_e}", flush=True)
-
     return {"deleted": deleted_count, "bytes_freed": bytes_freed, "errors": errors}
 
 
@@ -2137,7 +1874,7 @@ def probe_partial_state():
         sys.path.insert(0, "/")
     import handler
     sb = handler.supabase
-    table = os.environ.get("PROMPTLY_JOB_TABLE") or "video_jobs"
+    table = os.environ.get("PROMPTLY_JOB_TABLE") or "jobs"
     report = {"table": table}
     if sb is None:
         report["error"] = "supabase client not configured on worker"
@@ -2534,279 +2271,6 @@ def cert_e2e():
         with open(os.path.join(cert_dir, f"{lang}.m4a"), "rb") as fh:
             b64 = base64.b64encode(fh.read()).decode()
         print("RESULT", cert_bridge_e2e.remote(lang, b64))
-
-
-@app.function(cpu=16, memory=12288, region="us", timeout=1800, volumes={"/prewarm": prewarm_volume})
-def cert_render_proof() -> list:
-    """4-SHAPE RENDER PROOF (Zac 2026-08-03): render each shape that was failing —
-    (A) concurrency band 30-60s/30fps/2-3 chunks, (B) 29.97 NTSC, (C) long→burst,
-    (D) short→in-process — on the LIVE code at cpu=16/12GiB. Durable face + en
-    speech, no DB rows, no prod callback. Reports status/url/seconds per shape.
-    Run: `modal run modal_app.py::render_proof` (ephemeral; dispatches to the
-    DEPLOYED render_burst via from_name). ~$0.40."""
-    import os, sys, subprocess, tempfile, uuid, time
-    os.environ["JOB_STATUS_WRITES_ENABLED"] = ""   # no phantom video_jobs rows
-    os.environ["APP_URL"] = ""                       # no progress/completion posts to prod
-    os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16" # FAITHFUL to run_pipeline_bg (cpu=16):
-    # without this the proof floors to 4 and renders at concurrency=2/chunk instead of the
-    # production 4/chunk (8 total = ~0.5/core optimum). The render logic is identical; only
-    # the tab budget differs, so it changes render SPEED, not correctness.
-    sys.path.insert(0, "/")
-    import handler
-    s3 = handler._aws_s3_client
-    work = tempfile.mkdtemp()
-    face_p = os.path.join(work, "face.mp4")
-    audio_p = os.path.join(work, "en.m4a")
-    s3.download_file(_CERT_BUCKET, _CERT_FACE_KEY, face_p)
-    s3.download_file(_CERT_BUCKET, f"{_CERT_PREFIX}/_bridge_regression/en.m4a", audio_p)
-    shapes = [
-        ("A_concurrency_band_45s_30fps", 45, "30"),
-        ("B_ntsc_29_97fps_35s", 35, "30000/1001"),
-        ("C_long_burst_90s", 90, "30"),
-        ("D_short_inprocess_18s", 18, "30"),
-    ]
-    out = []
-    for label, dur, fps in shapes:
-        src_p = os.path.join(work, f"{label}.mp4")
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error",
-                        "-stream_loop", "-1", "-i", face_p,
-                        "-stream_loop", "-1", "-i", audio_p,
-                        "-map", "0:v:0", "-map", "1:a:0", "-t", str(dur), "-r", fps,
-                        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-                        "-c:a", "aac", "-b:a", "128k", "-ar", "44100", src_p], check=True)
-        _built = subprocess.check_output(
-            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-             "stream=r_frame_rate", "-show_entries", "format=duration",
-             "-of", "default=nw=1:nk=1", src_p]).decode().strip().replace("\n", " ")
-        key = f"{_CERT_PREFIX}/_render_proof/{label}.mp4"
-        s3.upload_file(src_p, _CERT_BUCKET, key, ExtraArgs={"ContentType": "video/mp4"})
-        video_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{key}"
-        render_key = f"{_CERT_PREFIX}/_render_proof/{label}_render.mp4"
-        upload_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{render_key}"
-        body = {"job_id": str(uuid.uuid4()), "video_url": video_url, "vibe": "viral",
-                "user_id": str(uuid.uuid4()), "upload_url": upload_url, "public_url": upload_url}
-        t0 = time.time()
-        try:
-            r = handler.handler({"input": body})
-        except Exception as e:
-            r = {"status": "exception", "error": f"{type(e).__name__}: {e}"}
-        el = round(time.time() - t0, 1)
-        row = {"shape": label, "built_fps_dur": _built, "status": (r or {}).get("status"),
-               "url": (r or {}).get("video_url"), "route": (r or {}).get("route"),
-               "elapsed_s": el, "render_time_s": (r or {}).get("render_time"),
-               "error": (r or {}).get("error") or (r or {}).get("user_message")}
-        out.append(row)
-        print(f"[proof] {label}: status={row['status']} url={bool(row['url'])} "
-              f"route={row['route']} {el}s err={row['error']}", flush=True)
-    return out
-
-
-@app.local_entrypoint()
-def render_proof():
-    import json
-    print("PROOF_RESULTS " + json.dumps(cert_render_proof.remote(), indent=2))
-
-
-@app.function(cpu=16, memory=12288, region="us", timeout=1200, volumes={"/prewarm": prewarm_volume})
-def cert_burst_floor_ab() -> dict:
-    """BURST-FLOOR A/B (Zac 2026-08-03, the SLOPE lever): a 30s source rendered
-    IN-PROCESS (cpu=16, FAITHFUL budget=16 → concurrency 8) vs FORCED to the cpu=32
-    burst (PROMPTLY_BURST_MIN_OUTPUT_S=0; burst cut 48→32 2026-08-03). Reports
-    wall · render_time · CORE-SECONDS for each — does the burst finish far sooner at
-    similar total compute? Target: 30s source → under 60s. The burst arm's
-    render_time is the cpu=32 datapoint to compare against the 95s cpu=48 baseline
-    (byfiv3qho). Run: modal run modal_app.py::burst_ab. ~$0.25."""
-    import os, sys, subprocess, tempfile, uuid, time
-    os.environ["JOB_STATUS_WRITES_ENABLED"] = ""
-    os.environ["APP_URL"] = ""
-    os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16"   # faithful to run_pipeline_bg
-    sys.path.insert(0, "/")
-    import handler
-    s3 = handler._aws_s3_client
-    work = tempfile.mkdtemp()
-    face_p, audio_p = os.path.join(work, "face.mp4"), os.path.join(work, "en.m4a")
-    s3.download_file(_CERT_BUCKET, _CERT_FACE_KEY, face_p)
-    s3.download_file(_CERT_BUCKET, f"{_CERT_PREFIX}/_bridge_regression/en.m4a", audio_p)
-    src_p = os.path.join(work, "src30.mp4")
-    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-stream_loop", "-1", "-i", face_p,
-                    "-stream_loop", "-1", "-i", audio_p, "-map", "0:v:0", "-map", "1:a:0",
-                    "-t", "30", "-r", "30", "-c:v", "libx264", "-preset", "veryfast",
-                    "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", "-ar", "44100", src_p], check=True)
-    key = f"{_CERT_PREFIX}/_burst_ab/src30.mp4"
-    s3.upload_file(src_p, _CERT_BUCKET, key, ExtraArgs={"ContentType": "video/mp4"})
-    video_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{key}"
-
-    def _run(label, floor):
-        if floor is None:
-            os.environ.pop("PROMPTLY_BURST_MIN_OUTPUT_S", None)
-        else:
-            os.environ["PROMPTLY_BURST_MIN_OUTPUT_S"] = str(floor)
-        rk = f"{_CERT_PREFIX}/_burst_ab/{label}.mp4"
-        uu = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{rk}"
-        body = {"job_id": str(uuid.uuid4()), "video_url": video_url, "vibe": "viral",
-                "user_id": str(uuid.uuid4()), "upload_url": uu, "public_url": uu}
-        t0 = time.time()
-        try:
-            r = handler.handler({"input": body})
-        except Exception as e:
-            r = {"status": "exception", "error": f"{type(e).__name__}: {e}"}
-        wall = round(time.time() - t0, 1)
-        st = (r or {}).get("stage_timings") or {}
-        rt = (r or {}).get("render_time") or st.get("render")
-        went_burst = (floor == 0)
-        # core-seconds: the orchestrator (cpu=16) is held the whole wall; a burst
-        # render additionally holds cpu=32 for render_time (the double-pay). 32
-        # tracks the render_burst decorator (cut 48→32, 2026-08-03).
-        core_s = wall * 16 + ((rt or 0) * 32 if went_burst else 0)
-        print(f"[burst-ab] {label}: status={(r or {}).get('status')} wall={wall}s "
-              f"render={rt}s core_s~{core_s:.0f} url={bool((r or {}).get('video_url'))} "
-              f"err={(r or {}).get('error') or (r or {}).get('user_message')}", flush=True)
-        return {"label": label, "path": "burst_cpu48" if went_burst else "in_process_cpu16",
-                "status": (r or {}).get("status"), "wall_s": wall, "render_time_s": rt,
-                "core_seconds": round(core_s), "url_ok": bool((r or {}).get("video_url"))}
-
-    inproc = _run("in_process_floor45", None)   # 30s output < 45 floor → in-process @ cpu=16
-    burst = _run("forced_burst_floor0", 0)       # floor 0 → forced to cpu=48 burst
-    return {"source": "30s @ 30fps (durable face+en speech)",
-            "in_process": inproc, "burst": burst,
-            "verdict": {"wall_faster_on_burst_s": round((inproc["wall_s"] or 0) - (burst["wall_s"] or 0), 1),
-                        "extra_core_seconds_on_burst": round((burst["core_seconds"] or 0) - (inproc["core_seconds"] or 0))}}
-
-
-@app.local_entrypoint()
-def burst_ab():
-    import json
-    print("BURST_AB " + json.dumps(cert_burst_floor_ab.remote(), indent=2))
-
-
-# ── REGRESSION CORPUS (Zac 2026-08-04, "gone for good") ──────────────────────
-# The failure corpus retains the exact source that killed every job. This RE-RUNS
-# one saved source per FIXED sub-code on every deploy and asserts it now COMPLETES
-# — so no fixed class can ever return silently, and "the fix regressed" / "the fix
-# never ran" / "these predate it" stop being confusable. ~$0.10-0.15/source.
-#
-# The manifest is sub_code -> the corpus key of a source that once reproduced it.
-# Grows as the corpus captures the missing ones. write_timeout is a NETWORK
-# transient (not source-deterministic), so it is tracked but NOT asserted-fatal.
-# Sources live under s3://{_CERT_BUCKET}/failure-corpus/{CODE}/{job_id}.mp4.
-_REGRESSION_CORPUS = [
-    # sub_code, corpus_key, deterministic (assert completes) or advisory
-    ("concurrency",          "failure-corpus/RENDER_FATAL/20682270-1566-452a-9fe7-d5de8e3b6d67.mp4", True),
-    ("no_video_stream",      "failure-corpus/RENDER_FATAL/26a05f5d-596b-42cf-8f01-6b89bbc25985.mp4", True),
-    ("analyze_shot_changes", "failure-corpus/RENDER_FFMPEG/41403891-1953-4a5b-85a6-e247eb9932bd.mp4", True),
-    ("analyze_face_detect",  "failure-corpus/RENDER_FFMPEG/dc48a05a-9ef4-431c-a711-050de7fdec71.mp4", True),
-    ("write_timeout",        "failure-corpus/TRANSCRIPTION/94306a2e-85e0-484c-b71a-6f85af57c242.mp4", False),
-    # TODO seed as the corpus captures them: frame_grid, analyze_loudness, keyterm_limit
-]
-
-
-@app.function(image=image, secrets=[modal.Secret.from_name("promptly-secrets")],
-              cpu=16, memory=12288, region="us", timeout=1800,
-              volumes={"/prewarm": prewarm_volume})
-def cert_regression_corpus() -> dict:
-    """Render every _REGRESSION_CORPUS source through the real handler and assert
-    the deterministic ones COMPLETE (status=success + a video_url). Returns per
-    sub-code {status, ok}. Run: modal run modal_app.py::regression_corpus."""
-    import os as _os, sys as _sys, uuid as _uuid, time as _time
-    # Capture the real APP_URL + secret BEFORE prod-isolating the render, so a
-    # REGRESSED verdict can fire a LOUD owner alert (a gate whose failure goes
-    # unread is not a gate — Zac 2026-08-04).
-    _real_app_url = (_os.environ.get("APP_URL") or "").rstrip("/")
-    _cb_secret = _os.environ.get("MODAL_CALLBACK_SECRET") or ""
-    _os.environ["JOB_STATUS_WRITES_ENABLED"] = ""   # never touch prod rows
-    _os.environ["APP_URL"] = ""                     # prod-isolate the render
-    _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16"
-    _sys.path.insert(0, "/")
-    import handler
-    results = {}
-    for _sub, _key, _deterministic in _REGRESSION_CORPUS:
-        _video_url = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{_key}"
-        _jid = str(_uuid.uuid4())
-        _rk = f"{_CERT_PREFIX}/_regression/{_sub}.mp4"
-        _uu = f"https://{_CERT_BUCKET}.s3.amazonaws.com/{_rk}"
-        _body = {"job_id": _jid, "video_url": _video_url, "vibe": "viral",
-                 "user_id": str(_uuid.uuid4()), "upload_url": _uu, "public_url": _uu}
-        _t0 = _time.time()
-        try:
-            _r = handler.handler({"input": _body})
-        except Exception as _e:
-            _r = {"status": "exception", "error": f"{type(_e).__name__}: {_e}"}
-        _status = (_r or {}).get("status")
-        _has_video = bool((_r or {}).get("video_url"))
-        _code = (_r or {}).get("error_code")
-        _subc = (_r or {}).get("error_subcode")
-        # A deterministic entry PASSES if it now renders clean (success+video) OR it
-        # cleanly REJECTS for a DIFFERENT named reason — its original defect is gone.
-        # It FAILS if it still dies as its founding sub-code, OR as UNKNOWN (masking a
-        # class is itself a defect — the UNKNOWN=0 law). Advisory entries (network-
-        # transient) pass unless they reproduce their EXACT sub-code.
-        _rendered = (_status == "success" and _has_video)
-        _clean_reject = (_status not in (None, "exception") and _code not in (None, "UNKNOWN")
-                         and _subc != _sub)
-        if _deterministic:
-            _ok = _rendered or _clean_reject
-        else:
-            _ok = _rendered or (_subc != _sub and _code != "UNKNOWN")
-        results[_sub] = {"status": _status, "error_code": _code, "error_subcode": _subc,
-                         "video": _has_video, "wall_s": round(_time.time() - _t0, 1),
-                         "deterministic": _deterministic, "ok": _ok}
-        _tag = "PASS" if _ok else "FAIL"
-        print(f"[REGRESSION-CORPUS] {_tag} sub_code={_sub} status={_status} code={_code} "
-              f"subcode={_subc} video={_has_video} wall={results[_sub]['wall_s']}s"
-              + ("" if _deterministic else " (advisory — network-transient)"), flush=True)
-    # _ok already folds in determinism (advisory sources pass unless they
-    # reproduce their EXACT sub-code), so a not-ok entry is a real regression.
-    _fatal = [s for s, v in results.items() if not v["ok"]]
-    _all_ok = len(_fatal) == 0
-    print(f"[REGRESSION-CORPUS] {'ALL GREEN' if _all_ok else 'REGRESSED: ' + ','.join(_fatal)} "
-          f"({sum(1 for v in results.values() if v['ok'])}/{len(results)} ok)", flush=True)
-    # DURABILITY (Zac 2026-08-04): a REGRESSED verdict must be impossible to miss.
-    # Leg 1 — a loud grep-stable [ALERT] line (always lands in Modal logs). Leg 2 —
-    # a SYNCHRONOUS owner push (not the daemon-thread variant, which a cert
-    # container exiting on return would cut off). Both best-effort; never raise.
-    if _fatal:
-        try:
-            print(f"[ALERT] render failure job=regression-corpus code=REGRESSION_CORPUS "
-                  f"detail=fixed classes REGRESSED on deploy: {','.join(_fatal)}", flush=True)
-        except Exception:
-            pass
-        if _real_app_url:
-            try:
-                import requests as _rq
-                _rq.post(
-                    f"{_real_app_url}/api/internal/render-alert",
-                    json={"job_id": "regression-corpus", "error_code": "REGRESSION_CORPUS",
-                          "detail": f"fixed classes REGRESSED on deploy: {','.join(_fatal)}",
-                          "category": "render"},
-                    headers=({"X-Modal-Secret": _cb_secret} if _cb_secret else {}),
-                    timeout=8,
-                )
-            except Exception:
-                pass
-    return {"all_ok": _all_ok, "regressed": _fatal, "results": results}
-
-
-@app.local_entrypoint()
-def regression_corpus():
-    # SPAWN, not remote (Zac 2026-08-04): a .remote() dies with the local process,
-    # so a detached nohup was the only way to not block the deploy — and its result
-    # went unread. .spawn() dispatches to Modal and returns immediately; the
-    # container renders, asserts, and SELF-ALERTS on REGRESSED (loud [ALERT] + owner
-    # push), outliving this process. deploy.sh no longer needs nohup. The verdict
-    # lives in Modal logs ([REGRESSION-CORPUS] / [ALERT]) regardless of this shell.
-    _fc = cert_regression_corpus.spawn()
-    print(f"REGRESSION_CORPUS spawned call={_fc.object_id} — "
-          f"grep [REGRESSION-CORPUS]/[ALERT] in Modal logs for the verdict")
-
-
-@app.local_entrypoint()
-def regression_corpus_sync():
-    # Blocking variant for manual runs — waits + non-zero exits on a regression.
-    import json, sys as _sys
-    _out = cert_regression_corpus.remote()
-    print("REGRESSION_CORPUS " + json.dumps(_out, indent=2))
-    if not _out.get("all_ok"):
-        _sys.exit(1)
 
 
 # ── ARABIC BRIDGE PERMANENT REGRESSION (Zac 2026-07-20) ──────────────────────
