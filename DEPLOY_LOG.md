@@ -619,3 +619,80 @@ deploy, not two.
 | `terminal_flip_lost` `props.cause` | → no `update_error`/23514 | the classifier that named this |
 | DISPATCH_UNREACHABLE users/day | → ~2 (the true residual) | 14 today, 86% of it the write-loss class |
 | `/api/health` `.gate` | still **null**, `.build` present | Render is NOT running the declared buildCommand — owner action, unchanged |
+
+---
+
+## 2026-08-12 — BUILDER: build list EMPTY. Five items shipped, one deploy pending a window.
+
+### Worker v527 @ `8daa0bd` (00:30Z) — the true root + the flag ruling
+
+Both secret flips went through on retry, each VERIFIED `31 keys, 0 lost, 0
+gained, exactly 1 changed`, then deployed together. **The gate refused the first
+attempt** — `CANON_PENDING` held the old lever values I had just changed
+(*"Pending means the decision is open, not that the value may drift"*). That
+check working on its first real use is why the decision got recorded before it
+shipped rather than after.
+
+Lever ruling, now asserted in CANON forever: `HLS_COPY=1` **kept** on the owner's
+GO · `MEDIA_RESOLUTION` and `PROXY_SAMPLE_FPS` **reverted** to defaults, dated
+RECENT by fingerprint (Gemini uncached tokens flat at 14–16.5k p50 Aug 2–8, no
+~9× drop anywhere; zero Gemini calls from Aug 9 — they were set inside the
+window where their own effect is unobservable).
+
+### The build list
+
+| # | item | state |
+|---|---|---|
+| 1 | **COMPONENT_OBEY** — MG_OBEY generalized cluster-wide | shipped v527 |
+| 2 | **Adapter #2 MULTI_CLIP** | shipped v527 |
+| 3 | **UPSCALE v1** — real ffmpeg 4K enhance | committed `a3dde5b`, **deploy pending a quiet window** |
+| 4 | **Two infra kills** | live cs `206cbca` |
+| 5 | **225 spec FROZEN**, items 1–7 | live cs `206cbca` |
+
+All dark. Gate **367/367** worker · **28/28** content-studio.
+
+### 🎯 THE RENDER GATE IS ARMED — first time ever
+
+```
+"gate":  {"passed": 28, "total": 28, "skipped": [], "at": "01:00:02Z"}
+"build": {"at": "00:59:33Z"}
+```
+
+The gate ran 29s after `npm install`. The two-day [UNKNOWN] is closed: the
+declared `buildCommand` never ran, and the fix (postinstall, guarded by
+`process.env.RENDER`) needs no dashboard. **Bonus finding from `skipped: []`:
+Render DOES have ffmpeg** — the export-watermark smoke genuinely ran, so
+`EXPORT_WATERMARK_ENABLED` is safe to flip when its turn comes. That closes
+`BLOCKER_C2_EXPORT_FFMPEG.md`'s open question too.
+
+### Both open watches, on a real denominator
+
+Since the repair went live (23:35Z): **29 terminal jobs · 1 repair · 0 still
+told a finished render failed.** `terminal_flip_lost` shows 4 × `cause=update_error`
+(all 23514, all from before v527). The worker root fix landed at 00:30Z, so
+`repair` should now trend to ~0 — **a repair firing after v527 means the root
+re-opened**, which is the owner's success metric and needs no new instrument.
+
+### Mistakes, stated
+
+- Pushed `main` once with a **red gate**: piped `validate_deploy` through `tail`,
+  so the shell read tail's status. **Pipe rule now codified and followed** — exit
+  codes captured directly, never through a pipe.
+- That red was **flaky**, which is worse: my scheduler smoke spawned a real
+  child that queried Supabase and blew the 60s per-smoke budget. With 4a arming
+  the gate on every Render build, a flaky smoke means random build failures —
+  the C2 class again. Runner injected; 4/4 deterministic.
+- Item 3's gate run caught three more of my own defects before deploy (borrowed
+  out-of-scope AWS locals, a namespace-extractor allowlist, and the x264
+  byte-identity idiom). On the last one I matched the codebase's idiom rather
+  than widening the guard — loosening a safety check to fit new code is how
+  guards rot.
+
+### HELD, awaiting the owner
+
+- **Orphan recovery** of the 9 finished renders still sitting in S3.
+- Every flag: `COMPONENT_OBEY`, `ADAPTER_V1`, `UPSCALE_V1`, `UPSCALE_NEGOTIATE`,
+  `EXPORT_GATE_ENABLED`, `EXPORT_WATERMARK_ENABLED`, `CHAT_ACTIONS`,
+  `UNIFIED_CORE`, `SURGICAL_V2`, `CAPTION_TRANSLATE`.
+
+**No new instruments, no new watches.** Launch-ready.
