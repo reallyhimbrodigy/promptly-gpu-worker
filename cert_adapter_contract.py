@@ -98,18 +98,48 @@ def _structure():
                              % (bad_attachments,))
 
 
-@check("sockets: adapters #2/#3 are honest stubs")
+@check("sockets: #3 is an honest stub, #2 is BUILT and covered by its own cert")
 def _sockets():
+    """A socket may only leave stub state by GAINING a cert, never by losing one.
+
+    Adapter #2 (multi_clip) was filled 2026-08-12. This cert's own instruction
+    was "if a capability lane filled it, extend this cert with its contract
+    instead" — done: the contract is asserted in full by cert_multi_clip.py,
+    which runs in the deploy gate. What is enforced here is the RULE, so a
+    future socket cannot be quietly filled with nothing checking it.
+    """
     import adapter_contract as adc
-    for fn, args in ((adc.adapt_multi_clip, ("v", [])),
-                     (adc.adapt_image_still, ("v", []))):
-        try:
-            fn(*args)
-        except NotImplementedError:
-            continue
-        raise AssertionError("%s no longer raises NotImplementedError — if a "
-                             "capability lane filled it, extend this cert with "
-                             "its contract instead" % fn.__name__)
+
+    # #3 must still be a stub — nothing has built it.
+    try:
+        adc.adapt_image_still("v", [])
+        raise AssertionError("adapt_image_still no longer raises NotImplementedError "
+                             "— if a capability lane filled it, extend this cert with "
+                             "its contract instead")
+    except NotImplementedError:
+        pass
+
+    # #2 must be BUILT (structural refusal, not NotImplementedError)...
+    try:
+        adc.adapt_multi_clip("v", [])
+        raise AssertionError("adapt_multi_clip accepted zero attachments")
+    except NotImplementedError:
+        raise AssertionError("adapt_multi_clip regressed to a stub — it was built "
+                             "2026-08-12; a capability cannot un-ship silently")
+    except ValueError:
+        pass
+
+    # ...and its cert must EXIST and be wired into the gate. A built socket with
+    # no cert is exactly the state this check exists to make impossible.
+    _cert = os.path.join(HERE, "cert_multi_clip.py")
+    assert os.path.exists(_cert), (
+        "adapter #2 is built but cert_multi_clip.py is gone — a filled socket "
+        "must carry its contract cert")
+    with open(os.path.join(HERE, "validate_deploy.py")) as _f:
+        _vd = _f.read()
+    assert "cert_multi_clip.py" in _vd, (
+        "cert_multi_clip.py exists but the deploy gate does not run it — a cert "
+        "nothing invokes proves nothing")
 
 
 @check("wiring: handler routes through the contract; modal_app mounts it")

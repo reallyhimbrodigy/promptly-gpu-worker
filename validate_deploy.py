@@ -9046,6 +9046,18 @@ def _completion_post_carries_url():
         'edit_plan["_rendered_video_url"]).')
 
 
+@check("ADAPTER #2 (MULTI_CLIP) RESOLVES TO ONE VIDEO ON ONE CLOCK (2026-08-12, RULE-1): 'combine my clips' is top-tier demand and fully buildable without Gemini, and the socket was frozen in adapter_contract.py BEFORE the capability existed so the build could be checked against a written contract instead of a memory of one. The law that matters is the clock: N clips resolve to ONE stitched video, and word timings are re-clocked onto that timeline as a SINGLE index space, so a plan's word indices mean exactly what they mean on adapter #1. A second clock here is the class the shared-clock law exists to prevent and would stay invisible until captions drifted on the second clip. Runs cert_multi_clip.py in the gate: structural refusal (0/1 attachments, no path, unmeasured duration, non-parallel word lists), all N refs kept in timeline order with roles and provenance, the caller's FootageRefs NOT mutated, a SILENT clip still advancing the offset (dropping its time slides every later word early — the off-by-a-clip drift), summed duration, a loud refusal when concat has not run, and adapter #1's identity guarantee intact. Zero network, zero Modal, zero Gemini.")
+def _multi_clip_cert():
+    import subprocess as _sub, os as _os, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_multi_clip.py")],
+                  capture_output=True, text=True, timeout=300, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0 and "ALL PASS" in _out, (
+        "cert_multi_clip FAILED — adapter #2's resolution contract is violated.\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1500:])
+
+
 @check("COMPONENT_OBEY: DARK IS BYTE-IDENTICAL, AND THE NOTE LEG REACHES LEAN (2026-08-12, RULE-1, JUDGE's DISHONOR_ROUTE_VERDICT). The dishonor cluster (transitions, text_overlay, broll, motion_graphics) lives on the LEAN side, not premium: 94.0% silent on lean (n=215) vs 63.5% premium and 54.5% standard, with motion_graphics 96% silent on lean vs 37% on premium — so the unified-core flip aims at the route that is already least broken, and the lever is a generalized component-ask override. It has two legs because a route that structurally cannot render a component is defensible and SILENCE is not: HONOR where the toolbox has it (the prompt directive, generalized from MG to the whole cluster) and NOTE where it does not (deterministic, AFTER the model — lean routes never call the editorial model at all, so a prompt-side fix cannot reach 94% of the loss by construction). Runs cert_component_obey.py inside the gate: flag-dark byte-identity, negation guard (a negative must never arrive as a request we then 'honour'), one combined note not a pile, partial toolboxes (hype can do transitions but not MGs), and MG_OBEY still working alone so the paid 3-arm A/B is unbroken. Zero network, zero Modal, zero Gemini.")
 def _component_obey_cert():
     import subprocess as _sub, os as _os, sys as _sys
