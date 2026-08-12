@@ -7330,6 +7330,11 @@ def _no_unregistered_live_flags():
         "PROMPTLY_SILENT_TO_MOODREEL": "1",
         "PROMPTLY_STRUCTURE_ABORT": "1",
     }
+    # Flags that are BUILT AND DARK are not "live" and must not be registered as
+    # canonical values — CANON asserts what production IS, and asserting ""
+    # for a key the secret does not carry would fail every deploy. They are
+    # listed here only so a reader knows they are deliberate absences:
+    #   PROMPTLY_COMPONENT_OBEY  (2026-08-12, dark; arms both override legs)
     _script = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
                             "secret_flags_readback.py")
     try:
@@ -9039,6 +9044,24 @@ def _completion_post_carries_url():
         "hand the job to the ~900s fallback, which tells the user their finished video "
         "failed. Pass the route's real URL (_video_url, or "
         'edit_plan["_rendered_video_url"]).')
+
+
+@check("COMPONENT_OBEY: DARK IS BYTE-IDENTICAL, AND THE NOTE LEG REACHES LEAN (2026-08-12, RULE-1, JUDGE's DISHONOR_ROUTE_VERDICT). The dishonor cluster (transitions, text_overlay, broll, motion_graphics) lives on the LEAN side, not premium: 94.0% silent on lean (n=215) vs 63.5% premium and 54.5% standard, with motion_graphics 96% silent on lean vs 37% on premium — so the unified-core flip aims at the route that is already least broken, and the lever is a generalized component-ask override. It has two legs because a route that structurally cannot render a component is defensible and SILENCE is not: HONOR where the toolbox has it (the prompt directive, generalized from MG to the whole cluster) and NOTE where it does not (deterministic, AFTER the model — lean routes never call the editorial model at all, so a prompt-side fix cannot reach 94% of the loss by construction). Runs cert_component_obey.py inside the gate: flag-dark byte-identity, negation guard (a negative must never arrive as a request we then 'honour'), one combined note not a pile, partial toolboxes (hype can do transitions but not MGs), and MG_OBEY still working alone so the paid 3-arm A/B is unbroken. Zero network, zero Modal, zero Gemini.")
+def _component_obey_cert():
+    import subprocess as _sub, os as _os, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _env = dict(_os.environ)
+    # The cert owns its own arms; a flag leaking in from the operator's shell
+    # would make the dark arm dishonest.
+    _env.pop("PROMPTLY_COMPONENT_OBEY", None)
+    _env.pop("PROMPTLY_MG_OBEY", None)
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_component_obey.py")],
+                  capture_output=True, text=True, timeout=300, env=_env, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, (
+        "cert_component_obey FAILED — the component-ask override is not safe to ship.\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1500:])
+    assert "ALL PASS" in _out, f"cert_component_obey did not report ALL PASS:\n{_out[-800:]}"
 
 
 @check("BUNDLE-FRESHNESS GUARD (Zac 2026-08-02, RULE-1, forged from SafeImg nearly shipping inert): a Remotion TSX change ships DEAD if a redeploy reuses a cached bundle without re-running prebundle.mjs — the render then executes STALE compiled JS while the source (and every gate that reads the source) says the fix is present. This gate asserts the anti-inert mechanism is wired on BOTH ends: (1) prebundle.mjs fingerprints every src .ts/.tsx/.mjs into bundle/.src_hash at image-build time, and (2) handler.py defines _assert_bundle_fresh() AND calls it inside render_stage, so the FIRST real render recomputes the live-source hash and refuses (STALE_BUNDLE) if the deployed bundle wasn't built from the deployed source. Fail-open only when the stamp is absent (pre-fingerprint bundle), never on mismatch. One check closes the class forever: a TSX fix can no longer pass every source gate yet render from an old bundle.")

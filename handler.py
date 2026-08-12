@@ -319,6 +319,133 @@ _MG_NEG_RE = re.compile(
     re.IGNORECASE)
 
 
+# ── COMPONENT-ASK OBEDIENCE, CLUSTER-WIDE (JUDGE verdict 2026-08-11) ─────────
+# MG_OBEY generalized. JUDGE's DISHONOR_ROUTE_VERDICT settled the decisive
+# question: the dishonor cluster (transitions, text_overlay, broll,
+# motion_graphics) lives on the LEAN side, not the premium side, so the lever is
+# a generalized component-ask override — NOT the unified-core flip, which aims
+# at the route that is already least broken.
+#
+#   cluster silent-drop, pre-outage clean cohort [MEASURED]
+#     lean      94.0% (n=215)   <- 20.1% of lean jobs carry a cluster ask
+#     premium   63.5% (n=178)
+#     standard  54.5% (n=749)
+#   motion_graphics alone: 96% silent on lean vs 37% on premium.
+#
+# TWO LEGS, because a route that structurally cannot render a component is
+# defensible and silence is not:
+#
+#   HONOR where the toolbox has it  — the obey directive (MG's, generalized to
+#     the whole cluster), armed only on routes that can actually render them.
+#   NOTE where it does not          — a deterministic capability note naming the
+#     component the user asked for and this route cannot do. DETERMINISTIC CODE
+#     AFTER THE MODEL, never prompt compliance (obedience law): lean routes
+#     never call the editorial model at all, so a prompt-side fix cannot reach
+#     94% of the loss by construction.
+#
+# JUDGE's acceptance bar: cluster silent-rate on lean 94% -> <20% over >=150
+# post-flip cluster asks, with a matching honest-note rate.
+
+_TRANSITION_ASK_RE = re.compile(
+    r"\btransitions?\b|\b(?:add|with|include|use|put|want|more|some)\b[^.!?\n]{0,40}?"
+    r"\b(?:dissolves?|cross[- ]?fades?|wipes?|fades?)\b", re.IGNORECASE)
+# _parse_broll_requests requires a SUBJECT ("b-roll of Tokyo") because its job is
+# to force the FETCH. "add b-roll" with no subject is still an ASK, and for the
+# cluster question the ask is what matters — so the two are unioned, never
+# conflated.
+_BROLL_ASK_RE = re.compile(
+    r"\bb[- ]?roll\b|\bcutaways?\b|\bstock\s+(?:footage|clips?|video)\b", re.IGNORECASE)
+_TEXT_ASK_RE = re.compile(
+    r"\btext\s+overlays?\b|\btitle\s+cards?\b|\bon[- ]?screen\s+text\b"
+    r"|\b(?:add|with|include|use|put|want|more|some)\b[^.!?\n]{0,40}?\btext\b", re.IGNORECASE)
+
+# Component -> (detector, user-facing noun). motion_graphics and broll reuse the
+# existing high-precision parsers rather than growing a fourth spelling of them.
+_CLUSTER_COMPONENTS = ("motion_graphics", "text_overlay", "transitions", "broll")
+_CLUSTER_NOUN = {
+    "motion_graphics": "motion graphics",
+    "text_overlay": "text overlays",
+    "transitions": "transitions",
+    "broll": "B-roll",
+}
+
+# What each route's toolbox can actually RENDER. Lean routes are a re-pace or an
+# intact passthrough by construction — they build no components at all, which is
+# exactly why their cluster asks vanish.
+_ROUTE_TOOLBOX = {
+    "minimal": frozenset(),
+    "minimal_speech_uncut": frozenset(),
+    "hype": frozenset({"transitions"}),
+    "moodreel": frozenset({"transitions"}),
+    "standard_editorial": frozenset(_CLUSTER_COMPONENTS),
+}
+
+
+def _component_obey_enabled():
+    """DARK by default. PROMPTLY_COMPONENT_OBEY=1 arms BOTH legs.
+
+    PROMPTLY_MG_OBEY stays honoured as the narrower predecessor so the existing
+    3-arm cert keeps working unchanged; either flag arms the MG leg."""
+    return os.environ.get("PROMPTLY_COMPONENT_OBEY", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _parse_component_requests(text):
+    """Which cluster components the user EXPLICITLY asked for. Set of names.
+
+    Each detector is high-precision and negation-guarded exactly like
+    _parse_mg_requests — a negative ('no transitions') belongs to
+    _parse_off_features, the deterministic strip, and must never arrive here as
+    a request we then 'honour'."""
+    _t = str(text or "")
+    _out = set()
+    if _parse_mg_requests(_t):
+        _out.add("motion_graphics")
+    try:
+        if _parse_broll_requests(_t):
+            _out.add("broll")
+    except Exception:
+        pass
+    for _name, _rx in (("transitions", _TRANSITION_ASK_RE), ("text_overlay", _TEXT_ASK_RE),
+                       ("broll", _BROLL_ASK_RE)):
+        for _m in _rx.finditer(_t):
+            if _MG_NEG_RE.search(_t[:_m.start()]):
+                continue
+            _out.add(_name)
+            break
+    return _out
+
+
+def _component_unmet_notes(text, route_name):
+    """LEG B — the honest note for every asked component this route cannot build.
+
+    Returns a list of user-facing strings (usually 0 or 1). Deterministic, runs
+    AFTER the model, and on lean routes there is no model at all — which is the
+    whole point: 94% of the loss is on routes a prompt directive can never
+    reach.
+
+    Silent when the flag is dark, when nothing in the cluster was asked, or when
+    the route can build everything asked (then LEG A owns it)."""
+    if not _component_obey_enabled():
+        return []
+    _asked = _parse_component_requests(text)
+    if not _asked:
+        return []
+    _can = _ROUTE_TOOLBOX.get(str(route_name or ""), frozenset(_CLUSTER_COMPONENTS))
+    _unmet = [c for c in _CLUSTER_COMPONENTS if c in _asked and c not in _can]
+    if not _unmet:
+        return []
+    _nouns = [_CLUSTER_NOUN[c] for c in _unmet]
+    _list = _nouns[0] if len(_nouns) == 1 else (
+        ", ".join(_nouns[:-1]) + " or " + _nouns[-1])
+    # Names the ask, names why, names the one thing that would change it. Never
+    # apologetic filler and never a promise we cannot keep.
+    return [f"You asked for {_list} — this clip took the {'uncut' if route_name == 'minimal_speech_uncut' else 'clean re-pace'} "
+            f"route, which doesn't build {'them' if len(_nouns) > 1 else _nouns[0]}. "
+            "A clip of someone speaking to camera gets the full edit."]
+
+
 def _mg_obey_enabled():
     """DARK by default. PROMPTLY_MG_OBEY=1 arms the MG user-ask directive —
     env-only (the PLAN_ONLY cert app sets it per-arm in its own container)."""
@@ -346,7 +473,18 @@ def _mg_request_directive(vibe):
     MGs) — otherwise "" and the prompt is byte-identical. Overrides the
     abstention default while leaving the earn-gates in charge of WHICH type
     and WHERE; an empty answer must become an honest note, never silence."""
-    if not _mg_obey_enabled() or not _parse_mg_requests(vibe):
+    if not (_mg_obey_enabled() or _component_obey_enabled()):
+        return ""
+    # CLUSTER-WIDE (JUDGE verdict): when COMPONENT_OBEY is armed, any cluster
+    # ask this route CAN build arms the directive — not just an MG ask. The MG
+    # wording stays because motion_graphics is the #1 named ask (224/359 silent,
+    # 309 preset taps name it literally) and the earn-gates still choose type
+    # and placement; the other three ride the same "none is not an answer while
+    # qualifying moments exist" contract.
+    if _component_obey_enabled():
+        if not _parse_component_requests(vibe):
+            return ""
+    elif not _parse_mg_requests(vibe):
         return ""
     return (
         "\n**REQUIRED MOTION GRAPHICS (user request — OBEY):** the user explicitly "
@@ -32953,6 +33091,23 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         _rationale, _pkg_fields.get("post_caption"), _pkg_fields.get("post_hook"))
     _persist_post_package(job_id, _post_package)
     _out_mb = os.path.getsize(output_path) / (1024 * 1024) if os.path.exists(output_path) else 0.0
+        # LEG B — THE HONEST NOTE (JUDGE verdict 2026-08-11). Every branch above set
+    # _capability_notes from the ROUTE's own story; none of them ever mentioned
+    # what the USER asked for. That is the 94%: one in five lean jobs carries a
+    # cluster ask and 94 of 100 vanish without a word. Deterministic, after the
+    # fact, and on this path there is no editorial model to instruct at all.
+    try:
+        # The lean pipeline takes input_data, not a bare `vibe` — and the
+        # change_request matters too: a re-edit ask ("add motion graphics") is
+        # the same silent drop as an initial one.
+        _obey_src = " ".join(str(input_data.get(k) or "")
+                             for k in ("vibe", "change_request"))
+        _obey_notes = _component_unmet_notes(_obey_src, _route_name)
+        if _obey_notes:
+            _capability_notes = list(_capability_notes or []) + _obey_notes
+    except Exception as _e:   # a note must never cost a delivered video
+        print(f"[component-obey] note assembly failed job={job_id}: {_e}", flush=True)
+
     result_payload = {
         "status": "success",
         "job_id": job_id,

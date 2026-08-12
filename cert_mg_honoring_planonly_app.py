@@ -23,7 +23,7 @@ Verdicts the printout states:
   ask_obey > ask, whys name real moments -> the obedience channel works; queue differ + flip request
   ask_obey == ask                -> H1 alone insufficient; escalate to H2/H3 reads
 
-COST: ~$0.10-0.20/arm plan-only => ~$0.30-0.60 for 3 arms x 1 source. Scale
+COST: ~$0.10-0.20/arm plan-only => ~$0.40-0.80 for 4 arms x 1 source. Scale
 to N golden sources only on approval inside the standing <=$10 PLAN_ONLY
 budget. Run: `modal run cert_mg_honoring_planonly_app.py`.
 """
@@ -46,12 +46,24 @@ SRC = ("https://d1iax8jos987n3.cloudfront.net/sources/e9b47b30-5edf-4bc6-825a-"
        "7d2a8fe1a43d/1785239363288-A2A4B085-5918-4575-BB13-CC3CD92EF816_L0_001.mp4")
 
 PRESET_ASK = "Make this a smooth video, add zooms, sound effects and motion graphics"
+# The cluster ask: names components from more than one family, so the arm
+# tests the GENERALIZATION rather than re-testing the MG leg.
+CLUSTER_ASK = PRESET_ASK + " and add some transitions and text overlays"
 CONTROL_VIBE = "Make this a smooth video"
 
 ARMS = [
     ("control", CONTROL_VIBE, {}),
     ("ask", PRESET_ASK, {}),
     ("ask_obey", PRESET_ASK, {"PROMPTLY_MG_OBEY": "1"}),
+    # CLUSTER ARM (2026-08-12, JUDGE's DISHONOR_ROUTE_VERDICT). MG_OBEY was the
+    # narrow predecessor; COMPONENT_OBEY arms the same directive for the whole
+    # dishonor cluster (transitions, text_overlay, broll, motion_graphics). This
+    # arm answers the one question only real Gemini can: does the generalized
+    # directive change the PLAN, and does it do so WITHOUT the density collapse
+    # the MG diagnosis named. Everything else about the override — dark
+    # byte-identity, the negation guard, the note leg — is proven offline for $0
+    # by cert_component_obey.py, which runs in the deploy gate.
+    ("ask_cluster", CLUSTER_ASK, {"PROMPTLY_COMPONENT_OBEY": "1"}),
 ]
 
 
@@ -137,7 +149,7 @@ def run() -> dict:
 
 @app.local_entrypoint()
 def main():
-    print("=== PLAN_ONLY: MG-honoring A/B (control / ask / ask_obey) ===")
+    print("=== PLAN_ONLY: component-honoring A/B (control / ask / ask_obey / ask_cluster) ===")
     o = run.remote()
     a = (o or {}).get("arms", {})
     for arm, _, _env in ARMS:

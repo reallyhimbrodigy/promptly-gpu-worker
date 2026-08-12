@@ -41,7 +41,7 @@ def _extract_block():
         src = f.read()
     start = src.index("_MG_ASK_RE = re.compile(")
     tail = src[start:]
-    m = re.search(r"\ndef (?!_mg_obey_enabled|_parse_mg_requests|"
+    m = re.search(r"\ndef (?!_mg_obey_enabled|_parse_mg_requests|_component_obey_enabled|_parse_component_requests|_component_unmet_notes|"
                   r"_mg_request_directive)", tail)
     block = tail[:m.start()] if m else tail
     ns = {"re": re, "os": os}
