@@ -29,23 +29,51 @@ reason `golden/plans/` is committed. If either file is ever replaced, that is a
 recorded in the commit that replaces it, with the owner's sign-off, never
 silently.
 
-## What is measured from them
+## What is measured from them — CONFIRMED, not quoted `[MEASURED 2026-08-12]`
 
-`LUMEN_REFERENCE_SPEC.md` §0 already records the measurements taken:
+Both files re-measured on arrival rather than trusting the spec's numbers.
+Every §0 figure reproduced exactly:
 
-| | REF-1 | REF-2 |
+| | REF-1 landscape | REF-2 vertical |
 |---|---|---|
-| canvas | **1080x608 landscape** | 720x1280 vertical |
-| hard cuts | 21 (median shot ~1.8s) | 8 (long takes + inserts every 5-8s) |
-| audio master | mean -15.8 dB, peaks 0.0 | mean -15.7 dB, peaks 0.0 |
-| insert scenes | b-roll + kinetic type | ~6 designed scenes in 43s |
+| file | `ref1-legalsoft-corporate-landscape.mp4` | `ref2-viral-creator-doc-vertical.mp4` |
+| canvas | **1080×608** | 720×1280 |
+| fps / duration | 30 / 52.60s | 30 / 43.20s |
+| codec | hevc, 13.9 Mbps | hevc, 14.0 Mbps |
+| audio | aac 44.1k stereo, mean **−15.8 dB**, peak **0.0** | aac 44.1k stereo, mean **−15.7 dB**, peak **0.0** |
+| hard cuts (scene>0.3) | **21** | **8** |
+| median shot | **1.77s** | **6.13s** |
+| longest cut-to-cut gap | **6.1s** | **9.5s** |
 
-The **~1s motion rhythm law** (§1.G) is derived from these and is now a measured
-harness dimension, not a vibe — see `cert_rhythm_dimension.py`.
+## THE FINDING THAT CALIBRATES THE RHYTHM LAW
+
+**Cuts alone do not satisfy the ~1s motion law — not remotely.** REF-2 runs
+**9.5 seconds** between hard cuts; REF-1 runs 6.1s. Measured on cuts only, *both
+references fail* the 2.0s stillness bar in `rhythm_dimension.py`.
+
+The rhythm in these edits is carried by **captions, insert scenes and kinetic
+type**, not by cutting. §1.G says exactly this ("REF-2 substitutes caption-beat +
+scene-insert rhythm over long takes") and the measurement confirms it.
+
+Two consequences, both binding:
+
+1. `rhythm_dimension.py` must count **every** motion kind (caption, scene, zoom,
+   MG, text, transition, b-roll), not just cuts. It does.
+2. **Any future implementation that weights cuts heavily is wrong** — it would
+   reject the bar itself. This is the calibration check to run against any
+   change to that dimension: *if the references fail, the dimension is broken,
+   not the references.*
+
+## Size, stated plainly
+
+167 MB of binaries enter git history permanently. Accepted because these are
+goldens (byte-stability is the point) and because `golden/` is **not** bundled
+into the Modal image — `modal_app.py` mounts only `src/assets/fonts`,
+`src/remotion` and `src/assets/sounds`, so deploy size and image build time are
+unaffected [MEASURED].
 
 ## Status
 
-⏳ **Awaiting the owner's drop** (§6 of the reference spec: "two minutes").
-Nothing in the Lumen campaign is blocked on the *files* — the anatomy is already
-decomposed and the build sheet is written. They are blocked on the **judge
-calibration**, which needs the blind-sheet scores (§7.2).
+✅ **Both files present and verified.** The remaining Lumen calibration input is
+the blind-sheet scores (§7.2) — the files establish the bar; the scores make
+judging *against* it trustworthy.
