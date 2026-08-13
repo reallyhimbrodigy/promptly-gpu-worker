@@ -37,11 +37,19 @@ def check(name):
 
 
 def _extract_block():
+    # NOTE (2026-08-12): this allowlist has now truncated THREE times — when
+    # COMPONENT_OBEY landed, when UPSCALE v1 landed, and when §4.8's
+    # negotiated-never landed. The pattern is inherently brittle: it depends on
+    # module layout, so any new def placed between the anchor and the target
+    # silently shortens the block and every lookup KeyErrors. It stays because
+    # exec-ing a slice is what keeps this cert free of a real handler import —
+    # but if it breaks a fourth time, extract by AST node name instead of by
+    # "the next def I do not recognise".
     with open(os.path.join(HERE, "handler.py")) as f:
         src = f.read()
     start = src.index("_MG_ASK_RE = re.compile(")
     tail = src[start:]
-    m = re.search(r"\ndef (?!_mg_obey_enabled|_parse_mg_requests|_component_obey_enabled|_parse_component_requests|_component_unmet_notes|"
+    m = re.search(r"\ndef (?!_mg_obey_enabled|_parse_mg_requests|_component_obey_enabled|_parse_component_requests|_component_unmet_notes|_negotiated_never_notes|_parse_music_ask|"
                   r"_mg_request_directive)", tail)
     block = tail[:m.start()] if m else tail
     ns = {"re": re, "os": os}

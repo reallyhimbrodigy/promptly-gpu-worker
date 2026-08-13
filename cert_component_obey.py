@@ -110,6 +110,29 @@ def main():
     check("a NEGATIVE never arms the directive",
           H._mg_request_directive("no motion graphics") == "")
 
+    print("\n=== ARM 5b: NEGOTIATED-NEVER [§4.5/§4.8] — the ask outlives the feature ===")
+    # §4.8 removed the music machinery entirely. §4.5 is unconditional, so the
+    # 72 people who asked for music must still get an honest answer. These
+    # assertions exist because deleting a feature is exactly when its users go
+    # silent by accident.
+    os.environ.pop("PROMPTLY_COMPONENT_OBEY", None)
+    check("the ask is still DETECTED after the feature is gone",
+          H._parse_music_ask("can you add background music") is True)
+    check("negation still guarded ('no music' is a negative)",
+          H._parse_music_ask("no music please") is False)
+    n = H._negotiated_never_notes("add some background music")
+    check("an honest note fires with NO flag set (a flag would reintroduce the "
+          "silent drop by accident)", len(n) == 1, repr(n))
+    check("silent when nobody asked", H._negotiated_never_notes("make it punchy") == [])
+    check("the note does NOT say 'yet' — a decision is not a roadmap",
+          n and "yet" not in n[0].lower(), repr(n))
+    check("it names what the product DOES do with audio instead of dangling a future",
+          n and "your own audio" in n[0].lower(), repr(n))
+    check("the music MACHINERY is gone (§4.8: dead-purpose code does not stay dark)",
+          not hasattr(H, "_music_filter_chain") and not hasattr(H, "_music_pick_bed")
+          and not hasattr(H, "_MUSIC_BED_LUFS"),
+          "music machinery still importable")
+
     print("\n=== ARM 6: MG_OBEY still works alone (predecessor unbroken) ===")
     os.environ.pop("PROMPTLY_COMPONENT_OBEY", None)
     os.environ["PROMPTLY_MG_OBEY"] = "1"

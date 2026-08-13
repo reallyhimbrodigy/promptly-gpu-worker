@@ -362,6 +362,61 @@ _TEXT_ASK_RE = re.compile(
 # Component -> (detector, user-facing noun). motion_graphics and broll reuse the
 # existing high-precision parsers rather than growing a fourth spelling of them.
 _CLUSTER_COMPONENTS = ("motion_graphics", "text_overlay", "transitions", "broll")
+
+# ── NEGOTIATED-NEVER [§4.5, §4.8] ────────────────────────────────────────────
+# §4.8: dead-purpose code does not stay dark, it goes. The background-music
+# machinery was removed entirely (bed synthesis, selection, placeholder tracks,
+# the sidechain chain, its cert). What must NOT go with it is the USER'S ASK.
+#
+# 72 people asked for music. Deleting the build does not delete the demand, and
+# §4.5 is unconditional: fulfilled or negotiated, NEVER silent. So the ask keeps
+# a home here — in the honesty vocabulary rather than in a feature flag.
+#
+# THIS IS A DIFFERENT NOTE FROM THE UNSUPPORTED LIST. That list says "not YET"
+# — a roadmap promise. This says "not something Promptly does", which is a
+# product decision, and saying "yet" about a decision is a lie with a friendly
+# face. The copy therefore points at what the product DOES do with audio (the
+# user's own sound, cut to it) instead of dangling a future.
+_NEGOTIATED_NEVER = {
+    "music": (
+        "Promptly doesn't add background music — your edit uses your own audio, "
+        "cut and balanced around what you actually said."
+    ),
+}
+
+
+def _negotiated_never_notes(text):
+    """Honest notes for asks Promptly has DECIDED not to serve [§4.5/§4.8].
+
+    Unconditional — no flag. A capability that will never exist has no dark
+    state to hide in, and gating an honesty note behind a flag is how a silent
+    drop gets reintroduced by accident."""
+    _t = str(text or "")
+    _out = []
+    if _parse_music_ask(_t):
+        _out.append(_NEGOTIATED_NEVER["music"])
+    return _out
+
+
+# Kept from the removed machinery — the DETECTOR, not the feature. Recognising
+# the ask is what makes the honest answer possible; §4.8 removes dead-purpose
+# code, and a detector feeding a live note is not dead purpose.
+_MUSIC_ASK_RE = re.compile(
+    r"\b(?:add|include|put|overlay|with|lay|drop|throw|want|need)\b[^.!?\n]{0,32}?"
+    r"\b(?:music|soundtrack|song|score|backing\s+track|background\s+music)\b"
+    r"|\bbackground\s+music\b|\bmusic\s+(?:bed|under|behind)\b",
+    re.IGNORECASE)
+
+
+def _parse_music_ask(text):
+    """True when the user explicitly asks for a music bed. Negation-guarded —
+    'no music' is a NEGATIVE and belongs to the deterministic strip."""
+    _t = str(text or "")
+    for _m in _MUSIC_ASK_RE.finditer(_t):
+        if _MG_NEG_RE.search(_t[:_m.start()]):
+            continue
+        return True
+    return False
 _CLUSTER_NOUN = {
     "motion_graphics": "motion graphics",
     "text_overlay": "text overlays",
@@ -697,144 +752,6 @@ def _parse_upscale_request(text):
             continue
         return True
     return False
-
-
-# ── BACKGROUND MUSIC v1 (DARK behind PROMPTLY_MUSIC_V1, 2026-08-12) ──────────
-# 72 recorded asks for background music, and nothing transforms the perceived
-# quality of short-form like a bed under the voice. It sits on the
-# _UNSUPPORTED_CAPABILITIES list today, which is honest but is an apology.
-#
-# THE SAFETY PROPERTY THAT LETS THIS LIVE IN THE REPO BEHIND A FLAG:
-# every track in assets/music/ is a SYNTHESIZED PLACEHOLDER, and the manifest
-# marks each `deliverable: false`. _music_pick_bed REFUSES any track that is not
-# explicitly deliverable, so flipping PROMPTLY_MUSIC_V1 today delivers NO music
-# and emits the honest note instead. The mechanism is fully exercised; the audio
-# a user receives is gated on the owner's licensing pick, not on a flag. A
-# placeholder can never reach a user by accident, only by someone editing a
-# licence record — which the deploy gate asserts against.
-#
-# THE VOLUME LAW, stated as numbers so it is arguable rather than vibes:
-#   bed target       -28 LUFS integrated (absolute) — present, never competing
-#   duck under speech -14 dB further (0.02 linear) — the voice is the product
-#   attack/release    20ms / 400ms — fast enough to clear a word onset, slow
-#                     enough that the bed does not pump between words
-# The bed is ducked by SIDECHAIN off the speech itself, not by a static
-# schedule: a schedule drifts the moment a cut moves, and the whole point of the
-# shared-clock law is that we do not keep two clocks for one thing.
-
-_MUSIC_BED_LUFS = -28.0          # bed target, ABSOLUTE (loudnorm I=), not relative gain
-_MUSIC_BED_DBFS = -20.0          # legacy reference for the ducked ceiling
-_MUSIC_DUCK_DB = -14.0           # additional attenuation under speech
-_MUSIC_ATTACK_MS = 20
-_MUSIC_RELEASE_MS = 400
-_MUSIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "music")
-
-_MUSIC_ASK_RE = re.compile(
-    r"\b(?:add|include|put|overlay|with|lay|drop|throw|want|need)\b[^.!?\n]{0,32}?"
-    r"\b(?:music|soundtrack|song|score|backing\s+track|background\s+music)\b"
-    r"|\bbackground\s+music\b|\bmusic\s+(?:bed|under|behind)\b",
-    re.IGNORECASE)
-_MUSIC_NEG_RE = re.compile(
-    r"\b(?:no|without|don'?t|dont|remove|not|mute)\b[^.!?\n]{0,24}$", re.IGNORECASE)
-
-
-def _music_v1_enabled(input_data=None):
-    """DARK by default. Independent of the honesty note: the note must keep
-    firing while this is off, or an ask goes silent."""
-    if input_data and input_data.get("music_v1_test"):
-        return True
-    return os.environ.get("PROMPTLY_MUSIC_V1", "").strip().lower() in (
-        "1", "true", "yes", "on",
-    )
-
-
-def _parse_music_request(text):
-    """True when the user explicitly asks for a music bed. Negation-guarded —
-    'no music' is a NEGATIVE and belongs to the deterministic strip, never here."""
-    _t = str(text or "")
-    for _m in _MUSIC_ASK_RE.finditer(_t):
-        if _MUSIC_NEG_RE.search(_t[:_m.start()]):
-            continue
-        return True
-    return False
-
-
-def _music_load_manifest(music_dir=None):
-    """The library, or [] when there isn't one. Never raises — a missing or
-    malformed manifest means 'no fit', which is an honest note, not a failure."""
-    _d = music_dir or _MUSIC_DIR
-    try:
-        with open(os.path.join(_d, "manifest.json"), encoding="utf-8") as _f:
-            _m = json.load(_f)
-        return _m.get("tracks") or []
-    except Exception:
-        return []
-
-
-def _music_pick_bed(vibe, music_dir=None):
-    """Choose a DELIVERABLE bed whose mood matches the vibe. Returns the track
-    dict or None.
-
-    THE REFUSAL IS THE POINT. A track is eligible only when `deliverable` is
-    exactly True AND its file exists. Placeholders (deliverable:false) are
-    therefore invisible to delivery no matter what the flag says, and 'no
-    eligible track' resolves to the honest note rather than to silence or to
-    shipping unlicensed audio."""
-    _tracks = [t for t in _music_load_manifest(music_dir)
-               if isinstance(t, dict) and t.get("deliverable") is True
-               and os.path.exists(os.path.join(music_dir or _MUSIC_DIR, str(t.get("file") or "")))]
-    if not _tracks:
-        return None
-    _v = str(vibe or "").lower()
-    for _t in _tracks:                      # a named mood in the vibe wins
-        for _mood in (_t.get("mood") or []):
-            if str(_mood).lower() in _v:
-                return _t
-    return _tracks[0]                       # otherwise the library's first bed
-
-
-def _music_filter_chain(music_label="1:a", speech_label="0:a", out_label="amixed"):
-    """The ffmpeg filter that puts a bed under a voice.
-
-    Sidechain, not a schedule: the duck follows the ACTUAL speech envelope, so it
-    stays correct when a cut moves. A static duck schedule would be a second
-    clock over the same audio — the class the shared-clock law exists to stop.
-
-    The speech is split because it is needed twice: once as the sidechain KEY
-    and once as the thing being mixed. Reusing one label silently produces an
-    empty stream in ffmpeg's graph."""
-    _duck_ratio = 20
-    # LOUDNESS-NORMALISED, NOT GAIN-SCALED. A relative `volume=` multiplies
-    # whatever the track already had, so a bed's real level depends on how hot
-    # the source file was mastered — and a library of licensed tracks will vary
-    # by 20 dB. The first build did exactly that and produced a bed at -57.8
-    # dBFS: inaudible, i.e. the feature shipping as a no-op that every test
-    # still passed. loudnorm targets an ABSOLUTE integrated loudness, so every
-    # track in any library lands at the same place under the voice.
-    return (
-        f"[{speech_label}]asplit=2[sc][sp];"
-        f"[{music_label}]loudnorm=I={_MUSIC_BED_LUFS}:TP=-2:LRA=7,"
-        f"aloop=loop=-1:size=2e9[bed];"
-        f"[bed][sc]sidechaincompress=threshold=0.03:ratio={_duck_ratio}:"
-        f"attack={_MUSIC_ATTACK_MS}:release={_MUSIC_RELEASE_MS}:makeup=1[ducked];"
-        f"[sp][ducked]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[{out_label}]"
-    )
-
-
-_MUSIC_NO_FIT_NOTE = (
-    "You asked for background music — Promptly doesn't have a music library it "
-    "can licence to you yet, so this edit ships without a bed rather than with "
-    "music we don't have the rights to hand you."
-)
-
-
-def _music_note(delivered, track=None):
-    """One place decides which truth the user hears — derived from whether a bed
-    was actually mixed, never from the ask. Same law as the upscale note."""
-    if delivered and track:
-        return (f"You asked for background music — added a bed ({track.get('id')}) "
-                "under your audio, ducked automatically so your voice stays on top.")
-    return _MUSIC_NO_FIT_NOTE
 
 
 def _parse_unsupported_requests(text):
@@ -33455,6 +33372,9 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         _obey_src = " ".join(str(input_data.get(k) or "")
                              for k in ("vibe", "change_request"))
         _obey_notes = _component_unmet_notes(_obey_src, _route_name)
+        # [§4.5/§4.8] Decided-never asks are honoured with honesty on EVERY
+        # route, flag or no flag — the demand outlived the feature.
+        _obey_notes = list(_obey_notes) + _negotiated_never_notes(_obey_src)
         if _obey_notes:
             _capability_notes = list(_capability_notes or []) + _obey_notes
     except Exception as _e:   # a note must never cost a delivered video

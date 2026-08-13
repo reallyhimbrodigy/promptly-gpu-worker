@@ -122,7 +122,6 @@ ignition as floor maintenance. **None of them is the headline.**
 | **Payoff arms 6+7** `[§6.4]` | built dark | 0 punchy payoffs / 253 | one differ pass, ~$0.20, PLAN_ONLY |
 | **Caption translate** `[§4.5]` | built dark | 50 asks, 23 silent (46%) | flip → differ → that class's silent rate |
 | **Density / moment tuning** `[§6.4]` | not started | 63% of std-editorial carry **zero** MGs; 7.76 vs the owner's 16.7 per 25s | measure H3/H4 **free** first |
-| **Music v1** `[§4.5, §7.3]` | built dark | 72 asks | **owner: is music even wanted?** |
 | **Upscale v1** `[§3.2 edge]` | live dark | 195 asks | flip → the class stops dropping |
 
 **Density's free measurement comes first.** The E1 ceiling is *architectural,
@@ -175,6 +174,21 @@ spec-debt with a named payoff date, not a design I intend to keep.
 ---
 
 ## WHAT THIS CAMPAIGN WILL NOT DO
+
+### Struck 2026-08-12 `[§4.8]`
+
+**Background music: REMOVED, not deferred.** §4.8 — dead-purpose code does not
+stay dark, it goes. The bed synthesis, selection, placeholder tracks, sidechain
+chain and its cert are deleted from the tree.
+
+What did NOT go with it is the **ask**. 72 people wanted music; deleting the
+build does not delete the demand, and §4.5 is unconditional. The ask now lives
+in COMPONENT_OBEY's **negotiated-never** vocabulary, unflagged: *"Promptly
+doesn't add background music — your edit uses your own audio, cut and balanced
+around what you actually said."* It deliberately does not say "yet" — that word
+belongs to a roadmap, not to a decision.
+
+SFX mixing and speech normalization are untouched. They are the edit.
 
 - **No new instruments, no new watches** until launch (owner's standing order).
 - **No tuning inside a window.** RED is held.
