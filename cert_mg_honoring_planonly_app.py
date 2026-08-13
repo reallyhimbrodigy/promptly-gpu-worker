@@ -73,6 +73,10 @@ def run() -> dict:
     import traceback
     import uuid
 
+    from build_lane import mark_build_lane
+
+    mark_build_lane("cert_mg_honoring_planonly_app.py")
+
     os.environ["APP_URL"] = ""
     os.environ["JOB_STATUS_WRITES_ENABLED"] = ""
     os.environ.pop("PROMPTLY_MG_OBEY", None)   # per-ARM control only

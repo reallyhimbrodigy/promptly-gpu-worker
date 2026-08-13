@@ -9046,6 +9046,21 @@ def _completion_post_carries_url():
         'edit_plan["_rendered_video_url"]).')
 
 
+@check("EDITORIAL_LIVE: THE BRAIN IS OFF FOR LIVE TRAFFIC BY DEFAULT (2026-08-12, RULE-1) [§3.1/§6.1]. Restoring Vertex billing must cost ZERO additional live-traffic spend — users cannot reach the editorial model until the owner personally flips them onto it, while the harness, cert apps and Lumen build loop call Gemini freely. Suppression rides the EXISTING force_safe_reason door (whose own contract is 'straight down the deterministic safe path — no Gemini call'), so an off gate takes byte-identically the path every job has taken throughout the outage. But that door has two conditions of its own — kept_words non-empty and SAFE_EDIT_FALLBACK_ENABLED on — so a HARD STOP also sits inside _call_gemini_post_cuts itself: a gate that fails open on an empty transcript or a flipped kill switch is a tendency, not a guarantee. Runs cert_editorial_live.py: off by default with nothing configured, a live call raising its OWN exception type (an outage, a timeout and a validator rejection all also end in a safe edit and mean completely different things), the build lane passing through, the owner's flip opening it, and the fail-open hole staying shut. It also asserts build_lane.py is IMAGE-MOUNTED and that every Gemini-calling cert app marks itself — an unmounted deferred import would ImportError in-container and the cert would run suppressed, reporting a null that looks like data.")
+def _editorial_live_cert():
+    import subprocess as _sub, os as _os, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _env = dict(_os.environ)
+    for _k in ("PROMPTLY_EDITORIAL_LIVE", "PROMPTLY_BUILD_LANE", "SAFE_EDIT_FALLBACK_ENABLED"):
+        _env.pop(_k, None)
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_editorial_live.py")],
+                  capture_output=True, text=True, timeout=600, env=_env, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0 and "ALL PASS" in _out, (
+        "cert_editorial_live FAILED — live traffic may be able to reach the editorial model.\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1500:])
+
+
 @check("PAYOFF ARMS 6+7 STAY DARK AND STAY VALID (2026-08-12, RULE-1): 0 punchy payoffs in 253 chances is NOT a bug — it is the system obeying the owner's own twice-expressed ruling (handler.py doctrine line + the payoff prose). Arm 6 widens the zoom enum; its own pre-registered read says a null there is INCONCLUSIVE because the prose still forbids what the enum now allows, so a null could be obeyance rather than judgement. Arm 7 widens the enum AND neutralises the prose, which is the only configuration in which 'never picked' is a real confirmation. This runs cert_payoff_arms.py to protect the VALIDITY of that test: control byte-identical, arm 6 ADDS rather than replaces, arm 7 implies arm 6, the prose swap NEUTRALISES without ever advocating a snap (advocacy would measure the new instruction instead of the model's taste), the swap target exists VERBATIM in the real prompt (non-circular — otherwise arm 7 raises at ignition when there is no time to debug), a drifted prompt RAISES rather than silently no-opping (a faked null reads as 'the model agrees with the ruling', the most expensive wrong conclusion here), and the two prose arms cannot run together and quietly measure neither.")
 def _payoff_arms_cert():
     import subprocess as _sub, os as _os, sys as _sys

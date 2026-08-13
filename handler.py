@@ -12963,6 +12963,14 @@ def _post_cuts_response_schema():
     return _s
 
 
+class EditorialSuppressed(RuntimeError):
+    """Live traffic reached an editorial call with the brain OFF [§3.1/§6.1].
+
+    Its own type so the class is countable and can never be mistaken for a
+    Vertex outage, a timeout, or a validator rejection — three things that also
+    end in a safe edit but mean something completely different."""
+
+
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
                            recipe_deadline_s=None, media_res_override=None,
                            source_duration_s=None, n_words=None):
@@ -12980,6 +12988,11 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     on thinking + actual JSON response. At 24K thinking, ~40K is left for
     the JSON output — typical PostCutPlan JSON is 2-4K, comfortable margin.
     """
+    if _editorial_suppressed():
+        raise EditorialSuppressed(
+            "PROMPTLY_EDITORIAL_LIVE is off — live traffic does not call the "
+            "editorial model. Set PROMPTLY_BUILD_LANE=1 in a build/cert "
+            "container, or flip the gate and redeploy.")
     print(
         f"[gemini-post] Calling {model_name} (thinking_budget=24576, PostCutPlan schema, "
         f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
@@ -13820,6 +13833,51 @@ def _plan_zoom_beyond_source(_plan, source_dur_s, n_words=None):
     return None
 
 
+# ── EDITORIAL_LIVE — THE BRAIN IS OFF FOR LIVE TRAFFIC BY DEFAULT [§3.1/§6.1] ─
+# Restoring Vertex billing must cost ZERO additional live-traffic spend. Until
+# the owner personally flips users onto it, every live user job keeps taking
+# EXACTLY today's path — the deterministic safe edit that has served every job
+# throughout the outage.
+#
+# HOW, and why this door and not a new one: force_safe_reason is an EXISTING,
+# designed parameter whose own contract is "forces the recipe stage straight
+# down the deterministic safe path — no Gemini call, no repair loop, the exact
+# span every recipe flows through." That is precisely the required behaviour,
+# on a code path already exercised by the rescue re-run. Inventing a second
+# suppression mechanism would mean a second thing to get wrong.
+#
+# THE BUILD LANE IS NOT LIVE TRAFFIC. The harness, the cert apps and the Lumen
+# build loop run in their OWN Modal containers and set PROMPTLY_BUILD_LANE=1
+# there. They call Gemini regardless of this gate — the whole point is that
+# Lumen can be BUILT while users cannot reach the brain. That env var never
+# belongs in the production secret, and the NO-UNREGISTERED-LIVE-FLAG gate
+# catches it if it ever appears there.
+
+def _editorial_live_enabled():
+    """DEFAULT OFF. Live user jobs do not call the editorial model unless the
+    owner has explicitly turned this on AND redeployed (memory-snapshot law)."""
+    return os.environ.get("PROMPTLY_EDITORIAL_LIVE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _build_lane():
+    """True inside a harness/cert/build container, which is never live traffic.
+
+    Set per-container by the build tooling, never in the production secret."""
+    return os.environ.get("PROMPTLY_BUILD_LANE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _editorial_suppressed():
+    """Should THIS call take the deterministic path instead of the model?
+
+    Suppressed only for live traffic with the gate off. The build lane is never
+    suppressed — that asymmetry IS the feature."""
+    return (not _build_lane()) and (not _editorial_live_enabled())
+
+
 def generate_edit_gemini(
     video_path, vibe, duration, trend_context=None, deepgram_words=None,
     shot_changes=None, shot_change_scores=None, vocal_emphasis=None, source_loudness=None,
@@ -14520,6 +14578,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
     # repair loop, the exact span every recipe flows through. Honors the
     # same kill switch; with empty kept_words the normal path proceeds (and
     # fails honestly — that job class is deny-listed at the rescue gate).
+    # [§3.1/§6.1] EDITORIAL_LIVE gate. Default OFF => live traffic takes the
+    # deterministic safe edit and makes NO model call, byte-identical to the
+    # path every job has taken throughout the outage. The build lane bypasses.
+    if force_safe_reason is None and _editorial_suppressed():
+        force_safe_reason = "editorial_live_off"
     if force_safe_reason and _safe_edit_on and kept_words:
         _use_safe = True
         _safe_reason = str(force_safe_reason)

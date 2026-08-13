@@ -27,6 +27,8 @@ def run_arm(arm: dict) -> dict:
     # source overload it (2 arms fine, 6 time out). Stagger so calls barely overlap.
     if arm.get("stagger_s"):
         time.sleep(float(arm["stagger_s"]))
+    from build_lane import mark_build_lane
+    mark_build_lane("cert_e1_ab_app.py")
     os.environ["APP_URL"] = ""                     # no completion callback / progress posts
     os.environ["JOB_STATUS_WRITES_ENABLED"] = ""   # no phantom video_jobs rows (canonical cert setup)
     sys.path.insert(0, "/")

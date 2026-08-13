@@ -41,6 +41,8 @@ N_SOURCES = int(os.environ.get("N_SOURCES", "8") or "8")
 @app.function(secrets=SECRETS, cpu=16.0, memory=49152, timeout=3000)
 def run(n_sources: int) -> dict:
     import time, uuid, traceback
+    from build_lane import mark_build_lane
+    mark_build_lane("cert_planonly_fps_ab_corpus_app.py")
     os.environ["APP_URL"] = ""; os.environ["JOB_STATUS_WRITES_ENABLED"] = ""
     # per-arm control ONLY — neutralize any live values for the two lever flags
     os.environ.pop("PROMPTLY_PROXY_SAMPLE_FPS", None)

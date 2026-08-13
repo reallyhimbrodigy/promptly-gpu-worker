@@ -30,6 +30,8 @@ SRC = "https://d1iax8jos987n3.cloudfront.net/sources/e9b47b30-5edf-4bc6-825a-7d2
 @app.function(secrets=SECRETS, cpu=16.0, memory=49152, timeout=1800)
 def run() -> dict:
     import time, uuid, traceback, copy
+    from build_lane import mark_build_lane
+    mark_build_lane("cert_planonly_fps_ab_app.py")
     os.environ["APP_URL"] = ""; os.environ["JOB_STATUS_WRITES_ENABLED"] = ""
     # neutralize any live prod env for these flags — control PER-ARM only
     os.environ.pop("PROMPTLY_PROXY_SAMPLE_FPS", None)

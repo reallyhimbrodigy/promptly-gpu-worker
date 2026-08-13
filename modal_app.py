@@ -534,6 +534,13 @@ image = (
     # RenderTimeline (unification pillar 3). handler.py imports it inside the
     # shadow block (Slice 1) — bundle it or the shadow silently self-skips.
     .add_local_file("render_timeline.py", "/render_timeline.py")
+    # [§3.1/§6.1] build_lane.py — the EDITORIAL_LIVE bypass marker. Mounted
+    # because the cert apps import it INSIDE their container functions, and the
+    # deferred-import law is explicit: an import that only runs in the container
+    # must be image-mounted or it ImportErrors exactly where nobody is watching.
+    # Harmless in production: importing it changes nothing, and only calling
+    # mark_build_lane() sets the marker — which production never does.
+    .add_local_file("build_lane.py", "/build_lane.py")
     # EditPolicy spine (Phase 2). handler.py lazy-imports `edit_policy` only when
     # the per-job/env flag is on; without this entry the flag-on path would hit
     # ModuleNotFoundError (caught + disabled per-job, but the feature wouldn't run).
