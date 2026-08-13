@@ -1,246 +1,184 @@
-# QUALITY_CAMPAIGN — the taste war, ranked, with a loop per item
+# QUALITY_CAMPAIGN — ranked by PRODUCT_SPEC §3, sequenced by §6
 
-**Written 2026-08-12, before ignition, so the campaign starts the afternoon
-payments land with zero planning delay.** Everything ranked below is either
-already built dark or is a named, scoped build. Nothing here waits on a meeting.
+**Rewritten 2026-08-12 against the constitution.** The previous ranking was
+mine and it was wrong: it led with floor work (payoff, density, captions) and
+put the premium look sixth. §3 ranks the premium look **first** and §6.4 files
+payoff/density/captions as **floor maintenance, never the headline**. This file
+now follows the spec, not my judgement.
 
-The reliability war is finished: 0 repairs / 0 P0 across 36 post-v527 terminal
-jobs, the Render gate armed, the pre-push gate armed. What is left is not
-uptime. It is whether the video is *good*.
+Every item cites its section (§8). An item that cannot cite one is not in this
+file.
 
 ---
 
-## THE LOOP — the same four steps for every item, no exceptions
+## THE LOOP — unchanged, applies to every item (§4.7)
 
 ```
 change dark  →  differ verdict in HOURS  →  fulfillment + export delta in a DAY  →  keep or kill
 ```
 
-| step | what it means | who |
-|---|---|---|
-| **change dark** | flag off = byte-identical, cert in the deploy gate | BUILDER |
-| **differ** | `harness_plan_diff.py diff --golden golden/plans --candidate <dir>` — offline, free, hours | BUILDER |
-| **delta** | JUDGE's fulfillment honor-rate + the export/result_viewed ratio, cut BY ROUTE, on a clean cohort | JUDGE |
-| **keep or kill** | GREEN → keep · RED → **kill, do not tune in-window** | owner |
-
-Three rules that make the loop honest, all of them already paid for:
-
-1. **RED is HELD, not tuned.** The compressed-window law. A route that fails
-   keeps its flag off and ships next window.
-2. **A differ GREEN is "the corpus saw no regression" — not proof of
-   improvement.** Improvement is a taste call on pixels, and that is the
-   owner's, on rendered pairs, never on a flag.
-3. **Never send a pair not programmatically proven to differ.** Frame-diff at
-   motion timestamps, PSNR reported. Three rounds of the owner's time were lost
-   to pairs that may have been identical.
+Three standing rules: **RED is HELD, never tuned in-window** · a differ GREEN
+means "the corpus saw no regression", **not** proof of improvement — improvement
+is a taste call on pixels, the owner's, never mine · **no pair reaches him that
+has not been programmatically proven to differ.**
 
 ---
 
-## THE RANKED BACKLOG
+# CAMPAIGN #1 — LUMEN REVIVAL `[§3.1, §6.1]`
 
-Ranked by **(measured demand or measured defect) × (confidence it moves
-perceived quality) ÷ (risk to a working render)**. The first three are built.
+**The #1 value in the spec. Fires 0 in 2,074 production jobs.**
 
----
+## Step 1 — DONE TODAY, no Gemini required: the trigger is named
 
-### 1. PAYOFF ARMS 6 + 7 — the ruling gets its evidence · **BUILT, dark**
+The mechanics are proven end to end. Nothing is broken in Lumen. **The model is
+never told generated scenes exist.**
 
-**The number:** 0 punchy payoffs in 253 chances.
+```
+server.js:5020-5022   premiumPipeline = entitlement.isPro === true
+                                     && body?.premium_pipeline_enabled === true
+                                     && premiumPipelineEnabled()
+server.js:590-592     premiumPipelineEnabled() → process.env.PREMIUM_PIPELINE_ENABLED
+render.yaml           ← NOT DECLARED. THE TRIGGER DIES HERE.
+dispatch-to-modal.js:1024   premium_pipeline_enabled: false   (always)
+handler.py:35879-35880      route_premium = is_premium AND _premium_flag_on → False
+handler.py:7746             if premium:   ← the GENERATED SCENES directive never appends
+```
 
-**Read the ruling before touching this.** That zero is not a bug. It is the
-system obeying the owner's own twice-expressed doctrine [CODE handler.py:1215;
-prompt prose at the payoff position]: *"the slow commitment IS what makes the
-payoff bigger than every beat before it; a snap would read as just another
-mid_peak."* It is coherent, it is deliberate, and 0/253 is evidence it is
-**working**, not failing.
+`handler.py:7746` is the last gate: the entire generated-scenes art-directive is
+appended **only** when `premium` is true. It never is. So the model has never
+once been asked for a generated scene, and 0/2,074 is not the model declining —
+it is an instruction that was never sent.
 
-What was missing is the choice, not the answer:
+**Evidence [MEASURED], probe proven live by its own population:** 6,329
+`render_started` events since 2026-07-01 carry `premium: false` — **6,329 of
+6,329**.
 
-| arm | flag | what it changes |
-|---|---|---|
-| 6 (2026-07-31) | `PROMPTLY_PAYOFF_PUNCHY` | enum widened — a snap becomes *sayable* at payoff |
-| 7 (2026-08-12) | `PROMPTLY_PAYOFF_OPEN` | enum widened **and** the prohibition removed from the prose (implies arm 6) |
+*(Recorded because it nearly became a false finding: my first probe read
+`route_premium` out of `result` and returned a confident 0. That key is a
+`render_burst` payload (`handler.py:25487`) and is never persisted. Discarded,
+not reported.)*
 
-Arm 6 alone cannot settle it, and its own pre-registered read says so: the prose
-still forbids what the enum now allows, so a null there is **obeyance, not
-judgement**. Arm 7 is the only configuration in which "never picked" is a real
-confirmation. Arm 7 was built now rather than after arm 6 returns null purely to
-take a serial dependency off ignition — both dark costs nothing, and one differ
-pass separates obeyance from judgement instead of two.
+## Step 2 — the second cause, independent of the first
 
-**The swap neutralises, it never advocates.** It removes the prohibition and
-keeps the requirement (the payoff must still commit); it never says "be punchy".
-Prose arguing for a snap would measure the new instruction instead of the
-model's taste — the same defect in the opposite direction.
+**`profiles.tier` = 3 pro / 997 free.** Even with the flag on, `entitlement.isPro`
+gates Lumen to **0.3%** of the base. Flipping the env var does not produce a
+campaign; it produces three users' worth of Lumen.
 
-**Pre-registered read, fixed before any data:**
-- punchy IS picked → purity was obeyance. Report which beats, render the pairs.
-- still never picked, prose neutral and enum open → **the model agrees with the
-  ruling on its own.** A real confirmation, which arm 6 alone could never give.
-- picked but the pairs read worse → **the ruling is vindicated on pixels**, the
-  strongest possible outcome for it.
+**This is a §3 tension for the owner, not a bug and not my call.** §3 says the
+premium look is *what makes it worth $50 instead of $10* — but it is currently
+reachable only by users who already pay, and only if they open a model picker
+and choose it. A capability that can only be seen after purchase cannot do the
+selling. Whether Lumen is the paid tier's reward or the product's shop window is
+a pricing decision, and it is his.
 
-**No outcome changes anything by itself.** It produces the pixels the owner's
-ruling stands or falls on. His call, on pixels, never on a flag.
+## Step 3 — what unblocks, in order
 
-`cert_payoff_arms.py` · gate check 368 · cost: PLAN_ONLY, ~$0.10/arm.
+1. **Owner: declare `PREMIUM_PIPELINE_ENABLED`** on Render. `/api/health` now
+   reports `premium_pipeline` so this is a curl, not a log dig — shipped today
+   for exactly this reason.
+2. **Owner: the Lumen blind-sheet scores** (§7.2). They calibrate the judge for
+   the #1 value; nothing downstream is trustworthy without them.
+3. **Owner: the reference set** (§7.1) — he has offered generated-graphics
+   examples. Those seed the golden references the look is tuned against.
+4. **Then me:** wire Lumen into the live flow, quality-tune the scenes against
+   his references until the look commands the price.
 
----
-
-### 2. BACKGROUND MUSIC v1 — the mechanism · **BUILT, dark**
-
-**The number:** 72 recorded asks, dropped. Nothing transforms the perceived
-quality of short-form like a bed under the voice.
-
-Built: ask detection (negation-guarded), bed selection, **sidechain** ducking
-off the speech envelope, a stated volume law, and an honest note when no bed
-fits.
-
-**The volume law, in numbers so it is arguable:**
-
-| | |
-|---|---|
-| bed target | **−28 LUFS integrated** (absolute, `loudnorm`) |
-| duck under speech | −14 dB further, ratio 20 |
-| attack / release | 20 ms / 400 ms |
-| measured | bed alone **−29.8 dB** · under speech it adds **+0.00 dB** over speech-only |
-
-Two decisions worth keeping:
-
-- **Sidechain, not a schedule.** The duck follows the actual speech envelope, so
-  it stays correct when a cut moves. A scheduled duck is a second clock over the
-  same audio — the class the shared-clock law exists to stop.
-- **Loudness-normalised, not gain-scaled.** A relative `volume=` multiplies
-  whatever the track was mastered at, and a licensed library varies by ~20 dB.
-  The first build did exactly that and produced a bed at **−57.8 dBFS**:
-  inaudible — the feature shipping as a no-op that a one-sided assertion still
-  called green. The audibility floor is now asserted in **both** directions.
-
-**The safety property that lets this sit in the repo behind a flag:** all three
-beds are synthesized placeholders marked `deliverable: false`, and bed selection
-**refuses** anything not explicitly deliverable. Flipping the flag today
-delivers **no music** and says so honestly. The audio a user receives is gated
-on the owner's licensing pick, not on a flag.
-
-**Owner's move:** pick the licensed library. Tracks land in `assets/music/`,
-each gains `deliverable: true` with its licence filled in, and the mechanism is
-already certified.
-
-**Remaining build (named, not hidden):** splicing the bed into the render's
-existing SFX `amix`. That touches delivered audio, so it gets its own change
-with the render certs run — not a hasty ride-along.
-
-`cert_music_v1.py` · gate check 369.
+**Until 1–3 land this campaign is owner-blocked, and no amount of my building
+moves it.** That is the honest status, and it is why the diagnosis was worth
+doing today: it converts "why doesn't Lumen fire" from a research project into
+three decisions only he can make.
 
 ---
 
-### 3. COMPONENT_OBEY — the honesty floor · **BUILT, dark** (shipped v527)
+# CAMPAIGN #2 — GENERATIVE INTEGRATION `[§3.2, §6.2]`
 
-**The number:** cluster silent-drop **94.0% on lean** (n=215) vs 63.5% premium,
-54.5% standard. One in five lean jobs carries a cluster ask; 94 of 100 vanish
-without a word.
-
-Honor where the toolbox has it; **note where it does not**. The note leg is
-deterministic code after the model, because lean routes never call the editorial
-model at all — a prompt-side fix cannot reach 94% of the loss by construction.
-
-**JUDGE's acceptance bar, theirs to read:** lean cluster silent-rate 94% →
-**<20%** over ≥150 post-flip cluster asks, with a matching honest-note rate.
-
-This is the floor the rest of the campaign stands on: *the user is never
-silently ignored.* Ship it first — a beautiful edit that drops your request is
-still a product that does not listen.
+Veo-class changes to the footage itself — the #2 value, **not started**. Design
+is buildable today with no provider access: see `GENERATIVE_INTEGRATION.md`
+(provider evaluation, cost model, and the §4.1 honest-progress carve-out
+contract). Design lands first so that when the owner picks a provider the build
+is a wiring job, not a research project.
 
 ---
 
-### 4. DENSITY / MOMENT TUNING — the biggest quality gap not yet armed
+# CAMPAIGN #3 — SURGICAL DEPTH `[§3.3, §6.3]`
 
-**The numbers:** 63% of standard-editorial jobs carry **zero** motion graphics.
-Density 7.76 vs the owner's reference 16.7 per 25s — **we cut half as often as
-his own reference edit.**
-
-**Known before starting, so the loop is not wasted:** the E1 density ceiling is
-**architectural, not prompt-tunable** — multi-gate culling, not model
-reluctance. `MG_HONORING_DIAGNOSIS.md` ranks four hypotheses (H1 prompt, H2
-route mix, H3 projection-miss drops, H4 render collision/floor drops). H3 and H4
-are **post-model** and cost $0 to measure: count `projection_miss_drop`
-divergence rows and the render-layer drop reasons on existing traffic.
-
-**Do the free measurement first.** If the drops are post-model, no prompt arm
-can fix it and COMPONENT_OBEY's honor leg will under-deliver for a reason that
-has nothing to do with the prompt.
-
-Loop: measure H3/H4 free → arm whichever gate is culling → differ → density per
-25s by route + honor rate. **Not started.**
+The deferred re-plan ops (re-cut, timing shifts). Deliberately sequenced after
+226 ships, because 226 is what finally generates a real re-edit corpus — building
+surgical depth against an imagined corpus is how the re-edit taxonomy went wrong
+the first time. `PROMPTLY_SURGICAL_V2` is built dark and flips at ignition.
 
 ---
 
-### 5. CAPTION POLISH — the most-seen surface in the product
+# CAMPAIGN #4 — THE FLOOR, CONTINUOUSLY `[§3.4, §6.4]`
 
-Captions are the best-fulfilled class already (**79% honored**, 235 asks, and
-the one place notes actually fire). The gap is not fulfillment, it is *finish*:
-entrance crispness (frame-1-is-final is law), the never-early ceiling (0% early
-across all 9 styles), legibility floor, and mid-word endings.
+**Ranked last by the spec and that is correct — but "last" means "held at
+pro-freelancer parity forever", not "neglected".** §3's interpretation is
+binding: the floor is mandatory, assumed, and invisible when right. These run at
+ignition as floor maintenance. **None of them is the headline.**
 
-Highest-leverage first: **caption_language** — 50 asks, 23 dropped silently
-(46%), and `PROMPTLY_CAPTION_TRANSLATE` is **already built and dark**. That is a
-flip with a cert, not a build.
+| item | status | measured gap | loop |
+|---|---|---|---|
+| **COMPONENT_OBEY** `[§4.5]` | built dark | cluster silent-drop **94% on lean** (n=215) | flip → differ → lean silent-rate 94%→<20% over ≥150 asks |
+| **Payoff arms 6+7** `[§6.4]` | built dark | 0 punchy payoffs / 253 | one differ pass, ~$0.20, PLAN_ONLY |
+| **Caption translate** `[§4.5]` | built dark | 50 asks, 23 silent (46%) | flip → differ → that class's silent rate |
+| **Density / moment tuning** `[§6.4]` | not started | 63% of std-editorial carry **zero** MGs; 7.76 vs the owner's 16.7 per 25s | measure H3/H4 **free** first |
+| **Music v1** `[§4.5, §7.3]` | built dark | 72 asks | **owner: is music even wanted?** |
+| **Upscale v1** `[§3.2 edge]` | live dark | 195 asks | flip → the class stops dropping |
 
-Loop: flip caption-translate on its own window → differ → the 46% silent rate on
-that class. **Ready.**
+**Density's free measurement comes first.** The E1 ceiling is *architectural,
+not prompt-tunable* — multi-gate culling. H3 (projection-miss drops) and H4
+(render collision/floor drops) are **post-model** and cost $0 to count on
+existing traffic. Arming a prompt arm before that measurement burns a window on
+the wrong layer.
 
----
-
-### 6. PREMIUM / LUMEN REVIVAL — the largest capability sitting dark
-
-moodreel + hype have been **exactly 0 for 3+ days** (685 completions, 643
-users), against a **31.6% pre-outage share**. Premium is also the *best*
-performer on the product's #1 named ask (motion_graphics 37% silent on premium
-vs 96% on lean).
-
-**This is a launch-day P0 gate, not a campaign item, until it is answered.**
-LAUNCH_DAY Step 2: if routes are still 0 an hour after billing with n ≥ 10,
-declare the second P0 — a stuck fail-safe — and stop. Everything downstream
-depends on real editorial plans.
-
-Once routes return: Lumen Increment 1 (premium E2E 834s, 0 scenes) is the
-quality ceiling worth attacking, and `PROMPTLY_UNIFIED_CORE` flips on its own
-merits (premium composition identity) — **not** as an honor-rate lever. JUDGE's
-verdict is explicit that it aims at the side already least broken.
+**Payoff arms carry one correction to my own framing:** 0/253 is the system
+**obeying** the owner's twice-expressed doctrine. It is not a defect. Arm 7
+neutralises the prose so "never picked" can finally mean judgement rather than
+obeyance — it produces the pixels his ruling stands or falls on, and changes
+nothing by itself.
 
 ---
 
-### 7. UPSCALE v1 — shipped, awaiting its flag · **BUILT, live dark (v528)**
+# CAMPAIGN #5 — THE TWO-MINUTE LAW `[§4.1, §6.5]`
 
-195 asks, 100% dropped. The negotiation ships the honesty; the pass ships the
-substance (lanczos 2× to 2160×3840 + unsharp, audio copied, runs only on an
-explicit ask). The note is derived from the produced artifact, never the intent.
-
-Loop: flip → the 195-ask class stops dropping → export-rate delta on jobs that
-asked. `cert_upscale_v1.py` · gate check 367.
+Staged latency levers validated at ignition (`PROMPTLY_HLS_COPY` is already on),
+plus a premium-path budget until Lumen-class edits land ≤120s. The §4.1
+carve-out is explicit: generative operations may exceed it **with an honest
+progress contract in the chat**; editing never does.
 
 ---
 
-## THE FIRST AFTERNOON — what actually happens when ignition lands
+## A CONFLICT I HAVE TO DECLARE `[§4.4]`
 
-Ordered so nothing waits on anything else:
+**§4.4 makes the legacy lean routes anti-spec** — "no route may strip the
+toolbox; simplicity is restraint guidance on the full core, never removed
+capability."
 
-1. **Route-recovery check** (1 traffic hour). Premium back, or the second P0.
-2. **Freeze** — `bash golden/ignite.sh`. Whole-or-nothing.
-3. **COMPONENT_OBEY** first. The honesty floor; everything else is judged on top
-   of a product that no longer silently ignores people.
-4. **Payoff arms 6 + 7 in ONE differ pass** — PLAN_ONLY, ~$0.20 total. Obeyance
-   vs judgement, settled in an afternoon.
-5. **Caption-translate** — built, dark, a flip and a cert.
-6. **Density H3/H4 free measurement** — no spend, no window, runs in parallel.
-7. **Music** — the moment the owner names the library.
+**COMPONENT_OBEY's note leg is built on the opposite premise.** Its
+`_ROUTE_TOOLBOX` encodes lean routes as having an *empty* toolbox and writes an
+honest note saying so ("this clip took the clean re-pace route, which doesn't
+build them").
+
+Both things are true at once:
+- Under **§4.5**, the note leg is correct and is the single biggest honesty win
+  available (94% → <20%). It should still flip at ignition.
+- Under **§4.4**, the note is a **transitional** artifact. The compliant end
+  state is the unified core's restraint profiles, where the toolbox is never
+  stripped and the note becomes unnecessary because the ask can simply be
+  honored.
+
+So: **ship the note leg now, retire it with the unified core.** I have not
+changed the code — the note is honest today and honesty now beats architectural
+purity later. But it is on record that `_ROUTE_TOOLBOX`'s empty sets are
+spec-debt with a named payoff date, not a design I intend to keep.
+
+---
 
 ## WHAT THIS CAMPAIGN WILL NOT DO
 
-- **No new instruments and no new watches** until launch. The scoreboard,
-  fulfillment judge, differ, and export ledger already answer every question
-  below. Another dashboard is not another insight.
+- **No new instruments, no new watches** until launch (owner's standing order).
 - **No tuning inside a window.** RED is held.
-- **No pair to the owner that has not been proven to differ.**
-- **No taste call made by me.** I build the choice; he makes it. That is
-  explicitly true of item 1, where the thing under test is his own ruling.
+- **No taste call made by me.** I build the choice; he makes it.
+- **Nothing in §6.1–§6.3 is claimed as progress while it is owner-blocked.**
+  Campaign #1's honest status today is: diagnosed, and waiting on three
+  decisions.
