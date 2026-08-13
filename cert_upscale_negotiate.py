@@ -37,33 +37,14 @@ def check(name):
 
 
 def _extract_block():
-    with open(os.path.join(HERE, "handler.py")) as f:
-        src = f.read()
-    start = src.index("_UPSCALE_ASK_RE = re.compile(")
-    tail = src[start:]
-    # UPSCALE v1 (2026-08-12) landed _upscale_v1_enabled / _upscale_to_4k /
-    # _upscale_note between the regexes and the negotiation predicates. The
-    # extractor stops at the first def OUTSIDE this allowlist, so the new
-    # functions have to be named here or the block truncates and every lookup
-    # below KeyErrors. (Same breakage cert_mg_obey hit when COMPONENT_OBEY
-    # landed — this extraction style is load-bearing and brittle by design.)
-    m = re.search(r"\ndef (?!_upscale_negotiate_enabled|"
-                  r"_parse_upscale_request|_upscale_v1_enabled|"
-                  r"_upscale_to_4k|_upscale_note)", tail)
-    block = tail[:m.start()] if m else tail
-    # _upscale_to_4k shells out and pins threads, so the exec namespace needs
-    # those names; the cert never CALLS it (cert_upscale_v1.py owns the real
-    # pass), it only needs the block to compile.
-    import subprocess as _sp
-    # MUSIC v1 (2026-08-12) added module-level constants ahead of the upscale
-    # predicates, and _MUSIC_DIR resolves __file__ — which an exec'd block does
-    # not have. Supply the module's own globals it legitimately needs; the block
-    # is compiled, never called, so this only has to let it EXIST.
-    ns = {"re": re, "os": os, "subprocess": _sp, "print": print, "json": json,
-          "__file__": os.path.join(HERE, "handler.py"),
-          "_X264_ENCODE_THREADS": 48}
-    exec(compile(block, "handler.py<upscale>", "exec"), ns)
-    return ns
+    """Extract by AST NODE NAME [§8] — see cert_extract.py. Replaces a
+    positional slice that had to be widened every time an unrelated function
+    landed nearby."""
+    from cert_extract import extract_from
+    return extract_from("handler.py", names=[
+        "_UPSCALE_ASK_RE", "_UPSCALE_NEG_RE", "_UPSCALE_NEGOTIATION_NOTE",
+        "_upscale_negotiate_enabled", "_parse_upscale_request",
+    ], globals_={"re": re, "os": os})
 
 
 NS = _extract_block()

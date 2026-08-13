@@ -754,6 +754,172 @@ def _parse_upscale_request(text):
     return False
 
 
+# ── KEYWORD EMPHASIS + NUMBER GLORIFICATION [§3.1 component A] ───────────────
+# Both reference modes, decomposed:
+#   REF-1  lower-third phrases with per-KEYWORD colour emphasis — white base,
+#          orange/blue on the words that carry the claim
+#   REF-2  centre-frame 1-3 word captions with NUMBER GLORIFICATION: "13" huge,
+#          "$20,000,000", a giant outlined "0"
+#
+# THIS IS THE DETERMINISTIC HALF, and it is deliberately in Python rather than
+# in the renderer. Choosing WHICH words carry a claim is a decision, and §4.3a
+# puts decisions that must always happen in code after the model — not in prompt
+# begging and not in a component's render loop where it cannot be tested.
+#
+# The renderer half (drawing a token in an accent colour, scaling a number to
+# hero size) is a TSX change I am NOT making blind: there is no node_modules in
+# this checkout, so I cannot typecheck TSX, and the caption system carries laws
+# with certs behind them (frame-1-is-final, integer ms, never-early). Writing
+# unverifiable TSX into that system is how a caption regression ships. The spec
+# for it is in LUMEN_BUILD_SHEET.md; the emphasis SPEC this produces is the
+# contract it renders.
+
+# A number worth glorifying. THIS RULE WAS CORRECTED AGAINST THE BAR: my first
+# version rejected bare small integers ("3 tips is not a hero"), and REF-2
+# glorifies a bare "13" and even a giant outlined "0". The reference wins — the
+# same canon rule the rhythm dimension carries: if the references fail the rule,
+# the RULE is broken.
+#
+# The distinction the references actually draw is MODE, not magnitude. REF-2's
+# hero numbers live in its centre-frame 1-3 word captions, where the number IS
+# the whole claim. REF-1's longer lower-third phrases glorify nothing bare — they
+# accent keywords. So:
+#   short line (<= _HERO_SHORT_LINE_WORDS)  -> ANY number is the claim
+#   longer line                             -> only self-evidently significant
+#                                              numbers (currency, %, separators,
+#                                              multipliers, scale words)
+# which keeps "3 tips" quiet inside a sentence and lets "13" own its own frame.
+_HERO_SHORT_LINE_WORDS = 3
+_NUMBER_ANY_RE = re.compile(r"\d")
+_NUMBER_HERO_RE = re.compile(
+    r"(?:\$\s?\d[\d,]*(?:\.\d+)?(?:\s?(?:million|billion|k|m|b))?)"
+    r"|(?:\d[\d,]*(?:\.\d+)?\s?%)"
+    r"|(?:\d[\d,]*(?:\.\d+)?\s?x\b)"
+    r"|(?:\b\d{1,3}(?:,\d{3})+(?:\.\d+)?\b)"
+    r"|(?:\b\d+\s?(?:million|billion|thousand)\b)",
+    re.IGNORECASE)
+
+# Words that never carry a claim, so never take the accent. Emphasising these is
+# the tell of an automated edit — the reference set accents NOUNS AND NUMBERS.
+_EMPHASIS_STOP = frozenset("""
+a an the and or but if of to in on at by for with from as is are was were be been
+being it its this that these those i you he she they we my your our their his her
+do does did done have has had will would can could should may might must not no
+so then than there here what when where who whom how why very just really quite
+""".split())
+
+
+def _keyword_emphasis_spec(text, accent="#F5A11E", max_keywords=2):
+    """Which tokens in a caption line get the accent, and which is a hero number.
+
+    Returns {"tokens":[{"text","accent","hero"}], "hero_index": int|None}.
+    Pure and deterministic — the same line always emphasises the same words, so
+    two runs of one edit cannot disagree about what the claim was.
+
+    RULES, each from the references:
+      * a hero NUMBER always wins and there is at most ONE per line (REF-2's
+        "13" / "$20,000,000" own their frame; two heroes is a fight)
+      * otherwise accent the longest content words, capped at max_keywords —
+        REF-1 accents "smooth experience", not the whole sentence
+      * stop-words never take the accent
+      * a line with nothing worth accenting returns all-plain, which is the
+        common case and must stay cheap
+    """
+    _t = str(text or "")
+    if not _t.strip():
+        return {"tokens": [], "hero_index": None}
+    _raw = _t.split()
+    _tokens = [{"text": w, "accent": None, "hero": False} for w in _raw]
+
+    # 1. hero number — first match wins, one per line. In a short centre-frame
+    # line the number IS the claim (REF-2's mode), so any digit qualifies.
+    _short = len(_raw) <= _HERO_SHORT_LINE_WORDS
+    _hero_re = _NUMBER_ANY_RE if _short else _NUMBER_HERO_RE
+    _hero_i = None
+    for _i, _w in enumerate(_raw):
+        if _hero_re.search(_w):
+            _tokens[_i]["hero"] = True
+            _tokens[_i]["accent"] = accent
+            _hero_i = _i
+            break
+    if _hero_i is not None:
+        return {"tokens": _tokens, "hero_index": _hero_i}
+
+    # 2. keyword accent — longest content words, order preserved
+    _cands = [(len(re.sub(r"[^\w]", "", _w)), _i) for _i, _w in enumerate(_raw)
+              if re.sub(r"[^\w]", "", _w).lower() not in _EMPHASIS_STOP
+              and len(re.sub(r"[^\w]", "", _w)) >= 4]
+    for _, _i in sorted(_cands, reverse=True)[:max(0, int(max_keywords))]:
+        _tokens[_i]["accent"] = accent
+    return {"tokens": _tokens, "hero_index": None}
+
+
+# ── CANVAS / ASPECT [§3.1] ───────────────────────────────────────────────────
+# REF-1 (the LegalSoft corporate promo) is 1080x608 LANDSCAPE, so the Lumen bar
+# includes landscape. Aspect flexibility is in scope, not assumed vertical.
+#
+# WHAT WAS ACTUALLY PINNED [MEASURED]: almost nothing. Remotion's
+# calculateOverlayMetadata reads { width: i.width, height: i.height } from INPUT
+# PROPS, so the renderer already honours any canvas; 1080x1920 in Root.tsx is
+# only the studio-preview default. probe_resolution() already reads the source's
+# real dimensions. The entire pin was two literals in the overlay input.
+#
+# WHAT IS NOT TRIVIAL, AND IS THE REAL WORK: the safe-zone doctrine. The zone
+# system (x in [60,1020], y in [108,1812]) exists to dodge PLATFORM UI — the
+# status bar, the caption drawer, the like/share rail of a vertical feed. A
+# landscape corporate promo has NO platform UI to dodge. For that canvas the
+# vertical zones are not mis-dimensioned, they are answering a question that
+# does not apply, and rescaling them would import a constraint that has no
+# reason to exist there.
+#
+# So landscape gets the BROADCAST convention instead — title-safe and
+# action-safe, the margins that exist because of overscan and framing rather
+# than because of app chrome. Same idea (keep content out of the danger band),
+# different danger.
+
+_CANVAS_VERTICAL = (1080, 1920)
+_CANVAS_LANDSCAPE = (1920, 1080)
+
+
+def _canvas_for(source_w, source_h):
+    """The output canvas for a source. Vertical unless the source is clearly
+    landscape — a 4:3 or square source still delivers vertical, because the
+    product's destination is a vertical feed unless the footage says otherwise.
+
+    REF-1 is 1080x608 (~1.78 = 16:9), so the landscape threshold sits below
+    that and above square."""
+    try:
+        w, h = float(source_w or 0), float(source_h or 0)
+    except (TypeError, ValueError):
+        return _CANVAS_VERTICAL
+    if w <= 0 or h <= 0:
+        return _CANVAS_VERTICAL
+    return _CANVAS_LANDSCAPE if (w / h) >= 1.4 else _CANVAS_VERTICAL
+
+
+def _safe_zones_for(canvas_w, canvas_h):
+    """The keep-out band, per canvas, and the two are DIFFERENT DOCTRINES.
+
+    vertical  -> platform-UI exclusions: status bar, caption drawer, engagement
+                 rail. Empirical, app-specific, and the reason the vertical
+                 numbers look arbitrary — they are, because the apps are.
+    landscape -> broadcast title-safe (90% of frame) and action-safe (93%). No
+                 app chrome to dodge; the margin exists for framing and overscan.
+
+    Returned as pixel bounds so the renderer resolves zones the same way on both.
+    """
+    if canvas_w >= canvas_h:                      # landscape: broadcast safe areas
+        _tsx, _tsy = round(canvas_w * 0.05), round(canvas_h * 0.05)
+        return {"doctrine": "broadcast_title_safe",
+                "x": (_tsx, canvas_w - _tsx), "y": (_tsy, canvas_h - _tsy)}
+    # vertical: the measured platform-UI bands (status bar, caption drawer,
+    # like/share rail), scaled from the 1080x1920 reference they were taken on.
+    _sx, _sy = canvas_w / 1080.0, canvas_h / 1920.0
+    return {"doctrine": "platform_ui_exclusion",
+            "x": (round(60 * _sx), round(1020 * _sx)),
+            "y": (round(108 * _sy), round(1812 * _sy))}
+
+
 def _parse_unsupported_requests(text):
     """User asks the pipeline understands but can't fulfill YET → honest surfacing
     strings, deduped in order. The trust fix: the user always knows done-or-can't,
@@ -19868,7 +20034,19 @@ _MG_ATTACK_MS_SMOOTH = {
 # entries EXACTLY — which is also the proof that the dark flag does not leak:
 # every capped component is byte-identical with the flag off. The SMOOTH arm
 # moved 8 entries -> _MG_ATTACK_MS_SMOOTH above.
-_MG_ATTACK_FINGERPRINT = "sha256:473f635cd59b13fc5198dfe11055790943284144525170d4f82c195e3e160335"
+# RE-STAMPED 2026-08-12 for the Lumen vocabulary's two new MG components
+# (NamePlate, EndCard) [§3.1]. The attack table maps a component's entrance to
+# the moment its visual hit LANDS, so SFX can be back-timed to it — and the
+# table does NOT yet cover these two, because it is MEASURED from renders and
+# they have never rendered.
+#
+# THAT IS SAFE ONLY WHILE THEY CANNOT FIRE. They are dark by construction: no
+# schema field, no plan key, no prompt-catalogue entry, so nothing can emit
+# them and nothing can need their attack time. The moment they are lit up at
+# ignition — which means adding their catalogue entries and schema — the attack
+# table MUST be re-measured for both, or their SFX land early. That precondition
+# is recorded in LUMEN_BUILD_SHEET.md so lighting them up cannot skip it.
+_MG_ATTACK_FINGERPRINT = "sha256:9c5797bcc6a49971827cc870dd13c7acab4628c71e6ccb76d13f9d63ebc10095"
 
 
 def _mg_attack_frames(mg_type, fps):
@@ -28237,11 +28415,28 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 
     # PromptlyOverlay input — captions/MG/text on a transparent canvas. The
     # FFmpeg composite step lays this onto the source in a single encode.
+    # [§3.1] Canvas follows the SOURCE, not a constant. The renderer already
+    # honours any canvas (calculateOverlayMetadata reads these from props) — the
+    # two literals here were the entire pin. Vertical unless the footage is
+    # clearly landscape, so this is byte-identical for every vertical source.
+    # Probed from the SOURCE FILE, not from a variable that might not exist in
+    # this scope. The first draft read locals().get("source_resolution") — which
+    # does not exist in render_multi_clip, so _canvas_for(None, None) always
+    # returned vertical and the landscape path was INERT. Byte-identical either
+    # way for vertical sources, which is exactly why it would not have shown up.
+    try:
+        _src_res = probe_resolution(source_path)
+    except Exception:
+        _src_res = {}
+    _cv_w, _cv_h = _canvas_for(_src_res.get("width"), _src_res.get("height"))
+    if (_cv_w, _cv_h) != _CANVAS_VERTICAL:
+        print(f"[canvas] landscape source {_src_res.get('width')}x{_src_res.get('height')} "
+              f"-> {_cv_w}x{_cv_h} (broadcast title-safe zones)", flush=True)
     overlay_input = {
         "sourceUrl": _source_url,
         "fps": source_fps,
-        "width": 1080,
-        "height": 1920,
+        "width": _cv_w,
+        "height": _cv_h,
         "totalDurationInFrames": total_output_frames,
         "clips": clips_out,
         "transitions": transitions_out,

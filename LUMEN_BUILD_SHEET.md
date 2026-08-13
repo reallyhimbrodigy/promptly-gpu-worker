@@ -132,3 +132,29 @@ The reference files are **not** on the critical path: the anatomy is already
 decomposed and this sheet is written from it. What the files unlock is
 *scoring against the bar* rather than against our own history — which only the
 blind-sheet scores make trustworthy anyway.
+
+
+---
+
+## BLOCKING PRECONDITION when the vocabulary is lit up `[§3.1, §4.7]`
+
+The deterministic components are built and DARK. Two debts must be paid at the
+moment they become emittable, and both are silent failures if skipped:
+
+1. **Re-measure the MG attack table for `NamePlate` and `EndCard`.**
+   `_MG_ATTACK_FINGERPRINT` was re-stamped when they landed, but the table maps
+   an entrance to the frame its visual hit LANDS on, and it is measured from
+   real renders. These two have never rendered. That is safe only while nothing
+   can emit them — no schema field, no plan key, no catalogue entry. **Adding
+   any of those three without re-measuring makes their SFX land early**, which
+   reads as sloppy timing and has no error to point at.
+
+2. **The TSX is UNVERIFIED.** There is no `node_modules` in this checkout, so
+   `NamePlate.tsx` and `EndCard.tsx` have never been typechecked or compiled.
+   Import shapes were verified by reading (`MG_FONTS.anton/.inter`,
+   `useMGPhase`'s return, `SafeImg`'s required `role`) and two real errors were
+   caught that way — but reading is not compiling. **First bundle build after
+   these land is the real test**, and it must be run before they are lit up, not
+   after.
+
+Neither blocks anything today. Both block the flip.

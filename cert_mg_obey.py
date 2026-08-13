@@ -37,24 +37,23 @@ def check(name):
 
 
 def _extract_block():
-    # NOTE (2026-08-12): this allowlist has now truncated THREE times — when
-    # COMPONENT_OBEY landed, when UPSCALE v1 landed, and when §4.8's
-    # negotiated-never landed. The pattern is inherently brittle: it depends on
-    # module layout, so any new def placed between the anchor and the target
-    # silently shortens the block and every lookup KeyErrors. It stays because
-    # exec-ing a slice is what keeps this cert free of a real handler import —
-    # but if it breaks a fourth time, extract by AST node name instead of by
-    # "the next def I do not recognise".
-    with open(os.path.join(HERE, "handler.py")) as f:
-        src = f.read()
-    start = src.index("_MG_ASK_RE = re.compile(")
-    tail = src[start:]
-    m = re.search(r"\ndef (?!_mg_obey_enabled|_parse_mg_requests|_component_obey_enabled|_parse_component_requests|_component_unmet_notes|_negotiated_never_notes|_parse_music_ask|"
-                  r"_mg_request_directive)", tail)
-    block = tail[:m.start()] if m else tail
-    ns = {"re": re, "os": os}
-    exec(compile(block, "handler.py<mg-obey>", "exec"), ns)
-    return ns
+    """Extract by AST NODE NAME [§8]. The old positional slice truncated THREE
+    times in two days (COMPONENT_OBEY, UPSCALE v1, negotiated-never) because it
+    depended on module layout: any new def between the anchor and the target
+    silently shortened the block and every lookup KeyErrored — pointing at a
+    broken cert when the real event was a moved function. Ruled and replaced."""
+    from cert_extract import extract_from
+    return extract_from("handler.py", names=[
+        "_MG_ASK_RE", "_MG_NEG_RE", "_mg_obey_enabled", "_parse_mg_requests",
+        "_mg_request_directive",
+        # _mg_request_directive calls into the cluster predicates, so they come
+        # too. The AST extractor NAMED this missing dependency instead of
+        # silently truncating — which is the whole point of the change.
+        "_component_obey_enabled", "_parse_component_requests",
+        "_BROLL_ASK_RE", "_TRANSITION_ASK_RE", "_TEXT_ASK_RE",
+        "_parse_broll_requests", "_BROLL_REQ_RE", "_BROLL_ARTICLES", "_BROLL_STOP",
+        "_BROLL_MEDIA",
+    ], globals_={"re": re, "os": os})
 
 
 NS = _extract_block()

@@ -58,3 +58,13 @@ export { DropCard } from "./DropCard";
 export { PillMarquee } from "./PillMarquee";
 export { TimelineRoadmap } from "./TimelineRoadmap";
 export { MouseDrag } from "./MouseDrag";
+
+// ── LUMEN VOCABULARY [§3.1] ──────────────────────────────────────────────────
+// Components D and F from LUMEN_REFERENCE_SPEC's anatomy. Both are TOOLS whose
+// content is generated per video [§4.2]: the name, the role, the palette, the
+// CTA lines all come from the plan. Two videos produce two different plates and
+// two different end cards, or this would be templating.
+export { NamePlate } from "./NamePlate";
+export type { NamePlateProps } from "./NamePlate";
+export { EndCard } from "./EndCard";
+export type { EndCardProps, EndCardKind, EndCardLine } from "./EndCard";
