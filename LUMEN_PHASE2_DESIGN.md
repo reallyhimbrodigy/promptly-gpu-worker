@@ -3,9 +3,19 @@
 **Budget: ~70s of Lumen wall-clock, parallel by construction, prefetch during
 transcription.** Every number is from `golden/first-light/` — measured in-run.
 
-**Quota, now exact:** `GenContentImageGenRequestsPerMinutePerProjectPerBaseModelGlobal`
-= **2 requests/minute** on `promptly-479218`. Increase to 60 filed
-(`promptly-image-gen-60rpm`, pending).
+**Quota, now exact AND multiplied.** The metric
+`GenContentImageGenRequestsPerMinutePerProjectPerBaseModelGlobal` is dimensioned
+**per base_model**, and that dimension is a real, separate bucket — proven by
+experiment 2026-08-15:
+
+| model | measured limit | evidence |
+|---|---|---|
+| `gemini-3-pro-image` | **2/min** | documented; serial calls 429 |
+| `gemini-3.1-flash-image` | **~4/min** | 4 rapid calls OK, 5th-7th 429 |
+| **combined** | **~6/min** | **Pro succeeded immediately after 3 flash calls** — if the bucket were shared it would have 429'd |
+
+**That is 3x today's effective rate, available now, with no dependency on the
+60/min increase** (`promptly-image-gen-60rpm`, still `granted: 2`).
 
 ---
 
@@ -45,10 +55,15 @@ Quota is not among them.
 Admission window = prefetch window (~30–45s, during transcription) + main budget
 (~25–40s) ≈ **~75s of wall in which calls may be admitted**.
 
-| quota | admissions in ~75s | **generated scenes/edit** | binding constraint |
+| configuration | admissions in ~75s | **generated scenes/edit** | binding constraint |
 |---|---|---|---|
-| **2/min (today)** | 2.5 | **2** (3 only if the window stretches) | **QUOTA** |
-| 60/min (filed) | 75 | **4** | **LATENCY** — back to ~18s/scene |
+| Pro only, 2/min | 2.5 | **2** | quota |
+| **Pro + flash, ~6/min (TODAY)** | **7.5** | **4** | **latency** |
+| 60/min granted | 75 | **4+** | latency |
+
+**The two-model split reaches the 4-scene target today.** The Google grant is
+still worth having — it removes the flash dependency and raises the ceiling
+beyond 4 — but Phase 2 no longer *waits* on it.
 
 **Under today's quota the ceiling is 2 generated insert scenes per edit**, and a
 two-call hero scene consumes the entire budget by itself.
@@ -67,6 +82,21 @@ turns ~4×18s of serial work into a parallel ~18–36s.
 under a different convention. Rounding to ~18s here so the arithmetic does not
 imply precision the convention does not support.)*
 
+### Which family goes to which model
+
+Flash returns **1024x1024** (1.1 MB PNG); Pro returned **1408x768** at the same
+1120 image tokens. Both are real, usable output — the split is by *demand*, not
+by whether flash works.
+
+| scene family | model | why |
+|---|---|---|
+| icon composition, flat infographic card, stat callout, evidence card | **flash** | geometric, few elements, no photographic subject — 4/min is where the volume belongs |
+| hero / subject-bearing scenes, anything needing the 2-call matte | **Pro** | quality carries the frame, and its 2/min is reserved for the scenes that justify it |
+
+This is also why the alpha/hero path stops being hopeless: moving the simple
+families onto flash **frees Pro's entire 2/min** for the two-call reservation
+that currently never wins twice in a row.
+
 ## 3 — PREFETCH, AS SPECIFIED
 
 **Transcript-independent scenes only. One shared pacer. Two-call scenes reserve
@@ -76,7 +106,8 @@ both admissions.**
 scene specs (independent, order-free)
         │
         ▼
-  ONE global pacer ── admits ≤ R req/min   (R = 2 today, 60 if granted)
+  ONE global pacer ── PER-MODEL buckets: R_pro = 2/min, R_flash = 4/min
+                      (they are independent; one pacer, two counters)
         ├── prefetch lane  opens at DISPATCH, runs during transcription
         └── main lane      opens when the transcript lands
         │

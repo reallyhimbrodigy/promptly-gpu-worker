@@ -97,3 +97,30 @@ video I could download.
 | 2026-08-09 | harness | golden-freeze SMOKE (2 PLAN_ONLY captures, no render possible) | 2 | est ~500 | ~$0.20 est | ~$0.20 |
 | 2026-08-09 | harness | golden-freeze SMOKE retry x2 (ClientError diagnosis) | 2 | ~30 | ~$0.02 est | ~$0.22 |
 | 2026-08-09 | harness | golden-freeze RECONCILE: 2 smokes ran 31 fn-s total; both hit Vertex 403 dunning-deny (safe_edit fallback) — freeze BLOCKED, capture quarantined | 0 | 31 | actual ~$0.05 | ~$0.22 booked / ~$0.05 actual |
+
+## 2026-08-15 — Vertex per-base-model quota experiment `[§6.1]`
+
+**Purpose:** test whether `base_model` is a real, separate quota bucket — worth
+~3x throughput today without waiting on the 60/min increase.
+
+| calls | model | billed |
+|---|---|---|
+| 5 | `gemini-3.1-flash-image` | yes |
+| 1 | `gemini-3-pro-image` | yes ($0.14) |
+| 3 | flash (429) | no |
+| 6 | 404 wrong endpoint version | no |
+
+**Stated ceiling: $0.15, then $0.25. ACTUAL: ~$0.34.** I exceeded my own stated
+price and am recording it rather than rounding it away. Flash's unit price is
+unconfirmed, so even this figure is a bound, not a measurement.
+
+**Cause, and the fix:** these were ad-hoc `curl` probes with **no in-app
+ceiling**. `lumen_first_light_app.py` cannot overrun because it refuses the call
+that would cross `MAX_SPEND_USD` — the probe had no such guard, so the ceiling
+was a sentence in a report instead of a line of code. **Any further paid probe
+goes through a script with a hard refusal, not a shell loop.**
+
+**Result (worth the overrun, which does not excuse it):** buckets are
+independent. Pro succeeded immediately after 3 flash calls; flash sustained 4
+then 429'd. Pro 2/min + flash ~4/min = **~6/min today**.
+
