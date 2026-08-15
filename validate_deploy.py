@@ -9205,6 +9205,18 @@ def _post_upload_watchdog_safe():
         "prevent — treating the repair-cluster number as 'the saving' and summing it. Summing "
         "the UPPER counts savings on jobs that would have been rescued sooner and overstates "
         "by ~4x at 60 jobs/day. recovered_lower is the summable one.")
+    # THE PROPERTY THAT WAS MISSING WHEN THIS SHIPPED AND CAUSED A 9x LOOP.
+    # Six safety properties of the EXIT all passed while nothing asserted what
+    # the SYSTEM does after it. The watchdog may only be armable once the
+    # respawn side cannot re-render a job whose artifact is already in S3 —
+    # otherwise killing a container IS a re-render request.
+    assert "_POST_UPLOAD_WATCHDOG_ENABLED" in _src, (
+        "the watchdog is no longer flag-gated. It shipped ON once and produced 294 kills "
+        "across 49 jobs (up to 9 re-renders each) because the respawn side treats a killed "
+        "worker as a drained one. It may not default ON again.")
+    _armfn = _fn_source(_src, "_post_upload_watchdog_arm")
+    assert "if not _POST_UPLOAD_WATCHDOG_ENABLED" in _armfn, (
+        "arming no longer checks the flag — the kill/respawn loop returns")
     _m = _re11.search(r"_POST_UPLOAD_WATCHDOG_S = int\(os\.environ\.get\([^)]*\) or (\d+)\)", _src)
     assert _m, "the watchdog threshold must have a literal default"
     _n = int(_m.group(1))
