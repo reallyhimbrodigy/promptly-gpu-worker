@@ -929,6 +929,37 @@ def _caption_modes_liveness(job_id, pages, accent):
         print(f"[caption-modes] liveness soft-failed: {type(_ce).__name__}", flush=True)
 
 
+_JOB_COLUMN_CACHE = {}
+
+
+def _job_column_exists(column):
+    """Does video_jobs have this column? Cached per container, fail-CLOSED.
+
+    Fail-closed is the whole point. If we cannot prove the column exists we do
+    NOT add it to the patch — because PostgREST rejects the ENTIRE patch when any
+    column is unknown (PGRST204), which would take `result` down with it and
+    manufacture the exact envelope loss this dual-write exists to stop. An
+    optimistic guess here would turn a migration-ordering mistake into a
+    total write failure on every job.
+
+    One cheap probe per container: select the column with limit 0.
+    """
+    if column in _JOB_COLUMN_CACHE:
+        return _JOB_COLUMN_CACHE[column]
+    ok = False
+    try:
+        if supabase is not None:
+            table = os.environ.get("PROMPTLY_JOB_TABLE") or "video_jobs"
+            supabase.table(table).select(column).limit(1).execute()
+            ok = True
+    except Exception as _ce:
+        ok = False
+        print(f"[dual-write] column {column!r} not available "
+              f"({type(_ce).__name__}) — writing result only", flush=True)
+    _JOB_COLUMN_CACHE[column] = ok
+    return ok
+
+
 def _design_system_liveness(job_id, ok, accent=None, canvas=None, err=None):
     """PHASE 1 LIVENESS COUNTER [Rule 2]. Every Phase 1 component ships with one,
     and this is the pattern.
@@ -31958,6 +31989,30 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
             patch["progress_at"] = progress_at
         if result is not None:
             patch["result"] = result
+            # DUAL-WRITE (migration 03, 2026-08-15) [Law 2]. edit_recipe and
+            # stage_timings get their OWN columns, because inside `result` they
+            # share one failure mode with everything else in it — and that mode
+            # fires on 38.6% of completions. When result is lost the recipe and
+            # the timings are lost WITH it, so the quality board loses its
+            # denominator for the same jobs, at the same moment, for a reason
+            # that has nothing to do with quality.
+            #
+            # TRANSITIONAL AND ADDITIVE: result keeps carrying both exactly as
+            # today, so every existing reader is untouched and this is reversible
+            # at any point. The columns are written IN THE SAME PATCH as result,
+            # so they cannot disagree with it — a separate write could land one
+            # and lose the other, which would be a new split-brain in the name of
+            # closing one.
+            #
+            # PGRST204-SAFE: if migration 03 has not been run yet the columns do
+            # not exist, and PostgREST bounces the WHOLE patch — taking `result`
+            # with it and manufacturing the exact loss this closes. So the keys
+            # are only added when the column is known to exist.
+            if isinstance(result, dict):
+                if _job_column_exists("edit_recipe") and result.get("edit_recipe") is not None:
+                    patch["edit_recipe"] = result.get("edit_recipe")
+                if _job_column_exists("stage_timings") and result.get("stage_timings") is not None:
+                    patch["stage_timings"] = result.get("stage_timings")
             # COPY-TRUTH MIRROR (2026-07-05): the failed-terminal patch carries
             # the honest copy in BOTH places — result.user_message (structured)
             # and the legacy error_message column (cold-load readers). Same

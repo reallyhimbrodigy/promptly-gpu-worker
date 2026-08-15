@@ -9349,6 +9349,27 @@ def _rhythm_dimension_cert():
         "the SECONDARY stillness bar is not 3.5s — JUDGE's secondary number moved without a ruling")
 
 
+@check("RECIPE/TIMINGS DUAL-WRITE IS FAIL-CLOSED (2026-08-15, RULE-1) [Law 2, migration 03]. edit_recipe and stage_timings are moving into their own columns because inside `result` they share ONE failure mode with everything else in it — and that mode fires on 38.6% of completions (180/466, 161 users). When result is lost the recipe and the timings are lost WITH it, so the quality board loses its denominator for the same jobs at the same moment, for a reason that has nothing to do with quality. The transition is additive: result keeps carrying both, so every existing reader is untouched and it is reversible at any point. TWO PROPERTIES ARE LOAD-BEARING AND BOTH ARE ASSERTED. (1) The new keys ride the SAME patch as result — a separate write could land one and lose the other, which would be a new split-brain created in the name of closing one. (2) It is FAIL-CLOSED on column existence: if migration 03 has not been run the columns do not exist, PostgREST rejects the ENTIRE patch with PGRST204, and that would take `result` down with it — manufacturing the exact envelope loss this exists to stop. So the keys are added ONLY when a cached probe proves the column is there, and the probe defaults to False on any error. An optimistic guess would turn a migration-ordering mistake into a total write failure on every job.")
+def _dual_write_fail_closed():
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "_job_column_exists" in _h, "the dual-write column probe is gone"
+    _ws = _fn_source(_h, "write_job_status")
+    assert 'patch["edit_recipe"]' in _ws and 'patch["stage_timings"]' in _ws, (
+        "the dual-write does not ride write_job_status's patch — a separate write could "
+        "land one and lose the other, a new split-brain in the name of closing one")
+    assert '_job_column_exists("edit_recipe")' in _ws, (
+        "edit_recipe is written WITHOUT proving the column exists — if migration 03 has not "
+        "run, PGRST204 rejects the WHOLE patch and takes `result` with it")
+    assert '_job_column_exists("stage_timings")' in _ws, (
+        "stage_timings is written without the column probe — same PGRST204 hazard")
+    _probe = _fn_source(_h, "_job_column_exists")
+    assert "ok = False" in _probe and "except Exception" in _probe, (
+        "the column probe is not FAIL-CLOSED — on any error it must decline to write the "
+        "column, never guess that it exists")
+
+
 @check("CAPTION MODES ARE WIRED AND CARRY A LIVENESS COUNTER (2026-08-15, RULE-1) [§3.1 PHASE 1.2]. Keyword colour emphasis and number glorification are the two caption modes the references demand, and they are ONE spec reading MODE rather than magnitude: a short centre-frame line lets any number own the frame (REF-2's '13', '$20,000,000') while a longer lower-third line accents keywords and glorifies nothing bare (REF-1), which is why '3 tips' stays quiet inside a sentence. _keyword_emphasis_spec was written days ago and, like design_system.py before it, was COMPLETELY INERT — zero call sites. This check asserts the whole chain rather than the predicate alone: the page builder ACCEPTS an accent, the caption path PASSES one drawn from this job's design system via _caption_accent_for, emphasis is stamped ONLY when an accent exists (so no palette means captions render byte-identically to today rather than in an invented colour — a second palette on the surface the viewer reads most would look right in every cert and be wrong on every video), and the liveness counter fires. It runs cert_caption_modes.py for the behaviour: both reference modes, one hero per line, determinism, and no-palette-no-emphasis.")
 def _caption_modes_wired():
     import os as _os, subprocess as _sub, sys as _sys
