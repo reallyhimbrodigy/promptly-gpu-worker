@@ -45,8 +45,7 @@ it, exiting would strand a user with nothing.
         terminal=NOT-LANDED — forcing exit; the row is repairable from S3
      b. emit analytics_events `post_upload_watchdog_fired`
         {job_id, waited_s, artifact_key, last_stage, container_age_s}
-     c. one LAST attempt at the terminal write (cheap, and if it succeeds the
-        whole event becomes a near-miss worth counting)
+     c. NO last-chance terminal write — see below; the deploy gate killed it
      d. os._exit(0) — immediate, no atexit, no thread join
 ```
 
@@ -60,6 +59,23 @@ tail was a BUSY worker. `os._exit` is the only exit that cannot be blocked.
 this is a *write* failure being contained, not a render failure. A non-zero exit
 would make Modal retry semantics and the failure taxonomy read a successful
 render as a crash.
+
+### THE LAST-CHANCE WRITE WAS REMOVED, AND THE GATE IS WHY
+
+This spec originally had the watchdog fire one last
+`write_job_status(status="completed")` before exiting. On implementation,
+validate_deploy's existing **"minimal completed write lost its route contract"**
+check failed immediately — and it was right.
+
+The timer thread has **no access to `result_payload`**, so the only completion it
+could write is a **bare** one: no `route`, no `route_reason`, no floor markers,
+no vocab. **The watchdog would have manufactured the exact thin-envelope defect
+it was built to cap.**
+
+It now records `terminal_write_attempted: false` with the reason, and leaves
+recovery to the repair path, which writes the URL and the terminal together from
+S3 evidence. A pre-existing gate, written for a different reason, caught a
+new defect in the thing meant to fix that class.
 
 ## CHOOSING N
 
