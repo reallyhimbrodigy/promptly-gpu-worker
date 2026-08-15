@@ -881,6 +881,19 @@ _CANVAS_VERTICAL = (1080, 1920)
 _CANVAS_LANDSCAPE = (1920, 1080)
 
 
+def _source_wh_for_design(video_path):
+    """(w, h) for the design canvas, or (None, None) so _canvas_for takes its
+    default. Never raises — a probe failure must not cost the edit its palette,
+    let alone its render."""
+    try:
+        _r = probe_resolution(video_path)
+        if isinstance(_r, dict):
+            return _r.get("width"), _r.get("height")
+    except Exception:
+        pass
+    return None, None
+
+
 def _canvas_for(source_w, source_h):
     """The output canvas for a source. Vertical unless the source is clearly
     landscape — a 4:3 or square source still delivers vertical, because the
@@ -15147,6 +15160,35 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 f"thumbnail={edit_plan.get('thumbnail_timestamp')}",
                 flush=True,
             )
+
+            # DESIGN SYSTEM — PHASE 1, THE THING EVERY SCENE CONSUMES [§3.1/§6.1].
+            # Built ONCE per job, here, because this is the first point where the
+            # source path and the finished plan are both in hand.
+            #
+            # It ships wired rather than dark on purpose: design_system.py sat
+            # fully written, cert-green and COMPLETELY INERT — never imported,
+            # never image-mounted — which is the unmounted-moodreel_editor class
+            # this codebase keeps paying for. A palette that no renderer can read
+            # is not a design system.
+            #
+            # FAIL-OPEN, ALWAYS. A palette is an enhancement; a render is the
+            # product. Extraction reads frames with ffmpeg and can fail on a
+            # codec, a zero-length source, or a missing binary — none of which
+            # may cost the user their edit.
+            try:
+                import design_system as _ds
+                edit_plan["_design_system"] = _ds.build_design_system(
+                    video_path=video_path,
+                    canvas=_canvas_for(*_source_wh_for_design(video_path)),
+                    work_dir="/tmp/ds",
+                )
+                _dsa = (edit_plan["_design_system"].get("palette") or {}).get("accent")
+                print(f"[design-system] built accent={_dsa} canvas="
+                      f"{edit_plan['_design_system'].get('canvas')}", flush=True)
+            except Exception as _dse:
+                edit_plan["_design_system"] = None
+                print(f"[design-system] build failed ({type(_dse).__name__}: {_dse}) — "
+                      f"rendering without it; the edit is unaffected", flush=True)
 
             # Post-processing
             edit_plan["_deepgram_words"] = list(deepgram_words or [])

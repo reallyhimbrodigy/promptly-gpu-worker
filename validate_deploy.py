@@ -9328,6 +9328,27 @@ def _rhythm_dimension_cert():
         "the SECONDARY stillness bar is not 3.5s — JUDGE's secondary number moved without a ruling")
 
 
+@check("DESIGN SYSTEM IS WIRED, NOT MERELY WRITTEN (2026-08-15, RULE-1) [§3.1/§6.1]. design_system.py sat fully written and cert-green for a day while being COMPLETELY INERT — never imported by handler, never image-mounted. That is the unmounted-moodreel_editor class, and the spec names it directly: built is not deployed and deployed is not working. Phase 1 puts every scene downstream of this one object, so an inert palette would silently make the name-plate, the end-card and every generated scene fall back to defaults with no error anywhere. This check asserts all THREE links of the chain, because any one of them alone is the failure: (1) design_system.py is IMAGE-MOUNTED in modal_app.py — a deferred import without a mount ImportErrors only in-container, only on real traffic, and fails open into 'no palette' so nobody notices for weeks; (2) handler actually IMPORTS it and calls build_design_system; (3) the result is attached to edit_plan under _design_system so a renderer can read it — a palette computed and dropped on the floor is the same as no palette. It also asserts the build is wrapped, because a palette is an enhancement and an ffmpeg frame-sample failure must never cost a user their render.")
+def _design_system_wired():
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _m = open(_os.path.join(_here, "modal_app.py"), encoding="utf-8").read()
+    assert '"design_system.py"' in _m, (
+        "design_system.py is NOT image-mounted — handler's deferred import would "
+        "ImportError in-container and fail open to no palette")
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "import design_system as _ds" in _h, "handler does not import design_system"
+    assert "_ds.build_design_system(" in _h, "handler never calls build_design_system"
+    assert 'edit_plan["_design_system"]' in _h, (
+        "the design system is never attached to edit_plan — a palette computed and "
+        "dropped on the floor is the same as no palette")
+    _i = _h.index("_ds.build_design_system(")
+    _win = _h[max(0, _i - 900):_i + 900]
+    assert "except Exception" in _win, (
+        "the design-system build is not wrapped — a frame-sample failure would cost "
+        "the user their render for the sake of an enhancement")
+
+
 @check("DESIGN SYSTEM: THE PALETTE IS EXTRACTED FROM THE FOOTAGE, NOT GUESSED (2026-08-14, RULE-1) [§3.1/§6.1]. Components D (name-plate) and F (end-card/brand) in LUMEN_REFERENCE_SPEC both hang on ONE derived thing — an accent colour that belongs to the user's own video — and a wrong accent is worse than no accent: it reads as a template applied to someone's footage. This check runs cert_design_system.py, whose canon rule is the reference itself: REF-1's documented accent is ORANGE, so the extractor must return hue 15-45 degrees on it. That rule has already caught the real defect once — the first extractor sampled only the opening seconds behind a 3% presence floor and confidently returned GREEN for a documented-orange reference, a wrong answer delivered with no error at all, which is the probe-collapse class. Sampling now spans the WHOLE source (fps=n/duration) with a 0.5% presence floor and a 0.35 saturation floor. The cert also holds: the same source yields the same palette twice (a palette that drifts between the name-plate and the end-card of ONE render is a visible defect), foreground contrast stays at or above 0.45 against every surface it lands on, and BOTH safe-zone doctrines exist and differ (platform_ui_exclusion for 9:16 where the app's own chrome eats the frame, broadcast_title_safe for landscape) because one doctrine applied to both aspect ratios puts type under the share sheet. Offline, zero network, zero Modal, zero Gemini.")
 def _design_system_cert():
     import subprocess as _sub, os as _os, sys as _sys
