@@ -84,3 +84,81 @@ from a ratio; `burst_double_hold` measures it directly, per job, in core-seconds
 
 All three push the same direction — the model **undercounts** — which is the
 dangerous direction for a cost model.
+
+
+---
+
+# ADDENDUM 2026-08-15 — the denominator re-measured, and the two investigations converge
+
+## The 600s UNS wait is a RENDER process, not a Modal container
+
+One read settles it: `SOURCE_WAIT_MS = 600_000` (`lib/source-presence.js:30`),
+`waitForSource` is called at `dispatch-to-modal.js:1208`, and the Modal spawn is
+at 1285/1377 — **after** it. The failure path says so in its own log line:
+*"failing WITHOUT spawning Modal"*.
+
+**So the 600s UNS wait costs ~$0 of Modal spend.** It is a Node async wait on
+Render, which bills per instance, not per awaiting promise.
+
+**This re-ranks the UNS fix: it is a USER-EXPERIENCE and correctness problem
+(users wait ten minutes and are then refunded), NOT a cost lever.** Anyone
+sizing it as ~$7/day of Modal was sizing the wrong thing — I would have, without
+this read.
+
+It also fixes the denominator below: the **80 jobs with no `worker_started_at`
+never spawned Modal**, so they must be EXCLUDED from container-seconds.
+
+## The denominator, re-measured
+
+My earlier "5.1%" was wrong — it multiplied jobs by a flat 30s wall. Real
+per-job lifetimes:
+
+| denominator | $/day | vs $25.94 orchestration |
+|---|---|---|
+| `worker_started_at → end`, workers only | 5.66 | 21.8% |
+| **`created_at → end`, workers only** | **9.12** | **35.2%** |
+| `created_at → end`, ALL jobs | 12.91 | 49.8% |
+
+The middle row is the honest one — the widest row double-counts the 80 jobs that
+never spawned.
+
+| term | $/day | share |
+|---|---|---|
+| measured job lifetimes | 9.12 | 35.2% |
+| + 45s scaledown tail × 161 jobs/day | 1.71 | 6.6% |
+| + 11s cold start × 161 jobs/day | 0.42 | 1.6% |
+| **accounted** | **11.25** | **43.4%** |
+| **RESIDUAL** | **14.69** | **56.6%** |
+
+## THE CONVERGENCE — the residual and the envelope-loss class are the same population
+
+The envelope-loss cohort is **180 jobs / 3 days = 60/day** whose worker never
+reached its terminal write. If those containers are HUNG rather than gone, they
+burn their container cap while writing nothing:
+
+| assumed cap | added $/day | total vs invoice |
+|---|---|---|
+| 600s | +8.50 | 76% |
+| **900s** | **+12.76** | **93%** |
+| 1200s | +17.01 | 109% |
+
+**A ~900s hang closes the residual to 93%** — and 900s is not an arbitrary
+number in this system: it is the p99 wall and the 15-minute fallback timer.
+
+**Stated as a FIT, not a measurement.** The cap was chosen to match the residual,
+which is exactly the reasoning that must not be trusted on its own. But it makes
+one prediction that is already being tested: **a hung worker emits NO
+`worker_envelope_write` event at all**. At n≥100, the ratio of completions to
+envelope-write events measures the hang rate directly.
+
+**If it holds, the ranking changes completely:**
+
+| lever | worth |
+|---|---|
+| **fix the worker hang** | **~$440/mo** + 38.6% envelope loss + the 304s/904s latency tail |
+| L1 (Lumen path) | +$72/mo |
+| prewarm / validator | $74.19 / $75.33 cycle-to-date |
+
+One defect would account for the largest cost line, the largest telemetry hole,
+and the worst latency class simultaneously. That is worth more than every
+container-sizing lever combined, and it is why L1 stays uncommitted.
