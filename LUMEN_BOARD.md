@@ -82,6 +82,30 @@ single average would report "13s" and hide the entire affected population.
 not the trigger. Long-queued jobs are the ones that lose envelopes; *why* a
 long-queued job loses its envelope is what `worker_envelope_write` will answer.
 
+### THE HARD-TERMINAL FENCE — REFUTED 2026-08-14 [MEASURED]
+
+The leading candidate is dead. The fence declines a worker write only when the
+row is already `failed`/`canceled`, and `repairCompletedRender` never clears
+`error_message` — so a row that passed through `failed` keeps its error string
+after being flipped to completed. It is a query, not an inference:
+
+| cohort | n | `error_message` non-null |
+|---|---|---|
+| envelope LOST | 181 | **0 (0.0%)** |
+| envelope PRESENT | 278 | 0 (0.0%) |
+| refund / fail events | 150 sampled each | 0 / 0 |
+
+**Probe validated on a known-bad window before the zero was believed:** 50/50
+rows with `status='failed'` DO carry `error_message`; `render_failed` events DO
+carry `job_id` (6/6); only **1** completed row in the entire table has an error
+string. The probe can see the thing it reported absent.
+
+**So the LOST rows were never non-processing before the worker's write.** The
+fence never fired. That sharpens the remaining space: `matched=0` is only
+reachable via the fence, so `worker_envelope_write` must land on
+`accepted=true` (→ the envelope landed and a later writer replaced it) or
+`raised=true` (→ the write threw; PGRST204 flagged).
+
 **Honesty note on the trend:** `worker_started_at` was created by Migration 01 at
 **2026-08-11 19:49Z**, so this series *cannot* extend earlier. There is **no
 pre-migration baseline**, and I cannot say queue delay "rose" against one. Within

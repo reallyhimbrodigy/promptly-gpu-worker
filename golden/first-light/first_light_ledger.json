@@ -1,0 +1,221 @@
+{
+  "run": "first_light",
+  "date_utc": "2026-08-15",
+  "app": "lumen_first_light_app.py",
+  "deploys_in_force": {
+    "worker": "v531 (e3ecb6e)",
+    "content_studio": "fee568b"
+  },
+  "provider": {
+    "vendor": "Google Vertex AI",
+    "project": "promptly-479218",
+    "location": "global",
+    "model": "gemini-3-pro-image",
+    "client": "vertex (service account)"
+  },
+  "measurement": "IN-RUN by the harness at each call site; NOT read back from video_jobs.result",
+  "why_in_run": "result loses its envelope on 38.6% of completions (180/466, 161 users), so any number cut from it comes off a corrupted population",
+  "envelope": {
+    "scenes_attempted": 10,
+    "scenes_ok": 10,
+    "scene_failure_rate": 0.0,
+    "usd_per_scene": 0.14,
+    "secs_per_scene_p50": 18.7,
+    "secs_per_scene_min": 15.6,
+    "secs_per_scene_max": 32.4,
+    "alpha_attempts": 2,
+    "alpha_ok": 0,
+    "alpha_failure_rate": 1.0,
+    "usd_per_hero_scene": "UNMEASURED \u2014 0 of 2 attempts succeeded",
+    "alpha_legs_billed": 2,
+    "total_images_billed": 12,
+    "run_total_usd": 1.96,
+    "ceiling_usd": 2.0,
+    "ceiling_respected": true
+  },
+  "rate_limit": {
+    "verdict": "RATE LIMIT, not a spend cap",
+    "evidence": [
+      "every call ran SERIALLY and 429s still occurred",
+      "uncontended call ~17.9s => serial ceiling ~3.4 req/min",
+      "429s decayed across the ladder (attempt1=6, attempt2=5, attempt3=2) \u2014 they CLEAR with time",
+      "a spend cap fails all 4 attempts persistently; it does not recover in 5-8s"
+    ],
+    "binds_below_req_per_min": 3.4,
+    "lever": "Vertex quota-increase request \u2014 an approval, NOT a spend decision"
+  },
+  "calls": [
+    {
+      "artifact": "fl_00.png",
+      "role": "scene",
+      "bytes": 1122628,
+      "model": "gemini-3-pro-image",
+      "tokens": 2385,
+      "usd": 0.14,
+      "secs": 19.4,
+      "retries_429_absorbed": 0,
+      "call_ok": true,
+      "kind": "stat_callout",
+      "scene_ok": true
+    },
+    {
+      "artifact": "fl_01.png",
+      "role": "scene",
+      "bytes": 1382997,
+      "model": "gemini-3-pro-image",
+      "tokens": 2443,
+      "usd": 0.14,
+      "secs": 17.4,
+      "retries_429_absorbed": 0,
+      "call_ok": true,
+      "kind": "evidence_card",
+      "scene_ok": true
+    },
+    {
+      "artifact": "fl_02.png",
+      "role": "scene",
+      "bytes": 1041584,
+      "model": "gemini-3-pro-image",
+      "tokens": 2396,
+      "usd": 0.14,
+      "secs": 20.0,
+      "retries_429_absorbed": 0,
+      "call_ok": true,
+      "kind": "icon_composition",
+      "scene_ok": true
+    },
+    {
+      "artifact": "fl_03.png",
+      "role": "scene",
+      "bytes": 1007074,
+      "model": "gemini-3-pro-image",
+      "tokens": 2378,
+      "usd": 0.14,
+      "secs": 17.1,
+      "retries_429_absorbed": 0,
+      "call_ok": true,
+      "kind": "ui_mockup",
+      "scene_ok": true
+    },
+    {
+      "artifact": "fl_04.png",
+      "role": "scene",
+      "bytes": 628132,
+      "model": "gemini-3-pro-image",
+      "tokens": 2358,
+      "usd": 0.14,
+      "secs": 15.6,
+      "retries_429_absorbed": 0,
+      "call_ok": true,
+      "kind": "infographic",
+      "scene_ok": true
+    },
+    {
+      "artifact": "fl_05.png",
+      "role": "scene",
+      "bytes": 1089849,
+      "model": "gemini-3-pro-image",
+      "tokens": 2383,
+      "usd": 0.14,
+      "secs": 17.9,
+      "retries_429_absorbed": 0,
+      "call_ok": true,
+      "kind": "stat_callout",
+      "scene_ok": true
+    },
+    {
+      "artifact": "fl_06.png",
+      "role": "scene",
+      "bytes": 1472894,
+      "model": "gemini-3-pro-image",
+      "tokens": 2336,
+      "usd": 0.14,
+      "secs": 18.7,
+      "retries_429_absorbed": 0,
+      "call_ok": true,
+      "kind": "evidence_card",
+      "scene_ok": true
+    },
+    {
+      "artifact": "fl_07.png",
+      "role": "scene",
+      "bytes": 1060500,
+      "model": "gemini-3-pro-image",
+      "tokens": 2457,
+      "usd": 0.14,
+      "secs": 32.4,
+      "retries_429_absorbed": 2,
+      "call_ok": true,
+      "kind": "icon_composition",
+      "scene_ok": true
+    },
+    {
+      "artifact": "fl_08.png",
+      "role": "scene",
+      "bytes": 871993,
+      "model": "gemini-3-pro-image",
+      "tokens": 2310,
+      "usd": 0.14,
+      "secs": 17.0,
+      "retries_429_absorbed": 0,
+      "call_ok": true,
+      "kind": "ui_mockup",
+      "scene_ok": true
+    },
+    {
+      "artifact": "fl_09.png",
+      "role": "scene",
+      "bytes": 828439,
+      "model": "gemini-3-pro-image",
+      "tokens": 2340,
+      "usd": 0.14,
+      "secs": 23.5,
+      "retries_429_absorbed": 1,
+      "call_ok": true,
+      "kind": "infographic",
+      "scene_ok": true
+    },
+    {
+      "artifact": "al_0_w.png",
+      "role": "alpha_leg",
+      "bytes": 937370,
+      "model": "gemini-3-pro-image",
+      "tokens": 2452,
+      "usd": 0.14,
+      "secs": 30.1,
+      "retries_429_absorbed": 2,
+      "call_ok": true
+    },
+    {
+      "artifact": "alpha_attempt_0",
+      "role": "alpha_attempt",
+      "attempt_ok": false,
+      "secs": 60.56,
+      "calls_made": 2,
+      "usd": 0.28,
+      "retries_429_absorbed": 3,
+      "note": "leg 1 (white bg) landed; leg 2 (black bg, for the matte) exhausted all 4 retries on 429"
+    },
+    {
+      "artifact": "al_1_w.png",
+      "role": "alpha_leg",
+      "bytes": 109223,
+      "model": "gemini-3-pro-image",
+      "tokens": 2295,
+      "usd": 0.14,
+      "secs": 31.0,
+      "retries_429_absorbed": 2,
+      "call_ok": true
+    },
+    {
+      "artifact": "alpha_attempt_1",
+      "role": "alpha_attempt",
+      "attempt_ok": false,
+      "secs": 61.28,
+      "calls_made": 2,
+      "usd": 0.28,
+      "retries_429_absorbed": 3,
+      "note": "leg 1 (white bg) landed; leg 2 (black bg, for the matte) exhausted all 4 retries on 429"
+    }
+  ]
+}
