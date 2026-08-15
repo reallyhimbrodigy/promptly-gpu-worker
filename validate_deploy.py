@@ -9141,6 +9141,19 @@ def _worker_envelope_write_instrument():
         "be one analytics row per 4 seconds per job")
     assert "soft-failed" in _win and "except Exception" in _win, (
         "instrumentation must be wrapped — a telemetry insert that can raise would fail renders")
+    # THIRD OUTCOME: a write that RAISES. The accepted/declined emit sits inside
+    # the try, so an exception path would emit NOTHING and "no row" would have to
+    # be read as evidence — inference from absence, which is what made this class
+    # unresolvable for three days. PGRST204 is flagged explicitly because
+    # Migration 01 (2026-08-11 19:49Z) added video_jobs.completion_delivery and
+    # worker_started_at hours before the regression's onset, and PostgREST
+    # bounces a WHOLE patch when any column is unknown — losing `result` with it.
+    assert '"raised": True' in _src, (
+        "a write that RAISES must emit its own event — otherwise the exception path is "
+        "invisible and absence-of-row becomes the only signal")
+    assert '"pgrst204": _pgrst204' in _src, (
+        "PGRST204 must be a QUERYABLE field, not just a log line and an S3-only defect "
+        "ledger — the exoneration is re-openable only if it can be measured")
 
 
 @check("RHYTHM DIMENSION HOLDS JUDGE's TARGETS IN JUDGE's ORDER (2026-08-14, RULE-1) [§4.7/§3.1]. The ~1s motion law was a vibe; JUDGE measured it off the two references: PRIMARY ~3.5 moving samples/s, SECONDARY 3.5s maximum stillness, and the ORDER is the ruling — build to those, NOT to cut rate. The references run 21 and 8 hard cuts with longest cut-to-cut gaps of 6.1s and 9.5s, so any system tuned to cut rate rejects the very edits it exists to imitate. My first version of this dimension gated on the GAP alone at a 2.0s bar with density reported as mere context, which was stricter than JUDGE on the lesser number and SILENT on the greater one — an edit at 1.2 samples/s, visibly sparse, passed clean. This check runs cert_rhythm_dimension.py so that regression cannot return: both references meet the primary target and the stillness bar, a CUTS-ONLY reading of those same references fails the primary by ~8x (the calibration that proves the dimension is not secretly a cut counter), a decoy that BEATS the primary target still fails on a dead hole (density alone is gameable — 40 captions in 2s averages beautifully), every motion kind counts (caption, scene, zoom, cut, transition, broll, MG, text, emphasis), unit inference between ms/seconds/frames cannot flip a verdict, and an unmeasurable plan reports None rather than passing silently. Offline, zero network, zero Modal, zero Gemini.")

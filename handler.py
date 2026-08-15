@@ -31826,8 +31826,47 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                           f"{type(_evx).__name__}", flush=True)
         except Exception as e:
             print(f"[job-status] write failed job={job_id}: {e} (fail open)", flush=True)
-            if "PGRST204" in str(e):
+            _pgrst204 = "PGRST204" in str(e)
+            if _pgrst204:
                 _ledger_defect("absent_column", "job_status_write", e, job_id=job_id)
+            # RAISED IS A THIRD OUTCOME, AND IT MUST BE POSITIVELY RECORDED
+            # (2026-08-14) [Law 2]. The accepted/declined instrument above sits
+            # INSIDE the try, so a write that RAISES emits nothing at all — and
+            # "no row" would then have to be read as evidence, which is the exact
+            # inference-from-absence that made this class unresolvable for three
+            # days. The three outcomes are now distinguishable by query:
+            #   row accepted=true   the envelope landed (an empty result after
+            #                       this is an OVERWRITE by a later writer)
+            #   row accepted=false  the hard-terminal fence declined it
+            #   row raised=true     the write threw — PGRST204 means PostgREST
+            #                       rejected a column it does not know, which
+            #                       loses the WHOLE patch, `result` included
+            # PGRST204 matters specifically because Migration 01 applied
+            # 2026-08-11 19:49Z, hours before this regression's onset, and a
+            # schema-cache mismatch is a fail-open path that destroys the
+            # envelope while leaving the row looking merely incomplete. The
+            # existing defect ledger flushes to S3 and cannot be read without S3
+            # credentials; this is queryable from the same place as everything
+            # else.
+            if result is not None:
+                try:
+                    supabase.table("analytics_events").insert({
+                        "event": "worker_envelope_write",
+                        "platform": "worker",
+                        "props": {
+                            "job_id": str(job_id),
+                            "matched": 0,
+                            "accepted": False,
+                            "raised": True,
+                            "pgrst204": _pgrst204,
+                            "error_class": type(e).__name__,
+                            "error_detail": str(e)[:200],
+                            "terminal": bool(_terminal),
+                            "status": str(patch.get(status_col) or ""),
+                        },
+                    }).execute()
+                except Exception:
+                    pass   # the write already failed; never compound it
         if _terminal:
             _JOB_PROGRESS_HW.pop(job_id, None)  # free the high-water entry — warm containers reuse the process
 
