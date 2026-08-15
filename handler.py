@@ -974,6 +974,36 @@ def _job_column_exists(column):
     return ok
 
 
+def _brand_liveness(job_id, specs, had_design_system):
+    """PHASE 1 LIVENESS COUNTER for D + F [Rule 2].
+
+    Distinguishes the three states that look identical downstream: no design
+    system (the palette failed), design system but no COPY (nothing to say), and
+    a spec actually built. Without that split, "0 name-plates in production"
+    could mean the component is broken or that no plan has ever carried a name —
+    and those want completely different fixes.
+    """
+    try:
+        if supabase is None or not job_id:
+            return
+        _s = specs or {}
+        supabase.table("analytics_events").insert({
+            "event": "brand_components_built",
+            "platform": "worker",
+            "props": {"job_id": str(job_id),
+                      "had_design_system": bool(had_design_system),
+                      "name_plate": bool(_s.get("name_plate")),
+                      "end_card": bool(_s.get("end_card")),
+                      "reason": (None if _s.get("name_plate") or _s.get("end_card")
+                                 else ("no_design_system" if not had_design_system
+                                       else "no_copy_in_plan"))},
+        }).execute()
+        print(f"[brand] name_plate={bool(_s.get('name_plate'))} "
+              f"end_card={bool(_s.get('end_card'))} ds={bool(had_design_system)}", flush=True)
+    except Exception as _ble:
+        print(f"[brand] liveness soft-failed: {type(_ble).__name__}", flush=True)
+
+
 def _design_system_liveness(job_id, ok, accent=None, canvas=None, err=None):
     """PHASE 1 LIVENESS COUNTER [Rule 2]. Every Phase 1 component ships with one,
     and this is the pattern.
@@ -15353,6 +15383,36 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                       f"rendering without it; the edit is unaffected", flush=True)
                 _design_system_liveness(_ACTIVE_JOB_ID, False,
                                         err=f"{type(_dse).__name__}: {_dse}")
+
+            # BRAND COMPONENTS D + F [§3.1 PHASE 1.3] — the first components a
+            # viewer can SEE. Built here because this is where the design system
+            # they consume already exists.
+            #
+            # THE SPEC IS BUILT; THE COPY IS NOT INVENTED. A name-plate needs a
+            # NAME and an end-card needs a HEADLINE, and neither can be derived
+            # from footage. Where the plan does not carry them, both builders
+            # return None and nothing renders — which is correct, and materially
+            # different from rendering a plate that says nothing. The liveness
+            # counter records WHICH of the two was missing, so "the component is
+            # broken" and "the copy was never supplied" stay distinguishable.
+            try:
+                import brand_components as _bc
+                _brand_src = (edit_plan.get("post_package") or {}) if isinstance(
+                    edit_plan.get("post_package"), dict) else {}
+                edit_plan["_brand_specs"] = _bc.build_brand_specs(
+                    edit_plan.get("_design_system"),
+                    name=_brand_src.get("speaker_name"),
+                    role=_brand_src.get("speaker_role"),
+                    headline=_brand_src.get("brand_name") or _brand_src.get("handle"),
+                    subline=_brand_src.get("brand_subline"),
+                    duration_s=duration,
+                )
+                _brand_liveness(_ACTIVE_JOB_ID, edit_plan["_brand_specs"],
+                                bool(edit_plan.get("_design_system")))
+            except Exception as _bce:
+                edit_plan["_brand_specs"] = None
+                print(f"[brand] spec build failed ({type(_bce).__name__}: {_bce}) — "
+                      f"rendering without D/F; the edit is unaffected", flush=True)
 
             # Post-processing
             edit_plan["_deepgram_words"] = list(deepgram_words or [])

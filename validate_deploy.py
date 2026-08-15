@@ -9482,6 +9482,42 @@ def _dual_write_fail_closed():
         "column, never guess that it exists")
 
 
+@check("BRAND COMPONENTS D+F ARE WIRED AND COUNT THEIR OWN REACH (2026-08-15, RULE-1) [§3.1 PHASE 1.3]. The name-plate and the end-card are the first Phase 1 components a VIEWER CAN SEE, and both consume the design system rather than inventing anything: colour, type size and safe zones all come from the palette built off the user's own footage. A component that picks its own colour is a second design system competing with the real one — right in every cert, wrong on every video. Same three-link chain as design_system and caption modes, because that is where the last two inert components were caught: brand_components.py is IMAGE-MOUNTED (a deferred import without a mount ImportErrors only in-container, only on real traffic), handler IMPORTS and CALLS build_brand_specs, and the result is ATTACHED to edit_plan. Plus the liveness counter, which must distinguish THREE states that look identical downstream — no design system, design system but no COPY in the plan, and a spec actually built — because '0 name-plates in production' otherwise cannot tell a broken component from a plan that never carried a name, and those want completely different fixes. Runs cert_brand_components.py for the behaviour, including the units arm: type_scale is ALREADY PIXELS and re-multiplying it by canvas height produced name_px=192000, a caption taller than a hundred screens.")
+def _brand_components_wired():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _m = open(_os.path.join(_here, "modal_app.py"), encoding="utf-8").read()
+    assert '"brand_components.py"' in _m, (
+        "brand_components.py is NOT image-mounted — the deferred import would ImportError "
+        "in-container and fail open to no components")
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "import brand_components as _bc" in _h, "handler does not import brand_components"
+    assert "_bc.build_brand_specs(" in _h, "handler never calls build_brand_specs"
+    # Assert the attach carries the BUILD RESULT, not merely that the key exists.
+    # The except branch also writes edit_plan["_brand_specs"] = None, so a bare
+    # key check passed even with the real assignment deleted — the RED proof
+    # caught that this gate did not cover what it claimed.
+    assert 'edit_plan["_brand_specs"] = _bc.build_brand_specs(' in _h, (
+        "the specs are never attached to edit_plan FROM THE BUILDER — a spec built and "
+        "dropped is the same as no spec, and the None-on-failure assignment is not enough "
+        "to prove the success path is wired")
+    assert "_brand_liveness" in _h and '"brand_components_built"' in _h, (
+        "PHASE 1 LIVENESS COUNTER MISSING — a component whose production reach cannot be "
+        "counted is not done")
+    _lv = _fn_source(_h, "_brand_liveness")
+    assert "except Exception" in _lv, "the brand liveness counter is not wrapped"
+    assert "no_copy_in_plan" in _lv and "no_design_system" in _lv, (
+        "the counter cannot tell a broken component from a plan with no copy — the two "
+        "want completely different fixes and both read as zero")
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_brand_components.py")],
+                  capture_output=True, text=True, timeout=300, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, (
+        "cert_brand_components FAILED\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1200:])
+    assert "ALL PASS" in _out, f"cert_brand_components did not report ALL PASS:\n{_out[-600:]}"
+
+
 @check("CAPTION MODES ARE WIRED AND CARRY A LIVENESS COUNTER (2026-08-15, RULE-1) [§3.1 PHASE 1.2]. Keyword colour emphasis and number glorification are the two caption modes the references demand, and they are ONE spec reading MODE rather than magnitude: a short centre-frame line lets any number own the frame (REF-2's '13', '$20,000,000') while a longer lower-third line accents keywords and glorifies nothing bare (REF-1), which is why '3 tips' stays quiet inside a sentence. _keyword_emphasis_spec was written days ago and, like design_system.py before it, was COMPLETELY INERT — zero call sites. This check asserts the whole chain rather than the predicate alone: the page builder ACCEPTS an accent, the caption path PASSES one drawn from this job's design system via _caption_accent_for, emphasis is stamped ONLY when an accent exists (so no palette means captions render byte-identically to today rather than in an invented colour — a second palette on the surface the viewer reads most would look right in every cert and be wrong on every video), and the liveness counter fires. It runs cert_caption_modes.py for the behaviour: both reference modes, one hero per line, determinism, and no-palette-no-emphasis.")
 def _caption_modes_wired():
     import os as _os, subprocess as _sub, sys as _sys

@@ -569,6 +569,9 @@ image = (
     # mount law exists for: it ImportErrors only in-container, only on real
     # traffic, and fails open into "no palette" so nobody notices for weeks.
     .add_local_file("design_system.py", "/design_system.py")
+    # Phase 1.3 components D+F. Deferred-imported in handler, so the mount law
+    # applies exactly as it did for design_system.py.
+    .add_local_file("brand_components.py", "/brand_components.py")
     # Leaf module — canonical component-type frozensets shared between
     # handler.py + render_schemas.py. Both import from here; without
     # this entry the container starts and immediately crashes on
