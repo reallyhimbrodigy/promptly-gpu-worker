@@ -31,6 +31,26 @@ import urllib.request
 
 # A row in any of these is user work that a deploy would orphan.
 IN_FLIGHT = ("processing", "pending", "queued")
+
+# LIVE WORK, NOT MERELY NON-TERMINAL (2026-08-15).
+#
+# The gate protects in-flight USER WORK from being orphaned by a deploy. A row
+# that is non-terminal but STALE is not live work — it is a wedged row whose
+# container Modal already killed, and blocking on it protects nothing while
+# blocking everything.
+#
+# THE BOUND IS THE CONTAINER CAP, deliberately, not the heartbeat interval.
+# Modal terminates run_pipeline_bg at its 1200s timeout, so NOTHING can still be
+# running past it: excluding rows staler than the cap cannot exclude live work,
+# by construction. A heartbeat-derived bound (4s) would be far tighter but NOT
+# safe — some stages legitimately go quiet for tens of seconds — and a gate that
+# skips a live job is worse than one that waits too long.
+#
+# Test case that forced this: fb702c40, status=processing at step=analyze, age
+# 2180s, LAST TOUCHED 2170s ago. One row, wedged ~970s past the point its
+# container could exist, blocked every deploy for ~17 minutes — including the
+# fix for a contention bug that was live and unfixed.
+CONTAINER_CAP_S = int(os.environ.get("PROMPTLY_CONTAINER_CAP_S") or 1200)
 ENV_FILE = "/Users/zaclibman/content-studio/.env.local"
 
 
@@ -74,8 +94,9 @@ def main():
 
     status_in = ",".join(IN_FLIGHT)
     try:
-        inflight = _get(url, key,
-                        f"select=id,status,created_at&status=in.({status_in})&limit=200")
+        inflight_raw = _get(url, key,
+                            f"select=id,status,created_at,updated_at,current_step"
+                            f"&status=in.({status_in})&limit=200")
         # NON-VACUITY: the probe must be able to see SOMETHING recent, or its
         # zero means nothing. Any row in the last 24h proves table + auth work.
         recent = _get(url, key, "select=id,status&order=created_at.desc&limit=5")
@@ -89,11 +110,45 @@ def main():
               "call this quiet.")
         return 0 if allow else 2
 
+    # Split LIVE from WEDGED on staleness, and report the wedged ones LOUDLY —
+    # silently ignoring them would trade a blocked deploy for an invisible stuck
+    # job, which is the worse of the two.
+    import datetime as _dt
+    _now = _dt.datetime.now(_dt.timezone.utc)
+
+    def _stale_s(row):
+        _u = row.get("updated_at") or row.get("created_at")
+        if not _u:
+            return None                     # unknown age -> treat as LIVE
+        try:
+            _t = _dt.datetime.fromisoformat(str(_u).replace("Z", "+00:00"))
+            if _t.tzinfo is None:
+                _t = _t.replace(tzinfo=_dt.timezone.utc)
+            return (_now - _t).total_seconds()
+        except Exception:
+            return None                     # unparseable -> treat as LIVE
+
+    inflight, wedged = [], []
+    for _r in inflight_raw:
+        _s = _stale_s(_r)
+        (wedged if (_s is not None and _s > CONTAINER_CAP_S) else inflight).append((_r, _s))
+
+    if wedged:
+        print(f"  NOTE: {len(wedged)} non-terminal row(s) are STALER than the "
+              f"{CONTAINER_CAP_S}s container cap — their containers cannot still "
+              f"exist, so they are NOT live work and do not block this deploy:")
+        for _r, _s in wedged[:10]:
+            print(f"    WEDGED  {_r.get('status')}/{_r.get('current_step') or '-'}  "
+                  f"{_r.get('id')}  stale={int(_s)}s")
+        print("  They are still STUCK ROWS and want fixing — they are just not a "
+              "reason to hold a deploy.")
+
     if inflight:
         print(f"QUIET-WINDOW: BUSY — {len(inflight)} in-flight user job(s). "
               "Deploying now orphans live user work.")
-        for row in inflight[:10]:
-            print(f"    {row.get('status')}  {row.get('id')}  {row.get('created_at')}")
+        for _r, _s in inflight[:10]:
+            print(f"    {_r.get('status')}  {_r.get('id')}  {_r.get('created_at')}"
+                  f"  stale={int(_s) if _s is not None else '?'}s")
         print("  Wait for them to settle and re-run. Deliberate override: "
               "PROMPTLY_ALLOW_BUSY_DEPLOY=1 (and attribute the orphans in DEPLOY_LOG.md).")
         return 0 if allow else 1
