@@ -31790,6 +31790,40 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
             if not (getattr(_resp, "data", None) or []):
                 print(f"[job-status] fence declined job={job_id} "
                       f"patch_keys={sorted(patch.keys())} matched=0", flush=True)
+            # ENVELOPE-WRITE INSTRUMENT (2026-08-14) [Law 2]. The two lines above
+            # are the ONLY record of whether the worker's envelope reached the
+            # row — and Modal keeps logs live-tail only, so historically they are
+            # unreadable. That is exactly why the 38-46% envelope-absent class
+            # could not be resolved from evidence: "the worker never wrote it"
+            # and "the worker wrote it and something replaced it" leave the SAME
+            # row behind, and the fix is completely different for each.
+            #
+            # So the outcome of every RESULT-bearing write becomes a durable row.
+            # matched=0 means the hard-terminal fence declined it — the row was
+            # already failed/canceled, and the worker's whole envelope was
+            # dropped on the floor with no trace but a log nobody can read.
+            # Cheap by construction: only fires when `result` is in the patch, so
+            # it is a handful of rows per job, not one per heartbeat.
+            if result is not None:
+                try:
+                    _matched = len(getattr(_resp, "data", None) or [])
+                    supabase.table("analytics_events").insert({
+                        "event": "worker_envelope_write",
+                        "platform": "worker",
+                        "props": {
+                            "job_id": str(job_id),
+                            "matched": _matched,
+                            "accepted": _matched > 0,
+                            "terminal": bool(_terminal),
+                            "status": str(patch.get(status_col) or ""),
+                            "result_keys": sorted(result.keys())[:40] if isinstance(result, dict) else None,
+                            "result_bytes": len(str(patch.get("result") or "")),
+                        },
+                    }).execute()
+                except Exception as _evx:
+                    # Instrumentation must never be able to fail a render.
+                    print(f"[job-status] envelope-write event soft-failed job={job_id}: "
+                          f"{type(_evx).__name__}", flush=True)
         except Exception as e:
             print(f"[job-status] write failed job={job_id}: {e} (fail open)", flush=True)
             if "PGRST204" in str(e):

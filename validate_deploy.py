@@ -9123,6 +9123,26 @@ def _component_obey_cert():
     assert "ALL PASS" in _out, f"cert_component_obey did not report ALL PASS:\n{_out[-800:]}"
 
 
+@check("WORKER ENVELOPE-WRITE INSTRUMENT (2026-08-14, RULE-1) [Law 2]. 38-46% of completions since Aug 12 carry a result of exactly {lifecycle_push_v1} and nothing else — no stage_timings, no video_url — while every one of those users DID get their video. The class could not be resolved from the rows because 'the worker never wrote its envelope' and 'the worker wrote it and something replaced it' leave the SAME row behind, and the fix is completely different for each. The only existing record of which one happened is _write_job_status's own stdout ('terminal write ... matched=N' / 'fence declined'), and Modal keeps logs LIVE-TAIL ONLY, so historically it is unreadable — the evidence is destroyed by the same event it would explain. This check asserts the outcome of every RESULT-BEARING write is now durable instead: a worker_envelope_write analytics row carrying matched/accepted/terminal/result_keys. matched=0 means the HARD-TERMINAL FENCE declined it (the row was already failed/canceled and the worker's whole envelope was dropped) — the single most likely mechanism for a long-queued job, since the absent cohort's queue delay is p50 151s against p50 10s for healthy ones. It fires ONLY when `result` is in the patch, so it costs a handful of rows per job rather than one per 4s heartbeat, and it is wrapped so instrumentation can never fail a render.")
+def _worker_envelope_write_instrument():
+    import os as _os, re as _re9
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _src = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "worker_envelope_write" in _src, (
+        "the envelope-write instrument is GONE — the overwrite-vs-never-arrived question "
+        "becomes unanswerable again the moment it is removed")
+    _i = _src.index("worker_envelope_write")
+    _win = _src[max(0, _i - 1200):_i + 1200]
+    assert '"accepted": _matched > 0' in _win, (
+        "the event must record ACCEPTED (matched>0) — a row that only says 'the worker tried' "
+        "cannot tell a declined write from a successful one, which is the entire question")
+    assert "if result is not None:" in _win, (
+        "the instrument must fire only on RESULT-bearing writes; on every heartbeat it would "
+        "be one analytics row per 4 seconds per job")
+    assert "soft-failed" in _win and "except Exception" in _win, (
+        "instrumentation must be wrapped — a telemetry insert that can raise would fail renders")
+
+
 @check("RHYTHM DIMENSION HOLDS JUDGE's TARGETS IN JUDGE's ORDER (2026-08-14, RULE-1) [§4.7/§3.1]. The ~1s motion law was a vibe; JUDGE measured it off the two references: PRIMARY ~3.5 moving samples/s, SECONDARY 3.5s maximum stillness, and the ORDER is the ruling — build to those, NOT to cut rate. The references run 21 and 8 hard cuts with longest cut-to-cut gaps of 6.1s and 9.5s, so any system tuned to cut rate rejects the very edits it exists to imitate. My first version of this dimension gated on the GAP alone at a 2.0s bar with density reported as mere context, which was stricter than JUDGE on the lesser number and SILENT on the greater one — an edit at 1.2 samples/s, visibly sparse, passed clean. This check runs cert_rhythm_dimension.py so that regression cannot return: both references meet the primary target and the stillness bar, a CUTS-ONLY reading of those same references fails the primary by ~8x (the calibration that proves the dimension is not secretly a cut counter), a decoy that BEATS the primary target still fails on a dead hole (density alone is gameable — 40 captions in 2s averages beautifully), every motion kind counts (caption, scene, zoom, cut, transition, broll, MG, text, emphasis), unit inference between ms/seconds/frames cannot flip a verdict, and an unmeasurable plan reports None rather than passing silently. Offline, zero network, zero Modal, zero Gemini.")
 def _rhythm_dimension_cert():
     import subprocess as _sub, os as _os, sys as _sys
