@@ -1241,8 +1241,8 @@ def render_burst(payload: dict) -> dict:
     # NO GPU — the orchestrator does NO GPU work on the critical path. NVENC +
     # CUDA decode are hardcoded off (_HAS_NVENC/_HAS_HWACCEL=False → CPU libx264
     # encode, CPU decode, CPU minterpolate); the Remotion render is Chromium-on-
-    # CPU; Deepgram transcription is a CLOUD call; rife_normalize_remote is DEAD
-    # CODE. The ONLY local GPU consumer was pyannote diarization — and it runs
+    # CPU; Deepgram transcription is a CLOUD call; rife_normalize_remote was
+    # REMOVED 2026-08-15 [§4.8]. The ONLY local GPU consumer was pyannote diarization — and it runs
     # ONLY when Deepgram detects >=2 speakers (handler.py ~18147), a minority of
     # short-form talking-head jobs. So an A100/H100 was held for the FULL render
     # on 100% of jobs but used on a fraction, capping parallelism at the account's
@@ -1574,111 +1574,6 @@ def cancel_call(body: dict):
         print(f"[cancel-call] {_call_id} not cancelled: {type(_e).__name__}: {_e}", flush=True)
         return {"ok": False, "call_id": _call_id, "cancelled": False,
                 "error": f"{type(_e).__name__}: {str(_e)[:200]}"}
-
-
-# ── RIFE GPU function ─────────────────────────────────────────────────────────
-# Stateless H100-backed function that the CPU orchestrator calls when a source
-# needs frame interpolation. Splitting RIFE off lets the orchestrator drop its
-# H100 — the orchestrator does Remotion + ffmpeg + audio (all CPU/memory) for
-# 60s, but only ~5-15s of that needs the GPU. Paying H100 rates for the full
-# 60s on every render was the main cost driver.
-#
-# Pricing: H100 + 4 CPU + 16 GB ≈ $4.13/hr. A typical RIFE call is 5-15s + a
-# 15-20s cold start when the function isn't warm. With scaledown_window=30,
-# back-to-back renders (within 30s) reuse the warm GPU container and pay only
-# the 5-15s exec time.
-@app.function(
-    gpu="H100",
-    cpu=4,
-    memory=16384,
-    # 90s scaledown so a prewarm spawn (fired the moment iOS upload completes)
-    # keeps the GPU container warm long enough to absorb the user's typical
-    # decision delay before tapping "render". 30s was tight — covered back-to-
-    # back renders only. 90s reliably covers prewarm → real render gaps. Each
-    # extra 60s of idle warmth costs ~$0.07 of GPU time, but saves 15-20s of
-    # critical-path cold start per render — net win.
-    scaledown_window=90,
-    timeout=480,
-    region="us-west",
-)
-def rife_normalize_remote(source_bytes: bytes, target_fps: int, warmup: bool = False) -> bytes:
-    """Interpolate a video to `target_fps` via RIFE 4.18 on H100.
-
-    Input/output are full mp4 bytes. Internally writes to /tmp, runs the
-    same /rife_normalize.py script the orchestrator used to call locally,
-    reads the output back. Forwards `[rife] ...` log lines so the GPU
-    container's logs match what the orchestrator used to print.
-
-    `warmup=True` mode runs the CUDA driver fix + a tiny torch CUDA probe
-    and returns immediately (no real RIFE work). Used by PromptlyPrewarmWorker
-    to provision the GPU container the moment iOS uploads complete, so the
-    real RIFE call ~30-60s later hits a warm container instead of paying
-    a 15-20s cold start on the critical path.
-
-    Raises RuntimeError with rc + last 3000 chars of stderr on failure
-    (preserves the diagnostics added when chasing the SIGSEGV).
-    """
-    import os
-    import subprocess
-    import sys
-    import tempfile
-
-    # Modal's NVIDIA driver mount leaves 0-byte stubs at the SONAME paths
-    # (libcuda.so / libcuda.so.1) and ships forward-compat libs at version
-    # 560.35.05 in /usr/local/cuda*/compat that ABI-mismatch the real 580
-    # driver. The setup helper replaces stubs with proper symlinks and
-    # excludes compat from LD_LIBRARY_PATH. Idempotent — kept symlinks
-    # return immediately, so calling on every invocation is cheap.
-    if "/" not in sys.path:
-        sys.path.insert(0, "/")
-    from cuda_driver_setup import setup_cuda_driver_mount
-    setup_cuda_driver_mount()
-
-    if warmup:
-        # Provision the container, run the driver-mount fix, do a tiny
-        # torch CUDA probe to force CUDA init + libcuda resolution, then
-        # return. Real RIFE work skipped. The container stays warm for
-        # scaledown_window so the next real call reuses it.
-        _r = subprocess.run(
-            ["python", "-c",
-             "import torch; "
-             "assert torch.cuda.is_available(), 'cuda not available'; "
-             "_ = torch.zeros(4, device='cuda') + 1.0; "
-             "torch.cuda.synchronize(); "
-             "print('[rife-warmup] cuda OK on', torch.cuda.get_device_name(0), flush=True)"],
-            capture_output=True, text=True, timeout=60,
-        )
-        for _line in (_r.stdout or "").splitlines():
-            if _line.strip():
-                print(_line, flush=True)
-        if _r.returncode != 0:
-            print(f"[rife-warmup] cuda probe failed: {(_r.stderr or '')[:500]}", flush=True)
-        return b""
-
-    with tempfile.TemporaryDirectory(prefix="rife-") as work:
-        src = os.path.join(work, "src.mp4")
-        out = os.path.join(work, "out.mp4")
-        with open(src, "wb") as f:
-            f.write(source_bytes)
-        r = subprocess.run(
-            ["python", "/rife_normalize.py",
-             "--input", src,
-             "--output", out,
-             "--target-fps", str(target_fps),
-             "--rife-dir", "/opt/rife"],
-            capture_output=True, text=True, timeout=420,
-        )
-        for _line in (r.stdout or "").splitlines():
-            if _line.startswith("[rife]"):
-                print(_line, flush=True)
-        if r.returncode != 0 or not os.path.exists(out):
-            raise RuntimeError(
-                f"RIFE remote failed: rc={r.returncode} "
-                f"stderr={(r.stderr or '')[-3000:]} "
-                f"stdout={(r.stdout or '')[-1500:]}"
-            )
-        with open(out, "rb") as f:
-            return f.read()
 
 
 # ── Canonical flag values — the janitor's daily drift sentinel reads these ────

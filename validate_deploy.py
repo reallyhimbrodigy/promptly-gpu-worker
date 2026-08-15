@@ -9123,6 +9123,20 @@ def _component_obey_cert():
     assert "ALL PASS" in _out, f"cert_component_obey did not report ALL PASS:\n{_out[-800:]}"
 
 
+@check("NO GPU ON THE WORKER APP (2026-08-15, RULE-1) [§4.8/Law 1]. The render path is CPU-ONLY by design — GPU was removed because it CAPPED PARALLELISM, not because it was slow: an A100/H100 was held for the FULL render on 100% of jobs while the only local GPU consumer (pyannote diarization) ran on a minority of them. One `gpu=` entrypoint survived that removal as dead code: rife_normalize_remote, an H100 function whose own docstring priced it at ~$4.13/hr and which modal_app.py itself recorded as DEAD CODE with no live callers. It cost $0 because it never fired, which is exactly what made it easy to leave — and exactly why it was dangerous: a dead H100 entrypoint is ONE accidental call away from ~$0.00117 per second, and it sat inside a money-path app. §4.8 is unambiguous that dead-purpose code goes rather than staying dark. Removed 2026-08-15. This check FAILS on any `gpu=` reappearing in modal_app.py, so re-introducing a GPU surface has to be a deliberate, reviewed act rather than a copy-paste — and it names rife_normalize_remote specifically so the exact corpse cannot be resurrected.")
+def _no_gpu_on_worker_app():
+    import os as _os, re as _re10
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _src = open(_os.path.join(_here, "modal_app.py"), encoding="utf-8").read()
+    _hits = [l.strip()[:90] for l in _src.splitlines()
+             if _re10.search(r"^\s*gpu\s*=", l) or _re10.search(r"@app\.(function|cls)\([^)]*gpu\s*=", l)]
+    assert not _hits, (
+        "a gpu= entrypoint is back in modal_app.py — the render path is CPU-only and a GPU "
+        "surface here is a money-path decision, not a refactor:\n  " + "\n  ".join(_hits))
+    assert "def rife_normalize_remote" not in _src, (
+        "rife_normalize_remote is back — it was removed as dead H100 code (§4.8)")
+
+
 @check("WORKER ENVELOPE-WRITE INSTRUMENT (2026-08-14, RULE-1) [Law 2]. 38-46% of completions since Aug 12 carry a result of exactly {lifecycle_push_v1} and nothing else — no stage_timings, no video_url — while every one of those users DID get their video. The class could not be resolved from the rows because 'the worker never wrote its envelope' and 'the worker wrote it and something replaced it' leave the SAME row behind, and the fix is completely different for each. The only existing record of which one happened is _write_job_status's own stdout ('terminal write ... matched=N' / 'fence declined'), and Modal keeps logs LIVE-TAIL ONLY, so historically it is unreadable — the evidence is destroyed by the same event it would explain. This check asserts the outcome of every RESULT-BEARING write is now durable instead: a worker_envelope_write analytics row carrying matched/accepted/terminal/result_keys. matched=0 means the HARD-TERMINAL FENCE declined it (the row was already failed/canceled and the worker's whole envelope was dropped) — the single most likely mechanism for a long-queued job, since the absent cohort's queue delay is p50 151s against p50 10s for healthy ones. It fires ONLY when `result` is in the patch, so it costs a handful of rows per job rather than one per 4s heartbeat, and it is wrapped so instrumentation can never fail a render.")
 def _worker_envelope_write_instrument():
     import os as _os, re as _re9
