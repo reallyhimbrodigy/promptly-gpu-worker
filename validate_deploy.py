@@ -9123,6 +9123,40 @@ def _component_obey_cert():
     assert "ALL PASS" in _out, f"cert_component_obey did not report ALL PASS:\n{_out[-800:]}"
 
 
+@check("RHYTHM DIMENSION HOLDS JUDGE's TARGETS IN JUDGE's ORDER (2026-08-14, RULE-1) [§4.7/§3.1]. The ~1s motion law was a vibe; JUDGE measured it off the two references: PRIMARY ~3.5 moving samples/s, SECONDARY 3.5s maximum stillness, and the ORDER is the ruling — build to those, NOT to cut rate. The references run 21 and 8 hard cuts with longest cut-to-cut gaps of 6.1s and 9.5s, so any system tuned to cut rate rejects the very edits it exists to imitate. My first version of this dimension gated on the GAP alone at a 2.0s bar with density reported as mere context, which was stricter than JUDGE on the lesser number and SILENT on the greater one — an edit at 1.2 samples/s, visibly sparse, passed clean. This check runs cert_rhythm_dimension.py so that regression cannot return: both references meet the primary target and the stillness bar, a CUTS-ONLY reading of those same references fails the primary by ~8x (the calibration that proves the dimension is not secretly a cut counter), a decoy that BEATS the primary target still fails on a dead hole (density alone is gameable — 40 captions in 2s averages beautifully), every motion kind counts (caption, scene, zoom, cut, transition, broll, MG, text, emphasis), unit inference between ms/seconds/frames cannot flip a verdict, and an unmeasurable plan reports None rather than passing silently. Offline, zero network, zero Modal, zero Gemini.")
+def _rhythm_dimension_cert():
+    import subprocess as _sub, os as _os, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_rhythm_dimension.py")],
+                  capture_output=True, text=True, timeout=300, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, (
+        "cert_rhythm_dimension FAILED — the rhythm targets are not what JUDGE measured.\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1500:])
+    assert "ALL PASS" in _out, f"cert_rhythm_dimension did not report ALL PASS:\n{_out[-800:]}"
+    # The ORDER is the ruling, so the literals are asserted here too: a future
+    # edit that flips them back to a gap-only bar has to defeat two checks in
+    # two files, not one.
+    _src = open(_os.path.join(_here, "rhythm_dimension.py"), encoding="utf-8").read()
+    assert "MOVING_SAMPLES_PER_S_TARGET = 3.5" in _src, (
+        "the PRIMARY density target is not 3.5/s — JUDGE's primary number moved without a ruling")
+    assert "STILL_GAP_BAR_S = 3.5" in _src, (
+        "the SECONDARY stillness bar is not 3.5s — JUDGE's secondary number moved without a ruling")
+
+
+@check("DESIGN SYSTEM: THE PALETTE IS EXTRACTED FROM THE FOOTAGE, NOT GUESSED (2026-08-14, RULE-1) [§3.1/§6.1]. Components D (name-plate) and F (end-card/brand) in LUMEN_REFERENCE_SPEC both hang on ONE derived thing — an accent colour that belongs to the user's own video — and a wrong accent is worse than no accent: it reads as a template applied to someone's footage. This check runs cert_design_system.py, whose canon rule is the reference itself: REF-1's documented accent is ORANGE, so the extractor must return hue 15-45 degrees on it. That rule has already caught the real defect once — the first extractor sampled only the opening seconds behind a 3% presence floor and confidently returned GREEN for a documented-orange reference, a wrong answer delivered with no error at all, which is the probe-collapse class. Sampling now spans the WHOLE source (fps=n/duration) with a 0.5% presence floor and a 0.35 saturation floor. The cert also holds: the same source yields the same palette twice (a palette that drifts between the name-plate and the end-card of ONE render is a visible defect), foreground contrast stays at or above 0.45 against every surface it lands on, and BOTH safe-zone doctrines exist and differ (platform_ui_exclusion for 9:16 where the app's own chrome eats the frame, broadcast_title_safe for landscape) because one doctrine applied to both aspect ratios puts type under the share sheet. Offline, zero network, zero Modal, zero Gemini.")
+def _design_system_cert():
+    import subprocess as _sub, os as _os, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_design_system.py")],
+                  capture_output=True, text=True, timeout=300, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, (
+        "cert_design_system FAILED — the palette lock is not trustworthy.\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1500:])
+    assert "ALL PASS" in _out, f"cert_design_system did not report ALL PASS:\n{_out[-800:]}"
+
+
 @check("BUNDLE-FRESHNESS GUARD (Zac 2026-08-02, RULE-1, forged from SafeImg nearly shipping inert): a Remotion TSX change ships DEAD if a redeploy reuses a cached bundle without re-running prebundle.mjs — the render then executes STALE compiled JS while the source (and every gate that reads the source) says the fix is present. This gate asserts the anti-inert mechanism is wired on BOTH ends: (1) prebundle.mjs fingerprints every src .ts/.tsx/.mjs into bundle/.src_hash at image-build time, and (2) handler.py defines _assert_bundle_fresh() AND calls it inside render_stage, so the FIRST real render recomputes the live-source hash and refuses (STALE_BUNDLE) if the deployed bundle wasn't built from the deployed source. Fail-open only when the stamp is absent (pre-fingerprint bundle), never on mismatch. One check closes the class forever: a TSX fix can no longer pass every source gate yet render from an old bundle.")
 def _bundle_freshness_guard():
     import os as _os, re as _re3

@@ -6,7 +6,16 @@ refs — a cut, a word, a scene, a zoom. REF-1 median shot 1.8s; REF-2 substitut
 caption-beat + scene-insert rhythm over long takes. Stillness never exceeds
 ~2s."*
 
-That is a vibe until it is a number. This makes it a number.
+That is a vibe until it is a number. This makes it a number — JUDGE's numbers,
+measured off the two references on 2026-08-14:
+
+    PRIMARY    ~3.5 moving samples per second
+    SECONDARY  3.5s maximum stillness
+
+**Build to those, not to cut rate.** The references run 21 and 8 hard cuts with
+longest cut-to-cut gaps of 6.1s and 9.5s — a system built to cut rate rejects the
+very edits it is meant to imitate. Motion is captions, scenes, zooms and type;
+cuts are one contributor among several.
 
 WHAT IT MEASURES — motion events on ONE timeline, from the PLAN alone. No
 render, no Gemini, no spend, so it runs in the deploy gate and on every differ
@@ -22,15 +31,18 @@ candidate. An event is anything that changes the frame:
 
 THE TWO NUMBERS THAT MATTER, and why they are not one number:
 
-  events_per_second   density. Easy to game — 40 captions in 2s scores well and
-                      looks like a seizure.
-  max_still_gap_s     THE LAW. The longest stretch with NOTHING happening.
-                      §1.G's real claim is about the GAP, not the average: an
-                      edit can average 1.2 events/s and still have a dead 6s
-                      hole, and the hole is what reads as amateur.
+  events_per_second   density — THE PRIMARY TARGET, 3.5/s. The thing that
+                      separates a Lumen-class edit from a competent trim.
+  max_still_gap_s     SECONDARY, 3.5s. The longest stretch with NOTHING
+                      happening. Density alone is gameable: 40 captions in 2s
+                      averages beautifully and still leaves a dead 6s hole, and
+                      the hole is what reads as amateur.
 
-So the gate is on the GAP, and density is reported beside it as context. A
-single average would have hidden exactly the defect the references rule out.
+Neither subsumes the other, which is why both survive. My first version of this
+file gated on the GAP alone at a 2.0s bar and reported density as context — so
+an edit could sit at 1.2 samples/s, visibly sparse, and pass clean. That was
+stricter than JUDGE on the lesser number and silent on the greater one. Both are
+targets now, and every report prints them in JUDGE's order.
 
 Usage:
     python3 rhythm_dimension.py <plan.json> [...]        # report
@@ -39,10 +51,23 @@ Usage:
 import json
 import sys
 
-# §1.G: "stillness never exceeds ~2s". 2.0 is the bar the references set; the
-# gate warns above it rather than failing, because a legitimate long take with a
-# strong caption cadence is a real editorial choice (REF-2 does exactly that).
-STILL_GAP_BAR_S = 2.0
+# JUDGE's targets, 2026-08-14 — these REPLACE my earlier read of §1.G.
+#
+#   PRIMARY    ~3.5 moving samples per second
+#   SECONDARY  3.5s maximum stillness
+#
+# The primary target is DENSITY, not cut rate, and that ordering is the whole
+# point: the references run 21 and 8 hard cuts, with longest cut-to-cut gaps of
+# 6.1s and 9.5s, so anything built to cut rate rejects the bar itself. Motion
+# comes from captions, scenes, zooms and type — cuts are one contributor among
+# several.
+#
+# My earlier bar was a 2.0s gap with no density target at all. That was stricter
+# on stillness and silent on the thing JUDGE ranks FIRST, so an edit could sit at
+# 1.2 samples/s — visibly sparse — and still pass. Both targets now exist, in
+# JUDGE's order.
+MOVING_SAMPLES_PER_S_TARGET = 3.5    # PRIMARY
+STILL_GAP_BAR_S = 3.5                # SECONDARY
 
 
 def _num(v):
@@ -123,9 +148,15 @@ def measure_rhythm(plan, duration_s=None):
     for _, k in ev:
         by_kind[k] = by_kind.get(k, 0) + 1
 
+    _per_s = round(len(ev) / total, 3) if total else 0.0
     return {
         "events": len(ev),
-        "per_second": round(len(ev) / total, 3) if total else 0.0,
+        "per_second": _per_s,
+        # PRIMARY target [JUDGE 2026-08-14]. Reported as a ratio so a read is
+        # actionable at a glance: 1.0 is on target, 0.4 is 40% of the bar.
+        "density_ratio": round(_per_s / MOVING_SAMPLES_PER_S_TARGET, 2)
+                         if MOVING_SAMPLES_PER_S_TARGET else None,
+        "meets_density": _per_s >= MOVING_SAMPLES_PER_S_TARGET,
         "max_still_gap_s": round(max_gap, 2),
         "gap_at_s": round(gap_at, 2),
         "by_kind": by_kind,
@@ -139,7 +170,11 @@ def compare_to_reference(measured, ref_name="REF"):
     without a timestamp is not actionable."""
     if measured.get("max_still_gap_s") is None:
         return f"{ref_name}: unmeasurable ({measured.get('note')})"
-    verdict = "WITHIN BAR" if measured["within_bar"] else "TOO STILL"
+    # PRIMARY first, secondary second — JUDGE's order, so a report cannot lead
+    # with the lesser number.
+    _d = "DENSITY OK" if measured.get("meets_density") else "TOO SPARSE"
+    _s = "gap ok" if measured["within_bar"] else "TOO STILL"
+    verdict = f"{_d} / {_s}"
     return (f"{ref_name}: {verdict} — {measured['events']} events over "
             f"{measured['duration_s']}s = {measured['per_second']}/s; longest "
             f"still gap {measured['max_still_gap_s']}s at t={measured['gap_at_s']}s "
@@ -163,7 +198,9 @@ def main(argv):
             plan = plan["plan"]
         m = measure_rhythm(plan, plan.get("duration_s") or plan.get("source_duration_s"))
         print(compare_to_reference(m, path.split("/")[-1]))
-        if m.get("within_bar") is False:
+        # Either target missed is a miss. Gating on the gap alone was exactly
+        # the blind spot JUDGE's ordering corrects.
+        if m.get("within_bar") is False or m.get("meets_density") is False:
             rc = 1
     return rc
 
