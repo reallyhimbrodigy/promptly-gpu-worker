@@ -162,3 +162,26 @@ envelope-write events measures the hang rate directly.
 One defect would account for the largest cost line, the largest telemetry hole,
 and the worst latency class simultaneously. That is worth more than every
 container-sizing lever combined, and it is why L1 stays uncommitted.
+
+
+## DISPATCH_UNREACHABLE IS A DIFFERENT CLASS — do not collapse the labels
+
+Checked directly, since a shared 904s tail made them look alike:
+
+| | DISPATCH_UNREACHABLE | envelope-lost |
+|---|---|---|
+| n / distinct users (since Aug 1) | 12 / 8 | 180 / 161 (Aug-12 cohort) |
+| **`modal_call_id`** | **0/12 — Modal was NEVER reached** | present |
+| `worker_started_at` | **0/12** | 180/180 |
+| result shape | full error envelope + `refund` | `{lifecycle_push_v1}` and nothing else |
+| status | 11 failed, 1 completed | all completed |
+| **overlap** | **1 job** | |
+
+**They are opposites, not variants.** DISPATCH_UNREACHABLE fails *before* a
+container exists; envelope-loss happens *after* a render succeeds. And because
+0/12 ever held a container, **DISPATCH_UNREACHABLE contributes ~$0 to the cost
+residual** — its 1420s p90 tail is the Render-side 600s source wait, which the
+read above already proved costs nothing on Modal.
+
+Collapsing the labels would have merged a 12-job dispatch fault into a 180-job
+worker fault and pointed the fix at the wrong layer.
