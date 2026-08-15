@@ -43,10 +43,39 @@ after   plan_leg(cpu=2, 4GiB)     ← transcribe + editorial + scene generation
 The plan leg returns a plan; the render leg consumes it. No shared mutable state,
 which is what makes the split safe.
 
-**Prize:** orchestration is 72.3% of $35.88 = **$25.94/day**. If ~82% of that is
-wait and it moves 16 → 2 cores, the saving is bounded by
-`$25.94 × 0.82 × (14/16)` ≈ **$18.6/day ≈ $558/mo**. Stated as a **bound**, not a
-promise — the split also adds one container handoff per job.
+### THE HANDOFF, PRICED — net, not gross
+
+My earlier "~$558/mo" was **gross** and it was wrong to quote. The split adds a
+**second cold start** (~11s at cpu=16, documented in-body handler import):
+
+```
+saving per second of network wait moved 16 → 2 cores   $0.0002012
+handoff cost (11s second cold start at cpu=16)         $0.00260 / job
+──────────────────────────────────────────────────────────────────
+BREAK-EVEN: the wait leg must exceed 12.9s or the split LOSES money
+```
+
+| wait leg | net |
+|---|---|
+| **6.4s** — today's unaccounted slice | **−$7/mo (NEGATIVE)** |
+| 12.9s | break-even |
+| 25s | +$14/mo |
+| **Lumen, +70s of scene generation** | **+$72/mo** |
+
+**So L1 is net-negative at today's job profile and earns its keep almost entirely
+from Lumen.** That is the opposite of how I first sold it, and it is the whole
+reason for pricing net.
+
+### AND THE DENOMINATOR DOES NOT CLOSE
+
+Orchestration is **$25.94/day** by invoice. My per-job model — 188 jobs × ~30s
+wall at cpu=16/12 GiB — is **$1.33/day**, i.e. it explains **5.1%**. The
+orchestrator is billed roughly **19× longer than its jobs run**.
+
+So every net figure above rests on a denominator covering a twentieth of the
+spend. **L1 is not committed until orchestrator container-seconds are measured**
+— the same discipline being applied to L2. The break-even (12.9s) is the one
+number here that is denominator-independent: it falls out of the rate card alone.
 
 ## 2 — L2: STOP HOLDING THE ORCHESTRATOR THROUGH THE BURST
 
@@ -118,13 +147,20 @@ shape:
 | **prewarm 0.125c/4G** | **84.4%** |
 | validator 4c/2G | 7.8% |
 
-→ **PromptlyPrewarmWorker ≈ $6.50/day ≈ $195/mo**, ~7× my earlier estimate, and
-the validator **cannot** be the term (7.8% is nowhere near 93.6%).
+### SUPERSEDED BY THE DASHBOARD — use these
 
-**The validator, bounded separately:** cpu=4/2 GiB at a 300s window with a
-measured 45% up-fraction = **~$2.21/day ≈ $66/mo**, attributable to the UNS
-upload-validation path. That is a **bound from the container spec**, not an
-invoice line — the CLI reports per-APP only (`object_id, description,
-environment, interval_start, resource, cost`), with **no function dimension**, so
-per-function shares cannot come from it. The 72.3%/9.6% split above is taken as
-given from the dashboard.
+| surface | **dashboard, cycle-to-date** | my inference | error |
+|---|---|---|---|
+| PromptlyPrewarmWorker | **$74.19** | ~$97 (15d) | overstated ~1.3× |
+| validator (UNS upload path) | **$75.33** | ~$33 (15d) | **understated ~2.3×** |
+| together | **$149.52 = 17.0% of the $878.10 cycle** | — | total was close |
+
+**The attribution was wrong even though the total was near.** I solved the
+27.5%-memory residual assuming **ONE** surface, got 93.6%, matched it to the
+prewarm shape (84.4%), and concluded the validator "cannot be the term". In fact
+**two surfaces of nearly equal size sum to it** — and a two-term sum is not
+recoverable from one blended ratio. The single-surface assumption was the error,
+and it produced a confident exclusion of the validator that was simply false.
+
+The validator is the **UNS upload-validation path** and is now the **larger** of
+the two at $75.33 cycle-to-date.

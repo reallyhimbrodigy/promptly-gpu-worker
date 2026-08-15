@@ -9123,6 +9123,39 @@ def _component_obey_cert():
     assert "ALL PASS" in _out, f"cert_component_obey did not report ALL PASS:\n{_out[-800:]}"
 
 
+@check("L1 PLAN LEG CARRIES NO ENCODE (2026-08-15, RULE-1) [Law 1]. L1 splits the network-waiting legs off the cpu=16 orchestrator onto a cheap cpu=2 plan leg. The specific way that kills renders is already on the record: cutting cores from 16 to 8 CRASHED completion 78.9% -> 35.7%, because a 480p ultrafast proxy encode was CPU-STARVED. A plan leg at cpu=2 that touches ffmpeg, x264 or Remotion repeats that outage at a quarter of the cores. The guard was written as a comment in the build plan, which is exactly the form that rots — so it is a gate. TWO MODES, and the check REPORTS which one it is in, because a check that silently passes when its subject does not exist is the vacuous class this repo has now paid for three times: (a) the plan leg does not exist yet -> assert the forbidden-symbol manifest is non-empty, so the guard cannot be hollowed out before it is needed; (b) the plan leg EXISTS -> assert its body contains none of them. The manifest is asserted non-empty in BOTH modes: a guard whose forbidden list has been emptied would pass every file trivially.")
+def _l1_plan_leg_no_encode():
+    import ast as _ast10, os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    # Symbols that mean "this code encodes video". CPU-bound, and the reason the
+    # cpu=8 cut took completion down with it.
+    _FORBIDDEN = ("ffmpeg", "libx264", "x264", "ultrafast", "remotion",
+                  "renderMedia", "render_stage", "_X264_ENCODE_THREADS", "nvenc")
+    assert len(_FORBIDDEN) >= 5, (
+        "the forbidden-encode manifest has been emptied — the guard would pass any plan leg")
+    _PLAN_LEG_NAMES = ("plan_leg", "run_plan_leg", "plan_leg_remote")
+    _src = open(_os.path.join(_here, "modal_app.py"), encoding="utf-8").read()
+    _tree = _ast10.parse(_src)
+    _found = [n for n in _tree.body
+              if isinstance(n, (_ast10.FunctionDef, _ast10.AsyncFunctionDef))
+              and n.name in _PLAN_LEG_NAMES]
+    if not _found:
+        # Mode (a). Stated out loud rather than passing silently.
+        print("      [l1-guard] ARMED, not yet binding: no plan leg exists in modal_app.py. "
+              f"Manifest holds {len(_FORBIDDEN)} forbidden encode symbols and will bind the "
+              "moment a plan leg lands.")
+        return
+    for _fn in _found:
+        _body = _ast10.get_source_segment(_src, _fn) or ""
+        _low = _body.lower()
+        _hits = sorted({_f for _f in _FORBIDDEN if _f.lower() in _low})
+        assert not _hits, (
+            f"the L1 plan leg `{_fn.name}` contains encode work: {_hits}. "
+            "It runs at low cpu; the 16->8 core cut already crashed completion "
+            "78.9%->35.7% on a CPU-starved proxy encode. Every ffmpeg/Remotion call "
+            "belongs on the render leg.")
+
+
 @check("RED PROOFS CANNOT PASS FOR THE WRONG REASON (2026-08-15, RULE-1). A gate is worth exactly what its RED proof is worth, and this repo has now produced the SAME defect three times: a proof that reported RED-then-GREEN while never exercising the thing it claimed to test. (1) __smoke_result_rmw_audit matched `updated_at` inside a COMMENT in the select list, so deleting the real column still passed. (2) _no_gpu_on_worker_app's injected gpu=\"H100\" matched no anchor, so the gate ran against an UNMODIFIED file and passed — and was nearly recorded as proven. (3) predeploy_no_regress._surface carries its own note that comment-stripping is 'a bug this repo has now written five times, most recently in the very gate written to prevent it'. Every one looked identical to a real proof from outside: non-zero exit, then zero exit. The missing step is never the check — it is VERIFYING THAT THE MUTATION LANDED. red_proof.py refuses to report RED unless it proves byte-for-byte that the file changed AND that the injected marker is really present, treating an unapplied mutation as a HARNESS FAILURE rather than a pass. This check asserts the harness exists and keeps its three refusals: byte-identical-after-mutation, marker-absent-after-injection, and check-passed-on-a-proven-broken-file. It also asserts the file is restored and re-hashed, because a proof that leaves the tree mutated is worse than no proof.")
 def _red_proof_harness():
     import os as _os
