@@ -25653,7 +25653,51 @@ def _run_render_via_burst_or_local(
     # .remote() BLOCKS. A burst that RAISES (render_stage error) or DIES
     # (SIGKILL/OOM/preempt → Modal re-raises) propagates HERE unhandled, into
     # handler's single except → classify_error → the ONE terminal. NOT swallowed.
+    # DOUBLE-HOLD INSTRUMENT (2026-08-15) [Law 1]. `.remote()` BLOCKS, so for its
+    # whole duration TWO reservations are live for ONE piece of work: this
+    # orchestrator at cpu=16 doing nothing but waiting, and the burst at cpu=32
+    # doing the render. 48 cores held, 32 of them useful.
+    #
+    # This was the largest term in my cost model that was ESTIMATED rather than
+    # measured — derived from stage_timings' render seconds, which is the burst's
+    # own view and does not include dispatch, upload of the payload, queueing for
+    # a burst container, or its cold start. The real overlap is the wall clock of
+    # this call, and only this call site can see it. Measuring it turns the L2
+    # lever from an argument into a number.
+    # module-level `time`, NOT `_time`: _time is imported locally in other
+    # functions and is NOT in scope here — using it would NameError on every
+    # burst render, before the try below could catch it.
+    _dh_t0 = time.time()
     _out = _fn.remote(_payload)
+    _dh_s = time.time() - _dh_t0
+    try:
+        _dh_render = None
+        if isinstance(_out, dict):
+            _dh_rs = _out.get("rs") or {}
+            _dh_render = (_dh_rs.get("stage_timings") or {}).get("render") if isinstance(_dh_rs, dict) else None
+        print(f"[double-hold] job={job_id} blocked={_dh_s:.1f}s "
+              f"orchestrator_idle_core_s={_dh_s * 16:.0f} burst_core_s={_dh_s * 32:.0f} "
+              f"total={_dh_s * 48:.0f} (render_reported={_dh_render})", flush=True)
+        if supabase is not None:
+            supabase.table("analytics_events").insert({
+                "event": "burst_double_hold",
+                "platform": "worker",
+                "props": {
+                    "job_id": str(job_id),
+                    "blocked_s": round(_dh_s, 2),
+                    # the WASTE: cores held by a process that is only waiting
+                    "orchestrator_idle_core_s": round(_dh_s * 16, 1),
+                    "burst_core_s": round(_dh_s * 32, 1),
+                    "total_core_s": round(_dh_s * 48, 1),
+                    # the burst's OWN render number, so the gap between "render
+                    # time" and "time the orchestrator was pinned" is visible —
+                    # that gap is dispatch + queue + cold start and it is billed
+                    # at 48 cores while looking like nothing in stage_timings.
+                    "burst_reported_render_s": _dh_render,
+                },
+            }).execute()
+    except Exception as _dhe:
+        print(f"[double-hold] telemetry soft-failed job={job_id}: {type(_dhe).__name__}", flush=True)
     if not isinstance(_out, dict) or "rs" not in _out:
         raise RuntimeError(
             f"render_burst returned a malformed result ({type(_out).__name__}) — "

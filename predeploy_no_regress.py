@@ -108,17 +108,53 @@ def _surface(src):
     return defs, lits
 
 
+# SCOPE WIDENED 2026-08-15 [Law 1]. This gate covered handler.py ONLY, so every
+# Modal ENTRYPOINT in modal_app.py had no revert detection at all — a lane could
+# drop `render_burst`, the ASGI app, or a cert entrypoint and this gate would
+# report "all still present" while the deployed surface silently shrank. Found
+# when removing the dead H100 function passed the gate cleanly: the pass was
+# CORRECT (out of scope) but the scope was the bug.
+#
+# modal_app.py is where the money-path resource decorators live (cpu=, memory=,
+# gpu=), so a silent drop there is both a functional and a billing regression.
+_TRACKED_FILES = ("handler.py", "modal_app.py")
+
+
+def _surface_multi(read):
+    """Union the surface across every tracked file. `read` maps path -> source
+    or None when the file is absent at that ref (a file that did not yet exist
+    contributes nothing rather than raising)."""
+    defs, lits = set(), set()
+    for path in _TRACKED_FILES:
+        src = read(path)
+        if not src:
+            continue
+        d, l = _surface(src)
+        defs |= d
+        lits |= l
+    return defs, lits
+
+
 def surface_at(ref):
     """(defs, literals) at a git ref, or None if the ref is unreachable."""
-    r = _sh(["git", "show", f"{ref}:handler.py"])
-    if r.returncode != 0:
+    def _read(path):
+        r = _sh(["git", "show", f"{ref}:{path}"])
+        return r.stdout if r.returncode == 0 else None
+    # handler.py must exist at the ref, or the ref itself is unusable.
+    if _read("handler.py") is None:
         return None
-    return _surface(r.stdout)
+    return _surface_multi(_read)
 
 
 def surface_in_worktree():
-    with open("handler.py") as fh:
-        return _surface(fh.read())
+    import os as _os2
+
+    def _read(path):
+        if not _os2.path.exists(path):
+            return None
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    return _surface_multi(_read)
 
 
 def main():

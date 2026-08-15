@@ -9123,6 +9123,28 @@ def _component_obey_cert():
     assert "ALL PASS" in _out, f"cert_component_obey did not report ALL PASS:\n{_out[-800:]}"
 
 
+@check("RED PROOFS CANNOT PASS FOR THE WRONG REASON (2026-08-15, RULE-1). A gate is worth exactly what its RED proof is worth, and this repo has now produced the SAME defect three times: a proof that reported RED-then-GREEN while never exercising the thing it claimed to test. (1) __smoke_result_rmw_audit matched `updated_at` inside a COMMENT in the select list, so deleting the real column still passed. (2) _no_gpu_on_worker_app's injected gpu=\"H100\" matched no anchor, so the gate ran against an UNMODIFIED file and passed — and was nearly recorded as proven. (3) predeploy_no_regress._surface carries its own note that comment-stripping is 'a bug this repo has now written five times, most recently in the very gate written to prevent it'. Every one looked identical to a real proof from outside: non-zero exit, then zero exit. The missing step is never the check — it is VERIFYING THAT THE MUTATION LANDED. red_proof.py refuses to report RED unless it proves byte-for-byte that the file changed AND that the injected marker is really present, treating an unapplied mutation as a HARNESS FAILURE rather than a pass. This check asserts the harness exists and keeps its three refusals: byte-identical-after-mutation, marker-absent-after-injection, and check-passed-on-a-proven-broken-file. It also asserts the file is restored and re-hashed, because a proof that leaves the tree mutated is worse than no proof.")
+def _red_proof_harness():
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _p = _os.path.join(_here, "red_proof.py")
+    assert _os.path.exists(_p), (
+        "red_proof.py is gone — RED proofs go back to being hand-rolled, which is how "
+        "the same pass-for-the-wrong-reason defect happened three times")
+    _src = open(_p, encoding="utf-8").read()
+    for _needle, _why in (
+        ("byte-identical after mutating",
+         "the harness must refuse when the file did not actually change"),
+        ("did not land where it was aimed",
+         "the harness must refuse when the injected marker is absent"),
+        ("PASSED on a file proven to be broken",
+         "the harness must fail when the check does not fire on a real mutation"),
+        ("was NOT restored",
+         "the harness must verify it restored the file, or a proof can leave the tree broken"),
+    ):
+        assert _needle in _src, f"red_proof.py lost a refusal: {_why}"
+
+
 @check("NO GPU ON THE WORKER APP (2026-08-15, RULE-1) [§4.8/Law 1]. The render path is CPU-ONLY by design — GPU was removed because it CAPPED PARALLELISM, not because it was slow: an A100/H100 was held for the FULL render on 100% of jobs while the only local GPU consumer (pyannote diarization) ran on a minority of them. One `gpu=` entrypoint survived that removal as dead code: rife_normalize_remote, an H100 function whose own docstring priced it at ~$4.13/hr and which modal_app.py itself recorded as DEAD CODE with no live callers. It cost $0 because it never fired, which is exactly what made it easy to leave — and exactly why it was dangerous: a dead H100 entrypoint is ONE accidental call away from ~$0.00117 per second, and it sat inside a money-path app. §4.8 is unambiguous that dead-purpose code goes rather than staying dark. Removed 2026-08-15. This check FAILS on any `gpu=` reappearing in modal_app.py, so re-introducing a GPU surface has to be a deliberate, reviewed act rather than a copy-paste — and it names rife_normalize_remote specifically so the exact corpse cannot be resurrected.")
 def _no_gpu_on_worker_app():
     import os as _os, re as _re10
