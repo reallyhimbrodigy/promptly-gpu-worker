@@ -9349,6 +9349,34 @@ def _rhythm_dimension_cert():
         "the SECONDARY stillness bar is not 3.5s — JUDGE's secondary number moved without a ruling")
 
 
+@check("CAPTION MODES ARE WIRED AND CARRY A LIVENESS COUNTER (2026-08-15, RULE-1) [§3.1 PHASE 1.2]. Keyword colour emphasis and number glorification are the two caption modes the references demand, and they are ONE spec reading MODE rather than magnitude: a short centre-frame line lets any number own the frame (REF-2's '13', '$20,000,000') while a longer lower-third line accents keywords and glorifies nothing bare (REF-1), which is why '3 tips' stays quiet inside a sentence. _keyword_emphasis_spec was written days ago and, like design_system.py before it, was COMPLETELY INERT — zero call sites. This check asserts the whole chain rather than the predicate alone: the page builder ACCEPTS an accent, the caption path PASSES one drawn from this job's design system via _caption_accent_for, emphasis is stamped ONLY when an accent exists (so no palette means captions render byte-identically to today rather than in an invented colour — a second palette on the surface the viewer reads most would look right in every cert and be wrong on every video), and the liveness counter fires. It runs cert_caption_modes.py for the behaviour: both reference modes, one hero per line, determinism, and no-palette-no-emphasis.")
+def _caption_modes_wired():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "emphasis_accent=None" in _h, "the page builder does not accept an accent"
+    assert "emphasis_accent=_cap_accent" in _h, (
+        "the caption path never PASSES an accent — the emphasis spec stays inert, which is "
+        "exactly how it sat unused for days")
+    assert "_caption_accent_for(edit_plan)" in _h, (
+        "the accent is not drawn from this job's design system")
+    assert "if emphasis_accent:" in _h, (
+        "emphasis would be stamped even without a palette, inventing a colour on the surface "
+        "the viewer reads most")
+    assert "_caption_modes_liveness" in _h and '"caption_modes_applied"' in _h, (
+        "PHASE 1 LIVENESS COUNTER MISSING — a component whose production reach cannot be "
+        "counted is not done")
+    _lv = _fn_source(_h, "_caption_modes_liveness")
+    assert "except Exception" in _lv, "the caption liveness counter is not wrapped"
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_caption_modes.py")],
+                  capture_output=True, text=True, timeout=300, cwd=_here)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, (
+        "cert_caption_modes FAILED\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "CERT:" in l)[-1200:])
+    assert "ALL PASS" in _out, f"cert_caption_modes did not report ALL PASS:\n{_out[-600:]}"
+
+
 @check("DESIGN SYSTEM IS WIRED, NOT MERELY WRITTEN (2026-08-15, RULE-1) [§3.1/§6.1]. design_system.py sat fully written and cert-green for a day while being COMPLETELY INERT — never imported by handler, never image-mounted. That is the unmounted-moodreel_editor class, and the spec names it directly: built is not deployed and deployed is not working. Phase 1 puts every scene downstream of this one object, so an inert palette would silently make the name-plate, the end-card and every generated scene fall back to defaults with no error anywhere. This check asserts all THREE links of the chain, because any one of them alone is the failure: (1) design_system.py is IMAGE-MOUNTED in modal_app.py — a deferred import without a mount ImportErrors only in-container, only on real traffic, and fails open into 'no palette' so nobody notices for weeks; (2) handler actually IMPORTS it and calls build_design_system; (3) the result is attached to edit_plan under _design_system so a renderer can read it — a palette computed and dropped on the floor is the same as no palette. It also asserts the build is wrapped, because a palette is an enhancement and an ffmpeg frame-sample failure must never cost a user their render.")
 def _design_system_wired():
     import os as _os

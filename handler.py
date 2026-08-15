@@ -881,6 +881,54 @@ _CANVAS_VERTICAL = (1080, 1920)
 _CANVAS_LANDSCAPE = (1920, 1080)
 
 
+def _caption_accent_for(edit_plan):
+    """The caption accent, from THIS job's design system, or None.
+
+    None is a first-class answer: it means "render captions exactly as today".
+    Returning a constant instead would put a second, invented palette on the
+    surface the viewer reads most, and it would look identical in every cert
+    while being wrong on every video."""
+    try:
+        _ds = (edit_plan or {}).get("_design_system") or {}
+        _acc = (_ds.get("palette") or {}).get("accent")
+        return _acc if isinstance(_acc, str) and _acc.startswith("#") else None
+    except Exception:
+        return None
+
+
+def _caption_modes_liveness(job_id, pages, accent):
+    """PHASE 1 LIVENESS COUNTER for caption modes [Rule 2].
+
+    Counts what actually reached the page list, not what the code intended:
+    pages built, pages carrying emphasis, and how many of those glorified a hero
+    number vs accented keywords. A component whose production reach cannot be
+    counted is not done — and `emphasis` rides caption_pages, which is stripped
+    or lost exactly as `_design_system` is, so a row-side read would be
+    unmeasurable in the same way.
+    """
+    try:
+        if supabase is None or not job_id:
+            return
+        _pages = list(pages or [])
+        _emph = [p for p in _pages if isinstance(p, dict) and p.get("emphasis")]
+        _hero = sum(1 for p in _emph
+                    if (p.get("emphasis") or {}).get("hero_index") is not None)
+        _kw = sum(1 for p in _emph
+                  if (p.get("emphasis") or {}).get("hero_index") is None
+                  and any(t.get("accent") for t in ((p.get("emphasis") or {}).get("tokens") or [])))
+        supabase.table("analytics_events").insert({
+            "event": "caption_modes_applied",
+            "platform": "worker",
+            "props": {"job_id": str(job_id), "accent": accent,
+                      "pages": len(_pages), "pages_with_emphasis": len(_emph),
+                      "hero_number_pages": _hero, "keyword_accent_pages": _kw},
+        }).execute()
+        print(f"[caption-modes] pages={len(_pages)} emphasised={len(_emph)} "
+              f"hero={_hero} keyword={_kw} accent={accent}", flush=True)
+    except Exception as _ce:
+        print(f"[caption-modes] liveness soft-failed: {type(_ce).__name__}", flush=True)
+
+
 def _design_system_liveness(job_id, ok, accent=None, canvas=None, err=None):
     """PHASE 1 LIVENESS COUNTER [Rule 2]. Every Phase 1 component ships with one,
     and this is the pattern.
@@ -27095,12 +27143,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                         _cal_map = {}; edit_plan["_caption_align_map"] = {}
                 if _cal_map:
                     _caption_words = _apply_caption_alignment(_caption_words, _cal_map)
+        # The accent comes from the DESIGN SYSTEM built for this job — the
+        # user's own footage, not a constant. If the palette failed to build,
+        # _caption_accent_for returns None and captions render exactly as they do
+        # today; a hardcoded fallback colour would be a second design system
+        # competing with the real one, on the one surface the viewer reads most.
+        _cap_accent = _caption_accent_for(edit_plan)
         caption_pages = _build_tiktok_pages_from_projected(
             _caption_words,
             max_words_per_page=_max_words_per_page,
             position_boundaries_sec=sorted(set(_position_boundaries_out_sec)),
             clip_boundaries_sec=sorted(set(_clip_boundaries_out_sec)),
+            emphasis_accent=_cap_accent,
         )
+        _caption_modes_liveness(_ACTIVE_JOB_ID, caption_pages, _cap_accent)
         # ── CAPTION TRANSLATION (LANE-SEAM, DARK behind PROMPTLY_CAPTION_
         # TRANSLATE). Runs AFTER pagination so page windows/boundaries are
         # preserved exactly; FULL-OR-NOTHING (patchy captions are a defect —
@@ -30350,7 +30406,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
 # that produced three DipToBlack production crashes.
 
 
-def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, position_boundaries_sec=None, clip_boundaries_sec=None, fps=60.0):
+def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, position_boundaries_sec=None, clip_boundaries_sec=None, fps=60.0, emphasis_accent=None):
     """Convert projected Deepgram words into TikTokPage[] structured for the
     @remotion/captions types consumed by the pack caption components.
 
@@ -30391,12 +30447,32 @@ def _build_tiktok_pages_from_projected(projected_words, max_words_per_page=3, po
         nonlocal current_tokens, current_start_ms, current_text_parts, last_word_end
         if current_tokens and current_start_ms is not None:
             duration_ms = max(1, int(round(last_word_end * 1000)) - current_start_ms)
-            pages.append({
-                "text": " ".join(current_text_parts).strip(),
+            _page_text = " ".join(current_text_parts).strip()
+            _page = {
+                "text": _page_text,
                 "startMs": current_start_ms,
                 "durationMs": duration_ms,
                 "tokens": current_tokens,
-            })
+            }
+            # CAPTION MODES [§3.1, PHASE 1.2] — keyword colour emphasis and number
+            # glorification, stamped per page at construction so the renderer
+            # reads a decision rather than re-deriving one. Both reference modes
+            # ride the SAME spec: a short centre-frame line lets any number own
+            # the frame (REF-2's "13"), a longer lower-third line accents its
+            # keywords instead (REF-1). See _keyword_emphasis_spec.
+            #
+            # Only stamped when an accent EXISTS. No palette -> no emphasis field
+            # -> the renderer's existing plain path, byte-identical to today.
+            # An emphasis that invents its own colour would be a second design
+            # system competing with the real one.
+            if emphasis_accent:
+                try:
+                    _emph = _keyword_emphasis_spec(_page_text, accent=emphasis_accent)
+                    if _emph.get("tokens"):
+                        _page["emphasis"] = _emph
+                except Exception:
+                    pass   # a caption always ships; emphasis is the enhancement
+            pages.append(_page)
         current_tokens = []
         current_start_ms = None
         current_text_parts = []
