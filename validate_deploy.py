@@ -4999,7 +4999,47 @@ def _cancel_fence_wired():
     # exactly ONE write_job_status rail chain exists — the chokepoint stays the
     # chokepoint (`patch` is that rail's var; the step-token rail below uses
     # `_step_patch`, so a THIRD writer reusing `patch` still trips this).
-    assert _src.count(".update(patch).eq(\"id\", job_id)") == 1, "a second rail write chain appeared"
+    # AST NODE COUNTING, not substring counting (2026-08-15). This counted the
+    # literal with _src.count(), so ANY MENTION of the chain matched — including
+    # a COMMENT explaining the single-writer law, which is exactly how it failed:
+    # a note reading "validate_deploy enforces exactly ONE `.update(patch).eq(...)`
+    # chain" read as a second chain and blocked a deploy on unchanged behaviour.
+    #
+    # That is the THIRD false failure of this class in this file — after
+    # updated_at-inside-a-comment and gpu=-inside-a-comment. Comments are not
+    # code and a gate that cannot tell them apart will keep firing on prose.
+    # AST sees calls; it cannot see commentary.
+    import ast as _ast15
+
+    def _rail_chain_calls(_source):
+        _n = 0
+        for _node in _ast15.walk(_ast15.parse(_source)):
+            # match  <...>.update(patch).eq("id", job_id)
+            if not isinstance(_node, _ast15.Call):
+                continue
+            _f = _node.func
+            if not (isinstance(_f, _ast15.Attribute) and _f.attr == "eq"):
+                continue
+            _inner = _f.value
+            if not (isinstance(_inner, _ast15.Call)
+                    and isinstance(_inner.func, _ast15.Attribute)
+                    and _inner.func.attr == "update"):
+                continue
+            _ia = _inner.args
+            if not (_ia and isinstance(_ia[0], _ast15.Name) and _ia[0].id == "patch"):
+                continue
+            _a = _node.args
+            if (len(_a) == 2 and isinstance(_a[0], _ast15.Constant) and _a[0].value == "id"
+                    and isinstance(_a[1], _ast15.Name) and _a[1].id == "job_id"):
+                _n += 1
+        return _n
+
+    _chains = _rail_chain_calls(_src)
+    assert _chains == 1, (
+        f"a second rail write chain appeared ({_chains} found). Exactly one "
+        ".update(patch).eq('id', job_id) may exist: a duplicate needs the hard-terminal "
+        "fence AND the copy-truth error_message mirror maintained in two places, and the "
+        "moment they drift the rail has two truths.")
     # SECOND legitimate video_jobs rail (2026-07-24 step-token durability): narrow
     # (narrative columns only) and STRICTER-fenced than the chokepoint — it also
     # excludes `completed`. Pinned so it can never lose its terminal fence (a bare

@@ -2629,7 +2629,28 @@ try:
             supabase = create_client(
                 supabase_url, supabase_key,
                 options=ClientOptions(postgrest_client_timeout=15))
-            _POSTGREST_TIMEOUT_S = 15
+            # ASSERT IT IS IN EFFECT, not merely ACCEPTED. ClientOptions taking
+            # the kwarg proves the constructor's signature, nothing more — a
+            # future version could accept and ignore it. Read the timeout back
+            # off the constructed postgrest session; if it is not there, treat it
+            # exactly like the fallback, because the risk is identical.
+            _POSTGREST_TIMEOUT_S = None
+            try:
+                _pg = getattr(supabase, "postgrest", None)
+                _sess = getattr(_pg, "session", None) or getattr(_pg, "_session", None)
+                _tmo = getattr(_sess, "timeout", None)
+                _val = getattr(_tmo, "read", None) or getattr(_tmo, "connect", None) or _tmo
+                if _val is not None and float(_val) > 0:
+                    _POSTGREST_TIMEOUT_S = float(_val)
+                    print(f"[startup] postgrest timeout VERIFIED in effect: "
+                          f"{_POSTGREST_TIMEOUT_S}s", flush=True)
+            except Exception as _tv:
+                print(f"[startup] could not verify the postgrest timeout ({type(_tv).__name__})",
+                      flush=True)
+            if _POSTGREST_TIMEOUT_S is None:
+                print("[startup] !! postgrest timeout was ACCEPTED but is NOT IN EFFECT on the "
+                      "constructed client — durable writes can block indefinitely. This is the "
+                      "wedge class and it is now visible instead of assumed.", flush=True)
         except Exception as _co_e:
             # LOUD, because this is the difference between a bounded write and an
             # INDEFINITE one — the exact failure mode the timeout exists for.

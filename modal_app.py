@@ -269,7 +269,14 @@ image = (
         # surface we use is stable across the 3.x line and 3.8 → 3.10 is
         # a minor-feature bump only.
         "deepgram-sdk>=3.8.0,<4.0",
-        "supabase>=2,<3",
+        # EXACT PIN (2026-08-15). This was ">=2,<3" — a range — and the client
+        # is constructed with ClientOptions(postgrest_client_timeout=15) inside a
+        # try/except. A kwarg rename in ANY future 2.x lands in that except and
+        # yields a client with NO postgrest timeout, restoring indefinite
+        # blocking on a wedged socket: the hang class, reintroduced by a
+        # dependency resolution nobody reviewed. A range is not a pin on a
+        # money-path timeout.
+        "supabase==2.7.4",
         "boto3[crt]>=1,<2",   # AWS Common Runtime — 2-6× S3 throughput vs stock boto3
         "httpx>=0.27,<1",
         "fastapi>=0.115,<1",
