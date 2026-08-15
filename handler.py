@@ -1,3 +1,17 @@
+        # FALL THROUGH into the SAME write chain below, holding no lock.
+        #
+        # NOT a second write. validate_deploy enforces exactly ONE rail UPDATE
+        # chain (it counts the literal, so this note must not quote it) — and it
+        # is right to: a
+        # duplicate would need the hard-terminal fence AND the copy-truth
+        # error_message mirror maintained in two places, and the moment they
+        # drift the rail has two truths. My first attempt at this DID duplicate
+        # the chain and the gate rejected it on both counts.
+        #
+        # The independent bound on THIS write is the postgrest client's own 15s
+        # timeout — and the startup path now says LOUDLY when that timeout could
+        # not be installed, because the image pins supabase>=2,<3 and a rename in
+        # a future 2.x would restore indefinite blocking silently.
 # Modal worker entrypoint
 import subprocess
 import os
@@ -2615,8 +2629,18 @@ try:
             supabase = create_client(
                 supabase_url, supabase_key,
                 options=ClientOptions(postgrest_client_timeout=15))
+            _POSTGREST_TIMEOUT_S = 15
         except Exception as _co_e:
-            print(f"[startup] supabase ClientOptions timeout unavailable ({_co_e}) — default client", flush=True)
+            # LOUD, because this is the difference between a bounded write and an
+            # INDEFINITE one — the exact failure mode the timeout exists for.
+            # The image pins supabase>=2,<3, a RANGE: a future 2.x that renames
+            # postgrest_client_timeout lands here silently and every durable
+            # write goes back to blocking forever on a wedged socket. That is
+            # the hang class, restored by a dependency bump nobody reviewed.
+            _POSTGREST_TIMEOUT_S = None
+            print(f"[startup] !! supabase ClientOptions timeout UNAVAILABLE ({_co_e}) — "
+                  f"falling back to a client with NO postgrest timeout. Durable writes "
+                  f"can now block indefinitely; this is the wedge class.", flush=True)
             supabase = create_client(supabase_url, supabase_key)
         print("[startup] supabase OK", flush=True)
     else:
@@ -31875,8 +31899,6 @@ _JOB_STATUS_LOCK = threading.Lock()
 # to. A caller waiting 30s for this lock is not slow, it is stuck behind a
 # holder that is never coming back.
 _JOB_STATUS_LOCK_TIMEOUT_S = float(os.environ.get("PROMPTLY_JOB_STATUS_LOCK_TIMEOUT_S") or 30)
-
-
 def _job_status_lock_timeout_event(job_id, waited_s, terminal, patch_keys):
     """Durable, because the log is not readable after the fact — Modal keeps logs
     live-tail only, which is exactly why this class survived three days of
@@ -32014,6 +32036,18 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
         # the 38.6% envelope loss. Better a raced write than no write.
         print(f"[job-status] proceeding WITHOUT the lock for the terminal write "
               f"job={job_id} — a terminal that never lands is the defect", flush=True)
+        # FALL THROUGH into the SAME rail chain below, holding no lock.
+        #
+        # An earlier attempt wrote a SECOND chain here and validate_deploy
+        # rejected it on two counts — the single-writer law and the copy-truth
+        # mirror. It was right: a duplicate would need the hard-terminal fence
+        # and the error_message mirror maintained in two places, and the moment
+        # they drift the rail has two truths.
+        #
+        # The bound on THIS write is therefore the postgrest client's own 15s
+        # timeout, and the startup path now says LOUDLY when that timeout could
+        # not be installed — the image pins supabase>=2,<3, so a kwarg rename in
+        # a future 2.x would restore indefinite blocking silently.
     try:
         # First-terminal-wins (final-wave review): async intermediate writes
         # ride daemon threads and can land AFTER the synchronous terminal
