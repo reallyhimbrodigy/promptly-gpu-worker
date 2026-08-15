@@ -37,6 +37,26 @@ import sys
 # Intentional deletions: "symbol": "why it went, and what replaced it".
 # An entry here is a claim that the removal was deliberate and reviewed.
 INTENTIONAL_REMOVALS = {
+    # WATCHDOG RECOVERY FIELDS RENAMED 2026-08-15. The gate fired on these and it
+    # was RIGHT to — two live analytics field names vanish in this deploy. The
+    # removal is deliberate and the rename is the whole point:
+    #   LIVE (v536 b052af0): recovered_core_s_vs_reconciler_cluster
+    #                        recovered_core_s_vs_repair_cluster
+    #   NOW:                 recovered_lower  /  recovered_upper
+    #                        + recovered_upper_is_a_bound: true
+    # The old names invited the error the band exists to prevent: treating the
+    # repair-cluster figure as "the saving" and SUMMING it. LOWER is what the job
+    # would have burned reaching the ~210s reconciler cluster and is the only
+    # summable one; UPPER is a bound on a job that was already going to be
+    # rescued sooner, so summing it counts savings that never occur (~4x
+    # overstatement at 60 jobs/day). validate_deploy now REFUSES the old name by
+    # literal, so this pair cannot come back quietly.
+    # Data note: post_upload_watchdog_fired rows written before this deploy carry
+    # the OLD keys. Any query spanning the boundary must read both.
+    "recovered_core_s_vs_reconciler_cluster":
+        "watchdog recovery band renamed to recovered_lower (the summable one)",
+    "recovered_core_s_vs_repair_cluster":
+        "watchdog recovery band renamed to recovered_upper (a BOUND, never summed)",
     # W1/DELIVERY 2026-08-11, reviewed by TRUTH against both trees before allowing.
     # The gate fired on this and it was RIGHT to: a live identifier vanished.
     # Verified deliberate, not an accidental drop.
