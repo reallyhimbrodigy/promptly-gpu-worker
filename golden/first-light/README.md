@@ -20,11 +20,28 @@ site**.
 | | measured | denominator |
 |---|---|---|
 | scenes ok | **10 / 10** — failure rate **0.00** | 10 |
-| s/scene | **p50 18.73s** · min 15.6s · max 32.43s | 10 |
+| s/scene | **p50 17.9s** (nearest-rank) · p90 23.5s · min 15.6s · max 32.43s | 10 |
 | $/scene | **$0.140** (1 image) | 10 |
 | **alpha / hero** | **0 / 2** — failure rate **1.00** | 2 |
 | $/hero-scene | **UNMEASURED** — nothing succeeded to price | — |
-| run total | **$1.96** (ceiling $2.00, respected) | 12 billed images |
+| images written | **12** | files on disk |
+| **billed calls** | **14** = 10 scene + 4 alpha (2 attempts x 2 calls) | reconciles to $1.96 |
+| run total | **$1.96** (ceiling $2.00, respected) | 14 x $0.14 |
+
+### Two conventions, both stated because both were wrong once
+
+**Percentiles are NEAREST-RANK**: k = ceil(p·n), value = sorted[k-1], no
+interpolation. With n=10 the p50 is the **5th smallest = 17.9s**. The harness's
+own printed p50 is **18.73s** — a different convention on the same data, not a
+different measurement. The ledger uses nearest-rank throughout and says so; where
+earlier documents quote 18.7s they are quoting the harness.
+
+**Billed calls exceed images written.** A call that exhausts its retry ladder on
+429 **still bills and writes no file** — so 12 files but 14 billed calls. Only
+`billed_calls` reconciles against the run total, and the ledger now asserts that
+reconciliation (`14 × $0.14 = $1.96`) so the two can never drift apart silently
+again. The first version of this ledger reported `total_images_billed: 12`, which
+did **not** reconcile against $1.96.
 
 **One correction recorded rather than buried:** the first pass of this ledger
 reported *12 scenes at 12/12*. It counted the alpha path's successful first leg

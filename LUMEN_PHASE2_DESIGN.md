@@ -48,7 +48,7 @@ Admission window = prefetch window (~30–45s, during transcription) + main budg
 | quota | admissions in ~75s | **generated scenes/edit** | binding constraint |
 |---|---|---|---|
 | **2/min (today)** | 2.5 | **2** (3 only if the window stretches) | **QUOTA** |
-| 60/min (filed) | 75 | **4** | **LATENCY** — back to 18.7s/scene |
+| 60/min (filed) | 75 | **4** | **LATENCY** — back to ~18s/scene |
 
 **Under today's quota the ceiling is 2 generated insert scenes per edit**, and a
 two-call hero scene consumes the entire budget by itself.
@@ -60,7 +60,12 @@ deterministic vocabulary — which is precisely why the split matters more than 
 quota does.
 
 At 60/min the constraint flips back to latency, and the pacer below is what
-turns 4×18.7s of serial work into a parallel ~19–38s.
+turns ~4×18s of serial work into a parallel ~18–36s.
+
+*(Scene timing convention: the ledger reports **nearest-rank** percentiles — p50
+**17.9s**, p90 23.5s, max 32.4s. The harness prints 18.73s for the same data
+under a different convention. Rounding to ~18s here so the arithmetic does not
+imply precision the convention does not support.)*
 
 ## 3 — PREFETCH, AS SPECIFIED
 

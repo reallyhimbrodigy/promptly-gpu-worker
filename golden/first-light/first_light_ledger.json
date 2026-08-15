@@ -11,38 +11,43 @@
     "project": "promptly-479218",
     "location": "global",
     "model": "gemini-3-pro-image",
-    "client": "vertex (service account)"
+    "client": "vertex (service account)",
+    "quota_id": "GenContentImageGenRequestsPerMinutePerProjectPerBaseModelGlobal",
+    "quota_limit_req_per_min": 2,
+    "increase_filed": {
+      "preference": "promptly-image-gen-60rpm",
+      "requested_req_per_min": 60,
+      "trace_id": "d0e2fa72-b5fc-4633-9ad1-8ab89f048852",
+      "granted_req_per_min": 2,
+      "state": "reconciling"
+    }
   },
   "measurement": "IN-RUN by the harness at each call site; NOT read back from video_jobs.result",
-  "why_in_run": "result loses its envelope on 38.6% of completions (180/466, 161 users), so any number cut from it comes off a corrupted population",
+  "conventions": {
+    "percentile_method": "NEAREST-RANK: k = ceil(p * n), value = sorted[k-1]. No interpolation. n=10, so p50 is the 5th smallest.",
+    "billed_vs_written": "A call that exhausts its retry ladder on 429 still BILLS and writes no file. billed_calls therefore EXCEEDS images_written; only billed_calls reconciles against run_total_usd.",
+    "roles": "fl_* = scene (1 call). al_* = a LEG that wrote. alpha_attempt = a 2-call hero attempt; its legs are counted via calls_made, NOT via al_* rows, to avoid double counting."
+  },
   "envelope": {
     "scenes_attempted": 10,
     "scenes_ok": 10,
     "scene_failure_rate": 0.0,
     "usd_per_scene": 0.14,
-    "secs_per_scene_p50": 18.7,
+    "secs_per_scene_p50_nearest_rank": 17.9,
+    "secs_per_scene_p90_nearest_rank": 23.5,
     "secs_per_scene_min": 15.6,
     "secs_per_scene_max": 32.4,
     "alpha_attempts": 2,
     "alpha_ok": 0,
     "alpha_failure_rate": 1.0,
     "usd_per_hero_scene": "UNMEASURED \u2014 0 of 2 attempts succeeded",
-    "alpha_legs_billed": 2,
-    "total_images_billed": 12,
+    "images_written": 12,
+    "billed_calls": 14,
+    "billed_calls_breakdown": "10 scene + 4 alpha (2 attempts x 2 calls) = 14",
     "run_total_usd": 1.96,
+    "reconciles": true,
     "ceiling_usd": 2.0,
     "ceiling_respected": true
-  },
-  "rate_limit": {
-    "verdict": "RATE LIMIT, not a spend cap",
-    "evidence": [
-      "every call ran SERIALLY and 429s still occurred",
-      "uncontended call ~17.9s => serial ceiling ~3.4 req/min",
-      "429s decayed across the ladder (attempt1=6, attempt2=5, attempt3=2) \u2014 they CLEAR with time",
-      "a spend cap fails all 4 attempts persistently; it does not recover in 5-8s"
-    ],
-    "binds_below_req_per_min": 3.4,
-    "lever": "Vertex quota-increase request \u2014 an approval, NOT a spend decision"
   },
   "calls": [
     {
@@ -54,7 +59,7 @@
       "usd": 0.14,
       "secs": 19.4,
       "retries_429_absorbed": 0,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "stat_callout",
       "scene_ok": true
     },
@@ -67,7 +72,7 @@
       "usd": 0.14,
       "secs": 17.4,
       "retries_429_absorbed": 0,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "evidence_card",
       "scene_ok": true
     },
@@ -80,7 +85,7 @@
       "usd": 0.14,
       "secs": 20.0,
       "retries_429_absorbed": 0,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "icon_composition",
       "scene_ok": true
     },
@@ -93,7 +98,7 @@
       "usd": 0.14,
       "secs": 17.1,
       "retries_429_absorbed": 0,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "ui_mockup",
       "scene_ok": true
     },
@@ -106,7 +111,7 @@
       "usd": 0.14,
       "secs": 15.6,
       "retries_429_absorbed": 0,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "infographic",
       "scene_ok": true
     },
@@ -119,7 +124,7 @@
       "usd": 0.14,
       "secs": 17.9,
       "retries_429_absorbed": 0,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "stat_callout",
       "scene_ok": true
     },
@@ -132,7 +137,7 @@
       "usd": 0.14,
       "secs": 18.7,
       "retries_429_absorbed": 0,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "evidence_card",
       "scene_ok": true
     },
@@ -145,7 +150,7 @@
       "usd": 0.14,
       "secs": 32.4,
       "retries_429_absorbed": 2,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "icon_composition",
       "scene_ok": true
     },
@@ -158,7 +163,7 @@
       "usd": 0.14,
       "secs": 17.0,
       "retries_429_absorbed": 0,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "ui_mockup",
       "scene_ok": true
     },
@@ -171,7 +176,7 @@
       "usd": 0.14,
       "secs": 23.5,
       "retries_429_absorbed": 1,
-      "call_ok": true,
+      "wrote_file": true,
       "kind": "infographic",
       "scene_ok": true
     },
@@ -184,7 +189,7 @@
       "usd": 0.14,
       "secs": 30.1,
       "retries_429_absorbed": 2,
-      "call_ok": true
+      "wrote_file": true
     },
     {
       "artifact": "alpha_attempt_0",
@@ -192,9 +197,11 @@
       "attempt_ok": false,
       "secs": 60.56,
       "calls_made": 2,
+      "calls_that_wrote": 1,
       "usd": 0.28,
       "retries_429_absorbed": 3,
-      "note": "leg 1 (white bg) landed; leg 2 (black bg, for the matte) exhausted all 4 retries on 429"
+      "wrote_file": false,
+      "note": "leg 1 (white bg) wrote; leg 2 (black bg, for the matte) exhausted all 4 retries on 429 \u2014 it BILLED and wrote nothing"
     },
     {
       "artifact": "al_1_w.png",
@@ -205,7 +212,7 @@
       "usd": 0.14,
       "secs": 31.0,
       "retries_429_absorbed": 2,
-      "call_ok": true
+      "wrote_file": true
     },
     {
       "artifact": "alpha_attempt_1",
@@ -213,9 +220,11 @@
       "attempt_ok": false,
       "secs": 61.28,
       "calls_made": 2,
+      "calls_that_wrote": 1,
       "usd": 0.28,
       "retries_429_absorbed": 3,
-      "note": "leg 1 (white bg) landed; leg 2 (black bg, for the matte) exhausted all 4 retries on 429"
+      "wrote_file": false,
+      "note": "leg 1 (white bg) wrote; leg 2 (black bg, for the matte) exhausted all 4 retries on 429 \u2014 it BILLED and wrote nothing"
     }
   ]
 }
