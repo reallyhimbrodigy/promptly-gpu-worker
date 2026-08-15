@@ -9146,6 +9146,36 @@ def _post_upload_watchdog_safe():
     assert _src.count("_post_upload_watchdog_disarm()") >= 2, (
         "a terminal completion write is missing its disarm — the watchdog would kill a job "
         "that had already finished")
+    # ORDERING IS THE WHOLE POINT, and the first shipped version got it wrong.
+    # The disarm must come AFTER write_job_status RETURNS. Disarming BEFORE the
+    # call means a terminal write that HANGS has already cancelled the watchdog —
+    # so the watchdog cannot fire on the exact failure it exists for, while still
+    # passing every "is it wired?" check. This asserts by AST that no disarm
+    # immediately PRECEDES a terminal write_job_status.
+    import ast as _ast12
+    _tree12 = _ast12.parse(_src)
+    _term_lines = []
+    for _n in _ast12.walk(_tree12):
+        if isinstance(_n, _ast12.Expr) and isinstance(_n.value, _ast12.Call) \
+                and getattr(_n.value.func, "id", None) == "write_job_status":
+            _kw = {k.arg: k for k in _n.value.keywords}
+            _v = _kw.get("status")
+            if _v is not None and isinstance(_v.value, _ast12.Constant) \
+                    and _v.value.value == "completed":
+                _term_lines.append((_n.lineno, _n.end_lineno))
+    assert _term_lines, "no terminal write_job_status(status='completed') found"
+    _srclines = _src.split("\n")
+    for _start, _end in _term_lines:
+        _j = _start - 2
+        while _j >= 0 and not _srclines[_j].strip():
+            _j -= 1
+        assert _j < 0 or _srclines[_j].strip() != "_post_upload_watchdog_disarm()", (
+            f"disarm PRECEDES the terminal write at line {_start} — a hanging write would "
+            "leave the watchdog already cancelled, so it could never fire on the very "
+            "failure it was built for")
+        _after = "\n".join(_srclines[_end:_end + 6])
+        assert "_post_upload_watchdog_disarm()" in _after, (
+            f"the terminal write at line {_start} has no disarm AFTER it returns")
     for _needle, _why in (
         ('"waited_s"', "elapsed at exit"),
         ('"last_stage"', "the stage it died in"),
@@ -9239,8 +9269,21 @@ def _worker_envelope_write_instrument():
     assert "worker_envelope_write" in _src, (
         "the envelope-write instrument is GONE — the overwrite-vs-never-arrived question "
         "becomes unanswerable again the moment it is removed")
-    _i = _src.index("worker_envelope_write")
-    _win = _src[max(0, _i - 1200):_i + 1200]
+    # SCOPE BY AST, NOT BY A CHARACTER WINDOW. This assertion used a +/-1200
+    # char slice around the event name, so simply ADDING A COMMENT near the
+    # instrument pushed its own error handler out of the window and failed the
+    # gate on unchanged behaviour. That is the same brittleness cert_extract.py
+    # was built to retire (slice-from-an-anchor, breaks when anything moves).
+    # The enclosing function is the honest scope.
+    import ast as _ast13
+    _t13 = _ast13.parse(_src)
+    _fn13 = None
+    for _n13 in _ast13.walk(_t13):
+        if isinstance(_n13, _ast13.FunctionDef) and _n13.name == "write_job_status":
+            _fn13 = _n13
+            break
+    assert _fn13 is not None, "write_job_status is gone"
+    _win = _ast13.get_source_segment(_src, _fn13) or ""
     assert '"accepted": _matched > 0' in _win, (
         "the event must record ACCEPTED (matched>0) — a row that only says 'the worker tried' "
         "cannot tell a declined write from a successful one, which is the entire question")

@@ -31810,13 +31810,16 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                 patch["error_message"] = str(result["user_message"])
         if partial_state is not None:
             patch["partial_state"] = partial_state
+        # Hoisted above the try so the EXCEPT path can always time the failed
+        # call — a write that dies after 30s and one that dies instantly are the
+        # same row afterwards, and the difference is the whole diagnosis.
+        _wjs_t0 = time.time()
         try:
             # HARD-TERMINAL FENCE (v195): invariants that span writers live where
             # the writers meet. failed/canceled only — needs_input must accept the
             # resume run's writes, and a terminal re-write stays legal. Zero
             # matched rows = the fence declining (logged; that log IS the proof
             # in the cancel-run redux).
-            _wjs_t0 = time.time()
             _resp = supabase.table(table).update(patch).eq("id", job_id).not_.in_(
                 status_col, ("failed", "canceled")).execute()
             _wjs_ms = int((time.time() - _wjs_t0) * 1000)
@@ -31862,6 +31865,16 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                             "status": str(patch.get(status_col) or ""),
                             "result_keys": sorted(result.keys())[:40] if isinstance(result, dict) else None,
                             "result_bytes": len(str(patch.get("result") or "")),
+                            # TWO-CHANNEL DIAGNOSIS (2026-08-15). Progress pushes
+                            # (HTTP -> content-studio) LAND while these direct DB
+                            # writes (HTTPS -> Supabase/PostgREST) do not, on the
+                            # same job, from the same container. Different
+                            # channel, different outcome — so the worker's DB
+                            # client is the suspect and it has to report its own
+                            # latency. A write that takes 30s and one that takes
+                            # 30ms are indistinguishable in the row afterwards.
+                            "db_write_ms": _wjs_ms,
+                            "db_write_slow": _wjs_ms > 5000,
                         },
                     }).execute()
                 except Exception as _evx:
@@ -31905,6 +31918,15 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                             "pgrst204": _pgrst204,
                             "error_class": type(e).__name__,
                             "error_detail": str(e)[:200],
+                            # name the channel failure explicitly rather than
+                            # leaving it to be grepped out of error_detail
+                            "is_timeout": ("timeout" in type(e).__name__.lower()
+                                           or "timeout" in str(e).lower()
+                                           or "timed out" in str(e).lower()),
+                            "is_connection": ("connection" in type(e).__name__.lower()
+                                              or "connection" in str(e).lower()
+                                              or "ssl" in str(e).lower()),
+                            "db_write_ms": int((time.time() - _wjs_t0) * 1000),
                             "terminal": bool(_terminal),
                             "status": str(patch.get(status_col) or ""),
                         },
@@ -33953,7 +33975,6 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         result_payload["hls_manifest_url"] = _hls_url
     if _thumbnail_url:
         result_payload["thumbnail_url"] = _thumbnail_url
-    _post_upload_watchdog_disarm()
     write_job_status(
         job_id, status="completed", phase="Done", progress=100,
         result={
@@ -33975,6 +33996,10 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "post_package": result_payload.get("post_package"),
         },
     )
+    # DISARM ONLY AFTER THE WRITE RETURNS. Disarming BEFORE it meant a
+    # terminal write that HANGS left the watchdog already cancelled — the
+    # watchdog could not fire on the one failure it exists for.
+    _post_upload_watchdog_disarm()
     send_progress(job_id, "complete", 100, "Your video is ready!", app_url,
                   video_url=_video_url)
     print(f"[minimal-route] DONE route={_route_name} job={job_id} {time.time() - _t0:.1f}s "
@@ -40440,7 +40465,6 @@ def handler(job):
         # Durable TERMINAL write (synchronous so it lands before return): complete.
         # Carries the floor markers (Part 3) so degradation-rate is a SQL
         # query over result jsonb, not a log grep.
-        _post_upload_watchdog_disarm()
         write_job_status(
             job_id, status="completed", phase="Done", progress=100,
             result={
@@ -40502,6 +40526,10 @@ def handler(job):
                 "post_package": result_payload.get("post_package"),
             },
         )
+        # DISARM ONLY AFTER THE WRITE RETURNS. Disarming BEFORE it meant a
+        # terminal write that HANGS left the watchdog already cancelled — the
+        # watchdog could not fire on the one failure it exists for.
+        _post_upload_watchdog_disarm()
         return result_payload
 
     except Exception as e:

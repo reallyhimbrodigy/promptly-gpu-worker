@@ -185,3 +185,52 @@ either, on any of them.
 
 Both are live. Neither needed a new instrument invented for JUDGE's question;
 the question named what the existing ones already measure.
+
+
+---
+
+# CORRECTION 2026-08-15 — the watchdog as first shipped could not fire
+
+**The disarm was placed BEFORE `write_job_status`, not after.** So a terminal
+write that HANGS — the exact failure this exists for — had already cancelled the
+watchdog. It passed every "is it wired?" check while being unable to fire on its
+own target.
+
+```
+BEFORE (broken)              AFTER (correct)
+  disarm()                     write_job_status(...)   <- may hang
+  write_job_status(...)        disarm()                <- only once it RETURNS
+```
+
+**It keys on the WORKER'S OWN terminal-write state, never on the row's.** That
+distinction is load-bearing: if it keyed on the row, the reconciler rescuing a
+job at ~304s would silently disarm the watchdog on a container that is still
+hung, and the cost would keep burning with the watchdog reporting success.
+
+**Gated by AST**: no disarm may immediately precede a terminal
+`write_job_status(status="completed")`, and every one must have a disarm within
+six lines *after* it returns. RED-proven by moving a disarm back to the
+pre-write position — gate exit 1, naming the line.
+
+## Also corrected: `render_frames` is vestigial
+
+Dropped from the analysis. It is null in **0/293** and **0/183** — it never
+writes on any job, healthy or not, so its absence in the envelope-lost cohort
+distinguishes nothing. I cited it as "the loudest fact"; it was noise.
+
+## The two-channel instrument
+
+Progress pushes (HTTP → content-studio) LAND while direct DB writes (HTTPS →
+Supabase/PostgREST) do not, **on the same job, from the same container**.
+Different channel, different outcome — so the worker's DB client is the suspect
+and now reports on itself:
+
+| field | why |
+|---|---|
+| `db_write_ms` | a write that dies after 30s and one that dies instantly leave the SAME row |
+| `db_write_slow` | >5s, the existing wedge bar |
+| `is_timeout` / `is_connection` | names the channel failure instead of leaving it to be grepped out of `error_detail` |
+
+The timer is hoisted above the `try` so the **except** path can time a failed
+call too — otherwise the only writes we could measure would be the ones that
+worked.
