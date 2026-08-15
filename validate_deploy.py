@@ -9123,6 +9123,45 @@ def _component_obey_cert():
     assert "ALL PASS" in _out, f"cert_component_obey did not report ALL PASS:\n{_out[-800:]}"
 
 
+@check("POST-UPLOAD WATCHDOG IS SAFE BY CONSTRUCTION (2026-08-15, RULE-1) [Law 1/Law 2]. It is the first mechanism that deliberately KILLS a running container, so every one of its safety properties is asserted rather than trusted. It fires on exactly one state — the artifact IS confirmed in S3 AND the terminal write has NOT landed AND that has held for N seconds — which is the envelope-loss cohort precisely (180/180 had worker_started_at and a delivery column; 0/180 carried the worker's envelope). Exiting is safe ONLY because the evidence-triggered repair already recovers that exact row from S3, so the artifact precondition is load-bearing: arming without an artifact would strand a user with nothing. It must use os._exit and NOT sys.exit — a hung worker is hung somewhere, and normal interpreter shutdown joins threads and can block on the very thing that is stuck (the ThreadPool 30s billed exit tail is on the record as NOT fixable by shutdown(wait=False) or daemon threads, because the tail was a BUSY worker). Exit code 0 deliberately: the render SUCCEEDED, so a non-zero exit would make the failure taxonomy read a completed render as a crash. N is bounded below by many missed 4s heartbeats and above by the container cap it pre-empts, and it matches QUIET_ROW_REPAIR_MS so the watchdog and the quiet-row repair cannot disagree about whether a row is quiet. Telemetry at exit carries elapsed, last stage, whether a terminal write was attempted, and recovered container-seconds against BOTH observed clusters (reconciler ~210s, repair ~904s) so the saving is reported, never assumed.")
+def _post_upload_watchdog_safe():
+    import os as _os, re as _re11
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _src = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "_post_upload_watchdog_arm" in _src, "the post-upload watchdog is gone"
+    _i = _src.index("def _post_upload_watchdog_fire")
+    _win = _src[_i:_i + 4200]
+    assert "os._exit(0)" in _win, (
+        "the watchdog must os._exit(0) — sys.exit runs interpreter shutdown, which joins "
+        "threads and can block on the very hang it is escaping (the ThreadPool busy-worker "
+        "exit tail), and a non-zero code would classify a SUCCEEDED render as a crash")
+    assert "sys.exit(" not in _win, "sys.exit in the watchdog fire path"
+    # never fire without an artifact — the property that makes the kill safe
+    _a = _src.index("def _post_upload_watchdog_arm")
+    _awin = _src[_a:_a + 1400]
+    assert "if not job_id or not artifact" in _awin, (
+        "the watchdog must REFUSE to arm without a confirmed artifact — exiting a job with "
+        "nothing in S3 destroys the user's render")
+    # disarm must be unconditional and wired at EVERY terminal completion write
+    assert _src.count("_post_upload_watchdog_disarm()") >= 2, (
+        "a terminal completion write is missing its disarm — the watchdog would kill a job "
+        "that had already finished")
+    for _needle, _why in (
+        ('"waited_s"', "elapsed at exit"),
+        ('"last_stage"', "the stage it died in"),
+        ('"terminal_write_attempted"', "whether a last-chance write was tried"),
+        ('"recovered_core_s_vs_reconciler_cluster"', "recovered core-seconds vs the ~210s cluster"),
+        ('"recovered_core_s_vs_repair_cluster"', "recovered core-seconds vs the ~904s cluster"),
+    ):
+        assert _needle in _win, f"watchdog telemetry lost {_why} ({_needle})"
+    _m = _re11.search(r"_POST_UPLOAD_WATCHDOG_S = int\(os\.environ\.get\([^)]*\) or (\d+)\)", _src)
+    assert _m, "the watchdog threshold must have a literal default"
+    _n = int(_m.group(1))
+    assert 60 <= _n < 1200, (
+        f"watchdog N={_n}s is outside its safe band: below ~60s it can cut a slow-but-working "
+        "terminal write, and at/above the 1200s container cap it pre-empts nothing")
+
+
 @check("L1 PLAN LEG CARRIES NO ENCODE (2026-08-15, RULE-1) [Law 1]. L1 splits the network-waiting legs off the cpu=16 orchestrator onto a cheap cpu=2 plan leg. The specific way that kills renders is already on the record: cutting cores from 16 to 8 CRASHED completion 78.9% -> 35.7%, because a 480p ultrafast proxy encode was CPU-STARVED. A plan leg at cpu=2 that touches ffmpeg, x264 or Remotion repeats that outage at a quarter of the cores. The guard was written as a comment in the build plan, which is exactly the form that rots — so it is a gate. TWO MODES, and the check REPORTS which one it is in, because a check that silently passes when its subject does not exist is the vacuous class this repo has now paid for three times: (a) the plan leg does not exist yet -> assert the forbidden-symbol manifest is non-empty, so the guard cannot be hollowed out before it is needed; (b) the plan leg EXISTS -> assert its body contains none of them. The manifest is asserted non-empty in BOTH modes: a guard whose forbidden list has been emptied would pass every file trivially.")
 def _l1_plan_leg_no_encode():
     import ast as _ast10, os as _os

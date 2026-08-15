@@ -31925,6 +31925,140 @@ def _async_job_status(job_id, **kw):
 
 
 # ─── FLOOR TELEMETRY (directive #7 · Part 3 — the monitoring seam) ───────────
+# ── POST-UPLOAD WATCHDOG (2026-08-15) [Law 1, Law 2] ─────────────────────────
+# THE STATE IT EXISTS FOR: the artifact IS in S3 and the terminal write has NOT
+# landed. That is the envelope-loss cohort exactly — 180/180 had
+# worker_started_at, 180/180 had a delivery column, 0/180 carried the worker's
+# envelope. The render succeeded; only the write is missing, and the container
+# then holds cpu=16 doing nothing until its cap.
+#
+# ROOT-INDEPENDENT ON PURPOSE. It caps the cost and the latency without knowing
+# WHY the worker hangs, so it ships now instead of waiting on a root cause.
+#
+# EXITING IS SAFE ONLY BECAUSE THE RECOVERY PATH IS ALREADY LIVE: the
+# evidence-triggered repair (content-studio, 2026-08-15) repairs exactly this row
+# — quiet, non-terminal, playable render in S3 — and settles the dispatcher's
+# pending promise. The artifact-in-S3 precondition is what makes the exit safe;
+# without it, exiting would strand a user with nothing.
+_POST_UPLOAD_WATCHDOG_S = int(os.environ.get("PROMPTLY_POST_UPLOAD_WATCHDOG_S") or 120)
+_pu_watchdog = {"timer": None, "armed_at": None, "job_id": None,
+                "artifact": None, "stage": None, "terminal_landed": False}
+
+
+def _post_upload_watchdog_disarm(_reason="terminal-landed"):
+    """Unconditional. A watchdog that can fail to disarm kills healthy jobs."""
+    try:
+        _t = _pu_watchdog.get("timer")
+        _pu_watchdog["terminal_landed"] = True
+        if _t is not None:
+            _t.cancel()
+            _pu_watchdog["timer"] = None
+    except Exception:
+        pass
+
+
+def _post_upload_watchdog_fire():
+    """Loud, instrumented, then gone. Never called on a healthy job."""
+    try:
+        if _pu_watchdog.get("terminal_landed"):
+            return
+        _armed = _pu_watchdog.get("armed_at") or time.time()
+        _elapsed = time.time() - _armed
+        _job = _pu_watchdog.get("job_id")
+        _stage = _pu_watchdog.get("stage")
+        # NO LAST-CHANCE TERMINAL WRITE — and the deploy gate is why.
+        #
+        # The first version of this fired write_job_status(status="completed")
+        # here. validate_deploy's "minimal completed write lost its route
+        # contract" check caught it immediately, and the check was RIGHT: this
+        # timer thread has no access to result_payload, so the only completion it
+        # could write is a BARE one — no route, no route_reason, no floor
+        # markers, no vocab. That is precisely the thin-envelope shape this whole
+        # investigation exists to eliminate. The watchdog would have manufactured
+        # the very defect it was built to cap.
+        #
+        # The recovery is already correct elsewhere: the evidence-triggered
+        # repair writes the URL and the terminal TOGETHER from S3 evidence. So
+        # this path logs, meters, and gets out of the way.
+        _attempted = False
+        _attempt_ok = False
+        _attempt_skipped_reason = "no result_payload in the timer thread; a bare " \
+                                  "completion would strip route/floor/vocab"
+        # RECOVERED CONTAINER-SECONDS, reported against BOTH observed clusters:
+        # the reconciler cluster settles ~180-240s and the repair cluster ~904s.
+        # Without this cap the container would have burned to one of them.
+        _cs_now = _elapsed * 16
+        _rec_reconciler = max(0.0, (210 - _elapsed)) * 16
+        _rec_repair = max(0.0, (904 - _elapsed)) * 16
+        print(f"[post-upload-watchdog] job={_job} artifact={_pu_watchdog.get('artifact')} "
+              f"waited={_elapsed:.0f}s terminal=NOT-LANDED last_stage={_stage} "
+              f"attempted_write={_attempted} write_ok={_attempt_ok} "
+              f"held_core_s={_cs_now:.0f} recovered_core_s_vs_reconciler={_rec_reconciler:.0f} "
+              f"recovered_core_s_vs_repair={_rec_repair:.0f} — forcing exit; "
+              f"the row is repairable from S3", flush=True)
+        try:
+            if supabase is not None:
+                supabase.table("analytics_events").insert({
+                    "event": "post_upload_watchdog_fired",
+                    "platform": "worker",
+                    "props": {
+                        "job_id": str(_job),
+                        "waited_s": round(_elapsed, 1),
+                        "last_stage": _stage,
+                        "artifact_key": _pu_watchdog.get("artifact"),
+                        "terminal_write_attempted": _attempted,
+                        "terminal_write_ok": _attempt_ok,
+                        "terminal_write_skipped_reason": _attempt_skipped_reason,
+                        "held_core_s": round(_cs_now, 1),
+                        "recovered_core_s_vs_reconciler_cluster": round(_rec_reconciler, 1),
+                        "recovered_core_s_vs_repair_cluster": round(_rec_repair, 1),
+                        "watchdog_s": _POST_UPLOAD_WATCHDOG_S,
+                    },
+                }).execute()
+        except Exception as _ae:
+            print(f"[post-upload-watchdog] telemetry soft-failed: {type(_ae).__name__}", flush=True)
+    except Exception as _oe:
+        print(f"[post-upload-watchdog] fire path raised: {type(_oe).__name__}", flush=True)
+    finally:
+        _sys_stdout_flush()
+        # os._exit, NOT sys.exit. A hung worker is hung SOMEWHERE, and normal
+        # interpreter shutdown joins threads and can block on the very thing that
+        # is stuck — the ThreadPool 30s billed exit tail is on the record as NOT
+        # fixable by shutdown(wait=False) or daemon threads, because the tail was
+        # a BUSY worker. Exit code 0 deliberately: the render SUCCEEDED and the
+        # artifact exists, so this is a contained write failure, not a crash.
+        os._exit(0)
+
+
+def _sys_stdout_flush():
+    try:
+        import sys as _s
+        _s.stdout.flush()
+        _s.stderr.flush()
+    except Exception:
+        pass
+
+
+def _post_upload_watchdog_arm(job_id, artifact, stage=None):
+    """Arm at UPLOAD, not at the write: a worker that hangs before reaching
+    write_job_status would never be caught by arming at the write."""
+    try:
+        if not job_id or not artifact:
+            return   # no artifact => exiting would strand the user. Never arm.
+        _post_upload_watchdog_disarm("re-arm")
+        _pu_watchdog.update({"armed_at": time.time(), "job_id": job_id,
+                             "artifact": str(artifact)[:300], "stage": stage,
+                             "terminal_landed": False})
+        _t = threading.Timer(_POST_UPLOAD_WATCHDOG_S, _post_upload_watchdog_fire)
+        _t.daemon = True
+        _t.start()
+        _pu_watchdog["timer"] = _t
+        print(f"[post-upload-watchdog] armed job={job_id} n={_POST_UPLOAD_WATCHDOG_S}s "
+              f"artifact={str(artifact)[:80]}", flush=True)
+    except Exception as _e:
+        print(f"[post-upload-watchdog] arm failed job={job_id}: {type(_e).__name__}", flush=True)
+
+
 def _floor_markers(state):
     """Degradation markers stamped into the terminal video_jobs.result write,
     so floor-rate is queryable (SQL over result jsonb), not grep-only.
@@ -33819,6 +33953,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         result_payload["hls_manifest_url"] = _hls_url
     if _thumbnail_url:
         result_payload["thumbnail_url"] = _thumbnail_url
+    _post_upload_watchdog_disarm()
     write_job_status(
         job_id, status="completed", phase="Done", progress=100,
         result={
@@ -35768,6 +35903,9 @@ def render_stage(
             _video_url = input_data["public_url"]
         else:
             _video_url = upload_url.split("?")[0]
+        # ARM HERE: the artifact is now confirmed in S3, so an exit from this
+        # point on is recoverable by the evidence-triggered repair.
+        _post_upload_watchdog_arm(job_id, _video_url, stage="upload_complete")
         _mb = os.path.getsize(output_path) / (1024 * 1024)
         print(
             f"[pipeline] upload complete ({_scheme}-multipart {_mb:.1f}MB in {_ue:.1f}s "
@@ -40302,6 +40440,7 @@ def handler(job):
         # Durable TERMINAL write (synchronous so it lands before return): complete.
         # Carries the floor markers (Part 3) so degradation-rate is a SQL
         # query over result jsonb, not a log grep.
+        _post_upload_watchdog_disarm()
         write_job_status(
             job_id, status="completed", phase="Done", progress=100,
             result={
