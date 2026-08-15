@@ -101,10 +101,37 @@ carry `job_id` (6/6); only **1** completed row in the entire table has an error
 string. The probe can see the thing it reported absent.
 
 **So the LOST rows were never non-processing before the worker's write.** The
-fence never fired. That sharpens the remaining space: `matched=0` is only
-reachable via the fence, so `worker_envelope_write` must land on
-`accepted=true` (→ the envelope landed and a later writer replaced it) or
-`raised=true` (→ the write threw; PGRST204 flagged).
+fence never fired.
+
+### PGRST204 — ALSO REFUTED 2026-08-15 [MEASURED, reproduced directly]
+
+Reproduced in the build lane rather than waited for: PostgREST validates an
+UPDATE payload against its schema cache BEFORE matching rows, so the worker's
+exact envelope-write payload was issued against the LIVE schema targeting a
+nonexistent id — zero side effects, real answer.
+
+| | |
+|---|---|
+| CONTROL (bogus column) | **PGRST204** — probe proven able to detect it |
+| every worker column, individually | **accepted** (11/11, incl. both Migration-01 columns) |
+| the FULL terminal patch | **accepted** |
+| columns rejected by the schema cache | **NONE** |
+
+A stale cache also cannot explain three days at 34-46% — PostgREST reloads within
+minutes of DDL. **PGRST204 is out.**
+
+### WHAT REMAINS
+
+Fence out, PGRST204 out, and **no code writes `result` empty or null** (swept).
+For the final state to be exactly `{lifecycle_push_v1}`, the result was empty
+when the push read it, and nothing ever added the envelope. These rows were
+flipped to `completed` by the reconciler (156) or repair (24) off S3 evidence —
+**neither writes `result`**.
+
+So the standing hypothesis is: **the worker never reached its terminal write** on
+these jobs. `worker_envelope_write` settles it by ABSENCE — a LOST job with no
+event never reached the write; one with `accepted=true` was overwritten. Read at
+n>=100.
 
 **Honesty note on the trend:** `worker_started_at` was created by Migration 01 at
 **2026-08-11 19:49Z**, so this series *cannot* extend earlier. There is **no
@@ -136,16 +163,37 @@ because the fixtures were wrong, not the target.
 | users who lost a video to envelope loss | **0** | 180/180 had a delivery column |
 
 **The failure mode is quota, not correctness** — every failure in both runs was a
-429, never a bad image. That makes these *rate limits*, not defect rates, and it
-is the same wall Law 2's parallelism requirement runs into.
+429, never a bad image. That makes these *rate limits*, not defect rates.
+
+**THE EXACT LIMIT, 2026-08-15:**
+`GenContentImageGenRequestsPerMinutePerProjectPerBaseModelGlobal` = **2
+requests/minute** on `promptly-479218` (Cloud Quotas API). Below the ~3.4/min a
+purely SERIAL workload achieves — which is exactly why serial calls 429'd. The
+measurement and the documented limit agree.
+
+**Increase to 60/min FILED** as `promptly-image-gen-60rpm`, trace
+`d0e2fa72-b5fc-4633-9ad1-8ab89f048852`, `reconciling: true`, granted value still
+2. **No owner click was required.**
 
 **The alpha/hero path is the sharp edge and it is currently 0%.** A hero scene
 needs TWO sequential calls (white-bg then black-bg, differenced into a matte).
-The first lands; the second arrives while the quota is still recovering from the
-first and starves through all four retries. Single scenes survive 429s because
-one retry ladder is enough; the two-call path has to win twice in a row and
-currently never does. **Component C (text-behind-subject) depends on this path**,
-so it is blocked on quota headroom, not on code.
+Leg 1 lands; leg 2 arrives while the quota is recovering and starves through all
+four retries. Against a 2/min limit the two-call path can never win twice in a
+row.
+
+**CORRECTION:** I previously wrote that Component C depends on this path. It does
+not. C is text behind the USER'S REAL SUBJECT, which SEGMENTATION_SPIKE.md
+settles as **RVM** — a deterministic temporal matte, zero image generation. The
+alpha path mattes a GENERATED subject, a B-family concern. What the 0/2 blocks is
+hero/generated-subject compositions. C's real blockers are the spike's three
+unpriced items: latency (an editing effect, no §4.1 carve-out), cost (a second
+GPU app per job), concurrency.
+
+**THE SPLIT (see LUMEN_PHASE2_DESIGN.md):** of the eight reference components,
+exactly ONE (B, insert scenes) requires generation. A, C, D, E, F, G and
+landscape are all deterministic at ZERO quota cost. Scene ceiling today: **2
+generated scenes/edit** (quota-bound); at 60/min: **4** (latency-bound). The edit
+is not thin at 2 — the whole deterministic vocabulary rides free.
 
 ---
 

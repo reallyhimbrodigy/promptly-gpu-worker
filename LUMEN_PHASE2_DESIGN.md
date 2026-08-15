@@ -1,126 +1,114 @@
-# PHASE 2 — the scene vocabulary, designed to a 70s wall `[§3.1/§6.1]`
+# PHASE 2 — the scene vocabulary, deterministic/generated split `[§3.1/§6.1]`
 
 **Budget: ~70s of Lumen wall-clock, parallel by construction, prefetch during
-transcription.** Every number below is from `golden/first-light/` — measured
-in-run, not estimated.
+transcription.** Every number is from `golden/first-light/` — measured in-run.
+
+**Quota, now exact:** `GenContentImageGenRequestsPerMinutePerProjectPerBaseModelGlobal`
+= **2 requests/minute** on `promptly-479218`. Increase to 60 filed
+(`promptly-image-gen-60rpm`, pending).
 
 ---
 
-## THE FINDING THAT DECIDES THE DESIGN
+## 1 — THE SPLIT, AND IT IS LOPSIDED
 
-**Parallelism buys almost nothing at the current quota, and the arithmetic says
-so plainly.**
+| # | component | deterministic or generated | quota cost |
+|---|---|---|---|
+| **A** | keyword captions + number glorification | **deterministic** — caption renderers | 0 |
+| **B** | **insert scenes** | **GENERATED — the only one** | 1 image each |
+| **C** | text-behind-subject | **deterministic** — RVM matte on the user's own footage | 0 |
+| **D** | name-plate | **deterministic** — design-system type | 0 |
+| **E** | b-roll | **deterministic** — stock, live today | 0 |
+| **F** | end-cards + palette lock | **deterministic** — `extract_palette`, $0 | 0 |
+| **G** | rhythm law | **deterministic** — measured in the gate | 0 |
+| — | landscape canvas | **deterministic** — 2 literals + a zone doctrine | 0 |
+| ~~H~~ | ~~music bed~~ | **struck** `[§4.8]` — machinery removed | — |
 
-| | |
-|---|---|
-| uncontended call | **17.9s** |
-| serial throughput | **~3.4 images/min** |
-| observed limit | binds **below 3.4/min** — serial calls still 429'd |
+**One of eight needs pixels from a model.** That is the re-plan: the scene budget
+should buy generated scenes *only* where the frame genuinely cannot be
+constructed, and everything else should never touch the quota.
 
-A 70s budget at 18.7s/scene holds **~3.7 scenes serially**. The rate limit
-independently allows **~3.4–4 images/min**. **Those are the same number.** Firing
-6 scenes concurrently does not produce 6 scenes in 19s; it produces 429s, retry
-ladders, and a *longer* wall than serial — which is exactly what happened to the
-alpha path, the only two-call-in-a-row workload in the run, and it failed 2/2.
+### A correction I owe on Component C
 
-So the honest design constraint is:
+I reported C as "blocked on rate headroom, not code." **That was wrong.** C is
+text behind the *user's real subject*, which `SEGMENTATION_SPIKE.md` settles as
+**RVM** — a deterministic temporal matte, zero image generation. What I measured
+failing 2/2 was the **alpha/hero** path, which mattes a *generated* subject; that
+is a B-family concern, not C.
 
-> **~4 generated scenes per edit is the ceiling, and it is imposed by quota, not
-> by the 70s budget.** Raising the wall to 120s does not buy a 5th scene. A
-> Vertex quota increase does.
+C's real blockers are the three unpriced items in the spike §4 — **latency**
+(matting is an *editing* effect, so §4.1 gives it no carve-out), **cost** (a
+second GPU app per job), and **concurrency** (a sibling `.spawn()` surface).
+Quota is not among them.
 
-Designing for 6–8 scenes today would be designing for a provider we do not have.
+## 2 — THE SCENE CEILING, UNDER EACH QUOTA
 
-## THE BUDGET
+Admission window = prefetch window (~30–45s, during transcription) + main budget
+(~25–40s) ≈ **~75s of wall in which calls may be admitted**.
 
-| stage | budget | note |
-|---|---|---|
-| **prefetch window** (during transcription) | **~30–45s, free** | see below |
-| scene generation, remaining | ~25–40s | 1–2 scenes if not prefetched |
-| composition + render integration | ~10s | deterministic, no provider |
-| **total added wall** | **≤70s** | |
+| quota | admissions in ~75s | **generated scenes/edit** | binding constraint |
+|---|---|---|---|
+| **2/min (today)** | 2.5 | **2** (3 only if the window stretches) | **QUOTA** |
+| 60/min (filed) | 75 | **4** | **LATENCY** — back to 18.7s/scene |
 
-### Prefetch during transcription is the whole trick
+**Under today's quota the ceiling is 2 generated insert scenes per edit**, and a
+two-call hero scene consumes the entire budget by itself.
 
-Transcription (Deepgram) occupies **30–45s** during which **zero image calls are
-in flight** — the quota sits completely idle. That window is free throughput, and
-it is the only place to get more scenes without more quota.
+**But the edit is not thereby thin.** Captions (A), b-roll (E), name-plate (D),
+end-card + palette (F), rhythm (G), landscape, and text-behind-subject (C) all
+render at **zero quota cost**. A 2-scene Lumen edit can still carry the full
+deterministic vocabulary — which is precisely why the split matters more than the
+quota does.
 
-At ~3.4 images/min, a 40s idle window is worth **~2.2 images**. Prefetching two
-scenes there means the post-transcript budget only has to cover ~2 more —
-**bringing 4 scenes inside 70s without exceeding the rate limit at any instant.**
+At 60/min the constraint flips back to latency, and the pacer below is what
+turns 4×18.7s of serial work into a parallel ~19–38s.
 
-**What can be prefetched before the transcript exists:** scenes whose content
-derives from things known at dispatch — the user's brief/vibe, the source
-footage's palette (`design_system.extract_palette`, already deterministic and
-$0), aspect ratio, and brand/name-plate material. Concretely: **end-card (F),
-name-plate (D), and brand-frame** scenes are all specifiable without a word of
-transcript.
+## 3 — PREFETCH, AS SPECIFIED
 
-**What cannot:** stat callouts, evidence cards, and anything quoting the speaker.
-Those need the transcript and belong in the post-transcript budget.
-
-That split is not a convenience — it is what makes the prefetch *correct* rather
-than speculative. A prefetch that guesses at transcript content would be thrown
-away, which spends the very quota it was meant to save.
-
-## PARALLEL BY CONSTRUCTION — with an admission-controlled pacer
-
-"Parallel by construction" cannot mean "fire N at once" here. It means the scene
-set is expressed as **independent units with no ordering dependency**, submitted
-to one **shared pacer** that admits calls at the measured safe rate.
+**Transcript-independent scenes only. One shared pacer. Two-call scenes reserve
+both admissions.**
 
 ```
 scene specs (independent, order-free)
         │
         ▼
-  ONE global pacer  ── admits ≤ R req/min, R measured not guessed
-        │                 (starts at 3, tuned by observed 429 rate)
-        ├── prefetch lane  (opens at dispatch, runs during transcription)
-        └── main lane      (opens when the transcript lands)
+  ONE global pacer ── admits ≤ R req/min   (R = 2 today, 60 if granted)
+        ├── prefetch lane  opens at DISPATCH, runs during transcription
+        └── main lane      opens when the transcript lands
         │
         ▼
-  each scene resolves INDEPENDENTLY — Law 4: any one may fail with no
-  effect on the edit or on its siblings
+  every scene resolves INDEPENDENTLY — Law 4: any one may fail alone
 ```
 
-Three properties this buys:
+**Prefetchable** (specifiable at dispatch from brief + vibe + palette + aspect,
+no transcript): **end-card (F)**, **name-plate (D)**, **brand frame**. Note these
+are *deterministic* — so under a 2/min quota the prefetch lane costs **nothing**
+and the whole admission budget stays available for B.
 
-1. **The pacer is the single place the rate limit is known.** Today the retry
-   ladder is per-call, so N concurrent calls each discover the limit
-   independently and all back off together — a thundering herd that converts one
-   limit into N failures.
-2. **Prefetch and main share one budget.** Without a shared pacer they would
-   compete, and the prefetch would starve the transcript-dependent scenes that
-   actually carry the edit.
-3. **It scales the day quota is raised** — R is one number.
+**Not prefetchable:** stat callouts, evidence cards, anything quoting the
+speaker. A speculative prefetch that gets discarded spends the very quota it was
+meant to save.
 
-## THE ALPHA/HERO PATH NEEDS A SEQUENCING RULE, NOT MORE RETRIES
+**Why one pacer:** today each call carries its own retry ladder, so N concurrent
+calls each discover the 2/min limit independently and back off together — one
+limit converted into N failures. That is the alpha path's exact death.
 
-A hero scene is two calls that must both land. At this quota it is 0/2 because
-leg 2 arrives while the quota is recovering from leg 1.
+**Two-call rule:** a hero scene **reserves both admissions before leg 1 fires**;
+if the pacer cannot promise both, it degrades to a single-call scene. Spending
+leg 1 on an attempt that structurally cannot finish is the $0.28 already burned.
 
-**Rule: a two-call scene reserves BOTH admissions from the pacer before leg 1
-fires.** If the pacer cannot promise both, the hero scene is not attempted at all
-— it degrades to a single-call scene. Spending leg 1's money on an attempt that
-structurally cannot finish is the failure mode we already paid $0.28 for.
+## 4 — WHAT THIS REFUSES
 
-## WHAT THIS DESIGN REFUSES TO DO
+- **No speculative over-generation** — generate 8, keep 4 costs 2× and buys
+  nothing against a rate limit.
+- **No retry-as-answer** (standing law). The pacer prevents the 429.
+- **No scene on the critical path** — Law 4. A scene unresolved when the render
+  is ready is **dropped, not waited for**.
 
-- **No speculative over-generation.** Generating 8 and keeping 4 costs 2× and
-  buys nothing at a rate limit.
-- **No retry-as-answer** (standing law). The pacer prevents the 429; it does not
-  absorb it.
-- **No scene on the critical path.** Law 4: every scene independently optional.
-  A scene that has not resolved when the render is ready is **dropped, not
-  waited for** — the 70s is a budget, not a promise the edit blocks on.
+## 5 — OPEN
 
-## OPEN, AND HONEST ABOUT IT
-
-- **R is not yet measured under a pacer.** 3.4/min is a serial-run *upper bound*;
-  the real admission rate needs one cheap calibration run.
-- **$/render is still unmeasurable** — 4 scenes × $0.14 = **$0.56/edit** at the
-  ceiling, which fits the "well under $1" law, but only once a scene *count per
-  edit* is real rather than assumed.
-- **Nothing here is built.** This is the design the measured envelope supports;
-  it is not a claim that any of it exists.
+- **R under a pacer is unmeasured.** 2/min is the documented limit; the safe
+  admission rate needs one cheap calibration run.
+- **$/render**: 2 scenes × $0.14 = **$0.28/edit** today; 4 × $0.14 = **$0.56** at
+  60/min. Both sit under the $1 law — but only once a scene count per edit is
+  real rather than assumed.
+- **Nothing here is built.** This is the design the measured envelope supports.

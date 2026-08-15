@@ -50,13 +50,32 @@ Evidence, all from this run:
 **The lever is a Vertex quota-increase request — an approval, not a purchase.**
 Nothing here needs a spend decision.
 
-## Component C is blocked here, and only here
+## What the alpha failure actually blocks — a correction
 
 A hero scene needs **two sequential calls** (white background, then black,
 differenced into a matte). Leg 1 lands; leg 2 arrives while the quota is still
-recovering from leg 1 and starves through all four retries. Single scenes survive
-429s because one retry ladder is enough — the two-call path has to win **twice in
-a row**, and at this quota it never does.
+recovering and starves through all four retries. Single scenes survive 429s
+because one ladder is enough — the two-call path must win **twice in a row**, and
+against a **2 req/min** limit it never does.
 
-So **text-behind-subject is blocked on rate headroom, not on code.** The
-segmentation work itself is unaffected.
+**CORRECTION.** I first wrote that this blocks Component C (text-behind-subject).
+It does not. C is text behind the **user's real subject**, which
+`SEGMENTATION_SPIKE.md` settles as **RVM** — a deterministic temporal matte with
+**zero image generation**. The alpha path mattes a *generated* subject, which is
+a **B-family** concern.
+
+So what the alpha failure blocks is **hero/generated-subject compositions**, not
+C. C's real blockers are the spike's three unpriced items — latency (an *editing*
+effect, so §4.1 gives it no carve-out), cost (a second GPU app per job), and
+concurrency. Quota is not among them.
+
+## The exact limit
+
+`GenContentImageGenRequestsPerMinutePerProjectPerBaseModelGlobal` = **2
+requests/minute** on `promptly-479218`, confirmed via the Cloud Quotas API. That
+is *below* the ~3.4/min a purely serial workload achieves, which is why serial
+calls 429'd — the measurement and the documented limit agree.
+
+Increase to **60/min** filed 2026-08-15 as `promptly-image-gen-60rpm`
+(trace `d0e2fa72-b5fc-4633-9ad1-8ab89f048852`), pending Google review. No owner
+click was required.
