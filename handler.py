@@ -974,6 +974,27 @@ def _job_column_exists(column):
     return ok
 
 
+def _plan_persist_liveness(job_id, ok, n_keys, reason=None):
+    """Counter for the plan-time recipe write [Rule 2].
+
+    The pre-registered read is explicit: coverage closes when envelope-lost rows
+    carry a recipe at >0% (0/21 today). This counter is the leading indicator —
+    it says whether the WRITE happened, before anyone has to wait for a job to
+    fail to find out.
+    """
+    try:
+        if supabase is None or not job_id:
+            return
+        supabase.table("analytics_events").insert({
+            "event": "plan_recipe_persisted",
+            "platform": "worker",
+            "props": {"job_id": str(job_id), "ok": bool(ok),
+                      "recipe_keys": int(n_keys or 0), "reason": reason},
+        }).execute()
+    except Exception:
+        pass
+
+
 def _brand_liveness(job_id, specs, had_design_system):
     """PHASE 1 LIVENESS COUNTER for D + F [Rule 2].
 
@@ -15413,6 +15434,42 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 edit_plan["_brand_specs"] = None
                 print(f"[brand] spec build failed ({type(_bce).__name__}: {_bce}) — "
                       f"rendering without D/F; the edit is unaffected", flush=True)
+
+            # PLAN-TIME RECIPE PERSIST [Law 2, JUDGE's fix].
+            #
+            # THE MEASUREMENT HOLE THIS CLOSES: the recipe currently reaches the
+            # DB only in the TERMINAL write, and the terminal write is exactly
+            # what never happens for the hang class — last_stage was
+            # upload_complete on 286/286 kills and 0 of 49 jobs ever emitted a
+            # worker_envelope_write. So envelope-lost rows carry NO recipe (0/21)
+            # and the quality board loses its denominator for precisely the jobs
+            # that failed, for a reason that has nothing to do with quality.
+            #
+            # The plan exists HERE — minutes before upload, and long before the
+            # point every failure sits at. Writing it now means a lost terminal
+            # can no longer take the recipe with it.
+            #
+            # Deliberately NOT through write_job_status: that path takes
+            # _JOB_STATUS_LOCK, the very thing suspected of wedging, and a safety
+            # net must not queue behind the failure it is insuring against. It is
+            # also a different UPDATE shape, so the single-rail-chain law is
+            # untouched — that law governs the status rail, not this column.
+            try:
+                if _job_column_exists("edit_recipe"):
+                    _plan_recipe = {k: v for k, v in edit_plan.items()
+                                    if not (isinstance(k, str) and k.startswith("_"))}
+                    _tbl = os.environ.get("PROMPTLY_JOB_TABLE") or "video_jobs"
+                    supabase.table(_tbl).update({"edit_recipe": _plan_recipe}).eq(
+                        "id", _ACTIVE_JOB_ID).execute()
+                    print(f"[plan-persist] edit_recipe written at PLAN time "
+                          f"({len(_plan_recipe)} keys) — survives a lost terminal", flush=True)
+                    _plan_persist_liveness(_ACTIVE_JOB_ID, True, len(_plan_recipe))
+                else:
+                    _plan_persist_liveness(_ACTIVE_JOB_ID, False, 0, "no_column")
+            except Exception as _ppe:
+                print(f"[plan-persist] failed ({type(_ppe).__name__}: {_ppe}) — the "
+                      f"terminal write remains the only path", flush=True)
+                _plan_persist_liveness(_ACTIVE_JOB_ID, False, 0, type(_ppe).__name__)
 
             # Post-processing
             edit_plan["_deepgram_words"] = list(deepgram_words or [])

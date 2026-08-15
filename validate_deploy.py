@@ -9482,6 +9482,39 @@ def _dual_write_fail_closed():
         "column, never guess that it exists")
 
 
+@check("THE RECIPE IS PERSISTED AT PLAN TIME (2026-08-15, RULE-1) [Law 2]. The recipe reached the DB only in the TERMINAL write, and the terminal write is exactly what never happens for the hang class: last_stage was upload_complete on 286/286 kills and 0 of 49 jobs ever emitted a worker_envelope_write. So envelope-lost rows carry NO recipe (0/21 measured) and the quality board loses its denominator for precisely the jobs that failed — for a reason that has nothing to do with quality. The plan exists minutes earlier, long before the point every failure sits at, so writing it there means a lost terminal can no longer take the recipe with it. THREE PROPERTIES ARE LOAD-BEARING. It must NOT go through write_job_status: that path takes _JOB_STATUS_LOCK, the very thing suspected of wedging, and a safety net that queues behind the failure it insures against is not a safety net. It must be FAIL-CLOSED on column existence, because migration 03 may not have run and PostgREST rejects a whole patch on an unknown column. And it must strip underscored keys, because those are render-side signals the sanitizer removes everywhere else — persisting them here would put megabytes of word timings and design specs into a column meant for the recipe.")
+def _plan_time_recipe_persist():
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert '"[plan-persist]' in _h, "the plan-time recipe persist is gone"
+    _ge = _fn_source(_h, "generate_edit_gemini")
+    assert '{"edit_recipe": _plan_recipe}' in _ge, (
+        "the recipe is not written at PLAN time — it would reach the DB only in the "
+        "terminal write, which is exactly what the hang class never performs")
+    assert '_job_column_exists("edit_recipe")' in _ge, (
+        "the plan-time write is not FAIL-CLOSED on column existence — if migration 03 has "
+        "not run, PostgREST rejects the update on an unknown column")
+    assert 'startswith("_")' in _ge, (
+        "underscored render-side keys are not stripped — the column would carry word "
+        "timings and design specs instead of the recipe")
+    # Scope to the plan-persist BLOCK itself. An earlier version looked at the
+    # 1500 chars preceding the log marker and caught unrelated, legitimate
+    # write_job_status calls elsewhere in the same function — a proximity test
+    # masquerading as a scope test.
+    _blk_start = _ge.index('if _job_column_exists("edit_recipe"):')
+    _blk = _ge[_blk_start:_blk_start + 1400]
+    assert "write_job_status" not in _blk, (
+        "the plan-time persist routes through write_job_status, which takes "
+        "_JOB_STATUS_LOCK — a safety net must not queue behind the failure it insures "
+        "against")
+    assert "supabase.table(" in _blk and ".update({\"edit_recipe\"" in _blk, (
+        "the plan-time persist does not write the column directly")
+    assert "_plan_persist_liveness" in _h and '"plan_recipe_persisted"' in _h, (
+        "PHASE liveness counter missing — the write's own success must be countable before "
+        "anyone waits for a job to FAIL to find out whether it worked")
+
+
 @check("BRAND COMPONENTS D+F ARE WIRED AND COUNT THEIR OWN REACH (2026-08-15, RULE-1) [§3.1 PHASE 1.3]. The name-plate and the end-card are the first Phase 1 components a VIEWER CAN SEE, and both consume the design system rather than inventing anything: colour, type size and safe zones all come from the palette built off the user's own footage. A component that picks its own colour is a second design system competing with the real one — right in every cert, wrong on every video. Same three-link chain as design_system and caption modes, because that is where the last two inert components were caught: brand_components.py is IMAGE-MOUNTED (a deferred import without a mount ImportErrors only in-container, only on real traffic), handler IMPORTS and CALLS build_brand_specs, and the result is ATTACHED to edit_plan. Plus the liveness counter, which must distinguish THREE states that look identical downstream — no design system, design system but no COPY in the plan, and a spec actually built — because '0 name-plates in production' otherwise cannot tell a broken component from a plan that never carried a name, and those want completely different fixes. Runs cert_brand_components.py for the behaviour, including the units arm: type_scale is ALREADY PIXELS and re-multiplying it by canvas height produced name_px=192000, a caption taller than a hundred screens.")
 def _brand_components_wired():
     import os as _os, subprocess as _sub, sys as _sys
