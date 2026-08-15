@@ -881,6 +881,38 @@ _CANVAS_VERTICAL = (1080, 1920)
 _CANVAS_LANDSCAPE = (1920, 1080)
 
 
+def _design_system_liveness(job_id, ok, accent=None, canvas=None, err=None):
+    """PHASE 1 LIVENESS COUNTER [Rule 2]. Every Phase 1 component ships with one,
+    and this is the pattern.
+
+    WHY NOT A FIELD ON THE RESULT. `_design_system` is underscored, so the recipe
+    sanitizer strips it from persistence (handler.py, sanitized_old_plan) — which
+    means the attach rate is UNMEASURABLE from rows by construction. Reading
+    "0/76 carry _design_system" as "it never attached" is a failed measurement
+    wearing a number, and it is exactly the shape this project keeps paying for.
+
+    WHY NOT stage_timings EITHER. Nesting there survives the top-level strip, but
+    38.6% of completions lose their whole envelope — so a liveness signal riding
+    the result would be missing on 2 of every 5 jobs and would UNDERCOUNT itself,
+    in the same direction as the defect it is meant to watch.
+
+    An analytics row is independent of both. Never raises: a counter that can
+    fail a render is not a counter, it is a new failure mode.
+    """
+    try:
+        if supabase is None or not job_id:
+            return
+        supabase.table("analytics_events").insert({
+            "event": "design_system_built",
+            "platform": "worker",
+            "props": {"job_id": str(job_id), "ok": bool(ok),
+                      "accent": accent, "canvas": list(canvas) if canvas else None,
+                      "error": (err or None)},
+        }).execute()
+    except Exception as _le:
+        print(f"[design-system] liveness soft-failed: {type(_le).__name__}", flush=True)
+
+
 def _source_wh_for_design(video_path):
     """(w, h) for the design canvas, or (None, None) so _canvas_for takes its
     default. Never raises — a probe failure must not cost the edit its palette,
@@ -15185,10 +15217,18 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 _dsa = (edit_plan["_design_system"].get("palette") or {}).get("accent")
                 print(f"[design-system] built accent={_dsa} canvas="
                       f"{edit_plan['_design_system'].get('canvas')}", flush=True)
+                # _ACTIVE_JOB_ID is the existing per-job global (set at handler
+                # entry); generate_edit_gemini takes no job_id, and threading one
+                # through a 30-argument signature to reach a counter would be a
+                # worse change than reading the global that already exists.
+                _design_system_liveness(_ACTIVE_JOB_ID, True, accent=_dsa,
+                                        canvas=edit_plan["_design_system"].get("canvas"))
             except Exception as _dse:
                 edit_plan["_design_system"] = None
                 print(f"[design-system] build failed ({type(_dse).__name__}: {_dse}) — "
                       f"rendering without it; the edit is unaffected", flush=True)
+                _design_system_liveness(_ACTIVE_JOB_ID, False,
+                                        err=f"{type(_dse).__name__}: {_dse}")
 
             # Post-processing
             edit_plan["_deepgram_words"] = list(deepgram_words or [])
@@ -32048,17 +32088,27 @@ def _post_upload_watchdog_fire():
         _attempt_ok = False
         _attempt_skipped_reason = "no result_payload in the timer thread; a bare " \
                                   "completion would strip route/floor/vocab"
-        # RECOVERED CONTAINER-SECONDS, reported against BOTH observed clusters:
-        # the reconciler cluster settles ~180-240s and the repair cluster ~904s.
-        # Without this cap the container would have burned to one of them.
+        # RECOVERED CONTAINER-SECONDS AS A BAND, NOT A FIGURE.
+        #
+        # Renamed 2026-08-15 from ..._vs_reconciler_cluster / ..._vs_repair_cluster
+        # to recovered_lower / recovered_upper, because the old names invited the
+        # exact mistake the band exists to prevent: treating the repair-cluster
+        # number as "the saving" and summing it.
+        #
+        # LOWER  = what this job would have burned reaching the ~210s reconciler
+        #          cluster. This is the ONLY one that may be summed across jobs.
+        # UPPER  = what it would have burned reaching the ~904s repair cluster.
+        #          A BOUND on a job that was ALREADY going to be rescued sooner —
+        #          summing it counts a saving that would not have occurred, and
+        #          on 60 jobs/day it overstates by roughly 4x.
         _cs_now = _elapsed * 16
-        _rec_reconciler = max(0.0, (210 - _elapsed)) * 16
-        _rec_repair = max(0.0, (904 - _elapsed)) * 16
+        _rec_lower = max(0.0, (210 - _elapsed)) * 16
+        _rec_upper = max(0.0, (904 - _elapsed)) * 16
         print(f"[post-upload-watchdog] job={_job} artifact={_pu_watchdog.get('artifact')} "
               f"waited={_elapsed:.0f}s terminal=NOT-LANDED last_stage={_stage} "
               f"attempted_write={_attempted} write_ok={_attempt_ok} "
-              f"held_core_s={_cs_now:.0f} recovered_core_s_vs_reconciler={_rec_reconciler:.0f} "
-              f"recovered_core_s_vs_repair={_rec_repair:.0f} — forcing exit; "
+              f"held_core_s={_cs_now:.0f} recovered_lower={_rec_lower:.0f} "
+              f"recovered_upper={_rec_upper:.0f} (upper is a BOUND, never summed) — forcing exit; "
               f"the row is repairable from S3", flush=True)
         try:
             if supabase is not None:
@@ -32074,8 +32124,12 @@ def _post_upload_watchdog_fire():
                         "terminal_write_ok": _attempt_ok,
                         "terminal_write_skipped_reason": _attempt_skipped_reason,
                         "held_core_s": round(_cs_now, 1),
-                        "recovered_core_s_vs_reconciler_cluster": round(_rec_reconciler, 1),
-                        "recovered_core_s_vs_repair_cluster": round(_rec_repair, 1),
+                        # SUMMABLE across jobs.
+                        "recovered_lower": round(_rec_lower, 1),
+                        # A BOUND. NOT summable — see recovered_upper_is_a_bound.
+                        "recovered_upper": round(_rec_upper, 1),
+                        "recovered_upper_is_a_bound": True,
+                        "recovered_units": "container core-seconds at cpu=16",
                         "watchdog_s": _POST_UPLOAD_WATCHDOG_S,
                     },
                 }).execute()

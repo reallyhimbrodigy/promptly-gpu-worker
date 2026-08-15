@@ -58,6 +58,8 @@ def main(argv=None):
     ap.add_argument("--with", dest="with_", default="", help="replacement text")
     ap.add_argument("--marker", help="token that MUST be present after mutating")
     ap.add_argument("--marker-absent", help="token that MUST be gone after mutating")
+    ap.add_argument("--expect", help="the check's output MUST contain this. Without it a "
+                                     "proof only shows SOMETHING failed, not the right thing.")
     ap.add_argument("--timeout", type=int, default=1800)
     a = ap.parse_args(argv)
 
@@ -68,6 +70,18 @@ def main(argv=None):
 
     before_sha = _sha(path)
     backup = os.path.join(tempfile.gettempdir(), f"redproof_{os.path.basename(path)}.bak")
+    # STALE-MUTATION GUARD (2026-08-15, learned the hard way). The restore lives
+    # in a `finally`, which does NOT run if the process is KILLED — and a
+    # long-running gate is exactly the thing that gets killed or backgrounded.
+    # That leaves the working tree MUTATED with nothing saying so, and the next
+    # commit ships the mutation. If a backup is already sitting here, a previous
+    # proof did not finish: refuse, and say where the good copy is.
+    if os.path.exists(backup):
+        print(f"RED-PROOF: REFUSING — a stale backup exists at {backup}, so an earlier "
+              f"proof was killed before it restored {path}. Your working copy is probably "
+              f"still MUTATED. Restore it first:\n    cp {backup} {path}\n"
+              f"then delete the backup and re-run.")
+        return 2
     shutil.copy2(path, backup)
 
     try:
@@ -126,6 +140,20 @@ def main(argv=None):
             print("RED-PROOF: FAIL — the check PASSED on a file proven to be broken. "
                   "The gate does not cover what it claims to cover.")
             return 1
+        # THE SECOND WAY A PROOF PASSES FOR THE WRONG REASON, learned from this
+        # harness's own use (2026-08-15): breaking a liveness call made the gate
+        # go red on PYFLAKES undefined-name, not on the liveness assertion — which
+        # did not exist. The mutation landed, the check fired, and the proof was
+        # still meaningless. Verifying the file changed is necessary and NOT
+        # sufficient; the failure has to be the one you were testing for.
+        if a.expect:
+            _all = (r.stdout or "") + (r.stderr or "")
+            if a.expect not in _all:
+                print(f"RED-PROOF: FAIL — the check failed, but NOT for the expected "
+                      f"reason. Wanted {a.expect!r} in its output; it failed on something "
+                      f"else, so this proves nothing about the assertion under test.")
+                return 1
+            print(f"  failure reason confirmed: {a.expect!r}")
     finally:
         shutil.copy2(backup, path)
         os.remove(backup)

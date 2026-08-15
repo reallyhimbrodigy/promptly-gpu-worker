@@ -9123,22 +9123,37 @@ def _component_obey_cert():
     assert "ALL PASS" in _out, f"cert_component_obey did not report ALL PASS:\n{_out[-800:]}"
 
 
+def _fn_source(src, name):
+    """The full source of a top-level function, by AST.
+
+    CHARACTER WINDOWS AROUND AN ANCHOR HAVE NOW FAILED THREE TIMES in this file
+    — each time on UNCHANGED behaviour, because someone added a comment or a
+    field and pushed the asserted token past the slice. cert_extract.py was
+    written to retire exactly this for the certs; these checks get the same
+    treatment. The enclosing function is the honest scope."""
+    import ast as _a
+    for _n in _a.walk(_a.parse(src)):
+        if isinstance(_n, (_a.FunctionDef, _a.AsyncFunctionDef)) and _n.name == name:
+            return _a.get_source_segment(src, _n) or ""
+    return ""
+
+
 @check("POST-UPLOAD WATCHDOG IS SAFE BY CONSTRUCTION (2026-08-15, RULE-1) [Law 1/Law 2]. It is the first mechanism that deliberately KILLS a running container, so every one of its safety properties is asserted rather than trusted. It fires on exactly one state — the artifact IS confirmed in S3 AND the terminal write has NOT landed AND that has held for N seconds — which is the envelope-loss cohort precisely (180/180 had worker_started_at and a delivery column; 0/180 carried the worker's envelope). Exiting is safe ONLY because the evidence-triggered repair already recovers that exact row from S3, so the artifact precondition is load-bearing: arming without an artifact would strand a user with nothing. It must use os._exit and NOT sys.exit — a hung worker is hung somewhere, and normal interpreter shutdown joins threads and can block on the very thing that is stuck (the ThreadPool 30s billed exit tail is on the record as NOT fixable by shutdown(wait=False) or daemon threads, because the tail was a BUSY worker). Exit code 0 deliberately: the render SUCCEEDED, so a non-zero exit would make the failure taxonomy read a completed render as a crash. N is bounded below by many missed 4s heartbeats and above by the container cap it pre-empts, and it matches QUIET_ROW_REPAIR_MS so the watchdog and the quiet-row repair cannot disagree about whether a row is quiet. Telemetry at exit carries elapsed, last stage, whether a terminal write was attempted, and recovered container-seconds against BOTH observed clusters (reconciler ~210s, repair ~904s) so the saving is reported, never assumed.")
 def _post_upload_watchdog_safe():
     import os as _os, re as _re11
     _here = _os.path.dirname(_os.path.abspath(__file__))
     _src = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
     assert "_post_upload_watchdog_arm" in _src, "the post-upload watchdog is gone"
-    _i = _src.index("def _post_upload_watchdog_fire")
-    _win = _src[_i:_i + 4200]
+    _win = _fn_source(_src, "_post_upload_watchdog_fire")
+    assert _win, "_post_upload_watchdog_fire is gone"
     assert "os._exit(0)" in _win, (
         "the watchdog must os._exit(0) — sys.exit runs interpreter shutdown, which joins "
         "threads and can block on the very hang it is escaping (the ThreadPool busy-worker "
         "exit tail), and a non-zero code would classify a SUCCEEDED render as a crash")
     assert "sys.exit(" not in _win, "sys.exit in the watchdog fire path"
     # never fire without an artifact — the property that makes the kill safe
-    _a = _src.index("def _post_upload_watchdog_arm")
-    _awin = _src[_a:_a + 1400]
+    _awin = _fn_source(_src, "_post_upload_watchdog_arm")
+    assert _awin, "_post_upload_watchdog_arm is gone"
     assert "if not job_id or not artifact" in _awin, (
         "the watchdog must REFUSE to arm without a confirmed artifact — exiting a job with "
         "nothing in S3 destroys the user's render")
@@ -9180,10 +9195,16 @@ def _post_upload_watchdog_safe():
         ('"waited_s"', "elapsed at exit"),
         ('"last_stage"', "the stage it died in"),
         ('"terminal_write_attempted"', "whether a last-chance write was tried"),
-        ('"recovered_core_s_vs_reconciler_cluster"', "recovered core-seconds vs the ~210s cluster"),
-        ('"recovered_core_s_vs_repair_cluster"', "recovered core-seconds vs the ~904s cluster"),
+        ('"recovered_lower"', "the SUMMABLE recovered core-seconds (vs the ~210s cluster)"),
+        ('"recovered_upper"', "the BOUND (vs the ~904s cluster)"),
+        ('"recovered_upper_is_a_bound": True', "the flag that forbids summing the upper"),
     ):
         assert _needle in _win, f"watchdog telemetry lost {_why} ({_needle})"
+    assert "recovered_core_s_vs_repair_cluster" not in _src, (
+        "the old recovery field name is back. It invited the exact error the band exists to "
+        "prevent — treating the repair-cluster number as 'the saving' and summing it. Summing "
+        "the UPPER counts savings on jobs that would have been rescued sooner and overstates "
+        "by ~4x at 60 jobs/day. recovered_lower is the summable one.")
     _m = _re11.search(r"_POST_UPLOAD_WATCHDOG_S = int\(os\.environ\.get\([^)]*\) or (\d+)\)", _src)
     assert _m, "the watchdog threshold must have a literal default"
     _n = int(_m.group(1))
@@ -9339,12 +9360,29 @@ def _design_system_wired():
     _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
     assert "import design_system as _ds" in _h, "handler does not import design_system"
     assert "_ds.build_design_system(" in _h, "handler never calls build_design_system"
+    # LIVENESS COUNTER — Phase 1's standing requirement, and the design system is
+    # the first component to carry one. It cannot be a field on the result:
+    # `_design_system` is underscored, so the recipe sanitizer strips it from
+    # persistence, which makes the attach rate UNMEASURABLE from rows by
+    # construction (0/76 reads as "never attached" when it means "never
+    # persisted"). Nor can it ride stage_timings: 38.6% of completions lose their
+    # whole envelope, so it would undercount itself in the same direction as the
+    # defect it watches. An analytics row is independent of both.
+    assert "_design_system_liveness" in _h, (
+        "PHASE 1 LIVENESS COUNTER MISSING — a component whose production reach cannot be "
+        "counted is not done. cert-green is not connected.")
+    assert '"design_system_built"' in _h, (
+        "the design_system_built liveness event is gone — attach rate becomes unmeasurable "
+        "again, because the underscored plan key is stripped from persistence")
+    _lv = _fn_source(_h, "_design_system_liveness")
+    assert "except Exception" in _lv, (
+        "the liveness counter is not wrapped — a counter that can fail a render is not a "
+        "counter, it is a new failure mode")
     assert 'edit_plan["_design_system"]' in _h, (
         "the design system is never attached to edit_plan — a palette computed and "
         "dropped on the floor is the same as no palette")
-    _i = _h.index("_ds.build_design_system(")
-    _win = _h[max(0, _i - 900):_i + 900]
-    assert "except Exception" in _win, (
+    _win = _fn_source(_h, "generate_edit_gemini")
+    assert "_ds.build_design_system(" in _win and "except Exception" in _win, (
         "the design-system build is not wrapped — a frame-sample failure would cost "
         "the user their render for the sake of an enhancement")
 

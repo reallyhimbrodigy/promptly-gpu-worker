@@ -12,7 +12,7 @@ const probeId = process.argv[2];
 if (!probeId) { console.error('usage: node cert_watchdog_probe_check.js <probe_job_id>'); process.exit(2); }
 
 const REQUIRED = ['waited_s', 'last_stage', 'terminal_write_attempted', 'held_core_s',
-                  'recovered_core_s_vs_reconciler_cluster', 'recovered_core_s_vs_repair_cluster'];
+                  'recovered_lower', 'recovered_upper'];
 
 (async () => {
   const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -47,5 +47,5 @@ const REQUIRED = ['waited_s', 'last_stage', 'terminal_write_attempted', 'held_co
     process.exit(1);
   }
   console.log(`\nWATCHDOG PROBE (count half): PASS — waited=${p.waited_s}s stage=${p.last_stage} `
-    + `held=${p.held_core_s} core-s  recovered_vs_repair=${p.recovered_core_s_vs_repair_cluster} core-s`);
+    + `held=${p.held_core_s} core-s  recovered_vs_repair=${p.recovered_upper} core-s`);
 })();
