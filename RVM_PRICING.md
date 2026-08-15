@@ -18,7 +18,7 @@ From `matting/matting_app.py` on `behind-layer-phase1`:
 | downsample | fast 0.25 · best 0.375 |
 | lead-in | **1.0s before every window** — recurrent state must settle |
 
-**Seconds: UNMEASURED.** The app instruments itself (`dl_s`, `load_s`, `t_all`)
+**Seconds: UNMEASURED — and seconds are the whole question.** The app instruments itself (`dl_s`, `load_s`, `t_all`)
 but **no benchmark result was ever recorded** in the repo — the July spike
 recorded *matte quality* (bite/lag, edge bias), never throughput. There are also
 no Modal GPU rates in `MODAL_SPEND_LEDGER.md`.
@@ -38,6 +38,39 @@ what it costs to price it.**
 
 Term 3 is the one that scales with the *plan*, and term 1 is the one people
 forget. A 2-window edit pays the lead-in twice.
+
+## 1b — RE-FRAMED: THE BLOCKER IS WALL CLOCK, NOT COST
+
+**GPU-seconds are ~$0.013 for a 60s L4 pass** (owner-supplied). That is ~$0.0002/s,
+and it settles the cost question outright:
+
+| | |
+|---|---|
+| a 60s L4 matte pass | **~$0.013** |
+| against the $1 Lumen budget | **1.3%** |
+| against 4 generated scenes ($0.56) | **2.3%** |
+
+**Cost is not the blocker and should not be listed as one.** Even a full-source
+matte on every premium render would be a rounding error next to scene generation.
+
+**The binding constraint is WALL CLOCK.** The budget is unforgiving:
+
+```
+120s editing law
+ -70s Lumen scene budget
+ ────
+ ~50s for render + upload + delivery
+```
+
+A 60s pass does not fit in ~50s. It does not fit *at all* on the critical path —
+so the question was never "can we afford it" but "when does it run and against
+how much footage". That is precisely why §3's conditional design is the whole
+answer: matte only the spans that need it, so the pass is a few seconds of
+windows rather than 60s of source, and never runs at all on the common path.
+
+**What still needs measuring is therefore SECONDS, not dollars** — s/window at
+each quality rung, so a plan can predict whether its windows fit the remainder
+before it commits to the composition.
 
 ## 2 — THE MEASUREMENT, PRICED
 
@@ -119,6 +152,9 @@ have an answer:
 
 | blocker | status |
 |---|---|
-| **latency** | **answered by design** — conditional, so the common path pays 0s |
+| **latency / wall clock** | **the real constraint** — answered by design (conditional + windows only), but s/window still needs measuring |
 | **concurrency** | **answered by design** — synchronous `.remote()`, never `.spawn()` |
-| **cost** | **still open** — needs the $0.05 measurement above |
+| ~~cost~~ | **CLOSED** — ~$0.013 per 60s L4 pass, 1.3% of the Lumen budget. Never the blocker. |
+
+The $0.05 measurement run stays worth doing, but its purpose is now **seconds per
+window**, not dollars per pass.

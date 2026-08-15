@@ -124,3 +124,27 @@ goes through a script with a hard refusal, not a shell loop.**
 independent. Pro succeeded immediately after 3 flash calls; flash sustained 4
 then 429'd. Pro 2/min + flash ~4/min = **~6/min today**.
 
+### Flash price per call — MEASURED SHAPE, UNCONFIRMED PRICE
+
+| | `gemini-3-pro-image` | `gemini-3.1-flash-image` |
+|---|---|---|
+| output | 1408x768 PNG, 666 KB | **1024x1024 PNG, 1145 KB** |
+| **image tokens/call** | **1,120** | **1,120** |
+| rate limit | 2/min | **~4/min** |
+| $/call | $0.14 (known) | **UNCONFIRMED** |
+
+**I could not retrieve flash's price.** The Cloud Billing API is DISABLED on
+`promptly-479218`, and enabling an API on the owner's project as a side effect of
+a pricing question is a config change beyond the ask — it needs his word.
+
+**Do not infer it from my spend.** I estimated ~$0.34 for 5 flash + 1 Pro by
+*assuming* a flash unit price; using that same figure to derive the price would
+be circular, and this is exactly the probe-collapse shape (a failed measurement
+wearing a number's clothes).
+
+**The one real signal:** flash bills the **same 1,120 image tokens per call** as
+Pro did in the identical test. If Vertex bills image output per token at a shared
+rate, flash is a *rate* win but NOT a cost win. If flash sits in a cheaper
+per-image tier — as flash-class models normally do — it is both. **That is a
+one-line answer from the billing console and it changes the Phase 2 cost model,
+so it is worth asking for.**
