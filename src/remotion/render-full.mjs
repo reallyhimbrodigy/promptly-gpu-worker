@@ -33,7 +33,7 @@ import {
   openBrowser,
   ensureBrowser,
 } from "@remotion/renderer";
-import { existsSync, readFileSync, mkdirSync, statSync } from "fs";
+import { existsSync, readFileSync, mkdirSync, statSync, writeFileSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import os from "os";
@@ -249,6 +249,10 @@ const _intervalSamples = [];
 
 let _rmResult = null;
 try {
+// Frame-truth file, next to the render output so the watcher's
+// {work_dir}/*.progress.json glob finds it without being told where to look.
+const _progressJsonPath = `${outputPath}.progress.json`;
+
   _rmResult = await renderMedia({
   serveUrl: bundleLocation,
   composition,
@@ -311,6 +315,31 @@ try {
   onProgress: (info) => {
     const { progress, encodedFrames, renderedFrames } = info || {};
     const now = Date.now();
+    // FRAME-TRUTH FILE for the render frame watcher (handler.py
+    // _start_render_frame_watcher). It polls {work_dir}/*.progress.json and
+    // writes render_frames + a fresh progress_at ONLY when frames advance — so a
+    // frozen render leaves progress_at stale, which is the unambiguous
+    // zero-movement signal a progress-delta watchdog can kill on. updated_at
+    // cannot serve: the heartbeat keeps it fresh straight through a stall.
+    //
+    // WRITTEN ON EVERY TICK, deliberately NOT inside the throttled 10%-log
+    // branch below. The watchdog's whole question is "did frames move since I
+    // last looked", and a file that only updates every 10% would read as frozen
+    // for minutes of healthy rendering.
+    //
+    // This file did not exist. The watcher was written, complete and correct,
+    // polling for something nothing produced — which is why render_frames is
+    // null in 0/293 rows and progress_at null in 180/180 of the envelope-lost
+    // cohort. Both halves had to land for either to mean anything.
+    try {
+      writeFileSync(_progressJsonPath, JSON.stringify({
+        renderedFrames: renderedFrames || 0,
+        encodedFrames: encodedFrames || 0,
+        expectedFrames: _CLK._expectedFrames || 0,
+        progress: progress || 0,
+        at: now,
+      }));
+    } catch (_) { /* progress telemetry must never fail a render */ }
     // The instant the LAST frame is painted. Everything after is stitch/encode.
     if (!_CLK._framesDoneAt && _CLK._expectedFrames
         && (renderedFrames || 0) >= _CLK._expectedFrames) {

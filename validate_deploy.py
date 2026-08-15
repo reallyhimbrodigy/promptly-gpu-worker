@@ -9349,6 +9349,35 @@ def _rhythm_dimension_cert():
         "the SECONDARY stillness bar is not 3.5s — JUDGE's secondary number moved without a ruling")
 
 
+@check("RENDER FRAME WATCHER IS WIRED ON BOTH SIDES (2026-08-15, RULE-1) [Rule 2]. _start_render_frame_watcher was fully written, correct, and had ZERO CALL SITES — and its data source did not exist either: render-full.mjs LOGGED progress but never wrote the *.progress.json the watcher polls. That is why render_frames is null in 0/293 rows and progress_at null in 180/180 of the envelope-lost cohort, both facts measured before the cause was known. EITHER HALF ALONE IS STILL INERT, which is exactly how this stayed broken: a watcher polling for a file nothing writes finds no frames and silently continues forever. So this asserts BOTH — the writer emits the file on EVERY progress tick (not inside the throttled 10%-log branch, because a file that only updates every 10% reads as frozen through minutes of healthy rendering), and the caller starts the watcher in render_stage and stops it in a FINALLY so a raising render cannot strand the thread. It matters beyond telemetry: progress_at is the ONLY signal that goes stale during a stall while updated_at stays fresh under the heartbeat, so a progress-delta watchdog is impossible without it.")
+def _frame_watcher_wired_both_sides():
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "_start_render_frame_watcher(" in _h, "the frame watcher is gone"
+    _rs = _fn_source(_h, "render_stage")
+    assert "_start_render_frame_watcher(" in _rs, (
+        "render_stage never STARTS the frame watcher — it was defined and uncalled for "
+        "weeks, which is why render_frames is null on every row")
+    assert "_render_fw_stop.set()" in _rs, (
+        "the frame watcher is never stopped — a daemon thread would outlive the render")
+    _fin = _rs[_rs.rindex("finally:"):] if "finally:" in _rs else ""
+    assert "_render_fw_stop.set()" in _rs and "finally" in _rs, (
+        "the stop must sit in a finally so a raising render still halts the thread")
+    _mjs = open(_os.path.join(_here, "src/remotion/render-full.mjs"), encoding="utf-8").read()
+    assert "_progressJsonPath" in _mjs and "writeFileSync(_progressJsonPath" in _mjs, (
+        "render-full.mjs does not WRITE the progress file — the watcher would poll forever "
+        "for something nothing produces, which is the state this whole thing was in")
+    _op = _mjs[_mjs.index("onProgress: (info) =>"):]
+    _op = _op[:4000]
+    assert "writeFileSync(_progressJsonPath" in _op, (
+        "the progress file is not written inside onProgress")
+    _throttled = _op.index("lastPctLogged") if "lastPctLogged" in _op else len(_op)
+    assert _op.index("writeFileSync(_progressJsonPath") < _throttled, (
+        "the progress file is written INSIDE the throttled 10%-log branch — it would only "
+        "update every 10%, reading as frozen through minutes of healthy rendering")
+
+
 @check("RECIPE/TIMINGS DUAL-WRITE IS FAIL-CLOSED (2026-08-15, RULE-1) [Law 2, migration 03]. edit_recipe and stage_timings are moving into their own columns because inside `result` they share ONE failure mode with everything else in it — and that mode fires on 38.6% of completions (180/466, 161 users). When result is lost the recipe and the timings are lost WITH it, so the quality board loses its denominator for the same jobs at the same moment, for a reason that has nothing to do with quality. The transition is additive: result keeps carrying both, so every existing reader is untouched and it is reversible at any point. TWO PROPERTIES ARE LOAD-BEARING AND BOTH ARE ASSERTED. (1) The new keys ride the SAME patch as result — a separate write could land one and lose the other, which would be a new split-brain created in the name of closing one. (2) It is FAIL-CLOSED on column existence: if migration 03 has not been run the columns do not exist, PostgREST rejects the ENTIRE patch with PGRST204, and that would take `result` down with it — manufacturing the exact envelope loss this exists to stop. So the keys are added ONLY when a cached probe proves the column is there, and the probe defaults to False on any error. An optimistic guess would turn a migration-ordering mistake into a total write failure on every job.")
 def _dual_write_fail_closed():
     import os as _os

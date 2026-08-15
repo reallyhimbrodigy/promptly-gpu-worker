@@ -32175,6 +32175,27 @@ def _async_job_status(job_id, **kw):
 # — quiet, non-terminal, playable render in S3 — and settles the dispatcher's
 # pending promise. The artifact-in-S3 precondition is what makes the exit safe;
 # without it, exiting would strand a user with nothing.
+# DEFAULT OFF as of 2026-08-15 — I shipped this ON and it caused a KILL/RESPAWN
+# LOOP. Measured: 294 fires across only 50 DISTINCT JOBS, up to 9 fires on a
+# single job. os._exit(0) cannot fire twice in one process, so each fire was a
+# separate container: the watchdog killed the worker, the row stayed
+# non-terminal, respawnDecision saw dbNonTerminal and RE-SPAWNED, the new
+# container re-rendered, re-armed, and was killed again.
+#
+# The spec's safety argument was "exiting is safe because the evidence-triggered
+# repair recovers this row from S3". That was WRONG IN ONE DIRECTION I did not
+# check: the repair and the RESPAWN both watch a non-terminal row, and the
+# respawn gets there first. I proved the watchdog fires; I never proved what
+# happens to the job afterwards, and firing was the only half I tested.
+#
+# This is the double-render class I had called "latent, never realised" — 0
+# double renders measured across 120 sampled jobs. I realised it myself, and at
+# up to 9x per job it is far worse than the 900s wall it was meant to cap.
+#
+# OFF until the watchdog and the respawn cannot both act on the same row. Set
+# PROMPTLY_POST_UPLOAD_WATCHDOG=1 to re-enable once that is true.
+_POST_UPLOAD_WATCHDOG_ENABLED = str(
+    os.environ.get("PROMPTLY_POST_UPLOAD_WATCHDOG") or "").strip().lower() in ("1", "true", "yes", "on")
 _POST_UPLOAD_WATCHDOG_S = int(os.environ.get("PROMPTLY_POST_UPLOAD_WATCHDOG_S") or 120)
 _pu_watchdog = {"timer": None, "armed_at": None, "job_id": None,
                 "artifact": None, "stage": None, "terminal_landed": False}
@@ -32292,6 +32313,8 @@ def _post_upload_watchdog_arm(job_id, artifact, stage=None):
     """Arm at UPLOAD, not at the write: a worker that hangs before reaching
     write_job_status would never be caught by arming at the write."""
     try:
+        if not _POST_UPLOAD_WATCHDOG_ENABLED:
+            return   # OFF by default — see the kill/respawn loop note above.
         if not job_id or not artifact:
             return   # no artifact => exiting would strand the user. Never arm.
         _post_upload_watchdog_disarm("re-arm")
@@ -35471,6 +35494,31 @@ def render_stage(
         app_url,
         duration_estimate_s=_render_est,
     )
+    # FRAME WATCHER — the honest half of render progress [Rule 2, 2026-08-15].
+    #
+    # It runs ALONGSIDE the heartbeat, not instead of it. The heartbeat keeps the
+    # user's bar moving through the pre-frame phase (bundle, openBrowser,
+    # selectComposition emit no frames for ~10-30s); the watcher overwrites it
+    # with REAL frame counts the moment frames start, and writes progress_at
+    # ONLY on advance — so a frozen render leaves progress_at stale while
+    # updated_at stays fresh. That difference is the whole point: it is the one
+    # signal a progress-delta watchdog can kill on.
+    #
+    # This was defined and never called, so render_frames is null in 0/293 rows
+    # and progress_at null in 180/180 of the envelope-lost cohort. Its data
+    # source did not exist either — render-full.mjs logged progress but never
+    # wrote the *.progress.json the watcher polls. BOTH halves ship together;
+    # either alone is still inert.
+    _render_fw_stop = None
+    try:
+        _render_fw_stop = _start_render_frame_watcher(
+            job_id, work_dir, app_url,
+            messages=["Cutting your timeline", "Adding captions and emphasis",
+                      "Compositing your edit", "Finalizing your video"],
+        )
+    except Exception as _fwe:
+        print(f"[frame-watcher] failed to start ({type(_fwe).__name__}) — "
+              f"falling back to the heartbeat alone", flush=True)
     t = time.time()
     # ── W3 PROGRESSIVE DELIVERY (DARK behind PROMPTLY_PROGRESSIVE) ──────
     # Flag ON: previews of the composite chunks publish IN ORDER to
@@ -35575,6 +35623,8 @@ def render_stage(
         )
     finally:
         _render_hb_stop.set()
+        if _render_fw_stop is not None:
+            _render_fw_stop.set()
         # W3 PROGRESSIVE: detach the per-job publisher (warm-container
         # hygiene — the next job must never see this one's publisher).
         # The daemon worker finishes/abandons on its own timers; QA
