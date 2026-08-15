@@ -31870,6 +31870,29 @@ def classify_error(e):
 # so a process-local high-water mark is authoritative; the supabase update runs
 # UNDER the lock so the decision and the write are atomic (ordered, no race).
 _JOB_STATUS_LOCK = threading.Lock()
+# Longer than any healthy durable write (db_write_ms p50 is 120ms, max observed
+# 487ms) and far shorter than the 1200s container cap the wedge otherwise bills
+# to. A caller waiting 30s for this lock is not slow, it is stuck behind a
+# holder that is never coming back.
+_JOB_STATUS_LOCK_TIMEOUT_S = float(os.environ.get("PROMPTLY_JOB_STATUS_LOCK_TIMEOUT_S") or 30)
+
+
+def _job_status_lock_timeout_event(job_id, waited_s, terminal, patch_keys):
+    """Durable, because the log is not readable after the fact — Modal keeps logs
+    live-tail only, which is exactly why this class survived three days of
+    investigation. Never raises."""
+    try:
+        if supabase is None:
+            return
+        supabase.table("analytics_events").insert({
+            "event": "job_status_lock_timeout",
+            "platform": "worker",
+            "props": {"job_id": str(job_id), "waited_s": round(float(waited_s), 2),
+                      "terminal": bool(terminal), "patch_keys": list(patch_keys or [])[:20],
+                      "timeout_s": _JOB_STATUS_LOCK_TIMEOUT_S},
+        }).execute()
+    except Exception:
+        pass
 _JOB_PROGRESS_HW = {}
 _JOB_TERMINAL_SEEN = set()  # first-terminal-wins guard (bounded: one small string per job per warm container)  # job_id -> highest progress written this process
 
@@ -31948,7 +31971,50 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
             progress = int(progress)  # coerce up front so no int() can raise below
         except (TypeError, ValueError):
             progress = None
-    with _JOB_STATUS_LOCK:
+    # ── TIMED LOCK ACQUISITION (2026-08-15) [Law 2] ──────────────────────────
+    # _JOB_STATUS_LOCK is the top suspect for the hang class, and the repo
+    # already wrote the mechanism down at the client-timeout site: "ONE hung
+    # .execute() silently freezes every later durable write in the process — no
+    # error, no log — and a handler blocked in its terminal write never returns."
+    #
+    # Every measurement fits it. The heartbeat writes progress over HTTP
+    # (send_progress), which takes NO lock, so progress pushes keep landing while
+    # DB writes stop — the two-channel finding. 0 of 49 killed jobs ever emitted
+    # a worker_envelope_write, and last_stage was upload_complete on 286/286.
+    #
+    # An UNBOUNDED `with` cannot tell those apart: a caller waiting forever on
+    # the lock and a caller hung in its own .execute() look identical from
+    # outside. A TIMED acquisition separates them, and a timeout that fires names
+    # the holder — convicting or clearing the suspect on the next occurrence.
+    _lk_t0 = time.time()
+    _lk_got = _JOB_STATUS_LOCK.acquire(timeout=_JOB_STATUS_LOCK_TIMEOUT_S)
+    _lk_wait = time.time() - _lk_t0
+    if not _lk_got:
+        # LOUD, never silent. Someone has held this lock longer than any healthy
+        # write takes.
+        # `patch` is built INSIDE the lock, so it does not exist here. Report
+        # the caller's INTENT instead — which is the useful field anyway: it says
+        # what kind of write got wedged, not what dict we would have sent.
+        _intent = [k for k, v in (("status", status), ("phase", phase),
+                                  ("progress", progress), ("result", result),
+                                  ("partial_state", partial_state),
+                                  ("render_frames", render_frames),
+                                  ("progress_at", progress_at)) if v is not None]
+        print(f"[job-status] LOCK TIMEOUT job={job_id} waited={_lk_wait:.1f}s "
+              f"terminal={_terminal} intent={_intent} — another write_job_status has "
+              f"held _JOB_STATUS_LOCK for longer than {_JOB_STATUS_LOCK_TIMEOUT_S}s; "
+              f"this is the wedge class", flush=True)
+        _job_status_lock_timeout_event(job_id, _lk_wait, _terminal, _intent)
+        if not _terminal:
+            return   # an intermediate tick is not worth racing for
+        # A TERMINAL write proceeds WITHOUT the lock. The lock orders writes; it
+        # does not make a single UPDATE correct. A terminal that races is
+        # recoverable — the hard-terminal fence and first-terminal-wins still
+        # apply server-side — whereas a terminal that never lands is precisely
+        # the 38.6% envelope loss. Better a raced write than no write.
+        print(f"[job-status] proceeding WITHOUT the lock for the terminal write "
+              f"job={job_id} — a terminal that never lands is the defect", flush=True)
+    try:
         # First-terminal-wins (final-wave review): async intermediate writes
         # ride daemon threads and can land AFTER the synchronous terminal
         # write — a late "processing" status would regress a "completed" row
@@ -32088,6 +32154,10 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                             # 30ms are indistinguishable in the row afterwards.
                             "db_write_ms": _wjs_ms,
                             "db_write_slow": _wjs_ms > 5000,
+                            # Contention shows here BEFORE it wedges: a rising
+                            # lock_wait_ms across jobs is the early warning that
+                            # a holder is starting to block others.
+                            "lock_wait_ms": int(_lk_wait * 1000),
                         },
                     }).execute()
                 except Exception as _evx:
@@ -32148,6 +32218,9 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                     pass   # the write already failed; never compound it
         if _terminal:
             _JOB_PROGRESS_HW.pop(job_id, None)  # free the high-water entry — warm containers reuse the process
+    finally:
+        if _lk_got:
+            _JOB_STATUS_LOCK.release()
 
 
 def _async_job_status(job_id, **kw):
@@ -34390,8 +34463,16 @@ def _start_render_frame_watcher(job_id, work_dir, app_url, messages=None, interv
     # (bundle/openBrowser/selectComposition emit no frames — a legit ~10-30s gap
     # the watchdog threshold must exceed).
     try:
-        write_job_status(job_id, phase="render", progress=65, render_frames=0,
-                         progress_at=datetime.utcnow().isoformat())
+        # ASYNC, NOT SYNCHRONOUS [2026-08-15]. This watcher ticks every 4s and
+        # write_job_status runs UNDER _JOB_STATUS_LOCK — the top suspect for the
+        # hang class. A new 4-second contender for that lock, added inside the
+        # exact window where the wedge lives (upload_complete -> terminal write),
+        # would risk making the defect worse in the name of measuring it.
+        # _async_job_status rides a daemon thread, so a wedged write parks that
+        # thread instead of the render, and the terminal write is never queued
+        # behind progress telemetry.
+        _async_job_status(job_id, phase="render", progress=65, render_frames=0,
+                          progress_at=datetime.utcnow().isoformat())
     except Exception:
         pass
 
@@ -34422,8 +34503,11 @@ def _start_render_frame_watcher(job_id, work_dir, app_url, messages=None, interv
                         _msg = messages[_state["i"] % len(messages)]
                         _state["i"] += 1
                     try:
-                        write_job_status(job_id, phase="render", progress=_pct,
-                                         render_frames=_tot,
+                        # ASYNC for the same reason as the baseline write above:
+                        # this fires every 4s on frame advance and must never
+                        # queue the terminal write behind progress telemetry.
+                        _async_job_status(job_id, phase="render", progress=_pct,
+                                          render_frames=_tot,
                                          progress_at=datetime.utcnow().isoformat())
                         if _msg and app_url:
                             send_progress(job_id, "render", _pct, _msg, app_url)

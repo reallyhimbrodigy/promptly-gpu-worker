@@ -9361,6 +9361,37 @@ def _rhythm_dimension_cert():
         "the SECONDARY stillness bar is not 3.5s — JUDGE's secondary number moved without a ruling")
 
 
+@check("_JOB_STATUS_LOCK ACQUISITION IS TIMED, AND THE FRAME WATCHER DOES NOT CONTEND (2026-08-15, RULE-1) [Law 2]. The lock is the top suspect for the hang class, and the repo already wrote the mechanism down at the postgrest-timeout site: 'ONE hung .execute() silently freezes every later durable write in the process — no error, no log — and a handler blocked in its terminal write never returns'. Every measurement fits: the heartbeat writes progress over HTTP (send_progress) and takes NO lock, so progress pushes keep landing while DB writes stop — the two-channel finding; 0 of 49 killed jobs ever emitted a worker_envelope_write; last_stage was upload_complete on 286/286; and the container bills to its full cap. An UNBOUNDED `with` cannot convict or clear it, because a caller waiting forever on the lock and a caller hung in its own .execute() look identical from outside. So acquisition is TIMED, a timeout is LOUD and DURABLE (Modal logs are live-tail only — the reason this class survived three days), an intermediate tick gives up while a TERMINAL write proceeds WITHOUT the lock (the lock orders writes, it does not make one UPDATE correct; a raced terminal is recoverable, a terminal that never lands IS the 38.6% loss), and the wait is recorded even on SUCCESS so rising contention shows before it wedges. It also asserts the newly-wired frame watcher uses _async_job_status ONLY: it ticks every 4s inside the exact window where the wedge lives, so a synchronous writer there would risk worsening the defect in the name of measuring it.")
+def _job_status_lock_timed():
+    import os as _os, re as _re14
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "_JOB_STATUS_LOCK_TIMEOUT_S" in _h, "the lock timeout constant is gone"
+    _ws = _fn_source(_h, "write_job_status")
+    assert "_JOB_STATUS_LOCK.acquire(timeout=" in _ws, (
+        "the lock is acquired UNBOUNDED again — a caller waiting forever and a caller hung "
+        "in its own execute() become indistinguishable, which is what hid this for days")
+    assert "_JOB_STATUS_LOCK.release()" in _ws and "finally:" in _ws, (
+        "the lock is not released in a finally — a raising write would wedge every later "
+        "durable write in the process, which is the exact defect under investigation")
+    assert "_job_status_lock_timeout_event" in _ws, (
+        "a lock timeout is not recorded DURABLY. Modal keeps logs live-tail only, which is "
+        "why this class survived three days of investigation")
+    assert "if not _terminal:" in _ws, (
+        "a TERMINAL write must proceed without the lock on timeout — a terminal that never "
+        "lands is the 38.6% envelope loss; a raced one is recoverable")
+    assert '"lock_wait_ms"' in _h, (
+        "the lock wait is not recorded on SUCCESS — rising contention must be visible "
+        "BEFORE it wedges, not only after")
+    _m = _re14.search(r"_JOB_STATUS_LOCK_TIMEOUT_S = float\([^)]*\) or (\d+)\)", _h)
+    _fw = _fn_source(_h, "_start_render_frame_watcher")
+    assert not _re14.search(r"(?<!_)\bwrite_job_status\(", _fw), (
+        "the frame watcher writes SYNCHRONOUSLY. It ticks every 4s under _JOB_STATUS_LOCK, "
+        "inside the exact window where the wedge lives — it would risk worsening the defect "
+        "in the name of measuring it. Use _async_job_status.")
+    assert "_async_job_status(" in _fw, "the frame watcher does not write at all"
+
+
 @check("RENDER FRAME WATCHER IS WIRED ON BOTH SIDES (2026-08-15, RULE-1) [Rule 2]. _start_render_frame_watcher was fully written, correct, and had ZERO CALL SITES — and its data source did not exist either: render-full.mjs LOGGED progress but never wrote the *.progress.json the watcher polls. That is why render_frames is null in 0/293 rows and progress_at null in 180/180 of the envelope-lost cohort, both facts measured before the cause was known. EITHER HALF ALONE IS STILL INERT, which is exactly how this stayed broken: a watcher polling for a file nothing writes finds no frames and silently continues forever. So this asserts BOTH — the writer emits the file on EVERY progress tick (not inside the throttled 10%-log branch, because a file that only updates every 10% reads as frozen through minutes of healthy rendering), and the caller starts the watcher in render_stage and stops it in a FINALLY so a raising render cannot strand the thread. It matters beyond telemetry: progress_at is the ONLY signal that goes stale during a stall while updated_at stays fresh under the heartbeat, so a progress-delta watchdog is impossible without it.")
 def _frame_watcher_wired_both_sides():
     import os as _os
