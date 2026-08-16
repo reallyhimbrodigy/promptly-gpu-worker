@@ -41,6 +41,7 @@ IT NEVER FAILS SILENTLY. If it cannot reach a container it says so and exits 2 �
 """
 import json
 import os
+import re
 import subprocess
 import sys
 
@@ -95,6 +96,119 @@ def _load_baseline():
     return out
 
 
+def _declared_specs():
+    """Every pip spec declared in modal_app.py's image, across ALL layers.
+
+    Bracket-matched rather than line-matched: the specs sit in several
+    `.pip_install(...)` calls, and a naive regex caught only the first, which is
+    exactly the blind spot that let the layers diverge unnoticed.
+    """
+    out = []
+    src = open(os.path.join(HERE, "modal_app.py"), encoding="utf-8").read()
+    for m in re.finditer(r"\.pip_install\(", src):
+        i = m.end() - 1
+        depth = 0
+        for j in range(i, len(src)):
+            if src[j] == "(":
+                depth += 1
+            elif src[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    break
+        blk = re.sub(r"#[^\n]*", "", src[i:j + 1])
+        out += [s for s in re.findall(r'"([A-Za-z0-9_.\-\[\]]+[^"]*)"', blk)
+                if not s.startswith(("-", "http"))]
+    return sorted(set(out))
+
+
+def _vkey(v):
+    """PEP440-lite sort key. Vendored deliberately: `packaging` is NOT in the
+    deploy host's python, and a ceiling check that reports NOT MEASURED on every
+    real deploy is a check that does not exist. These specs are all plain numeric
+    ranges, so a numeric tuple is sufficient and has no install step."""
+    core = re.split(r"[+-]", str(v).strip())[0]
+    parts = []
+    for chunk in core.split("."):
+        m = re.match(r"^(\d+)", chunk)
+        parts.append(int(m.group(1)) if m else 0)
+    return tuple(parts + [0] * (6 - len(parts)))[:6]
+
+
+def _is_prerelease(v):
+    return bool(re.search(r"(a|b|rc|dev|alpha|beta)\d*$", str(v).strip(), re.I))
+
+
+def _satisfies(v, rng):
+    """Does version v satisfy a comma-separated spec like '>=1.0,<2'?"""
+    if not rng:
+        return True
+    for clause in rng.split(","):
+        clause = clause.strip()
+        m = re.match(r"^(==|!=|>=|<=|>|<|~=)\s*(.+)$", clause)
+        if not m:
+            continue
+        op, target = m.group(1), m.group(2).strip()
+        a, b = _vkey(v), _vkey(target)
+        if op == "==" and not (a == b or str(v).strip() == target):
+            return False
+        if op == "!=" and a == b:
+            return False
+        if op == ">=" and not a >= b:
+            return False
+        if op == "<=" and not a <= b:
+            return False
+        if op == ">" and not a > b:
+            return False
+        if op == "<" and not a < b:
+            return False
+        if op == "~=" and not (a >= b and a[:len(b) - 1] == b[:len(b) - 1]):
+            return False
+    return True
+
+
+def _below_ceiling(live):
+    """Packages installed BELOW what their own declared spec allows.
+
+    THE BASELINE CANNOT BE THE ONLY TRUTH. INSTALLED_SET.txt was first captured
+    DURING the incident, so it happily enshrined google-genai==1.2.0 — the very
+    version that took editorial down — as "correct", and a baseline-only diff
+    would report NO DRIFT forever while the wrong library ran. A frozen snapshot
+    proves nothing about whether the snapshot was right.
+
+    So this leg asks a different question: does what is INSTALLED match what we
+    DECLARED we wanted? google-genai>=1.0,<2 resolving to 1.2.0 while 1.75.0
+    satisfies the same spec is 73 minor versions of silent loss, and it is
+    visible ONLY from the spec, never from the baseline.
+
+    Returns (rows, measured). measured=False when PyPI is unreachable — an
+    unmeasurable state is reported as itself, never as "nothing below ceiling".
+    """
+    from urllib.request import urlopen
+    rows = []
+    for spec in _declared_specs():
+        m = re.match(r"^([A-Za-z0-9_.\-]+)(\[[^\]]*\])?(.*)$", spec)
+        if not m:
+            continue
+        name = m.group(1).lower().replace("_", "-")
+        rng = (m.group(3) or "").strip()
+        inst = live.get(name)
+        if not inst:
+            continue
+        try:
+            with urlopen(f"https://pypi.org/pypi/{name}/json", timeout=30) as r:
+                data = json.loads(r.read().decode())
+            allowed = [v for v in data.get("releases", {})
+                       if not _is_prerelease(v) and _satisfies(v, rng)]
+            if not allowed:
+                continue
+            top = max(allowed, key=_vkey)
+            if _vkey(inst) < _vkey(top):
+                rows.append((name, inst, str(top), spec))
+        except Exception:
+            return rows, False
+    return rows, True
+
+
 def main(argv):
     cid = _live_container()
     if not cid:
@@ -130,10 +244,32 @@ def main(argv):
 
     print(f"[installed-set] live image {cid}: {len(live)} packages | "
           f"baseline: {len(base)}")
+
+    # LEG 2 — DECLARED-SPEC COMPARISON. Runs ALWAYS, including when the baseline
+    # matches, because a baseline captured during an incident enshrines the
+    # incident: INSTALLED_SET.txt was first frozen while google-genai==1.2.0 was
+    # live, so a baseline-only diff would say NO DRIFT forever while the very
+    # library that caused the outage kept running.
+    ceil_rows, measured = _below_ceiling(live)
+    if not measured:
+        print("[installed-set] ceiling check NOT MEASURED (PyPI unreachable or "
+              "`packaging` missing) — reported as its own state, not as a pass.")
+    elif ceil_rows:
+        print(f"\n[installed-set] !! {len(ceil_rows)} package(s) INSTALLED BELOW "
+              "THEIR OWN DECLARED SPEC — a sibling layer pushed them down:")
+        for name, inst, top, spec in ceil_rows:
+            print(f"   BELOW CEILING  {name:26} running {inst:14} spec '{spec}' "
+                  f"allows up to {top}")
+        print("   google-genay 1.2.0 vs 1.75.0 was this exact shape, and it cost "
+              "11 hours across 33 users.".replace("google-genay", "google-genai"))
+    else:
+        print("[installed-set] ceiling check: every declared package is at the top "
+              "of its own spec.")
+
     if not (added or removed or moved):
-        print(f"[installed-set] NO DRIFT — all {len(base)} packages match the "
-              "reviewed baseline.")
-        return 0
+        print(f"[installed-set] NO BASELINE DRIFT — all {len(base)} packages match "
+              "the reviewed baseline.")
+        return 1 if (measured and ceil_rows) else 0
 
     print("\n[installed-set] !! DEPENDENCY DRIFT — packages moved that NO DIFF NAMED.")
     print("   This is the class that took editorial down for 11 hours on 2026-08-16:")
@@ -145,7 +281,8 @@ def main(argv):
         print(f"   ADDED    {k:34} {'-':16} -> {live[k]}")
     for k in removed:
         print(f"   REMOVED  {k:34} {base[k]:16} -> (gone)")
-    print(f"\n   {len(moved)} moved, {len(added)} added, {len(removed)} removed.")
+    print(f"\n   {len(moved)} moved, {len(added)} added, {len(removed)} removed, "
+          f"{len(ceil_rows)} below their declared ceiling.")
     print("   If this is INTENDED: python3 installed_set_diff.py --update && commit.")
     print("   If it is NOT: you have just found your next incident before it "
           "found your users.")

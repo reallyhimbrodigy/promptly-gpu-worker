@@ -276,7 +276,30 @@ image = (
         # blocking on a wedged socket: the hang class, reintroduced by a
         # dependency resolution nobody reviewed. A range is not a pin on a
         # money-path timeout.
-        "supabase==2.7.4",
+        # 2.7.4 -> 2.15.0 (2026-08-16). THE 2.7.4 PIN WAS THE ROOT OF THE OUTAGE.
+        # It requires httpx<0.28; EVERY google-genai from 1.3.0 on requires
+        # httpx>=0.28.1. Mutually exclusive — so the pin did not merely PERMIT
+        # google-genai 1.2.0, it MATHEMATICALLY FORCED it, 73 minor versions back,
+        # and 1.2.0 predates VideoMetadata.fps. generate_edit_gemini then raised
+        # before reaching the editorial gate, so PROMPTLY_EDITORIAL_LIVE=off
+        # shielded nothing: 11 hours, 48 jobs, 33 users.
+        #
+        # 2.15.0 requires httpx<0.29,>=0.26, which intersects google-genai's floor.
+        # VERIFIED BY CONSTRUCTION, not by hope, in a clean env before this edit:
+        #   supabase 2.15.0 + google-genai>=1.0,<2 -> google-genai 1.75.0, httpx 0.28.1
+        #   ClientOptions(postgrest_client_timeout=15) accepted AND readable back
+        #   genai_types.VideoMetadata(fps=18) -> 18.0  (the field 1.2.0 lacked)
+        #
+        # The EXACT pin stays, for the original reason: a kwarg rename in any
+        # future 2.x lands in the ClientOptions try/except and yields a client
+        # with NO postgrest timeout — indefinite blocking on a wedged socket. A
+        # range is not a pin on a money-path timeout. What changed is WHICH exact
+        # version, chosen so it cannot drag a sibling under its own ceiling.
+        #
+        # The startup check still proves the timeout is IN EFFECT post-construction,
+        # and installed_set_diff.py's declared-spec leg now fails the deploy report
+        # if any package sits below its own spec again.
+        "supabase==2.15.0",
         "boto3[crt]>=1,<2",   # AWS Common Runtime — 2-6× S3 throughput vs stock boto3
         "httpx>=0.27,<1",
         "fastapi>=0.115,<1",
