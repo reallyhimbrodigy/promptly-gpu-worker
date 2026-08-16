@@ -192,3 +192,32 @@ fi
 set -e
 echo "  ▶ spawned — verdict in Modal logs ([REGRESSION-CORPUS] ALL GREEN / REGRESSED:);"
 echo "     a REGRESSED fires an [ALERT] + owner push, so it can't go unread"
+
+# ── INSTALLED-SET DRIFT (2026-08-16, RULE-1) ─────────────────────────────────
+# The general fix for INDEPENDENT LAYER RESOLUTION. Modal's .pip_install() layers
+# resolve separately, so a later layer silently downgrades an earlier one and no
+# diff ever names it. On 2026-08-16 a one-line `supabase==2.7.4` pin forced
+# google-genai 73 versions back to 1.2.0 — the only release compatible with its
+# httpx floor — which predates VideoMetadata.fps and took editorial down for 11
+# hours across 33 users.
+#
+# The thing that breaks you is never the thing you edited. So every deploy now
+# diffs the RUNNING image against the reviewed INSTALLED_SET.txt.
+#
+# NON-BLOCKING BY CONSTRUCTION: the image only exists after the build, so this is
+# a smoke alarm, not a door lock. Exit 2 (no warm container) is reported as a
+# FAILED MEASUREMENT, never as "no drift".
+echo "════════════════════════════════════════════════════════════"
+echo "  INSTALLED-SET DRIFT CHECK"
+set +e
+python3 "$(dirname "$0")/installed_set_diff.py"
+_ISD=$?
+set -e
+if [ "$_ISD" = "1" ]; then
+    echo "  ⚠️  DEPENDENCY DRIFT ABOVE — packages moved that no diff named."
+    echo "     Intended? python3 installed_set_diff.py --update && commit."
+    echo "     Not intended? That is your next incident, found before your users."
+elif [ "$_ISD" = "2" ]; then
+    echo "  ⚠️  NOT MEASURED (no warm container). Re-run after the first job:"
+    echo "     python3 installed_set_diff.py"
+fi

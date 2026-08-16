@@ -800,10 +800,102 @@ def run_pipeline_bg(body: dict):
             except Exception:
                 pass
 
+    # ── THE WORKER WRITES ITS OWN TERMINAL (2026-08-16, RULE-1) ──────────────
+    # MEASURED: on 2026-08-16, 48 jobs across 33 users died in the plan stage and
+    # NOT ONE of them wrote a terminal status. 0/48 emitted worker_envelope_write
+    # while 45 OTHER jobs in the same window did — so the instrument works and the
+    # zero is real. Every one of those users waited 888-900s (spread ~4s across 8
+    # samples: a TIMER, not work) before the dispatcher's reaper gave up and told
+    # them "we had trouble reaching the render service."
+    #
+    # The mechanism is this exact block. `_H.handler` was wrapped in try/FINALLY
+    # with NO except: the finally ran telemetry, the exception kept propagating,
+    # and the completion-POST below — the thing that settles the job in
+    # milliseconds — was never reached. So a failure the worker understood in
+    # seconds cost the user a quarter of an hour, every time, for any cause.
+    #
+    # THIS IS CAUSE-AGNOSTIC ON PURPOSE. It does not care WHY the pipeline died;
+    # it guarantees that a dead pipeline still terminalises itself. The next
+    # unknown failure — and there will be one — costs ~1s instead of 900s.
+    #
+    # FOUR PROPERTIES ARE LOAD-BEARING:
+    #  1. BaseException, not Exception. A SystemExit or a KeyboardInterrupt-shaped
+    #     death is exactly the case that leaves a row stranded.
+    #  2. It writes the DB DIRECTLY, never through write_job_status — that path
+    #     takes _JOB_STATUS_LOCK, and a safety net must not queue behind the
+    #     failure it insures against.
+    #  3. It is IDEMPOTENT: it reads status first and writes only when the row is
+    #     still non-terminal, so a handler that already failed honestly keeps its
+    #     own better error instead of being overwritten by this generic one.
+    #  4. It RETURNS the envelope rather than re-raising. run_pipeline_bg is
+    #     spawned as a retriable background function; re-raising would hand a
+    #     hard-failing job back for another full re-render. Returning also lets
+    #     the completion-POST below fire, which is what actually settles the user.
+    _TERMINAL = ("completed", "failed", "error", "cancelled", "canceled")
+
+    def _worker_terminalise(_exc):
+        """Last resort: make the row terminal NOW. Never raises."""
+        _jid = body.get("job_id")
+        _why = f"{type(_exc).__name__}: {str(_exc)[:400]}"
+        print(f"[worker-terminal] pipeline died job={_jid} {_why}", flush=True)
+        try:
+            import traceback as _tb
+            print("[worker-terminal] " + _tb.format_exc()[-2000:], flush=True)
+        except Exception:
+            pass
+        _envelope = {
+            "error": "WORKER_DIED",
+            "error_code": "WORKER_DIED",
+            "error_class": "worker",
+            "error_detail": _why,
+            "error_where": "worker/run_pipeline_bg (pipeline raised; worker "
+                           "terminalised itself rather than leaving the row for "
+                           "the 900s reaper)",
+        }
+        try:
+            _sb = getattr(_H, "supabase", None)
+            if _sb is None or not _jid:
+                print("[worker-terminal] NO SUPABASE/JOB_ID — cannot self-terminalise; "
+                      "the reaper will settle this one", flush=True)
+                return _envelope
+            _rows = _sb.table("video_jobs").select("status,result").eq("id", _jid).execute()
+            _data = getattr(_rows, "data", None) or []
+            _cur = (_data[0] or {}) if _data else {}
+            _status = (_cur.get("status") or "").strip().lower()
+            if _status in _TERMINAL:
+                print(f"[worker-terminal] row already terminal (status={_status!r}) — "
+                      f"leaving the handler's own error intact", flush=True)
+                return _envelope
+            _res = _cur.get("result") if isinstance(_cur.get("result"), dict) else {}
+            _res = dict(_res or {})
+            _res.update(_envelope)
+            _sb.table("video_jobs").update(
+                {"status": "failed", "result": _res,
+                 "error_message": "Your edit stopped partway through. That is on "
+                                  "us — nothing was wrong with your video."}
+            ).eq("id", _jid).execute()
+            print(f"[worker-terminal] job={_jid} terminalised by the WORKER "
+                  f"(saved the user the ~900s reaper wall)", flush=True)
+            try:
+                _sb.table("analytics_events").insert({
+                    "event": "worker_self_terminalised",
+                    "platform": "worker",
+                    "props": {"job_id": str(_jid), "why": _why[:300],
+                              "stage": getattr(_H, "_CPU_STAGE", ["?"])[0]},
+                }).execute()
+            except Exception:
+                pass
+        except Exception as _te:
+            print(f"[worker-terminal] SELF-TERMINALISE FAILED "
+                  f"({type(_te).__name__}: {_te}) — the reaper remains the net", flush=True)
+        return _envelope
+
     _cpu_thread = _threading.Thread(target=_cpu_sampler, daemon=True)
     _cpu_thread.start()
     try:
         result = _H.handler({"input": body})
+    except BaseException as _die:          # noqa: BLE001 — deliberate, see above
+        result = _worker_terminalise(_die)
     finally:
         _cpu_stop.set()
         try:
