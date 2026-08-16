@@ -861,16 +861,54 @@ def run_pipeline_bg(body: dict):
         _jid = body.get("job_id")
         _why = f"{type(_exc).__name__}: {str(_exc)[:400]}"
         print(f"[worker-terminal] pipeline died job={_jid} {_why}", flush=True)
+        # THE FRAME IS THE WHOLE POINT — persist it, do not just print it.
+        #
+        # v546 shipped writing only the exception STRING to the DB and printing
+        # the traceback to the container log. The first real death was
+        # "TypeError: float() argument must be a string or a real number, not
+        # 'dict'" — a perfectly true sentence that names no file, no line and no
+        # function. By the time it was read the container was gone (Modal streams
+        # logs only for LIVE containers), so the traceback was unrecoverable and
+        # the search collapsed to grepping every float() in a 41,000-line file:
+        # three undefended candidates in the zoom-projection path, no way to
+        # choose between them.
+        #
+        # A death that cannot say where it happened is only half-instrumented.
+        # The DEEPEST frame in OUR OWN code is what we want — the tail of a
+        # traceback is usually inside a library, while the last line WE wrote is
+        # the one to fix. Frames are captured with their source text so the row
+        # answers "what broke" without a repo checkout.
+        _frames = []
         try:
             import traceback as _tb
             print("[worker-terminal] " + _tb.format_exc()[-2000:], flush=True)
+            for _fr in reversed(_tb.extract_tb(_exc.__traceback__)):
+                _fn = str(_fr.filename or "")
+                if "/site-packages/" in _fn or "/usr/lib/" in _fn:
+                    continue          # library frame — not ours to fix
+                _frames.append({
+                    "file": _fn.rsplit("/", 1)[-1],
+                    "line": _fr.lineno,
+                    "func": _fr.name,
+                    "code": (_fr.line or "")[:200],
+                })
+                if len(_frames) >= 3:
+                    break
         except Exception:
             pass
+        if _frames:
+            _f0 = _frames[0]
+            print(f"[worker-terminal] DEEPEST OWN FRAME {_f0['file']}:{_f0['line']} "
+                  f"in {_f0['func']}() -> {_f0['code']}", flush=True)
         _envelope = {
             "error": "WORKER_DIED",
             "error_code": "WORKER_DIED",
             "error_class": "worker",
             "error_detail": _why,
+            # file:line:func of the deepest frame we own, plus up to 2 callers.
+            "error_frame": (f"{_frames[0]['file']}:{_frames[0]['line']} in "
+                            f"{_frames[0]['func']}()" if _frames else None),
+            "error_frames": _frames or None,
             "error_where": "worker/run_pipeline_bg (pipeline raised; worker "
                            "terminalised itself rather than leaving the row for "
                            "the 900s reaper)",

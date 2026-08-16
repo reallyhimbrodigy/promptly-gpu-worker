@@ -9652,6 +9652,22 @@ def _worker_writes_own_terminal():
                     "for another full re-render")
     assert '"worker_self_terminalised"' in _m, (
         "no liveness counter — the fix must be countable on real traffic [Rule 2]")
+    # (5) THE FRAME MUST BE PERSISTED, NOT MERELY PRINTED. v546 wrote only the
+    # exception STRING to the row and printed the traceback to the container log.
+    # The first real death — "TypeError: float() argument must be a string or a
+    # real number, not 'dict'" — is a true sentence naming no file, no line and no
+    # function, and Modal streams logs only for LIVE containers, so by the time it
+    # was read the traceback was gone. The search collapsed to grepping every
+    # float() in a 41,000-line file: three undefended candidates in the
+    # zoom-projection path with no way to choose between them. A death that cannot
+    # say WHERE it happened is only half-instrumented.
+    assert '"error_frame"' in _src and 'extract_tb' in _src, (
+        "the worker-death envelope no longer carries the traceback frame — the row "
+        "would name WHAT broke but never WHERE, and the container log that holds the "
+        "traceback is gone within minutes")
+    assert 'site-packages' in _src, (
+        "library frames are no longer filtered — the DEEPEST frame we OWN is the one "
+        "to fix; a tail inside a library names someone else's code")
 
 
 @check("CAPTION MODES ARE WIRED AND CARRY A LIVENESS COUNTER (2026-08-15, RULE-1) [§3.1 PHASE 1.2]. Keyword colour emphasis and number glorification are the two caption modes the references demand, and they are ONE spec reading MODE rather than magnitude: a short centre-frame line lets any number own the frame (REF-2's '13', '$20,000,000') while a longer lower-third line accents keywords and glorifies nothing bare (REF-1), which is why '3 tips' stays quiet inside a sentence. _keyword_emphasis_spec was written days ago and, like design_system.py before it, was COMPLETELY INERT — zero call sites. This check asserts the whole chain rather than the predicate alone: the page builder ACCEPTS an accent, the caption path PASSES one drawn from this job's design system via _caption_accent_for, emphasis is stamped ONLY when an accent exists (so no palette means captions render byte-identically to today rather than in an invented colour — a second palette on the surface the viewer reads most would look right in every cert and be wrong on every video), and the liveness counter fires. It runs cert_caption_modes.py for the behaviour: both reference modes, one hero per line, determinism, and no-palette-no-emphasis.")
