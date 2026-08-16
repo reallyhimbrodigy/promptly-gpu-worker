@@ -35,4 +35,16 @@ export interface EndCardProps extends MGTimingProps {
   // Logo asset URL for the sting. Absent -> wordmark from `title`, which is the
   // honest fallback rather than a placeholder mark.
   logoUrl?: string;
+
+  // ── DESIGN-SYSTEM OVERRIDES [§4.2 palette/type lock] ──────────────────────
+  // Absent = the card's own canvas-relative defaults (today's pixels). Present
+  // = the px the DESIGN SYSTEM resolved for this video (`type_scale.display` /
+  // `type_scale.body`, already resolved against the canvas — see
+  // brand_components._ds_parts, which records the 192000px bug that came from
+  // re-multiplying them). The spec adapter in ../brand forwards them.
+  titlePx?: number;
+  linePx?: number;
+  // Left/right inset in canvas px from the design system's safe zone. Absent =
+  // the card's own 8%-of-width padding.
+  sideMarginPx?: number;
 }

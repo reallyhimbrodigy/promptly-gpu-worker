@@ -13,19 +13,41 @@ const GLYPH: Record<string, string> = {
   globe: "○", phone: "✆", mail: "✉", at: "@",
 };
 
+// The card arrives slower than a lower third (it is the close, not a label) and
+// leaves fast, because the video ends behind it.
+const ENTER_FRAMES = 10;
+const EXIT_FRAMES = 6;
+
 export const EndCard: React.FC<EndCardProps> = ({
-  kind, title, lines = [], palette, logoUrl, ...timing
+  kind, title, lines = [], palette, logoUrl,
+  titlePx, linePx, sideMarginPx,
+  // Named explicitly, not `...timing` — see the note in NamePlate.
+  startMs, durationMs, enterFrames, exitFrames,
 }) => {
   const { width, height, fps } = useVideoConfig();
   const frame = useCurrentFrame();
-  const { phase, enterProgress, exitProgress } = useMGPhase(timing);
+  // useMGPhase REQUIRES its defaults object; one argument is a TypeError at
+  // mount, which would have killed the render the first time the card was ever
+  // dispatched. See the same note in NamePlate.
+  const { phase, enterProgress, exitProgress } = useMGPhase(
+    { startMs, durationMs, enterFrames, exitFrames },
+    { defaultEnterFrames: ENTER_FRAMES, defaultExitFrames: EXIT_FRAMES },
+  );
   if (phase === "before" || phase === "after") return null;
 
   const landscape = width >= height;
   const enter = easeOutCubic(clamp01(enterProgress));
   const out = 1 - clamp01(exitProgress);
-  const titleSize = Math.round(height * (landscape ? 0.085 : 0.055));
-  const lineSize = Math.round(titleSize * 0.34);
+  // Design-system px win over the canvas fraction (see EndCardProps.titlePx).
+  const titleSize = Number.isFinite(titlePx as number) && (titlePx as number) > 0
+    ? Math.round(titlePx as number)
+    : Math.round(height * (landscape ? 0.085 : 0.055));
+  const lineSize = Number.isFinite(linePx as number) && (linePx as number) > 0
+    ? Math.round(linePx as number)
+    : Math.round(titleSize * 0.34);
+  const sidePad = Number.isFinite(sideMarginPx as number)
+    ? Math.max(0, Math.min(Math.round(sideMarginPx as number), Math.round(width * 0.2)))
+    : Math.round(width * 0.08);
 
   // The sting is a spring so it lands with weight; the other kinds rise.
   const stingScale = spring({ frame, fps, config: { damping: 14, mass: 0.7 } });
@@ -74,7 +96,8 @@ export const EndCard: React.FC<EndCardProps> = ({
                             letterSpacing: "-0.03em" }}>{asText(title ?? "")}</div>}
         </div>
       ) : (
-        <div style={{ textAlign: "center", padding: `0 ${Math.round(width * 0.08)}px` }}>
+        <div style={{ textAlign: "center", padding: `0 ${sidePad}px`,
+                      maxWidth: width, overflowWrap: "break-word" }}>
           {title ? (
             <div style={{
               color: kind === "echo" ? palette.accent : palette.fg,

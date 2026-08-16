@@ -9572,6 +9572,75 @@ def _brand_components_wired():
     assert "ALL PASS" in _out, f"cert_brand_components did not report ALL PASS:\n{_out[-600:]}"
 
 
+@check("THE WORKER WRITES ITS OWN TERMINAL (2026-08-16, RULE-1) [Law 2, Rule 7]. MEASURED: 48 jobs across 33 DISTINCT USERS died in the plan stage on 2026-08-16 and NOT ONE wrote a terminal status — 0/48 emitted worker_envelope_write while 45 OTHER jobs in the same window did, so the instrument works and the zero is real. Every one of those users waited 888-900s (spread ~4s across 8 samples: a TIMER, not work) for the dispatcher\'s reaper to give up and tell them the render service was unreachable. THE MECHANISM WAS run_pipeline_bg ITSELF: `_H.handler` sat in a try/FINALLY with NO except, so the finally ran telemetry, the exception kept propagating, and the completion-POST below it — the thing that settles a job in milliseconds — was never reached. A failure the worker understood in seconds cost the user a quarter of an hour, for ANY cause. This check is deliberately CAUSE-AGNOSTIC: it does not care why a pipeline dies, only that a dead pipeline terminalises itself, so the NEXT unknown failure costs ~1s instead of 900s. FOUR PROPERTIES ARE LOAD-BEARING. (1) BaseException, not Exception — a SystemExit-shaped death is exactly the case that strands a row. (2) It writes the DB DIRECTLY and never through write_job_status, because that path takes _JOB_STATUS_LOCK and a safety net must not queue behind the failure it insures against. (3) It is IDEMPOTENT — it reads status first and writes only when the row is still non-terminal, so a handler that already failed honestly keeps its own better error. (4) It RETURNS the envelope instead of re-raising: run_pipeline_bg is spawned as a RETRIABLE background function, and re-raising would hand a hard-failing job back for another full re-render.")
+def _worker_writes_own_terminal():
+    import os as _os, ast as _ast
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _m = open(_os.path.join(_here, "modal_app.py"), encoding="utf-8").read()
+    _t = _ast.parse(_m)
+    _fn = next((n for n in _ast.walk(_t)
+                if isinstance(n, _ast.FunctionDef) and n.name == "run_pipeline_bg"), None)
+    assert _fn is not None, "run_pipeline_bg is gone"
+    _src = _ast.get_source_segment(_m, _fn)
+    # (1) the handler call must sit under an except that catches BaseException
+    _guarded = False
+    for _n in _ast.walk(_fn):
+        if not isinstance(_n, _ast.Try):
+            continue
+        _calls_handler = any(
+            isinstance(_c, _ast.Attribute) and _c.attr == "handler"
+            for _b in _n.body for _c in _ast.walk(_b))
+        if not _calls_handler:
+            continue
+        for _h in _n.handlers:
+            _nm = _ast.unparse(_h.type) if _h.type else "BARE"
+            if _nm in ("BaseException", "BARE"):
+                _guarded = True
+    assert _guarded, (
+        "_H.handler is NOT wrapped in an except BaseException — a raise escapes, the "
+        "completion-POST never runs, and the row waits ~900s for the reaper. This is "
+        "the exact shape that cost 33 users 15 minutes each on 2026-08-16")
+    # (2) direct write, never through the locked path
+    assert "_worker_terminalise" in _src, "the last-resort terminal writer is gone"
+    _wt = _src[_src.index("def _worker_terminalise"):]
+    _wt = _wt[:_wt.index("_cpu_thread = ")] if "_cpu_thread = " in _wt else _wt
+    assert 'table("video_jobs").update(' in _wt, (
+        "the last-resort write does not write video_jobs directly")
+    assert "write_job_status" not in _wt, (
+        "the last-resort terminal routes through write_job_status, which takes "
+        "_JOB_STATUS_LOCK — a safety net must not queue behind the failure it insures "
+        "against")
+    # (3) idempotent: it must READ status and refuse to clobber a terminal row
+    assert 'select("status' in _wt and "_TERMINAL" in _wt, (
+        "the last-resort write is not idempotent — it must read status first and leave "
+        "an already-terminal row alone, or it overwrites the handler\'s own better error")
+    # (4) must NOT re-raise — run_pipeline_bg is spawned RETRIABLE
+    for _n in _ast.walk(_fn):
+        if isinstance(_n, _ast.ExceptHandler) and (
+                _ast.unparse(_n.type) if _n.type else "BARE") in ("BaseException", "BARE"):
+            for _b in _ast.walk(_n):
+                assert not isinstance(_b, _ast.Raise), (
+                    "the worker-death handler RE-RAISES — run_pipeline_bg is spawned as a "
+                    "retriable background function, so that hands a hard-failing job back "
+                    "for another full re-render")
+    assert '"worker_self_terminalised"' in _m, (
+        "no liveness counter — the fix must be countable on real traffic [Rule 2]")
+
+
+@check("EVERY COMPONENT THE RENDERER CAN PRODUCE IS REQUESTABLE AND TAUGHT (2026-08-16, RULE-1) [§3.1, Law 2]. This is the SEVENTH instance of one class: a component built, mounted, called — and unreachable because one link of its chain was missing. The list so far is the design system, the caption emphasis spec, _start_render_frame_watcher, the BOOLEAN preview column, moodreel_editor, the unallowlisted analytics events, and the extra=\"forbid\" mirror that silently ate motionTokens. Each was found by hand, days late, by someone who happened to look. THE CHAIN IS: the renderer can produce it -> the response SCHEMA lets the model ask for it -> the PROMPT or a ROUTABLE guidance profile teaches it. Break any link and the component is dead while every cert stays green, because each link certs fine in isolation. The gate derives the component list from the RENDERER'S OWN DISPATCH TABLES (CAPTION_MAP/TRANSITION_MAP/ZOOM_MAP/MG_MAP in PromptlyRender.tsx) rather than from a list typed into the gate — a hand-maintained list is the same stale-list defect one file over. Parity is asserted BOTH directions per family: renderable-but-unrequestable means nobody can ask for it, requestable-but-unrenderable means the model asks for a crash. It also covers the SPEC-BUILT producers (build_name_plate/build_end_card), which have no enum name because they are requested by COPY — exactly why a map-based check alone could never catch them. THIS CHECK CAUGHT A LIVE ONE ON ITS FIRST RUN: handler read brand copy from edit_plan['post_package'], which is a DIFFERENT published contract (POST_PACKAGE_CONTRACT.md) and is never a key on edit_plan at all, so _brand_specs was {name_plate: None, end_card: None} on 100% of jobs and the liveness counter could only ever report 'no_copy_in_plan'. Guidance that names a component perfectly inside a profile NO ROUTE SELECTS is the same defect one layer up, and ARM 6 fails on it.")
+def _component_chain_complete():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_component_completeness.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, (
+        "cert_component_completeness FAILED\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "COMPLETENESS:" in l)[-1600:])
+    assert "ALL PASS" in _out, (
+        f"cert_component_completeness did not report ALL PASS:\n{_out[-800:]}")
+
+
 @check("CAPTION MODES ARE WIRED AND CARRY A LIVENESS COUNTER (2026-08-15, RULE-1) [§3.1 PHASE 1.2]. Keyword colour emphasis and number glorification are the two caption modes the references demand, and they are ONE spec reading MODE rather than magnitude: a short centre-frame line lets any number own the frame (REF-2's '13', '$20,000,000') while a longer lower-third line accents keywords and glorifies nothing bare (REF-1), which is why '3 tips' stays quiet inside a sentence. _keyword_emphasis_spec was written days ago and, like design_system.py before it, was COMPLETELY INERT — zero call sites. This check asserts the whole chain rather than the predicate alone: the page builder ACCEPTS an accent, the caption path PASSES one drawn from this job's design system via _caption_accent_for, emphasis is stamped ONLY when an accent exists (so no palette means captions render byte-identically to today rather than in an invented colour — a second palette on the surface the viewer reads most would look right in every cert and be wrong on every video), and the liveness counter fires. It runs cert_caption_modes.py for the behaviour: both reference modes, one hero per line, determinism, and no-palette-no-emphasis.")
 def _caption_modes_wired():
     import os as _os, subprocess as _sub, sys as _sys

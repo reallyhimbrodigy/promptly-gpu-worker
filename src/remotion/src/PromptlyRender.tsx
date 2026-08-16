@@ -87,6 +87,14 @@ import {
   DropBanner, DropCard, PillMarquee, TimelineRoadmap, MouseDrag,
 } from "./motion-graphics";
 
+// ── LUMEN VOCABULARY [§3.1] — the SPEC-BUILT components D and F ─────────────
+// NamePlate and EndCard do not arrive as authored MG props like the 26 above.
+// They arrive as SPEC DICTS built by brand_components.py from the design
+// system, so they dispatch through adapters that map spec -> props. Registering
+// the bare components here would render a plate with no name (the spec's key is
+// `name` inside a different shape) — the adapter IS the wiring.
+import { NamePlateMG, EndCardMG } from "./motion-graphics/brand";
+
 // Flare motion-token system (Workstream D). The provider gates the whole
 // system on one flag; migrated components read useMotionTokens(). GLIDE/
 // EASE_GLIDE/dur drive the token-ON b-roll path below.
@@ -136,6 +144,13 @@ export const MG_MAP: Record<string, React.FC<any>> = {
   Timeline, Reticle, RankedList, PullQuote,
   PillCluster, Stamp, BarRace, SectionDivider, EditorialQuote, StepDivider,
   DropBanner, DropCard, PillMarquee, TimelineRoadmap, MouseDrag,
+  // LUMEN D + F — dispatched through their spec adapters (see the import note).
+  // The KEY is the canonical component name because that is what every mirror
+  // agrees on: type_registries.VALID_MG_TYPES, render_schemas.MotionGraphicType,
+  // handler's _MG_TYPES Literal, and types.ts MotionGraphicType. The VALUE is
+  // the adapter. Gate: brand-mg-wiring.test.mjs.
+  NamePlate: NamePlateMG,
+  EndCard: EndCardMG,
 };
 
 // ─── Per-clip renderer ─────────────────────────────────────────────────────

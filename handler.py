@@ -2421,6 +2421,33 @@ class _VideoPlan(BaseModel):
     editorial_vision: str = Field(max_length=800)
 
 
+class _BrandCopy(BaseModel):
+    """[§3.1 components D + F] The WORDS for the name-plate and the end-card.
+
+    THE ONLY THING AUTHORED HERE IS COPY. Colour, type size, safe zones, hold
+    duration and placement are all derived from the design system built off this
+    user's own footage (brand_components.py) — a component that picks its own
+    colour is a second design system competing with the real one.
+
+    OBSERVED ONLY, NEVER INVENTED. Fill a field only from what the video itself
+    states — the speaker says their name, role or brand, or it is legible on
+    screen (an existing lower third, a slide, a wordmark, a handle). A name
+    guessed from a face, a voice or a topic is a fabrication printed on a real
+    person's video. Omit the field instead: every field is optional, an absent
+    field renders nothing, and there is no default and no placeholder.
+    """
+    # NAME-PLATE (D): a lower third naming the speaker, held ~3s, ONCE, early.
+    # speaker_name alone is a valid plate; an absent role is DROPPED, not blank.
+    speaker_name: Optional[str] = Field(default=None, max_length=48)
+    speaker_role: Optional[str] = Field(default=None, max_length=64)
+    # END-CARD (F): the held closing frame. brand_name is the headline; handle
+    # is the headline when the video belongs to a creator rather than a
+    # business; brand_subline is the contact/site line beneath it.
+    brand_name: Optional[str] = Field(default=None, max_length=32)
+    handle: Optional[str] = Field(default=None, max_length=32)
+    brand_subline: Optional[str] = Field(default=None, max_length=48)
+
+
 class PostCutPlan(BaseModel):
     """Schema for the SECOND Gemini call — visual placement on a perfect transcript.
 
@@ -2510,6 +2537,15 @@ class PostCutPlan(BaseModel):
     # result.post_package + video_jobs.post_package (POST_PACKAGE_CONTRACT.md).
     post_caption: Optional[str] = Field(default=None, max_length=120)
     post_hook: Optional[str] = Field(default=None, max_length=60)
+    # BRAND COPY (2026-08-16) [§3.1 PHASE 1.3] — the words for the name-plate
+    # (D) and the end-card (F), the first two components a VIEWER CAN SEE.
+    # Nested-optional with default None: omission-tolerant exactly like
+    # _GeneratedScene.stat (whose Vertex acceptance was proven first), and
+    # byte-identical output when the model has nothing OBSERVED to put here.
+    # brand_components.build_brand_specs turns these into specs; a missing field
+    # returns None from its builder and NOTHING renders — which is correct, and
+    # materially different from a plate that says nothing.
+    brand_copy: Optional[_BrandCopy] = None
 
 
 class EditPlan(BaseModel):
@@ -15472,8 +15508,17 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # broken" and "the copy was never supplied" stay distinguishable.
             try:
                 import brand_components as _bc
-                _brand_src = (edit_plan.get("post_package") or {}) if isinstance(
-                    edit_plan.get("post_package"), dict) else {}
+                # THE COPY COMES FROM THE PLAN'S brand_copy OBJECT. This read
+                # "post_package" until 2026-08-16, which is a DIFFERENT contract
+                # ({edit_rationale, post_caption, post_hook} —
+                # POST_PACKAGE_CONTRACT.md), is never a key on edit_plan at all,
+                # and carries none of these five fields — so _brand_src was {}
+                # on EVERY job, both builders returned None 100% of the time,
+                # and the liveness counter could only ever report
+                # "no_copy_in_plan". cert_component_completeness.py now FAILS if
+                # this key is not a declared field of the response schema.
+                _brand_src = (edit_plan.get("brand_copy") or {}) if isinstance(
+                    edit_plan.get("brand_copy"), dict) else {}
                 edit_plan["_brand_specs"] = _bc.build_brand_specs(
                     edit_plan.get("_design_system"),
                     name=_brand_src.get("speaker_name"),
