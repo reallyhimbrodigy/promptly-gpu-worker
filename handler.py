@@ -910,6 +910,31 @@ def _caption_accent_for(edit_plan):
         return None
 
 
+def _caption_route_has_no_captions(job_id, route):
+    """Record that a route produced NO CAPTIONS BY DESIGN [Rule 2].
+
+    Without this, caption-mode reach reads 0% and every reader has to
+    re-discover why. Today's mix is moodreel 18 / minimal_speech_uncut 9 /
+    minimal 2 of 46 — all through _run_minimal_pipeline, which emits "0% cuts and
+    0% captions" by design. So a 0% caption-emphasis rate is CORRECT and says
+    nothing about the component.
+
+    The distinction the board needs is "the component did not fire" versus "there
+    was nothing for it to fire on", and only one of those is a defect.
+    """
+    try:
+        if supabase is None or not job_id:
+            return
+        supabase.table("analytics_events").insert({
+            "event": "caption_modes_not_applicable",
+            "platform": "worker",
+            "props": {"job_id": str(job_id), "route": str(route or "?"),
+                      "reason": "route builds no caption pages"},
+        }).execute()
+    except Exception:
+        pass
+
+
 def _caption_modes_liveness(job_id, pages, accent):
     """PHASE 1 LIVENESS COUNTER for caption modes [Rule 2].
 
@@ -14293,7 +14318,36 @@ def generate_edit_gemini(
     # which 1-2fps carries. PROMPTLY_PROXY_SAMPLE_FPS lowers it (18->2 ~= 9x fewer
     # video tokens -> lower TTFB). Default 18 = byte-identical. A/B decides quality.
     _sample_fps = int(sample_fps_override or os.environ.get("PROMPTLY_PROXY_SAMPLE_FPS", "18") or "18")
-    _video_fps_meta = genai_types.VideoMetadata(fps=_sample_fps) if hasattr(genai_types, "VideoMetadata") else None
+    # CONSTRUCTED DEFENSIVELY (2026-08-15) — this line took down the entire
+    # editorial path and nothing noticed.
+    #
+    # `hasattr(genai_types, "VideoMetadata")` proves the CLASS exists. It does
+    # NOT prove the class accepts `fps`, and google-genai is pinned ">=1.0,<2" —
+    # a RANGE. A 1.x that drops the field makes this a pydantic
+    # extra_forbidden ValidationError, raised BEFORE any Gemini call, on EVERY
+    # editorial job. Measured in the exact production image on 2026-08-15: 100%
+    # failure at this line.
+    #
+    # It was invisible only because PROMPTLY_EDITORIAL_LIVE is off, so live
+    # traffic never reaches here. Flipping that flag would have converted a
+    # dormant dependency break into a total editorial outage in one step.
+    #
+    # This is the same shape as the postgrest timeout: "the constructor accepted
+    # it" and "the field is in effect" are different claims, and only the second
+    # one is worth anything. Degrade to no fps hint rather than raise — a slower,
+    # more expensive call beats no call at all.
+    _video_fps_meta = None
+    if hasattr(genai_types, "VideoMetadata"):
+        try:
+            _video_fps_meta = genai_types.VideoMetadata(fps=_sample_fps)
+        except Exception as _vm_e:
+            _video_fps_meta = None
+            if not globals().get("_VIDEO_FPS_META_WARNED"):
+                globals()["_VIDEO_FPS_META_WARNED"] = True
+                print(f"[gemini] !! VideoMetadata(fps=) REJECTED by the installed "
+                      f"google-genai ({type(_vm_e).__name__}) — proceeding WITHOUT the "
+                      f"fps hint. The sample-rate lever is inert until the SDK pin is "
+                      f"corrected; editorial still runs.", flush=True)
     _video_part_fallback = None
     if inline_video_bytes and video_reference_url:
         # LEVER 4: the call references the job's ONE uploaded proxy; the
@@ -34470,6 +34524,9 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         result_payload["hls_manifest_url"] = _hls_url
     if _thumbnail_url:
         result_payload["thumbnail_url"] = _thumbnail_url
+    # This route emits no caption pages, so caption-mode reach is 0% BY DESIGN.
+    # Recording it turns a bare zero into an explained one.
+    _caption_route_has_no_captions(job_id, _route_name)
     write_job_status(
         job_id, status="completed", phase="Done", progress=100,
         result={

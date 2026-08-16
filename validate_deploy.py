@@ -9482,6 +9482,27 @@ def _dual_write_fail_closed():
         "column, never guess that it exists")
 
 
+@check("NO SDK OBJECT IS CONSTRUCTED ON A hasattr GUARD ALONE (2026-08-15, RULE-1) [Law 2]. handler.py:14321 built genai_types.VideoMetadata(fps=...) behind `hasattr(genai_types, \"VideoMetadata\")`. That guard proves the CLASS EXISTS and nothing more — it does not prove the class accepts `fps`. google-genai is pinned \">=1.0,<2\", a RANGE, so a 1.x that drops the field turns this into a pydantic extra_forbidden ValidationError raised BEFORE any Gemini call, on EVERY editorial job. MEASURED IN THE EXACT PRODUCTION IMAGE on 2026-08-15: 100% failure at that line, python3.10, the real pins. The entire editorial path was DOWN and nothing noticed, because PROMPTLY_EDITORIAL_LIVE is off and live traffic never reaches it — so flipping that flag would have converted a dormant dependency break into a total editorial outage in a single step. This is the same shape as the postgrest timeout: 'the constructor accepted it' and 'the field is in effect' are different claims and only the second is worth anything. The construction must be wrapped so it DEGRADES to no fps hint (a slower, costlier call beats no call), and the degradation must be announced once rather than silently.")
+def _no_bare_hasattr_sdk_construction():
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "genai_types.VideoMetadata(fps=" in _h, "the fps hint construction is gone entirely"
+    _i = _h.index("genai_types.VideoMetadata(fps=")
+    _win = _h[max(0, _i - 700):_i + 700]
+    assert "try:" in _win and "except Exception" in _win, (
+        "VideoMetadata(fps=) is constructed WITHOUT a try — a google-genai build that "
+        "drops the field raises before any Gemini call and takes the whole editorial path "
+        "down, exactly as measured in the production image on 2026-08-15")
+    assert "_VIDEO_FPS_META_WARNED" in _h, (
+        "the degradation is silent — an inert sample-rate lever must announce itself once, "
+        "or it becomes another dark flag nobody can see")
+    # the same class, one line up: a bare hasattr must not be the ONLY guard
+    assert 'if hasattr(genai_types, "VideoMetadata"):' in _h, (
+        "the hasattr guard was removed rather than paired with a try — keep both: hasattr "
+        "for the missing-class case, try for the missing-FIELD case")
+
+
 @check("THE RECIPE IS PERSISTED AT PLAN TIME (2026-08-15, RULE-1) [Law 2]. The recipe reached the DB only in the TERMINAL write, and the terminal write is exactly what never happens for the hang class: last_stage was upload_complete on 286/286 kills and 0 of 49 jobs ever emitted a worker_envelope_write. So envelope-lost rows carry NO recipe (0/21 measured) and the quality board loses its denominator for precisely the jobs that failed — for a reason that has nothing to do with quality. The plan exists minutes earlier, long before the point every failure sits at, so writing it there means a lost terminal can no longer take the recipe with it. THREE PROPERTIES ARE LOAD-BEARING. It must NOT go through write_job_status: that path takes _JOB_STATUS_LOCK, the very thing suspected of wedging, and a safety net that queues behind the failure it insures against is not a safety net. It must be FAIL-CLOSED on column existence, because migration 03 may not have run and PostgREST rejects a whole patch on an unknown column. And it must strip underscored keys, because those are render-side signals the sanitizer removes everywhere else — persisting them here would put megabytes of word timings and design specs into a column meant for the recipe.")
 def _plan_time_recipe_persist():
     import os as _os

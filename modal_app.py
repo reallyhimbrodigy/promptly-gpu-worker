@@ -2596,6 +2596,105 @@ def burst_ab():
     print("BURST_AB " + json.dumps(cert_burst_floor_ab.remote(), indent=2))
 
 
+# ── FIRST LUMEN EDIT (build lane) ────────────────────────────────────────────
+# WHY THIS LIVES HERE AND NOT IN ITS OWN APP FILE. I built a standalone harness
+# app for this and it failed five times on IMAGE PARITY: google-genai unpinned
+# resolved a 2.x without VideoMetadata(fps=...); the pinned range still resolved
+# a 1.x without it; pinning pydantic did not help; and importing modal_app to
+# borrow its image collided on App lifecycle (APP_STATE_STOPPED), because the
+# import brings the App, not just the image.
+#
+# Every one of those tested a DIFFERENT product than the one that ships. Defining
+# the function HERE makes parity structural — it inherits the exact image,
+# secrets and pins production runs, the same way cert_burst_floor_ab does.
+#
+# It is a BUILD-LANE function: mark_build_lane() opens the editorial gate for
+# this container only, so it needs no PROMPTLY_EDITORIAL_LIVE flip and cannot
+# affect live traffic.
+@app.function(image=image, cpu=8, memory=16384, timeout=1800,
+              secrets=[modal.Secret.from_name("promptly-secrets"),
+                       modal.Secret.from_name("gemini-vertex")],
+              volumes={"/prewarm": prewarm_volume})
+def lumen_first_edit(source_url: str = "", source_bytes: bytes = b"") -> dict:
+    import sys as _sys, os as _os, time as _time, json as _json, traceback as _tb
+    _sys.path.insert(0, "/")
+    import build_lane as _bl
+    _bl.mark_build_lane()
+    _os.environ["PREMIUM_PIPELINE_ENABLED"] = "1"
+    import handler as _H
+
+    out = {"ok": False, "build_lane": _H._build_lane(),
+           "editorial_suppressed": _H._editorial_suppressed()}
+    if out["editorial_suppressed"]:
+        out["why"] = "editorial suppressed inside the build lane — the asymmetry is broken"
+        return out
+    _t0 = _time.time()
+    try:
+        _src = "/tmp/lumen_src.mp4"
+        if source_bytes:
+            # Passed as bytes rather than mounted: the golden refs are 75-91MB
+            # and baking one into the PRODUCTION image to run a build-lane cert
+            # would bloat every render container for a one-off.
+            with open(_src, "wb") as _f:
+                _f.write(source_bytes)
+            print(f"[lumen-first] source from bytes ({len(source_bytes) / 1e6:.1f}MB)", flush=True)
+        else:
+            import subprocess as _sp
+            _sp.run(["curl", "-sL", "-o", _src, source_url], check=True, timeout=600)
+        _dur = _H.probe_duration(_src)
+        _tr = _H.transcribe_audio(_src, keywords=None, language="multi") or {}
+        _words = _tr.get("words") or []
+        print(f"[lumen-first] dur={_dur} words={len(_words)}", flush=True)
+        _plan = _H.generate_edit_gemini(
+            _src, vibe="make it viral", duration=_dur, trend_context=None,
+            deepgram_words=_words, shot_changes=None, shot_change_scores=None,
+            vocal_emphasis=None, source_loudness=None, face_positions=None,
+            smoothed_face_trajectory=None, user_style_profile=None, premium=True)
+        _scenes = (_plan or {}).get("generated_scenes") or []
+        out.update({
+            "ok": True, "wall_s": round(_time.time() - _t0, 1),
+            "scene_count": len(_scenes),
+            "scene_kinds": [(s or {}).get("kind") or (s or {}).get("type")
+                            for s in _scenes][:12],
+            "clips": len((_plan or {}).get("clips") or []),
+            "plan_keys": sorted(k for k in (_plan or {}) if not str(k).startswith("_")),
+            "has_design_system": bool((_plan or {}).get("_design_system")),
+            "accent": ((((_plan or {}).get("_design_system") or {}).get("palette")
+                        or {}).get("accent")),
+            "brand_specs": {k: bool(v) for k, v in
+                            (((_plan or {}).get("_brand_specs")) or {}).items()},
+        })
+    except Exception as _e:
+        out.update({"ok": False, "error": f"{type(_e).__name__}: {_e}",
+                    "trace": _tb.format_exc()[-2000:],
+                    "wall_s": round(_time.time() - _t0, 1)})
+    print("[lumen-first] RESULT " + _json.dumps(out, default=str)[:1800], flush=True)
+    return out
+
+
+@app.local_entrypoint()
+def lumen_first(source_url: str = "", source_path: str = ""):
+    """modal run modal_app.py::lumen_first --source-path golden/lumen-refs/ref2-...mp4"""
+    import json, os
+    _b = b""
+    if source_path:
+        with open(source_path, "rb") as _f:
+            _b = _f.read()
+        print(f"  uploading {os.path.basename(source_path)} "
+              f"({len(_b) / 1e6:.1f}MB) to the build lane…")
+    elif not source_url:
+        print("give --source-path (a local file) or --source-url (a public mp4)")
+        return
+    r = lumen_first_edit.remote(source_url, _b)
+    print(json.dumps(r, indent=2, default=str)[:2500])
+    n = (r or {}).get("scene_count")
+    if r.get("ok"):
+        print(f"\n  scenes planned : {n}")
+        print(f"  scene spend    : ${0.14 * (n or 0):.2f}  (@ $0.14/scene)")
+        print(f"  plan wall      : {r.get('wall_s')}s")
+        print(f"  design system  : {r.get('has_design_system')} accent={r.get('accent')}")
+
+
 # ── REGRESSION CORPUS (Zac 2026-08-04, "gone for good") ──────────────────────
 # The failure corpus retains the exact source that killed every job. This RE-RUNS
 # one saved source per FIXED sub-code on every deploy and asserts it now COMPLETES
