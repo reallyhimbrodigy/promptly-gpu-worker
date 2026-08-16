@@ -148,3 +148,29 @@ rate, flash is a *rate* win but NOT a cost win. If flash sits in a cheaper
 per-image tier — as flash-class models normally do — it is both. **That is a
 one-line answer from the billing console and it changes the Phase 2 cost model,
 so it is worth asking for.**
+
+---
+
+## 2026-08-16 — first Lumen edit, build lane
+
+| item | priced in advance | actual | note |
+|---|---|---|---|
+| FIRST LUMEN EDIT (`lumen_first`, ref2 vertical) | **$1.20 ceiling** | *pending* | editorial call + $0.14/scene images; run started 13:11:46Z |
+
+Stated before the run, per Rule 6. The ceiling is a REFUSAL point, not a
+forecast: the realistic band is $0.10–$0.60 depending on how many scenes the
+plan asks for, and a Vertex denial costs only the container seconds (~cents)
+because the call dies before any image is generated.
+
+WHY THIS SPEND IS JUSTIFIED, having been deferred four times: nothing else
+exercises the editorial path. Live traffic is deterministic by design
+(`_editorial_suppressed()` is true whenever `PROMPTLY_EDITORIAL_LIVE` is off),
+so the ONLY way to learn whether the planner produces scenes is to run it in the
+build lane, where the gate opens without touching the live flag. Every previous
+attempt cost $0 and answered nothing — five died on dependency drift before
+reaching Gemini, which is precisely the class v547 closed by restoring
+google-genai 1.75.0.
+
+**Session running total is still owed a reconciliation against the invoice** —
+the per-run figures here are priced, not measured, and `modal billing report
+--csv` is the only truth. That pull is the standing weekly line.
