@@ -2645,11 +2645,18 @@ def lumen_first_edit(source_url: str = "", source_bytes: bytes = b"") -> dict:
         _tr = _H.transcribe_audio(_src, keywords=None, language="multi") or {}
         _words = _tr.get("words") or []
         print(f"[lumen-first] dur={_dur} words={len(_words)}", flush=True)
+        # generate_edit_gemini does NOT read the video off the path — it needs
+        # the bytes inline or a pre-uploaded gemini_file. Production uploads a
+        # PROXY; here the source is already a small re-encode, so inline is both
+        # sufficient and cheaper.
+        with open(_src, "rb") as _vf:
+            _vbytes = _vf.read()
         _plan = _H.generate_edit_gemini(
             _src, vibe="make it viral", duration=_dur, trend_context=None,
             deepgram_words=_words, shot_changes=None, shot_change_scores=None,
             vocal_emphasis=None, source_loudness=None, face_positions=None,
-            smoothed_face_trajectory=None, user_style_profile=None, premium=True)
+            smoothed_face_trajectory=None, user_style_profile=None, premium=True,
+            inline_video_bytes=_vbytes)
         _scenes = (_plan or {}).get("generated_scenes") or []
         out.update({
             "ok": True, "wall_s": round(_time.time() - _t0, 1),
