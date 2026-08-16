@@ -1612,12 +1612,30 @@ def _no_hardcoded_transition_set_drift():
 def _parse_ts_literal_block(ts_src: str, type_name: str) -> set:
     """Extract the string members of a TypeScript `export type X = | "a" | "b" ...`
     Literal block. Used by the Python↔TypeScript boundary checks below to
-    pin each TS Literal against the canonical Python set."""
+    pin each TS Literal against the canonical Python set.
+
+    COMMENTS ARE STRIPPED FIRST, and that is load-bearing. The member regex
+    matches a RUN of consecutive `| "X"` entries, so a single explanatory
+    comment placed BETWEEN members silently truncates the union at that point —
+    every name after the comment vanishes from the parsed set and the check
+    reports a Python↔TS drift that does not exist. It did exactly that when
+    NamePlate/EndCard were added with a comment above them explaining that they
+    are spec-built: both were present in types.ts and the gate insisted they
+    were missing.
+
+    That is the EIGHTH time in this repo a check has failed on its own
+    documentation rather than on the code. The fix is always the same and it is
+    applied here once, at the shared parser, so it covers all four TS boundary
+    checks instead of being re-learned per call site."""
     import re
+    _clean = re.sub(r"/\*[\s\S]*?\*/", "", ts_src)
+    # Only a comment that OPENS a line — never `https://`, which appears inside
+    # string members and must survive.
+    _clean = re.sub(r"^\s*//.*$", "", _clean, flags=re.M)
     _match = re.search(
         r"export\s+type\s+" + re.escape(type_name) +
         r"\s*=\s*((?:\s*\|\s*\"[^\"]+\")+)",
-        ts_src,
+        _clean,
     )
     assert _match, f"TypeScript `export type {type_name}` Literal block not found"
     return set(re.findall(r'"([^"]+)"', _match.group(1)))
@@ -3605,7 +3623,15 @@ def _recipe_omittable_field_contract():
         # DESIGN: pure narrative fields, no validator or renderer reads them;
         # the only consumer is _build_post_package which .get()s with None →
         # the package key is simply absent (never a raise, never a drop).
-        "PostCutPlan": {"cut_refinements", "existing_caption_region",
+        # brand_copy: D+F (2026-08-16) — omission-tolerant BY DESIGN and
+        # VERIFIED, not assumed. The single reader is
+        # `edit_plan.get("brand_copy") or {}` behind an isinstance guard, so an
+        # omitted field yields {} -> build_brand_specs returns
+        # {name_plate: None, end_card: None} -> NOTHING renders, which is
+        # byte-identical to the world before the field existed. Vertex DOES drop
+        # empty optionals (project_vertex_migration), and that is the correct
+        # outcome here: no observed name means no plate, never a blank one.
+        "PostCutPlan": {"brand_copy", "cut_refinements", "existing_caption_region",
                         "edit_rationale", "generated_scenes", "notes",
                         "post_caption", "post_hook",
                         "preserved_silences", "source_text_regions"},
@@ -9668,6 +9694,32 @@ def _worker_writes_own_terminal():
     assert 'site-packages' in _src, (
         "library frames are no longer filtered — the DEEPEST frame we OWN is the one "
         "to fix; a tail inside a library names someone else's code")
+
+
+@check("EVERY COMPONENT THE RENDERER CAN PRODUCE IS REQUESTABLE AND TAUGHT (2026-08-16, RULE-1) [§3.1, Law 2]. This is the SEVENTH instance of one class: a component built, mounted, called — and unreachable because one link of its chain was missing. The list so far is the design system, the caption emphasis spec, _start_render_frame_watcher, the BOOLEAN preview column, moodreel_editor, the unallowlisted analytics events, and the extra=\"forbid\" mirror that silently ate motionTokens. Each was found by hand, days late, by someone who happened to look. THE CHAIN IS: the renderer can produce it -> the response SCHEMA lets the model ask for it -> the PROMPT or a ROUTABLE guidance profile teaches it. Break any link and the component is dead while every cert stays green, because each link certs fine in isolation. The gate derives the component list from the RENDERER'S OWN DISPATCH TABLES (CAPTION_MAP/TRANSITION_MAP/ZOOM_MAP/MG_MAP in PromptlyRender.tsx) rather than from a list typed into the gate — a hand-maintained list is the same stale-list defect one file over. Parity is asserted BOTH directions per family: renderable-but-unrequestable means nobody can ask for it, requestable-but-unrenderable means the model asks for a crash. It also covers the SPEC-BUILT producers (build_name_plate/build_end_card), which have no enum name because they are requested by COPY — exactly why a map-based check alone could never catch them. THIS CHECK CAUGHT A LIVE ONE ON ITS FIRST RUN: handler read brand copy from edit_plan['post_package'], which is a DIFFERENT published contract (POST_PACKAGE_CONTRACT.md) and is never a key on edit_plan at all, so _brand_specs was {name_plate: None, end_card: None} on 100% of jobs and the liveness counter could only ever report 'no_copy_in_plan'. Guidance that names a component perfectly inside a profile NO ROUTE SELECTS is the same defect one layer up, and ARM 6 fails on it.")
+def _component_chain_complete():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_component_completeness.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, (
+        "cert_component_completeness FAILED\n"
+        + "\n".join(l for l in _out.splitlines() if "[FAIL]" in l or "COMPLETENESS:" in l)[-1600:])
+    assert "ALL PASS" in _out, (
+        f"cert_component_completeness did not report ALL PASS:\n{_out[-800:]}")
+
+
+@check("THE BRAND COMPONENTS ARE MOUNTABLE, NOT JUST DISPATCHABLE (2026-08-16, RULE-1) [§3.1 PHASE 1.3]. LINK SEVEN. NamePlate and EndCard were registered, taught, spec-built and dispatch-mapped — and they would have CRASHED THE RENDER on the first job that requested one. Both called `useMGPhase(timing)` with ONE argument where it destructures TWO, which is `TypeError: Cannot destructure property defaultEnterFrames of undefined` AT MOUNT: RENDER_FATAL, the user's whole video lost, on a component every other layer had certified as ready. All 26 other MGs pass the defaults object; these two were written against an older signature and nothing compared them. THAT IS THE POINT — every other link asks 'is it declared?', and none of them asks 'does it RUN?'. This runs src/remotion/brand-mg-wiring.test.mjs: MG_MAP dispatches the spec ADAPTERS rather than the bare components (the adapter maps brand_components.py's spec dict onto component props), every style field the producer emits is both MAPPED and actually dereferenced (a map nobody reads is a comment, not wiring), the vocabulary matches VALID_MG_TYPES in BOTH directions, and the hook-arity check that would have caught the crash. Offline, $0, no network, no render — it parses the real source and derives the component list from the producer and the registry rather than from a list typed into the test, because a hand-maintained list is the same stale-list defect one file over.")
+def _brand_mg_mountable():
+    import os as _os, subprocess as _sub
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _t = _os.path.join(_here, "src", "remotion", "brand-mg-wiring.test.mjs")
+    assert _os.path.exists(_t), "the brand MG wiring smoke is gone — link seven is unguarded"
+    _r = _sub.run(["node", _t], capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"brand-mg-wiring FAILED\n{_out[-1600:]}"
+    assert "checks passed" in _out, f"brand-mg-wiring did not report passing:\n{_out[-600:]}"
 
 
 @check("CAPTION MODES ARE WIRED AND CARRY A LIVENESS COUNTER (2026-08-15, RULE-1) [§3.1 PHASE 1.2]. Keyword colour emphasis and number glorification are the two caption modes the references demand, and they are ONE spec reading MODE rather than magnitude: a short centre-frame line lets any number own the frame (REF-2's '13', '$20,000,000') while a longer lower-third line accents keywords and glorifies nothing bare (REF-1), which is why '3 tips' stays quiet inside a sentence. _keyword_emphasis_spec was written days ago and, like design_system.py before it, was COMPLETELY INERT — zero call sites. This check asserts the whole chain rather than the predicate alone: the page builder ACCEPTS an accent, the caption path PASSES one drawn from this job's design system via _caption_accent_for, emphasis is stamped ONLY when an accent exists (so no palette means captions render byte-identically to today rather than in an invented colour — a second palette on the surface the viewer reads most would look right in every cert and be wrong on every video), and the liveness counter fires. It runs cert_caption_modes.py for the behaviour: both reference modes, one hero per line, determinism, and no-palette-no-emphasis.")

@@ -211,6 +211,45 @@ otherwise.
     axes={"cuts": "preserve-speech"},
 ))
 
+_register(GuidanceProfile(
+    name="brand_identity",
+    kind="intent",
+    # SHORT ON PURPOSE. These two components were built, mounted, called and
+    # counted, and were still unrequestable because nothing ever told the model
+    # they existed [Rule 2, the built-not-wired class]. The cure is the smallest
+    # block that closes that — WHAT the two are, WHEN each earns its place, and
+    # the one hard rule. Everything else about them (colour, type size, safe
+    # zones, hold duration, placement) is derived from the palette in
+    # brand_components.py, so there is nothing else for the model to author and
+    # nothing else worth spending prompt on.
+    guidance="""=== GUIDANCE PROFILE: SPEAKER + BRAND IDENTITY ===
+Two identity components can ride this edit. You author only their WORDS, in
+`brand_copy` — colour, size, safe zones and hold all come from the palette
+already derived from THIS footage, so there is nothing to style and no
+placement to pick.
+- NAME-PLATE — a lower third naming the speaker, held ~3s, ONCE, early.
+  **FITS:** a talking head whose CREDIBILITY carries the claim — an expert, a
+  founder, a title that changes how the line lands. **FIGHTS:** a casual or
+  personal clip, a face the audience already knows, a name never stated.
+- END-CARD — the held closing frame, so the edit ENDS rather than stops.
+  **FITS:** a close that hands the viewer an owner or an ask — a business, a
+  handle, a site. **FIGHTS:** a clip that lands on its own punchline, with
+  nothing to hand over.
+
+OBSERVED ONLY, NEVER INVENTED — the one hard rule. Fill a `brand_copy` field
+only from what this video itself states: the speaker says their name, role or
+brand, or it is legible on screen (an existing lower third, a slide, a
+wordmark, a handle). A name guessed from a face, a voice or a topic is a
+fabrication printed on a real person's video. Omit the field instead — omitted
+is CORRECT, renders nothing, and has no placeholder.""",
+    # A NEW axis, deliberately: `brand-copy` is pinned by no other profile, so
+    # this block stacks with every route (premium, hype, moodreel, minimal,
+    # speech-preservation) without ever raising GuidanceContradiction. Pinning
+    # an existing axis — pace, spine, decoration — would make identity copy
+    # mutually exclusive with an editorial register it has nothing to do with.
+    axes={"brand-copy": "observed-only"},
+))
+
 
 # ── Deterministic router ─────────────────────────────────────────────────────
 # route name (the zero-reject router's vocabulary, H35) → profile stack.
@@ -224,6 +263,14 @@ _ROUTE_STACKS: Dict[str, Tuple[str, ...]] = {
     "moodreel": ("moodreel_aesthetic",),
     "minimal": ("minimal_restraint",),
     "minimal_speech_uncut": ("minimal_restraint", "speech_preservation"),
+    # The full route PLUS the identity block. A SEPARATE KEY, not an edit to
+    # "full": cert_unified_core asserts select_stack("full") composes to the
+    # base object UNCHANGED, and that byte-identity is the entire safety
+    # argument for flipping the seam on the main route. Arming identity copy is
+    # a real prompt change and goes through the PLAN_ONLY differ like every
+    # other one — it does not get to ride in on a route key that is certified
+    # to change nothing.
+    "full_brand": ("premium_full", "brand_identity"),
 }
 
 

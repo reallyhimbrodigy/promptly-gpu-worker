@@ -21,4 +21,23 @@ export interface NamePlateProps extends MGTimingProps {
   anchor?: "lower_third_safe" | "upper_third_safe";
   // Frame fraction the plate's text block occupies. Default 0.42.
   widthPct?: number;
+
+  // ── DESIGN-SYSTEM OVERRIDES [§4.2 palette/type lock] ──────────────────────
+  // Absent = the component's own canvas-relative defaults (today's pixels).
+  // Present = the value the DESIGN SYSTEM resolved for this video, which is the
+  // only authority allowed to set type size or colour. brand_components.py
+  // emits these in `style` (name_px / role_px / backdrop) and the spec adapter
+  // in ../brand forwards them here; a plate that recomputed its own sizes would
+  // be a second design system competing with the real one.
+  namePx?: number;
+  rolePx?: number;
+  // The palette's base colour, drawn as a legibility scrim BEHIND the text so
+  // the plate survives a bright frame. Absent = no scrim at all (the reference
+  // plate over dark footage needs none) — never a defaulted colour, because a
+  // guessed backdrop is an invented brand.
+  backdropColor?: string;
+  // Left inset in canvas px, from the design system's safe zone (`safe.x[0]` —
+  // platform-UI exclusion on vertical, broadcast title-safe on landscape).
+  // Absent = the component's own doctrine-matched default.
+  sideMarginPx?: number;
 }

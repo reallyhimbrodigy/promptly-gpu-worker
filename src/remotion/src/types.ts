@@ -308,7 +308,15 @@ export type MotionGraphicType =
   | "DropCard"
   | "PillMarquee"
   | "TimelineRoadmap"
-  | "MouseDrag";
+  | "MouseDrag"
+  // LUMEN [§3.1] components D and F. SPEC-BUILT: `props` is the dict
+  // brand_components.py emits (name/role/style/anchor/safe — or headline/
+  // subline/style/safe), NOT authored MG props, and PromptlyRender dispatches
+  // them through the adapters in motion-graphics/brand. Must stay in lockstep
+  // with type_registries.VALID_MG_TYPES, which is where the Python Literals in
+  // handler.py and render_schemas.py both derive from.
+  | "NamePlate"
+  | "EndCard";
 
 export interface MotionGraphicSpec {
   type: MotionGraphicType;

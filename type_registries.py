@@ -119,6 +119,21 @@ VALID_MG_TYPES = frozenset({
     "PullQuote", "PillCluster", "Stamp", "BarRace", "SectionDivider",
     "EditorialQuote", "StepDivider", "DropBanner", "DropCard", "PillMarquee",
     "TimelineRoadmap", "MouseDrag",
+    # ── BRAND COMPONENTS D + F (2026-08-16) [§3.1 PHASE 1.3] ────────────────
+    # The name-plate and the end-card: the first Phase 1 components a VIEWER CAN
+    # SEE. Registering them here is the whole schema seam — handler's _MG_TYPES
+    # and render_schemas.MotionGraphicType both derive from this frozenset, so
+    # one edit makes them requestable in every mirror at once.
+    #
+    # THEY ARE REQUESTED BY COPY, NOT BY NAME. The model fills PostCutPlan
+    # .brand_copy (speaker_name / speaker_role / brand_name / handle /
+    # brand_subline) and the pipeline builds the specs from the DESIGN SYSTEM —
+    # colour, type size and safe zones all derived from the user's own footage.
+    # A component that picks its own colour is a second design system competing
+    # with the real one: right in every cert, wrong on every video. These names
+    # exist here so the RENDERER can dispatch them, which is the link that was
+    # missing while everything else was green.
+    "NamePlate", "EndCard",
 })
 
 # ── Generated scenes (Phase E · composed premium graphics) ──────────────────
