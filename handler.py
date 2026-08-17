@@ -13347,8 +13347,21 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             "PROMPTLY_EDITORIAL_LIVE is off — live traffic does not call the "
             "editorial model. Set PROMPTLY_BUILD_LANE=1 in a build/cert "
             "container, or flip the gate and redeploy.")
+    # THE LOG MUST REPORT THE VALUE, NOT A CONSTANT (2026-08-17).
+    #
+    # This printed the literal `thinking_budget=24576` while the request below
+    # reads PROMPTLY_POST_THINKING_BUDGET from the environment. So every A/B run
+    # using that dial — a dark knob since 2026-07-31 — logged 24576 no matter
+    # what it actually sent. The dial was real; its observability was fake.
+    #
+    # Found while checking whether a matrix cell's budget had taken effect: the
+    # log said 24576 for all six cells, which was consistent with the env being
+    # inert AND with it working perfectly. It answered nothing. The real evidence
+    # came from a 400 the API returned ("thinking_budget is out of range"), which
+    # is the value ARRIVING and being rejected — the opposite of inert.
+    _post_think = int(os.environ.get("PROMPTLY_POST_THINKING_BUDGET", "24576") or "24576")
     print(
-        f"[gemini-post] Calling {model_name} (thinking_budget=24576, PostCutPlan schema, "
+        f"[gemini-post] Calling {model_name} (thinking_budget={_post_think}, PostCutPlan schema, "
         f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
         flush=True,
     )
@@ -13406,7 +13419,7 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                     # Default 24576 (byte-identical when unset). Lower = less
                     # deliberation time AND — per the r=0.59 output-vs-wallclock
                     # measurement — possibly less spiral/degen (60K drove spirals).
-                    thinking_budget=int(os.environ.get("PROMPTLY_POST_THINKING_BUDGET", "24576") or "24576")),
+                    thinking_budget=_post_think),
                 # MEDIUM (was LOW) — shipped as a production A/B. Measured
                 # token-identical to LOW on the 480p proxy (a no-op on the
                 # synthetic probe), so any real-footage output change is the

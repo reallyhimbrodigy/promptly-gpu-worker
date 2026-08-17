@@ -213,3 +213,5 @@ google-genai 1.75.0.
 **Session running total is still owed a reconciliation against the invoice** —
 the per-run figures here are priced, not measured, and `modal billing report
 --csv` is the only truth. That pull is the standing weekly line.
+
+| TRACK 1 MATRIX (2 models x 3 thinking, REF-2, plan-only) | **$1.20** | *pending* | the one measurement worth real spend; plan-only because a render cannot change what the PLANNER emits |
