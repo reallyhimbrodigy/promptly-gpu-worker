@@ -9663,6 +9663,18 @@ def _asr_diagnostics_ride_the_row():
         f"cert_asr_diagnostics did not report PASS:\n{_out[-600:]}")
 
 
+@check("THE EDITORIAL PLANNER IS OVERRIDABLE AND PINNED (2026-08-17, RULE-1) [§4.7]. Two halves, both load-bearing. OVERRIDABLE: §4.7 is `change dark -> differ verdict -> keep or kill`, and an editorial-model swap that needs a code edit per arm cannot be staged behind the differ at all — the measured case for gemini-3.7-flash on the editorial path (3/3 replicated, component parity, better latency) is worth nothing until it can run against the frozen goldens without reaching a user first. PINNED: a planner whose identity can change without a deploy cannot be held to a differ verdict, because a GREEN would be scored against a model that no longer exists by the time it matters; `-latest` is refused outright, while `-preview` is allowed because gemini-3.1-pro-preview is a concrete resolvable version and not a moving pointer. The chat path already paid for this — an alias was blamed, a pin shipped on that hypothesis, and the real cause was prepay depletion; the pin was right, the reasoning was not. The DEFAULT is additionally pinned by name so that merely shipping the override cannot silently re-point the live planner: changing which model production plans on stays a deliberate, reviewed edit. Finally the startup line must interpolate the variable, because this file has already shipped a log that printed a hardcoded number while the real value differed, which made a whole matrix unreadable until it was caught.")
+def _editorial_model_overridable_and_pinned():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_editorial_model_pinned.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_editorial_model_pinned FAILED\n{_out[-1200:]}"
+    assert "CERT EDITORIAL-MODEL: PASS" in _out, (
+        f"cert_editorial_model_pinned did not report PASS:\n{_out[-600:]}")
+
+
 @check("EVERY COUNTER NAMES ITS BUILD (2026-08-16, RULE-1) [Rule 4, JUDGE]. A counter that records WHAT happened but not WHICH BUILD it happened on cannot be read back without RECONSTRUCTION. That bit on 2026-08-16: two build-lane runs showed `brand_copy` declined even on the reference where a name is spoken — a load-bearing input to redesigning the directive — and attributing those runs to an image required walking commit timestamps, because the run record named no build. Worse, the run's own output was INSUFFICIENT to settle it: `brand_specs` appears in the result even on a commit that lacks the schema field, so the obvious evidence pointed the right way for the wrong reason. Reconstruction is not observation. Every analytics counter now carries build_sha, and the dirty marker rides with it because a counter emitted from an uncommitted tree is attributed to a commit that does NOT describe the code that produced it — which is worse than being unattributed, because it looks authoritative. FAILS if _build_stamp is removed or if any counter stops carrying it.")
 def _counters_name_their_build():
     import os as _os

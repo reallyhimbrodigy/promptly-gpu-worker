@@ -120,7 +120,25 @@ HANDLER_VERSION = "3.2.0"
 # _log_available_gemini_models below) will show the new ID and we
 # can swap to a VERIFIED name from the API, not a guessed one.
 GEMINI_MODEL = "gemini-3.1-pro-preview"
-GEMINI_EDITORIAL_MODEL = "gemini-3.1-pro-preview"
+# EDITORIAL MODEL — OVERRIDABLE, PINNED, AND DARK BY DEFAULT (2026-08-17).
+#
+# The default is UNCHANGED, so this edit is inert for every existing container:
+# production still plans on gemini-3.1-pro-preview until a secret says otherwise.
+# What it buys is the ability to stage a model behind the differ (§4.7: change
+# dark -> differ verdict -> keep or kill) without a code change per arm, which
+# is the only way an editorial-model swap can be measured before it reaches a
+# user's video.
+#
+# THE DEFAULT MUST STAY AN EXPLICIT VERSION, NEVER A `-latest` ALIAS. The chat
+# path already taught this at cost: an alias moved underneath us, the failure
+# was read as a model problem, and a pin shipped on a hypothesis that turned out
+# to be prepay depletion. A planner whose identity can change without a deploy
+# cannot be held to a differ verdict — the corpus would be scored against a
+# model that no longer exists. cert_editorial_model_pinned.py enforces both
+# halves: overridable, and pinned to a concrete version.
+GEMINI_EDITORIAL_MODEL = (
+    os.environ.get("PROMPTLY_EDITORIAL_MODEL", "").strip()
+    or "gemini-3.1-pro-preview")
 # Bump when the edit_plan schema or render pipeline changes in a way that breaks
 # replay of older persisted plans. Returned in every job response so the server
 # can tag video_jobs.render_version and gate re-edit compatibility.
