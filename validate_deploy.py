@@ -9625,6 +9625,21 @@ def _installed_set_diffed_every_deploy():
         "again be discovered by reading failure rates 11 hours later")
 
 
+@check("EVERY KEY HANDLER STAMPS ONTO A RENDER-INPUT DICT IS DECLARED (2026-08-17, RULE-1) [Law 2]. handler.py:30889 stamps `_page[\"emphasis\"]` whenever a design-system accent exists. render_schemas.TikTokPage is extra=\"forbid\" and never declared it, so EVERY emphasised caption page failed render-input validation with extra_forbidden; the degrade ladder then tried full -> retry -> stripped, every rung carried the SAME caption pages, and it exhausted \"with no input-differing rung\". 135 RENDER_FATALs across 44 DISTINCT USERS [Rule 7], and the rate tracked the DESIGN-SYSTEM ATTACH RATE (1, 5, 5, 30, 54 per hour) rather than any deploy boundary — which is exactly why every deploy-correlation hypothesis failed to fit and it read as a mystery for a day. THIRD INSTANCE OF THIS SHAPE: motionTokens was silently blocked by the same extra=\"forbid\" mirror, and source_duration_s / cpu_by_stage / gemini_tokens were each stripped by content-studio's top-level filter and had to be re-nested. A producer adds a key, the consumer's schema does not know it, and the failure surfaces far from the edit. The cert reads the ASSIGNMENTS out of handler's source rather than a hand-kept list, and strips comments first because a key named in prose is not a key assigned.")
+def _render_input_mirror():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_render_input_mirror.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"render-input mirror FAILED\n{_out[-1600:]}"
+    assert "ALL PASS" in _out, f"cert did not report ALL PASS:\n{_out[-700:]}"
+    # the TS mirror must agree too — three mirrors, one shape
+    _ts = open(_os.path.join(_here, "src", "remotion", "src", "types.ts"), encoding="utf-8").read()
+    assert "emphasis?" in _ts, (
+        "types.ts TikTokPageLike no longer declares emphasis — the third mirror drifted")
+
+
 @check("AN ERROR HANDLER MAY NOT RAISE (2026-08-16, RULE-1) [Law 2]. handler.py:41270 sat inside an `except` and did `round(float(v), 1)` over EVERY value of _timings — which legitimately carries nested DICTS, because gemini_tokens, cpu_by_stage and mem_by_stage were each deliberately nested there by a SEPARATE persist guard (content-studio strips unknown top-level result keys). So a job failed for a real reason, the error handler raised while recording it, and the TypeError REPLACED the original cause. Two of ten terminal jobs in the post-12:33Z cohort died that way and BOTH ARE NOW PERMANENTLY UNATTRIBUTABLE. That is the worst thing an error handler can do: not merely fail, but DESTROY THE EVIDENCE of why anything failed. Nobody wrote a bug here — three nesting fixes were individually correct and the coercion was individually reasonable; they collided, and only a rule about the SHAPE of error paths catches a collision. THE RULE: inside except/finally, a coercion over DATA WHOSE SHAPE YOU DO NOT CONTROL (a subscript, a .get(), a comprehension variable) must be guarded by isinstance or its own try. Arithmetic on locals is deliberately NOT flagged — `round(time.time() - t0, 1)` cannot surprise you, and a gate that flags it too becomes un-greenable, which teaches people to route around it.")
 def _error_path_totality():
     import os as _os, subprocess as _sub, sys as _sys
