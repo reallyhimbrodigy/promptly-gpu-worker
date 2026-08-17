@@ -155,7 +155,46 @@ so it is worth asking for.**
 
 | item | priced in advance | actual | note |
 |---|---|---|---|
-| FIRST LUMEN EDIT (`lumen_first`, ref2 vertical) | **$1.20 ceiling** | *pending* | editorial call + $0.14/scene images; run started 13:11:46Z |
+| FIRST LUMEN PLAN (`lumen_first`, REF-2 vertical) | **$1.20 ceiling** | **~$0.10 est.** | 216.8s in-function; 0 scenes -> 0 image generations |
+| SECOND LUMEN PLAN (`lumen_first`, REF-1 landscape) | (same ceiling) | **~$0.10 est.** | 108.0s in-function; 0 scenes |
+
+**ADJUDICATING THE PRE-REGISTRATION AGAINST EVIDENCE, not against my report.**
+
+The registered question was: does the planner produce scenes with premium=True
+and the editorial gate open? The registered fallback was: if scenes come back
+zero, walk the strip gates.
+
+  RESULT, both references, editorial gate OPEN (`editorial_suppressed: false`):
+    REF-2  ok=true  wall 216.8s  scene_count 0  accent #8B350D
+    REF-1  ok=true  wall 108.0s  scene_count 0  accent #F06D1F
+
+  STRIP GATES: WALKED AND EXONERATED. The drop path logs
+  `[two-pass] Dropping generated_scene:` and that line appears in NEITHER run.
+  Nothing was stripped. The model was offered the beat and declined it, which
+  makes this 0 of 779 rather than 0 of 778.
+
+  WHAT DID WORK, and it is the first evidence of it: the editorial path
+  completed end to end for the first time since the dependency break — 7 clips,
+  5 SFX on beats, zoom variety with 2 clip splits to preserve it, 2 B-roll asks
+  with negative constraints, 3 MGs (REF-2). The design system extracted a
+  DIFFERENT, CORRECT accent per video: #F06D1F on REF-1 is the documented
+  reference orange that an earlier extractor got wrong.
+
+  WHAT FAILED: brand_specs {name_plate: false, end_card: false} on BOTH — including
+  REF-1 where a name IS spoken. `brand_copy` never appears in plan_keys, and it
+  survives _LEAN_DROP_FIELDS / _apply_lean_schema / _apply_why_diet, so the field
+  reached the model intact and was declined. Same shape as generated_scenes.
+
+  NO ARTIFACT EXISTS. `lumen_first_edit` calls no render path (verified: no
+  render_stage / render_video / remotion reference). These runs produced PLANS.
+  There is no mp4 for JUDGE to score or the owner to watch until the render leg
+  lands.
+
+**The $ figures above are ESTIMATES, not measurements** — container seconds at
+cpu=8/16GiB plus one editorial call each, with zero image generations because
+zero scenes were emitted. `modal billing report --csv` is the only truth and the
+standing weekly pull is what settles it. Reporting an estimate as a measurement
+is the probe-collapse class this ledger exists to prevent.
 
 Stated before the run, per Rule 6. The ceiling is a REFUSAL point, not a
 forecast: the realistic band is $0.10–$0.60 depending on how many scenes the

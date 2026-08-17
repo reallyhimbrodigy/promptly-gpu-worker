@@ -928,7 +928,7 @@ def _caption_route_has_no_captions(job_id, route):
         supabase.table("analytics_events").insert({
             "event": "caption_modes_not_applicable",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "route": str(route or "?"),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "route": str(route or "?"),
                       "reason": "route builds no caption pages"},
         }).execute()
     except Exception:
@@ -958,7 +958,7 @@ def _caption_modes_liveness(job_id, pages, accent):
         supabase.table("analytics_events").insert({
             "event": "caption_modes_applied",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "accent": accent,
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "accent": accent,
                       "pages": len(_pages), "pages_with_emphasis": len(_emph),
                       "hero_number_pages": _hero, "keyword_accent_pages": _kw},
         }).execute()
@@ -1013,7 +1013,7 @@ def _plan_persist_liveness(job_id, ok, n_keys, reason=None):
         supabase.table("analytics_events").insert({
             "event": "plan_recipe_persisted",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "ok": bool(ok),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "ok": bool(ok),
                       "recipe_keys": int(n_keys or 0), "reason": reason},
         }).execute()
     except Exception:
@@ -1036,7 +1036,7 @@ def _brand_liveness(job_id, specs, had_design_system):
         supabase.table("analytics_events").insert({
             "event": "brand_components_built",
             "platform": "worker",
-            "props": {"job_id": str(job_id),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id),
                       "had_design_system": bool(had_design_system),
                       "name_plate": bool(_s.get("name_plate")),
                       "end_card": bool(_s.get("end_card")),
@@ -1074,7 +1074,7 @@ def _design_system_liveness(job_id, ok, accent=None, canvas=None, err=None):
         supabase.table("analytics_events").insert({
             "event": "design_system_built",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "ok": bool(ok),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "ok": bool(ok),
                       "accent": accent, "canvas": list(canvas) if canvas else None,
                       "error": (err or None)},
         }).execute()
@@ -2434,13 +2434,20 @@ class _BrandCopy(BaseModel):
     user's own footage (brand_components.py) — a component that picks its own
     colour is a second design system competing with the real one.
 
-    OBSERVED ONLY, NEVER INVENTED. Fill a field only from what the video itself
-    states — the speaker says their name, role or brand, or it is legible on
-    screen (an existing lower third, a slide, a wordmark, a handle). A name
-    guessed from a face, a voice or a topic is a fabrication printed on a real
-    person's video. Omit the field instead: every field is optional, an absent
-    field renders nothing, and there is no default and no placeholder.
-    """
+    WHEN THE VIDEO GIVES YOU ONE OF THESE, FILL IT:
+      • the speaker SAYS their own name, or introduces themselves by role
+        ("I'm Dana Reyes", "as managing partner here") -> speaker_name /
+        speaker_role;
+      • a NAME OR ROLE is legible on screen — an existing lower third, a slide,
+        a badge, a title card -> speaker_name / speaker_role;
+      • a BRAND, COMPANY OR HANDLE is spoken or legible — a wordmark, a URL, an
+        @handle, "here at LegalSoft" -> brand_name / handle / brand_subline.
+
+    If the video gives you one of these and you still leave it blank, say why in
+    `notes` (one clause). A silent omission is not an answer.
+
+    THE BOUNDARY — OBSERVED ONLY, NEVER INVENTED. Fill a field only from what the
+    video itself"""
     # NAME-PLATE (D): a lower third naming the speaker, held ~3s, ONCE, early.
     # speaker_name alone is a valid plate; an absent role is DROPPED, not blank.
     speaker_name: Optional[str] = Field(default=None, max_length=48)
@@ -8100,13 +8107,74 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
     # and source-is-its-own-evidence (the B-roll principles), the inevitable-
     # choice / component-quality bias, and the ONE committed palette from
     # editorial_vision. Threaded, not restated; used RARELY.
-    if premium:
+    if premium and _scenes_directive_v2():
+        # ── CONDITION-BOUND SCENES DIRECTIVE (2026-08-16, DARK behind
+        # PROMPTLY_SCENES_DIRECTIVE_V2) ──────────────────────────────────────
+        # MEASURED: generated_scenes has fired on 0 of 779 planned jobs. Two
+        # build-lane runs on the exact references the feature was designed for —
+        # editorial gate OPEN, premium=True — returned ZERO, and nothing was
+        # stripped (the `[two-pass] Dropping generated_scene` path never logged).
+        # The model was offered the beat and declined.
+        #
+        # THREE THINGS IN THE OLD BLOCK DEFEATED IT, AND ONE WAS FATAL:
+        #   1. It opened "You may emit" — permission, not a trigger.
+        #   2. Its green light was an AND of three conditions, one subjective
+        #      ("stock would be the WEAKER choice"), so any doubt closed it.
+        #   3. FATAL: it said leaving it empty is "correct and expected". The
+        #      prompt blessed the zero it was written to explain.
+        #
+        # This version names the beats that TRIGGER a scene and requires an
+        # honest note when one is declined [§4.5 honor-or-note], so a zero
+        # becomes a stated decision instead of silence. The RARITY ceiling and
+        # the on-palette law are preserved verbatim below — the change is the
+        # TRIGGER, not the taste.
+        system_instruction += """
+
+GENERATED SCENES (premium) — a bespoke graphic, COMPOSED not pulled.
+
+WHEN THE DIALOGUE HANDS YOU ONE OF THESE, EMIT A SCENE:
+  • a STATED NUMBER or stat that carries the point ("we did $20,000,000", "13
+    clients", "three times faster") — `typo_stat`, the count landing its final
+    value on the emphasis word;
+  • a NAMED CONCEPT or OBJECT the words make concrete (a lock, a key, a folder,
+    a graph, a product or app the speaker references);
+  • a CLAIM the footage cannot show — a before/after, a comparison, a promise
+    whose evidence is not on camera.
+
+If a beat matches and you still decline it, SAY SO in `notes` with the reason
+(one clause). A silent zero is not an answer — declining is a decision and it
+gets written down. That is the only thing this block asks of you that the
+previous one did not.
+
+`generated_scenes` are full-frame composed takeover beats where a"""
+    # NOT `elif premium:` — deliberately. validate_deploy's legibleOnDark check
+    # locates the premium emission block with a regex on the literal
+    # `if premium:`, and "elif premium:" CONTAINS that substring (el-if
+    # premium:), so an elif silently hijacked the match and handed the check the
+    # short control header instead of the tail that carries the 3-hex demand.
+    # Spelling the condition out keeps the first `if premium:` in the file the
+    # one the check means.
+    if premium and not _scenes_directive_v2():
         system_instruction += """
 
 GENERATED SCENES (premium) — a bespoke graphic, COMPOSED not pulled.
 **MEASURED 2026-08-04: `generated_scenes` fired on 0 of 778 planned jobs.** It has never once been used. Either this beat genuinely never applies — in which case leaving it empty is correct and expected — or it is being skipped for a reason the description above does not address.
 
 You may emit `generated_scenes`: full-frame composed takeover beats where a
+"""
+    # SHARED TAIL — identical for both arms. The A/B changes the TRIGGER, never
+    # the taste: rarity ceiling, the ONE committed palette, and the three
+    # designed types are the same text in control and variant, so any difference
+    # in the result is attributable to the trigger alone.
+    #
+    # THE COMMENT LIVES ABOVE THE GUARD ON PURPOSE. validate_deploy's
+    # legibleOnDark check locates this block by regex on `if premium:` followed
+    # DIRECTLY by the append, so a comment BETWEEN the guard and the append
+    # breaks the match — \s does not span a comment line — and the check then
+    # reads some other block and fails on a demand this text actually satisfies.
+    # Ninth instance of a check tripping on documentation rather than on code.
+    if premium:
+        system_instruction += """
 custom-made graphic serves the moment better than stock B-roll or a templated
 motion-graphic. A generated scene is a background WORLD (a gradient in the
 video's committed palette) with a bespoke rendered SUBJECT in it, kinetic type,
@@ -14152,6 +14220,50 @@ def _build_lane():
 
     Set per-container by the build tooling, never in the production secret."""
     return os.environ.get("PROMPTLY_BUILD_LANE", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
+def _build_stamp():
+    """The SHA this container was built from — stamped onto EVERY counter.
+
+    JUDGE'S FIX, GENERALIZED. A counter that records WHAT happened but not WHICH
+    BUILD it happened on cannot be read back later without reconstruction. That
+    bit today: two build-lane runs showed `brand_copy` declined even where a name
+    was spoken — a load-bearing input to the directive redesign — and attributing
+    those runs to an image took a walk through commit timestamps, because the run
+    record itself named no build. Reconstruction is not observation [Rule 4].
+
+    Stamped as the SHORT sha plus a dirty marker. `dirty` is not decoration: a
+    counter emitted from an uncommitted tree is attributed to a commit that does
+    not describe the code that produced it, which is worse than being unattributed
+    because it looks authoritative.
+    """
+    _s = os.environ.get("PROMPTLY_BUILD_SHA", "") or "unknown"
+    return _s[:12] + ("-dirty" if os.environ.get("PROMPTLY_BUILD_DIRTY") == "1" else "")
+
+
+def _scenes_directive_v2():
+    """Is the CONDITION-BOUND scenes directive armed? Default OFF.
+
+    generated_scenes has fired on 0 of 779 planned jobs. Two build-lane runs on
+    the exact references the feature was designed for — editorial gate OPEN,
+    premium=True — returned ZERO, and NOTHING WAS STRIPPED: the
+    `[two-pass] Dropping generated_scene` path never logged. The model was
+    offered the beat and declined it.
+
+    So the blocker is not the flag chain, not quota, and not a strip gate. It is
+    the ask. The old block opened "You may emit", gated on an AND of three
+    conditions one of which is subjective, and — fatally — told the model that
+    leaving it empty is "correct and expected". A prompt that blesses the zero it
+    was written to explain will keep getting zero.
+
+    DARK BY DEFAULT so control and variant differ by exactly ONE variable and
+    the A/B is attributable. The SHARED TAIL (rarity ceiling, the one committed
+    palette, the three designed types) is byte-identical across both arms — this
+    changes the TRIGGER, never the taste.
+    """
+    return os.environ.get("PROMPTLY_SCENES_DIRECTIVE_V2", "").strip().lower() in (
         "1", "true", "yes", "on",
     )
 
@@ -26117,7 +26229,7 @@ def _run_render_via_burst_or_local(
             supabase.table("analytics_events").insert({
                 "event": "burst_double_hold",
                 "platform": "worker",
-                "props": {
+                "props": {"build_sha": _build_stamp(), 
                     "job_id": str(job_id),
                     "blocked_s": round(_dh_s, 2),
                     # the WASTE: cores held by a process that is only waiting
@@ -32159,7 +32271,7 @@ def _job_status_lock_timeout_event(job_id, waited_s, terminal, patch_keys):
         supabase.table("analytics_events").insert({
             "event": "job_status_lock_timeout",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "waited_s": round(float(waited_s), 2),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "waited_s": round(float(waited_s), 2),
                       "terminal": bool(terminal), "patch_keys": list(patch_keys or [])[:20],
                       "timeout_s": _JOB_STATUS_LOCK_TIMEOUT_S},
         }).execute()
@@ -32420,7 +32532,7 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                     supabase.table("analytics_events").insert({
                         "event": "worker_envelope_write",
                         "platform": "worker",
-                        "props": {
+                        "props": {"build_sha": _build_stamp(), 
                             "job_id": str(job_id),
                             "matched": _matched,
                             "accepted": _matched > 0,
@@ -32477,7 +32589,7 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                     supabase.table("analytics_events").insert({
                         "event": "worker_envelope_write",
                         "platform": "worker",
-                        "props": {
+                        "props": {"build_sha": _build_stamp(), 
                             "job_id": str(job_id),
                             "matched": 0,
                             "accepted": False,
@@ -32624,7 +32736,7 @@ def _post_upload_watchdog_fire():
                 supabase.table("analytics_events").insert({
                     "event": "post_upload_watchdog_fired",
                     "platform": "worker",
-                    "props": {
+                    "props": {"build_sha": _build_stamp(), 
                         "job_id": str(_job),
                         "waited_s": round(_elapsed, 1),
                         "last_stage": _stage,
@@ -41267,8 +41379,29 @@ def handler(job):
                 "error_where": _err_where,
                 # SA-0: partial stage timings at time of death — shows how far
                 # the pipeline got and what the wall was spent on before failing.
-                "stage_timings": {k: round(float(v), 1)
-                                  for k, v in (locals().get("_timings") or {}).items()},
+                # NESTED VALUES SURVIVE, SCALARS ROUND (2026-08-16, RULE-1).
+                # This was `round(float(v), 1)` over EVERY value, and _timings
+                # legitimately carries nested DICTS — gemini_tokens, cpu_by_stage
+                # and mem_by_stage were each deliberately NESTED here by three
+                # separate persist guards, because content-studio strips unknown
+                # TOP-LEVEL result keys. So the nesting fixes and this dictcomp
+                # were on a collision course.
+                #
+                # AND IT COLLIDED IN THE ERROR HANDLER, which makes it far worse
+                # than a crash: a job failed for some REAL reason, this line
+                # raised while recording the partial timings, and the TypeError
+                # REPLACED the original cause. Every WORKER_DIED carrying
+                # "float() argument ... not 'dict'" is MASKING a different
+                # failure that was never recorded. Measured: 2 of 10 terminal
+                # jobs in the post-12:33Z cohort, both unattributable as a result.
+                #
+                # Found by the frame-persist on its FIRST real capture
+                # (handler.py:41270 in <dictcomp>) — the fix that named this is
+                # the reason it took minutes instead of another archaeology dig.
+                "stage_timings": {
+                    k: (round(float(v), 1) if isinstance(v, (int, float))
+                        and not isinstance(v, bool) else v)
+                    for k, v in (locals().get("_timings") or {}).items()},
                 "stage_manifest": locals().get("_stage_manifest") or None,
                 **_floor_markers(_floor_state),
             },

@@ -9625,6 +9625,60 @@ def _installed_set_diffed_every_deploy():
         "again be discovered by reading failure rates 11 hours later")
 
 
+@check("AN ERROR HANDLER MAY NOT RAISE (2026-08-16, RULE-1) [Law 2]. handler.py:41270 sat inside an `except` and did `round(float(v), 1)` over EVERY value of _timings — which legitimately carries nested DICTS, because gemini_tokens, cpu_by_stage and mem_by_stage were each deliberately nested there by a SEPARATE persist guard (content-studio strips unknown top-level result keys). So a job failed for a real reason, the error handler raised while recording it, and the TypeError REPLACED the original cause. Two of ten terminal jobs in the post-12:33Z cohort died that way and BOTH ARE NOW PERMANENTLY UNATTRIBUTABLE. That is the worst thing an error handler can do: not merely fail, but DESTROY THE EVIDENCE of why anything failed. Nobody wrote a bug here — three nesting fixes were individually correct and the coercion was individually reasonable; they collided, and only a rule about the SHAPE of error paths catches a collision. THE RULE: inside except/finally, a coercion over DATA WHOSE SHAPE YOU DO NOT CONTROL (a subscript, a .get(), a comprehension variable) must be guarded by isinstance or its own try. Arithmetic on locals is deliberately NOT flagged — `round(time.time() - t0, 1)` cannot surprise you, and a gate that flags it too becomes un-greenable, which teaches people to route around it.")
+def _error_path_totality():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_error_path_totality.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"error-path totality FAILED\n{_out[-1600:]}"
+    assert "ALL PASS" in _out, f"cert did not report ALL PASS:\n{_out[-600:]}"
+
+
+@check("EVERY COUNTER NAMES ITS BUILD (2026-08-16, RULE-1) [Rule 4, JUDGE]. A counter that records WHAT happened but not WHICH BUILD it happened on cannot be read back without RECONSTRUCTION. That bit on 2026-08-16: two build-lane runs showed `brand_copy` declined even on the reference where a name is spoken — a load-bearing input to redesigning the directive — and attributing those runs to an image required walking commit timestamps, because the run record named no build. Worse, the run's own output was INSUFFICIENT to settle it: `brand_specs` appears in the result even on a commit that lacks the schema field, so the obvious evidence pointed the right way for the wrong reason. Reconstruction is not observation. Every analytics counter now carries build_sha, and the dirty marker rides with it because a counter emitted from an uncommitted tree is attributed to a commit that does NOT describe the code that produced it — which is worse than being unattributed, because it looks authoritative. FAILS if _build_stamp is removed or if any counter stops carrying it.")
+def _counters_name_their_build():
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "def _build_stamp(" in _h, "the build stamp helper is gone"
+    assert "PROMPTLY_BUILD_DIRTY" in _h, (
+        "the stamp no longer marks a dirty tree — an unattributable counter is better "
+        "than one attributed to a commit that does not describe it")
+    _n = _h.count('"build_sha": _build_stamp()')
+    assert _n >= 9, (
+        f"only {_n} counters carry build_sha; every analytics_events emitter must, or a "
+        "finding read back later is unattributable to an image")
+    _m = open(_os.path.join(_here, "modal_app.py"), encoding="utf-8").read()
+    assert '"build_sha": _os.environ.get("PROMPTLY_BUILD_SHA", "")[:12]' in _m, (
+        "the build-lane harness run record no longer names its build — the exact gap "
+        "that made the 2026-08-16 brand_copy finding unattributable")
+
+
+@check("PRODUCTION PROVENANCE IS READABLE, NOT INFERRED (2026-08-16, RULE-1) [Rule 4]. The build SHA has always been BAKED into the image, but it was only ever READABLE from a log line or a completed job's payload — so 'what is running right now?' had no direct answer and every attempt to answer it was INFERENCE. I inferred it twice today: once from `modal app history`, once by counting live functions and identifiers (480/2108) to decide whether a change had made it in. Both are proxies. Rule 4 says assert only what you can OBSERVE, and that is impossible without a surface to observe. build_info is that surface — one GET returning the exact SHA, mirroring content-studio's /api/health `rev`, which has settled this same question on the server side repeatedly. DIRTY IS PART OF THE ANSWER: a deploy from a tree with uncommitted changes reports a SHA that does not describe what is running, so `dirty` is returned alongside it rather than assumed false. This check FAILS if the endpoint is removed, if it stops being a GET (a POST cannot be curled by an operator mid-incident, which is exactly when it is needed), or if it stops reporting either the sha or the dirty flag.")
+def _build_provenance_readable():
+    import os as _os, ast as _ast
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _m = open(_os.path.join(_here, "modal_app.py"), encoding="utf-8").read()
+    _t = _ast.parse(_m)
+    _fn = next((n for n in _ast.walk(_t)
+                if isinstance(n, _ast.FunctionDef) and n.name == "build_info"), None)
+    assert _fn is not None, (
+        "build_info is gone — production provenance goes back to being INFERRED from "
+        "log lines and function counts")
+    _dec = " ".join(_ast.unparse(d) for d in _fn.decorator_list)
+    assert "fastapi_endpoint" in _dec and 'method=\'GET\'' in _dec.replace('"', "'"), (
+        "build_info is not a GET endpoint — an operator cannot curl it mid-incident, "
+        "which is the only moment it matters")
+    _src = _ast.get_source_segment(_m, _fn)
+    assert "PROMPTLY_BUILD_SHA" in _src, "build_info no longer reports the SHA"
+    assert "PROMPTLY_BUILD_DIRTY" in _src, (
+        "build_info no longer reports DIRTY — a SHA from an uncommitted tree does not "
+        "describe what is running, and reporting it alone is worse than reporting nothing")
+    assert '"PROMPTLY_BUILD_SHA": _BUILD_SHA' in _m, (
+        "the SHA is no longer baked into the image env at deploy time")
+
+
 @check("THE WORKER WRITES ITS OWN TERMINAL (2026-08-16, RULE-1) [Law 2, Rule 7]. MEASURED: 48 jobs across 33 DISTINCT USERS died in the plan stage on 2026-08-16 and NOT ONE wrote a terminal status — 0/48 emitted worker_envelope_write while 45 OTHER jobs in the same window did, so the instrument works and the zero is real. Every one of those users waited 888-900s (spread ~4s across 8 samples: a TIMER, not work) for the dispatcher\'s reaper to give up and tell them the render service was unreachable. THE MECHANISM WAS run_pipeline_bg ITSELF: `_H.handler` sat in a try/FINALLY with NO except, so the finally ran telemetry, the exception kept propagating, and the completion-POST below it — the thing that settles a job in milliseconds — was never reached. A failure the worker understood in seconds cost the user a quarter of an hour, for ANY cause. This check is deliberately CAUSE-AGNOSTIC: it does not care why a pipeline dies, only that a dead pipeline terminalises itself, so the NEXT unknown failure costs ~1s instead of 900s. FOUR PROPERTIES ARE LOAD-BEARING. (1) BaseException, not Exception — a SystemExit-shaped death is exactly the case that strands a row. (2) It writes the DB DIRECTLY and never through write_job_status, because that path takes _JOB_STATUS_LOCK and a safety net must not queue behind the failure it insures against. (3) It is IDEMPOTENT — it reads status first and writes only when the row is still non-terminal, so a handler that already failed honestly keeps its own better error. (4) It RETURNS the envelope instead of re-raising: run_pipeline_bg is spawned as a RETRIABLE background function, and re-raising would hand a hard-failing job back for another full re-render.")
 def _worker_writes_own_terminal():
     import os as _os, ast as _ast
