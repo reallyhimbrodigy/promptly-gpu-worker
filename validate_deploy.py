@@ -9651,6 +9651,18 @@ def _error_path_totality():
     assert "ALL PASS" in _out, f"cert did not report ALL PASS:\n{_out[-600:]}"
 
 
+@check("AN ASR DIVERSION CARRIES THE EVIDENCE FOR ITS OWN VERDICT (2026-08-17, RULE-1) [Rule 2, Rule 5]. On the live worker version 0 of 60 jobs (0 of 60 users) reached the editorial path, and 82% of the diversions were ASR-driven — no_speech / no_speech_muted / no_audio / transcription_incomplete. The routing gate is `if len(_dg_words) == 0`, a literal zero, so it can only ever be as right as the transcript handed to it. Deciding whether those diversions were CORRECT cost a night of downloading production sources and re-transcribing them by hand, because a diverted row stored `\"transcript\": []` and NOTHING ELSE: the word count that drove the gate and the audio level that produced the word count both died with the container. THE MEASUREMENT HOLE WAS THE OUTAGE'S LENGTH, not the bug — and the replay ultimately proved BOTH verdicts exist in production (0 words at -6.1 dBFS bass-dominant, a music clip correctly routed; and 0 words at -26.5 dBFS speech-dominant on a Japanese source the replay transcribed and production did not). With the evidence in the row that is one query. The block must also survive write_job_status(result=), which is an explicit ALLOWLIST — a field present on result_payload but missing there is BUILT, NOT WORKING, exactly how error_subcode and motionTokens were silently swallowed. FAILS if the per-job reset goes (a warm Modal container would attribute the previous job's audio to this one), if the level stops being measured on the bytes ASR actually received, if word_count stops being persisted, if any result payload records a transcript+edit_recipe without the block, or if a failed measurement is allowed to report a number instead of FAILED (the PROBE COLLAPSE class, which has already produced one false verdict here).")
+def _asr_diagnostics_ride_the_row():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_asr_diagnostics.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_asr_diagnostics FAILED\n{_out[-1600:]}"
+    assert "CERT ASR-DIAGNOSTICS: PASS" in _out, (
+        f"cert_asr_diagnostics did not report PASS:\n{_out[-600:]}")
+
+
 @check("EVERY COUNTER NAMES ITS BUILD (2026-08-16, RULE-1) [Rule 4, JUDGE]. A counter that records WHAT happened but not WHICH BUILD it happened on cannot be read back without RECONSTRUCTION. That bit on 2026-08-16: two build-lane runs showed `brand_copy` declined even on the reference where a name is spoken — a load-bearing input to redesigning the directive — and attributing those runs to an image required walking commit timestamps, because the run record named no build. Worse, the run's own output was INSUFFICIENT to settle it: `brand_specs` appears in the result even on a commit that lacks the schema field, so the obvious evidence pointed the right way for the wrong reason. Reconstruction is not observation. Every analytics counter now carries build_sha, and the dirty marker rides with it because a counter emitted from an uncommitted tree is attributed to a commit that does NOT describe the code that produced it — which is worse than being unattributed, because it looks authoritative. FAILS if _build_stamp is removed or if any counter stops carrying it.")
 def _counters_name_their_build():
     import os as _os

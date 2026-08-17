@@ -5064,6 +5064,105 @@ def detect_shot_changes(source_path, threshold=7.0, out_scores=None):
 
 # ─── DEEPGRAM TRANSCRIPTION ───────────────────────────────────────────────────
 
+# ─── ASR SELF-DIAGNOSIS ───────────────────────────────────────────────────────
+#
+# WHY THIS EXISTS (2026-08-17). On the live version EVERY completed job was
+# diverted off the editorial path — 0 of 60 jobs, 0 of 60 users — and 82% of
+# those diversions were ASR-driven (no_speech / no_speech_muted / no_audio /
+# transcription_incomplete). Answering the ONLY question that matters — was the
+# audio actually silent, or did ASR fail on good audio? — cost a night of
+# downloading production sources and re-transcribing them by hand, because a
+# diverted row stored `"transcript": []` and nothing else. The measurement hole
+# WAS the outage's length.
+#
+# A row that says `no_speech` must carry the evidence for its own verdict:
+#   0 words @ -6.1 dBFS, bass-dominant   -> a music clip, correctly routed
+#   0 words @ -26 dBFS, speech-dominant  -> a MISS
+# One of each is already confirmed in production (the miss: a Japanese source a
+# replay transcribed and production did not).
+#
+# MEASURED / FAILED / ABSENT is load-bearing, not decoration. A failed
+# measurement reported as a number is the PROBE COLLAPSE class, and it has
+# already cost this project one false verdict. A level we could not measure
+# says so, in the row.
+_ASR_DIAG = {}
+
+_ASR_DIAG_FIELDS = ("word_count", "detected_language", "level_status",
+                    "mean_dbfs", "max_dbfs", "speech_band_dbfs", "bass_dbfs",
+                    "flac_bytes", "asr_model", "asr_language_opt")
+
+
+def _asr_diag_reset():
+    """One job, one diagnostic record. Called at intake, not at import."""
+    _ASR_DIAG.clear()
+    _ASR_DIAG.update({k: None for k in _ASR_DIAG_FIELDS})
+    _ASR_DIAG["level_status"] = "absent"
+
+
+def _asr_diag_set(**kw):
+    if not _ASR_DIAG:
+        _asr_diag_reset()
+    _ASR_DIAG.update(kw)
+
+
+def _asr_diag_snapshot():
+    """The block that rides EVERY result payload. Never raises, never guesses."""
+    try:
+        if not _ASR_DIAG:
+            return {"level_status": "absent", "word_count": None}
+        d = dict(_ASR_DIAG)
+        # The verdict this row justifies, computed once, stored next to its
+        # inputs so a query can count misses without re-deriving the rule.
+        sb, bs = d.get("speech_band_dbfs"), d.get("bass_dbfs")
+        if d.get("word_count") == 0 and d.get("level_status") == "measured":
+            if sb is not None and bs is not None:
+                # controls (known speech) measured +6.8 dB; diverted music -0.8
+                d["zero_words_verdict"] = (
+                    "suspect_miss" if (sb - bs) >= 4.0 else "consistent_no_speech")
+            else:
+                d["zero_words_verdict"] = "unknown"
+        return d
+    except Exception:
+        return {"level_status": "failed", "word_count": None}
+
+
+def _measure_audio_levels(flac_bytes) -> dict:
+    """Level of the EXACT bytes ASR received — full band, speech band, bass.
+
+    Two short ffmpeg passes over ALREADY-EXTRACTED audio (no video decode);
+    measured under 1s for a 2-minute source. Speech lives in 300-3400 Hz and
+    pauses; music carries bass and runs continuous, so speech_band minus bass
+    separates them. Any failure records FAILED — never a number, never silence.
+    """
+    out = {"level_status": "failed", "mean_dbfs": None, "max_dbfs": None,
+           "speech_band_dbfs": None, "bass_dbfs": None,
+           "flac_bytes": len(flac_bytes or b"")}
+    if not flac_bytes:
+        out["level_status"] = "absent"
+        return out
+
+    def _vol(af):
+        p = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-i", "pipe:0", "-af", af, "-f", "null", "-"],
+            input=flac_bytes, capture_output=True, timeout=60)
+        err = (p.stderr or b"").decode("utf-8", errors="replace")
+        m = re.search(r"mean_volume:\s*(-?[\d.]+) dB", err)
+        x = re.search(r"max_volume:\s*(-?[\d.]+) dB", err)
+        return (float(m.group(1)) if m else None, float(x.group(1)) if x else None)
+
+    try:
+        mean, mx = _vol("volumedetect")
+        if mean is None:
+            return out
+        out["mean_dbfs"], out["max_dbfs"] = mean, mx
+        sb, _ = _vol("highpass=f=300,lowpass=f=3400,volumedetect")
+        bs, _ = _vol("lowpass=f=250,volumedetect")
+        out["speech_band_dbfs"], out["bass_dbfs"] = sb, bs
+        out["level_status"] = "measured"
+    except Exception as e:
+        out["measure_error"] = "%s: %s" % (type(e).__name__, str(e)[:80])
+    return out
+
 
 def prepare_audio_for_deepgram(source_path: str) -> bytes:
     """Extract bit-perfect mono FLAC for transcription.
@@ -5100,9 +5199,19 @@ def prepare_audio_for_deepgram(source_path: str) -> bytes:
         raise RuntimeError(
             f"Deepgram audio prep failed: {(proc.stderr or b'').decode('utf-8', errors='replace')[-300:]}"
         )
+    # MEASURE THE BYTES ASR ACTUALLY RECEIVES, and carry the numbers into the
+    # row. The log prints the MEASURED values — never a constant, which is a
+    # mistake this file has already shipped once (the thinking-budget log).
+    _lv = _measure_audio_levels(proc.stdout)
+    _asr_diag_set(**_lv)
+    _mdb = _lv.get("mean_dbfs")
+    _sb, _bs = _lv.get("speech_band_dbfs"), _lv.get("bass_dbfs")
     print(
         f"[deepgram-prep] Extracted {len(proc.stdout) / 1024:.0f}KB FLAC "
-        f"(mono 48kHz, lossless — no level processing)",
+        f"(mono 48kHz, lossless — no level processing) "
+        f"level={_lv.get('level_status')} "
+        f"mean={('%.1f dBFS' % _mdb) if _mdb is not None else 'unmeasured'} "
+        f"speech-bass={('%+.1f dB' % (_sb - _bs)) if (_sb is not None and _bs is not None) else 'unmeasured'}",
         flush=True,
     )
     return proc.stdout
@@ -5610,6 +5719,19 @@ def transcribe_audio(source_path, keywords=None, language="multi"):
                 # An SDK build that does not accept `timeout` must still work.
                 resp = _tf({"buffer": audio_bytes, "mimetype": "audio/flac"}, options)
             result = _parse_deepgram_response(resp)
+            # The word count is the number the routing gate acts on. Persist it
+            # beside the level that produced it, so `no_speech` becomes a claim
+            # a query can audit instead of a verdict we have to replay by hand.
+            # model/language are READ BACK off the options object — not written
+            # as literals, which is how a log once reported a constant.
+            try:
+                _asr_diag_set(
+                    word_count=len((result or {}).get("words") or []),
+                    detected_language=(result or {}).get("detected_language"),
+                    asr_model=getattr(options, "model", None),
+                    asr_language_opt=getattr(options, "language", None))
+            except Exception:
+                pass
             print(f"[metric] stage_duration stage=transcribe_file duration_ms={int((time.time()-_t0)*1000)} attempt={attempt+1}", flush=True)
             return result
         except Exception as e:
@@ -34691,6 +34813,12 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         "edit_recipe": {"route": _route_name, "reason": reason,
                         "plan": _plan.model_dump()},
         "transcript": [],
+        # THE DIVERSION CARRIES ITS OWN EVIDENCE. `"transcript": []` alone made
+        # every `no_speech` row unfalsifiable — the audio level and word count
+        # that justified the divert died with the container. This is the block
+        # that lets a query separate "correctly routed music" from "ASR missed
+        # real speech" without downloading a single source.
+        "asr_diagnostics": _asr_diag_snapshot(),
         "analysis_data": None,
         "resolved_broll": [],
         "trend_snapshot": None,
@@ -34720,6 +34848,11 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "clean_export_key": _clean_export_key,
             "edit_recipe": result_payload["edit_recipe"],
             "transcript": [],
+            # THE ALLOWLIST IS THE ROW. Putting the evidence only on
+            # result_payload would leave it unqueryable — built, not working.
+            # This route's whole purpose here is to explain WHY it diverted, so
+            # the explanation has to survive the write that the row keeps.
+            "asr_diagnostics": result_payload.get("asr_diagnostics"),
             "render_version": RENDER_VERSION,
             "thumbnail_url": _thumbnail_url,
             "capability_notes": _capability_notes,
@@ -36980,6 +37113,11 @@ def _capture_failure_corpus(source_path, job_id, klass):
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
+    # ASR EVIDENCE: fresh per job. Modal containers are REUSED, so without this
+    # a diverted row would inherit the previous job's audio level and word count
+    # — a row that lies with a plausible number, which is worse than a row that
+    # says nothing. Reset here, beside the other per-job accumulators.
+    _asr_diag_reset()
     # DEGEN COUNT PER JOB (Zac 2026-08-04). The degeneration spiral lives in the
     # `why` field, and PROMPTLY_LEAN_SCHEMA strips exactly that field — so the
     # A/B already running is a free test of whether the prompt change fixes a 22%
@@ -41166,6 +41304,11 @@ def handler(job):
             "thumbnail_timestamp": round(float(thumbnail_source_ts), 3),
             # ── Re-edit persistence fields ────────────────────────────────
             "transcript": transcript,
+            # The SAME block the diverted routes carry. Present on the editorial
+            # path too, because a diversion rate needs a denominator measured
+            # the same way: what word count and audio level does a job that DOES
+            # reach editorial actually have?
+            "asr_diagnostics": _asr_diag_snapshot(),
             # measurement semantics: REAL analyzer output or honest None —
             # never the plan echo (the write died; see the landmine tombstone)
             "analysis_data": _cached_analysis if isinstance(_cached_analysis, dict) else None,
@@ -41259,6 +41402,10 @@ def handler(job):
                 # thumbnail, not the re-edit path (see the Phase-3 hydration note).
                 "edit_recipe": result_payload.get("edit_recipe"),
                 "transcript": result_payload.get("transcript"),
+                # THE DENOMINATOR. A diversion rate is only readable if the jobs
+                # that DID reach editorial carry the same measurement — same
+                # allowlist discipline as clean_export_key above.
+                "asr_diagnostics": result_payload.get("asr_diagnostics"),
                 "analysis_data": result_payload.get("analysis_data"),
                 "resolved_broll": result_payload.get("resolved_broll"),
                 "trend_snapshot": result_payload.get("trend_snapshot"),

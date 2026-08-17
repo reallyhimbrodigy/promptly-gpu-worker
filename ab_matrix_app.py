@@ -49,7 +49,7 @@ restored to isolate. This run holds the prompt CONSTANT (v2 on) and varies model
 x thinking only — so it answers "which model/effort follows the NEW instruction
 best", NOT "was it the model or the prompt".
 
-PRICED: ~$1.20 for six cells on one reference. One container per cell, plan only,
+PRICED: ~$0.80 for four cells on two FROZEN RAW sources. One container per cell, plan only,
 no render, no image generation (scenes at zero generate nothing).
 
     modal run ab_matrix_app.py
@@ -74,7 +74,26 @@ REF = "golden/lumen-refs/ref2-viral-creator-doc-vertical.mp4"
 # control); 0 tests whether thinking is load-bearing at all; 60000 was the prior
 # cap and tests whether MORE effort buys the declined components.
 MODELS = ["gemini-3.1-pro-preview", "gemini-3.7-flash"]
-THINKING = [0, 24576, 60000]
+# 60000 IS STRUCK. The API rejects it — "thinking_budget is out of range" — and
+# both 60000 cells fell to recipe_transport:ClientError -> safe-edit fallback at
+# ~18-20s. Read as a latency win by anyone not printing the notes. It was the cap
+# for an earlier model generation.
+THINKING = [24576]        # production default; the only budget both models accept
+
+# RAW TALKING-HEAD SOURCES FROM THE FROZEN CORPUS, not the references.
+#
+# REF-2 answered the wrong question: the models declined it with a coherent
+# reason — "Source is fully edited with massive burned-in text", "already
+# contains bespoke 3D motion graphics... declined extra scenes to prevent
+# clutter". Refusing to decorate finished work is GOOD JUDGMENT, so a finished
+# reference cannot measure whether the planner will decorate a raw one.
+#
+# These are sha256+etag-FROZEN entries from fps_ab_corpus_manifest.json (frozen
+# at commit 1601ae0) — the constructed-durable pattern the A/B law requires,
+# never live user media. Both are route=editorial, English, no hard_case flag;
+# the `burned_in_captions` entry is deliberately EXCLUDED because it would
+# reproduce exactly the REF-2 confound.
+CORPUS_IDS = ["editorial_eng_5decdf11", "editorial_eng_a41276b2"]
 
 
 @app.function(image=_IMAGE, cpu=8, memory=16384, timeout=1800,
@@ -98,9 +117,26 @@ def cell(spec: dict) -> dict:
     out = {"model": spec["model"], "thinking": spec["thinking"],
            "build_sha": os.environ.get("PROMPTLY_BUILD_SHA", "")[:12], "ok": False}
     src = "/tmp/ab_src.mp4"
+    out["src_id"] = spec.get("src_id")
     try:
-        with open(src, "wb") as f:
-            f.write(spec["source_bytes"])
+        if spec.get("source_bytes"):
+            with open(src, "wb") as f:
+                f.write(spec["source_bytes"])
+        else:
+            # FROZEN CORPUS SOURCE — fetched by s3_key, then VERIFIED against the
+            # manifest's sha256. A corpus whose bytes drifted is not a corpus, and
+            # an A/B on drifted bytes compares two different things.
+            import hashlib as _hl
+            H._aws_s3_client.download_file(
+                H._fanout_s3_bucket(), spec["s3_key"], src)
+            if spec.get("sha256"):
+                _d = _hl.sha256(open(src, "rb").read()).hexdigest()
+                out["sha256_ok"] = (_d == spec["sha256"])
+                if not out["sha256_ok"]:
+                    out["error"] = (f"CORPUS DRIFT: {spec['src_id']} sha256 "
+                                    f"{_d[:12]} != manifest {spec['sha256'][:12]}")
+                    print(f"[cell] {out['error']}", flush=True)
+                    return out
         dur = H.probe_duration(src)
         tr = H.transcribe_audio(src, keywords=None, language="multi") or {}
         words = tr.get("words") or []
@@ -157,14 +193,33 @@ def cell(spec: dict) -> dict:
 
 
 @app.local_entrypoint()
-def main(source_path: str = REF):
-    with open(source_path, "rb") as f:
-        b = f.read()
-    specs = [{"model": m, "thinking": t, "source_bytes": b}
-             for m in MODELS for t in THINKING]
-    print(f"=== TRACK 1 MATRIX — {len(specs)} cells, priced ~$1.20 ===")
-    print(f"    source: {os.path.basename(source_path)} ({len(b)/1e6:.1f}MB)")
-    print(f"    prompt HELD CONSTANT (scenes v2 ON) — model x thinking only\n")
+def main(source_path: str = ""):
+    import json as _j
+    man = _j.load(open("fps_ab_corpus_manifest.json"))
+    by_id = {x["id"]: x for x in man["sources"]}
+    specs = []
+    if source_path:
+        with open(source_path, "rb") as f:
+            b = f.read()
+        for m in MODELS:
+            for t in THINKING:
+                specs.append({"model": m, "thinking": t, "source_bytes": b,
+                              "src_id": os.path.basename(source_path)})
+    else:
+        for cid in CORPUS_IDS:
+            e = by_id[cid]
+            for m in MODELS:
+                for t in THINKING:
+                    specs.append({"model": m, "thinking": t, "source_bytes": b"",
+                                  "s3_key": e["s3_key"], "src_id": cid,
+                                  "src_dur": e["duration_s"], "sha256": e.get("sha256")})
+    _srcs = sorted({str(sp.get("src_id")) for sp in specs})
+    print(f"=== TRACK 1 MATRIX — {len(specs)} cells, priced ~$0.80 ===")
+    print(f"    sources: {', '.join(_srcs)}")
+    print(f"    FROZEN corpus, sha256-verified per cell (a corpus whose bytes")
+    print(f"    drifted is not a corpus, and an A/B on drifted bytes compares")
+    print(f"    two different things)")
+    print(f"    prompt HELD CONSTANT (scenes v2 ON) — model axis only\n")
     res = list(cell.map(specs))
 
     print("\n" + "=" * 92)
@@ -173,9 +228,9 @@ def main(source_path: str = REF):
     print("=" * 92)
     for r in res:
         if not r.get("ok"):
-            print(f"{r['model']:26} {r['thinking']:>7}   FAILED  {str(r.get('error'))[:44]}")
+            print(f"{str(r.get('src_id'))[:26]:26} {r['model']:26} {r['thinking']:>7}   FAILED  {str(r.get('error'))[:40]}")
             continue
-        print(f"{r['model']:26} {r['thinking']:>7} {r['wall_s']:>8} {r['scenes']:>7} "
+        print(f"{str(r.get('src_id'))[:26]:26} {r['model']:26} {r['thinking']:>7} {r['wall_s']:>8} {r['scenes']:>7} "
               f"{str(r['brand_copy_emitted']):>6} {r['mg']:>4} {r['payoff']:>7} "
               f"{r['emphasis']:>5} {r['cuts']:>5}")
     ok = [r for r in res if r.get("ok")]

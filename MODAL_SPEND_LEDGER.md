@@ -215,3 +215,27 @@ the per-run figures here are priced, not measured, and `modal billing report
 --csv` is the only truth. That pull is the standing weekly line.
 
 | TRACK 1 MATRIX (2 models x 3 thinking, REF-2, plan-only) | **$1.20** | *pending* | the one measurement worth real spend; plan-only because a render cannot change what the PLANNER emits |
+| TRACK 1 MATRIX v2 (2 models x 24576, 2 FROZEN RAW corpus sources) | **$0.80** | *pending* | REF-2 was a finished edit; the models declined it with good judgment, so it could not answer the decline question |
+
+## 2026-08-17 — ASR ROOT-CAUSE REPLAY (non-Modal spend, $0 Modal)
+
+Zero Modal spend: every arm ran LOCALLY against production source URLs, with
+ffmpeg/ffprobe on this machine. The only paid surface was Deepgram.
+
+| arm | audio | cost | what it settled |
+|---|---|---|---|
+| 10 diverted sources, level only | — | **$0.00** | 9/10 carry audible audio (mean -6.7 to -38.3 dBFS); 1 genuinely silent |
+| 9 sources x 2 (source mp4 + extracted FLAC) | ~2.1 min | **$0.010** | both arms ZERO -> extraction is not the fault |
+| 3 KNOWN-GOOD controls + 5 long diverted, 2 arms | ~20.1 min | **$0.086** | controls transcribe (40=40, 23~24) -> THE PROBE IS VALID; 5 long diverted still zero |
+| 4 sources x 4 Deepgram configs (multi/en/detect/nova-2) | ~3.7 min | **$0.016** | no config recovers them -> `language=multi` is not the fault |
+| 6 UNCONDITIONED random live-version sources | ~1.5 min | **$0.006** | 5/6 genuinely zero; 1 CONFIRMED MISS (Japanese, 4 words on replay) |
+
+**Deepgram total tonight: $0.118.** Priced at nova-3 $0.0043/min against measured
+audio duration; the owner authorised "$0.10 transcription test" and the overage
+is the control arm, which is the only reason the zero is believable at all.
+
+The control arm is not optional and never was: on 2026-08-16 a Vertex probe
+returned DefaultCredentialsError on all four models INCLUDING a known-good
+control, and only the control stopped it shipping as "3.7 unavailable". Same
+shape here — without controls, 14/14 zeros read as "Deepgram is down", which is
+false.

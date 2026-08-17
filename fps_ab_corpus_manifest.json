@@ -1,565 +1,687 @@
 {
-  "built_from": "video_jobs completed + asr_scribe_cohort2 lang join",
-  "frozen_at_commit": "1601ae0",
-  "obedience_note": "4 sources / 5 markers (brief asked 5 sources): the 5th-best real ask ('professional corporate style') is a taste call, not a plan-checkable element \u2014 excluded per feedback_edit_review_higher_bar",
-  "premium_note": "UNSOURCEABLE: zero lumen/premium jobs exist in live traffic [MEASURED 2026-08-09]; premium arm absent by honesty, not oversight",
-  "sources": [
+ "built_from": "video_jobs completed + asr_scribe_cohort2 lang join",
+ "frozen_at_commit": "1601ae0",
+ "obedience_note": "4 sources / 5 markers (brief asked 5 sources): the 5th-best real ask ('professional corporate style') is a taste call, not a plan-checkable element \u2014 excluded per feedback_edit_review_higher_bar",
+ "premium_note": "UNSOURCEABLE: zero lumen/premium jobs exist in live traffic [MEASURED 2026-08-09]; premium arm absent by honesty, not oversight",
+ "sources": [
+  {
+   "bytes": 30947323,
+   "created_at": "2026-08-02T04:30:56.654271+00:00",
+   "duration_s": 26.6,
+   "etag": "3f89b2da654afc86e8af5caa4d9d8b21",
+   "id": "editorial_hin_a1e38092",
+   "job_id": "a1e38092-f749-42fa-b4f7-001e1b9abc44",
+   "lang": "hin",
+   "model": "flare",
+   "obedience": [
     {
-      "bytes": 30947323,
-      "created_at": "2026-08-02T04:30:56.654271+00:00",
-      "duration_s": 26.6,
-      "etag": "3f89b2da654afc86e8af5caa4d9d8b21",
-      "id": "editorial_hin_a1e38092",
-      "job_id": "a1e38092-f749-42fa-b4f7-001e1b9abc44",
-      "lang": "hin",
-      "model": "flare",
-      "obedience": [
-        {
-          "check": "family_min",
-          "family": "captions",
-          "min": 1
-        },
-        {
-          "check": "family_min",
-          "family": "zooms",
-          "min": 1
-        },
-        {
-          "check": "family_min",
-          "family": "sfx",
-          "min": 1
-        }
-      ],
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/11d10886-8e7d-479d-b313-3007b22004d0/1785644975641-9C8050E5-AF2F-48FF-B9E4-4C1A194568F4_L0_001.mp4",
-      "sha256": "d6afe3a94824382a403d0eed5e563c2a17491df38004635ef535cae486d5154e",
-      "vibe": "Viral engaging video with hinglish captions cuts zooms sound effects",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/11d10886-8e7d-479d-b313-3007b22004d0/1785644975641-9C8050E5-AF2F-48FF-B9E4-4C1A194568F4_L0_001.mp4"
+     "check": "family_min",
+     "family": "captions",
+     "min": 1
     },
     {
-      "bytes": 6160054,
-      "created_at": "2026-08-01T19:14:36.647562+00:00",
-      "duration_s": 27.0,
-      "etag": "6180cc871654cbcdb810f982fa5a7eee",
-      "id": "editorial_hin_3e01408c",
-      "job_id": "3e01408c-e512-48a1-8443-1b1cb5e73d87",
-      "lang": "hin",
-      "model": "flare",
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/1ad58fdc-8c34-414b-96c9-25a6d3766026/1785611140431-483EF18A-862D-4C1A-851A-271DA2E82973_L0_001.mp4",
-      "sha256": "382abf0c9ad696e872b88cd337da8ec430adb0e5ced9ef2c53b6a6ea4ea23e9d",
-      "vibe": "Viral engaging video",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/1ad58fdc-8c34-414b-96c9-25a6d3766026/1785611140431-483EF18A-862D-4C1A-851A-271DA2E82973_L0_001.mp4"
+     "check": "family_min",
+     "family": "zooms",
+     "min": 1
     },
     {
-      "bytes": 31899644,
-      "created_at": "2026-08-02T06:08:55.565551+00:00",
-      "duration_s": 22.6,
-      "etag": "df14407fd1439ca4eb1fbb01d9cbaf6a",
-      "id": "editorial_hin_b1b30df4",
-      "job_id": "b1b30df4-eb4e-4cb8-ab81-1d9cf63af3de",
-      "lang": "hin",
-      "model": "flare",
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/eefbcb98-b14f-467f-9363-7cfd6e4b15ed/1785650868944-3F2C00B1-115E-4711-A8A1-290FA03ADACC_L0_001.mp4",
-      "sha256": "c327e825d8647b188c13b262ac90316df4195957ca7d0c79e4e760e603466907",
-      "vibe": "Viral engaging video",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/eefbcb98-b14f-467f-9363-7cfd6e4b15ed/1785650868944-3F2C00B1-115E-4711-A8A1-290FA03ADACC_L0_001.mp4"
-    },
-    {
-      "bytes": 160936456,
-      "created_at": "2026-08-02T04:17:04.347445+00:00",
-      "duration_s": 19.6,
-      "etag": "fb8d95b526a5560df475cbe8a17defa5",
-      "id": "editorial_hin_6c9f83d5",
-      "job_id": "6c9f83d5-cc7e-444c-aec5-b47a60147120",
-      "lang": "hin",
-      "model": "flare",
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/adda36ea-1f9d-4d9f-b1e4-5f1196496d7d/1785643864740-E39326C5-07AF-4D82-A963-BAC02978C941_L0_001.mp4",
-      "sha256": "acbb6ed3337c76c3e3de8820ead9325f2f948c328ce6dd6d981dfdcda726e361",
-      "vibe": "Change the background of this video to a real looking background and also enhance the voice of this girl",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/adda36ea-1f9d-4d9f-b1e4-5f1196496d7d/1785643864740-E39326C5-07AF-4D82-A963-BAC02978C941_L0_001.mp4"
-    },
-    {
-      "bytes": 64308940,
-      "created_at": "2026-08-02T02:03:01.761332+00:00",
-      "duration_s": 33.6,
-      "etag": "ea7cabefded15a48c2098edb559fadc2",
-      "id": "editorial_hin_5e85a61b",
-      "job_id": "5e85a61b-b08d-42b6-816e-c22c133ecfce",
-      "lang": "hin",
-      "model": "flare",
-      "obedience": [
-        {
-          "check": "family_min",
-          "family": "zooms",
-          "min": 1
-        }
-      ],
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/02b598ae-86f8-4cec-84a6-923059223f7d/1785636123477-A278D0CD-52F6-4ACF-A08A-E26D5CA5CB35_L0_001.mp4",
-      "sha256": "aa6629df81f39915458fdb69ed08dfdbd6da673bef9c073984638bb9c64122ca",
-      "vibe": "Make this podcast style zoom in the girl when she speak and zoom in to boy when he speak",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/02b598ae-86f8-4cec-84a6-923059223f7d/1785636123477-A278D0CD-52F6-4ACF-A08A-E26D5CA5CB35_L0_001.mp4"
-    },
-    {
-      "bytes": 53224036,
-      "created_at": "2026-08-09T09:51:07.935588+00:00",
-      "duration_s": 27.3,
-      "etag": "d763da19e36497181a9d52ea921d1107",
-      "hard_case": "multi_speaker",
-      "id": "editorial_hin_b598d5ba",
-      "job_id": "b598d5ba-58e8-4218-ae68-1184defa7338",
-      "lang": "hin",
-      "model": "flare",
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/800884f9-d342-47ac-93e1-0c4067588da5/1786268011340-766A7100-6729-46E8-8389-67934D4FAB25_L0_001.mp4",
-      "sha256": "0b9cf6f8f1cdc90faf5c4971a1fe58a8e8fd5d408d0ca70470662fd10abb49e7",
-      "vibe": "Professional corporate style",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/800884f9-d342-47ac-93e1-0c4067588da5/1786268011340-766A7100-6729-46E8-8389-67934D4FAB25_L0_001.mp4"
-    },
-    {
-      "bytes": 13414204,
-      "created_at": "2026-08-02T06:28:05.640594+00:00",
-      "duration_s": 24.6,
-      "etag": "fd2d00f7dbae5c0577d496fb9864aea1-3",
-      "hard_case": "burned_in_captions",
-      "id": "editorial_eng_fa3efb69",
-      "job_id": "fa3efb69-b43e-470b-b7b9-cd341b86bdfe",
-      "lang": "eng",
-      "model": "flare",
-      "obedience": [
-        {
-          "check": "family_min",
-          "family": "captions",
-          "min": 1
-        }
-      ],
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/fd79c0c7-553b-43e9-bd30-90b1e5bce94b/1785652047710-58BDDA0E-925E-435B-83C5-A8E51E511924_L0_001.mp4",
-      "sha256": "e380e999acee35ec7b1365912673a5eb35d5acbb1e4f8ace521b39334ddf15e9",
-      "vibe": "Write text for the video with some effects",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/fd79c0c7-553b-43e9-bd30-90b1e5bce94b/1785652047710-58BDDA0E-925E-435B-83C5-A8E51E511924_L0_001.mp4"
-    },
-    {
-      "bytes": 18475222,
-      "created_at": "2026-08-01T22:09:09.906995+00:00",
-      "duration_s": 28.9,
-      "etag": "b8818d8d560e957cfe29b5100bc707a4",
-      "id": "editorial_eng_a41276b2",
-      "job_id": "a41276b2-9909-46a2-8513-dcfeef3df236",
-      "lang": "eng",
-      "model": "flare",
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/17340d82-bd52-4d6d-9d5d-2116124183dc/1785621662647-AD5E8188-12D2-44D7-9745-3590D418DB23_L0_001.mp4",
-      "sha256": "8e83c00d8160348e20c7e7cf0a0e568814415a59cca771269efa4c446b4e2611",
-      "vibe": "Increase quality of video and audio enhance",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/17340d82-bd52-4d6d-9d5d-2116124183dc/1785621662647-AD5E8188-12D2-44D7-9745-3590D418DB23_L0_001.mp4"
-    },
-    {
-      "bytes": 3116524,
-      "created_at": "2026-08-02T04:35:36.772847+00:00",
-      "duration_s": 15.0,
-      "etag": "aba8d011cdaed8886b2f5ec95df90936",
-      "id": "editorial_eng_5decdf11",
-      "job_id": "5decdf11-10c4-4c84-acd8-e735a41af1fc",
-      "lang": "eng",
-      "model": "flare",
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/7413cb5b-3a34-4446-9643-d69dba1f8626/1785645188878-0250CECF-2E26-4572-BF2B-1D7E68212030_L0_001.mp4",
-      "sha256": "7a4d4ab28c04cfb9aa8af026b51d1805ef1fb5330d0507961e5c0719aa145c24",
-      "vibe": "Make this video say Jonda newbry seriously i don\u2019t wanna talk to you anymore",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/7413cb5b-3a34-4446-9643-d69dba1f8626/1785645188878-0250CECF-2E26-4572-BF2B-1D7E68212030_L0_001.mp4"
-    },
-    {
-      "bytes": 37482459,
-      "created_at": "2026-08-01T21:45:53.224894+00:00",
-      "duration_s": 16.4,
-      "etag": "1e19d9786a83cd82f394685310b2faa4",
-      "id": "editorial_spa_3de806c4",
-      "job_id": "3de806c4-d494-48f1-8ca3-ba557acb4d94",
-      "lang": "spa",
-      "model": "flare",
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/d520cb89-c8a4-4408-9d24-fd7e0e00b571/1785620423541-3DCA18DD-8119-4597-A342-556C77828A51_L0_001.mp4",
-      "sha256": "7cb1178571beb5d23cdfb9b2fbce0ed1dc95b8982f51ab2e5e5f63164abf125a",
-      "vibe": "Remove text \u201c@alessandodossetti\u201d from video",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/d520cb89-c8a4-4408-9d24-fd7e0e00b571/1785620423541-3DCA18DD-8119-4597-A342-556C77828A51_L0_001.mp4"
-    },
-    {
-      "bytes": 50785490,
-      "created_at": "2026-08-01T23:15:38.792916+00:00",
-      "duration_s": 23.2,
-      "etag": "603bf3578cd83a437e1f9f97eea934bc",
-      "id": "editorial_ben_2103a83c",
-      "job_id": "2103a83c-882d-400b-aaa7-c88836780217",
-      "lang": "ben",
-      "model": "flare",
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/8177b906-48bb-47ee-8315-77ad11a69b59/1785621259429-9D696045-1206-4407-985C-C7F759537B2D_L0_001.mp4",
-      "sha256": "75aaf7754477a92b7cab5d6f8a9661e001f2f5170dc84cdbb1f602c23ea8c91f",
-      "vibe": "Viral engaging video",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/8177b906-48bb-47ee-8315-77ad11a69b59/1785621259429-9D696045-1206-4407-985C-C7F759537B2D_L0_001.mp4"
-    },
-    {
-      "bytes": 93233798,
-      "created_at": "2026-08-10T03:13:33.33664+00:00",
-      "duration_s": 25.0,
-      "etag": "c33cda22f38ab099120f87d8cc993ccc",
-      "id": "editorial_xx_01ef2a80",
-      "job_id": "01ef2a80-9ce1-40b3-98a3-bea6d3a6c05e",
-      "lang": null,
-      "lang_note": "vibe requests Arabic subtitles; source language unverified",
-      "model": "flare",
-      "obedience": [
-        {
-          "check": "family_min",
-          "family": "captions",
-          "min": 1
-        }
-      ],
-      "route_expected": "editorial",
-      "route_reason": null,
-      "s3_key": "sources/74cac34b-cf0b-4be2-bf17-6894838c7484/1786331482452-972BEAA9-116D-421A-9F5E-84ADAAF55991_L0_001.mp4",
-      "sha256": "173f185cd0434d5de353ce5957235c3779daf7ae08276c77144676ea1e32a618",
-      "vibe": "Add Arabic subtitles.\n* Keep subtitles short and easy to read.\n* Highlight only important words.\n* Use a clean modern sans-serif font.",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/74cac34b-cf0b-4be2-bf17-6894838c7484/1786331482452-972BEAA9-116D-421A-9F5E-84ADAAF55991_L0_001.mp4"
-    },
-    {
-      "bytes": 20952172,
-      "created_at": "2026-08-08T11:18:51.218001+00:00",
-      "duration_s": 13.1,
-      "etag": "368e925239121626606c9f17221eed5f",
-      "id": "moodreel_xx_d5cf8ea2",
-      "job_id": "d5cf8ea2-9c59-486f-8d01-7e47732afdae",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "moodreel",
-      "route_reason": "no_speech",
-      "s3_key": "sources/7b9ea675-d671-403e-8baf-de2ac5f45a0b/1786187835831-28182C32-3F05-4EC9-AF47-30D80695D426_L0_001.mp4",
-      "sha256": "d3850be4e6744ff0dd94ba2fc8006b831f39762abd6c16018054f00633bec637",
-      "vibe": "Ekta attitude video editing kore dao ar attitude hindi background music diba",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/7b9ea675-d671-403e-8baf-de2ac5f45a0b/1786187835831-28182C32-3F05-4EC9-AF47-30D80695D426_L0_001.mp4"
-    },
-    {
-      "bytes": 51569157,
-      "created_at": "2026-08-08T11:18:10.824213+00:00",
-      "duration_s": 12.3,
-      "etag": "4dff15106237388b1f352950c9110fd2",
-      "id": "moodreel_xx_3a697250",
-      "job_id": "3a697250-a154-4479-bb02-a63ea182ff08",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "moodreel",
-      "route_reason": "no_speech",
-      "s3_key": "sources/2dd14699-ff3c-40c0-9198-663ed87f826c/1786187700854-24809609-3C33-4508-B329-326652BDBCD3_L0_001.mp4",
-      "sha256": "07e2112ccd6aeb8558f6c7fee2fcc030c5a149b63ee968c340ba2bf37cb9d67e",
-      "vibe": "Viral engaging video",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/2dd14699-ff3c-40c0-9198-663ed87f826c/1786187700854-24809609-3C33-4508-B329-326652BDBCD3_L0_001.mp4"
-    },
-    {
-      "bytes": 22055049,
-      "created_at": "2026-08-08T11:03:48.006003+00:00",
-      "duration_s": 33.3,
-      "etag": "c8298ff1df75270febea9aea2d7358ba",
-      "id": "moodreel_xx_83889adc",
-      "job_id": "83889adc-2b1f-4942-943f-6194eade0cad",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "moodreel",
-      "route_reason": "no_speech_muted",
-      "s3_key": "sources/b0786f9b-1e6c-41b8-9aed-d31d0942ff85/1786186580235-F076C7B1-BF20-48CC-AF21-CE6AA15038F7_L0_001.mp4",
-      "sha256": "c7a7ee37b4cda6f6a32485ed405a8772dffe30dd416dca7dfe4970baf9a4aae7",
-      "vibe": "Viral engaging video",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/b0786f9b-1e6c-41b8-9aed-d31d0942ff85/1786186580235-F076C7B1-BF20-48CC-AF21-CE6AA15038F7_L0_001.mp4"
-    },
-    {
-      "bytes": 38280708,
-      "created_at": "2026-08-08T10:59:00.47171+00:00",
-      "duration_s": 12.2,
-      "etag": "bcbd064843468e245ef40ae84b26bac6",
-      "id": "moodreel_xx_12bc86e8",
-      "job_id": "12bc86e8-392b-4595-aee1-d8eb2e7b840a",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "moodreel",
-      "route_reason": "no_speech",
-      "s3_key": "sources/ab7f5269-670f-4017-9315-7ddd96b0a662/1786186507020-AFFFBE62-26AE-4756-B4BF-0AFA6FBEB55D_L0_001.mp4",
-      "sha256": "0540edfa4ba5cd0f1f11ed8c0f8723a9f05ad9c1221764914f3142be897d0c9b",
-      "vibe": "Is video ko edit kar do",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/ab7f5269-670f-4017-9315-7ddd96b0a662/1786186507020-AFFFBE62-26AE-4756-B4BF-0AFA6FBEB55D_L0_001.mp4"
-    },
-    {
-      "bytes": 105816178,
-      "created_at": "2026-08-08T10:55:35.685653+00:00",
-      "duration_s": 37.8,
-      "etag": "84ef6d8aa0dac794ab1759c0d8402c74",
-      "id": "moodreel_xx_3255dbdf",
-      "job_id": "3255dbdf-516c-4615-8f88-3f68af7412e1",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "moodreel",
-      "route_reason": "not_talking_head",
-      "s3_key": "sources/31995e9f-5fa3-4b38-b883-6a2222604fad/1786186417270-A88E92CC-3441-4903-ADCB-5084ED56D614_L0_001.mp4",
-      "sha256": "9c848731005df88348ace7078ced62df803a874c6de060ee46b89009d8195342",
-      "vibe": "Viral engaging video",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/31995e9f-5fa3-4b38-b883-6a2222604fad/1786186417270-A88E92CC-3441-4903-ADCB-5084ED56D614_L0_001.mp4"
-    },
-    {
-      "bytes": 37594816,
-      "created_at": "2026-08-10T02:09:42.054165+00:00",
-      "duration_s": 6.7,
-      "etag": "23dc10f369f9e564d44ff2f5ae62672c",
-      "hard_case": "near_silent",
-      "id": "minimal_xx_c80bf5a9",
-      "job_id": "c80bf5a9-1956-4d24-b87e-2e6d921447f6",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "minimal",
-      "route_reason": "no_speech",
-      "s3_key": "sources/99b6b12c-e954-4194-af29-b7d2cf4930da/1786327673287-2866069A-F959-4C92-916E-B9136EFC5FAC_L0_001.mp4",
-      "sha256": "11d8ff921f96f4ea719d1b71c9523f3f05fd8ee96abac27f7f6764226ede053b",
-      "vibe": "Viral engaging video",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/99b6b12c-e954-4194-af29-b7d2cf4930da/1786327673287-2866069A-F959-4C92-916E-B9136EFC5FAC_L0_001.mp4"
-    },
-    {
-      "bytes": 16814919,
-      "created_at": "2026-08-10T02:12:00.441595+00:00",
-      "duration_s": 25.9,
-      "etag": "d42c221bc8cc18716512d1b91742e50f",
-      "id": "minimal_xx_dc766ac2",
-      "job_id": "dc766ac2-c025-41af-bd4a-7925bbe85210",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "minimal",
-      "route_reason": "no_audio",
-      "s3_key": "sources/ba2e9513-3aab-4133-ab44-37bb5842edb7/1786327861868-28F67216-C0EB-42F8-A70E-B01C7140FD01_L0_001.mp4",
-      "sha256": "4f3d6f978cc601e329a50ae6ad00e951c4e4c0d48017f5436d835546ecfa3497",
-      "vibe": "Viral engaging video . King going to another palace enter palace.",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/ba2e9513-3aab-4133-ab44-37bb5842edb7/1786327861868-28F67216-C0EB-42F8-A70E-B01C7140FD01_L0_001.mp4"
-    },
-    {
-      "bytes": 71872166,
-      "created_at": "2026-08-10T02:05:52.912406+00:00",
-      "duration_s": 24.0,
-      "etag": "8f6e581f540bb48005817094c3dce638",
-      "id": "minimal_xx_761a349b",
-      "job_id": "761a349b-c8f4-47d9-a7d7-c655e7ada2ac",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "minimal",
-      "route_reason": "not_talking_head",
-      "s3_key": "sources/40e82ad7-1d46-47a0-be3c-4e2fca9540b2/1786327120415-3CA9DD84-F9AA-40A2-9811-D4A15BD10F5C_L0_001.mp4",
-      "sha256": "9b8dd4dcc2852e17de90ba5f497c191be542624192cf32cc3cfd2bfe8a77b59d",
-      "vibe": "Create a cinematic ultra-realistic \u201cSIGMA MALE\u201d video edit of a confident young man walking in slow motion. He has a calm but intense expression, showing dominance and self-control. The environment is dark and moody with neon lights, city streets at night, slight rain, and reflections on the ground.\n\nAdd dramatic lighting with shadows on the face, highlighting jawline and eyes. Use slow-motion effects, smooth transitions, and subtle camera shake for realism. Include smoke, particles, and light leaks for a stylish aesthetic.\n\nColor grading should be high contrast with a mix of teal and orange tones. Background music should be deep bass, phonk, or dark trap beat. Sync cuts with beat drops.\n\nAdd bold cinematic text overlays like:\n\u201cNO FEAR\u201d\n\u201cSILENCE IS POWER\u201d\n\u201cREAL SIGMA NEVER EXPLAINS\u201d\n\nInclude glitch effects, zoom transitions, and blur motion effects during beat drops. End with a powerful close-up shot and fade to black.\n\nAspect ratio: 9:16 (for reels/shorts)\nQuality: 4K ultra HD\nStyle: Dark, aesthetic, attitude, sigma mindset",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/40e82ad7-1d46-47a0-be3c-4e2fca9540b2/1786327120415-3CA9DD84-F9AA-40A2-9811-D4A15BD10F5C_L0_001.mp4"
-    },
-    {
-      "bytes": 123057671,
-      "created_at": "2026-08-10T03:34:29.676004+00:00",
-      "duration_s": 58.8,
-      "etag": "3f7d0c158a22be4a256c191f0e340b28",
-      "id": "minimal_speech_uncut_xx_de3b8bf4",
-      "job_id": "de3b8bf4-5c6e-430f-839c-c2c4a03c42ed",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "minimal_speech_uncut",
-      "route_reason": "transcription_incomplete",
-      "s3_key": "sources/eac153f0-c5d1-4c6a-87c4-80344da55b67/1786332855984-71CD42CE-71F7-4FF3-AD94-BCC043605BF2_L0_001.mp4",
-      "sha256": "8647311e34a344e4f5a8adc1501c692ba8be3655974d63dfc0054b4314810d2f",
-      "vibe": "Clean and engaging edit",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/eac153f0-c5d1-4c6a-87c4-80344da55b67/1786332855984-71CD42CE-71F7-4FF3-AD94-BCC043605BF2_L0_001.mp4"
-    },
-    {
-      "bytes": 2248963,
-      "created_at": "2026-08-10T02:37:20.018272+00:00",
-      "duration_s": 16.1,
-      "etag": "e45dac41aae13c83608092e6b86964ba",
-      "id": "minimal_speech_uncut_xx_56f178b2",
-      "job_id": "56f178b2-3540-4394-96fb-9df5887f63d8",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "minimal_speech_uncut",
-      "route_reason": "plan_collapsed",
-      "s3_key": "sources/06ce7870-0be9-4dd7-999a-ba684adf34ce/1786329401663-9491753D-FBF9-4FD2-93B8-7534F57C3C8E_L0_001.mp4",
-      "sha256": "948fb985928a3ca1a3fdc2f7988df263931efe1361bff82beabf2d9f6247b3d4",
-      "vibe": "Let him say i love you my sweet Monica",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/06ce7870-0be9-4dd7-999a-ba684adf34ce/1786329401663-9491753D-FBF9-4FD2-93B8-7534F57C3C8E_L0_001.mp4"
-    },
-    {
-      "bytes": 3878913,
-      "created_at": "2026-08-08T10:58:54.689482+00:00",
-      "duration_s": 33.9,
-      "etag": "1e053c292894c50ee834649262e135c9",
-      "id": "hype_xx_c71030e5",
-      "job_id": "c71030e5-3cce-4210-be13-d6e2aee3370c",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "hype",
-      "route_reason": "no_speech",
-      "s3_key": "sources/8ec3b106-1f05-4402-9014-4e4d00087af5/1786186705250-87A76437-5A0D-4C79-9297-A108BB566BA6_L0_001.mp4",
-      "sha256": "37dba1dfbcbfa3d29acef9f54ba0ffa6bbed9e219dc111c0239bf7d2c60060b3",
-      "vibe": "Clean and engaging edit",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/8ec3b106-1f05-4402-9014-4e4d00087af5/1786186705250-87A76437-5A0D-4C79-9297-A108BB566BA6_L0_001.mp4"
-    },
-    {
-      "bytes": 147577844,
-      "created_at": "2026-08-08T10:44:23.180393+00:00",
-      "duration_s": 31.8,
-      "etag": "5fbcd62a4cfe758d1e53fe21676c0109",
-      "id": "hype_xx_c995d73c",
-      "job_id": "c995d73c-3e74-42e7-b498-2a56e3311ee9",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "hype",
-      "route_reason": "no_speech",
-      "s3_key": "sources/e8b20108-c4da-4b99-a74f-2210323d58d6/1786185649272-8FA2EEBB-38E2-41CA-BA8B-E06BA2BD3DC3_L0_001.mp4",
-      "sha256": "7bebf614e39916588363d10025c101337f2c515a977e31c1ed03a9bfa5550a3f",
-      "vibe": "I want Here's the complete, all-in-one script for this reel:\n\n**\ud83c\udfac FULL SCRIPT \u2014 \"The Tihai Fail\"**\n\n**[0-2 sec] HOOK**\nFreeze on your pose (like the photo), text on screen:\n*\"3 rounds. 1 tihai. Guess who messes up the last sam \ud83d\ude05\"*\n(Trending audio tip: use a suspenseful/comedic trending sound with a \"beat drop\" or \"record scratch\" moment \u2014 search Reels audio for trending \"fail/comedy timing\" sounds this week, they change often)\n\n**[2-6 sec] ROUNDS 1-2 \u2014 Clean & Synced**\nQuick cuts, no text. Let the ghungroo sound and your sync do the talking. This builds the pattern so the mistake pays off.\n\n**[6-9 sec] ROUND 3 \u2014 THE MISTAKE (slow-mo if possible)**\nYou + other student hit sam directly. She adds the extra step then catches up.\nText: *\"Two of us: sam. Her: 'let me add a little something extra' \ud83d\ude02\"*\n\n**[9-11 sec] REACTION**\nGenuine laugh/side-eye from you and students.\nText: *\"Kathak class in a nutshell\"*\n\n**[11-13 sec] CTA**\nText: *\"Save this, we're doing it again till she gets it \ud83d\ude2d\"*\n\n**Caption (below video):**\n\"A tihai = same phrase repeated 3 times, landing together on 'sam.' Somebody added a bonus step \ud83d\ude43 Attempt #[X], we'll get there. Which one of you is this student? \ud83d\ude02 #kathak #indianclassicaldance\"\n\n---\n\n**\ud83d\udd25 More relatable hook variations (rotate these across future reels for variety + virality):**\n- \"Rate our tihai 1-10 (be honest, she wasn't)\"\n- \"POV: you're the one student who breaks the sync and everyone knows it's you\"\n- \"This is what 6 months of Kathak practice actually looks like \u2014 not the highlight reel\"\n- \"We look confident. We are not confident.\"\n- \"Dance class group chat after this happens: \ud83d\udc80\"\n\n**\ud83d\udcc8 For more comments specifically, always end with a direct question:**\n- \"Which one of us do you think messed up first try?\"\n- \"Would you have caught the mistake without the text? \ud83d\udc40\"\n- \"Tag someone who'd 100% be the 'extra step' friend\"\n\n**\ud83d\udca1 Growth tips:**\n- Post consistently (3-4x/week) \u2014 the algorithm favors accounts that post often over ones that post rarely, even if quality varies slightly\n- Reuse this exact format (\"clean rounds \u2192 funny fail \u2192 reaction\") as a series \u2014 once one version goes viral, sequels ride the same wave\n- Trending audio matters more than perfect video quality for reach \u2014 check Reels' \"trending\" tab same-day before posting, since sounds cycle fast\n- Reply to every comment in the first hour \u2014 early engagement is what pushes Instagram to show it to more people\nNot same to this but add your creativity and also make this video like more relatable more shares it get",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/e8b20108-c4da-4b99-a74f-2210323d58d6/1786185649272-8FA2EEBB-38E2-41CA-BA8B-E06BA2BD3DC3_L0_001.mp4"
-    },
-    {
-      "bytes": 64605637,
-      "created_at": "2026-08-08T09:54:19.712994+00:00",
-      "duration_s": 48.1,
-      "etag": "d208981aa27bff74e30508cec60f38ee",
-      "id": "hype_xx_c9abb367",
-      "job_id": "c9abb367-5978-479e-8026-a512a980ec93",
-      "lang": null,
-      "model": "flare",
-      "route_expected": "hype",
-      "route_reason": "not_talking_head",
-      "s3_key": "sources/3e8c4921-b155-4c52-87fe-d8aad29dc1f6/1786182799550-A508793F-153B-413B-BAE0-E2075750F521_L0_001.mp4",
-      "sha256": "775aabb3f76d93887b1b476df37ec27f1d034010acb0525f4c39f18eb70d393f",
-      "vibe": "\u2728 Add smooth animations (zoom, shake, glow, motion effects)\n* \ud83c\udfb5 Add background music\n* \ud83d\udd0a Add English sound effects (whooshes, impacts, clicks, cinematic sounds)\n* \ud83d\udcdd Add English captions or animated text\n* \ud83c\udfac Make it look cinematic or suitable for YouTube Shorts/TikTok/Reels\n* \ud83c\udf08 Add color grading and transitions\n\nOnce you upload the video, also tell me the style you want, for example:\n\n* Cinematic\n* Action\n* Gaming (Free Fire)\n* Funny\n* Horror\n* Motivational\n\nI\u2019ll help create the edit plan and the English audio/animation ideas for your video.add some animation and glow",
-      "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/3e8c4921-b155-4c52-87fe-d8aad29dc1f6/1786182799550-A508793F-153B-413B-BAE0-E2075750F521_L0_001.mp4"
+     "check": "family_min",
+     "family": "sfx",
+     "min": 1
     }
-  ],
-  "tweak_capture_contract": "SEAM produces golden/tweaks/<case_id>.json per case: {kind:'tweak',case_id,capture:{classification,new_plan,human_summary,flag_on}}; judge with: python3 harness_plan_diff.py tweak-judge --manifest golden/manifest.json --captures golden/tweaks",
-  "tweak_cases": [
+   ],
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/11d10886-8e7d-479d-b313-3007b22004d0/1785644975641-9C8050E5-AF2F-48FF-B9E4-4C1A194568F4_L0_001.mp4",
+   "sha256": "d6afe3a94824382a403d0eed5e563c2a17491df38004635ef535cae486d5154e",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 95,
+    "brand_copy": [],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Viral engaging video with hinglish captions cuts zooms sound effects",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/11d10886-8e7d-479d-b313-3007b22004d0/1785644975641-9C8050E5-AF2F-48FF-B9E4-4C1A194568F4_L0_001.mp4"
+  },
+  {
+   "bytes": 6160054,
+   "created_at": "2026-08-01T19:14:36.647562+00:00",
+   "duration_s": 27.0,
+   "etag": "6180cc871654cbcdb810f982fa5a7eee",
+   "id": "editorial_hin_3e01408c",
+   "job_id": "3e01408c-e512-48a1-8443-1b1cb5e73d87",
+   "lang": "hin",
+   "model": "flare",
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/1ad58fdc-8c34-414b-96c9-25a6d3766026/1785611140431-483EF18A-862D-4C1A-851A-271DA2E82973_L0_001.mp4",
+   "sha256": "382abf0c9ad696e872b88cd337da8ec430adb0e5ced9ef2c53b6a6ea4ea23e9d",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 22,
+    "brand_copy": [],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/1ad58fdc-8c34-414b-96c9-25a6d3766026/1785611140431-483EF18A-862D-4C1A-851A-271DA2E82973_L0_001.mp4"
+  },
+  {
+   "bytes": 31899644,
+   "created_at": "2026-08-02T06:08:55.565551+00:00",
+   "duration_s": 22.6,
+   "etag": "df14407fd1439ca4eb1fbb01d9cbaf6a",
+   "id": "editorial_hin_b1b30df4",
+   "job_id": "b1b30df4-eb4e-4cb8-ab81-1d9cf63af3de",
+   "lang": "hin",
+   "model": "flare",
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/eefbcb98-b14f-467f-9363-7cfd6e4b15ed/1785650868944-3F2C00B1-115E-4711-A8A1-290FA03ADACC_L0_001.mp4",
+   "sha256": "c327e825d8647b188c13b262ac90316df4195957ca7d0c79e4e760e603466907",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 94,
+    "brand_copy": [],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/eefbcb98-b14f-467f-9363-7cfd6e4b15ed/1785650868944-3F2C00B1-115E-4711-A8A1-290FA03ADACC_L0_001.mp4"
+  },
+  {
+   "bytes": 160936456,
+   "created_at": "2026-08-02T04:17:04.347445+00:00",
+   "duration_s": 19.6,
+   "etag": "fb8d95b526a5560df475cbe8a17defa5",
+   "id": "editorial_hin_6c9f83d5",
+   "job_id": "6c9f83d5-cc7e-444c-aec5-b47a60147120",
+   "lang": "hin",
+   "model": "flare",
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/adda36ea-1f9d-4d9f-b1e4-5f1196496d7d/1785643864740-E39326C5-07AF-4D82-A963-BAC02978C941_L0_001.mp4",
+   "sha256": "acbb6ed3337c76c3e3de8820ead9325f2f948c328ce6dd6d981dfdcda726e361",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 54,
+    "brand_copy": [],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Change the background of this video to a real looking background and also enhance the voice of this girl",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/adda36ea-1f9d-4d9f-b1e4-5f1196496d7d/1785643864740-E39326C5-07AF-4D82-A963-BAC02978C941_L0_001.mp4"
+  },
+  {
+   "bytes": 64308940,
+   "created_at": "2026-08-02T02:03:01.761332+00:00",
+   "duration_s": 33.6,
+   "etag": "ea7cabefded15a48c2098edb559fadc2",
+   "id": "editorial_hin_5e85a61b",
+   "job_id": "5e85a61b-b08d-42b6-816e-c22c133ecfce",
+   "lang": "hin",
+   "model": "flare",
+   "obedience": [
     {
-      "adaptation": "SEAM's literal find-word 'rise' appears in NO golden transcript [MEASURED 12/12]; bound to once-occurring transcript word 'devil' (same op class, transcript-guaranteed find)",
-      "case_id": "S3A_caption_override",
-      "expect": {
-        "classification": "tweak",
-        "plan_list_contains": {
-          "entry": {
-            "find": "devil",
-            "replace": "devyl"
-          },
-          "path": "caption_text_overrides"
-        }
-      },
-      "parent_id": "editorial_eng_fa3efb69",
-      "payload": {
-        "change_request": "change 'devil' to 'devyl'",
-        "mode": "tweak",
-        "surgical_v2_test": true
-      },
-      "spec_origin": "SEAM_OBEDIENCE_CASES_FOR_HARNESS.md case S3-A"
-    },
-    {
-      "case_id": "S3A_flag_off",
-      "expect": {
-        "plan_list_absent": {
-          "entry": {
-            "find": "devil",
-            "replace": "devyl"
-          },
-          "path": "caption_text_overrides"
-        }
-      },
-      "parent_id": "editorial_eng_fa3efb69",
-      "payload": {
-        "change_request": "change 'devil' to 'devyl'",
-        "mode": "tweak"
-      },
-      "spec_origin": "SEAM case S3-A flag-off byte-identity arm"
-    },
-    {
-      "binding": {
-        "after_word_index": 36,
-        "gap_ms": 585,
-        "note": "gap 585ms fits DipToBlack (350ms) [MEASURED from parent plan cuts + Deepgram words]",
-        "seam_cut_idx": 3,
-        "word": "back"
-      },
-      "case_id": "S3B_add_transition",
-      "expect": {
-        "classification": "tweak",
-        "plan_list_contains": {
-          "entry": {
-            "after_word_index": 36,
-            "type": "DipToBlack"
-          },
-          "path": "transitions"
-        }
-      },
-      "parent_id": "editorial_eng_a41276b2",
-      "payload": {
-        "change_request": "add a DipToBlack after 'back'",
-        "mode": "tweak",
-        "surgical_v2_test": true
-      },
-      "spec_origin": "SEAM case S3-B"
-    },
-    {
-      "binding": {
-        "after_word_index": 36,
-        "gap_ms": 585,
-        "needs_ms": 800,
-        "note": "same seam: 585ms < CrossfadeZoom natural 800ms \u2014 must be skipped WITH note",
-        "word": "back"
-      },
-      "case_id": "S3B_neg_squeeze",
-      "expect": {
-        "note_required_containing": "skip",
-        "plan_list_absent": {
-          "entry": {
-            "after_word_index": 36,
-            "type": "CrossfadeZoom"
-          },
-          "path": "transitions"
-        }
-      },
-      "parent_id": "editorial_eng_a41276b2",
-      "payload": {
-        "change_request": "add a CrossfadeZoom after 'back'",
-        "mode": "tweak",
-        "surgical_v2_test": true
-      },
-      "spec_origin": "SEAM case S3-B negative twin (natural-duration law)"
-    },
-    {
-      "case_id": "S3B_flag_off",
-      "expect": {
-        "plan_list_absent": {
-          "entry": {
-            "after_word_index": 36,
-            "type": "DipToBlack"
-          },
-          "path": "transitions"
-        }
-      },
-      "parent_id": "editorial_eng_a41276b2",
-      "payload": {
-        "change_request": "add a DipToBlack after 'back'",
-        "mode": "tweak"
-      },
-      "spec_origin": "SEAM case S3-B flag-off byte-identity arm"
+     "check": "family_min",
+     "family": "zooms",
+     "min": 1
     }
-  ],
-  "version": 1
+   ],
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/02b598ae-86f8-4cec-84a6-923059223f7d/1785636123477-A278D0CD-52F6-4ACF-A08A-E26D5CA5CB35_L0_001.mp4",
+   "sha256": "aa6629df81f39915458fdb69ed08dfdbd6da673bef9c073984638bb9c64122ca",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 92,
+    "brand_copy": [],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Make this podcast style zoom in the girl when she speak and zoom in to boy when he speak",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/02b598ae-86f8-4cec-84a6-923059223f7d/1785636123477-A278D0CD-52F6-4ACF-A08A-E26D5CA5CB35_L0_001.mp4"
+  },
+  {
+   "bytes": 53224036,
+   "created_at": "2026-08-09T09:51:07.935588+00:00",
+   "duration_s": 27.3,
+   "etag": "d763da19e36497181a9d52ea921d1107",
+   "hard_case": "multi_speaker",
+   "id": "editorial_hin_b598d5ba",
+   "job_id": "b598d5ba-58e8-4218-ae68-1184defa7338",
+   "lang": "hin",
+   "model": "flare",
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/800884f9-d342-47ac-93e1-0c4067588da5/1786268011340-766A7100-6729-46E8-8389-67934D4FAB25_L0_001.mp4",
+   "sha256": "0b9cf6f8f1cdc90faf5c4971a1fe58a8e8fd5d408d0ca70470662fd10abb49e7",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Professional corporate style",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/800884f9-d342-47ac-93e1-0c4067588da5/1786268011340-766A7100-6729-46E8-8389-67934D4FAB25_L0_001.mp4"
+  },
+  {
+   "bytes": 13414204,
+   "created_at": "2026-08-02T06:28:05.640594+00:00",
+   "duration_s": 24.6,
+   "etag": "fd2d00f7dbae5c0577d496fb9864aea1-3",
+   "hard_case": "burned_in_captions",
+   "id": "editorial_eng_fa3efb69",
+   "job_id": "fa3efb69-b43e-470b-b7b9-cd341b86bdfe",
+   "lang": "eng",
+   "model": "flare",
+   "obedience": [
+    {
+     "check": "family_min",
+     "family": "captions",
+     "min": 1
+    }
+   ],
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/fd79c0c7-553b-43e9-bd30-90b1e5bce94b/1785652047710-58BDDA0E-925E-435B-83C5-A8E51E511924_L0_001.mp4",
+   "sha256": "e380e999acee35ec7b1365912673a5eb35d5acbb1e4f8ace521b39334ddf15e9",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 36,
+    "brand_copy": [],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Write text for the video with some effects",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/fd79c0c7-553b-43e9-bd30-90b1e5bce94b/1785652047710-58BDDA0E-925E-435B-83C5-A8E51E511924_L0_001.mp4"
+  },
+  {
+   "bytes": 18475222,
+   "created_at": "2026-08-01T22:09:09.906995+00:00",
+   "duration_s": 28.9,
+   "etag": "b8818d8d560e957cfe29b5100bc707a4",
+   "id": "editorial_eng_a41276b2",
+   "job_id": "a41276b2-9909-46a2-8513-dcfeef3df236",
+   "lang": "eng",
+   "model": "flare",
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/17340d82-bd52-4d6d-9d5d-2116124183dc/1785621662647-AD5E8188-12D2-44D7-9745-3590D418DB23_L0_001.mp4",
+   "sha256": "8e83c00d8160348e20c7e7cf0a0e568814415a59cca771269efa4c446b4e2611",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 50,
+    "brand_copy": [
+     "brand/company"
+    ],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Increase quality of video and audio enhance",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/17340d82-bd52-4d6d-9d5d-2116124183dc/1785621662647-AD5E8188-12D2-44D7-9745-3590D418DB23_L0_001.mp4"
+  },
+  {
+   "bytes": 3116524,
+   "created_at": "2026-08-02T04:35:36.772847+00:00",
+   "duration_s": 15.0,
+   "etag": "aba8d011cdaed8886b2f5ec95df90936",
+   "id": "editorial_eng_5decdf11",
+   "job_id": "5decdf11-10c4-4c84-acd8-e735a41af1fc",
+   "lang": "eng",
+   "model": "flare",
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/7413cb5b-3a34-4446-9643-d69dba1f8626/1785645188878-0250CECF-2E26-4572-BF2B-1D7E68212030_L0_001.mp4",
+   "sha256": "7a4d4ab28c04cfb9aa8af026b51d1805ef1fb5330d0507961e5c0719aa145c24",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 28,
+    "brand_copy": [],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Make this video say Jonda newbry seriously i don\u2019t wanna talk to you anymore",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/7413cb5b-3a34-4446-9643-d69dba1f8626/1785645188878-0250CECF-2E26-4572-BF2B-1D7E68212030_L0_001.mp4"
+  },
+  {
+   "bytes": 37482459,
+   "created_at": "2026-08-01T21:45:53.224894+00:00",
+   "duration_s": 16.4,
+   "etag": "1e19d9786a83cd82f394685310b2faa4",
+   "id": "editorial_spa_3de806c4",
+   "job_id": "3de806c4-d494-48f1-8ca3-ba557acb4d94",
+   "lang": "spa",
+   "model": "flare",
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/d520cb89-c8a4-4408-9d24-fd7e0e00b571/1785620423541-3DCA18DD-8119-4597-A342-556C77828A51_L0_001.mp4",
+   "sha256": "7cb1178571beb5d23cdfb9b2fbce0ed1dc95b8982f51ab2e5e5f63164abf125a",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 11,
+    "brand_copy": [],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Remove text \u201c@alessandodossetti\u201d from video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/d520cb89-c8a4-4408-9d24-fd7e0e00b571/1785620423541-3DCA18DD-8119-4597-A342-556C77828A51_L0_001.mp4"
+  },
+  {
+   "bytes": 50785490,
+   "created_at": "2026-08-01T23:15:38.792916+00:00",
+   "duration_s": 23.2,
+   "etag": "603bf3578cd83a437e1f9f97eea934bc",
+   "id": "editorial_ben_2103a83c",
+   "job_id": "2103a83c-882d-400b-aaa7-c88836780217",
+   "lang": "ben",
+   "model": "flare",
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/8177b906-48bb-47ee-8315-77ad11a69b59/1785621259429-9D696045-1206-4407-985C-C7F759537B2D_L0_001.mp4",
+   "sha256": "75aaf7754477a92b7cab5d6f8a9661e001f2f5170dc84cdbb1f602c23ea8c91f",
+   "triggers": {
+    "_status": "measured",
+    "_transcript_words": 12,
+    "brand_copy": [],
+    "payoff": [],
+    "scenes": []
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/8177b906-48bb-47ee-8315-77ad11a69b59/1785621259429-9D696045-1206-4407-985C-C7F759537B2D_L0_001.mp4"
+  },
+  {
+   "bytes": 93233798,
+   "created_at": "2026-08-10T03:13:33.33664+00:00",
+   "duration_s": 25.0,
+   "etag": "c33cda22f38ab099120f87d8cc993ccc",
+   "id": "editorial_xx_01ef2a80",
+   "job_id": "01ef2a80-9ce1-40b3-98a3-bea6d3a6c05e",
+   "lang": null,
+   "lang_note": "vibe requests Arabic subtitles; source language unverified",
+   "model": "flare",
+   "obedience": [
+    {
+     "check": "family_min",
+     "family": "captions",
+     "min": 1
+    }
+   ],
+   "route_expected": "editorial",
+   "route_reason": null,
+   "s3_key": "sources/74cac34b-cf0b-4be2-bf17-6894838c7484/1786331482452-972BEAA9-116D-421A-9F5E-84ADAAF55991_L0_001.mp4",
+   "sha256": "173f185cd0434d5de353ce5957235c3779daf7ae08276c77144676ea1e32a618",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Add Arabic subtitles.\n* Keep subtitles short and easy to read.\n* Highlight only important words.\n* Use a clean modern sans-serif font.",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/74cac34b-cf0b-4be2-bf17-6894838c7484/1786331482452-972BEAA9-116D-421A-9F5E-84ADAAF55991_L0_001.mp4"
+  },
+  {
+   "bytes": 20952172,
+   "created_at": "2026-08-08T11:18:51.218001+00:00",
+   "duration_s": 13.1,
+   "etag": "368e925239121626606c9f17221eed5f",
+   "id": "moodreel_xx_d5cf8ea2",
+   "job_id": "d5cf8ea2-9c59-486f-8d01-7e47732afdae",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "moodreel",
+   "route_reason": "no_speech",
+   "s3_key": "sources/7b9ea675-d671-403e-8baf-de2ac5f45a0b/1786187835831-28182C32-3F05-4EC9-AF47-30D80695D426_L0_001.mp4",
+   "sha256": "d3850be4e6744ff0dd94ba2fc8006b831f39762abd6c16018054f00633bec637",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Ekta attitude video editing kore dao ar attitude hindi background music diba",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/7b9ea675-d671-403e-8baf-de2ac5f45a0b/1786187835831-28182C32-3F05-4EC9-AF47-30D80695D426_L0_001.mp4"
+  },
+  {
+   "bytes": 51569157,
+   "created_at": "2026-08-08T11:18:10.824213+00:00",
+   "duration_s": 12.3,
+   "etag": "4dff15106237388b1f352950c9110fd2",
+   "id": "moodreel_xx_3a697250",
+   "job_id": "3a697250-a154-4479-bb02-a63ea182ff08",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "moodreel",
+   "route_reason": "no_speech",
+   "s3_key": "sources/2dd14699-ff3c-40c0-9198-663ed87f826c/1786187700854-24809609-3C33-4508-B329-326652BDBCD3_L0_001.mp4",
+   "sha256": "07e2112ccd6aeb8558f6c7fee2fcc030c5a149b63ee968c340ba2bf37cb9d67e",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/2dd14699-ff3c-40c0-9198-663ed87f826c/1786187700854-24809609-3C33-4508-B329-326652BDBCD3_L0_001.mp4"
+  },
+  {
+   "bytes": 22055049,
+   "created_at": "2026-08-08T11:03:48.006003+00:00",
+   "duration_s": 33.3,
+   "etag": "c8298ff1df75270febea9aea2d7358ba",
+   "id": "moodreel_xx_83889adc",
+   "job_id": "83889adc-2b1f-4942-943f-6194eade0cad",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "moodreel",
+   "route_reason": "no_speech_muted",
+   "s3_key": "sources/b0786f9b-1e6c-41b8-9aed-d31d0942ff85/1786186580235-F076C7B1-BF20-48CC-AF21-CE6AA15038F7_L0_001.mp4",
+   "sha256": "c7a7ee37b4cda6f6a32485ed405a8772dffe30dd416dca7dfe4970baf9a4aae7",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/b0786f9b-1e6c-41b8-9aed-d31d0942ff85/1786186580235-F076C7B1-BF20-48CC-AF21-CE6AA15038F7_L0_001.mp4"
+  },
+  {
+   "bytes": 38280708,
+   "created_at": "2026-08-08T10:59:00.47171+00:00",
+   "duration_s": 12.2,
+   "etag": "bcbd064843468e245ef40ae84b26bac6",
+   "id": "moodreel_xx_12bc86e8",
+   "job_id": "12bc86e8-392b-4595-aee1-d8eb2e7b840a",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "moodreel",
+   "route_reason": "no_speech",
+   "s3_key": "sources/ab7f5269-670f-4017-9315-7ddd96b0a662/1786186507020-AFFFBE62-26AE-4756-B4BF-0AFA6FBEB55D_L0_001.mp4",
+   "sha256": "0540edfa4ba5cd0f1f11ed8c0f8723a9f05ad9c1221764914f3142be897d0c9b",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Is video ko edit kar do",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/ab7f5269-670f-4017-9315-7ddd96b0a662/1786186507020-AFFFBE62-26AE-4756-B4BF-0AFA6FBEB55D_L0_001.mp4"
+  },
+  {
+   "bytes": 105816178,
+   "created_at": "2026-08-08T10:55:35.685653+00:00",
+   "duration_s": 37.8,
+   "etag": "84ef6d8aa0dac794ab1759c0d8402c74",
+   "id": "moodreel_xx_3255dbdf",
+   "job_id": "3255dbdf-516c-4615-8f88-3f68af7412e1",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "moodreel",
+   "route_reason": "not_talking_head",
+   "s3_key": "sources/31995e9f-5fa3-4b38-b883-6a2222604fad/1786186417270-A88E92CC-3441-4903-ADCB-5084ED56D614_L0_001.mp4",
+   "sha256": "9c848731005df88348ace7078ced62df803a874c6de060ee46b89009d8195342",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/31995e9f-5fa3-4b38-b883-6a2222604fad/1786186417270-A88E92CC-3441-4903-ADCB-5084ED56D614_L0_001.mp4"
+  },
+  {
+   "bytes": 37594816,
+   "created_at": "2026-08-10T02:09:42.054165+00:00",
+   "duration_s": 6.7,
+   "etag": "23dc10f369f9e564d44ff2f5ae62672c",
+   "hard_case": "near_silent",
+   "id": "minimal_xx_c80bf5a9",
+   "job_id": "c80bf5a9-1956-4d24-b87e-2e6d921447f6",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "minimal",
+   "route_reason": "no_speech",
+   "s3_key": "sources/99b6b12c-e954-4194-af29-b7d2cf4930da/1786327673287-2866069A-F959-4C92-916E-B9136EFC5FAC_L0_001.mp4",
+   "sha256": "11d8ff921f96f4ea719d1b71c9523f3f05fd8ee96abac27f7f6764226ede053b",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/99b6b12c-e954-4194-af29-b7d2cf4930da/1786327673287-2866069A-F959-4C92-916E-B9136EFC5FAC_L0_001.mp4"
+  },
+  {
+   "bytes": 16814919,
+   "created_at": "2026-08-10T02:12:00.441595+00:00",
+   "duration_s": 25.9,
+   "etag": "d42c221bc8cc18716512d1b91742e50f",
+   "id": "minimal_xx_dc766ac2",
+   "job_id": "dc766ac2-c025-41af-bd4a-7925bbe85210",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "minimal",
+   "route_reason": "no_audio",
+   "s3_key": "sources/ba2e9513-3aab-4133-ab44-37bb5842edb7/1786327861868-28F67216-C0EB-42F8-A70E-B01C7140FD01_L0_001.mp4",
+   "sha256": "4f3d6f978cc601e329a50ae6ad00e951c4e4c0d48017f5436d835546ecfa3497",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Viral engaging video . King going to another palace enter palace.",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/ba2e9513-3aab-4133-ab44-37bb5842edb7/1786327861868-28F67216-C0EB-42F8-A70E-B01C7140FD01_L0_001.mp4"
+  },
+  {
+   "bytes": 71872166,
+   "created_at": "2026-08-10T02:05:52.912406+00:00",
+   "duration_s": 24.0,
+   "etag": "8f6e581f540bb48005817094c3dce638",
+   "id": "minimal_xx_761a349b",
+   "job_id": "761a349b-c8f4-47d9-a7d7-c655e7ada2ac",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "minimal",
+   "route_reason": "not_talking_head",
+   "s3_key": "sources/40e82ad7-1d46-47a0-be3c-4e2fca9540b2/1786327120415-3CA9DD84-F9AA-40A2-9811-D4A15BD10F5C_L0_001.mp4",
+   "sha256": "9b8dd4dcc2852e17de90ba5f497c191be542624192cf32cc3cfd2bfe8a77b59d",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Create a cinematic ultra-realistic \u201cSIGMA MALE\u201d video edit of a confident young man walking in slow motion. He has a calm but intense expression, showing dominance and self-control. The environment is dark and moody with neon lights, city streets at night, slight rain, and reflections on the ground.\n\nAdd dramatic lighting with shadows on the face, highlighting jawline and eyes. Use slow-motion effects, smooth transitions, and subtle camera shake for realism. Include smoke, particles, and light leaks for a stylish aesthetic.\n\nColor grading should be high contrast with a mix of teal and orange tones. Background music should be deep bass, phonk, or dark trap beat. Sync cuts with beat drops.\n\nAdd bold cinematic text overlays like:\n\u201cNO FEAR\u201d\n\u201cSILENCE IS POWER\u201d\n\u201cREAL SIGMA NEVER EXPLAINS\u201d\n\nInclude glitch effects, zoom transitions, and blur motion effects during beat drops. End with a powerful close-up shot and fade to black.\n\nAspect ratio: 9:16 (for reels/shorts)\nQuality: 4K ultra HD\nStyle: Dark, aesthetic, attitude, sigma mindset",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/40e82ad7-1d46-47a0-be3c-4e2fca9540b2/1786327120415-3CA9DD84-F9AA-40A2-9811-D4A15BD10F5C_L0_001.mp4"
+  },
+  {
+   "bytes": 123057671,
+   "created_at": "2026-08-10T03:34:29.676004+00:00",
+   "duration_s": 58.8,
+   "etag": "3f7d0c158a22be4a256c191f0e340b28",
+   "id": "minimal_speech_uncut_xx_de3b8bf4",
+   "job_id": "de3b8bf4-5c6e-430f-839c-c2c4a03c42ed",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "minimal_speech_uncut",
+   "route_reason": "transcription_incomplete",
+   "s3_key": "sources/eac153f0-c5d1-4c6a-87c4-80344da55b67/1786332855984-71CD42CE-71F7-4FF3-AD94-BCC043605BF2_L0_001.mp4",
+   "sha256": "8647311e34a344e4f5a8adc1501c692ba8be3655974d63dfc0054b4314810d2f",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Clean and engaging edit",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/eac153f0-c5d1-4c6a-87c4-80344da55b67/1786332855984-71CD42CE-71F7-4FF3-AD94-BCC043605BF2_L0_001.mp4"
+  },
+  {
+   "bytes": 2248963,
+   "created_at": "2026-08-10T02:37:20.018272+00:00",
+   "duration_s": 16.1,
+   "etag": "e45dac41aae13c83608092e6b86964ba",
+   "id": "minimal_speech_uncut_xx_56f178b2",
+   "job_id": "56f178b2-3540-4394-96fb-9df5887f63d8",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "minimal_speech_uncut",
+   "route_reason": "plan_collapsed",
+   "s3_key": "sources/06ce7870-0be9-4dd7-999a-ba684adf34ce/1786329401663-9491753D-FBF9-4FD2-93B8-7534F57C3C8E_L0_001.mp4",
+   "sha256": "948fb985928a3ca1a3fdc2f7988df263931efe1361bff82beabf2d9f6247b3d4",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Let him say i love you my sweet Monica",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/06ce7870-0be9-4dd7-999a-ba684adf34ce/1786329401663-9491753D-FBF9-4FD2-93B8-7534F57C3C8E_L0_001.mp4"
+  },
+  {
+   "bytes": 3878913,
+   "created_at": "2026-08-08T10:58:54.689482+00:00",
+   "duration_s": 33.9,
+   "etag": "1e053c292894c50ee834649262e135c9",
+   "id": "hype_xx_c71030e5",
+   "job_id": "c71030e5-3cce-4210-be13-d6e2aee3370c",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "hype",
+   "route_reason": "no_speech",
+   "s3_key": "sources/8ec3b106-1f05-4402-9014-4e4d00087af5/1786186705250-87A76437-5A0D-4C79-9297-A108BB566BA6_L0_001.mp4",
+   "sha256": "37dba1dfbcbfa3d29acef9f54ba0ffa6bbed9e219dc111c0239bf7d2c60060b3",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "Clean and engaging edit",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/8ec3b106-1f05-4402-9014-4e4d00087af5/1786186705250-87A76437-5A0D-4C79-9297-A108BB566BA6_L0_001.mp4"
+  },
+  {
+   "bytes": 147577844,
+   "created_at": "2026-08-08T10:44:23.180393+00:00",
+   "duration_s": 31.8,
+   "etag": "5fbcd62a4cfe758d1e53fe21676c0109",
+   "id": "hype_xx_c995d73c",
+   "job_id": "c995d73c-3e74-42e7-b498-2a56e3311ee9",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "hype",
+   "route_reason": "no_speech",
+   "s3_key": "sources/e8b20108-c4da-4b99-a74f-2210323d58d6/1786185649272-8FA2EEBB-38E2-41CA-BA8B-E06BA2BD3DC3_L0_001.mp4",
+   "sha256": "7bebf614e39916588363d10025c101337f2c515a977e31c1ed03a9bfa5550a3f",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "I want Here's the complete, all-in-one script for this reel:\n\n**\ud83c\udfac FULL SCRIPT \u2014 \"The Tihai Fail\"**\n\n**[0-2 sec] HOOK**\nFreeze on your pose (like the photo), text on screen:\n*\"3 rounds. 1 tihai. Guess who messes up the last sam \ud83d\ude05\"*\n(Trending audio tip: use a suspenseful/comedic trending sound with a \"beat drop\" or \"record scratch\" moment \u2014 search Reels audio for trending \"fail/comedy timing\" sounds this week, they change often)\n\n**[2-6 sec] ROUNDS 1-2 \u2014 Clean & Synced**\nQuick cuts, no text. Let the ghungroo sound and your sync do the talking. This builds the pattern so the mistake pays off.\n\n**[6-9 sec] ROUND 3 \u2014 THE MISTAKE (slow-mo if possible)**\nYou + other student hit sam directly. She adds the extra step then catches up.\nText: *\"Two of us: sam. Her: 'let me add a little something extra' \ud83d\ude02\"*\n\n**[9-11 sec] REACTION**\nGenuine laugh/side-eye from you and students.\nText: *\"Kathak class in a nutshell\"*\n\n**[11-13 sec] CTA**\nText: *\"Save this, we're doing it again till she gets it \ud83d\ude2d\"*\n\n**Caption (below video):**\n\"A tihai = same phrase repeated 3 times, landing together on 'sam.' Somebody added a bonus step \ud83d\ude43 Attempt #[X], we'll get there. Which one of you is this student? \ud83d\ude02 #kathak #indianclassicaldance\"\n\n---\n\n**\ud83d\udd25 More relatable hook variations (rotate these across future reels for variety + virality):**\n- \"Rate our tihai 1-10 (be honest, she wasn't)\"\n- \"POV: you're the one student who breaks the sync and everyone knows it's you\"\n- \"This is what 6 months of Kathak practice actually looks like \u2014 not the highlight reel\"\n- \"We look confident. We are not confident.\"\n- \"Dance class group chat after this happens: \ud83d\udc80\"\n\n**\ud83d\udcc8 For more comments specifically, always end with a direct question:**\n- \"Which one of us do you think messed up first try?\"\n- \"Would you have caught the mistake without the text? \ud83d\udc40\"\n- \"Tag someone who'd 100% be the 'extra step' friend\"\n\n**\ud83d\udca1 Growth tips:**\n- Post consistently (3-4x/week) \u2014 the algorithm favors accounts that post often over ones that post rarely, even if quality varies slightly\n- Reuse this exact format (\"clean rounds \u2192 funny fail \u2192 reaction\") as a series \u2014 once one version goes viral, sequels ride the same wave\n- Trending audio matters more than perfect video quality for reach \u2014 check Reels' \"trending\" tab same-day before posting, since sounds cycle fast\n- Reply to every comment in the first hour \u2014 early engagement is what pushes Instagram to show it to more people\nNot same to this but add your creativity and also make this video like more relatable more shares it get",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/e8b20108-c4da-4b99-a74f-2210323d58d6/1786185649272-8FA2EEBB-38E2-41CA-BA8B-E06BA2BD3DC3_L0_001.mp4"
+  },
+  {
+   "bytes": 64605637,
+   "created_at": "2026-08-08T09:54:19.712994+00:00",
+   "duration_s": 48.1,
+   "etag": "d208981aa27bff74e30508cec60f38ee",
+   "id": "hype_xx_c9abb367",
+   "job_id": "c9abb367-5978-479e-8026-a512a980ec93",
+   "lang": null,
+   "model": "flare",
+   "route_expected": "hype",
+   "route_reason": "not_talking_head",
+   "s3_key": "sources/3e8c4921-b155-4c52-87fe-d8aad29dc1f6/1786182799550-A508793F-153B-413B-BAE0-E2075750F521_L0_001.mp4",
+   "sha256": "775aabb3f76d93887b1b476df37ec27f1d034010acb0525f4c39f18eb70d393f",
+   "triggers": {
+    "_status": "unknown_no_transcript"
+   },
+   "vibe": "\u2728 Add smooth animations (zoom, shake, glow, motion effects)\n* \ud83c\udfb5 Add background music\n* \ud83d\udd0a Add English sound effects (whooshes, impacts, clicks, cinematic sounds)\n* \ud83d\udcdd Add English captions or animated text\n* \ud83c\udfac Make it look cinematic or suitable for YouTube Shorts/TikTok/Reels\n* \ud83c\udf08 Add color grading and transitions\n\nOnce you upload the video, also tell me the style you want, for example:\n\n* Cinematic\n* Action\n* Gaming (Free Fire)\n* Funny\n* Horror\n* Motivational\n\nI\u2019ll help create the edit plan and the English audio/animation ideas for your video.add some animation and glow",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/3e8c4921-b155-4c52-87fe-d8aad29dc1f6/1786182799550-A508793F-153B-413B-BAE0-E2075750F521_L0_001.mp4"
+  }
+ ],
+ "trigger_annotation": {
+  "added": "2026-08-17",
+  "patterns_mirror": "the directives' own trigger language in handler.py (_BrandCopy docstring, GENERATED SCENES block)",
+  "why": "two corpora in a row were selected on properties unrelated to the component under test; a source without a trigger is N/A, not a decline"
+ },
+ "tweak_capture_contract": "SEAM produces golden/tweaks/<case_id>.json per case: {kind:'tweak',case_id,capture:{classification,new_plan,human_summary,flag_on}}; judge with: python3 harness_plan_diff.py tweak-judge --manifest golden/manifest.json --captures golden/tweaks",
+ "tweak_cases": [
+  {
+   "adaptation": "SEAM's literal find-word 'rise' appears in NO golden transcript [MEASURED 12/12]; bound to once-occurring transcript word 'devil' (same op class, transcript-guaranteed find)",
+   "case_id": "S3A_caption_override",
+   "expect": {
+    "classification": "tweak",
+    "plan_list_contains": {
+     "entry": {
+      "find": "devil",
+      "replace": "devyl"
+     },
+     "path": "caption_text_overrides"
+    }
+   },
+   "parent_id": "editorial_eng_fa3efb69",
+   "payload": {
+    "change_request": "change 'devil' to 'devyl'",
+    "mode": "tweak",
+    "surgical_v2_test": true
+   },
+   "spec_origin": "SEAM_OBEDIENCE_CASES_FOR_HARNESS.md case S3-A"
+  },
+  {
+   "case_id": "S3A_flag_off",
+   "expect": {
+    "plan_list_absent": {
+     "entry": {
+      "find": "devil",
+      "replace": "devyl"
+     },
+     "path": "caption_text_overrides"
+    }
+   },
+   "parent_id": "editorial_eng_fa3efb69",
+   "payload": {
+    "change_request": "change 'devil' to 'devyl'",
+    "mode": "tweak"
+   },
+   "spec_origin": "SEAM case S3-A flag-off byte-identity arm"
+  },
+  {
+   "binding": {
+    "after_word_index": 36,
+    "gap_ms": 585,
+    "note": "gap 585ms fits DipToBlack (350ms) [MEASURED from parent plan cuts + Deepgram words]",
+    "seam_cut_idx": 3,
+    "word": "back"
+   },
+   "case_id": "S3B_add_transition",
+   "expect": {
+    "classification": "tweak",
+    "plan_list_contains": {
+     "entry": {
+      "after_word_index": 36,
+      "type": "DipToBlack"
+     },
+     "path": "transitions"
+    }
+   },
+   "parent_id": "editorial_eng_a41276b2",
+   "payload": {
+    "change_request": "add a DipToBlack after 'back'",
+    "mode": "tweak",
+    "surgical_v2_test": true
+   },
+   "spec_origin": "SEAM case S3-B"
+  },
+  {
+   "binding": {
+    "after_word_index": 36,
+    "gap_ms": 585,
+    "needs_ms": 800,
+    "note": "same seam: 585ms < CrossfadeZoom natural 800ms \u2014 must be skipped WITH note",
+    "word": "back"
+   },
+   "case_id": "S3B_neg_squeeze",
+   "expect": {
+    "note_required_containing": "skip",
+    "plan_list_absent": {
+     "entry": {
+      "after_word_index": 36,
+      "type": "CrossfadeZoom"
+     },
+     "path": "transitions"
+    }
+   },
+   "parent_id": "editorial_eng_a41276b2",
+   "payload": {
+    "change_request": "add a CrossfadeZoom after 'back'",
+    "mode": "tweak",
+    "surgical_v2_test": true
+   },
+   "spec_origin": "SEAM case S3-B negative twin (natural-duration law)"
+  },
+  {
+   "case_id": "S3B_flag_off",
+   "expect": {
+    "plan_list_absent": {
+     "entry": {
+      "after_word_index": 36,
+      "type": "DipToBlack"
+     },
+     "path": "transitions"
+    }
+   },
+   "parent_id": "editorial_eng_a41276b2",
+   "payload": {
+    "change_request": "add a DipToBlack after 'back'",
+    "mode": "tweak"
+   },
+   "spec_origin": "SEAM case S3-B flag-off byte-identity arm"
+  }
+ ],
+ "version": 1
 }
