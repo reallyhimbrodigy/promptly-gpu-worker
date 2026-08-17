@@ -15,6 +15,44 @@ cd "$(dirname "$0")"
 # jobs and would have blocked the whole deploy queue indefinitely. The probe
 # refuses to call a zero "quiet" unless it can also see recent rows (non-vacuity).
 # Runs FIRST because it is the cheapest gate and the one that protects users.
+# ── FREEZE THE TREE (2026-08-17, RULE-1) ────────────────────────────────────
+# A DEPLOY MUST DESCRIBE A COMMIT. modal_app bakes PROMPTLY_BUILD_SHA into the
+# image from `git rev-parse HEAD` at deploy time, so a dirty tree ships a SHA
+# THAT DOES NOT DESCRIBE WHAT IS RUNNING — the commit says one thing and the
+# image contains another, and the source of the live code is unrecoverable.
+#
+# THIS ALREADY HAPPENED, ONCE, ON ITS FIRST DAY. v550 (036db90) reports
+# build_dirty=true: I edited preflight_quiet_window.py after committing but
+# while the deploy sat QUEUED on the quiet window, and the queued deploy picked
+# up the edit. The build_dirty flag — one day old — is what caught it, in the
+# first Lumen render's own result payload.
+#
+# The window makes this the DEFAULT hazard rather than a rare one: a deploy can
+# wait many minutes for live jobs to drain, and that wait is exactly when a
+# working tree keeps moving. So the check runs FIRST, before the window, and
+# refuses rather than warns.
+#
+# PROMPTLY_ALLOW_DIRTY_DEPLOY=1 is the deliberate exception and it prints what
+# was dirty, so an override is attributable instead of silent.
+echo "════════════════════════════════════════════════════════════"
+echo "  Tree freeze — the image must describe a commit"
+echo "════════════════════════════════════════════════════════════"
+_DIRTY="$(git status --porcelain --untracked-files=no)"
+if [ -n "$_DIRTY" ]; then
+    echo "  DIRTY TREE — these tracked files differ from HEAD:"
+    echo "$_DIRTY" | sed 's/^/    /'
+    if [ -n "$PROMPTLY_ALLOW_DIRTY_DEPLOY" ]; then
+        echo "  ⚠️  PROMPTLY_ALLOW_DIRTY_DEPLOY set — shipping a SHA that does not"
+        echo "     describe the image. Record why in DEPLOY_LOG.md."
+    else
+        echo "  REFUSING. Commit or stash first; the deployed SHA must be the code."
+        echo "  (deliberate override: PROMPTLY_ALLOW_DIRTY_DEPLOY=1)"
+        exit 1
+    fi
+else
+    echo "  clean — HEAD $(git rev-parse --short HEAD) describes the image"
+fi
+
 echo "════════════════════════════════════════════════════════════"
 echo "  Quiet window — in-flight USER JOBS (db), not modal tasks"
 echo "════════════════════════════════════════════════════════════"
