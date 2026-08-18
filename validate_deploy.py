@@ -9722,6 +9722,18 @@ def _ref2_is_a_bar_not_an_input():
         f"cert_ref2_not_a_test_input did not report PASS:\n{_out[-600:]}")
 
 
+@check("NEVER DOUBLE THE CAPTIONS (ART_DIRECTION §3, 2026-08-17, RULE-1). The owner watched the trigger-source render and found Promptly's own yellow captions stacked on top of the source's burned-in white ones, in the same band, overlapping — one defect that made the output read as broken regardless of every other decision in it. THE CAUSE WAS NOT A MISSING SIGNAL. It was THREE descriptions of one fact and the WEAKEST one gating captions: the zoom gate read _burned_text['regions'][].class=='captions' or a wide non-corner signage band (BROAD — it fired correctly, suppressing 4 zooms on that very render), while the caption gate read only _burned_text['has_burned_captions'] (NARROW — it did not fire); and the model had ALSO declared source_text_regions=['bottom'] in the same plan, but that field was normalised AFTER the suppression decision, so it could never influence it at all. A fourth `or` clause would have fixed that render and left the class alive, so the fix is structural: ONE predicate, _burned_text_caption_block(), which every caption-suppression decision routes through and which reads every signal at the zoom gate's breadth. This asserts each blocking branch still exists AND IS REACHABLE — name-presence alone was vacuous, because `for r in ():` and `if False:` both leave the return in the AST as dead code, which is precisely the shape of the original bug (a branch that existed and ran too late to matter). The explicit-user-request override is verified as a resolved CALL at both sites rather than a substring, because renaming the function left its old name as a prefix and sailed through the substring version. ART_DIRECTION §3 is absolute: burned-in text present => caption_style 'none'; there is no reduce and no reposition.")
+def _never_double_the_captions():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_never_double_captions.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_never_double_captions FAILED\n{_out[-1600:]}"
+    assert "CERT NEVER-DOUBLE-CAPTIONS: PASS" in _out, (
+        f"cert_never_double_captions did not report PASS:\n{_out[-600:]}")
+
+
 @check("EVERY COUNTER NAMES ITS BUILD (2026-08-16, RULE-1) [Rule 4, JUDGE]. A counter that records WHAT happened but not WHICH BUILD it happened on cannot be read back without RECONSTRUCTION. That bit on 2026-08-16: two build-lane runs showed `brand_copy` declined even on the reference where a name is spoken — a load-bearing input to redesigning the directive — and attributing those runs to an image required walking commit timestamps, because the run record named no build. Worse, the run's own output was INSUFFICIENT to settle it: `brand_specs` appears in the result even on a commit that lacks the schema field, so the obvious evidence pointed the right way for the wrong reason. Reconstruction is not observation. Every analytics counter now carries build_sha, and the dirty marker rides with it because a counter emitted from an uncommitted tree is attributed to a commit that does NOT describe the code that produced it — which is worse than being unattributed, because it looks authoritative. FAILS if _build_stamp is removed or if any counter stops carrying it.")
 def _counters_name_their_build():
     import os as _os

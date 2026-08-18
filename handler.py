@@ -5869,6 +5869,68 @@ def _edit_in_language_enabled():
     return bool(os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE", "").strip())
 
 
+def _burned_text_caption_block(edit_plan, vibe=None):
+    """ONE predicate for "the source already carries its own caption layer".
+    `[ART_DIRECTION §3]`
+
+    THE DEFECT THIS CLOSES (2026-08-17). Two gates read two different signals
+    for one reality:
+
+      zoom gate      _bt["regions"][].class == "captions", or wide non-corner
+                     signage  -> BROAD. Fired correctly: 4 zooms suppressed.
+      caption gate   _bt["has_burned_captions"] only              -> NARROW.
+                     Did not fire. CleanCut shipped ON TOP of the source's own
+                     white captions, in the same band.
+
+    The model had ALSO declared `source_text_regions: ["bottom"]`, but that was
+    normalised AFTER the suppression decision, so it could never influence it.
+    Three descriptions of the same fact, and the weakest one gated captions.
+
+    ART_DIRECTION §3 is absolute: burned-in text present => caption_style
+    "none". No reduce, no reposition — a second caption track over the source's
+    own makes the output read as broken regardless of every other decision in
+    it. The one exception is an EXPLICIT user request for captions, which
+    outranks our inference about their footage.
+
+    Returns (blocked: bool, band: str, signal: str) — band is where the existing
+    layer sits, so layout can respect it even when captions are off.
+    """
+    plan = edit_plan if isinstance(edit_plan, dict) else {}
+    bt = plan.get("_burned_text") if isinstance(plan.get("_burned_text"), dict) else {}
+
+    # a) the model's Stage-0 read
+    ecr = str(plan.get("existing_caption_region") or "none").strip().lower()
+    if ecr not in ("none", "bottom", "top", "other", "center"):
+        ecr = "none"
+    if ecr != "none":
+        return True, ecr, "stage0"
+
+    # b) the model's W3 declaration — normalised HERE, before any decision uses
+    #    it, which is the ordering bug that let this ship.
+    raw = plan.get("source_text_regions")
+    bands = sorted({str(b).strip().lower() for b in raw
+                    if str(b).strip().lower() in ("top", "center", "bottom")}) \
+        if isinstance(raw, list) else []
+    if bands:
+        return True, bands[0], "w3_declared"
+
+    # c) the detector — the SAME breadth the zoom gate uses, not the narrow flag
+    if bool(bt.get("has_burned_captions")):
+        b = str(bt.get("existing_caption_region") or "bottom").strip().lower()
+        return True, (b if b in ("top", "center", "bottom") else "bottom"), "detector"
+    for r in (bt.get("regions") or []):
+        if not isinstance(r, dict):
+            continue
+        if r.get("class") == "captions" or (
+                r.get("class") == "signage" and not r.get("corner")
+                and float(r.get("max_row_extent") or 0) >= 0.5):
+            return True, "bottom", "detector_region"
+    for b in (bt.get("source_text_regions") or []):
+        if str(b).strip().lower() in ("top", "center", "bottom"):
+            return True, str(b).strip().lower(), "detector_bands"
+    return False, "none", ""
+
+
 def _burned_text_enabled():
     """Whether the burned-in-text guard is live — ONE flag gating the whole
     feature: the sharpened Stage-0 prompt block (belt), the deterministic EAST
@@ -17369,16 +17431,27 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                       f"(Stage-0 read said none) — existing_caption_region={_ecr}",
                       flush=True)
             edit_plan["existing_caption_region"] = _ecr
-            if (_ecr != "none" and edit_plan["caption_style"] != "none"
+            # ART_DIRECTION §3 — ONE predicate, the same breadth the zoom gate
+            # uses. Reading a narrower signal here is what shipped a second
+            # caption track over the source's own.
+            _blocked, _blk_band, _blk_signal = _burned_text_caption_block(edit_plan, vibe)
+            if _blocked and _ecr == "none":
+                _ecr = _blk_band if _blk_band in ("bottom", "center", "top") else "bottom"
+                edit_plan["existing_caption_region"] = _ecr
+                print(f"[generate-edit] burned captions: {_blk_signal} signal engaged "
+                      f"(Stage-0 read said none) — existing_caption_region={_ecr}",
+                      flush=True)
+            if (_blocked and edit_plan["caption_style"] != "none"
                     and not _vibe_requests_captions(vibe)):
                 _record_divergence(
                     "caption",
                     {"style": edit_plan["caption_style"], "region": _ecr,
-                     "signal": ("analysis" if _ana_burned else "stage0"),
+                     "signal": _blk_signal,
                      "generation": "a1a2"},
                     "burned_suppress",
                     final={"style": "none"},
-                    reason="source_carries_burned_in_captions",
+                    reason="source_carries_burned_in_captions (ART_DIRECTION §3: "
+                           "never double the captions)",
                 )
                 edit_plan["caption_style"] = "none"
 
@@ -19605,14 +19678,20 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
     if _ecr == "none" and _ana_burned:
         _ecr = "bottom"
     plan["existing_caption_region"] = _ecr
-    if (_ecr != "none" and plan.get("caption_style") != "none"
+    # ART_DIRECTION §3 — the SAME predicate as the fresh span and the zoom gate.
+    _blocked_re, _blk_band_re, _blk_sig_re = _burned_text_caption_block(plan, vibe)
+    if _blocked_re and _ecr == "none":
+        _ecr = _blk_band_re if _blk_band_re in ("bottom", "center", "top") else "bottom"
+        plan["existing_caption_region"] = _ecr
+    if (_blocked_re and plan.get("caption_style") != "none"
             and not _vibe_requests_captions(vibe)):
         _record_divergence(
             "caption", {"style": plan.get("caption_style"), "region": _ecr,
-                        "signal": ("analysis" if _ana_burned else "stage0"),
+                        "signal": _blk_sig_re,
                         "generation": "reedit"},
             "burned_suppress", final={"style": "none"},
-            reason="source_carries_burned_in_captions (re-edit revalidation)")
+            reason="source_carries_burned_in_captions (re-edit revalidation, "
+                   "ART_DIRECTION §3)")
         plan["caption_style"] = "none"
         _applied.append(("caption_suppressed", _ecr))
     _str_raw = plan.get("source_text_regions")
