@@ -170,6 +170,10 @@ def cell(spec: dict) -> dict:
             "broll": len(p.get("broll_clips") or []),
             "cuts": len(p.get("cuts") or []),
             "notes": str(p.get("notes") or "")[:600],
+            # WHY it fell back, not just THAT it did — capacity, transport and
+            # schema are three different fixes and the wall clock alone cannot
+            # tell them apart (Step A: 3 long walls, 2 short, same "fallback").
+            "safe_edit_reason": (getattr(H, "_LAST_SAFE_EDIT", {}) or {}).get("reason"),
             "accent": ((p.get("_design_system") or {}).get("palette") or {}).get("accent"),
         })
         print(f"[cell] {spec['model']} think={spec['thinking']} "
@@ -194,7 +198,7 @@ def cell(spec: dict) -> dict:
 
 @app.local_entrypoint()
 def main(source_path: str = "", manifest: str = "fps_ab_corpus_manifest.json",
-         ids: str = ""):
+         ids: str = "", models: str = "", serial: bool = False):
     """`manifest`/`ids` let STEP A run against the FROZEN GOLDENS without
     forking this harness. golden/manifest.json carries the same s3_key +
     sha256 + duration_s fields, so the per-cell byte verification is unchanged
@@ -203,17 +207,18 @@ def main(source_path: str = "", manifest: str = "fps_ab_corpus_manifest.json",
     man = _j.load(open(manifest))
     by_id = {x["id"]: x for x in man["sources"]}
     specs = []
+    _models = [x.strip() for x in models.split(',') if x.strip()] or MODELS
     if source_path:
         with open(source_path, "rb") as f:
             b = f.read()
-        for m in MODELS:
+        for m in _models:
             for t in THINKING:
                 specs.append({"model": m, "thinking": t, "source_bytes": b,
                               "src_id": os.path.basename(source_path)})
     else:
         for cid in ([s.strip() for s in ids.split(",") if s.strip()] or CORPUS_IDS):
             e = by_id[cid]
-            for m in MODELS:
+            for m in _models:
                 for t in THINKING:
                     specs.append({"model": m, "thinking": t, "source_bytes": b"",
                                   "s3_key": e["s3_key"], "src_id": cid,
@@ -234,7 +239,14 @@ def main(source_path: str = "", manifest: str = "fps_ab_corpus_manifest.json",
     print(f"    drifted is not a corpus, and an A/B on drifted bytes compares")
     print(f"    two different things)")
     print(f"    prompt HELD CONSTANT (scenes v2 ON) — model axis only\n")
-    res = list(cell.map(specs))
+    if serial:
+        # SERIAL MODE settles a concurrency confound: Step A ran 24 cells at
+        # once, so a fallback could be capacity rather than the model. One cell
+        # at a time removes that explanation entirely.
+        print(f"    SERIAL — one cell at a time (concurrency confound removed)\n")
+        res = [cell.remote(sp) for sp in specs]
+    else:
+        res = list(cell.map(specs))
 
     print("\n" + "=" * 92)
     print(f"{'model':26} {'think':>7} {'wall_s':>8} {'scenes':>7} {'brand':>6} "

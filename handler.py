@@ -14180,6 +14180,29 @@ def build_safe_recipe(kept_words, vocal_emphasis=None, ep_off=None):
     }
 
 
+# A SAFE-EDIT FALLBACK MUST NAME ITS OWN CAUSE (2026-08-17).
+#
+# `_safe_reason` was a local: the plan came back with notes "safe-edit fallback"
+# and the REASON died with the stack frame. So a differ could report that 5 of
+# 12 control cells fell back and could not say whether that was capacity,
+# transport, or schema — three causes with three different fixes, and the
+# measurement could not distinguish them. Same class as the ASR hole closed
+# earlier today: the verdict survived, the evidence did not.
+#
+# Module-scoped for the same reason _VIDEO_REF_UPLOADED_LAST is: the reason is
+# set deep inside the recipe closure and read by callers outside it.
+_LAST_SAFE_EDIT = {"reason": None}
+
+
+def _mark_safe_edit(reason):
+    """Record WHY the deterministic path was taken, and return it unchanged.
+
+    Every assignment to `_safe_reason` goes through here — cert_safe_edit_reason
+    asserts that, so a new fallback door cannot open without naming itself."""
+    _LAST_SAFE_EDIT["reason"] = str(reason)
+    return str(reason)
+
+
 # LEVER 4: the uploaded-reference key, module-scoped (the established _LAST
 # pattern) because the upload happens inside the edit-recipe closure and the
 # teardown delete runs in handler()'s finally — closure locals don't cross.
@@ -15153,6 +15176,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
     ).strip().lower() not in ("0", "false", "no", "off")
     _use_safe = False
     _safe_reason = ""
+    _LAST_SAFE_EDIT["reason"] = None   # per-call: a stale reason is a wrong one
     # Outermost-rung re-entry (P1a): the rescue re-run forces the recipe
     # stage straight down the deterministic safe path — no Gemini call, no
     # repair loop, the exact span every recipe flows through. Honors the
@@ -15165,7 +15189,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         force_safe_reason = "editorial_live_off"
     if force_safe_reason and _safe_edit_on and kept_words:
         _use_safe = True
-        _safe_reason = str(force_safe_reason)
+        _safe_reason = _mark_safe_edit(force_safe_reason)
     for _repair_attempt in range(_repair_max + 2):
         if _repair_attempt > _repair_max and not _use_safe:
             break  # the extra slot is safe-mode only
@@ -15180,7 +15204,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         if (not _use_safe and recipe_deadline_s is not None
                 and time.time() > recipe_deadline_s and _safe_edit_on and kept_words):
             _use_safe = True
-            _safe_reason = (
+            _safe_reason = _mark_safe_edit(
                 f"recipe wall-clock budget exhausted after {_repair_attempt} "
                 f"re-ask(s) — compounding stopped before the render timeout"
             )
@@ -15254,7 +15278,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         flush=True,
                     )
                     _use_safe = True
-                    _safe_reason = f"recipe_transport:{type(_tx_err).__name__}"
+                    _safe_reason = _mark_safe_edit(f"recipe_transport:{type(_tx_err).__name__}")
                     continue
                 raise
         try:
@@ -18942,7 +18966,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             if _repair_attempt >= _repair_max or not _repair_budget_ok:
                 if _safe_edit_on and kept_words:
                     _use_safe = True
-                    _safe_reason = f"RECIPE_INVALID:{str(_repair_err)[:80]}"
+                    _safe_reason = _mark_safe_edit(f"RECIPE_INVALID:{str(_repair_err)[:80]}")
                     continue
                 raise RecipeInvalidError(
                     f"RECIPE_INVALID after {_repair_attempt + 1} attempt(s): {_repair_err}"

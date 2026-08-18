@@ -9675,6 +9675,18 @@ def _editorial_model_overridable_and_pinned():
         f"cert_editorial_model_pinned did not report PASS:\n{_out[-600:]}")
 
 
+@check("A SAFE-EDIT FALLBACK NAMES ITS OWN CAUSE (2026-08-17, RULE-1) [Rule 4]. The Step-A differ found 5 of 12 control cells falling to the deterministic safe edit, and could not say WHY: the plan carried `notes: \"safe-edit fallback\"` and nothing else, because `_safe_reason` was a local that died with its stack frame. Four doors lead there — editorial_live_off (config), recipe wall-clock budget (capacity), recipe_transport:<Error> (transport), RECIPE_INVALID:<detail> (schema) — and they have four different fixes. The run could not distinguish them even though the evidence said it was NOT one cause: the five fallback walls split 3 long (503-516s, the retry-then-timeout signature) and 2 short (113-125s, which capacity does not explain). This is the same class as the ASR diagnostics hole closed the same day — the VERDICT survived and the EVIDENCE did not — and it is the difference between 'the control model is unreliable' and 'my harness ran 24 cells at once', which are opposite conclusions with opposite actions. Every assignment to _safe_reason now routes through _mark_safe_edit(), so a NEW fallback door cannot open without naming itself, and the recorder resets per call because a stale reason attributed to the next plan is worse than no reason at all.")
+def _safe_edit_names_its_cause():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_safe_edit_reason.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_safe_edit_reason FAILED\n{_out[-1200:]}"
+    assert "CERT SAFE-EDIT-REASON: PASS" in _out, (
+        f"cert_safe_edit_reason did not report PASS:\n{_out[-600:]}")
+
+
 @check("EVERY COUNTER NAMES ITS BUILD (2026-08-16, RULE-1) [Rule 4, JUDGE]. A counter that records WHAT happened but not WHICH BUILD it happened on cannot be read back without RECONSTRUCTION. That bit on 2026-08-16: two build-lane runs showed `brand_copy` declined even on the reference where a name is spoken — a load-bearing input to redesigning the directive — and attributing those runs to an image required walking commit timestamps, because the run record named no build. Worse, the run's own output was INSUFFICIENT to settle it: `brand_specs` appears in the result even on a commit that lacks the schema field, so the obvious evidence pointed the right way for the wrong reason. Reconstruction is not observation. Every analytics counter now carries build_sha, and the dirty marker rides with it because a counter emitted from an uncommitted tree is attributed to a commit that does NOT describe the code that produced it — which is worse than being unattributed, because it looks authoritative. FAILS if _build_stamp is removed or if any counter stops carrying it.")
 def _counters_name_their_build():
     import os as _os
