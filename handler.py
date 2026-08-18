@@ -40424,6 +40424,12 @@ def handler(job):
                         str(input_data.get("_safe_edit_rescue") or "").strip() or None
                     ),
                     burned_text_override=bool(input_data.get("burned_text_test")),
+                    # PROMPT V2 arm B, per job. WITHOUT THIS LINE the override is
+                    # a parameter nothing passes, arm B silently runs arm A, and
+                    # the A/B reports a null result from a control-vs-control run
+                    # — the built-not-wired class, aimed at a measurement instead
+                    # of a feature. cert_prompt_v2_wiring asserts the line exists.
+                    prompt_v2_override=bool(input_data.get("prompt_v2_test")),
                     # E1 density A/B: per-job override toggles the density reshape
                     # for one job without flipping the global secret (mirrors
                     # burned_text_test / broll_gate_test). Inert for real traffic.

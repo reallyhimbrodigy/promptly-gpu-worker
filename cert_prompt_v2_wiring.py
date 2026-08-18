@@ -178,6 +178,27 @@ def main():
           "n_words=None, v2=False" in call_fn,
           "the default must be arm A")
 
+    # ── 4b. ARM B IS REACHABLE FROM A JOB ──────────────────────────────────
+    # prompt_v2_override was a parameter that NOTHING PASSED. Arm B was
+    # unreachable, so the A/B would have run control-vs-control and reported a
+    # null result as a finding. Built-not-wired, aimed at a measurement rather
+    # than a feature — asserted here against the CALL, not the signature.
+    _calls = [n for n in ast.walk(_tree) if isinstance(n, ast.Call)
+              and getattr(n.func, "id", None) == "generate_edit_gemini"]
+    check("generate_edit_gemini is actually called somewhere", bool(_calls),
+          "no call site found")
+    _wired = [c for c in _calls
+              if any(kw.arg == "prompt_v2_override" for kw in (c.keywords or []))]
+    check("a job can reach arm B (prompt_v2_override is PASSED, not just declared)",
+          bool(_wired),
+          "no call site passes prompt_v2_override — arm B is unreachable and the "
+          "A/B would silently be control-vs-control")
+    for _c in _wired:
+        _kw = next(k for k in _c.keywords if k.arg == "prompt_v2_override")
+        check("arm B is driven by the per-job flag, not a constant",
+              "prompt_v2_test" in ast.dump(_kw.value),
+              f"expected input_data['prompt_v2_test']; got {ast.dump(_kw.value)[:120]}")
+
     # ── 5. the three modules are mounted into the image ─────────────────────
     ma = open(os.path.join(HERE, "modal_app.py")).read()
     for mod in ("prompt_v2_editor", "prompt_v2_schema", "prompt_v2_exemplars"):
