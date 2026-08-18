@@ -13734,9 +13734,59 @@ class EditorialSuppressed(RuntimeError):
     end in a safe edit but mean something completely different."""
 
 
+def _v2_response_schema():
+    """ARM B's beat-major response schema, INLINED on purpose.
+
+    prompt_v2_schema.BeatMajorPlan is the source of truth for the shape, but
+    pydantic's model_json_schema() emits `$defs` + `$ref` for the nested Beat and
+    BeatPlacement models, and this response-schema surface does not reliably
+    accept references — a rejection here would surface as an editorial failure
+    with nothing pointing at the schema. So the same shape is written flat, and
+    cert_prompt_v2_wiring asserts the two never drift: every field of the pydantic
+    model must appear here, and vice versa.
+    """
+    return {
+        "type": "object",
+        "properties": {
+            "beats": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        # Word index, never a float second: every time field in
+                        # this pipeline is word-anchored and Python derives the
+                        # seconds. A second clock has cost this repo twice.
+                        "word_index": {"type": "integer"},
+                        "says": {"type": "string", "maxLength": 300},
+                        "read": {"type": "string", "maxLength": 400},
+                        "place": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "component": {"type": "string"},
+                                    "props": {"type": "object"},
+                                    "hold_s": {"type": "number"},
+                                },
+                                "required": ["component"],
+                            },
+                        },
+                    },
+                    "required": ["word_index"],
+                },
+            },
+            "caption_style": {"type": "string"},
+            "aspect_ratio": {"type": "string"},
+            "video_identity": {"type": "string"},
+            "notes": {"type": "string"},
+        },
+        "required": ["beats"],
+    }
+
+
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
                            recipe_deadline_s=None, media_res_override=None,
-                           source_duration_s=None, n_words=None):
+                           source_duration_s=None, n_words=None, v2=False):
     """Second Gemini call: visual placement on the kept-only transcript.
 
     Deep-thinking budget. thinking_budget=24576 (lowered from a 60000 cap).
@@ -13818,7 +13868,12 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 # output to 16-36K; Lever 1 cuts it at the 16K degen threshold.
                 max_output_tokens=40000,
                 response_mime_type="application/json",
-                response_json_schema=_post_cuts_response_schema(),
+                # ARM B sends the beat-major schema; ARM A is byte-identical to
+                # production. R3 measured that response_schema is part of the
+                # Vertex cache key, so the two arms cannot share a cache entry —
+                # which is correct here, they are different prompts.
+                response_json_schema=(_v2_response_schema() if v2
+                                      else _post_cuts_response_schema()),
                 # 24576 thinking budget — lowered from 60000. 60K bought no
                 # quality (every good recipe this session ran at ≤24576) and
                 # drove the model to spiral past its output budget into an
@@ -13922,6 +13977,19 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             # degeneration-class signal the daily [REPORT] reads and the Lever-3
             # flip watches. Also does the flag-gated A/B S3 capture inside.
             _measure_rationale_lengths(_parsed)
+            # ARM B: beats[] -> the component-major arrays the rest of this file
+            # consumes, BEFORE any of the guards below. Flattening first is what
+            # keeps every downstream invariant — the string caps, the strict
+            # PostCutPlan validation, and the motion-graphics equality assertion
+            # at the render seam — applying to arm B exactly as they do to arm A.
+            # A placement dropped in the transform is dropped BY US, so it goes
+            # to the component ledger under that name rather than reading as a
+            # model decline (the distinction the ledger exists to make).
+            if v2:
+                import prompt_v2_schema as _pv2s
+                _parsed = _pv2s.flatten_beats(
+                    _parsed, ledger=(_ledger_requested, _ledger_dropped))
+                print(f"[prompt-v2] flattened: {_parsed.get('_v2_counts')}", flush=True)
             # L1+L2: declared caps + repetition signatures enforced at THE
             # parse edge — every downstream consumer reads capped strings.
             _enforce_string_caps(_parsed, _post_cuts_response_schema(), "post_cuts")
@@ -14767,6 +14835,7 @@ def generate_edit_gemini(
     sample_fps_override=None,
     media_res_override=None,
     guidance_profiles=None,
+    prompt_v2_override=False,
 ):
     _pre_analysis = cached_response
 
@@ -14882,6 +14951,68 @@ def generate_edit_gemini(
         density_override=density_override,
         density_variant=density_variant,
     )
+    # ── PROMPT V2 (DARK — HARNESS-ONLY, and deliberately not flag-armable) ────
+    # V2 replaces the ~2,000-line doctrine with the 111-line beat-major one and
+    # REUSES this call's catalog/schema block verbatim, so the A/B measures a
+    # doctrine change rather than a different pipeline.
+    #
+    # WHY THE SECRET FLAG ALONE CANNOT ARM IT. BeatMajorPlan can express exactly
+    # one thing: component placements on a beat (plus four globals). It has no
+    # field for cut_refinements, emphasis_moments, text_overlays, broll_clips,
+    # caption_keywords, caption_position_changes or the thumbnail — while the v2
+    # doctrine's own steps 3, 5 and 6 tell the model to cut for pace, vary the
+    # texture and land the payoff with sound and zoom. So the response schema
+    # physically cannot carry most of what the doctrine asks for, and a job run
+    # this way would return an MG-only plan: no zooms, no b-roll, no sound, no
+    # caption keywords. That is not an A/B arm on live traffic, it is a much
+    # worse edit, so PROMPTLY_PROMPT_V2 on its own is REFUSED here and says why.
+    # The A/B harness passes prompt_v2_override=True per job (the burned_text_test
+    # pattern) and reads plan-only output, which is what the pre-registration
+    # specifies. Filed: extend the beat vocabulary to the other five families
+    # before this can be a live route.
+    _v2_on = bool(prompt_v2_override)
+    if not _v2_on:
+        # The refusal notice lives in its own scope so nothing it binds can leak
+        # into the armed branch below. A `try` that imports for BOTH paths left
+        # `_pv2` possibly-undefined at its use site — safe at runtime, but that
+        # is the job-1a72b344 class and the gate refuses it on sight.
+        try:
+            import prompt_v2_editor as _pv2_probe
+            if _pv2_probe.v2_enabled():
+                print("[prompt-v2] PROMPTLY_PROMPT_V2 is SET but refused on this path: "
+                      "BeatMajorPlan cannot express cuts/emphasis/sound/b-roll/captions, "
+                      "so arming it globally would ship MG-only plans. Harness only "
+                      "(prompt_v2_override).", flush=True)
+        except Exception as _v2_err:
+            print(f"[prompt-v2] module unavailable ({type(_v2_err).__name__}) — arm A",
+                  flush=True)
+    if _v2_on:
+        # Armed: both imports here, so a failure surfaces to the harness as a
+        # real error rather than a quiet fall back to arm A that would silently
+        # turn the A/B into a control-vs-control run.
+        import prompt_v2_editor as _pv2
+        import prompt_v2_exemplars as _pv2x
+        # The catalog begins at the first component section. Everything above it
+        # is the doctrine v2 replaces; everything from here down is the shared
+        # half both arms send, sliced rather than rewritten so arm A stays
+        # BYTE-IDENTICAL to production.
+        _CATALOG_MARK = "=== CAPTIONS ==="
+        _cut = post_sys.find(_CATALOG_MARK)
+        if _cut < 0:
+            # LOUD, never silent: a v2 prompt with no catalog would ask for
+            # components it never named and read as a doctrine failure.
+            raise RuntimeError(
+                f"prompt_v2: catalog marker {_CATALOG_MARK!r} not found in the "
+                f"post-cuts system instruction ({len(post_sys)} chars) — the "
+                f"section headings moved and the v2 slice would send a "
+                f"catalog-less prompt")
+        _mode = os.environ.get("PROMPTLY_PROMPT_V2_EXEMPLARS", "").strip() or "PLAN_ONLY"
+        post_sys = _pv2.build_v2_system_instruction(
+            post_sys[_cut:], _pv2x.exemplar_block(_mode))
+        print(f"[prompt-v2] ARM B — doctrine swapped, catalog reused from "
+              f"{_CATALOG_MARK!r} ({len(post_sys)} chars, exemplars={_mode})",
+              flush=True)
+
     # ── UNIFIED CORE (LANE-SEAM Step 2, DARK): additive guidance profiles.
     # guidance_profiles is None on every call unless the PROMPTLY_UNIFIED_CORE
     # selection at the call site armed it — None composes NOTHING (this block
@@ -15540,7 +15671,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         else:
             try:
                 try:
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []))
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on)
                 except Exception as _ref_err:
                     if (_video_part_fallback is None
                             or type(_ref_err).__name__ != "ClientError"):
@@ -15563,7 +15694,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         "video_reference_fallback", reason=str(_ref_err)[:180])
                     _video_part = _video_part_fallback
                     _video_part_fallback = None
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []))
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on)
             except Exception as _tx_err:
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the

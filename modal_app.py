@@ -622,6 +622,15 @@ image = (
     # LANE-SEAM (DARK behind PROMPTLY_SURGICAL_V2): tweak-op teaching text +
     # deterministic validators for caption-spelling / add-transition ops.
     .add_local_file("surgical_ops.py", "/surgical_ops.py")
+    # PROMPT V2 (DARK, harness-only): the beat-major doctrine, its schema and the
+    # exemplars. handler defer-imports all three, and a deferred import of an
+    # unmounted module dies INSIDE its fail-safe — the class that silently
+    # un-shipped moodreel_editor and progressive_publish. The mount law
+    # (validate_deploy _loud_failsafe_mount_law) derives this requirement from
+    # handler's source, so these three are here the day they are imported.
+    .add_local_file("prompt_v2_editor.py", "/prompt_v2_editor.py")
+    .add_local_file("prompt_v2_schema.py", "/prompt_v2_schema.py")
+    .add_local_file("prompt_v2_exemplars.py", "/prompt_v2_exemplars.py")
     # LANE-SEAM (DARK behind PROMPTLY_CAPTION_TRANSLATE): caption-page
     # translation — parser + full-or-nothing page rebuild (pure; the Gemini
     # closure lives in handler's build-site touchpoint).
