@@ -2440,6 +2440,17 @@ class _VideoPlan(BaseModel):
 
 
 class _BrandCopy(BaseModel):
+    # VETO, NOT REQUEST (2026-08-17). The plate is now TRIGGERED BY THE
+    # TRANSCRIPT: if the speaker says their name, the plate fires. This field
+    # exists so the model can say NO — a footage-aware override for the cases
+    # Python cannot see (the name is already burned on screen, the "name" is a
+    # brand not a person, the opening is not the speaker).
+    #
+    # WHY THE INVERSION. As a REQUEST, this object was emitted on 0 of 198 jobs,
+    # so the component was unreachable and the 0/198 read as a decline when it
+    # was actually an input that never arrived. A default-on trigger with a veto
+    # closes that class WITHOUT a new directive: silence now means yes.
+    suppress_name_plate: Optional[bool] = None
     """[§3.1 components D + F] The WORDS for the name-plate and the end-card.
 
     These render as the `NamePlate` and `EndCard` components. DO NOT put
@@ -5120,6 +5131,7 @@ def _asr_diag_reset():
 def _asr_diag_set(**kw):
     if not _ASR_DIAG:
         _asr_diag_reset()
+    _component_ledger_reset()   # requested-vs-rendered, per component type
     _ASR_DIAG.update(kw)
 
 
@@ -5967,6 +5979,101 @@ def _speaker_identity_from_transcript(transcript_text):
     if rm:
         role = rm.group(1).strip().title()
     return name, role
+
+
+# ── REQUESTED vs RENDERED, PER COMPONENT TYPE ────────────────────────────────
+#
+# THE THESIS THIS EXISTS TO TEST. Every component number this campaign has acted
+# on — scenes 0/779, brand_copy 0/198, MG ~62% dropped — is a RENDERED count. Not
+# one of them distinguishes "the planner declined" from "the planner asked and we
+# dropped it". Those have opposite fixes: the first is a prompt problem, the
+# second is ours.
+#
+# The trigger-source render settled one case by hand: the model asked for a
+# StatCard and a PillCluster, wrote their props into `why` because the schema
+# gave it nowhere else, and both were dropped as empty-props — recorded as a
+# decline. That is a WE-dropped-it, misfiled as a THEY-declined.
+#
+# One job, one record: what was asked for, what survived, per type.
+_COMPONENT_LEDGER = {}
+
+
+def _component_ledger_reset():
+    _COMPONENT_LEDGER.clear()
+
+
+def _ledger_requested(kind, ctype=None, n=1):
+    """The planner ASKED for n of these."""
+    try:
+        k = f"{kind}:{ctype}" if ctype else str(kind)
+        e = _COMPONENT_LEDGER.setdefault(k, {"requested": 0, "rendered": 0, "dropped": {}})
+        e["requested"] += int(n)
+    except Exception:
+        pass
+
+
+def _ledger_rendered(kind, ctype=None, n=1):
+    """n of these SURVIVED to the render spec."""
+    try:
+        k = f"{kind}:{ctype}" if ctype else str(kind)
+        e = _COMPONENT_LEDGER.setdefault(k, {"requested": 0, "rendered": 0, "dropped": {}})
+        e["rendered"] += int(n)
+    except Exception:
+        pass
+
+
+def _ledger_dropped(kind, ctype=None, reason="unspecified", n=1):
+    """n were dropped BY US, with the reason — this is the half that was missing."""
+    try:
+        k = f"{kind}:{ctype}" if ctype else str(kind)
+        e = _COMPONENT_LEDGER.setdefault(k, {"requested": 0, "rendered": 0, "dropped": {}})
+        e["dropped"][str(reason)[:60]] = e["dropped"].get(str(reason)[:60], 0) + int(n)
+    except Exception:
+        pass
+
+
+def _ledger_absorb_plan(plan):
+    """Record what the PLANNER ASKED FOR, per type, straight off the plan.
+
+    Read from the plan rather than counted at each placement site, because a
+    placement site that never runs cannot report the request it never saw —
+    which is precisely how "the planner declined" got written for components the
+    planner did ask for.
+    """
+    if not isinstance(plan, dict):
+        return
+    for key in ("motion_graphics", "text_overlays", "broll_clips", "transitions",
+                "generated_scenes", "emphasis_moments", "sound_effects",
+                "cut_refinements", "tight_cut_overlays"):
+        arr = plan.get(key)
+        if not isinstance(arr, list):
+            continue
+        if key == "motion_graphics":
+            for it in arr:
+                _ledger_requested("motion_graphic",
+                                  (it or {}).get("type") if isinstance(it, dict) else None)
+        else:
+            _ledger_requested(key, None, len(arr))
+    if plan.get("brand_copy"):
+        _ledger_requested("brand_copy")
+
+
+def _component_ledger_snapshot():
+    """Rides the result payload. A type whose requested > rendered is OUR bug."""
+    try:
+        out = {}
+        for k, v in _COMPONENT_LEDGER.items():
+            req = int(v.get("requested", 0))
+            drops = sum(int(x) for x in (v.get("dropped") or {}).values())
+            out[k] = {"requested": req,
+                      "dropped_by_us": drops,
+                      # DERIVED, not observed at the render — labelled so it is
+                      # never mistaken for a rendered-frame count.
+                      "survived_derived": max(0, req - drops),
+                      "drop_reasons": v.get("dropped", {})}
+        return out
+    except Exception:
+        return {}
 
 
 def _burned_text_caption_block(edit_plan, vibe=None):
@@ -15989,6 +16096,17 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 _det_name, _det_role = _speaker_identity_from_transcript(_det_text)
                 _bc_name = _brand_src.get("speaker_name") or _det_name
                 _bc_role = _brand_src.get("speaker_role") or _det_role
+                # THE VETO. Silence means YES — the transcript trigger stands
+                # unless the model actively objects.
+                if _brand_src.get("suppress_name_plate") is True:
+                    _record_divergence(
+                        "brand", {"name": _bc_name, "source": "model_veto"},
+                        "name_plate_vetoed",
+                        reason="the planner saw the footage and declined the "
+                               "plate; the transcript trigger defers to it")
+                    print(f"[brand] name plate VETOED by the planner "
+                          f"(would have been {_bc_name!r})", flush=True)
+                    _bc_name = _bc_role = None
                 if _det_name and not _brand_src.get("speaker_name"):
                     print(f"[brand] name plate from TRANSCRIPT (deterministic): "
                           f"{_det_name!r} role={_det_role!r}", flush=True)
@@ -15998,6 +16116,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         "name_plate_derived",
                         reason="planner emitted no brand_copy; the spoken name "
                                "in the transcript supplied it (ART_DIRECTION_6)")
+                _ledger_absorb_plan(edit_plan)
                 edit_plan["_brand_specs"] = _bc.build_brand_specs(
                     edit_plan.get("_design_system"),
                     name=_bc_name,
@@ -17680,6 +17799,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         f"nothing to rewrite from. Render continues without it.",
                         flush=True,
                     )
+                    _ledger_dropped("motion_graphic", _mg_type, "empty_props")
                     _record_divergence(
                         "motion_graphic",
                         {"type": _mg_type,
@@ -35067,6 +35187,10 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         # that lets a query separate "correctly routed music" from "ASR missed
         # real speech" without downloading a single source.
         "asr_diagnostics": _asr_diag_snapshot(),
+        # THE THESIS INSTRUMENT: requested vs dropped-by-us, per component type.
+        # Every component number this campaign acted on was a RENDERED count,
+        # which cannot tell a decline from a drop — opposite fixes.
+        "component_ledger": _component_ledger_snapshot(),
         "analysis_data": None,
         "resolved_broll": [],
         "trend_snapshot": None,
@@ -35101,6 +35225,7 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             # This route's whole purpose here is to explain WHY it diverted, so
             # the explanation has to survive the write that the row keeps.
             "asr_diagnostics": result_payload.get("asr_diagnostics"),
+            "component_ledger": result_payload.get("component_ledger"),
             "render_version": RENDER_VERSION,
             "thumbnail_url": _thumbnail_url,
             "capability_notes": _capability_notes,
@@ -41557,6 +41682,7 @@ def handler(job):
             # the same way: what word count and audio level does a job that DOES
             # reach editorial actually have?
             "asr_diagnostics": _asr_diag_snapshot(),
+            "component_ledger": _component_ledger_snapshot(),
             # measurement semantics: REAL analyzer output or honest None —
             # never the plan echo (the write died; see the landmine tombstone)
             "analysis_data": _cached_analysis if isinstance(_cached_analysis, dict) else None,
@@ -41654,6 +41780,7 @@ def handler(job):
                 # that DID reach editorial carry the same measurement — same
                 # allowlist discipline as clean_export_key above.
                 "asr_diagnostics": result_payload.get("asr_diagnostics"),
+                "component_ledger": result_payload.get("component_ledger"),
                 "analysis_data": result_payload.get("analysis_data"),
                 "resolved_broll": result_payload.get("resolved_broll"),
                 "trend_snapshot": result_payload.get("trend_snapshot"),
