@@ -55,8 +55,8 @@ written down, so each component improvised its own geometry.
 
 ## §2 — TYPE (the caption system)
 
-*Geometry and legibility here are INVARIANTS (layer 1). Colour pairing, case and
-decoration belong to each style (layer 2) — see §8.2 for the open owner call.*
+*Geometry, contrast floor and palette membership are INVARIANTS (layer 1).
+Base colour, case, pairing and decoration belong to each style (layer 2).*
 
 ### 2.1 Measured off REF-2 (720x1280 vertical)
 
@@ -70,6 +70,10 @@ decoration belong to each style (layer 2) — see §8.2 for the open owner call.
 | tracking | tight; slightly negative at large sizes | `[MEASURED]` |
 | words per page | **1-3**, never a full sentence | `[MEASURED]` |
 | vertical position | **~53% of frame height** — centre-band, NOT lower third | `[MEASURED]` |
+
+**`base colour` and `case` above are STYLE-layer defaults, not invariants**
+(resolved 2026-08-17). The binding rules on colour are the contrast floor
+(§2.4) and palette membership (§6) — see §8.2.
 
 **The lower-third assumption was wrong and is retired.** Both references place
 captions in the centre band, horizontally displaced away from the subject.
@@ -208,14 +212,22 @@ code, and no art direction per style.
    palette lock. One implementation every style imports — so a style CANNOT
    improvise geometry, and the numbers stop being per-component folklore.
 
-   **OWNER CALL OWED, and I will not decide it silently:** two of §2.1's
-   measurements are arguably style IDENTITY rather than invariant —
-   **base colour `#FEFCFD`** and **case (lowercase prose / UPPERCASE accent)**.
-   Forcing both would flatten TwoTone and Gadzhi into near-copies, which is the
-   consolidation that was just rejected, arriving through the back door. My
-   recommendation: hold **cap-height ratio, vertical anchor, words-per-page,
-   legibility floor, motion law and palette lock** as invariant; let **colour
-   pairing, case and decoration** belong to the style.
+   **OWNER CALL RESOLVED 2026-08-17:** `#FEFCFD` and case (lowercase prose /
+   UPPERCASE accent) move to the **STYLE layer** — they are identity, and
+   forcing them would have flattened TwoTone and Gadzhi into near-copies, which
+   is the rejected consolidation arriving through the back door.
+
+   They are replaced by two invariants that constrain the same surface without
+   dictating the look:
+
+   | invariant | rule | why it replaces a fixed colour |
+   |---|---|---|
+   | **contrast floor** | every glyph clears a minimum contrast ratio against the pixels it sits on, measured on the DARKEST and LIGHTEST frame the caption spans — not the frame at its start | a style may use any colour it likes; it may not use one you cannot read |
+   | **palette membership** | every colour a component emits is a member of the job's derived palette (or its computed tints/shades) — never a hardcoded brand value | holds §1's "one hand" across the edit while leaving each style free to pair those colours differently |
+
+   A style is therefore free to be white-on-black, two-tone, or accent-heavy.
+   It is not free to be illegible, and it is not free to introduce a colour the
+   rest of the edit has never seen.
 
 3. **§6 name plate + end card** — deterministic, no model call, immediate lift.
    Triggered off a spoken name/role that the transcript already carries.
