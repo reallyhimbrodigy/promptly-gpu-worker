@@ -1,0 +1,24 @@
+[
+ {
+  "id": "c4739d9f-5b9d-49d0-9cef-a9fa22c5c1ed",
+  "dur": 28.298333333333332,
+  "reason": "no_speech_muted",
+  "mean_dbfs": -24.7,
+  "speech_band_dbfs": -25.5,
+  "bass_dbfs": -34.6,
+  "word_count": 0,
+  "detected_language": null,
+  "url": "https://d1iax8jos987n3.cloudfront.net/sources/753eaf94-a513-49d1-95e6-340c9b8442d6/1787022308747-847A30AC-08FA-457B-8D70-75AF41C0EAA1_L0_001.mp4"
+ },
+ {
+  "id": "0d590a4b-f758-4478-9cff-36c031c73d52",
+  "dur": 37.166666666666664,
+  "reason": "no_speech_muted",
+  "mean_dbfs": -34.3,
+  "speech_band_dbfs": -36.6,
+  "bass_dbfs": -44,
+  "word_count": 0,
+  "detected_language": null,
+  "url": "https://d1iax8jos987n3.cloudfront.net/sources/255c5a31-8906-4e80-85ee-3287f750090b/1787026255794-60681E83-68E5-4F8B-B5A6-00648210FCBD_L0_001.mp4"
+ }
+]
