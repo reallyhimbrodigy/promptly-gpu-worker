@@ -14463,6 +14463,34 @@ def build_safe_recipe(kept_words, vocal_emphasis=None, ep_off=None):
 _LAST_SAFE_EDIT = {"reason": None}
 
 
+def _safe_edit_deliverable_on_failure():
+    """Is a safe edit a DELIVERABLE when editorial FAILED? Default: NO.
+
+    OWNER RULING 2026-08-18: "safe_edit stops being a deliverable and becomes an
+    incident." An editorial failure that quietly ships a deterministic clean-cut
+    is a degraded product delivered as if it were the product, and it is
+    invisible in every metric — the job completes, the user gets a video, and
+    nothing counts the quality we did not deliver.
+
+    MEASURED BEFORE SHIPPING, because this converts deliveries into failures:
+      since Aug 11   216 safe_edit / 174 FAILURE-driven (148 users)
+      post-v557       41 safe_edit /   0 failure-driven
+    All 174 were the success-path TypeError class. At today's rate this change
+    costs ZERO deliveries — it is a guard for when editorial goes live, not a
+    withdrawal of something users are getting.
+
+    TWO DOORS ARE DELIBERATELY UNAFFECTED, because neither is a failure:
+      editorial_live_off  — CONFIG. Editorial is suppressed; the deterministic
+                            path IS the product today (41 of 41 post-v557).
+      recipe wall-clock   — a BUDGET guard that stops compounding before the
+                            render SIGKILL. A safe edit beats a killed job.
+
+    Rollback: PROMPTLY_SAFE_EDIT_ON_FAILURE=1 restores today's behaviour.
+    """
+    return os.environ.get("PROMPTLY_SAFE_EDIT_ON_FAILURE", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 def _mark_safe_edit(reason):
     """Record WHY the deterministic path was taken, and return it unchanged.
 
@@ -15540,7 +15568,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the
                 # ladder's next rung is the safe edit.
-                if _safe_edit_on and kept_words:
+                if _safe_edit_on and kept_words and _safe_edit_deliverable_on_failure():
                     print(
                         f"[safe-edit] recipe transport exhausted "
                         f"({type(_tx_err).__name__}: {str(_tx_err)[:120]})",
@@ -15549,6 +15577,17 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     _use_safe = True
                     _safe_reason = _mark_safe_edit(f"recipe_transport:{type(_tx_err).__name__}")
                     continue
+                # THE RUNG IS GONE (owner ruling 2026-08-18). Retries already
+                # happened inside the call; an exhausted transport is an
+                # INCIDENT, and it fails with the copy that already exists
+                # rather than shipping a deterministic edit as if it were the
+                # product.
+                print(f"[safe-edit] REFUSED as a deliverable — transport exhausted "
+                      f"({type(_tx_err).__name__}); failing honestly", flush=True)
+                _record_divergence(
+                    "recipe", {"reason": f"recipe_transport:{type(_tx_err).__name__}"},
+                    "safe_edit_refused",
+                    reason="editorial failed; a safe edit is an incident, not a deliverable")
                 raise
         try:
 
@@ -19285,10 +19324,18 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     f"RECIPE_INVALID: safe-edit recipe failed validation: {_repair_err}"
                 ) from _repair_err
             if _repair_attempt >= _repair_max or not _repair_budget_ok:
-                if _safe_edit_on and kept_words:
+                # _repair_max defaults to 1, so control reaches here only AFTER
+                # the one retry the ruling allows. The safe rung is then gone.
+                if _safe_edit_on and kept_words and _safe_edit_deliverable_on_failure():
                     _use_safe = True
                     _safe_reason = _mark_safe_edit(f"RECIPE_INVALID:{str(_repair_err)[:80]}")
                     continue
+                _record_divergence(
+                    "recipe", {"reason": f"RECIPE_INVALID:{str(_repair_err)[:60]}",
+                               "attempts": _repair_attempt + 1},
+                    "safe_edit_refused",
+                    reason="editorial failed after its retry; a safe edit is an "
+                           "incident, not a deliverable")
                 raise RecipeInvalidError(
                     f"RECIPE_INVALID after {_repair_attempt + 1} attempt(s): {_repair_err}"
                 ) from _repair_err
