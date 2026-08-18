@@ -24,6 +24,30 @@ import importlib
 import inspect
 from typing import Any
 
+# ─── NO GATE VERDICT MAY COME FROM STALE BYTECODE (2026-08-18, RULE-1) ───────
+# A cert reported a failure that WAS NOT IN THE SOURCE. A RED-proof harness had
+# mutated duration_target.py by ONE CHARACTER (`<` -> `>`), a subprocess imported
+# the mutant and cached its bytecode, and the restore landed inside the SAME
+# mtime SECOND. CPython validates a .pyc on (mtime_seconds, size) — a one-char
+# swap leaves size identical, so both matched and the poisoned bytecode stayed
+# "valid" FOREVER. Every later run of that cert failed on code that no longer
+# existed; the source read correct while the gate read red.
+#
+# That is PROBE COLLAPSE (project_probe_collapse_class) pointed at the gate
+# itself: a failed measurement presented as a confident verdict. Suppressing
+# WRITES would not have saved us — the poison was already on disk and would
+# still be READ. Redirecting the cache prefix is what closes both directions:
+# with sys.pycache_prefix set, CPython ignores the source-adjacent __pycache__
+# entirely, and with writes off nothing accumulates in the new location either.
+# So the gate — and every cert subprocess that inherits this env — compiles from
+# SOURCE, always. Asserted behaviourally by _gate_verdict_never_stale_bytecode.
+_PYC_JAIL = os.path.join(os.path.realpath(os.environ.get("TMPDIR", "/tmp")),
+                         f"promptly_gate_pyc_{os.getpid()}")
+sys.dont_write_bytecode = True
+sys.pycache_prefix = _PYC_JAIL
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+os.environ["PYTHONPYCACHEPREFIX"] = _PYC_JAIL
+
 # Suppress noisy startup prints from handler import.
 _real_stderr = sys.stderr
 _real_stdout = sys.stdout
@@ -69,6 +93,56 @@ def _syntax_check():
 def _modal_syntax():
     with open("modal_app.py") as f:
         ast.parse(f.read())
+
+
+@check("NO GATE VERDICT MAY COME FROM STALE BYTECODE (2026-08-18, RULE-1). MEASURED: cert_duration_target reported a failure that was NOT IN THE SOURCE. A RED-proof harness had mutated duration_target.py by ONE CHARACTER (`<` -> `>`), a subprocess imported the mutant and cached its bytecode, and the restore landed inside the SAME mtime SECOND — and CPython validates a .pyc on (mtime_seconds, size), so a one-char swap leaves size identical, both matched, and the poisoned bytecode stayed 'valid' FOREVER. The source read correct while the gate read red, on code that no longer existed. This is PROBE COLLAPSE aimed at the gate itself: a failed measurement presented as a confident verdict, and it is the one failure mode that can make EVERY other check here lie. Suppressing writes would NOT have cured it (the poison was already on disk and would still be read) — only redirecting sys.pycache_prefix bypasses the source-adjacent __pycache__ in BOTH directions. Asserted BEHAVIOURALLY on the exact worst case: a one-character mutation with mtime forced back to the original, proven to reproduce the stale read on the KNOWN-BAD window (no jail) before the jailed run is believed, so a vacuous probe fails loudly instead of passing quietly.")
+def _gate_verdict_never_stale_bytecode():
+    import subprocess as _sp, tempfile as _tf, shutil as _sh
+
+    # 1. the jail is wired — in THIS process, and inherited by every child cert
+    assert sys.dont_write_bytecode is True, \
+        "sys.dont_write_bytecode must be on or this run leaves poison behind"
+    assert sys.pycache_prefix and "promptly_gate_pyc" in sys.pycache_prefix, \
+        "sys.pycache_prefix must point at the per-run jail, not __pycache__"
+    assert os.environ.get("PYTHONPYCACHEPREFIX") == sys.pycache_prefix, \
+        "cert SUBPROCESSES must inherit the jail — they are most of the gate"
+    assert os.environ.get("PYTHONDONTWRITEBYTECODE") == "1", \
+        "a child that writes bytecode re-arms this trap for the next run"
+
+    _d = _tf.mkdtemp()
+    _mod = os.path.join(_d, "pycjail_probe.py")
+    with open(_mod, "w") as _fh:
+        _fh.write("def v():\n    return 'OLD'\n")
+    _st = os.stat(_mod)
+    _jail = dict(os.environ)
+    _bare = {k: v for k, v in os.environ.items()
+             if k not in ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE")}
+
+    def _run(_env):
+        return _sp.run([sys.executable, "-c", "import pycjail_probe as p; print(p.v())"],
+                       cwd=_d, env=_env, capture_output=True, text=True).stdout.strip()
+
+    # 2. THE KNOWN-BAD WINDOW FIRST. Import unjailed so a .pyc for OLD exists,
+    #    then mutate one char and force the mtime back: same size, same second.
+    assert _run(_bare) == "OLD", "positive control: the probe must read OLD first"
+    with open(_mod, "w") as _fh:
+        _fh.write("def v():\n    return 'NEW'\n")
+    os.utime(_mod, (_st.st_atime, _st.st_mtime))
+    assert os.stat(_mod).st_size == _st.st_size, \
+        "the mutation must not change size — that is what defeats .pyc validation"
+    _stale = _run(_bare)
+    assert _stale == "OLD", (
+        f"VACUOUS PROBE: without the jail the poisoned bytecode did NOT reproduce "
+        f"(read {_stale!r}) — this check cannot prove the jail does anything, so "
+        f"its pass would be meaningless. No zero is believed until the same probe "
+        f"demonstrably fires on the known-bad window.")
+
+    # 3. SAME POISONED TREE, JAILED. Must read the source, not the cache.
+    _fresh = _run(_jail)
+    assert _fresh == "NEW", (
+        f"THE JAIL LEAKED: a gate subprocess read {_fresh!r} from stale bytecode "
+        f"while the source said NEW — every verdict in this file is unsafe")
+    _sh.rmtree(_d, ignore_errors=True)
 
 
 @check("INC2-TELEMETRY NEST GUARD (speed agent 2026-08-01, RULE-1): the cpu_by_stage / mem_by_stage sizing telemetry must be NESTED inside stage_timings (result.setdefault('stage_timings')), never a top-level result key — content-studio strips unknown top-level keys, so a top-level cpu_by_stage persisted 0/121 on real traffic (same class as source_duration). FAILS if it regresses to `result[\"cpu_by_stage\"] =`, which would make the inc2 burst-sizing data silently un-queryable again.")
