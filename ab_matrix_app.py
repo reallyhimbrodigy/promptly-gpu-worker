@@ -112,7 +112,10 @@ def cell(spec: dict) -> dict:
     import build_lane as _bl
     _bl.mark_build_lane()                       # opens the editorial gate IN-LANE
     os.environ["PREMIUM_PIPELINE_ENABLED"] = "1"
-    os.environ["PROMPTLY_SCENES_DIRECTIVE_V2"] = "1"   # prompt held CONSTANT
+    # PROMPT AXIS. Held constant within a run; switchable BETWEEN runs, because
+    # "does the directive help" and "does the decline it targets even exist" are
+    # different questions and the second one is answered at production config.
+    os.environ["PROMPTLY_SCENES_DIRECTIVE_V2"] = str(spec.get("scenes_v2", "1"))
     os.environ["PROMPTLY_POST_THINKING_BUDGET"] = str(spec["thinking"])
 
     import handler as H
@@ -203,7 +206,7 @@ def cell(spec: dict) -> dict:
 @app.local_entrypoint()
 def main(source_path: str = "", manifest: str = "fps_ab_corpus_manifest.json",
          ids: str = "", models: str = "", serial: bool = False,
-         thinking: str = ""):
+         thinking: str = "", scenes_v2: str = "1"):
     """`manifest`/`ids` let STEP A run against the FROZEN GOLDENS without
     forking this harness. golden/manifest.json carries the same s3_key +
     sha256 + duration_s fields, so the per-cell byte verification is unchanged
@@ -219,14 +222,14 @@ def main(source_path: str = "", manifest: str = "fps_ab_corpus_manifest.json",
             b = f.read()
         for m in _models:
             for t in _think:
-                specs.append({"model": m, "thinking": t, "source_bytes": b,
+                specs.append({"model": m, "thinking": t, "source_bytes": b, "scenes_v2": scenes_v2,
                               "src_id": os.path.basename(source_path)})
     else:
         for cid in ([s.strip() for s in ids.split(",") if s.strip()] or CORPUS_IDS):
             e = by_id[cid]
             for m in _models:
                 for t in _think:
-                    specs.append({"model": m, "thinking": t, "source_bytes": b"",
+                    specs.append({"model": m, "thinking": t, "source_bytes": b"", "scenes_v2": scenes_v2,
                                   "s3_key": e["s3_key"], "src_id": cid,
                                   "src_dur": e["duration_s"], "sha256": e.get("sha256")})
     _srcs = sorted({str(sp.get("src_id")) for sp in specs})
@@ -240,6 +243,7 @@ def main(source_path: str = "", manifest: str = "fps_ab_corpus_manifest.json",
           f"priced ~${len(specs) * _PER_CELL_USD:.2f} "
           f"(${_PER_CELL_USD:.2f}/cell, ledgered rate) ===")
     print(f"    manifest: {manifest}")
+    print(f"    scenes_directive_v2={scenes_v2}  thinking={_think}  models={_models}")
     print(f"    sources: {', '.join(_srcs)}")
     print(f"    FROZEN corpus, sha256-verified per cell (a corpus whose bytes")
     print(f"    drifted is not a corpus, and an A/B on drifted bytes compares")
