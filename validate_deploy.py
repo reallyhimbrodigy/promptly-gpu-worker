@@ -7334,6 +7334,11 @@ def _secret_canonical_values():
         # 5/5 and emphasis 18 vs 18 — BUT at thinking=24576, which is NOT
         # production's 2048; the latency claim is re-measured at 2048 before any
         # Step C. rollback = "gemini-3.1-pro-preview" here + secret + redeploy.
+        # CAPTION TEXT SWAP LIVE (owner ruling 2026-08-18, key named).
+        # The mechanical half of the diff path, ALONE: PROMPTLY_SURGICAL_V2
+        # stays DARK because it would also hand the model transition-add.
+        # rollback = "" here + secret + redeploy.
+        "PROMPTLY_CAPTION_TEXT_OPS": "1",
         "PROMPTLY_EDITORIAL_MODEL": "gemini-3.7-flash",
         "PROMPTLY_ROUTE_LANGS": "hi,bn,ta,te,mr,gu,kn,ur,ar,id",  # Tier-1 graduated scripts (Hindi first, Arabic 2026-07-20, +id)
         "PROMPTLY_MOTION_BLUR": "1",       # motion-blur path LIVE per readback 2026-08-09
@@ -9707,6 +9712,18 @@ def _safe_edit_is_not_a_deliverable():
     _out = (_r.stdout or "") + (_r.stderr or "")
     assert _r.returncode == 0, f"cert_safe_edit_not_a_deliverable FAILED\n{_out[-1400:]}"
     assert "CERT SAFE-EDIT-DELIVERABLE: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("THE CAPTION TEXT SWAP SHIPS ALONE (owner ruling 2026-08-18, RULE-1) [secret-auth law]. PROMPTLY_SURGICAL_V2 reads like a caption flag and is not: at the call site it gates THREE things — caption_text_overrides in the op enum (MECHANICAL, wanted), TRANSITION_ADD_BULLET replacing the refusal (a CREATIVE capability the model does not have today), and OPS_VOCAB_ADDENDUM. Flipping it to ship the text swap would also hand the model transition-add on re-edit, which is a second variable inside a one-variable change and exactly how a regression gets attributed to the wrong cause. This is why the secret-auth law names KEYS rather than features: the owner said 'un-dark caption_text_overrides', and the key that does that does more than its name implies. So the text swap gets PROMPTLY_CAPTION_TEXT_OPS — it is the single most common small request there is ('you spelled my name wrong'), purely mechanical, and the first user-visible proof that the diff path works at all, carrying ONE variable. THE ASSERTION THAT MATTERS IS THE NEGATIVE ONE: the narrow flag must NOT arm transition-add, and a future edit collapsing the two flags back together fails here. The transition-add selection is checked on the PARSED tree rather than by substring, because the two flag names differ by a prefix and a substring check would pass on the wrong one. surgical_v2 stays a superset so arming the broad flag can never silently disarm the narrow one.")
+def _caption_text_ops_ships_alone():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_caption_text_ops_split.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_caption_text_ops_split FAILED\n{_out[-1200:]}"
+    assert "CERT CAPTION-TEXT-OPS SPLIT: PASS" in _out, (
         f"cert did not report PASS:\n{_out[-600:]}")
 
 

@@ -1814,6 +1814,11 @@ _CANON_FLAGS = {
     # CANON — the deploy-time gate and this daily sentinel are two readers of
     # ONE value set, and the gate ast-compares them precisely so a change here
     # cannot lag. PROMPTLY_EDITORIAL_LIVE stays OFF and unregistered.
+    # CAPTION TEXT SWAP LIVE (owner ruling 2026-08-18, key named).
+    # The mechanical half of the diff path, ALONE: PROMPTLY_SURGICAL_V2
+    # stays DARK because it would also hand the model transition-add.
+    # rollback = "" here + secret + redeploy.
+    "PROMPTLY_CAPTION_TEXT_OPS": "1",
     "PROMPTLY_EDITORIAL_MODEL": "gemini-3.7-flash",
     "PROMPTLY_ROUTE_LANGS": "hi,bn,ta,te,mr,gu,kn,ur,ar,id",
     "PROMPTLY_MOTION_BLUR": "1",

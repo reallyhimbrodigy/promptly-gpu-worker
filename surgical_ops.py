@@ -49,6 +49,38 @@ def enabled(input_data=None):
     )
 
 
+def caption_text_ops_enabled(input_data=None):
+    """THE SPLIT (owner ruling 2026-08-18). Caption text swap, ALONE.
+
+    WHY THIS FLAG EXISTS. `PROMPTLY_SURGICAL_V2` reads like a caption flag and
+    is not: at the call site it gates THREE changes at once —
+
+      1. caption_text_overrides in the op enum        (MECHANICAL, wanted now)
+      2. TRANSITION_ADD_BULLET replacing the refusal  (CREATIVE capability)
+      3. OPS_VOCAB_ADDENDUM in the prompt             (teaches op 1)
+
+    Flipping it to ship the text swap would also hand the model the ability to
+    ADD TRANSITIONS on re-edit, where it currently refuses. That is a second
+    variable inside a one-variable change, and it is how a regression gets
+    attributed to the wrong cause.
+
+    Text swap is the single most common small request there is ("you spelled my
+    name wrong"), it is purely mechanical, and it is the first user-visible proof
+    that the diff path works at all. It gets its own key so that proof carries
+    ONE variable.
+
+    PROMPTLY_SURGICAL_V2 stays dark until transition-add gets its own read.
+    Either flag arms the caption op; only SURGICAL_V2 arms transition-add.
+    """
+    if input_data and input_data.get("caption_text_ops_test"):
+        return True
+    if os.environ.get("PROMPTLY_CAPTION_TEXT_OPS", "").strip().lower() in (
+            "1", "true", "yes", "on"):
+        return True
+    # SURGICAL_V2 is a superset: if the broad flag is on, the caption op is too.
+    return enabled(input_data)
+
+
 def caption_override_anchor(entry):
     """_DIFF_LIST_ANCHORS anchor for caption_text_overrides: the find-text."""
     return entry.get("find") if isinstance(entry, dict) else None

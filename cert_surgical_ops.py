@@ -82,11 +82,31 @@ def _prompt_identity():
     assert "transitions are authored in the dedicated seam pass" not in h, (
         "handler.py still carries an inline copy of the refusal bullet — "
         "two copies WILL drift; it must come only from surgical_ops")
-    assert ("_surgical_ops.TRANSITION_ADD_BULLET + "
-            "_surgical_ops.CAPTION_TEXT_BULLET\n"
-            "           if surgical_v2 else "
-            "_surgical_ops.TRANSITION_REFUSAL_BULLET") in h, \
-        "the flag-conditional bullet swap is gone from generate_plan_diff"
+    # RE-EXPRESSED AS A PROPERTY (2026-08-18). This pinned the EXACT source
+    # bytes of one ternary, so it failed the moment the caption op was split
+    # onto its own flag — a legitimate refactor that STRENGTHENED the gating.
+    # Third time today a location-pinned check fired on a refactor; the property
+    # is what matters, so it is resolved on the parsed tree.
+    #
+    # THE PROPERTY: transition-add is selected by surgical_v2 and ONLY by
+    # surgical_v2; the refusal bullet is the flag-off alternative; and neither
+    # bullet is inlined (asserted above).
+    import ast as _ast
+    _tree = _ast.parse(h)
+    _add_sel = [n for n in _ast.walk(_tree)
+                if isinstance(n, _ast.IfExp)
+                and "TRANSITION_ADD_BULLET" in (_ast.get_source_segment(h, n) or "")]
+    assert _add_sel, "transition-add is no longer flag-selected at all"
+    for _n in _add_sel:
+        _t = _ast.get_source_segment(h, _n.test) or ""
+        assert "surgical_v2" in _t, (
+            "transition-add must be gated by surgical_v2")
+        assert "caption_text_ops_enabled" not in _t, (
+            "transition-add must NOT be gated by the caption flag — that would "
+            "ship a creative capability inside the mechanical text-swap change")
+        _alt = _ast.get_source_segment(h, _n.orelse) or ""
+        assert "TRANSITION_REFUSAL_BULLET" in _alt, (
+            "flag-off must still select the refusal bullet verbatim")
     for frag in ("after_word_index", "\"type\""):
         assert frag in so.TRANSITION_ADD_BULLET
     for frag in ("find", "replace"):

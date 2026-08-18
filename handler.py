@@ -19414,8 +19414,13 @@ def _plan_diff_ops_schema(surgical_v2=False):
     surgical_v2 (LANE-SEAM Step 3, dark): when OFF, caption_text_overrides is
     STRIPPED from the list_key enum — a flag-off model structurally cannot
     emit the new op, so flag-off behavior is byte-identical."""
+    import surgical_ops as _surgical_ops   # local: module-load order (see below)
     _lks = set(_DIFF_LIST_ANCHORS)
-    if not surgical_v2:
+    # THE SPLIT (2026-08-18): the caption text op is armed by its OWN flag, so
+    # the mechanical text swap ships without also handing the model
+    # transition-add. surgical_v2 remains a superset — see
+    # surgical_ops.caption_text_ops_enabled.
+    if not (surgical_v2 or _surgical_ops.caption_text_ops_enabled()):
         _lks.discard("caption_text_overrides")
     _op = {"type": "object", "properties": {
         "op": {"type": "string",
@@ -20234,8 +20239,10 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
         # LANE-SEAM Step 3 (dark): with surgical_v2 ON the transition-add hole
         # closes and the caption-spelling op is taught; OFF keeps the refusal
         # verbatim — byte-identical prompt text.
-        + (_surgical_ops.TRANSITION_ADD_BULLET + _surgical_ops.CAPTION_TEXT_BULLET
-           if surgical_v2 else _surgical_ops.TRANSITION_REFUSAL_BULLET) +
+        + ((_surgical_ops.TRANSITION_ADD_BULLET if surgical_v2
+            else _surgical_ops.TRANSITION_REFUSAL_BULLET)
+           + (_surgical_ops.CAPTION_TEXT_BULLET
+              if (surgical_v2 or _surgical_ops.caption_text_ops_enabled()) else "")) +
         "  • 'add a tight_cut_overlay at K' / 'add a LightLeak at the pivot'\n"
         "      → append a new tight_cut_overlays entry with after_word_index at the named cut\n"
         "        (the pipeline validates it sits on a real tight boundary). Overlays carry\n"
@@ -20363,7 +20370,8 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
         "  • replace — swap ONE anchored entry wholesale (value_json = the full new entry). Reach for set_field first; replace only when the user asked for a different entry.\n"
         "  • add — append a new entry (value_json = the full entry object).\n\n"
         "value_json is ALWAYS a JSON-encoded STRING (e.g. \"null\", \"\\\"CleanCut\\\"\", \"{\\\"word_indices\\\": [40], ...}\").\n\n"
-        + (_surgical_ops.OPS_VOCAB_ADDENDUM if surgical_v2 else "") +
+        + (_surgical_ops.OPS_VOCAB_ADDENDUM
+           if (surgical_v2 or _surgical_ops.caption_text_ops_enabled()) else "") +
         "Emit classification FIRST, then scope, then ops:\n"
         "  classification — tweak | guided_redraft | reinterpret | needs_clarification (same meanings as above)\n"
         "  layers_in_scope — which layers the request touches (captions, cuts, emphasis, sounds, broll, motion_graphics, text_overlays, transitions, pacing, vibe)\n"
