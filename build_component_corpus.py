@@ -138,7 +138,8 @@ def main(argv):
         if h in seen:
             seen[h]["dupe_jobs"] += 1
             continue
-        hits = {c: [lab for pat, lab in pats if re.search(pat, tx, re.I)]
+        hits = {c: [lab for pat, lab, ic in pats
+                    if re.search(pat, tx, re.I if ic else 0)]
                 for c, pats in TRIGGERS.items()}
         if not any(hits.values()):
             continue

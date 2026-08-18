@@ -9710,6 +9710,18 @@ def _component_corpus_is_an_instrument():
         f"cert_component_corpus did not report PASS:\n{_out[-600:]}")
 
 
+@check("REF-2 IS A BAR, NOT AN INPUT (owner ruling 2026-08-17, RULE-1) [Rule 3]. The owner watched the first Lumen edit end to end and confirmed REF-2 is ALREADY FULLY EDITED — so the planner's refusal to decorate it ('already contains bespoke 3D motion graphics... declined extra scenes to prevent clutter') was CORRECT JUDGEMENT, not a defect. That settles a question this project spent real money re-asking: a finished video cannot measure whether the planner decorates a RAW one, so every run that used REF-2 as an input measured the wrong thing and read a correct decline as a failure. It is the third corpus-selection error of exactly this shape, and the only one that had to be resolved by the owner watching output himself, which is the most expensive way this project can learn anything. REF-2 is therefore RETIRED as a test input — nothing may plan, transcribe, probe or mount it — while golden/lumen-refs/ stays exactly where it is, because it remains the bar an edit is judged against by eye and deleting it would lose the reference. This check caught a live instance the moment it was written (ab_matrix_app.py still held the path constant). Prose is deliberately still allowed: comments never reach the AST and docstrings are exempted by name, so the reasoning can be written down wherever it helps; what fails is a ref2 path reaching CODE.")
+def _ref2_is_a_bar_not_an_input():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_ref2_not_a_test_input.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_ref2_not_a_test_input FAILED\n{_out[-1400:]}"
+    assert "CERT REF2-NOT-AN-INPUT: PASS" in _out, (
+        f"cert_ref2_not_a_test_input did not report PASS:\n{_out[-600:]}")
+
+
 @check("EVERY COUNTER NAMES ITS BUILD (2026-08-16, RULE-1) [Rule 4, JUDGE]. A counter that records WHAT happened but not WHICH BUILD it happened on cannot be read back without RECONSTRUCTION. That bit on 2026-08-16: two build-lane runs showed `brand_copy` declined even on the reference where a name is spoken — a load-bearing input to redesigning the directive — and attributing those runs to an image required walking commit timestamps, because the run record named no build. Worse, the run's own output was INSUFFICIENT to settle it: `brand_specs` appears in the result even on a commit that lacks the schema field, so the obvious evidence pointed the right way for the wrong reason. Reconstruction is not observation. Every analytics counter now carries build_sha, and the dirty marker rides with it because a counter emitted from an uncommitted tree is attributed to a commit that does NOT describe the code that produced it — which is worse than being unattributed, because it looks authoritative. FAILS if _build_stamp is removed or if any counter stops carrying it.")
 def _counters_name_their_build():
     import os as _os

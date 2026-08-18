@@ -46,27 +46,35 @@ ENV = "/Users/zaclibman/content-studio/.env.local"
 TRIGGERS = {
     # _BrandCopy: "the speaker SAYS their own name, or introduces themselves by
     # role" / "a BRAND, COMPANY OR HANDLE is spoken or legible"
+    # CASE-SENSITIVE, DELIBERATELY (fixed 2026-08-17). This pattern was matched
+    # with re.I, which makes [A-Z] match lowercase — so "I'm paying", "I'm sure"
+    # and "I'm not" all scored as self-introductions. Measured on the component
+    # candidates: EVERY "spoken name" hit was a false positive. A corpus built on
+    # that would have reported "brand_copy declined 0/11" on sources where no
+    # name is ever spoken — manufacturing exactly the decline this file exists to
+    # prevent. The third tuple element is `ignorecase`; only patterns that do not
+    # depend on capitalisation may set it True.
     "brand_copy": [
-        (r"\b(?:i'?m|my name is|this is|i am)\s+[A-Z][a-z]+", "self-introduction"),
+        (r"\b(?:I'?m|My name is|This is|I am)\s+[A-Z][a-z]+", "self-introduction", False),
         (r"\b(founder|ceo|co-?founder|partner|director|manager|coach|attorney|owner|"
-         r"realtor|trainer|therapist)\b", "stated role"),
-        (r"\b(?:here at|welcome to|we at|at)\s+[A-Z][A-Za-z]{2,}", "brand/company"),
-        (r"@\w{2,}|\b[a-z0-9-]+\.(?:com|io|co|app)\b", "handle or URL"),
+         r"realtor|trainer|therapist)\b", "stated role", True),
+        (r"\b(?:here at|welcome to|we at|at)\s+[A-Z][A-Za-z]{2,}", "brand/company", False),
+        (r"@\w{2,}|\b[a-z0-9-]+\.(?:com|io|co|app)\b", "handle or URL", True),
     ],
     # generated_scenes: "a STATED NUMBER or stat" / "a NAMED CONCEPT or OBJECT
     # the words make concrete" / "a CLAIM the footage cannot show"
     "scenes": [
         (r"\$[\d,.]+|\b\d[\d,.]*\s*(?:million|billion|thousand|percent|%|k\b|x\b)|"
-         r"\b\d{2,}\b", "stated number/stat"),
+         r"\b\d{2,}\b", "stated number/stat", True),
         (r"\b(lock|key|folder|graph|chart|map|door|ladder|bridge|clock|scale|"
-         r"mountain|puzzle)\b", "named concrete object"),
+         r"mountain|puzzle)\b", "named concrete object", True),
         (r"\b(before and after|used to|now i|compared to|instead of|imagine)\b",
-         "claim the footage cannot show"),
+         "claim the footage cannot show", True),
     ],
     # payoff zoom: a build that RESOLVES — the arc needs a landing
     "payoff": [
         (r"\b(and that'?s why|so that'?s|the point is|here'?s the thing|"
-         r"which means|that'?s how)\b", "resolution phrase"),
+         r"which means|that'?s how)\b", "resolution phrase", True),
     ],
 }
 
@@ -107,8 +115,8 @@ def main(argv):
             continue
         found = {}
         for comp, pats in TRIGGERS.items():
-            hits = [label for pat, label in pats
-                    if re.search(pat, text, re.I)]
+            hits = [label for pat, label, ic in pats
+                    if re.search(pat, text, re.I if ic else 0)]
             found[comp] = hits
         s["triggers"] = {k: v for k, v in found.items()}
         s["triggers"]["_status"] = "measured"

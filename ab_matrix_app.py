@@ -68,7 +68,8 @@ app = modal.App("ab-editorial-matrix")
 
 _IMAGE = _prod.image.add_local_file("modal_app.py", "/modal_app.py")
 
-REF = "golden/lumen-refs/ref2-viral-creator-doc-vertical.mp4"
+# REF-2 REMOVED as an input (owner ruling 2026-08-17: already fully edited, so
+# its decline is correct and measures nothing). It stays the BAR, not a run.
 
 # 2 models x 3 thinking budgets. 24576 is production's current default (the
 # control); 0 tests whether thinking is load-bearing at all; 60000 was the prior

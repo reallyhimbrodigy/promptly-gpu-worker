@@ -3,7 +3,7 @@
  "coverage": {
   "brand_copy": 7,
   "payoff": 5,
-  "scenes": 8
+  "scenes": 10
  },
  "selection": "deduped by transcript hash; >=1 directive trigger; durable s3 source pinned by sha256+etag",
  "sources": [
@@ -22,7 +22,6 @@
    "text_hash": "305ee172333c6ef0",
    "triggers": {
     "brand_copy": [
-     "self-introduction",
      "stated role"
     ],
     "scenes": [
@@ -33,6 +32,77 @@
    "vibe": "Over the face, add text of what ai model you are",
    "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/23b848f8-bc5c-4ba1-a89d-ba5d9ec2befa/1783900343885-3EAA3CC9-47AB-4BB6-89AB-C2137D50826E_L0_001.mp4",
    "words": 198
+  },
+  {
+   "bytes": 110819862,
+   "created_at": "2026-08-02",
+   "dupe_jobs": 0,
+   "duration_s": 61.1,
+   "etag": "43e547e9e7c9e4b837a8e52608010edb",
+   "id": "comp_scenes_536daed2",
+   "job_id": "536daed2-a7e1-486a-9a22-1d9342ba4e55",
+   "mean_dbfs": -20.3,
+   "route": null,
+   "s3_key": "sources/c5a95814-c66d-4044-85c9-76ee0740da49/1785676280230-796A0D7B-16CA-409B-83F4-62E78F818156_L0_001.mp4",
+   "sha256": "e05f0573c22142a56da3c3319449497da41f76f4a4d0a0ed66e3542d81d95b6b",
+   "text_hash": "16412ebb9230c3ec",
+   "triggers": {
+    "scenes": [
+     "stated number/stat",
+     "claim the footage cannot show"
+    ]
+   },
+   "vibe": "Edit this into a high-retention Instagram Reel using the style of today\u2019s viral fitness co",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/c5a95814-c66d-4044-85c9-76ee0740da49/1785676280230-796A0D7B-16CA-409B-83F4-62E78F818156_L0_001.mp4",
+   "words": 157
+  },
+  {
+   "bytes": 28249426,
+   "created_at": "2026-08-02",
+   "dupe_jobs": 0,
+   "duration_s": 25.9,
+   "etag": "cde703accce5e2c7200c547eed17d434",
+   "id": "comp_scenes_43c8dbe8",
+   "job_id": "43c8dbe8-ab10-477c-a86f-a49759c7071a",
+   "mean_dbfs": -40.9,
+   "route": null,
+   "s3_key": "sources/44fa053f-6bd6-4e83-9ea5-6b21623b894e/1785657202154-9148C6C6-9BDD-40F8-A7A3-D29521DFFD12_L0_001.mp4",
+   "sha256": "cf10e2d69e74442b7e957fb019b6943b66e69ccbe4c0b2acfd2b13dc688cf114",
+   "text_hash": "23fed07fe38efdcb",
+   "triggers": {
+    "scenes": [
+     "stated number/stat",
+     "named concrete object"
+    ]
+   },
+   "vibe": "Give best video to short video YouTube",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/44fa053f-6bd6-4e83-9ea5-6b21623b894e/1785657202154-9148C6C6-9BDD-40F8-A7A3-D29521DFFD12_L0_001.mp4",
+   "words": 33
+  },
+  {
+   "bytes": 140082556,
+   "created_at": "2026-08-01",
+   "dupe_jobs": 0,
+   "duration_s": 29.2,
+   "etag": "56d266a819bb93e85968b0ce28a8c1bd",
+   "id": "comp_brand_copy_scenes_6e69470f",
+   "job_id": "6e69470f-355a-42f8-842b-2cb8d45ba9f2",
+   "mean_dbfs": -30.8,
+   "route": null,
+   "s3_key": "sources/43e0cce4-1b51-4488-ba6e-9d3278242785/1785571442490-469CF887-2418-4503-9FF7-ACA2C37B9C82_L0_001.mp4",
+   "sha256": "1e7a9ea8458b4c2341ecf9b8879d8e852614b409a72735a195191cef36d6e14d",
+   "text_hash": "d0e393caebd61509",
+   "triggers": {
+    "brand_copy": [
+     "self-introduction"
+    ],
+    "scenes": [
+     "claim the footage cannot show"
+    ]
+   },
+   "vibe": "Professional corporate style",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/43e0cce4-1b51-4488-ba6e-9d3278242785/1785571442490-469CF887-2418-4503-9FF7-ACA2C37B9C82_L0_001.mp4",
+   "words": 83
   },
   {
    "bytes": 58352788,
@@ -49,7 +119,6 @@
    "text_hash": "6b3a3c3048a5f8fd",
    "triggers": {
     "brand_copy": [
-     "self-introduction",
      "brand/company"
     ],
     "scenes": [
@@ -61,30 +130,29 @@
    "words": 123
   },
   {
-   "bytes": 37425129,
-   "created_at": "2026-07-29",
+   "bytes": 45040388,
+   "created_at": "2026-07-30",
    "dupe_jobs": 0,
-   "duration_s": 50.2,
-   "etag": "7d425a5c705c0b9062138617cbfc7ab1",
-   "id": "comp_brand_copy_scenes_5fbb62ef",
-   "job_id": "5fbb62ef-a752-4cee-9d02-960098b57c00",
-   "mean_dbfs": -28.6,
+   "duration_s": 68.2,
+   "etag": "13e8e9bd48faf3e07dbf8cfe95287332",
+   "id": "comp_brand_copy_scenes_f81a2f5b",
+   "job_id": "f81a2f5b-0002-4ff1-ae36-e00bb006fca4",
+   "mean_dbfs": -22.2,
    "route": null,
-   "s3_key": "sources/d1725b47-850e-4537-9daf-ec0b455dbafa/1785340399340-CDD8321C-0CAB-403C-B98C-43C8B6DDA254_L0_001.mp4",
-   "sha256": "7afdc9fe78da2faddbbe982e295beddcce3fd2daf1a4df316df2d3912c7583f6",
-   "text_hash": "b7b01bb82b83c7e9",
+   "s3_key": "sources/6d17e9e8-6393-4508-88fa-4d0a607793ac/1785377900431-6D3A5914-FB5B-4CB5-AF53-90EE962FD075_L0_001.mp4",
+   "sha256": "50a9daa080343f1b473141b7db4504506574cefddedd56b99fd8b483cd4abaf1",
+   "text_hash": "3345c8e3bd1a6cd7",
    "triggers": {
     "brand_copy": [
-     "self-introduction"
+     "brand/company"
     ],
     "scenes": [
-     "stated number/stat",
-     "claim the footage cannot show"
+     "stated number/stat"
     ]
    },
-   "vibe": "Viral engaging video",
-   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/d1725b47-850e-4537-9daf-ec0b455dbafa/1785340399340-CDD8321C-0CAB-403C-B98C-43C8B6DDA254_L0_001.mp4",
-   "words": 222
+   "vibe": "Professional corporate style",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/6d17e9e8-6393-4508-88fa-4d0a607793ac/1785377900431-6D3A5914-FB5B-4CB5-AF53-90EE962FD075_L0_001.mp4",
+   "words": 164
   },
   {
    "bytes": 27364973,
@@ -101,8 +169,7 @@
    "text_hash": "e59664777a94cdd7",
    "triggers": {
     "brand_copy": [
-     "stated role",
-     "brand/company"
+     "stated role"
     ],
     "scenes": [
      "claim the footage cannot show"
@@ -113,56 +180,29 @@
    "words": 74
   },
   {
-   "bytes": 128395619,
-   "created_at": "2026-07-28",
+   "bytes": 140474812,
+   "created_at": "2026-07-29",
    "dupe_jobs": 0,
-   "duration_s": 74.8,
-   "etag": "21d7094a89081ba018b0173c538b5758",
-   "id": "comp_brand_copy_scenes_fe0d64fb",
-   "job_id": "fe0d64fb-ed41-4fd8-a45a-50bc43ceb9f8",
-   "mean_dbfs": -37.9,
+   "duration_s": 53.2,
+   "etag": "45de2d7b5a3c1956ede0bb09bf1863ae-27",
+   "id": "comp_brand_copy_scenes_36ff178d",
+   "job_id": "36ff178d-ae10-4768-a16f-f31d0825271f",
+   "mean_dbfs": -23.7,
    "route": null,
-   "s3_key": "sources/ccfff07a-7976-4c91-8eeb-b12801f7f185/1785234607117-7C79B145-1BE7-46E8-AEB3-8D147003981A_L0_001.mp4",
-   "sha256": "c2109f3d0703a8a43f72ff2ab81b992234728d9fac1cb1c945be083acb8a25f6",
-   "text_hash": "0546eba08ddc231a",
-   "triggers": {
-    "brand_copy": [
-     "self-introduction",
-     "brand/company"
-    ],
-    "scenes": [
-     "stated number/stat"
-    ]
-   },
-   "vibe": "Viral engaging video make this a smooth video ,add zoom, sound effects , and motion graphi",
-   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/ccfff07a-7976-4c91-8eeb-b12801f7f185/1785234607117-7C79B145-1BE7-46E8-AEB3-8D147003981A_L0_001.mp4",
-   "words": 82
-  },
-  {
-   "bytes": 35114382,
-   "created_at": "2026-07-28",
-   "dupe_jobs": 1,
-   "duration_s": 29.8,
-   "etag": "62fff0655c29cb401357c0d3739221a7",
-   "id": "comp_brand_copy_scenes_712a3a3a",
-   "job_id": "712a3a3a-15c9-459c-b6f7-630814815dd5",
-   "mean_dbfs": -21.4,
-   "route": null,
-   "s3_key": "sources/5519ef85-7785-4e28-915c-518e614b70af/1785222048947-5CF311C8-1372-4C28-B6A6-833608684852_L0_001.mp4",
-   "sha256": "3ff8c7434581d3b8205b09f7edd4c120c21e7a7954d83e17e0471a223396a17e",
-   "text_hash": "efdea38a0561ca96",
+   "s3_key": "sources/2370d013-ed24-4db2-9257-c25f26eb53bc/1785313818678-54481814-916E-4632-942C-118AF52C1E32_L0_001.mp4",
+   "sha256": "a81054548c0d1bdbc0d4007fd3fcc6174af1cf74dabb2c42038ad8231b20f3a1",
+   "text_hash": "73184a64c7533fbf",
    "triggers": {
     "brand_copy": [
      "self-introduction"
     ],
     "scenes": [
-     "stated number/stat",
      "claim the footage cannot show"
     ]
    },
-   "vibe": "Help me edit this video with captions and a great title. Make a bulleted point list for ea",
-   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/5519ef85-7785-4e28-915c-518e614b70af/1785222048947-5CF311C8-1372-4C28-B6A6-833608684852_L0_001.mp4",
-   "words": 119
+   "vibe": "Create a aesthetic reel and with a good hook that attracts audience and add subtitles and ",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/2370d013-ed24-4db2-9257-c25f26eb53bc/1785313818678-54481814-916E-4632-942C-118AF52C1E32_L0_001.mp4",
+   "words": 156
   },
   {
    "bytes": 92426980,
