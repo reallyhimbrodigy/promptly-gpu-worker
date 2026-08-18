@@ -1810,6 +1810,11 @@ _CANON_FLAGS = {
     "PROMPTLY_BROLL_GATE": "1",
     "PROMPTLY_COVERAGE_GATE": "1",
     "PROMPTLY_LANG_ROUTING": "1",
+    # STEP B (owner GO 2026-08-17 naming the key). Mirror of validate_deploy's
+    # CANON — the deploy-time gate and this daily sentinel are two readers of
+    # ONE value set, and the gate ast-compares them precisely so a change here
+    # cannot lag. PROMPTLY_EDITORIAL_LIVE stays OFF and unregistered.
+    "PROMPTLY_EDITORIAL_MODEL": "gemini-3.7-flash",
     "PROMPTLY_ROUTE_LANGS": "hi,bn,ta,te,mr,gu,kn,ur,ar,id",
     "PROMPTLY_MOTION_BLUR": "1",
     "PROMPTLY_MIN_OUTPUT_RATIO": "0.20",

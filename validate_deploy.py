@@ -7324,6 +7324,17 @@ def _secret_canonical_values():
         # were the only live flags the sweep could silently regress. Growing
         # ROUTE_LANGS is a per-script graduation decision: update it here AND in
         # the secret together, like every other canonical value.
+        # STEP B (owner GO 2026-08-17 naming the key; PROMPTLY_EDITORIAL_LIVE
+        # stays OFF and is deliberately NOT registered here). Points the
+        # editorial planner at 3.7-flash. INERT WHILE EDITORIAL IS SUPPRESSED:
+        # _editorial_suppressed() is true for all live traffic with the flag off,
+        # so today this changes which model the BUILD LANE and any future flip
+        # would use, and changes nothing a user sees. Measured on the frozen
+        # goldens: paired p50 171.5s -> 62.9s (2.73x) with cut count identical
+        # 5/5 and emphasis 18 vs 18 — BUT at thinking=24576, which is NOT
+        # production's 2048; the latency claim is re-measured at 2048 before any
+        # Step C. rollback = "gemini-3.1-pro-preview" here + secret + redeploy.
+        "PROMPTLY_EDITORIAL_MODEL": "gemini-3.7-flash",
         "PROMPTLY_ROUTE_LANGS": "hi,bn,ta,te,mr,gu,kn,ur,ar,id",  # Tier-1 graduated scripts (Hindi first, Arabic 2026-07-20, +id)
         "PROMPTLY_MOTION_BLUR": "1",       # motion-blur path LIVE per readback 2026-08-09
         "PROMPTLY_MIN_OUTPUT_RATIO": "0.20",  # output-ratio floor: reject below 20% of source
