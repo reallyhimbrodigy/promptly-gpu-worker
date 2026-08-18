@@ -125,7 +125,16 @@ def exemplar_block(mode="PLAN_ONLY"):
         "deliberately — REF-2 refuses the one beat where the camera already "
         "proves the claim.\n\n"
         "Read the `read` line on each beat. That is the thinking being asked "
-        "for.\n"
+        "for.\n\n"
+        "**THESE BEATS SHOW ONE TREATMENT — `place`. THAT IS A LIMIT OF THE "
+        "TRANSCRIPTION, NOT THE BAR.** These lists were written down from the "
+        "two reference edits by hand, and only their component placements were "
+        "recorded; the cuts, camera moves, sound and cutaways those edits "
+        "certainly contain are simply not written here. They are NOT absent "
+        "from the reference and they are NOT discouraged. Do not read the shape "
+        "of these examples as the shape of a good plan — a beat list that is "
+        "only placements would be a worse edit than either of these videos. Use "
+        "every treatment the moment calls for.\n"
     )
     body = [
         "\n--- REF-1 · corporate promo · CALM · 6 placements / 40s ---\n"

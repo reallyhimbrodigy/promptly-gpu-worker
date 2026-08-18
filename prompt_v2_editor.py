@@ -109,10 +109,8 @@ Every one of those is about WHERE and WHETHER IT COLLIDES. None is a budget.
 Fifteen well-placed graphics with no collisions is restrained; three dropped at
 random is not, however few.
 
-**`place: []` is a real answer.** A beat that should breathe gets nothing, and
-you say why in `read`. A source that is ALREADY EDITED — burned-in captions,
-existing graphics, its own motion — should receive almost nothing, and declining
-to decorate finished work is correct judgement, not a failure to act.
+**A beat with no treatment at all is a real answer.** A beat that should breathe
+gets nothing, and you say why in `read`.
 
 --- WHAT A BAD EDIT LOOKS LIKE ---
 
@@ -135,6 +133,33 @@ large carries the claim); **graphics** render what the camera cannot point at;
 **the camera** punctuates, differently at different moments; **sound** gives a
 visible event physical weight and always pairs with one; **transitions** tell the
 eye the video turned, and a video with real scene changes and none is a miss.
+
+--- WHAT A BEAT CARRIES ---
+
+Every tool above has a field on the beat. Use the one that fits the moment; most
+beats carry one, many carry none.
+
+  `cut`       remove from this word through `until_word_index`, with the reason.
+              This is the first tool, not the last — a tight take is the biggest
+              single difference between an amateur edit and a professional one.
+  `emphasis`  a stressed moment: how it lands, what it sounds like, and the
+              camera move (`zoom`) if the camera is doing the work.
+  `overlay`   text on screen.
+  `broll`     a cutaway covering this word through `until_word_index`.
+  `scene`     a generated scene — background, subject, motion.
+  `caption`   the words to emphasise in the caption, and a position change when
+              the caption has to move.
+  `place`     components from the catalog.
+
+EVERY SPAN ENDS ON A WORD INDEX, never on a number of seconds. The word list is
+the only clock in this system; a second one has been introduced twice and cost
+real work both times. If you want something to last two seconds, name the word
+it ends on.
+
+An empty beat is a real answer, and you say why in `read` — a moment whose power
+is that it is quiet gets nothing. A source that is ALREADY EDITED — burned-in
+captions, existing graphics, its own motion — should receive almost nothing, and
+declining to decorate finished work is correct judgement, not a failure to act.
 
 --- THE ONE THING THAT SEPARATES A PRO EDIT ---
 

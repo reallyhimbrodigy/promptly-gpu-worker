@@ -13735,53 +13735,22 @@ class EditorialSuppressed(RuntimeError):
 
 
 def _v2_response_schema():
-    """ARM B's beat-major response schema, INLINED on purpose.
+    """ARM B's beat-major response schema — the MODEL'S OWN, not a copy.
 
-    prompt_v2_schema.BeatMajorPlan is the source of truth for the shape, but
-    pydantic's model_json_schema() emits `$defs` + `$ref` for the nested Beat and
-    BeatPlacement models, and this response-schema surface does not reliably
-    accept references — a rejection here would surface as an editorial failure
-    with nothing pointing at the schema. So the same shape is written flat, and
-    cert_prompt_v2_wiring asserts the two never drift: every field of the pydantic
-    model must appear here, and vice versa.
+    This was briefly hand-inlined, on the belief that this surface could not take
+    pydantic's `$defs`/`$ref` output. That belief was wrong and checkable in one
+    line: ARM A's schema IS PostCutPlan.model_json_schema(), it carries both
+    `$defs` and `$ref`, and it has been in production for months.
+
+    A hand-copied schema is a second declaration of a shape that already has one,
+    and the only thing a second declaration can do is drift — with the drift
+    surfacing as the model omitting a field nobody notices is missing. Now that a
+    beat carries seven treatments across six nested models, the copy would have
+    been ~120 lines of exactly that risk. So arm B asks the model for its own
+    schema, and there is nothing left to keep in step.
     """
-    return {
-        "type": "object",
-        "properties": {
-            "beats": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        # Word index, never a float second: every time field in
-                        # this pipeline is word-anchored and Python derives the
-                        # seconds. A second clock has cost this repo twice.
-                        "word_index": {"type": "integer"},
-                        "says": {"type": "string", "maxLength": 300},
-                        "read": {"type": "string", "maxLength": 400},
-                        "place": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "component": {"type": "string"},
-                                    "props": {"type": "object"},
-                                    "hold_s": {"type": "number"},
-                                },
-                                "required": ["component"],
-                            },
-                        },
-                    },
-                    "required": ["word_index"],
-                },
-            },
-            "caption_style": {"type": "string"},
-            "aspect_ratio": {"type": "string"},
-            "video_identity": {"type": "string"},
-            "notes": {"type": "string"},
-        },
-        "required": ["beats"],
-    }
+    import prompt_v2_schema as _pv2s
+    return _pv2s.BeatMajorPlan.model_json_schema()
 
 
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
@@ -14956,20 +14925,21 @@ def generate_edit_gemini(
     # REUSES this call's catalog/schema block verbatim, so the A/B measures a
     # doctrine change rather than a different pipeline.
     #
-    # WHY THE SECRET FLAG ALONE CANNOT ARM IT. BeatMajorPlan can express exactly
-    # one thing: component placements on a beat (plus four globals). It has no
-    # field for cut_refinements, emphasis_moments, text_overlays, broll_clips,
-    # caption_keywords, caption_position_changes or the thumbnail — while the v2
-    # doctrine's own steps 3, 5 and 6 tell the model to cut for pace, vary the
-    # texture and land the payoff with sound and zoom. So the response schema
-    # physically cannot carry most of what the doctrine asks for, and a job run
-    # this way would return an MG-only plan: no zooms, no b-roll, no sound, no
-    # caption keywords. That is not an A/B arm on live traffic, it is a much
-    # worse edit, so PROMPTLY_PROMPT_V2 on its own is REFUSED here and says why.
+    # WHY THE SECRET FLAG ALONE CANNOT ARM IT. This refusal was first written
+    # because BeatMajorPlan could express ONLY component placements, so a live
+    # job would have returned an MG-only plan. That reason is GONE: a beat now
+    # carries all seven treatments — cut, emphasis (with zoom + sound), overlay,
+    # broll, scene, caption and place — and flattens into the exact shapes
+    # PostCutPlan declares (cert_prompt_v2_families).
+    #
+    # The refusal STANDS on the reason that remains, and it is the stronger one:
+    # THIS DOCTRINE HAS NEVER BEEN MEASURED. Arming an unvalidated editorial
+    # doctrine globally would make every user's edit the experiment, before the
+    # pre-registered A/B has produced a single number — and flips happen per
+    # LAUNCH_DAY.md, on evidence, not because a schema became capable.
     # The A/B harness passes prompt_v2_override=True per job (the burned_text_test
     # pattern) and reads plan-only output, which is what the pre-registration
-    # specifies. Filed: extend the beat vocabulary to the other five families
-    # before this can be a live route.
+    # specifies. When the A/B has run and won, this is the line to revisit.
     _v2_on = bool(prompt_v2_override)
     if not _v2_on:
         # The refusal notice lives in its own scope so nothing it binds can leak
@@ -14980,9 +14950,10 @@ def generate_edit_gemini(
             import prompt_v2_editor as _pv2_probe
             if _pv2_probe.v2_enabled():
                 print("[prompt-v2] PROMPTLY_PROMPT_V2 is SET but refused on this path: "
-                      "BeatMajorPlan cannot express cuts/emphasis/sound/b-roll/captions, "
-                      "so arming it globally would ship MG-only plans. Harness only "
-                      "(prompt_v2_override).", flush=True)
+                      "the beat doctrine has never been measured, and arming it "
+                      "globally would make every user's edit the experiment. "
+                      "Harness only (prompt_v2_override) until the A/B has run.",
+                      flush=True)
         except Exception as _v2_err:
             print(f"[prompt-v2] module unavailable ({type(_v2_err).__name__}) — arm A",
                   flush=True)

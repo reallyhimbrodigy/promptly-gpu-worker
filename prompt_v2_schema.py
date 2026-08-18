@@ -12,18 +12,47 @@ the first is cosmetic:
   1. it answers "exactly what component, exactly where" LITERALLY — that IS a
      beat list; component-major arrays answer "what exists" and only imply where;
   2. density becomes visible TO THE MODEL WHILE IT WRITES — three consecutive
-     `place: []` beats across 9 seconds is a gap it can see and fix in the same
-     generation. Filling four separate arrays, nobody can see the gaps, us
+     empty beats across 9 seconds is a gap it can see and fix in the same
+     generation. Filling seven separate arrays, nobody can see the gaps, us
      included;
   3. `read` sits where it does work — one line per beat, immediately before the
      decision it justifies, rather than as a preamble at the top;
-  4. the intent/execution gap becomes legible: `read` (what it saw), `place`
-     (what it asked for), the component ledger (what shipped). Every "the
-     planner declined" finding in this campaign resolved into something WE did.
+  4. the intent/execution gap becomes legible: `read` (what it saw), the beat's
+     own treatments (what it asked for), the component ledger (what shipped).
+     Every "the planner declined" finding in this campaign resolved into
+     something WE did.
 
-THE RENDER SIDE DOES NOT CHANGE. flatten_beats() converts beats[].place[] back
-into the component-major arrays the pipeline already consumes, and DECLARES the
-per-component counts that handler.py:28540's equality assertion needs.
+═══ THE BEAT CARRIES THE WHOLE EDIT, NOT JUST GRAPHICS (2026-08-18) ═══════════
+
+The first version of this schema could express ONE thing: a component placement.
+It had no field for a cut, a zoom, an overlay, a b-roll clip, a caption beat or a
+generated scene — while the doctrine's own steps 3, 5 and 6 tell the model to cut
+for pace, vary the texture, and land the payoff with sound and zoom. So the
+doctrine asked for an edit and the schema could only receive decoration, and any
+job run that way returned an MG-only plan: no zooms, no b-roll, no sound.
+
+That also made the pre-registered win condition unmeasurable — `generated_scenes`
+coming off zero cannot be observed in a vocabulary with no scene in it.
+
+A beat now carries every treatment an editor applies at a moment:
+
+    cut       remove from here to there — the FIRST tool, per doctrine step 3
+    emphasis  the zoom + sound + intensity of a stressed moment
+    overlay   a text overlay
+    broll     a cutaway
+    scene     a generated scene (the win condition)
+    caption   keyword emphasis and caption position
+    place     component placements (motion graphics)
+
+Seven treatments, one timeline, one clock. THE CLOCK IS THE WORD LIST: spanning
+treatments end at `until_word_index`, never at a float second. This pipeline has
+paid twice for a second clock, and a beat list is exactly where a third would be
+tempting to introduce.
+
+THE RENDER SIDE DOES NOT CHANGE. flatten_beats() converts the beats back into the
+component-major arrays the pipeline already consumes, in the EXACT shapes
+PostCutPlan declares, and DECLARES the per-family counts that handler.py's
+equality assertion needs.
 
 ON TYPED PROPS AND WHAT IS ACTUALLY EXPRESSIBLE (§5). The honest constraint:
 Vertex's structured-output schema does not reliably carry discriminated unions
@@ -33,11 +62,13 @@ with everything optional, and PYTHON enforces the per-component contract:
 
     required-by-trigger  -> the fields the beat's own trigger guarantees exist
     everything else      -> optional
-    missing required     -> THE PLACEMENT IS DROPPED, never fabricated, and the
+    missing required     -> THE TREATMENT IS DROPPED, never fabricated, and the
                             drop is ledgered with its reason
 
 That is the same guarantee a discriminated union would give, enforced where it
-can actually run.
+can actually run — and it now applies to all seven treatments, not just
+placements. A treatment dropped here is dropped BY US, which is the distinction
+the component ledger exists to make.
 """
 from typing import Any, Dict, List, Optional
 
@@ -79,6 +110,18 @@ TIMING_ONLY = frozenset({"Reticle", "RecordingFrame", "SectionDivider",
                          "StepDivider", "MouseDrag", "AnnotationArrow",
                          "PillMarquee", "EchoOutro"})
 
+# ── THE TREATMENT CONTRACT ───────────────────────────────────────────────────
+# Mirrors PostCutPlan's own `required` sets, read off the live schema rather than
+# guessed, so a flattened beat plan validates against the SAME strict model arm A
+# does. cert_prompt_v2_families asserts these stay in step with PostCutPlan.
+TREATMENT_REQUIRED: Dict[str, List[str]] = {
+    "cut":      ["until_word_index", "reason"],
+    "emphasis": ["type", "intensity", "duration", "viewer_feeling", "sound"],
+    "overlay":  ["variant", "duration_seconds"],
+    "broll":    ["keyword", "until_word_index", "reason"],
+    "scene":    ["background", "subject", "motion", "until_word_index", "anchor"],
+}
+
 
 class BeatPlacement(BaseModel):
     """One component placed at one beat."""
@@ -86,6 +129,80 @@ class BeatPlacement(BaseModel):
     props: Dict[str, Any] = Field(default_factory=dict)
     # Optional, and only meaningful for spanning components.
     hold_s: Optional[float] = None
+
+
+class BeatZoom(BaseModel):
+    """The camera move on an emphasised beat. Mirrors PostCutPlan's zoom claim."""
+    arc_position: str
+    type: str
+    scale: Optional[float] = None
+    originX: Optional[float] = None
+    originY: Optional[float] = None
+    durationMs: Optional[int] = None
+
+
+class BeatCut(BaseModel):
+    """Remove from this beat's word through `until_word_index`, inclusive.
+
+    Doctrine step 3: the cut is the FIRST tool, not the last. This is the field
+    that makes that instruction answerable.
+    """
+    until_word_index: int
+    reason: str
+
+
+class BeatEmphasis(BaseModel):
+    """A stressed moment: how it lands, how it sounds, how the camera moves."""
+    type: str
+    intensity: str
+    duration: float
+    viewer_feeling: str
+    sound: str
+    until_word_index: Optional[int] = None
+    zoom: Optional[BeatZoom] = None
+
+
+class BeatOverlay(BaseModel):
+    """A text overlay starting at this beat."""
+    variant: str
+    duration_seconds: float
+    text: Optional[str] = None
+    quote: Optional[str] = None
+    attribution: Optional[str] = None
+    topText: Optional[str] = None
+    bottomText: Optional[str] = None
+    position: Optional[str] = None
+    why: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class BeatBroll(BaseModel):
+    """A cutaway covering this beat through `until_word_index`."""
+    keyword: str
+    until_word_index: int
+    reason: str
+    entry_transition: Optional[str] = None
+    exit_transition: Optional[str] = None
+
+
+class BeatScene(BaseModel):
+    """A generated scene — the component class the campaign was built around."""
+    background: str
+    subject: str
+    motion: str
+    until_word_index: int
+    anchor: str
+    scene_type: Optional[str] = None
+    stat: Optional[Dict[str, Any]] = None
+    text_layers: Optional[List[Dict[str, Any]]] = None
+    land_word_index: Optional[int] = None
+    duration_seconds: Optional[float] = None
+
+
+class BeatCaption(BaseModel):
+    """Caption treatment at this beat: emphasised words, and/or a move."""
+    keywords: List[str] = Field(default_factory=list)
+    position: Optional[str] = None
 
 
 class Beat(BaseModel):
@@ -98,6 +215,14 @@ class Beat(BaseModel):
     # §1.3 — one line of reasoning, immediately before the decision it justifies.
     read: str = Field(default="", max_length=400)
     place: List[BeatPlacement] = Field(default_factory=list)
+    # The other six treatments. All optional: most beats carry one or none, and
+    # some deliberately carry nothing — stillness is a decision too.
+    cut: Optional[BeatCut] = None
+    emphasis: Optional[BeatEmphasis] = None
+    overlay: Optional[BeatOverlay] = None
+    broll: Optional[BeatBroll] = None
+    scene: Optional[BeatScene] = None
+    caption: Optional[BeatCaption] = None
 
 
 class BeatMajorPlan(BaseModel):
@@ -107,6 +232,21 @@ class BeatMajorPlan(BaseModel):
     aspect_ratio: Optional[str] = None
     video_identity: Optional[str] = None
     notes: Optional[str] = None
+
+
+# The families a beat can emit, in flatten order. Named once so the transform,
+# the counts and the cert cannot disagree about what "all families" means.
+BEAT_FAMILIES = ("cut", "emphasis", "overlay", "broll", "scene", "caption", "place")
+# family -> the component-major array it flattens into.
+FAMILY_TARGET = {
+    "cut": "cut_refinements",
+    "emphasis": "emphasis_moments",
+    "overlay": "text_overlays",
+    "broll": "broll_clips",
+    "scene": "generated_scenes",
+    "caption": "caption_keywords",          # + caption_position_changes
+    "place": "motion_graphics",
+}
 
 
 # ── THE FLATTEN TRANSFORM ────────────────────────────────────────────────────
@@ -128,29 +268,53 @@ def _validate_props(component: str, props: Dict[str, Any]):
     return True, p, None
 
 
+def _missing(obj: Dict[str, Any], family: str):
+    """Which required fields this treatment did not supply. Never fabricates."""
+    return [k for k in TREATMENT_REQUIRED.get(family, [])
+            if obj.get(k) in (None, "", [], {})]
+
+
 def flatten_beats(plan: Dict[str, Any], *, ledger=None) -> Dict[str, Any]:
     """beats[] -> the component-major arrays the render path already consumes.
 
     Returns the SAME dict, mutated, so every downstream reader is untouched.
 
-    handler.py:28540 asserts
+    handler.py asserts
         len(motion_graphics_out) + misses == top-level + emphasis + brand
     and derives `top-level` from len(edit_plan["motion_graphics"]). Because this
     transform runs BEFORE that count is taken, the equality holds by
     construction — but the counts are ALSO declared explicitly in
     `_v2_counts` so a mismatch is diagnosable rather than merely fatal.
 
-    `ledger` is handler's _ledger_requested/_ledger_dropped pair when available:
-    a placement dropped HERE is dropped BY US, and that is exactly the
-    distinction the component ledger exists to make.
+    `ledger` is handler's (_ledger_requested, _ledger_dropped) pair when
+    available: a treatment dropped HERE is dropped BY US, and that is exactly
+    the distinction the component ledger exists to make.
     """
     beats = plan.get("beats")
     if not isinstance(beats, list):
         return plan                      # not a v2 plan — leave it alone
 
     mgs: List[Dict[str, Any]] = []
+    cuts: List[Dict[str, Any]] = []
+    emphases: List[Dict[str, Any]] = []
+    overlays: List[Dict[str, Any]] = []
+    brolls: List[Dict[str, Any]] = []
+    scenes: List[Dict[str, Any]] = []
+    cap_words: List[str] = []
+    cap_moves: List[Dict[str, Any]] = []
+
     counts: Dict[str, int] = {}
     dropped: Dict[str, int] = {}
+    per_family: Dict[str, int] = {f: 0 for f in BEAT_FAMILIES}
+
+    def _req(kind, ctype=None):
+        if ledger:
+            ledger[0](kind, ctype)
+
+    def _drop(kind, ctype, why):
+        dropped[kind] = dropped.get(kind, 0) + 1
+        if ledger:
+            ledger[1](kind, ctype, why)
 
     for b in beats:
         if not isinstance(b, dict):
@@ -159,19 +323,18 @@ def flatten_beats(plan: Dict[str, Any], *, ledger=None) -> Dict[str, Any]:
             wi = int(b.get("word_index"))
         except (TypeError, ValueError):
             continue
+
+        # ── place -> motion_graphics ────────────────────────────────────────
         for pl in (b.get("place") or []):
             if not isinstance(pl, dict):
                 continue
             comp = str(pl.get("component") or "").strip()
             if not comp:
                 continue
-            if ledger:
-                ledger[0]("motion_graphic", comp)        # requested
+            _req("motion_graphic", comp)
             ok, props, why = _validate_props(comp, pl.get("props") or {})
             if not ok:
-                dropped[comp] = dropped.get(comp, 0) + 1
-                if ledger:
-                    ledger[1]("motion_graphic", comp, why)   # dropped BY US
+                _drop("motion_graphic", comp, why)
                 continue
             entry = {
                 "type": comp,
@@ -184,62 +347,226 @@ def flatten_beats(plan: Dict[str, Any], *, ledger=None) -> Dict[str, Any]:
                 entry["duration_seconds"] = pl["hold_s"]
             mgs.append(entry)
             counts[comp] = counts.get(comp, 0) + 1
+            per_family["place"] += 1
+
+        # ── cut -> cut_refinements ──────────────────────────────────────────
+        cut = b.get("cut")
+        if isinstance(cut, dict):
+            _req("cut_refinement")
+            miss = _missing(cut, "cut")
+            if miss:
+                _drop("cut_refinement", None, f"missing_required:{','.join(miss)}")
+            else:
+                cuts.append({
+                    "start_word_index": wi,
+                    "end_word_index": int(cut["until_word_index"]),
+                    "reason": str(cut["reason"]),
+                })
+                per_family["cut"] += 1
+
+        # ── emphasis -> emphasis_moments ────────────────────────────────────
+        em = b.get("emphasis")
+        if isinstance(em, dict):
+            _req("emphasis", em.get("type"))
+            miss = _missing(em, "emphasis")
+            if miss:
+                _drop("emphasis", em.get("type"),
+                      f"missing_required:{','.join(miss)}")
+            else:
+                until = em.get("until_word_index")
+                try:
+                    end = int(until) if until is not None else wi
+                except (TypeError, ValueError):
+                    end = wi
+                entry = {
+                    "word_indices": list(range(wi, max(end, wi) + 1)),
+                    "type": str(em["type"]),
+                    "intensity": str(em["intensity"]),
+                    "duration": float(em["duration"]),
+                    "viewer_feeling": str(em["viewer_feeling"]),
+                    "sound": str(em["sound"]),
+                }
+                z = em.get("zoom")
+                if isinstance(z, dict) and z.get("arc_position") and z.get("type"):
+                    entry["zoom_effect"] = {k: v for k, v in z.items() if v is not None}
+                emphases.append(entry)
+                per_family["emphasis"] += 1
+
+        # ── overlay -> text_overlays ────────────────────────────────────────
+        ov = b.get("overlay")
+        if isinstance(ov, dict):
+            _req("text_overlay", ov.get("variant"))
+            miss = _missing(ov, "overlay")
+            if miss:
+                _drop("text_overlay", ov.get("variant"),
+                      f"missing_required:{','.join(miss)}")
+            else:
+                entry = {"variant": str(ov["variant"]),
+                         "start_word_index": wi,
+                         "duration_seconds": float(ov["duration_seconds"])}
+                for k in ("text", "quote", "attribution", "topText", "bottomText",
+                          "position", "why", "notes"):
+                    if ov.get(k) not in (None, ""):
+                        entry[k] = ov[k]
+                overlays.append(entry)
+                per_family["overlay"] += 1
+
+        # ── broll -> broll_clips ────────────────────────────────────────────
+        br = b.get("broll")
+        if isinstance(br, dict):
+            _req("broll")
+            miss = _missing(br, "broll")
+            if miss:
+                _drop("broll", None, f"missing_required:{','.join(miss)}")
+            else:
+                entry = {"keyword": str(br["keyword"]),
+                         "start_word_index": wi,
+                         "end_word_index": int(br["until_word_index"]),
+                         "reason": str(br["reason"])}
+                for k in ("entry_transition", "exit_transition"):
+                    if br.get(k) not in (None, ""):
+                        entry[k] = br[k]
+                brolls.append(entry)
+                per_family["broll"] += 1
+
+        # ── scene -> generated_scenes (THE WIN CONDITION) ───────────────────
+        sc = b.get("scene")
+        if isinstance(sc, dict):
+            _req("generated_scene", sc.get("scene_type"))
+            miss = _missing(sc, "scene")
+            if miss:
+                _drop("generated_scene", sc.get("scene_type"),
+                      f"missing_required:{','.join(miss)}")
+            else:
+                entry = {"background": str(sc["background"]),
+                         "subject": str(sc["subject"]),
+                         "motion": str(sc["motion"]),
+                         "start_word_index": wi,
+                         "end_word_index": int(sc["until_word_index"]),
+                         "anchor": str(sc["anchor"])}
+                for k in ("scene_type", "stat", "text_layers", "land_word_index",
+                          "duration_seconds"):
+                    if sc.get(k) not in (None, "", [], {}):
+                        entry[k] = sc[k]
+                scenes.append(entry)
+                per_family["scene"] += 1
+
+        # ── caption -> caption_keywords + caption_position_changes ──────────
+        cap = b.get("caption")
+        if isinstance(cap, dict):
+            kws = [str(k) for k in (cap.get("keywords") or []) if str(k).strip()]
+            if kws:
+                _req("caption_keyword")
+                cap_words.extend(kws)
+                per_family["caption"] += len(kws)
+            if cap.get("position"):
+                _req("caption_position")
+                cap_moves.append({"word_index": wi, "position": str(cap["position"])})
+                per_family["caption"] += 1
 
     plan["motion_graphics"] = mgs
-    # DECLARED, not inferred. The assertion at handler.py:28540 is an equality;
-    # when it trips, this is the record of what the transform believed it built.
+    plan["cut_refinements"] = cuts
+    plan["emphasis_moments"] = emphases
+    plan["text_overlays"] = overlays
+    plan["broll_clips"] = brolls
+    plan["generated_scenes"] = scenes
+    # De-duplicated, order preserved: the same word emphasised at two beats is
+    # one caption keyword, and a duplicate would double-count the density read.
+    plan["caption_keywords"] = list(dict.fromkeys(cap_words))
+    plan["caption_position_changes"] = cap_moves
+
+    # DECLARED, not inferred. The equality assertion at the render seam is an
+    # equality; when it trips, this is the record of what the transform believed
+    # it built — now for every family, not just the graphics.
     plan["_v2_counts"] = {
         "beats": len(beats),
         "placements_requested": sum(counts.values()) + sum(dropped.values()),
         "placements_emitted": sum(counts.values()),
         "dropped_by_us": dropped,
         "by_component": counts,
+        "by_family": dict(per_family),
+        "emitted_by_family": {
+            "cut_refinements": len(cuts),
+            "emphasis_moments": len(emphases),
+            "text_overlays": len(overlays),
+            "broll_clips": len(brolls),
+            "generated_scenes": len(scenes),
+            "caption_keywords": len(plan["caption_keywords"]),
+            "caption_position_changes": len(cap_moves),
+            "motion_graphics": len(mgs),
+        },
         # The equality's own left-hand side, stated where a human can read it.
         "motion_graphics_len": len(mgs),
     }
     return plan
 
 
+def _beat_moves(b: Dict[str, Any]) -> int:
+    """How many MOVING SAMPLES this beat contributes (§4's unit)."""
+    if not isinstance(b, dict):
+        return 0
+    n = len(b.get("place") or [])
+    for f in ("cut", "emphasis", "overlay", "broll", "scene"):
+        if isinstance(b.get(f), dict):
+            n += 1
+    cap = b.get("caption")
+    if isinstance(cap, dict):
+        n += len([k for k in (cap.get("keywords") or []) if str(k).strip()])
+        if cap.get("position"):
+            n += 1
+    return n
+
+
 def density_of(plan: Dict[str, Any], duration_s: float) -> Dict[str, Any]:
-    """PLACEMENT density — and it is NOT the §4 3.5/sec figure.
+    """Motion density — and now it IS comparable to §4's 3.5/sec.
 
     THE UNIT ERROR THIS AVOIDS, caught on the exemplars before the A/B ran: §4's
     ~3.5 moving samples/sec counts EVERY motion kind together — cuts, caption
-    beats, graphics, camera moves. Component placements are one of those four.
-    REF-2 carries 6 placements in 43s = 0.14/sec, and reporting that against a
-    3.5 target reads as a catastrophic miss when the two numbers measure
-    different things.
+    beats, graphics, camera moves. While the schema could only express component
+    placements, those were ONE of those four, and reporting REF-2's 6 placements
+    in 43s (0.14/sec) against a 3.5 target read as a catastrophic miss when the
+    two numbers measured different things.
 
-    So this returns placement density ONLY, with the comparable reference
-    measured off the same exemplars, and deliberately does not carry the §4
-    figure into the same table. Motion density needs cuts and caption pages,
-    which live on the flattened plan, not here.
+    Now that a beat carries all seven treatments, the same plan yields BOTH
+    numbers honestly: `placements_per_s` for the like-for-like exemplar
+    comparison, and `moves_per_s` — every motion kind — which is the number §4's
+    3.5 target is actually about. They are reported separately and labelled,
+    because collapsing them is the error this docstring exists to prevent.
     """
     beats = [b for b in (plan.get("beats") or []) if isinstance(b, dict)]
     placed = sum(len(b.get("place") or []) for b in beats)
+    moves = sum(_beat_moves(b) for b in beats)
     d = max(float(duration_s or 0.0), 0.001)
     return {
         "placements": placed,
         "placements_per_s": round(placed / d, 3),
         # measured off the exemplars: REF-1 6/40s, REF-2 6/43s
         "reference_placements_per_s": 0.14,
+        "moves": moves,
+        "moves_per_s": round(moves / d, 3),
+        "reference_moves_per_s": 3.5,     # §4, all motion kinds together
         "beats_total": len(beats),
-        "beats_empty": sum(1 for b in beats if not (b.get("place") or [])),
-        "note": "placement density only; §4's 3.5/sec counts all motion kinds "
-                "(cuts + captions + graphics + camera) and is NOT this number",
+        "beats_empty": sum(1 for b in beats if _beat_moves(b) == 0),
+        "note": "placements_per_s is components only; moves_per_s counts every "
+                "motion kind and is the one comparable to §4's 3.5/sec",
     }
 
 
 def stillness_violations(plan: Dict[str, Any], word_times: Dict[int, float],
                          ceiling_s: float = 3.5) -> List[Dict[str, Any]]:
-    """§4: no still stretch longer than 3.5s, measured between PLACED beats.
+    """§4: no still stretch longer than 3.5s, measured between MOVING beats.
 
     Needs the word-index -> seconds map, because beats are word-anchored (there
     is one clock in this pipeline and it is the word list). Returns the gaps
     that exceed the ceiling, so a violation names its own window.
+
+    A beat counts as moving if it carries ANY treatment — a cut or a caption beat
+    breaks stillness exactly as a graphic does. Counting only placements
+    (as this did while placements were all that existed) reports stillness that
+    the finished video does not have.
     """
     placed = sorted(int(b["word_index"]) for b in (plan.get("beats") or [])
-                    if isinstance(b, dict) and (b.get("place") or [])
+                    if isinstance(b, dict) and _beat_moves(b) > 0
                     and b.get("word_index") is not None)
     out = []
     for i in range(len(placed) - 1):

@@ -117,37 +117,36 @@ def main():
                if isinstance(n, ast.FunctionDef) and n.name == "_v2_response_schema"), None)
     check("_v2_response_schema exists", fn is not None, "not defined")
     if fn is not None:
-        schema_src = ast.get_source_segment(src, fn) or ""
         ns = {}
         exec(compile(ast.Module(body=[fn], type_ignores=[]), "<cert>", "exec"), ns)
         schema = ns["_v2_response_schema"]()
+        # THE WIRE SCHEMA IS THE MODEL'S OWN — there is nothing to keep in step.
+        # It was briefly hand-inlined on the belief that this surface could not
+        # take $defs/$ref. Arm A disproves that in one line: its schema IS
+        # PostCutPlan.model_json_schema(), refs and all, in production for
+        # months. A copy of a shape that already has a declaration can only
+        # drift, so the copy is gone and this asserts it stays gone.
+        check("the wire schema IS BeatMajorPlan's own, not a copy",
+              schema == pv2s.BeatMajorPlan.model_json_schema(),
+              "a hand-maintained duplicate drifts; ask the model for its schema")
         schema_fields = set(schema.get("properties", {}).keys())
-        check("every BeatMajorPlan field is in the wire schema",
+        check("every BeatMajorPlan field reaches the wire",
               model_fields <= schema_fields,
               f"missing from the schema: {sorted(model_fields - schema_fields)}")
-        check("the wire schema invents no field the model lacks",
-              schema_fields <= model_fields,
-              f"not on BeatMajorPlan: {sorted(schema_fields - model_fields)}")
-        beat = (schema["properties"]["beats"]["items"]["properties"])
-        check("beats are anchored on word_index, never a float second",
-              beat.get("word_index", {}).get("type") == "integer"
-              and not any(k in beat for k in ("start_s", "time_s", "at_s")),
-              f"beat keys: {sorted(beat)} — a float clock here is a SECOND clock")
-        # PROPERTY, NOT LOCATION. The first version of this grepped the
-        # function's SOURCE — which failed on its own docstring, because the
-        # docstring explains what $defs and $ref are. Ask the built object.
-        import json as _json
-        _wire = _json.dumps(schema)
-        check("the schema carries no $ref/$defs this surface may reject",
-              '"$ref"' not in _wire and '"$defs"' not in _wire,
-              f"references must be inlined; found in the emitted schema: {_wire[:160]}")
-        # And prove the pydantic route WOULD have tripped it, so the check is
-        # not vacuous — this is the exact reason the schema is written by hand.
-        _pyd = _json.dumps(pv2s.BeatMajorPlan.model_json_schema())
-        check("the negative control holds: model_json_schema DOES emit $defs",
-              '"$defs"' in _pyd or '"$ref"' in _pyd,
-              "pydantic no longer emits references — the hand-written schema may "
-              "no longer be necessary; re-check before keeping the duplication")
+
+    # ── 3b. ALL SEVEN TREATMENTS ARE EXPRESSIBLE ────────────────────────────
+    # The live-path refusal below used to rest on this being FALSE. It is now
+    # true, and the refusal rests on the doctrine being unmeasured instead — so
+    # this asserts the capability the A/B depends on, and the refusal check
+    # asserts the reason given for holding it is the CURRENT one.
+    _beat_fields = set(pv2s.Beat.model_fields.keys())
+    for _fam in ("cut", "emphasis", "overlay", "broll", "scene", "caption", "place"):
+        check(f"a beat can carry {_fam!r}", _fam in _beat_fields,
+              f"Beat fields: {sorted(_beat_fields)} — a doctrine that asks for "
+              f"this and a schema that cannot receive it is the MG-only defect")
+    check("word_index is an integer word anchor, never a float second",
+          pv2s.Beat.model_fields["word_index"].annotation is int,
+          "a float here is a SECOND CLOCK; this repo has paid for two")
 
     # ── 4. the flatten runs BEFORE the downstream guards ────────────────────
     call_fn = src[src.find("def _call_gemini_post_cuts"):]
@@ -186,19 +185,18 @@ def main():
               f'"{mod}.py"' in ma,
               "a deferred import of an unmounted module dies inside its fail-safe")
 
-    # ── 6. THE HONEST SCOPE. Named here so it cannot be forgotten. ──────────
-    # If someone extends BeatMajorPlan to carry the other families, this check
-    # is what tells them the refusal above can be revisited.
-    expressible = set(pv2s.BeatMajorPlan.model_fields.keys())
-    for family in ("cut_refinements", "emphasis_moments", "text_overlays",
-                   "broll_clips", "caption_keywords"):
-        if family in expressible:
-            FAILS.append(
-                f"{family} is now expressible in BeatMajorPlan — the live-path "
-                f"refusal in handler was written because it was NOT. Re-read it.")
-    print("  [NOTE] BeatMajorPlan expresses component placements + "
-          f"{sorted(expressible - {'beats'})} and nothing else; the live-path "
-          f"refusal stands until that changes.")
+    # ── 6. THE REFUSAL MUST GIVE ITS CURRENT REASON ────────────────────────
+    # A guard whose stated reason has been overtaken by events is worse than no
+    # comment: the next reader fixes the named cause, finds the guard still
+    # there, and assumes it is stale. The MG-only reason is fixed; the reason
+    # that remains is that this doctrine has never been measured.
+    check("the refusal cites the reason that is still true",
+          "never been measured" in v2_block,
+          "the live-path refusal still cites the MG-only limitation, which the "
+          "beat vocabulary has fixed — restate it or lift it")
+    check("the refusal does NOT cite the fixed limitation as current",
+          "cannot express cuts/emphasis" not in v2_block,
+          "a stale reason reads as a guard nobody understands")
 
     print(f"\nCERT PROMPT-V2 WIRING: {'FAIL' if FAILS else 'PASS'}")
     for f in FAILS:
