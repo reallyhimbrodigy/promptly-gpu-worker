@@ -78,7 +78,11 @@ MODELS = ["gemini-3.1-pro-preview", "gemini-3.7-flash"]
 # both 60000 cells fell to recipe_transport:ClientError -> safe-edit fallback at
 # ~18-20s. Read as a latency win by anyone not printing the notes. It was the cap
 # for an earlier model generation.
-THINKING = [24576]        # production default; the only budget both models accept
+# CORRECTED 2026-08-17: 24576 is NOT production's default. The canonical live
+# value is PROMPTLY_POST_THINKING_BUDGET=2048 (owner GO 2026-08-02, measured
+# -29.5s wall). Every earlier run in this harness forced 24576 and therefore
+# described a configuration production does not run. Overridable per-run now.
+THINKING = [2048]         # production's CANONICAL budget (validate_deploy CANON)
 
 # RAW TALKING-HEAD SOURCES FROM THE FROZEN CORPUS, not the references.
 #
@@ -198,7 +202,8 @@ def cell(spec: dict) -> dict:
 
 @app.local_entrypoint()
 def main(source_path: str = "", manifest: str = "fps_ab_corpus_manifest.json",
-         ids: str = "", models: str = "", serial: bool = False):
+         ids: str = "", models: str = "", serial: bool = False,
+         thinking: str = ""):
     """`manifest`/`ids` let STEP A run against the FROZEN GOLDENS without
     forking this harness. golden/manifest.json carries the same s3_key +
     sha256 + duration_s fields, so the per-cell byte verification is unchanged
@@ -208,18 +213,19 @@ def main(source_path: str = "", manifest: str = "fps_ab_corpus_manifest.json",
     by_id = {x["id"]: x for x in man["sources"]}
     specs = []
     _models = [x.strip() for x in models.split(',') if x.strip()] or MODELS
+    _think = [int(x) for x in thinking.split(',') if x.strip()] or THINKING
     if source_path:
         with open(source_path, "rb") as f:
             b = f.read()
         for m in _models:
-            for t in THINKING:
+            for t in _think:
                 specs.append({"model": m, "thinking": t, "source_bytes": b,
                               "src_id": os.path.basename(source_path)})
     else:
         for cid in ([s.strip() for s in ids.split(",") if s.strip()] or CORPUS_IDS):
             e = by_id[cid]
             for m in _models:
-                for t in THINKING:
+                for t in _think:
                     specs.append({"model": m, "thinking": t, "source_bytes": b"",
                                   "s3_key": e["s3_key"], "src_id": cid,
                                   "src_dur": e["duration_s"], "sha256": e.get("sha256")})
