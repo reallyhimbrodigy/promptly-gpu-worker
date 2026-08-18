@@ -70,7 +70,7 @@ can actually run — and it now applies to all seven treatments, not just
 placements. A treatment dropped here is dropped BY US, which is the distinction
 the component ledger exists to make.
 """
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -125,7 +125,7 @@ TREATMENT_REQUIRED: Dict[str, List[str]] = {
 
 class BeatPlacement(BaseModel):
     """One component placed at one beat."""
-    component: str
+    component: str = Field(max_length=60)
     props: Dict[str, Any] = Field(default_factory=dict)
     # Optional, and only meaningful for spanning components.
     hold_s: Optional[float] = None
@@ -133,8 +133,8 @@ class BeatPlacement(BaseModel):
 
 class BeatZoom(BaseModel):
     """The camera move on an emphasised beat. Mirrors PostCutPlan's zoom claim."""
-    arc_position: str
-    type: str
+    arc_position: str = Field(max_length=40)
+    type: str = Field(max_length=40)
     scale: Optional[float] = None
     originX: Optional[float] = None
     originY: Optional[float] = None
@@ -148,51 +148,51 @@ class BeatCut(BaseModel):
     that makes that instruction answerable.
     """
     until_word_index: int
-    reason: str
+    reason: str = Field(max_length=200)
 
 
 class BeatEmphasis(BaseModel):
     """A stressed moment: how it lands, how it sounds, how the camera moves."""
-    type: str
-    intensity: str
+    type: str = Field(max_length=40)
+    intensity: str = Field(max_length=24)
     duration: float
-    viewer_feeling: str
-    sound: str
+    viewer_feeling: str = Field(max_length=200)
+    sound: str = Field(max_length=60)
     until_word_index: Optional[int] = None
     zoom: Optional[BeatZoom] = None
 
 
 class BeatOverlay(BaseModel):
     """A text overlay starting at this beat."""
-    variant: str
+    variant: str = Field(max_length=40)
     duration_seconds: float
-    text: Optional[str] = None
-    quote: Optional[str] = None
-    attribution: Optional[str] = None
-    topText: Optional[str] = None
-    bottomText: Optional[str] = None
-    position: Optional[str] = None
-    why: Optional[str] = None
-    notes: Optional[str] = None
+    text: Optional[str] = Field(default=None, max_length=200)
+    quote: Optional[str] = Field(default=None, max_length=300)
+    attribution: Optional[str] = Field(default=None, max_length=80)
+    topText: Optional[str] = Field(default=None, max_length=120)
+    bottomText: Optional[str] = Field(default=None, max_length=120)
+    position: Optional[str] = Field(default=None, max_length=40)
+    why: Optional[str] = Field(default=None, max_length=200)
+    notes: Optional[str] = Field(default=None, max_length=200)
 
 
 class BeatBroll(BaseModel):
     """A cutaway covering this beat through `until_word_index`."""
-    keyword: str
+    keyword: str = Field(max_length=80)
     until_word_index: int
-    reason: str
-    entry_transition: Optional[str] = None
-    exit_transition: Optional[str] = None
+    reason: str = Field(max_length=200)
+    entry_transition: Optional[str] = Field(default=None, max_length=40)
+    exit_transition: Optional[str] = Field(default=None, max_length=40)
 
 
 class BeatScene(BaseModel):
     """A generated scene — the component class the campaign was built around."""
-    background: str
-    subject: str
-    motion: str
+    background: str = Field(max_length=300)
+    subject: str = Field(max_length=300)
+    motion: str = Field(max_length=200)
     until_word_index: int
-    anchor: str
-    scene_type: Optional[str] = None
+    anchor: str = Field(max_length=40)
+    scene_type: Optional[str] = Field(default=None, max_length=40)
     stat: Optional[Dict[str, Any]] = None
     text_layers: Optional[List[Dict[str, Any]]] = None
     land_word_index: Optional[int] = None
@@ -201,8 +201,11 @@ class BeatScene(BaseModel):
 
 class BeatCaption(BaseModel):
     """Caption treatment at this beat: emphasised words, and/or a move."""
-    keywords: List[str] = Field(default_factory=list)
-    position: Optional[str] = None
+    # Each keyword is ONE spoken word. The per-ITEM cap is the load-bearing
+    # one: a list cap bounds how many, only an item cap bounds how long, and an
+    # unbounded string is what the runaway detector kills the call over.
+    keywords: List[Annotated[str, Field(max_length=60)]] = Field(default_factory=list)
+    position: Optional[str] = Field(default=None, max_length=40)
 
 
 class Beat(BaseModel):
@@ -211,9 +214,16 @@ class Beat(BaseModel):
     # this pipeline is word-anchored and Python derives seconds. A float here
     # would be a second clock, and this repo has already paid for two.
     word_index: int
-    says: str = Field(default="", max_length=300)
-    # §1.3 — one line of reasoning, immediately before the decision it justifies.
-    read: str = Field(default="", max_length=400)
+    # REQUIRED, both of them, and this is load-bearing. With defaults, the ONLY
+    # required field on a beat was word_index — and a measured cell returned 14
+    # beats carrying a word index each, no `says`, no `read`, no treatment, in
+    # 1,688 output tokens. That is a schema-minimal response: the model answered
+    # exactly what it was obliged to answer. The doctrine says `read` sits on
+    # EVERY beat, before the decision it justifies; the schema now says the same
+    # thing, so an empty beat costs a sentence explaining why it is empty rather
+    # than being the cheapest legal answer.
+    says: str = Field(max_length=300)
+    read: str = Field(max_length=400)
     place: List[BeatPlacement] = Field(default_factory=list)
     # The other six treatments. All optional: most beats carry one or none, and
     # some deliberately carry nothing — stillness is a decision too.
@@ -225,13 +235,76 @@ class Beat(BaseModel):
     caption: Optional[BeatCaption] = None
 
 
+# NO LIST-LENGTH CAPS ANYWHERE BELOW. pydantic renders `max_length` on a List as
+# `maxItems`, which is the ONE json-schema keyword this schema used that arm A's
+# does not — and adding it made Vertex reject the whole request with
+# `400 INVALID_ARGUMENT`, measured. Per-ITEM caps (maxLength on the string) are
+# kept: those are what bound a runaway, and arm A uses them too.
+
+
+class ArcSegment(BaseModel):
+    start_word_index: int
+    end_word_index: int
+    position: str = Field(max_length=40)
+    intensity: str = Field(max_length=24)
+
+
+class KeyMoment(BaseModel):
+    word_index: int
+    what_lands: str = Field(max_length=200)
+    why_emphasis: str = Field(max_length=200)
+    what_i_saw: str = Field(max_length=200)
+    viewer_feeling: str = Field(max_length=200)
+
+
+class Movement(BaseModel):
+    start_word_index: int
+    end_word_index: int
+    job: str = Field(max_length=120)
+    energy: str = Field(max_length=40)
+    lead_instrument: str = Field(max_length=40)
+    captions: str = Field(max_length=60)
+
+
+class VideoPlan(BaseModel):
+    """The narrative arc. NOT derivable from the beats — it is a separate read.
+
+    Deriving this (hook = first beat, payoff = loudest emphasis, arc from spans)
+    would be INVENTING structure the model never declared, which is the one thing
+    this schema refuses to do anywhere else. So arm B asks for it, exactly as arm
+    A does, and the A/B stays a test of the doctrine rather than of how cleverly
+    the transform can guess an arc.
+    """
+    what_happens: str = Field(max_length=600)
+    hook_word_index: int
+    payoff_word_index: int
+    close_word_index: int
+    story_shape: str = Field(max_length=200)
+    editorial_vision: str = Field(max_length=600)
+    key_moments: List[KeyMoment] = Field(default_factory=list)
+    arc_segments: List[ArcSegment] = Field(default_factory=list)
+    movements: List[Movement] = Field(default_factory=list)
+
+
 class BeatMajorPlan(BaseModel):
-    """The v2 response shape. Globals stay global; everything timed is a beat."""
+    """The v2 response shape. Globals stay global; everything timed is a beat.
+
+    THE GLOBALS ARE NOT OPTIONAL, and finding that out cost four paid cells: the
+    pipeline REQUIRES audio_denoise, outro, thumbnail_word_index and video_plan
+    on every plan, and a beat list without them is rejected as RECIPE_INVALID
+    after the model has already done all the work. "Everything timed is a beat"
+    was never a licence to drop the untimed contract.
+    """
     beats: List[Beat] = Field(default_factory=list)
-    caption_style: Optional[str] = None
-    aspect_ratio: Optional[str] = None
-    video_identity: Optional[str] = None
-    notes: Optional[str] = None
+    caption_style: Optional[str] = Field(default=None, max_length=60)
+    aspect_ratio: Optional[str] = Field(default=None, max_length=16)
+    video_identity: Optional[str] = Field(default=None, max_length=300)
+    notes: Optional[str] = Field(default=None, max_length=600)
+    # Required by the plan contract — see the docstring above.
+    audio_denoise: bool = False
+    outro: Literal["none", "fade_black", "fade_white"] = "none"
+    thumbnail_word_index: int = 0
+    video_plan: Optional[VideoPlan] = None
 
 
 # The families a beat can emit, in flatten order. Named once so the transform,
@@ -274,7 +347,26 @@ def _missing(obj: Dict[str, Any], family: str):
             if obj.get(k) in (None, "", [], {})]
 
 
-def flatten_beats(plan: Dict[str, Any], *, ledger=None) -> Dict[str, Any]:
+def _empty_contract(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Every array and global the plan contract requires, at their empty value.
+
+    A beat plan that emitted nothing still owes the pipeline a COMPLETE object:
+    the validator rejects a missing key, not just a wrong one, and it does so
+    after the model has already done all the work.
+    """
+    for _k in ("motion_graphics", "cut_refinements", "emphasis_moments",
+               "text_overlays", "broll_clips", "generated_scenes",
+               "caption_keywords", "caption_position_changes", "sound_effects"):
+        if not isinstance(plan.get(_k), list):
+            plan[_k] = []
+    plan.setdefault("audio_denoise", False)
+    plan.setdefault("outro", "none")
+    plan.setdefault("thumbnail_word_index", 0)
+    return plan
+
+
+def flatten_beats(plan: Dict[str, Any], *, ledger=None,
+                  ensure_contract: bool = False) -> Dict[str, Any]:
     """beats[] -> the component-major arrays the render path already consumes.
 
     Returns the SAME dict, mutated, so every downstream reader is untouched.
@@ -292,7 +384,18 @@ def flatten_beats(plan: Dict[str, Any], *, ledger=None) -> Dict[str, Any]:
     """
     beats = plan.get("beats")
     if not isinstance(beats, list):
-        return plan                      # not a v2 plan — leave it alone
+        # NOT A BEAT PLAN. Two very different situations, and conflating them
+        # cost a paid cell: outside arm B this is simply someone else's plan and
+        # must be left untouched; INSIDE arm B it means the model returned an
+        # object with no beats — which is exactly what the repair re-ask
+        # produces, because it is told to "fix caption_keywords" and re-emits a
+        # corrected object rather than a whole beat list. Early-returning there
+        # left every required array ABSENT, and the plan died on
+        # `caption_keywords must be an array, got NoneType` AFTER a full
+        # generation. In arm B the contract is guaranteed either way.
+        if ensure_contract:
+            _empty_contract(plan)
+        return plan
 
     mgs: List[Dict[str, Any]] = []
     cuts: List[Dict[str, Any]] = []
@@ -465,6 +568,17 @@ def flatten_beats(plan: Dict[str, Any], *, ledger=None) -> Dict[str, Any]:
                 per_family["caption"] += 1
 
     plan["motion_graphics"] = mgs
+    # THE UNTIMED CONTRACT. These are not derived from beats and must survive
+    # the flatten: the pipeline rejects a plan without them (RECIPE_INVALID),
+    # and it does so AFTER the model has done all the work.
+    plan.setdefault("audio_denoise", False)
+    plan.setdefault("outro", "none")
+    plan.setdefault("thumbnail_word_index", 0)
+    # sound_effects: arm A does not declare it either — the validator only
+    # requires the KEY to be an array. An empty list is the honest value; the
+    # sound intent itself rides emphasis_moments[].sound, exactly as in arm A.
+    if not isinstance(plan.get("sound_effects"), list):
+        plan["sound_effects"] = []
     plan["cut_refinements"] = cuts
     plan["emphasis_moments"] = emphases
     plan["text_overlays"] = overlays

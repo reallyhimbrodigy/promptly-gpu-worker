@@ -108,12 +108,42 @@ def run(n_sources: int) -> dict:
         except Exception:
             pass
         t0 = time.time()
+        # TEE, don't redirect: a failed cell must carry the TEXT it failed on.
+        # Three arm-B cells died with `string-runaway` and the harness recorded
+        # only the class name, so each diagnosis cost another paid run. The tail
+        # of the model's own output is the evidence; keep it on the cell.
+        import io as _io
+
+        class _Tee:
+            def __init__(self, real):
+                self.real, self.buf = real, _io.StringIO()
+
+            def write(self, s):
+                self.real.write(s)
+                try:
+                    self.buf.write(s)
+                except Exception:
+                    pass
+                return len(s)
+
+            def flush(self):
+                self.real.flush()
+
+        _tee = _Tee(sys.stdout)
+        _orig = sys.stdout
+        sys.stdout = _tee
         try:
-            res = H.handler(body) or {}
+            # handler takes the RunPod envelope, not the body — job["input"].
+            res = H.handler({"input": body}) or {}
         except Exception as e:
             return {"source": src["id"], "arm": arm, "error": f"{type(e).__name__}: {e}",
-                    "traceback": traceback.format_exc()[-900:], "wall_s": round(time.time() - t0, 1)}
+                    "traceback": traceback.format_exc()[-900:],
+                    "stdout_tail": _tee.buf.getvalue()[-2500:],
+                    "wall_s": round(time.time() - t0, 1)}
+        finally:
+            sys.stdout = _orig
         plan = res.get("edit_plan") if isinstance(res, dict) else None
+        _no_plan = not isinstance(plan, dict)
         beats = (plan or {}).get("beats") if isinstance(plan, dict) else None
         cell = {
             "source": src["id"],
@@ -133,6 +163,16 @@ def run(n_sources: int) -> dict:
             "ledger": H._component_ledger_snapshot(),
             "safe_edit": bool((plan or {}).get("_safe_edit")) if isinstance(plan, dict) else None,
         }
+        if _no_plan:
+            # A CELL THAT PRODUCED NO PLAN IS A FAILED CELL, even when handler
+            # returned an envelope instead of raising — three arm-B cells read
+            # `err=False, counts={}` and the harness kept no evidence, so each
+            # diagnosis cost another paid run. Keep the model's own tail.
+            cell["no_plan"] = True
+            cell["result_error"] = {k: res.get(k) for k in
+                                    ("status", "error", "error_code", "error_class",
+                                     "user_message", "reason") if isinstance(res, dict)}
+            cell["stdout_tail"] = _tee.buf.getvalue()[-2500:]
         if isinstance(beats, list):
             cell["n_beats"] = len(beats)
             # `beats[].read` verbatim — the first look at what the model saw.
@@ -153,7 +193,8 @@ def run(n_sources: int) -> dict:
                 OUT["errors"].append({"source": cell["source"], "arm": arm,
                                       "error": cell["error"]})
             print(f"[cell] {src['id'][:28]:30} arm={arm} wall={cell.get('wall_s')}s "
-                  f"counts={cell.get('counts')} err={bool(cell.get('error'))}", flush=True)
+                  f"counts={cell.get('counts')} err={bool(cell.get('error'))} "
+                  f"no_plan={bool(cell.get('no_plan'))}", flush=True)
     return OUT
 
 
@@ -166,8 +207,8 @@ def main():
     with open(path, "w") as fh:
         json.dump(out, fh, indent=1)
     cells = out.get("cells") or []
-    A = [c for c in cells if c["arm"] == "A" and not c.get("error")]
-    B = [c for c in cells if c["arm"] == "B" and not c.get("error")]
+    A = [c for c in cells if c["arm"] == "A" and not c.get("error") and not c.get("no_plan")]
+    B = [c for c in cells if c["arm"] == "B" and not c.get("error") and not c.get("no_plan")]
     print(f"\n  cells: {len(cells)}  usable A={len(A)} B={len(B)}  errors={len(out.get('errors') or [])}")
 
     def _req(cells_):

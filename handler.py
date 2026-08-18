@@ -13734,6 +13734,54 @@ class EditorialSuppressed(RuntimeError):
     end in a safe edit but mean something completely different."""
 
 
+_V2_CATALOG_MARK = "=== CAPTIONS ==="
+_V2_SHAPE_MARK = "=== RESPONSE FORMAT ==="
+
+
+def _v2_catalog_slice(system_instruction):
+    """The half of the post-cuts prompt ARM B REUSES, with arm A's SHAPE removed.
+
+    MEASURED, on the first validation pair: arm B degenerated into a
+    repetition loop — `shape-abort vocab-collapse, run=2048ch`, spiralling on
+    "...as Promptly effortlessly correctly right away here today in full..." —
+    while arm A on the same source completed normally in 105s.
+
+    THE CAUSE WAS THIS SLICE. Taking everything from the first component section
+    to the END also took `=== RESPONSE FORMAT ===`, which describes arm A's
+    component-major arrays. Arm B was therefore told IN PROSE to emit
+    motion_graphics[] / text_overlays[] while its enforced response schema
+    demanded beats[]. A prompt at war with its own schema is not a doctrine
+    test; it is a contradiction, and the model came apart on it.
+
+    So the catalog — what components exist, when each fits and fights, the
+    global fields — is kept verbatim, and ONLY the response-shape section is
+    excised. Everything appended AFTER it (the editor's constraints, the
+    terse-rationale rule, the author-in-source-language rule, the burned-in-text
+    check) is preserved: those are constraints, not shape, and both arms need
+    them.
+
+    Raises rather than degrading: if either heading moves, a silent slice would
+    send a catalog-less or shape-contradicted prompt and the A/B would read the
+    wreckage as the doctrine failing.
+    """
+    cut = system_instruction.find(_V2_CATALOG_MARK)
+    if cut < 0:
+        raise RuntimeError(
+            f"prompt_v2: catalog marker {_V2_CATALOG_MARK!r} not found in the "
+            f"post-cuts system instruction ({len(system_instruction)} chars) — "
+            f"the section headings moved and the v2 slice would send a "
+            f"catalog-less prompt")
+    catalog = system_instruction[cut:]
+    shape = catalog.find(_V2_SHAPE_MARK)
+    if shape < 0:
+        raise RuntimeError(
+            f"prompt_v2: shape marker {_V2_SHAPE_MARK!r} not found — arm B would "
+            f"carry arm A's response format and contradict its own schema, which "
+            f"is what collapsed the first validation run")
+    tail = catalog.find("\n\n=== ", shape + len(_V2_SHAPE_MARK))
+    return catalog[:shape] + ("" if tail < 0 else catalog[tail:])
+
+
 def _v2_response_schema():
     """ARM B's beat-major response schema — the MODEL'S OWN, not a copy.
 
@@ -13957,7 +14005,11 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             if v2:
                 import prompt_v2_schema as _pv2s
                 _parsed = _pv2s.flatten_beats(
-                    _parsed, ledger=(_ledger_requested, _ledger_dropped))
+                    _parsed, ledger=(_ledger_requested, _ledger_dropped),
+                    # In arm B a plan with no beats is not "someone else's
+                    # plan", it is the repair re-ask returning a corrected
+                    # object — and it still owes the full contract.
+                    ensure_contract=True)
                 print(f"[prompt-v2] flattened: {_parsed.get('_v2_counts')}", flush=True)
             # L1+L2: declared caps + repetition signatures enforced at THE
             # parse edge — every downstream consumer reads capped strings.
@@ -14964,24 +15016,15 @@ def generate_edit_gemini(
         import prompt_v2_editor as _pv2
         import prompt_v2_exemplars as _pv2x
         # The catalog begins at the first component section. Everything above it
-        # is the doctrine v2 replaces; everything from here down is the shared
-        # half both arms send, sliced rather than rewritten so arm A stays
-        # BYTE-IDENTICAL to production.
-        _CATALOG_MARK = "=== CAPTIONS ==="
-        _cut = post_sys.find(_CATALOG_MARK)
-        if _cut < 0:
-            # LOUD, never silent: a v2 prompt with no catalog would ask for
-            # components it never named and read as a doctrine failure.
-            raise RuntimeError(
-                f"prompt_v2: catalog marker {_CATALOG_MARK!r} not found in the "
-                f"post-cuts system instruction ({len(post_sys)} chars) — the "
-                f"section headings moved and the v2 slice would send a "
-                f"catalog-less prompt")
+        # is the doctrine v2 replaces; the catalog below it is the shared half
+        # both arms send, sliced rather than rewritten so arm A stays
+        # BYTE-IDENTICAL to production — MINUS arm A's response-shape section,
+        # which would contradict arm B's own schema (see _v2_catalog_slice).
         _mode = os.environ.get("PROMPTLY_PROMPT_V2_EXEMPLARS", "").strip() or "PLAN_ONLY"
         post_sys = _pv2.build_v2_system_instruction(
-            post_sys[_cut:], _pv2x.exemplar_block(_mode))
-        print(f"[prompt-v2] ARM B — doctrine swapped, catalog reused from "
-              f"{_CATALOG_MARK!r} ({len(post_sys)} chars, exemplars={_mode})",
+            _v2_catalog_slice(post_sys), _pv2x.exemplar_block(_mode))
+        print(f"[prompt-v2] ARM B — doctrine swapped, catalog reused without "
+              f"arm A's response format ({len(post_sys)} chars, exemplars={_mode})",
               flush=True)
 
     # ── UNIFIED CORE (LANE-SEAM Step 2, DARK): additive guidance profiles.

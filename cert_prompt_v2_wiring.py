@@ -57,13 +57,16 @@ def main():
     v2_block = v2_block[:v2_block.find("# ── UNIFIED CORE")]
     check("the v2 block exists in generate_edit_gemini", bool(v2_block.strip()),
           "no PROMPT V2 block found")
-    mark = re.search(r'_CATALOG_MARK\s*=\s*"([^"]+)"', v2_block)
-    check("the catalog marker is declared", bool(mark), "no _CATALOG_MARK")
-    if mark:
-        check("the marker actually occurs in the built prompt",
-              f'{mark.group(1)}' in src,
-              f"{mark.group(1)!r} is not present in handler.py at all — the slice "
-              f"would return -1 on every job")
+    for _name in ("_V2_CATALOG_MARK", "_V2_SHAPE_MARK"):
+        _m = re.search(rf'^{_name}\s*=\s*"([^"]+)"', src, re.M)
+        check(f"{_name} is declared at module level", bool(_m), f"no {_name}")
+        if _m:
+            # The heading must actually EXIST in the prompt this slices, or the
+            # slice raises on every job — loudly, but on every job.
+            check(f"{_m.group(1)!r} occurs in the built prompt",
+                  src.count(_m.group(1)) >= 2,
+                  f"{_m.group(1)!r} appears {src.count(_m.group(1))}x — it must be "
+                  f"in the prompt text as well as in the constant")
     # ── PARSED, NOT GREPPED ──────────────────────────────────────────────────
     # The first version of these three was substring-based and every one of them
     # was VACUOUS: a mutation that APPENDS to a line still contains the original
@@ -91,14 +94,53 @@ def main():
               f"(an `or v2_enabled()`) ships MG-only plans to users. Got: "
               f"{ast.dump(_rhs)[:140]}")
 
-    _guards = [n for n in ast.walk(_gen) if isinstance(n, ast.If)
-               and isinstance(n.test, ast.Compare)
-               and isinstance(n.test.left, ast.Name) and n.test.left.id == "_cut"
-               and any(isinstance(b, ast.Raise) for b in ast.walk(n))]
-    check("a missing marker RAISES rather than sending a catalog-less prompt",
-          bool(_guards),
-          "the `if _cut < 0:` branch must RAISE; a silent -1 slices the WHOLE "
-          "prompt away and the A/B reads it as the doctrine failing")
+    # ── THE SLICE, DRIVEN FOR REAL ──────────────────────────────────────────
+    # MEASURED on the first validation pair: arm B degenerated into a repetition
+    # loop (shape-abort vocab-collapse, 2048ch) while arm A completed in 105s on
+    # the same source. The slice had kept `=== RESPONSE FORMAT ===`, so arm B was
+    # told in prose to emit component-major arrays while its schema demanded
+    # beats. A prompt at war with its own schema is not a doctrine test.
+    _hsrc = {}
+    _fn_slice = next((n for n in ast.walk(_tree) if isinstance(n, ast.FunctionDef)
+                      and n.name == "_v2_catalog_slice"), None)
+    check("_v2_catalog_slice exists as a testable function", _fn_slice is not None,
+          "inline string math cannot be driven by a cert")
+    if _fn_slice is not None:
+        _mod = ast.Module(body=[
+            ast.parse('_V2_CATALOG_MARK = "=== CAPTIONS ==="').body[0],
+            ast.parse('_V2_SHAPE_MARK = "=== RESPONSE FORMAT ==="').body[0],
+            _fn_slice], type_ignores=[])
+        exec(compile(_mod, "<cert>", "exec"), _hsrc)
+        _slice = _hsrc["_v2_catalog_slice"]
+        _fake = ("=== YOUR JOB ===\ndoctrine here\n\n"
+                 "=== CAPTIONS ===\ncaption catalog\n\n"
+                 "=== MOTION GRAPHICS ===\nthe component list\n\n"
+                 "=== RESPONSE FORMAT ===\nemit motion_graphics[] and text_overlays[]\n\n"
+                 "=== AUTHOR EVERY WORD YOU WRITE IN THE SOURCE LANGUAGE ===\nconstraint\n")
+        _out = _slice(_fake)
+        check("the slice drops the doctrine arm B replaces",
+              "doctrine here" not in _out, "arm A's doctrine leaked into arm B")
+        check("the slice KEEPS the component catalog",
+              "the component list" in _out and "caption catalog" in _out,
+              "a catalog-less prompt asks for components it never named")
+        check("the slice REMOVES arm A's response format",
+              "emit motion_graphics[]" not in _out,
+              "THE COLLAPSE: arm B told in prose to emit component-major arrays "
+              "while its schema demands beats[] — the model came apart on it")
+        check("the slice KEEPS the constraints appended after the shape section",
+              "constraint" in _out,
+              "the language/burned-text/rationale constraints are not shape and "
+              "both arms need them")
+        for _bad, _why in ((_fake.replace("=== CAPTIONS ===", "=== CAPS ==="),
+                            "a moved catalog heading"),
+                           (_fake.replace("=== RESPONSE FORMAT ===", "=== SHAPE ==="),
+                            "a moved shape heading")):
+            try:
+                _slice(_bad)
+                check(f"{_why} RAISES rather than degrading", False,
+                      "returned silently — a bad slice reads as the doctrine failing")
+            except RuntimeError:
+                check(f"{_why} RAISES rather than degrading", True)
 
     check("a set-but-refused secret says so out loud",
           "refused on this path" in v2_block,
@@ -133,6 +175,50 @@ def main():
         check("every BeatMajorPlan field reaches the wire",
               model_fields <= schema_fields,
               f"missing from the schema: {sorted(model_fields - schema_fields)}")
+
+    # ── 3a. THE IDENTITY RULE IS A SUBSTITUTION, NOT A UNIVERSAL ────────────
+    # MEASURED, twice, at ~$0.40 each: arm B degenerated into a repetition loop —
+    # "...here today as Promptly effortlessly correctly right away ... as
+    # Promptly seamlessly directly..." — while arm A completed normally on the
+    # same source. CAUSE: condensing arm A's "any text you author THAT WOULD NAME
+    # Gemini or any underlying model names Promptly INSTEAD" down to "any text
+    # you author names Promptly" turned a SUBSTITUTION into a requirement that
+    # every string contain the word, and the model tried to satisfy it in every
+    # string field until the runaway detector killed the call.
+    #
+    # This is the condensation ceiling in one line: compression that drops a
+    # conditional does not shorten a rule, it INVERTS it.
+    import prompt_v2_editor as _pv2e
+    _doc = _pv2e.MASTER_EDITOR_DOCTRINE
+    _idpos = _doc.find("YOUR IDENTITY")
+    _idpara = _doc[_idpos:_idpos + 700] if _idpos >= 0 else ""
+    check("the identity rule exists", bool(_idpara), "no identity paragraph")
+    check("the identity rule is scoped as a SUBSTITUTION",
+          ("instead" in _idpara.lower()
+           and ("would name" in _idpara.lower() or "that would" in _idpara.lower())),
+          "an unscoped 'any text you author names Promptly' reads as 'every "
+          "string must contain the word' and drove two measured repetition-loop "
+          "degenerations")
+
+    # ── 3a2. EVERY FIELD ARM B EMITS CARRIES A LENGTH INSTRUCTION ──────────
+    # Arm B excises `=== RESPONSE FORMAT ===` because it describes arm A's
+    # component-major shape — and that section is ALSO where arm A's per-field
+    # length guidance lives. Cut without replacement, video_identity ran away
+    # into adverb padding until the repetition-abort killed the call, on four
+    # consecutive measured cells. The schema's maxLength is ADVISORY; the model
+    # does not enforce it, which is why arm A caps at the parse edge instead.
+    _built = _pv2e.build_v2_system_instruction("=== CAPTIONS ===\ncatalog")
+    for _f in ("video_identity", "caption_style", "aspect_ratio", "notes"):
+        check(f"arm B instructs the global field {_f!r}", _f in _built,
+              f"{_f} is emitted by BeatMajorPlan but arm B never says what it is "
+              f"or how long it may be")
+    check("video_identity carries an explicit length bound",
+          re.search(r"video_identity.{0,200}(sentence|SENTENCE)", _built, re.S) is not None,
+          "an unbounded identity field is what four measured cells ran away in")
+    check("the abort cost is stated where the model can act on it",
+          "ABORTED" in _built or "aborted" in _built,
+          "the model must know a padded string ends the whole call, not just "
+          "the field")
 
     # ── 3b. ALL SEVEN TREATMENTS ARE EXPRESSIBLE ────────────────────────────
     # The live-path refusal below used to rest on this being FALSE. It is now

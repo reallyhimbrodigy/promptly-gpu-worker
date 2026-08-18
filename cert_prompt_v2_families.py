@@ -86,6 +86,37 @@ def main():
                   f"not in the arm-A schema — the flatten would write a key "
                   f"nothing downstream reads")
 
+    # ── 1b. NO UNBOUNDED STRING ANYWHERE IN THE WIRE SCHEMA ────────────────
+    # MEASURED, three arm-B cells in a row: `shape-abort string-runaway
+    # (run=4096ch)` — one string field ran away and the degeneration detector
+    # killed the call, every time, while arm A completed on the same source.
+    # Arm A caps its strings by declaration and enforces them at the parse edge;
+    # this schema declared `notes`, `background`, `subject`, `motion`, every
+    # `reason` and each caption keyword with NO max_length at all. An unbounded
+    # string in a structured-output schema is an invitation to a repetition loop.
+    def _uncapped(node, path=""):
+        out = []
+        if isinstance(node, dict):
+            # BOUNDED is the property, not "has a maxLength". An enum-constrained
+            # string cannot run away — its value set is finite — so requiring a
+            # length on it tests the wrong thing and would push a pointless cap
+            # onto every closed vocabulary.
+            _bounded = ("maxLength" in node or "enum" in node or "const" in node)
+            if node.get("type") == "string" and not _bounded:
+                out.append(path or "<root>")
+            for k, v in node.items():
+                out += _uncapped(v, f"{path}.{k}")
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                out += _uncapped(v, f"{path}[{i}]")
+        return out
+    _wire = pv2s.BeatMajorPlan.model_json_schema()
+    _open = _uncapped(_wire)
+    check("every string field in the wire schema declares a maxLength",
+          not _open,
+          f"unbounded: {_open} — an uncapped string is what three measured "
+          f"arm-B cells ran away in")
+
     # ── 2. a full-coverage plan flattens into arm A's shapes ────────────────
     plan = {"beats": [
         {"word_index": 0, "says": "hello", "read": "open",
