@@ -41703,8 +41703,26 @@ def handler(job):
             # length lets EVERY latency/cost read cohort-control by duration and
             # split fixed-vs-slope (the two-term fit); without it the 90s target
             # can't be tracked and $/job questions stay unresolved.
+            #
+            # THE MASK'S TWIN, ON THE SUCCESS PATH (2026-08-18). The error-path
+            # copy of the _timings comprehension below was guarded on 2026-08-16
+            # and this one was NOT: the gate written that day
+            # (cert_error_path_totality) inspects only except/finally blocks, and
+            # this line sits on the path where EVERYTHING WENT RIGHT. `_timings`
+            # legitimately carries nested dicts (gemini_tokens, cpu_by_stage,
+            # mem_by_stage — each nested deliberately to survive content-studio's
+            # top-level strip), so round(float(dict)) raised TypeError AFTER the
+            # render finished and the URL was already written. MEASURED: 111 of
+            # 114 rows that failed WITH A FINISHED VIDEO since Aug 16 were this
+            # one line — progress 100, step complete, rendered_video_url present,
+            # 90 users shown "Something went wrong." The largest failure class in
+            # the product. Prose lives HERE rather than inside the dict: the
+            # lean_arm gate measures proximity from `"stage_timings": {` and a
+            # comment in between silently broke it.
             "stage_timings": {
-                **{k: round(float(v), 1) for k, v in _timings.items()},
+                **{k: (round(float(v), 1) if isinstance(v, (int, float))
+                       and not isinstance(v, bool) else v)
+                   for k, v in _timings.items()},
                 "source_duration_s": round(float(source_duration), 1) if source_duration else None,
                 # Gemini token cost NESTED (Zac 2026-08-02) — the 3rd field that
                 # would have been lost to content-studio top-level stripping. The

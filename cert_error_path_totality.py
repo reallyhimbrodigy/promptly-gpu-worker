@@ -117,6 +117,49 @@ def main():
         p = os.path.join(here, f)
         if os.path.exists(p):
             findings += _scan(p)
+    # ── SHAPE-UNCONTROLLED ACCUMULATORS, ON *EVERY* PATH ────────────────────
+    #
+    # THE GAP THIS CLOSES (2026-08-18). The scan above only inspects except and
+    # finally blocks, because the defect it was forged from lived in one. The
+    # SAME comprehension existed on the SUCCESS path, unguarded, and this gate
+    # never looked at it:
+    #
+    #     {k: round(float(v), 1) for k, v in _timings.items()}
+    #
+    # `_timings` legitimately carries nested dicts — gemini_tokens,
+    # cpu_by_stage, mem_by_stage, each nested DELIBERATELY to survive
+    # content-studio's top-level key strip. So it raised TypeError after the
+    # render had finished and the URL was already written.
+    #
+    # MEASURED: 111 of 114 jobs that failed WITH A FINISHED VIDEO since Aug 16
+    # were this single line. 90 users, shown "Something went wrong." while their
+    # video sat in S3. The largest failure class in the product, and the gate
+    # written to prevent exactly this class was scoped one branch too narrowly.
+    #
+    # THE RULE: an accumulator whose SHAPE WE DO NOT CONTROL must be guarded
+    # wherever it is coerced — the error path has no monopoly on this defect.
+    _ACCUMULATORS = ("_timings",)
+    for f in ("handler.py", "modal_app.py"):
+        _p = os.path.join(here, f)
+        if not os.path.exists(_p):
+            continue
+        _src = open(_p, encoding="utf-8").read()
+        _tree = ast.parse(_src)
+        for n in ast.walk(_tree):
+            if not isinstance(n, (ast.DictComp, ast.ListComp, ast.SetComp,
+                                  ast.GeneratorExp)):
+                continue
+            seg = ast.get_source_segment(_src, n) or ""
+            if not any(f"{a}.items()" in seg or f"{a}.values()" in seg
+                       for a in _ACCUMULATORS):
+                continue
+            has_coerce = any(isinstance(c, ast.Call)
+                             and getattr(c.func, "id", None) in ("float", "int", "round")
+                             for c in ast.walk(n))
+            if has_coerce and "isinstance" not in seg:
+                findings.append((_p, n.lineno, "shape-uncontrolled accumulator",
+                                 seg.replace("\n", " ")[:100]))
+
     if findings:
         print(f"ERROR-PATH TOTALITY: {len(findings)} UNGUARDED coercion(s) in an "
               f"except/finally block\n")
