@@ -1,0 +1,289 @@
+{
+ "built": "2026-08-17",
+ "coverage": {
+  "brand_copy": 7,
+  "payoff": 5,
+  "scenes": 8
+ },
+ "selection": "deduped by transcript hash; >=1 directive trigger; durable s3 source pinned by sha256+etag",
+ "sources": [
+  {
+   "bytes": 6396936,
+   "created_at": "2026-07-12",
+   "dupe_jobs": 0,
+   "duration_s": 63.5,
+   "etag": "4942bf8f5e5eb84e3e638dd8e4a2cbbb",
+   "id": "comp_brand_copy_scenes_725faf2b",
+   "job_id": "725faf2b-4061-410c-8443-5483476858c5",
+   "mean_dbfs": -21.4,
+   "route": null,
+   "s3_key": "sources/23b848f8-bc5c-4ba1-a89d-ba5d9ec2befa/1783900343885-3EAA3CC9-47AB-4BB6-89AB-C2137D50826E_L0_001.mp4",
+   "sha256": "2b827bc918ab72aa28703b435011bf1083364fdd6c39441c7043ba40a7cc3262",
+   "text_hash": "305ee172333c6ef0",
+   "triggers": {
+    "brand_copy": [
+     "self-introduction",
+     "stated role"
+    ],
+    "scenes": [
+     "stated number/stat",
+     "claim the footage cannot show"
+    ]
+   },
+   "vibe": "Over the face, add text of what ai model you are",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/23b848f8-bc5c-4ba1-a89d-ba5d9ec2befa/1783900343885-3EAA3CC9-47AB-4BB6-89AB-C2137D50826E_L0_001.mp4",
+   "words": 198
+  },
+  {
+   "bytes": 58352788,
+   "created_at": "2026-07-30",
+   "dupe_jobs": 0,
+   "duration_s": 54.4,
+   "etag": "a5585a3566876dc31d91d14b2f489cc3",
+   "id": "comp_brand_copy_scenes_d0e9dd40",
+   "job_id": "d0e9dd40-c783-4ffc-ab2c-83d44b7bcfc5",
+   "mean_dbfs": -24.0,
+   "route": null,
+   "s3_key": "sources/26102cbd-60d9-4778-8f09-43f8fd38511f/1785391806512-EB1FB301-3C4A-472B-87CC-33007D638450_L0_001.mp4",
+   "sha256": "8efe58cc7e2a56ee7695c4982875e6984224706b3f519aaba9f3c4f2d84713a5",
+   "text_hash": "6b3a3c3048a5f8fd",
+   "triggers": {
+    "brand_copy": [
+     "self-introduction",
+     "brand/company"
+    ],
+    "scenes": [
+     "stated number/stat"
+    ]
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/26102cbd-60d9-4778-8f09-43f8fd38511f/1785391806512-EB1FB301-3C4A-472B-87CC-33007D638450_L0_001.mp4",
+   "words": 123
+  },
+  {
+   "bytes": 37425129,
+   "created_at": "2026-07-29",
+   "dupe_jobs": 0,
+   "duration_s": 50.2,
+   "etag": "7d425a5c705c0b9062138617cbfc7ab1",
+   "id": "comp_brand_copy_scenes_5fbb62ef",
+   "job_id": "5fbb62ef-a752-4cee-9d02-960098b57c00",
+   "mean_dbfs": -28.6,
+   "route": null,
+   "s3_key": "sources/d1725b47-850e-4537-9daf-ec0b455dbafa/1785340399340-CDD8321C-0CAB-403C-B98C-43C8B6DDA254_L0_001.mp4",
+   "sha256": "7afdc9fe78da2faddbbe982e295beddcce3fd2daf1a4df316df2d3912c7583f6",
+   "text_hash": "b7b01bb82b83c7e9",
+   "triggers": {
+    "brand_copy": [
+     "self-introduction"
+    ],
+    "scenes": [
+     "stated number/stat",
+     "claim the footage cannot show"
+    ]
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/d1725b47-850e-4537-9daf-ec0b455dbafa/1785340399340-CDD8321C-0CAB-403C-B98C-43C8B6DDA254_L0_001.mp4",
+   "words": 222
+  },
+  {
+   "bytes": 27364973,
+   "created_at": "2026-07-29",
+   "dupe_jobs": 0,
+   "duration_s": 40.9,
+   "etag": "85c6522d8cb1de2ece2c1ad259e71efa",
+   "id": "comp_brand_copy_scenes_3a92f7de",
+   "job_id": "3a92f7de-02cd-491e-a3d4-09a0a23b51c5",
+   "mean_dbfs": -24.3,
+   "route": null,
+   "s3_key": "sources/b0c1fbf6-9c88-44f7-b6b1-a2bbf00e5f50/1785329550789-8FA7ED59-191A-41A9-AAAC-8EE85B3755B0_L0_001.mp4",
+   "sha256": "afb7e7acee51e92357073ae306ddba7c83568ad6bf63fc6a2d31c82d5959a957",
+   "text_hash": "e59664777a94cdd7",
+   "triggers": {
+    "brand_copy": [
+     "stated role",
+     "brand/company"
+    ],
+    "scenes": [
+     "claim the footage cannot show"
+    ]
+   },
+   "vibe": "Make this video smooth and add elements between it",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/b0c1fbf6-9c88-44f7-b6b1-a2bbf00e5f50/1785329550789-8FA7ED59-191A-41A9-AAAC-8EE85B3755B0_L0_001.mp4",
+   "words": 74
+  },
+  {
+   "bytes": 128395619,
+   "created_at": "2026-07-28",
+   "dupe_jobs": 0,
+   "duration_s": 74.8,
+   "etag": "21d7094a89081ba018b0173c538b5758",
+   "id": "comp_brand_copy_scenes_fe0d64fb",
+   "job_id": "fe0d64fb-ed41-4fd8-a45a-50bc43ceb9f8",
+   "mean_dbfs": -37.9,
+   "route": null,
+   "s3_key": "sources/ccfff07a-7976-4c91-8eeb-b12801f7f185/1785234607117-7C79B145-1BE7-46E8-AEB3-8D147003981A_L0_001.mp4",
+   "sha256": "c2109f3d0703a8a43f72ff2ab81b992234728d9fac1cb1c945be083acb8a25f6",
+   "text_hash": "0546eba08ddc231a",
+   "triggers": {
+    "brand_copy": [
+     "self-introduction",
+     "brand/company"
+    ],
+    "scenes": [
+     "stated number/stat"
+    ]
+   },
+   "vibe": "Viral engaging video make this a smooth video ,add zoom, sound effects , and motion graphi",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/ccfff07a-7976-4c91-8eeb-b12801f7f185/1785234607117-7C79B145-1BE7-46E8-AEB3-8D147003981A_L0_001.mp4",
+   "words": 82
+  },
+  {
+   "bytes": 35114382,
+   "created_at": "2026-07-28",
+   "dupe_jobs": 1,
+   "duration_s": 29.8,
+   "etag": "62fff0655c29cb401357c0d3739221a7",
+   "id": "comp_brand_copy_scenes_712a3a3a",
+   "job_id": "712a3a3a-15c9-459c-b6f7-630814815dd5",
+   "mean_dbfs": -21.4,
+   "route": null,
+   "s3_key": "sources/5519ef85-7785-4e28-915c-518e614b70af/1785222048947-5CF311C8-1372-4C28-B6A6-833608684852_L0_001.mp4",
+   "sha256": "3ff8c7434581d3b8205b09f7edd4c120c21e7a7954d83e17e0471a223396a17e",
+   "text_hash": "efdea38a0561ca96",
+   "triggers": {
+    "brand_copy": [
+     "self-introduction"
+    ],
+    "scenes": [
+     "stated number/stat",
+     "claim the footage cannot show"
+    ]
+   },
+   "vibe": "Help me edit this video with captions and a great title. Make a bulleted point list for ea",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/5519ef85-7785-4e28-915c-518e614b70af/1785222048947-5CF311C8-1372-4C28-B6A6-833608684852_L0_001.mp4",
+   "words": 119
+  },
+  {
+   "bytes": 92426980,
+   "created_at": "2026-07-17",
+   "dupe_jobs": 0,
+   "duration_s": 65.2,
+   "etag": "65343fd3d1e3e08403ac176f334273df",
+   "id": "comp_brand_copy_payoff_87a884e0",
+   "job_id": "87a884e0-a374-4a8a-a39c-536835a32ced",
+   "mean_dbfs": -18.2,
+   "route": null,
+   "s3_key": "sources/ed104a1a-12dd-44f2-bace-bb07ed9a320a/1784302020489-4CBCFAE3-DBDE-4B2D-A159-10ECE492C7ED_L0_001.mp4",
+   "sha256": "bdc53ca1d9a6217a10a7b9d02b09926e95e9b294f4c0cdd8fde9fae8994dad5e",
+   "text_hash": "35e04e222b19e753",
+   "triggers": {
+    "brand_copy": [
+     "stated role"
+    ],
+    "payoff": [
+     "resolution phrase"
+    ]
+   },
+   "vibe": "Make this a smooth video, add zooms,sound effects and motion graphics.",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/ed104a1a-12dd-44f2-bace-bb07ed9a320a/1784302020489-4CBCFAE3-DBDE-4B2D-A159-10ECE492C7ED_L0_001.mp4",
+   "words": 211
+  },
+  {
+   "bytes": 132139739,
+   "created_at": "2026-07-11",
+   "dupe_jobs": 1,
+   "duration_s": 63.2,
+   "etag": "44e2ee281c37834a53e85dcafc8b2b84",
+   "id": "comp_payoff_scenes_aaa02383",
+   "job_id": "aaa02383-25dc-4c2a-bde2-f0ffd7ffb26c",
+   "mean_dbfs": -36.1,
+   "route": null,
+   "s3_key": "sources/0d017cc5-dde7-479f-8cca-74547bbea578/1783776300523-3EBBA31F-955B-4DF9-A5FE-2F1CAC9938E2_L0_001.mp4",
+   "sha256": "c007217e11d8217bf167bcddfb8de18f6301682d05b0c5160557b03f332e274b",
+   "text_hash": "473adb9e4a13027b",
+   "triggers": {
+    "payoff": [
+     "resolution phrase"
+    ],
+    "scenes": [
+     "stated number/stat"
+    ]
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/0d017cc5-dde7-479f-8cca-74547bbea578/1783776300523-3EBBA31F-955B-4DF9-A5FE-2F1CAC9938E2_L0_001.mp4",
+   "words": 180
+  },
+  {
+   "bytes": 20557293,
+   "created_at": "2026-06-27",
+   "dupe_jobs": 5,
+   "duration_s": 23.3,
+   "etag": "2bd8573cdb605e14224d1e74558fd633",
+   "id": "comp_payoff_scenes_7513987a",
+   "job_id": "7513987a-9462-4335-a740-4f69165297fc",
+   "mean_dbfs": -23.8,
+   "route": null,
+   "s3_key": "sources/ec702499-ca10-49e6-8850-df8f99840904/1782599246881-AB653DB0-BCCF-4C67-9910-0355686EC183_L0_001.mp4",
+   "sha256": "b1856684e0f895d263cb598732ed18fb05608d7dc58ae5da0e4ac4e724a8f5da",
+   "text_hash": "639625ab628e4ea8",
+   "triggers": {
+    "payoff": [
+     "resolution phrase"
+    ],
+    "scenes": [
+     "stated number/stat"
+    ]
+   },
+   "vibe": "Fast paced punchy",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/ec702499-ca10-49e6-8850-df8f99840904/1782599246881-AB653DB0-BCCF-4C67-9910-0355686EC183_L0_001.mp4",
+   "words": 108
+  },
+  {
+   "bytes": 98402426,
+   "created_at": "2026-07-15",
+   "dupe_jobs": 0,
+   "duration_s": 50.6,
+   "etag": "c19002f50bb0be7b97f544f3efd6a6ee",
+   "id": "comp_payoff_8bce6ec1",
+   "job_id": "8bce6ec1-023e-466f-aa61-d45125add8dc",
+   "mean_dbfs": -22.4,
+   "route": null,
+   "s3_key": "sources/0d017cc5-dde7-479f-8cca-74547bbea578/1784131546747-12D94BA2-823B-4B3E-B62B-28CF71AF76CA_L0_001.mp4",
+   "sha256": "4458b6862d8e4f651a79dba0db9237b6d2b5c5a88ecd4cf346853d274a27216d",
+   "text_hash": "b15b8ba13e17102e",
+   "triggers": {
+    "payoff": [
+     "resolution phrase"
+    ]
+   },
+   "vibe": "Viral engaging video",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/0d017cc5-dde7-479f-8cca-74547bbea578/1784131546747-12D94BA2-823B-4B3E-B62B-28CF71AF76CA_L0_001.mp4",
+   "words": 167
+  },
+  {
+   "bytes": 39631070,
+   "created_at": "2026-07-12",
+   "dupe_jobs": 0,
+   "duration_s": 23.6,
+   "etag": "eb6472c01b77a04cd1ab5b0f03f2af30",
+   "id": "comp_payoff_8ce6656c",
+   "job_id": "8ce6656c-ccdd-4178-b04d-bbddb68d15f0",
+   "mean_dbfs": -24.6,
+   "route": null,
+   "s3_key": "sources/dd800f9a-6092-4d1a-9702-6710ae4863cc/1783815364939-D999DECA-D05D-4DCA-B42F-20284B85E50E_L0_001.mp4",
+   "sha256": "248d2db5b27f2a0d219957893eaf0a25ac576639f5dfc9df83171267fe4832ea",
+   "text_hash": "109bfdb072e069a9",
+   "triggers": {
+    "payoff": [
+     "resolution phrase"
+    ]
+   },
+   "vibe": "Viral engaging video with captions",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/dd800f9a-6092-4d1a-9702-6710ae4863cc/1783815364939-D999DECA-D05D-4DCA-B42F-20284B85E50E_L0_001.mp4",
+   "words": 77
+  }
+ ],
+ "trigger_patterns_mirror": "annotate_corpus_triggers.TRIGGERS, which mirrors the directives' own trigger language",
+ "why": "the goldens are closed as a component instrument: of 12 editorial goldens, brand_copy is testable on 1, scenes on 0, payoff on 0. Selection, not inspection."
+}

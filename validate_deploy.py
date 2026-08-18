@@ -9698,6 +9698,18 @@ def _safe_edit_names_its_cause():
         f"cert_safe_edit_reason did not report PASS:\n{_out[-600:]}")
 
 
+@check("NO COMPONENT IS SCORED AGAINST A SOURCE THAT CANNOT TRIGGER IT (2026-08-17, RULE-1) [Rule 5]. Three corpora in a row were selected on properties unrelated to the component under test, and each would have reported a CORRECT DECLINE as a component failure: REF-2 was already edited (declining to decorate finished work is judgement, not a defect); the editorial_eng_* pair contained no spoken name and no stated number, so brand_copy 0/4 was N/A and a planner emitting brand copy there would have been FABRICATING, which the directive forbids; and the frozen goldens, measured 2026-08-17, can test brand_copy on 1 of 12 sources, scenes on 0 and payoff on 0 — excellent for route/language regression, closed as a component instrument. The fix is SELECTION, not inspection after the fact, because checking triggers afterwards still wastes the whole run. This asserts the component corpus keeps the properties that make it an instrument: every source carries a recorded directive trigger; every component has at least 2 sources, since one cannot separate a decline from noise; every source is durably pinned by sha256+etag+bytes in our own bucket rather than live user media, because an A/B on drifted bytes compares two different things; no two entries share sha256, because two ASR runs of ONE video produce different transcript text and the text-hash pass demonstrably let an identical 47.4s/305MB source through twice; and every source sits inside the product's own 15-90s band, because a 171s source measures a regime users do not have.")
+def _component_corpus_is_an_instrument():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_component_corpus.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_component_corpus FAILED\n{_out[-1400:]}"
+    assert "CERT COMPONENT-CORPUS: PASS" in _out, (
+        f"cert_component_corpus did not report PASS:\n{_out[-600:]}")
+
+
 @check("EVERY COUNTER NAMES ITS BUILD (2026-08-16, RULE-1) [Rule 4, JUDGE]. A counter that records WHAT happened but not WHICH BUILD it happened on cannot be read back without RECONSTRUCTION. That bit on 2026-08-16: two build-lane runs showed `brand_copy` declined even on the reference where a name is spoken — a load-bearing input to redesigning the directive — and attributing those runs to an image required walking commit timestamps, because the run record named no build. Worse, the run's own output was INSUFFICIENT to settle it: `brand_specs` appears in the result even on a commit that lacks the schema field, so the obvious evidence pointed the right way for the wrong reason. Reconstruction is not observation. Every analytics counter now carries build_sha, and the dirty marker rides with it because a counter emitted from an uncommitted tree is attributed to a commit that does NOT describe the code that produced it — which is worse than being unattributed, because it looks authoritative. FAILS if _build_stamp is removed or if any counter stops carrying it.")
 def _counters_name_their_build():
     import os as _os
