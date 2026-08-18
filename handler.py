@@ -28531,18 +28531,78 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"explicitly skipped."
         )
 
+    # ── THE EMISSION SEAM: _brand_specs -> motion_graphics_out ──────────────
+    #
+    # THE DEFECT THIS CLOSES (2026-08-18). BrandSpecMG.tsx documents "THE
+    # CONTRACT WITH THE HANDLER" in full — append {type, fromFrame,
+    # durationInFrames, props: <the spec verbatim>} — and THE HANDLER HALF WAS
+    # NEVER WRITTEN. There was no emission site at all. So NamePlate and EndCard
+    # have never produced a pixel, even on jobs where the spec built cleanly:
+    # brand_copy at 0/198 was the visible cause, and this was the one underneath
+    # it. The v555 transcript-triggered plate would have been swallowed here
+    # identically.
+    #
+    # PLACEMENT IS THE HANDLER'S JOB, deliberately: the spec carries start_s /
+    # hold_s on the OUTPUT clock and the component window is a <Sequence>, so a
+    # component that also placed itself would do the same math twice on two
+    # different clocks (the adapter's own note).
+    #
+    # `props` is the SPEC VERBATIM — the adapter reads style/safe/anchor off it.
+    # Passing a reshaped dict here would be a fifth schema mirror.
+    _brand_specs_now = edit_plan.get("_brand_specs") or {}
+    _brand_mg_keys = (("name_plate", "NamePlate"), ("end_card", "EndCard"))
+    # DECLARED FROM THE SPECS, NOT FROM WHAT WE EMITTED. Counting emissions
+    # would make the invariant below vacuous for brand MGs — it could never
+    # fail, which is the opposite of what an integrity assertion is for. A spec
+    # that exists and does not reach the output must trip it or be ledgered.
+    _expected_brand_mgs = sum(
+        1 for _k, _t in _brand_mg_keys
+        if isinstance(_brand_specs_now.get(_k), dict))
+    for _bkey, _btype in _brand_mg_keys:
+        _bspec = _brand_specs_now.get(_bkey)
+        if not isinstance(_bspec, dict):
+            continue
+        _ledger_requested("brand_mg", _btype)
+        try:
+            _b_start = float(_bspec.get("start_s") or 0.0)
+            _b_hold = float(_bspec.get("hold_s") or 0.0)
+            if _b_hold <= 0:
+                raise ValueError("non-positive hold")
+            _b_from = max(0, int(round(_b_start * source_fps)))
+            _b_frames = max(1, int(round(_b_hold * source_fps)))
+            motion_graphics_out.append({
+                "type": _btype,
+                "fromFrame": _b_from,
+                "durationInFrames": _b_frames,
+                "props": _bspec,
+            })
+            _ledger_rendered("brand_mg", _btype)
+            print(f"[brand-mg] {_btype} -> output {_b_from}-{_b_from + _b_frames}f "
+                  f"({_b_start:.2f}s +{_b_hold:.2f}s)", flush=True)
+        except Exception as _be:
+            # LEDGERED, NEVER SILENT — the invariant below counts this drop, so
+            # a brand spec cannot vanish between builder and renderer again.
+            _mg_projection_misses += 1
+            _ledger_dropped("brand_mg", _btype, f"placement:{type(_be).__name__}")
+            _record_divergence(
+                "motion_graphic", {"type": _btype, "start_s": _bspec.get("start_s")},
+                "brand_mg_placement_failed",
+                reason=f"brand spec built but could not be placed ({_be})")
+
     _expected_emphasis_mgs = sum(
         1 for em in (edit_plan.get("_emphasis_moments") or [])
         if em.get("motion_graphic")
     )
     _expected_top_mgs = len(edit_plan.get("motion_graphics") or [])
-    _expected_total_mgs = _expected_top_mgs + _expected_emphasis_mgs
+    _expected_total_mgs = (_expected_top_mgs + _expected_emphasis_mgs
+                           + _expected_brand_mgs)
     if len(motion_graphics_out) + _mg_projection_misses != _expected_total_mgs:
         raise RuntimeError(
             f"Pipeline integrity violation: motion_graphics_out has "
             f"{len(motion_graphics_out)} entries (+{_mg_projection_misses} "
             f"ledgered projection-miss drops) but validation produced "
             f"{_expected_top_mgs} top-level + {_expected_emphasis_mgs} emphasis "
+            f"+ {_expected_brand_mgs} brand "
             f"MGs ({_expected_total_mgs} total). Every validated MG must reach "
             f"the output spec or be explicitly ledgered."
         )
@@ -41475,6 +41535,12 @@ def handler(job):
             # the zoom gate. render_only replay does NOT re-run the detector, so it
             # must survive storage or a replay would re-add a suppressed zoom.
             "_burned_text",
+            # Brand specs (D + F): built in generate_edit_gemini from the design
+            # system, READ by the render path's emission seam. A render_only
+            # re-edit replay does NOT re-enter generation, so without this the
+            # name plate and end card would vanish on every re-edit — the same
+            # replay-loss class _burned_text is here for.
+            "_brand_specs",
         }
         sanitized_recipe = {
             k: v for k, v in edit_plan.items()
