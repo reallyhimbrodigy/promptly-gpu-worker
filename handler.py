@@ -5869,6 +5869,106 @@ def _edit_in_language_enabled():
     return bool(os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE", "").strip())
 
 
+# ── §6 NAME PLATE + END CARD: DETERMINISTIC, NO MODEL CALL ───────────────────
+#
+# WHY DETERMINISTIC. brand_components.build_brand_specs() has always been a pure
+# function — no model call, palette lock built in. It was simply fed from
+# `edit_plan["brand_copy"]`, which the planner emits on 0 of 198 jobs. So both
+# components were WIRED AND UNREACHABLE: the mechanism worked end to end and the
+# only input never arrived.
+#
+# The transcript already carries the trigger. On the render the owner watched,
+# the speaker says "Hey, Clippers team. My name is Sujay Ahmad" in the first six
+# words, and the plate did not fire.
+#
+# THE PATTERN IS CASE-SENSITIVE, DELIBERATELY. Matched with re.I, `[A-Z][a-z]+`
+# matches lowercase, so "I'm paying", "I'm sure" and "I'm not" all scored as
+# self-introductions — EVERY name hit in the first component corpus was a false
+# positive. A name plate built on that would caption a stranger's video with a
+# word the speaker never used as a name, which is worse than no plate.
+# Honorific is consumed so "I'm Mr. Shannon" yields "Mr. Shannon", not "Mr" —
+# measured on 400 production transcripts, where the period split the match.
+_NAME_INTRO = re.compile(
+    r"\b(?:My name is|I'?m|This is|I am)\s+"
+    r"((?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s+)?"
+    r"([A-Z][a-z]{1,15}(?![a-z])(?:\s+[A-Z][a-z]{1,15}(?![a-z])){0,2})")
+# A name plate is an OPENER (§6: appears within the first ~3s), so the claim is
+# only trusted where an introduction actually belongs. Measured: this is what
+# separates "Hi, my name is Rohit" from a capitalised product word 200 words in
+# ("Excel", "Aditi"), which were the precision failures on real transcripts.
+_NAME_INTRO_WORD_WINDOW = 25
+# Words that legitimately follow "I'm" capitalised at a sentence start or as a
+# nationality/adjective, and are NOT names. Without this, "I'm American" and a
+# sentence-initial "This is Great" become name plates.
+_NOT_A_NAME = frozenset({
+    "American", "British", "Indian", "Australian", "Canadian", "African",
+    "Just", "Really", "Going", "Gonna", "Trying", "Excited", "Happy", "Sorry",
+    "Here", "Back", "Still", "About", "Not", "So", "The", "A", "An", "This",
+    "That", "It", "There", "Great", "Good", "Sure", "Glad", "Very", "Super",
+    # Measured false positives on 400 production transcripts (ASR garble and
+    # product words that happened to sit after an intro phrase).
+    "My", "Nursing", "Excel", "Today", "Welcome", "Okay", "Alright", "Hello",
+})
+_ROLE_WORDS = (r"founder|co-?founder|ceo|cto|coo|president|director|manager|"
+               r"partner|coach|attorney|lawyer|realtor|agent|trainer|therapist|"
+               r"designer|developer|engineer|editor|creator|consultant|owner|"
+               r"student|nurse|doctor|teacher|chef|photographer")
+# FIRST-PERSON ONLY. "comments from the CEO" is a third party's role, not the
+# speaker's — an early corpus read matched exactly that and would have captioned
+# a stock-market clip with someone else's job title.
+_ROLE_FIRST_PERSON = re.compile(
+    r"\b(?:I'?m|I am|as)\s+(?:an?\s+|the\s+)?(" + _ROLE_WORDS + r")\b", re.I)
+
+
+def _speaker_identity_from_transcript(transcript_text):
+    """(name, role) spoken by the speaker, or (None, None). NEVER a guess.
+
+    Returning None is the correct, common outcome: most sources never state a
+    name, and a plate that invents one is a defect, not a degraded feature.
+    """
+    txt = str(transcript_text or "")
+    if not txt.strip():
+        return None, None
+    name = None
+    head = " ".join(txt.split()[:_NAME_INTRO_WORD_WINDOW])
+    for m in _NAME_INTRO.finditer(head):
+        honorific = (m.group(1) or "").strip()
+        cand = m.group(2).strip()
+        first = cand.split()[0]
+        if first in _NOT_A_NAME:
+            continue
+        # "My name is My client is..." — ASR garble that captured the next
+        # sentence's opener. A name never introduces another introduction.
+        if re.match(r"\s*name\s+is\b", head[m.end():], re.I):
+            continue
+        # "This is X" is the WEAKEST intro form — it introduces people
+        # ("This is Abhi, a third year PD student") and things equally
+        # ("this is Sea Buckthorn", a berry, which is the one false positive
+        # left at n=800). First-person forms are self-evidently about the
+        # speaker; this one needs corroboration from a first-person pronoun
+        # near it before it can name a plate.
+        if m.group(0).lower().lstrip().startswith("this is"):
+            _after = " ".join(head[m.end():].split()[:12])
+            if not re.search(r"\b(I'?m|I am|my|me|I)\b", _after, re.I):
+                continue
+        # POSSESSIVE = A CHANNEL, NOT A PERSON. "This is Bennie's Basketball".
+        # Checked in Python, not as a regex lookahead: as a lookahead the engine
+        # simply backtracked the token to "Benni" and satisfied it.
+        if re.match(r"['\u2019]s\b", head[m.end():]):
+            continue
+        # A trailing non-name token ("Sujay Ahmad And") is trimmed rather than
+        # rejected — the first 1-2 capitalised tokens are the name.
+        parts = [w for w in cand.split() if w not in _NOT_A_NAME][:2]
+        if parts:
+            name = (honorific + " " if honorific else "") + " ".join(parts)
+            break
+    role = None
+    rm = _ROLE_FIRST_PERSON.search(txt)
+    if rm:
+        role = rm.group(1).strip().title()
+    return name, role
+
+
 def _burned_text_caption_block(edit_plan, vibe=None):
     """ONE predicate for "the source already carries its own caption layer".
     `[ART_DIRECTION §3]`
@@ -15875,10 +15975,33 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # this key is not a declared field of the response schema.
                 _brand_src = (edit_plan.get("brand_copy") or {}) if isinstance(
                     edit_plan.get("brand_copy"), dict) else {}
+                # §6 DETERMINISTIC FALLBACK. The planner's brand_copy wins when
+                # present (it has context this cannot see); when it is absent —
+                # which is 198 of 198 jobs measured — the transcript answers.
+                # No model call, no extra latency, no cost.
+                # deepgram_words is the parameter actually in scope here —
+                # `transcript` is not, and reading it would NameError on every
+                # job. Rebuilt from the words, preferring punctuated_word
+                # because capitalisation is what makes the name pattern safe.
+                _det_text = " ".join(
+                    str((_w or {}).get("punctuated_word") or (_w or {}).get("word") or "")
+                    for _w in (deepgram_words or []) if isinstance(_w, dict))
+                _det_name, _det_role = _speaker_identity_from_transcript(_det_text)
+                _bc_name = _brand_src.get("speaker_name") or _det_name
+                _bc_role = _brand_src.get("speaker_role") or _det_role
+                if _det_name and not _brand_src.get("speaker_name"):
+                    print(f"[brand] name plate from TRANSCRIPT (deterministic): "
+                          f"{_det_name!r} role={_det_role!r}", flush=True)
+                    _record_divergence(
+                        "brand", {"name": _det_name, "role": _det_role,
+                                  "source": "transcript_deterministic"},
+                        "name_plate_derived",
+                        reason="planner emitted no brand_copy; the spoken name "
+                               "in the transcript supplied it (ART_DIRECTION_6)")
                 edit_plan["_brand_specs"] = _bc.build_brand_specs(
                     edit_plan.get("_design_system"),
-                    name=_brand_src.get("speaker_name"),
-                    role=_brand_src.get("speaker_role"),
+                    name=_bc_name,
+                    role=_bc_role,
                     headline=_brand_src.get("brand_name") or _brand_src.get("handle"),
                     subline=_brand_src.get("brand_subline"),
                     duration_s=duration,
@@ -17446,12 +17569,17 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 _record_divergence(
                     "caption",
                     {"style": edit_plan["caption_style"], "region": _ecr,
-                     "signal": _blk_signal,
+                     "signal": _blk_signal, "spec": "ART_DIRECTION_3",
                      "generation": "a1a2"},
                     "burned_suppress",
                     final={"style": "none"},
-                    reason="source_carries_burned_in_captions (ART_DIRECTION §3: "
-                           "never double the captions)",
+                    # LEDGER TOKEN — EXACT, NEVER DECORATED. The weekly table
+                    # counts this literal; appending "(ART_DIRECTION §3)" to it
+                    # broke the no-regress gate, correctly: a decorated ledger
+                    # token silently orphans every historical row that carried
+                    # the undecorated one. The §3 reference belongs in the
+                    # payload, which is free-form, not in the key.
+                    reason="source_carries_burned_in_captions",
                 )
                 edit_plan["caption_style"] = "none"
 
@@ -19687,11 +19815,10 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
             and not _vibe_requests_captions(vibe)):
         _record_divergence(
             "caption", {"style": plan.get("caption_style"), "region": _ecr,
-                        "signal": _blk_sig_re,
+                        "signal": _blk_sig_re, "spec": "ART_DIRECTION_3",
                         "generation": "reedit"},
             "burned_suppress", final={"style": "none"},
-            reason="source_carries_burned_in_captions (re-edit revalidation, "
-                   "ART_DIRECTION §3)")
+            reason="source_carries_burned_in_captions (re-edit revalidation)")
         plan["caption_style"] = "none"
         _applied.append(("caption_suppressed", _ecr))
     _str_raw = plan.get("source_text_regions")

@@ -9734,6 +9734,18 @@ def _never_double_the_captions():
         f"cert_never_double_captions did not report PASS:\n{_out[-600:]}")
 
 
+@check("THE NAME PLATE FIRES WITHOUT A MODEL CALL, AND NEVER INVENTS A NAME (ART_DIRECTION §6, 2026-08-17, RULE-1) [Rule 2]. brand_components.build_brand_specs() was ALWAYS a pure function — no model call, palette lock built in — and it was fed from edit_plan['brand_copy'], which the planner emits on 0 of 198 jobs. So the name plate and end card were WIRED AND UNREACHABLE: the mechanism worked end to end and its only input never arrived, which is why 'the component is broken' and 'the copy was never supplied' stayed confusable for weeks. On the render the owner watched, the speaker says 'My name is Sujay Ahmad' in the first six words and no plate fired. The transcript already carries the trigger, so the fallback is deterministic — no model call, no added latency, no cost — and the planner's brand_copy still wins whenever it is present. The cert is BEHAVIOURAL, not structural: it loads the real function out of handler.py and runs it against a table of real production transcripts and real measured failures, because a structural check ('the regex is case-sensitive') can be satisfied by code that does not work. It pins four failure modes measured against 800 production transcripts: re.I made [A-Z] match lowercase so 'I'm paying' / 'I'm sure' / 'I'm not' all scored as names (EVERY name hit in the first component corpus was a false positive); a trailing (?!'s) let the regex BACKTRACK so \"Bennie's\" matched as 'Benni' with the lookahead satisfied, inventing a person; 'I'm Mr. Shannon' yielded the name 'Mr'; and 'comments from the CEO' is a third party's title, not the speaker's. Final precision: 17 of 17 fires correct at n=800. A wrong plate on a stranger's video is worse than no plate, so refusing is always the safe outcome and the traps are asserted as hard as the hits.")
+def _name_plate_deterministic():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_name_plate_deterministic.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_name_plate_deterministic FAILED\n{_out[-1600:]}"
+    assert "CERT NAME-PLATE: PASS" in _out, (
+        f"cert_name_plate_deterministic did not report PASS:\n{_out[-600:]}")
+
+
 @check("EVERY COUNTER NAMES ITS BUILD (2026-08-16, RULE-1) [Rule 4, JUDGE]. A counter that records WHAT happened but not WHICH BUILD it happened on cannot be read back without RECONSTRUCTION. That bit on 2026-08-16: two build-lane runs showed `brand_copy` declined even on the reference where a name is spoken — a load-bearing input to redesigning the directive — and attributing those runs to an image required walking commit timestamps, because the run record named no build. Worse, the run's own output was INSUFFICIENT to settle it: `brand_specs` appears in the result even on a commit that lacks the schema field, so the obvious evidence pointed the right way for the wrong reason. Reconstruction is not observation. Every analytics counter now carries build_sha, and the dirty marker rides with it because a counter emitted from an uncommitted tree is attributed to a commit that does NOT describe the code that produced it — which is worse than being unattributed, because it looks authoritative. FAILS if _build_stamp is removed or if any counter stops carrying it.")
 def _counters_name_their_build():
     import os as _os
