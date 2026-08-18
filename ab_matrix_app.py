@@ -193,9 +193,14 @@ def cell(spec: dict) -> dict:
 
 
 @app.local_entrypoint()
-def main(source_path: str = ""):
+def main(source_path: str = "", manifest: str = "fps_ab_corpus_manifest.json",
+         ids: str = ""):
+    """`manifest`/`ids` let STEP A run against the FROZEN GOLDENS without
+    forking this harness. golden/manifest.json carries the same s3_key +
+    sha256 + duration_s fields, so the per-cell byte verification is unchanged
+    — which is the whole point of running the differ on a frozen corpus."""
     import json as _j
-    man = _j.load(open("fps_ab_corpus_manifest.json"))
+    man = _j.load(open(manifest))
     by_id = {x["id"]: x for x in man["sources"]}
     specs = []
     if source_path:
@@ -206,7 +211,7 @@ def main(source_path: str = ""):
                 specs.append({"model": m, "thinking": t, "source_bytes": b,
                               "src_id": os.path.basename(source_path)})
     else:
-        for cid in CORPUS_IDS:
+        for cid in ([s.strip() for s in ids.split(",") if s.strip()] or CORPUS_IDS):
             e = by_id[cid]
             for m in MODELS:
                 for t in THINKING:
@@ -214,7 +219,16 @@ def main(source_path: str = ""):
                                   "s3_key": e["s3_key"], "src_id": cid,
                                   "src_dur": e["duration_s"], "sha256": e.get("sha256")})
     _srcs = sorted({str(sp.get("src_id")) for sp in specs})
-    print(f"=== TRACK 1 MATRIX — {len(specs)} cells, priced ~$0.80 ===")
+    # PRICE THE RUN THAT IS ACTUALLY ABOUT TO HAPPEN. This line used to read
+    # "~$0.80" as a literal while the cell count was a variable — a log that
+    # reports a constant instead of the value in force, which is the same
+    # defect the thinking-budget log shipped. $0.20/cell is the ledgered rate
+    # (TRACK 1 MATRIX: 6 cells / $1.20), so a 24-cell run prices itself.
+    _PER_CELL_USD = 0.20
+    print(f"=== EDITORIAL MODEL DIFFER — {len(specs)} cells, "
+          f"priced ~${len(specs) * _PER_CELL_USD:.2f} "
+          f"(${_PER_CELL_USD:.2f}/cell, ledgered rate) ===")
+    print(f"    manifest: {manifest}")
     print(f"    sources: {', '.join(_srcs)}")
     print(f"    FROZEN corpus, sha256-verified per cell (a corpus whose bytes")
     print(f"    drifted is not a corpus, and an A/B on drifted bytes compares")
