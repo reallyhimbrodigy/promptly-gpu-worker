@@ -628,6 +628,12 @@ image = (
     # un-shipped moodreel_editor and progressive_publish. The mount law
     # (validate_deploy _loud_failsafe_mount_law) derives this requirement from
     # handler's source, so these three are here the day they are imported.
+    # THE MECHANICAL RE-EDIT INSTRUMENTS (DARK). Both are defer-imported by
+    # handler at the _deterministic_reedit seam, so the mount law demands them
+    # here — and both spent a day as CERT-ONLY modules: built, cert-green,
+    # deployed, and imported by nothing that ships.
+    .add_local_file("mechanical_router.py", "/mechanical_router.py")
+    .add_local_file("duration_target.py", "/duration_target.py")
     .add_local_file("prompt_v2_editor.py", "/prompt_v2_editor.py")
     .add_local_file("prompt_v2_schema.py", "/prompt_v2_schema.py")
     .add_local_file("prompt_v2_exemplars.py", "/prompt_v2_exemplars.py")

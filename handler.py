@@ -19850,6 +19850,159 @@ def _deterministic_reedit(old_plan, change_request):
             "deterministic": True}
 
 
+def _mechanical_reedit(old_plan, change_request):
+    """INSTRUMENT 2 — the mechanical router, for what Instrument 1 declines.
+
+    REUSE, NEVER PARALLEL (rider 4). Instrument 1 above owns category-off and
+    the caption-style swap; it returns None for everything else. This picks up
+    the rest of the mechanical vocabulary — aspect ratio, a caption TEXT SWAP,
+    denoise — and applies it through `_apply_plan_ops`, THE SAME MERGE the model
+    rail uses. It invents no op shape of its own, so anything it produces is
+    already understood by every downstream consumer.
+
+    Whole-request-or-nothing. The router disqualifies a request that ALSO asks
+    for a word-space mutation ("use Cove captions and cut the dead air"), because
+    applying the half it understands would hand the user a changed video that
+    silently ignored the rest — the worst failure this path can produce, since it
+    looks like success.
+
+    DARK behind PROMPTLY_MECHANICAL_ROUTER. Every failure returns None and the
+    request rides the model rail, which is exactly today's behaviour.
+    """
+    try:
+        import mechanical_router as _mr
+    except Exception as _mr_err:
+        _ledger_defect("missing_module", "mechanical_router", _mr_err)
+        return None
+    if not _mr.enabled():
+        return None
+    try:
+        _verdict, _ops, _why = _mr.classify(
+            change_request, valid_caption_styles=set(VALID_CAPTION_STYLES))
+    except Exception as _cls_err:
+        print(f"[plan-diff] router raised ({type(_cls_err).__name__}: "
+              f"{_cls_err}) — falling through to the model rail", flush=True)
+        return None
+    if _verdict != "mechanical" or not _ops:
+        return None
+    try:
+        _new_plan, _applied, _failed = _apply_plan_ops(old_plan, _ops)
+    except Exception as _ap_err:
+        print(f"[plan-diff] router ops failed to apply "
+              f"({type(_ap_err).__name__}) — model rail", flush=True)
+        return None
+    # A PARTIAL APPLICATION IS A SILENT WRONG ANSWER. If any op did not land,
+    # decline the whole thing and let the model handle it rather than shipping
+    # the half that worked.
+    if _failed or not _applied:
+        print(f"[plan-diff] router declined: {len(_failed or [])} op(s) failed "
+              f"to apply — the whole request goes to the model rail", flush=True)
+        return None
+    _record_divergence(
+        "reedit", {"ops": len(_applied), "why": _why[:120]},
+        "reedit_mechanical_router", reason=str(change_request)[:120])
+    print(f"[plan-diff] MECHANICAL — zero model calls: {_why}", flush=True)
+    return {"classification": "tweak", "new_plan": _new_plan,
+            "fused_vibe": None,
+            "changed_fields": sorted({str(o.get("list_key")) for o in _ops}),
+            "human_summary": f"{_why} — everything else untouched.",
+            "clarification_question": None, "deterministic": True}
+
+
+# "make it 30 seconds" / "cut it to a minute" — the ASK, not the mutation.
+_DURATION_ASK = re.compile(
+    r"\b(?:make|cut|trim|get|bring|keep)\s+(?:it|this|the video)?\s*"
+    r"(?:down\s+)?(?:to|under|below)?\s*"
+    r"(?P<n>\d+(?:\.\d+)?)\s*(?P<u>s|sec|secs|second|seconds|m|min|mins|minute|minutes)\b",
+    re.I)
+
+
+def _duration_reedit(old_plan, change_request, transcript, source_duration_s=None):
+    """INSTRUMENT 3 — "make it 30 seconds", answered HONESTLY.
+
+    THE PRODUCT LAW THIS SERVES: never over-cut to hit a number. A video that
+    reaches 30s by removing meaning is a worse answer than one that honestly
+    reports 78s and says what going further would cost.
+
+    SCOPE, STATED PLAINLY — this wires the HONEST-ANSWER half only:
+
+        impossible  the target is longer than the source. Answered here, with
+                    zero model calls, as a sentence rather than a silently
+                    unchanged video.
+        floor       the ladder is exhausted and the target is still short.
+                    Answered here with the achievable duration and what the
+                    remaining gap would cost.
+        met         reachable — and NOT applied here. Applying it mutates the
+                    kept-word space, which re-times every anchor in the
+                    document. Re-anchoring is proven
+                    (cert_reanchor_under_word_mutation) but is not integrated
+                    into this seam, and shipping a half-integrated word-space
+                    mutation is how anchors rot silently. It rides the model
+                    rail, as today, and the miss is LEDGERED rather than hidden.
+
+    DARK behind PROMPTLY_TARGET_DURATION. Any failure returns None.
+    """
+    try:
+        import duration_target as _dt
+    except Exception as _dt_err:
+        _ledger_defect("missing_module", "duration_target", _dt_err)
+        return None
+    if not _dt.enabled():
+        return None
+    _m = _DURATION_ASK.search(str(change_request or ""))
+    if not _m:
+        return None
+    _target = float(_m.group("n"))
+    if _m.group("u").lower().startswith("m"):
+        _target *= 60.0
+    _words = (transcript.get("words") if isinstance(transcript, dict)
+              else transcript if isinstance(transcript, list) else None)
+    if not _words:
+        return None
+    _src = float(source_duration_s or 0.0)
+    if not _src:
+        try:                      # derive from the word list — one clock only
+            _src = float(_words[-1].get("end") or 0.0)
+        except Exception:
+            return None
+    _detectors = {"detect_dead_air": detect_dead_air,
+                  "detect_filler": detect_filler,
+                  "detect_false_start": detect_false_start,
+                  "detect_stutter": detect_stutter,
+                  "detect_phrase_retake": detect_phrase_retake}
+    try:
+        _res = _dt.plan_to_target(_words, _src, _target, _detectors)
+    except Exception as _pt_err:
+        print(f"[plan-diff] duration target raised ({type(_pt_err).__name__}) "
+              f"— model rail", flush=True)
+        return None
+    _verdict = _res.get("verdict")
+    if _verdict in ("no_target", "met"):
+        # `met` is reachable but not applied here — see the docstring. Ledger it
+        # so the gap between what we could answer and what we do answer is a
+        # number somebody can read, not a silence.
+        if _verdict == "met":
+            _record_divergence(
+                "reedit", {"target_s": _target, "achieved_s": _res.get("achieved_s"),
+                           "rungs": _res.get("spent_rungs")},
+                "duration_target_not_applied",
+                reason="reachable but word-space mutation is not wired at this seam")
+        return None
+    _record_divergence(
+        "reedit", {"verdict": _verdict, "target_s": _target,
+                   "achieved_s": _res.get("achieved_s")},
+        "duration_target_answered", reason=str(change_request)[:120])
+    print(f"[plan-diff] DURATION {_verdict.upper()} — zero model calls: "
+          f"{_res.get('message')}", flush=True)
+    import copy as _copy_dur
+    _plan = _copy_dur.deepcopy(
+        {k: v for k, v in old_plan.items()
+         if not (isinstance(k, str) and k.startswith("_"))})
+    return {"classification": "tweak", "new_plan": _plan, "fused_vibe": None,
+            "changed_fields": [], "human_summary": _res.get("message"),
+            "clarification_question": None, "deterministic": True}
+
+
 # ─── TIER-3b PART 3: guided_redraft SCOPED-COPY (Zac 2026-07-11) ─────────────
 # A general/creative re-edit ("make it punchier") re-authors ONLY its in-scope
 # layers; every out-of-scope layer is byte-identical to the prior plan BY
@@ -20298,6 +20451,15 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
     # Instrument 1: the unambiguous category-off / style-swap never pays a
     # model call — the same engine EditPolicy trusts applies it directly.
     _det = _deterministic_reedit(old_plan, change_request)
+    # THREE INSTRUMENTS, ONE SEAM, IN COST ORDER. Each returns the same shape or
+    # None; None means "not mine" and the request falls to the next, ending at
+    # the model rail — which is exactly today's behaviour when all three decline.
+    # Wired here rather than beside this function because a second entry point is
+    # how two engines start disagreeing about the same request (rider 4).
+    if _det is None:
+        _det = _mechanical_reedit(old_plan, change_request)
+    if _det is None:
+        _det = _duration_reedit(old_plan, change_request, transcript)
     if _det is not None:
         return _det
 

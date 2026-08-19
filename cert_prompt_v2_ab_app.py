@@ -48,13 +48,16 @@ SECRETS = [modal.Secret.from_name("promptly-secrets"),
            # changes the flags the planner runs under and confounds both arms.
            modal.Secret.from_name("promptly-lang-flags")]
 
+RUN_TAG = "run"
 FAMILIES = ("cut_refinements", "emphasis_moments", "text_overlays", "broll_clips",
             "generated_scenes", "motion_graphics", "caption_keywords",
             "caption_position_changes")
 
 
 @app.function(secrets=SECRETS, cpu=16.0, memory=49152, timeout=7200)
-def run(n_sources: int) -> dict:
+def run(n_sources: int, run_tag: str) -> dict:
+    global RUN_TAG
+    RUN_TAG = run_tag
     import time
     import uuid
     import traceback
@@ -195,14 +198,39 @@ def run(n_sources: int) -> dict:
             print(f"[cell] {src['id'][:28]:30} arm={arm} wall={cell.get('wall_s')}s "
                   f"counts={cell.get('counts')} err={bool(cell.get('error'))} "
                   f"no_plan={bool(cell.get('no_plan'))}", flush=True)
+            # THE DURABLE RECORD. The first full run died on `local client
+            # disconnected` with 0 cells written: the results only existed in the
+            # local entrypoint's return value, so a dropped client threw away
+            # every completed cell AND the money that bought it. One JSON line
+            # per cell means `modal app logs` is the record of truth, and the
+            # run survives losing the thing watching it.
+            print("[celljson] " + json.dumps(cell, default=str), flush=True)
+            # AND PERSIST FROM INSIDE THE CONTAINER. Two full runs died on the
+            # LOCAL client — once "local client disconnected", once
+            # "ConnectionError: Deadline exceeded" — and took every completed
+            # cell with them, because the results only ever existed in the
+            # entrypoint's return value. A result that lives only in the thing
+            # watching the run is not a result; the run must survive losing its
+            # observer. Written after EVERY cell, so a death costs one cell.
+            try:
+                import boto3
+                boto3.client("s3").put_object(
+                    Bucket="thisismybucketagainwooo",
+                    Key=f"prompt-v2-ab/{RUN_TAG}/partial.json",
+                    Body=json.dumps(OUT, default=str).encode(),
+                    ContentType="application/json")
+            except Exception as _s3e:
+                print(f"[celljson] S3 persist failed (non-fatal): "
+                      f"{type(_s3e).__name__}", flush=True)
     return OUT
 
 
 @app.local_entrypoint()
 def main():
     n = int(os.environ.get("N_SOURCES", "13") or "13")
+    tag = os.environ.get("RUN_TAG") or "run"
     print(f"PROMPT V2 A/B — {n} sources x 2 arms, SERIAL, plan-only, ~${n * 2 * 0.20:.2f}")
-    out = run.remote(n)
+    out = run.remote(n, tag)
     path = "/tmp/prompt_v2_ab_result.json"
     with open(path, "w") as fh:
         json.dump(out, fh, indent=1)
