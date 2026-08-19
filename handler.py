@@ -1536,6 +1536,100 @@ def _mg_clear_region_exists(mg_type, sw_s, ew_s, face_traj, burned_bands=frozens
         return True  # fail-open, like every face-data consumer
 
 
+_MG_MIN_WINDOW_S = 0.8          # a graphic below this is a flash, not a beat
+_MG_REPOSITION_STEP_S = 0.25
+
+
+def _mg_unplaced_note(said):
+    """The sentence a user reads when a beat was deliberately left bare.
+
+    Extracted so its WORDING is testable. The first version of the cert grepped
+    the surrounding source block for failure language and matched the comment
+    above it ("NOT AN ERROR MESSAGE") — a location check standing in for a
+    property check. The property is about THIS STRING.
+
+    Rules it must keep: names the moment in the USER'S words, never a component
+    type, never an error code, never failure language. Nothing failed here — a
+    component was considered and not placed, which is a decision an editor makes
+    constantly.
+    """
+    _s = str(said or "").strip()
+    if _s:
+        return (f"I wanted a graphic on \u201c{_s}\u201d \u2014 the frame is too tight "
+                f"there for one to sit clear of your face, so I let the line "
+                f"carry it.")
+    return ("One beat was too tight for a graphic to sit clear of your face, "
+            "so I let the line carry it.")
+
+
+def _caption_occupied_bands(edit_plan, t0_s, t1_s):
+    """The band(s) OUR OWN caption track occupies over [t0,t1]. `[2026-08-19]`
+
+    F7 excludes `burned_bands` — the bands the SOURCE's text owns — and knows
+    nothing about the captions WE are about to render. A face-only reposition
+    will happily move a card into the band the captions land in, trading a
+    collision with the speaker for a collision with our own type.
+
+    THE EXCEPTION MATTERS: when caption_style is "none" the source carries its
+    own burned captions and we render no track of our own. There is nothing of
+    ours to avoid, and source_text_regions already covers those bands — counting
+    caption occupancy here too would double-exclude and strand a card that had
+    somewhere to go.
+    """
+    try:
+        if str(edit_plan.get("caption_style") or "none").strip().lower() == "none":
+            return frozenset()
+        out = set()
+        for _seg in (edit_plan.get("caption_position_segments") or []):
+            if not isinstance(_seg, dict):
+                continue
+            _a = float(_seg.get("from_seconds") or 0.0)
+            _b = float(_seg.get("to_seconds") or 0.0)
+            _p = str(_seg.get("position") or "").strip().lower()
+            if _p in ("top", "center", "bottom") and not (_b <= t0_s or _a >= t1_s):
+                out.add(_p)
+        return frozenset(out)
+    except Exception:
+        return frozenset()      # fail-open, like every face-data consumer
+
+
+def _place_component_gracefully(mg_type, sw_start, ew_end, face_traj, edit_plan):
+    """THE LADDER: reposition -> drop-with-note. Never raises, never fails the edit.
+
+    THREE RUNGS, NOT FOUR. The `shrink` rung is impossible against this check and
+    is documented in SPEC_GRACEFUL_COMPONENT_PLACEMENT.md: F7 judges size by TYPE
+    MEMBERSHIP (`mg_type in _MG_FULLSIZE_TYPES`), so content never reaches it and
+    a shorter card gets the identical verdict.
+
+    REPOSITION MOVES THE WINDOW, NOT THE CONTENT, AND NEVER THE ANCHOR. The start
+    stays exactly where the planner grounded it; only the END contracts, looking
+    for a sub-window where a band is clear. The face moves during a shot, so a
+    shorter window frequently has a clear band the full one does not — and
+    because the anchor never moves, grounding (F5.3) is preserved by
+    construction rather than by a second check.
+
+    Returns (outcome, end_seconds, note) where outcome is
+    "placed" | "repositioned" | "dropped".
+    """
+    _burned = frozenset(edit_plan.get("source_text_regions") or ())
+    _blocked = _burned | _caption_occupied_bands(edit_plan, sw_start, ew_end)
+
+    if _mg_clear_region_exists(mg_type, sw_start, ew_end, face_traj,
+                               burned_bands=_blocked):
+        return "placed", ew_end, None
+
+    _end = ew_end
+    while (_end - sw_start) - _MG_REPOSITION_STEP_S >= _MG_MIN_WINDOW_S:
+        _end -= _MG_REPOSITION_STEP_S
+        # Re-read caption occupancy for the SHORTER window — a contracted window
+        # can fall entirely inside a segment where the captions sit elsewhere.
+        _b2 = _burned | _caption_occupied_bands(edit_plan, sw_start, _end)
+        if _mg_clear_region_exists(mg_type, sw_start, _end, face_traj,
+                                   burned_bands=_b2):
+            return "repositioned", _end, None
+    return "dropped", ew_end, "unfittable"
+
+
 _MG_FACE_BAND_YRANGES = {"top": (120.0, 640.0), "center": (640.0, 1280.0), "bottom": (1280.0, 1800.0)}
 
 
@@ -18080,6 +18174,28 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # repair attempt carries every correction (first-raise-wins burned
             # one attempt per flaw and exhausted the budget on real plans).
             _mg_violations = []
+            # RUNG 3's user-facing half. Collected here, rendered into the
+            # edit's own summary below — the ledger is for us, this is for the
+            # person who asked for the edit.
+            _mg_user_notes = []
+
+            def _mg_words_at(_wi, _span=4):
+                """The user's OWN WORDS around an anchor — never our type names.
+
+                A note that says "StatCard at word 62" tells the user nothing;
+                they know their video by what they said in it. Falls back to an
+                empty string rather than inventing a phrase."""
+                try:
+                    _src = kept_words or deepgram_words or []
+                    _a = max(0, int(_wi) - 1)
+                    _b = min(len(_src), int(_wi) + _span)
+                    _ws = [str((_src[_k] or {}).get("punctuated_word")
+                               or (_src[_k] or {}).get("word") or "").strip()
+                           for _k in range(_a, _b)]
+                    return " ".join(w for w in _ws if w).strip(" ,.")
+                except Exception:
+                    return ""
+
             validated_mg = []
             for _i, _mg in enumerate(raw_mg):
                 if not isinstance(_mg, dict):
@@ -18273,18 +18389,60 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             f"Use the speaker's own numeral or remove the card."
                         )
 
-                # ── F7: clear-region rule — an oversized card with no
-                # face-clear anchor at its fitted size cannot be placed.
-                # Fail-open when face data is absent (inside the helper).
-                if not _mg_clear_region_exists(
-                    _mg_type, _sw_start, _ew_end, _smoothed_trajectory,
-                    burned_bands=frozenset(edit_plan.get("source_text_regions") or ()),
-                ):
-                    _mg_violations.append(
-                        f"{_mg_type} at word {_sw}: no face-clear region exists for "
-                        f"a card this size — reduce its content, or move it to a "
-                        f"window where the speaker sits lower/off-center."
-                    )
+                # ── F7: clear-region rule, NOW A LADDER, NOT A VERDICT
+                # (2026-08-19). Before this, an unplaceable card appended a
+                # violation -> RECIPE_INVALID -> the MODEL was asked to repair it
+                # twice -> safe_edit_refused -> the user got NOTHING, after we had
+                # paid for transcription, analysis and a full planning call. The
+                # pipeline was asking the model to compute something it can
+                # compute itself, and discarding a paid render when the model
+                # declined. One component must never cost the whole edit.
+                #
+                # Blast radius measured before building: RECIPE_INVALID fired on
+                # 2 of 7,712 jobs since 07-20 and NEITHER cited this check, so
+                # this is a LATENT class — and the V2 scenes directive, whose
+                # entire purpose is to make the planner place more, hit it on the
+                # first source tried. This is a precondition for shipping that.
+                _place_outcome, _ew_end_fitted, _place_note = (
+                    _place_component_gracefully(
+                        _mg_type, _sw_start, _ew_end, _smoothed_trajectory,
+                        edit_plan))
+                if _place_outcome == "repositioned":
+                    # The window contracted; the ANCHOR never moved, so grounding
+                    # is preserved by construction. Silent to the user on purpose:
+                    # they get a changelog of subtractions, never of successes.
+                    _record_divergence(
+                        "motion_graphic",
+                        {"type": _mg_type, "word": _sw,
+                         "from_s": round(float(_ew_end), 2),
+                         "to_s": round(float(_ew_end_fitted), 2)},
+                        "clear_region_repositioned",
+                        reason="window contracted to a face- and caption-clear span")
+                    _ew_end = _ew_end_fitted
+                if _place_outcome == "dropped":
+                    # THE FIRST CLAUSE USED TO SAY "reduce its content", WHICH IS
+                    # ADVICE THAT CANNOT WORK (2026-08-19). F7 judges size by TYPE
+                    # MEMBERSHIP — `mg_type in _MG_FULLSIZE_TYPES` — so the content
+                    # never reaches the function and a shorter card gets the
+                    # IDENTICAL verdict. We were asking the model to perform an
+                    # action with no effect, then failing the whole edit twice when
+                    # it did not succeed. Only remedies that can actually change the
+                    # answer are named now: move the window, or do not place it.
+                    # RUNG 3 — DROP, LOUDLY TO US, GENTLY TO THE USER.
+                    _ledger_dropped("motion_graphic", _mg_type,
+                                    "clear_region_unfittable")
+                    _record_divergence(
+                        "motion_graphic", {"type": _mg_type, "word": _sw},
+                        "clear_region_unfittable",
+                        reason="no face/caption-clear band at any window length")
+                    _mg_user_notes.append({
+                        "word_index": _sw,
+                        "type": _mg_type,
+                        # The USER'S OWN WORDS name the moment; the internal type
+                        # name never reaches them (cert clause 5b).
+                        "said": _mg_words_at(_sw),
+                    })
+                    continue          # the edit survives without this component
 
                 validated_mg.append({
                     "type": _mg_type,
@@ -18328,6 +18486,29 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     f"{_f6_words} words for {_f6_window:.1f}s; viewers need "
                     f"~{_f6_floor:.1f}s — shorten the text or widen the window."
                 )
+
+            # RUNG 3, USER-FACING. A beat we deliberately left bare is a
+            # JUDGMENT, and saying so is the difference between a tool that
+            # quietly did less and a collaborator that made a call and told you.
+            # It also hands the user the one thing no internal ledger can: the
+            # fix is to reframe the shot.
+            #
+            # NOT AN ERROR MESSAGE. No component type name, no error code, no
+            # failure language — the standing law is fail loudly to US, never to
+            # the user, and nothing here failed. Silence for shrink/reposition:
+            # the user gets a changelog of SUBTRACTIONS, never of successes.
+            if _mg_user_notes:
+                _said = next((str(_n.get("said") or "").strip()
+                              for _n in _mg_user_notes if _n.get("said")), "")
+                _note = _mg_unplaced_note(_said)
+                _prev = str(edit_plan.get("edit_rationale") or "").strip()
+                _joined = (f"{_prev} {_note}" if _prev else _note)
+                # edit_rationale is capped at 400 in PostCutPlan; the NOTE is the
+                # part the user did not already have, so it wins the space.
+                edit_plan["edit_rationale"] = (
+                    _joined if len(_joined) <= 400 else _note[:400])
+                print(f"[mg] {len(_mg_user_notes)} component(s) left unplaced — "
+                      f"told the user in the edit's own words", flush=True)
 
             if _mg_violations:
                 raise ValueError("\n".join(_mg_violations))
