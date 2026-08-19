@@ -2995,6 +2995,56 @@ except Exception:
 
 print("[startup] all import checks done", flush=True)
 
+
+def _image_module_manifest():
+    """WHICH REPO MODULES ARE ACTUALLY IN THIS CONTAINER — Rule 0, half two.
+
+    `modal app history` proves which COMMIT deployed. It does not prove the
+    running image carries the files that commit added: a mount line can be
+    missing, or a module can be committed and never mounted, and the SHA reads
+    identical either way. Every check we had for this was an INFERENCE — the
+    gate reads modal_app.py's source, git reads the commit, and an ephemeral
+    probe builds its own image from the local tree. None of them observes the
+    container that is serving traffic.
+
+    This runs INSIDE that container, on real jobs. Sizes rather than booleans,
+    because a 0-byte or truncated mount has bitten before (the models/ symlink
+    clobber shipped a file that existed and was unusable).
+
+    Costs one os.path.getsize per module at startup and nothing per job.
+    """
+    import os as _os
+    _mods = ("handler", "surgical_ops", "duration_target", "mechanical_router",
+             "prompt_v2_editor", "prompt_v2_schema", "prompt_v2_exemplars",
+             "burned_text", "hype_render", "design_system", "edit_policy")
+    out = {}
+    for _m in _mods:
+        _p = f"/{_m}.py"
+        try:
+            out[_m] = _os.path.getsize(_p) if _os.path.exists(_p) else 0
+        except Exception:
+            out[_m] = -1                      # unreadable is NOT the same as absent
+    return out
+
+
+# Printed once per container, with a grep-stable prefix, so any real job's log
+# answers "what is actually in the image?" without a synthetic probe run. The
+# ABSENT list is printed separately because that is the line worth alerting on.
+_IMAGE_MODULES = _image_module_manifest()
+# ONLY MEANINGFUL INSIDE THE WORKER IMAGE. Run from a checkout there are no /
+# mounts, so every module reads absent and this would alarm on every gate run
+# and every local import — a warning that fires when nothing is wrong is how a
+# real one gets ignored. `/handler.py` present == we are in the image.
+_IN_IMAGE = _IMAGE_MODULES.get("handler", 0) > 0
+if _IN_IMAGE:
+    print(f"[startup] image modules: "
+          f"{ {k: v for k, v in _IMAGE_MODULES.items() if v > 0} }", flush=True)
+    _absent = sorted(k for k, v in _IMAGE_MODULES.items() if v <= 0)
+    if _absent:
+        print(f"[startup] !! MODULES ABSENT FROM THIS IMAGE: {_absent} — a "
+              f"deferred import of any of these dies inside its fail-safe",
+              flush=True)
+
 # ── GPU flags ─────────────────────────────────────────────────────────────────
 # Orchestrator runs CPU-only — the H100 moved to the dedicated
 # rife_normalize_remote function. NVENC and CUDA hwaccel decode
@@ -38393,6 +38443,19 @@ def handler(job):
             "source_hinted": bool(_hint_source_cached),
             "transcript_hinted": bool(_hint_transcript_cached),
         }
+        # RULE 0, HALF TWO, ON ORGANIC TRAFFIC. `modal app history` proves which
+        # COMMIT deployed; only this proves the RUNNING image carries the files
+        # that commit added. Same nesting trick as prewarm above — it rides
+        # result.stage_timings WHOLE, so "is the module actually in the image?"
+        # becomes a DB query on real jobs instead of an inference from source, a
+        # git object, or an ephemeral probe that builds its own image. Only the
+        # ABSENT names are persisted: the present set is large, static per
+        # deploy, and already in the startup log, while an absent module is the
+        # thing worth finding — a deferred import of one dies inside its
+        # fail-safe, which is how moodreel_editor and progressive_publish
+        # silently un-shipped.
+        _timings["image_absent"] = sorted(
+            k for k, v in _IMAGE_MODULES.items() if v <= 0)
 
         # Only emit the `download` token on a true cache miss — a cached copy
         # resolves in <100ms and would flash the UI label for no reason.
