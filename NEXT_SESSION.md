@@ -1,109 +1,93 @@
-# NEXT SESSION — the queue, in order
+# NEXT SESSION — the queue, in the owner's order
 
-**LIVE NOW**
-- worker **v557 = `fafe171`** (Modal-verified) — the mask's twin fixed
-- server **`1e4b59f`** — verified at `promptly-ae0u.onrender.com/api/health`,
-  gate receipt 41/41 @ 15:07:53Z. `markJobFailed` routes through the invariant.
-- worker HEAD **`dd15778`** — the v2 build, committed, gate 399 green, **dark
-  and unwired**. Not deployed; it selects nothing until step 2.
+Written 2026-08-19 at the end of a long session. Everything below is stated as
+BUILT / REACHABLE / PROVEN separately, because this session's most expensive
+lesson was that those three are not the same and the gate only ever checked the
+first one.
 
 ---
 
-## 1. `invariant_heal` on a real denominator — a READ, first
+## 1. Migrate the 26 word→seconds sites onto `word_time_s`
 
-The guard went live **2026-08-18T15:07:53Z**. Snapshot at handoff:
+**The no-op property IS the verification.** `_SHARED_CLOCK_LEAD_MS` is `0.0`
+today, so routing every inline `float(words[i].get("start"/"end"))` through the
+authority must produce a BYTE-IDENTICAL plan. If a diff appears, the migration is
+wrong — not the baseline.
 
-```
-jobs since guard live : 5
-invariant_heal fires  : 0
-rows failed WITH video: 0
-```
+    authority   handler.py  word_time_s / word_frame / caption_ms_for_frame
+    policies    WORD_FRAME_COMPONENT (round)  ·  WORD_FRAME_NEVER_EARLY (ceil)
+    audited     26 inline sites, 4 rounding policies, 3 partial authorities
 
-**5 is not a denominator.** Do not report 0 as proven until a few hours of
-traffic have passed (the rate has been ~180 jobs/day).
+**Do not collapse the two policies.** They are two encodings of ONE instant under
+two reveal semantics: a component fires on a frame index; a caption reveals when
+`(frame/fps)*1000 >= fromMs`. Rounding a caption down reintroduces the earliness
+Zac's 2026-07-15 ruling removed, and there is a gate check on it.
 
-- **non-zero** ⇒ post-fix exceptions are still reaching that path; the TypeError
-  was one trigger among several and the guard is doing real work.
-- **zero on a real denominator** ⇒ v557 closed the trigger and the guard is
-  insurance rather than a running repair.
+Method: migrate in batches, gate after each, diff a plan from a fixed source
+before/after. The lead being 0.0 is what makes this safe; if anyone raises it
+first, the migration stops being verifiable.
 
-One query: `completion_delivery=eq.invariant_heal & updated_at >= 15:07:53Z`.
+## 2. Run `cert_timing_rendered_artifact_app.py` ONCE (~$0.30)
 
-## 2. The v2 wiring — the only thing between the build and the A/B
+Turns the timing guarantee from asserted into observed. It renders a constructed
+source, then measures the OUTPUT FILE: first frame whose luma jumps (must equal
+the predicted frame, exactly) and the audio transient's sample (must land within
+one frame), plus the A/V divergence — which is the failure that actually reads as
+a mistake.
 
-`prompt_v2_*.py` are built and verified; **nothing selects them.** Wire into
-`generate_edit_gemini`:
+Every timing check before this one read the PLAN, which is why the caption-only
+lateness of 2026-07-13 needed a human to notice it.
 
-- when `prompt_v2_editor.v2_enabled(input_data)`, assemble the system
-  instruction from `build_v2_system_instruction(catalog_block, exemplar_block(mode))`
-  — the catalog is PASSED IN, not rewritten, so the A/B measures doctrine and
-  not a rebuilt pipeline;
-- select `BeatMajorPlan` as the response schema instead of the component-major one;
-- on return, `flatten_beats(plan, ledger=(_ledger_requested, _ledger_dropped))`
-  **before** anything counts `motion_graphics` — that ordering is what keeps
-  `handler.py:28540`'s equality true by construction.
+## 3. The four generation-free compositions
 
-Flag default OFF. Production must stay byte-identical with it unset.
+**State: BUILT, NOT REACHABLE.** By this session's own standard they are not done.
 
-## 3. The A/B — per `PROMPT_V2_AB_PREREGISTRATION.md`
+    in MG_MAP (renderer dispatch)   YES
+    in VALID_MG_TYPES               YES  4/4
+    in COMPONENT_CONTRACT           YES  typed, required-by-trigger
+    named in the prompt catalog     NO   <- no planner can request them
+    worker derives atSeconds        NO   <- at_word_index -> seconds missing
 
-Serial (the concurrency confound is measured and real), trigger corpus,
-3.7-flash, thinking=2048, ~$5.20 for 26 cells, plan-only.
+Remaining: a catalog entry with a FITS/FIGHTS line per component, the
+`at_word_index -> atSeconds` derivation **through `word_frame`** (that is the
+whole reason the authority went first), then a cert + the ledger counter for
+requested-vs-dropped per type.
 
-**Capture `read` from EVERY cell, verbatim** — that is the first look at what
-the model actually saw, and it is the deliverable even if the numbers disappoint.
+`tsc` is not installed here, so `FrameCompositions.tsx` is unverified by a
+compiler — only by review. Install or run the bundle build before trusting it.
 
-Report **requested vs dropped-by-us from the component ledger**, never rendered
-counts. Thresholds are already fixed in the pre-registration; do not re-choose
-them after seeing the result, and do not re-run on a different corpus to get a
-better number.
+## 4. Closed this session
 
-## 4. `dispatch-to-modal.js:751` — the misattribution
+- **Attach sweep — CLOSED.** Synthetic orphan injected into production, sweep
+  reconstructed the chat in **304s**, both rows cleaned up. FRONTEND unblocked;
+  waiting only on Apple. Census: `still_stranded = 0` of 5,406.
+- **§8.2 backfill** — 540 renders / 476 users, verified by read-back.
+- **Deliverable guard** — 0 executions / 14 failures / 76 jobs / 74 users.
+  Deployed and UNEXERCISED; that is a result, not a proof.
 
-All 55 had `worker_started_at` AND `modal_call_id` set. **Zero** were pre-spawn
-throws. 39 users were told "We had trouble reaching the render service" about a
-service we reached, whose worker ran. Class name AND user copy.
+## 5. Still open, not queued by the owner
 
-Predicate: `worker_started_at ∧ modal_call_id` ⇒ a worker death whose completion
-never arrived, not an unreachable dispatcher. (Class is stale — 0 since Aug 16
-11:40Z — so this is a copy/labelling fix, not an outage.)
+- `dispatch-to-modal.js:751` DISPATCH_UNREACHABLE misattribution + user copy.
+- prompt-v2: arm B returned a valid but EMPTY plan on **6 of 10** sources. The
+  reads are excellent where they exist (37/37 carry a real read) and it beat arm
+  A **+49%** on the 4 productive sources — but 60% silent is not shippable, and
+  that is the thing to chase, not the density delta.
+- **`generated_scenes` = 0 in BOTH arms** with a scene field available. The
+  scene decline is NOT a vocabulary problem; that theory is dead.
+- Cert-only modules remaining: `rhythm_dimension.py`, `harness_plan_diff.py`.
 
-## 5. The multimodal boundary — start with one line
+## 6. Traps this session paid for — do not re-pay
 
-`CHAT_ARCHITECTURE_SPEC.md` (content-studio). **First: re-scope
-`empty_ai_reply`** — today `!reply.trim()` 502s an image-only reply, so every
-other part of §1 ships broken without it. Then media in, then §3's pacer, then
-non-text out, then §2 tool calling.
-
----
-
-## Open filings
-
-- `FILING_EMPHASIS_OUTSIDE_VIDEO.md` — Step-C precondition. `emphasis_moments[4]
-  derived t=73.217s is outside video` on a **74.8s** source. Cheap first move:
-  make the message name the bound it compared against.
-- `held/echo_outro/BLOCKER.md` — built, mirror test 14/14, blocked on an owner
-  call about render-only types across three gates.
-- `FILING_CANON_MIRROR_CONSOLIDATION.md` — four surfaces, low priority.
-- `FILING_TYPED_MG_PROPS.md` — superseded in part by `prompt_v2_schema.py`.
-
-## Corrections carried forward — do NOT re-derive
-
-- **"props empty 210/210" — WITHDRAWN.** It read the render-side projected shape
-  out of `edit_recipe`, not the model's plan. Historical rate is UNMEASURED.
-- **"41.7% fallback rate" — WITHDRAWN.** That was `cell.map` concurrency,
-  refuted by a serial control (0/5).
-- **"terminal-invariant was never deployed" — WITHDRAWN.** It WAS on origin/main;
-  my checkout was 19 commits stale. The real defect was narrower: deployed but
-  `markJobFailed` never called it. Fixed in `1e4b59f`.
-- **§4's 3.5/sec is NOT placement density.** It counts every motion kind; REF-2
-  is 0.14 placements/sec. Do not put them in the same table.
-- Step A's real numbers, serial at production's canonical thinking=2048:
-  3.7-flash **2.50×** faster at p50 (70.1s → 28.0s), **cut count identical 5/5**,
-  marginally less decorative.
-
-## The lesson that cost the most this session
-
-**Three separate cohorts read as live defects purely because the measurement
-window straddled a fix.** What resolved all three was not a better diagnosis —
-it was cutting each cohort at its deploy boundary before believing any of it.
+- **Look for the tool before writing one.** Wrote `cert_no_orphan_modules.py`
+  before finding `sweep_built_not_wired.py`; nearly wired a second re-edit engine
+  beside `_deterministic_reedit`, whose docstring says "reuse, never parallel".
+- **Grep the repo before spending.** `maxItems` is rejected by Vertex —
+  handler.py:19590 has said so since 2026-07-11. I rediscovered it by burning a
+  paid A/B cell.
+- **Read the error.** Four probe attempts for one `ModuleNotFoundError`: an
+  ephemeral app must mount `modal_app.py` explicitly.
+- **A long `modal run` dies with its client.** Use `--detach`, and persist
+  results FROM INSIDE the container — a result that lives only in the process
+  watching the run is not a result.
+- **Mutating a module in place poisons `__pycache__`** when size and mtime-second
+  match. The gate now runs in a pycache jail.

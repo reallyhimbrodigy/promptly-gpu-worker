@@ -1261,6 +1261,78 @@ def _audible_word_onset_s(dg_words, idx):
         return 0.0
 
 
+def word_time_s(words, idx, edge="start"):
+    """THE ONE READER of a word's clock. `[timing authority, 2026-08-19]`
+
+    AUDITED: 26 independent inline `float(words[i].get("start"/"end"))` sites in
+    this file, each its own conversion, several reading RAW start while
+    _audible_word_onset_s above declares itself "the clock for everything". A
+    lever that one function applies and twenty-six call sites bypass is not a
+    lever, and _SHARED_CLOCK_LEAD_MS has been quietly partial ever since.
+
+    Routing every site through here is BYTE-IDENTICAL TODAY, because the lead is
+    0.0 — and it is what finally makes the lead universal, which is the whole
+    claim of the docstring above it.
+
+    `end` carries the SAME lead as `start`, so a span keeps its length: shifting
+    only one edge would silently stretch or squeeze every window in the edit.
+    """
+    try:
+        if edge == "start":
+            return _audible_word_onset_s(words, idx)
+        _raw = float(words[idx].get("end") or 0.0)
+        return max(0.0, _raw - (_SHARED_CLOCK_LEAD_MS / 1000.0))
+    except Exception:
+        return 0.0
+
+
+# The two POLICIES, named once. No component may pick its own — that is how the
+# ceil/round split became invisible in the first place.
+WORD_FRAME_COMPONENT = "component"    # round: SFX / zoom / MG / b-roll / overlay
+WORD_FRAME_NEVER_EARLY = "never_early"  # ceil: captions, per Zac 2026-07-15
+
+
+def word_frame(words, idx, fps, edge="start", policy=WORD_FRAME_COMPONENT):
+    """THE ONE CONVERSION from a word anchor to a FRAME INDEX.
+
+    Frames, not seconds, because the frame is the quantum every consumer
+    actually lands on — 33.3ms at 30fps. Returning seconds and letting each
+    caller quantise is precisely the seam this replaces.
+
+    TWO POLICIES, AND THE SECOND ONE IS NOT DRIFT. I originally proposed a single
+    never-late rule and it was wrong on contact with the code:
+
+      component   round(t*fps). Fires on the nearest frame, which may be up to
+                  half a frame BEFORE the onset. Correct for a zoom or a sound —
+                  they are not claiming to be a spoken word.
+      never_early ceil(t*fps). A caption word reveals ONLY when it is audible
+                  (Zac 2026-07-15, gate-enforced, measured 0% early across all 9
+                  styles). Rounding a caption down would reintroduce exactly the
+                  earliness that ruling removed.
+
+    They are two encodings of one instant under two different reveal semantics,
+    not two opinions about rounding. The epsilon keeps a value already exactly on
+    a frame boundary from being pushed to the next one by float error.
+    """
+    _t = word_time_s(words, idx, edge)
+    _f = _t * float(fps or 30.0)
+    if policy == WORD_FRAME_NEVER_EARLY:
+        return max(0, int(math.ceil(_f - 1e-9)))
+    return max(0, int(round(_f)))
+
+
+def caption_ms_for_frame(frame, fps):
+    """The ms that reveals a caption on EXACTLY `frame`.
+
+    A caption's reveal condition is `(frame/fps)*1000 >= fromMs`, so the ms must
+    be floored onto the frame or the reveal slips to the next one. MUST be an
+    int: TikTokToken.fromMs/toMs are `int` in render_schemas and a float fails
+    PromptlyRenderInput validation and kills the whole render (regression
+    2026-07-13).
+    """
+    return int((int(frame) * 1000.0) // float(fps or 30.0))
+
+
 # NOTE (Zac 2026-07-15): the sharp-vs-soft measurability gate (_sfx_may_fire /
 # _sfx_onset_measurable / _SFX_SHARP_ATTACK_MS) is DELETED. A sound — sharp or soft —
 # fires on its emphasis word's shared-clock onset, no gate, no swell fallback. The

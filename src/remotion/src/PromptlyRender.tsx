@@ -470,16 +470,32 @@ const TextOverlaysLayer: React.FC<{
 );
 
 // ─── Motion graphics ───────────────────────────────────────────────────────
+// The generation-free compositions render a FRAME OF THE USER'S OWN VIDEO, so
+// unlike every other motion graphic they need the source and the frame rate.
+// Injected ONLY for these four: spreading extra props into the other 28
+// components would change their call signature for no reason, and this layer
+// has been byte-identical for a long time. `atSeconds` is NOT computed here —
+// the worker derives it from a word index, because there is one clock in this
+// pipeline and it is not in the renderer.
+const FRAME_COMPOSITION_TYPES = new Set([
+  "EvidenceCard", "DeviceMockup", "BeforeAfter", "FrameCallout",
+]);
+
 const MotionGraphicRenderer: React.FC<{
   spec: MotionGraphicSpec;
   fps: number;
-}> = ({ spec, fps }) => {
+  sourceUrl?: string;
+}> = ({ spec, fps, sourceUrl }) => {
   const Comp = MG_MAP[spec.type];
   if (!Comp) return null;
+  const frameProps = FRAME_COMPOSITION_TYPES.has(spec.type)
+    ? { sourceUrl, fps, durationInFrames: spec.durationInFrames }
+    : null;
   return (
     <Comp
       startMs={0}
       durationMs={Math.round((spec.durationInFrames / fps) * 1000)}
+      {...(frameProps || {})}
       {...spec.props}
     />
   );
@@ -488,7 +504,8 @@ const MotionGraphicRenderer: React.FC<{
 const MotionGraphicsLayer: React.FC<{
   items: MotionGraphicSpec[];
   fps: number;
-}> = ({ items, fps }) => (
+  sourceUrl?: string;
+}> = ({ items, fps, sourceUrl }) => (
   <>
     {items.map((mg, i) => (
       <Sequence
@@ -501,7 +518,7 @@ const MotionGraphicsLayer: React.FC<{
             layer); static hold frames re-render identically under the blur but
             still pay the samples× cost — see the cost note in the D2 report. */}
         <MotionBlurWrap>
-          <MotionGraphicRenderer spec={mg} fps={fps} />
+          <MotionGraphicRenderer spec={mg} fps={fps} sourceUrl={sourceUrl} />
         </MotionBlurWrap>
       </Sequence>
     ))}
@@ -901,7 +918,7 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
         captionKeywords={caption?.keywords ?? []}
         fps={fps}
       />
-      <MotionGraphicsLayer items={motionGraphics} fps={fps} />
+      <MotionGraphicsLayer items={motionGraphics} fps={fps} sourceUrl={sourceUrl} />
       {/* Captions paint ABOVE the content-accent tier (text overlays + motion
           graphics) and BELOW only the tight-cut flash — readable over speaker,
           B-roll, accents, and any residual overlap. Captions are the dialogue

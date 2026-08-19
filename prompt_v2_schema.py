@@ -103,6 +103,19 @@ COMPONENT_CONTRACT: Dict[str, Dict[str, Any]] = {
     "Notification":   {"required": ["text"], "optional": ["title"]},
     "ChatThread":     {"required": ["messages"], "optional": []},
     "Timeline":       {"required": ["items"], "optional": []},
+    # ── GENERATION-FREE COMPOSITIONS ────────────────────────────────────────
+    # required = what the beat's trigger GUARANTEES. Each takes a WORD INDEX for
+    # the frame it shows (`at_word_index`), never a second: the worker derives
+    # the source time. A renderer that did clock arithmetic would be a second
+    # clock, and this pipeline has paid for two.
+    "EvidenceCard":   {"required": ["at_word_index", "claim"],
+                       "optional": ["caption", "accent"]},
+    "DeviceMockup":   {"required": ["at_word_index"],
+                       "optional": ["label", "accent"]},
+    "BeforeAfter":    {"required": ["before_word_index", "after_word_index"],
+                       "optional": ["before_label", "after_label", "accent"]},
+    "FrameCallout":   {"required": ["at_word_index", "focus_x", "focus_y"],
+                       "optional": ["note", "accent"]},
 }
 # Components that carry no content — timing only. An empty props dict is CORRECT
 # for these, and must never be read as a grounding miss.

@@ -327,7 +327,8 @@ export type MotionGraphicType =
   // with type_registries.VALID_MG_TYPES, which is where the Python Literals in
   // handler.py and render_schemas.py both derive from.
   | "NamePlate"
-  | "EndCard";
+  | "EndCard"
+;
 
 export interface MotionGraphicSpec {
   type: MotionGraphicType;
