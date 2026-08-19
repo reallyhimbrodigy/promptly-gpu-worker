@@ -1255,8 +1255,7 @@ def _audible_word_onset_s(dg_words, idx):
     shift instead — coherent AND on-time. THIS is the clock for everything,
     sharp SFX included — no component has a separate timing gate (Zac 2026-07-15)."""
     try:
-        _raw = float(dg_words[idx].get("start") or 0.0)
-        return max(0.0, _raw - (_SHARED_CLOCK_LEAD_MS / 1000.0))
+        return word_time_s(dg_words, idx, "start")
     except Exception:
         return 0.0
 
@@ -1276,14 +1275,21 @@ def word_time_s(words, idx, edge="start"):
 
     `end` carries the SAME lead as `start`, so a span keeps its length: shifting
     only one edge would silently stretch or squeeze every window in the edit.
+
+    IT RAISES ON A BAD INDEX, DELIBERATELY. The 26 sites this replaces are bare
+    `float(words[i].get("start"))` expressions that raise IndexError on an
+    out-of-range anchor. Swallowing that into 0.0 during the migration would
+    convert a loud crash into a component silently placed at t=0 — a different
+    failure, quietly, on every site at once, and precisely the silent-fail-safe
+    this repo has a standing law against. The migration changes WHERE the
+    arithmetic lives, not what happens when the input is wrong.
+
+    `_audible_word_onset_s` keeps its own try/except for ITS existing callers,
+    and now delegates the arithmetic here, so there is still one lead and one
+    formula.
     """
-    try:
-        if edge == "start":
-            return _audible_word_onset_s(words, idx)
-        _raw = float(words[idx].get("end") or 0.0)
-        return max(0.0, _raw - (_SHARED_CLOCK_LEAD_MS / 1000.0))
-    except Exception:
-        return 0.0
+    _raw = float(words[idx].get("end" if edge == "end" else "start") or 0.0)
+    return max(0.0, _raw - (_SHARED_CLOCK_LEAD_MS / 1000.0))
 
 
 # The two POLICIES, named once. No component may pick its own — that is how the
@@ -4982,7 +4988,7 @@ def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.60, s
             # word and the cut lands inside the word-gap. The pre-split
             # boundary is still word N (the LAST kept word before the cut).
             if _new_idx + 1 < len(kept_words):
-                _next_ws = float(kept_words[_new_idx + 1].get("start") or 0)
+                _next_ws = word_time_s(kept_words, _new_idx + 1, "start")
                 _dist_start = abs(_next_ws - _sc)
                 if _dist_start <= _best_dist:
                     _best_dist = _dist_start
@@ -10746,8 +10752,8 @@ def detect_dead_air(
     # within-clip locator uses LEVEL silence; the flag-off tiers use VAD silence.
     _wc_regions = _level_regions if _WITHIN_CLIP_DEADAIR else silence_regions
     for a, b in zip(kept, kept[1:]):
-        gap_start = float(words[a].get("end") or 0.0)
-        gap_end = float(words[b].get("start") or 0.0)
+        gap_start = word_time_s(words, a, "end")
+        gap_end = word_time_s(words, b, "start")
         if gap_end <= gap_start:
             continue
         silence_in_gap = 0.0
@@ -10965,7 +10971,7 @@ def detect_stutter(words: list) -> list:
         while j < n:
             lemma_j = _word_lemma(words[j])
             spk_j = int(words[j].get("speaker") or 0)
-            gap = float(words[j].get("start") or 0.0) - float(words[chain_end].get("end") or 0.0)
+            gap = word_time_s(words, j, "start") - word_time_s(words, chain_end, "end")
             if lemma_j == lemma_i and spk_j == spk_i and gap < _STUTTER_MAX_GAP_S:
                 chain_end = j
                 j += 1
@@ -13224,7 +13230,7 @@ def _seam_splice_index(awi, dg_words, cuts, removed_src):
           prices at room 0 and can only be offered as an overlay home.
     """
     try:
-        _we = float(dg_words[awi].get("end") or 0.0)
+        _we = word_time_s(dg_words, awi, "end")
     except Exception:
         return None
     _nk = awi + 1
@@ -13232,7 +13238,7 @@ def _seam_splice_index(awi, dg_words, cuts, removed_src):
         _nk += 1
     if _nk >= len(dg_words):
         return None
-    _nk_start = float(dg_words[_nk].get("start") or 0.0)
+    _nk_start = word_time_s(dg_words, _nk, "start")
     for _i in range(len(cuts) - 1):
         _cs = float(cuts[_i]["source_start"])
         _ns = float(cuts[_i + 1]["source_start"])
@@ -15478,8 +15484,8 @@ def generate_edit_gemini(
         def _audio_gap_at_boundary(ni):
             if ni < 0 or ni + 1 >= len(kept_words):
                 return float("inf")
-            _a_end = float(kept_words[ni].get("end") or 0.0)
-            _b_start = float(kept_words[ni + 1].get("start") or 0.0)
+            _a_end = word_time_s(kept_words, ni, "end")
+            _b_start = word_time_s(kept_words, ni + 1, "start")
             return max(0.0, _b_start - _a_end)
         _candidate_indices = sorted(_word_removal_set | _dead_air_set | _shot_boundary_set)
 
@@ -16071,8 +16077,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
 
                 def _rng_secs(_ra, _rb):
                     try:
-                        _s = float(kept_words[_ra].get("start") or 0.0)
-                        _e = float(kept_words[_rb].get("end") or 0.0)
+                        _s = word_time_s(kept_words, _ra, "start")
+                        _e = word_time_s(kept_words, _rb, "end")
                         return round(_s, 2), round(max(0.0, _e - _s), 3)
                     except Exception:
                         return None, None
@@ -16134,7 +16140,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                 if 0 <= int(new_to_src[_ki]) < len(deepgram_words)]
                     _cw_prev = (deepgram_words[_cw_src[0] - 1]
                                 if _cw_src and _cw_src[0] > 0 else None)
-                    _cw_gap = ((float(_cw_span[0].get("start") or 0.0)
+                    _cw_gap = ((word_time_s(_cw_span, 0, "start")
                                 - float((_cw_prev or {}).get("end") or 0.0))
                                if (_cw_span and _cw_prev) else 0.0)
                     # gap AFTER the span (to the next transcript word) — clause (iii)
@@ -16142,8 +16148,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # flows into the following word is kept. No following word (end of
                     # transcript) → 0.0 (conservative: never treat the last word as a
                     # cuttable dead-air fragment).
-                    _cw_gap_after = ((float(_cw_foll[0].get("start") or 0.0)
-                                      - float(_cw_span[-1].get("end") or 0.0))
+                    _cw_gap_after = ((word_time_s(_cw_foll, 0, "start")
+                                      - word_time_s(_cw_span, -1, "end"))
                                      if (_cw_span and _cw_foll) else 0.0)
                     if not _gemini_cut_span_removable(_cw_span, _cw_foll, _cw_prev, _cw_gap, _cw_gap_after):
                         _record_divergence(
@@ -16264,12 +16270,12 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             def _word_start(src_idx):
                 if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
                     return None
-                return float(_dg[int(src_idx)].get("start") or 0)
+                return word_time_s(_dg, int(src_idx), "start")
 
             def _word_end(src_idx):
                 if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
                     return None
-                return float(_dg[int(src_idx)].get("end") or 0)
+                return word_time_s(_dg, int(src_idx), "end")
 
             # caption_position_segments (synthesized from caption_position_changes)
             _changes = edit_plan.get("caption_position_changes") or []
@@ -17108,7 +17114,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             _wi = int(_ch["word_index"])
                             if _wi < 0 or _wi >= len(_dg_words):
                                 continue
-                            _ch_t = float(_dg_words[_wi].get("start") or 0)
+                            _ch_t = word_time_s(_dg_words, _wi, "start")
                             if _ch_t > _cur_t:
                                 _resynth_segments.append({
                                     "from_seconds": _cur_t,
@@ -17373,7 +17379,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # const-indices (membership IS the schema); heavy-unfit →
                     # extracted-to-room-gating (natural must fit the seam's room).
                     # All three unrepresentable on the governed path.
-                    word_end = float(_dg_words[awi].get("end") or 0)
+                    word_end = word_time_s(_dg_words, awi, "end")
                     # Build extras dict — copy through all component-specific props
                     # "sound" rides _transition_sound (its own carrier);
                     # leaking it here spread into TransitionSpec (extra="forbid")
@@ -17807,8 +17813,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 if _sw_kept > _ew_kept:
                     print(f"[broll] All words [{_sw}]-[{_ew}] removed — skipping '{_br_kw}'", flush=True)
                     continue
-                _br_ts = float(_broll_dg_words[_sw_kept].get("start") or 0)
-                _br_end = float(_broll_dg_words[_ew_kept].get("end") or 0)
+                _br_ts = word_time_s(_broll_dg_words, _sw_kept, "start")
+                _br_end = word_time_s(_broll_dg_words, _ew_kept, "end")
                 # SOURCE-TIME span between the two words — INCLUDES any
                 # mechanically-removed silence/filler. Computed but no longer
                 # surfaced as the recipe `duration` field, because downstream
@@ -18214,8 +18220,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # difference between this stored value and the clip boundary,
                 # causing project_source_time_to_output to return None at render
                 # time — same precision bug class as the emphasis-moment one.
-                _sw_start = float(_dg_words[_sw].get("start") or 0)
-                _ew_end = float(_dg_words[_ew].get("end") or 0)
+                _sw_start = word_time_s(_dg_words, _sw, "start")
+                _ew_end = word_time_s(_dg_words, _ew, "end")
 
                 # ── F5: content grounding — card text must come from the
                 # dialogue (∪ vibe ∪ identity). Numerals always pass here;
@@ -18996,7 +19002,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # No rounding — match clip source bounds exactly. See the same
                 # comment on motion_graphics _sw_start above for the precision-bug
                 # class this avoids.
-                _source_start = float(_dg_words[_swi].get("start") or 0)
+                _source_start = word_time_s(_dg_words, _swi, "start")
                 _entry = {
                     "variant": _var,
                     "start_word_index": _swi,
@@ -20084,7 +20090,7 @@ def _duration_reedit(old_plan, change_request, transcript, source_duration_s=Non
     _src = float(source_duration_s or 0.0)
     if not _src:
         try:                      # derive from the word list — one clock only
-            _src = float(_words[-1].get("end") or 0.0)
+            _src = word_time_s(_words, -1, "end")
         except Exception:
             return None
     _detectors = {"detect_dead_air": detect_dead_air,
@@ -20486,8 +20492,8 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
             try:
                 _sw = int(_mg.get("start_word_index"))
                 _ew = int(_mg.get("end_word_index"))
-                _sw_s = float(_dg[_sw].get("start") or 0) if 0 <= _sw < len(_dg) else 0.0
-                _ew_s = float(_dg[_ew].get("end") or 0) if 0 <= _ew < len(_dg) else 0.0
+                _sw_s = word_time_s(_dg, _sw, "start") if 0 <= _sw < len(_dg) else 0.0
+                _ew_s = word_time_s(_dg, _ew, "end") if 0 <= _ew < len(_dg) else 0.0
             except (TypeError, ValueError):
                 _sw_s = _ew_s = 0.0
             if not _mg_clear_region_exists(_mt, _sw_s, _ew_s, face_traj,
@@ -22260,8 +22266,8 @@ def _broll_window_context(bc, tx_words):
                 str(tx_words[i].get("word") or "").strip()
                 for i in range(sw, ew + 1)
             ).strip()
-            mid_s = (float(tx_words[sw].get("start") or 0.0)
-                     + float(tx_words[ew].get("end") or 0.0)) / 2.0
+            mid_s = (word_time_s(tx_words, sw, "start")
+                     + word_time_s(tx_words, ew, "end")) / 2.0
         except (TypeError, ValueError, AttributeError):
             mid_s = None
     return dlg_text, mid_s
@@ -23321,6 +23327,20 @@ def compute_transition_slot_frames(transition_type, tail_room_s, head_room_s,
     if str(transition_type or "none") not in VALID_TRANSITION_TYPES:
         return 0
     _nat_f = get_transition_duration_frames(str(transition_type))
+    # NOT A word_frame CALL, AND DELIBERATELY EXEMPT FROM THE TIMING AUTHORITY
+    # (2026-08-19). word_frame answers "when does this anchor LAND?" and rounds
+    # (or ceils, for never-early). This answers a different question — "how much
+    # room is REALLY there?" — where the safe direction is DOWN: over-reporting
+    # handle by one frame lets a transition consume footage that does not exist,
+    # and the all-or-nothing rule above turns that into a 700ms ShutterFlash
+    # rendering as a 33ms flicker (job 7013697d).
+    #
+    # The +1e-9 is not a patched boundary case. 0.5 * 30 lands at
+    # 14.999999999999998 in binary floating point, and a bare floor would
+    # discard a frame of room that physically exists — the epsilon makes the
+    # floor mean "floor the REAL value", not "floor the float error".
+    #
+    # Absorbing this into the authority would be a regression, not a cleanup.
     _tail_f = int(math.floor(float(tail_room_s) * fps + 1e-9))
     _head_f = int(math.floor(float(head_room_s) * fps + 1e-9))
     return _nat_f if (_tail_f >= _nat_f and _head_f >= _nat_f) else 0
@@ -26815,7 +26835,7 @@ def align_caption_tokens(dg_words, gemini_tokens):
         elif tag == "delete":
             continue
         elif tag == "replace":
-            s = float(dg_words[i1].get("start") or 0.0); e = float(dg_words[i2 - 1].get("end") or 0.0)
+            s = word_time_s(dg_words, i1, "start"); e = word_time_s(dg_words, i2 - 1, "end")
             if e <= s:
                 e = s + 1e-3
             m = j2 - j1
@@ -26824,8 +26844,8 @@ def align_caption_tokens(dg_words, gemini_tokens):
                             "end": s + (e - s) * (k + 1) / m, "source": "split"})
         elif tag == "insert":
             m = j2 - j1
-            left = float(dg_words[i1 - 1].get("end") or 0.0) if i1 > 0 else None
-            right = float(dg_words[i1].get("start") or 0.0) if i1 < len(dg_words) else None
+            left = word_time_s(dg_words, i1 - 1, "end") if i1 > 0 else None
+            right = word_time_s(dg_words, i1, "start") if i1 < len(dg_words) else None
             if left is None or right is None:
                 dropped.append({"kind": "open_ended", "n": m}); continue
             gap = right - left
@@ -26872,7 +26892,7 @@ def _corrected_text_by_index(dg_words, gemini_tokens):
             m = j2 - j1
             if i1 <= 0 or i1 >= len(dg_words):
                 meta["dropped_spans"].append({"kind": "open_ended", "n": m}); continue
-            gap = float(dg_words[i1].get("start") or 0.0) - float(dg_words[i1 - 1].get("end") or 0.0)
+            gap = word_time_s(dg_words, i1, "start") - word_time_s(dg_words, i1 - 1, "end")
             if m <= _CAPTION_ALIGN_MAX_INSERT_TOKENS and gap <= _CAPTION_ALIGN_MAX_INSERT_GAP_S:
                 _prev = mp.get(i1 - 1)
                 _base = _prev if _prev is not None else (dg_words[i1 - 1].get("punctuated_word")
@@ -28651,7 +28671,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # _audible_word_onset_s) — same correction as SFX, one derivation.
         try:
             _dgw2 = transcript.get("words") or []
-            _sh = float(_dgw2[idx].get("start") or 0.0) - _audible_word_onset_s(_dgw2, idx)
+            _sh = word_time_s(_dgw2, idx, "start") - _audible_word_onset_s(_dgw2, idx)
             if 0.0 < _sh <= 0.45:
                 _t0 = max(0.0, _t0 - _sh)
         except Exception:
@@ -29552,7 +29572,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 # shift measured in source time (speed is 1.0 by doctrine).
                 try:
                     _sfx_dgw = transcript.get("words") or []
-                    _onset_shift = (float(_sfx_dgw[_sfx_wi].get("start") or 0.0)
+                    _onset_shift = (word_time_s(_sfx_dgw, _sfx_wi, "start")
                                     - _audible_word_onset_s(_sfx_dgw, _sfx_wi))
                     if 0.0 < _onset_shift <= 0.45:
                         _projected_t = max(0.0, _projected_t - _onset_shift)
