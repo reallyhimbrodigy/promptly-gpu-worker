@@ -62,11 +62,20 @@ SECRETS = [modal.Secret.from_name("promptly-secrets"),
 # footage cannot show" — two of the three beats the v2 block names as
 # scene-triggering. Picking a source with no trigger would score a correct
 # decline as a defect, which is the exact error this corpus exists to prevent.
-SOURCE_ID = "comp_scenes_536daed2"
+# TWO SOURCES, contrasting. 536daed2 is the 61s face-filling talking head whose
+# StatCard could not be placed on 2026-08-19 — the hard case, and the one the
+# ladder now has to degrade rather than kill. 43c8dbe8 is 25.9s with a
+# named-concrete-object trigger, a different framing.
+#
+# I am NOT claiming to know which has headroom: the rung that fires is the
+# measurement. A source where reposition succeeds has room; one where the drop
+# fires does not, and the cert already showed contraction cannot save a static
+# face — so the outcome names the framing rather than my guess doing it.
+SOURCE_IDS = ["comp_scenes_536daed2", "comp_scenes_43c8dbe8"]
 
 
 @app.function(secrets=SECRETS, cpu=16.0, memory=49152, timeout=3600)
-def run(source_id: str, run_tag: str) -> dict:
+def run(source_ids: list, run_tag: str) -> dict:
     import time
     import uuid
     import traceback
@@ -79,11 +88,10 @@ def run(source_id: str, run_tag: str) -> dict:
     import handler as H
 
     manifest = json.load(open("/component_corpus_manifest.json"))
-    src = next(s for s in manifest["sources"] if s["id"] == source_id)
-    OUT = {"source": source_id, "triggers": src.get("triggers"),
-           "duration_s": src.get("duration_s"), "cells": []}
+    _by_id = {s["id"]: s for s in manifest["sources"]}
+    OUT = {"sources": source_ids, "cells": []}
 
-    def _one(label, v2_on):
+    def _one(src, label, v2_on):
         # The flag is read at call time by _scenes_directive_v2(), so setting it
         # here is what makes the two cells differ — and it is the ONLY thing
         # that differs. One variable.
@@ -107,13 +115,41 @@ def run(source_id: str, run_tag: str) -> dict:
         except Exception:
             pass
         t0 = time.time()
+        # TEE, don't redirect. The first run of this harness recorded a cell that
+        # produced NO PLAN with no error and no evidence, and I had to pay for a
+        # log pull to find out why. I had already fixed exactly this in the
+        # prompt-v2 harness and then wrote a new one without the lesson.
+        import io as _io
+
+        class _Tee:
+            def __init__(self, real):
+                self.real, self.buf = real, _io.StringIO()
+
+            def write(self, x):
+                self.real.write(x)
+                try:
+                    self.buf.write(x)
+                except Exception:
+                    pass
+                return len(x)
+
+            def flush(self):
+                self.real.flush()
+
+        _tee = _Tee(sys.stdout)
+        _orig = sys.stdout
+        sys.stdout = _tee
         try:
             res = H.handler({"input": body}) or {}
         except Exception as e:
             return {"cell": label, "v2": v2_on, "error": f"{type(e).__name__}: {e}",
                     "traceback": traceback.format_exc()[-800:],
+                    "stdout_tail": _tee.buf.getvalue()[-3000:],
                     "wall_s": round(time.time() - t0, 1)}
+        finally:
+            sys.stdout = _orig
         plan = res.get("edit_plan") if isinstance(res, dict) else None
+        _no_plan = not isinstance(plan, dict)
         scenes = (plan or {}).get("generated_scenes") if isinstance(plan, dict) else None
         cell = {
             "cell": label, "v2": v2_on,
@@ -130,14 +166,37 @@ def run(source_id: str, run_tag: str) -> dict:
                        if isinstance(v, list)} if isinstance(plan, dict) else {},
             "gemini_output_tokens": (res or {}).get("gemini_output_tokens"),
             "ledger": H._component_ledger_snapshot(),
+            # THE THIRD STATE. `generated_scenes: None` means the cell produced no
+            # plan; `0` means it produced one and declined. Folding those together
+            # is what made my own verdict print "BOTH ZERO" on a run where the ON
+            # cell had CRASHED — and that reading would have promoted the
+            # frame-grab arm on a false premise.
+            "no_plan": _no_plan,
+            # the ladder's own outcomes, so the re-run doubles as its first
+            # real-traffic exercise
+            "placement_notes": [ln for ln in _tee.buf.getvalue().splitlines()
+                                if "component(s) left unplaced" in ln
+                                or "clear_region_repositioned" in ln
+                                or "clear_region_unfittable" in ln][:12],
+            "edit_rationale_final": (plan or {}).get("edit_rationale") if isinstance(plan, dict) else None,
         }
+        if _no_plan:
+            cell["result_error"] = {k: res.get(k) for k in
+                                    ("status", "error", "error_code", "user_message")
+                                    if isinstance(res, dict)}
+            cell["stdout_tail"] = _tee.buf.getvalue()[-3000:]
         return cell
 
-    for label, v2 in (("ON_v2", True), ("OFF_control", False)):
-        c = _one(label, v2)
+    for _sid in source_ids:
+      src = _by_id[_sid]
+      for label, v2 in (("ON_v2", True), ("OFF_control", False)):
+        c = _one(src, label, v2)
+        c["source"] = _sid
+        c["triggers"] = src.get("triggers")
+        c["duration_s"] = src.get("duration_s")
         OUT["cells"].append(c)
-        print(f"[cell] {label:12} scenes={c.get('generated_scenes')} "
-              f"wall={c.get('wall_s')}s err={bool(c.get('error'))}", flush=True)
+        print(f"[cell] {_sid[:26]:28} {label:12} scenes={c.get('generated_scenes')} "
+              f"no_plan={bool(c.get('no_plan'))} wall={c.get('wall_s')}s", flush=True)
         print("[celljson] " + json.dumps(c, default=str)[:4000], flush=True)
         try:
             import boto3
@@ -154,9 +213,10 @@ def run(source_id: str, run_tag: str) -> dict:
 @app.local_entrypoint()
 def main():
     tag = os.environ.get("RUN_TAG") or "scenes"
-    out = run.remote(SOURCE_ID, tag)
-    print(f"\n  SOURCE {out.get('source')}  triggers={out.get('triggers')}")
+    out = run.remote(SOURCE_IDS, tag)
     for c in out.get("cells", []):
+        print(f"\n  SOURCE {c.get('source')}  ({c.get('duration_s')}s)  "
+              f"triggers={c.get('triggers')}")
         print(f"\n  ── {c.get('cell')} (SCENES_DIRECTIVE_V2={'1' if c.get('v2') else '0'}) ──")
         if c.get("error"):
             print(f"     ERROR: {c['error']}")
@@ -164,13 +224,31 @@ def main():
         print(f"     generated_scenes : {c.get('generated_scenes')}")
         print(f"     wall / out-tokens: {c.get('wall_s')}s / {c.get('gemini_output_tokens')}")
         print(f"     notes (VERBATIM) : {c.get('notes')}")
+        print(f"     LADDER           : {c.get('placement_notes') or 'no rung fired'}")
+        print(f"     rationale FINAL  : {str(c.get('edit_rationale_final'))[:260]}")
         print(f"     edit_rationale   : {str(c.get('edit_rationale'))[:300]}")
         if c.get("scenes"):
             for s in c["scenes"][:4]:
                 print(f"       scene: {json.dumps(s, default=str)[:220]}")
+    for _sid in SOURCE_IDS:
+        _cs = [c for c in out.get("cells", []) if c.get("source") == _sid]
+        _on = next((c for c in _cs if c.get("v2")), {})
+        _off = next((c for c in _cs if not c.get("v2")), {})
+        print(f"\n  == {_sid} ==  ON scenes={_on.get('generated_scenes')} "
+              f"(no_plan={bool(_on.get('no_plan'))})  |  OFF scenes="
+              f"{_off.get('generated_scenes')} (no_plan={bool(_off.get('no_plan'))})")
     a = next((c for c in out.get("cells", []) if c.get("v2")), {})
     b = next((c for c in out.get("cells", []) if not c.get("v2")), {})
     na, nb = a.get("generated_scenes"), b.get("generated_scenes")
+    if a.get("no_plan") or b.get("no_plan") or a.get("error") or b.get("error"):
+        print("     INCONCLUSIVE — a cell produced NO PLAN. A failed cell is not a "
+              "zero, and reading it as one is how a crash gets reported as a "
+              "decline. Fix the failure before reading the scene question.")
+        for c in (a, b):
+            if c.get("no_plan") or c.get("error"):
+                print(f"       {c.get('cell')}: error={c.get('error')} "
+                      f"result_error={str(c.get('result_error'))[:160]}")
+        return
     print("\n  ── PRE-REGISTERED READING ──")
     if na and not nb:
         print("     ON non-zero, OFF zero -> the v2 directive WORKS; the old one blocked it.")
