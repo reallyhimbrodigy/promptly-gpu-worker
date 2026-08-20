@@ -185,3 +185,106 @@ def build_frame_composition(kind, design_system, at_seconds, props,
     except Exception:
         return None
     return None
+
+
+# ── MECHANICAL GAP-FILL — free, instant, claim-anchored ──────────────────────
+# MEASURED 2026-08-20: 13 of 24 unbiased real sources (54%) have ZERO scdet shot
+# changes. For over half of traffic the picture NEVER CHANGES ON ITS OWN, so
+# every visual change has to be manufactured — and recipe_eval already reports
+# the consequence, e.g. "FAIL [dead-zone] 11.6s with no visual event ... the
+# swipe happens here", logged and ignored on every job.
+#
+# WHY MECHANICAL AND NOT A SECOND MODEL CALL. A repair re-ask is a second Gemini
+# call on every job that trips, and on a 54%-single-shot population that is most
+# of them — roughly the price of the planning call again, against a $0.10/job
+# and 90s law. This runs AFTER the plan, in Python, and costs $0.
+#
+# THE FOUR CONSTRAINTS, each enforced below rather than intended:
+#   FREE      — the image is a frame of the user's own video. No fetch, no
+#               generation, no quota, no network.
+#   INSTANT   — no I/O of any kind on this path.
+#   ANCHORED  — the claim is the WORDS THE SPEAKER IS SAYING in that gap,
+#               verbatim from the transcript. Not summarised, not invented.
+#   NOT THIN  — the still IS the source, so it cannot be irrelevant to the
+#               video the way a stock clip can.
+#
+# EVIDENCECARD ONLY, AND THE OTHER TWO ARE REFUSED ON PURPOSE. DeviceMockup
+# needs a screen to be on camera and EmojiCard needs an emoji that means
+# something — neither is derivable from a transcript, so filling with them would
+# be the pipeline asserting something it cannot check. That is the thin-b-roll
+# failure wearing a different hat.
+_GAPFILL_MIN_GAP_S = 5.0        # the 5-7s cadence floor; below this, no hole
+_GAPFILL_DURATION_S = 1.6       # long enough to read, short enough to not stall
+_GAPFILL_OPENING_GUARD_S = 3.0  # the opening belongs to the speaker (b-roll law)
+_GAPFILL_MAX = 6                # never carpet a video with cards
+_GAPFILL_MIN_CLAIM_WORDS = 3    # fewer words than this is not a claim
+
+
+def plan_gap_fills(plan, words, min_gap_s=None, max_fills=None):
+    """Return [{start_word_index, end_word_index, at_seconds, claim, gap}] —
+    EvidenceCards that close the plan's own visual dead gaps.
+
+    Decides NOTHING about rendering; the caller builds the specs and ledgers.
+    Returns a parallel `declines` list so a gap left open is attributable.
+    """
+    import recipe_eval as _re
+    min_gap_s = _GAPFILL_MIN_GAP_S if min_gap_s is None else min_gap_s
+    max_fills = _GAPFILL_MAX if max_fills is None else max_fills
+    fills, declines = [], []
+    if not words:
+        return fills, declines
+
+    # ITERATIVE, BECAUSE ONE FILL DOES NOT CLOSE A GAP — IT SPLITS IT.
+    # The first cut of this filled each gap's midpoint ONCE and returned: a
+    # 31.9s hole got a single card and stayed a 15.9s hole on both sides, which
+    # closes nothing and would still fail the dead-zone bar. Each placed card
+    # becomes an event, so the gaps are RECOMPUTED and the largest remaining one
+    # is filled next — the loop targets max_dead_gap_s directly and stops when
+    # the cadence is met or the cap binds.
+    _synthetic = {"motion_graphics": list(plan.get("motion_graphics") or []),
+                  "text_overlays": list(plan.get("text_overlays") or []),
+                  "broll_clips": list(plan.get("broll_clips") or []),
+                  "transitions": list(plan.get("transitions") or []),
+                  "emphasis_moments": list(plan.get("emphasis_moments") or [])}
+    _seen_anchor = set()
+    while len(fills) < max_fills:
+        gaps = _re.visual_gaps(_synthetic, words, min_gap_s)
+        if not gaps:
+            break
+        g0, g1, glen = max(gaps, key=lambda g: g[2])   # always the worst one
+        lo = max(g0, _GAPFILL_OPENING_GUARD_S)
+        if g1 - lo < min_gap_s * 0.5:
+            declines.append({"gap": (g0, g1), "reason": "inside_opening_guard"})
+            break
+        mid = lo + (g1 - lo) / 2.0
+        idx = [i for i, w in enumerate(words)
+               if float(w.get("start") or 0.0) >= mid]
+        if not idx or idx[0] in _seen_anchor:
+            declines.append({"gap": (g0, g1), "reason": "no_word_at_anchor"})
+            break
+        i0 = idx[0]
+        i1 = min(len(words) - 1, i0 + 7)
+        claim = " ".join(str(words[j].get("word") or "")
+                         for j in range(i0, i1 + 1)).strip()
+        if len(claim.split()) < _GAPFILL_MIN_CLAIM_WORDS:
+            declines.append({"gap": (g0, g1), "reason": "no_claim_text"})
+            break
+        _seen_anchor.add(i0)
+        fills.append({
+            "start_word_index": i0,
+            "end_word_index": i1,
+            "at_seconds": round(float(words[i0].get("start") or mid), 3),
+            "claim": claim,
+            "gap_s": glen,
+        })
+        # the card is now an event — the next iteration sees a smaller hole
+        _synthetic["motion_graphics"].append({"start_word_index": i0})
+    else:
+        # loop exited on the cap, not on "no gaps left" — say so, per the
+        # no-silent-caps rule.
+        _left = _re.visual_gaps(_synthetic, words, min_gap_s)
+        if _left:
+            declines.append({"gap": (_left[0][0], _left[0][1]),
+                             "reason": f"max_fills_reached ({max_fills}); "
+                                       f"{len(_left)} gap(s) left open"})
+    return fills, declines

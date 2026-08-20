@@ -6286,6 +6286,15 @@ def _speaker_identity_from_transcript(transcript_text):
 _COMPONENT_LEDGER = {}
 
 
+def _gapfill_enabled():
+    """DEFAULT OFF. The mechanical gap-fill changes what is on screen for a
+    majority of sources (54% are single-shot), and whether the cards read as
+    intentional or as glitches is a TASTE call that no instrument here settles.
+    It ships dark, gets judged on one artifact, and is armed by the owner."""
+    return os.environ.get("PROMPTLY_GAP_FILL", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
 def _component_ledger_reset():
     _COMPONENT_LEDGER.clear()
 
@@ -16800,6 +16809,53 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # the identical frame as every other component on the same word,
                 # at any fps, with no second conversion to keep in step. The
                 # renderer still never sees a word index.
+                # ── MECHANICAL GAP-FILL, BEFORE THE SPEC PROJECTION ─────
+                # 54% of real sources (13/24, unbiased) have ZERO scdet shot
+                # changes: for most of traffic the picture never changes on its
+                # own, and recipe_eval already reports the consequence ("the
+                # swipe happens here") on every job, logged and ignored.
+                #
+                # These cards are inserted HERE, immediately before the
+                # projection below, so they flow through the IDENTICAL spec
+                # build, adapter and ladder as any composition the planner
+                # requested. No second render path, nothing to keep in step.
+                #
+                # $0 and no network: the image is a frame of the user's own
+                # video and the claim is the words they are saying, verbatim.
+                # Every fill and every declined gap is ledgered.
+                try:
+                    _gf_words = kept_words if "kept_words" in dir() else None
+                    if _gf_words and _gapfill_enabled():
+                        import frame_compositions as _gfc
+                        _gf_fills, _gf_dec = _gfc.plan_gap_fills(edit_plan, _gf_words)
+                        for _gf in _gf_fills:
+                            edit_plan.setdefault("motion_graphics", []).append({
+                                "type": "EvidenceCard",
+                                "start_word_index": _gf["start_word_index"],
+                                "end_word_index": _gf["end_word_index"],
+                                "anchor": "center_safe",
+                                "props": {"claim": _gf["claim"]},
+                                "why": f"gap-fill: closed a {_gf['gap_s']:.1f}s dead stretch",
+                                "_gap_fill": True,
+                            })
+                            _ledger_requested("gap_fill", "EvidenceCard")
+                        for _gd in _gf_dec:
+                            _ledger_dropped("gap_fill", "EvidenceCard", _gd["reason"])
+                        if _gf_fills or _gf_dec:
+                            _record_divergence(
+                                "gap_fill",
+                                {"filled": len(_gf_fills), "declined": len(_gf_dec),
+                                 "gaps": [round(f["gap_s"], 1) for f in _gf_fills]},
+                                "mechanical_gap_fill",
+                                reason="dead visual stretches closed with the "
+                                       "user's own frames — $0, no model call")
+                            print(f"[gap-fill] {len(_gf_fills)} EvidenceCard(s) "
+                                  f"placed, {len(_gf_dec)} gap(s) declined",
+                                  flush=True)
+                except Exception as _gfe:
+                    print(f"[gap-fill] skipped ({type(_gfe).__name__}: "
+                          f"{str(_gfe)[:120]}) — plan unchanged", flush=True)
+
                 try:
                     import frame_compositions as _fc
                     _fc_built = 0

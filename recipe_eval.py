@@ -497,3 +497,55 @@ if __name__ == "__main__":
     boundaries = json.load(open(sys.argv[3])) if len(sys.argv) > 3 else []
     dur = words[-1]["end"] if words else 0.0
     print(evaluate_recipe(plan, words, boundaries, dur).summary())
+
+
+def visual_event_times(plan, words):
+    """The SAME event definition evaluate_recipe scores on, exposed for the
+    mechanical gap-fill.
+
+    ONE DEFINITION, NOT TWO. The gap-fill must target exactly the gaps this
+    module reports, or the fix and the metric drift apart and the metric stops
+    being able to falsify the fix. So the filler reads this, and
+    evaluate_recipe's own event list is built by calling it.
+    """
+    ev = []
+    for e in (plan.get("emphasis_moments") or []):
+        if e.get("zoom_effect") and e.get("word_indices"):
+            t = _word_time(words, e["word_indices"][0])
+            if t is not None:
+                ev.append((t, "zoom", e["word_indices"][0]))
+    for t_ in (plan.get("transitions") or []):
+        t = _word_time(words, t_.get("after_word_index"), "end")
+        if t is not None:
+            ev.append((t, "transition", t_.get("after_word_index")))
+    for b in (plan.get("broll_clips") or []):
+        t = _word_time(words, b.get("start_word_index"))
+        if t is not None:
+            ev.append((t, "broll", b.get("start_word_index")))
+    for m in (plan.get("motion_graphics") or []):
+        t = _word_time(words, m.get("start_word_index"))
+        if t is not None:
+            ev.append((t, "mg", m.get("start_word_index")))
+    for o in (plan.get("text_overlays") or []):
+        t = _word_time(words, o.get("start_word_index"))
+        if t is not None:
+            ev.append((t, "overlay", o.get("start_word_index")))
+    return sorted(ev)
+
+
+def visual_gaps(plan, words, min_gap_s):
+    """Stretches with NO visual event, longer than min_gap_s.
+
+    Returns [(gap_start_s, gap_end_s, gap_len_s)] — the same intervals whose
+    longest member evaluate_recipe reports as `max_dead_gap_s`.
+    """
+    if not words:
+        return []
+    end_t = float(words[-1].get("end") or 0.0)
+    ts = [t for t, _k, _w in visual_event_times(plan, words)] + [end_t]
+    out, prev = [], 0.0
+    for t in ts:
+        if t - prev > min_gap_s:
+            out.append((round(prev, 3), round(t, 3), round(t - prev, 3)))
+        prev = t
+    return out
