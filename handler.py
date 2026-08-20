@@ -34638,11 +34638,49 @@ def _outer_safe_rescue(job, input_data, classified, state, run_fn=None):
             )
             return None
         print(f"[safe-edit] engaged reason=outer:{code}", flush=True)
-        _record_divergence(
-            "outer", {"error_code": code}, "safe_edit_rescue",
-            reason="orchestration failure outside the inner nets — "
-                   "one guarded safe-edit re-run through the normal path",
-        )
+        # ── NAME WHAT `UNKNOWN` IS HIDING ────────────────────────────────────
+        # `code` is whatever classify_error could name, and on 128 of 781 jobs
+        # it named nothing: UNKNOWN. The frame that would identify the class was
+        # never captured — traceback.print_exc() at the call site sends it to
+        # container stdout, which is not queryable across renders. So capture it
+        # HERE, structurally: the exception type, its message, and the INNERMOST
+        # frame (file:line:function), which is the line that actually raised.
+        #
+        # sys.exc_info() rather than a new parameter: this function is only ever
+        # called from inside an `except` block, so the live exception is already
+        # available, and threading it through the signature would be a second
+        # thing to keep in sync. Fail-open — a rescue must never raise (see the
+        # docstring); if the frame cannot be read, the record still ships with
+        # the code alone.
+        _detail = {"error_code": code}
+        try:
+            # LOCAL IMPORT, DELIBERATELY: `traceback` is NOT module-scope in this
+            # file. Without this line the extract_tb call below raises NameError
+            # INSIDE the fail-open except, and the frame is lost silently —
+            # which is the exact defect this block exists to fix, reintroduced
+            # one level down. The cert asserts `frame` is present so a
+            # regression here cannot pass as "captured nothing this time".
+            import traceback as _tbmod
+            _exc = sys.exc_info()[1]
+            if _exc is not None:
+                _detail["exc_type"] = type(_exc).__name__
+                _detail["exc_msg"] = str(_exc)[:300]
+                _tb = _tbmod.extract_tb(sys.exc_info()[2])
+                if _tb:
+                    _f = _tb[-1]           # innermost frame — where it raised
+                    _detail["frame"] = (f"{os.path.basename(_f.filename)}:"
+                                        f"{_f.lineno}:{_f.name}")
+                    _detail["frame_line"] = (_f.line or "")[:160]
+        except Exception:
+            pass
+        _record_divergence("outer", _detail, "safe_edit_rescue",
+                           reason="orchestration failure outside the inner nets "
+                                  "— one guarded safe-edit re-run through the "
+                                  "normal path")
+        # Carried on the input so the INNER run re-emits it after its own
+        # _DIVERGENCE_LOG.clear() — without this the record above is wiped
+        # before any ledger reaches S3 (see the re-ledger block in handler()).
+        input_data["_rescue_ledger"] = _detail
         input_data["_safe_edit_rescue"] = f"outer:{code}"
         _inner = (run_fn or handler)(job)
         if isinstance(_inner, dict) and _inner.get("status") == "success":
@@ -38476,6 +38514,31 @@ def _capture_failure_corpus(source_path, job_id, klass):
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
+    # ── THE OUTER RESCUE RE-LEDGERS ITSELF HERE, AFTER THE CLEAR ─────────────
+    # MEASURED 2026-08-19: across 781 real jobs (2026-08-16..18), ZERO ledger
+    # rows carried component=outer, while 128 of those jobs (16.4%) recorded its
+    # CONSEQUENCE as recipe:safe_edit_fallback original={'reason':
+    # 'outer:UNKNOWN'}. The rescue was invisible precisely where it should have
+    # been loudest.
+    #
+    # THE MECHANISM, and why the record cannot live at the rescue site: the
+    # rescue calls handler(job) again, and the FIRST thing that call does is the
+    # clear on the line above. Anything the rescue appended is wiped, and the
+    # inner run then flushes its own (rescue-free) ledger to S3. Recording
+    # harder at the rescue site cannot fix this; the record has to be re-emitted
+    # INSIDE the run whose ledger actually flushes. That is here.
+    #
+    # This survives whatever the cause turns out to be — it is an observability
+    # fix, not a theory about UNKNOWN.
+    try:
+        _resc = input_data.get("_rescue_ledger") if isinstance(input_data, dict) else None
+        if isinstance(_resc, dict):
+            _record_divergence(
+                "outer", _resc, "safe_edit_rescue",
+                reason="orchestration failure outside the inner nets — one "
+                       "guarded safe-edit re-run through the normal path")
+    except Exception:
+        pass
     # ASR EVIDENCE: fresh per job. Modal containers are REUSED, so without this
     # a diverted row would inherit the previous job's audio level and word count
     # — a row that lies with a plausible number, which is worse than a row that

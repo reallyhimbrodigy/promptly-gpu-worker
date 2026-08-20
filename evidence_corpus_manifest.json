@@ -81,8 +81,8 @@
     "evidence_corpus_frames/127d3c07_50.jpg",
     "evidence_corpus_frames/127d3c07_75.jpg"
    ],
-   "visual_trigger": "MARGINAL",
-   "visual_note": "driving lesson, two people in a car with burned-in captions and a watermark; teach context but no object presented"
+   "visual_trigger": "YES",
+   "visual_note": "CORRECTED 2026-08-20 after watching 11 frames (the /watch skill) instead of one. The creator inserts a transient PICTURE-IN-PICTURE close-up of the exact control being discussed (handbrake/gearstick) at the moment the claim is spoken, and it is ABSENT in frames where the claim is not being made. That is EvidenceCard, hand-built by a real user. A single mid-point frame missed it."
   },
   {
    "id": "cfa5c7e3-6dde-4607-a99b-3b68d34c4b19",
@@ -101,10 +101,11 @@
   }
  ],
  "visual_confirmation": {
-  "method": "the 50% frame of each source inspected by eye (not asserted, not vision-modelled)",
+  "method": "initially ONE frame per source by eye \u2014 which was too thin and misgraded 127d3c07. Re-graded with the /watch skill (11 keyframes, local, --no-whisper).",
   "date": "2026-08-19",
-  "result": "1 YES, 2 MARGINAL, 3 NO of 6",
+  "result": "2 YES, 1 MARGINAL, 3 NO of 6 (127d3c07 corrected from MARGINAL)",
   "verdict": "THIS CORPUS CANNOT CARRY AN ARM. shot_changes>=3 selects 'has cuts', which on this platform means multi-shot reels and jump-cut talking heads \u2014 not 'a speaker states a claim whose proof is on camera'. Running EvidenceCard/DeviceMockup here would repeat the vacuous-denominator error in the opposite direction.",
-  "also_observed": "4 of 6 carry burned-in captions or a watermark"
+  "also_observed": "4 of 6 carry burned-in captions or a watermark",
+  "finding": "A real user MANUALLY BUILDS the EvidenceCard pattern \u2014 a timed PiP inset of the referenced object. The trigger is not absent from user footage; a one-frame probe could not see it. The remaining 5 sources deserve the same re-pass."
  }
 }

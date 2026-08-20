@@ -9897,6 +9897,19 @@ def _frame_comp_jsx_bindings():
     assert _r.returncode == 0, f"frame-comp wiring FAILED\n{_out[-1200:]}"
 
 
+@check("THE LOUDEST EVENT IN A JOB'S LIFE MUST REACH THE LEDGER (2026-08-19, RULE-1) [Rule 2, Law 2]. Measured on real traffic: across 781 jobs (2026-08-16..18) ZERO divergence rows carried component=outer, while 128 of those jobs (16.4%, 96 DISTINCT USERS, 1.3 jobs/user — broad, not one retrying user) recorded the rescue's CONSEQUENCE as recipe:safe_edit_fallback original={'reason':'outer:UNKNOWN'}. 'Everything failed, we re-ran it as a bare mechanical cut so the user got something' was the one event the ledger could not see. MECHANISM, and the naive fix does not work: _outer_safe_rescue records the divergence, then calls handler(job), whose FIRST action is _DIVERGENCE_LOG.clear() — the record is wiped and the inner run flushes a rescue-free ledger to S3. Recording harder at the rescue site cannot fix it; the record must be re-emitted INSIDE the run whose ledger actually flushes, so it rides on input_data['_rescue_ledger'] and handler() re-records it immediately after the clear. The same record now NAMES what UNKNOWN hides — exc_type, exc_msg and the INNERMOST frame (file:line:function) — because traceback.print_exc() only reaches container stdout, which is not queryable across renders. Note `traceback` is NOT module-scope in handler.py: a missing local import loses the frame silently inside the fail-open except, which is why clause 4 asserts the frame is present. All four clauses RED-proven by re-introducing the real defects (deleting the re-emit block; dropping the local import) and restoring byte-identically.")
+def _outer_rescue_ledgered():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable,
+                   _os.path.join(_here, "cert_outer_rescue_ledgered.py")],
+                  capture_output=True, text=True, timeout=420)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_outer_rescue_ledgered FAILED\n{_out[-1600:]}"
+    assert "CERT OUTER-RESCUE-LEDGERED: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
 @check("EVERY DECODE SURFACE IS BOUNDED SOMEWHERE, AND props IS REQUIRED TO DECODE BUT NOT TO PARSE (2026-08-19, RULE-1) [Law 2]. Lever 3 capped 42 free-text strings and made an in-string repetition loop decode-impossible; it moved the runaway rather than ending it. Enumerated on the live schema, exactly four surfaces survived unbounded — the two free-form props objects plus caption_keywords and ref_image_keys, whose ITEMS were capped at 120/200 chars while their item COUNT was not — and a shape-abort tail caught the spiral running on exactly that axis: 4,096 chars of '#newlaunch #exclusiveaccess #presale #booknow ...'. Measured cost of the props half: 10 of 24 requested motion graphics (41.7%, 5 of 7 sources) dropped as empty_props, the model having written the card's payload into `why` and overflowed its 96-char cap (logged: parse-edge maxlength field=post_cuts.why declared=96 actual=122 carrying '80% 5-year post-handover'). The cert holds four clauses: no new uncapped string or string-list; props required in the schema SENT to Vertex but NOT on the pydantic model (required on the model would fail a whole edit over one missing field instead of dropping one component, K7); maxItems never appears in the sent schema (Vertex 400s on it — an outage on every job, so the bound must live at the parse edge); and the cap demonstrably truncates an over-long list while leaving a list at exactly the cap untouched. Vertex grammar compile with props required was verified on the REAL schema before shipping (control compiled too). All four clauses RED-proven by monkeypatch.")
 def _unbounded_decode_surfaces():
     import os as _os, subprocess as _sub, sys as _sys
