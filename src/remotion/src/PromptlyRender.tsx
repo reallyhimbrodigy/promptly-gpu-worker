@@ -897,7 +897,12 @@ const TightCutOverlayLayer: React.FC<{
 // Output is encoded with alpha (ProRes 4444) so FFmpeg can composite it
 // over the base in the final mux step.
 export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
-  const { caption, motionGraphics, textOverlays, fps, broll, tightCutOverlays, generatedScenes } = input;
+  const { caption, motionGraphics, textOverlays, fps, broll, tightCutOverlays, generatedScenes,
+    // EvidenceCard/DeviceMockup render a FRAME OF THE USER'S OWN VIDEO, so the
+    // overlay pass needs the source. It is on PromptlyRenderInput already; this
+    // component simply never bound it, and referencing it unbound cost a
+    // RENDER_FATAL (ReferenceError: sourceUrl is not defined).
+    sourceUrl } = input;
 
   return (
     <SmoothGraphicsProvider enabled={input.smoothGraphics ?? false}>

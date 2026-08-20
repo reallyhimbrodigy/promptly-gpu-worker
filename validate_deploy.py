@@ -9885,6 +9885,18 @@ def _graceful_component_placement():
         f"cert did not report PASS:\n{_out[-600:]}")
 
 
+@check("EVERY IDENTIFIER PASSED IN JSX IS BOUND (2026-08-19, RULE-1) [Law 2]. `<MotionGraphicsLayer ... sourceUrl={sourceUrl} />` was added inside PromptlyOverlay, which destructures its input and NEVER BOUND sourceUrl — PromptlyRenderInput carries it, the component just did not take it. It surfaced as `SymbolicateableError [ReferenceError]: sourceUrl is not defined` -> RENDER_FATAL, after a full image rebuild, a planning call and 196s of wall clock, and the render produced NOTHING. NOTHING IN THIS REPO COULD HAVE CAUGHT IT: there is no tsc in the tree, this gate reads Python, and brand-mg-wiring reads the MG mirrors — a TSX ReferenceError had no guard of any kind. Deliberately NARROW: it checks identifiers passed to the layers that carry the frame compositions, not everything a linter would, because the one pattern that cost a render is the one worth a check. RED-proven by re-introducing the exact defect.")
+def _frame_comp_jsx_bindings():
+    import os as _os, subprocess as _sub
+    _rt = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "src", "remotion")
+    _t = _os.path.join(_rt, "frame-comp-wiring.test.mjs")
+    assert _os.path.exists(_t), "the JSX-binding smoke is gone — the class is unguarded"
+    _r = _sub.run(["node", "frame-comp-wiring.test.mjs"], cwd=_rt,
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"frame-comp wiring FAILED\n{_out[-1200:]}"
+
+
 @check("NO COMPONENT IS SCORED AGAINST A SOURCE THAT CANNOT TRIGGER IT (2026-08-17, RULE-1) [Rule 5]. Three corpora in a row were selected on properties unrelated to the component under test, and each would have reported a CORRECT DECLINE as a component failure: REF-2 was already edited (declining to decorate finished work is judgement, not a defect); the editorial_eng_* pair contained no spoken name and no stated number, so brand_copy 0/4 was N/A and a planner emitting brand copy there would have been FABRICATING, which the directive forbids; and the frozen goldens, measured 2026-08-17, can test brand_copy on 1 of 12 sources, scenes on 0 and payoff on 0 — excellent for route/language regression, closed as a component instrument. The fix is SELECTION, not inspection after the fact, because checking triggers afterwards still wastes the whole run. This asserts the component corpus keeps the properties that make it an instrument: every source carries a recorded directive trigger; every component has at least 2 sources, since one cannot separate a decline from noise; every source is durably pinned by sha256+etag+bytes in our own bucket rather than live user media, because an A/B on drifted bytes compares two different things; no two entries share sha256, because two ASR runs of ONE video produce different transcript text and the text-hash pass demonstrably let an identical 47.4s/305MB source through twice; and every source sits inside the product's own 15-90s band, because a 171s source measures a regime users do not have.")
 def _component_corpus_is_an_instrument():
     import os as _os, subprocess as _sub, sys as _sys
