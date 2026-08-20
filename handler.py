@@ -248,6 +248,32 @@ _MG_FULLSIZE_TYPES = frozenset({
     "TimelineRoadmap", "ChatThread", "RankedList", "BarRace", "Notification",
 })
 
+# ── FRAME-REPLACING TYPES — a different thing from "full size" ───────────────
+# _MG_FULLSIZE_TYPES above are tall cards that still sit ON the footage: they
+# occupy more than one anchor band, so F7 judges them on a band PAIR. These
+# REPLACE the frame. Each renders as an AbsoluteFill with its own opaque
+# background (FrameCompositions.tsx), so during its window the source video —
+# and the speaker's face — is not on screen at all.
+#
+# THEREFORE BAND CLEARANCE IS VACUOUS FOR THEM. Asking "does a band clear the
+# face?" of a component that has already covered the face is a question with no
+# meaning, and answering it can only produce a FALSE DROP. They were classed as
+# ordinary overlays, so F7 judged them against a single anchor band and the
+# graceful ladder checked them against caption occupancy — two gates that
+# describe a frame they do not leave visible.
+#
+# HONEST ABOUT WHAT THIS HAS COST SO FAR: nothing observable. These three were
+# requested ZERO times in every measurement to date, so the ladder never ran on
+# them. This is a PRECONDITION for the cutaway work, not a fix for an observed
+# loss — the loss would arrive the moment they were requested.
+#
+# THE MEMBERSHIP TEST IS THE RENDER, NOT A LIST BY HAND: every type here must be
+# a full-frame AbsoluteFill in the renderer, and cert_frame_replacing_types.py
+# asserts exactly that against FrameCompositions.tsx.
+_MG_FRAME_REPLACING_TYPES = frozenset({
+    "EvidenceCard", "DeviceMockup", "EmojiCard",
+})
+
 
 _ECR_TO_SEMANTIC = {"bottom": "lower_third_safe", "top": "upper_third_safe"}
 
@@ -1496,6 +1522,9 @@ def _mg_clear_region_exists(mg_type, sw_s, ew_s, face_traj, burned_bands=frozens
     occupies) are never candidates — the source's text owns them, exactly as
     the teach says; a card with no un-burned clear band has no region."""
     try:
+        # A FRAME REPLACEMENT COVERS THE FACE — there is no band to clear.
+        if mg_type in _MG_FRAME_REPLACING_TYPES:
+            return True
         _burned = frozenset(burned_bands or ())
         if len(_burned) >= 3:
             return False        # every band burned — nothing is clear
@@ -1611,6 +1640,11 @@ def _place_component_gracefully(mg_type, sw_start, ew_end, face_traj, edit_plan)
     Returns (outcome, end_seconds, note) where outcome is
     "placed" | "repositioned" | "dropped".
     """
+    # NOTE: no frame-replacing early-return here ON PURPOSE. The exemption lives
+    # in _mg_clear_region_exists (F7) alone, which this function calls below —
+    # a second copy here was DEAD CODE, and my own RED-proof caught it: deleting
+    # it changed no behaviour, so the cert could not tell the two apart. One
+    # mechanism, one place to get it wrong.
     _burned = frozenset(edit_plan.get("source_text_regions") or ())
     _blocked = _burned | _caption_occupied_bands(edit_plan, sw_start, ew_end)
 
