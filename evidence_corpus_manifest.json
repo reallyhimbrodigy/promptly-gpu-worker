@@ -22,7 +22,7 @@
     "evidence_corpus_frames/15512537_75.jpg"
    ],
    "visual_trigger": "NO",
-   "visual_note": "office interview, two talking heads; the 8 cuts are speaker-to-speaker, no object or screen on camera"
+   "visual_note": "confirmed at 11 frames: office interview, whiteboard stays blank, nothing presented to camera"
   },
   {
    "id": "694cd698-84da-4447-a00e-b01ddea2644b",
@@ -36,8 +36,8 @@
     "evidence_corpus_frames/694cd698_50.jpg",
     "evidence_corpus_frames/694cd698_75.jpg"
    ],
-   "visual_trigger": "MARGINAL",
-   "visual_note": "street scene, a phone IS in frame and in hand, but the footage is b-roll-style with burned-in text, not a speaker making a claim about it"
+   "visual_trigger": "YES",
+   "visual_note": "RE-GRADED at 11 frames: a printed product/flyer is HANDED between people and held in frame by two of them \u2014 the object under discussion is on camera and handled. The 50%-frame showed only a phone in a crowd, which read as incidental b-roll."
   },
   {
    "id": "4df7f32c-49c0-45b1-a4fd-e75511c20dab",
@@ -52,7 +52,7 @@
     "evidence_corpus_frames/4df7f32c_75.jpg"
    ],
    "visual_trigger": "NO",
-   "visual_note": "motorcycle travel reel with burned-in text; 31 cuts are scenery, no spoken claim with on-camera proof"
+   "visual_note": "confirmed at 11 frames: travel/scenery reel with burned-in text, no object presented"
   },
   {
    "id": "8e68b7a2-edec-486b-9394-c5f01ccebb51",
@@ -67,7 +67,7 @@
     "evidence_corpus_frames/8e68b7a2_75.jpg"
    ],
    "visual_trigger": "NO",
-   "visual_note": "close-up talking head, 46 cuts are jump cuts on one face; nothing held up"
+   "visual_note": "confirmed at 11 frames: jump-cut talking head, nothing held up"
   },
   {
    "id": "127d3c07-9864-4a5b-9d2f-37ab5e9b4e3a",
@@ -101,11 +101,11 @@
   }
  ],
  "visual_confirmation": {
-  "method": "initially ONE frame per source by eye \u2014 which was too thin and misgraded 127d3c07. Re-graded with the /watch skill (11 keyframes, local, --no-whisper).",
+  "method": "11 keyframes per source via the /watch skill, local, --no-whisper. One-frame grading RETIRED.",
   "date": "2026-08-19",
-  "result": "2 YES, 1 MARGINAL, 3 NO of 6 (127d3c07 corrected from MARGINAL)",
-  "verdict": "THIS CORPUS CANNOT CARRY AN ARM. shot_changes>=3 selects 'has cuts', which on this platform means multi-shot reels and jump-cut talking heads \u2014 not 'a speaker states a claim whose proof is on camera'. Running EvidenceCard/DeviceMockup here would repeat the vacuous-denominator error in the opposite direction.",
+  "result": "3 YES, 0 MARGINAL, 3 NO of 6",
+  "verdict": "THE CORPUS CAN CARRY AN ARM. Half of it (3 of 6) holds the EvidenceCard trigger. Both re-grades moved UP (MARGINAL->YES twice); the one-frame pass under-graded in the only direction it could, because a trigger that is a MOMENT is invisible to a sample that is not that moment.",
   "also_observed": "4 of 6 carry burned-in captions or a watermark",
-  "finding": "A real user MANUALLY BUILDS the EvidenceCard pattern \u2014 a timed PiP inset of the referenced object. The trigger is not absent from user footage; a one-frame probe could not see it. The remaining 5 sources deserve the same re-pass."
+  "finding": "EvidenceCard's premise is VALIDATED on real user footage: one user hand-builds it as a timed PiP inset (127d3c07); another presents the product in-frame (694cd698). The earlier 'we may have built two components for content our users do not shoot' was an artifact of one-frame grading, not a property of the users."
  }
 }
