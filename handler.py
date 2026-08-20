@@ -8152,6 +8152,15 @@ Props: {{ "label"?: "LOCK", "regionWidth"?: 620, "regionHeight"?: 720, "accentCo
 
 Also answers here: MouseDrag (see WHEN THE SCREEN OR APP IS THE SUBJECT).
 
+**EvidenceCard** — a STILL OF THEIR OWN FRAME, held up as evidence for the line they just said, tilted like a print on a surface with the claim behind it and a caption overlapping in front. Claim: "here is the thing I just described." Use when the speaker points at something that IS on camera but goes by too fast to read — a screen, a label, a receipt, a face reacting. Needs `claim` (the line it evidences); `caption` optional. NO GENERATION: the still is a frame of the video you are already editing, so it can never be wrong about what the video contains. **FITS:** demo, review, reaction, teach — anywhere the footage already holds the proof. **FIGHTS:** a beat whose power is the speaker's face; do not cover a landing with their own frame.
+
+**DeviceMockup** — their own frame inside a drawn phone shell. Claim: "this is what it looks like in the app." Use when the speaker is showing something screen-shaped and the words name it. `label` optional. The shell is drawn, never an asset. **FITS:** app walkthroughs, product demos, anything screen-recorded. **FIGHTS:** outdoor/handheld footage where a phone frame is a lie about where the shot came from.
+
+**NumberCard** — a stated number, full-bleed, cropping off both frame edges, on a flat field in the job's palette with an accent outline. Claim: "this number is the point." Needs `value` — the numeral EXACTLY as spoken; `label` optional (the unit or what it counts). ZERO ASSETS, no generation. **THE NUMBER MUST COME FROM THE DIALOGUE** — a card showing a figure nobody said is an on-screen lie. **FITS:** results, prices, counts, stats, anything where the figure IS the claim. **FIGHTS:** approximate or hedged numbers ("like a hundred-ish"); a full-bleed number promises precision the sentence did not.
+
+**EmojiCard** — one emoji at display size, tilted with a real shadow, and at most two words. Claim: "this is the thing, and it is funny/blunt/obvious." Needs `emoji`; `words` optional (max two). Uses the emoji font already in the render, so it adds nothing to the build. **FITS:** casual, creator, comedic, reaction — a shorthand the audience reads instantly. **FIGHTS:** formal-corporate, medical, financial-advice registers, where an emoji undercuts the authority the speaker is building.
+
+
 Every instrument here is an equal — the moment picks. Reading the footage fresh means the moment-type finds you before the component does.
 
 ═══════════════════════════════════════════════════════════════════════════
@@ -8334,15 +8343,6 @@ Register tunes the cutaway's CHARACTER (the extend test still decides whether ea
 ═══════════════════════════════════════════════════════════════════════════
 
 Transitions and tight-cut overlays are decided by a dedicated seam-dressing pass that reads your editorial_vision, story_shape, arc_segments, and key_moments against the footage's actual picture changes. You do not emit them here. Write your vision's transition intent as INTENT (the energy, the register) — the seam pass consumes it. Same-scene splices need nothing from you: the hard cut owns them, and their energy goes where it belongs — a mask-zoom on the first word back, a caption that leans in, an SFX that lands the beat.
-
-**EvidenceCard** — a STILL OF THEIR OWN FRAME, held up as evidence for the line they just said, tilted like a print on a surface with the claim behind it and a caption overlapping in front. Claim: "here is the thing I just described." Use when the speaker points at something that IS on camera but goes by too fast to read — a screen, a label, a receipt, a face reacting. Needs `claim` (the line it evidences); `caption` optional. NO GENERATION: the still is a frame of the video you are already editing, so it can never be wrong about what the video contains. **FITS:** demo, review, reaction, teach — anywhere the footage already holds the proof. **FIGHTS:** a beat whose power is the speaker's face; do not cover a landing with their own frame.
-
-**DeviceMockup** — their own frame inside a drawn phone shell. Claim: "this is what it looks like in the app." Use when the speaker is showing something screen-shaped and the words name it. `label` optional. The shell is drawn, never an asset. **FITS:** app walkthroughs, product demos, anything screen-recorded. **FIGHTS:** outdoor/handheld footage where a phone frame is a lie about where the shot came from.
-
-**NumberCard** — a stated number, full-bleed, cropping off both frame edges, on a flat field in the job's palette with an accent outline. Claim: "this number is the point." Needs `value` — the numeral EXACTLY as spoken; `label` optional (the unit or what it counts). ZERO ASSETS, no generation. **THE NUMBER MUST COME FROM THE DIALOGUE** — a card showing a figure nobody said is an on-screen lie. **FITS:** results, prices, counts, stats, anything where the figure IS the claim. **FIGHTS:** approximate or hedged numbers ("like a hundred-ish"); a full-bleed number promises precision the sentence did not.
-
-**EmojiCard** — one emoji at display size, tilted with a real shadow, and at most two words. Claim: "this is the thing, and it is funny/blunt/obvious." Needs `emoji`; `words` optional (max two). Uses the emoji font already in the render, so it adds nothing to the build. **FITS:** casual, creator, comedic, reaction — a shorthand the audience reads instantly. **FIGHTS:** formal-corporate, medical, financial-advice registers, where an emoji undercuts the authority the speaker is building.
-
 
 === GLOBAL FIELDS ===
 ═══════════════════════════════════════════════════════════════════════════

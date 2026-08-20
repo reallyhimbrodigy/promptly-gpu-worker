@@ -96,18 +96,33 @@ def run(build_sha: str) -> dict:
     finally:
         sys.stdout = _orig
     log = _tee.buf.getvalue()
-    plan = (res or {}).get("edit_plan") or {}
+    # THE PAYLOAD KEY IS `edit_recipe`, NOT `edit_plan`, AND THE LEDGER RIDES THE
+    # PAYLOAD. The first run of this harness read res["edit_plan"] (absent) and
+    # the MODULE-GLOBAL ledger (empty by then), and reported `MG types shipped:
+    # []` / an empty requested-vs-shipped table for a render that had in fact
+    # shipped a StatCard — a false zero of exactly the class that cost this
+    # campaign a week on generated_scenes. Read the payload, and cross-check
+    # against the render's own `[mg] <Type> src=` lines, which are emitted at
+    # the moment a graphic is written into the output spec.
+    plan = ((res or {}).get("edit_recipe")
+            or (res or {}).get("edit_plan") or {})
     mgs = plan.get("motion_graphics") or []
+    import re as _re
+    _rendered = _re.findall(r"^\[mg\] ([A-Za-z]+) src=", log, _re.M)
     FOUR = {"EvidenceCard", "DeviceMockup", "NumberCard", "EmojiCard"}
     return {
         "build_sha": build_sha,
+        "result_keys": sorted((res or {}).keys()),
+        "mg_types_in_output": _rendered,
+        "compositions_in_output": [t for t in _rendered if t in FOUR],
         "source": src["id"], "source_url": src["video_url"],
         "trigger": src.get("trigger_verbatim"),
         "wall_s": round(time.time() - t0, 1),
         "error": err,
         "video_url": (res or {}).get("video_url") or (res or {}).get("public_url") or url,
         "s3_key": key,
-        "ledger": H._component_ledger_snapshot(),
+        # the ledger the PIPELINE emitted, not a module global read after the fact
+        "ledger": (res or {}).get("component_ledger") or H._component_ledger_snapshot(),
         "mg_types_shipped": [m.get("type") for m in mgs if isinstance(m, dict)],
         "compositions_shipped": [m.get("type") for m in mgs
                                  if isinstance(m, dict) and m.get("type") in FOUR],
@@ -134,8 +149,10 @@ def main():
     print(f"  trigger: {str(r.get('trigger'))[:100]}")
     if r.get("error"):
         print(f"  ERROR: {r['error'][:400]}")
-    print(f"\n  MG types shipped     : {r.get('mg_types_shipped')}")
-    print(f"  COMPOSITIONS shipped : {r.get('compositions_shipped') or 'NONE'}")
+    print(f"\n  MG types IN OUTPUT   : {r.get('mg_types_in_output')}   (from the render's own [mg] lines)")
+    print(f"  MG types in plan     : {r.get('mg_types_shipped')}")
+    print(f"  COMPOSITIONS in out  : {r.get('compositions_in_output') or 'NONE'}")
+    print(f"  payload keys         : {r.get('result_keys')}")
     for cs in (r.get("composition_specs") or []):
         s = cs.get("spec") or {}
         print(f"    {cs['type']}: at={s.get('at_seconds')}s tilt={s.get('tilt_deg')} "

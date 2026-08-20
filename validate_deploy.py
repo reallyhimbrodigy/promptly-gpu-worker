@@ -9897,6 +9897,18 @@ def _frame_comp_jsx_bindings():
     assert _r.returncode == 0, f"frame-comp wiring FAILED\n{_out[-1200:]}"
 
 
+@check("A COMPONENT IS TAUGHT IN THE ASSEMBLED PROMPT, IN THE SECTION IT IS EMITTED FROM (2026-08-19, RULE-1) [Law 2]. The four generation-free compositions shipped with EVERY link of the chain closed — module, MG_MAP, adapter, VALID_MG_TYPES (32 types, all four in the enum), types.ts, production counter, gate green, sweep 'reachable' — and were requested ZERO times on a live render. Cause, measured in characters rather than asserted from the source: all four were present in the assembled 177,814-char instruction with intact FITS/FIGHTS, but under `=== SEAM TREATMENTS (transitions & tight-cut overlays) — AUTHORED IN A DEDICATED PASS ===`, four lines below the sentence 'You do not emit them here.' — 73,394 chars downstream of StatCard, which the same model requested twice on the same source. PRESENCE IS NOT TEACHING: a motion graphic documented in the seam section has been told not to be authored. The cert assembles the prompt via the same _build_post_cuts_prompt the pipeline calls, then requires each of the four to sit in the SAME section as StatCard (the positive control, known-reachable from live traffic), with a fabricated type name as the negative control so a loose matcher cannot report a clean sheet. RED-proven on the real defect in both premium arms before the fix.")
+def _catalog_reaches_the_model():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_catalog_reaches_model.py")],
+                  capture_output=True, text=True, timeout=420)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_catalog_reaches_model FAILED\n{_out[-1600:]}"
+    assert "PASS — all four are IN the assembled instruction" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
 @check("NO COMPONENT IS SCORED AGAINST A SOURCE THAT CANNOT TRIGGER IT (2026-08-17, RULE-1) [Rule 5]. Three corpora in a row were selected on properties unrelated to the component under test, and each would have reported a CORRECT DECLINE as a component failure: REF-2 was already edited (declining to decorate finished work is judgement, not a defect); the editorial_eng_* pair contained no spoken name and no stated number, so brand_copy 0/4 was N/A and a planner emitting brand copy there would have been FABRICATING, which the directive forbids; and the frozen goldens, measured 2026-08-17, can test brand_copy on 1 of 12 sources, scenes on 0 and payoff on 0 — excellent for route/language regression, closed as a component instrument. The fix is SELECTION, not inspection after the fact, because checking triggers afterwards still wastes the whole run. This asserts the component corpus keeps the properties that make it an instrument: every source carries a recorded directive trigger; every component has at least 2 sources, since one cannot separate a decline from noise; every source is durably pinned by sha256+etag+bytes in our own bucket rather than live user media, because an A/B on drifted bytes compares two different things; no two entries share sha256, because two ASR runs of ONE video produce different transcript text and the text-hash pass demonstrably let an identical 47.4s/305MB source through twice; and every source sits inside the product's own 15-90s band, because a 171s source measures a regime users do not have.")
 def _component_corpus_is_an_instrument():
     import os as _os, subprocess as _sub, sys as _sys
