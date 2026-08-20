@@ -9897,6 +9897,19 @@ def _frame_comp_jsx_bindings():
     assert _r.returncode == 0, f"frame-comp wiring FAILED\n{_out[-1200:]}"
 
 
+@check("EVERY DECODE SURFACE IS BOUNDED SOMEWHERE, AND props IS REQUIRED TO DECODE BUT NOT TO PARSE (2026-08-19, RULE-1) [Law 2]. Lever 3 capped 42 free-text strings and made an in-string repetition loop decode-impossible; it moved the runaway rather than ending it. Enumerated on the live schema, exactly four surfaces survived unbounded — the two free-form props objects plus caption_keywords and ref_image_keys, whose ITEMS were capped at 120/200 chars while their item COUNT was not — and a shape-abort tail caught the spiral running on exactly that axis: 4,096 chars of '#newlaunch #exclusiveaccess #presale #booknow ...'. Measured cost of the props half: 10 of 24 requested motion graphics (41.7%, 5 of 7 sources) dropped as empty_props, the model having written the card's payload into `why` and overflowed its 96-char cap (logged: parse-edge maxlength field=post_cuts.why declared=96 actual=122 carrying '80% 5-year post-handover'). The cert holds four clauses: no new uncapped string or string-list; props required in the schema SENT to Vertex but NOT on the pydantic model (required on the model would fail a whole edit over one missing field instead of dropping one component, K7); maxItems never appears in the sent schema (Vertex 400s on it — an outage on every job, so the bound must live at the parse edge); and the cap demonstrably truncates an over-long list while leaving a list at exactly the cap untouched. Vertex grammar compile with props required was verified on the REAL schema before shipping (control compiled too). All four clauses RED-proven by monkeypatch.")
+def _unbounded_decode_surfaces():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable,
+                   _os.path.join(_here, "cert_unbounded_decode_surfaces.py")],
+                  capture_output=True, text=True, timeout=420)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_unbounded_decode_surfaces FAILED\n{_out[-1600:]}"
+    assert "CERT UNBOUNDED-DECODE: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
 @check("A COMPONENT IS TAUGHT IN THE ASSEMBLED PROMPT, IN THE SECTION IT IS EMITTED FROM (2026-08-19, RULE-1) [Law 2]. The four generation-free compositions shipped with EVERY link of the chain closed — module, MG_MAP, adapter, VALID_MG_TYPES (32 types, all four in the enum), types.ts, production counter, gate green, sweep 'reachable' — and were requested ZERO times on a live render. Cause, measured in characters rather than asserted from the source: all four were present in the assembled 177,814-char instruction with intact FITS/FIGHTS, but under `=== SEAM TREATMENTS (transitions & tight-cut overlays) — AUTHORED IN A DEDICATED PASS ===`, four lines below the sentence 'You do not emit them here.' — 73,394 chars downstream of StatCard, which the same model requested twice on the same source. PRESENCE IS NOT TEACHING: a motion graphic documented in the seam section has been told not to be authored. The cert assembles the prompt via the same _build_post_cuts_prompt the pipeline calls, then requires each of the four to sit in the SAME section as StatCard (the positive control, known-reachable from live traffic), with a fabricated type name as the negative control so a loose matcher cannot report a clean sheet. RED-proven on the real defect in both premium arms before the fix.")
 def _catalog_reaches_the_model():
     import os as _os, subprocess as _sub, sys as _sys

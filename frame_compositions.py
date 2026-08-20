@@ -132,6 +132,24 @@ def build_number_card(design_system, at_seconds, value, label=None,
     assets. The number is full-bleed and crops off both frame edges per §4 —
     that crop is what makes it read as designed rather than centred.
 
+    ON THE RECORD: THIS OVERLAPS StatCard, AND THE PLANNER PREFERS StatCard.
+    Measured 2026-08-19 on cada6a1b — a source whose entire pitch is two figures
+    (80% payment plan, 20% down) — the planner asked for StatCard on every
+    numeric beat in 3 of 3 plan cells and for this card in none, both before and
+    after the catalog entries were moved into the MOTION GRAPHICS section. The
+    section move was necessary (they had been filed under a header reading "You
+    do not emit them here") and was not sufficient: on a numeric beat there is an
+    incumbent that does the job, and no reason was given to prefer this one.
+
+    The honest difference is one property: StatCard counts a number up OVER the
+    live footage; this REPLACES the frame with a flat field. So it earns a beat
+    only when the picture should stop — a payoff figure, a reveal. That is now
+    what the catalog entry says. If a later measurement shows it still unchosen
+    on payoff beats, the right move is DELETING it, not teaching it harder — an
+    instrument nobody reaches for is prompt weight that every job pays for.
+    EvidenceCard and DeviceMockup do not have this problem: nothing else in the
+    catalog can put the user's own footage on screen as its own evidence.
+
     The value must come from the dialogue; grounding is checked upstream (F5.3).
     """
     v = str(value or "").strip()

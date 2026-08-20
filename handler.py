@@ -8152,11 +8152,11 @@ Props: {{ "label"?: "LOCK", "regionWidth"?: 620, "regionHeight"?: 720, "accentCo
 
 Also answers here: MouseDrag (see WHEN THE SCREEN OR APP IS THE SUBJECT).
 
-**EvidenceCard** — a STILL OF THEIR OWN FRAME, held up as evidence for the line they just said, tilted like a print on a surface with the claim behind it and a caption overlapping in front. Claim: "here is the thing I just described." Use when the speaker points at something that IS on camera but goes by too fast to read — a screen, a label, a receipt, a face reacting. Needs `claim` (the line it evidences); `caption` optional. NO GENERATION: the still is a frame of the video you are already editing, so it can never be wrong about what the video contains. **FITS:** demo, review, reaction, teach — anywhere the footage already holds the proof. **FIGHTS:** a beat whose power is the speaker's face; do not cover a landing with their own frame.
+**EvidenceCard** — a STILL OF THEIR OWN FRAME, held up as evidence for the line they just said, tilted like a print on a surface with the claim behind it and a caption overlapping in front. Claim: "here is the thing I just described." **THE TRIGGER NOTHING ELSE IN THIS CATALOG SERVES: the proof is a THING, and it is already in the footage.** Every other card in this section DRAWS something — a number, a bar, a pill, a quote. Not one of them can show the receipt, the screen, the label, the keys, the face that reacted. When the sentence's evidence is visible on camera and gone in half a second, this is the only instrument that holds it still. Ask: is the speaker pointing at, holding up, or standing in front of the thing the sentence is about? If yes, that beat is THIS card — a number card there would restate the words and throw away the proof. Needs `claim` (the line it evidences); `caption` optional. NO GENERATION: the still is a frame of the video you are already editing, so it can never be wrong about what the video contains. **FITS:** demo, review, reaction, teach, walkthrough, any claim the footage itself can settle. **FIGHTS:** a beat whose power is the speaker's face; do not cover a landing with their own frame.
 
-**DeviceMockup** — their own frame inside a drawn phone shell. Claim: "this is what it looks like in the app." Use when the speaker is showing something screen-shaped and the words name it. `label` optional. The shell is drawn, never an asset. **FITS:** app walkthroughs, product demos, anything screen-recorded. **FIGHTS:** outdoor/handheld footage where a phone frame is a lie about where the shot came from.
+**DeviceMockup** — their own frame inside a drawn phone shell. Claim: "this is what it looks like on the device." **THE TRIGGER NOTHING ELSE SERVES: the claim is about what a SCREEN looks like, and the screen is on camera.** A stat, a bar or a pill can tell the viewer a number about the app; none of them can show the app. When the speaker says "it looks like this", "here's the app", "watch what happens when I tap" — the words are a promise the footage already keeps, and this card frames it as the thing it is. `label` optional. The shell is drawn, never an asset. **FITS:** app walkthroughs, product demos, anything screen-recorded. **FIGHTS:** outdoor/handheld footage where a phone frame is a lie about where the shot came from.
 
-**NumberCard** — a stated number, full-bleed, cropping off both frame edges, on a flat field in the job's palette with an accent outline. Claim: "this number is the point." Needs `value` — the numeral EXACTLY as spoken; `label` optional (the unit or what it counts). ZERO ASSETS, no generation. **THE NUMBER MUST COME FROM THE DIALOGUE** — a card showing a figure nobody said is an on-screen lie. **FITS:** results, prices, counts, stats, anything where the figure IS the claim. **FIGHTS:** approximate or hedged numbers ("like a hundred-ish"); a full-bleed number promises precision the sentence did not.
+**NumberCard** — a stated number, full-bleed, cropping off both frame edges, on a flat field in the job's palette with an accent outline. Claim: "this number is the point." **REDUNDANT WITH StatCard ON PURPOSE-OF-BEAT — MEASURED 2026-08-19: on a source whose whole pitch is two figures (80% payment plan, 20% down), the planner reached for StatCard on every numeric beat across 3 of 3 cells and never for this.** That is the correct instinct and this entry does not argue with it. The two differ ONLY in treatment: StatCard is a counting hero number floating over the live footage; this is a static full-bleed field that REPLACES the frame. So the discriminator is whether the footage should survive the beat. Reach here only when the number deserves to stop the video — a payoff figure, a reveal, the one statistic the whole edit was built toward. If the footage underneath is still doing work, that is StatCard's beat, not this one. Needs `value` — the numeral EXACTLY as spoken; `label` optional (the unit or what it counts). ZERO ASSETS, no generation. **THE NUMBER MUST COME FROM THE DIALOGUE** — a card showing a figure nobody said is an on-screen lie. **FITS:** a payoff figure the edit has been building toward, where stopping the picture IS the emphasis. **FIGHTS:** any numeric beat where the footage still matters (that is StatCard); approximate or hedged numbers ("like a hundred-ish"), where a full-bleed number promises precision the sentence did not.
 
 **EmojiCard** — one emoji at display size, tilted with a real shadow, and at most two words. Claim: "this is the thing, and it is funny/blunt/obvious." Needs `emoji`; `words` optional (max two). Uses the emoji font already in the render, so it adds nothing to the build. **FITS:** casual, creator, comedic, reaction — a shorthand the audience reads instantly. **FIGHTS:** formal-corporate, medical, financial-advice registers, where an emoji undercuts the authority the speaker is building.
 
@@ -13411,6 +13411,38 @@ _FALSIFY_TEXT_KEYS = {"text"}   # renders verbatim on screen — truncation woul
 _COMPONENT_ARRAYS = {"text_overlays", "motion_graphics", "emphasis_moments",
                      "broll_clips", "transitions", "tight_cut_overlays"}
 
+# ── THE LAST UNBOUNDED DECODE SURFACES (2026-08-19) ─────────────────────────
+# Lever 3 capped 42 free-text STRINGS and made an in-string runaway
+# decode-impossible. The runaway moved to the axis it could not cap: LIST
+# LENGTH. Enumerated on the live schema, exactly four surfaces survive Lever 3
+# unbounded — _MotionGraphic.props and _EmphasisMotionGraphic.props (free-form
+# objects, uncappable by construction) and these two lists.
+#
+# Observed, verbatim, in a shape-abort tail: 4,096 chars of
+# "#newlaunch #exclusiveaccess #presale #booknow #downpayment …". Each ITEM was
+# already capped at 120 chars by Lever 3, so the spiral ran on the only axis
+# left — item COUNT.
+#
+# WHY THE CAP LIVES HERE AND NOT IN THE SCHEMA: Vertex's passthrough REJECTS
+# maxItems with 400 INVALID_ARGUMENT (see the response-schema builder), so the
+# bound cannot be declared where it would be enforced by decoding. This is the
+# parse edge — the same one that already enforces every string cap.
+#
+# HONEST ABOUT WHAT THIS BUYS: a post-decode cap bounds what reaches the RENDER.
+# It does NOT stop the decode — the model still generates the spiral, and the
+# in-stream shape-abort is still what bounds the wall clock. This closes the
+# correctness half; the latency half belongs to the abort.
+#
+# SIZED SO A LEGIT PLAN IS NEVER CLIPPED (the Lever 3 discipline: a generous cap
+# that no real output reaches). The prompt teaches ~1 keyword per 3-4 kept words
+# ("for 80 kept words that lands at ~20-25"). The 120s content cap at ~3.3
+# words/s bounds a transcript near 400 kept words, so a legit ceiling is ~133.
+# 250 is ~2x that and still an order of magnitude under a spiral.
+_LIST_ITEM_CAPS = {
+    "caption_keywords": 250,
+    "ref_image_keys": 12,     # a generated scene's subject references; a handful
+}
+
 
 def _schema_string_caps(schema, caps=None, name=None):
     """field name -> the MAX declared maxLength across the schema. Collision
@@ -13486,6 +13518,21 @@ def _enforce_string_caps(parsed, schema, call_label):
                             _falsify_drops.append(comp_ctx)
                         else:
                             obj[_k] = _v[:_cap]
+                elif isinstance(_v, list) and _k in _LIST_ITEM_CAPS:
+                    _lcap = _LIST_ITEM_CAPS[_k]
+                    if len(_v) > _lcap:
+                        _events[0] += 1
+                        print(f"[parse-edge] LIST RUNAWAY ({call_label}.{_k}): "
+                              f"{len(_v)} items > {_lcap} — truncated. Tail: "
+                              f"{str(_v[_lcap:_lcap + 8])[:200]}", flush=True)
+                        _record_divergence(
+                            "recipe_transport",
+                            {"class": "parse-edge maxitems",
+                             "field": f"{call_label}.{_k}",
+                             "declared": _lcap, "actual": len(_v)},
+                            "maxitems_violation",
+                            reason=str(_v[_lcap:_lcap + 12])[:400])
+                        del _v[_lcap:]
                 elif isinstance(_v, list) and _k in _COMPONENT_ARRAYS:
                     for _i, _entry in enumerate(_v):
                         _walk(_entry, (_v, _i, _k))
@@ -13973,6 +14020,33 @@ def _post_cuts_response_schema():
     # on the SECOND call (a schema change busts the Vertex cache key, so the
     # first call reads 0 cached for the wrong reason). Default off -> the
     # emitted schema is byte-identical.
+    # ── props REQUIRED FOR DECODING, OPTIONAL FOR PARSING (2026-08-19) ───────
+    # MEASURED: 10 of 24 motion graphics the planner asked for across the 11-cell
+    # arm (41.7%, on 5 of 7 sources) were dropped as `empty_props` — the model
+    # emitted no props at all and wrote the card's payload into `why` instead,
+    # overflowing that field's Lever-3 cap (logged verbatim: parse-edge maxlength
+    # field=post_cuts.why declared=96 actual=122, carrying "80% 5-year
+    # post-handover"). The content existed; it landed in the wrong field, and we
+    # dropped a correct component. Combined with drop_ungrounded_text, 15/24
+    # (62.5%) of requested motion graphics never reached the screen.
+    #
+    # ASYMMETRIC ON PURPOSE. This marks props required in the schema sent to
+    # Vertex, so constrained decoding CANNOT close a motion graphic without it —
+    # while the pydantic field keeps default_factory=dict, so a response that
+    # somehow lacks props still PARSES instead of failing the whole plan. Making
+    # it required on the model too would turn one missing field into a rejected
+    # edit; that trade is never worth it (K7: the component drops, the plan
+    # survives). Required-ness here forces the field to EXIST, not to be useful —
+    # an empty {} still decodes, and the empty-props drop stays as the floor.
+    for _mgdef in ("_MotionGraphic", "_EmphasisMotionGraphic"):
+        _d = (_s.get("$defs") or {}).get(_mgdef)
+        if not _d or "props" not in (_d.get("properties") or {}):
+            continue
+        _req = list(_d.get("required") or [])
+        if "props" not in _req:
+            _req.append("props")
+            _d["required"] = _req
+
     _pad = os.environ.get("PROMPTLY_SCHEMA_PAD", "").strip()
     if _pad:
         try:
