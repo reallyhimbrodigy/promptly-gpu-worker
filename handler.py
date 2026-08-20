@@ -10185,9 +10185,43 @@ _MIDSENTENCE_STALL_S = 0.70
 
 
 def _sentence_final_word(w):
+    # NATIVE TERMINAL GLYPHS ARE TERMINAL PUNCTUATION. `؟` is the Arabic
+    # question mark and `。`/`！`/`？` are the CJK forms — a transcript that
+    # punctuates correctly in its own script was being read as UNPUNCTUATED
+    # here, which silently moved every one of its gaps onto the mid-sentence
+    # stall bar (see _transcript_is_punctuated).
     _t = str((w or {}).get("punctuated_word") or (w or {}).get("word") or "")
     _t = _t.rstrip().rstrip('"\')]”’')
-    return _t.endswith((".", "?", "!", "…"))
+    return _t.endswith((".", "?", "!", "…", "؟", "。", "！", "？"))
+
+
+def _transcript_is_punctuated(words):
+    """Does this transcript carry ANY sentence-final punctuation at all?
+
+    MEASURED 2026-08-20 on job cada6a1b (Arabic, 88 words): Deepgram populated
+    `punctuated_word` for 88 of 88 words and emitted ZERO terminal punctuation.
+
+    WHY THAT SILENTLY RAISES THE BAR 23x. The dead-air gate is "sentence-final
+    OR >= _MIDSENTENCE_STALL_S". When nothing is ever sentence-final, the first
+    half can never fire, so EVERY gap is judged against 0.70s instead of the
+    0.03s trigger — not by decision, but as a side effect of the ASR's
+    punctuation habits. On that job all 3 inter-word gaps (max 0.63s) fell
+    under it and the dead-air path returned zero.
+
+    So: when a transcript has no terminal punctuation anywhere, "not
+    sentence-final" carries NO INFORMATION and must not be used to escalate the
+    threshold. Return False and the caller skips the linguistic gate.
+
+    THIS IS NOT THE PASSTHROUGH FIX, and the size is stated so nobody mistakes
+    it for one: on cada6a1b it recovers ~0.63s of a 34.9s edit. The passthrough
+    is `cut_refinements` coming back empty (159/159 measured 2026-08-04, and
+    absent on both renders of 2026-08-19). This closes a structural hole for
+    every language whose ASR does not punctuate; it does not make an edit.
+    """
+    for _w in (words or []):
+        if _sentence_final_word(_w):
+            return True
+    return False
 
 
 def _cut_lemma(w):
@@ -10890,6 +10924,9 @@ def detect_dead_air(
             )
 
     # within-clip locator uses LEVEL silence; the flag-off tiers use VAD silence.
+    # Computed ONCE per transcript, not per gap — the linguistic gate below
+    # is only meaningful when this ASR punctuates at all.
+    _punctuated = _transcript_is_punctuated(words)
     _wc_regions = _level_regions if _WITHIN_CLIP_DEADAIR else silence_regions
     for a, b in zip(kept, kept[1:]):
         gap_start = word_time_s(words, a, "end")
@@ -10917,7 +10954,11 @@ def detect_dead_air(
                 continue
             # A — the linguistic gate: within a sentence, below the stall
             # threshold, this gap is rhythm — not a candidate, not offered.
-            if (not _sentence_final_word(words[a])
+            # SKIPPED ENTIRELY when the transcript carries no terminal
+            # punctuation anywhere: "not sentence-final" is then a fact about
+            # the ASR, not about the speech, and using it would put a whole
+            # language route on the 0.70s bar by accident.
+            if (_punctuated and not _sentence_final_word(words[a])
                     and silence_in_gap < _MIDSENTENCE_STALL_S):
                 continue
             out.append({
