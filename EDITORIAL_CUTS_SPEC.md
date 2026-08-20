@@ -1,6 +1,36 @@
 # EDITORIAL CUTS — a capability spec
 
-**Status: SPEC ONLY. Nothing built. Reported for a decision before any code.**
+**Status: `pace_cuts` HELD BY OWNER RULING 2026-08-20. Nothing built.**
+
+---
+
+## THE RULING, which governs everything below
+
+> **Filler only — the speaker's own words stay unless they said them twice.**
+
+This is a product law, not a scope trim. It draws the line at a specific place:
+
+| removable | why it is allowed |
+|---|---|
+| filler, phrasal restarts, abandoned starts, stutters | ARTEFACTS of speaking, not things the speaker chose to say |
+| measured dead air | silence, not words |
+| an exact second delivery (`full_take_retake`) | **DEDUPLICATION** — the words survive, one copy of them |
+
+**Not removable, struck from this spec:** `redundant_restatement`, `preamble`,
+`tangent`, `example_surplus`, `trailing_repeat`. Every one of those removes
+something the speaker *meant to say once*. They are retained in §1-§5 below only
+as a record of the reasoning, and are **not to be built unless the owner rules
+otherwise**.
+
+**The distinction that makes `full_take_retake` survive the ruling:** it does not
+decide what the video is about. It removes a *duplicate*, and the mechanical
+precondition (§0c) means it can only fire when a duplicate demonstrably exists.
+Nothing the speaker said once is lost. That is why it is deduplication and not
+content removal, and it is the only reason it stays.
+
+**What this leaves:** the two capabilities that are already proven and touch no
+content — the disfluency pass (fires, measured §0b) and dead-air gating (fixed,
+shipped v561). Finish those before anything here is reconsidered.
 
 ---
 
