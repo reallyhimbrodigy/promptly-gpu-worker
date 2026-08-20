@@ -168,3 +168,77 @@ on Pexels having something honest for every hole.
 4. **Cut by route.** moodreel/minimal/hype already carry their own pacing; this
    is about the standard editorial path. A blended number across routes would
    hide the thing being fixed.
+
+---
+
+# INVESTIGATION RESULTS (2026-08-20) — answered before building, nothing wired
+
+**Headline: this is a DENSITY AND TRIGGERING problem, not a rendering one. The
+architecture already does what a cutaway needs.**
+
+## 1. Replacement — ALREADY WORKS
+
+`BrollClip` renders `<AbsoluteFill><Video style={{width:"100%",height:"100%",
+objectFit:"cover"}}/></AbsoluteFill>` inside a `<Sequence from= durationInFrames=>`,
+composited above the source layer. **During its span it FULLY REPLACES the
+talking head.** Generated scenes render the same way. Nothing to build here.
+
+## 2. Audio continuity — STRUCTURALLY GUARANTEED, not merely observed
+
+Audio is built as a SEPARATE WAV from the cut plan, before the visual render
+finishes:
+
+    [audio] Built per-cut audio: 2 cuts, 0 transition(s), 34.400s, 1517040 samples
+    [sfx]   Mixed 4 SFX track(s) into audio (no ducking)
+    [render] Final audio built in 1.4s → final_audio.wav
+
+and the mux is explicit:
+
+    -map 0:v    video from the visual render
+    -map 1:a    audio from final_audio.wav ONLY
+
+**A full-frame takeover CANNOT interrupt speech — impossible by construction.**
+
+**ONE HAZARD, LOAD-BEARING AND UNDOCUMENTED:** the b-roll `<Video>` carries NO
+`muted` prop. Its stock audio would leak — except `-map 1:a` discards it. The
+law holds TODAY BY ACCIDENT OF THE MUX, not by intent at the component. Anyone
+who later adds an audio path to the visual render breaks the one property this
+whole capability rests on, with no check to catch it. If cutaways are built,
+`muted` belongs on that component and a gate assertion belongs on the mapping.
+
+## 3. What the prompt asks — GARNISH, with a per-clip justification burden
+
+> "B-roll earns its place by EXTENDING the moment. … before you request the
+> cutaway it surfaced, name what the frame gives the viewer beyond what the
+> words and the speaker's face already deliver."
+
+Plus a ~15%-of-runtime coverage guide. That is a SCARCITY DOCTRINE: every clip
+argues for itself against the speaker's face. The references make cutaways the
+DEFAULT STATE OF THE SCREEN. The gap is a posture, not a threshold.
+
+## 4. Trigger vocabulary — EVERY FIELD IS CONTENT-TYPED, NONE IS PACING-TYPED
+
+    named object                 broll_clips.keyword          full-frame  OK
+    place                        broll_clips.keyword          full-frame  OK
+    action described not shown   broll_clips.keyword          full-frame  OK
+    stated claim                 EvidenceCard                 full-frame  BUT CLASSED AS A MOTION GRAPHIC
+    a number                     StatCard                     OVERLAY — "no card background,
+                                                              the number floats over the footage"
+
+The planner can say WHAT to show. It has NO WAY to say "this stretch needs a
+visual change." There is no field. `recipe_eval` computes exactly that
+information — AFTER the plan, as a warning nobody acts on.
+
+## 5. Sources ranked — THE CHEAPEST IS ALREADY BUILT AND REQUESTED ZERO TIMES
+
+    1. user's own frame (EvidenceCard/DeviceMockup)  $0, instant, always relevant,
+                                                     cannot be thin. Full-frame.
+                                                     Built+wired+taught. REQUESTED 0/3.
+    2. b-roll fetch                                  $0, adds fetch latency. FIRES 0.
+    3. EmojiCard                                     $0 pure type.
+    4. generated scenes                              quota-bound, ~$0.14. FIRES 0/11.
+                                                     Correctly the last resort.
+
+Sources 1 and 3 are MISCLASSED AS MOTION GRAPHICS, so they compete in the MG
+slot AND block b-roll through the exclusivity gate — the family that should be
+the cheapest cutaway supply is currently the thing that suppresses the supply.

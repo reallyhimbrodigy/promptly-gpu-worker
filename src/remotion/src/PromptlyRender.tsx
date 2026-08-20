@@ -194,6 +194,10 @@ const ClipRenderer: React.FC<{ clip: ClipSpec; sourceUrl: string }> = ({
         src={sourceUrl}
         trimBefore={clip.startFromFrames}
         playbackRate={clip.playbackRate}
+        // MUTED BY INTENT — see the audio-isolation law in cert_audio_isolation.py.
+        // Speech comes from final_audio.wav via `-map 1:a`; a video element here
+        // must never be an audio source.
+        muted
         style={{ width: "100%", height: "100%", objectFit: "cover" }}
       />
     </AbsoluteFill>
@@ -217,6 +221,7 @@ const TransitionRenderer: React.FC<{
           src={transition.clipBSrc ? resolveSrc(transition.clipBSrc) : sourceUrl}
           trimBefore={transition.clipBSrc ? 0 : transition.clipBStartFromFrames}
           playbackRate={transition.clipBPlaybackRate}
+          muted   /* audio-isolation law — final_audio.wav is the only audio source */
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
       </AbsoluteFill>
@@ -659,6 +664,11 @@ const BrollClip: React.FC<{ spec: BrollSpec; fps: number }> = ({ spec, fps }) =>
         <Video
           src={resolvedSrc}
           trimBefore={startFromFrames}
+          // MUTED BY INTENT. A cutaway is VISUAL ONLY: this clip full-frame
+          // replaces the speaker while their speech continues underneath. Stock
+          // audio here would talk over them. Today `-map 1:a` discards it, but
+          // that is the MUX protecting us, not this component — so state it here.
+          muted
           playbackRate={spec.playbackRate || 1.0}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
