@@ -30339,6 +30339,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     if _audio_r.returncode != 0:
         raise RuntimeError(f"Audio post-processing failed: {(_audio_r.stderr or '')[-600:]}")
     _audio_elapsed = time.time() - _audio_t0
+    _tl_add_done("render_audio", _audio_elapsed, "render")
     print(f"[render] Final audio built in {_audio_elapsed:.1f}s → {_final_audio_path}", flush=True)
     # W3 PROGRESSIVE (DARK): the composite chains above were dispatched BEFORE
     # this audio build, so early chunks can complete first — the publisher
@@ -30404,6 +30405,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # threads from outliving this call. Same rationale as _audio_pool above.
     _render_pool.shutdown(wait=True)
     _render_elapsed = time.time() - _render_t0
+    _tl_add_done("render_remotion", _render_elapsed, "render")
 
     # ── Concat overlay chunks (-c copy, lossless) ─────────────────────────
     # ProRes 4444 chunks share identical codec parameters (resolution, fps,
@@ -30637,6 +30639,8 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _am_elapsed = time.time() - _am_t0
 
     _mux_elapsed = time.time() - _mux_t0
+    _tl_add_done("render_composite", _mux_elapsed, "render")
+    _tl_add_done("render_audio_mux", _am_elapsed, "render_composite")
     # W3 PROGRESSIVE (DARK): the REAL final artifact now exists — request
     # preview finalization. Non-blocking best-effort: the publisher's worker
     # writes #EXT-X-ENDLIST only after it has drained the LAST chunk (a
@@ -35759,6 +35763,30 @@ def _tl_end(s):
 def _tl_add(name, start, end, parent="job"):
     if _TL is not None:
         _TL.add(name, start, end, parent)
+
+
+def _tl_add_done(name, elapsed, parent="job"):
+    """Attach a span that has JUST finished, given only its elapsed seconds.
+
+    The render internals were timed with `time.time()` deltas years before the
+    one clock existed, and those three numbers (remotion / audio / composite)
+    were printed to stdout and thrown away — which is why production's own
+    timeline reported `render: unaccounted = 671.1s of 671.1s`, i.e. 100% blind,
+    on 160 of 160 jobs. This converts such a duration into timeline coordinates
+    at the moment of the call, so an existing `time.time()` stage can become a
+    child span without being re-plumbed onto the monotonic clock.
+
+    Accurate because it is called AT the stage boundary: end is now, start is
+    now minus the measured duration. No-ops when there is no timeline (probes,
+    unit tests, direct render_multi_clip calls outside the handler)."""
+    if _TL is None:
+        return
+    _now = _TL.now()
+    try:
+        _e = max(0.0, float(elapsed or 0.0))
+    except (TypeError, ValueError):
+        return
+    _TL.add(name, max(0.0, _now - _e), _now, parent)
 
 
 def _tl_render(node, depth=0):
