@@ -9897,6 +9897,17 @@ def _frame_comp_jsx_bindings():
     assert _r.returncode == 0, f"frame-comp wiring FAILED\n{_out[-1200:]}"
 
 
+@check("THE SPEAKER'S AUDIO IS THE ONLY AUDIO (2026-08-20, RULE-1) [Rule 2]. A cutaway is VISUAL ONLY: a full-frame b-roll clip or insert scene replaces the talking head while the speaker keeps talking underneath. INVESTIGATED AND FOUND HOLDING BY ACCIDENT: BrollClip rendered a full-frame <Video> with NO `muted` prop — its stock audio WOULD have played over the speaker — and the only thing preventing it was the final mux's `-map 0:v` / `-map 1:a`, which takes audio from final_audio.wav ONLY and discards whatever the visual render carries. The single property the entire cutaway capability rests on was protected by one ffmpeg flag, with nothing asserting it and no statement of intent at the component. TWO CLAUSES, both load-bearing: (1) every <Video>/<OffthreadVideo> in the PRODUCTION render tree carries `muted`, so the law is true locally rather than by side effect — probes are excluded BY NAME so the gap is a checkable claim; (2) the final mux still maps video from the render and audio from final_audio.wav only, so it stays true globally even if a future component forgets clause 1. Either alone is a single point of failure. RED-proven by removing `muted` from BrollClip and by flipping the mux to -map 0:a.")
+def _audio_isolation():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_audio_isolation.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_audio_isolation FAILED\n{_out[-1400:]}"
+    assert "CERT AUDIO-ISOLATION: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
 @check("AN ASR'S PUNCTUATION HABITS MUST NOT GATE A LANGUAGE ROUTE (2026-08-20, RULE-1) [Rule 2]. The dead-air gate reads 'sentence-final OR >= _MIDSENTENCE_STALL_S (0.70s)'. MEASURED on job cada6a1b (Arabic, 88 words): Deepgram populated punctuated_word on 88 of 88 and emitted ZERO terminal punctuation, so the first half of that gate could NEVER fire and every gap was judged against 0.70s instead of the 0.03s trim trigger — a 23x stricter bar applied to a whole live Tier-1 route as a SIDE EFFECT of the ASR's habits, never as a decision. All 3 inter-word gaps (max 0.63s) fell under it, detect_dead_air returned zero, cut_plan['located_silences'] was empty, the WITHIN-CLIP SILENCES prompt block was never appended, and preserved_silences:[] in the plan was the SCHEMA DEFAULT rather than a decision. Two halves: native terminal glyphs are now terminal punctuation (؟ 。 ！ ？ — a correctly-punctuated non-Latin transcript was being read as unpunctuated), and when a transcript has NO terminal punctuation anywhere the linguistic gate is skipped entirely because 'not sentence-final' then says nothing about the speech. SIZE STATED SO IT IS NEVER MISREAD AS THE PASSTHROUGH FIX: this recovers ~0.63s of a 34.9s edit; the passthrough is cut_refinements coming back EMPTY (159/159 on 2026-08-04, absent on both renders of 2026-08-19). RED-proven by dropping the native glyphs and by unconditioning the gate.")
 def _deadair_unpunctuated():
     import os as _os, subprocess as _sub, sys as _sys
