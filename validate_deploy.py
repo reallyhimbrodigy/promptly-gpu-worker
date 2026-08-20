@@ -3721,7 +3721,7 @@ def _recipe_omittable_field_contract():
                         "edit_rationale", "generated_scenes", "notes",
                         "post_caption", "post_hook",
                         "preserved_silences", "scenes_declined",
-                        "source_text_regions"},
+                        "scenes_decline_class", "source_text_regions"},
         # B (Zac 2026-07-11): sound rides the beat — omission IS the default
         # ("most beats are carried by the voice"); the derivation .get()s it.
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},

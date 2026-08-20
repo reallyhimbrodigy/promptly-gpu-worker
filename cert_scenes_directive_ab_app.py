@@ -167,6 +167,9 @@ def run(source_ids: list, run_tag: str) -> dict:
             # carried "2 located_silence, 0 filler". An EMPTY scenes_declined
             # means no beat triggered; it is not the same as a zero with no text.
             "scenes_declined": (plan or {}).get("scenes_declined") if isinstance(plan, dict) else None,
+            # The COUNTABLE half. Prose is what a human reads; the class is what
+            # makes this run comparable to the next one.
+            "scenes_decline_class": (plan or {}).get("scenes_decline_class") if isinstance(plan, dict) else None,
             "edit_rationale": (plan or {}).get("edit_rationale") if isinstance(plan, dict) else None,
             "video_identity": (plan or {}).get("video_identity") if isinstance(plan, dict) else None,
             "counts": {k: len(v) for k, v in (plan or {}).items()
@@ -230,6 +233,7 @@ def main():
             continue
         print(f"     generated_scenes : {c.get('generated_scenes')}")
         print(f"     wall / out-tokens: {c.get('wall_s')}s / {c.get('gemini_output_tokens')}")
+        print(f"     decline CLASS    : {c.get('scenes_decline_class')!r}")
         print(f"     scenes_declined  : {c.get('scenes_declined')!r}   <- the decline channel")
         print(f"     notes (mechanical): {str(c.get('notes'))[:150]}")
         print(f"     LADDER           : {c.get('placement_notes') or 'no rung fired'}")

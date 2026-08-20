@@ -65,6 +65,22 @@ _CLAIM = re.compile(
     r"the difference|turns out|the result|which means|that means|so that)\b", re.I)
 
 
+def _latin_share(text):
+    """Fraction of letters in Latin script — a cheap language proxy.
+
+    LANGUAGE IS A CORPUS PROPERTY, NOT AN ACCIDENT. The first build kept 3
+    non-English sources of 4 purely by what surfaced. That is defensible (the
+    product's traffic IS multilingual and lang routing is live) but it must be a
+    STATED choice: on a non-English source I cannot eyeball whether a scene
+    SHOULD have fired, so a zero there rests entirely on the transcript match.
+    """
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return 0.0
+    latin = sum(1 for ch in letters if ord(ch) < 0x250)
+    return latin / len(letters)
+
+
 def _creds():
     env = {}
     with open(ENV) as fh:
@@ -149,6 +165,8 @@ def main(argv):
             "trigger_kind": "stated_number" if nums else "claim_not_shown",
             "trigger_verbatim": text[i:m.end() + 60].strip(),
             "n_numerals": len(nums), "n_claims": len(claims),
+            "latin_share": round(_latin_share(text), 2),
+            "likely_english": _latin_share(text) > 0.85,
         })
     print(f"  {len(cands)} carry a stated claim in the product's duration band")
 
@@ -182,7 +200,16 @@ def main(argv):
     ), "sources": kept, "rejected": rejected}
     with open(a.out, "w") as fh:
         json.dump(out, fh, indent=1)
+    _eng = [k for k in kept if k.get("likely_english")]
     print(f"\n  KEPT {len(kept)} / probed {len(kept) + len(rejected)}  -> {a.out}")
+    print(f"  ENGLISH share: {len(_eng)}/{len(kept)}"
+          f"{'' if not kept else f'  ({100.0 * len(_eng) / len(kept):.0f}%)'}")
+    if kept and len(_eng) * 2 < len(kept):
+        print("  *** FEWER THAN HALF ENGLISH. This is a STATED finding, not an "
+              "oversight: on a non-English source I cannot eyeball whether a "
+              "scene SHOULD have fired, so a zero there rests on the transcript "
+              "match alone. Either raise --probe until the English share is "
+              "half, or read the result knowing it.")
     if len(kept) < 3:
         print("  *** FEWER THAN 3 USABLE SOURCES. Do not run the arm on this: a "
               "corpus this small cannot separate 'will not emit' from 'this "

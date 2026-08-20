@@ -2745,6 +2745,24 @@ class PostCutPlan(BaseModel):
     # which is a different statement from "notes did not mention scenes", and
     # only the dedicated field can make that distinction.
     scenes_declined: Optional[str] = Field(default=None, max_length=300)
+    # AND A CLASS BESIDE THE PROSE. Free text cannot be COUNTED: "Video contains
+    # embedded training B-roll in source" and "the footage already shows it" are
+    # the same finding in different words, and a campaign that re-runs monthly
+    # needs to know whether declines are concentrated in one cause or spread
+    # across many. The prose stays — it is what caught "already edited" and "in
+    # favor of crisp kinetic typography" — but the class is what makes a run
+    # comparable to the last one.
+    #
+    # source_shows_it     the footage already proves the claim (a cutaway, a
+    #                     demo, the object on screen) — a CORRECT decline, and
+    #                     the one that invalidated four corpora
+    # no_trigger          nothing in the dialogue earns a scene
+    # would_collide       a scene would fight something already on the beat
+    # not_worth_it        the beat is real but a takeover would overstate it
+    # other               anything else; the prose carries it
+    scenes_decline_class: Optional[Literal[
+        "source_shows_it", "no_trigger", "would_collide", "not_worth_it", "other"
+    ]] = None
     # EDIT RATIONALE (2026-07-25) — a 1-2 sentence, USER-FACING explanation of the
     # editorial choices (why these cuts / this pacing / these moments), distinct
     # from the mechanical `notes` above. Additive + purely narrative: no renderer
@@ -8788,7 +8806,10 @@ WHEN THE DIALOGUE HANDS YOU ONE OF THESE, EMIT A SCENE:
 
 If a beat matches and you still decline it, SAY SO in `scenes_declined` with the
 reason (one clause) — NOT in `notes`, which carries other things and has
-crowded the reason out before. A silent zero is not an answer: declining is a
+crowded the reason out before — and put the CLASS in `scenes_decline_class`:
+`source_shows_it` (the footage already proves it), `no_trigger`,
+`would_collide`, `not_worth_it`, or `other`. The prose is for us to read; the
+class is so declines can be counted across runs. A silent zero is not an answer: declining is a
 decision and it gets written down. Leave `scenes_declined` empty ONLY when no
 beat matched at all — an empty field means "nothing triggered", not "I chose not
 to say". That is the only thing this block asks of you that the previous one

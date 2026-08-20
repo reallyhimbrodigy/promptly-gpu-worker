@@ -16,6 +16,8 @@
    "trigger_verbatim": "\u0644\u0648 \u0628\u062a\u062f\u0648\u0631 \u0639\u0644\u064a \u0639\u0642\u0627\u0631 \u062c\u0627\u0647\u0632 \u0628\u062e\u0637\u0647 \u0633\u062f\u0627\u062f 80% \u0628\u0639\u062f \u0627\u0644\u0627\u0633\u062a\u0644\u0627\u0645 \u0639\u0644\u064a \u062e\u0645\u0633 \u0633\u0646\u064a\u0646 \u062c\u0627\u064a\u0628 \u0644\u0643 \u063a\u0631\u0641\u0647 \u0648\u0635\u0627\u0644\u0647 \u0641\u064a \u0642\u0631\u064a\u0647 \u062c\u0648\u0645\u064a\u0631\u0627",
    "n_numerals": 2,
    "n_claims": 0,
+   "latin_share": 0.01,
+   "likely_english": false,
    "shot_changes": 0,
    "shot_probe_ok": true
   },
@@ -28,6 +30,8 @@
    "trigger_verbatim": "You ever wonder why she stopped looking at you the way she used to? It's not because she fell out of love. It's because somewh",
    "n_numerals": 0,
    "n_claims": 1,
+   "latin_share": 1.0,
+   "likely_english": true,
    "shot_changes": 2,
    "shot_probe_ok": true
   },
@@ -40,6 +44,8 @@
    "trigger_verbatim": "nd regalia \u0926\u094b\u0928\u094b\u0902 \u0915\u0940 \u0939\u092e \u092c\u093e\u0924 \u0915\u0930\u0947\u0902 \u0924\u094b \u0926\u094b\u0928\u094b\u0902 \u0939\u0940 projects 4.5 \u0938\u0947 five acres \u092e\u0947\u0902 \u0939\u0948 despite being comparatively smaller projects and \u0907\u0928\u094d",
    "n_numerals": 1,
    "n_claims": 0,
+   "latin_share": 0.65,
+   "likely_english": false,
    "shot_changes": 2,
    "shot_probe_ok": true
   },
@@ -52,7 +58,37 @@
    "trigger_verbatim": "\u0939\u0948 \u0924\u093e\u0915\u093f \u092e\u0941\u091d\u0947 proper \u0924\u0930\u0940\u0915\u0947 \u0938\u0947 check \u0915\u0930 \u0938\u0915\u0942\u0902. So \u0926\u0947\u0916\u094b almost 50 percent \u0924\u0915 \u0921\u093e\u0932 \u091a\u0941\u0915\u093e \u0939\u0942\u0902 \u0914\u0930 \u092f\u0939 \u0939\u094b \u0917\u092f\u093e \u0939\u0948 full",
    "n_numerals": 1,
    "n_claims": 0,
+   "latin_share": 0.53,
+   "likely_english": false,
    "shot_changes": 1,
+   "shot_probe_ok": true
+  },
+  {
+   "id": "dc1148fc-820c-4bb3-9fb6-486135131e6e",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/3f7f80e8-97a3-418a-ab2e-9eab0b54a8ed/1787124581611-FB399E24-08A1-4AC1-B131-29FCFB9331B8_L0_001.mp4",
+   "duration_s": 56.6,
+   "vibe": "Viral engaging video, make it informative transcribe with highlighted keywords and icons",
+   "trigger_kind": "stated_number",
+   "trigger_verbatim": "August 20. So for \u0905\u0930\u094d\u091c\u0941\u0928\u093e and \u0932\u0915\u094d\u0937\u094d\u092f batch, you have to pay 3,700 rupees for the complete course. And for the \u092f\u0915\u0940\u0928 need in English b",
+   "n_numerals": 2,
+   "n_claims": 0,
+   "latin_share": 0.98,
+   "likely_english": true,
+   "shot_changes": 0,
+   "shot_probe_ok": true
+  },
+  {
+   "id": "8f619658-c9cd-4bf4-863d-63b52887d8ca",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/133cc5a3-9633-43a9-b915-f2a6326e6fed/1787057880366-5E146B50-007F-4479-A1A6-14DD3D0A24D2_L0_001.mp4",
+   "duration_s": 23.3,
+   "vibe": "Viral engaging video",
+   "trigger_kind": "claim_not_shown",
+   "trigger_verbatim": "me. I'm gonna try the promptly AI to edit this video. If it turns out good, great. I'm gonna keep the app. And if it doesn't feel",
+   "n_numerals": 0,
+   "n_claims": 1,
+   "latin_share": 1.0,
+   "likely_english": true,
+   "shot_changes": 0,
    "shot_probe_ok": true
   }
  ],
@@ -66,6 +102,8 @@
    "trigger_verbatim": "body \u090f\u0915 depletion phase \u092e\u0947\u0902 \u0930\u0939\u0924\u0940 \u0939\u0948 \u091c\u0939\u093e\u0902 \u092a\u0930 minimum four to five hours \u0906\u092a\u0915\u0940 body \u092e\u0947\u0902 \u0915\u094b\u0908 food \u0915\u093e intake \u0928\u0939\u0940\u0902 \u0930\u0939\u0924\u093e \u0939\u0948. So breakfast",
    "n_numerals": 3,
    "n_claims": 0,
+   "latin_share": 0.87,
+   "likely_english": true,
    "shot_changes": 36,
    "shot_probe_ok": true,
    "reject": "36 shot changes \u2014 the source carries its own B-roll"
@@ -79,6 +117,8 @@
    "trigger_verbatim": "body \u090f\u0915 depletion phase \u092e\u0947\u0902 \u0930\u0939\u0924\u0940 \u0939\u0948 \u091c\u0939\u093e\u0902 \u092a\u0930 minimum four to five hours \u0906\u092a\u0915\u0940 body \u092e\u0947\u0902 \u0915\u094b\u0908 food \u0915\u093e intake \u0928\u0939\u0940\u0902 \u0930\u0939\u0924\u093e \u0939\u0948. So breakfast",
    "n_numerals": 3,
    "n_claims": 0,
+   "latin_share": 0.87,
+   "likely_english": true,
    "shot_changes": 36,
    "shot_probe_ok": true,
    "reject": "36 shot changes \u2014 the source carries its own B-roll"
@@ -92,6 +132,8 @@
    "trigger_verbatim": "\u093f\u090f \u0935\u0939\u0940 premium fragrance experience \u0905\u092c \u0924\u0941\u092e\u094d\u0939\u0947\u0902 original kit 1 percent price \u092a\u0930 \u092e\u093f\u0932 \u0938\u0915\u0924\u093e \u0939\u0948. \u0924\u094b \u0905\u0917\u0930 \u0924\u0941\u092e \u092d\u0940 \u092f\u0939 fragrance try \u0915\u0930\u0928\u093e \u091a",
    "n_numerals": 1,
    "n_claims": 0,
+   "latin_share": 0.64,
+   "likely_english": false,
    "shot_changes": 6,
    "shot_probe_ok": true,
    "reject": "6 shot changes \u2014 the source carries its own B-roll"
@@ -105,9 +147,26 @@
    "trigger_verbatim": "owder, hibiscus, Areita \u0914\u0930 \u0906\u0902\u0935\u0932\u093e powder \u092f\u0947 \u0938\u092c \u092e\u093f\u0932 \u091c\u093e\u090f\u0917\u093e. \u0905\u092c hundred percent hair growth \u0939\u094b\u0917\u0940. \u0910\u0938\u093e claim \u0928\u093e brand \u0915\u0930 \u0930\u0939\u0940 \u0939\u0948 \u0928\u093e \u092e\u0948\u0902 \u092c\u094b\u0932 \u0930",
    "n_numerals": 1,
    "n_claims": 0,
+   "latin_share": 0.54,
+   "likely_english": false,
    "shot_changes": 13,
    "shot_probe_ok": true,
    "reject": "13 shot changes \u2014 the source carries its own B-roll"
+  },
+  {
+   "id": "4bc2dc1d-e039-4eed-93af-dfabd51aa165",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/4756342d-d5b7-4a73-8819-8760fe4015c5/1787101295243-E7EC9F56-4362-474F-A8B6-7B1C761F7745_L0_001.mp4",
+   "duration_s": 44.0,
+   "vibe": "Viral engaging video voice ko tax me English me likhdo",
+   "trigger_kind": "stated_number",
+   "trigger_verbatim": "\u0908 \u0914\u0930 drop \u092d\u0940 location \u092e\u093f\u0932 \u0917\u0908. \u0939\u092e\u0928\u0947 drop \u0915\u0930 \u0926\u0940 \u0905\u092a\u0928\u0947 \u0915\u094b \u092e\u0948\u0902\u0928\u0947 52 rupees. \u092b\u093f\u0930 \u0939\u092e\u0928\u0947 \u090f\u0915 \u0914\u0930 ride \u092e\u093f\u0932\u0940. \u0926\u0942\u0938\u0930\u0940 ride \u092e\u093f\u0932\u0924\u0940 \u0905\u092a\u0928\u0947 \u0915\u094b, \u0909\u0938\u0915\u0947 \u092e",
+   "n_numerals": 6,
+   "n_claims": 0,
+   "latin_share": 0.3,
+   "likely_english": false,
+   "shot_changes": 24,
+   "shot_probe_ok": true,
+   "reject": "24 shot changes \u2014 the source carries its own B-roll"
   }
  ]
 }
