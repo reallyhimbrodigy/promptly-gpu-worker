@@ -36,15 +36,24 @@ THE INVARIANTS (ART_DIRECTION.md), applied once, in this file:
   tilt + overlap §4    5-8 degrees, hard edge, real shadow: a physical object on
                        a surface. "A stack of centred, non-overlapping boxes
                        reads as a slide."
-  frame-1-is-final     NO entrance animation. The first frame is the final
-                       frame — no opacity ramp, no slide, no scale. (The
-                       crisp-entrance law, 2026-07-13.)
+  card entrances §1    CORRECTED 2026-08-20. frame-1-is-final is a CAPTION law
+                       (the caption text layer); it was wrongly applied to these
+                       cards. REF-2's cards animate in — so each spec names an
+                       arrival (ENTRANCE) the renderer eases, velocity-caps and
+                       motion-blurs. The RESTING frame is still the §4
+                       composition, unchanged.
 """
 from typing import Any, Dict, Optional
 
 # §4: a physical print on a surface, never a floating layer.
 TILT_DEG = {"EvidenceCard": -6.0, "DeviceMockup": 5.0,
             "EmojiCard": -7.0}
+# Entrances — CORRECTED 2026-08-20. frame-1-is-final is a CAPTION law (the
+# caption text layer; four passes, the owner's eye). It was wrongly carried onto
+# these CARDS, which shipped `entrance: "none"` and popped on with zero motion.
+# REF-2's cards animate in, so each names an arrival the renderer eases,
+# velocity-caps (MAX_ENTRANCE_STEP 1/6) and motion-blurs. `none` stays static.
+ENTRANCE = {"EvidenceCard": "rise", "DeviceMockup": "rise", "EmojiCard": "scale"}
 # Cap-height fractions from §2.4, applied to the type size the design system
 # hands us rather than to a hardcoded pixel value.
 _SHADOW_OFFSET_FRAC = 0.02
@@ -93,9 +102,9 @@ def _base(kind, design_system, at_seconds, duration_s):
         # there is one clock in this pipeline and it is not in the renderer.
         "at_seconds": round(float(at_seconds or 0.0), 3),
         "duration_s": round(float(duration_s or 2.0), 3),
-        # frame-1-is-final: stated in the spec so the renderer cannot quietly
-        # add an entrance and no reviewer has to infer the intent.
-        "entrance": "none",
+        # Spec-driven arrival (see ENTRANCE) — a real, eased, velocity-capped
+        # card entrance. frame-1-is-final remains the CAPTION law, not a card one.
+        "entrance": ENTRANCE.get(kind, "rise"),
     }
 
 
