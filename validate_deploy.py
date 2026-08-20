@@ -3705,10 +3705,23 @@ def _recipe_omittable_field_contract():
         # byte-identical to the world before the field existed. Vertex DOES drop
         # empty optionals (project_vertex_migration), and that is the correct
         # outcome here: no observed name means no plate, never a blank one.
+        # scenes_declined (2026-08-19): the scene decline's OWN channel, added
+        # because `notes` is a MECHANICAL field (silence/filler/stutter counts
+        # merged from the first call) and an editorial decline placed there
+        # collides with bookkeeping — measured on one two-source run, where one
+        # source carried a real reason and the other carried "2 located_silence,
+        # 0 filler". OMISSION-TOLERANT BY DESIGN, and the collapse is the point:
+        # Vertex drops empty optionals, so ABSENT and EMPTY both mean "no
+        # decline text was written". Nothing distinguishes them and nothing
+        # needs to — the only consumers are reads (.get()) in the harness and
+        # the scene read, neither of which requires presence. It must NEVER
+        # become require-present: a plan that fails because the model had
+        # nothing to decline would be the worst possible reading of this field.
         "PostCutPlan": {"brand_copy", "cut_refinements", "existing_caption_region",
                         "edit_rationale", "generated_scenes", "notes",
                         "post_caption", "post_hook",
-                        "preserved_silences", "source_text_regions"},
+                        "preserved_silences", "scenes_declined",
+                        "source_text_regions"},
         # B (Zac 2026-07-11): sound rides the beat — omission IS the default
         # ("most beats are carried by the voice"); the derivation .get()s it.
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},

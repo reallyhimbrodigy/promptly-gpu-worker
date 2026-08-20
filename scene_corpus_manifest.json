@@ -1,0 +1,113 @@
+{
+ "built": "2026-08-19",
+ "criteria": {
+  "stated_claim": "numeral or claim-not-shown language, recorded verbatim",
+  "no_broll": "<=2 scene cuts (ffmpeg scdet), PROBED not assumed",
+  "duration_band": "15-90s"
+ },
+ "why": "Four prior corpora scored CORRECT DECLINES as defects: REF-2 (already edited), the editorial_eng pair (no trigger at all), the frozen goldens (scenes testable on 0/12), and the component corpus (source carries its own B-roll \u2014 the model said so). A scene answers a claim the footage CANNOT show, so only a source with a claim and no cutaway can falsify 'the model will not emit a scene'.",
+ "sources": [
+  {
+   "id": "cada6a1b-ae11-447c-9036-45a8a0d87bff",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/3d8a97aa-be53-463d-9857-01d4c4ab1394/1787169988283-CAC9F130-1098-4C88-AF5F-A160586173C6_L0_001.mp4",
+   "duration_s": 34.9,
+   "vibe": "Edit this video into a high-end, professional real estate social media video.\n\nKeep my original voice and natural speaking style. Do not change the meaning of what I say.\n\nEditing style:\n\n* Fast-paced but elegant editing suitable for Instagram Reels, TikTok and YouTube Shorts.\n* Remove long pauses, dead air, unnecessary breaths, mistakes and awkward gaps.\n* Add subtle punch-in zooms (around 105%\u2013115%) when I emphasize an important point.\n* Use smooth zoom-outs or slight reframing when changing between topics.\n* Add occasional subtle camera movement to make the footage feel dynamic, but avoid excessive effects.\n* Use clean, modern transitions. Avoid flashy or cheesy transitions.\n\nAudio:\n\n* Clean and enhance my voice so it sounds crisp, clear and professional.\n* Reduce background noise and room echo.\n* Add subtle professional sound effects for important cuts, text appearances and transitions.\n* Keep sound effects low enough that they never overpower my voice.\n* Add subtle whoosh/click/pop sounds only where they feel natural.\n* Use light background music if appropriate, keeping it very low under my voice.\n\nOn-screen text:\n\n* Add clean, modern captions synchronized precisely with my speech.\n* Highlight important keywords using a contrasting accent color.\n* Use short phrases instead of displaying full sentences whenever possible.\n* Make the typography premium, minimal and easy to read on a phone.\n* Add important numbers, prices, percentages, locations and investment terms as larger animated text when mentioned.\n* Use smooth text animations such as fade, slide or subtle scale.\n* Keep text away from my face.\n\nVisual emphasis:\n\n* When I mention a location, price, ROI, payment plan, developer or important investment point, emphasize it visually with animated text.\n* Use subtle icons or minimal graphic elements when they improve understanding.\n* If the video contains property images, maps or screenshots, add smooth zooms and pans to them.\n* Use B-roll or visual overlays only when they genuinely support what I am saying.\n\nColor and look:\n\n* Give the footage a premium real-estate look.\n* Improve exposure, contrast, sharpness and skin tones naturally.\n* Keep skin tones realistic.\n* Use a sophisticated cinematic color grade without making the footage overly dark or oversaturated.\n\nOverall:\nThe final video should feel like it was edited by a professional Dubai luxury real-estate content editor.\n\nPrioritize:\n\n1. Strong hook in the first 2\u20133 seconds.\n2. High viewer retention.\n3. Clear voice.\n4. Dynamic but natural cuts.\n5. Professional animated captions.\n6. Subtle zooms and sound effects.\n7. Premium real-estate branding.\n8. No unnecessary effects or distracting animations.\n\nMake the final result polished, modern, confident and suitable for a Dubai real estate broker building a personal brand.",
+   "trigger_kind": "stated_number",
+   "trigger_verbatim": "\u0644\u0648 \u0628\u062a\u062f\u0648\u0631 \u0639\u0644\u064a \u0639\u0642\u0627\u0631 \u062c\u0627\u0647\u0632 \u0628\u062e\u0637\u0647 \u0633\u062f\u0627\u062f 80% \u0628\u0639\u062f \u0627\u0644\u0627\u0633\u062a\u0644\u0627\u0645 \u0639\u0644\u064a \u062e\u0645\u0633 \u0633\u0646\u064a\u0646 \u062c\u0627\u064a\u0628 \u0644\u0643 \u063a\u0631\u0641\u0647 \u0648\u0635\u0627\u0644\u0647 \u0641\u064a \u0642\u0631\u064a\u0647 \u062c\u0648\u0645\u064a\u0631\u0627",
+   "n_numerals": 2,
+   "n_claims": 0,
+   "shot_changes": 0,
+   "shot_probe_ok": true
+  },
+  {
+   "id": "07558ed1-a3a7-4d4b-8921-16e1a08ab9ed",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/10474491-f790-4011-9014-327c8475e3f4/1787163379056-853E9A2F-8175-408A-84CB-D9D8C64C14B1_L0_001.mp4",
+   "duration_s": 64.1,
+   "vibe": "Viral engaging video add zoom , sound effects and motion graphics",
+   "trigger_kind": "claim_not_shown",
+   "trigger_verbatim": "You ever wonder why she stopped looking at you the way she used to? It's not because she fell out of love. It's because somewh",
+   "n_numerals": 0,
+   "n_claims": 1,
+   "shot_changes": 2,
+   "shot_probe_ok": true
+  },
+  {
+   "id": "d95a2de0-52d0-4c48-b01e-4bf56f674a6a",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/b997cdcb-d5e3-4b64-b8b6-7bdc56adff4f/1787143540680-514B05D4-5232-4A71-A65B-2E8FE456CE11_L0_001.mp4",
+   "duration_s": 78.4,
+   "vibe": "Make this a smooth video add motion graphics animations vfx",
+   "trigger_kind": "stated_number",
+   "trigger_verbatim": "nd regalia \u0926\u094b\u0928\u094b\u0902 \u0915\u0940 \u0939\u092e \u092c\u093e\u0924 \u0915\u0930\u0947\u0902 \u0924\u094b \u0926\u094b\u0928\u094b\u0902 \u0939\u0940 projects 4.5 \u0938\u0947 five acres \u092e\u0947\u0902 \u0939\u0948 despite being comparatively smaller projects and \u0907\u0928\u094d",
+   "n_numerals": 1,
+   "n_claims": 0,
+   "shot_changes": 2,
+   "shot_probe_ok": true
+  },
+  {
+   "id": "65563e97-5933-4b75-97ff-8d361125d9a6",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/c9193ec6-de4a-4944-8473-cbdd84a59c60/1787126806385-9036335B-C072-4BC3-BDB9-563F86043656_L0_001.mp4",
+   "duration_s": 42.6,
+   "vibe": "Clean and engaging edit",
+   "trigger_kind": "stated_number",
+   "trigger_verbatim": "\u0939\u0948 \u0924\u093e\u0915\u093f \u092e\u0941\u091d\u0947 proper \u0924\u0930\u0940\u0915\u0947 \u0938\u0947 check \u0915\u0930 \u0938\u0915\u0942\u0902. So \u0926\u0947\u0916\u094b almost 50 percent \u0924\u0915 \u0921\u093e\u0932 \u091a\u0941\u0915\u093e \u0939\u0942\u0902 \u0914\u0930 \u092f\u0939 \u0939\u094b \u0917\u092f\u093e \u0939\u0948 full",
+   "n_numerals": 1,
+   "n_claims": 0,
+   "shot_changes": 1,
+   "shot_probe_ok": true
+  }
+ ],
+ "rejected": [
+  {
+   "id": "e77af8a0-d167-4aa7-b7ea-fc9d61ee3224",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/efc57c91-043a-404f-8876-a9a3aa64d860/1787163275415-E1923448-149B-4DA7-A3F6-5A7203569787_L0_001.mp4",
+   "duration_s": 58.7,
+   "vibe": "Add zooms sound effects and motion graphics don\u2019t do colour correction in that",
+   "trigger_kind": "stated_number",
+   "trigger_verbatim": "body \u090f\u0915 depletion phase \u092e\u0947\u0902 \u0930\u0939\u0924\u0940 \u0939\u0948 \u091c\u0939\u093e\u0902 \u092a\u0930 minimum four to five hours \u0906\u092a\u0915\u0940 body \u092e\u0947\u0902 \u0915\u094b\u0908 food \u0915\u093e intake \u0928\u0939\u0940\u0902 \u0930\u0939\u0924\u093e \u0939\u0948. So breakfast",
+   "n_numerals": 3,
+   "n_claims": 0,
+   "shot_changes": 36,
+   "shot_probe_ok": true,
+   "reject": "36 shot changes \u2014 the source carries its own B-roll"
+  },
+  {
+   "id": "c7337449-6616-417b-af89-214c197ce40d",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/26916e27-2734-43a3-bdfb-eb02283c7fdc/1787159647260-E1923448-149B-4DA7-A3F6-5A7203569787_L0_001.mp4",
+   "duration_s": 58.7,
+   "vibe": "Clean and engaging edit",
+   "trigger_kind": "stated_number",
+   "trigger_verbatim": "body \u090f\u0915 depletion phase \u092e\u0947\u0902 \u0930\u0939\u0924\u0940 \u0939\u0948 \u091c\u0939\u093e\u0902 \u092a\u0930 minimum four to five hours \u0906\u092a\u0915\u0940 body \u092e\u0947\u0902 \u0915\u094b\u0908 food \u0915\u093e intake \u0928\u0939\u0940\u0902 \u0930\u0939\u0924\u093e \u0939\u0948. So breakfast",
+   "n_numerals": 3,
+   "n_claims": 0,
+   "shot_changes": 36,
+   "shot_probe_ok": true,
+   "reject": "36 shot changes \u2014 the source carries its own B-roll"
+  },
+  {
+   "id": "8467c3c5-7d4e-445d-b59c-4525d7ee3d79",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/291c8781-f6e4-4d81-8a79-24741a7c6b19/1787154001141-1E454C46-7ED5-4D71-A217-BAFC9B93A94D_L0_001.mp4",
+   "duration_s": 48.4,
+   "vibe": "Act as a professional Instagram Reels editor and viral content strategist. My video is already trimmed; do not make major cuts or change the sequence. Enhance the edit to maximize retention and engagement.\u201d \u201cCreate a scroll-stopping hook in the first 2 seconds. Add smooth zooms, speed ramps, motion blur, and clean transitions where needed. Insert pattern interrupts every2-4 seconds using text animations, B-roll, or camera movements. Generate accurate, stylish captions for every line. Highlight keywords like celebrity name, perfume name, notes, original price, and dupe price with different colors. Add relevant cinematic sound effects like whooshes, clicks, spray sounds, but don\u2019t overpower the voice. Show on-screen elegant visuals for each perfume note mentioned. Sync cuts and effects with the music beat. Build curiosity till the CTA. End with a clear call-to-action asking viewers to comment a keyword to get the buy link in DMs. Keep the overall feel natural and engaging, not overly cinematic or ad-like.",
+   "trigger_kind": "stated_number",
+   "trigger_verbatim": "\u093f\u090f \u0935\u0939\u0940 premium fragrance experience \u0905\u092c \u0924\u0941\u092e\u094d\u0939\u0947\u0902 original kit 1 percent price \u092a\u0930 \u092e\u093f\u0932 \u0938\u0915\u0924\u093e \u0939\u0948. \u0924\u094b \u0905\u0917\u0930 \u0924\u0941\u092e \u092d\u0940 \u092f\u0939 fragrance try \u0915\u0930\u0928\u093e \u091a",
+   "n_numerals": 1,
+   "n_claims": 0,
+   "shot_changes": 6,
+   "shot_probe_ok": true,
+   "reject": "6 shot changes \u2014 the source carries its own B-roll"
+  },
+  {
+   "id": "8d222d4a-7fb0-47b2-ad96-f65b87f7f036",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/e7ab2915-855b-4389-83bb-08538d1871c8/1787130170316-0CA5C842-49F9-45DE-959D-2A7E1EDB1D7A_L0_001.mp4",
+   "duration_s": 65.3,
+   "vibe": "Make this a smooth video, add zoom sound effects and motion graphics.",
+   "trigger_kind": "stated_number",
+   "trigger_verbatim": "owder, hibiscus, Areita \u0914\u0930 \u0906\u0902\u0935\u0932\u093e powder \u092f\u0947 \u0938\u092c \u092e\u093f\u0932 \u091c\u093e\u090f\u0917\u093e. \u0905\u092c hundred percent hair growth \u0939\u094b\u0917\u0940. \u0910\u0938\u093e claim \u0928\u093e brand \u0915\u0930 \u0930\u0939\u0940 \u0939\u0948 \u0928\u093e \u092e\u0948\u0902 \u092c\u094b\u0932 \u0930",
+   "n_numerals": 1,
+   "n_claims": 0,
+   "shot_changes": 13,
+   "shot_probe_ok": true,
+   "reject": "13 shot changes \u2014 the source carries its own B-roll"
+  }
+ ]
+}

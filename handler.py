@@ -2731,6 +2731,20 @@ class PostCutPlan(BaseModel):
     # call returns; if Gemini emits notes here, they take precedence in the
     # downstream merge (see edit_plan construction in generate_edit_gemini).
     notes: Optional[str] = Field(default=None, max_length=800)
+    # ── THE SCENE DECLINE GETS ITS OWN CHANNEL (2026-08-19) ─────────────────
+    # The v2 scenes directive demands "if a beat matches and you still decline
+    # it, SAY SO in `notes`" — and `notes` is a SHARED field. Measured across
+    # one two-source run it carried, on one source, a real editorial reason
+    # ("Video contains embedded training B-roll in source") and on the other,
+    # mechanical-cut bookkeeping ("2 located_silence, 0 filler, 0 false_start").
+    # A reason channel that sometimes carries the reason makes every future
+    # scene run unreadable: a zero with no decline text is indistinguishable
+    # from a zero whose decline text got crowded out by something else.
+    #
+    # So the decline is its OWN field. Empty means "no scene beat was declined",
+    # which is a different statement from "notes did not mention scenes", and
+    # only the dedicated field can make that distinction.
+    scenes_declined: Optional[str] = Field(default=None, max_length=300)
     # EDIT RATIONALE (2026-07-25) — a 1-2 sentence, USER-FACING explanation of the
     # editorial choices (why these cuts / this pacing / these moments), distinct
     # from the mechanical `notes` above. Additive + purely narrative: no renderer
@@ -8772,10 +8786,13 @@ WHEN THE DIALOGUE HANDS YOU ONE OF THESE, EMIT A SCENE:
   • a CLAIM the footage cannot show — a before/after, a comparison, a promise
     whose evidence is not on camera.
 
-If a beat matches and you still decline it, SAY SO in `notes` with the reason
-(one clause). A silent zero is not an answer — declining is a decision and it
-gets written down. That is the only thing this block asks of you that the
-previous one did not.
+If a beat matches and you still decline it, SAY SO in `scenes_declined` with the
+reason (one clause) — NOT in `notes`, which carries other things and has
+crowded the reason out before. A silent zero is not an answer: declining is a
+decision and it gets written down. Leave `scenes_declined` empty ONLY when no
+beat matched at all — an empty field means "nothing triggered", not "I chose not
+to say". That is the only thing this block asks of you that the previous one
+did not.
 
 `generated_scenes` are full-frame composed takeover beats where a"""
     # NOT `elif premium:` — deliberately. validate_deploy's legibleOnDark check
