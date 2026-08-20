@@ -36,9 +36,12 @@ THE INVARIANTS (ART_DIRECTION.md), applied once, in this file:
   tilt + overlap §4    5-8 degrees, hard edge, real shadow: a physical object on
                        a surface. "A stack of centred, non-overlapping boxes
                        reads as a slide."
-  frame-1-is-final     NO entrance animation. The first frame is the final
-                       frame — no opacity ramp, no slide, no scale. (The
-                       crisp-entrance law, 2026-07-13.)
+  card entrances §1    CORRECTED 2026-08-20. frame-1-is-final is a CAPTION law
+                       (the caption text layer); it was wrongly applied to these
+                       cards. REF-2's cards animate in — so each spec names an
+                       arrival (ENTRANCE) the renderer eases, velocity-caps and
+                       motion-blurs. The RESTING frame is still the §4
+                       composition, unchanged.
 """
 from typing import Any, Dict, Optional
 
