@@ -632,11 +632,24 @@ image = (
     # handler at the _deterministic_reedit seam, so the mount law demands them
     # here — and both spent a day as CERT-ONLY modules: built, cert-green,
     # deployed, and imported by nothing that ships.
+    # The four generation-free compositions' SPEC BUILDER. handler defer-imports
+    # it at the brand-spec seam, so the mount law demands it here — and it
+    # caught this within one gate run of the import being added.
+    .add_local_file("frame_compositions.py", "/frame_compositions.py")
     .add_local_file("mechanical_router.py", "/mechanical_router.py")
     .add_local_file("duration_target.py", "/duration_target.py")
     .add_local_file("prompt_v2_editor.py", "/prompt_v2_editor.py")
     .add_local_file("prompt_v2_schema.py", "/prompt_v2_schema.py")
     .add_local_file("prompt_v2_exemplars.py", "/prompt_v2_exemplars.py")
+    # FRAMES_PLAN stills. Verified received by the model before wiring
+    # (probe_frames_received_app: 7/7 described, 7 full-frame graphics, 0
+    # talking heads, 0 missing). Absent mount => _v2_reference_still_parts()
+    # returns [] and the call says so LOUDLY rather than claiming attachments.
+    # NO copy=True: it forces a BUILD STEP, and this chain already ends in
+    # add_local_* calls — Modal then refuses the image ("tried to run a build
+    # step after using image.add_local_*"). Nothing needs to run after the
+    # stills, so they are added on container start like every other mount.
+    .add_local_dir("reference_stills", "/stills")
     # LANE-SEAM (DARK behind PROMPTLY_CAPTION_TRANSLATE): caption-page
     # translation — parser + full-or-nothing page rebuild (pure; the Gemini
     # closure lives in handler's build-site touchpoint).

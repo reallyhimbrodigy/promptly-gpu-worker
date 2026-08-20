@@ -94,6 +94,12 @@ import {
 // the bare components here would render a plate with no name (the spec's key is
 // `name` inside a different shape) — the adapter IS the wiring.
 import { NamePlateMG, EndCardMG } from "./motion-graphics/brand";
+// Generation-free compositions — ADAPTERS, never the bare components: a bare
+// component renders a card with no content because the spec's keys live in a
+// different shape (the NamePlate lesson).
+import {
+  EvidenceCardMG, DeviceMockupMG, NumberCardMG, EmojiCardMG,
+} from "./FrameCompositions";
 
 // Flare motion-token system (Workstream D). The provider gates the whole
 // system on one flag; migrated components read useMotionTokens(). GLIDE/
@@ -151,6 +157,10 @@ export const MG_MAP: Record<string, React.FC<any>> = {
   // the adapter. Gate: brand-mg-wiring.test.mjs.
   NamePlate: NamePlateMG,
   EndCard: EndCardMG,
+  EvidenceCard: EvidenceCardMG,
+  DeviceMockup: DeviceMockupMG,
+  NumberCard: NumberCardMG,
+  EmojiCard: EmojiCardMG,
 };
 
 // ─── Per-clip renderer ─────────────────────────────────────────────────────
@@ -478,7 +488,10 @@ const TextOverlaysLayer: React.FC<{
 // the worker derives it from a word index, because there is one clock in this
 // pipeline and it is not in the renderer.
 const FRAME_COMPOSITION_TYPES = new Set([
-  "EvidenceCard", "DeviceMockup", "BeforeAfter", "FrameCallout",
+  // ONLY these two render a frame of the user's video. NumberCard and
+  // EmojiCard are pure type and must NOT receive sourceUrl — injecting it
+  // would imply a dependency they do not have.
+  "EvidenceCard", "DeviceMockup",
 ]);
 
 const MotionGraphicRenderer: React.FC<{

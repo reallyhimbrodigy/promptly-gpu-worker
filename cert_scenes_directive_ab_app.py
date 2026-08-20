@@ -51,7 +51,10 @@ import modal, modal_app                                            # noqa: E402
 image = (modal_app.image
          .add_local_file("modal_app.py", "/modal_app.py")
          .add_local_file("component_corpus_manifest.json",
-                         "/component_corpus_manifest.json"))
+                         "/component_corpus_manifest.json")
+         .add_local_file("scene_corpus_manifest.json",
+                         "/scene_corpus_manifest.json")
+         .add_local_dir("reference_stills", "/stills"))
 app = modal.App("cert-scenes-directive-ab", image=image)
 SECRETS = [modal.Secret.from_name("promptly-secrets"),
            modal.Secret.from_name("promptly-cloudfront"),
@@ -71,7 +74,21 @@ SECRETS = [modal.Secret.from_name("promptly-secrets"),
 # measurement. A source where reposition succeeds has room; one where the drop
 # fires does not, and the cert already showed contraction cannot save a static
 # face — so the outcome names the framing rather than my guess doing it.
-SOURCE_IDS = ["comp_scenes_536daed2", "comp_scenes_43c8dbe8"]
+# THE SIX. Every one carries a stated claim recorded VERBATIM and <=2 shot
+# changes (probed, not assumed) — so no source here can decline because its own
+# footage already shows the claim, which is what invalidated the last four
+# corpora. This is the first run where a zero would mean REFUSAL.
+import json as _json
+# BOTH ENVIRONMENTS. This module is imported LOCALLY (cwd = repo) and again
+# INSIDE THE CONTAINER (cwd is not the repo, the file is at the mount path).
+# A relative path resolves locally and raises FileNotFoundError remotely — and
+# "it imports fine locally" is NOT evidence about the container, which is
+# exactly how this shipped.
+_SC_PATH = ("/scene_corpus_manifest.json"
+            if os.path.exists("/scene_corpus_manifest.json")
+            else "scene_corpus_manifest.json")
+_SC = _json.load(open(_SC_PATH))
+SOURCE_IDS = [s["id"] for s in _SC["sources"]]
 
 
 @app.function(secrets=SECRETS, cpu=16.0, memory=49152, timeout=3600)
@@ -87,7 +104,7 @@ def run(source_ids: list, run_tag: str) -> dict:
     sys.path.insert(0, "/")
     import handler as H
 
-    manifest = json.load(open("/component_corpus_manifest.json"))
+    manifest = json.load(open("/scene_corpus_manifest.json"))
     _by_id = {s["id"]: s for s in manifest["sources"]}
     OUT = {"sources": source_ids, "cells": []}
 
@@ -95,7 +112,11 @@ def run(source_ids: list, run_tag: str) -> dict:
         # The flag is read at call time by _scenes_directive_v2(), so setting it
         # here is what makes the two cells differ — and it is the ONLY thing
         # that differs. One variable.
-        os.environ["PROMPTLY_SCENES_DIRECTIVE_V2"] = "1" if v2_on else ""
+        # The scenes directive is ON for BOTH arms here — this run is no longer
+        # asking "does the directive work", it is asking "does the model need to
+        # SEE an insert scene to emit one". Exemplar MODE is the only variable.
+        os.environ["PROMPTLY_SCENES_DIRECTIVE_V2"] = "1"
+        os.environ["PROMPTLY_PROMPT_V2_EXEMPLARS"] = "FRAMES_PLAN" if v2_on else "PLAN_ONLY"
         jid = str(uuid.uuid4())
         url = ("https://thisismybucketagainwooo.s3.amazonaws.com/"
                f"scenes-directive/{label}/{jid}/out.mp4")
@@ -199,10 +220,12 @@ def run(source_ids: list, run_tag: str) -> dict:
 
     for _sid in source_ids:
       src = _by_id[_sid]
-      for label, v2 in (("ON_v2", True), ("OFF_control", False)):
+      for label, v2 in (("FRAMES_PLAN", True), ("PLAN_ONLY_control", False)):
         c = _one(src, label, v2)
         c["source"] = _sid
-        c["triggers"] = src.get("triggers")
+        c["trigger_verbatim"] = src.get("trigger_verbatim")
+        c["trigger_kind"] = src.get("trigger_kind")
+        c["shot_changes"] = src.get("shot_changes")
         c["duration_s"] = src.get("duration_s")
         OUT["cells"].append(c)
         print(f"[cell] {_sid[:26]:28} {label:12} scenes={c.get('generated_scenes')} "
@@ -226,7 +249,7 @@ def main():
     out = run.remote(SOURCE_IDS, tag)
     for c in out.get("cells", []):
         print(f"\n  SOURCE {c.get('source')}  ({c.get('duration_s')}s)  "
-              f"triggers={c.get('triggers')}")
+              f"trigger={str(c.get('trigger_verbatim'))[:70]!r}")
         print(f"\n  ── {c.get('cell')} (SCENES_DIRECTIVE_V2={'1' if c.get('v2') else '0'}) ──")
         if c.get("error"):
             print(f"     ERROR: {c['error']}")

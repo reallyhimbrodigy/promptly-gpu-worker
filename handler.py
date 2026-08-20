@@ -8335,6 +8335,15 @@ Register tunes the cutaway's CHARACTER (the extend test still decides whether ea
 
 Transitions and tight-cut overlays are decided by a dedicated seam-dressing pass that reads your editorial_vision, story_shape, arc_segments, and key_moments against the footage's actual picture changes. You do not emit them here. Write your vision's transition intent as INTENT (the energy, the register) — the seam pass consumes it. Same-scene splices need nothing from you: the hard cut owns them, and their energy goes where it belongs — a mask-zoom on the first word back, a caption that leans in, an SFX that lands the beat.
 
+**EvidenceCard** — a STILL OF THEIR OWN FRAME, held up as evidence for the line they just said, tilted like a print on a surface with the claim behind it and a caption overlapping in front. Claim: "here is the thing I just described." Use when the speaker points at something that IS on camera but goes by too fast to read — a screen, a label, a receipt, a face reacting. Needs `claim` (the line it evidences); `caption` optional. NO GENERATION: the still is a frame of the video you are already editing, so it can never be wrong about what the video contains. **FITS:** demo, review, reaction, teach — anywhere the footage already holds the proof. **FIGHTS:** a beat whose power is the speaker's face; do not cover a landing with their own frame.
+
+**DeviceMockup** — their own frame inside a drawn phone shell. Claim: "this is what it looks like in the app." Use when the speaker is showing something screen-shaped and the words name it. `label` optional. The shell is drawn, never an asset. **FITS:** app walkthroughs, product demos, anything screen-recorded. **FIGHTS:** outdoor/handheld footage where a phone frame is a lie about where the shot came from.
+
+**NumberCard** — a stated number, full-bleed, cropping off both frame edges, on a flat field in the job's palette with an accent outline. Claim: "this number is the point." Needs `value` — the numeral EXACTLY as spoken; `label` optional (the unit or what it counts). ZERO ASSETS, no generation. **THE NUMBER MUST COME FROM THE DIALOGUE** — a card showing a figure nobody said is an on-screen lie. **FITS:** results, prices, counts, stats, anything where the figure IS the claim. **FIGHTS:** approximate or hedged numbers ("like a hundred-ish"); a full-bleed number promises precision the sentence did not.
+
+**EmojiCard** — one emoji at display size, tilted with a real shadow, and at most two words. Claim: "this is the thing, and it is funny/blunt/obvious." Needs `emoji`; `words` optional (max two). Uses the emoji font already in the render, so it adds nothing to the build. **FITS:** casual, creator, comedic, reaction — a shorthand the audience reads instantly. **FIGHTS:** formal-corporate, medical, financial-advice registers, where an emoji undercuts the authority the speaker is building.
+
+
 === GLOBAL FIELDS ===
 ═══════════════════════════════════════════════════════════════════════════
 
@@ -14042,6 +14051,48 @@ def _v2_catalog_slice(system_instruction):
     return catalog[:shape] + ("" if tail < 0 else catalog[tail:])
 
 
+def _v2_reference_still_parts():
+    """The FRAMES_PLAN stills, as media parts. `[2026-08-19]`
+
+    exemplar_block("FRAMES_PLAN") has always emitted "Stills from each reference
+    are attached" while NOTHING ATTACHED THEM — the module says the caller does
+    it and no caller did. A run on that would have measured a prompt referencing
+    absent images.
+
+    VERIFIED before wiring: probe_frames_received_app sent these to the model and
+    it described all 7 literally ("a blurred person with large text saying 'this
+    kid makes $2,000,000 a month'"), 7 full-frame graphics, 0 talking heads, 0
+    missing. I cannot see the images; that description is the audit.
+    """
+    import glob as _glob
+    from google.genai import types as _gt
+    out = []
+    for _p in sorted(_glob.glob("/stills/*.jpg")):
+        try:
+            with open(_p, "rb") as _fh:
+                out.append(_gt.Part.from_bytes(data=_fh.read(),
+                                               mime_type="image/jpeg"))
+        except Exception:
+            continue
+    return out
+
+
+# THE LABEL IS THE LOAD-BEARING PART. Reference stills sit in the same payload as
+# the user's own video, and a model that mistakes them for the user's frames will
+# place components describing SOMEBODY ELSE'S video — fabrication, and the worst
+# possible outcome of showing examples. Both boundaries are stated explicitly.
+_V2_REF_LABEL = (
+    "The images that follow are STILLS FROM TWO OTHER FINISHED EDITS. They are "
+    "reference material showing what an insert scene looks like. They are NOT "
+    "frames from the video you are editing. Never describe them, never place a "
+    "component from them, never quote their text."
+)
+_V2_SOURCE_LABEL = (
+    "That was the reference material. What follows is THE VIDEO YOU ARE EDITING "
+    "and its transcript. Everything you emit refers to THIS video only."
+)
+
+
 def _v2_response_schema():
     """ARM B's beat-major response schema — the MODEL'S OWN, not a copy.
 
@@ -14063,7 +14114,7 @@ def _v2_response_schema():
 
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
                            recipe_deadline_s=None, media_res_override=None,
-                           source_duration_s=None, n_words=None, v2=False):
+                           source_duration_s=None, n_words=None, v2=False, v2_frames=False):
     """Second Gemini call: visual placement on the kept-only transcript.
 
     Deep-thinking budget. thinking_budget=24576 (lowered from a 60000 cap).
@@ -14078,6 +14129,14 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     on thinking + actual JSON response. At 24K thinking, ~40K is left for
     the JSON output — typical PostCutPlan JSON is 2-4K, comfortable margin.
     """
+    # Resolved ONCE per call: empty unless FRAMES_PLAN armed AND the stills are
+    # mounted. An unmounted stills directory yields [] and the payload is
+    # byte-identical to today — the arm cannot silently half-run.
+    _v2_ref_parts = _v2_reference_still_parts() if v2_frames else []
+    if v2_frames and not _v2_ref_parts:
+        print("[prompt-v2] FRAMES_PLAN armed but NO STILLS FOUND at /stills — "
+              "sending text-only rather than claiming attachments that do not "
+              "exist", flush=True)
     if _editorial_suppressed():
         raise EditorialSuppressed(
             "PROMPTLY_EDITORIAL_LIVE is off — live traffic does not call the "
@@ -14126,7 +14185,14 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
         t0 = time.time()
         _stream_result = _gemini_stream_with_cache(
             client, model_name,
-            contents=[video_part, user_content],
+            contents=(
+                # References FIRST (they match the exemplars already in the
+                # system instruction), then a hard boundary, then the user's
+                # own video adjacent to its own transcript.
+                [_V2_REF_LABEL, *_v2_ref_parts, _V2_SOURCE_LABEL,
+                 video_part, user_content]
+                if _v2_ref_parts else [video_part, user_content]
+            ),
             base_config_kwargs=dict(
                 temperature=1.0,
                 # max_output_tokens is the SHARED thinking+output cap. HELD at
@@ -15253,6 +15319,7 @@ def generate_edit_gemini(
     # pattern) and reads plan-only output, which is what the pre-registration
     # specifies. When the A/B has run and won, this is the line to revisit.
     _v2_on = bool(prompt_v2_override)
+    _v2_frames_on = False
     if not _v2_on:
         # The refusal notice lives in its own scope so nothing it binds can leak
         # into the armed branch below. A `try` that imports for BOTH paths left
@@ -15281,6 +15348,10 @@ def generate_edit_gemini(
         # BYTE-IDENTICAL to production — MINUS arm A's response-shape section,
         # which would contradict arm B's own schema (see _v2_catalog_slice).
         _mode = os.environ.get("PROMPTLY_PROMPT_V2_EXEMPLARS", "").strip() or "PLAN_ONLY"
+        # FRAMES_PLAN is the only mode that attaches media. INLINE_VIDEO stays
+        # off the live path permanently (owner: "no video, ever") — it exists in
+        # the enum so its cost can be priced and REJECTED on evidence.
+        _v2_frames_on = (_mode == "FRAMES_PLAN")
         post_sys = _pv2.build_v2_system_instruction(
             _v2_catalog_slice(post_sys), _pv2x.exemplar_block(_mode))
         print(f"[prompt-v2] ARM B — doctrine swapped, catalog reused without "
@@ -15945,7 +16016,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         else:
             try:
                 try:
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on,
+                                                          v2_frames=_v2_frames_on)
                 except Exception as _ref_err:
                     if (_video_part_fallback is None
                             or type(_ref_err).__name__ != "ClientError"):
@@ -15968,7 +16040,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         "video_reference_fallback", reason=str(_ref_err)[:180])
                     _video_part = _video_part_fallback
                     _video_part_fallback = None
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on)
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on,
+                                                          v2_frames=_v2_frames_on)
             except Exception as _tx_err:
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the
@@ -16561,6 +16634,67 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         reason="planner emitted no brand_copy; the spoken name "
                                "in the transcript supplied it (ART_DIRECTION_6)")
                 _ledger_absorb_plan(edit_plan)
+                # ── THE FOUR GENERATION-FREE COMPOSITIONS ──────────────────
+                # Same seam, same design system as D+F: the model supplied the
+                # CONTENT, the pipeline derives every visual. The spec rides in
+                # the MG's own props as `spec`, which MotionGraphicRenderer
+                # spreads, so the adapter receives it (a bare component would
+                # render an empty card — the NamePlate lesson).
+                #
+                # THE TIMING AUTHORITY, without needing fps here. The delivery
+                # fps is resolved much later in the pipeline, so this seam
+                # cannot compute a frame — and it does not need to:
+                #
+                #     word_frame(w, i, fps) == round(word_time_s(w, i) * fps)
+                #
+                # and the renderer already applies exactly that rounding to
+                # at_seconds. Passing the AUTHORITY'S SECONDS therefore lands on
+                # the identical frame as every other component on the same word,
+                # at any fps, with no second conversion to keep in step. The
+                # renderer still never sees a word index.
+                try:
+                    import frame_compositions as _fc
+                    _fc_built = 0
+                    for _mg in (edit_plan.get("motion_graphics") or []):
+                        if not isinstance(_mg, dict):
+                            continue
+                        _k = str(_mg.get("type") or "")
+                        if _k not in _fc.BUILDERS:
+                            continue
+                        _wi = _mg.get("start_word_index")
+                        try:
+                            _at_s = word_time_s(kept_words, int(_wi))
+                        except Exception:
+                            # An unanchorable index is OURS to drop, loudly —
+                            # never a component silently placed at t=0.
+                            _ledger_dropped("motion_graphic", _k,
+                                            "unanchorable_word_index")
+                            _mg["_fc_drop"] = True
+                            continue
+                        _spec = _fc.build_frame_composition(
+                            _k, edit_plan.get("_design_system"),
+                            _at_s, _mg.get("props") or {},
+                            duration_s=float(_mg.get("duration_seconds") or 2.0))
+                        if not _spec:
+                            # Content the composition needs is absent. DROP,
+                            # never fabricate — and ledger it as ours.
+                            _ledger_dropped("motion_graphic", _k,
+                                            "missing_required_props")
+                            _mg["_fc_drop"] = True
+                            continue
+                        _mg.setdefault("props", {})["spec"] = _spec
+                        _fc_built += 1
+                    if any(_m.get("_fc_drop") for _m in
+                           (edit_plan.get("motion_graphics") or [])
+                           if isinstance(_m, dict)):
+                        edit_plan["motion_graphics"] = [
+                            _m for _m in edit_plan["motion_graphics"]
+                            if not (isinstance(_m, dict) and _m.get("_fc_drop"))]
+                    if _fc_built:
+                        print(f"[frame-comp] {_fc_built} composition spec(s) built "
+                              f"from the design system", flush=True)
+                except Exception as _fc_err:
+                    _ledger_defect("missing_module", "frame_compositions", _fc_err)
                 edit_plan["_brand_specs"] = _bc.build_brand_specs(
                     edit_plan.get("_design_system"),
                     name=_bc_name,
