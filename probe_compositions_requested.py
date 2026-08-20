@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DOES THE PLANNER ASK FOR THE FOUR COMPOSITIONS, NOW THAT THEY ARE FILED UNDER
+"""DOES THE PLANNER ASK FOR THE THREE COMPOSITIONS, NOW THAT THEY ARE FILED UNDER
 === MOTION GRAPHICS === INSTEAD OF THE SEAM SECTION?
 
 THE ONE NUMBER: requested, per composition. Nothing else in this probe matters.
@@ -44,7 +44,7 @@ SECRETS = [modal.Secret.from_name("promptly-secrets"),
            modal.Secret.from_name("promptly-lang-flags")]
 
 SOURCE_ID = "cada6a1b"
-FOUR = ["EvidenceCard", "DeviceMockup", "NumberCard", "EmojiCard"]
+THREE = ["EvidenceCard", "DeviceMockup", "EmojiCard"]
 CELLS = 3
 
 
@@ -116,10 +116,10 @@ def cell(i: int) -> dict:
     import re as _re0
     dropped_types = _re0.findall(r"DROP motion_graphic '([A-Za-z]+)'", log)
     types = [m.get("type") for m in mgs] + dropped_types
-    ours = [t for t in types if t in FOUR]
+    ours = [t for t in types if t in THREE]
     # The model's own JSON is the backstop: if the payload shape ever changes
     # again, a raw scan of the transcript still sees what was asked for.
-    raw = {t: log.count(f'"type": "{t}"') for t in FOUR}
+    raw = {t: log.count(f'"type": "{t}"') for t in THREE}
 
     if err or (not plan and not mgs and not dropped_types):
         state = "FAILED"
@@ -149,7 +149,7 @@ def cell(i: int) -> dict:
 def main():
     rows = list(cell.map(range(CELLS)))
     print("\n  ════ REQUESTED PER COMPOSITION — the entire result ════")
-    got = {k: 0 for k in FOUR}
+    got = {k: 0 for k in THREE}
     states = {}
     for r in rows:
         states[r["state"]] = states.get(r["state"], 0) + 1
@@ -169,7 +169,7 @@ def main():
     usable = sum(v for k, v in states.items() if k != "FAILED")
     print(f"\n  ──────────────────────────────────────────────")
     print(f"  cells: {states}   usable (a plan came back): {usable}/{len(rows)}")
-    for k in FOUR:
+    for k in THREE:
         print(f"    {k:14} requested in {got[k]}/{usable} usable cells")
     if usable == 0:
         print("  VERDICT: NO EVIDENCE — every cell failed. This is NOT a zero.")

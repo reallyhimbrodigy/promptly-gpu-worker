@@ -39,8 +39,12 @@ import sys
 
 os.environ.setdefault("APP_URL", "")
 
-# The four generation-free compositions (2026-08-19).
-FOUR = ["EvidenceCard", "DeviceMockup", "NumberCard", "EmojiCard"]
+# The generation-free compositions (2026-08-19). NumberCard was DELETED
+# 2026-08-19: measured redundant with StatCard twice (0/3 cells both
+# before and after its entry was rewritten, on a source whose whole
+# pitch is two figures). An instrument nobody reaches for is prompt
+# weight every job pays for.
+THREE = ["EvidenceCard", "DeviceMockup", "EmojiCard"]
 POSITIVE_CONTROL = "StatCard"
 NEGATIVE_CONTROL = "ZzNotARealComponentCard"
 
@@ -117,7 +121,7 @@ def audit(premium):
     print(f"  [control -] {NEGATIVE_CONTROL:16} correctly ABSENT")
 
     rows, missing = [], []
-    for name in FOUR:
+    for name in THREE:
         s, e, block = _entry_span(sys_text, name)
         if s is None:
             print(f"  [MISSING ] {name:16} NOT IN THE ASSEMBLED PROMPT")
@@ -154,7 +158,7 @@ def main():
         if r["missing"]:
             ok = False
             print(f"  FAIL premium={premium}: {r['missing']}")
-    print("\n  " + ("PASS — all four are IN the assembled instruction with "
+    print("\n  " + ("PASS — all three are IN the assembled instruction with "
                     "FITS/FIGHTS, both arms."
                     if ok else "FAIL — see above."))
     return 0 if ok else 1

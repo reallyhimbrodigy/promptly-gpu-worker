@@ -98,7 +98,7 @@ import { NamePlateMG, EndCardMG } from "./motion-graphics/brand";
 // component renders a card with no content because the spec's keys live in a
 // different shape (the NamePlate lesson).
 import {
-  EvidenceCardMG, DeviceMockupMG, NumberCardMG, EmojiCardMG,
+  EvidenceCardMG, DeviceMockupMG, EmojiCardMG,
 } from "./FrameCompositions";
 
 // Flare motion-token system (Workstream D). The provider gates the whole
@@ -159,7 +159,6 @@ export const MG_MAP: Record<string, React.FC<any>> = {
   EndCard: EndCardMG,
   EvidenceCard: EvidenceCardMG,
   DeviceMockup: DeviceMockupMG,
-  NumberCard: NumberCardMG,
   EmojiCard: EmojiCardMG,
 };
 
@@ -488,9 +487,9 @@ const TextOverlaysLayer: React.FC<{
 // the worker derives it from a word index, because there is one clock in this
 // pipeline and it is not in the renderer.
 const FRAME_COMPOSITION_TYPES = new Set([
-  // ONLY these two render a frame of the user's video. NumberCard and
-  // EmojiCard are pure type and must NOT receive sourceUrl — injecting it
-  // would imply a dependency they do not have.
+  // ONLY these two render a frame of the user's video. EmojiCard is pure
+  // type and must NOT receive sourceUrl — injecting it would imply a
+  // dependency it does not have.
   "EvidenceCard", "DeviceMockup",
 ]);
 

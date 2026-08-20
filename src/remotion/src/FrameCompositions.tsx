@@ -128,29 +128,6 @@ export const DeviceMockup: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
     </AbsoluteFill>
   );
 
-/** NUMBER CARD — REF-2's "$2,000,000": flat field, huge type, ZERO assets.
- *  Full-bleed, cropping off BOTH frame edges — that crop is what makes it read
- *  as designed rather than centred (§4). */
-export const NumberCard: React.FC<{ spec: FrameCompSpec }> = ({ spec }) => (
-  <AbsoluteFill style={{ background: spec.bg, justifyContent: "center" }}>
-    <div style={{
-      width: `${spec.value_width_pct ?? 118}%`, marginLeft: "-9%",
-      textAlign: "center", fontWeight: 900,
-      fontSize: spec.cap_px * 2.4, lineHeight: 0.86, color: spec.fg,
-      letterSpacing: "-0.05em",
-      WebkitTextStroke: spec.outline ? `3px ${spec.accent}` : undefined,
-      ...legible(spec),
-    }}>{spec.value}</div>
-    {spec.label ? (
-      <div style={{
-        marginTop: spec.cap_px * 0.22, textAlign: "center",
-        fontSize: spec.cap_px * 0.42, fontWeight: 700, color: spec.accent,
-        letterSpacing: "0.06em", textTransform: "uppercase", ...legible(spec),
-      }}>{spec.label}</div>
-    ) : null}
-  </AbsoluteFill>
-);
-
 /** EMOJI-AS-TYPE — REF-2's TOP SECRET folder: an emoji, a tilt, a shadow and
  *  two words. Noto Color Emoji is ALREADY in the image (the caption stack uses
  *  it), so this adds no font, no asset and no dependency. */
@@ -194,5 +171,4 @@ const withSpec = (Comp: React.FC<any>, needsSource: boolean): React.FC<any> =>
 
 export const EvidenceCardMG = withSpec(EvidenceCard, true);
 export const DeviceMockupMG = withSpec(DeviceMockup, true);
-export const NumberCardMG = withSpec(NumberCard, false);
 export const EmojiCardMG = withSpec(EmojiCard, false);

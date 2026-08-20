@@ -296,7 +296,7 @@ export interface CaptionSpec {
 // NOTE: no comments INSIDE this union — brand-mg-wiring.test.mjs parses member
 // lines and stops at the first non-member line, so a comment here silently
 // truncates the mirror. Generation-free compositions (EvidenceCard,
-// DeviceMockup, NumberCard, EmojiCard) mirror type_registries.VALID_MG_TYPES.
+// DeviceMockup, EmojiCard) mirror type_registries.VALID_MG_TYPES.
 export type MotionGraphicType =
   | "AnnotationArrow"
   | "ChatThread"
@@ -334,7 +334,6 @@ export type MotionGraphicType =
   | "EndCard"
   | "EvidenceCard"
   | "DeviceMockup"
-  | "NumberCard"
   | "EmojiCard"
 ;
 

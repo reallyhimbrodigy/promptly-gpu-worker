@@ -110,7 +110,6 @@ COMPONENT_CONTRACT: Dict[str, Dict[str, Any]] = {
     # clock, and this pipeline has paid for two.
     "EvidenceCard":   {"required": ["claim"], "optional": ["caption"]},
     "DeviceMockup":   {"required": [], "optional": ["label"]},
-    "NumberCard":     {"required": ["value"], "optional": ["label"]},
     "EmojiCard":      {"required": ["emoji"], "optional": ["words"]},
 }
 # Components that carry no content — timing only. An empty props dict is CORRECT

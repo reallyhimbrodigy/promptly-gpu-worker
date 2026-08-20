@@ -109,12 +109,12 @@ def run(build_sha: str) -> dict:
     mgs = plan.get("motion_graphics") or []
     import re as _re
     _rendered = _re.findall(r"^\[mg\] ([A-Za-z]+) src=", log, _re.M)
-    FOUR = {"EvidenceCard", "DeviceMockup", "NumberCard", "EmojiCard"}
+    THREE = {"EvidenceCard", "DeviceMockup", "EmojiCard"}
     return {
         "build_sha": build_sha,
         "result_keys": sorted((res or {}).keys()),
         "mg_types_in_output": _rendered,
-        "compositions_in_output": [t for t in _rendered if t in FOUR],
+        "compositions_in_output": [t for t in _rendered if t in THREE],
         "source": src["id"], "source_url": src["video_url"],
         "trigger": src.get("trigger_verbatim"),
         "wall_s": round(time.time() - t0, 1),
@@ -125,11 +125,11 @@ def run(build_sha: str) -> dict:
         "ledger": (res or {}).get("component_ledger") or H._component_ledger_snapshot(),
         "mg_types_shipped": [m.get("type") for m in mgs if isinstance(m, dict)],
         "compositions_shipped": [m.get("type") for m in mgs
-                                 if isinstance(m, dict) and m.get("type") in FOUR],
+                                 if isinstance(m, dict) and m.get("type") in THREE],
         "composition_specs": [{"type": m.get("type"),
                                "spec": (m.get("props") or {}).get("spec")}
                               for m in mgs if isinstance(m, dict)
-                              and m.get("type") in FOUR],
+                              and m.get("type") in THREE],
         "edit_rationale": plan.get("edit_rationale"),
         # the ladder's own lines, verbatim
         "ladder": [ln for ln in log.splitlines()

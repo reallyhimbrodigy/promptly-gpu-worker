@@ -9918,7 +9918,7 @@ def _catalog_reaches_the_model():
                   capture_output=True, text=True, timeout=420)
     _out = (_r.stdout or "") + (_r.stderr or "")
     assert _r.returncode == 0, f"cert_catalog_reaches_model FAILED\n{_out[-1600:]}"
-    assert "PASS — all four are IN the assembled instruction" in _out, (
+    assert "PASS — all three are IN the assembled instruction" in _out, (
         f"cert did not report PASS:\n{_out[-600:]}")
 
 

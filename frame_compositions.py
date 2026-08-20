@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""THE FOUR GENERATION-FREE COMPOSITIONS — specs, built from the design system.
+"""THE GENERATION-FREE COMPOSITIONS — specs, built from the design system.
 
-Four insert scenes that need NO image model, NO Vertex call, NO quota, NO new
+Insert scenes that need NO image model, NO Vertex call, NO quota, NO new
 dependency and NO asset pipeline. Two are built on a frame of the USER'S OWN
-video; two are pure type.
+video; one is pure type.
 
 WHY THIS FAMILY. Measured 2026-08-19: on real footage the planner reaches for
 StatCard and Stamp UNPROMPTED — twice on one source, hard enough to hit the
@@ -44,7 +44,7 @@ from typing import Any, Dict, Optional
 
 # §4: a physical print on a surface, never a floating layer.
 TILT_DEG = {"EvidenceCard": -6.0, "DeviceMockup": 5.0,
-            "NumberCard": 0.0, "EmojiCard": -7.0}
+            "EmojiCard": -7.0}
 # Cap-height fractions from §2.4, applied to the type size the design system
 # hands us rather than to a hardcoded pixel value.
 _SHADOW_OFFSET_FRAC = 0.02
@@ -126,42 +126,6 @@ def build_device_mockup(design_system, at_seconds, label=None,
     return s
 
 
-def build_number_card(design_system, at_seconds, value, label=None,
-                      duration_s=2.0) -> Optional[Dict[str, Any]]:
-    """REF-2's "$2,000,000" beat: flat field, huge type, palette accent, ZERO
-    assets. The number is full-bleed and crops off both frame edges per §4 —
-    that crop is what makes it read as designed rather than centred.
-
-    ON THE RECORD: THIS OVERLAPS StatCard, AND THE PLANNER PREFERS StatCard.
-    Measured 2026-08-19 on cada6a1b — a source whose entire pitch is two figures
-    (80% payment plan, 20% down) — the planner asked for StatCard on every
-    numeric beat in 3 of 3 plan cells and for this card in none, both before and
-    after the catalog entries were moved into the MOTION GRAPHICS section. The
-    section move was necessary (they had been filed under a header reading "You
-    do not emit them here") and was not sufficient: on a numeric beat there is an
-    incumbent that does the job, and no reason was given to prefer this one.
-
-    The honest difference is one property: StatCard counts a number up OVER the
-    live footage; this REPLACES the frame with a flat field. So it earns a beat
-    only when the picture should stop — a payoff figure, a reveal. That is now
-    what the catalog entry says. If a later measurement shows it still unchosen
-    on payoff beats, the right move is DELETING it, not teaching it harder — an
-    instrument nobody reaches for is prompt weight that every job pays for.
-    EvidenceCard and DeviceMockup do not have this problem: nothing else in the
-    catalog can put the user's own footage on screen as its own evidence.
-
-    The value must come from the dialogue; grounding is checked upstream (F5.3).
-    """
-    v = str(value or "").strip()
-    if not v:
-        return None
-    s = _base("NumberCard", design_system, at_seconds, duration_s)
-    # Full-bleed: the number is sized to overflow, so it is a FRACTION OF FRAME
-    # WIDTH, not a type-scale step.
-    s.update(value=v[:16], label=(str(label).strip()[:40] if label else None),
-             value_width_pct=118, outline=True)
-    return s
-
 
 def build_emoji_card(design_system, at_seconds, emoji, words=None,
                      duration_s=2.0) -> Optional[Dict[str, Any]]:
@@ -184,7 +148,6 @@ def build_emoji_card(design_system, at_seconds, emoji, words=None,
 BUILDERS = {
     "EvidenceCard": build_evidence_card,
     "DeviceMockup": build_device_mockup,
-    "NumberCard": build_number_card,
     "EmojiCard": build_emoji_card,
 }
 
@@ -207,9 +170,6 @@ def build_frame_composition(kind, design_system, at_seconds, props,
         if kind == "DeviceMockup":
             return fn(design_system, at_seconds, label=p.get("label"),
                       duration_s=duration_s)
-        if kind == "NumberCard":
-            return fn(design_system, at_seconds, p.get("value"),
-                      label=p.get("label"), duration_s=duration_s)
         if kind == "EmojiCard":
             return fn(design_system, at_seconds, p.get("emoji"),
                       words=p.get("words"), duration_s=duration_s)

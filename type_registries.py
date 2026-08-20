@@ -145,7 +145,7 @@ VALID_MG_TYPES = frozenset({
     # Stamp UNPROMPTED on real footage while asking for zero generated_scenes
     # with the directive on and stills in the payload. These ground in something
     # it can SEE — a word index pointing at a frame that certainly exists.
-    "EvidenceCard", "DeviceMockup", "NumberCard", "EmojiCard",
+    "EvidenceCard", "DeviceMockup", "EmojiCard",
 })
 
 # ── Generated scenes (Phase E · composed premium graphics) ──────────────────
