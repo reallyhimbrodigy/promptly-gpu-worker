@@ -180,8 +180,8 @@ def main():
         print(f"  {a} s3: s3://thisismybucketagainwooo/{arms[a].get('s3_key')}")
         if arms[a].get("error"): print(f"  {a} ERROR: {str(arms[a]['error'])[:200]}")
     with open("/tmp/gapfill_ab.json","w") as fh: json.dump(arms, fh, indent=1)
-    print(f"\n  BUILD {r['build_sha']}   source {r['source']}   wall {r['wall_s']}s")
-    print(f"  trigger: {str(r.get('trigger'))[:100]}")
+    _on = arms.get("ON") or {}
+    print(f"\n  BUILD {_on.get('build_sha')}   source {_on.get('source')}   wall {_on.get('wall_s')}s")
     if r.get("error"):
         print(f"  ERROR: {r['error'][:400]}")
     print(f"\n  MG types IN OUTPUT   : {r.get('mg_types_in_output')}   (from the render's own [mg] lines)")

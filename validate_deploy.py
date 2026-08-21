@@ -9897,6 +9897,17 @@ def _frame_comp_jsx_bindings():
     assert _r.returncode == 0, f"frame-comp wiring FAILED\n{_out[-1200:]}"
 
 
+@check("THE FREEZE EXEMPTION IS INTERVAL-SCOPED, NEVER A BLANKET PASS (2026-08-20, RULE-1) [Rule 2]. EvidenceCard and DeviceMockup render a <Freeze> of the user's own frame — A HELD STILL IS THE COMPONENT. The integrity gate's freeze check exists to catch a STUCK RENDER, so it saw those held frames and killed the job: INTEGRITY_TRIP: freeze=[[16.4,17.73],[18.13,19.0],[19.0,21.17],[21.4,22.67],[22.67,23.8]] — every interval inside a declared card window (out=[14.93..17.73],[18.05..21.56],[21.32..23.82]). The freezes ARE the cards. Correct by the gate's own rule, wrong for these components; same shape as the F7 reclassification. THE MASK MECHANISM ALREADY EXISTED (full-size MGs, b-roll, generated scenes) — frame-replacing types simply were not in the set feeding it, so this is a one-predicate change, not a new exemption path. THIS CERT IS MOSTLY NEGATIVE ON PURPOSE: an exemption is the easiest thing here to over-widen, and the integrity gate is the last thing between a broken render and a user. A freeze wholly inside a declared window is masked; a freeze OUTSIDE any window still trips; a freeze merely OVERLAPPING a window's edge still trips (a stuck render that begins during a card must not be laundered by it); and StatCard — an overlay with no freeze of its own — contributes NO window, so it can never mask a stuck render behind a floating number. RED-proven two ways: adding StatCard to the mask set, and neutering the interval subtraction into a blanket pass.")
+def _freeze_mask_scope():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_freeze_mask_scope.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_freeze_mask_scope FAILED\n{_out[-1400:]}"
+    assert "CERT FREEZE-MASK-SCOPE: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
 @check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")
 def _tsx_parses():
     import os as _os, subprocess as _sub

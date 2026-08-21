@@ -30593,7 +30593,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
          (float(_mg.get("fromFrame") or 0)
           + float(_mg.get("durationInFrames") or 0)) / float(source_fps))
         for _mg in motion_graphics_out
-        if str(_mg.get("type") or "") in _MG_FULLSIZE_TYPES
+        # FRAME-REPLACING TYPES BELONG HERE TOO (2026-08-20). EvidenceCard and
+        # DeviceMockup render a <Freeze> of the user's own frame — a HELD STILL
+        # is the component, not a symptom. The integrity gate's freeze check
+        # exists to catch a stuck render, so it saw those held frames and
+        # tripped, correctly by its own rule and wrongly for these components:
+        #
+        #   INTEGRITY_TRIP: freeze=[[16.4,17.73],[18.13,19.0],[19.0,21.17],
+        #                           [21.4,22.67],[22.67,23.8]]
+        #
+        # Every one of those intervals falls inside a declared card window
+        # (out=[14.93..17.73], [18.05..21.56], [21.32..23.82]) — the freezes ARE
+        # the cards. Same shape as the F7 reclassification: a component whose
+        # whole purpose is X must not be judged by a rule that assumes X is a
+        # defect.
+        #
+        # INTERVAL-SCOPED ON PURPOSE. This masks only the DECLARED window of a
+        # frame-replacing component. A freeze anywhere else — including a stuck
+        # render that happens to overlap one edge — still trips, and
+        # cert_freeze_mask_scope.py holds that line.
+        if str(_mg.get("type") or "") in (_MG_FULLSIZE_TYPES
+                                          | _MG_FRAME_REPLACING_TYPES)
     ]
     edit_plan["_render_clip_output_ranges"] = _clip_ranges
     edit_plan["_render_total_output_frames"] = int(total_output_frames)
