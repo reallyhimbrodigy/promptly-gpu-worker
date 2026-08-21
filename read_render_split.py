@@ -137,13 +137,46 @@ def main():
         after = [r for r in rows if str(r["created_at"]) >= a.compare]
         analyse(before, f"BEFORE the graft (< {a.compare})")
         r2 = analyse(after, f"AFTER the graft (>= {a.compare})")
-        if r2 and r2["blind"] == 0 and r2["n"]:
-            print(f"\n  GRAFT CONFIRMED ON REAL TRAFFIC: {r2['n']}/{r2['n']} renders "
-                  f"have children; 0 opaque.")
-        elif r2:
-            print(f"\n  NOT YET CONFIRMED: {r2['blind']} of {r2['n']} still opaque. "
-                  f"A burst job needs >45s OUTPUT — if none has run since the "
-                  f"deploy, this is an EMPTY TEST, not a failed one.")
+        # CONFIRMATION REQUIRES A BURST RENDER, NOT MERELY A NON-EMPTY WINDOW.
+        #
+        # THE BUG THIS REPLACES (mine, 2026-08-21): the check was `blind == 0`,
+        # which is TRIVIALLY TRUE in a window containing only in-process
+        # renders — those always had children, before and after the graft. It
+        # printed "GRAFT CONFIRMED" off a 31.6s-source job that never went near
+        # the burst. A confirmation that cannot fail is not a confirmation.
+        #
+        # Ground truth for "this job used the burst" is the burst_double_hold
+        # analytics event, which is emitted ONLY at the dispatch site.
+        burst_ids = set()
+        try:
+            ev = _q(url, key,
+                    "analytics_events?select=props,created_at&event=eq.burst_double_hold"
+                    "&created_at=gte." + urllib.parse.quote(a.compare) + "&limit=200")
+            for e in ev:
+                p = e.get("props")
+                if isinstance(p, str):
+                    try:
+                        p = json.loads(p)
+                    except Exception:
+                        p = {}
+                if isinstance(p, dict) and p.get("job_id"):
+                    burst_ids.add(str(p["job_id"])[:8])
+        except Exception as _e:
+            print(f"\n  (could not read burst_double_hold: {type(_e).__name__})")
+        after_ids = {str(r["id"])[:8] for r in after}
+        burst_after = burst_ids & after_ids
+        print(f"\n  burst-dispatched jobs since the deploy: {len(burst_after)}"
+              + (f" {sorted(burst_after)}" if burst_after else ""))
+        if not burst_after:
+            print(f"  NOT YET TESTED. Every post-deploy render was IN-PROCESS "
+                  f"(sub-floor), and those ALWAYS had children. This window "
+                  f"cannot confirm or refute the graft — it is an EMPTY TEST.")
+        elif r2 and r2["blind"] == 0:
+            print(f"  GRAFT CONFIRMED ON REAL TRAFFIC: {len(burst_after)} burst "
+                  f"render(s) since the deploy, 0 opaque.")
+        else:
+            print(f"  GRAFT FAILED: {r2['blind']} opaque render(s) remain with "
+                  f"{len(burst_after)} burst job(s) in the window.")
         return 0
     analyse([r for r in rows if str(r["created_at"]) >= since], f"since {since}")
     return 0

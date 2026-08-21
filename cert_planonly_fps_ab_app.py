@@ -63,6 +63,10 @@ def run() -> dict:
         mg = [e for e in em if isinstance(e, dict) and e.get("motion_graphic")]
         calls = [c for c in getattr(H, "_GEMINI_CALL_LOG", []) if isinstance(c, dict)]
         gemini_s = round(sum(c.get("total_s") or 0 for c in calls if not c.get("aborted")), 1)
+        import collections as _coll
+        _p = edit_plan if isinstance(edit_plan, dict) else {}
+        _mgt = _coll.Counter(str(e["motion_graphic"].get("type"))
+                             for e in mg if isinstance(e.get("motion_graphic"), dict))
         RESULT["arms"][arm] = {
             "tokens": H._gemini_token_summary(),
             "gemini_leg_s": gemini_s,
@@ -72,6 +76,25 @@ def run() -> dict:
             "n_emphasis": len(em),
             "n_motion_graphic": len(mg),
             "emphasis_ts": [round(float(e.get("t", 0) or 0), 1) for e in em[:12] if isinstance(e, dict)],
+            # ── FULL COMPONENT CUT (2026-08-21). The original capture read only
+            # zooms/emphasis/MG, so a cut that silently moved the CUT LIST or the
+            # captions would have passed as "quality held". Cuts and captions are
+            # the CONTROL surfaces here: they are timed off Deepgram, not off the
+            # video, so they must be IDENTICAL across arms. If they move, the arm
+            # is not isolating video sampling and no other number can be trusted.
+            "n_cuts": len(cuts or []),
+            "cut_bounds": [(round(float(c.get("source_start", 0) or 0), 2),
+                            round(float(c.get("source_end", 0) or 0), 2))
+                           for c in (cuts or [])[:14]],
+            "mg_types": dict(_mgt),
+            "n_text_overlays": len(_p.get("text_overlays") or []),
+            "n_sfx": len(_p.get("sound_effects") or []),
+            "n_broll": len(_p.get("broll_clips") or _p.get("broll") or []),
+            "n_transitions": len(_p.get("transitions") or []),
+            "n_caption_keywords": len(_p.get("caption_keywords") or []),
+            "caption_style": str(_p.get("caption_style") or ""),
+            "thumbnail_word_index": _p.get("thumbnail_word_index"),
+            "post_hook": str(_p.get("post_hook") or "")[:80],
         }
         raise _CaptureDone()
 
@@ -128,4 +151,37 @@ def main():
         print(f"  === GEMINI LEG: {ga}s -> {gb}s ({ga-gb:+.0f}s)")
         print(f"  === QUALITY: zooms {A.get('n_zoom')}->{B.get('n_zoom')}, emphasis {A.get('n_emphasis')}->{B.get('n_emphasis')}, MG {A.get('n_motion_graphic')}->{B.get('n_motion_graphic')}")
         print("      (survive => flip is safe; collapse => 2fps too coarse for placement)")
+
+        # ── CONTROL SURFACES: must be IDENTICAL, or the arm isolates nothing ──
+        print("\n  === CONTROL (Deepgram-timed, NOT video-derived — must be identical) ===")
+        _ctl_ok = True
+        for k in ("n_cuts", "n_caption_keywords", "caption_style"):
+            va, vb = A.get(k), B.get(k)
+            same = (va == vb)
+            _ctl_ok &= same
+            print(f"    {k:<22} {va} -> {vb}   {'OK' if same else '** MOVED **'}")
+        ca, cb = A.get("cut_bounds"), B.get("cut_bounds")
+        if ca is not None and cb is not None:
+            same = (ca == cb)
+            _ctl_ok &= same
+            print(f"    {'cut_bounds':<22} {'identical' if same else '** DIFFER **'}")
+            if not same:
+                print(f"      A: {ca}")
+                print(f"      B: {cb}")
+        if not _ctl_ok:
+            print("\n    !! A CONTROL SURFACE MOVED. Video sampling is not the only")
+            print("       variable in this pair — read NOTHING else from it.")
+
+        print("\n  === THE REAL TEST (video-grounded placement) ===")
+        for k in ("n_emphasis", "n_motion_graphic", "n_zoom", "n_text_overlays",
+                  "n_sfx", "n_broll", "n_transitions", "thumbnail_word_index"):
+            va, vb = A.get(k), B.get(k)
+            flag = ""
+            if isinstance(va, int) and isinstance(vb, int) and va:
+                d = (vb - va) / va * 100
+                flag = "   <-- COLLAPSE" if d <= -40 else ("   <-- surge" if d >= 60 else "")
+            print(f"    {k:<22} {va} -> {vb}{flag}")
+        print(f"    {'mg_types':<22} {A.get('mg_types')} -> {B.get('mg_types')}")
+        print(f"    {'emphasis_ts A':<22} {A.get('emphasis_ts')}")
+        print(f"    {'emphasis_ts B':<22} {B.get('emphasis_ts')}")
     print("\nPLAN_ONLY A/B COMPLETE.")
