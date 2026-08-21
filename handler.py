@@ -16852,6 +16852,40 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             print(f"[gap-fill] {len(_gf_fills)} EvidenceCard(s) "
                                   f"placed, {len(_gf_dec)} gap(s) declined",
                                   flush=True)
+                            # RE-EVALUATE, because recipe_eval already ran ~540
+                            # lines ABOVE this seam and therefore scored the
+                            # PRE-FILL plan. Measured live: it reported
+                            # max_dead_gap_s 13.9 / empty_windows 14 on a job
+                            # where six cards had just been placed — a metric
+                            # that runs before the fix cannot falsify it, and
+                            # reads as "no improvement" when it means "not
+                            # looked at". Pure Python over the plan, no I/O.
+                            try:
+                                from recipe_eval import evaluate_recipe as _gf_eval
+                                _gf_w = [{"word": str(_w.get("word") or ""),
+                                          "start": float(_w.get("start") or 0.0),
+                                          "end": float(_w.get("end") or 0.0)}
+                                         for _w in _gf_words]
+                                _gf_rep = _gf_eval(edit_plan, _gf_w, [],
+                                                   float(_gf_w[-1]["end"]) if _gf_w else 0.0)
+                                # `stats` is a DICT ATTRIBUTE on the report, not
+                                # a method — calling it would have thrown into
+                                # the except below and printed "unavailable",
+                                # which reads like a missing module rather than
+                                # my own wrong call.
+                                _gf_st = getattr(_gf_rep, "stats", {}) or {}
+                                print(f"[gap-fill] recipe_eval POST-FILL: "
+                                      f"max_dead_gap_s={_gf_st.get('max_dead_gap_s')} "
+                                      f"empty_windows={_gf_st.get('empty_windows')}/"
+                                      f"{_gf_st.get('runtime_windows')} "
+                                      f"visual_events={_gf_st.get('visual_events')} "
+                                      f"(the PRE-FILL numbers above this line are "
+                                      f"the baseline, not the result)", flush=True)
+                            except Exception as _gfee:
+                                print(f"[gap-fill] POST-FILL eval unavailable "
+                                      f"({type(_gfee).__name__}) — the pre-fill "
+                                      f"numbers above are NOT the result",
+                                      flush=True)
                 except Exception as _gfe:
                     print(f"[gap-fill] skipped ({type(_gfe).__name__}: "
                           f"{str(_gfe)[:120]}) — plan unchanged", flush=True)

@@ -154,8 +154,12 @@ def run(build_sha: str, gap_fill: bool) -> dict:
 def main():
     sha = os.environ.get("BUILD_SHA", "unknown")
     arms = {}
-    for _gf in (False, True):
-        arms["ON" if _gf else "OFF"] = run.remote(sha, _gf)
+    # ONE ARM PER INVOCATION. Two 13-minute renders in one local_entrypoint
+    # exceeded the Modal client heartbeat and killed the run mid-second-arm
+    # ("local client disconnected"). The OFF baseline is the artifact_run2
+    # render — same source, same harness, same 4-core handicap, render stage
+    # 402.9s — so only the ON arm needs paying for.
+    arms["ON"] = run.remote(sha, True)
     print(f"\n  ════ GAP-FILL A/B — cada6a1b (SINGLE SHOT, scdet 0) — build {sha} ════")
     print(f"  {'':22}{'OFF':>12}{'ON':>12}")
     def g(a, k, i=-1, d="-"):
@@ -163,15 +167,16 @@ def main():
         return v[i] if v else d
     for label, key in (("max_dead_gap_s","recipe_eval"), ("empty_windows","empty_windows"),
                        ("runtime_windows","runtime_windows"), ("visual_events","visual_events")):
-        print(f"  {label:22}{str(g('OFF',key)):>12}{str(g('ON',key)):>12}")
-    for a in ("OFF","ON"):
+        print(f"  {label:22}{'(baseline)':>12}{str(g('ON',key)):>12}")
+    for a in ("ON",):
         _rs = arms[a].get("render_stage_s") or []
         _r = f"{int(_rs[-1])/1000:.1f}s" if _rs else "-"
         print(f"  {'WALL / render-stage ' + a:22}{arms[a]['wall_s']:>9}s {_r:>11}")
     print(f"\n  gap-fill lines : {arms['ON'].get('gapfill_lines')}")
     print(f"  card at_seconds: {arms['ON'].get('card_seconds')}")
-    print(f"  MG in output   : OFF={arms['OFF'].get('mg_types_in_output')}  ON={arms['ON'].get('mg_types_in_output')}")
-    for a in ("OFF","ON"):
+    print(f"  MG in output   : ON={arms['ON'].get('mg_types_in_output')}")
+    print(f"  OFF BASELINE (artifact_run2, same handicap): render stage 402.9s, max_dead_gap_s 11.6, 2 clips")
+    for a in ("ON",):
         print(f"  {a} s3: s3://thisismybucketagainwooo/{arms[a].get('s3_key')}")
         if arms[a].get("error"): print(f"  {a} ERROR: {str(arms[a]['error'])[:200]}")
     with open("/tmp/gapfill_ab.json","w") as fh: json.dump(arms, fh, indent=1)

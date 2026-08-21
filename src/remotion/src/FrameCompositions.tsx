@@ -248,11 +248,36 @@ export const EmojiCard: React.FC<{ spec: FrameCompSpec }> = ({ spec }) => {
 // The NamePlate/EndCard precedent: registering a bare component renders a card
 // with no content, because the spec's keys live in a different shape. The
 // adapter IS the wiring (gate: brand-mg-wiring.test.mjs).
+// A COMPONENT THAT CANNOT RENDER MUST SAY SO. The refusals below used to
+// `return null` silently, and that silence cost a full render to find: the
+// pipeline reported "[gap-fill] 6 EvidenceCard(s) placed", "[frame-comp] 6
+// composition spec(s) built" and four "[mg] EvidenceCard ... → out=[...]" lines
+// while the delivered file contained ZERO of them. Every counter said shipped;
+// the pixels said nothing.
+//
+// Remotion surfaces browser console output in the render log (a ReferenceError
+// from this file reached it verbatim once), so a console.warn here IS the
+// renderer-side ledger — the one place a refusal can be recorded from inside
+// the browser. The marker is greppable on purpose.
+const FC_REFUSED = "[frame-comp] REFUSED";
+
 const withSpec = (Comp: React.FC<any>, needsSource: boolean): React.FC<any> =>
   (props: any) => {
     const spec: FrameCompSpec | undefined = props?.spec || props?.props?.spec;
-    if (!spec || !spec.kind) return null;      // no spec, no pixels — never a blank card
-    if (needsSource && !props?.sourceUrl) return null;
+    if (!spec || !spec.kind) {
+      // Name the keys we DID get — "no spec" and "spec arrived under a
+      // different key" are different bugs and must not look the same.
+      console.warn(
+        `${FC_REFUSED} no-spec: propKeys=[${Object.keys(props || {}).join(",")}] ` +
+        `nestedPropKeys=[${Object.keys(props?.props || {}).join(",")}]`);
+      return null;
+    }
+    if (needsSource && !props?.sourceUrl) {
+      console.warn(
+        `${FC_REFUSED} ${spec.kind}: sourceUrl is ${JSON.stringify(props?.sourceUrl)} ` +
+        `— this component renders a frame of the user's video and cannot without it`);
+      return null;
+    }
     return <Comp spec={spec} sourceUrl={props?.sourceUrl} fps={props?.fps ?? 30} />;
   };
 
