@@ -1,5 +1,6 @@
 import React from "react";
-import { AbsoluteFill } from "remotion";
+import { AbsoluteFill, staticFile } from "remotion";
+import { Video } from "@remotion/media";
 import { MG_MAP } from "./PromptlyRender";
 import { MotionBlurProvider } from "./motion-graphics/shared/motion-blur";
 import { SmoothGraphicsProvider } from "./motion-graphics/shared/smooth-graphics-flag";
@@ -15,14 +16,25 @@ export interface MGCraftProbeProps {
   type: string;
   props: Record<string, unknown>;
   motionBlur?: boolean;
+  /** Optional footage behind the component — a filename in public/ or a URL. Used
+   *  to verify the contrast floor over REAL video, not just the flat gray plate. */
+  bgVideo?: string;
 }
 const PLATE = "#808080";
-export const MGCraftProbe: React.FC<MGCraftProbeProps> = ({ type, props, motionBlur }) => {
+export const MGCraftProbe: React.FC<MGCraftProbeProps> = ({ type, props, motionBlur, bgVideo }) => {
   const Comp = MG_MAP[type];
+  const bgSrc = bgVideo
+    ? (/^https?:\/\//.test(bgVideo) ? bgVideo : staticFile(bgVideo))
+    : undefined;
   return (
     <MotionBlurProvider enabled={motionBlur ?? true} samples={10} shutterAngle={180}>
       <SmoothGraphicsProvider enabled={true}>
-        <AbsoluteFill style={{ backgroundColor: PLATE }}>
+        <AbsoluteFill style={{ backgroundColor: bgSrc ? "#000" : PLATE }}>
+          {bgSrc ? (
+            <AbsoluteFill>
+              <Video src={bgSrc} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+            </AbsoluteFill>
+          ) : null}
           {Comp ? <Comp startMs={0} durationMs={4000} {...props} /> : null}
         </AbsoluteFill>
       </SmoothGraphicsProvider>

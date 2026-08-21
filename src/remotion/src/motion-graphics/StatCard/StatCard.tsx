@@ -128,6 +128,19 @@ export const StatCard: React.FC<StatCardProps> = ({
   // The accent spine spans (near) the full number width — a structural bar, not a
   // hairline. Estimated from the final figure so it doesn't grow with the count.
   const accentWidth = numberSize * estWidthEm(finalDisplay) * 0.92;
+  // §2.4 CONTRAST FLOOR, SCALED to the full-bleed size — a fixed-px shadow is
+  // invisible behind a 300px+ glyph, and the floor is "verified against the
+  // darkest AND lightest frame". The halo scales with the figure so it separates
+  // it from footage of any luminance. VERIFIED over real footage (dark clip).
+  // CAVEAT (upstream, not here): the number COLOUR must be the palette's LIGHT
+  // overlay ink — a dark figure over dark footage fails the floor regardless of
+  // shadow; StatCard floats over video, so its colour is chosen for that, not the
+  // on-light-background fg.
+  const numberShadow =
+    `0 ${Math.round(numberSize * 0.012)}px ${Math.round(numberSize * 0.05)}px rgba(0,0,0,0.9), ` +
+    `0 ${Math.round(numberSize * 0.035)}px ${Math.round(numberSize * 0.12)}px rgba(0,0,0,0.5)`;
+  const labelShadow =
+    `0 ${Math.round(labelSize * 0.06)}px ${Math.round(labelSize * 0.22)}px rgba(0,0,0,0.85)`;
 
   const pulseScale = interpolate(localFrame, [24, 27, 30], [1, 1.06, 1], {
     extrapolateLeft: "clamp",
@@ -187,7 +200,7 @@ export const StatCard: React.FC<StatCardProps> = ({
                 fontVariantNumeric: "tabular-nums",
                 color: numberColor,
                 lineHeight: 1,
-                textShadow,
+                textShadow: numberShadow,
                 whiteSpace: "nowrap",
               }}
             >
@@ -242,7 +255,7 @@ export const StatCard: React.FC<StatCardProps> = ({
               marginTop: numberSize * 0.03,
               opacity: labelFadeIn,
               transform: `translateY(${labelY}px)`,
-              textShadow,
+              textShadow: labelShadow,
             }}
           >
             {label}
