@@ -77,6 +77,29 @@ def main():
                 + ("a stuck render would ship as a delivered video"
                    if must_trip else "the cards would keep killing the job"))
 
+    # ── 5: RUNTIME — the mask must actually BUILD, not just be declared ─────
+    # THE GAP THIS CLOSES: clauses 1-4 assert the TYPE SET and the subtraction
+    # helper, both of which were correct while the live gate reported
+    # masks=0/0/0. A cert that is true about the code and silent about the
+    # wiring passes while the feature does nothing — the same shape as the
+    # recipe_eval ordering bug. So drive the REAL mask builder.
+    built = H._build_integrity_masks({
+        "_integrity_fullmg_ranges": [(14.97, 17.77), (18.09, 21.59)],
+        "_integrity_slot_ranges": [], "_broll_output_ranges": [],
+        "_rendered_generated_scenes": [], "_render_fps": 30.0,
+    })
+    n_freeze = len(built.get("freeze") or [])
+    print(f"  [5] _build_integrity_masks with 2 card windows -> {n_freeze} freeze mask(s)")
+    if n_freeze < 2:
+        fails.append(f"the real mask builder produced {n_freeze} freeze mask(s) "
+                     f"from 2 declared card windows — the exemption is declared "
+                     f"but does not BUILD, so the gate still sees the cards")
+    empty = H._build_integrity_masks({"_render_fps": 30.0})
+    if (empty.get("freeze") or []):
+        fails.append("the builder invents masks with NO declared ranges — that "
+                     "would mask a stuck render on a plan with no cards at all")
+    print(f"      with no declared ranges -> {len(empty.get('freeze') or [])} (must be 0)")
+
     print()
     if fails:
         for f in fails:

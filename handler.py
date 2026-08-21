@@ -30615,6 +30615,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         if str(_mg.get("type") or "") in (_MG_FULLSIZE_TYPES
                                           | _MG_FRAME_REPLACING_TYPES)
     ]
+    # STATE THE MASK, so masks=0/0/0 at the gate is attributable. A run where
+    # this prints 0 with cards in the plan is a PLUMBING failure; a run where it
+    # prints N and the gate still reports 0 is a LIFETIME failure (the key did
+    # not survive to the gate). Those need different fixes, and without this
+    # line the log cannot tell them apart — which cost one render already.
+    try:
+        _fmr = edit_plan.get("_integrity_fullmg_ranges") or []
+        _fmt = sorted({str(_m.get("type") or "") for _m in motion_graphics_out
+                       if str(_m.get("type") or "")
+                       in (_MG_FULLSIZE_TYPES | _MG_FRAME_REPLACING_TYPES)})
+        print(f"[integrity] freeze-mask windows from frame-replacing/full-size "
+              f"MGs: {len(_fmr)} {_fmt}", flush=True)
+    except Exception:
+        pass
     edit_plan["_render_clip_output_ranges"] = _clip_ranges
     edit_plan["_render_total_output_frames"] = int(total_output_frames)
     # Slice 1 shadow REMOVED — the frame-domain truth is now consumed
