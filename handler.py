@@ -29762,6 +29762,20 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # stage a SYMLINK into the bundle. Remotion serves a VALID symlink fine —
         # but if that symlink's target becomes unresolvable at frame-serve time
         # (the transition/micro subprocess is the only source reader), its
+        #
+        # ^^ STALE AS OF 2026-08-20 — OVERLAY IS ALSO A SOURCE READER. The frame
+        # compositions (EvidenceCard, DeviceMockup) render SourceStill ->
+        # <Video src={sourceUrl}>, which makes the OVERLAY subprocess read the
+        # staged source too. Measured: [overlay-01], the chunk containing those
+        # cards, failed with "404 while downloading .../__source_canonical.mp4"
+        # while [overlay-00] (StatCard only, nothing that reads the source)
+        # rendered fine. The cards were reported placed by every upstream
+        # counter and appear in ZERO delivered frames.
+        #
+        # Anything that changes staging, its lifetime, or its cleanup must now
+        # hold for the overlay chunks as well — not only transition/micro.
+        # cert_asset_dependency_declared.py fails if this note is removed while
+        # a source-reading frame comp still exists.
         # serve-handler returns 404 "could not be found" and fails the render
         # (prod job d7207dc8). Dereference to the real file so the bundle holds a
         # hardlink to the source INODE (or a copy on cross-fs) — target-independent
@@ -33037,6 +33051,49 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
             if _rung == 2:
                 _stripped = ["motion_graphics", "text_overlays", "transitions",
                              "tight_cut_overlays", "broll", "generated_scenes"]
+                # ── LEDGER THE LOSS, PER COMPONENT, BEFORE DESTROYING IT ────
+                # THE DEFECT THIS CLOSES, measured 2026-08-20: a render reported
+                # "[gap-fill] 6 EvidenceCard(s) placed", "[frame-comp] 6 spec(s)
+                # built" and four "[mg] EvidenceCard ... → out=[...]" lines, and
+                # the delivered file contained NONE of them. Every counter said
+                # shipped; the pixels said nothing.
+                #
+                # The component ledger records requested-vs-dropped at the
+                # COMPONENT sites, and this ladder destroys components AFTER all
+                # of them have already reported success. So the ladder is the one
+                # place that can turn a silent quality loss into a countable one,
+                # and until now it recorded only `{"rung": 2}` — that a strip
+                # happened, never WHAT it cost.
+                #
+                # A degraded render is not a failure the user sees; it is a
+                # WORSE VIDEO delivered quietly. That is exactly the class that
+                # must be loud to us and invisible to them.
+                _degr_counts = {}
+                try:
+                    for _mg_d in (edit_plan.get("motion_graphics") or []):
+                        if isinstance(_mg_d, dict):
+                            _t = str(_mg_d.get("type") or "?")
+                            _ledger_dropped("motion_graphic", _t, "render_degrade_rung2")
+                            _degr_counts[f"mg:{_t}"] = _degr_counts.get(f"mg:{_t}", 0) + 1
+                    for _key, _kind in (("text_overlays", "text_overlay"),
+                                        ("broll_clips", "broll"),
+                                        ("transitions", "transition"),
+                                        ("tight_cut_overlays", "tight_cut_overlay"),
+                                        ("generated_scenes", "generated_scene")):
+                        _n_d = len(edit_plan.get(_key) or [])
+                        for _ in range(_n_d):
+                            _ledger_dropped(_kind, None, "render_degrade_rung2")
+                        if _n_d:
+                            _degr_counts[_kind] = _n_d
+                    if _degr_counts:
+                        print(f"[render-degrade] COMPONENTS DESTROYED: {_degr_counts} "
+                              f"— the user gets a worse video and every upstream "
+                              f"counter already said these shipped", flush=True)
+                except Exception as _dgl:
+                    print(f"[render-degrade] loss-ledger failed "
+                          f"({type(_dgl).__name__}) — the strip below is "
+                          f"UNCOUNTED, treat the component ledger as a LIE for "
+                          f"this job", flush=True)
                 edit_plan["motion_graphics"] = []
                 edit_plan["text_overlays"] = []
                 edit_plan["transitions"] = []
@@ -33051,7 +33108,7 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
                         _em_rl["motion_graphic"] = None
                 print(f"[render-degrade] stripped={_stripped}", flush=True)
                 _record_divergence(
-                    "render", {"rung": 2}, "render_stripped",
+                    "render", {"rung": 2, "destroyed": _degr_counts}, "render_stripped",
                     reason="two render crashes — decorations stripped, "
                            "cuts+captions+zooms kept",
                 )
