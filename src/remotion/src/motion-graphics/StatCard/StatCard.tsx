@@ -6,21 +6,45 @@ import { useMGPhase } from "../shared/useMGPhase";
 import type { StatCardProps } from "./types";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
+import { MotionBlurWrap } from "../shared/motion-blur";
 
+// ART DIRECTION (2026-08-20) — reference: REF-2's number treatment, §4:
+// "the number: full-bleed, cropping off both frame edges, accent-outlined."
+// StatCard is the hero-number OVERLAY (no card background — it floats over the
+// footage, by design). The craft pass gives that number real presence:
+//   • FULL-BLEED — the figure is sized to span the frame width (kissing the
+//     edges), adapting to the string so "0" is enormous and "$20,000,000" fills
+//     the width. Was a modest fixed 240px centred in open space.
+//   • STRUCTURAL ACCENT — a thick accent bar the width of the number, not a 48px
+//     hairline. It is the spine the label hangs from, drawn in on the landing.
+//   • ANCHORED LABEL — the caps line sits tight under the accent spine, so the
+//     three read as ONE object, not a floating centred stack (§4: a stack of
+//     centred boxes reads as a slide).
+//   • MOTION BLUR — the count-up + scale entrance render through the film-shutter
+//     blur (task 2: 30fps smoothness comes from the smear, not linear motion).
+// INVARIANTS HELD: tabular-nums, the contrast-floor drop shadow, palette-only
+// colours (numberColor/accentColor/labelColor arrive from the job palette), and
+// the entrance velocity cap (cappedEntranceProgress). The count-up, eased
+// scale-in, landing pulse and rule-draw timings are preserved verbatim.
 
-const NUMBER_SIZE = 240;
-const AFFIX_SIZE = 132;
-const AFFIX_GAP = 10;
-const LABEL_SIZE = 34;
-const RULE_WIDTH = 48;
-const RULE_HEIGHT = 2;
-const NUMBER_TO_RULE = 22;
-const RULE_TO_LABEL = 18;
+const LABEL_RATIO = 0.14;   // label cap-height as a fraction of the number size
+const AFFIX_RATIO = 0.55;   // prefix/suffix size relative to the number
+const ACCENT_HEIGHT_RATIO = 0.045;
+const NUMBER_MIN = 210;
+const NUMBER_MAX = 470;
+const FULL_BLEED_FRAC = 1.0; // span the frame width; outermost strokes kiss the edge
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 
 const DEFAULT_TEXT_SHADOW =
   "0 2px 8px rgba(0,0,0,0.85), 0 12px 40px rgba(0,0,0,0.6)";
+
+// Anton is a tall condensed bold; advances estimated in em so the number can be
+// sized to a target width without a DOM measure. Separators are narrow.
+const antonCharEm = (c: string): number =>
+  c === "," || c === "." ? 0.24 : c === " " ? 0.30 : 0.50;
+const estWidthEm = (s: string): number =>
+  s.split("").reduce((a, c) => a + antonCharEm(c), 0);
 
 export const StatCard: React.FC<StatCardProps> = ({
   startMs,
@@ -47,57 +71,72 @@ export const StatCard: React.FC<StatCardProps> = ({
     undefined,
     "StatCard",
   );
-  const { fps } = useVideoConfig();
+  const { fps, width } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 32, defaultExitFrames: 12 },
   );
 
   if (!visible) return null;
+  // v197 fail-closed: a non-numeric value would paint NaN via the count-up.
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
 
-  // ENTRANCE VELOCITY CAP: an 8-FRAME range is fps-dependent (133ms at 60, 267ms
-  // at 30) and linear, so a quarter of the travel lands in one delivered frame
-  // (measured peak_step 0.46). cappedEntranceProgress is ms-based and profiled.
+  // ENTRANCE VELOCITY CAP (unchanged): cappedEntranceProgress is ms-based and
+  // profiled so no single delivered frame exceeds the peak-travel cap.
   const smoothEntrance = useSmoothGraphics();
   const enterP = cappedEntranceProgress({ localFrame, fps, authoredFrames: 8 });
   const numberEnterScale = smoothEntrance
     ? 0.92 + 0.08 * enterP
     : interpolate(localFrame, [0, 8], [0.92, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-    easing: easeOutCubic,
-  });
-  const numberFadeIn = smoothEntrance ? enterP : interpolate(localFrame, [0, 8], [0, 1], {
-    extrapolateLeft: "clamp",
-    extrapolateRight: "clamp",
-  });
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+        easing: easeOutCubic,
+      });
+  const numberFadeIn = smoothEntrance
+    ? enterP
+    : interpolate(localFrame, [0, 8], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
 
   const countProgress = interpolate(localFrame, [4, 24], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
   const easedCount = easeOutCubic(countProgress);
-  // v197 fail-closed: a non-numeric value would paint NaN via the count-up
-  // (convicted on the f1e15483 specimen — empty props passed F5 vacuously).
-  if (typeof value !== "number" || !Number.isFinite(value)) return null;
   const currentValue = fromValue + (value - fromValue) * easedCount;
   const display =
     decimals !== undefined
       ? currentValue.toFixed(decimals)
       : Math.round(currentValue).toLocaleString();
 
-  const pulseScale = interpolate(
-    localFrame,
-    [24, 27, 30],
-    [1, 1.08, 1],
-    { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
+  // FULL-BLEED SIZING (§4). Size the number to the FINAL string's width so the
+  // envelope is stable while the count grows into it — the figure never jumps.
+  const finalDisplay =
+    decimals !== undefined ? value.toFixed(decimals) : Math.round(value).toLocaleString();
+  const affixChars = (prefix ? prefix.length : 0) + (suffix ? suffix.length : 0);
+  const totalEm =
+    estWidthEm(finalDisplay) +
+    affixChars * 0.5 * AFFIX_RATIO +
+    (prefix ? 0.08 : 0) +
+    (suffix ? 0.08 : 0);
+  const numberSize = Math.max(
+    NUMBER_MIN,
+    Math.min(NUMBER_MAX, (width * FULL_BLEED_FRAC) / Math.max(totalEm, 0.5)),
   );
+  const affixSize = numberSize * AFFIX_RATIO;
+  const affixGap = numberSize * 0.04;
+  const labelSize = Math.max(24, numberSize * LABEL_RATIO);
+  const accentHeight = Math.max(9, numberSize * ACCENT_HEIGHT_RATIO);
+  // The accent spine spans (near) the full number width — a structural bar, not a
+  // hairline. Estimated from the final figure so it doesn't grow with the count.
+  const accentWidth = numberSize * estWidthEm(finalDisplay) * 0.92;
 
+  const pulseScale = interpolate(localFrame, [24, 27, 30], [1, 1.06, 1], {
+    extrapolateLeft: "clamp",
+    extrapolateRight: "clamp",
+  });
   const ruleScaleX = interpolate(localFrame, [24, 30], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-
   const labelFadeIn = interpolate(localFrame, [26, 32], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
@@ -110,112 +149,106 @@ export const StatCard: React.FC<StatCardProps> = ({
   const exitDriftY = exitProgress * -10;
   const exitOpacity = 1 - exitProgress;
 
+  const affixStyle: React.CSSProperties = {
+    fontFamily: MG_FONTS.anton,
+    fontSize: affixSize,
+    fontWeight: 400,
+    letterSpacing: "-0.02em",
+    lineHeight: 1,
+    opacity: 0.9,
+    fontVariantNumeric: "tabular-nums",
+  };
+
   return (
     <AbsoluteFill style={containerStyle}>
       <div style={wrapperStyle}>
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          transform: `translateY(${exitDriftY}px)`,
-          opacity: exitOpacity,
-        }}
-      >
+        {/* Blur the WHOLE card as one subtree (count-up + scale + rule-draw).
+            Wrapping only the number breaks the flex flow — CameraMotionBlur
+            re-lays-out whatever it wraps. */}
+        <MotionBlurWrap>
         <div
           style={{
             display: "flex",
-            flexDirection: "row",
-            alignItems: "baseline",
-            justifyContent: "center",
-            transform: `scale(${numberEnterScale * pulseScale})`,
-            transformOrigin: "center",
-            opacity: numberFadeIn,
-            fontVariantNumeric: "tabular-nums",
-            color: numberColor,
-            lineHeight: 1,
-            textShadow,
+            flexDirection: "column",
+            alignItems: "center",
+            transform: `translateY(${exitDriftY}px)`,
+            opacity: exitOpacity,
           }}
         >
-          {prefix ? (
-            <span
+            <div
               style={{
-                fontFamily: MG_FONTS.anton,
-                fontSize: AFFIX_SIZE,
-                fontWeight: 400,
-                letterSpacing: "-0.02em",
-                lineHeight: 1,
-                opacity: 0.9,
-                marginRight: AFFIX_GAP,
+                display: "flex",
+                flexDirection: "row",
+                alignItems: "baseline",
+                justifyContent: "center",
+                transform: `scale(${numberEnterScale * pulseScale})`,
+                transformOrigin: "center",
+                opacity: numberFadeIn,
                 fontVariantNumeric: "tabular-nums",
+                color: numberColor,
+                lineHeight: 1,
+                textShadow,
+                whiteSpace: "nowrap",
               }}
             >
-              {prefix}
-            </span>
-          ) : null}
+              {prefix ? (
+                <span style={{ ...affixStyle, marginRight: affixGap }}>{prefix}</span>
+              ) : null}
+              <span
+                style={{
+                  fontFamily: MG_FONTS.anton,
+                  fontSize: numberSize,
+                  fontWeight: 400,
+                  letterSpacing: "-0.02em",
+                  lineHeight: 1,
+                  fontVariantNumeric: "tabular-nums",
+                }}
+              >
+                {display}
+              </span>
+              {suffix ? (
+                <span style={{ ...affixStyle, marginLeft: affixGap }}>{suffix}</span>
+              ) : null}
+            </div>
 
-          <span
+          {/* STRUCTURAL ACCENT — the spine the label hangs from. Draws in on land. */}
+          <div
             style={{
-              fontFamily: MG_FONTS.anton,
-              fontSize: NUMBER_SIZE,
-              fontWeight: 400,
-              letterSpacing: "-0.02em",
-              lineHeight: 1,
-              fontVariantNumeric: "tabular-nums",
+              width: accentWidth,
+              height: accentHeight,
+              backgroundColor: accentColor,
+              // Small positive gap below the figure — the original stacking that
+              // renders correctly; scaled up for the bigger number. The spine reads
+              // as the number's baseline, the label hangs off it.
+              marginTop: numberSize * 0.03,
+              transform: `scaleX(${ruleScaleX})`,
+              transformOrigin: "center",
+              boxShadow: "0 3px 10px rgba(0,0,0,0.5)",
+              borderRadius: accentHeight / 2,
+            }}
+          />
+
+          {/* ANCHORED LABEL — tucked tight under the spine; one object, not a stack. */}
+          <div
+            style={{
+              fontFamily: MG_FONTS.inter,
+              fontSize: labelSize,
+              fontWeight: 700,
+              color: labelColor,
+              letterSpacing: "0.2em",
+              textTransform: "uppercase",
+              textAlign: "center",
+              lineHeight: 1.1,
+              marginTop: numberSize * 0.03,
+              opacity: labelFadeIn,
+              transform: `translateY(${labelY}px)`,
+              textShadow,
             }}
           >
-            {display}
-          </span>
-
-          {suffix ? (
-            <span
-              style={{
-                fontFamily: MG_FONTS.anton,
-                fontSize: AFFIX_SIZE,
-                fontWeight: 400,
-                letterSpacing: "-0.02em",
-                lineHeight: 1,
-                opacity: 0.9,
-                marginLeft: AFFIX_GAP,
-                fontVariantNumeric: "tabular-nums",
-              }}
-            >
-              {suffix}
-            </span>
-          ) : null}
+            {label}
+          </div>
         </div>
-
-        <div
-          style={{
-            width: RULE_WIDTH,
-            height: RULE_HEIGHT,
-            backgroundColor: accentColor,
-            marginTop: NUMBER_TO_RULE,
-            marginBottom: RULE_TO_LABEL,
-            transform: `scaleX(${ruleScaleX})`,
-            transformOrigin: "center",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.5)",
-          }}
-        />
-
-        <div
-          style={{
-            fontFamily: MG_FONTS.inter,
-            fontSize: LABEL_SIZE,
-            fontWeight: 600,
-            color: labelColor,
-            letterSpacing: "0.22em",
-            textTransform: "uppercase",
-            textAlign: "center",
-            lineHeight: 1.2,
-            opacity: labelFadeIn,
-            transform: `translateY(${labelY}px)`,
-            textShadow,
-          }}
-        >
-          {label}
-        </div>
-      </div>
+        </MotionBlurWrap>
       </div>
     </AbsoluteFill>
   );

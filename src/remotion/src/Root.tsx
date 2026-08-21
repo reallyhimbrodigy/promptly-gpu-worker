@@ -19,6 +19,7 @@ import { ZoomTagProbe } from "./ZoomTagProbe";
 import { ZoomEaseProbe } from "./ZoomEaseProbe";
 import { GenSceneProbe } from "./GenSceneProbe";
 import { FrameCompProbe } from "./FrameCompProbe";
+import { MGCraftProbe } from "./MGCraftProbe";
 
 /**
  * Remotion root — two production compositions:
@@ -146,6 +147,22 @@ export const RemotionRoot: React.FC = () => {
           kind: "EmojiCard",
           spec: {},
           sourceUrl: "",
+          motionBlur: true,
+        } as unknown as Record<string, unknown>}
+      />
+      {/* MGCraftProbe — catalogue-pass render-proof (blur + smooth-graphics on a
+          gray plate). 1080x1920@60fps to match MGAttackProbe's timing grid so
+          before/after frames are directly comparable. Not used in production. */}
+      <Composition
+        id="MGCraftProbe"
+        component={MGCraftProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={96}
+        defaultProps={{
+          type: "StatCard",
+          props: {},
           motionBlur: true,
         } as unknown as Record<string, unknown>}
       />
