@@ -6,6 +6,7 @@ import { useMGPhase } from "../shared/useMGPhase";
 import type { StampFontKey, StampMark, StampProps, StampStyle } from "./types";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
+import { MotionBlurWrap } from "../shared/motion-blur";
 
 
 const easeInCubic = (t: number): number => t * t * t;
@@ -20,9 +21,11 @@ const STYLE_DEFAULTS: Record<
   StampStyle,
   { fontKey: StampFontKey; fontSize: number; mark: StampMark; distress: boolean; size: number }
 > = {
-  seal: { fontKey: "oswald", fontSize: 64, mark: "star", distress: false, size: 380 },
-  stamp: { fontKey: "anton", fontSize: 84, mark: "none", distress: true, size: 440 },
-  ribbon: { fontKey: "anton", fontSize: 72, mark: "none", distress: false, size: 520 },
+  // Presence bump (2026-08-20): a stamp reads as an authoritative mark, not a
+  // small sticker. Sizes raised for the same treatment as the rest of the pass.
+  seal: { fontKey: "oswald", fontSize: 64, mark: "star", distress: false, size: 470 },
+  stamp: { fontKey: "anton", fontSize: 84, mark: "none", distress: true, size: 540 },
+  ribbon: { fontKey: "anton", fontSize: 72, mark: "none", distress: false, size: 620 },
 };
 
 const FONT_FAMILY: Record<StampFontKey, string> = {
@@ -397,29 +400,35 @@ export const Stamp: React.FC<StampProps> = (props) => {
   return (
     <AbsoluteFill style={containerStyle}>
       <div style={wrapperStyle}>
-        <div
-          style={{
-            position: "relative",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transform: `translate(0px, ${exitY.toFixed(2)}px) scale(${finalScale.toFixed(4)})`,
-            transformOrigin: "center",
-            opacity: groupOpacity,
-          }}
-        >
-          {/* Rotation group */}
+        {/* The bounce-in press (scale overshoot + rotation settle) renders through
+            the film-shutter blur. Wraps the WHOLE self-contained stamp group (the
+            only child of wrapperStyle) — never a single flex child, per the
+            MotionBlurWrap subtree constraint. */}
+        <MotionBlurWrap>
           <div
             style={{
               position: "relative",
-              transform: `rotate(${finalRot}deg)`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transform: `translate(0px, ${exitY.toFixed(2)}px) scale(${finalScale.toFixed(4)})`,
               transformOrigin: "center",
-              filter: BADGE_SHADOW,
+              opacity: groupOpacity,
             }}
           >
-            {badge}
+            {/* Rotation group */}
+            <div
+              style={{
+                position: "relative",
+                transform: `rotate(${finalRot}deg)`,
+                transformOrigin: "center",
+                filter: BADGE_SHADOW,
+              }}
+            >
+              {badge}
+            </div>
           </div>
-        </div>
+        </MotionBlurWrap>
       </div>
     </AbsoluteFill>
   );
