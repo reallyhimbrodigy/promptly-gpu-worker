@@ -16827,8 +16827,28 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     _gf_words = kept_words if "kept_words" in dir() else None
                     if _gf_words and _gapfill_enabled():
                         import frame_compositions as _gfc
-                        _gf_fills, _gf_dec = _gfc.plan_gap_fills(edit_plan, _gf_words)
+                        _gf_mode = (os.environ.get("PROMPTLY_GAP_FILL_MODE", "")
+                                    .strip().lower() or "cards")
+                        _gf_fills, _gf_dec = _gfc.plan_gap_fills(
+                            edit_plan, _gf_words, mode=_gf_mode)
                         for _gf in _gf_fills:
+                            # B-ROLL IS MOTION; A CARD IS A HELD STILL. The
+                            # cards-only arm raised n_cuts 0->4 and left
+                            # mean_change at 0.0257 against a 0.0358 floor,
+                            # because a settled card is near-zero frame-to-frame
+                            # change BY DESIGN. B-roll is moving footage, which
+                            # is the only thing that can close that gap.
+                            if _gf.get("kind") == "broll":
+                                edit_plan.setdefault("broll_clips", []).append({
+                                    "keyword": _gf["keyword"],
+                                    "start_word_index": _gf["start_word_index"],
+                                    "end_word_index": _gf["end_word_index"],
+                                    "reason": f"gap-fill: closed a "
+                                              f"{_gf['gap_s']:.1f}s dead stretch",
+                                    "_gap_fill": True,
+                                })
+                                _ledger_requested("gap_fill", "broll")
+                                continue
                             edit_plan.setdefault("motion_graphics", []).append({
                                 "type": "EvidenceCard",
                                 "start_word_index": _gf["start_word_index"],
@@ -16849,8 +16869,11 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                 "mechanical_gap_fill",
                                 reason="dead visual stretches closed with the "
                                        "user's own frames — $0, no model call")
-                            print(f"[gap-fill] {len(_gf_fills)} EvidenceCard(s) "
-                                  f"placed, {len(_gf_dec)} gap(s) declined",
+                            _n_br = sum(1 for _x in _gf_fills
+                                        if _x.get("kind") == "broll")
+                            print(f"[gap-fill] mode={_gf_mode} "
+                                  f"{len(_gf_fills) - _n_br} card(s) + {_n_br} "
+                                  f"b-roll placed, {len(_gf_dec)} gap(s) declined",
                                   flush=True)
                             # RE-EVALUATE, because recipe_eval already ran ~540
                             # lines ABOVE this seam and therefore scored the

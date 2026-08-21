@@ -219,8 +219,72 @@ _GAPFILL_OPENING_GUARD_S = 3.0  # the opening belongs to the speaker (b-roll law
 _GAPFILL_MAX = 6                # never carpet a video with cards
 _GAPFILL_MIN_CLAIM_WORDS = 3    # fewer words than this is not a claim
 
+# ── THE ENGLISH-ONLY LIMIT ON MECHANICAL B-ROLL FILL ────────────────────────
+# A CONSTRAINT ON THE CAPABILITY, not a detail. Filling a gap with a CARD is
+# language-agnostic: the still is the user's own frame and the claim is their
+# own words, verbatim, in any script. Filling a gap with B-ROLL is not — it
+# needs a stock-library QUERY, and the library is English.
+#
+# On cada6a1b (Arabic) a mechanical keyword is unbuildable: copying the words
+# into a Pexels query returns nothing, and inventing an English phrase from
+# Arabic speech requires a MODEL CALL — which breaks both constraints this
+# feature is built on ($0/instant, no new model) and is precisely the thin-b-roll
+# assertion the honest-fallback path exists to prevent.
+#
+# THE MODEL CAN do it (it once emitted "luxury modern apartment living room
+# interior dubai skyline view daylight 4k" from this same Arabic speech). The
+# MECHANICAL path cannot. So:
+#
+#   ANY SCRIPT      -> cards. Always available, always honest.
+#   LATIN/ENGLISH   -> cards + b-roll may mix.
+#   NON-LATIN       -> cards ONLY, and the b-roll half of any mix silently
+#                      does not exist. Never report a mixed-arm result as
+#                      applying to non-Latin traffic.
+#
+# Measured population note: of 179 usable transcripts, roughly HALF were
+# non-Latin (25/25 in the first 50 sampled). So this limit is not an edge case —
+# it decides what the mix can be for about half of real traffic.
+_GAPFILL_BROLL_MIN_LATIN = 0.8
 
-def plan_gap_fills(plan, words, min_gap_s=None, max_fills=None):
+
+def _is_latin_transcript(words):
+    """Can a stock-library query be built from these words at all?"""
+    txt = " ".join(str(w.get("word") or "") for w in (words or [])
+                   if isinstance(w, dict))
+    tot = sum(ch.isalpha() for ch in txt)
+    if not tot:
+        return False
+    latin = sum(ch.isascii() and ch.isalpha() for ch in txt)
+    return (latin / tot) >= _GAPFILL_BROLL_MIN_LATIN
+
+
+_GAPFILL_STOP = frozenset("""
+a an the and or but so because if then than that this these those there here
+i me my we our you your he she it they them his her its their of to in on at
+for with from into onto by about over under up down off out through is are was
+were be been being am do does did done doing has have had having will would can
+could may might shall should must just really very quite not no as too also
+""".split())
+
+
+def _broll_keyword_from_words(words, i0, i1):
+    """A stock query from the speaker's own CONTENT words. Returns None when
+    too few survive — an empty window beats a lying cutaway."""
+    toks = []
+    for j in range(i0, min(i1 + 1, len(words))):
+        w = "".join(ch for ch in str(words[j].get("word") or "").lower()
+                    if ch.isalnum() or ch == "'")
+        if w and w not in _GAPFILL_STOP and len(w) > 2:
+            toks.append(w)
+    seen, out = set(), []
+    for t in toks:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return " ".join(out[:8]) if len(out) >= 3 else None
+
+
+def plan_gap_fills(plan, words, min_gap_s=None, max_fills=None, mode="cards"):
     """Return [{start_word_index, end_word_index, at_seconds, claim, gap}] —
     EvidenceCards that close the plan's own visual dead gaps.
 
@@ -270,7 +334,28 @@ def plan_gap_fills(plan, words, min_gap_s=None, max_fills=None):
             declines.append({"gap": (g0, g1), "reason": "no_claim_text"})
             break
         _seen_anchor.add(i0)
+        # MIXED MODE: alternate b-roll / card across gaps. B-roll is MOTION —
+        # a held card cannot raise frame-to-frame change, which is the gap the
+        # cards-only arm could not close. The language guard is enforced here,
+        # not assumed: on a non-Latin transcript there is no honest query, so
+        # every gap falls back to a card and the arm is cards-only by
+        # construction (see _GAPFILL_BROLL_MIN_LATIN).
+        _kind = "card"
+        if mode == "mixed" and (len(fills) % 2 == 0) and _is_latin_transcript(words):
+            _kw = _broll_keyword_from_words(words, i0, i1)
+            if _kw:
+                _kind = "broll"
+                fills.append({
+                    "kind": "broll", "keyword": _kw,
+                    "start_word_index": i0, "end_word_index": i1,
+                    "at_seconds": round(float(words[i0].get("start") or mid), 3),
+                    "gap_s": glen,
+                })
+                _synthetic["broll_clips"].append({"start_word_index": i0})
+                continue
+            declines.append({"gap": (g0, g1), "reason": "no_honest_broll_query"})
         fills.append({
+            "kind": "card",
             "start_word_index": i0,
             "end_word_index": i1,
             "at_seconds": round(float(words[i0].get("start") or mid), 3),
