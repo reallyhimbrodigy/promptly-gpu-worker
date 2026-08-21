@@ -5,6 +5,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
   interpolate,
+  staticFile,
 } from "remotion";
 import { Video } from "@remotion/media";
 import { cappedEntranceProgress } from "./motion-graphics/shared/entrance-cap";
@@ -105,6 +106,15 @@ const groupStyle = (e: Entrance, origin: string): React.CSSProperties =>
       }
     : {};
 
+/** Mirrors PromptlyRender's resolveSrc: pass through absolute/protocol URLs,
+ *  otherwise resolve through staticFile so the bundle's public dir is used
+ *  regardless of which composition (and therefore which page URL) is rendering. */
+const resolveStatic = (s: string): string => {
+  if (!s) return s;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(s) || s.startsWith("//")) return s;
+  return staticFile(s);
+};
+
 /** ONE FROZEN FRAME OF THE USER'S OWN VIDEO, treated as a physical print. */
 const SourceStill: React.FC<{
   sourceUrl: string; atSeconds: number; fps: number;
@@ -122,7 +132,14 @@ const SourceStill: React.FC<{
       }}
     >
       <Freeze frame={frame}>
-        <Video src={sourceUrl} startFrom={frame} muted
+        {/* staticFile(), NOT the raw string. MEASURED 2026-08-20: a raw
+            relative src resolves against the PAGE URL, which differs per
+            composition — it works in PromptlyMicroSegments (ClipRenderer) and
+            404s in PromptlyOverlay, where these cards render. BrollClip loads a
+            staged asset in this SAME composition and succeeds precisely because
+            it goes through resolveSrc/staticFile. The serve-root proof showed
+            the file PRESENT for every chunk, so this was never staging. */}
+        <Video src={resolveStatic(sourceUrl)} startFrom={frame} muted
           style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </Freeze>
     </div>

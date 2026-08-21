@@ -9897,6 +9897,16 @@ def _frame_comp_jsx_bindings():
     assert _r.returncode == 0, f"frame-comp wiring FAILED\n{_out[-1200:]}"
 
 
+@check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")
+def _tsx_parses():
+    import os as _os, subprocess as _sub
+    _rt = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "src", "remotion")
+    _r = _sub.run(["node", "tsx-parses.test.mjs"], cwd=_rt,
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"render-tree TSX failed to parse\n{_out[-1200:]}"
+
+
 @check("ONE BAD COMPONENT MUST NOT COST THE DECORATION LAYER (2026-08-20, RULE-1) [Rule 2, K7]. Measured and confirmed by falsifiable prediction: ONE EvidenceCard whose <Video> 404'd on the staged source caused rung 2 to strip motion_graphics, text_overlays, transitions, tight_cut_overlays, broll AND generated_scenes — the entire decoration layer. StatCard, which does not reference that asset, was VISIBLE at t=3.0s in the render without the card and ABSENT at t=3.6s in the render with it. It was collateral. Rung 2a now follows the graceful-placement pattern already shipped for components: try the NARROWEST repair first and widen only when it cannot apply. A render error that NAMES its asset names its culprit; everything else is innocent. Four clauses: the asset is extracted correctly from a REAL error string (the first cut used a non-greedy \\S*? and returned 'localhost:3004' — the host, not the filename — and a surgical rung that mis-reads the culprit drops the WRONG components, which is worse than dropping all of them); only the implicated source-reading comps drop; the innocent survive (StatCard, EmojiCard, overlays, transitions, b-roll); and an unmatched asset returns EMPTY so the ladder widens to the wholesale strip rather than silently re-rendering an identical failing spec. Clause 1 also asserts the greedy and non-greedy forms DISAGREE, so the fixture cannot stop discriminating. RED-proven by re-introducing the original defect (treat every MG as implicated) — clause 3 names StatCard.")
 def _surgical_degrade():
     import os as _os, subprocess as _sub, sys as _sys

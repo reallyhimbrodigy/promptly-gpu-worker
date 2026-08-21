@@ -33142,7 +33142,12 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
                         # "/" after "http:" and yields "localhost:3004" instead
                         # of the filename. Greedy backtracks to the LAST
                         # separator, which is where the basename begins.
-                        r"status code of 404 while downloading file\s+\S*/([^/\s]+)",
+                        # Remotion's message is "...downloading file ${url}." —
+                        # the trailing period is the SENTENCE, not the filename.
+                        # Capturing it broke the b-roll substring match against
+                        # _local_path, so the surgical rung would have missed a
+                        # b-roll culprit entirely.
+                        r"status code of 404 while downloading file\s+\S*/([^/\s]+?)\.?\s*$",
                         str(_last_err_rl or ""))
                     if _m404:
                         _bad_asset = _m404.group(1)
