@@ -7290,6 +7290,43 @@ def _build_face_signals(face_positions, deepgram_words, duration, premium=False)
     return face_visibility, speaker_positions, off_center, shot_scale, _v_zones
 
 
+_WORKED_EXAMPLES_HEAD = "WORKED EXAMPLES"
+_WORKED_EXAMPLES_END = "=== RESPONSE FORMAT ==="
+
+
+def _cut_worked_examples(sys_text):
+    """Remove the WORKED EXAMPLES block from an assembled system instruction.
+
+    Returns the text UNCHANGED if either marker is missing — the caller prints a
+    loud REFUSED line on that, because a cut that silently no-ops turns an A/B
+    into control-vs-control, and a control-vs-control run reported as an A/B is
+    worse than no run: it produces a confident null result.
+
+    Boundaries are found on the ASSEMBLED string rather than by editing the
+    f-string literal, so arm A stays byte-identical to production — the same
+    discipline the prompt-v2 arm uses for its catalog slice.
+
+    A one-line pointer replaces the block instead of nothing at all: the
+    surrounding text refers to "the examples above", and deleting the referent
+    while leaving the reference is a different edit than removing the block.
+    """
+    if not isinstance(sys_text, str) or not sys_text:
+        return sys_text
+    _end = sys_text.find(_WORKED_EXAMPLES_END)
+    if _end < 0:
+        return sys_text
+    _head = sys_text.find(_WORKED_EXAMPLES_HEAD)
+    if _head < 0 or _head >= _end:
+        return sys_text
+    # back up to the box rule that opens the block so the heading's own banner
+    # goes with it and no orphaned rule is left behind
+    _rule = sys_text.rfind("\n═", 0, _head)
+    _start = _rule + 1 if _rule > 0 else _head
+    return (sys_text[:_start]
+            + "(Worked examples omitted for this run.)\n\n"
+            + sys_text[_end:])
+
+
 def _build_post_cuts_prompt(
     vibe, duration, trend_context=None,
     shot_changes=None, vocal_emphasis=None, source_loudness=None,
@@ -15514,6 +15551,42 @@ def generate_edit_gemini(
         print(f"[prompt-v2] ARM B — doctrine swapped, catalog reused without "
               f"arm A's response format ({len(post_sys)} chars, exemplars={_mode})",
               flush=True)
+
+    # ── EXEMPLAR CUT (2026-08-21, DARK): drop WORKED EXAMPLES from the prompt.
+    #
+    # MEASURED: the assembled instruction is ~178,000 chars and WORKED EXAMPLES
+    # — four worked edits — is 16,568 of them (9.31%), the largest EXEMPLAR
+    # block. (It was first mis-measured as part of THUMBNAIL because its header
+    # is a box rule rather than `=== X ===`; THUMBNAIL proper is 1,369 chars and
+    # is the most efficient block in the prompt, not the least.)
+    #
+    # THE CONFOUND THIS FLAG CANNOT REMOVE, stated so no arm is read naively:
+    # the system prompt is held BYTE-IDENTICAL across jobs precisely so Gemini's
+    # IMPLICIT CACHE hits (see the note at the user-content seam). Cutting it
+    # changes the cache prefix, so arm B's FIRST call pays a cold cache that arm
+    # A — warmed by production all day — does not. A single pair therefore
+    # measures cache state, not prompt length. Read arm B's SECOND call, or read
+    # the pair as a lower bound on the cut's benefit.
+    #
+    # DARK by default: exemplars teach the whole recipe, not one field, so this
+    # is a measurement instrument until an A/B says otherwise — never a silent
+    # quality change to a live user's edit.
+    if os.environ.get("PROMPTLY_CUT_EXEMPLARS", "").strip() == "1":
+        _pre_cut = len(post_sys)
+        _cut = _cut_worked_examples(post_sys)
+        if len(_cut) < _pre_cut:
+            post_sys = _cut
+            print(f"[exemplar-cut] ARM B — WORKED EXAMPLES removed: "
+                  f"{_pre_cut:,} → {len(post_sys):,} chars "
+                  f"(-{_pre_cut - len(post_sys):,}, "
+                  f"-{(_pre_cut - len(post_sys)) / max(1, _pre_cut) * 100:.2f}%)",
+                  flush=True)
+        else:
+            # LOUD: a cut that silently no-ops turns the A/B into control-vs-
+            # control, which is the exact failure the prompt-v2 arm calls out.
+            print(f"[exemplar-cut] ARM B REFUSED — the WORKED EXAMPLES markers "
+                  f"were not found in the assembled prompt ({_pre_cut:,} chars). "
+                  f"NOT a cut arm; do not report this run as arm B.", flush=True)
 
     # ── UNIFIED CORE (LANE-SEAM Step 2, DARK): additive guidance profiles.
     # guidance_profiles is None on every call unless the PROMPTLY_UNIFIED_CORE
