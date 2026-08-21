@@ -32918,6 +32918,32 @@ def _remotion_subprocess(label, cmd, timeout=600, _self_healed=False):
     clause here, so the object was garbage-collected unread. The evidence was
     in memory the whole time.
     """
+    # ── SERVE-ROOT PROOF (2026-08-20) ───────────────────────────────────────
+    # A 404 on a staged asset has TWO possible causes needing OPPOSITE fixes:
+    # the file is NOT THERE (staging/lifetime bug) or it IS there and the
+    # composition cannot resolve it (staticFile/serve-root bug). The render log
+    # alone cannot tell them apart, and guessing costs a ten-minute render per
+    # guess. So state the fact BEFORE the render that will or will not 404:
+    # what the serve root actually contains at spawn time.
+    #
+    # Presence here does not prove servability at FRAME-serve time — the file
+    # could still be unlinked mid-render — but ABSENCE here is decisive, and
+    # presence narrows the remaining question to resolution. That is the fork
+    # this print exists to close.
+    try:
+        _sr = "/remotion/bundle/public"
+        _entries = sorted(os.listdir(_sr)) if os.path.isdir(_sr) else None
+        if _entries is None:
+            print(f"[{label}] SERVE-ROOT {_sr} DOES NOT EXIST — every staticFile "
+                  f"in this render will 404", flush=True)
+        else:
+            _srcs = [e for e in _entries if "source_canonical" in e]
+            print(f"[{label}] serve-root {_sr}: {len(_entries)} file(s); "
+                  f"source_canonical present={bool(_srcs)} {_srcs[:2]}", flush=True)
+    except Exception as _sre:
+        print(f"[{label}] serve-root probe failed ({type(_sre).__name__}) — "
+              f"a 404 below is UNATTRIBUTABLE, not innocent", flush=True)
+
     _t0 = time.time()
     try:
         _r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -33003,6 +33029,50 @@ def _remotion_subprocess(label, cmd, timeout=600, _self_healed=False):
     return _elapsed
 
 
+def _surgical_drop_for_asset(edit_plan, asset_basename):
+    """Drop ONLY the components that reference `asset_basename`. Returns a list
+    of what was dropped, or [] when nothing matches (caller widens).
+
+    WHY THIS EXISTS: a 404 on one asset used to strip every decoration in the
+    video. The error names the file; the file names the components. Anything
+    that does not reference it is innocent and must survive.
+
+    Frame compositions that render user footage (_MG_FRAME_REPLACING_TYPES that
+    read the source) are implicated by the SOURCE asset; b-roll by its own
+    staged clip. Each drop is ledgered so the loss is countable.
+    """
+    _dropped = []
+    _is_source = "source_canonical" in (asset_basename or "")
+    try:
+        _mgs = edit_plan.get("motion_graphics") or []
+        _keep = []
+        for _m in _mgs:
+            if not isinstance(_m, dict):
+                _keep.append(_m)
+                continue
+            _t = str(_m.get("type") or "")
+            # Only the source-reading compositions can 404 on the source.
+            if _is_source and _t in ("EvidenceCard", "DeviceMockup"):
+                _ledger_dropped("motion_graphic", _t, "asset_unresolvable")
+                _dropped.append(f"mg:{_t}")
+                continue
+            _keep.append(_m)
+        if len(_keep) != len(_mgs):
+            edit_plan["motion_graphics"] = _keep
+        _brs = edit_plan.get("broll_clips") or []
+        _bk = [_b for _b in _brs
+               if not (isinstance(_b, dict)
+                       and asset_basename in str(_b.get("_local_path") or ""))]
+        if len(_bk) != len(_brs):
+            for _ in range(len(_brs) - len(_bk)):
+                _ledger_dropped("broll", None, "asset_unresolvable")
+                _dropped.append("broll")
+            edit_plan["broll_clips"] = _bk
+    except Exception:
+        return []
+    return _dropped
+
+
 def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
     """RENDER DEGRADE LADDER (zero-fatal): rung 0 = full render; a crash used to
     retry the IDENTICAL spec once (rung 1) — LEVER 4 now SKIPS that rung when its
@@ -33021,8 +33091,11 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
     output_path. edit_plan is mutated for re-entry exactly as documented.
     """
     import copy as _copy_rl
+    import re as _re_deg
     _pristine_cuts = _copy_rl.deepcopy(edit_plan["cuts"])
     _rung = 0
+    _surgical_tried = False     # rung 2a fires at most once per render
+    _last_err_rl = None         # the error text rung 2a reads its culprit from
     _prev_sig_rl = None
     _last_render_sig = None  # LEVER 4: input signature of the last ATTEMPTED render
     while True:
@@ -33048,6 +33121,54 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
                     os.remove(output_path)
                 except OSError:
                     pass
+            # ── RUNG 2a: SURGICAL — DROP WHAT FAILED, NOT EVERYTHING ────
+            # MEASURED 2026-08-20: one EvidenceCard whose <Video> 404'd took
+            # down the ENTIRE decoration layer. StatCard, text overlays,
+            # transitions, b-roll and generated scenes were all destroyed as
+            # collateral for an asset none of them referenced. Verified by
+            # prediction: StatCard is visible at t=3.0s in the render WITHOUT
+            # the card and ABSENT at t=3.6s in the render with it.
+            #
+            # This follows the graceful-placement ladder: try the narrowest
+            # repair first, and only widen when the narrow one cannot apply.
+            # A render error that NAMES its asset tells us exactly which
+            # components are implicated — everything else is innocent.
+            if _rung == 2 and not _surgical_tried:
+                _surgical_tried = True
+                _bad_asset = None
+                try:
+                    _m404 = _re_deg.search(
+                        # GREEDY \S* on purpose: non-greedy stops at the first
+                        # "/" after "http:" and yields "localhost:3004" instead
+                        # of the filename. Greedy backtracks to the LAST
+                        # separator, which is where the basename begins.
+                        r"status code of 404 while downloading file\s+\S*/([^/\s]+)",
+                        str(_last_err_rl or ""))
+                    if _m404:
+                        _bad_asset = _m404.group(1)
+                except Exception:
+                    _bad_asset = None
+                if _bad_asset:
+                    _surg = _surgical_drop_for_asset(edit_plan, _bad_asset)
+                    if _surg:
+                        print(f"[render-degrade] rung=2a SURGICAL — asset "
+                              f"{_bad_asset!r} is unresolvable; dropped ONLY the "
+                              f"{len(_surg)} component(s) that reference it: "
+                              f"{_surg}. Every other decoration SURVIVES.",
+                              flush=True)
+                        _record_divergence(
+                            "render", {"rung": "2a", "asset": _bad_asset,
+                                       "dropped": _surg},
+                            "render_surgical_drop",
+                            reason="a render error that names its asset names "
+                                   "its culprit — the decoration layer is not "
+                                   "collateral for one component")
+                        _rung = 1   # re-render with the narrow repair applied
+                        continue
+                    print(f"[render-degrade] rung=2a SURGICAL not applicable "
+                          f"(asset {_bad_asset!r} matched no component) — "
+                          f"falling through to the wholesale strip", flush=True)
+
             if _rung == 2:
                 _stripped = ["motion_graphics", "text_overlays", "transitions",
                              "tight_cut_overlays", "broll", "generated_scenes"]
@@ -33150,6 +33271,10 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
             render_once(edit_plan["cuts"], broll_clips)
             return
         except Exception as _render_err:
+            # Rung 2a reads its culprit out of this text: a Remotion 404 NAMES
+            # the file it could not download, and the file names the components
+            # that reference it. Bound here so the surgical rung has it.
+            _last_err_rl = f"{type(_render_err).__name__}: {_render_err}"
             # (B) if the interpreter began finalizing DURING this rung, the crash
             # is a container reclaim, not a render defect — surface the designed
             # ContainerTeardownError and STOP. Retrying is structurally impossible
