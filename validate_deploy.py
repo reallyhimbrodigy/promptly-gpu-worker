@@ -9916,6 +9916,17 @@ def _freeze_mask_scope():
     assert "CERT FREEZE-MASK-SCOPE: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
 
 
+@check("A BURST RENDER'S SPAN MUST HAVE CHILDREN (2026-08-21, RULE-1) [Rule 2]. `_TL` is created at handler() ENTRY and render_burst calls render_stage DIRECTLY, so in the burst container `_TL is None` and all three `_tl_add_done(..., 'render')` calls silently no-op. MEASURED on the first post-flip cohort: 6 of 21 renders reported a `render` span with ZERO children, and they were EXACTLY the six slowest (173-278s) — the blindness was perfectly anti-correlated with where the time went, because a slow render is a long one, a long one clears the 45s output floor, and clearing the floor is what sends it to the burst. Same shape as the build-lane handicap. The cert asserts the WIRING at the process boundary (the timing code was always correct; nobody called it in that process) plus the negative that a graft must not launder the dispatch/queue/cold-start head, which is billed at 48 cores.")
+def _burst_timeline_graft():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_burst_timeline_graft.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_burst_timeline_graft FAILED\n{_out[-1600:]}"
+    assert "CERT BURST-TIMELINE-GRAFT: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
 @check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")
 def _tsx_parses():
     import os as _os, subprocess as _sub

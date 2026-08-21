@@ -27817,7 +27817,11 @@ def _run_render_via_burst_or_local(
     }
     import modal as _modal
     _fn = _modal.Function.from_name("promptly-gpu-worker", "render_burst")
-    print(f"[render_burst] dispatch job={job_id} → cpu=48 burst (flag ON)", flush=True)
+    # cpu=32, not 48: the burst was cut 48→32 (Zac GO 2026-08-03) because the
+    # render is concurrency-bound, not core-bound. This string said 48 for 18
+    # days while the double-hold instrument below correctly used 32 — a stale
+    # claim sitting exactly where a cost investigation would read it.
+    print(f"[render_burst] dispatch job={job_id} → cpu=32 burst (flag ON)", flush=True)
     # .remote() BLOCKS. A burst that RAISES (render_stage error) or DIES
     # (SIGKILL/OOM/preempt → Modal re-raises) propagates HERE unhandled, into
     # handler's single except → classify_error → the ONE terminal. NOT swallowed.
@@ -27836,13 +27840,21 @@ def _run_render_via_burst_or_local(
     # functions and is NOT in scope here — using it would NameError on every
     # burst render, before the try below could catch it.
     _dh_t0 = time.time()
+    # Timeline coordinate of the dispatch, captured BEFORE the blocking call so
+    # the burst's spans can be re-based onto this clock when they come home.
+    _dh_tl_base = _TL.now() if _TL is not None else None
     _out = _fn.remote(_payload)
     _dh_s = time.time() - _dh_t0
     try:
         _dh_render = None
         if isinstance(_out, dict):
             _dh_rs = _out.get("rs") or {}
-            _dh_render = (_dh_rs.get("stage_timings") or {}).get("render") if isinstance(_dh_rs, dict) else None
+            # KEY NAME (fixed 2026-08-21): render_stage returns its timings under
+            # "timings" — there is no "stage_timings" key in that dict, so this
+            # read was None on 6 of 6 burst jobs and the dispatch/queue/cold-start
+            # gap it exists to expose has never once been recorded. The same
+            # wrong-key shape has now cost four separate investigations.
+            _dh_render = (_dh_rs.get("timings") or {}).get("render") if isinstance(_dh_rs, dict) else None
         print(f"[double-hold] job={job_id} blocked={_dh_s:.1f}s "
               f"orchestrator_idle_core_s={_dh_s * 16:.0f} burst_core_s={_dh_s * 32:.0f} "
               f"total={_dh_s * 48:.0f} (render_reported={_dh_render})", flush=True)
@@ -27870,6 +27882,39 @@ def _run_render_via_burst_or_local(
         raise RuntimeError(
             f"render_burst returned a malformed result ({type(_out).__name__}) — "
             f"contract breach; failing to handler's one terminal")
+    # ── GRAFT the burst's timeline onto THIS job's `render` parent ───────────
+    # The burst measured its own render in its own process and its own clock.
+    # Without this the planner's `render` span is a single opaque block and
+    # `unaccounted` reads 100% — on precisely the slowest jobs (see the burst
+    # side's note). Re-basing is the whole trick: burst coordinates start at ITS
+    # t0, which begins after dispatch + queue + cold start, so the spans are laid
+    # against the END of the blocked window and the head gap is left EXPLICITLY
+    # unaccounted rather than silently absorbed. That gap is billed at 48 cores
+    # and has never appeared in a timeline before.
+    try:
+        _bspans = _out.get("tl_spans") or []
+        if _bspans and _TL is not None and _dh_tl_base is not None:
+            _bwall = max((float(_s.get("end") or 0.0) for _s in _bspans), default=0.0)
+            _bhead = max(0.0, _dh_s - _bwall)
+            _bbase = _dh_tl_base + _bhead
+            for _s in _bspans:
+                _bp = str(_s.get("parent") or "render")
+                # The burst has no `render` span of its own — that parent is
+                # OURS. Anything it rooted at "job" is render work here, so
+                # re-parent it rather than hanging it off the job root where it
+                # would double-count against a sibling stage.
+                if _bp == "job":
+                    _bp = "render"
+                _TL.add(str(_s.get("name")),
+                        _bbase + float(_s.get("start") or 0.0),
+                        _bbase + float(_s.get("end") or 0.0), _bp)
+            print(f"[render_burst] grafted {len(_bspans)} timeline span(s) onto "
+                  f"render (burst_wall={_bwall:.1f}s, dispatch+queue+coldstart "
+                  f"head={_bhead:.1f}s of {_dh_s:.1f}s blocked)", flush=True)
+    except Exception as _ge:
+        print(f"[render_burst] timeline graft soft-failed: {type(_ge).__name__} "
+              f"— render is unaffected", flush=True)
+
     _cd = _out.get("cost_delta") or [0.0, 0]
     try:
         _rs_cost_cell[0] = float(_cd[0]); _rs_cost_cell[1] = int(_cd[1])

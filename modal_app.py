@@ -1353,6 +1353,24 @@ def render_burst(payload: dict) -> dict:
                 _mem_s.append(_m)
     _samp_t = _threading.Thread(target=_samp, daemon=True)
     _samp_t.start()
+    # 0. ONE CLOCK, ACROSS THE PROCESS BOUNDARY (2026-08-21).
+    #
+    # handler's `_TL` is a module global created at handler() ENTRY, and this
+    # container never runs handler() — it calls render_stage directly (the same
+    # shape as the build-lane handicap). So `_TL is None` here, and all three
+    # `_tl_add_done(..., "render")` calls inside the render hit their None-guard
+    # and silently no-op.
+    #
+    # MEASURED, not theorised: of 21 post-flip production renders, 6 reported a
+    # `render` span with ZERO children — and they were EXACTLY the six slowest
+    # (173-278s), because a slow render is a long one, a long one clears the 45s
+    # output floor, and clearing the floor is what sends it here. The blindness
+    # was perfectly anti-correlated with where the time went.
+    #
+    # The timeline cannot cross a process boundary as an object, so it doesn't:
+    # spans are captured as plain dicts on the way out and re-based onto the
+    # planner's own clock at the dispatch site.
+    _H._TL = _H._JobTimeline()
     # 1. reconstitute the local work_dir (all planner media) at the SAME path so
     #    every embedded absolute path in the render args resolves unchanged.
     _H._extract_workdir_from_s3(payload["s3_workdir_key"], _work_dir)
@@ -1384,7 +1402,30 @@ def render_burst(payload: dict) -> dict:
         # SUCCESS: return the picklable render result + the QA-regen cost delta.
         # (No {"ok":...} envelope — a FAILURE raises and propagates, so a returned
         # dict always means success; the planner folds cost_delta into its meter.)
-        return {"rs": _rs, "cost_delta": [float(_rs_cost_cell[0]), int(_rs_cost_cell[1])]}
+        #
+        # tl_spans: the render's own timeline, flattened to plain dicts so it
+        # PICKLES. Times are relative to THIS container's t0 and are meaningless
+        # until the dispatch site re-bases them onto the planner's clock — which
+        # is why they travel as raw coordinates and not as a rendered tree.
+        # Soft-failing: a timeline is telemetry, and telemetry must never be the
+        # reason a finished render is thrown away.
+        _tl_spans = []
+        try:
+            _btl = _H._TL
+            if _btl is not None:
+                _bnow = _btl.now()
+                for _s in list(_btl._spans):
+                    _tl_spans.append({
+                        "name": str(_s.get("name")),
+                        "parent": str(_s.get("parent")),
+                        "start": float(_s.get("start") or 0.0),
+                        "end": float(_s["end"] if _s.get("end") is not None else _bnow),
+                    })
+        except Exception as _te:
+            print(f"[render_burst] timeline capture soft-failed: "
+                  f"{type(_te).__name__} — render is unaffected", flush=True)
+        return {"rs": _rs, "cost_delta": [float(_rs_cost_cell[0]), int(_rs_cost_cell[1])],
+                "tl_spans": _tl_spans}
     finally:
         # burst sizing telemetry — peak/mean cores + peak RSS (confirms cpu=48 /
         # 64 GiB against real render work).
@@ -1394,7 +1435,7 @@ def render_burst(payload: dict) -> dict:
                 _pk = max(_cpu_s); _mn = sum(_cpu_s) / len(_cpu_s)
                 print(f"[burst-cpu] job={_job_id} peak={_pk:.1f} mean={_mn:.1f} of "
                       f"{_ncores} cores ({100 * _pk / max(1, _ncores):.0f}% peak, "
-                      f"{len(_cpu_s)} samples) — cpu=48 sizing check", flush=True)
+                      f"{len(_cpu_s)} samples) — cpu=32 sizing check", flush=True)
             if _mem_s:
                 _MB = 1024 * 1024
                 print(f"[burst-mem] job={_job_id} peak={max(_mem_s)/_MB:.0f}MB "
