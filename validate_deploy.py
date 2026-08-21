@@ -7391,6 +7391,14 @@ def _secret_canonical_values():
         "PROMPTLY_SCRIPT_DENYLIST": "",   # graduated: no script denied
         "PROMPTLY_PLAN_CAPTURE": "",      # plan-capture corpus hook inert
         "PROMPTLY_BURNED_TEXT": "1",      # burned-in-text guard LIVE (flipped 2026-07-24 after flag-on smoke test)
+        # THE BRAIN IS ON (owner GO 2026-08-21 naming the key). Registered here
+        # the moment it went to "1": while it was OFF the comment above said it
+        # was "deliberately NOT registered", which was defensible for a flag
+        # nobody could flip by accident — but an UNREGISTERED LIVE flag is
+        # invisible drift, and this one decides whether 161 users/day get an
+        # editorial edit or a deterministic safe edit. Canonical and secret move
+        # together, like every other value here.
+        "PROMPTLY_EDITORIAL_LIVE": "1",
         "PROMPTLY_ZERO_REJECT": "1",      # ZERO-REJECT LIVE (Zac's "FLIP MINIMAL" 2026-07-25 on the minimal samples; cert 5/5; rollback = 0 here + secret + redeploy)
         "PROMPTLY_WHY_DIET": "1",         # A-L1 output diet LIVE (rationale caps 240→96; output-bound call → speed lever; =0 is the one-flag rollback)
         "PROMPTLY_DELIVERY_FPS": "30",    # FPS 30 APPROVED (Zac blanket-GO 2026-07-25 on the A/B pair): delivery target 30fps — halves the render tail; rollback = "" (60) here + secret

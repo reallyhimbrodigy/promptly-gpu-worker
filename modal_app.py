@@ -1827,6 +1827,10 @@ _CANON_FLAGS = {
     "PROMPTLY_SCRIPT_DENYLIST": "",
     "PROMPTLY_PLAN_CAPTURE": "",
     "PROMPTLY_BURNED_TEXT": "1",
+    # THE BRAIN IS ON (owner GO 2026-08-21 naming the key). Both mirrors
+    # move together — the flag-drift sentinel caught this one missing
+    # and refused the deploy, which is the check earning its place.
+    "PROMPTLY_EDITORIAL_LIVE": "1",
     "PROMPTLY_ZERO_REJECT": "1",
     "PROMPTLY_WHY_DIET": "1",
     "PROMPTLY_DELIVERY_FPS": "30",
