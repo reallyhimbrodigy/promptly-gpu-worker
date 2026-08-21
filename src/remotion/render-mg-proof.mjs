@@ -25,7 +25,7 @@ const PAL = BG
 const PROPS = {
   StatCard: { value: 100000, label: "SUBSCRIBERS", numberColor: PAL.number, labelColor: PAL.label, accentColor: PAL.accent, anchor: "center" },
   Stamp: { text: "SOLD OUT", color: PAL.accent, anchor: "center" },
-  PillCluster: { pills: ["mindset", "focus", "discipline"], accentColor: PAL.accent, anchor: "center" },
+  PillCluster: { tags: ["mindset", "focus", "discipline", "grit", "habits", "growth"], accentColor: PAL.accent, textColor: PAL.number, anchor: "center" },
 }[TYPE] || {};
 const FRAMES = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46] }[TYPE] || [4, 14, 28, 46];
 

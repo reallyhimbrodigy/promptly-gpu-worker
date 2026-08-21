@@ -20,6 +20,24 @@ const hash01 = (i: number): number => {
   return x - Math.floor(x);
 };
 
+// ART DIRECTION (2026-08-20). Reference: the iOS glass "topic/keyword sticker"
+// cluster — Control-Center / Apple-Music frosted pills and the story-sticker
+// tag pile. What that look is made of, decided on purpose (not spec-compliance):
+//   • MATERIAL: frosted glass (backdrop blur + a top light gradient + a hairline
+//     inner highlight), so the pills read as physical chips over the footage, not
+//     flat labels. Every third is the JOB ACCENT — a solid, glowing chip — for a
+//     colour rhythm across the pile.
+//   • ARRANGEMENT (§4, overlap reads as design): a DENSE pile, each pill at a
+//     small organic ±3deg, popped in a shuffled order so it never reads L→R, then
+//     a slow idle float. The density (tight gap + the tilt) is what makes it a
+//     PILE, not a centred row of buttons. gap tightened 22→15 for that.
+// INVARIANTS: palette-only colours (accent + text from the job), the contrast
+// floor via the pill's own shadow + the glass ground, velocity handled by the
+// per-pill stagger (small travel, no single-frame spike). NOTE: this component
+// is deliberately NOT motion-blurred — CameraMotionBlur re-lays-out its subtree
+// and cannot preserve the parent-centred, fixed-width, backdrop-filter cluster
+// (proven by render, 2026-08-20); the pop travel is small and needs none.
+
 export const PillCluster: React.FC<PillClusterProps> = ({
   startMs,
   durationMs,
@@ -79,7 +97,7 @@ export const PillCluster: React.FC<PillClusterProps> = ({
             flexWrap: "wrap",
             justifyContent: "center",
             alignItems: "center",
-            gap: 22,
+            gap: 15,
             width,
             maxWidth: width,
             opacity: exitOpacity,
