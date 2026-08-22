@@ -5417,9 +5417,20 @@ def _asr_diag_reset():
 
 
 def _asr_diag_set(**kw):
+    # NO LEDGER RESET HERE (removed 2026-08-22). This line used to read
+    # `_component_ledger_reset()`, OUTSIDE the guard above, so every ASR
+    # diagnostic update wiped the whole component ledger. _ledger_absorb_plan
+    # runs at planning; any _asr_diag_set after it — a level re-measure, a
+    # language re-route — erased the record, and _component_ledger_snapshot
+    # then wrote `{}` into the result.
+    #
+    # MEASURED: 22 of 70 post-flip editorial jobs shipped with NO ledger, and
+    # they were the SLOW ones (p50 render 247.7s vs 153.7s, 1.61x) holding the
+    # entire p95 tail — because a slow job is exactly the job that picks up a
+    # late ASR update. The instrument was erased by the jobs it most needed to
+    # describe. Per-job state now resets at handler entry with the rest of it.
     if not _ASR_DIAG:
         _asr_diag_reset()
-    _component_ledger_reset()   # requested-vs-rendered, per component type
     _ASR_DIAG.update(kw)
 
 
@@ -39475,6 +39486,13 @@ def handler(job):
         _pipeline_start = time.time()
         _timings = {}
         del _GEMINI_CALL_LOG[:]  # fresh per job — 1 input per container
+        # Component ledger: ONE reset, HERE, with the rest of the per-job state.
+        # It previously lived inside _asr_diag_set, which runs repeatedly during
+        # a job and therefore erased the ledger on 22 of 70 editorial jobs —
+        # the SLOW ones, which pick up late ASR updates. A per-job accumulator
+        # must be cleared where per-job state is cleared, not in a setter that
+        # happens to be nearby.
+        _component_ledger_reset()
 
         # Step 1 — Download + parallel stage kickoff
         # ─────────────────────────────────────────────────────────────────
