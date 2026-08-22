@@ -115,8 +115,18 @@ def run() -> dict:
         raise _CaptureDone()
 
     H.render_multi_clip = _spy
+    # THREE ARMS, and the third is the point. A single A/B at n=1 cannot tell an
+    # fps effect from Gemini's own run-to-run variance: the last run showed
+    # emphasis placement sharing only 2/5 anchors between arms, which is either
+    # a real degradation or just the model being non-deterministic. A-vs-A
+    # measures the noise floor with the SAME input, so B's delta can be read
+    # against it instead of against zero.
+    #
+    # Interleaved A, B, A2 rather than A, A2, B so a drift in Vertex latency
+    # across the run cannot masquerade as the control being stable.
     for arm, ov in [("fps18_default", {}),
-                    ("fps2_low", {"proxy_sample_fps": 2, "media_resolution": "MEDIA_RESOLUTION_LOW"})]:
+                    ("fps2_low", {"proxy_sample_fps": 2, "media_resolution": "MEDIA_RESOLUTION_LOW"}),
+                    ("fps18_control", {})]:
         _cur["arm"] = arm
         try:
             H._GEMINI_CALL_LOG.clear()
@@ -148,7 +158,12 @@ def main():
     print("=== PLAN_ONLY A/B: Gemini proxy 18fps vs 2fps+LOW ===")
     o = run.remote()
     a = (o or {}).get("arms", {})
-    for arm in ("fps18_default", "fps2_low"):
+    # DERIVED from what actually ran, never a hardcoded list. The previous cut
+    # iterated ("fps18_default", "fps2_low") while the run loop had THREE arms,
+    # so the A-vs-A control executed, cost money, returned data — and was never
+    # printed. Eighth reporter bug of this shape in this campaign.
+    for arm in [k for k in ("fps18_default", "fps2_low", "fps18_control") if k in a] \
+               + [k for k in a if k not in ("fps18_default", "fps2_low", "fps18_control")]:
         d = a.get(arm, {})
         print(f"\n[{arm}]  pipeline_wall={o.get('wall', {}).get(arm)}s")
         if d.get("err"):
