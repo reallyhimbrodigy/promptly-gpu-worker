@@ -31474,7 +31474,39 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # function's DEFAULT 300->600 because micro submitted without an explicit
     # timeout; that default is carried on _remotion_subprocess, and micro now
     # also passes its own computed budget, so the default is a fallback only.
-    _run_remotion = _remotion_subprocess
+    # RASTERISATION SPLIT (2026-08-22). `render_remotion` is 80-85% of the
+    # render and, until this line, 100% BLIND: every production job reported
+    # unaccounted == dur with ZERO children (277f6a2e: 267.5s of 267.5s). It is
+    # the same signature the `render` span carried before v566, one level down.
+    #
+    # Every parallel leg — overlay chunks AND micro chunks — funnels through
+    # this one alias, so wrapping it here instruments all of them at a single
+    # point rather than at each submit site, where a new chunk type added later
+    # would silently arrive uninstrumented.
+    #
+    # Spans OVERLAP by design (the pool runs them concurrently). That is correct
+    # and handled: _JobTimeline computes coverage as the UNION of children and
+    # DERIVES `parallel` from it, so N chunks running 100s each inside a 120s
+    # parent read as 120s covered and parallel=True — never as 'N x 100s of
+    # work' summed into a nonsense total.
+    _run_remotion_raw = _remotion_subprocess
+
+    def _run_remotion(_rr_label, *_rr_a, **_rr_kw):
+        """Timing-transparent wrapper: same signature, same return value.
+
+        The span is emitted in a `finally` so a chunk that TIMES OUT or raises
+        still reports the seconds it burned — a failing chunk is exactly the
+        one whose cost matters, and the degrade ladder above will re-render on
+        top of it."""
+        _rr_t0 = time.time()
+        try:
+            return _run_remotion_raw(_rr_label, *_rr_a, **_rr_kw)
+        finally:
+            try:
+                _tl_add_done(f"remotion:{_rr_label}", time.time() - _rr_t0,
+                             "render_remotion")
+            except Exception:
+                pass   # telemetry must never break a render that worked
 
     def _split_frames(total_frames: int, n_chunks: int) -> list:
         """Partition [0, total_frames) into n_chunks contiguous inclusive

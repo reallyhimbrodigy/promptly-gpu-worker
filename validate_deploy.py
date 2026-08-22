@@ -9977,6 +9977,17 @@ def _model_attributed():
     assert "CERT MODEL-ATTRIBUTED: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
 
 
+@check("THE LARGEST TERM MUST NOT BE 100% BLIND (2026-08-22, RULE-1) [Rule 2]. render_remotion is 80-85% of the render span and reported unaccounted == dur with ZERO children on every production job (277f6a2e: 267.5s of 267.5s) — the same signature `render` carried before v566, one level deeper. Every competing explanation for the p95 tail is already eliminated by measurement: source duration r=0.132, drawn components r=0.224, cut count r=0.064, upload/HLS/exports 1%, prep 3%, render_attempts=1. Overlay and micro chunks both funnel through the _run_remotion alias, so one transparent wrapper instruments every leg — including chunk types added later, which a per-submit-site patch would miss. Asserts the wrapper returns the raw value (_remotion_subprocess returns ELAPSED SECONDS that callers print; swallowing it zeroes downstream timing), that spans are parented to render_remotion so they SUBDIVIDE the blind term instead of inflating `render` beside it, that they are emitted in a finally so a timed-out chunk still reports its cost, that overlapping concurrent chunks are union-covered with parallel DERIVED rather than summed into a nonsense total, and that a raising _tl_add_done can never kill a render that already succeeded.")
+def _rasterisation_split():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_rasterisation_split.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_rasterisation_split FAILED\n{_out[-1600:]}"
+    assert "CERT RASTERISATION-SPLIT: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
 @check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")
 def _tsx_parses():
     import os as _os, subprocess as _sub

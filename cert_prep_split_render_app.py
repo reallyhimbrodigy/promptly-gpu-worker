@@ -86,6 +86,42 @@ def run() -> dict:
             out["timeline"] = st.get("timeline")
             out["render_attempts"] = st.get("render_attempts")
             out["source_duration_s"] = st.get("source_duration_s")
+        # PRINT THE SPLIT FROM INSIDE THE CONTAINER.
+        #
+        # The first run of this cell was lost: `modal run --detach` returns
+        # immediately, so the @local_entrypoint that formats the report never
+        # ran, the ephemeral app's logs aged out, and ~$0.40 of render bought
+        # nothing. The measurement must survive the client disconnecting, so it
+        # is emitted HERE, where the data actually is.
+        try:
+            _n = out.get("timeline")
+            def _f(nd, nm):
+                if not isinstance(nd, dict):
+                    return None
+                if nd.get("name") == nm:
+                    return nd
+                for _c in nd.get("children") or []:
+                    _r2 = _f(_c, nm)
+                    if _r2:
+                        return _r2
+                return None
+            _rn = _f(_n, "render") if _n else None
+            if _rn:
+                _d = float(_rn.get("dur") or 0.0)
+                _k = {c["name"]: float(c.get("dur") or 0.0)
+                      for c in (_rn.get("children") or [])}
+                _p = _k.get("render_prep", 0.0)
+                print(f"[PREP-SPLIT] render={_d:.1f}s prep={_p:.1f}s "
+                      f"({_p/_d*100 if _d else 0:.0f}%) "
+                      f"zoomPE={_k.get('render_zoom_pre_extract', 0):.1f}s "
+                      f"transPE={_k.get('render_transition_pre_extract', 0):.1f}s "
+                      f"remotion={_k.get('render_remotion', 0):.1f}s "
+                      f"composite={_k.get('render_composite', 0):.1f}s "
+                      f"unacc={float(_rn.get('unaccounted') or 0):.1f}s "
+                      f"attempts={out.get('render_attempts')}", flush=True)
+        except Exception as _pe:
+            print(f"[PREP-SPLIT] in-container print failed: {type(_pe).__name__}",
+                  flush=True)
     except Exception as e:
         out["wall"] = round(time.time() - t0, 1)
         out["err"] = f"{type(e).__name__}: {str(e)[:400]}"
