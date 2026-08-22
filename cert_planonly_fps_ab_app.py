@@ -75,7 +75,23 @@ def run() -> dict:
             "zoom_ts": _zoom_ts(cuts)[:12],
             "n_emphasis": len(em),
             "n_motion_graphic": len(mg),
-            "emphasis_ts": [round(float(e.get("t", 0) or 0), 1) for e in em[:12] if isinstance(e, dict)],
+            # PLACEMENT, not a count. The previous cut read e.get("t") — a key
+            # _EmphasisMoment does not have (it carries word_indices) — so every
+            # timestamp came back 0.0 in BOTH arms and the run reported
+            # "emphasis 4->4, placement identical" while measuring nothing at
+            # all. Counts holding is the WEAK claim; whether 2fps moves WHERE
+            # emphasis lands is the question the cut turns on, because visual
+            # grounding is the only thing fps feeds.
+            "emphasis_anchors": [sorted(e.get("word_indices") or [])
+                                 for e in em[:14] if isinstance(e, dict)],
+            "emphasis_kinds": [f"{e.get('type')}/{e.get('intensity')}"
+                               for e in em[:14] if isinstance(e, dict)],
+            # MG placement rides its own anchor; a card that survives but moves
+            # to a different word is a different edit.
+            "mg_anchors": [sorted((e.get("motion_graphic") or {}).get("word_indices")
+                                  or e.get("word_indices") or [])
+                           for e in em[:14]
+                           if isinstance(e, dict) and e.get("motion_graphic")],
             # ── FULL COMPONENT CUT (2026-08-21). The original capture read only
             # zooms/emphasis/MG, so a cut that silently moved the CUT LIST or the
             # captions would have passed as "quality held". Cuts and captions are
@@ -141,7 +157,9 @@ def main():
         print(f"  tokens: prompt={t.get('prompt')} uncached_delta={t.get('uncached_delta')} out={t.get('output')} (n_calls={d.get('n_calls')})")
         print(f"  GEMINI LEG wall: {d.get('gemini_leg_s')}s")
         print(f"  zooms={d.get('n_zoom')} @ {d.get('zoom_ts')}")
-        print(f"  emphasis={d.get('n_emphasis')} (motion_graphic={d.get('n_motion_graphic')}) @ {d.get('emphasis_ts')}")
+        print(f"  emphasis={d.get('n_emphasis')} (motion_graphic={d.get('n_motion_graphic')})")
+        print(f"    anchors: {d.get('emphasis_anchors')}")
+        print(f"    kinds  : {d.get('emphasis_kinds')}")
     # deltas
     A, B = a.get("fps18_default", {}), a.get("fps2_low", {})
     if A.get("tokens") and B.get("tokens"):
@@ -182,6 +200,21 @@ def main():
                 flag = "   <-- COLLAPSE" if d <= -40 else ("   <-- surge" if d >= 60 else "")
             print(f"    {k:<22} {va} -> {vb}{flag}")
         print(f"    {'mg_types':<22} {A.get('mg_types')} -> {B.get('mg_types')}")
-        print(f"    {'emphasis_ts A':<22} {A.get('emphasis_ts')}")
-        print(f"    {'emphasis_ts B':<22} {B.get('emphasis_ts')}")
+        # THE REAL TEST: does 2fps move WHERE emphasis lands?
+        _aa, _ab = A.get("emphasis_anchors") or [], B.get("emphasis_anchors") or []
+        _same = (_aa == _ab)
+        print(f"\n    emphasis PLACEMENT identical: {_same}")
+        print(f"      18fps : {_aa}")
+        print(f"      2fps  : {_ab}")
+        if not _same:
+            _sa = {tuple(x) for x in _aa}; _sb = {tuple(x) for x in _ab}
+            print(f"      only@18fps: {sorted(_sa - _sb)}")
+            print(f"      only@2fps : {sorted(_sb - _sa)}")
+            print(f"      shared    : {len(_sa & _sb)}/{max(len(_sa), len(_sb))}")
+        print(f"    emphasis KINDS  A={A.get('emphasis_kinds')}")
+        print(f"                    B={B.get('emphasis_kinds')}")
+        print(f"    MG anchors      A={A.get('mg_anchors')}  B={B.get('mg_anchors')}")
+        if not (A.get("mg_anchors") or B.get("mg_anchors")):
+            print("      ** MG=0 in BOTH arms on this source — MG placement is "
+                  "UNTESTED here, not held. **")
     print("\nPLAN_ONLY A/B COMPLETE.")

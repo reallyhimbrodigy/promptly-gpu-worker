@@ -63,7 +63,7 @@ def main():
     rows = _q(url, key,
               "video_jobs?select=id,created_at,stage_timings,result&status=eq.completed"
               f"&created_at=gte.{urllib.parse.quote(V566_UTC)}"
-              "&order=created_at.asc&limit=200")
+              "&order=created_at.desc&limit=1000")
     data = []
     for row in rows:
         if P.route(row) != "EDITORIAL":

@@ -43393,6 +43393,29 @@ def handler(job):
                 "lean_arm": _lean_ab_arm(),
                 "lean_schema_on": bool(_lean_schema_enabled()),
                 "lean_decor_ground_on": bool(_lean_decor_ground_enabled()),
+                # WHICH BRAIN RENDERED THIS JOB (2026-08-22).
+                #
+                # MEASURED: 48 of 48 editorial jobs carried NO gemini model
+                # string anywhere in their envelope. The only place it appeared
+                # was _analysis_stamp(), which rides analysis_data — and
+                # analysis_data is None on most jobs, so in practice the model
+                # was never persisted at all.
+                #
+                # WHY THAT MATTERS MORE THAN IT SOUNDS. Reading the SOURCE gives
+                # the wrong answer: GEMINI_EDITORIAL_MODEL defaults to
+                # `gemini-3.1-pro-preview`, but PROMPTLY_EDITORIAL_MODEL in the
+                # secret overrides it to `gemini-3.7-flash`, and the two differ
+                # by roughly an order of magnitude in input price. A cost model
+                # built off the default would be wrong by that ratio, and a
+                # model swap could never be attributed to a cohort after the
+                # fact — the same class as the ledger the slow jobs erased and
+                # the timeline the burst threw away.
+                #
+                # Nested with timeline/gemini_tokens so content-studio's
+                # top-level key strip cannot eat it (the class that already hid
+                # gemini_tokens, vad_coverage, _lang_bundle and source_duration).
+                "editorial_model": GEMINI_EDITORIAL_MODEL,
+                "utility_model": GEMINI_MODEL,
                 # ONE CLOCK (Zac 2026-08-02): hierarchical wall-clock tree with
                 # start/end/parent per span; unaccounted = parent − union(children)
                 # is exact, so any gap is VISIBLE not absorbed. Nested to survive

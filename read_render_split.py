@@ -131,7 +131,7 @@ def main():
               "video_jobs?select=id,created_at,stage_timings,result"
               "&status=eq.completed&created_at=gte."
               + urllib.parse.quote("2026-08-21T18:47:00Z")
-              + "&order=created_at.asc&limit=400")
+              + "&order=created_at.desc&limit=1000")
     if a.compare:
         before = [r for r in rows if str(r["created_at"]) < a.compare]
         after = [r for r in rows if str(r["created_at"]) >= a.compare]
@@ -151,7 +151,7 @@ def main():
         try:
             ev = _q(url, key,
                     "analytics_events?select=props,created_at&event=eq.burst_double_hold"
-                    "&created_at=gte." + urllib.parse.quote(a.compare) + "&limit=200")
+                    "&created_at=gte." + urllib.parse.quote(a.compare) + "&limit=1000")
             for e in ev:
                 p = e.get("props")
                 if isinstance(p, str):

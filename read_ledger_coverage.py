@@ -82,10 +82,20 @@ def _cut(rows, label):
 
 def main():
     url, key = _creds()
+    # ORDER DESC, NOT ASC. With asc+limit the NEWEST rows are the ones dropped —
+    # and the newest rows are the entire point of an after-the-fix read. 448
+    # completed jobs matched this window against a limit of 400, so the last 48
+    # were silently discarded and the AFTER cut reported "no editorial renders
+    # yet" while one had already landed. A silent truncation reads exactly like
+    # an empty window, which is the third time that shape has cost a wrong
+    # report here.
     rows = _q(url, key,
               "video_jobs?select=id,created_at,stage_timings,result&status=eq.completed"
               "&created_at=gte." + urllib.parse.quote("2026-08-20T00:00:00Z")
-              + "&order=created_at.asc&limit=400")
+              + "&order=created_at.desc&limit=1000")
+    if len(rows) >= 1000:
+        print("  ** 1000-row cap HIT — this read may be truncated; widen it "
+              "before believing any zero below. **")
     before = [r for r in rows if str(r["created_at"]) < V565_UTC]
     after = [r for r in rows if str(r["created_at"]) >= V565_UTC]
     print(f"  ── COMPONENT LEDGER COVERAGE · v565 @ {V565_UTC} ──")

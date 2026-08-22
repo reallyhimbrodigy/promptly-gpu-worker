@@ -100,7 +100,7 @@ def main():
               "video_jobs?select=id,user_id,status,created_at,started_at,completed_at,"
               "error_message,stage_timings,result,edit_recipe"
               f"&created_at=gte.{urllib.parse.quote(a.since)}"
-              "&order=created_at.asc&limit=400")
+              "&order=created_at.desc&limit=1000")
     n = len(rows)
     print(f"  ── POST-FLIP COHORT · created >= {a.since} ──")
     if n == 0:

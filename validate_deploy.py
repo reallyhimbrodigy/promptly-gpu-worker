@@ -9966,6 +9966,17 @@ def _render_prep_accounted():
     assert "CERT RENDER-PREP-ACCOUNTED: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
 
 
+@check("EVERY JOB MUST NAME THE MODEL THAT MADE IT (2026-08-22, RULE-1) [Rule 4]. MEASURED: 48 of 48 editorial jobs carried NO gemini model string anywhere in their envelope — the only emitter was _analysis_stamp(), which rides `analysis_data`, and that is None on most jobs. Reading the SOURCE gives the WRONG answer: GEMINI_EDITORIAL_MODEL defaults to `gemini-3.1-pro-preview` while PROMPTLY_EDITORIAL_MODEL in the secret overrides it to `gemini-3.7-flash`, and the two differ by roughly an order of magnitude in input price. A cost model built from the default is wrong by that ratio (the L1/L2 ranking already came out 6-8x too large from an unverified premise), and a model swap could never be attributed to a cohort after the fact. Asserts the field is written from the OVERRIDABLE constant rather than a literal, that it is NESTED beside timeline/gemini_tokens where content-studio's top-level strip cannot eat it, that the env override genuinely reaches the constant, and that both canonical mirrors agree on the value the field will report.")
+def _model_attributed():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_model_attributed.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_model_attributed FAILED\n{_out[-1600:]}"
+    assert "CERT MODEL-ATTRIBUTED: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
 @check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")
 def _tsx_parses():
     import os as _os, subprocess as _sub
