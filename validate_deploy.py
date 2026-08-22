@@ -6094,9 +6094,26 @@ def _lever4_no_identical_render():
     assert "def _ladder_input_sig(" in _h, "the input-signature helper must exist"
     # the skip fires before render_once, keyed on equality with the last render
     _i_sig = _h.find("_cur_render_sig = _ladder_input_sig(edit_plan, broll_clips)")
-    _i_render = _h.find("render_once(edit_plan[\"cuts\"], broll_clips)\n            return")
+    # The call is now wrapped in try/finally so the per-attempt timeline span is
+    # recorded even when the render RAISES into the ladder — the retry path is
+    # the one most likely to be slow, so it is the one that must not report
+    # nothing. That moved the old `...broll_clips)\n            return` literal,
+    # which is why this check fired. The ORDERING invariant it guards is
+    # unchanged and still asserted; only the literal is relaxed, and the call
+    # site stays unambiguous (asserted below) so relaxing it cannot match a
+    # different render.
+    assert _h.count("render_once(edit_plan[\"cuts\"], broll_clips)") == 1, \
+        "the ladder render call is no longer unique — the ordering assertion " \
+        "below could match the wrong site"
+    _i_render = _h.find("render_once(edit_plan[\"cuts\"], broll_clips)")
     assert _i_sig != -1 and _i_render != -1 and _i_sig < _i_render, \
         "the input-signature check must run BEFORE render_once"
+    # success still leaves the ladder immediately — a rung that renders and then
+    # loops would re-render on top of a good output.
+    assert re.search(
+        r"render_once\(edit_plan\[\"cuts\"\], broll_clips\)"
+        r"(?:(?!\n            except).)*?\n            return", _h, re.S), \
+        "a successful render must still return out of the ladder loop"
     assert 'if _cur_render_sig is not None and _cur_render_sig == _last_render_sig:' in _h, \
         "must skip only when the signature is computable AND equals the last attempted render (fail-safe)"
     assert '"ladder_identical_input_skip"' in _h, "the skip must be ledgered"
@@ -9936,6 +9953,17 @@ def _ledger_survives_asr():
     _out = (_r.stdout or "") + (_r.stderr or "")
     assert _r.returncode == 0, f"cert_ledger_survives_asr FAILED\n{_out[-1600:]}"
     assert "CERT LEDGER-SURVIVES-ASR: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
+@check("THE RENDER MUST ACCOUNT FOR ITS OWN SECONDS (2026-08-22, RULE-1) [Rule 2]. `render` unaccounted is 17.1s at p50 but 499.0s at max, and THE TAIL IS THE UNACCOUNTED: e4750766 renders 750.7s of which remotion 241.6 + composite 14.6 + upload_export 4.1 leaves 494.9s DARK. upload/HLS/exports explain 1%. And NO plan variable predicts it — source duration r=0.132, drawn components r=0.224, cut count r=0.064, measured on the FULL population including the tail after the ledger fix made it visible. So the seconds are spent inside the render and nothing named them: render_prep (a catch-all from entry to the Remotion spawn, 3,500 lines of ffmpeg subprocess work), the two pre-extract pools (which measured themselves and threw the number away — ffmpeg decodes that scale with source RESOLUTION and zoom count, not output duration, which is the shape of a 24.6s source rendering in 750.7s), and render_attempts. The counter is separate on purpose: a rung-2 retry re-runs the ENTIRE render, and two 240s renders vs one 480s render are identical on every dashboard we have while needing opposite fixes. degen_retries counts Gemini degeneration and read 0 on every job that retried.")
+def _render_prep_accounted():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_render_prep_accounted.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_render_prep_accounted FAILED\n{_out[-1600:]}"
+    assert "CERT RENDER-PREP-ACCOUNTED: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
 
 
 @check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")

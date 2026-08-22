@@ -6296,6 +6296,12 @@ def _speaker_identity_from_transcript(transcript_text):
 # One job, one record: what was asked for, what survived, per type.
 _COMPONENT_LEDGER = {}
 
+# Render attempts for THIS job (a list so the ladder can bump it without a
+# `global`). Reset at handler entry with the rest of the per-job state — the
+# lesson from _component_ledger_reset, which lived in a setter and got wiped by
+# the slowest jobs.
+_RENDER_ATTEMPTS = [0]
+
 
 def _gapfill_enabled():
     """DEFAULT OFF. The mechanical gap-fill changes what is on screen for a
@@ -28130,6 +28136,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     """
     import math
 
+    # RENDER PREP CLOCK (2026-08-22). Everything between here and the Remotion
+    # spawn — staging, b-roll, zoom and transition pre-extracts, micro-segment
+    # assembly — was untimed, and it is 3,500 lines of ffmpeg subprocess work.
+    #
+    # MEASURED: `render` unaccounted is 17.1s at p50 but 499.0s at max, and the
+    # tail IS the unaccounted (e4750766: 750.7s render, 241.6s remotion, 14.6s
+    # composite, 4.1s upload_export -> 494.9s dark). upload/HLS/exports explain
+    # 1% of it, and no PLAN variable predicts it: duration r=0.132, components
+    # r=0.224, cuts r=0.064. So the seconds are being spent here, in prep, and
+    # nothing named them.
+    #
+    # This is a CATCH-ALL on purpose. The pre-extract spans below are the
+    # hypothesis; this span is the bound. If prep is small and the dark time
+    # persists, the hypothesis is wrong and the next place to look is narrowed
+    # rather than guessed at again.
+    _prep_t0 = time.time()
+
     # ── 0. Source is already canonical ──────────────────────────────────────
     # The ingest pass (_do_fps_normalize in mega_pool) folded fps + scale +
     # crop + pix_fmt into a single transcode and produced source_canonical.mp4.
@@ -31143,11 +31166,18 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 _extract_one_zoom_clip, _zoom_clips_to_extract
             ):
                 print(_log_line, flush=True)
+        _zoom_pe_s = time.time() - _t_pre_extract_all
         print(
             f"[zoom-pre-extract] {len(_zoom_clips_to_extract)} clip(s) total "
-            f"in {(time.time() - _t_pre_extract_all) * 1000:.0f}ms (parallel)",
+            f"in {_zoom_pe_s * 1000:.0f}ms (parallel)",
             flush=True,
         )
+        # This number was measured and thrown away. Every zoom clip is an
+        # ffmpeg decode of the SOURCE, so the cost scales with source
+        # RESOLUTION and zoom count, not with output duration — which is
+        # exactly the shape of the p95 tail (a 24.6s source rendering in
+        # 750.7s). Now a child of `render`, so it stops hiding in unaccounted.
+        _tl_add_done("render_zoom_pre_extract", _zoom_pe_s, "render")
 
     # ── TRANSITION LAYER PRE-EXTRACT (Zac 2026-08-03) ──────────────────────
     # A transition reads ONE file at TWO positions — clipA is the outgoing shot,
@@ -31243,11 +31273,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         ) as _trans_pool:
             for _log_line in _trans_pool.map(_extract_one_transition, _trans_to_extract):
                 print(_log_line, flush=True)
+        _trans_pe_s = time.time() - _t_trans_extract
         print(
             f"[transition-pre-extract] {len(_trans_to_extract)} transition(s) "
-            f"in {(time.time() - _t_trans_extract) * 1000:.0f}ms (parallel)",
+            f"in {_trans_pe_s * 1000:.0f}ms (parallel)",
             flush=True,
         )
+        _tl_add_done("render_transition_pre_extract", _trans_pe_s, "render")
 
     # PromptlyMicroSegments input — only the windows Remotion must render.
     # Each segment carries its own clip/transition spec; Python tracks a
@@ -31785,6 +31817,11 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
               f"(was a flat {_MICRO_TIMEOUT_FLOOR}s default)", flush=True)
 
     _render_t0 = time.time()
+    # Closes the prep clock at the Remotion spawn. Recorded BEFORE the render so
+    # a render that raises into the degrade ladder still leaves its prep cost on
+    # the timeline — otherwise the retry path, the one most likely to be slow,
+    # would be the one that reports nothing.
+    _tl_add_done("render_prep", _render_t0 - _prep_t0, "render")
     _micro_descr = ""
     if micro_cmds:
         if _micro_chunked:
@@ -33463,7 +33500,25 @@ def _render_degrade_ladder(render_once, edit_plan, broll_clips, output_path):
                 _rung += 1
                 continue
             _last_render_sig = _cur_render_sig
-            render_once(edit_plan["cuts"], broll_clips)
+            # RETRIES COUNTED, NEVER ABSORBED (2026-08-22). A rung-2 retry
+            # re-runs the ENTIRE render — prep, pre-extracts, Remotion, mux —
+            # so a single retry roughly doubles the render. Until now the only
+            # trace was a log line: the child spans of attempt 2 simply landed
+            # on the timeline beside attempt 1's with the same names, and the
+            # count itself was nowhere in the payload. Two 240s renders and one
+            # 480s render are the same number on every dashboard we have, and
+            # they need opposite fixes.
+            #
+            # `render_attempts` rides stage_timings (nested, so content-studio's
+            # top-level key strip cannot eat it) and each attempt gets its own
+            # named span so the LADDER cost is separable from the render cost.
+            _rl_attempt_t0 = time.time()
+            _RENDER_ATTEMPTS[0] = _RENDER_ATTEMPTS[0] + 1
+            try:
+                render_once(edit_plan["cuts"], broll_clips)
+            finally:
+                _tl_add_done(f"render_attempt_rung{_rung}",
+                             time.time() - _rl_attempt_t0, "render")
             return
         except Exception as _render_err:
             # Rung 2a reads its culprit out of this text: a Remotion 404 NAMES
@@ -39493,6 +39548,7 @@ def handler(job):
         # must be cleared where per-job state is cleared, not in a setter that
         # happens to be nearby.
         _component_ledger_reset()
+        _RENDER_ATTEMPTS[0] = 0
 
         # Step 1 — Download + parallel stage kickoff
         # ─────────────────────────────────────────────────────────────────
@@ -43329,6 +43385,11 @@ def handler(job):
                 # the overlapped recipe, same as before.
                 "lang_bundle": _lang_bundle_holder.get("value"),
                 "degen_retries": int(globals().get("_DEGEN_RETRIES", 0) or 0),
+                # Ladder retries, counted rather than absorbed. degen_retries
+                # counts a DIFFERENT thing (Gemini degeneration) and read 0 on
+                # every job that retried its render, which is why a doubled
+                # render was invisible.
+                "render_attempts": int(_RENDER_ATTEMPTS[0]),
                 "lean_arm": _lean_ab_arm(),
                 "lean_schema_on": bool(_lean_schema_enabled()),
                 "lean_decor_ground_on": bool(_lean_decor_ground_enabled()),
