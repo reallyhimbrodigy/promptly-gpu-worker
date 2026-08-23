@@ -38152,6 +38152,29 @@ def _tl_add(name, start, end, parent="job"):
         _TL.add(name, start, end, parent)
 
 
+def _tl_wait(name, fn, parent="edit_plan"):
+    """Time a BLOCKING WAIT on an upstream future, as a child of its stage.
+
+    THE GAP THIS CLOSES. `edit_plan` is a 3-line span around
+    `future_edit.result()`, and the future it awaits itself waits on seven more
+    (transcript, proxy encode, trend, shot changes, vocal emphasis, loudness,
+    faces) plus an optional Scribe upgrade. None emitted a child, so 45% of the
+    PLAN stage was unaccounted at p50 — the same shape the render carried before
+    v566, one stage over, and the reason a "stream the plan" lever was sized
+    against a number that was mostly unmeasured.
+
+    Measures the WAIT, not the work: these futures run on the mega-pool and may
+    already be finished. That is the number wanted — it names the LONG POLE, the
+    dependency the plan is actually blocked on, which is what any parallelism
+    change has to move.
+    """
+    _s = _tl_start(name, parent)
+    try:
+        return fn()
+    finally:
+        _tl_end(_s)
+
+
 def _tl_add_done(name, elapsed, parent="job"):
     """Attach a span that has JUST finished, given only its elapsed seconds.
 
@@ -41437,8 +41460,8 @@ def handler(job):
             with the download), a regular mega-pool file-based call, or the provided_transcript
             for re-edit paths. Whichever landed first wins.
             """
-            _transcript = _get_resolved_transcript()
-            _proxy_bytes = future_gemini_proxy.result() if future_gemini_proxy is not None else None
+            _transcript = _tl_wait("wait_transcript", _get_resolved_transcript)
+            _proxy_bytes = _tl_wait("wait_proxy_encode", future_gemini_proxy.result) if future_gemini_proxy is not None else None
             # LEVER 4: one reference per job, derived as early as the proxy
             # exists. Client-proxy jobs reference the client's own object
             # (zero upload); otherwise one put_object here.
@@ -41453,20 +41476,20 @@ def handler(job):
                     print(f"[pipeline] early trend fetch failed: {_tr_err} — proceeding without trend", flush=True)
                     _trend = provided_trend
             elif future_trend is not None:
-                _trend = future_trend.result()
+                _trend = _tl_wait("wait_trend", future_trend.result)
             else:
                 _trend = provided_trend
             # Shot changes + vocal emphasis + loudness all feed into Gemini's
             # placement decisions. Beats are NOT computed for talking-head
             # content — they're noise on speech audio.
-            _shots = future_shot_changes.result()
-            _vocal = future_vocal_emphasis.result()
-            _loudness = future_loudness.result()
+            _shots = _tl_wait("wait_shot_changes", future_shot_changes.result)
+            _vocal = _tl_wait("wait_vocal_emphasis", future_vocal_emphasis.result)
+            _loudness = _tl_wait("wait_loudness", future_loudness.result)
             # Face detection (proxy-based) completes before Gemini — collect here
             # so the prompt can carry face visibility + speaker-position signals.
             # Detection typically finishes in 2-3s; Gemini at MEDIUM thinking takes
             # 15-25s, so this adds zero latency to critical path.
-            _face_res = future_faces.result() if future_faces is not None else ([], [])
+            _face_res = _tl_wait("wait_faces", future_faces.result) if future_faces is not None else ([], [])
             if isinstance(_face_res, tuple) and len(_face_res) == 2:
                 _face_positions, _smoothed_trajectory = _face_res
             else:

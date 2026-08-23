@@ -9999,6 +9999,17 @@ def _overlay_skip_safe():
     assert "CERT OVERLAY-SKIP: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
 
 
+@check("THE PLAN STAGE MUST ACCOUNT FOR ITS OWN SECONDS (2026-08-23, RULE-1) [Rule 2]. MEASURED across 77 editorial jobs: edit_plan is 68.8s p50 with 45% UNACCOUNTED — its only children were gemini_call[post-cuts] 31.2s, proxy_encode 0.9s, proxy_upload 0.0s. That dark 45% cost something concrete: TARGET_ARCHITECTURE.md sized 'stream the plan' as recovering 68.5s of blocking, and it cannot — streaming touches only the Gemini call, and the rest of the stage had never been measured. Second time in two days a lever was scoped against a mostly-dark number (the render's was the first, where prep turned out to be 3%). ROOT: edit_plan is a 3-line span around future_edit.result(), and that future itself waits on SEVEN more — transcript, proxy encode, trend, shot changes, vocal emphasis, loudness, faces — none of which emitted a child. Each is now named INDIVIDUALLY because the point is to find the LONG POLE; one aggregate 'waits' span would say the stage is blocked without saying on what, which is the situation being fixed. _tl_wait returns the future's value (these wrap .result() calls whose values feed the prompt — swallowing one would plan against None instead of failing loudly) and ends its span in a finally (a dependency that RAISES is exactly the one worth timing).")
+def _edit_plan_accounted():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_edit_plan_accounted.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_edit_plan_accounted FAILED\n{_out[-1600:]}"
+    assert "CERT EDIT-PLAN-ACCOUNTED: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
 @check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")
 def _tsx_parses():
     import os as _os, subprocess as _sub
