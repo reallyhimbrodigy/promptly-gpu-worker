@@ -10010,6 +10010,17 @@ def _edit_plan_accounted():
     assert "CERT EDIT-PLAN-ACCOUNTED: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
 
 
+@check("A MODULE IN THE IMAGE MUST BE REACHABLE (2026-08-23, RULE-1) [Rule 2]. MEASURED 2026-08-18 by sweep_built_not_wired.py, verbatim: 'duration_target and mechanical_router were built, cert-green, committed and DEPLOYED, with no import, no mount and no call site anywhere in production.' Both stayed cert-green throughout, because both certs drive their module in isolation with injected fakes — deleting the call site leaves them passing. The sweep that caught it was never wired into anything, so the regression it exists to prevent has been UNGATED ever since. Wiring the sweep itself would be useless: it exits 0 always and reports 142 candidates, mostly `modal run` entrypoints legitimately imported by nothing, so as a gate it is vacuous or blocking and baselining it would ratchet noise. This asserts the narrow invariant instead: every module mounted via add_local_file must be REACHABLE in the import graph rooted at handler.py and modal_app.py. TRANSITIVE on purpose — a first cut checked handler.py alone and flagged guidance_registry.py, which unified_core imports, and a gate that cries wolf is one people learn to wave through. The four RIFE modules are named in KNOWN_DEAD with their reason (modal_app.py itself calls that entrypoint DEAD CODE, a §4.8 removal candidate) rather than silently allowlisted, and a KNOWN_DEAD module becoming reachable ALSO fails — that means it was revived without retiring the note.")
+def _mounted_is_reachable():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_mounted_is_reachable.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_mounted_is_reachable FAILED\n{_out[-1600:]}"
+    assert "CERT MOUNTED-IS-REACHABLE: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
 @check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")
 def _tsx_parses():
     import os as _os, subprocess as _sub

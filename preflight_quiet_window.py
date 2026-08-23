@@ -32,6 +32,26 @@ import urllib.request
 # A row in any of these is user work that a deploy would orphan.
 IN_FLIGHT = ("processing", "pending", "queued")
 
+# NARROWED TO THE RENDER STAGE (owner ruling 2026-08-23).
+#
+# WHY. This file's own opening note says a too-broad gate "would have blocked
+# the deploy queue indefinitely while a week of certified work decayed." That
+# condition has fired repeatedly: a single job sitting at `analyze` with
+# progress_pct=0 held the queue while instrumented, gated, certified work
+# waited — and orphaning that job costs almost nothing, because it has not
+# reached the expensive stage.
+#
+# WHAT THE NARROWING TRADES, measured rather than assumed. Render is 63% of an
+# editorial job (p50 186s of 295s). A job orphaned BEFORE render loses planning
+# work and no render container; a job orphaned DURING render loses the
+# expensive half and is minutes from delivering. So the protection is pointed
+# at the second case and deliberately withdrawn from the first.
+#
+# THIS IS A REAL COST, NOT A FREE WIN: pre-render jobs WILL now be orphaned by
+# deploys, and they are still user work. They are listed loudly below so the
+# orphans are attributable [deploy-cadence law], not silently waved through.
+RENDER_STEPS = ("render", "rendering", "composite", "upload", "export")
+
 # AWAITING THE USER IS NOT LIVE WORK (2026-08-17).
 #
 # A job parked on an ask-back has NO CONTAINER RUNNING. It is waiting on a human,
@@ -111,7 +131,7 @@ def main():
     status_in = ",".join(IN_FLIGHT)
     try:
         inflight_raw = _get(url, key,
-                            f"select=id,status,created_at,updated_at,current_step"
+                            f"select=id,status,created_at,updated_at,current_step,progress_pct"
                             f"&status=in.({status_in})&limit=200")
         # NON-VACUITY: the probe must be able to see SOMETHING recent, or its
         # zero means nothing. Any row in the last 24h proves table + auth work.
@@ -174,9 +194,34 @@ def main():
         print("  They are still STUCK ROWS and want fixing — they are just not a "
               "reason to hold a deploy.")
 
+    # Split the live rows: only the render stage holds the deploy.
+    def _in_render(_row):
+        _step = str(_row.get("current_step") or "").strip().lower()
+        # UNKNOWN STEP COUNTS AS RENDER. A null/absent step is exactly the case
+        # where we cannot prove the job is safe to orphan, and this gate's whole
+        # discipline is that an unmeasurable thing is never reported as clear.
+        if not _step or _step in ("none", "null"):
+            return True
+        return any(_k in _step for _k in RENDER_STEPS)
+
+    rendering = [t for t in inflight if _in_render(t[0])]
+    prerender = [t for t in inflight if not _in_render(t[0])]
+
+    if prerender:
+        print(f"  NOTE: {len(prerender)} in-flight row(s) have NOT reached the "
+              f"render stage. The gate no longer holds for these (owner ruling "
+              f"2026-08-23) — but a deploy WILL orphan them, so they are named "
+              f"here for attribution:")
+        for _r, _s in prerender[:10]:
+            print(f"    PRE-RENDER (will be orphaned)  {_r.get('id')}  "
+                  f"step={_r.get('current_step') or '-'}  "
+                  f"pct={_r.get('progress_pct')}")
+
+    inflight = rendering
     if inflight:
-        print(f"QUIET-WINDOW: BUSY — {len(inflight)} in-flight user job(s). "
-              "Deploying now orphans live user work.")
+        print(f"QUIET-WINDOW: BUSY — {len(inflight)} job(s) IN THE RENDER STAGE. "
+              "Deploying now discards the expensive half of a job that is minutes "
+              "from delivering.")
         for _r, _s in inflight[:10]:
             print(f"    {_r.get('status')}  {_r.get('id')}  {_r.get('created_at')}"
                   f"  stale={int(_s) if _s is not None else '?'}s")

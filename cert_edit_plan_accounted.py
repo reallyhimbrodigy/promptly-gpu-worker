@@ -34,7 +34,13 @@ child span.
 import os, re, sys
 os.environ.setdefault("APP_URL", "")
 HERE = os.path.dirname(os.path.abspath(__file__))
-WAITS = ("wait_transcript", "wait_proxy_encode", "wait_trend", "wait_shot_changes",
+# wait_trend_early is the LIVE branch; wait_trend is the fallback one. Both are
+# required: instrumenting only the fallback (which the first cut did) means the
+# span never fires, and a dead instrument reads exactly like a free stage.
+# wait_trend / wait_trend_early are GONE with the trend removal (2026-08-23).
+# The dependency they timed no longer exists, so requiring them would fail the
+# gate on correct code — a cert must track the pipeline, not a memory of it.
+WAITS = ("wait_transcript", "wait_proxy_encode", "wait_shot_changes",
          "wait_vocal_emphasis", "wait_loudness", "wait_faces")
 
 
