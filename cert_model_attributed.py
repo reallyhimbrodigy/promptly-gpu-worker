@@ -66,6 +66,34 @@ def main():
         fails.append("utility_model is not persisted from GEMINI_MODEL — a bill "
                      "split across two tiers cannot be reconstructed from one")
 
+    # ── 1b: the PROXY SAMPLING this job actually used ──────────────────────
+    # Modal mounts secrets at CONTAINER START, so after a proxy flip production
+    # runs BOTH arms simultaneously — cold-start containers on the new value,
+    # snapshot-restored ones on the frozen old one. A timestamp cut is a
+    # mixture. Worse, prompt tokens scale with SOURCE DURATION, so a short
+    # source is indistinguishable from an active 2fps flip: a window read
+    # produced -34.3% against a predicted -36% and was pure confound.
+    for fld, src_expr in (("proxy_sample_fps", "_resolved_sample_fps_holder"),
+                          ("media_resolution", "_resolved_media_res_holder")):
+        mm = re.search(r'"' + fld + r'"\s*:\s*([A-Za-z_][\w.]*)', src)
+        print(f"  [1b] {fld:<18} persisted from: {mm.group(1) if mm else None}")
+        if not mm:
+            fails.append(f"{fld} is not persisted — after a flip, no row says "
+                         f"which arm ran, and a pre/post cut by timestamp is a "
+                         f"mixture reported as a cohort")
+        elif mm.group(1).split(".")[0] != src_expr:
+            fails.append(f"{fld} is written from {mm.group(1)!r}, not the "
+                         f"resolved holder — a re-derived value can disagree "
+                         f"with what was actually sent")
+    # the capture must be an IDENTITY at the use site, never a second copy of
+    # the override/env/default precedence (a second copy drifts, and the copy
+    # that drifts is the one the report reads)
+    ident = re.search(r"def _remember_media_res\(_v\):(?:(?!\ndef ).)*?return _v", src, re.S)
+    print(f"  [1b] media_resolution capture is an identity fn: {bool(ident)}")
+    if not ident:
+        fails.append("_remember_media_res does not return its argument — the "
+                     "capture would CHANGE what Gemini receives")
+
     # ── 2: nested, not top-level ───────────────────────────────────────────
     i_model = src.find('"editorial_model"')
     i_tl = src.find('"timeline": _tl_report()')

@@ -6302,6 +6302,24 @@ _COMPONENT_LEDGER = {}
 # the slowest jobs.
 _RENDER_ATTEMPTS = [0]
 
+# Resolved proxy sampling for THIS job. Holders rather than globals-by-name for
+# the same reason _lang_bundle_holder exists: the value is produced deep inside
+# the Gemini call site and read at the payload seam, and a plain global read
+# there was NameError-ing on every job for the bundle.
+_resolved_sample_fps_holder = {"value": None}
+_resolved_media_res_holder = {"value": None}
+
+
+def _remember_media_res(_v):
+    """Record the media_resolution this job actually sent, and return it.
+
+    Wraps the expression at its USE SITE rather than duplicating the
+    override/env/default precedence somewhere else — a second copy of that
+    chain would drift, and the copy that drifts is always the one the report
+    reads. Identity function: the call cannot change what Gemini receives."""
+    _resolved_media_res_holder["value"] = _v
+    return _v
+
 
 def _gapfill_enabled():
     """DEFAULT OFF. The mechanical gap-fill changes what is on screen for a
@@ -14443,9 +14461,10 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 # synthetic probe), so any real-footage output change is the
                 # signal this swap is testing for. FIX A (dark): LOW is ~66 vs
                 # ~258 tok/frame — the fps A/B pairs with this. Default MEDIUM.
-                media_resolution=(media_res_override
-                                  or os.environ.get("PROMPTLY_MEDIA_RESOLUTION", "").strip()
-                                  or "MEDIA_RESOLUTION_MEDIUM"),
+                media_resolution=_remember_media_res(
+                    media_res_override
+                    or os.environ.get("PROMPTLY_MEDIA_RESOLUTION", "").strip()
+                    or "MEDIA_RESOLUTION_MEDIUM"),
             ),
             system_instruction=system_instruction,
             # Lever 1: stream and abort the instant output crosses the degen
@@ -15667,6 +15686,7 @@ def generate_edit_gemini(
     # which 1-2fps carries. PROMPTLY_PROXY_SAMPLE_FPS lowers it (18->2 ~= 9x fewer
     # video tokens -> lower TTFB). Default 18 = byte-identical. A/B decides quality.
     _sample_fps = int(sample_fps_override or os.environ.get("PROMPTLY_PROXY_SAMPLE_FPS", "18") or "18")
+    _resolved_sample_fps_holder["value"] = _sample_fps
     # CONSTRUCTED DEFENSIVELY (2026-08-15) — this line took down the entire
     # editorial path and nothing noticed.
     #
@@ -43446,6 +43466,24 @@ def handler(job):
                 # Nested with timeline/gemini_tokens so content-studio's
                 # top-level key strip cannot eat it (the class that already hid
                 # gemini_tokens, vad_coverage, _lang_bundle and source_duration).
+                # WHICH PROXY SAMPLING THIS JOB ACTUALLY USED (2026-08-23).
+                #
+                # Modal mounts secrets at CONTAINER START, so after a flip a
+                # cold-start container picks the new value up immediately while a
+                # snapshot-restored one keeps the frozen old one. For a window
+                # after any proxy flip, production runs BOTH arms at once and
+                # nothing in the row says which — so a pre/post cut by timestamp
+                # is a mixture reported as a cohort.
+                #
+                # It is worse than that here: prompt tokens scale with SOURCE
+                # DURATION (~60,540 + 1,255/source-second), so a short source
+                # looks exactly like an active 2fps flip. A window-based read
+                # produced -34.3% against a predicted -36% and was pure
+                # confound — the dangerous kind of wrong, because it AGREED.
+                #
+                # Recording the resolved values makes attribution PER JOB.
+                "proxy_sample_fps": _resolved_sample_fps_holder.get("value"),
+                "media_resolution": _resolved_media_res_holder.get("value"),
                 "editorial_model": GEMINI_EDITORIAL_MODEL,
                 "utility_model": GEMINI_MODEL,
                 # ONE CLOCK (Zac 2026-08-02): hierarchical wall-clock tree with
