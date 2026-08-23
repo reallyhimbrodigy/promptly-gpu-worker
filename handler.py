@@ -6310,6 +6310,59 @@ _resolved_sample_fps_holder = {"value": None}
 _resolved_media_res_holder = {"value": None}
 
 
+# ── EMPTY-CANVAS OVERLAY SKIP ────────────────────────────────────────────────
+# PromptlyOverlay paints a TRANSPARENT canvas for the full output duration, and
+# on 14% of editorial jobs every layer it can draw is empty: no captions, no
+# motion graphics, no text overlays, no tight-cut overlays, no generated scenes,
+# no b-roll. It renders anyway, then ffmpeg composites a fully transparent
+# ProRes 4444 layer onto the base — work whose output is provably invisible.
+#
+# SIZED HONESTLY, because it is easy to oversell: the overlay runs OFF THE
+# CRITICAL PATH (measured 72.0s inside a 103.4s micro-segment window), so
+# skipping it does NOT cut the wall on a job with micro segments — which is
+# exactly when a job is slow. This is a COST and CORRECTNESS change: it stops
+# burning a Remotion process and a ProRes encode to produce nothing. It pays in
+# full only on jobs with no micro segments, and those are already the fast ones.
+#
+# THE PREDICATE IS INVERTED ON PURPOSE. Enumerating the layers that DO paint
+# means a family added later is silently skipped — the failure mode is a user's
+# captions vanishing, which is far worse than a slow render. So instead the
+# STRUCTURAL keys are allowlisted and everything else is treated as
+# potentially-painting. A new content key defaults to RENDER.
+_OVERLAY_STRUCTURAL_KEYS = frozenset({
+    # geometry / timing — describe the canvas, never mark it
+    "sourceUrl", "fps", "width", "height", "totalDurationInFrames",
+    # consumed by the BASE video and the micro segments, not by the overlay
+    "clips", "transitions", "outro",
+    # provider switches — they modulate how a layer draws, they never draw
+    "motionBlur", "motionBlurSamples", "motionBlurShutterAngle",
+    "motionTokens", "smoothGraphics", "resprungZooms",
+})
+
+
+def _overlay_paints_nothing(overlay_input):
+    """True ONLY when no layer in PromptlyOverlay can mark a pixel.
+
+    Any doubt renders [owner ruling]. A non-dict, an unknown key with content,
+    or anything this function cannot reason about returns False — the expensive,
+    correct answer.
+    """
+    if not isinstance(overlay_input, dict) or not overlay_input:
+        return False
+    for _k, _v in overlay_input.items():
+        if _k in _OVERLAY_STRUCTURAL_KEYS:
+            continue
+        # `caption` is a DICT when present and None at style="none"; the layer
+        # renders on truthiness, so a present-but-thin caption block still
+        # paints and must still count.
+        if isinstance(_v, (list, tuple, dict, str)):
+            if len(_v) > 0:
+                return False
+        elif _v not in (None, False, 0):
+            return False
+    return True
+
+
 def _remember_media_res(_v):
     """Record the media_resolution this job actually sent, and return it.
 
@@ -31677,9 +31730,23 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _base = _PLAIN_CHUNK_TIMEOUT + _sf * (_SCENE_FRAME_MULT - 1) * _SEC_PER_SCENE_FRAME_EXTRA
         return int(min(_OVERLAY_TIMEOUT_CAP, _RENDER_TIMEOUT_INSIDE_FN, _base * _render_fps_factor))
 
+    # EMPTY-CANVAS SKIP. Decided ONCE, here, before a single overlay chunk is
+    # built — so the skip and the composite cannot disagree about whether an
+    # overlay exists. Deciding it twice is how a filtergraph ends up referencing
+    # an input nobody rendered.
+    _overlay_skip = _overlay_paints_nothing(overlay_input)
+    if _overlay_skip:
+        _ledger_dropped("overlay", None, "empty_canvas")
+        print(f"[overlay-skip] every paintable layer is empty (captions, MG, "
+              f"text overlays, tight-cut, generated scenes, b-roll) — skipping "
+              f"the overlay render for {total_output_frames} frame(s). The "
+              f"composite passes the base through untouched.", flush=True)
+
     _overlay_chunk_paths: list = []
     overlay_cmds: list = []
-    if _overlay_chunked:
+    if _overlay_skip:
+        pass          # no chunks built -> nothing spawns -> nothing to composite
+    elif _overlay_chunked:
         for _i, (_fs, _fe) in enumerate(_overlay_ranges):
             _chunk_path = os.path.join(work_dir, f"overlay_chunk_{_i:02d}.mov")
             _overlay_chunk_paths.append(_chunk_path)
@@ -31988,9 +32055,14 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # overlay (legacy / single-pass path). The filtergraph's
         # overlay_is_chunk_local flag toggles whether to trim by
         # chunk_global_start_frame.
-        _ov_input = overlay_path if overlay_path is not None else overlay_video_path
-        chunk_inputs.append(_ov_input)
-        c_overlay_idx = len(chunk_inputs) - 1
+        # None -> build_final_filtergraph emits `[cur]null[composited]`, the
+        # pass-through branch that already existed for the no-overlay case.
+        if _overlay_skip:
+            c_overlay_idx = None
+        else:
+            _ov_input = overlay_path if overlay_path is not None else overlay_video_path
+            chunk_inputs.append(_ov_input)
+            c_overlay_idx = len(chunk_inputs) - 1
         c_audio_idx = None
         if include_audio:
             c_audio_idx = len(chunk_inputs)
@@ -32287,9 +32359,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             _t_chain = time.time()
             # Block on this chunk's overlay before starting composite.
             # +_fanout_wait_extra: 0 with the fan-out off (today's +30s).
-            overlay_futures[K].result(
-                timeout=_overlay_timeouts[K] + 30 + _fanout_wait_extra)
-            _ov_path = _overlay_chunk_paths[K]
+            if _overlay_skip:
+                _ov_path = None          # nothing was rendered; nothing to wait on
+            else:
+                overlay_futures[K].result(
+                    timeout=_overlay_timeouts[K] + 30 + _fanout_wait_extra)
+                _ov_path = _overlay_chunk_paths[K]
             if not os.path.exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
                 raise RuntimeError(
                     f"Overlay chunk {K} missing/invalid: {_ov_path}"
@@ -32477,7 +32552,9 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # overlay file is never assembled. Saves one ffmpeg pass + ~50-100MB
     # intermediate write, and lets composite chunks start as soon as their
     # overlay chunk finishes (not after the slowest one + concat).
-    if _overlay_chunked and not _pipeline_chunks:
+    if _overlay_skip:
+        pass          # nothing rendered, nothing to concat
+    elif _overlay_chunked and not _pipeline_chunks:
         for _p in _overlay_chunk_paths:
             if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
                 raise RuntimeError(f"Overlay chunk missing/invalid: {_p}")
@@ -32521,7 +32598,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # is never produced (composite reads chunks directly) — validate the
     # individual chunks here as a defensive sanity check; the chain
     # function already raised if any chunk failed.
-    if _pipeline_chunks:
+    if _overlay_skip:
+        # The overlay was deliberately not rendered — asserting its output
+        # exists would turn the skip into a RENDER_FATAL on exactly the jobs it
+        # is meant to help. This branch is the reason the skip decision is taken
+        # ONCE and read everywhere, rather than re-derived per site.
+        pass
+    elif _pipeline_chunks:
         for _p in _overlay_chunk_paths:
             if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
                 raise RuntimeError(f"Overlay chunk missing/invalid: {_p}")

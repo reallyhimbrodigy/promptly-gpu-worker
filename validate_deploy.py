@@ -9988,6 +9988,17 @@ def _rasterisation_split():
     assert "CERT RASTERISATION-SPLIT: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
 
 
+@check("SKIP ONLY WHAT PAINTS NOTHING, AND NEVER HALF-SKIP (2026-08-23, RULE-1) [Rule 2]. PromptlyOverlay renders a TRANSPARENT canvas for the full output duration; on 14% of editorial jobs every layer it can draw is empty (captions, MG, text overlays, tight-cut, generated scenes, b-roll) and it renders anyway, then ffmpeg composites a provably invisible ProRes 4444 layer. SIZED HONESTLY: the overlay is OFF the critical path (72.0s inside a 103.4s micro window), so this is COST and CORRECTNESS, not speed — it pays in full only on jobs with no micro segments, which are already the fast ones. THE FAILURE THIS GUARDS IS NOT 'SLOW', IT IS A USER'S CAPTIONS VANISHING: the predicate allowlists STRUCTURAL keys and treats every other key as potentially-painting, so a content family added later defaults to RENDER rather than being silently dropped. Six separate clauses assert each family blocks the skip, because during this work occupancy was twice measured on a SUBSET and a conclusion drawn from it (a '99% near-empty' figure that covered three families of six). The skip is decided ONCE and consumed at every site; the site count is asserted because removing any one guard is a distinct production failure — a filtergraph referencing an input nobody rendered, a chain blocking on a future that never existed, or the output validator raising RENDER_FATAL for a file the skip deliberately did not produce.")
+def _overlay_skip_safe():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_overlay_skip.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_overlay_skip FAILED\n{_out[-1600:]}"
+    assert "CERT OVERLAY-SKIP: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
 @check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")
 def _tsx_parses():
     import os as _os, subprocess as _sub
