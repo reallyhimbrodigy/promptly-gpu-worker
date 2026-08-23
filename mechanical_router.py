@@ -46,7 +46,10 @@ import re
 # The scalars the merge may `set` — the mechanical vocabulary, mirrored from
 # handler._REEDIT_SET_SCALARS. A scalar absent there cannot be set at all, so
 # routing it mechanically would promise something the merge cannot deliver.
-MECHANICAL_SCALARS = ("caption_style", "aspect_ratio", "outro",
+# aspect_ratio REMOVED 2026-08-23 — dead field (see the refusal at the aspect
+# branch below). color_effect is also inert: handler force-sets it to None
+# because the feature was removed, so the router must never emit it either.
+MECHANICAL_SCALARS = ("caption_style", "outro",
                       "thumbnail_word_index", "pacing", "audio_denoise",
                       "color_effect", "notes")
 
@@ -140,12 +143,29 @@ def classify(message, *, valid_caption_styles=None):
                 return "creative", [], f"caption style {name!r} is not a "\
                                        f"registered style — refusing to guess"
 
-    # 4. aspect ratio.
-    m = _ASPECT.search(msg)
-    if m:
-        ops.append({"op": "set", "list_key": "aspect_ratio",
-                    "value_json": json.dumps(_aspect_value(m.group(1)))})
-        why.append(f"aspect={_aspect_value(m.group(1))}")
+    # 4. ASPECT RATIO — REFUSED, not routed (2026-08-23).
+    #
+    # `aspect_ratio` IS A DEAD FIELD. handler.py:18373 states it outright:
+    # "aspect_ratio is informational — the pipeline always outputs 1080x1920
+    # regardless of this field", the plan schema is Literal["9:16"], and real
+    # format export is driven by input_data["export_formats"], which this router
+    # never touches.
+    #
+    # Routing it mechanically produced the WORST possible outcome: a `set` op
+    # that cannot change a pixel, plus human_summary "aspect=1:1 — everything
+    # else untouched." surfaced to the user as change_summary. A confident
+    # success message for a change that did not happen — precisely the class
+    # this module's own docstring exists to prevent, and three of the ten
+    # "mechanical" cases in its cert routed to it.
+    #
+    # Falling through to the creative path does not make aspect work either —
+    # nothing in the pipeline does — but it stops us CLAIMING it did. Making it
+    # real means wiring export_formats, which is a product change, not a router
+    # fix.
+    if _ASPECT.search(msg):
+        return "creative", [], ("aspect ratio is not something this pipeline "
+                                "can change — output is always 1080x1920 — so "
+                                "it is not answered mechanically")
 
     # 5. TEXT SWAP — the most common small request there is, and purely
     #    mechanical: find-text -> replace-text, validated downstream against the

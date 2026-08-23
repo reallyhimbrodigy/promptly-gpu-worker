@@ -10021,6 +10021,17 @@ def _mounted_is_reachable():
     assert "CERT MOUNTED-IS-REACHABLE: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
 
 
+@check("THE DETERMINISTIC LADDER MUST BE CALLED, AND CANARYABLE (2026-08-23, RULE-1) [Rule 2]. Check 427 asserts a mounted module is REACHABLE; this asserts it is actually INVOKED, which is a different failure — a module can be mounted, imported, and still never called. sweep_built_not_wired.py found exactly that on 2026-08-18: mechanical_router and duration_target 'built, cert-green, committed and DEPLOYED, with no import, no mount and no call site anywhere in production', and both certs stayed green throughout because both drive their module in ISOLATION with injected fakes. Also asserts the four defects found on 2026-08-23 stay fixed: BOTH helpers receive input_data (the per-job canary — without it the only way to arm a feature whose mis-fire writes a WRONG EDIT with no model in the loop is a secret plus a redeploy; surgical_ops passes it, these two did not); duration_target receives source_duration_s (deriving the denominator from the last word's end time makes trailing silence invisible, so a 40s video whose speech ends at 28s told the user it was 'already shorter than 30s'); mechanical_router receives the transcript, because caption-swap validation now runs BEFORE the mechanical return — its docstring claimed validation happened downstream and it did not, that path returns first, so an unspoken find no-op'd at render while the user was told it worked; and aspect_ratio is OUT of the mechanical vocabulary, because it is a dead field (the pipeline always outputs 1080x1920 regardless) and routing it emitted a set-op that cannot change a pixel plus a user-facing 'aspect=1:1 — everything else untouched.'")
+def _deterministic_ladder_wired():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_deterministic_ladder_wired.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_deterministic_ladder_wired FAILED\n{_out[-1600:]}"
+    assert "CERT DETERMINISTIC-LADDER-WIRED: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
 @check("EVERY RENDER-TREE TSX MUST ACTUALLY PARSE (2026-08-20, RULE-1) [Law 2]. There is no tsc in this repo and the wiring smokes are REGEX readers — they confirm a symbol is mentioned, never that the file compiles. TWICE a syntactically broken render tree passed every check and was caught only by a RENDER: `sourceUrl` used in JSX but never bound (SymbolicateableError [ReferenceError] -> RENDER_FATAL, 196s of wall, no artifact), and an import left as 'interpolate,\\n, staticFile} from \"remotion\";' while adding staticFile — malformed, and BOTH wiring smokes passed it clean. A render is a ten-minute, ~\$0.30 syntax checker; this is a 10ms one. esbuild is already a dependency (Remotion bundles with it) so this adds nothing to the image. It PARSES ONLY — imports are stubbed, no type checking, no module graph: a file that parses can still be wrong, but a file that does not parse is always wrong. Fails if it finds ZERO .tsx files, because a check that inspects nothing passes everything. RED-proven by re-introducing the exact malformed import — it names the file and the line.")
 def _tsx_parses():
     import os as _os, subprocess as _sub

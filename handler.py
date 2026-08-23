@@ -20830,11 +20830,37 @@ def _duration_reedit(old_plan, change_request, transcript,
               else transcript if isinstance(transcript, list) else None)
     if not _words:
         return None
+    # THE DENOMINATOR MUST BE THE DELIVERED VIDEO, NOT THE SOURCE TRANSCRIPT.
+    #
+    # Two defects were riding this line. (a) Falling back to the last word's end
+    # time makes trailing silence or music invisible, so a 40s video whose
+    # speech ends at 28s answered "this is already shorter than 30s" — wrong,
+    # and shown to the user. (b) `_words` is the SOURCE transcript, so the
+    # ladder ranked spans the current edit has already removed and compared the
+    # target against the source rather than the cut the user is looking at.
+    #
+    # `source_duration_s` is now passed from the caller. The word-list fallback
+    # remains ONLY as a floor, and it DECLINES rather than guessing when the
+    # plan says the delivered video is materially longer — a wrong denominator
+    # produces a confidently wrong verdict, which is worse than no answer.
     _src = float(source_duration_s or 0.0)
-    if not _src:
-        try:                      # derive from the word list — one clock only
+    _plan_out = 0.0
+    try:
+        for _c in (old_plan or {}).get("cuts") or []:
+            _plan_out += max(0.0, float(_c.get("source_end") or 0.0)
+                             - float(_c.get("source_start") or 0.0))
+    except Exception:
+        _plan_out = 0.0
+    if _plan_out > 0:
+        # The CURRENT edit's duration is the honest denominator for "make it
+        # 30 seconds" — the user is asking about the video they were shown.
+        _src = _plan_out
+    elif not _src:
+        try:                      # last resort — speech end, and it under-reads
             _src = word_time_s(_words, -1, "end")
         except Exception:
+            return None
+        if not _src:
             return None
     _detectors = {"detect_dead_air": detect_dead_air,
                   "detect_filler": detect_filler,
@@ -21288,7 +21314,7 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
 
 
 def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
-                       surgical_v2=False, input_data=None):
+                       surgical_v2=False, input_data=None, source_duration_s=None):
     """Call Gemini to produce a new plan from (old_plan, change_request).
 
     Returns a dict with keys: classification, new_plan, fused_vibe,
@@ -21332,6 +21358,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
                                   transcript=transcript)
     if _det is None:
         _det = _duration_reedit(old_plan, change_request, transcript,
+                                source_duration_s=source_duration_s,
                                 input_data=input_data)
     if _det is not None:
         return _det
@@ -40026,6 +40053,8 @@ def handler(job):
                     # carries the per-job canary keys (mechanical_router_test /
                     # target_duration_test) down to the deterministic ladder
                     input_data=input_data,
+                    # the honest denominator for "make it 30 seconds"
+                    source_duration_s=source_duration,
                 )
             except Exception as _pd_err:
                 # RE-EDIT RESILIENCE (Zac 2026-07-28, CRITICAL #3): a surgical plan-diff that
@@ -41446,8 +41475,17 @@ def handler(job):
             # both transcripts are scored through the SAME coverage gate that
             # would reject the job, and the better one wins. Inert with the flag
             # off. See _maybe_upgrade_transcript_scribe.
+            # A SECOND TRANSCRIPTION, INSIDE THE PLAN FUTURE (instrumented
+            # 2026-08-23). The seven wait_* spans cover only this function's
+            # .result() calls; the WORK it does after them was untimed, and it
+            # includes an entire second transcription path. That is the leading
+            # suspect for both the ~24s still dark inside edit_plan AND the
+            # wait_transcript p50 2.5s / max 266.6s spread — a tail that large
+            # is not one slow transcription, it is a second one on some jobs.
+            _sc_span = _tl_start("scribe_upgrade", "edit_plan")
             _transcript = _maybe_upgrade_transcript_scribe(
                 _transcript, _raw_source, source_duration)
+            _tl_end(_sc_span)
             # PROPAGATE the Scribe upgrade to the SHARED cache so EVERY consumer of
             # _get_resolved_transcript() sees Scribe's recovered words — the
             # Arabic-bridge and bilingual upgrades below already do this; Scribe
@@ -41585,7 +41623,8 @@ def handler(job):
             # and never pays the probe.
             if (_edit_in_language_enabled() and _script in ("Latin", "Cyrillic")
                     and _looks_confused(_transcript, _script)):
-                _is_ar, _ar_probe = _probe_confirms_arabic(_raw_source)
+                _is_ar, _ar_probe = _tl_wait(
+                    "arabic_probe", lambda: _probe_confirms_arabic(_raw_source))
                 if _is_ar:
                     _script = "Arabic"
                     # GRADUATION ROUTE: when Arabic is off the denylist, render it
@@ -41597,7 +41636,11 @@ def handler(job):
                     if _script_reaches_render("Arabic"):
                         _ar_full = None
                         try:
-                            _ar_full = transcribe_audio(_raw_source, language="ar")
+                            # BILLED: a full second Deepgram call. Timed so the
+                            # latency and the vendor line are one measurement.
+                            _ar_full = _tl_wait(
+                                "arabic_retranscribe",
+                                lambda: transcribe_audio(_raw_source, language="ar"))
                         except Exception as _are:
                             print(f"[arabic-bridge] route re-transcribe failed ({type(_are).__name__})", flush=True)
                         # FAIL-CLOSED (graduated only): the route must yield a
@@ -41634,8 +41677,14 @@ def handler(job):
                             # Gated by the same flag → dark/byte-identical when off.
                             _keep_multi_over_ar = False
                             if _coverage_gate_enabled(input_data):
-                                _, _ar_cov = _transcription_coverage_check(_raw_source, _ar_words, source_duration)
-                                _, _mu_cov = _transcription_coverage_check(_raw_source, _dg_words, source_duration)
+                                _, _ar_cov = _tl_wait(
+                                    "coverage_check_ar",
+                                    lambda: _transcription_coverage_check(
+                                        _raw_source, _ar_words, source_duration))
+                                _, _mu_cov = _tl_wait(
+                                    "coverage_check_multi",
+                                    lambda: _transcription_coverage_check(
+                                        _raw_source, _dg_words, source_duration))
                                 _ar_u, _mu_u = _ar_cov.get("unworded_speech_s"), _mu_cov.get("unworded_speech_s")
                                 if _ar_u is not None and _mu_u is not None and _ar_u > _mu_u + 1.0:
                                     _keep_multi_over_ar = True

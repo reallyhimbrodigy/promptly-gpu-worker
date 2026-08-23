@@ -28,12 +28,18 @@ CASES = [
     ("change the captions to TwoTone", "mechanical", "registered style"),
     ("no captions please", "mechanical", "caption off"),
     ("turn off the subtitles", "mechanical", "caption off"),
-    ("make it 9:16", "mechanical", "aspect"),
-    ("make it square", "mechanical", "aspect word"),
+    # ASPECT IS NOW REFUSED, not routed (2026-08-23). `aspect_ratio` is a DEAD
+    # FIELD — handler.py:18373 says the pipeline always outputs 1080x1920
+    # regardless, the schema is Literal["9:16"], and real export runs off
+    # input_data["export_formats"]. Routing it mechanically emitted a `set` op
+    # that cannot change a pixel AND told the user "aspect=1:1 — everything else
+    # untouched." These three cases previously asserted that false success.
+    ("make it 9:16", "creative", "aspect — dead field, must not claim success"),
+    ("make it square", "creative", "aspect word — dead field"),
     ('you spelled "Sujay" wrong, it should be "Sujai"', "mechanical", "text swap"),
     ('change "Clippers" to "Clipperz"', "mechanical", "text swap"),
     ("clean up the background noise", "mechanical", "denoise"),
-    ("use Prime captions and make it 9:16", "mechanical", "two clean scalars"),
+    ("use Prime captions and make it 9:16", "creative", "aspect poisons an otherwise clean scalar — refusing the WHOLE request is the module's own asymmetric-cost rule"),
 
     # ── THE INTERSECTION: mechanical scalar BESIDE a word mutation ───────────
     # Every one of these MUST be creative. Routing mechanically would apply the
