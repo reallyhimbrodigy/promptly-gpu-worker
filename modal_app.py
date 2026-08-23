@@ -1908,8 +1908,8 @@ _CANON_FLAGS = {
     # being dated RECENT — set inside the Vertex outage, where their own effect
     # on Gemini tokens is unobservable, against LAUNCH_DAY §6's "do not flip".
     "PROMPTLY_HLS_COPY": "1",
-    "PROMPTLY_MEDIA_RESOLUTION": "",
-    "PROMPTLY_PROXY_SAMPLE_FPS": "",
+    "PROMPTLY_MEDIA_RESOLUTION": "MEDIA_RESOLUTION_LOW",
+    "PROMPTLY_PROXY_SAMPLE_FPS": "2",
 }
 
 # ── Prewarm cache janitor ──────────────────────────────────────────────────────
