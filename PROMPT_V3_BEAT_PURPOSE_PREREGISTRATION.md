@@ -76,10 +76,24 @@ WE did.
 ## 3. PRE-REGISTERED THRESHOLDS
 
 ### WIN — all three must hold
-1. **Silent-source rate ≤ 10%** (arm B emits something on ≥ 9 of 10 trigger-bearing
-   sources). *This is the primary condition and it is aimed squarely at v2's
-   measured failure: silence on 6 of 10. A shape that cannot speak cannot be
-   judged on what it says.*
+1. **Silent sources ≤ 1 of 13.** Arm B emits beats on at least 12 of the 13
+   trigger-bearing sources. *Primary condition, aimed squarely at v2's measured
+   failure: silence on 6 of 10. A shape that cannot speak cannot be judged on
+   what it says.*
+
+   **AMENDED 2026-08-24, BEFORE ANY CELL RAN** — no data existed when this was
+   changed, which is the only time a pre-registration may be touched. It read
+   "≤ 10%", and at n=13 that percentage HAS NO RESOLUTION: 1 silent source is
+   7.7% (pass), 2 is 15.4% (fail). There is no outcome between them, so the
+   percentage implied a precision the sample cannot deliver and would have
+   invited an after-the-fact argument about where 10% really sits. A count says
+   the same thing and cannot be re-litigated.
+
+   **THE RESOLUTION LIMIT, STATED:** this threshold can distinguish 0-1 silent
+   from 2+. It CANNOT distinguish a 10% silence rate from a 15% one. If the
+   result lands at exactly 2, that is a FAIL by the pre-registered rule and also
+   **within the noise this n can resolve** — both facts get reported, and the
+   honest follow-up is more sources, not a re-reading of this number.
 2. **Requested placements ≥ 1.5× arm A** on trigger-bearing sources. Lower than
    v2's 2× deliberately — v2 asked for a doubling and got silence; the bar that
    matters first is *emitting at all*.
