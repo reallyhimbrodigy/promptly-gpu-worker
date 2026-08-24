@@ -1,3 +1,13 @@
+> **SUPERSEDED 2026-08-24 by `PROMPT_V3_BEAT_PURPOSE_PREREGISTRATION.md`.**
+> Nothing below is edited. This document records a REAL RESULT — the arm ran and
+> came back inconclusive: arm B was silent on 6 of 10 sources and the schema
+> could not express scenes. Its thresholds were fixed against beats as
+> PLACEMENT ANCHORS keyed on `word_index`; v3's beat is a TIME-BOXED UNIT with an
+> intent. Different object, different failure modes. In particular the win
+> condition "generated_scenes comes off zero" was later proved UNMEASURABLE in
+> this arm, so carrying it forward would import a dead condition into a live
+> pre-registration. Read this for what it measured; do not score v3 against it.
+
 # PROMPT V2 A/B — PRE-REGISTRATION
 
 **Written BEFORE the run.** The thresholds below are fixed here so they cannot
