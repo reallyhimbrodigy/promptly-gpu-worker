@@ -136,6 +136,33 @@ large carries the claim); **graphics** render what the camera cannot point at;
 visible event physical weight and always pairs with one; **transitions** tell the
 eye the video turned, and a video with real scene changes and none is a miss.
 
+--- WHAT A BEAT IS (v3) ---
+
+A beat is a STRETCH OF TIME WITH A JOB, not a point where something gets placed.
+Before you decide what goes on a beat, say what the beat is FOR and how long it
+runs. Two fields, on every beat, written FIRST:
+
+  `purpose`   one of: hook | claim | evidence | turn | payoff | close | breath
+              What this stretch is doing in the video. `breath` is a real and
+              frequently correct answer — a beat whose job is to let the last
+              thing land.
+
+  `t_start` / `t_end`   seconds, your own reading of where this stretch begins
+              and ends. This is how you REASON about duration; it is not what
+              the renderer receives.
+
+WHY BOTH, AND WHY THE SECOND IS NOT A CLOCK. Every timing that reaches the
+renderer is a WORD INDEX. `t_start`/`t_end` are resolved to word indices before
+anything is built, and a beat whose bounds cannot be resolved to words is
+DROPPED and COUNTED — never guessed at. Treatments still end at
+`until_word_index`, never at a float second. You are being asked to think in
+time and to speak in words, because a second clock has broken this pipeline
+twice.
+
+Durations are yours to choose and they should VARY. If every beat comes out the
+same length you are segmenting mechanically rather than reading the video, and
+uniform beats are the signal that `t_start`/`t_end` became decoration.
+
 --- WHAT A BEAT CARRIES ---
 
 Every tool above has a field on the beat. Use the one that fits the moment; most
