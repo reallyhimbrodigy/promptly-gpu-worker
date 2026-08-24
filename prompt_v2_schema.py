@@ -374,7 +374,8 @@ def _empty_contract(plan: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def flatten_beats(plan: Dict[str, Any], *, ledger=None,
-                  ensure_contract: bool = False) -> Dict[str, Any]:
+                  ensure_contract: bool = False,
+                  word_times: Dict[int, float] = None) -> Dict[str, Any]:
     """beats[] -> the component-major arrays the render path already consumes.
 
     Returns the SAME dict, mutated, so every downstream reader is untouched.
@@ -427,12 +428,43 @@ def flatten_beats(plan: Dict[str, Any], *, ledger=None,
         if ledger:
             ledger[1](kind, ctype, why)
 
+    # V3 (b): t_start/t_end ARE RESOLVED TO WORD INDICES HERE, and what cannot
+    # be resolved is COUNTED rather than vanishing.
+    #
+    # The previous loop did `continue` on a beat with no usable word_index —
+    # silently. A v3 beat reasons in seconds, so a plan can now be entirely
+    # well-formed and still land here with no word_index at all; dropping those
+    # without a count would report "the model emitted nothing" when the truth is
+    # "we discarded everything it emitted". That distinction is pre-registered as
+    # `unresolvable beats` and it is the difference between a model finding and
+    # one of ours.
+    unresolvable = []
+
+    def _resolve_wi(beat):
+        """word_index if the model gave one; else the word nearest t_start."""
+        try:
+            return int(beat.get("word_index"))
+        except (TypeError, ValueError):
+            pass
+        t0 = beat.get("t_start")
+        if not isinstance(t0, (int, float)) or not word_times:
+            return None
+        # NEAREST, not floor: a beat boundary landing 10ms before a word should
+        # attach to that word, and floor() would push it onto the previous one.
+        return min(word_times, key=lambda i: abs(word_times[i] - float(t0)))
+
     for b in beats:
         if not isinstance(b, dict):
             continue
-        try:
-            wi = int(b.get("word_index"))
-        except (TypeError, ValueError):
+        wi = _resolve_wi(b)
+        if wi is None:
+            unresolvable.append({
+                "purpose": b.get("purpose"),
+                "t_start": b.get("t_start"),
+                "t_end": b.get("t_end"),
+                "why": ("no word_index and no t_start" if b.get("t_start") is None
+                        else "t_start present but no word_times available"),
+            })
             continue
 
         # ── place -> motion_graphics ────────────────────────────────────────
@@ -602,6 +634,13 @@ def flatten_beats(plan: Dict[str, Any], *, ledger=None,
     # it built — now for every family, not just the graphics.
     plan["_v2_counts"] = {
         "beats": len(beats),
+        # PRE-REGISTERED METRIC. A beat we could not anchor is OUR drop, not the
+        # model's silence, and reporting zero here without the denominator would
+        # repeat the reading that made "0/779 scenes" unreadable for weeks.
+        "beats_unresolvable": len(unresolvable),
+        "unresolvable_detail": unresolvable[:20],
+        "purpose_distribution": _purpose_distribution(beats),
+        "beat_durations_s": _beat_durations(beats),
         "placements_requested": sum(counts.values()) + sum(dropped.values()),
         "placements_emitted": sum(counts.values()),
         "dropped_by_us": dropped,
@@ -621,6 +660,31 @@ def flatten_beats(plan: Dict[str, Any], *, ledger=None,
         "motion_graphics_len": len(mgs),
     }
     return plan
+
+
+def _purpose_distribution(beats) -> Dict[str, int]:
+    """Purpose counts. A near-constant distribution means the enum carries no
+    information and v3 has reduced to v2 with extra fields — pre-registered as
+    reading (2) of a worse result."""
+    out: Dict[str, int] = {}
+    for b in beats:
+        if isinstance(b, dict):
+            k = str(b.get("purpose") or "(absent)")
+            out[k] = out.get(k, 0) + 1
+    return out
+
+
+def _beat_durations(beats) -> list:
+    """t_end - t_start per beat. Uniform durations mean the model segmented
+    mechanically rather than reading the video — reading (4)."""
+    out = []
+    for b in beats:
+        if not isinstance(b, dict):
+            continue
+        a, z = b.get("t_start"), b.get("t_end")
+        if isinstance(a, (int, float)) and isinstance(z, (int, float)) and z > a:
+            out.append(round(float(z) - float(a), 2))
+    return out
 
 
 def _beat_moves(b: Dict[str, Any]) -> int:
