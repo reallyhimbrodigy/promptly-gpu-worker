@@ -50,9 +50,30 @@ Select for **editing craft that is visible in frames**:
 |---|---|
 | single speaker, talking-head base | matches our input class; a multi-cam skit teaches nothing transferable |
 | 15–90s | our output range; a 3-minute video has a different beat economy |
-| visible cuts ≥ 6 | a video with 2 cuts cannot demonstrate cut craft |
+| **performance ≥ Nx the ACCOUNT'S OWN median** | see below — this replaces raw view count |
 | carries at least one card/overlay | otherwise it cannot demonstrate what we most often decline |
 | carries at least one cutaway | same, for b-roll — this is the `broll` trigger added 2026-08-24 |
+
+Note that "visible cuts ≥ 6" is deliberately **absent**. It was in the first
+draft of this table and §3.1 is why it had to go.
+
+### 2.1 Performance is a MULTIPLIER against the account's own baseline
+
+The retired pipeline admitted anything over 500,000 views. **A large account
+clears 500k on anything it posts**, so that threshold selected for follower
+count — a property of the account, not of the edit. The selection was broken
+before Gemini ever saw a frame, which is the most expensive kind of broken.
+
+Score instead as `views / median(views of that account's recent posts)`. The
+clip-brain board's own numbers are the shape wanted here: **13.0x · 29.3x ·
+25.1x** against baseline. A 13x on a small account is craft; a 500k on a large
+one is distribution.
+
+This is the concrete form of "selection is for craft, not virality" — the
+abstraction was already in this spec and it did not survive contact with a
+threshold. Record `views`, `account_median_views` and `performance_multiple`
+separately, because a multiple whose denominator is not stored cannot be
+re-derived when the account grows.
 
 **A reference with no instance of a component cannot be evidence about that
 component.** The trigger discipline that governs our own A/B corpus governs this
@@ -98,6 +119,50 @@ read                string         one sentence: why this treatment, here
 deliberately left bare" is the single most under-represented fact in our own
 planning and the reason density reads as timid.
 
+Plus one video-level field, and §3.1 is why it is not buried in a beat:
+
+```
+first_visual_change_s   float|null   when ANYTHING first changes on screen:
+                                     a cut, a cutaway, a card, a title.
+                                     null = nothing changes for the whole video.
+```
+
+### 3.1 The granularity is achievable, not aspirational — and it already refutes something
+
+A worked example of this exact record shape, produced by Claude analysing one
+clip:
+
+> hook structure: *"curiosity-gap + insider hook … secret framing → loss/threat
+> framing"*
+>
+> 0.00s  caption pops "here's"
+> 0.75s  builds to "here's the part"
+> 1.50s  "nobody's"
+> 2.50s  "nobody's talking about" — **"talking" rendered in teal italic for
+> emphasis**
+
+That is **per-word treatment, timestamped, with the hook named as a STRUCTURE
+rather than a label**, and no aggregation anywhere. It is the target record, and
+it demonstrates the granularity is reachable today. A style guide would have
+rendered all of that as "uses bold animated captions."
+
+**The same analysis reports something that contradicts one of our own targets:**
+
+> *"no b-roll, no scene cut, no title card … the first visual change doesn't
+> arrive until around the 10 to 12 second mark."*
+
+A **performing** video with zero cutaways for ten seconds is a direct
+counter-example to `MOTION_DENSITY_TARGET_EVPS = 3.5`, which was calibrated on
+**two heavily-produced references**. Two references are a sample, not a law.
+
+This is the whole argument for records in one fact. An averaged guide would have
+emitted "trending videos cut fast" and **buried the counter-example inside the
+average that contradicts it.** `first_visual_change_s` is therefore stored per
+video and queryable: if a meaningful share of high-multiple videos hold past 8s,
+then 3.5/s is wrong — and it is wrong in the direction of our own instrument
+scoring restraint as a defect. That is a finding only records can produce, and
+it must be able to arrive without anyone having predicted it.
+
 **Cost is measured, not estimated**, and reported with cache hit/miss stated
 per arm — the same discipline the brain A/B carries, and for the same reason:
 Claude's explicit `cache_control` and Gemini's implicit cache are not comparable
@@ -110,6 +175,9 @@ without it.
 ```
 reference_videos   id · platform · source_url · author · duration_s · sha256
                    bytes · scraped_at · analyzed_at · analyzer_model
+                   views · account_median_views · performance_multiple
+                   first_visual_change_s      <- see 3.1; nullable, null is a RESULT
+                   hook_structure text        <- named as a structure, not a label
                    demonstrates text[]        <- which components it can be evidence about
                    selection_reason text
 
