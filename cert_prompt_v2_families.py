@@ -225,7 +225,7 @@ def main():
           f"must not vanish from the ledger, or it reads as a decline")
 
     # ── 6. the counts declare every family ─────────────────────────────────
-    counts = out.get("_v2_counts") or {}
+    counts = out.get("v2_counts") or {}
     check("_v2_counts declares per-family emissions",
           set(counts.get("emitted_by_family") or {}) >= {
               "cut_refinements", "emphasis_moments", "text_overlays",

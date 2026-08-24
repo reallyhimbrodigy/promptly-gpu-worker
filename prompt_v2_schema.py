@@ -385,7 +385,7 @@ def flatten_beats(plan: Dict[str, Any], *, ledger=None,
     and derives `top-level` from len(edit_plan["motion_graphics"]). Because this
     transform runs BEFORE that count is taken, the equality holds by
     construction — but the counts are ALSO declared explicitly in
-    `_v2_counts` so a mismatch is diagnosable rather than merely fatal.
+    `v2_counts` so a mismatch is diagnosable rather than merely fatal.
 
     `ledger` is handler's (_ledger_requested, _ledger_dropped) pair when
     available: a treatment dropped HERE is dropped BY US, and that is exactly
@@ -632,7 +632,13 @@ def flatten_beats(plan: Dict[str, Any], *, ledger=None,
     # DECLARED, not inferred. The equality assertion at the render seam is an
     # equality; when it trips, this is the record of what the transform believed
     # it built — now for every family, not just the graphics.
-    plan["_v2_counts"] = {
+    # NOT UNDERSCORE-PREFIXED, and that is load-bearing. handler sanitises plans
+    # with `k.startswith("_")` filters, so `_v2_counts` was STRIPPED before the
+    # plan ever reached a reader — the metrics were computed, certified, proven
+    # end to end, and then deleted in transit. A leading underscore in this
+    # codebase means "internal, safe to drop"; these are the pre-registered
+    # measurements and they must survive.
+    plan["v2_counts"] = {
         "beats": len(beats),
         # PRE-REGISTERED METRIC. A beat we could not anchor is OUR drop, not the
         # model's silence, and reporting zero here without the denominator would

@@ -55,7 +55,7 @@ FAMILIES = ("cut_refinements", "emphasis_moments", "text_overlays", "broll_clips
 
 
 @app.function(secrets=SECRETS, cpu=16.0, memory=49152, timeout=7200)
-def run(n_sources: int, run_tag: str) -> dict:
+def run(n_sources: int, run_tag: str, arms: str = "AB", repeats: int = 1) -> dict:
     global RUN_TAG
     RUN_TAG = run_tag
     import time
@@ -186,11 +186,52 @@ def run(n_sources: int, run_tag: str) -> dict:
                 cell["density"] = P.density_of(plan, float(src.get("duration_s") or 0))
             except Exception:
                 pass
+            # THE PRE-REGISTERED METRICS, SURFACED. flatten_beats computes these
+            # into _v2_counts and this harness read only `counts`/`density`/
+            # `ledger` — so they were built, certified, proven end to end, and
+            # invisible in the result. A $0.40 smoke found it; 26 cells would
+            # have cost $5.20 to reach the same blindness.
+            _vc = plan.get("v2_counts") or {}
+            for _k in ("beats_unresolvable", "purpose_distribution",
+                       "beat_durations_s", "unresolvable_detail"):
+                if _k in _vc:
+                    cell[_k] = _vc[_k]
+            # PURPOSE x EMPTY, paired per beat. "Which KIND of beat gets left
+            # bare" is the arcads claim under test: if `breath` beats are the
+            # empty ones, restraint is being chosen deliberately; if `payoff`
+            # beats are empty, the model is failing to place where it matters
+            # most. A total bare-count cannot tell those apart.
+            _pe = {}
+            for _b in beats:
+                if not isinstance(_b, dict):
+                    continue
+                _p = str(_b.get("purpose") or "(absent)")
+                _slot = _pe.setdefault(_p, {"total": 0, "empty": 0})
+                _slot["total"] += 1
+                if not P._beat_moves(_b):
+                    _slot["empty"] += 1
+            cell["purpose_x_empty"] = _pe
         return cell
 
     for src in sources:
-        for arm in ("A", "B"):
+        # SMOKE MODE (2026-08-24). ARMS=B runs arm B alone so the schema change
+        # can be proven for ~$0.20 before the remaining 25 cells are fired. v2's
+        # cells died three times on `string-runaway` before producing data;
+        # learning that at $0.20 instead of $5.20 is the entire point.
+        # ARMS CROSSES AS AN ARGUMENT, NOT AN ENV VAR. The first cut read
+        # os.environ inside the container, where the local `ARMS=B` was never
+        # set — so the filter silently did nothing and both arms ran ($0.40, not
+        # $0.20). Same class as the build-lane CORE_BUDGET trap: an env var set
+        # locally does not exist remotely.
+        for arm in tuple(arms.upper()):
+          # REPEATS: the same source, same arm, N times. Silence turned out to be
+          # NON-DETERMINISTIC — one source answered with 8 beats and then went
+          # silent 20 minutes later — so a single cell per source cannot tell a
+          # broken shape from a coin flip, which is exactly what the
+          # silent-source threshold was about to be scored on.
+          for _rep in range(max(1, repeats)):
             cell = _one(src, arm)
+            cell["rep"] = _rep          # so silence is attributable PER SOURCE
             OUT["cells"].append(cell)
             if cell.get("error"):
                 OUT["errors"].append({"source": cell["source"], "arm": arm,
@@ -230,7 +271,8 @@ def main():
     n = int(os.environ.get("N_SOURCES", "13") or "13")
     tag = os.environ.get("RUN_TAG") or "run"
     print(f"PROMPT V2 A/B — {n} sources x 2 arms, SERIAL, plan-only, ~${n * 2 * 0.20:.2f}")
-    out = run.remote(n, tag)
+    out = run.remote(n, tag, (os.environ.get("ARMS") or "AB").upper(),
+                     int(os.environ.get("REPEATS", "1") or "1"))
     path = "/tmp/prompt_v2_ab_result.json"
     with open(path, "w") as fh:
         json.dump(out, fh, indent=1)

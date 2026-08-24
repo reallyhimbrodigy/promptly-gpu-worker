@@ -272,3 +272,7 @@ returned DefaultCredentialsError on all four models INCLUDING a known-good
 control, and only the control stopped it shipping as "3.7 unavailable". Same
 shape here — without controls, 14/14 zeros read as "Deepgram is down", which is
 false.
+| 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3 SMOKE: 1 source, ARM B only) | 1 | plan-only | ~$0.20 est | ~$0.20 |
+| 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3 confirm: 1 cell, ARM B, metrics wired) | 1 | plan-only | ~$0.20 est | ~$0.60 |
+| 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3: HALTED — arm B silent on a source it answered 20min earlier) | 0 | — | $0.00 | ~$0.60 |
+| 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3 RELIABILITY: 2 sources x 5 reps, ARM B) | 10 | plan-only | ~$2.00 est | ~$2.60 |

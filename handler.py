@@ -14554,7 +14554,7 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                     # plan", it is the repair re-ask returning a corrected
                     # object — and it still owes the full contract.
                     ensure_contract=True)
-                print(f"[prompt-v2] flattened: {_parsed.get('_v2_counts')}", flush=True)
+                print(f"[prompt-v2] flattened: {_parsed.get('v2_counts')}", flush=True)
             # L1+L2: declared caps + repetition signatures enforced at THE
             # parse edge — every downstream consumer reads capped strings.
             _enforce_string_caps(_parsed, _post_cuts_response_schema(), "post_cuts")

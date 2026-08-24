@@ -21,7 +21,7 @@ WT = {i: i * 0.5 for i in range(40)}     # word i at 0.5s intervals
 
 
 def _counts(plan, **kw):
-    return S.flatten_beats(plan, **kw).get("_v2_counts", {})
+    return S.flatten_beats(plan, **kw).get("v2_counts", {})
 
 
 def main():
@@ -78,6 +78,16 @@ def main():
     check("purpose distribution is reported (reading 2: enum carries nothing)",
           c.get("purpose_distribution") == {"claim": 4},
           f"got {c.get('purpose_distribution')}")
+
+    # 7. THE KEY MUST NOT BE UNDERSCORE-PREFIXED. handler sanitises plans with
+    #    `k.startswith("_")` filters, so `_v2_counts` was STRIPPED IN TRANSIT —
+    #    computed, certified, proven end to end, and deleted before any reader
+    #    saw it. Two paid cells reported the metrics as ABSENT for that reason.
+    out = S.flatten_beats({"beats": [{"purpose": "hook", "word_index": 1, "place": []}]})
+    survivors = {k: v for k, v in out.items() if not k.startswith("_")}
+    check("the counts key survives an underscore strip",
+          survivors.get("v2_counts") is not None,
+          "the metrics are dropped in transit by handler's sanitiser")
 
     print()
     if fails:

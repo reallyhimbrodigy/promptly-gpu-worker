@@ -143,6 +143,37 @@ supports.
 
 ---
 
+## 4b. REPEAT COUNT — amended 2026-08-24, before the cross-arm run
+
+**Every source runs arm B N times, and silence is a RATE per source, not a bit.**
+
+WHY, MEASURED: the same source, same arm, same doctrine, same prompt-token count
+answered with **8 beats and 14 requested components**, then twenty minutes later
+returned **0 beats** — `safe_edit: false`, `status: plan_only`, one Gemini call,
+no error. The model simply emitted an object with no beats.
+
+**Silence is non-deterministic.** That breaks the primary threshold as written:
+"≤ 1 of 13 silent" scores one draw per source, so a stochastic 30% silence rate
+and a shape that is broken on 30% of sources produce the SAME number and point
+at opposite fixes. v2's headline "silent on 6 of 10" was one draw per source
+too — it may have been measuring variance, and nothing in that run could have
+distinguished the two.
+
+**The threshold is therefore restated on the repeated measure:**
+
+> A source counts as SILENT only if it returns no beats on **a majority of its N
+> runs**. Sources that are silent on some runs and not others are reported
+> separately as **FLAKY**, with the per-source rate, and a flaky population is a
+> RELIABILITY finding — not evidence about beat-major as a shape.
+
+N is fixed at **5 for the reliability probe** (2 sources, arm B, ~$2.00) and the
+cross-arm run's N is set from what that probe shows: if per-source silence is
+0/5 or 5/5, N=1 is defensible and the cross-arm run costs ~$5.20 as priced; if
+it is intermittent, N must rise and the cross-arm cost rises with it. **That
+number is not chosen after seeing the cross-arm result.**
+
+---
+
 ## 5. Sample size, honestly
 
 13 sources per arm. Enough to see a 1.5× effect and a silence rate; **not**
