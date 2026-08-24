@@ -14310,7 +14310,8 @@ def _v2_response_schema():
 
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
                            recipe_deadline_s=None, media_res_override=None,
-                           source_duration_s=None, n_words=None, v2=False, v2_frames=False):
+                           source_duration_s=None, n_words=None, v2=False, v2_frames=False,
+                           words=None):
     """Second Gemini call: visual placement on the kept-only transcript.
 
     Deep-thinking budget. thinking_budget=24576 (lowered from a 60000 cap).
@@ -14527,8 +14528,28 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             # model decline (the distinction the ledger exists to make).
             if v2:
                 import prompt_v2_schema as _pv2s
+                # THE CLOCK ARM B REASONS AGAINST. v3 beats carry t_start/t_end
+                # in SECONDS; without this map every one of them resolves as
+                # unresolvable and arm B reads as MUTE — for OUR reason, which is
+                # indistinguishable from v2's "silent on 6 of 10" result. Built
+                # from word_time_s, the timing authority, so the beat clock and
+                # the render clock are the same clock by construction.
+                _v3_word_times = None
+                if words:
+                    try:
+                        _v3_word_times = {
+                            _i: word_time_s(words, _i, "start")
+                            for _i in range(len(words))
+                            if isinstance(word_time_s(words, _i, "start"), (int, float))
+                        }
+                    except Exception as _wt_err:
+                        print(f"[prompt-v2] word_times build FAILED: "
+                              f"{type(_wt_err).__name__} — v3 beats will count as "
+                              f"unresolvable, which is the honest reading",
+                              flush=True)
                 _parsed = _pv2s.flatten_beats(
                     _parsed, ledger=(_ledger_requested, _ledger_dropped),
+                    word_times=_v3_word_times,
                     # In arm B a plan with no beats is not "someone else's
                     # plan", it is the repair re-ask returning a corrected
                     # object — and it still owes the full contract.
@@ -16251,7 +16272,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             try:
                 try:
                     post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on,
-                                                          v2_frames=_v2_frames_on)
+                                                          v2_frames=_v2_frames_on, words=deepgram_words)
                 except Exception as _ref_err:
                     if (_video_part_fallback is None
                             or type(_ref_err).__name__ != "ClientError"):
@@ -16275,7 +16296,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     _video_part = _video_part_fallback
                     _video_part_fallback = None
                     post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on,
-                                                          v2_frames=_v2_frames_on)
+                                                          v2_frames=_v2_frames_on, words=deepgram_words)
             except Exception as _tx_err:
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the
