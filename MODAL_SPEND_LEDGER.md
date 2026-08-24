@@ -14,7 +14,40 @@ summed across agents.** That gap is what this file closes.
 4. Harnesses count exactly like user jobs. A cert, a plan-only run, a single
    cheap read — all of it lands here.
 
+## VENDOR BOARD (added 2026-08-24) — the cap is per AGENT, not per vendor
+
+This file was forged from a $140/day spike whose cause was: **each agent priced
+its own runs and nobody summed ACROSS agents.** A second paid vendor reproduces
+that failure along a new axis — each vendor priced separately, nobody summing
+across vendors — and it would do so silently, because a per-vendor view of a
+$5 cap looks compliant at $5 each.
+
+**Rule 2 binds the AGENT'S TOTAL across every vendor below, not $5 per vendor.**
+
+| vendor | what it bills for | how it is metered | spend THIS session |
+|---|---|---|---|
+| **Modal** | container-seconds (render, harnesses, certs) | `cost_weekly.sh`, `modal app history` | see the ledger rows below |
+| **Anthropic API** | input/output TOKENS — images are input tokens | the response's own `usage` block, cache hit/miss stated | **$0.00** — every call this session returned 400 `credit balance is too low`; nothing was billed |
+| Google (Vertex / Gemini) | editorial + utility model tokens | `gemini_tokens` per job | not on this board; tracked per-job |
+| Apify | scrape actor runs | *(no token configured yet)* | $0.00 — blocked |
+
+**Anthropic is named here BEFORE it accumulates**, which is the only useful time.
+Its unit is not container-seconds and it will not appear in `cost_weekly.sh`, so
+it cannot be caught by the Modal instrument at all. Known unit costs, measured
+rather than quoted: **$0.19–$0.23 per reference video** at 512px/2fps
+(86–109 frames ≈ 55–70k input tokens, `build_reference_records.py` prints the
+estimate and the measurement side by side).
+
+**The caching asymmetry is a budgeting fact, not a footnote.** Anthropic spend
+here is dominated by PER-SOURCE FRAMES, which are unique and therefore
+uncacheable — only ~2k of ~57–72k tokens is a shared prefix, so a warm cache
+saves under 3%. Gemini's cost is the opposite shape: a ~60,540-token directive
+that caches almost entirely. **Do not budget one from the other.**
+
+---
+
 ## Format
+
 
 `| date | agent | app | runs | container-s | $ this run | $ session total |`
 
