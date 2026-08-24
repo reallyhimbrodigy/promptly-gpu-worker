@@ -21,11 +21,13 @@ const STYLE_DEFAULTS: Record<
   StampStyle,
   { fontKey: StampFontKey; fontSize: number; mark: StampMark; distress: boolean; size: number }
 > = {
-  // Presence bump (2026-08-20): a stamp reads as an authoritative mark, not a
-  // small sticker. Sizes raised for the same treatment as the rest of the pass.
-  seal: { fontKey: "oswald", fontSize: 64, mark: "star", distress: false, size: 470 },
-  stamp: { fontKey: "anton", fontSize: 84, mark: "none", distress: true, size: 540 },
-  ribbon: { fontKey: "anton", fontSize: 72, mark: "none", distress: false, size: 620 },
+  // §4 presence (2026-08-24): REF-2's mark commands the frame — the previous
+  // sizes read as a lone sticker floating mid-frame (render-proven). Sized so
+  // the default stamp spans ~70% of a 1080 frame the way the reference's
+  // number does.
+  seal: { fontKey: "oswald", fontSize: 64, mark: "star", distress: false, size: 620 },
+  stamp: { fontKey: "anton", fontSize: 84, mark: "none", distress: true, size: 760 },
+  ribbon: { fontKey: "anton", fontSize: 72, mark: "none", distress: false, size: 860 },
 };
 
 const FONT_FAMILY: Record<StampFontKey, string> = {
@@ -83,6 +85,11 @@ const renderMark = (
 };
 
 // Main word size in the rectangular-stamp viewBox (560 wide).
+// These are VIEWBOX-space sizes (the seal renders in a fixed 560-wide
+// viewBox): presence scaling comes from the `size` prop scaling the whole
+// SVG, NEVER from these — at 140 the word overflowed the frame and the
+// border rects struck through the glyphs ("SOLD" read as "$OLD",
+// render-proven 2026-08-24).
 const rectFontFit = (len: number): number =>
   len <= 6 ? 122 : len <= 8 ? 104 : len <= 10 ? 88 : len <= 12 ? 74 : 64;
 
@@ -172,7 +179,7 @@ export const Stamp: React.FC<StampProps> = (props) => {
 
   // --- Badge content ---
   const stampFont =
-    fontSizeProp ?? (text.length > 14 ? 58 : text.length > 11 ? 70 : d.fontSize);
+    fontSizeProp ?? (text.length > 14 ? 78 : text.length > 11 ? 94 : d.fontSize);
 
   let badge: React.ReactNode;
 
@@ -416,16 +423,39 @@ export const Stamp: React.FC<StampProps> = (props) => {
               opacity: groupOpacity,
             }}
           >
-            {/* Rotation group */}
+            {/* Rotation group. §4 second plane (2026-08-24): a stamp struck
+                once is a graphic; struck twice it's a physical act. The ghost
+                impression sits BEHIND at an offset + its own small rotation,
+                soft and inkier; the crisp strike occludes it. Both live inside
+                the press group so they land as one object. Shadow moved onto
+                the crisp strike only — the ghost is ink, not an object. */}
             <div
               style={{
                 position: "relative",
                 transform: `rotate(${finalRot}deg)`,
                 transformOrigin: "center",
-                filter: BADGE_SHADOW,
               }}
             >
-              {badge}
+              <div
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  // Scaled-up rather than laterally offset: a lateral offset
+                  // puts the ghost's frame BORDER through the crisp glyphs
+                  // (render-proven: "SOLD" read as "$OLD"). Scaling keeps the
+                  // ghost frame outside the crisp frame on every side.
+                  transform: "translate(7px, 12px) scale(1.05) rotate(2.2deg)",
+                  transformOrigin: "center",
+                  opacity: 0.14,
+                  filter: "blur(1.4px)",
+                }}
+              >
+                {badge}
+              </div>
+              <div style={{ position: "relative", filter: BADGE_SHADOW }}>
+                {badge}
+              </div>
             </div>
           </div>
         </MotionBlurWrap>
