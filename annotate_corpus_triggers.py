@@ -76,6 +76,53 @@ TRIGGERS = {
         (r"\b(and that'?s why|so that'?s|the point is|here'?s the thing|"
          r"which means|that'?s how)\b", "resolution phrase", True),
     ],
+    # broll_clips (CUTAWAYS). Added 2026-08-24: the corpus annotated brand_copy,
+    # scenes and payoff but had NO cutaway trigger, so no source could honestly
+    # be called "trigger-bearing" for the mixed cutaway arm. Picking one anyway
+    # risks the exact failure this file exists to prevent — an empty broll_clips
+    # that is a CORRECT decline, read as an arm that produced nothing.
+    #
+    # Mirrors the directive's own cutaway language (the coupling above is
+    # deliberate): "the concrete nouns named during build are the cutaway
+    # candidates", and a SINGLE NAMED REAL ENTITY — "a named place, landmark,
+    # city, real object, or real event the dialogue points at" — which the
+    # directive calls "often the single most valuable cutaway in the video".
+    #
+    # DELIBERATELY NOT A TRIGGER: the directive's mode (4) says an ABSTRACT word
+    # ("quality", "value", "powerful", "easy", "simple") HOLDS on the speaker.
+    # Matching those would manufacture a trigger where the correct behaviour is
+    # to stay on the face.
+    "broll": [
+        # A named real entity: a capitalised word that is NOT sentence-initial,
+        # so it is a name rather than a sentence start. CASE-SENSITIVE, and the
+        # reason is the scar on brand_copy above — matching this with re.I makes
+        # [A-Z] match lowercase, and EVERY hit becomes a false positive.
+        # MEASURED ON THE REAL CORPUS BEFORE TRUSTING IT (2026-08-24): the first
+        # cut of this pattern matched "in November", "in The" and "to App" —
+        # a month, an article and a truncation. Three of five candidates were
+        # false positives, which is the brand_copy scar repeating: a trigger
+        # that fires on a month sends the arm to a source with no cutaway
+        # candidate and then reads the correct decline as a failure.
+        # The stoplist is therefore part of the pattern, not a filter bolted on.
+        (r"(?<![.!?]\s)(?<!^)\b(?:in|to|from|at|visit|across|around)\s+"
+         r"(?!(?:The|A|An|I|My|Our|Your|His|Her|Their|It|This|That|These|Those|"
+         r"January|February|March|April|May|June|July|August|September|October|"
+         r"November|December|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|"
+         r"Sunday|God|English|Spanish|Hindi|Arabic)\b)"
+         r"[A-Z][a-z]{3,}", "named place the dialogue points at", False),
+        # Concrete physical objects — things a stock clip can literally show.
+        # Kept to nouns whose visual is unambiguous; an abstract noun would be a
+        # mode-(4) hold, not a cutaway.
+        (r"\b(coffee|kitchen|laptop|phone|camera|car|bike|dog|cat|garden|"
+         r"whiteboard|notebook|receipt|invoice|package|toolbox|workbench|"
+         r"guitar|piano|barbell|treadmill|passport|suitcase)\b",
+         "named concrete object", True),
+        # Physical ACTION the footage can show — the directive's "physical-action
+        # beat" ("real hands working with hand-tools").
+        (r"\b(building|cooking|running|driving|writing|typing|filming|"
+         r"lifting|painting|packing|shipping|hiking|climbing|welding|"
+         r"sanding|planting)\b", "physical action beat", True),
+    ],
 }
 
 
