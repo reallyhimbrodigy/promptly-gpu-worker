@@ -26,6 +26,14 @@ import sys
 import urllib.request
 
 MODEL = "claude-sonnet-5"
+
+# The two golden references, by sha256. Anything matching is INSIDE the
+# instrument that 3.5/s was calibrated on and cannot be independent evidence
+# about it.
+_GOLDEN_SHAS = {
+    "7392d2b42f281921",   # ref2-viral-creator-doc-vertical  43.2s / 8 cuts
+    "22ef7a120c76722c",   # ref1-legalsoft-corporate-landscape 52.6s / 21 cuts
+}
 FPS = 2                 # matches the live proxy arm (proxy_sample_fps=2)
 WIDTH = 512             # matches MEDIA_RESOLUTION_LOW's effective vertical width
 SCENE_THRESHOLD = 0.30  # ffmpeg scdet; the same value the render pipeline uses
@@ -169,7 +177,12 @@ def main():
 
     tx = open(a.transcript).read() if a.transcript and os.path.exists(a.transcript) else None
     body = json.dumps({
-        "model": MODEL, "max_tokens": 8000,
+        # 16000, not 8000. The two densest references (19 and 41 cuts) returned
+        # EXACTLY out=8000 — the cap, not a model failure — and truncated JSON
+        # is unparseable, so both were lost with the tokens already paid for.
+        # Beat count scales with cut count; the cap has to clear the densest
+        # reference, not the median one.
+        "model": MODEL, "max_tokens": 16000,
         "messages": [{"role": "user",
                       "content": build_request(frames, shots, tx, dur)}],
     }).encode()
@@ -205,9 +218,27 @@ def main():
         print("  no JSON in response — record NOT written")
         return 1
     rec = json.loads(m.group(0))
-    rec["_provenance"] = {"video": os.path.basename(a.video), "duration_s": dur,
-                          "analyzer_model": MODEL, "fps": FPS, "width": WIDTH,
-                          "mechanical_cuts": shots}
+    # PROVENANCE ON THE ROW. records-not-aggregates already makes one bad
+    # reference a single DELETABLE ROW rather than a contaminated mean — but only
+    # if the row names its source. Without this the deletion is untargetable and
+    # the whole guarantee is theatre.
+    import hashlib
+    _sha = hashlib.sha256(open(a.video, "rb").read()).hexdigest()
+    # IN_INSTRUMENT: two of the owner's ten are byte-identical to the goldens
+    # MOTION_DENSITY_TARGET_EVPS = 3.5 was calibrated on. Their density records
+    # CANNOT be evidence about that target — measuring a target against the
+    # videos that produced it is circular. Tagged so the query can exclude them.
+    rec["provenance"] = {
+        "source_file": os.path.basename(a.video),
+        "sha256": _sha,
+        "bytes": os.path.getsize(a.video),
+        "duration_s": dur,
+        "selected_by": "owner",
+        "in_instrument": _sha[:16] in _GOLDEN_SHAS,
+        "analyzer_model": MODEL, "fps": FPS, "width": WIDTH,
+        "mechanical_cuts": shots,
+        "cuts_per_s": round(len(shots) / dur, 3) if (shots and dur) else 0.0,
+    }
     json.dump(rec, open(a.out, "w"), indent=1)
     beats = rec.get("beats") or []
     bare = sum(1 for b in beats if not (b.get("treatment") or []))
@@ -215,6 +246,17 @@ def main():
           f" · first_visual_change_s={rec.get('first_visual_change_s')}")
     print(f"  hook       {str(rec.get('hook_structure'))[:100]}")
     print(f"  written    {a.out}")
+    # THE RECORD, FOR REVIEW. A good video can still produce a wrong reading, so
+    # what gets approved is this — not the file it came from.
+    print(f"\n  ── RECORD FOR REVIEW ── {rec['provenance']['source_file']}"
+          f"{'   [IN_INSTRUMENT]' if rec['provenance']['in_instrument'] else ''}")
+    print(f"  hook: {rec.get('hook_structure')}")
+    print(f"  first_visual_change_s: {rec.get('first_visual_change_s')}   "
+          f"cuts/s: {rec['provenance']['cuts_per_s']}")
+    for b in beats:
+        tr = b.get("treatment") or []
+        print(f"   {b.get('t_start'):>6}-{b.get('t_end'):<6} {str(b.get('purpose')):<9}"
+              f" {('[' + ','.join(tr) + ']') if tr else '[] BARE':<26} {str(b.get('read'))[:70]}")
     return 0
 
 
