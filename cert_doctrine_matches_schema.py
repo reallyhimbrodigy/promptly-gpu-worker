@@ -117,6 +117,38 @@ def main():
           f"only {n_routed} call site(s) pass v2 — arm B would be handed arm A's\n"
           f"         schema at request time however well the selector is written")
 
+    # ── THE GLOBALS, DECLARED NOT DEFAULTED ────────────────────────────────
+    # PostCutPlan requires 13 fields. Six of them (the component-major arrays)
+    # are CORRECTLY absent from BeatMajorPlan — flatten_beats produces those, and
+    # declaring them would defeat beat-major. The other seven are untimed globals
+    # that nothing derives, and every one was Optional-or-defaulted: the model was
+    # never obliged to emit them, emitted none, and strict validation killed the
+    # whole plan. `Invalid caption_style: ''`, 18 then 20 errors, a repair re-ask,
+    # 2 calls, 114,587 prompt tokens, no beats.
+    #
+    # The file's own docstring said "THE GLOBALS ARE NOT OPTIONAL" and cost four
+    # paid cells to learn it. A comment asserting a contract the schema does not
+    # enforce is not a contract — which is why this is an assertion now.
+    import prompt_v2_schema as _PV2
+    _pa = H.PostCutPlan.model_fields
+    _pb = _PV2.BeatMajorPlan.model_fields
+    _derived = {"broll_clips", "caption_keywords", "caption_position_changes",
+                "emphasis_moments", "motion_graphics", "text_overlays",
+                "cut_refinements", "generated_scenes"}
+    _req_a = {k for k, f in _pa.items() if f.is_required()}
+    _soft = sorted(k for k in (_req_a & set(_pb))
+                   if not _pb[k].is_required())
+    check("every global PostCutPlan REQUIRES is required in BeatMajorPlan too",
+          not _soft,
+          f"DEFAULTED: {_soft}\n"
+          f"         The model is not obliged to emit these, will not, and strict\n"
+          f"         PostCutPlan validation then rejects the entire plan after the\n"
+          f"         model has done all the work.")
+    _absent = sorted(k for k in (_req_a - set(_pb)) if k not in _derived)
+    check("no NON-DERIVED required field is missing from BeatMajorPlan",
+          not _absent,
+          f"ABSENT and not produced by flatten_beats: {_absent}")
+
     print()
     if fails:
         print(f"  CERT DOCTRINE-MATCHES-SCHEMA: FAIL ({len(fails)})")

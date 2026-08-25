@@ -316,16 +316,31 @@ class BeatMajorPlan(BaseModel):
     after the model has already done all the work. "Everything timed is a beat"
     was never a licence to drop the untimed contract.
     """
+    # DECLARED, NOT DEFAULTED (2026-08-24). The docstring above already said the
+    # globals are not optional — and every one of them was Optional or defaulted,
+    # so the model was never obliged to emit any of them. It emitted none, they
+    # arrived None, and strict PostCutPlan validation rejected the whole plan:
+    # `Invalid caption_style: ''`, 18 then 20 validation errors, a repair re-ask,
+    # 2 Gemini calls, 114,587 prompt tokens, and no beats survived.
+    #
+    # A comment asserting a contract the schema does not enforce is not a
+    # contract. This file records the identical defect one level down — with
+    # defaults, the only required field on a Beat was word_index and a measured
+    # cell returned 14 beats carrying exactly that and nothing else, because
+    # "the model answered exactly what it was obliged to answer".
+    #
+    # Prose loses to schema. Required means required.
     beats: List[Beat] = Field(default_factory=list)
-    caption_style: Optional[str] = Field(default=None, max_length=60)
-    aspect_ratio: Optional[str] = Field(default=None, max_length=16)
-    video_identity: Optional[str] = Field(default=None, max_length=300)
+    caption_style: str = Field(max_length=60)
+    aspect_ratio: str = Field(max_length=16)
+    video_identity: str = Field(max_length=300)
+    audio_denoise: bool
+    outro: Literal["none", "fade_black", "fade_white"]
+    thumbnail_word_index: int
+    video_plan: VideoPlan
+    # `notes` stays optional — it is the one field here the pipeline does not
+    # require, so making it required would cost output tokens for nothing.
     notes: Optional[str] = Field(default=None, max_length=600)
-    # Required by the plan contract — see the docstring above.
-    audio_denoise: bool = False
-    outro: Literal["none", "fade_black", "fade_white"] = "none"
-    thumbnail_word_index: int = 0
-    video_plan: Optional[VideoPlan] = None
 
 
 # The families a beat can emit, in flatten order. Named once so the transform,
