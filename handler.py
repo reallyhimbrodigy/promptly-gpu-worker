@@ -14107,7 +14107,20 @@ def _apply_payoff_open_swap(system_instruction):
     return system_instruction
 
 
-def _post_cuts_response_schema():
+def _post_cuts_response_schema(v2: bool = False):
+    """ARM B GETS ITS OWN SCHEMA. `BeatMajorPlan` existed — complete, commented,
+    and NEVER WIRED: this function always returned PostCutPlan's, so 141k chars
+    of beat-major doctrine ran against a component-major schema. Measured
+    2026-08-24: 89% silence across 9 runs, `purpose` emitted on zero beats.
+    Prose loses to schema, third instance. cert_doctrine_matches_schema asserts
+    every field the doctrine demands is present in the schema that constrains."""
+    if v2:
+        import prompt_v2_schema as _pv2s
+        return _pv2s.BeatMajorPlan.model_json_schema()
+    return _post_cuts_response_schema_arm_a()
+
+
+def _post_cuts_response_schema_arm_a():
     """PostCutPlan schema with the zoom claim-anyOf injected at
     $defs/_EmphasisMoment.properties.zoom_effect. Everything else stays
     pydantic-derived; the passthrough response_json_schema path ships anyOf
@@ -14413,7 +14426,7 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 # Vertex cache key, so the two arms cannot share a cache entry —
                 # which is correct here, they are different prompts.
                 response_json_schema=(_v2_response_schema() if v2
-                                      else _post_cuts_response_schema()),
+                                      else _post_cuts_response_schema(v2=v2)),
                 # 24576 thinking budget — lowered from 60000. 60K bought no
                 # quality (every good recipe this session ran at ≤24576) and
                 # drove the model to spiral past its output budget into an
@@ -14557,7 +14570,9 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 print(f"[prompt-v2] flattened: {_parsed.get('v2_counts')}", flush=True)
             # L1+L2: declared caps + repetition signatures enforced at THE
             # parse edge — every downstream consumer reads capped strings.
-            _enforce_string_caps(_parsed, _post_cuts_response_schema(), "post_cuts")
+            # v2=v2: caps must be read off the schema the model ACTUALLY ran
+            # against, or arm B's strings are capped by arm A's contract.
+            _enforce_string_caps(_parsed, _post_cuts_response_schema(v2=v2), "post_cuts")
             # Phase-4 OUTCOME-GATE (Cond-2 ratified). JSON-parseable is NOT the
             # same as schema-valid: a mid-plan degeneration can still close the
             # braces with a required field missing or a nested shape broken, and

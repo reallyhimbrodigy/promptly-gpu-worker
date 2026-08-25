@@ -232,6 +232,19 @@ class Beat(BaseModel):
     # than being the cheapest legal answer.
     says: str = Field(max_length=300)
     read: str = Field(max_length=400)
+    # V3: the beat's IDENTITY, required so it cannot be the field the model
+    # skips. `breath` is in the enum by name — 63% of standard-editorial jobs
+    # request zero motion graphics and an enum with no word for "this stretch's
+    # job is to let the last thing land" cannot record restraint as a decision.
+    purpose: Literal["hook", "claim", "evidence", "turn", "payoff",
+                     "close", "breath"]
+    # The model's own reading of the stretch, in seconds. NOT a clock: these are
+    # resolved to word indices by flatten_beats before anything is built, and an
+    # unresolvable beat is dropped, counted and reported. Optional because a beat
+    # that gives only word_index is still a valid beat — arm A's shape must keep
+    # working through the same transform.
+    t_start: Optional[float] = None
+    t_end: Optional[float] = None
     place: List[BeatPlacement] = Field(default_factory=list)
     # The other six treatments. All optional: most beats carry one or none, and
     # some deliberately carry nothing — stillness is a decision too.

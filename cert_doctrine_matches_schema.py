@@ -80,8 +80,11 @@ def main():
           "the doctrine itself is missing them — fix the doctrine, not the schema")
 
     # ── the schema actually permits these ───────────────────────────────────
+    # ARM B'S SCHEMA, not arm A's. The first cut of this cert read the no-arg
+    # call and was therefore asserting against the wrong schema entirely — its
+    # own wrong-key bug, in the cert written to catch wrong-schema bugs.
     try:
-        sch = H._post_cuts_response_schema()
+        sch = H._post_cuts_response_schema(v2=True)
     except Exception as e:
         check("the post-cuts response schema is buildable", False, str(e))
         return 1
@@ -102,6 +105,17 @@ def main():
     check("the schema has a `beats` container at all",
           "beats" in permitted or '"beats"' in blob,
           "arm B is emitting beat-major prose into a component-major schema")
+
+    # ROUTING. A cert that asks for v2=True would pass even if no call site ever
+    # passes it — the schema would exist and never be used, which is the
+    # built-not-wired class and has nine precedents here. Assert the call sites.
+    src = open(os.path.join(HERE, "handler.py"), encoding="utf-8").read()
+    src_nc = "\n".join(re.sub(r"#.*$", "", ln) for ln in src.splitlines())
+    n_routed = len(re.findall(r"_post_cuts_response_schema\(v2=v2\)", src_nc))
+    check("the call sites actually route the arm to the schema selector",
+          n_routed >= 2,
+          f"only {n_routed} call site(s) pass v2 — arm B would be handed arm A's\n"
+          f"         schema at request time however well the selector is written")
 
     print()
     if fails:

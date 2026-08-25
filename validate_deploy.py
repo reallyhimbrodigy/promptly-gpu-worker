@@ -6040,7 +6040,13 @@ def _outcome_gate_shadow():
     assert 'os.environ.get("PROMPTLY_OUTCOME_GATE", "shadow")' in _h, \
         "outcome-gate must be flag-gated, default 'shadow'"
     # strict validation against the REAL model, AFTER the cap salvage
-    _i_enforce = _h.find('_enforce_string_caps(_parsed, _post_cuts_response_schema(), "post_cuts")')
+    # ARGUMENT-AGNOSTIC PREFIX. The literal was the full call including "()",
+    # and arm B's schema selector made it `(v2=v2)` — so the find returned -1 and
+    # this check failed on a change that did not touch the ordering it asserts.
+    # Relaxed only after confirming the prefix is UNIQUE in handler.py (1 site),
+    # so it still pins the one call it means. The ORDERING assertion below is
+    # unchanged and is what this check is actually for.
+    _i_enforce = _h.find('_enforce_string_caps(_parsed, _post_cuts_response_schema(')
     _i_validate = _h.find("PostCutPlan.model_validate(_parsed)")
     assert _i_enforce != -1 and _i_validate != -1 and _i_validate > _i_enforce, \
         "PostCutPlan.model_validate must run AFTER the _enforce_string_caps salvage"
