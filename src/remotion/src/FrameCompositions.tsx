@@ -218,22 +218,47 @@ export const EmojiCard: React.FC<{ spec: FrameCompSpec }> = ({ spec }) => {
       <MotionBlurWrap>
         <div style={{ ...groupStyle(e, "50% 50%"), display: "flex",
                       flexDirection: "column", alignItems: "center" }}>
+          {/* §4 pass (2026-08-25, craft lane): two planes, not a stack. The
+              emoji is the OBJECT; the words are FOREGROUND TYPE that OVERLAPS
+              and occludes its lower third — REF-2's grammar (type over object,
+              heavy shadow separation). Was: a small centred caption UNDER the
+              emoji at 0.62×cap — centred non-overlapping boxes, the named §4
+              defect. Words stack as a slab (line 2 in the accent, slightly
+              larger, tucked up under line 1), opposing tilts via the individual
+              `rotate` property (REMOTION_CONVENTIONS forward law). Occlusion is
+              of the GRAPHIC only — user words are never covered. */}
           <div style={{
             fontSize: spec.emoji_px ?? spec.cap_px * 3.2,
-            transform: `rotate(${spec.tilt_deg}deg)`,
+            rotate: `${spec.tilt_deg}deg`,
             filter: `drop-shadow(0 ${spec.legibility.shadow_offset_px * 6}px `
               + `${spec.legibility.shadow_blur_px * 5}px rgba(0,0,0,0.45))`,
             lineHeight: 1,
           }}>{spec.emoji}</div>
           {(spec.words || []).length ? (
             <div style={{
-              marginTop: spec.cap_px * 0.3, display: "flex", gap: spec.cap_px * 0.22,
+              marginTop: -(spec.emoji_px ?? spec.cap_px * 3.2) * 0.28,
+              display: "flex", flexDirection: "column", alignItems: "center",
+              position: "relative", zIndex: 2,
             }}>
               {(spec.words || []).map((w, i) => (
                 <span key={i} style={{
-                  fontSize: spec.cap_px * 0.62, fontWeight: 900,
+                  // Render-caught (2026-08-25): no fontFamily = browser SERIF —
+                  // the words rendered Times-like since birth. Inter 900 is the
+                  // catalogue's claim voice.
+                  fontFamily: "Inter, sans-serif",
+                  fontSize: spec.cap_px * (i === 0 ? 1.0 : 1.15),
+                  fontWeight: 900,
                   color: i === 0 ? spec.fg : spec.accent,
-                  letterSpacing: "0.02em", textTransform: "uppercase", ...legible(spec),
+                  letterSpacing: "0.01em", textTransform: "uppercase",
+                  lineHeight: 0.92,
+                  rotate: `${(i % 2 === 0 ? -1 : 1) * 2.2}deg`,
+                  marginTop: i > 0 ? -spec.cap_px * 0.08 : 0,
+                  // Type-over-OBJECT needs more separation than type-over-bg:
+                  // the spec's legibility numbers are calibrated for the card
+                  // ground, so the overlapping slab doubles them (§2.4 scaled,
+                  // the StatCard contrast-floor precedent).
+                  textShadow: `0 ${spec.legibility.shadow_offset_px * 2}px ${spec.legibility.shadow_blur_px * 2}px `
+                    + `rgba(0,0,0,${Math.min(0.65, spec.legibility.shadow_opacity * 1.8)})`,
                 }}>{w}</span>
               ))}
             </div>
