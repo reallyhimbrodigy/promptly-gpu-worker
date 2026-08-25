@@ -276,3 +276,9 @@ false.
 | 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3 confirm: 1 cell, ARM B, metrics wired) | 1 | plan-only | ~$0.20 est | ~$0.60 |
 | 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3: HALTED — arm B silent on a source it answered 20min earlier) | 0 | — | $0.00 | ~$0.60 |
 | 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3 RELIABILITY: 2 sources x 5 reps, ARM B) | 10 | plan-only | ~$2.00 est | ~$2.60 |
+| 2026-08-24 | BUILDER | **Anthropic API** (corpus Pass B: 10 owner refs @ 512px/2fps) | 10 | tokens | ~$2.10 est | ~$4.70 |
+| 2026-08-24 | BUILDER | **Anthropic API** (corpus Pass B retry: 2 densest refs, cap 8k->16k) | 2 | tokens | ~$0.50 est | ~$5.31 | **OVER $5 CAP — owner said go explicitly** |
+| 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3 single cell, ARM B, schema WIRED) | 1 | plan-only | ~$0.20 est | ~$5.01 | **crosses $5.00 — owner named the ledger in the same instruction** |
+| 2026-08-24 | BUILDER | **CAP RAISED TO $12.00 by owner** — prior cap $5.00, session was $5.01 | — | — | — | ~$5.01 |
+| 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3 cell: schema wired + globals declared) | 1 | plan-only | ~$0.20 est | ~$5.21 |
+| 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3 cell: budgets + truncation verified) | 1 | plan-only | ~$0.20 est | ~$5.41 of $12.00 |

@@ -149,6 +149,20 @@ def main():
           not _absent,
           f"ABSENT and not produced by flatten_beats: {_absent}")
 
+    # ── DECLARED IS NOT ENOUGH: THE V3 BEAT FIELDS MUST BE REQUIRED ────────
+    # A field the doctrine demands and the schema merely PERMITS is a field the
+    # model skips. Measured three times in this one file: word_index-only beats
+    # (14 of them, nothing else), the seven defaulted globals, and t_start/t_end
+    # returning beat_durations_s == [] on a cell that otherwise cleared. Being
+    # in the schema is necessary and not sufficient.
+    _bf = _PV2.Beat.model_fields
+    _soft_beat = sorted(k for k in ("purpose", "t_start", "t_end", "read", "says")
+                        if k in _bf and not _bf[k].is_required())
+    check("the v3 beat fields are REQUIRED, not merely declared",
+          not _soft_beat,
+          f"OPTIONAL: {_soft_beat}\n"
+          f"         The model answers exactly what it is obliged to answer.")
+
     print()
     if fails:
         print(f"  CERT DOCTRINE-MATCHES-SCHEMA: FAIL ({len(fails)})")

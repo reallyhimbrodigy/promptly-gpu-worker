@@ -243,8 +243,16 @@ class Beat(BaseModel):
     # unresolvable beat is dropped, counted and reported. Optional because a beat
     # that gives only word_index is still a valid beat — arm A's shape must keep
     # working through the same transform.
-    t_start: Optional[float] = None
-    t_end: Optional[float] = None
+    # REQUIRED. They were Optional and the model emitted neither — beat_durations_s
+    # came back [] on a cell that otherwise cleared: `purpose` populated across 5
+    # values, beats_unresolvable 0, 14 components requested. Third time in this
+    # file that an optional v3 field was simply skipped, and the justification I
+    # gave was WRONG: "arm A's shape must keep flowing through the same
+    # transform" — arm A is constrained by PostCutPlan and never reaches
+    # flatten_beats (`if v2:` guards it). BeatMajorPlan is arm B only. There was
+    # no compatibility to preserve; I invented a constraint and then honoured it.
+    t_start: float
+    t_end: float
     place: List[BeatPlacement] = Field(default_factory=list)
     # The other six treatments. All optional: most beats carry one or none, and
     # some deliberately carry nothing — stillness is a decision too.
