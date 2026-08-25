@@ -243,7 +243,7 @@ from the story, and a detail that would surprise someone hearing it described.
 A genre-shaped phrasing ("a personal story about…") describes a thousand videos;
 this field describes one.
 
-`caption_style` — one style name from the catalog above, or null.
+`caption_style` — one style name from the catalog above. REQUIRED.
 
 `aspect_ratio` — one of "9:16", "16:9", "1:1", "4:5".
 
@@ -264,6 +264,23 @@ feels), `arc_segments` (start/end word, position, intensity) and `movements`
 (start/end word, the job of the section, its energy, its lead instrument, how
 captions behave). Write the arc FIRST and let the beats answer to it — a beat
 list with no arc behind it is a sequence of reflexes.
+
+EXPLICIT BUDGETS, because an unstated cap is not a cap. These are the real
+declared limits and the model is told them rather than left to infer:
+
+  `what_happens`      <= 600 characters   (~3-4 sentences)
+  `editorial_vision`  <= 600 characters   (~3-4 sentences)
+  `story_shape`       <= 200 characters   (one sentence)
+  `video_identity`    <= 300 characters   (2-3 sentences, then STOP)
+  `notes`             <= 600 characters   (at most three sentences)
+
+Compose TO the budget. A schema maxLength is ADVISORY — it is not enforced at
+token generation, measured — so it cannot stop a runaway; only knowing the
+number can. Four consecutive arm-B cells died to this exact field family.
+
+`caption_style` is REQUIRED and must be one of the catalog names above. It is
+not nullable: a plan without it is rejected wholesale after you have done all
+the work.
 
 LENGTH DISCIPLINE HERE IS NOT COSMETIC, and this is the one place it has bitten.
 The response is ABORTED on a repetition run, and a string that keeps appending
