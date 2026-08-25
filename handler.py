@@ -17427,7 +17427,10 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     vad_silences=list(_VAD_SILENCES_LAST),
                     max_compress=_PACING_MAX_COMPRESS,
                     within_clip_15ms=_WITHIN_CLIP_DEADAIR,
-                    level_silences=list(_LEVEL_SILENCES_LAST))
+                    level_silences=list(_LEVEL_SILENCES_LAST),
+                    # onset snapping needs the audio; without a path it
+                    # cannot read onsets and correctly does nothing.
+                    source_path=video_path)
                 edit_plan["_removed_word_indices"] = sorted(_removed_word_indices or [])
                 # ADDITION #1 (Zac 2026-07-28): persist the per-word cut REASON map
                 # {word_index: reason} alongside _removed_word_indices so deletions
@@ -26515,7 +26518,8 @@ def get_output_clip_ranges(cuts, effective_durations, transition_duration=None, 
 
 def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                            vad_silences=None, max_compress=False,
-                           within_clip_15ms=False, level_silences=None):
+                           within_clip_15ms=False, level_silences=None,
+                           source_path=None):
     """Apply Gemini's remove_words decisions and split kept words into clips.
 
     Gemini owns every cut decision; Python is a verbatim executor.
@@ -27303,6 +27307,50 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
     # + Gemini produced. Only guard: skip degenerate (zero-or-inverted)
     # spans, which can only arise from FP edge cases against video_duration
     # clamping above.
+    # ── ONSET SNAPPING (2026-08-25, PROMPTLY_ONSET_SNAP) ──────────────────
+    # THE ONE PLACE cut times become numbers. Measured on ten owner-selected
+    # references: professional cuts land within 120ms of an audio onset at a
+    # median 68% (range 40-90%), median delta 72ms. Ours land on Deepgram word
+    # boundaries — the comment above says so — which is where the WORDS end, not
+    # where the MUSIC turns.
+    #
+    # snap_cuts moves a boundary onto a nearby onset ONLY when that onset sits
+    # in the silence BETWEEN words. An onset mid-word is a real hit and a
+    # catastrophic cut point: it clips a syllable and produces a time no word
+    # index can express, which is the second clock this repo has paid for twice.
+    # Refusals are counted by reason so a zero is attributable.
+    #
+    # DARK by default. [BUILT-NOT-WIRED] until a production counter shows
+    # moved_frac > 0 on real traffic — a ledger entry is not reach.
+    _snap_ledger = None
+    if os.environ.get("PROMPTLY_ONSET_SNAP", "").strip().lower() in ("1", "true", "yes", "on"):
+        try:
+            import onset_snap as _osnap
+            _onsets = _osnap.onsets_from_audio(source_path) if source_path else None
+            if _onsets:
+                _bounds = [float(rc["padded_start"]) for rc in raw_clips] + \
+                          [float(raw_clips[-1]["padded_end"])] if raw_clips else []
+                _res = _osnap.snap_cuts(_bounds, _onsets, deepgram_words or [])
+                _snapped = _res["cuts"]
+                for _i, rc in enumerate(raw_clips):
+                    rc["padded_start"] = _snapped[_i]
+                    rc["padded_end"] = _snapped[_i + 1] if _i + 1 < len(_snapped) else rc["padded_end"]
+                _snap_ledger = _res["ledger"]
+                print(f"[onset-snap] {_snap_ledger['moved']}/{_snap_ledger['n_cuts']} "
+                      f"boundaries moved (median {_snap_ledger.get('median_delta_ms')}ms), "
+                      f"refused in-word {_snap_ledger['skipped_in_word']}, "
+                      f"beyond-tol {_snap_ledger['skipped_beyond_tol']}", flush=True)
+                _record_divergence("cut_boundary", _snap_ledger, "onset_snap",
+                                   reason=f"moved {_snap_ledger['moved']}/{_snap_ledger['n_cuts']}")
+            else:
+                # None vs [] matters: a failed probe is not a silent track.
+                print(f"[onset-snap] no onsets "
+                      f"({'probe FAILED' if _onsets is None else 'silent track'}) — no cuts moved",
+                      flush=True)
+        except Exception as _se:
+            print(f"[onset-snap] FAILED (non-fatal, cuts unchanged): "
+                  f"{type(_se).__name__}: {_se}", flush=True)
+
     final_clips = []
     for rc in raw_clips:
         s = float(rc["padded_start"])

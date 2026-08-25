@@ -284,3 +284,5 @@ false.
 | 2026-08-24 | BUILDER | **cert-prompt-v2-ab** (v3 cell: budgets + truncation verified) | 1 | plan-only | ~$0.20 est | ~$5.41 of $12.00 |
 | 2026-08-25 | BUILDER | **cert-prompt-v2-ab** (v3 confirm: all three readings) | 1 | plan-only | ~$0.20 est | ~$5.61 of $12.00 |
 | 2026-08-25 | BUILDER | **cert-prompt-v2-ab** (V3 CROSS-ARM: 13 sources x 2 arms, SERIAL) | 26 | plan-only | ~$5.20 est | ~$10.81 of $12.00 |
+| 2026-08-25 | BUILDER | **cert-prompt-v2-ab** (v3 tail: sources 9-12, ARM B, via run_modal.sh) | 4 | plan-only | ~$0.80 est | ~$10.30 of $12.00 |
+| 2026-08-25 | BUILDER | **cert-prompt-v2-ab** (v3 tail: sources 9-12, ARM A — completes the pairing) | 4 | plan-only | ~$0.80 est | ~$11.10 of $12.00 |

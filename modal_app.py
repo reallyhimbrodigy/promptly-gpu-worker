@@ -640,6 +640,11 @@ image = (
     .add_local_file("duration_target.py", "/duration_target.py")
     .add_local_file("prompt_v2_editor.py", "/prompt_v2_editor.py")
     .add_local_file("prompt_v2_schema.py", "/prompt_v2_schema.py")
+    # ONSET SNAPPING. Deferred repo-local imports MUST be baked in or they
+    # die SILENTLY inside their fail-safes — the gate caught exactly that
+    # here. onset_snap imports pass_a_signal, so both travel.
+    .add_local_file("onset_snap.py", "/onset_snap.py")
+    .add_local_file("pass_a_signal.py", "/pass_a_signal.py")
     .add_local_file("prompt_v2_exemplars.py", "/prompt_v2_exemplars.py")
     # FRAMES_PLAN stills. Verified received by the model before wiring
     # (probe_frames_received_app: 7/7 described, 7 full-frame graphics, 0

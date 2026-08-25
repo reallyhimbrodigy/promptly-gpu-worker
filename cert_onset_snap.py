@@ -85,6 +85,34 @@ def main():
           not S.in_word(2.50, spans) and not S.in_word(2.85, spans))
     check("a time strictly inside IS inside", S.in_word(2.60, spans))
 
+    # ── 7. THE CALL SITE EXISTS AND IS REACHABLE ───────────────────────────
+    # BUILT-NOT-WIRED has ten precedents here and this was the eleventh
+    # candidate. A transform with a green cert and no caller is a feature that
+    # cannot fire — and my first wiring attempt had TWO defects that my own
+    # non-fatal try/except would have swallowed: `video_path` was not in scope
+    # inside build_clips_from_words, and _record_divergence was called with four
+    # positionals against a signature whose `final` is keyword-only. Both raise;
+    # both were caught; the lever would have looked wired and never moved a cut.
+    import os as _os
+    import re as _re
+    _h = open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                            "handler.py"), encoding="utf-8").read()
+    _nc = "\n".join(_re.sub(r"#.*$", "", ln) for ln in _h.splitlines())
+    check("handler imports onset_snap at the clip builder",
+          "import onset_snap" in _nc, "no caller — the transform cannot fire")
+    check("snap_cuts is actually invoked", "_osnap.snap_cuts(" in _nc)
+    check("the snapped boundaries are WRITTEN BACK to the clips",
+          'rc["padded_start"] = _snapped' in _nc,
+          "snapping computes a result and discards it")
+    check("the source path reaches the clip builder",
+          "source_path=video_path" in _nc and "source_path=None" in _nc,
+          "without audio there are no onsets and the lever silently no-ops")
+    check("the ledger is recorded as a divergence, with the right signature",
+          '_record_divergence("cut_boundary", _snap_ledger, "onset_snap"' in _nc,
+          "component/original/action order, `final` keyword-only")
+    check("DARK by default behind PROMPTLY_ONSET_SNAP",
+          'PROMPTLY_ONSET_SNAP' in _nc)
+
     print()
     if fails:
         print(f"  CERT ONSET-SNAP: FAIL ({len(fails)})")

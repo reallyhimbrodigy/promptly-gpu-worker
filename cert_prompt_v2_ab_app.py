@@ -55,7 +55,8 @@ FAMILIES = ("cut_refinements", "emphasis_moments", "text_overlays", "broll_clips
 
 
 @app.function(secrets=SECRETS, cpu=16.0, memory=49152, timeout=7200)
-def run(n_sources: int, run_tag: str, arms: str = "AB", repeats: int = 1) -> dict:
+def run(n_sources: int, run_tag: str, arms: str = "AB", repeats: int = 1,
+        offset: int = 0) -> dict:
     global RUN_TAG
     RUN_TAG = run_tag
     import time
@@ -76,7 +77,11 @@ def run(n_sources: int, run_tag: str, arms: str = "AB", repeats: int = 1) -> dic
     import handler as H
 
     manifest = json.load(open("/component_corpus_manifest.json"))
-    sources = [s for s in manifest["sources"] if s.get("video_url")][:max(1, n_sources)]
+    # OFFSET crosses as an ARGUMENT, like arms and repeats — an env var read
+    # inside the container does not exist there. Resuming a run that died
+    # part-way needs the tail, not the head.
+    _all = [s for s in manifest["sources"] if s.get("video_url")]
+    sources = _all[max(0, offset):max(0, offset) + max(1, n_sources)]
     OUT = {"built": manifest.get("built"), "cells": [], "errors": []}
 
     def _plan_counts(plan):
@@ -272,7 +277,8 @@ def main():
     tag = os.environ.get("RUN_TAG") or "run"
     print(f"PROMPT V2 A/B — {n} sources x 2 arms, SERIAL, plan-only, ~${n * 2 * 0.20:.2f}")
     out = run.remote(n, tag, (os.environ.get("ARMS") or "AB").upper(),
-                     int(os.environ.get("REPEATS", "1") or "1"))
+                     int(os.environ.get("REPEATS", "1") or "1"),
+                     int(os.environ.get("SOURCE_OFFSET", "0") or "0"))
     path = "/tmp/prompt_v2_ab_result.json"
     with open(path, "w") as fh:
         json.dump(out, fh, indent=1)
