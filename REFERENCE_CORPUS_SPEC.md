@@ -294,3 +294,69 @@ is versioned, can be exercised in isolation, and is queried only when it applies
   never refuses is not evidence; it is decoration.
 - The analyzer's `read` lines get concatenated into the directive. That is
   `trend_profiles` again, wearing a new schema.
+
+---
+
+## 8. ARCHITECTURE SCOPE (ruled 2026-08-24) — short-form, measured
+
+### 8.1 Selection is a TOP-QUARTILE lever. Median jobs have nothing to select.
+
+Measured on the last 999 completed jobs:
+
+```
+p50     19.1s        p90     75.3s
+p75     41.8s        p95    113.5s
+p99    174.7s        max    179.9s  (3.0 min)
+```
+
+**You cannot cut a 30s clip out of a 19s source.** At p50 there is no selection
+decision to make — the whole source IS the output, and §3.2's pair teaches
+nothing a median job can use. Selection has headroom only where source
+substantially exceeds output, which begins around p75 and is real by p90.
+
+So §3.2 ships as specced and is **flagged top-quartile**: valuable, and not the
+thing that moves the median job. Recorded here because a corpus lever measured
+on the sources that CAN use it will look far stronger than its effect on the
+product, and that gap is exactly how a good feature gets over-ranked.
+
+### 8.2 Skills compile to TWO ARTIFACTS. There is no agent host in the render path.
+
+```
+doctrine   -> the prompt          small, cacheable, one blob
+resources  -> Supabase records    retrieved per-job, K-gated
+```
+
+**The render path makes ONE model call.** Not a loop, not a tool-using agent, not
+a retrieval agent that decides how many times to look. One call.
+
+This is a latency and cost constraint before it is an architectural taste: the
+laws are 90s end-to-end and $0.10/job, the editorial leg alone is already 22-30s
+measured, and a second call is a second leg. An agent host in the render path
+would put an unbounded number of them there.
+
+The split is what makes it work: the DOCTRINE stays small and cacheable (Gemini's
+~60,540-token prompt caches almost entirely — prompt-cutting was measured to buy
+nothing, which is the same fact from the other side), while the RESOURCES are
+retrieved per-job and only when they apply. Retrieval happens BEFORE the call and
+its result is part of the one prompt. K-gating is what stops it becoming
+recitation: below K matches the skill returns nothing rather than something thin.
+
+### 8.3 Ingestion caps at 5 minutes — and that costs nothing today
+
+```
+> 5 min :  0 / 999 = 0.0%      max observed 179.9s
+```
+
+**Not one job in the last 999 exceeds five minutes**, so the cap codifies what is
+already true rather than removing a capability. It is worth writing down anyway:
+it bounds the corpus's `source_transcript` size, bounds Pass B's frame count
+(5 min at 2fps = 600 frames, the practical ceiling for a single Claude call), and
+makes "long-form" an explicit LATER PRODUCT rather than a thing that arrives by
+accident when someone uploads a podcast.
+
+**The honest caveat:** 0/999 may be the cap teaching the users rather than the
+users teaching us — the observed max of 179.9s sits suspiciously flat against a
+180s boundary. If an upload limit is already refusing longer sources, this
+distribution is censored and "nobody wants long-form" is not what it shows. That
+is a question for the upload path, not for this spec, and it is filed rather than
+assumed.
