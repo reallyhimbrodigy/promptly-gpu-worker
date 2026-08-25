@@ -113,6 +113,10 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
             flexDirection: "row",
             alignItems: "stretch",
             gap: 38,
+            // §4 (2026-08-25): a barely-there editorial tilt on the whole
+            // block — the quote keeps its dignity; the depth comes from the
+            // giant behind-plane mark below. Individual rotate property.
+            rotate: "-1.2deg",
           }}
         >
           {/* Left accent bar */}
@@ -134,21 +138,38 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
               display: "flex",
               flexDirection: "column",
               alignItems: "flex-start",
+              position: "relative",
             }}
           >
             {showQuoteMark ? (
+              // §4 (2026-08-25): the mark was a small glyph ABOVE the text —
+              // its own row in a flat stack. Now it is the BEHIND plane: a
+              // giant accent impression the quote lines overlap and occlude
+              // (the classic editorial device). Text carries zIndex 1+ below;
+              // the mark never touches legibility — it sits under the ink.
               <div
+                aria-hidden
                 style={{
+                  position: "absolute",
+                  // The “ glyph's ink sits in the TOP ~third of its em box —
+                  // at -0.52em the impression never reached the text
+                  // (render-caught). Near-zero top puts the ink BEHIND
+                  // lines 1-2, which is the whole point of the plane.
+                  // A quote glyph's ink is ~28% of its em (punctuation hangs
+                  // at cap height) — at 3.4x it rendered a 100px whisper, not
+                  // an impression (render-caught twice: first too high, then
+                  // too small). 7x em ≈ two text lines of actual ink.
+                  top: -finalFontSize * 0.30,
+                  left: -finalFontSize * 0.15,
                   fontFamily: MG_FONTS[fontKey],
-                  fontSize: finalFontSize * 1.5,
+                  fontSize: finalFontSize * 7,
                   lineHeight: 0.66,
                   fontStyle: italic ? "italic" : "normal",
                   color: accentColor,
-                  marginBottom: -finalFontSize * 0.34,
-                  opacity: quoteOpacity * (1 - quoteExit),
+                  opacity: quoteOpacity * (1 - quoteExit) * 0.45,
                   transform: `translateY(${(-finalFontSize * 0.3 * quoteExit).toFixed(2)}px) scale(${(quoteScale * (1 - 0.35 * quoteExit)).toFixed(3)})`,
                   transformOrigin: "left top",
-                  textShadow: "0 2px 16px rgba(0,0,0,0.4)",
+                  zIndex: 0,
                 }}
               >
                 {"“"}
@@ -197,6 +218,8 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
                     lineHeight: 1.16,
                     letterSpacing: "-0.01em",
                     whiteSpace: "nowrap",
+                    position: "relative",
+                    zIndex: 1,
                     opacity: op,
                     transform: `translateX(${tx.toFixed(2)}px)`,
                     clipPath: reveal,
@@ -212,7 +235,9 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
             {author ? (
               <div
                 style={{
-                  marginTop: 28,
+                  marginTop: 14,
+                  position: "relative",
+                  zIndex: 1,
                   display: "flex",
                   flexDirection: "column",
                   opacity: authorOpacity * (1 - authorExitV),
