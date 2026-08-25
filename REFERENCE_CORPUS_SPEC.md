@@ -170,6 +170,66 @@ without it.
 
 ---
 
+## 3.2 THE SOURCE-MATCHED PAIR — selection is the second thing the corpus teaches
+
+A performing clip was **cut out of something longer**. The clip alone teaches how
+a moment was TREATED. The pair — clip plus the long-form it came from, aligned by
+timestamp — teaches **which moment was CHOSEN**, and out of how much.
+
+That is a different skill and, for us, arguably the larger one. Everything in
+§3.1 is craft applied to a span someone already picked. Selection is the decision
+that happens before any of it, and nothing in our pipeline or our corpus
+currently records a single instance of it.
+
+**What a pair is:**
+
+```
+reference_pairs
+  clip_id            FK -> reference_videos
+  source_url         the long-form original
+  source_duration_s  what it was cut FROM   <- the denominator
+  match_t_start      where the clip begins in the SOURCE
+  match_t_end        where it ends
+  match_method       transcript_align | manual | UNMATCHED
+  match_confidence   float; alignment score, not a vibe
+  source_transcript  the long-form transcript, full
+  selection_ratio    (match_t_end - match_t_start) / source_duration_s
+```
+
+**THE MATCH IS MECHANICAL.** Align the clip's transcript against the long-form
+transcript and take the best contiguous window. Do NOT ask a model "where did
+this come from" — a model asked to locate a span will locate one, and a
+confident wrong offset is worse than `UNMATCHED` because every downstream
+selection fact inherits it. `UNMATCHED` is a first-class value and a pair that
+cannot be aligned is stored unmatched rather than guessed. Same rule as ffmpeg
+owning the cuts.
+
+**What the pair makes askable**, none of which the clip alone can answer:
+
+- **Where in the source does a performing clip come from?** If high-multiple
+  clips cluster near the start, the answer is "openings travel"; if they cluster
+  mid-source, the answer is "the good bit is buried and finding it is the value".
+- **What was passed over?** The long-form transcript is a record of every span
+  that was NOT chosen. A corpus of chosen-vs-rejected spans on the same source is
+  the only honest training signal for selection, and it is free once the pair
+  exists.
+- **`selection_ratio`.** 30s cut from 8 minutes is a 6% selection; 30s from 45s
+  is trimming. Those are different products and we currently treat them the same.
+
+**Why this belongs in THIS spec and not a later one.** The scrape must capture
+the source URL **at scrape time**. Recovering "what was this clip cut from"
+afterwards is often impossible — the pairing metadata lives on the post and is
+gone once the clip is downloaded in isolation. A corpus built without it cannot
+be upgraded into one that has it; it has to be re-scraped.
+
+**And it is the honest content of "content intelligence."** A system that edits
+the span it is handed is an editor. A system that can say *"the moment worth
+publishing is at 4:12, and here is why the 400 seconds around it are not"* is
+doing something the user cannot easily do themselves. The corpus is where that
+distinction gets evidence or gets dropped.
+
+---
+
 ## 4. Storage — two tables, because one would force an aggregate
 
 ```
