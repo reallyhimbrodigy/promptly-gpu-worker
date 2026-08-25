@@ -1,0 +1,418 @@
+{
+ "hook_structure": "reenacted-DM/comment cold-open ('THIS...') interrupted by a hard whip-pan/glitch transition into a stylised promise-card sequence ('WHEN I GOT MADE to your video WITHOUT doing it MANUALLY'), baiting curiosity about a claimed AI shortcut before naming the tool",
+ "first_visual_change_s": 1.133,
+ "beats": [
+  {
+   "beat_index": 1,
+   "t_start": 0.0,
+   "t_end": 1.133,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "THIS / YOUR GONNA",
+   "read": "Talking-head cold open with punchy yellow/white caption words builds a direct-address curiosity hook before any cut occurs."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 1.133,
+   "t_end": 2.233,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text",
+    "sfx"
+   ],
+   "cutaway_subject": "blurred whip-pan reenactment of speaker holding a phone/mic wearing a pink shirt, simulating a 'reply to your video' stitch moment",
+   "card_text": "WAS A / WHEN I GOT MADE to your video",
+   "read": "A jarring glitch/whip-pan cut breaks the calm intro to simulate a reaction-video format, escalating curiosity about what 'this video' refers to."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 2.233,
+   "t_end": 4.2,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "without doing it / manually.",
+   "read": "Returns to grounded talking-head with rapid micro-cuts and highlighted keyword captions to state the core promise before revealing the tool name."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 4.2,
+   "t_end": 5.8,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text",
+    "sfx"
+   ],
+   "cutaway_subject": null,
+   "card_text": "We're going to use CapCut",
+   "read": "A warm light-leak flash and color-graded punch mark the naming of the tool as a mini reveal beat, reinforced by yellow caption emphasis on 'CapCut'."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 5.8,
+   "t_end": 7.933,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "FULL SUITE OF AI TOOLS",
+   "read": "Cuts to a full-screen bold sans-serif title card to isolate and emphasize the value proposition apart from the talking head."
+  },
+  {
+   "beat_index": 6,
+   "t_start": 7.933,
+   "t_end": 9.4,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "which makes the",
+   "read": "Returns to speaker to bridge into the pain-point setup, serif captions signal a shift in tone from hype to problem statement."
+  },
+  {
+   "beat_index": 7,
+   "t_start": 9.4,
+   "t_end": 10.467,
+   "purpose": "turn",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "split-screen: serif title card above, real b-roll of the creator hunched over a laptop looking frustrated at a desk",
+   "card_text": "boring parts of editing",
+   "read": "A split-frame cutaway to genuine frustrated-editing footage visually literalizes 'boring parts' as a tonal pivot, breaking the studio setting."
+  },
+  {
+   "beat_index": 8,
+   "t_start": 10.467,
+   "t_end": 11.133,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "a breeze. / Let's jump in",
+   "read": "Snaps back to speaker with a confident payoff line, transitioning verbally into the tutorial body."
+  },
+  {
+   "beat_index": 9,
+   "t_start": 11.133,
+   "t_end": 17.1,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text",
+    "punch_in"
+   ],
+   "cutaway_subject": "screen-recording of CapCut app: New Project screen, footage upload grid, and editing timeline with transcript button",
+   "card_text": "and upload our footage. / then going to head over / to our menu / and hit transcript.",
+   "read": "Extended dimmed screen-recording overlay demonstrates the actual software steps, serif narration captions guiding the viewer procedurally like a tutorial voiceover."
+  },
+  {
+   "beat_index": 10,
+   "t_start": 17.1,
+   "t_end": 18.9,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "to remove / any filler words.",
+   "read": "Cuts back to energetic talking-head delivery with yellow-highlighted keywords ('remove', 'filler') to punctuate the next feature being taught."
+  },
+  {
+   "beat_index": 11,
+   "t_start": 18.9,
+   "t_end": 22.233,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "screen-recording of CapCut's 'Remove filler words' panel highlighting detected filler words and a Delete button",
+   "card_text": "You know, the / \"ums\", the \"ahhs\" / and all those",
+   "read": "Dimmed screen capture again grounds the claim in visible software proof, captions narrate exactly what's being removed to match the UI highlights."
+  },
+  {
+   "beat_index": 12,
+   "t_start": 22.233,
+   "t_end": 22.5,
+   "purpose": "breath",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "sfx"
+   ],
+   "cutaway_subject": "quick warm-yellow flash/blur transition frame of the same UI panel",
+   "card_text": "and all those",
+   "read": "A very short flash-transition acts as a rhythmic breath/wipe between the UI demo and the return to speaker, mechanically detected as a rapid cut cluster."
+  },
+  {
+   "beat_index": 13,
+   "t_start": 22.5,
+   "t_end": 28.3,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "awkward pauses. / make sure / to check the transcript / for spelling errors / before moving on.",
+   "read": "Sustained talking-head block with word-level yellow/white caption emphasis walks through sequential sub-steps, keeping energy high with tight cuts on emphasis words."
+  },
+  {
+   "beat_index": 14,
+   "t_start": 28.3,
+   "t_end": 32.433,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "screen-recording: captions panel with 'Identify filler words' and 'Captions' buttons, then edit-captions list with timestamps",
+   "card_text": "we simply click / Add Captions",
+   "read": "Second long screen-capture segment demonstrates the captioning workflow in real UI, serif captions narrate the click actions being shown."
+  },
+  {
+   "beat_index": 15,
+   "t_start": 32.433,
+   "t_end": 32.5,
+   "purpose": "breath",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway"
+   ],
+   "cutaway_subject": "same captions UI, transitional single frame",
+   "card_text": "done for you.",
+   "read": "Micro-cut acts as a beat marker closing out the captions demo before the reveal of the finished result."
+  },
+  {
+   "beat_index": 16,
+   "t_start": 32.5,
+   "t_end": 34.433,
+   "purpose": "payoff",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "vertical clip of the finished captioned video playing back with styled colored captions over the creator's real footage",
+   "card_text": "and boom it's / done for you.",
+   "read": "Shows the finished output as visual proof/payoff of the process just described, framed in a mini vertical player mimicking the final TikTok format."
+  },
+  {
+   "beat_index": 17,
+   "t_start": 34.433,
+   "t_end": 36.9,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "can play around / with the styling,",
+   "read": "Returns to speaker to add a customization tip, keeping the tutorial rhythm of demo-then-explain alternating with talking head."
+  },
+  {
+   "beat_index": 18,
+   "t_start": 36.9,
+   "t_end": 38.867,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "screen-recording: 'Highlight' keyword panel with selectable words, one word 'landed' turning yellow",
+   "card_text": "highlight key words, / or just stick / default captions.",
+   "read": "Shows the actual highlight-keyword feature being toggled in the UI to substantiate the styling claim just made."
+  },
+  {
+   "beat_index": 19,
+   "t_start": 38.867,
+   "t_end": 41.0,
+   "purpose": "payoff",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "finished captioned clip playing in mini vertical player showing yellow/pink highlighted keywords in the caption text",
+   "card_text": "As a solo creator / the more time",
+   "read": "Second payoff clip demonstrates the final stylised captions in motion, tying the feature demo to a personal-benefit statement overlay."
+  },
+  {
+   "beat_index": 20,
+   "t_start": 41.0,
+   "t_end": 43.133,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "close-up b-roll of hands typing on a laptop keyboard, then wide shot of speaker typing at the desk",
+   "card_text": "I can save, / the more headspace / I have to be creative",
+   "read": "Mixes speaker cutaways with genuine typing b-roll to visually reinforce the abstract benefit of 'saved time/headspace' with matching captions."
+  },
+  {
+   "beat_index": 21,
+   "t_start": 43.133,
+   "t_end": 45.1,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text",
+    "punch_in"
+   ],
+   "cutaway_subject": "extreme close-up of speaker's eye, then color-grading software screen with wheel adjustments",
+   "card_text": "I have to be creative / So if you want",
+   "read": "An artistic macro close-up and a color-grading UI shot visually dramatize 'being creative' before pivoting to the CTA, adding cinematic texture to an otherwise talking-head video."
+  },
+  {
+   "beat_index": 22,
+   "t_start": 45.1,
+   "t_end": 46.333,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "to speed up your editing / workflow, / comment \"captions\"",
+   "read": "Speaker delivers direct CTA instructions, captions bolding the exact action word ('captions') viewers need to comment."
+  },
+  {
+   "beat_index": 23,
+   "t_start": 46.333,
+   "t_end": 49.2,
+   "purpose": "close",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "close-up of a finger tapping a laptop trackpad/keyboard in dim blue light",
+   "card_text": "comment \"captions\" / the link right now",
+   "read": "Moody macro cutaway visually stages the act of clicking/commenting, giving the CTA a cinematic, almost suspenseful treatment distinct from the casual talking-head tone."
+  },
+  {
+   "beat_index": 24,
+   "t_start": 49.2,
+   "t_end": 53.267,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text",
+    "sfx"
+   ],
+   "cutaway_subject": null,
+   "card_text": "Let me know / which of the AI tools / you use / and which saves the / most time for you.",
+   "read": "Returns to speaker for a warm sign-off with a light-flare transition, inviting engagement and closing the direct-address arc that opened the video."
+  },
+  {
+   "beat_index": 25,
+   "t_start": 53.267,
+   "t_end": 59.466,
+   "purpose": "close",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card"
+   ],
+   "cutaway_subject": "CapCut splash logo, then TikTok loading splash screen, then TikTok search bar pre-filled with '@denz_creates'",
+   "card_text": "CapCut / TikTok / @denz_creates",
+   "read": "A sequence of app/platform splash screens functions as an outro bumper and implicit CTA to search/follow the account, with no dialogue or narration over it."
+  }
+ ],
+ "provenance": {
+  "source_file": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
+  "sha256": "b58d6a511fceeef30b2db035db5037ce898059ab60c4f499e23e77aba3fbfd36",
+  "bytes": 4775274,
+  "duration_s": 59.466667,
+  "selected_by": "owner",
+  "in_instrument": false,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   1.133,
+   1.7,
+   2.233,
+   2.433,
+   2.467,
+   4.2,
+   4.233,
+   4.267,
+   5.8,
+   7.233,
+   7.933,
+   9.4,
+   10.467,
+   10.5,
+   10.533,
+   11.133,
+   17.1,
+   17.133,
+   17.2,
+   18.9,
+   22.233,
+   22.267,
+   22.3,
+   28.3,
+   32.433,
+   32.5,
+   34.433,
+   36.9,
+   38.867,
+   38.9,
+   41.0,
+   41.533,
+   42.233,
+   43.133,
+   45.1,
+   46.333,
+   49.2,
+   49.233,
+   49.267,
+   53.267,
+   53.333
+  ],
+  "cuts_per_s": 0.689
+ }
+}

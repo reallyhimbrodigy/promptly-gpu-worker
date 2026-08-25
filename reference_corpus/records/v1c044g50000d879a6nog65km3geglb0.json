@@ -1,0 +1,185 @@
+{
+ "hook_structure": "meta/self-referential curiosity-gap hook: direct address about the on-screen caption text itself -> reveal twist ('I didn't write a single word') that pivots into a problem/insider framing about generic auto-captions making everyone look the same",
+ "first_visual_change_s": 0.5,
+ "beats": [
+  {
+   "beat_index": 0,
+   "t_start": 0.0,
+   "t_end": 2.833,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "the CAPTIONS \u2192 you're READING right \u2192 I didn't \u2192 single WORD",
+   "read": "Single continuous talking-head shot; the hook lives entirely in the escalating word-by-word caption reveal, not in the cut, making the viewer read along until the twist lands."
+  },
+  {
+   "beat_index": 1,
+   "t_start": 2.833,
+   "t_end": 5.4,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "man in gray t-shirt on a couch scrolling his phone, tattooed forearm visible",
+   "card_text": "most auto CAPTION tools / gives you / ZERO CONTROL",
+   "read": "Cuts away from the speaker to a relatable phone-scrolling shot to dramatize the frustration, escalating to a bold 'ZERO CONTROL' card as the mini-punchline of the complaint."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 5.4,
+   "t_end": 6.067,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": "same man from a side angle near a window, adjusting his cap",
+   "card_text": "SAME FONT",
+   "read": "Very short punch-cut on a single-line card acts as a breath/list-beat, keeping the complaint list punchy without adding new visual information."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 6.067,
+   "t_end": 9.1,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": "wide side-profile shot of the man at an editing desk with laptop and mousepad",
+   "card_text": "SAME STYLE / same boring look / as everyone else",
+   "read": "A static wide shot lets the complaint breathe while three stacked cards build the sameness argument, matching the visual widening to the widening claim."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 9.1,
+   "t_end": 10.467,
+   "purpose": "turn",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "overlay_text",
+    "card"
+   ],
+   "cutaway_subject": "doorway-framed shot of the man at his desk with a ring light and mixing gear",
+   "card_text": "in your feed / that's why / I use / SUBMAGIC",
+   "read": "New framing marks the pivot from problem to solution, ending on the bold brand-name card as the mini-payoff that closes this stretch."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 10.467,
+   "t_end": 16.033,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "it auto GENERATES / my CAPTIONS / and makes them fully / without SPENDING too much time / here's exactly / HOW I USE IT",
+   "read": "Returns to direct-to-camera delivery held in one continuous shot; caption ticker alone carries the pacing while the speaker makes the core product claim."
+  },
+  {
+   "beat_index": 6,
+   "t_start": 16.033,
+   "t_end": 18.1,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "card"
+   ],
+   "cutaway_subject": "screen recording of the Submagic upload interface with a drag-and-drop file cursor",
+   "card_text": "upload your video / click captions",
+   "read": "Cuts to a screen-capture demo as literal proof of process; red instructional badges function like tutorial callouts rather than dialogue captions."
+  },
+  {
+   "beat_index": 7,
+   "t_start": 18.1,
+   "t_end": 23.133,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card"
+   ],
+   "cutaway_subject": "screen recording of the Submagic style picker and customization panel, cursor selecting fonts/colors",
+   "card_text": "and pick a style / if you want it / to match your brand / hit customize / change the font / the size / the color",
+   "read": "One unbroken screen-recording lets the customization flow speak for itself; rapid label swaps simulate a walkthrough voiceover without needing new cuts."
+  },
+  {
+   "beat_index": 8,
+   "t_start": 23.133,
+   "t_end": 29.267,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card"
+   ],
+   "cutaway_subject": "screen recording of the Submagic feature toggle list (auto zooms, auto b-rolls, remove bad takes) being switched on",
+   "card_text": "the animation / everything / and if you wanna / go further / auto B rolls / zoom ins / remove bad takes / it's all in here too",
+   "read": "Same continuous demo shot stacks feature-name cards to enumerate depth of the tool, with toggle animations visually confirming each spoken claim."
+  },
+  {
+   "beat_index": 9,
+   "t_start": 29.267,
+   "t_end": 33.4,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "now EVERY VIDEO / I post / looks like me / tap the link / in my profile / to try SUBMAGIC",
+   "read": "Cuts back to the speaker for the CTA, mirroring the opening's direct-address framing to bookend the video before the ask."
+  },
+  {
+   "beat_index": 10,
+   "t_start": 33.4,
+   "t_end": 37.430567,
+   "purpose": "close",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "card"
+   ],
+   "cutaway_subject": "generic TikTok app loading screen transitioning to a search bar showing '@ciggmedia'",
+   "card_text": "@ciggmedia",
+   "read": "Stock TikTok loading/search bumper serves as an outro tag driving profile visits, a deliberate templated end-card rather than custom footage."
+  }
+ ],
+ "provenance": {
+  "source_file": "v1c044g50000d879a6nog65km3geglb0.mp4",
+  "sha256": "c2225c1ca87894279a58ec6895d0ea3c20f44190febf9b9fd69623ac475f4da6",
+  "bytes": 2586485,
+  "duration_s": 37.430567,
+  "selected_by": "owner",
+  "in_instrument": false,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   2.833,
+   5.4,
+   6.067,
+   9.1,
+   10.467,
+   16.033,
+   18.1,
+   23.133,
+   29.267,
+   33.4
+  ],
+  "cuts_per_s": 0.267
+ }
+}

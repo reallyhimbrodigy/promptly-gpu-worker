@@ -1,0 +1,328 @@
+{
+ "hook_structure": "accusatory curiosity-gap hook: a blunt theft/loss claim ('captions are stealing your editing time') is slapped over a direct-address talking head with zero preamble, building word-by-word to force a read, then the pain is dramatized (tired eyes, every-hour grind) before the twist/payoff of naming the actual tool.",
+ "first_visual_change_s": 0.033,
+ "beats": [
+  {
+   "beat_index": 0,
+   "t_start": 0.0,
+   "t_end": 0.033,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "card"
+   ],
+   "cutaway_subject": null,
+   "card_text": "captions",
+   "read": "The clip opens already mid-reveal, with the word 'captions' slammed over the speaker's face before any spoken setup \u2014 a hard, cut-in-media-res start."
+  },
+  {
+   "beat_index": 1,
+   "t_start": 0.033,
+   "t_end": 1.933,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "captions are stealing your editing time",
+   "read": "Text builds phrase-by-phrase over a static talking-head hold, letting the accusatory line finish forming before any cut, maximizing the claim's weight."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 1.933,
+   "t_end": 2.8,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "close-up of hands typing on a mechanical keyboard on a green cutting mat, laptop and Coke crate in frame",
+   "card_text": "captions are the part",
+   "read": "Cuts away to literal typing b-roll to visually back the claim that manual caption work is 'the part' being called out."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 2.8,
+   "t_end": 3.967,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "that eats your entire day",
+   "read": "Punches back to the speaker rubbing his eye in visible fatigue, pairing the exhaustion gesture with the 'entire day' text for emotional proof."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 3.967,
+   "t_end": 4.567,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "overhead wide shot of the creator sitting cross-legged in his chair with a laptop on his lap",
+   "card_text": "every hour",
+   "read": "A quick lifestyle b-roll cut reinforces 'every hour' as an ongoing, repetitive burden rather than a one-time task."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 4.567,
+   "t_end": 6.233,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "stuck / captions / hour",
+   "read": "Returns to direct address so the creator can state the problem himself, captions keyed word-by-word to his cadence for emphasis."
+  },
+  {
+   "beat_index": 6,
+   "t_start": 6.233,
+   "t_end": 7.1,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "low wide shot of the creator typing on a laptop at a standing desk under a round softbox light",
+   "card_text": "have used / to land",
+   "read": "Cuts to a working shot to imply lived experience/credibility before the tool reveal, keeping the sentence trailing across the cut."
+  },
+  {
+   "beat_index": 7,
+   "t_start": 7.1,
+   "t_end": 8.233,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text",
+    "sfx"
+   ],
+   "cutaway_subject": "motion-blurred whip/rack-focus profile shot of the creator turning toward camera",
+   "card_text": "another / client",
+   "read": "A blurred whip-style transition signals a beat change, visually and sonically bridging into the tool reveal that follows immediately."
+  },
+  {
+   "beat_index": 8,
+   "t_start": 8.233,
+   "t_end": 9.733,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "Submagic / showed me / their tool",
+   "read": "The tool's name lands as its own card on a clean talking-head cut \u2014 the payoff of the hook's curiosity gap, isolated for legibility."
+  },
+  {
+   "beat_index": 9,
+   "t_start": 9.733,
+   "t_end": 11.9,
+   "purpose": "breath",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "card"
+   ],
+   "cutaway_subject": null,
+   "card_text": "I was amazed / how much time / it actually saves",
+   "read": "A blank white card sequence pulls focus entirely onto typography, giving the reaction beat room to breathe before the demo starts."
+  },
+  {
+   "beat_index": 10,
+   "t_start": 11.9,
+   "t_end": 13.033,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "top-down screen recording of a desktop with a yellow arrow annotation pointing at an object on the desk",
+   "card_text": "editors like us",
+   "read": "Switches to screen-recording mode to begin the proof-of-concept walkthrough, arrow graphic added to direct attention."
+  },
+  {
+   "beat_index": 11,
+   "t_start": 13.033,
+   "t_end": 15.9,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "screen recording of the Submagic web app: project folder, macOS file picker, upload modal, uploading progress bar",
+   "card_text": "you just / need to upload / the raw footage / hit AI captions / and pick a style",
+   "read": "A single continuous screen-record shot carries multiple caption changes, walking through the literal upload steps in real time rather than cutting per phrase."
+  },
+  {
+   "beat_index": 12,
+   "t_start": 15.9,
+   "t_end": 21.933,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "screen recording of the caption style editor: font, size, stroke, color swatches, animation dropdown, spotlight/blur vignette added around active controls",
+   "card_text": "if you want it / for your client / just customize / the font, colors / size and animation / in seconds",
+   "read": "Extended single-shot UI demo with a moving spotlight vignette guides the eye to whichever control is being discussed as captions change underneath."
+  },
+  {
+   "beat_index": 13,
+   "t_start": 21.933,
+   "t_end": 22.867,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "if you / need more",
+   "read": "Breaks back to the speaker to reset attention and pivot the pitch from styling into automation features."
+  },
+  {
+   "beat_index": 14,
+   "t_start": 22.867,
+   "t_end": 26.433,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "screen recording of the Scenes panel: AI Auto B-rolls / AI Auto Zooms toggles, per-line transcript with A-roll/B-roll thumbnails, settings dropdown menu",
+   "card_text": "there's auto B-rolls / auto zooms / and it even / removes / bad takes / for you",
+   "read": "One long screen-recording shot lists automation features sequentially via caption changes instead of new cuts, keeping the feature list feeling continuous and effortless."
+  },
+  {
+   "beat_index": 15,
+   "t_start": 26.433,
+   "t_end": 28.4,
+   "purpose": "payoff",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "this frees up / your time / to take on / more work",
+   "read": "Returns to the speaker to state the takeaway benefit directly, letting his delivery carry the payoff after the feature dump."
+  },
+  {
+   "beat_index": 16,
+   "t_start": 28.4,
+   "t_end": 29.767,
+   "purpose": "payoff",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "over-the-shoulder shot of the creator's hand on a laptop trackpad with an editing timeline visible on screen",
+   "card_text": "you're / editing / for clients",
+   "read": "Cuts to a lifestyle editing shot to visually anchor the 'editing for clients' payoff in a real workflow context."
+  },
+  {
+   "beat_index": 17,
+   "t_start": 29.767,
+   "t_end": 31.5,
+   "purpose": "turn",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "extreme close-up reflection on a curved monitor showing a video timeline, dark moody lighting",
+   "card_text": "or just / starting out CREATING CONTENT",
+   "read": "A moodier, blurred cutaway signals an audience pivot (from pro editors to beginners), with a distinct serif/italic card style marking the tonal shift."
+  },
+  {
+   "beat_index": 18,
+   "t_start": 31.5,
+   "t_end": 33.9,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "tap the link / in my profile / [you] / [Submagic]",
+   "read": "Closes on direct address for the CTA, with sub-captions in italics naming both the viewer and the product to make the ask concrete."
+  },
+  {
+   "beat_index": 19,
+   "t_start": 33.9,
+   "t_end": 37.916735,
+   "purpose": "close",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "card"
+   ],
+   "cutaway_subject": "TikTok app splash/loading screen with logo and a search bar reading '@ciggmedia'",
+   "card_text": null,
+   "read": "Ends on unedited platform chrome (TikTok's own loading/search screen) as a bare outro card pushing profile visits \u2014 no additional graphic treatment was added because the app UI itself does the CTA work."
+  }
+ ],
+ "provenance": {
+  "source_file": "v14044g50000d9kvim7og65hg0im5sng.mp4",
+  "sha256": "6e490d368d31c422ec0fd8ce69baed06526518d64caa0e4f93097ffc4b181e00",
+  "bytes": 3127293,
+  "duration_s": 37.916735,
+  "selected_by": "owner",
+  "in_instrument": false,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   0.033,
+   1.933,
+   2.8,
+   3.967,
+   4.567,
+   6.233,
+   7.1,
+   8.233,
+   9.733,
+   11.9,
+   13.033,
+   15.9,
+   21.933,
+   22.867,
+   26.433,
+   28.4,
+   29.767,
+   31.5,
+   33.9
+  ],
+  "cuts_per_s": 0.501
+ }
+}

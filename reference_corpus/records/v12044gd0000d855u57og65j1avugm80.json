@@ -1,0 +1,215 @@
+{
+ "hook_structure": "quality-shaming setup -> personal-solution reveal: 'posted on TikTok/Instagram looks trash' problem-framing cuts into 'I have the solution for you' with a day-count series stamp, front-loaded with rapid word-by-word kinetic text to hold attention before any explanation is given",
+ "first_visual_change_s": 0.5,
+ "beats": [
+  {
+   "beat_index": 1,
+   "t_start": 0.0,
+   "t_end": 5.05,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "cut",
+    "sfx"
+   ],
+   "cutaway_subject": null,
+   "card_text": "POSTED ON / TIKTOK (red, huge) / QUALITY / JUST LOOKS LIKE / TRASH (red) / WELL I HAVE THE / SOLUTION (red) / FOR YOU",
+   "read": "Rapid-fire kinetic captions punch in word-by-word, escalating from neutral white text to aggressive red on the pain word ('TRASH') then back to white on the resolution ('SOLUTION'), using color-coding to editorialize the emotional beats of the line."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 5.05,
+   "t_end": 13.85,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "sfx"
+   ],
+   "cutaway_subject": null,
+   "card_text": "THIS IS DAY 17 (red numeral) / OF THE LIFE OF A STUDENT / VIDEOGRAPHER (red) / A SERIES WHERE / FOR THE NEXT 60 DAYS (red) / I'LL BE SHARING / MY EXPERIENCES / AND WHAT I'VE LEARNED",
+   "read": "Series-premise text stacks continuously with no cuts to picture, using red accents only on the proper-noun/stat words (DAY 17, VIDEOGRAPHER) to make the concept legible at a glance while the speaker talks uninterrupted."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 13.85,
+   "t_end": 14.014,
+   "purpose": "breath",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut"
+   ],
+   "cutaway_subject": null,
+   "card_text": "AS A COLLEGE STUDENT / A CAREER IN VIDEOGRAPHY",
+   "read": "Three quick mechanical cuts in under 0.2s land on near-identical framing, a micro-adjustment/jump-cut cluster to keep the talking-head segment feeling alive rather than a true content change."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 14.014,
+   "t_end": 21.772,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "AFTER LOTS AND LOTS OF TESTING / I FOUND THAT THESE ARE THE / BEST PREMIERE / PRO EXPORT SETTINGS / FOR POSTING / ON INSTAGRAM AND TIKTOK",
+   "read": "Plain white lower-third captions (no color emphasis) sustain the explainer tone as he transitions from origin story into the tutorial's actual promise, treatment intentionally calmer than the hook."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 21.772,
+   "t_end": 24.566,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "Premiere Pro export settings panel (Video/Audio/Effects toggles) on a green grid background",
+   "card_text": "1350 X 1080P AT 24 FPS",
+   "read": "Cuts away from the speaker entirely to a screen-recording proof card, grounding the verbal claim in a literal screenshot so the viewer can pause and copy the numbers."
+  },
+  {
+   "beat_index": 6,
+   "t_start": 24.566,
+   "t_end": 28.32,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "BECAUSE I FEEL / MOST CINEMATIC / THEN I GO TO MORE / AND CHECK",
+   "read": "Returns to speaker to justify the setting choice conversationally before diving into the next screen-share, using plain captions to keep pacing brisk between two evidence cutaways."
+  },
+  {
+   "beat_index": 7,
+   "t_start": 28.32,
+   "t_end": 31.698,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card"
+   ],
+   "cutaway_subject": "Premiere export panel scrolled to Render/Encoding settings, checkboxes being ticked",
+   "card_text": "AT MAXIMUM DEPTH / AND USE MAXIMUM / RENDER QUALITY",
+   "read": "Second proof-cutaway shows the literal checkbox clicks matching the voiceover claim, treated identically to the first screen-share for visual consistency across the tutorial run."
+  },
+  {
+   "beat_index": 8,
+   "t_start": 31.698,
+   "t_end": 33.7,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "AND THIS IS / THE SAUCE / I USE",
+   "read": "Brief return to speaker builds anticipation ('the sauce') before the bitrate reveal, a classic tease-cut back to face to re-engage attention before more screen text."
+  },
+  {
+   "beat_index": 9,
+   "t_start": 33.7,
+   "t_end": 38.372,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card"
+   ],
+   "cutaway_subject": "Bitrate encoding dropdown menu and sliders (CBR to VBR 2-pass, target/max bitrate)",
+   "card_text": "VBR 2 PASS / WITH A TARGET / BITRATE OF 25 / AND A MAXIMUM / BITRATE OF 33",
+   "read": "Longest evidence block of the video, holding on the settings panel while captions step through each numeric parameter in sync with narration, prioritizing legibility over pace for the key takeaway."
+  },
+  {
+   "beat_index": 10,
+   "t_start": 38.372,
+   "t_end": 47.1,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "AFTER LONG HOURS / OF TESTING AND UPLOADING / TO TIKTOK AND INSTAGRAM / I FOUND THAT / THAT'S THE / BEST BITRATE / TO KEEP THE / HIGHEST QUALITY / WHILE / BYPASSING INSTAGRAM / AND TIKTOK'S / COMPRESSION",
+   "read": "A long uncut speaker take carries the payoff explanation, letting the credibility-building claim ('long hours of testing') play out on his face rather than cutting away, so the viewer trusts the conclusion."
+  },
+  {
+   "beat_index": 11,
+   "t_start": 47.1,
+   "t_end": 51.0,
+   "purpose": "payoff",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "AND THAT'S / MY PREMIERE EXPORT / SETTINGS FOR TIKTOK / AND INSTAGRAM",
+   "read": "Summary captions restate the video's core deliverable verbatim, a recap treatment giving skimmers a plain-text takeaway even without watching the demo section."
+  },
+  {
+   "beat_index": 12,
+   "t_start": 51.0,
+   "t_end": 55.097,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "AS A STUDENT / VIDEOGRAPHER / AND THAT'S IT / FOR DAY 17 / FOLLOW ME TO LEARN / WHAT I'VE LEARNED / AS A STUDENT / VIDEOGRAPHER",
+   "read": "Sign-off loops the series branding language from the hook (student videographer, day count) to reinforce the follow CTA, plain-text treatment matching the earlier explainer tone rather than the hook's red emphasis."
+  },
+  {
+   "beat_index": 13,
+   "t_start": 55.097,
+   "t_end": 59.309,
+   "purpose": "close",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "card"
+   ],
+   "cutaway_subject": "Black frame, then TikTok logo/loading animation, then TikTok search bar with handle typed in",
+   "card_text": "TikTok / @r0nin.lee",
+   "read": "Native TikTok end-card template (auto-inserted platform asset) closes the video with a searchable handle, a bare platform artifact rather than an editorial choice."
+  }
+ ],
+ "provenance": {
+  "source_file": "v12044gd0000d855u57og65j1avugm80.mp4",
+  "sha256": "824cd2844c3e5d774d3f7d6af608de1b16077d51a62f2eb04f1954de2d2a847f",
+  "bytes": 3140006,
+  "duration_s": 59.309309,
+  "selected_by": "owner",
+  "in_instrument": false,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   4.88,
+   4.963,
+   5.047,
+   13.847,
+   13.931,
+   13.972,
+   14.014,
+   21.772,
+   24.566,
+   28.32,
+   31.698,
+   33.7,
+   38.372,
+   55.097,
+   55.18
+  ],
+  "cuts_per_s": 0.253
+ }
+}

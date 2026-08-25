@@ -1,0 +1,227 @@
+{
+ "hook_structure": "curiosity-gap product tease: title card 'EDITS' spins in over direct-address claim ('today I'm going to show you how I get clean edits') -> promise is immediately validated by a whip-pan/jump cut to a different room, proving the 'clean edit' claim in real time",
+ "first_visual_change_s": 0.5,
+ "beats": [
+  {
+   "beat_index": 0,
+   "t_start": 0.0,
+   "t_end": 4.0,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "sfx"
+   ],
+   "cutaway_subject": null,
+   "card_text": "EDITS / today i'm going to show you how / i get clean edits just like this",
+   "read": "A spinning ring graphic slams in around a bold 'EDITS' title while captions build word-by-word to state the video's premise, front-loading the promise before any edit is shown."
+  },
+  {
+   "beat_index": 1,
+   "t_start": 4.0,
+   "t_end": 4.5,
+   "purpose": "payoff",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut"
+   ],
+   "cutaway_subject": null,
+   "card_text": "And it's all",
+   "read": "Hard cut from desk setup to a completely different room/angle mid-sentence, delivering the 'clean edit' the hook promised as an immediate demonstrable payoff."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 4.5,
+   "t_end": 6.833,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "done with the / captions app.",
+   "read": "Simple caption-follow treatment keeps focus on the verbal claim while he holds up his phone, no visual gimmick needed since the app icon graphic is about to carry the next beat."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 6.833,
+   "t_end": 7.0,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text",
+    "cut"
+   ],
+   "cutaway_subject": "Captions app icon (colorful wave logo) floating above his head",
+   "card_text": "Let me",
+   "read": "A graphic overlay of the app icon anchors the brand name visually the instant it's implied, reinforcing product ID before he says it outright."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 7.0,
+   "t_end": 15.292,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": "Phone screen showing a photo/video thumbnail he is pointing at",
+   "card_text": "This is a / completely raw / video straight / out of my / To manually / edit this and / add B-roll / with sound / effects will / take forever.",
+   "read": "Seated cut establishes the 'before' problem (raw manual editing pain) with rapid caption chunks synced to speech, building tension before the tool solves it."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 15.292,
+   "t_end": 15.792,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut"
+   ],
+   "cutaway_subject": null,
+   "card_text": null,
+   "read": "A quick reframe cut marks the pivot from 'the problem' into 'the solution', mechanically flagged but visually subtle (same room, slight angle shift)."
+  },
+  {
+   "beat_index": 6,
+   "t_start": 15.792,
+   "t_end": 16.75,
+   "purpose": "turn",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card"
+   ],
+   "cutaway_subject": "Captions app splash/logo screen on gradient background",
+   "card_text": "So I dropped / captions",
+   "read": "Full-screen app splash card acts as a hard scene-change flag, literally screen-recording the app open to prove authenticity of the walkthrough that follows."
+  },
+  {
+   "beat_index": 7,
+   "t_start": 16.75,
+   "t_end": 19.792,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "Screen recording: app home menu, Quick Trim editor, manual/AI edit toggle screens",
+   "card_text": "it into / captions and / use their AI / edit feature. / Instead of / using a",
+   "read": "Screen-recorded UI walkthrough is the core proof-of-process; captions narrate over real interface footage instead of talking-head to keep it tutorial-credible."
+  },
+  {
+   "beat_index": 8,
+   "t_start": 19.792,
+   "t_end": 23.208,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "Scrolling template gallery ('Align', 'Chalk', 'Journey' style cards) inside the app",
+   "card_text": "Instead of / using a / analyzes your / footage",
+   "read": "A parallax scroll through style templates visually sells variety/choice, letting the product's own UI do the persuading rather than the host's voice."
+  },
+  {
+   "beat_index": 9,
+   "t_start": 23.208,
+   "t_end": 25.417,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "Chat-style processing screen: 'On it! You can close the app...' with queued/editing status",
+   "card_text": "and what / you're saying / then builds an / edit around",
+   "read": "Chat-bot UI framing personifies the AI as an assistant, reinforcing the 'it does it for you' claim while progress indicators build anticipation for the reveal."
+  },
+  {
+   "beat_index": 10,
+   "t_start": 25.417,
+   "t_end": 26.5,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "Export progress ring animating from 94% to 100% with sparkle icons",
+   "card_text": "edit around / your content.",
+   "read": "A percentage-counter payoff beat gives a satisfying, almost gamified sense of completion right before cutting back to the human host for reaction."
+  },
+  {
+   "beat_index": 11,
+   "t_start": 26.5,
+   "t_end": 30.875,
+   "purpose": "payoff",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text",
+    "card"
+   ],
+   "cutaway_subject": null,
+   "card_text": "Here's the / original clip / and here's / Results / what captions / created in / Caption created / in just a few minutes",
+   "read": "Return to a new speaker angle (different shirt/room) with an elegant serif 'Results' title card orbited by a sparkle animation, signaling the reveal segment with a tonal upgrade from casual captions to a polished title treatment."
+  },
+  {
+   "beat_index": 12,
+   "t_start": 30.875,
+   "t_end": 40.0,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "If you're trying / to post more consistently / but struggling / with the edit, / this is one of / the easiest ways / I've seen to create / polished content / without needing / advanced editing / skills",
+   "read": "A new high-angle handheld setup with italicized serif captions (key words like 'trying', 'struggling', 'edit' italicized/bolded) signals the CTA/summary section, using a more stylized caption font to feel like a testimonial-style closer distinct from the earlier casual captions."
+  },
+  {
+   "beat_index": 13,
+   "t_start": 40.0,
+   "t_end": 43.583,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text",
+    "sfx"
+   ],
+   "cutaway_subject": "Magnifying glass prop held up to camera; app icon graphic reappears floating over him",
+   "card_text": "Download / captions and / try out the AI / edit for",
+   "read": "A blurred whip-transition into a new room, paired with a magnifying-glass prop gag and the recurring app icon overlay, closes the video with a literal 'go find it' visual pun reinforcing the download CTA."
+  }
+ ],
+ "provenance": {
+  "source_file": "v15044gf0000d8slpi7og65utp063oi0.mp4",
+  "sha256": "378fedd4f24d6262741f2ba6cca124dfa71db8a6a0a8ca7ee5a0630516886881",
+  "bytes": 4628394,
+  "duration_s": 43.583333,
+  "selected_by": "owner",
+  "in_instrument": false,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   4.0,
+   6.833,
+   15.292,
+   15.792,
+   16.75,
+   19.792,
+   23.208,
+   25.417,
+   26.5,
+   30.875
+  ],
+  "cuts_per_s": 0.229
+ }
+}

@@ -1,0 +1,146 @@
+{
+ "built": "2026-08-25",
+ "n": 10,
+ "beats_total": 153,
+ "bare_total": 0,
+ "purpose": {
+  "hook": 14,
+  "claim": 30,
+  "evidence": 52,
+  "turn": 19,
+  "payoff": 10,
+  "breath": 6,
+  "close": 22
+ },
+ "treatment": {
+  "overlay_text": 124,
+  "cutaway": 72,
+  "cut": 81,
+  "card": 40,
+  "sfx": 14,
+  "punch_in": 6
+ },
+ "in_instrument": 2,
+ "records": [
+  {
+   "file": "1e5eb227a1814bc0999fd1e62ebef34e.json",
+   "source_file": "1e5eb227a1814bc0999fd1e62ebef34e.mp4",
+   "sha256": "7392d2b42f28192170e0d7b667ffa38127efef397cc7fc989490d55af08f8548",
+   "duration_s": 43.2,
+   "cuts_per_s": 0.185,
+   "in_instrument": true,
+   "beats": 15,
+   "bare": 0,
+   "first_visual_change_s": 0.5,
+   "hook_structure": "curiosity-gap + age-shock framing: anonymized 'this kid' teaser -> escalating dollar-figure card -> reveal he's still underage/in-school, priming a rags-to-riches insider story"
+  },
+  {
+   "file": "56ba63210cfe4c4da625e0b457cc6703.json",
+   "source_file": "56ba63210cfe4c4da625e0b457cc6703.mp4",
+   "sha256": "22ef7a120c76722c4f7701e4e057d53b17fc2f3c072fec44332c66cdd34cf9d1",
+   "duration_s": 52.6,
+   "cuts_per_s": 0.399,
+   "in_instrument": true,
+   "beats": 22,
+   "bare": 0,
+   "first_visual_change_s": 0.4,
+   "hook_structure": "whip-pan/motion-blur cold-open into rapid identity-stacking cards (name -> title -> logo) that establish authority before any claim is spoken, functioning as a credibility hook rather than a question-based curiosity gap"
+  },
+  {
+   "file": "v09044g40000cm9oa7nog65s2crhkf00.json",
+   "source_file": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
+   "sha256": "a7b4a2935bdf696565ddf0824b2f509f8713e8da202213c9b52d95c3570fff73",
+   "duration_s": 25.45,
+   "cuts_per_s": 0.196,
+   "in_instrument": false,
+   "beats": 16,
+   "bare": 0,
+   "first_visual_change_s": 0.5,
+   "hook_structure": "direct how-to promise + escalating-stat proof: 'here's how' spoken cold-open immediately paired with a climbing on-screen counter (88\u2192100 'TikToks per hour') to visually dramatize the claim before the tool is even named"
+  },
+  {
+   "file": "v12044gd0000d855u57og65j1avugm80.json",
+   "source_file": "v12044gd0000d855u57og65j1avugm80.mp4",
+   "sha256": "824cd2844c3e5d774d3f7d6af608de1b16077d51a62f2eb04f1954de2d2a847f",
+   "duration_s": 59.309309,
+   "cuts_per_s": 0.253,
+   "in_instrument": false,
+   "beats": 13,
+   "bare": 0,
+   "first_visual_change_s": 0.5,
+   "hook_structure": "quality-shaming setup -> personal-solution reveal: 'posted on TikTok/Instagram looks trash' problem-framing cuts into 'I have the solution for you' with a day-count series stamp, front-loaded with rapid word-by-word kinetic text to hold attention before any explanation is given"
+  },
+  {
+   "file": "v14044g50000d5la79fog65q5itovh6g.json",
+   "source_file": "v14044g50000d5la79fog65q5itovh6g.mp4",
+   "sha256": "758f9506f21b2e5dc5bdc5f65a19b6f8c7434c0259e0b1fba9126feb8cbe079a",
+   "duration_s": 28.566667,
+   "cuts_per_s": 0.14,
+   "in_instrument": false,
+   "beats": 5,
+   "bare": 0,
+   "first_visual_change_s": 0.5,
+   "hook_structure": "problem-cost hook: on-screen word-build captions state the pain ('stop editing manually' / 'your captions') while a fake digital counter spins up to 03:00:00, turning an abstract complaint into a visualized time-cost before the solution is revealed"
+  },
+  {
+   "file": "v14044g50000d9kvim7og65hg0im5sng.json",
+   "source_file": "v14044g50000d9kvim7og65hg0im5sng.mp4",
+   "sha256": "6e490d368d31c422ec0fd8ce69baed06526518d64caa0e4f93097ffc4b181e00",
+   "duration_s": 37.916735,
+   "cuts_per_s": 0.501,
+   "in_instrument": false,
+   "beats": 20,
+   "bare": 0,
+   "first_visual_change_s": 0.033,
+   "hook_structure": "accusatory curiosity-gap hook: a blunt theft/loss claim ('captions are stealing your editing time') is slapped over a direct-address talking head with zero preamble, building word-by-word to force a read, then the pain is dramatized (tired eyes, every-hour grind) before the twist/payoff of naming the actual tool."
+  },
+  {
+   "file": "v15044gf0000d7akrh7og65p1f3s1ua0.json",
+   "source_file": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
+   "sha256": "dc38909eb970c8273c0f99ae0d5b78528ee2ba21d21fabd907c42127c430595e",
+   "duration_s": 38.566893,
+   "cuts_per_s": 0.207,
+   "in_instrument": false,
+   "beats": 12,
+   "bare": 0,
+   "first_visual_change_s": 0.4,
+   "hook_structure": "accusatory-callout hook stacked with word-by-word kinetic text: 'IF YOURE NOT MAKING VIDEOS because YOU DONT KNOW HOW TO EDIT' -> reframed as excuse ('EXCUSE = NO GOOD'), baiting viewer identity before pivoting to solution pitch"
+  },
+  {
+   "file": "v15044gf0000d8slpi7og65utp063oi0.json",
+   "source_file": "v15044gf0000d8slpi7og65utp063oi0.mp4",
+   "sha256": "378fedd4f24d6262741f2ba6cca124dfa71db8a6a0a8ca7ee5a0630516886881",
+   "duration_s": 43.583333,
+   "cuts_per_s": 0.229,
+   "in_instrument": false,
+   "beats": 14,
+   "bare": 0,
+   "first_visual_change_s": 0.5,
+   "hook_structure": "curiosity-gap product tease: title card 'EDITS' spins in over direct-address claim ('today I'm going to show you how I get clean edits') -> promise is immediately validated by a whip-pan/jump cut to a different room, proving the 'clean edit' claim in real time"
+  },
+  {
+   "file": "v1c044g50000d879a6nog65km3geglb0.json",
+   "source_file": "v1c044g50000d879a6nog65km3geglb0.mp4",
+   "sha256": "c2225c1ca87894279a58ec6895d0ea3c20f44190febf9b9fd69623ac475f4da6",
+   "duration_s": 37.430567,
+   "cuts_per_s": 0.267,
+   "in_instrument": false,
+   "beats": 11,
+   "bare": 0,
+   "first_visual_change_s": 0.5,
+   "hook_structure": "meta/self-referential curiosity-gap hook: direct address about the on-screen caption text itself -> reveal twist ('I didn't write a single word') that pivots into a problem/insider framing about generic auto-captions making everyone look the same"
+  },
+  {
+   "file": "v24044gl0000d2rj4k7og65tcgn43lr0.json",
+   "source_file": "v24044gl0000d2rj4k7og65tcgn43lr0.mp4",
+   "sha256": "b58d6a511fceeef30b2db035db5037ce898059ab60c4f499e23e77aba3fbfd36",
+   "duration_s": 59.466667,
+   "cuts_per_s": 0.689,
+   "in_instrument": false,
+   "beats": 25,
+   "bare": 0,
+   "first_visual_change_s": 1.133,
+   "hook_structure": "reenacted-DM/comment cold-open ('THIS...') interrupted by a hard whip-pan/glitch transition into a stylised promise-card sequence ('WHEN I GOT MADE to your video WITHOUT doing it MANUALLY'), baiting curiosity about a claimed AI shortcut before naming the tool"
+  }
+ ]
+}

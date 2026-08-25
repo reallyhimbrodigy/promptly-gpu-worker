@@ -1,0 +1,242 @@
+{
+ "hook_structure": "curiosity-gap + age-shock framing: anonymized 'this kid' teaser -> escalating dollar-figure card -> reveal he's still underage/in-school, priming a rags-to-riches insider story",
+ "first_visual_change_s": 0.5,
+ "beats": [
+  {
+   "beat_index": 1,
+   "t_start": 0.0,
+   "t_end": 2.0,
+   "purpose": "hook",
+   "speaker_on_screen": false,
+   "treatment": [
+    "overlay_text",
+    "cutaway"
+   ],
+   "cutaway_subject": "blurred/pixelated face of a teen boy sitting in a gaming chair at a desk, tilted phone-photo framing",
+   "card_text": "this kid / makes / $2,000,000 a month",
+   "read": "counts up the dollar figure live over a mystery-blurred subject to bait curiosity before any identity is given."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 2.0,
+   "t_end": 3.7,
+   "purpose": "hook",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "blurry motion-swipe transition into a graduation-photo polaroid of the same boy",
+   "card_text": "but hasn't even graduated high school",
+   "read": "the whip-pan/blur cut hides the reveal edit and the polaroid card delivers the age-shock twist that recontextualizes the big number."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 3.7,
+   "t_end": 6.5,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "at 13 years / Zach / Zach Yadegari / built a",
+   "read": "cut to talking-head interview establishes the narrator and stamps the subject's name/age as word-by-word captions track his speech."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 6.5,
+   "t_end": 11.433,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "card",
+    "sfx"
+   ],
+   "cutaway_subject": "app icon grid screenshot of 'Totally Science' game platform, then padlock 3D icon, then a laptop showing a browser game",
+   "card_text": "Totally Science / [description of gaming platform bypassing school filters] / it led / bypass school restrictions / and play games on their laptop",
+   "read": "a run of graphic cards and 3D icon animations illustrates the first product (school-game site) purely visually while VO explains it, no talking head needed."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 11.433,
+   "t_end": 12.0,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "after",
+   "read": "returns to the interview to pivot the story from the first venture to what came next, marked by a single-word transition card."
+  },
+  {
+   "beat_index": 6,
+   "t_start": 12.0,
+   "t_end": 15.0,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "he sold this / $100K / he / the profits / and / made an app",
+   "read": "rapid word-by-word captions keep pace with speech to sell the sale price and pivot into the new venture without any cutaways, letting the number ($100K) hit hard on its own beat."
+  },
+  {
+   "beat_index": 7,
+   "t_start": 15.0,
+   "t_end": 18.367,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "black app-icon tile with white apple graphic, then phone mockup showing 'Cal AI' nutrition-scanning app UI with a pancake photo and calorie count, then app dashboard screen",
+   "card_text": "that lets / 1,990 cal",
+   "read": "cuts away from the interview to product-demo phone mockups so the viewer sees the actual app (Cal AI) being described, grounding the claim in visible proof."
+  },
+  {
+   "beat_index": 8,
+   "t_start": 18.367,
+   "t_end": 21.267,
+   "purpose": "payoff",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "made / $20 / $20,000,000 / in the past year",
+   "read": "back on the speaker for the big reveal number, the '$20' card intentionally under-delivers for a half-second before snapping to the full '$20,000,000' figure as a comedic/dramatic beat."
+  },
+  {
+   "beat_index": 9,
+   "t_start": 21.267,
+   "t_end": 22.733,
+   "purpose": "breath",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "sat / Zach",
+   "read": "a hard cut to a different setting/interview (dark curtain backdrop) signals a new source or timeframe with minimal captioning, a quieter connective beat."
+  },
+  {
+   "beat_index": 10,
+   "t_start": 22.733,
+   "t_end": 23.533,
+   "purpose": "breath",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut"
+   ],
+   "cutaway_subject": null,
+   "card_text": null,
+   "read": "brief uncaptioned cut to a third location keeps momentum without adding new information, functioning as a visual palate-cleanser."
+  },
+  {
+   "beat_index": 11,
+   "t_start": 23.533,
+   "t_end": 27.0,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "he explained to / how / can / can do this / with / 0 / 0 coding experience",
+   "read": "big oversized '0' graphic isolates the most surprising fact (no coding background) as its own visual beat before the explanatory text catches up."
+  },
+  {
+   "beat_index": 12,
+   "t_start": 27.0,
+   "t_end": 28.0,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "he also",
+   "read": "short connective caption signals another point is coming without yet cutting away, sustaining the interview's momentum."
+  },
+  {
+   "beat_index": 13,
+   "t_start": 28.0,
+   "t_end": 33.033,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "blue 'TOP SECRET' folder icon animating, then floating question-mark icons with dollar amounts and an unrevealed app-store mockup",
+   "card_text": "TOP SECRET / making anything go viral / and a few other / multi-million dollar app ideas / $9,876,234.00 / $15,876,129.00 / $2,872,678.00 / $4,453,768.00",
+   "read": "mystery-box graphic treatment (blurred question marks, redacted folder) visually withholds the secret while stacking dollar figures to build anticipation for a CTA."
+  },
+  {
+   "beat_index": 14,
+   "t_start": 33.033,
+   "t_end": 39.167,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "that / have / have the time / to work on / if you / full / full conversation / comment / the word / and \"App\" / to \"App\" / right now \"App\"",
+   "read": "returns to interview for the direct-address CTA, word-paced captions building the exact comment instruction the viewer must follow."
+  },
+  {
+   "beat_index": 15,
+   "t_start": 39.167,
+   "t_end": 43.2,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text",
+    "sfx"
+   ],
+   "cutaway_subject": null,
+   "card_text": "right now \"App\" / @JACKHNEEL",
+   "read": "screen dims to near-black and an Instagram icon pulses/glows over the frozen final CTA, visually pushing the viewer toward the follow/comment action as the video ends."
+  }
+ ],
+ "provenance": {
+  "source_file": "1e5eb227a1814bc0999fd1e62ebef34e.mp4",
+  "sha256": "7392d2b42f28192170e0d7b667ffa38127efef397cc7fc989490d55af08f8548",
+  "bytes": 75794554,
+  "duration_s": 43.2,
+  "selected_by": "owner",
+  "in_instrument": true,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   3.7,
+   11.433,
+   18.367,
+   21.267,
+   22.733,
+   23.533,
+   33.033,
+   39.167
+  ],
+  "cuts_per_s": 0.185
+ }
+}

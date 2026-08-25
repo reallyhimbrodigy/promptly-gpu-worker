@@ -1,0 +1,348 @@
+{
+ "hook_structure": "whip-pan/motion-blur cold-open into rapid identity-stacking cards (name -> title -> logo) that establish authority before any claim is spoken, functioning as a credibility hook rather than a question-based curiosity gap",
+ "first_visual_change_s": 0.4,
+ "beats": [
+  {
+   "beat_index": 1,
+   "t_start": 0.0,
+   "t_end": 4.2,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "card",
+    "punch_in"
+   ],
+   "cutaway_subject": null,
+   "card_text": "Hello, everyone. / Jaden Kohan / Separation Manager / LEGAL SOFT (logo)",
+   "read": "Motion-blur whip-pan grabs attention on frame 1, then a fast stack of identity cards (name, title, logo) front-loads authority before any claim is made."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 4.2,
+   "t_end": 5.1,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "him typing at a desktop computer in profile",
+   "card_text": "Over the last 2yrs",
+   "read": "Cuts away from the static intro shot to a working-professional b-roll to visually back the 'experience' claim as it's spoken."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 5.1,
+   "t_end": 6.867,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "him walking into an office building through a glass door",
+   "card_text": "I've had the opportunity to work closely",
+   "read": "Continues the walking b-roll under a building caption, using physical motion to keep pace while the sentence completes across the cut."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 6.867,
+   "t_end": 9.367,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "animated US map filling with location pins",
+   "card_text": "Our Traction",
+   "read": "Full graphic takeover replaces the speaker to visualize scale/proof ('traction') rather than just asserting it verbally."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 9.367,
+   "t_end": 12.233,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "Helping them / BUILD / GROW / OPTIMIZE / their teams",
+   "read": "Returns to talking head but keeps energy up with giant cycling background words timed to each verb, a no-cut way to punctuate a list."
+  },
+  {
+   "beat_index": 6,
+   "t_start": 12.233,
+   "t_end": 14.6,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card"
+   ],
+   "cutaway_subject": "screen recording of a website populating staffing role cards",
+   "card_text": "View Our Roles For Your Firm",
+   "read": "Cuts to product UI as literal proof of the 'roles' being discussed, letting the interface do the selling."
+  },
+  {
+   "beat_index": 7,
+   "t_start": 14.6,
+   "t_end": 16.6,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "him walking outdoors checking his phone",
+   "card_text": "And my role as SEPARATION MANAGER",
+   "read": "Lifestyle b-roll paired with his title styled in bold orange caps to re-anchor his personal authority mid-pitch."
+  },
+  {
+   "beat_index": 8,
+   "t_start": 16.6,
+   "t_end": 17.833,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "over-the-shoulder shot of him at a monitor",
+   "card_text": "my focus is making sure",
+   "read": "Word 'focus' rendered in blue to visually flag the pivot into his stated mission statement."
+  },
+  {
+   "beat_index": 9,
+   "t_start": 17.833,
+   "t_end": 19.533,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "him shaking hands and smiling with a colleague/client in-office",
+   "card_text": "every client has a smooth experience",
+   "read": "Handshake visual literalizes 'smooth experience', with 'smooth' colored orange to isolate the promise word."
+  },
+  {
+   "beat_index": 10,
+   "t_start": 19.533,
+   "t_end": 21.033,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "him standing near an illuminated 'Legal Soft' office sign, texting",
+   "card_text": "whenever staffing changes.",
+   "read": "Brand-signage backdrop reinforces company presence while caption sets up the coming stats block."
+  },
+  {
+   "beat_index": 11,
+   "t_start": 21.033,
+   "t_end": 24.2,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "3D profile-card carousel, then rotating stat panel",
+   "card_text": "Nikki G. / Our Powerful Capabilities / 40% Increase in law firm profits / 28% / 53% / 60% Savings compared to hiring locally",
+   "read": "Data visualization dump substitutes for spoken proof, letting numbers carry the credibility beat with no speaker distraction."
+  },
+  {
+   "beat_index": 12,
+   "t_start": 24.2,
+   "t_end": 27.833,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "cutaway"
+   ],
+   "cutaway_subject": "small circular inset photos of professionals appearing beside his head",
+   "card_text": "or ensuring a transition",
+   "read": "Talking head resumes but floating headshot bubbles preview the 'team' payoff before it's shown fully, a soft turn."
+  },
+  {
+   "beat_index": 13,
+   "t_start": 27.833,
+   "t_end": 29.5,
+   "purpose": "turn",
+   "speaker_on_screen": false,
+   "treatment": [
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "We make that seamless.",
+   "read": "Full-screen statement card with drifting headshot bubbles delivers the pivot line as a standalone graphic beat for emphasis."
+  },
+  {
+   "beat_index": 14,
+   "t_start": 29.5,
+   "t_end": 30.833,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "him walking through a glass door into the Legal Soft office",
+   "card_text": "At Legal Soft, we recognize",
+   "read": "Re-entry through branded doorway visually signals 'arriving' at the company's core value proposition."
+  },
+  {
+   "beat_index": 15,
+   "t_start": 30.833,
+   "t_end": 32.533,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "him shaking hands with a seated staff member near a Lakers jersey wall",
+   "card_text": "that your staff is a critical part",
+   "read": "Warm office handshake illustrates staff value in a human, unscripted-feeling moment rather than more text-on-white."
+  },
+  {
+   "beat_index": 16,
+   "t_start": 32.533,
+   "t_end": 33.733,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "him walking away down an office hallway",
+   "card_text": "of your firm's operation.",
+   "read": "Walking-away transition shot bridges back toward the desk setup for the return to direct address."
+  },
+  {
+   "beat_index": 17,
+   "t_start": 33.733,
+   "t_end": 38.0,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "Which is why we're committed to providing / EXCEPTIONAL SERVICE / OUTSTANDING TALENT",
+   "read": "Longest uninterrupted talking-head stretch, using giant bold orange headline words instead of cuts to sell the core value prop."
+  },
+  {
+   "beat_index": 18,
+   "t_start": 38.0,
+   "t_end": 39.167,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway"
+   ],
+   "cutaway_subject": "man at a trade-show booth reviewing paperwork with another attendee",
+   "card_text": null,
+   "read": "Cut to real-world conference footage functions as unscripted social proof, deliberately left caption-free to feel candid."
+  },
+  {
+   "beat_index": 19,
+   "t_start": 39.167,
+   "t_end": 40.967,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway"
+   ],
+   "cutaway_subject": "close-up of hands flipping through printed intake papers",
+   "card_text": null,
+   "read": "Insert close-up detail shot sustains the same proof beat with a texture/detail cut, still no text to preserve documentary feel."
+  },
+  {
+   "beat_index": 20,
+   "t_start": 40.967,
+   "t_end": 42.5,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway"
+   ],
+   "cutaway_subject": "woman smiling in conversation with a man wearing a 'BillChecker' shirt at a conference booth",
+   "card_text": null,
+   "read": "Final proof shot of the trade-show sequence, again bare of graphics to let the in-person interaction read as authentic."
+  },
+  {
+   "beat_index": 21,
+   "t_start": 42.5,
+   "t_end": 48.6,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "card"
+   ],
+   "cutaway_subject": null,
+   "card_text": "LegalSl -> LegalSoft.col -> LegalSoft.com / Contact us now! / +1 (424) 341-4917 / support@legalsoft.com",
+   "read": "Direct-to-camera CTA with a typing-search-bar animation and stacked contact card gives an unmissable, literal next step."
+  },
+  {
+   "beat_index": 22,
+   "t_start": 48.6,
+   "t_end": 52.6,
+   "purpose": "close",
+   "speaker_on_screen": false,
+   "treatment": [
+    "card",
+    "cutaway",
+    "sfx"
+   ],
+   "cutaway_subject": "animated blue outro card with Legal Soft logo, then Instagram icon with handle",
+   "card_text": "LEGAL SOFT / @LEGALSOFTHQ",
+   "read": "Clean branded end-card with a flash-wipe transition and pulsing Instagram icon closes the video on a follow prompt, no speaker needed."
+  }
+ ],
+ "provenance": {
+  "source_file": "56ba63210cfe4c4da625e0b457cc6703.mp4",
+  "sha256": "22ef7a120c76722c4f7701e4e057d53b17fc2f3c072fec44332c66cdd34cf9d1",
+  "bytes": 91092308,
+  "duration_s": 52.6,
+  "selected_by": "owner",
+  "in_instrument": true,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   4.2,
+   5.1,
+   6.867,
+   9.367,
+   12.233,
+   14.6,
+   16.6,
+   17.833,
+   19.533,
+   21.033,
+   24.2,
+   27.833,
+   29.5,
+   30.833,
+   32.533,
+   33.733,
+   38.0,
+   39.167,
+   40.967,
+   42.5,
+   48.6
+  ],
+  "cuts_per_s": 0.399
+ }
+}

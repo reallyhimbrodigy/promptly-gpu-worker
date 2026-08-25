@@ -1,0 +1,98 @@
+{
+ "hook_structure": "problem-cost hook: on-screen word-build captions state the pain ('stop editing manually' / 'your captions') while a fake digital counter spins up to 03:00:00, turning an abstract complaint into a visualized time-cost before the solution is revealed",
+ "first_visual_change_s": 0.5,
+ "beats": [
+  {
+   "beat_index": 1,
+   "t_start": 0.0,
+   "t_end": 4.6,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "sfx"
+   ],
+   "cutaway_subject": null,
+   "card_text": "editing. / stop manually / YOUR CAPTIONS / I KNOW ITS COSTING [digital clock counting 01:11 -> 02:52:51 -> 03:00:00]",
+   "read": "Word-by-word caption build plus a fake ticking clock overlay dramatizes the time-cost claim while the speaker stays in single unbroken shot, letting the text do the pacing instead of a cut."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 4.6,
+   "t_end": 9.767,
+   "purpose": "claim",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "grayscale desaturated background of the speaker with a color phone-mockup screen floating in front showing him talking, branded with an animated 'submagic' logo card",
+   "card_text": "submagic / SUBMAGIC AUTOMATES / THIS WHOLE / ENTIRE PROCESS / SO",
+   "read": "A hard cut desaturates the real shot and frames the speaker inside a phone-mockup with the tool's logo, visually branding the claim ('it automates this') before any software is shown."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 9.767,
+   "t_end": 21.267,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "screen recording: iPhone camera app (timer 00:00:01-03) transitioning into a desktop walkthrough of the Submagic web app \u2014 upload video, generate captions, pick caption style (Hormozi presets), open AI tools menu, add b-roll/zooms, then export at 1080p",
+   "card_text": "submagic [step counter 1/2/3/4] / 'Generate captions with AI' / 'B-rolls with transitions added successfully' / 'Export video'",
+   "read": "One long unbroken screen-capture sequence with a numbered step badge overlay walks through the actual product UI as literal proof of the automation claim, letting the software footage itself be the evidence rather than more cuts."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 21.267,
+   "t_end": 24.567,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "It feels like cheating. / i give... / i know but / give it a. / try / try on your next video.",
+   "read": "Cut back to the speaker in the original lit room; captions turn conversational and self-deprecating ('feels like cheating', 'I give') to soften the pitch into a casual recommendation, closing the demo loop."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 24.567,
+   "t_end": 28.567,
+   "purpose": "close",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "card"
+   ],
+   "cutaway_subject": "native TikTok splash/loading screen transitioning to a TikTok search bar pre-filled with '@socialcontentki...'",
+   "card_text": "TikTok / @socialcontentki...",
+   "read": "A final cut to a TikTok-app loading/search mockup functions as a bare CTA card, prompting the viewer to search the creator's handle with no additional treatment needed since the graphic is self-explanatory."
+  }
+ ],
+ "provenance": {
+  "source_file": "v14044g50000d5la79fog65q5itovh6g.mp4",
+  "sha256": "758f9506f21b2e5dc5bdc5f65a19b6f8c7434c0259e0b1fba9126feb8cbe079a",
+  "bytes": 2998488,
+  "duration_s": 28.566667,
+  "selected_by": "owner",
+  "in_instrument": false,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   4.6,
+   9.767,
+   21.267,
+   24.567
+  ],
+  "cuts_per_s": 0.14
+ }
+}

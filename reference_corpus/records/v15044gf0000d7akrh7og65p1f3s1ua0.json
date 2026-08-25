@@ -1,0 +1,199 @@
+{
+ "hook_structure": "accusatory-callout hook stacked with word-by-word kinetic text: 'IF YOURE NOT MAKING VIDEOS because YOU DONT KNOW HOW TO EDIT' -> reframed as excuse ('EXCUSE = NO GOOD'), baiting viewer identity before pivoting to solution pitch",
+ "first_visual_change_s": 0.4,
+ "beats": [
+  {
+   "beat_index": 1,
+   "t_start": 0.0,
+   "t_end": 2.0,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "punch_in"
+   ],
+   "cutaway_subject": null,
+   "card_text": "IF YOURE NOT MAKING VIDEOS because",
+   "read": "Kinetic word-by-word caption build (NOT in red, VIDEOS in giant yellow) forces the eye to the accusation while speaker walks toward camera to build presence."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 2.0,
+   "t_end": 4.5,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "punch_in",
+    "sfx"
+   ],
+   "cutaway_subject": null,
+   "card_text": "YOU DONT KNOW HOW TO EDIT / EXCUSE = NO GOOD",
+   "read": "Continues the callout with DONT in red for emphasis then whip-crossfades into a big yellow EXCUSE card with red NO GOOD stamp, editorializing the audience's assumed objection before he even states it."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 4.5,
+   "t_end": 8.0,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "and that's why / I started using / the Captions App.",
+   "read": "Location/lighting change (new room, natural window light) signals a new scene beat; word-level yellow captions keep pace with speech as he introduces the product with a floating app-icon graphic overlay."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 8.0,
+   "t_end": 12.554,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "And trust me. / I get it. / I used to feel discouraged too when I didn't know how to edit.",
+   "read": "Hard cut to a static window-lit talking-head setup builds trust/rapport tone (no punch-ins), simple burned-in captions carry the sincerity beat without visual noise."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 12.554,
+   "t_end": 13.222,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "cutaway"
+   ],
+   "cutaway_subject": "Wide static shot of living room, speaker walking away from camera toward TV stand",
+   "card_text": "how to edit.",
+   "read": "Rapid mechanical cuts (12.554/12.888/13.222) chain quick wide shots of him moving through the room, a physical scene transition bridging talking-head to phone-screen demo."
+  },
+  {
+   "beat_index": 6,
+   "t_start": 13.222,
+   "t_end": 14.431,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway"
+   ],
+   "cutaway_subject": "Wide shot of him crouched by couch, back to camera, adjusting something",
+   "card_text": null,
+   "read": "Bare beat: no text or effect layered here, editor lets the silent physical action breathe as a bridge before the phone reveal."
+  },
+  {
+   "beat_index": 7,
+   "t_start": 14.431,
+   "t_end": 24.066,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text",
+    "punch_in"
+   ],
+   "cutaway_subject": "Screen-recording of Captions App UI: AI Edit button, Quick Trim upload, style browser, New Video settings, generating/loading chat",
+   "card_text": "With AI Edit / inside the Captions App / I just upload a raw clip / choose a style / then the Captions App / will edit everything for me in minutes.",
+   "read": "Green cutting-mat background frames every phone-screen recording like a tutorial insert; captions run continuously under the UI footage to narrate each tap as literal proof of the workflow."
+  },
+  {
+   "beat_index": 8,
+   "t_start": 24.066,
+   "t_end": 26.568,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": "Close, shaky low-angle selfie shot of speaker reacting to phone screen",
+   "card_text": "and even if change a few things I still can.",
+   "read": "Jarring extreme close-up with visible motion blur mimics an offhand, unscripted 'caught in the moment' aside, contrasting the polished screen-record segment to feel authentic."
+  },
+  {
+   "beat_index": 9,
+   "t_start": 26.568,
+   "t_end": 30.239,
+   "purpose": "payoff",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "Two large framed prints side-by-side: raw clip photo vs. finished 'EDITING' title-card photo, held up by speaker behind couch",
+   "card_text": "Now look at this / raw clip / compared to the / final version",
+   "read": "Physical before/after picture-frame prop is a tangible payoff device, letting the viewer visually compare raw vs. edited output rather than just being told about it."
+  },
+  {
+   "beat_index": 10,
+   "t_start": 30.239,
+   "t_end": 33.0,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "So if you wanna start posting videos creative journey",
+   "read": "Cut back to the original dim living-room set closes the loop visually to the opening scene, plain captions keep focus on the direct-address call to action."
+  },
+  {
+   "beat_index": 11,
+   "t_start": 33.0,
+   "t_end": 34.535,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text",
+    "card"
+   ],
+   "cutaway_subject": null,
+   "card_text": "download the Captions App",
+   "read": "App logo card floats in over speaker as final CTA beat, reinforcing brand recall right before the outro cut."
+  },
+  {
+   "beat_index": 12,
+   "t_start": 34.535,
+   "t_end": 38.566893,
+   "purpose": "close",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "card"
+   ],
+   "cutaway_subject": "TikTok loading/splash screen and profile search bar showing '@lucasxmoua'",
+   "card_text": "@lucasxmoua",
+   "read": "Native TikTok UI card is used as a platform-style outro/follow prompt, a deliberate bare-of-effects screen letting the app chrome itself do the closing CTA."
+  }
+ ],
+ "provenance": {
+  "source_file": "v15044gf0000d7akrh7og65p1f3s1ua0.mp4",
+  "sha256": "dc38909eb970c8273c0f99ae0d5b78528ee2ba21d21fabd907c42127c430595e",
+  "bytes": 3542673,
+  "duration_s": 38.566893,
+  "selected_by": "owner",
+  "in_instrument": false,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   12.554,
+   12.888,
+   13.222,
+   14.431,
+   24.066,
+   26.568,
+   30.239,
+   34.535
+  ],
+  "cuts_per_s": 0.207
+ }
+}

@@ -1,0 +1,256 @@
+{
+ "hook_structure": "direct how-to promise + escalating-stat proof: 'here's how' spoken cold-open immediately paired with a climbing on-screen counter (88\u2192100 'TikToks per hour') to visually dramatize the claim before the tool is even named",
+ "first_visual_change_s": 0.5,
+ "beats": [
+  {
+   "beat_index": 0,
+   "t_start": 0.0,
+   "t_end": 0.5,
+   "purpose": "hook",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "HERE'S HOW",
+   "read": "Cold open on the speaker's face with a bold white caption locking in the promise before any cut, so viewers commit before the payoff is shown."
+  },
+  {
+   "beat_index": 1,
+   "t_start": 0.5,
+   "t_end": 3.0,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "animated counter graphic (TikTok logo + numbers ticking 88\u2192100) and an AI chip icon, layered over a blurred freeze of the speaker",
+   "card_text": "EDIT / 100 / 100 TIKTOKS PER HOUR",
+   "read": "The face is defocused and pushed to background so the escalating counter card becomes the sole legible element, manufacturing urgency around volume before any explanation."
+  },
+  {
+   "beat_index": 2,
+   "t_start": 3.0,
+   "t_end": 3.5,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "FIRST GO TO",
+   "read": "Sharp cut back to the presenter's face signals the tutorial is now starting for real, re-establishing trust after the stat interlude."
+  },
+  {
+   "beat_index": 3,
+   "t_start": 3.5,
+   "t_end": 5.5,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "screen recording of typing 'sub' then 'submagic.co' into a browser, followed by the Submagic upload UI with the speaker's own clip loaded",
+   "card_text": "AND UPLOAD / YOUR VIDEO",
+   "read": "A literal screen-record cutaway proves the step by showing the exact URL and click path rather than just telling it."
+  },
+  {
+   "beat_index": 4,
+   "t_start": 5.5,
+   "t_end": 9.0,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "looping night-time cobblestone alley b-roll (stock 'a man working' clip) sharing frame with a picture-in-picture insert of the speaker; a phone prop is briefly held in his mouth",
+   "card_text": "HERE'S HOW / SECONDS / CAN USE TIKTOK / IT'LL GENERATE / IN AI TO / CAPTIONS / WANT TO / HIT 10-K PER MONTH / IN THE FACE / MORE THAN / SOME OF / POPULAR / IN JUST / THREE SIMPLE",
+   "read": "Split-screen PIP keeps the face present for authority while the metaphorical b-roll illustrates the abstract '10K/month, faceless' claim, with word-by-word colored captions (green/white/purple) driving pace and emphasis."
+  },
+  {
+   "beat_index": 5,
+   "t_start": 9.0,
+   "t_end": 9.033,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "BUT THE",
+   "read": "A snap cut to full-frame face on 'but' flags a pivot line, using the mechanical cut to physically punctuate the turn in the script."
+  },
+  {
+   "beat_index": 6,
+   "t_start": 9.033,
+   "t_end": 11.0,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "screen recording of Submagic's caption/B-roll editor panel, cursor clicking the 'Magic B-rolls' button",
+   "card_text": "BEST PART / JUST CLICK / AUTO B-ROLL",
+   "read": "Immediate second cut into UI proof right after the 'but' turn, showing the actual click that makes the promised feature feel real and easy."
+  },
+  {
+   "beat_index": 7,
+   "t_start": 11.0,
+   "t_end": 11.5,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "WILL ADD",
+   "read": "Cut back to full-frame face resets attention to the presenter as he begins listing the auto-added features."
+  },
+  {
+   "beat_index": 8,
+   "t_start": 11.5,
+   "t_end": 13.0,
+   "purpose": "evidence",
+   "speaker_on_screen": true,
+   "treatment": [
+    "overlay_text",
+    "card"
+   ],
+   "cutaway_subject": null,
+   "card_text": "ZOOMS / TRANSITIONS / SOUND EFFECTS",
+   "read": "Feature icons (magnifier, transition arrow, speaker) stack up over the same warm-graded talking-head shot to visually tally the growing feature list without needing new footage."
+  },
+  {
+   "beat_index": 9,
+   "t_start": 13.0,
+   "t_end": 14.433,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "close-up b-roll of hands counting cash on a desk, with the same icon row (zoom/transition/sound/camera) persisting on top",
+   "card_text": "B-ROLL CLIPS",
+   "read": "The money b-roll doubles as both the 'b-roll clips' example and a subliminal wealth cue, tying the feature demo back to the earlier income claim."
+  },
+  {
+   "beat_index": 10,
+   "t_start": 14.433,
+   "t_end": 15.5,
+   "purpose": "claim",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "VIDEO / THIS TOOL / INSANELY",
+   "read": "Mechanical cut returns to a clean full-frame shot for the superlative pitch line, with 'TOOL' and 'INSANELY' styled in colored/bold text to carry emphasis the voice alone can't show on camera.",
+   "": null
+  },
+  {
+   "beat_index": 11,
+   "t_start": 15.5,
+   "t_end": 16.5,
+   "purpose": "evidence",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cutaway",
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": "full-bleed return of the night alley b-roll, no PIP this time",
+   "card_text": "A MAN WORKING WELL / FOR HIMSELF IS RESPECTED / FOR FACELESS",
+   "read": "Dropping the PIP and letting the metaphor b-roll fill the whole frame raises intensity right as the script reaches its thesis about faceless creators being respected."
+  },
+  {
+   "beat_index": 12,
+   "t_start": 16.5,
+   "t_end": 17.6,
+   "purpose": "turn",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cutaway",
+    "overlay_text"
+   ],
+   "cutaway_subject": "same alley b-roll now shrunk back into a split panel beside the reappearing talking-head insert",
+   "card_text": "ON TIKTOK AND BUT DON'T / WANT TO SHOW YOUR PERSONAL",
+   "read": "Re-introducing the face alongside the metaphor visually bridges back from the abstract clip to the personal 'don't want to show your face' pivot line."
+  },
+  {
+   "beat_index": 13,
+   "t_start": 17.6,
+   "t_end": 20.5,
+   "purpose": "payoff",
+   "speaker_on_screen": true,
+   "treatment": [
+    "cut",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "SO IF / LEVEL UP / YOUR CONTENT / BUT DON'T / WANNA HIRE / EDITOR",
+   "read": "Cut settles into a sustained clean talking-head close for the direct-address payoff line, letting per-word color changes (white/purple split on 'YOUR CONTENT', purple 'EDITOR') carry emphasis without further visual noise.",
+   "": null
+  },
+  {
+   "beat_index": 14,
+   "t_start": 20.5,
+   "t_end": 21.4,
+   "purpose": "close",
+   "speaker_on_screen": true,
+   "treatment": [
+    "card",
+    "overlay_text"
+   ],
+   "cutaway_subject": null,
+   "card_text": "CHECKOUT / SUBMAGIC",
+   "read": "Brand logo cards drop in over the still-talking face as a soft CTA, naming the product explicitly right before the video ends."
+  },
+  {
+   "beat_index": 15,
+   "t_start": 21.4,
+   "t_end": 25.45,
+   "purpose": "close",
+   "speaker_on_screen": false,
+   "treatment": [
+    "cut",
+    "card"
+   ],
+   "cutaway_subject": "TikTok app loading/search animation with the search bar auto-filling '@kellanhenneberry...'",
+   "card_text": "@ kellanhenneberry...",
+   "read": "Hard cut to a mocked-up TikTok search screen acts as a built-in follow prompt; it holds static for the final ~4 seconds with no further treatment, a deliberate bare hold to let viewers read/tap before the video loops."
+  }
+ ],
+ "provenance": {
+  "source_file": "v09044g40000cm9oa7nog65s2crhkf00.mp4",
+  "sha256": "a7b4a2935bdf696565ddf0824b2f509f8713e8da202213c9b52d95c3570fff73",
+  "bytes": 4057895,
+  "duration_s": 25.45,
+  "selected_by": "owner",
+  "in_instrument": false,
+  "analyzer_model": "claude-sonnet-5",
+  "fps": 2,
+  "width": 512,
+  "mechanical_cuts": [
+   9.0,
+   9.033,
+   14.433,
+   17.6,
+   21.4
+  ],
+  "cuts_per_s": 0.196
+ }
+}
