@@ -72,9 +72,19 @@ const PROPS = {
     { label: "Step 2: Understand Process" }, { label: "Step 3: Start Working" }],
     accentColor: PAL.accent, anchor: "center" },
   ProgressBar: { label: "SAVINGS RATE", percentage: 10, anchor: "center" },
+  // Live 14d placements (social family). IMessageBubble's live anchor is
+  // "center" — the audited condition where the authored offsetY:820 default
+  // survives the override and lands the bubble 615px below center.
+  // InstagramComment omits timestamp (the doubled-dot condition) and sends no
+  // avatarColor (the invented-IG-pink default renders); the ✨ exercises the
+  // emoji fallback.
+  IMessageBubble: { text: "LOST", status: "Delivered", messageType: "outgoing",
+    anchor: "center" },
+  InstagramComment: { likes: 1600, comment: "16 gifts for sweet 16th ✨",
+    username: "reels_viral", anchor: "bottom" },
 }[TYPE] || {};
 const SOURCE = { EvidenceCard: "seek_long.mp4", DeviceMockup: "seek_long.mp4" }[TYPE];
-const FRAMES_DEFAULT = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50], DropCard: [6, 30, 50, 92], EvidenceCard: [4, 10, 20, 46], SectionDivider: [8, 20, 44, 70], StepDivider: [8, 20, 44, 70], Timeline: [8, 20, 44, 72], ProgressBar: [6, 16, 34, 44] }[TYPE] || [4, 14, 28, 46];
+const FRAMES_DEFAULT = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50], DropCard: [6, 30, 50, 92], EvidenceCard: [4, 10, 20, 46], SectionDivider: [8, 20, 44, 70], StepDivider: [8, 20, 44, 70], Timeline: [8, 20, 44, 72], ProgressBar: [6, 16, 34, 44], IMessageBubble: [4, 10, 20, 46], InstagramComment: [4, 10, 20, 46] }[TYPE] || [4, 14, 28, 46];
 // Env overrides for live-duration timing proofs on the 30fps composition:
 //   PROBE_FPS=30 DUR_MS=1520 FRAMES=10,19,26,33 node render-mg-proof.mjs SectionDivider before-live30
 const PROBE_ID = process.env.PROBE_FPS === "30" ? "MGCraftProbe30" : "MGCraftProbe";

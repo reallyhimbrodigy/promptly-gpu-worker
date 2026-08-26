@@ -25,7 +25,10 @@ export const InstagramComment: React.FC<InstagramCommentProps> = ({
   width = 620,
   avatarSrc,
   initials,
-  avatarColor = "#E1306C",
+  // §6 palette lock (pass #11, audited): "#E1306C" was invented Instagram
+  // brand pink — chroma no palette selected, rendered whenever the spec
+  // omits avatarColor (the live one does). Neutral disc by default.
+  avatarColor = "rgba(255,255,255,0.22)",
   username,
   comment,
   timestamp,
@@ -33,7 +36,9 @@ export const InstagramComment: React.FC<InstagramCommentProps> = ({
 }) => {
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
-    { anchor: "top", offsetY: 820 },
+    // The 820 default pairs with the default "top" anchor only — it must not
+    // survive an anchor-only override (the IMessageBubble precedent, pass #11).
+    { anchor: "top", offsetY: anchor == null ? 820 : 0 },
     "InstagramComment",
   );
   const { fps } = useVideoConfig();
@@ -49,14 +54,17 @@ export const InstagramComment: React.FC<InstagramCommentProps> = ({
   // effective positions) — the worst stepper in the MG set despite being one of
   // the LONGEST entrances. OFF => today's exact spring.
   const smoothEntrance = useSmoothGraphics();
+  // 12 was authored at 60fps (200ms) — raw, it ran 2x slower at production
+  // 30fps (pass #11, audited).
+  const enterF = Math.max(3, Math.round((12 / 60) * fps));
   const springProgress = spring({
     fps,
     frame: localFrame,
     config: SPRING_SNAPPY,
-    durationInFrames: 12,
+    durationInFrames: enterF,
   });
   const enterProgress = smoothEntrance
-    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: 12 })
+    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: enterF })
     : springProgress;
   const { transform, opacity } = composeBubbleTransform(
     enterProgress,
@@ -108,6 +116,10 @@ export const InstagramComment: React.FC<InstagramCommentProps> = ({
               color: "#FFFFFF",
               textShadow: TEXT_SHADOW,
               wordBreak: "break-word",
+              // User comments carry emoji; Inter's loaded subsets don't
+              // (pass #11 — the ✨ fell through to fontconfig luck). Same
+              // stack convention as the caption system.
+              fontFamily: `${MG_FONTS.inter}, 'Noto Color Emoji', sans-serif`,
             }}
           >
             <span
@@ -134,8 +146,15 @@ export const InstagramComment: React.FC<InstagramCommentProps> = ({
             }}
           >
             <span style={{ fontWeight: 600 }}>Reply</span>
-            <span style={{ opacity: 0.7 }}>·</span>
-            <span style={{ fontWeight: 400 }}>{timestamp}</span>
+            {/* Doubled-dot fix (pass #11, audited): the separator + timestamp
+                rendered unconditionally — a spec without timestamp (the live
+                one) showed "Reply · · 1.6K likes". */}
+            {timestamp ? (
+              <>
+                <span style={{ opacity: 0.7 }}>·</span>
+                <span style={{ fontWeight: 400 }}>{timestamp}</span>
+              </>
+            ) : null}
             {likes && likes > 0 ? (
               <>
                 <span style={{ opacity: 0.7 }}>·</span>
