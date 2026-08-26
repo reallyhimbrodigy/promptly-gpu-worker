@@ -81,6 +81,19 @@ def query(since: str = "", limit: int = 6000) -> dict:
     # code (pre-deploy) and is EXCLUDED — it is not a control, it is a
     # different build, and mixing it in is exactly the contamination Rule 5
     # exists to prevent.
+    # IS THE FLIP ACTUALLY LIVE? A control job is consistent with BOTH "armed,
+    # and the hash chose control" and "the secret never reached the container" —
+    # in which case every job reads 0.70 forever and the experiment silently
+    # never runs. Recomputing the arm the SPLIT would assign makes it decisive:
+    # if some job's hash says experimental and the row says control, the env is
+    # not live in that container. Mirrors handler._resolve_stall_arm.
+    import hashlib as _hl
+    def _expected(jid, v=0.25):
+        if not jid:
+            return 0.70
+        return v if (int(_hl.sha256(str(jid).encode("utf-8")).hexdigest()[:8], 16) % 2) else 0.70
+    disagree, agree = 0, 0
+
     arms, no_field, no_dead_air = {}, 0, 0
     for r in rows:
         st = r.get("st") or {}
@@ -99,6 +112,10 @@ def query(since: str = "", limit: int = 6000) -> dict:
         a = arms.setdefault(str(arm), {
             "jobs": 0, "users": set(), "located": [], "offered": [], "preserved": [],
             "jobs_with_located": 0})
+        if _expected(r.get("id")) == arm:
+            agree += 1
+        else:
+            disagree += 1
         a["jobs"] += 1
         a["users"].add(r.get("user_id"))
         a["located"].append(loc or 0)
@@ -129,6 +146,10 @@ def query(since: str = "", limit: int = 6000) -> dict:
         }
 
     return {"window_since": since or "all", "rows_scanned": len(rows),
+            # agree==n and disagree==0 with BOTH arms present => armed and correct.
+            # disagree>0 with every row on 0.70 => the secret is NOT live in the
+            # containers and the experiment is not running.
+            "split_agrees": agree, "split_disagrees": disagree,
             "excluded_no_arm_field_predeploy": no_field,
             "excluded_no_dead_air_measurement": no_dead_air,
             "arms": out}
@@ -143,6 +164,9 @@ def main(since: str = "", limit: int = 6000):
         sys.exit(1)
     arms = r.get("arms") or {}
     print(f"\n  window: {r['window_since']}   rows scanned: {r['rows_scanned']}")
+    print(f"  split check: {r.get('split_agrees')} agree / {r.get('split_disagrees')} "
+          f"disagree with hash(job_id) — any disagreement on a 0.70 row means the "
+          f"secret is not live in that container")
     print(f"  excluded: {r['excluded_no_arm_field_predeploy']} pre-deploy (no arm field), "
           f"{r['excluded_no_dead_air_measurement']} with no dead-air measurement")
     if not arms:
