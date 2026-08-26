@@ -6205,6 +6205,13 @@ _COMPONENT_LEDGER = {}
 # lesson from _component_ledger_reset, which lived in a setter and got wiped by
 # the slowest jobs.
 _RENDER_ATTEMPTS = [0]
+# DEAD-AIR ATTRITION, in three numbers rather than one. located = cleared the
+# silence bar; offered = survived every gate and reached the model; preserved =
+# the model chose to keep. located>offered is a GATE eating spans (the Arabic
+# defect); offered>0 with preserved=0 is the model cutting them all, which is a
+# decision. Reset per job at handler entry beside the component ledger.
+_DEAD_AIR_LOCATED = [0]
+_DEAD_AIR_OFFERED = [0]   # survived every gate and reached the model
 
 # Resolved proxy sampling for THIS job. Holders rather than globals-by-name for
 # the same reason _lang_bundle_holder exists: the value is produced deep inside
@@ -11034,6 +11041,14 @@ def detect_dead_air(
             # prompt can show Gemini each span's timestamp window.
             if silence_in_gap < _WITHIN_CLIP_TRIM_TRIGGER_S:
                 continue
+            # LOCATED: cleared the SILENCE bar, before any linguistic gate.
+            # This is the number that makes the Arabic class answerable. The
+            # detector once LOCATED 116 spans and RETURNED 0 — the model was
+            # never asked — and nothing recorded the gap between those two
+            # figures, so `preserved_silences: []` could not distinguish "asked
+            # and cut everything" from "never asked". One number was doing two
+            # jobs; this is the first of the three.
+            _DEAD_AIR_LOCATED[0] += 1
             # A — the linguistic gate: within a sentence, below the stall
             # threshold, this gap is rhythm — not a candidate, not offered.
             # SKIPPED ENTIRELY when the transcript carries no terminal
@@ -15777,6 +15792,10 @@ def generate_edit_gemini(
     # NOT yet cut — Gemini decides keep/cut per span (by list-number) in this
     # call; the non-preserved ones become dead_air cuts after it returns.
     _located_silences = cut_plan.get("located_silences") or []
+    # OFFERED: what survived every gate and will be shown to the model.
+    # Set from the SAME list the prompt section iterates, so the recorded
+    # number cannot drift from what was actually asked about.
+    _DEAD_AIR_OFFERED[0] = len(_located_silences)
     print(
         f"[cuts-mechanical] {cut_plan.get('notes', '')} "
         f"→ {len(raw_cut_remove_words)} remove_word entries"
@@ -39785,6 +39804,10 @@ def handler(job):
         # must be cleared where per-job state is cleared, not in a setter that
         # happens to be nearby.
         _component_ledger_reset()
+        # per-job, same reason the component ledger resets here: a counter that
+        # survives a job attributes one job's attrition to the next.
+        _DEAD_AIR_LOCATED[0] = 0
+        _DEAD_AIR_OFFERED[0] = 0
         _RENDER_ATTEMPTS[0] = 0
 
         # Step 1 — Download + parallel stage kickoff
@@ -43669,6 +43692,15 @@ def handler(job):
                 # is exact, so any gap is VISIBLE not absorbed. Nested to survive
                 # content-studio's top-level key stripping, same as gemini_tokens.
                 "timeline": _tl_report(),
+                # DEAD-AIR ATTRITION IN THREE NUMBERS. `preserved_silences: []`
+                # is the schema DEFAULT, so alone it cannot tell "asked and cut
+                # everything" from "never asked" — which is exactly why v561's
+                # Arabic fix was unconfirmable on real traffic. located>offered
+                # names a GATE eating spans; offered>0 with preserved 0 is the
+                # model deciding. Nested beside timeline because content-studio
+                # strips top-level keys and that already ate five fields.
+                "dead_air_spans_located": _DEAD_AIR_LOCATED[0],
+                "dead_air_spans_offered": _DEAD_AIR_OFFERED[0],
             },
             # W2: which stages ran/skipped and WHY (effort-proportional proof)
             "stage_manifest": _stage_manifest,
