@@ -46,9 +46,20 @@ import json
 import sys
 
 import modal
+
+# modal_app is the app DEFINITION and is NOT in the image by default, so the
+# container's re-import of THIS module dies at `import modal_app` — which is
+# exactly what killed the first fire: 12 cells, all UserCodeException, all at
+# import time, before a single frame was rendered.
+#
+# cert_gpu_fps.py already solved it: mount modal_app.py and put / on sys.path.
+# I had diagnosed and written up this precise fix hours earlier and then did not
+# apply it here.
+sys.path.insert(0, "/")
 import modal_app
 
-app = modal.App("batch-renderclock", image=modal_app.image)
+image = modal_app.image.add_local_file("modal_app.py", "/modal_app.py")
+app = modal.App("batch-renderclock", image=image)
 
 BUCKET = "thisismybucketagainwooo"
 PREFIX = "batch-corpus"
