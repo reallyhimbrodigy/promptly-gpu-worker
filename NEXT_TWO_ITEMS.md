@@ -205,3 +205,63 @@ stage_timings.midsentence_stall_s
 constant moves, `preserved/offered` is the FALSIFIER, and `midsentence_stall_s`
 is the arm the cohort is cut by — without it a post-flip window is a mixture of
 both arms, not a cohort.
+
+---
+
+# 2026-08-26 — normalize instrumentation LANDED and REFUTED its own hypothesis
+
+`normalize_transcribe_upload` on organic v576+ traffic:
+
+    dur 48.1s   unaccounted 48.1s   n_children 5
+      wait_normalize            0
+      wait_resolved_transcript  0
+      wait_loudness_collect     0
+      wait_shot_changes_collect 0
+      wait_fps_normalize        0
+
+THE NODE EXISTS AND THE CHILDREN EXIST — the v576 instrumentation is working.
+And ALL FIVE WAITS ARE ZERO. Every future was already complete when the block
+awaited it, so **the 48.1s is not spent waiting on any of them**.
+
+I instrumented the `.result()` calls on the hypothesis that the stage was
+await-bound on the mega-pool. It is not. That hypothesis is now REFUTED by its
+own instrument, which is the useful outcome: five candidates eliminated, and
+100% of the stage still unaccounted but for a *known* reason rather than an
+unmeasured one.
+
+WHERE IT MUST BE INSTEAD: the work executing BETWEEN the awaits inside that
+block, not the awaits. The batch confirms it scales with source duration
+(~36s @20s, ~60s @60s, ~82s @120s), so it is duration-proportional work —
+transcription/upload/normalize itself — not fixed setup. A warm pool cannot fix
+it. Next instrument goes around the WORK, not the waits.
+
+# RENDERCLOCK: THE BURST BOUNDARY, RE-LEARNED
+
+`render_legs` is EMPTY on organic traffic too, not just the batch.
+PROMPTLY_RENDER_BURST=1 and handler dispatches the render via `.spawn()` into a
+separate container (handler.py ~28400). The RENDERCLOCK parser sits in the
+orchestrator's `_remotion_subprocess` stdout loop, which never runs for a burst
+render.
+
+This is the ORIGINAL "logs in the burst container" problem, reintroduced by me:
+I moved the reader one process closer and still left it on the wrong side of a
+spawn boundary. Earlier offthreadVideoThreads reads worked only because those
+were non-burst legs.
+
+STANDING RULE (owner, 2026-08-26): **no metric is ever parsed from another
+process's stdout across a spawn boundary.** Produced-where-observed,
+persisted-at-source, nested under stage_timings (content-studio strips unknown
+top-level keys — that class has bitten twice).
+
+# THE BATCH HARNESS IS A HOLDER, AND MUST BE A DISPATCHER
+
+fire3 rendered 10 of 12 cells and then died on
+`GRPCError: UNAVAILABLE ... overflow` while collecting. Every result lived only
+in returned dicts and died with the client — the `.remote()`-dies-with-client
+trap already written in this repo's notes. The harness prints a warning about
+durable records and had none.
+
+Fix: spawn + from_id, each cell written the moment it exists.
+
+Also: batch jobs are prod-isolated (`APP_URL=""`), so they never reach
+video_jobs — the free DB read cannot be paid for by a batch. Organic rows only.
