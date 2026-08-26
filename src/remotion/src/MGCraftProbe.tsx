@@ -47,11 +47,17 @@ export const MGCraftProbe: React.FC<MGCraftProbeProps> = ({ type, props, motionB
             </AbsoluteFill>
           ) : null}
           {Comp ? (
+            // Precedence (render-caught): a PROPS entry may carry its own
+            // durationMs; the probe-level override must beat it — the effect
+            // leg of the clamp proof silently ran at 4s until it did.
             <Comp
-              startMs={0}
-              durationMs={durationMs ?? 4000}
-              {...props}
-              {...(sourceUrl ? { sourceUrl } : {})}
+              {...{
+                startMs: 0,
+                durationMs: 4000,
+                ...props,
+                ...(sourceUrl ? { sourceUrl } : {}),
+                ...(durationMs != null ? { durationMs } : {}),
+              }}
             />
           ) : null}
         </AbsoluteFill>
