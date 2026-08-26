@@ -308,3 +308,19 @@ these (the one ephemeral entry is from 08-19, 0 tasks).
 Deploy orphan attributed: `65a49d1d` (step=Queued, pct=0) — the one pre-render
 row in flight at deploy time. Batching all three items into a single deploy is
 why that is one orphaned job and not three.
+
+### 2026-08-25 (cont.) — arming the stall experiment
+
+| run | cost |
+|---|---|
+| `secret_flip.py` dry-run + apply (4 ephemeral CPU containers, 2 readbacks each) | ~$0.02 |
+| deploy attempt 1 — **FAILED** after 429/429 on the webpack-cache mount race | ~$0.02 |
+| deploy v575 @ `0a7aa0a` (114s, image rebuilt after the mount change) | ~$0.03 |
+| **running session total** | **~$0.11** |
+
+Deploy attempt 1 died AFTER every gate passed, killed by our own gate's Remotion
+renders rewriting `node_modules/.cache/webpack` inside the mounted directory.
+Fixed by excluding it from the mount (283 MB less uploaded per deploy) with a
+gate assertion, 2 mutations RED-proven. Zero orphans: the quiet window held on
+poll 1 (1 job in the render stage) and cleared on poll 2 — the render delivered.
+`PROMPTLY_ALLOW_BUSY_DEPLOY` unused.
