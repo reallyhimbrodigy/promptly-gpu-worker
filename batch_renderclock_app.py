@@ -38,7 +38,9 @@ SOURCES — CORRECTED TWICE BY MEASUREMENT (probe_corpus_app.py):
   the bar for a calibration pass, and it is the bar this clears.
 
   ./run_modal.sh batch_renderclock_app.py                 # dry
-  ./run_modal.sh batch_renderclock_app.py --dry=False     # fire
+  ./run_modal.sh batch_renderclock_app.py --no-dry        # fire
+     (Modal treats bool params as FLAGS: `--dry=False` is a CLI error,
+      not a fire. It failed loudly rather than silently doing nothing.)
 """
 import json
 import sys
@@ -230,7 +232,7 @@ def main(durations: str = "20,60,120", repeats: int = 2, dry: bool = True):
     print(f"  PRICED ~$0.07-0.10 each -> ~${0.07 * len(cells):.2f}-"
           f"${0.10 * len(cells):.2f}")
     if dry:
-        print("\n  DRY RUN — nothing rendered. --dry=False to fire.")
+        print("\n  DRY RUN — nothing rendered. Pass --no-dry to fire.")
         return
 
     print(f"\n  firing {len(cells)} cells (parallel)...\n")
