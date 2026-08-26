@@ -6212,6 +6212,7 @@ _RENDER_ATTEMPTS = [0]
 # decision. Reset per job at handler entry beside the component ledger.
 _DEAD_AIR_LOCATED = [0]
 _DEAD_AIR_OFFERED = [0]   # survived every gate and reached the model
+_DEAD_AIR_PRESERVED = [0] # the model chose to KEEP (the third number)
 
 # Resolved proxy sampling for THIS job. Holders rather than globals-by-name for
 # the same reason _lang_bundle_holder exists: the value is produced deep inside
@@ -10273,6 +10274,42 @@ _DEADAIR_MIN_RANGE_DB = 8.0    # below this floor->speech separation the pass NO
 _MIDSENTENCE_STALL_S = 0.70
 
 
+def _midsentence_stall_s():
+    """The mid-sentence OFFER bar, as an experiment knob. DARK: unset => 0.70,
+    byte-identical to today.
+
+    THE FINDING THIS EXISTS TO TEST. Exactly one gate sits between
+    dead_air_spans_located and dead_air_spans_offered, and it separates two
+    thresholds 23x apart: a sentence-final pause is offered at 30ms
+    (_WITHIN_CLIP_TRIM_TRIGGER_S), a mid-sentence pause must reach 700ms.
+    Natural mid-sentence pauses run 100-400ms and sit entirely inside that dead
+    zone. Measured on a fully-punctuated English source: 13 of 20 located spans
+    dropped, 65%, never reaching the model. That is why edits come out thin.
+
+    NOT the Arabic gate — `_punctuated` was TRUE there, so this fired at FULL
+    strength. The Arabic fix DISARMS this for ASRs that do not punctuate.
+
+    SCOPED TO THE TWO SITES THAT ARE THE SAME DECISION, deliberately:
+      * the detector's offer gate (located -> offered)
+      * the downstream trim filter, which re-applies the identical test
+    Moving only the first would raise `offered` while the cut still never
+    happened — the experiment would measure nothing and read as a null.
+
+    NOT applied to the connector-word rule (`_sentence_final_word(prev)` with
+    dead air required on BOTH sides). That is a different question — keep-when-
+    in-doubt for words like "Next"/"So" — and changing it too would make the
+    arms differ in more than one way, which is uninterpretable.
+    """
+    import os
+    try:
+        v = float(os.environ.get("PROMPTLY_MIDSENTENCE_STALL_S", "") or _MIDSENTENCE_STALL_S)
+    except (TypeError, ValueError):
+        return _MIDSENTENCE_STALL_S
+    # Bounded: below the locate bar the gate is a no-op and `offered` would
+    # simply equal `located`, which measures the plumbing rather than the lever.
+    return v if _WITHIN_CLIP_TRIM_TRIGGER_S < v <= 2.0 else _MIDSENTENCE_STALL_S
+
+
 def _sentence_final_word(w):
     # NATIVE TERMINAL GLYPHS ARE TERMINAL PUNCTUATION. `؟` is the Arabic
     # question mark and `。`/`！`/`？` are the CJK forms — a transcript that
@@ -11056,7 +11093,7 @@ def detect_dead_air(
             # the ASR, not about the speech, and using it would put a whole
             # language route on the 0.70s bar by accident.
             if (_punctuated and not _sentence_final_word(words[a])
-                    and silence_in_gap < _MIDSENTENCE_STALL_S):
+                    and silence_in_gap < _midsentence_stall_s()):
                 continue
             out.append({
                 "after_word_index": a,
@@ -17278,6 +17315,12 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         _preserved_nums.add(int(_pv))
                     except (TypeError, ValueError):
                         continue
+                # THE THIRD NUMBER. Counted from the PARSED set, not from
+                # len(edit_plan["preserved_silences"]) — a duplicate or an
+                # unparseable entry would inflate the raw list while changing
+                # nothing downstream, and the count has to match what the
+                # machinery actually honours.
+                _DEAD_AIR_PRESERVED[0] = len(_preserved_nums)
                 # Stash the PRESERVED spans (timestamps) so Step 4d's span-split never cuts
                 # inside a showing beat Gemini chose to keep — judgment stays Gemini's.
                 for _i, _s in enumerate(_located_silences):
@@ -27260,7 +27303,7 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
                     else:
                         break
                 if (not _sentence_final_word(_w4)
-                        and (_tb4 - _ta4) < _MIDSENTENCE_STALL_S):
+                        and (_tb4 - _ta4) < _midsentence_stall_s()):
                     continue
                 if any(_pa < _tb4 and _pb > _ta4 for (_pa, _pb) in _preserved4):
                     continue                       # Gemini kept this beat — never split it
@@ -39808,6 +39851,7 @@ def handler(job):
         # survives a job attributes one job's attrition to the next.
         _DEAD_AIR_LOCATED[0] = 0
         _DEAD_AIR_OFFERED[0] = 0
+        _DEAD_AIR_PRESERVED[0] = 0
         _RENDER_ATTEMPTS[0] = 0
 
         # Step 1 — Download + parallel stage kickoff
@@ -43701,6 +43745,8 @@ def handler(job):
                 # strips top-level keys and that already ate five fields.
                 "dead_air_spans_located": _DEAD_AIR_LOCATED[0],
                 "dead_air_spans_offered": _DEAD_AIR_OFFERED[0],
+                "dead_air_spans_preserved": _DEAD_AIR_PRESERVED[0],
+                "midsentence_stall_s": _midsentence_stall_s(),
             },
             # W2: which stages ran/skipped and WHY (effort-proportional proof)
             "stage_manifest": _stage_manifest,

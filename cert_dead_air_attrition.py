@@ -96,6 +96,60 @@ def main():
     check("the reset sits beside the component-ledger reset",
           abs(i_reset - NC.index("_component_ledger_reset()", i_reset - 900)) < 900)
 
+    # ── THE THIRD NUMBER, AND THE EXPERIMENT KNOB ──────────────────────────
+    check("preserved is persisted as the third number",
+          '"dead_air_spans_preserved"' in NC,
+          "located->offered alone cannot show the model REJECTING what it is offered")
+    check("preserved counts the PARSED set, not the raw list",
+          "_DEAD_AIR_PRESERVED[0] = len(_preserved_nums)" in NC,
+          "a duplicate or unparseable entry would inflate the count while "
+          "changing nothing downstream")
+    check("all three reset per job",
+          NC.count("_DEAD_AIR_PRESERVED[0] = 0") == 1
+          and NC.count("_DEAD_AIR_OFFERED[0] = 0") == 1
+          and NC.count("_DEAD_AIR_LOCATED[0] = 0") == 1)
+
+    # THE ARM MUST BE RECORDED ON THE ROW. Modal mounts secrets at CONTAINER
+    # START, so after a flip production runs BOTH arms at once and a cut by
+    # timestamp is a mixture — the exact confound that made the fps read
+    # unreadable until it was re-cut by the persisted arm.
+    check("the stall value in force is persisted per job",
+          '"midsentence_stall_s": _midsentence_stall_s()' in NC,
+          "a cohort could only be cut by clock, which is a mixture not a cohort")
+
+    check("the knob is DARK by default", "_MIDSENTENCE_STALL_S = 0.70" in NC
+          and 'PROMPTLY_MIDSENTENCE_STALL_S' in NC)
+
+    # SCOPED TO THE TWO SITES THAT ARE THE SAME DECISION. The detector's offer
+    # gate and the downstream trim filter re-apply an identical test; moving
+    # only the first would raise `offered` while the cut never happened, and the
+    # experiment would read as a null. The connector-word rule (dead air on BOTH
+    # sides) is a DIFFERENT question and must stay fixed, or the arms differ in
+    # more than one way and nothing is interpretable.
+    # EXACT TEXT, NOT A COUNT. The first cut of this check counted occurrences
+    # and failed on correct code: `re.sub(r"#.*$")` strips comments but NOT
+    # DOCSTRINGS, so two lines of prose naming the constant counted as reads.
+    # A count over a body it cannot parse is the instrument being wrong about
+    # the code — the exact class this session keeps paying for.
+    check("gate site 1: the detector's offer gate reads the knob",
+          "and silence_in_gap < _midsentence_stall_s()" in NC,
+          "located -> offered would not move with the arm")
+    check("gate site 2: the downstream trim filter reads the same knob",
+          "and (_tb4 - _ta4) < _midsentence_stall_s()" in NC,
+          "offered would rise while the cut still never happened — the "
+          "experiment would read as a null for a wiring reason")
+    n_knob = NC.count("_midsentence_stall_s()")
+    check("the knob is read NOWHERE ELSE",
+          n_knob == 4,   # def + 2 gate sites + the per-job persist
+          f"{n_knob} reads; expected 4 (def, 2 gates, persist)")
+
+    # THE CONNECTOR-WORD RULE IS A DIFFERENT QUESTION and must stay on the fixed
+    # constant, or the arms differ in two ways at once and nothing is readable.
+    check("the both-sides connector rule still uses the FIXED constant",
+          "and (silence_before_s or 0.0) >= _MIDSENTENCE_STALL_S" in NC
+          and "and (silence_after_s or 0.0) >= _MIDSENTENCE_STALL_S" in NC,
+          "the both-sides rule moved with the experiment")
+
     print()
     if fails:
         print(f"  CERT DEAD-AIR-ATTRITION: FAIL ({len(fails)})")
