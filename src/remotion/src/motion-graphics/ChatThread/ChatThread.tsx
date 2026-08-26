@@ -7,6 +7,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { msToFrames } from "../shared/timing";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
@@ -195,7 +196,14 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
   initials,
   avatarColor,
 }) => {
-  const fallbackLetter = (initials ?? name).slice(0, 2).toUpperCase();
+  // User text (name/subtitle/initials) routes by script + emoji tail; the
+  // status-bar clock stays chrome Inter (font census 2026-08-26). Initials
+  // slice is code-point safe (UTF-16 .slice split surrogate pairs).
+  const fallbackLetter = [...(initials ?? name)]
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  const nameMetrics = mgTextMetrics(name);
   return (
     <div
       style={{
@@ -241,7 +249,7 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
             alignItems: "center",
             justifyContent: "center",
             color: "#FFFFFF",
-            fontFamily: MG_FONTS.inter,
+            fontFamily: mgTextFont(fallbackLetter, "inter"),
             fontSize: 48,
             fontWeight: 600,
             letterSpacing: "-0.01em",
@@ -264,19 +272,20 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
         </div>
         <div
           style={{
-            fontFamily: MG_FONTS.inter,
+            fontFamily: mgTextFont(name, "inter"),
             fontSize: 28,
             fontWeight: 600,
             color: "#FFFFFF",
             letterSpacing: "-0.01em",
-            lineHeight: 1.1,
+            // 1.1 clips matras/hooks on non-Latin names; 1.1 exactly for latin.
+            lineHeight: Math.max(1.1, nameMetrics.lineHeight),
           }}
         >
           {name}
         </div>
         <div
           style={{
-            fontFamily: MG_FONTS.inter,
+            fontFamily: mgTextFont(subtitle, "inter"),
             fontSize: 22,
             fontWeight: 400,
             color: "rgba(255,255,255,0.55)",
@@ -359,7 +368,9 @@ const MessageBubble: React.FC<BubbleProps> = ({
           color: textColor,
           padding: "16px 22px",
           borderRadius: 30,
-          fontFamily: MG_FONTS.inter,
+          // Message text is user/model text — script-routed face + emoji
+          // tail (font census 2026-08-26).
+          fontFamily: mgTextFont(text, "inter"),
           fontSize: 34,
           fontWeight: 400,
           lineHeight: 1.28,

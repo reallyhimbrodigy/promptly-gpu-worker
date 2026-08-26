@@ -4,6 +4,7 @@ import { SPRING_SNAPPY } from "../shared/springs";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { HeartIcon } from "./icons";
@@ -88,7 +89,6 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
           src={avatarSrc}
           initials={initials}
           fallbackColor={avatarColor}
-          fontFamily={MG_FONTS.inter}
           fallbackText={username}
         />
 
@@ -103,6 +103,9 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
         >
           <div
             style={{
+              // User text routes by script + emoji tail (font census
+              // 2026-08-26); the like count keeps the root Inter (chrome).
+              fontFamily: mgTextFont(username, "inter"),
               fontSize: 22,
               fontWeight: 500,
               color: "#A8A8A8",
@@ -116,6 +119,7 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
 
           <div
             style={{
+              fontFamily: mgTextFont(comment, "inter"),
               fontSize: 24,
               fontWeight: 400,
               color: "#FFFFFF",

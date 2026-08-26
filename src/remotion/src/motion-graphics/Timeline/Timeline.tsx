@@ -6,6 +6,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { mgSchedule } from "../shared/schedule";
@@ -301,8 +302,19 @@ export const Timeline: React.FC<TimelineProps> = ({
             // inside this fixed 138px card and sliced the glyphs. 0.62em/char
             // over-estimates Inter 800 uppercase w/ -0.015em tracking
             // (measured 0.604 from the font's own advances) — never crops.
-            const titleChars = Math.max(1, [...String(step.label ?? "")].length);
-            const titleSize = Math.min(48, (cardWidth - 60) / (titleChars * 0.62));
+            // Font census (2026-08-26): label + description are user/model
+            // text — routed stacks; latin keeps the 0.62 constant, non-latin
+            // uses the census's render-proven advanceEm.
+            const labelText = String(step.label ?? "");
+            const labelMetrics = mgTextMetrics(labelText);
+            const labelFont = mgTextFont(labelText, "inter");
+            const descFont = step.description
+              ? mgTextFont(step.description, "inter")
+              : undefined;
+            const advance =
+              labelMetrics.script === "latin" ? 0.62 : labelMetrics.advanceEm;
+            const titleChars = Math.max(1, [...labelText].length);
+            const titleSize = Math.min(48, (cardWidth - 60) / (titleChars * advance));
             const ghostNum = step.index ?? String(i + 1).padStart(2, "0");
             return (
               <div
@@ -379,13 +391,15 @@ export const Timeline: React.FC<TimelineProps> = ({
                         style={{
                           display: "block",
                           transform: `translateY(${titleRise.toFixed(2)}%)`,
-                          fontFamily: MG_FONTS.inter,
+                          fontFamily: labelFont,
                           fontSize: titleSize,
                           fontWeight: 800,
                           color: labelColor,
                           letterSpacing: "-0.015em",
-                          lineHeight: 1.0,
-                          textTransform: "uppercase",
+                          lineHeight: Math.max(1.0, labelMetrics.lineHeight),
+                          textTransform: labelMetrics.uppercaseSafe
+                            ? "uppercase"
+                            : "none",
                           whiteSpace: "nowrap",
                           textShadow,
                         }}
@@ -409,7 +423,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     {step.description ? (
                       <span
                         style={{
-                          fontFamily: MG_FONTS.inter,
+                          fontFamily: descFont,
                           fontSize: 26,
                           fontWeight: 500,
                           color: "rgba(20,22,28,0.6)",

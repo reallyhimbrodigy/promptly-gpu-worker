@@ -1,10 +1,11 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { mgSchedule } from "../shared/schedule";
-import type { StepDividerFontKey, StepDividerProps } from "./types";
+import type { StepDividerProps } from "./types";
 import { asText } from "../../shared/asText";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
@@ -19,12 +20,6 @@ const CONTENT_MAX = 680;
 const SEG_W = 52;
 const SEG_H = 11;
 const SEG_GAP = 12;
-
-const FONT_FAMILY: Record<StepDividerFontKey, string> = {
-  anton: MG_FONTS.anton,
-  oswald: MG_FONTS.oswald,
-  inter: MG_FONTS.inter,
-};
 
 const withAlpha = (hex: string, a: number): string => {
   const x = hex.replace("#", "");
@@ -72,7 +67,15 @@ export const StepDivider: React.FC<StepDividerProps> = ({
   const lf = localFrame;
   const steps = Math.max(1, totalSteps);
   const cur = Math.max(1, Math.min(step, steps));
-  const lines = asText(title).split("\n");
+  const titleText = asText(title);
+  const lines = titleText.split("\n");
+
+  // Font census (2026-08-26): title + kicker are user/model text — routed
+  // stacks (+ emoji tail); the padded step digits stay chrome (bare Inter).
+  const titleMetrics = mgTextMetrics(titleText);
+  const titleFont = mgTextFont(titleText, fontKey);
+  const kickerFont = mgTextFont(kicker, "inter");
+  const kickerUppercaseSafe = mgTextMetrics(kicker).uppercaseSafe;
 
   // Width-driven autofit (pass #9, takeover law): the fixed 122px title sat at
   // ~32% of the frame — a divider that lands alone owns its axis. The title
@@ -81,7 +84,14 @@ export const StepDivider: React.FC<StepDividerProps> = ({
   // crop.
   let maxChars = 1;
   for (const l of lines) maxChars = Math.max(maxChars, [...l].length);
-  const advance = fontKey === "inter" ? 0.62 : 0.52;
+  // Latin keeps the measured constants; non-latin uses the census's
+  // render-proven advanceEm (deliberate over-estimate — never crops).
+  const advance =
+    titleMetrics.script === "latin"
+      ? fontKey === "inter"
+        ? 0.62
+        : 0.52
+      : titleMetrics.advanceEm;
   const fitTitleSize = Math.round(
     Math.max(56, Math.min(CONTENT_MAX / (maxChars * advance), 240)),
   );
@@ -193,7 +203,7 @@ export const StepDivider: React.FC<StepDividerProps> = ({
               fontSize: 32,
               fontWeight: 700,
               letterSpacing: "0.28em",
-              textTransform: "uppercase",
+              textTransform: kickerUppercaseSafe ? "uppercase" : "none",
               marginBottom: 26,
               opacity: kickerO,
               transform: `translateY(${kickerY.toFixed(2)}px)`,
@@ -201,7 +211,9 @@ export const StepDivider: React.FC<StepDividerProps> = ({
               whiteSpace: "nowrap",
             }}
           >
-            <span style={{ color: kickerColor }}>{kicker} </span>
+            <span style={{ color: kickerColor, fontFamily: kickerFont }}>
+              {kicker}{" "}
+            </span>
             <span style={{ color: accentColor }}>
               {String(cur).padStart(2, "0")}
             </span>
@@ -252,13 +264,16 @@ export const StepDivider: React.FC<StepDividerProps> = ({
               >
                 <div
                   style={{
-                    fontFamily: FONT_FAMILY[fontKey],
+                    fontFamily: titleFont,
                     fontSize: fitTitleSize,
                     fontWeight: 400,
                     color: titleColor,
                     letterSpacing: "-0.01em",
-                    lineHeight: 1.02,
-                    textTransform: uppercase ? "uppercase" : "none",
+                    lineHeight: Math.max(1.02, titleMetrics.lineHeight),
+                    textTransform:
+                      uppercase && titleMetrics.uppercaseSafe
+                        ? "uppercase"
+                        : "none",
                     textAlign: "center",
                     whiteSpace: "nowrap",
                     opacity: lineO,

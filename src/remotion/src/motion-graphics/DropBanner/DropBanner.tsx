@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { DropBannerPoint, DropBannerProps } from "./types";
 import { asText } from "../../shared/asText";
@@ -107,6 +108,10 @@ export const DropBanner: React.FC<DropBannerProps> = ({
   }
   const columnY = -slideHeight * stepSum;
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // the circle digits keep bare MG_FONTS (chrome).
+  const titleMetrics = mgTextMetrics(title);
+
   // --- Slide 0: the numbered intro ---
   const introSlide = (
     <div
@@ -121,14 +126,14 @@ export const DropBanner: React.FC<DropBannerProps> = ({
     >
       <div
         style={{
-          fontFamily: MG_FONTS.anton,
+          fontFamily: mgTextFont(title, "anton"),
           fontSize: 72,
           fontWeight: 400,
           color: titleColor,
           letterSpacing: "-0.005em",
-          textTransform: "uppercase",
+          textTransform: titleMetrics.uppercaseSafe ? "uppercase" : "none",
           textAlign: "center",
-          lineHeight: 1.02,
+          lineHeight: Math.max(1.02, titleMetrics.lineHeight),
           opacity: titleOpacity,
         }}
       >
@@ -138,7 +143,7 @@ export const DropBanner: React.FC<DropBannerProps> = ({
       {subtitle ? (
         <div
           style={{
-            fontFamily: MG_FONTS.inter,
+            fontFamily: mgTextFont(subtitle, "inter"),
             fontSize: 32,
             fontWeight: 400,
             color: subtitleColor,
@@ -252,7 +257,10 @@ export const DropBanner: React.FC<DropBannerProps> = ({
   // --- Caption slides: one per point, word-by-word grey -> black ---
   const captionSlides = points.map((pt, k) => {
     const captionStart = FIRST_SCROLL + k * STEP + SETTLE;
-    const words = asText(pt.caption).split(" ");
+    const captionText = asText(pt.caption);
+    const words = captionText.split(" ");
+    // Point title + caption are model text (font census 2026-08-26).
+    const ptTitleMetrics = mgTextMetrics(pt.title);
     return (
       <div
         key={`pt-${k}`}
@@ -267,13 +275,13 @@ export const DropBanner: React.FC<DropBannerProps> = ({
       >
         <div
           style={{
-            fontFamily: MG_FONTS.anton,
+            fontFamily: mgTextFont(pt.title, "anton"),
             fontSize: 60,
             fontWeight: 400,
             color: accentColor,
-            textTransform: "uppercase",
+            textTransform: ptTitleMetrics.uppercaseSafe ? "uppercase" : "none",
             letterSpacing: "-0.01em",
-            lineHeight: 1.0,
+            lineHeight: Math.max(1.0, ptTitleMetrics.lineHeight),
           }}
         >
           {pt.title}
@@ -282,7 +290,7 @@ export const DropBanner: React.FC<DropBannerProps> = ({
         <div
           style={{
             marginTop: 36,
-            fontFamily: MG_FONTS.inter,
+            fontFamily: mgTextFont(captionText, "inter"),
             fontSize: 44,
             fontWeight: 600,
             lineHeight: 1.34,

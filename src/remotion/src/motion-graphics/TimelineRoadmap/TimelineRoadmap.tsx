@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, interpolateColors } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { TimelineRoadmapProps, TimelineRoadmapStep } from "./types";
@@ -512,6 +513,13 @@ export const TimelineRoadmap: React.FC<TimelineRoadmapProps> = ({
               ? { left: nodeX + R }
               : { right: width - (nodeX - R) };
 
+            // Font census (2026-08-26): label + sublabel are user/model text —
+            // routed stacks, gated caps, non-latin line-height floor.
+            const labelMetrics = mgTextMetrics(step.label);
+            const labelFont = mgTextFont(step.label, "inter");
+            const sublabelMetrics = mgTextMetrics(step.sublabel ?? "");
+            const sublabelFont = mgTextFont(step.sublabel ?? "", "inter");
+
             return (
               <div
                 key={`label-${i}`}
@@ -552,13 +560,15 @@ export const TimelineRoadmap: React.FC<TimelineRoadmapProps> = ({
                 >
                   <div
                     style={{
-                      fontFamily: MG_FONTS.inter,
+                      fontFamily: labelFont,
                       fontSize: 58,
                       fontWeight: 800,
                       color: labelColor,
                       letterSpacing: "-0.015em",
-                      lineHeight: 1.02,
-                      textTransform: "uppercase",
+                      lineHeight: Math.max(1.02, labelMetrics.lineHeight),
+                      textTransform: labelMetrics.uppercaseSafe
+                        ? "uppercase"
+                        : "none",
                       whiteSpace: "nowrap",
                       textAlign: onRight ? "left" : "right",
                       textShadow,
@@ -574,13 +584,15 @@ export const TimelineRoadmap: React.FC<TimelineRoadmapProps> = ({
                         padding: "6px 18px",
                         borderRadius: 999,
                         background: accentColor,
-                        fontFamily: MG_FONTS.inter,
+                        fontFamily: sublabelFont,
                         fontSize: 28,
                         fontWeight: 700,
                         color: "#10131A",
                         letterSpacing: "0.03em",
-                        lineHeight: 1.1,
-                        textTransform: "uppercase",
+                        lineHeight: Math.max(1.1, sublabelMetrics.lineHeight),
+                        textTransform: sublabelMetrics.uppercaseSafe
+                          ? "uppercase"
+                          : "none",
                         whiteSpace: "nowrap",
                         boxShadow: `0 4px 14px ${accentColor}66`,
                       }}

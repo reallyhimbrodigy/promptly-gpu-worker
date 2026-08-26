@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { AbsoluteFill, interpolate } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { PullQuoteFontKey, PullQuoteProps } from "./types";
@@ -26,14 +27,6 @@ const MAX_FONT = 320;
 const DEFAULT_TEXT_SHADOW =
   "0 2px 8px rgba(0,0,0,0.6), 0 8px 30px rgba(0,0,0,0.45), 0 0 2px rgba(0,0,0,0.5)";
 
-const FONT_FAMILY: Record<PullQuoteFontKey, string> = {
-  anton: MG_FONTS.anton,
-  oswald: MG_FONTS.oswald,
-  inter: MG_FONTS.inter,
-  roboto: MG_FONTS.roboto,
-  dmSerifDisplay: MG_FONTS.dmSerifDisplay,
-  playfairDisplay: MG_FONTS.playfairDisplay,
-};
 const CHAR_RATIO: Record<PullQuoteFontKey, number> = {
   anton: 0.52,
   oswald: 0.55,
@@ -43,8 +36,11 @@ const CHAR_RATIO: Record<PullQuoteFontKey, number> = {
   playfairDisplay: 0.5,
 };
 
+// Unicode-aware (font census 2026-08-26): the old [^a-zA-Z0-9] strip deleted
+// every non-Latin keyword to "" — silent content deletion (a Hindi keyword
+// could never match its word). Strip punctuation/whitespace only.
 const normalize = (w: string): string =>
-  w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  w.replace(/[^\p{L}\p{N}]/gu, "").toLocaleLowerCase();
 
 export const PullQuote: React.FC<PullQuoteProps> = ({
   startMs,
@@ -123,8 +119,16 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
     for (let i = 0; i < words.length; i += m) lines.push(words.slice(i, i + m));
   }
 
-  // Deterministic font-fit (no DOM measurement).
-  const ratio = CHAR_RATIO[fontKey];
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // computed once for the whole quote so every word carries one face.
+  const quoteText = words.join(" ");
+  const quoteFont = mgTextFont(quoteText, fontKey);
+  const quoteMetrics = mgTextMetrics(quoteText);
+
+  // Deterministic font-fit (no DOM measurement). CHAR_RATIO stays the latin
+  // advance; non-Latin uses the census-conservative estimate.
+  const ratio =
+    quoteMetrics.script === "latin" ? CHAR_RATIO[fontKey] : quoteMetrics.advanceEm;
   let maxWeight = 0;
   for (const line of lines) {
     let w = 0;
@@ -347,13 +351,19 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                     style={{
                       position: "relative",
                       display: "inline-block",
-                      fontFamily: FONT_FAMILY[fontKey],
+                      fontFamily: quoteFont,
                       fontSize: restingSize,
                       fontWeight,
                       color,
-                      textTransform: uppercase ? "uppercase" : "none",
+                      textTransform:
+                        uppercase && quoteMetrics.uppercaseSafe
+                          ? "uppercase"
+                          : "none",
                       letterSpacing: "-0.01em",
-                      lineHeight: 0.95,
+                      lineHeight:
+                        quoteMetrics.script === "latin"
+                          ? 0.95
+                          : quoteMetrics.lineHeight,
                       opacity,
                       transform: `translateY(${riseY}px) scale(${wordScale})`,
                       transformOrigin: "center",

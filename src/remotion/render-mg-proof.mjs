@@ -96,13 +96,15 @@ const SOURCE = { EvidenceCard: "seek_long.mp4", DeviceMockup: "seek_long.mp4" }[
 const FRAMES_DEFAULT = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50], DropCard: [6, 30, 50, 92], EvidenceCard: [4, 10, 20, 46], SectionDivider: [8, 20, 44, 70], StepDivider: [8, 20, 44, 70], Timeline: [8, 20, 44, 72], ProgressBar: [6, 16, 34, 44], IMessageBubble: [4, 10, 20, 46], InstagramComment: [4, 10, 20, 46], AnnotationArrow: [4, 10, 18, 30], StickyNotes: [6, 14, 26, 40] }[TYPE] || [4, 14, 28, 46];
 // Env overrides for live-duration timing proofs on the 30fps composition:
 //   PROBE_FPS=30 DUR_MS=1520 FRAMES=10,19,26,33 node render-mg-proof.mjs SectionDivider before-live30
+// PROPS_JSON replaces the entry's PROPS wholesale (script-coverage specimens etc.).
 const PROBE_ID = process.env.PROBE_FPS === "30" ? "MGCraftProbe30" : "MGCraftProbe";
 const DUR_MS = process.env.DUR_MS ? Number(process.env.DUR_MS) : undefined;
 const FRAMES = process.env.FRAMES ? process.env.FRAMES.split(",").map(Number) : FRAMES_DEFAULT;
+const PROPS_FINAL = process.env.PROPS_JSON ? JSON.parse(process.env.PROPS_JSON) : PROPS;
 
 console.log(`[mg-proof] ${TYPE} (${TAG}) — bundling…`);
 const serveUrl = await bundle({ entryPoint: path.resolve(__dirname, "src/index.ts") });
-const inputProps = { type: TYPE, props: PROPS, motionBlur: true, ...(BG ? { bgVideo: BG } : {}), ...(SOURCE ? { sourceVideo: SOURCE } : {}), ...(DUR_MS ? { durationMs: DUR_MS } : {}) };
+const inputProps = { type: TYPE, props: PROPS_FINAL, motionBlur: true, ...(BG ? { bgVideo: BG } : {}), ...(SOURCE ? { sourceVideo: SOURCE } : {}), ...(DUR_MS ? { durationMs: DUR_MS } : {}) };
 const composition = await selectComposition({ serveUrl, id: PROBE_ID, inputProps });
 for (const frame of FRAMES) {
   const output = path.join(outDir, `${TYPE}_${TAG}_f${String(frame).padStart(2, "0")}.png`);

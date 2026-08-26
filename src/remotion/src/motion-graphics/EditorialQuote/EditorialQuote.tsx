@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { AbsoluteFill, interpolate } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { EditorialQuoteProps } from "./types";
@@ -62,6 +63,15 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
     lines.push(words.slice(i, i + m).join(" "));
   }
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // the giant quote-mark plane below keeps the bare face (chrome glyph).
+  const quoteText = words.join(" ");
+  const quoteFont = mgTextFont(quoteText, fontKey);
+  const quoteMetrics = mgTextMetrics(quoteText);
+  const authorFont = mgTextFont(author ?? "", "inter");
+  const authorCapsSafe = mgTextMetrics(author ?? "").uppercaseSafe;
+  const roleFont = mgTextFont(role ?? "", "inter");
+
   // Deterministic font-fit on the longest line (no DOM measurement).
   let maxChars = 0;
   for (const l of lines) maxChars = Math.max(maxChars, l.length);
@@ -70,8 +80,12 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
   // (render-caught: fontSize=108 bound while widthFit allowed ~130, leaving a
   // ~150px dead right margin). The bar (9) + gap (38) live inside the centered
   // block, so the text's usable width is TEXT_MAX_WIDTH minus that 47px.
+  // CHAR_RATIO stays the latin-italic-serif advance; non-Latin uses the
+  // census-conservative estimate.
+  const charRatio =
+    quoteMetrics.script === "latin" ? CHAR_RATIO : quoteMetrics.advanceEm;
   const widthFit =
-    (TEXT_MAX_WIDTH - 47) / (Math.max(1, maxChars) * CHAR_RATIO);
+    (TEXT_MAX_WIDTH - 47) / (Math.max(1, maxChars) * charRatio);
   const finalFontSize = clamp(widthFit, 56, 165);
 
   // Left accent bar draws down first.
@@ -218,12 +232,12 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
                 <div
                   key={li}
                   style={{
-                    fontFamily: MG_FONTS[fontKey],
+                    fontFamily: quoteFont,
                     fontSize: finalFontSize,
                     fontStyle: italic ? "italic" : "normal",
                     fontWeight: 500,
                     color: textColor,
-                    lineHeight: 1.16,
+                    lineHeight: Math.max(1.16, quoteMetrics.lineHeight),
                     letterSpacing: "-0.01em",
                     whiteSpace: "nowrap",
                     position: "relative",
@@ -268,12 +282,12 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
               >
                 <div
                   style={{
-                    fontFamily: MG_FONTS.inter,
+                    fontFamily: authorFont,
                     fontSize: Math.round(finalFontSize * 0.3),
                     fontWeight: 700,
                     color: textColor,
                     letterSpacing: "0.08em",
-                    textTransform: "uppercase",
+                    textTransform: authorCapsSafe ? "uppercase" : "none",
                   }}
                 >
                   {author}
@@ -281,7 +295,7 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
                 {role ? (
                   <div
                     style={{
-                      fontFamily: MG_FONTS.inter,
+                      fontFamily: roleFont,
                       fontSize: Math.round(finalFontSize * 0.22),
                       fontWeight: 500,
                       color: authorColor,

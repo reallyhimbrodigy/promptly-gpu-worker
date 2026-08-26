@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, interpolate } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { PillClusterProps } from "./types";
@@ -86,6 +86,11 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   const N = rendered.length;
   if (N === 0) return null;
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // computed once per tag — layout advance + span style both read these.
+  const tagFonts = rendered.map((t) => mgTextFont(t, "inter"));
+  const tagMetrics = rendered.map((t) => mgTextMetrics(t));
+
   // Shuffle the pop-in order deterministically so it doesn't read left→right.
   const orderBySeed = rendered
     .map((_, i) => i)
@@ -103,14 +108,18 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   const PAD_Y = 21;
   const pillH = fontSize + PAD_Y * 2;
   const rowStep = Math.round(pillH * 0.78); // rows overlap ~22% of pill height — edges tuck, text stays clear
-  const estW = (t: string): number =>
-    PAD_X * 2 + Math.max(3, t.length) * fontSize * 0.56;
+  // 0.56 stays the latin advance; non-Latin uses the census estimate.
+  const estW = (t: string, ti: number): number =>
+    PAD_X * 2 +
+    Math.max(3, t.length) *
+      fontSize *
+      (tagMetrics[ti].script === "latin" ? 0.56 : tagMetrics[ti].advanceEm);
   const placed: { x: number; y: number; rot: number }[] = [];
   {
     let x = 0;
     let row = 0;
     rendered.forEach((tag, i) => {
-      const w = Math.min(estW(tag), width);
+      const w = Math.min(estW(tag, i), width);
       if (x > 0 && x + w > width) {
         row += 1;
         // Alternating row indent so the left edge staggers like a real pile.
@@ -125,7 +134,7 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   }
   const clusterW = Math.min(
     width,
-    Math.max(...rendered.map((t, i) => placed[i].x + estW(t))),
+    Math.max(...rendered.map((t, i) => placed[i].x + estW(t, i))),
   );
   const clusterH = placed[placed.length - 1].y + pillH;
 
@@ -227,12 +236,12 @@ export const PillCluster: React.FC<PillClusterProps> = ({
               >
                 <span
                   style={{
-                    fontFamily: MG_FONTS.inter,
+                    fontFamily: tagFonts[i],
                     fontSize,
                     fontWeight: 600,
                     color: isAccent ? "#15151E" : textColor,
                     letterSpacing: "0.005em",
-                    lineHeight: 1,
+                    lineHeight: Math.max(1, tagMetrics[i].lineHeight),
                     textShadow: isAccent ? undefined : textShadow,
                   }}
                 >

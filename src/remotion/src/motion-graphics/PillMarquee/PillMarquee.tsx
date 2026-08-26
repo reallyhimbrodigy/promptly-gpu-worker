@@ -1,8 +1,8 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { useMGPhase } from "../shared/useMGPhase";
-import type { PillMarqueeFontKey, PillMarqueeProps } from "./types";
+import type { PillMarqueeProps } from "./types";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 
@@ -22,11 +22,6 @@ const DEFAULT_PALETTE = [
   "#EC4899",
   "#F5D90A",
 ];
-
-const FONT_FAMILY: Record<PillMarqueeFontKey, string> = {
-  inter: MG_FONTS.inter,
-  oswald: MG_FONTS.oswald,
-};
 
 const rotate = <T,>(arr: T[], by: number): T[] => {
   const n = arr.length;
@@ -70,9 +65,13 @@ export const PillMarquee: React.FC<PillMarqueeProps> = ({
   if (!visible) return null;
   if (pills.length === 0) return null;
 
+  // CHAR_W stays the latin advance; non-Latin uses the census estimate
+  // (font census 2026-08-26).
   const estPillW = (label: string): number => {
     const text = hashtag ? `#${label}` : label;
-    return Math.ceil(text.length * fontSize * CHAR_W) + paddingX * 2 + 4;
+    const m = mgTextMetrics(text);
+    const charW = m.script === "latin" ? CHAR_W : m.advanceEm;
+    return Math.ceil(text.length * fontSize * charW) + paddingX * 2 + 4;
   };
 
   const opacity =
@@ -85,6 +84,9 @@ export const PillMarquee: React.FC<PillMarqueeProps> = ({
   const renderPill = (label: string, key: string, hue: string) => {
     // Clean monochrome pill; the single accent shows only on the "#".
     const accent = colorMode === "varied" ? hue : accentColor;
+    // User/model text routes by script + emoji tail (font census 2026-08-26).
+    const pillFont = mgTextFont(label, fontKey);
+    const pillMetrics = mgTextMetrics(label);
     return (
       <div
         key={key}
@@ -111,13 +113,14 @@ export const PillMarquee: React.FC<PillMarqueeProps> = ({
       >
         <span
           style={{
-            fontFamily: FONT_FAMILY[fontKey],
+            fontFamily: pillFont,
             fontSize,
             fontWeight: 600,
             color: textColor,
-            textTransform: uppercase ? "uppercase" : "none",
+            textTransform:
+              uppercase && pillMetrics.uppercaseSafe ? "uppercase" : "none",
             letterSpacing: uppercase ? "0.06em" : "-0.01em",
-            lineHeight: 1,
+            lineHeight: Math.max(1, pillMetrics.lineHeight),
             textShadow: PILL_TEXT_SHADOW,
           }}
         >

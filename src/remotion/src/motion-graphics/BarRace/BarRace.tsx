@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, interpolateColors } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { RaceBarItem, BarRaceProps } from "./types";
@@ -80,6 +81,13 @@ export const BarRace: React.FC<BarRaceProps> = ({
   const barAreaW = width - VALUE_RESERVE;
   const blockHeight = N * ROW_H;
   const eps = maxVal * 0.05;
+
+  // Value affixes are user text (font census 2026-08-26); the digits are
+  // script-neutral so the affixes drive the tip stack's routing. Rank
+  // badges keep bare MG_FONTS (chrome).
+  const affixText = `${valuePrefix}${valueSuffix}`;
+  const affixFont = mgTextFont(affixText, "inter");
+  const affixLineHeight = Math.max(1, mgTextMetrics(affixText).lineHeight);
 
   const exitOpacity = 1 - exitProgress;
   const exitY = -10 * exitProgress;
@@ -248,13 +256,14 @@ export const BarRace: React.FC<BarRaceProps> = ({
                   </div>
                   <div
                     style={{
-                      fontFamily: MG_FONTS.inter,
+                      // Bar labels are user text (font census 2026-08-26).
+                      fontFamily: mgTextFont(bar.label, "inter"),
                       fontSize: 40,
                       fontWeight: 700,
                       // Blends white → accent in step with the bar fill.
                       color: valueColor,
                       letterSpacing: "0.005em",
-                      lineHeight: 1,
+                      lineHeight: Math.max(1, mgTextMetrics(bar.label).lineHeight),
                       textShadow,
                     }}
                   >
@@ -321,8 +330,8 @@ export const BarRace: React.FC<BarRaceProps> = ({
                       transform: "translateY(-50%)",
                       display: "flex",
                       alignItems: "baseline",
-                      fontFamily: MG_FONTS.inter,
-                      lineHeight: 1,
+                      fontFamily: affixFont,
+                      lineHeight: affixLineHeight,
                       whiteSpace: "nowrap",
                     }}
                   >

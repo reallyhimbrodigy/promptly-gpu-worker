@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, interpolate, interpolateColors, useVideoConfig } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { ReticleProps } from "./types";
@@ -106,6 +106,10 @@ export const Reticle: React.FC<ReticleProps> = ({
     [0, 14, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
+
+  // User/model text routes by script + emoji tail (font census 2026-08-26).
+  const tagFont = mgTextFont(label ?? "", "inter");
+  const tagMetrics = mgTextMetrics(label ?? "");
 
   // Tag spring-in at the corner (eased gently so it doesn't snap-pop).
   const tagScale = easeOutBack(clamp01((localFrame - LOCK) / 28));
@@ -311,13 +315,15 @@ export const Reticle: React.FC<ReticleProps> = ({
               />
               <span
                 style={{
-                  fontFamily: MG_FONTS.inter,
+                  fontFamily: tagFont,
                   fontSize: 30,
                   fontWeight: 700,
                   color: "#FFFFFF",
                   letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                  lineHeight: 1,
+                  textTransform: tagMetrics.uppercaseSafe
+                    ? "uppercase"
+                    : "none",
+                  lineHeight: Math.max(1, tagMetrics.lineHeight),
                   textShadow,
                 }}
               >

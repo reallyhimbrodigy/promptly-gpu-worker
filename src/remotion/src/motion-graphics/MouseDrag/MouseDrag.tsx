@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, interpolate } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { CursorArrow } from "./cursor";
@@ -39,6 +39,10 @@ export const MouseDrag: React.FC<MouseDragProps> = ({
   );
 
   if (!visible) return null;
+
+  // User/model text routes by script + emoji tail (font census 2026-08-26).
+  const labelFont = mgTextFont(label, "inter");
+  const labelMetrics = mgTextMetrics(label);
 
   const lf = localFrame;
   const cx = regionWidth / 2;
@@ -156,12 +160,12 @@ export const MouseDrag: React.FC<MouseDragProps> = ({
           >
             <span
               style={{
-                fontFamily: MG_FONTS.inter,
+                fontFamily: labelFont,
                 fontSize: 46,
                 fontWeight: 800,
                 color: cardTextColor,
                 letterSpacing: "0.01em",
-                lineHeight: 1,
+                lineHeight: Math.max(1, labelMetrics.lineHeight),
               }}
             >
               {label}

@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { StatCardProps } from "./types";
@@ -111,10 +112,22 @@ export const StatCard: React.FC<StatCardProps> = ({
   // envelope is stable while the count grows into it — the figure never jumps.
   const finalDisplay =
     decimals !== undefined ? value.toFixed(decimals) : Math.round(value).toLocaleString();
-  const affixChars = (prefix ? prefix.length : 0) + (suffix ? suffix.length : 0);
+  // Font census (2026-08-26): label + prefix/suffix are user/model text —
+  // routed stacks (+ emoji tail); the digits stay chrome (bare Anton). The
+  // affix width estimate keeps 0.5em/char for latin; non-latin uses the
+  // census's render-proven advanceEm.
+  const prefixMetrics = mgTextMetrics(prefix ?? "");
+  const suffixMetrics = mgTextMetrics(suffix ?? "");
+  const prefixFont = mgTextFont(prefix ?? "", "anton");
+  const suffixFont = mgTextFont(suffix ?? "", "anton");
+  const labelMetrics = mgTextMetrics(label);
+  const labelFont = mgTextFont(label, "inter");
+  const affixEm = (s: string, m: ReturnType<typeof mgTextMetrics>): number =>
+    m.script === "latin" ? s.length * 0.5 : [...s].length * m.advanceEm;
   const totalEm =
     estWidthEm(finalDisplay) +
-    affixChars * 0.5 * AFFIX_RATIO +
+    (affixEm(prefix ?? "", prefixMetrics) + affixEm(suffix ?? "", suffixMetrics)) *
+      AFFIX_RATIO +
     (prefix ? 0.08 : 0) +
     (suffix ? 0.08 : 0);
   const numberSize = Math.max(
@@ -205,7 +218,16 @@ export const StatCard: React.FC<StatCardProps> = ({
               }}
             >
               {prefix ? (
-                <span style={{ ...affixStyle, marginRight: affixGap }}>{prefix}</span>
+                <span
+                  style={{
+                    ...affixStyle,
+                    fontFamily: prefixFont,
+                    lineHeight: Math.max(1, prefixMetrics.lineHeight),
+                    marginRight: affixGap,
+                  }}
+                >
+                  {prefix}
+                </span>
               ) : null}
               <span
                 style={{
@@ -220,7 +242,16 @@ export const StatCard: React.FC<StatCardProps> = ({
                 {display}
               </span>
               {suffix ? (
-                <span style={{ ...affixStyle, marginLeft: affixGap }}>{suffix}</span>
+                <span
+                  style={{
+                    ...affixStyle,
+                    fontFamily: suffixFont,
+                    lineHeight: Math.max(1, suffixMetrics.lineHeight),
+                    marginLeft: affixGap,
+                  }}
+                >
+                  {suffix}
+                </span>
               ) : null}
             </div>
 
@@ -244,14 +275,14 @@ export const StatCard: React.FC<StatCardProps> = ({
           {/* ANCHORED LABEL — tucked tight under the spine; one object, not a stack. */}
           <div
             style={{
-              fontFamily: MG_FONTS.inter,
+              fontFamily: labelFont,
               fontSize: labelSize,
               fontWeight: 700,
               color: labelColor,
               letterSpacing: "0.2em",
-              textTransform: "uppercase",
+              textTransform: labelMetrics.uppercaseSafe ? "uppercase" : "none",
               textAlign: "center",
-              lineHeight: 1.1,
+              lineHeight: Math.max(1.1, labelMetrics.lineHeight),
               marginTop: numberSize * 0.03,
               opacity: labelFadeIn,
               transform: `translateY(${labelY}px)`,

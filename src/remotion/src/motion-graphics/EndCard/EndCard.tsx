@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { useMGPhase } from "../shared/useMGPhase";
 import { asText } from "../../shared/asText";
 import { SafeImg } from "../../SafeImg";
@@ -9,6 +9,9 @@ import type { EndCardLine, EndCardProps } from "./types";
 const clamp01 = (t: number): number => Math.max(0, Math.min(1, t));
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 
+// Symbol literals, not text: their spans still carry the mgTextFont stack so
+// the symbol/emoji presentation is declared, not a fontconfig accident
+// (font census 2026-08-26). Candidates for SVG replacement.
 const GLYPH: Record<string, string> = {
   globe: "○", phone: "✆", mail: "✉", at: "@",
 };
@@ -52,17 +55,27 @@ export const EndCard: React.FC<EndCardProps> = ({
   // The sting is a spring so it lands with weight; the other kinds rise.
   const stingScale = spring({ frame, fps, config: { damping: 14, mass: 0.7 } });
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26).
+  const titleText = asText(title ?? "");
+  const titleFont = mgTextFont(titleText, "anton");
+  const titleMetrics = mgTextMetrics(titleText);
+
   const renderLine = (l: EndCardLine, i: number) => {
     const li = clamp01(enter * 1.6 - i * 0.12);
+    const lineText = asText(l.text);
+    const glyph = l.icon ? GLYPH[l.icon] ?? "" : "";
     return (
       <div key={i} style={{
         display: "flex", alignItems: "center", gap: Math.round(lineSize * 0.5),
         opacity: li, transform: `translateY(${interpolate(li, [0, 1], [12, 0])}px)`,
-        color: palette.fg, fontFamily: MG_FONTS.inter, fontWeight: 600,
-        fontSize: lineSize, letterSpacing: "0.02em",
+        color: palette.fg, fontFamily: mgTextFont(lineText, "inter"),
+        fontWeight: 600, fontSize: lineSize, letterSpacing: "0.02em",
       }}>
-        {l.icon ? <span style={{ color: palette.accent }}>{GLYPH[l.icon] ?? ""}</span> : null}
-        <span>{asText(l.text)}</span>
+        {l.icon ? (
+          <span style={{ color: palette.accent,
+                         fontFamily: mgTextFont(glyph, "inter") }}>{glyph}</span>
+        ) : null}
+        <span>{lineText}</span>
       </div>
     );
   };
@@ -85,15 +98,15 @@ export const EndCard: React.FC<EndCardProps> = ({
                 role="decoration"
                 label="endcard-logo"
                 fallback={
-                  <div style={{ color: palette.fg, fontFamily: MG_FONTS.anton,
+                  <div style={{ color: palette.fg, fontFamily: titleFont,
                                 fontWeight: 900, fontSize: titleSize,
-                                letterSpacing: "-0.03em" }}>{asText(title ?? "")}</div>
+                                letterSpacing: "-0.03em" }}>{titleText}</div>
                 }
                 style={{ width: Math.round(width * 0.34) }}
               />
-            : <div style={{ color: palette.fg, fontFamily: MG_FONTS.anton,
+            : <div style={{ color: palette.fg, fontFamily: titleFont,
                             fontWeight: 900, fontSize: titleSize,
-                            letterSpacing: "-0.03em" }}>{asText(title ?? "")}</div>}
+                            letterSpacing: "-0.03em" }}>{titleText}</div>}
         </div>
       ) : (
         <div style={{ textAlign: "center", padding: `0 ${sidePad}px`,
@@ -101,10 +114,11 @@ export const EndCard: React.FC<EndCardProps> = ({
           {title ? (
             <div style={{
               color: kind === "echo" ? palette.accent : palette.fg,
-              fontFamily: MG_FONTS.anton, fontWeight: 800, fontSize: titleSize,
-              lineHeight: 1.05, letterSpacing: "-0.02em",
+              fontFamily: titleFont, fontWeight: 800, fontSize: titleSize,
+              lineHeight: Math.max(1.05, titleMetrics.lineHeight),
+              letterSpacing: "-0.02em",
               opacity: enter, transform: `translateY(${interpolate(enter, [0, 1], [20, 0])}px)`,
-            }}>{asText(title)}</div>
+            }}>{titleText}</div>
           ) : null}
           {lines.length ? (
             <div style={{

@@ -4,6 +4,7 @@ import { SPRING_SNAPPY } from "../shared/springs";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import {
@@ -118,7 +119,6 @@ export const TweetBubble: React.FC<TweetBubbleProps> = ({
             src={avatarSrc}
             initials={initials}
             fallbackColor={avatarColor}
-            fontFamily={MG_FONTS.inter}
             fallbackText={name}
           />
 
@@ -141,6 +141,9 @@ export const TweetBubble: React.FC<TweetBubbleProps> = ({
             >
               <span
                 style={{
+                  // User text routes by script + emoji tail (font census
+                  // 2026-08-26); counts/"Reply" chrome keep the root Inter.
+                  fontFamily: mgTextFont(name, "inter"),
                   fontSize: 26,
                   fontWeight: 700,
                   color: theme.text,
@@ -168,6 +171,7 @@ export const TweetBubble: React.FC<TweetBubbleProps> = ({
 
             <div
               style={{
+                fontFamily: mgTextFont(handleLine, "inter"),
                 fontSize: 22,
                 fontWeight: 400,
                 color: theme.muted,
@@ -185,6 +189,7 @@ export const TweetBubble: React.FC<TweetBubbleProps> = ({
 
         <div
           style={{
+            fontFamily: mgTextFont(text, "inter"),
             fontSize: 28,
             fontWeight: 400,
             color: theme.text,

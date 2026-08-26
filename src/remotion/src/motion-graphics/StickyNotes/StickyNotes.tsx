@@ -7,6 +7,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { msToFrames } from "../shared/timing";
 import type { StickyNotesProps } from "./types";
 import {
@@ -34,6 +35,9 @@ function fitStickyNote(
   noteFontSize: number,
   fontFamily: string,
   noteSize: number,
+  // Rendered line-height (font census 2026-08-26): non-Latin notes render
+  // taller lines, so the vertical budget must check the same factor.
+  lineHeightEm = 1.1,
 ): { scale: number; floored: boolean } {
   const font = { fontFamily, fontWeight: 400 };
   const inner = noteSize - 20 - 8; // padding(10x2) + breathing room
@@ -56,7 +60,7 @@ function fitStickyNote(
         w += extra;
       }
     }
-    if (lines * size * 1.1 <= vBudget) {
+    if (lines * size * lineHeightEm <= vBudget) {
       if (s < 1 - 1e-6) {
         console.log(
           `[caption-fit] style=StickyNotes page="${text}" action=scale(${s.toFixed(2)})`,
@@ -273,11 +277,19 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
             : enterShadowOp;
 
           const [xOff, yOff] = NOTE_POSITIONS[i] ?? [0, 0];
+          // Note text is user text (font census 2026-08-26): route the face
+          // and fit-measure in the SAME routed stack that renders.
+          const noteFace = mgTextFont(note.text, "caveatBrush");
+          const noteLineHeight = Math.max(
+            1.1,
+            mgTextMetrics(note.text).lineHeight,
+          );
           const noteFit = fitStickyNote(
             note.text,
             noteFontSize,
-            noteFontFamily,
+            noteFace,
             noteSize,
+            noteLineHeight,
           );
 
           return (
@@ -335,12 +347,12 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
 
                 <span
                   style={{
-                    fontFamily: noteFontFamily,
+                    fontFamily: noteFace,
                     fontSize: noteFontSize * noteFit.scale,
                     fontWeight: 400,
                     color: "#1A1A1A",
                     textAlign: "center",
-                    lineHeight: 1.1,
+                    lineHeight: noteLineHeight,
                     fontStyle: i === 2 ? "italic" : "normal",
                     maxWidth: "100%",
                     ...(noteFit.floored ? CHARWRAP_FALLBACK_STYLE : {}),

@@ -2,6 +2,7 @@ import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
 import { SPRING_SNAPPY } from "../shared/springs";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { mgSchedule } from "../shared/schedule";
@@ -123,6 +124,11 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
   const fillWidth = width * currentPercent;
   const radius = trackHeight / 2;
 
+  // Font census (2026-08-26): the eyebrow + milestone labels are user/model
+  // text — routed stacks + gated caps; the hero digits stay chrome (bare Anton).
+  const labelFont = mgTextFont(label ?? "", "inter");
+  const labelMetrics = mgTextMetrics(label ?? "");
+
   return (
     <AbsoluteFill style={containerStyle}>
       <div style={wrapperStyle}>
@@ -139,13 +145,13 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
         {label ? (
           <div
             style={{
-              fontFamily: MG_FONTS.inter,
+              fontFamily: labelFont,
               fontSize: 24,
               fontWeight: 600,
               color: accentColor,
               letterSpacing: "0.28em",
-              textTransform: "uppercase",
-              lineHeight: 1,
+              textTransform: labelMetrics.uppercaseSafe ? "uppercase" : "none",
+              lineHeight: Math.max(1, labelMetrics.lineHeight),
               opacity: eyebrowFadeIn,
               textShadow: textShadowSmall,
               whiteSpace: "nowrap",
@@ -250,6 +256,9 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
           {milestones.map((m, i) => {
             const x = width * m.at;
             const reached = currentPercent >= m.at;
+            // Milestone labels are user/model text sites too (census).
+            const msFont = mgTextFont(m.label ?? "", "inter");
+            const msUppercaseSafe = mgTextMetrics(m.label ?? "").uppercaseSafe;
             return (
               <React.Fragment key={i}>
                 <div
@@ -272,14 +281,14 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
                       left: x,
                       bottom: -38,
                       transform: "translateX(-50%)",
-                      fontFamily: MG_FONTS.inter,
+                      fontFamily: msFont,
                       fontSize: 18,
                       fontWeight: 600,
                       color: reached
                         ? "#FFFFFF"
                         : "rgba(255,255,255,0.5)",
                       letterSpacing: "0.2em",
-                      textTransform: "uppercase",
+                      textTransform: msUppercaseSafe ? "uppercase" : "none",
                       whiteSpace: "nowrap",
                       textShadow: textShadowSmall,
                     }}

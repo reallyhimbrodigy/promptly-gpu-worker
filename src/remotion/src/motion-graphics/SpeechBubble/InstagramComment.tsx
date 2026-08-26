@@ -4,6 +4,7 @@ import { SPRING_SNAPPY } from "../shared/springs";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { HeartIcon } from "./icons";
@@ -96,7 +97,6 @@ export const InstagramComment: React.FC<InstagramCommentProps> = ({
           src={avatarSrc}
           initials={initials}
           fallbackColor={avatarColor}
-          fontFamily={MG_FONTS.inter}
           fallbackText={username}
         />
 
@@ -116,14 +116,16 @@ export const InstagramComment: React.FC<InstagramCommentProps> = ({
               color: "#FFFFFF",
               textShadow: TEXT_SHADOW,
               wordBreak: "break-word",
-              // User comments carry emoji; Inter's loaded subsets don't
-              // (pass #11 — the ✨ fell through to fontconfig luck). Same
-              // stack convention as the caption system.
-              fontFamily: `${MG_FONTS.inter}, 'Noto Color Emoji', sans-serif`,
+              // User comments carry emoji AND non-Latin scripts; mgTextFont
+              // routes the face by script + carries the emoji tail (font
+              // census 2026-08-26 — generalizes the pass #11 hand-rolled
+              // stack). Username routes on its own text.
+              fontFamily: mgTextFont(comment, "inter"),
             }}
           >
             <span
               style={{
+                fontFamily: mgTextFont(username, "inter"),
                 fontWeight: 600,
                 marginRight: 6,
               }}

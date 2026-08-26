@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import type { DropCardPoint, DropCardProps, DropCardStep } from "./types";
 import { useMGPhase } from "../shared/useMGPhase";
 import { asText } from "../../shared/asText";
@@ -153,6 +154,11 @@ export const DropCard: React.FC<DropCardProps> = ({
   }
   const columnY = -slideHeight * stepSum;
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // the circle digits keep bare MG_FONTS (chrome).
+  const titleText = titleLead ? `${titleLead} ${title}` : title;
+  const titleMetrics = mgTextMetrics(titleText);
+
   // --- Slide 0: the numbered intro (dashed rail + labels) ---
   const introSlide = (
     <div
@@ -167,15 +173,15 @@ export const DropCard: React.FC<DropCardProps> = ({
     >
       <div
         style={{
-          fontFamily: MG_FONTS.anton,
+          fontFamily: mgTextFont(titleText, "anton"),
           // Interior takeover (pass #7c): 68px on a ~850px card read as a
           // caption, not a claim. The title is the card's voice.
           fontSize: 104,
           fontWeight: 400,
           letterSpacing: "-0.005em",
-          textTransform: "uppercase",
+          textTransform: titleMetrics.uppercaseSafe ? "uppercase" : "none",
           textAlign: "center",
-          lineHeight: 1.02,
+          lineHeight: Math.max(1.02, titleMetrics.lineHeight),
           opacity: titleOpacity,
         }}
       >
@@ -188,7 +194,7 @@ export const DropCard: React.FC<DropCardProps> = ({
       {subtitle ? (
         <div
           style={{
-            fontFamily: MG_FONTS.inter,
+            fontFamily: mgTextFont(subtitle, "inter"),
             fontSize: 40,
             fontWeight: 400,
             color: subtitleColor,
@@ -305,13 +311,16 @@ export const DropCard: React.FC<DropCardProps> = ({
               </div>
 
               {step.label ? (
+                // Step labels are model text (font census 2026-08-26).
                 <div
                   style={{
-                    fontFamily: MG_FONTS.inter,
+                    fontFamily: mgTextFont(step.label, "inter"),
                     fontSize: 30,
                     fontWeight: 700,
                     color: labelColor,
-                    textTransform: "uppercase",
+                    textTransform: mgTextMetrics(step.label).uppercaseSafe
+                      ? "uppercase"
+                      : "none",
                     letterSpacing: "0.06em",
                     textAlign: "center",
                     marginTop: 24,
@@ -332,7 +341,10 @@ export const DropCard: React.FC<DropCardProps> = ({
   // --- Caption slides: one per point, word-by-word grey -> black ---
   const captionSlides = points.map((pt, k) => {
     const captionStart = FIRST_SCROLL + k * STEP + SETTLE;
-    const words = asText(pt.caption).split(" ");
+    const captionText = asText(pt.caption);
+    const words = captionText.split(" ");
+    // Point title + caption are model text (font census 2026-08-26).
+    const ptTitleMetrics = mgTextMetrics(pt.title);
     return (
       <div
         key={`pt-${k}`}
@@ -347,15 +359,15 @@ export const DropCard: React.FC<DropCardProps> = ({
       >
         <div
           style={{
-            fontFamily: MG_FONTS.anton,
+            fontFamily: mgTextFont(pt.title, "anton"),
             // The payoff slide is the beat's HIT — it carries the accent and
             // the scale (pass #7c; was 56px floating in a ~850px void).
             fontSize: 96,
             fontWeight: 400,
             color: accentColor,
-            textTransform: "uppercase",
+            textTransform: ptTitleMetrics.uppercaseSafe ? "uppercase" : "none",
             letterSpacing: "-0.01em",
-            lineHeight: 1.0,
+            lineHeight: Math.max(1.0, ptTitleMetrics.lineHeight),
           }}
         >
           {pt.title}
@@ -364,7 +376,7 @@ export const DropCard: React.FC<DropCardProps> = ({
         <div
           style={{
             marginTop: 36,
-            fontFamily: MG_FONTS.inter,
+            fontFamily: mgTextFont(captionText, "inter"),
             fontSize: 58,
             fontWeight: 600,
             lineHeight: 1.28,

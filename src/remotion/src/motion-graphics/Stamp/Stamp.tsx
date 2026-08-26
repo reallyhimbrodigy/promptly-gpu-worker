@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { StampFontKey, StampMark, StampProps, StampStyle } from "./types";
@@ -34,11 +34,6 @@ const STYLE_DEFAULTS: Record<
   ribbon: { fontKey: "anton", fontSize: 72, mark: "none", distress: false, size: 1040 },
 };
 
-const FONT_FAMILY: Record<StampFontKey, string> = {
-  oswald: MG_FONTS.oswald,
-  anton: MG_FONTS.anton,
-  inter: MG_FONTS.inter,
-};
 const FONT_WEIGHT: Record<StampFontKey, number> = {
   oswald: 700,
   anton: 400,
@@ -185,6 +180,15 @@ export const Stamp: React.FC<StampProps> = (props) => {
   const stampFont =
     fontSizeProp ?? (text.length > 14 ? 78 : text.length > 11 ? 94 : d.fontSize);
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // caps-transform is gated and tight line boxes open up for non-Latin.
+  const textFont = mgTextFont(text, fontKey);
+  const textMetrics = mgTextMetrics(text);
+  const subTopFont = mgTextFont(subtextTop ?? "", "oswald");
+  const subTopMetrics = mgTextMetrics(subtextTop ?? "");
+  const subBottomFont = mgTextFont(subtextBottom ?? "", "oswald");
+  const subBottomMetrics = mgTextMetrics(subtextBottom ?? "");
+
   let badge: React.ReactNode;
 
   if (style === "seal") {
@@ -272,13 +276,13 @@ export const Stamp: React.FC<StampProps> = (props) => {
               x={W / 2}
               y={72}
               textAnchor="middle"
-              fontFamily={FONT_FAMILY.oswald}
+              fontFamily={subTopFont}
               fontWeight={700}
               fontSize={27}
               letterSpacing={9}
               fill={ink}
             >
-              {subtextTop.toUpperCase()}
+              {subTopMetrics.uppercaseSafe ? subtextTop.toUpperCase() : subtextTop}
             </text>
           ) : null}
 
@@ -286,13 +290,13 @@ export const Stamp: React.FC<StampProps> = (props) => {
             x={W / 2}
             y={hasSub ? 186 : 176}
             textAnchor="middle"
-            fontFamily={FONT_FAMILY[fontKey]}
+            fontFamily={textFont}
             fontWeight={FONT_WEIGHT[fontKey]}
             fontSize={mainFont}
             letterSpacing={2}
             fill={ink}
           >
-            {text.toUpperCase()}
+            {textMetrics.uppercaseSafe ? text.toUpperCase() : text}
           </text>
 
           {subtextBottom ? (
@@ -300,13 +304,15 @@ export const Stamp: React.FC<StampProps> = (props) => {
               x={W / 2}
               y={242}
               textAnchor="middle"
-              fontFamily={FONT_FAMILY.oswald}
+              fontFamily={subBottomFont}
               fontWeight={700}
               fontSize={27}
               letterSpacing={9}
               fill={ink}
             >
-              {subtextBottom.toUpperCase()}
+              {subBottomMetrics.uppercaseSafe
+                ? subtextBottom.toUpperCase()
+                : subtextBottom}
             </text>
           ) : null}
         </g>
@@ -329,13 +335,13 @@ export const Stamp: React.FC<StampProps> = (props) => {
       >
         <div
           style={{
-            fontFamily: FONT_FAMILY[fontKey],
+            fontFamily: textFont,
             fontWeight: FONT_WEIGHT[fontKey],
             fontSize: stampFont,
             color: textColor ?? "#FFFFFF",
             letterSpacing: "0.04em",
-            textTransform: "uppercase",
-            lineHeight: 1,
+            textTransform: textMetrics.uppercaseSafe ? "uppercase" : "none",
+            lineHeight: Math.max(1, textMetrics.lineHeight),
             textShadow,
           }}
         >
@@ -390,13 +396,14 @@ export const Stamp: React.FC<StampProps> = (props) => {
         ) : null}
         <div
           style={{
-            fontFamily: FONT_FAMILY[fontKey],
+            fontFamily: textFont,
             fontWeight: FONT_WEIGHT[fontKey],
             fontSize: stampFont,
             color: ink,
             letterSpacing: "0.04em",
-            textTransform: "uppercase",
-            lineHeight: 0.95,
+            textTransform: textMetrics.uppercaseSafe ? "uppercase" : "none",
+            lineHeight:
+              textMetrics.script === "latin" ? 0.95 : textMetrics.lineHeight,
             textShadow,
             whiteSpace: "nowrap",
           }}
@@ -404,7 +411,9 @@ export const Stamp: React.FC<StampProps> = (props) => {
           {text}
         </div>
         {subtextBottom ? (
-          <div style={subStyle(ink, textShadow)}>{subtextBottom}</div>
+          <div style={subStyle(ink, textShadow, subBottomFont, subBottomMetrics)}>
+            {subtextBottom}
+          </div>
         ) : null}
       </div>
     );
@@ -470,15 +479,20 @@ export const Stamp: React.FC<StampProps> = (props) => {
   );
 };
 
-function subStyle(color: string, textShadow: string): React.CSSProperties {
+function subStyle(
+  color: string,
+  textShadow: string,
+  fontFamily: string,
+  metrics: ReturnType<typeof mgTextMetrics>,
+): React.CSSProperties {
   return {
-    fontFamily: MG_FONTS.oswald,
+    fontFamily,
     fontWeight: 600,
     fontSize: 26,
     color,
     letterSpacing: "0.2em",
-    textTransform: "uppercase",
-    lineHeight: 1,
+    textTransform: metrics.uppercaseSafe ? "uppercase" : "none",
+    lineHeight: Math.max(1, metrics.lineHeight),
     opacity: 0.92,
     textShadow,
   };
