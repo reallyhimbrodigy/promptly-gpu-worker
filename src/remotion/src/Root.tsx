@@ -166,6 +166,24 @@ export const RemotionRoot: React.FC = () => {
           motionBlur: true,
         } as unknown as Record<string, unknown>}
       />
+      {/* MGCraftProbe30 — the SAME probe at production's 30fps. The 60fps grid
+          masks the absolute-frame-schedule class (raw frame constants run 2x
+          faster in real time and short live windows collide with exit) — pair
+          this with durationMs = the live placement's window to prove those
+          defects and their fixes. Not used in production. */}
+      <Composition
+        id="MGCraftProbe30"
+        component={MGCraftProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={30}
+        durationInFrames={240}
+        defaultProps={{
+          type: "StatCard",
+          props: {},
+          motionBlur: true,
+        } as unknown as Record<string, unknown>}
+      />
       {/* FitSpecimen — STANDALONE F4 caption width-fit battery composition.
           Renders one style with a worst-case-string page over black, strict
           fit invariant armed. Driven by fit-battery.mjs; pixel-scanned by

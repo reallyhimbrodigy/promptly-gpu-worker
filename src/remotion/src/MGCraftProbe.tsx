@@ -23,9 +23,13 @@ export interface MGCraftProbeProps {
    *  filename in public/ or a URL, resolved here to the adapter's sourceUrl —
    *  the adapters are needsSource and render null without it. */
   sourceVideo?: string;
+  /** Component window in ms (default 4000). Set to a LIVE placement's duration
+   *  (with the 30fps probe composition) to prove timing defects the 60fps/4s
+   *  probe masks — the absolute-frame-schedule class. */
+  durationMs?: number;
 }
 const PLATE = "#808080";
-export const MGCraftProbe: React.FC<MGCraftProbeProps> = ({ type, props, motionBlur, bgVideo, sourceVideo }) => {
+export const MGCraftProbe: React.FC<MGCraftProbeProps> = ({ type, props, motionBlur, bgVideo, sourceVideo, durationMs }) => {
   const Comp = MG_MAP[type];
   const bgSrc = bgVideo
     ? (/^https?:\/\//.test(bgVideo) ? bgVideo : staticFile(bgVideo))
@@ -45,7 +49,7 @@ export const MGCraftProbe: React.FC<MGCraftProbeProps> = ({ type, props, motionB
           {Comp ? (
             <Comp
               startMs={0}
-              durationMs={4000}
+              durationMs={durationMs ?? 4000}
               {...props}
               {...(sourceUrl ? { sourceUrl } : {})}
             />

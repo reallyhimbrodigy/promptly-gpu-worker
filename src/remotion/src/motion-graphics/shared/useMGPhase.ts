@@ -94,5 +94,6 @@ export function useMGPhase(
     phase,
     localFrame,
     durationFrames,
+    exitStartFrame,
   };
 }
