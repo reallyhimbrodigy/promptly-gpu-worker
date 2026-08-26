@@ -43,8 +43,14 @@ const PROPS = {
     { label: "Focus", value: "deep" },
     { label: "Discipline", value: "hard" },
   ], accentColor: PAL.accent, labelColor: PAL.number, anchor: "center" },
+  // Live-shaped (both 14d placements are lean: 1 point, short caption; one had
+  // no steps at all). titleLead is the accent span the model actually sends.
+  DropCard: { titleLead: "3-DAY", title: "SPRINT", subtitle: "English that sticks",
+    steps: [{ label: "Day 1" }, { label: "Day 2" }, { label: "Day 3" }],
+    points: [{ title: "Confident Kids", caption: "English Speaking Sprint" }],
+    accentColor: PAL.accent, startMs: 0, durationMs: 4000 },
 }[TYPE] || {};
-const FRAMES = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50] }[TYPE] || [4, 14, 28, 46];
+const FRAMES = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50], DropCard: [6, 30, 50, 92] }[TYPE] || [4, 14, 28, 46];
 
 console.log(`[mg-proof] ${TYPE} (${TAG}) — bundling…`);
 const serveUrl = await bundle({ entryPoint: path.resolve(__dirname, "src/index.ts") });
