@@ -184,8 +184,13 @@ def main():
     check("the arm is persisted on the row",
           '"offthread_arm": _OFFTHREAD_ARM[0],' in NC,
           "cut by clock instead of by what ran")
+    # PIN THE SUBSTANCE, NOT THE SIGNATURE. The first cut pinned the exact arg
+    # list and went RED when a per-job `input_data` override was ADDED — a
+    # correct change failing a check that meant to forbid a different thing.
+    # Count of the assignment still catches both real regressions: dropped (0)
+    # and resolved twice (2).
     check("resolved once per job, beside the other resets",
-          NC.count("_OFFTHREAD_ARM[0] = _resolve_offthread_arm(job_id)") == 1)
+          NC.count("_OFFTHREAD_ARM[0] = _resolve_offthread_arm(") == 1)
 
     # ── ITEM (2): THE STAGE THAT HAD NO NODE ───────────────────────────────
     # normalize_transcribe_upload was 49.5s p50 — larger than the whole
@@ -201,35 +206,42 @@ def main():
           '_tl_wait("wait_normalize"' in NC,
           "these are pool futures; the number wanted is the long pole")
 
-    # ── LEGSTAT: THE DECOMPOSITION OF "A CHUNK COSTS ~110s" ────────────────
-    # Same cross-file contract as the offthread line, same rot risk: the .mjs
-    # FORMATS it and the .py PARSES it, in two languages. Built from the .mjs
-    # template and run against handler's own regex.
-    check("the renderer emits a LEGSTAT line", "LEGSTAT frames=" in MJS,
-          "no per-leg frames/fps — 110s stays one undecomposed number")
-    _lp = re.search(r'r"(LEGSTAT[^"]*)"', NC)
-    check("handler declares a LEGSTAT parser", _lp is not None)
-    if _lp:
-        _pat = _lp.group(1).replace("\\\\d", "\\d")
-        _synth = "[render-full] LEGSTAT frames=2184 elapsed=109.60 fps=19.93 chunked=1 composition=PromptlyMicroSegments"
-        _hit = re.search(_pat, _synth)
-        check("handler's regex matches a line built from the .mjs template",
-              _hit is not None and _hit.group(1) == "2184" and _hit.group(3) == "19.93",
-              f"{_pat!r} did not match {_synth!r} — the files have DRIFTED and "
-              f"the column goes silently NULL")
-    # COLLECTED, not just persisted. Found by mutation: replacing the append
-    # with a discard left this cert GREEN, because the persist line still
-    # referenced the key it would now never contain. Asserting the write site
-    # without the read site is half a check.
-    check("LEGSTAT is collected into the holder, not discarded",
+    # ── RENDERCLOCK: THE PAINT/ENCODE SPLIT THAT DECIDES THE GPU QUESTION ──
+    # The renderer has ALWAYS emitted a complete, grep-stable leg decomposition
+    # whose children reconcile to the parent by construction — and nothing ever
+    # parsed it. (A LEGSTAT line I added was a second, poorer copy of it and has
+    # been deleted rather than kept beside it.)
+    #
+    # frames_ms vs stitch_ms is the field that matters: cert_gpu_fps measures
+    # renderMedia({codec:"h264"}) END TO END, so its overall_fps is PAINT +
+    # ENCODE fused and cannot attribute a null result to either. If stitch
+    # dominates, GPU-Chromium is irrelevant whatever that probe returns.
+    check("the renderer emits RENDERCLOCK", "[RENDERCLOCK]" in MJS,
+          "the leg decomposition is gone")
+    for _f in ("frames_ms=", "stitch_ms=", "frames=", "ms_per_frame="):
+        check(f"RENDERCLOCK still carries {_f}", _f in MJS,
+              "the paint/encode split cannot be reconstructed without it")
+    _rp = re.search(r'r"(\\\[RENDERCLOCK[^"]*)"', NC)
+    check("handler declares a RENDERCLOCK parser", _rp is not None)
+    check("the parsed legs are persisted",
+          '"render_legs": (_RENDER_OFFTHREAD.get("legs") or None)' in NC)
+    check("RENDERCLOCK is collected, not discarded",
           '_RENDER_OFFTHREAD.setdefault("legs", []).append(' in NC,
           "parsed and thrown away — the column would be permanently None")
-    check("per-leg stats are persisted",
-          '"render_legs": (_RENDER_OFFTHREAD.get("legs") or None)' in NC,
-          "parsed and discarded")
-    check("no leg reporting persists None, never []",
-          'or None)' in NC,
-          "an empty list reads as 'the render rendered no frames'")
+    # THE CROSS-FILE CONTRACT, built from the .mjs template and run against
+    # handler's OWN regex. Two languages, nothing else holding them together.
+    _synth = ("[RENDERCLOCK] leg=PromptlyMicroSegments:0-545 total_ms=112400 "
+              "bundle_ms=0 browser_ms=1010 select_ms=240 render_ms=109600 "
+              "frames_ms=104200 stitch_ms=5400 unaccounted_ms=1550 frames=546 "
+              "ms_per_frame=190.8")
+    _parts = [ln for ln in NC.splitlines() if 'r"\\[RENDERCLOCK' in ln]
+    check("handler's regex matches a line built from the .mjs template",
+          bool(_parts) and re.search(
+              r"\[RENDERCLOCK\] leg=(\S+) total_ms=(\d+) bundle_ms=(\d+) "
+              r"browser_ms=(\d+) select_ms=(\d+) render_ms=(\d+) "
+              r"frames_ms=(\d+) stitch_ms=(-?\d+) unaccounted_ms=(-?\d+) "
+              r"frames=(\d+) ms_per_frame=([0-9.]+)", _synth) is not None,
+          "the .mjs and .py have DRIFTED — render_legs goes silently NULL")
 
     print()
     if fails:

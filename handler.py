@@ -33649,13 +33649,32 @@ def _remotion_subprocess(label, cmd, timeout=600, _self_healed=False):
                 # PER-LEG frames / fps — the decomposition of "a chunk costs
                 # ~110s" into its two terms. Persisted so the question is a DB
                 # query on every job, not a log pull from a burst container.
-                _lg = re.search(r"LEGSTAT frames=(\d+) elapsed=([0-9.]+) fps=([0-9.]+)", _ls)
-                if _lg:
+                # RENDERCLOCK, not my LEGSTAT. The renderer ALREADY emitted a
+                # complete, grep-stable leg decomposition whose children
+                # reconcile to the parent by construction — and nothing has ever
+                # parsed it. LEGSTAT was a second, poorer copy of an instrument
+                # that already existed; it is deleted rather than kept beside it.
+                #
+                # THE FIELD THAT DECIDES THE GPU QUESTION IS frames_ms vs
+                # stitch_ms. cert_gpu_fps measures renderMedia({codec:"h264"})
+                # end-to-end, so its overall_fps is PAINT + ENCODE fused and
+                # cannot attribute a null result to either. If stitch dominates,
+                # GPU-Chromium is irrelevant no matter what that probe returns,
+                # because paint is not the bottleneck.
+                _rc = re.search(
+                    r"\[RENDERCLOCK\] leg=(\S+) total_ms=(\d+) bundle_ms=(\d+) "
+                    r"browser_ms=(\d+) select_ms=(\d+) render_ms=(\d+) "
+                    r"frames_ms=(\d+) stitch_ms=(-?\d+) unaccounted_ms=(-?\d+) "
+                    r"frames=(\d+) ms_per_frame=([0-9.]+)", _ls)
+                if _rc:
                     _RENDER_OFFTHREAD.setdefault("legs", []).append({
-                        "label": label,
-                        "frames": int(_lg.group(1)),
-                        "elapsed_s": float(_lg.group(2)),
-                        "fps": float(_lg.group(3)),
+                        "leg": _rc.group(1), "total_ms": int(_rc.group(2)),
+                        "bundle_ms": int(_rc.group(3)), "browser_ms": int(_rc.group(4)),
+                        "select_ms": int(_rc.group(5)), "render_ms": int(_rc.group(6)),
+                        "frames_ms": int(_rc.group(7)), "stitch_ms": int(_rc.group(8)),
+                        "unaccounted_ms": int(_rc.group(9)),
+                        "frames": int(_rc.group(10)),
+                        "ms_per_frame": float(_rc.group(11)),
                     })
                 _ovt = re.search(
                     r"concurrency=(\d+)\s+offthreadVideoThreads=(\d+)", _ls)

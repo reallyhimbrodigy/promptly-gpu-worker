@@ -158,13 +158,12 @@ def main():
     # confound that made the proxy-fps read AGREE with its own prediction
     # (-34.3% vs -36% predicted) while being pure noise.
     check("the arm is a per-job SPLIT keyed on job_id",
-          "def _resolve_stall_arm(job_id):" in NC
+          "def _resolve_stall_arm(job_id" in NC
           and "sha256(str(job_id).encode(" in NC,
           "a single env read is a flip, not a split — both arms cannot run "
           "concurrently and the comparison is temporal")
     check("resolved ONCE per job, beside the other per-job resets",
-          "_STALL_ARM[0] = _resolve_stall_arm(job_id)" in NC
-          and NC.count("_STALL_ARM[0] = _resolve_stall_arm(") == 1,
+          NC.count("_STALL_ARM[0] = _resolve_stall_arm(") == 1,
           "resolved more than once, or never — a mid-job change would split one "
           "job's spans across both arms")
     check("the gate sites read the RESOLVED arm, not the env",
