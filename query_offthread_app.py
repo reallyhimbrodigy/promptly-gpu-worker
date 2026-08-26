@@ -48,7 +48,8 @@ def query(since: str = "", limit: int = 4000) -> dict:
     for off in range(0, max(PAGE, limit), PAGE):
         q = (sb.table("video_jobs")
              .select("id, user_id, created_at, status, st:result->stage_timings, "
-                     "rt:result->route")
+                     "rt:result->route, oa:result->stage_timings->offthread_arm, "
+                     "rl:result->stage_timings->render_legs")
              .order("created_at", desc=True).range(off, off + PAGE - 1))
         if since:
             q = q.gte("created_at", since)
@@ -65,6 +66,9 @@ def query(since: str = "", limit: int = 4000) -> dict:
     # SHAPE PROBE: what does timeline ACTUALLY contain? Guessing key names is
     # how a confident zero gets reported for a stage that was simply read wrong.
     shape = {"stage_timings_keys": None, "timeline_keys": None, "timeline_sample": None}
+    # THE ARM + THE DECOMPOSITION. "2" = extractor pinned to Remotion's default;
+    # None = control. legs carry frames/elapsed/fps so 110s becomes two terms.
+    arms = {}
     by_route, unmeasured, no_field, seen_vals = {}, 0, 0, {}
     for r in rows:
         st = r.get("st") or {}
@@ -102,6 +106,18 @@ def query(since: str = "", limit: int = 4000) -> dict:
                  "n_children": len(_nz.get("children") or []),
                  "children": [(c.get("name"), c.get("dur")) for c in (_nz.get("children") or [])]}
                 if _nz else "NODE ABSENT FROM TIMELINE ENTIRELY")
+        _arm = str(r.get("oa"))
+        _a = arms.setdefault(_arm, {"jobs": 0, "users": set(), "render_s": [],
+                                    "frames": [], "fps": [], "legs": 0})
+        _a["jobs"] += 1
+        _a["users"].add(r.get("user_id"))
+        if isinstance(st.get("render"), (int, float)):
+            _a["render_s"].append(float(st["render"]))
+        for _l in (r.get("rl") or []):
+            if isinstance(_l, dict) and _l.get("frames"):
+                _a["legs"] += 1
+                _a["frames"].append(float(_l["frames"]))
+                _a["fps"].append(float(_l.get("fps") or 0))
         route = (r.get("rt") or "std-editorial")
         b = by_route.setdefault(route, {"jobs": 0, "users": set(), "legs": [],
                                         "offthread": {}, "concurrency": {},
@@ -164,7 +180,13 @@ def query(since: str = "", limit: int = 4000) -> dict:
             "excluded_pre_v574_no_field": no_field,
             "render_leg_unmeasured": unmeasured,
             "offthread_values_seen": seen_vals, "shape": shape,
-            "by_route": out}
+            "by_route": out,
+            "by_arm": {k: {"jobs": v["jobs"], "users": len(v["users"]),
+                           "render_s_p50": _pct(v["render_s"], .5),
+                           "legs_with_stats": v["legs"],
+                           "frames_p50": _pct(v["frames"], .5),
+                           "fps_p50": _pct(v["fps"], .5)}
+                       for k, v in arms.items()}}
 
 
 @app.local_entrypoint()
@@ -184,6 +206,18 @@ def main(since: str = "", limit: int = 4000):
         sys.exit(2)
     print(f"\n  offthreadVideoThreads observed across all routes: {seen}")
     print("  (2 = Remotion's default => the lever is NOT in force)")
+    ba = r.get("by_arm") or {}
+    print(f"\n  ── OFFTHREAD ARM ('2' = pinned to Remotion default, 'None' = control)")
+    print(f"  {'arm':>6} {'jobs':>5} {'users':>6} {'render_p50':>11} {'legs':>5} "
+          f"{'frames_p50':>11} {'fps_p50':>8}")
+    for a, v in sorted(ba.items()):
+        print(f"  {a:>6} {v['jobs']:>5} {v['users']:>6} {str(v['render_s_p50']):>11} "
+              f"{v['legs_with_stats']:>5} {str(v['frames_p50']):>11} {str(v['fps_p50']):>8}")
+    if len(ba) < 2:
+        print("  ONE ARM ONLY — not a comparison. Needs post-v577 traffic.")
+    _anylegs = sum(v['legs_with_stats'] for v in ba.values())
+    if not _anylegs:
+        print("  NO LEGSTAT YET — empty read, not 'the renderer reported nothing'.")
     for route, b in sorted(r["by_route"].items()):
         print(f"\n  ── {route}: {b['jobs']} jobs / {b['users']} users")
         print(f"     offthread {b['offthread_values']}   concurrency {b['concurrency_values']}")
