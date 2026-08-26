@@ -25,14 +25,19 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
   width = 620,
   avatarSrc,
   initials,
-  avatarColor = "#FE2C55",
+  // §6: brand-red was invented chroma (the InstagramComment precedent) —
+  // neutral disc unless the spec sends a palette color.
+  avatarColor = "rgba(255,255,255,0.22)",
   username,
   comment,
   likes,
 }) => {
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
-    { anchor: "top", offsetY: 820 },
+    // The 820 default pairs with the default "top" anchor only — it must not
+    // survive an anchor-only override (the audited IMessageBubble class; this
+    // was the third sibling carrying it).
+    { anchor: "top", offsetY: anchor == null ? 820 : 0 },
     "TikTokComment",
   );
   const { fps } = useVideoConfig();
