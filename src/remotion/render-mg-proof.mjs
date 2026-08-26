@@ -49,12 +49,22 @@ const PROPS = {
     steps: [{ label: "Day 1" }, { label: "Day 2" }, { label: "Day 3" }],
     points: [{ title: "Confident Kids", caption: "English Speaking Sprint" }],
     accentColor: PAL.accent, startMs: 0, durationMs: 4000 },
+  // The live 14d placement verbatim (palette extracted from that video by the
+  // pipeline) — only at_seconds is re-aimed into the probe clip (live 138.63s
+  // points outside any test asset). needsSource: the harness resolves
+  // SOURCE[TYPE] below into the adapter's sourceUrl.
+  EvidenceCard: { spec: { kind: "EvidenceCard", bg: "#3A302D", fg: "#FAFAFC",
+    accent: "#C68B73", cap_px: 163, claim: "INSTANT MATTE FINISH",
+    caption: "Half Face Test", entrance: "rise", tilt_deg: -6, at_seconds: 1.2,
+    duration_s: 2, still_width_pct: 58,
+    legibility: { shadow_offset_px: 3, shadow_blur_px: 7, shadow_opacity: 0.35 } } },
 }[TYPE] || {};
-const FRAMES = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50], DropCard: [6, 30, 50, 92] }[TYPE] || [4, 14, 28, 46];
+const SOURCE = { EvidenceCard: "seek_long.mp4", DeviceMockup: "seek_long.mp4" }[TYPE];
+const FRAMES = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50], DropCard: [6, 30, 50, 92], EvidenceCard: [4, 10, 20, 46] }[TYPE] || [4, 14, 28, 46];
 
 console.log(`[mg-proof] ${TYPE} (${TAG}) — bundling…`);
 const serveUrl = await bundle({ entryPoint: path.resolve(__dirname, "src/index.ts") });
-const inputProps = { type: TYPE, props: PROPS, motionBlur: true, ...(BG ? { bgVideo: BG } : {}) };
+const inputProps = { type: TYPE, props: PROPS, motionBlur: true, ...(BG ? { bgVideo: BG } : {}), ...(SOURCE ? { sourceVideo: SOURCE } : {}) };
 const composition = await selectComposition({ serveUrl, id: "MGCraftProbe", inputProps });
 for (const frame of FRAMES) {
   const output = path.join(outDir, `${TYPE}_${TAG}_f${String(frame).padStart(2, "0")}.png`);

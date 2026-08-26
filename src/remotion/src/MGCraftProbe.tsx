@@ -19,12 +19,19 @@ export interface MGCraftProbeProps {
   /** Optional footage behind the component — a filename in public/ or a URL. Used
    *  to verify the contrast floor over REAL video, not just the flat gray plate. */
   bgVideo?: string;
+  /** Footage for source-composing components (EvidenceCard/DeviceMockup): a
+   *  filename in public/ or a URL, resolved here to the adapter's sourceUrl —
+   *  the adapters are needsSource and render null without it. */
+  sourceVideo?: string;
 }
 const PLATE = "#808080";
-export const MGCraftProbe: React.FC<MGCraftProbeProps> = ({ type, props, motionBlur, bgVideo }) => {
+export const MGCraftProbe: React.FC<MGCraftProbeProps> = ({ type, props, motionBlur, bgVideo, sourceVideo }) => {
   const Comp = MG_MAP[type];
   const bgSrc = bgVideo
     ? (/^https?:\/\//.test(bgVideo) ? bgVideo : staticFile(bgVideo))
+    : undefined;
+  const sourceUrl = sourceVideo
+    ? (/^https?:\/\//.test(sourceVideo) ? sourceVideo : staticFile(sourceVideo))
     : undefined;
   return (
     <MotionBlurProvider enabled={motionBlur ?? true} samples={10} shutterAngle={180}>
@@ -35,7 +42,14 @@ export const MGCraftProbe: React.FC<MGCraftProbeProps> = ({ type, props, motionB
               <Video src={bgSrc} muted style={{ width: "100%", height: "100%", objectFit: "cover" }} />
             </AbsoluteFill>
           ) : null}
-          {Comp ? <Comp startMs={0} durationMs={4000} {...props} /> : null}
+          {Comp ? (
+            <Comp
+              startMs={0}
+              durationMs={4000}
+              {...props}
+              {...(sourceUrl ? { sourceUrl } : {})}
+            />
+          ) : null}
         </AbsoluteFill>
       </SmoothGraphicsProvider>
     </MotionBlurProvider>

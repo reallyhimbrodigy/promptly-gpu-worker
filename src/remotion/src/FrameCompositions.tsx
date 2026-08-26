@@ -10,6 +10,7 @@ import { Video } from "@remotion/media";
 import { cappedEntranceProgress } from "./motion-graphics/shared/entrance-cap";
 import { dur } from "./motion-graphics/shared/motion";
 import { MotionBlurWrap } from "./motion-graphics/shared/motion-blur";
+import { MG_FONTS } from "./motion-graphics/shared/fonts";
 
 // ── THE GENERATION-FREE COMPOSITIONS ────────────────────────────────────────
 //
@@ -137,11 +138,17 @@ export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
       <AbsoluteFill style={{ background: spec.bg }}>
         <MotionBlurWrap>
           <AbsoluteFill style={groupStyle(e, "50% 56%")}>
-            {/* PLANE 1 — background type, cropped by the frame edge on purpose */}
+            {/* PLANE 1 — background type, cropped by the frame edge on purpose.
+                Render-caught (pass #8): no fontFamily = browser SERIF — both
+                text planes rendered Times-like in the live placement (the
+                EmojiCard birth defect, again). Anton at its REAL weight 400 —
+                fontWeight 800 on a single-weight face is the NamePlate
+                faux-bold class. */}
             <div style={{
               position: "absolute", top: "12%", left: "-4%", right: "-4%",
-              fontSize: spec.cap_px * 1.2, fontWeight: 800, lineHeight: 0.92,
-              color: spec.fg, opacity: 0.14, letterSpacing: "-0.03em",
+              fontFamily: MG_FONTS.anton,
+              fontSize: spec.cap_px * 1.2, fontWeight: 400, lineHeight: 0.92,
+              color: spec.fg, opacity: 0.14, letterSpacing: "-0.01em",
               textTransform: "uppercase",
             }}>{spec.claim}</div>
             {/* PLANE 2 — the user's own frame */}
@@ -150,13 +157,20 @@ export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
                 tiltDeg={spec.tilt_deg} label="EvidenceCard.still"
                 style={{ width: `${spec.still_width_pct ?? 58}%`, aspectRatio: "9 / 16" }} />
             </AbsoluteFill>
-            {/* PLANE 3 — foreground type OVERLAPPING the still */}
+            {/* PLANE 3 — foreground type OVERLAPPING the still. Render-caught
+                (pass #8): at the default 58% still width the caption sat fully
+                BELOW the print — the overlap this comment promises never
+                happened; bottom 19.5% puts the type over the print's corner
+                (type-over-object, occluding the GRAPHIC only). The underline
+                is the beat's ONE full-chroma hit (corpus law 2) — at 55-alpha
+                the beat had zero. */}
             <div style={{
-              position: "absolute", bottom: "16%", left: "6%", right: "10%",
-              fontSize: spec.cap_px * 0.56, fontWeight: 800, color: spec.fg,
+              position: "absolute", bottom: "19.5%", left: "6%", right: "10%",
+              fontFamily: MG_FONTS.inter,
+              fontSize: spec.cap_px * 0.6, fontWeight: 800, color: spec.fg,
               lineHeight: 1.02, letterSpacing: "-0.02em", ...legible(spec),
             }}>
-              <span style={{ boxShadow: `inset 0 -0.34em 0 ${spec.accent}55` }}>
+              <span style={{ boxShadow: `inset 0 -0.34em 0 ${spec.accent}` }}>
                 {spec.caption || spec.claim}
               </span>
             </div>
@@ -175,10 +189,13 @@ export const DeviceMockup: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
         <MotionBlurWrap>
           <AbsoluteFill style={groupStyle(e, "50% 52%")}>
             {spec.label ? (
+              // Same render-caught class as EvidenceCard (pass #8): no
+              // fontFamily = browser serif; Anton's real weight is 400.
               <div style={{
                 position: "absolute", top: "9%", left: "6%",
-                fontSize: spec.cap_px, fontWeight: 800, color: spec.accent,
-                opacity: 0.16, letterSpacing: "-0.03em", textTransform: "uppercase",
+                fontFamily: MG_FONTS.anton,
+                fontSize: spec.cap_px, fontWeight: 400, color: spec.accent,
+                opacity: 0.16, letterSpacing: "-0.01em", textTransform: "uppercase",
               }}>{spec.label}</div>
             ) : null}
             <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
@@ -196,6 +213,7 @@ export const DeviceMockup: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
             {spec.label ? (
               <div style={{
                 position: "absolute", bottom: "14%", left: "8%",
+                fontFamily: MG_FONTS.inter,
                 fontSize: spec.cap_px * 0.5, fontWeight: 800, color: spec.fg,
                 letterSpacing: "-0.02em", ...legible(spec),
               }}>{spec.label}</div>
