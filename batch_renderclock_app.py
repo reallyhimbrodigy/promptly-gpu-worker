@@ -36,8 +36,32 @@ app = modal.App("batch-renderclock")
 image = modal.Image.debian_slim().pip_install("boto3")
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
 
-# Durable, already in S3, and a real talking-head source the pipeline can edit.
-BASE_KEY = "failure-corpus/RENDER_FFMPEG/41403891-1953-4a5b-85a6-e247eb9932bd.mp4"
+# BUCKET AND SOURCE, BOTH CORRECTED BY MEASUREMENT (probe_corpus_app.py).
+#
+# The first version read Supabase bucket "videos" and 404'd — wrong client AND
+# wrong bucket. Measured: S3_BUCKET_NAME is `thisismybucketagainwooo` and holds
+# 12 objects under failure-corpus/; `promptly-video-storage` (handler's default)
+# holds ZERO, so the env always wins and the default is dead.
+BUCKET_ENV = "S3_BUCKET_NAME"          # authoritative; do not hardcode
+PREFIX = "failure-corpus/"
+
+# AND THE failure-corpus IS UNUSABLE FOR THIS BATCH — measured, not assumed:
+#   durations   10 of 12 objects are 1.3-2.8s (they are CLIP_TOO_SHORT and
+#               friends; being tiny is WHY they are in a failure corpus). Max is
+#               30.0s, so 60s and 120s are not constructible from it at all.
+#   stall gaps  ZERO gaps in the 0.25-0.70s band across all 12. Forcing these
+#               through both arms would reproduce preserved=1 exactly.
+#
+# The owner-selected reference sources DO carry both properties (measured
+# locally, ffmpeg silencedetect at -30dB/0.20s):
+#   v15044gf0000d7akrh7og65p1f3s1ua0.mp4  38.6s  15 in-band gaps  <- stall clip
+#   v15044gf0000d8slpi7og65utp063oi0.mp4  43.6s   3 in-band
+#   v24044gl0000d2rj4k7og65tcgn43lr0.mp4  59.5s   2 in-band  <- the 60s point
+#   v14044g50000d5la79fog65q5itovh6g.mp4  28.6s   1 in-band
+# so the curve is constructible as: 20s trim / 59.5s native / 120s concat x2.
+# They must be UPLOADED to the bucket first — they exist only on the owner's
+# disk today, which is not a durable source (feedback_ab_durable_sources).
+BASE_KEY = None                        # set once the reference sources are uploaded
 
 
 @app.function(image=image, secrets=SECRETS, timeout=900)
