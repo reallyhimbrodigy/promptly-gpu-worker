@@ -22,6 +22,13 @@ import { asText } from "../../shared/asText";
 // never grows, text never escapes it).
 const STICKY_FIT_FLOOR = 0.35;
 
+// Pass #12 (audited): the fit only walked DOWN from 1 — the EditorialQuote
+// ceiling class. A short live note ("SAY") sat at 50px inside a 300px square
+// with room for ~2.6x. The walk now starts ABOVE 1 so short text GROWS to
+// own the note; the same two-axis constraints bind, so long text shrinks
+// exactly as before and can never escape.
+const STICKY_FIT_CEIL = 2.6;
+
 function fitStickyNote(
   text: string,
   noteFontSize: number,
@@ -33,7 +40,7 @@ function fitStickyNote(
   const vBudget = inner - 30; // marker glyph / underline allowance
   const words = asText(text).split(/\s+/).filter(Boolean);
   if (words.length === 0) return { scale: 1, floored: false };
-  for (let s = 1; s >= STICKY_FIT_FLOOR - 1e-6; s -= 0.05) {
+  for (let s = STICKY_FIT_CEIL; s >= STICKY_FIT_FLOOR - 1e-6; s -= 0.05) {
     const size = noteFontSize * s;
     const widths = words.map((w) => canvasMeasurer(w, size, font));
     if (Math.max(...widths) > inner) continue;
@@ -50,7 +57,7 @@ function fitStickyNote(
       }
     }
     if (lines * size * 1.1 <= vBudget) {
-      if (s < 1) {
+      if (s < 1 - 1e-6) {
         console.log(
           `[caption-fit] style=StickyNotes page="${text}" action=scale(${s.toFixed(2)})`,
         );
@@ -84,21 +91,26 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
+  // Pass #12 (audited): the choreography offsets were 60fps-authored raw
+  // frames, fps-blind. s converts them to render frames (same real time at
+  // any fps); the oscillators below run in radians per SECOND.
+  const s = fps / 60;
+
   const appearFrame = msToFrames(startMs, fps);
   const disappearFrame = msToFrames(startMs + durationMs, fps);
 
-  if (frame < appearFrame - 10) return null;
-  if (frame > disappearFrame + 10) return null;
+  if (frame < appearFrame - 10 * s) return null;
+  if (frame > disappearFrame + 10 * s) return null;
 
   const elapsed = frame - appearFrame;
 
-  const fogOpacity = interpolate(elapsed, [-5, 10], [0, 1], {
+  const fogOpacity = interpolate(elapsed, [-5 * s, 10 * s], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
   const fogFadeOut = interpolate(
     frame,
-    [disappearFrame, disappearFrame + 10],
+    [disappearFrame, disappearFrame + 10 * s],
     [1, 0],
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
@@ -134,8 +146,12 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
         }}
       >
         {renderableNotes.map((note, i) => {
-          const noteDelay = 5 * i;
-          const noteElapsed = elapsed - noteDelay - 2;
+          const noteDelay = 5 * i * s;
+          const noteElapsed = elapsed - noteDelay - 2 * s;
+          // Oscillator clock in 60fps-equivalent units: the sway/rock/tilt
+          // rates below are authored rad-per-60fps-frame; oscT keeps the
+          // real-time frequency identical at any render fps.
+          const oscT = noteElapsed * (60 / fps);
 
           const swayFreq = [0.35, 0.28, 0.32][i] ?? 0.3;
           const swayDir = i === 1 ? -1 : 1;
@@ -159,7 +175,7 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
             [0, 1, 0.5, 0],
           );
           const swayX =
-            Math.sin(noteElapsed * swayFreq) * 45 * swayAmount * swayDir;
+            Math.sin(oscT * swayFreq) * 45 * swayAmount * swayDir;
 
           const rockAmount = interpolate(
             fallProgress,
@@ -167,7 +183,7 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
             [0, 1, 0.4, 0],
           );
           const rockAngle =
-            Math.sin(noteElapsed * swayFreq + 0.5) * 18 * rockAmount;
+            Math.sin(oscT * swayFreq + 0.5) * 18 * rockAmount;
           const enterRotation = note.rotation + rockAngle;
 
           const tiltAmount = interpolate(
@@ -176,9 +192,9 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
             [0, 1, 0.3, 0],
           );
           const tiltX =
-            Math.sin(noteElapsed * swayFreq * 1.3) * 25 * tiltAmount;
+            Math.sin(oscT * swayFreq * 1.3) * 25 * tiltAmount;
           const tiltY =
-            Math.cos(noteElapsed * swayFreq * 0.9) * 15 * tiltAmount;
+            Math.cos(oscT * swayFreq * 0.9) * 15 * tiltAmount;
 
           const enterScale = interpolate(
             fallProgress,
@@ -199,7 +215,7 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
             [0.06, 0.2],
           );
 
-          const exitDelay = (2 - i) * 3;
+          const exitDelay = (2 - i) * 3 * s;
           const exitElapsed = frame - disappearFrame + exitDelay;
           const isExiting = exitElapsed >= 0;
 
@@ -296,16 +312,25 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
                 }}
               >
                 {i === 0 ? (
-                  <span
-                    style={{
-                      fontSize: noteFontSize * 0.8,
-                      color: "#1A1A1A",
-                      marginBottom: 2,
-                      fontFamily: noteFontFamily,
-                    }}
+                  // Drawn check, not a glyph (pass #12, audited): U+2713 does
+                  // not exist in Caveat Brush — the ✓ silently rendered in a
+                  // fallback face. An inline SVG has no font dependency and
+                  // keeps the hand-drawn register.
+                  <svg
+                    width={noteFontSize * 0.8}
+                    height={noteFontSize * 0.62}
+                    viewBox="0 0 40 31"
+                    style={{ marginBottom: 2 }}
                   >
-                    ✓
-                  </span>
+                    <path
+                      d="M3 17 C9 22 13 26 15 28 C21 18 30 8 37 3"
+                      fill="none"
+                      stroke="#1A1A1A"
+                      strokeWidth={4.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
                 ) : null}
 
                 <span

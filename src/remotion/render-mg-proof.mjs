@@ -82,9 +82,18 @@ const PROPS = {
     anchor: "center" },
   InstagramComment: { likes: 1600, comment: "16 gifts for sweet 16th ✨",
     username: "reels_viral", anchor: "bottom" },
+  // Live 14d placements (overlay family). StickyNotes' note colors are
+  // model-sent content (kept); AnnotationArrow re-inked to the plate accent.
+  AnnotationArrow: { start: { x: 0.35, y: 0.6 }, end: { x: 0.75, y: 0.45 },
+    pathType: "curved-arc", color: PAL.accent },
+  StickyNotes: { notes: [
+    { text: "SAY", color: "#FFE066", rotation: -2 },
+    { text: "SHOW", color: "#FFB3C1", rotation: 1 },
+    { text: "SELL", color: "#A8E6CF", rotation: 3 },
+  ] },
 }[TYPE] || {};
 const SOURCE = { EvidenceCard: "seek_long.mp4", DeviceMockup: "seek_long.mp4" }[TYPE];
-const FRAMES_DEFAULT = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50], DropCard: [6, 30, 50, 92], EvidenceCard: [4, 10, 20, 46], SectionDivider: [8, 20, 44, 70], StepDivider: [8, 20, 44, 70], Timeline: [8, 20, 44, 72], ProgressBar: [6, 16, 34, 44], IMessageBubble: [4, 10, 20, 46], InstagramComment: [4, 10, 20, 46] }[TYPE] || [4, 14, 28, 46];
+const FRAMES_DEFAULT = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50], DropCard: [6, 30, 50, 92], EvidenceCard: [4, 10, 20, 46], SectionDivider: [8, 20, 44, 70], StepDivider: [8, 20, 44, 70], Timeline: [8, 20, 44, 72], ProgressBar: [6, 16, 34, 44], IMessageBubble: [4, 10, 20, 46], InstagramComment: [4, 10, 20, 46], AnnotationArrow: [4, 10, 18, 30], StickyNotes: [6, 14, 26, 40] }[TYPE] || [4, 14, 28, 46];
 // Env overrides for live-duration timing proofs on the 30fps composition:
 //   PROBE_FPS=30 DUR_MS=1520 FRAMES=10,19,26,33 node render-mg-proof.mjs SectionDivider before-live30
 const PROBE_ID = process.env.PROBE_FPS === "30" ? "MGCraftProbe30" : "MGCraftProbe";
