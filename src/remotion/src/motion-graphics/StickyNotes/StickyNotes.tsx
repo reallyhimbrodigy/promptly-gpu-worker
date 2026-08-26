@@ -276,7 +276,14 @@ export const StickyNotes: React.FC<StickyNotesProps> = ({
             ? interpolate(exitProgress, [0, 1], [0.2, 0.03])
             : enterShadowOp;
 
-          const [xOff, yOff] = NOTE_POSITIONS[i] ?? [0, 0];
+          // Coupled-defaults audit (2026-08-26): the ±305/310 offsets were
+          // authored at noteSize 300; a size-only override overlapped (400)
+          // or scattered (200) the notes. Offsets scale with the size —
+          // 300 reproduces today's layout byte-for-byte.
+          const posScale = noteSize / 300;
+          const [baseX, baseY] = NOTE_POSITIONS[i] ?? [0, 0];
+          const xOff = baseX * posScale;
+          const yOff = baseY * posScale;
           // Note text is user text (font census 2026-08-26): route the face
           // and fit-measure in the SAME routed stack that renders.
           const noteFace = mgTextFont(note.text, "caveatBrush");

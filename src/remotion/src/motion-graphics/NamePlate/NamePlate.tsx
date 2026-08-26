@@ -1,5 +1,6 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
+import { inkFor } from "../shared/ink";
 import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { useMGPhase } from "../shared/useMGPhase";
 import { asText } from "../../shared/asText";
@@ -19,7 +20,7 @@ export const NamePlate: React.FC<NamePlateProps> = ({
   name,
   role,
   accentColor = "#F5A11E",
-  nameColor = "#FFFFFF",
+  nameColor,
   anchor = "lower_third_safe",
   widthPct = 0.42,
   namePx,
@@ -91,6 +92,15 @@ export const NamePlate: React.FC<NamePlateProps> = ({
   const roleFont = mgTextFont(roleText, "inter");
   const roleCapsSafe = mgTextMetrics(roleText).uppercaseSafe;
 
+  // 2026-08-26 coupled-defaults audit: the #FFFFFF default was authored for
+  // the no-backdrop over-footage case and survived a backdrop-only override —
+  // the ../brand adapter forwards style.color and style.backdrop independently
+  // (either can arrive None), so a light palette base drew its scrim under
+  // white ink. Unspecified ink now follows the scrim's luminance; no backdrop
+  // (or an unparseable one, which reads as dark) keeps white exactly.
+  const resolvedNameColor =
+    nameColor ?? (backdropColor ? inkFor(backdropColor) : "#FFFFFF");
+
   return (
     <AbsoluteFill style={{ opacity: out }}>
       <div style={{
@@ -120,7 +130,7 @@ export const NamePlate: React.FC<NamePlateProps> = ({
               ink can never touch its clip edge. */}
           <div style={{ overflow: "hidden", marginTop: Math.round(nameSize * 0.34),
                         paddingRight: Math.round(nameSize * 0.12) }}>
-            <div style={{ transform: `translateY(${nameRise}px)`, color: nameColor,
+            <div style={{ transform: `translateY(${nameRise}px)`, color: resolvedNameColor,
                           fontFamily: nameFont, fontWeight: 400,
                           fontSize: nameSize,
                           lineHeight: Math.max(1.04, nameMetrics.lineHeight),

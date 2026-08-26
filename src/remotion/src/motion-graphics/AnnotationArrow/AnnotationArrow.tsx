@@ -140,7 +140,7 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
   exitFrames,
   start,
   end,
-  pathType = "curved-arc",
+  pathType,
   customPath,
   color = "#C8551F",
   strokeWidth = 8,
@@ -153,6 +153,14 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
     { defaultEnterFrames: 22, defaultExitFrames: 10 },
   );
 
+  // Coupled-defaults audit (2026-08-26): the "curved-arc" default swallowed a
+  // caller-authored customPath sent without pathType (the path drew as a
+  // generic arc, no error). The default now follows its partner — types.ts
+  // says '"custom" requires customPath'; the converse holds too. An explicit
+  // pathType always wins.
+  const resolvedPathType =
+    pathType ?? (customPath != null ? "custom" : "curved-arc");
+
   // Pass #12 (audited absolute-frame-schedule class): the draw-in/head
   // choreography was 60fps-authored raw frames — 2x slower in real time at
   // production 30fps. mgSchedule: fps-relative, settled by 85% of the
@@ -164,16 +172,16 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
   const [customLength, setCustomLength] = useState<number | null>(null);
 
   useEffect(() => {
-    if (pathType === "custom" && customPathRef.current) {
+    if (resolvedPathType === "custom" && customPathRef.current) {
       try {
         setCustomLength(customPathRef.current.getTotalLength());
       } catch {
         setCustomLength(0);
       }
     }
-  }, [pathType, customPath]);
+  }, [resolvedPathType, customPath]);
 
-  const isCustom = pathType === "custom";
+  const isCustom = resolvedPathType === "custom";
 
   // `start`/`end` arrive NORMALIZED (0-1 fractions of the frame — see
   // types.ts). This is the one seam where they become canvas pixels,
@@ -182,9 +190,10 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
   const startPx = resolveArrowEndpoint(start, width, height);
   const endPx = resolveArrowEndpoint(end, width, height);
 
-  const bezier: BezierShape | null = isCustom
-    ? null
-    : buildBezier(startPx, endPx, pathType, seed);
+  const bezier: BezierShape | null =
+    resolvedPathType === "custom"
+      ? null
+      : buildBezier(startPx, endPx, resolvedPathType, seed);
 
   const pathD = isCustom ? customPath ?? "" : bezier!.d;
   const pathLength = isCustom ? customLength ?? 0 : bezier!.length;

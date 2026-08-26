@@ -1,9 +1,11 @@
 import React from "react";
 import { AbsoluteFill, interpolate, interpolateColors } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { inkFor } from "../shared/ink";
 import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
+import { SAFE_RECT } from "../../shared/safeZone";
 import type { TimelineRoadmapProps, TimelineRoadmapStep } from "./types";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
@@ -24,6 +26,8 @@ const POP = 16;
 const SPINE_W = 9;
 const LABEL_OFFSET = 30;
 const TICK = 30;
+
+const DEFAULT_ACCENT = "#FF8A1E";
 
 const DEFAULT_STEPS: TimelineRoadmapStep[] = [
   { label: "Discovery", sublabel: "Week 1" },
@@ -65,8 +69,9 @@ export const TimelineRoadmap: React.FC<TimelineRoadmapProps> = ({
   enterFrames,
   exitFrames,
   steps = DEFAULT_STEPS,
-  accentColor = "#FF8A1E",
+  accentColor = DEFAULT_ACCENT,
   trackColor = "rgba(255,255,255,0.18)",
+  sublabelColor,
   nodeSize = 96,
   width = 1040,
   rowHeight = 312,
@@ -98,14 +103,30 @@ export const TimelineRoadmap: React.FC<TimelineRoadmapProps> = ({
   const R = nodeSize / 2;
   const inactiveColor = "rgba(255,255,255,0.5)";
   const indexSize = Math.round(nodeSize * 0.4);
-  const blockHeight = (N - 1) * rowHeight + nodeSize;
+  // 2026-08-26 coupled-defaults audit: the 312 rowHeight default was budgeted
+  // for the 4-step default only — 5-6 steps (the documented sweet spot)
+  // overran the 1230px safe band. Fit-clamp the row pitch to the safe height;
+  // the default pair is untouched (N=4 budget is 378 > 312).
+  const rh = Math.min(
+    rowHeight,
+    (SAFE_RECT.height - nodeSize) / Math.max(1, N - 1),
+  );
+  const blockHeight = (N - 1) * rh + nodeSize;
+  // 2026-08-26 coupled-defaults audit: the pill ink was a hardcoded #10131A
+  // authored for the default light accent; derive it from the actual accent
+  // (and wire the declared-but-unread sublabelColor prop through).
+  const pillInk =
+    sublabelColor ??
+    (accentColor === DEFAULT_ACCENT
+      ? "#10131A"
+      : inkFor(accentColor, "#10131A"));
 
   // Node x alternates side-to-side → the snake. Label sits opposite the node.
   const xLeft = width * 0.27;
   const xRight = width * 0.73;
   const labelOnRight = (i: number): boolean =>
     firstSide === "right" ? i % 2 === 0 : i % 2 === 1;
-  const yFor = (i: number): number => R + i * rowHeight;
+  const yFor = (i: number): number => R + i * rh;
   const nodeXFor = (i: number): number => (labelOnRight(i) ? xLeft : xRight);
   const pts: Pt[] = rendered.map((_, i) => ({ x: nodeXFor(i), y: yFor(i) }));
 
@@ -587,7 +608,7 @@ export const TimelineRoadmap: React.FC<TimelineRoadmapProps> = ({
                         fontFamily: sublabelFont,
                         fontSize: 28,
                         fontWeight: 700,
-                        color: "#10131A",
+                        color: pillInk,
                         letterSpacing: "0.03em",
                         lineHeight: Math.max(1.1, sublabelMetrics.lineHeight),
                         textTransform: sublabelMetrics.uppercaseSafe

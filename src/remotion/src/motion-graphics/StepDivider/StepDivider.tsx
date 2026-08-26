@@ -37,7 +37,7 @@ export const StepDivider: React.FC<StepDividerProps> = ({
   exitFrames,
   title,
   step = 1,
-  totalSteps = 5,
+  totalSteps,
   kicker = "STEP",
   showProgress = true,
   showCount = true,
@@ -65,7 +65,11 @@ export const StepDivider: React.FC<StepDividerProps> = ({
   if (!visible) return null;
 
   const lf = localFrame;
-  const steps = Math.max(1, totalSteps);
+  // Coupled-defaults audit (2026-08-26): the defaulted total of 5 clamped an
+  // overridden step to a wrong "STEP 05 / 05" from beat 6 on. An unspecified
+  // totalSteps now grows with the step; an explicit totalSteps keeps today's
+  // clamp (and the plain default stays 5).
+  const steps = Math.max(1, totalSteps ?? Math.max(5, step));
   const cur = Math.max(1, Math.min(step, steps));
   const titleText = asText(title);
   const lines = titleText.split("\n");

@@ -56,7 +56,10 @@ export const TweetBubble: React.FC<TweetBubbleProps> = ({
 }) => {
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
-    { anchor: "top", offsetY: 720 },
+    // 2026-08-26 coupled-defaults audit: the 720 default pairs with the default
+    // "top" anchor only — it must not survive an anchor-only override (same
+    // class as the fixed IMessageBubble/InstagramComment/TikTokComment guard).
+    { anchor: "top", offsetY: anchor == null ? 720 : 0 },
     "TweetBubble",
   );
   const { fps } = useVideoConfig();

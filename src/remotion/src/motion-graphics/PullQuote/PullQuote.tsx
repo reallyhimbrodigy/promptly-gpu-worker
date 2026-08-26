@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import { AbsoluteFill, interpolate } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { inkFor } from "../shared/ink";
 import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
@@ -58,7 +59,7 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   highlightStyle = "color",
   keywordScale = 1.18,
   barColor,
-  highlightTextColor = "#0A0A0A",
+  highlightTextColor,
   align = "center",
   uppercase = true,
   wordStagger = 6,
@@ -84,6 +85,16 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   const resolvedKeywordColor = keywordColor ?? accentColor ?? "#FFD60A";
   const resolvedBarColor = barColor ?? resolvedKeywordColor;
   const resolvedQuoteColor = quoteMarkColor ?? resolvedKeywordColor;
+  // 2026-08-26 coupled-defaults audit: the #0A0A0A bar-mode ink was authored
+  // for the default yellow bar and survived a bar-side-only override (a dark
+  // palette accent made the EMPHASIZED words the invisible ones, and bar mode
+  // strips the textShadow rescue below). Unspecified ink now follows the
+  // resolved bar surface; the default yellow keeps #0A0A0A exactly.
+  const resolvedHighlightInk =
+    highlightTextColor ??
+    (resolvedBarColor === "#FFD60A"
+      ? "#0A0A0A"
+      : inkFor(resolvedBarColor, "#0A0A0A"));
 
   const keywordSet = useMemo(
     () => new Set(keywords.map(normalize)),
@@ -145,10 +156,14 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   );
 
   // Cap total entrance time for long lines.
+  // 2026-08-26 coupled-defaults audit: the 74-frame budget assumed wordReveal
+  // near its default 16 — an override past 74 drove the stagger NEGATIVE and
+  // played the reveal cascade backwards (last words fully up at frame 0).
+  // Floor at 0: simultaneous reveal is the worst case, never inverted order.
   const N = words.length;
-  const effStagger = Math.min(
-    wordStagger,
-    (74 - wordReveal) / Math.max(1, N - 1),
+  const effStagger = Math.max(
+    0,
+    Math.min(wordStagger, (74 - wordReveal) / Math.max(1, N - 1)),
   );
 
   // Corpus law 1 (pass #7b): the payoff LINE (the last line — the isolated
@@ -312,7 +327,7 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                 const useColor = kw && effStyle === "color";
                 const useBar = kw && effStyle === "bar";
                 const color = useBar
-                  ? highlightTextColor
+                  ? resolvedHighlightInk
                   : useColor
                     ? resolvedKeywordColor
                     : textColor;

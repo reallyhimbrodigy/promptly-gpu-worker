@@ -2,6 +2,7 @@ import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
 import { mgTextFont, mgTextMetrics } from "../shared/text-font";
+import { inkFor, isLightSurface } from "../shared/ink";
 import type { DropCardPoint, DropCardProps, DropCardStep } from "./types";
 import { useMGPhase } from "../shared/useMGPhase";
 import { asText } from "../../shared/asText";
@@ -45,13 +46,13 @@ export const DropCard: React.FC<DropCardProps> = ({
   steps = [],
   points = [],
   cardColor = "#FFFFFF",
-  titleColor = "#15151E",
-  subtitleColor = "#5A5A5A",
-  labelColor = "#2A2A30",
+  titleColor,
+  subtitleColor,
+  labelColor,
   accentColor = "#F5A11E",
   railColor,
-  spokenColor = "#15151E",
-  mutedColor = "#C2C2CA",
+  spokenColor,
+  mutedColor,
   cardHeightPct = 0.44,
 }) => {
   const { fps, width, height } = useVideoConfig();
@@ -65,6 +66,18 @@ export const DropCard: React.FC<DropCardProps> = ({
   const rows = steps.slice(0, START_ROT.length);
   const n = rows.length;
   const rail = railColor ?? accentColor;
+
+  // 2026-08-26 coupled-defaults audit: like `rail` above, the text family
+  // tracks its cardColor partner — the dark constants were authored for the
+  // white card, and a cardColor-only dark override rendered an invisible
+  // title/labels plus captions that fade OUT as spoken. Explicit overrides
+  // pass through; the light-card path keeps today's constants.
+  const lightCard = isLightSurface(cardColor);
+  const effTitleColor = titleColor ?? inkFor(cardColor); // "#15151E" on light
+  const effSpokenColor = spokenColor ?? inkFor(cardColor);
+  const effSubtitleColor = subtitleColor ?? (lightCard ? "#5A5A5A" : "#B0B0B8");
+  const effLabelColor = labelColor ?? (lightCard ? "#2A2A30" : "#D6D6DC");
+  const effMutedColor = mutedColor ?? (lightCard ? "#C2C2CA" : "#55555E");
 
   // Pass #7c (craft lane): the schedule is fps-relative and DURATION-AWARE.
   // The old absolute-frame constants (FIRST_SCROLL=55, STEP=98) meant a live
@@ -188,7 +201,7 @@ export const DropCard: React.FC<DropCardProps> = ({
         {titleLead ? (
           <span style={{ color: accentColor }}>{titleLead} </span>
         ) : null}
-        <span style={{ color: titleColor }}>{title}</span>
+        <span style={{ color: effTitleColor }}>{title}</span>
       </div>
 
       {subtitle ? (
@@ -197,7 +210,7 @@ export const DropCard: React.FC<DropCardProps> = ({
             fontFamily: mgTextFont(subtitle, "inter"),
             fontSize: 40,
             fontWeight: 400,
-            color: subtitleColor,
+            color: effSubtitleColor,
             textAlign: "center",
             lineHeight: 1.3,
             marginTop: 18,
@@ -317,7 +330,7 @@ export const DropCard: React.FC<DropCardProps> = ({
                     fontFamily: mgTextFont(step.label, "inter"),
                     fontSize: 30,
                     fontWeight: 700,
-                    color: labelColor,
+                    color: effLabelColor,
                     textTransform: mgTextMetrics(step.label).uppercaseSafe
                       ? "uppercase"
                       : "none",
@@ -387,7 +400,7 @@ export const DropCard: React.FC<DropCardProps> = ({
             const activation = captionStart + j * WORD_STEP;
             const t = (localFrame - activation) / WORD_FADE;
             return (
-              <span key={j} style={{ color: lerpColor(mutedColor, spokenColor, t) }}>
+              <span key={j} style={{ color: lerpColor(effMutedColor, effSpokenColor, t) }}>
                 {w}
                 {j < words.length - 1 ? " " : ""}
               </span>

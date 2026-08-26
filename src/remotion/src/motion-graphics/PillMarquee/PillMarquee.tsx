@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
 import { mgTextFont, mgTextMetrics } from "../shared/text-font";
+import { isLightSurface } from "../shared/ink";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { PillMarqueeProps } from "./types";
 
@@ -43,7 +44,7 @@ export const PillMarquee: React.FC<PillMarqueeProps> = ({
   fontKey = "inter",
   fontSize = 46,
   uppercase = false,
-  textColor = "#FFFFFF",
+  textColor,
   colorMode = "single",
   accentColor = "#FF6A3D",
   palette = DEFAULT_PALETTE,
@@ -81,6 +82,15 @@ export const PillMarquee: React.FC<PillMarqueeProps> = ({
       extrapolateRight: "clamp",
     });
 
+  // Coupled-defaults audit (2026-08-26): white ink + the dark halo were
+  // authored for the dark NEUTRAL_FILL; a light pillColor override kept both
+  // (white-on-white, halo-only ghost glyphs). Unspecified ink now follows
+  // the actual fill and drops the dark halo when it resolves dark; explicit
+  // textColor passes through untouched. Defaults unchanged.
+  const derivedDarkInk =
+    textColor == null && pillColor != null && isLightSurface(pillColor);
+  const ink = textColor ?? (derivedDarkInk ? "#0F1117" : "#FFFFFF");
+
   const renderPill = (label: string, key: string, hue: string) => {
     // Clean monochrome pill; the single accent shows only on the "#".
     const accent = colorMode === "varied" ? hue : accentColor;
@@ -116,12 +126,12 @@ export const PillMarquee: React.FC<PillMarqueeProps> = ({
             fontFamily: pillFont,
             fontSize,
             fontWeight: 600,
-            color: textColor,
+            color: ink,
             textTransform:
               uppercase && pillMetrics.uppercaseSafe ? "uppercase" : "none",
             letterSpacing: uppercase ? "0.06em" : "-0.01em",
             lineHeight: Math.max(1, pillMetrics.lineHeight),
-            textShadow: PILL_TEXT_SHADOW,
+            textShadow: derivedDarkInk ? undefined : PILL_TEXT_SHADOW,
           }}
         >
           {hashtag ? <span style={{ color: accent }}>#</span> : null}

@@ -10,6 +10,8 @@ import { MG_FONTS } from "../shared/fonts";
 import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { msToFrames } from "../shared/timing";
 import { resolveMGPosition } from "../shared/positioning";
+import { inkFor, isLightSurface } from "../shared/ink";
+import { SAFE_RECT } from "../../shared/safeZone";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { ChatMessage, ChatThreadProps } from "./types";
 import { SafeImg } from "../../SafeImg";
@@ -62,8 +64,8 @@ function buildSchedule(
 }
 
 
-const SignalBars: React.FC = () => (
-  <svg width={34} height={22} viewBox="0 0 34 22" fill="#FFFFFF">
+const SignalBars: React.FC<{ color: string }> = ({ color }) => (
+  <svg width={34} height={22} viewBox="0 0 34 22" fill={color}>
     <rect x="0" y="14" width="5" height="8" rx="1.2" />
     <rect x="8" y="10" width="5" height="12" rx="1.2" />
     <rect x="16" y="5" width="5" height="17" rx="1.2" />
@@ -71,15 +73,18 @@ const SignalBars: React.FC = () => (
   </svg>
 );
 
-const WifiIcon: React.FC = () => (
-  <svg width={30} height={22} viewBox="0 0 30 22" fill="#FFFFFF">
+const WifiIcon: React.FC<{ color: string }> = ({ color }) => (
+  <svg width={30} height={22} viewBox="0 0 30 22" fill={color}>
     <path d="M15 3.5C21 3.5 26 5.6 29 8.4L26.7 11C24.3 8.7 20 7 15 7S5.7 8.7 3.3 11L1 8.4C4 5.6 9 3.5 15 3.5Z" />
     <path d="M15 10.2c3.6 0 6.7 1.3 8.6 3.2L21.3 16C19.8 14.7 17.7 13.7 15 13.7S10.2 14.7 8.7 16L6.4 13.4C8.3 11.5 11.4 10.2 15 10.2Z" />
     <circle cx="15" cy="18.3" r="2.5" />
   </svg>
 );
 
-const BatteryIcon: React.FC<{ level?: number }> = ({ level = 1 }) => {
+const BatteryIcon: React.FC<{ level?: number; color: string }> = ({
+  level = 1,
+  color,
+}) => {
   const fillWidth = 38 * Math.max(0, Math.min(1, level));
   return (
     <svg width={52} height={22} viewBox="0 0 52 22" fill="none">
@@ -89,7 +94,7 @@ const BatteryIcon: React.FC<{ level?: number }> = ({ level = 1 }) => {
         width="42"
         height="20"
         rx="5"
-        stroke="#FFFFFF"
+        stroke={color}
         strokeOpacity="0.5"
         strokeWidth="1.5"
         fill="none"
@@ -100,7 +105,7 @@ const BatteryIcon: React.FC<{ level?: number }> = ({ level = 1 }) => {
         width="3"
         height="8"
         rx="1"
-        fill="#FFFFFF"
+        fill={color}
         fillOpacity="0.5"
       />
       <rect
@@ -109,7 +114,7 @@ const BatteryIcon: React.FC<{ level?: number }> = ({ level = 1 }) => {
         width={fillWidth}
         height="16"
         rx="3"
-        fill="#FFFFFF"
+        fill={color}
       />
     </svg>
   );
@@ -117,9 +122,11 @@ const BatteryIcon: React.FC<{ level?: number }> = ({ level = 1 }) => {
 
 interface StatusBarProps {
   time: string;
+  // Chrome ink — derived from backgroundColor (2026-08-26 coupled-defaults).
+  color: string;
 }
 
-const StatusBar: React.FC<StatusBarProps> = ({ time }) => (
+const StatusBar: React.FC<StatusBarProps> = ({ time, color }) => (
   <div
     style={{
       display: "flex",
@@ -139,7 +146,7 @@ const StatusBar: React.FC<StatusBarProps> = ({ time }) => (
         fontFamily: MG_FONTS.inter,
         fontSize: 34,
         fontWeight: 600,
-        color: "#FFFFFF",
+        color,
         letterSpacing: "-0.01em",
         lineHeight: 1,
       }}
@@ -154,9 +161,9 @@ const StatusBar: React.FC<StatusBarProps> = ({ time }) => (
         gap: 12,
       }}
     >
-      <SignalBars />
-      <WifiIcon />
-      <BatteryIcon level={1} />
+      <SignalBars color={color} />
+      <WifiIcon color={color} />
+      <BatteryIcon level={1} color={color} />
     </div>
   </div>
 );
@@ -187,6 +194,10 @@ interface iMessageHeaderProps {
   avatarSrc?: string;
   initials?: string;
   avatarColor: string;
+  // Chrome ink + surface flag — derived from backgroundColor (2026-08-26
+  // coupled-defaults).
+  chromeColor: string;
+  onLightSurface: boolean;
 }
 
 const MessageHeader: React.FC<iMessageHeaderProps> = ({
@@ -195,7 +206,20 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
   avatarSrc,
   initials,
   avatarColor,
+  chromeColor,
+  onLightSurface,
 }) => {
+  // Secondary chrome mirrors the white-alpha constants on a light surface
+  // (2026-08-26 coupled-defaults audit) — dark-surface path is byte-identical.
+  const secondaryChrome = onLightSurface
+    ? "rgba(11,11,15,0.55)"
+    : "rgba(255,255,255,0.55)";
+  const faintChrome = onLightSurface
+    ? "rgba(11,11,15,0.4)"
+    : "rgba(255,255,255,0.4)";
+  const hairline = onLightSurface
+    ? "rgba(11,11,15,0.1)"
+    : "rgba(255,255,255,0.1)";
   // User text (name/subtitle/initials) routes by script + emoji tail; the
   // status-bar clock stays chrome Inter (font census 2026-08-26). Initials
   // slice is code-point safe (UTF-16 .slice split surrogate pairs).
@@ -211,7 +235,7 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
         flexDirection: "column",
         alignItems: "stretch",
         paddingBottom: 14,
-        borderBottom: "1px solid rgba(255,255,255,0.1)",
+        borderBottom: `1px solid ${hairline}`,
       }}
     >
       <div
@@ -275,7 +299,7 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
             fontFamily: mgTextFont(name, "inter"),
             fontSize: 28,
             fontWeight: 600,
-            color: "#FFFFFF",
+            color: chromeColor,
             letterSpacing: "-0.01em",
             // 1.1 clips matras/hooks on non-Latin names; 1.1 exactly for latin.
             lineHeight: Math.max(1.1, nameMetrics.lineHeight),
@@ -288,7 +312,7 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
             fontFamily: mgTextFont(subtitle, "inter"),
             fontSize: 22,
             fontWeight: 400,
-            color: "rgba(255,255,255,0.55)",
+            color: secondaryChrome,
             letterSpacing: "0.01em",
             marginTop: 2,
             display: "flex",
@@ -301,7 +325,7 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
             width={12}
             height={16}
             viewBox="0 0 12 16"
-            fill="rgba(255,255,255,0.4)"
+            fill={faintChrome}
             style={{ marginTop: 1 }}
           >
             <path d="M2 2L10 8L2 14" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
@@ -313,7 +337,7 @@ const MessageHeader: React.FC<iMessageHeaderProps> = ({
 };
 
 
-const HomeIndicator: React.FC = () => (
+const HomeIndicator: React.FC<{ color: string }> = ({ color }) => (
   <div
     style={{
       display: "flex",
@@ -328,7 +352,7 @@ const HomeIndicator: React.FC = () => (
         width: 280,
         height: 8,
         borderRadius: 4,
-        backgroundColor: "#FFFFFF",
+        backgroundColor: color,
       }}
     />
   </div>
@@ -467,9 +491,9 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
   showHomeIndicator = true,
   backgroundColor = "#000000",
   incomingColor = "#26252A",
-  incomingTextColor = "#FFFFFF",
+  incomingTextColor,
   outgoingColor = "#0A84FF",
-  outgoingTextColor = "#FFFFFF",
+  outgoingTextColor,
   anchor,
   offsetX,
   offsetY,
@@ -489,6 +513,27 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
     undefined,
     "ChatThread",
   );
+
+  // 2026-08-26 coupled-defaults audit: the phone chrome (status bar, header
+  // name, home pill) was hardcoded white — authored for the black background
+  // default — and vanished under a light backgroundColor override. Chrome now
+  // follows the actual surface; the default black path keeps today's white.
+  const chromeOnLight = isLightSurface(backgroundColor);
+  const chromeColor = inkFor(backgroundColor, "#0B0B0F", "#FFFFFF");
+
+  // 2026-08-26 coupled-defaults audit: the white text defaults were authored
+  // for the dark bubble defaults and must not survive a bubble-color-only
+  // override (white on iMessage light grey ≈ 1.2:1). Unspecified ink derives
+  // from the actual bubble color; explicit overrides and the default dark
+  // bubbles (white ink) pass through unchanged.
+  const effIncomingTextColor = incomingTextColor ?? inkFor(incomingColor);
+  const effOutgoingTextColor = outgoingTextColor ?? inkFor(outgoingColor);
+
+  // 2026-08-26 coupled-defaults audit: minHeight default 1320 exceeds the
+  // 1230 safe-rect the position wrapper enforces, so the card bottom bled
+  // 90px into the TikTok caption/nav zone on every default render — clamp to
+  // the safe height.
+  const effMinHeight = Math.min(minHeight, SAFE_RECT.height);
 
   if (!visible) return null;
 
@@ -568,7 +613,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
         <div
           style={{
             width,
-            minHeight,
+            minHeight: effMinHeight,
             backgroundColor,
             borderRadius,
             display: "flex",
@@ -581,7 +626,9 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               "0 28px 80px rgba(0,0,0,0.6), 0 4px 12px rgba(0,0,0,0.4)",
           }}
         >
-          {showStatusBar ? <StatusBar time={statusBarTime} /> : null}
+          {showStatusBar ? (
+            <StatusBar time={statusBarTime} color={chromeColor} />
+          ) : null}
 
           {header ? (
             <MessageHeader
@@ -590,6 +637,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
               avatarSrc={header.avatarSrc}
               initials={header.initials}
               avatarColor={header.avatarColor ?? "#636366"}
+              chromeColor={chromeColor}
+              onLightSurface={chromeOnLight}
             />
           ) : null}
 
@@ -617,8 +666,8 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
                   }
                   textColor={
                     state.message.sender === "me"
-                      ? outgoingTextColor
-                      : incomingTextColor
+                      ? effOutgoingTextColor
+                      : effIncomingTextColor
                   }
                   entranceProgress={state.entranceProgress}
                 />
@@ -639,7 +688,7 @@ export const ChatThread: React.FC<ChatThreadProps> = ({
             ) : null}
           </div>
 
-          {showHomeIndicator ? <HomeIndicator /> : null}
+          {showHomeIndicator ? <HomeIndicator color={chromeColor} /> : null}
         </div>
       </div>
     </AbsoluteFill>

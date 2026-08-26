@@ -144,11 +144,24 @@ export const Reticle: React.FC<ReticleProps> = ({
   const exitOpacity = 1 - clamp01(exitProgress * 1.15);
   const exitScale = 1 + 0.05 * exitDefocus;
 
+  // Coupled-defaults audit (2026-08-26): armLength 64 was authored for the
+  // 620x720 default region; a tight region override (< ~128px) crossed the
+  // opposing corner arms into solid bars. Clamp the arm to the region's
+  // half-extents — inert at the defaults (min(64, 305, 355) = 64).
+  const arm = Math.max(
+    0,
+    Math.min(
+      armLength,
+      regionWidth / 2 - thickness,
+      regionHeight / 2 - thickness,
+    ),
+  );
+
   const cornerStyle = (c: Corner): React.CSSProperties => {
     const base: React.CSSProperties = {
       position: "absolute",
-      width: armLength,
-      height: armLength,
+      width: arm,
+      height: arm,
       boxSizing: "border-box",
     };
     const dx = c === "tl" || c === "bl" ? -spread : spread;

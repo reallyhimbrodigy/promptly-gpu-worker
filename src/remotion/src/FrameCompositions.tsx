@@ -170,9 +170,15 @@ export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
                 happened; bottom 19.5% puts the type over the print's corner
                 (type-over-object, occluding the GRAPHIC only). The underline
                 is the beat's ONE full-chroma hit (corpus law 2) — at 55-alpha
-                the beat had zero. */}
+                the beat had zero. 2026-08-26 coupled-defaults audit: 19.5 was
+                tuned against the 58% default only — derive the corner overlap
+                from the still's actual geometry (a 9:16 still's bottom edge
+                sits at (100-w)/2 % from the frame bottom; keep the ~1.5%
+                overlap at any width; 58 => 19.5, byte-identical). */}
             <div style={{
-              position: "absolute", bottom: "19.5%", left: "6%", right: "10%",
+              position: "absolute",
+              bottom: `${Math.max(4, (100 - (spec.still_width_pct ?? 58)) / 2 - 1.5)}%`,
+              left: "6%", right: "10%",
               fontFamily: mgTextFont(captionText, "inter"),
               fontSize: spec.cap_px * 0.6, fontWeight: 800, color: spec.fg,
               lineHeight: Math.max(1.02, captionM.lineHeight),
@@ -219,7 +225,13 @@ export const DeviceMockup: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
                 <SourceStill sourceUrl={sourceUrl} atSeconds={spec.at_seconds} fps={fps}
                   label="DeviceMockup.still"
                   style={{ width: spec.still_width_px ?? 430, aspectRatio: "9 / 16",
-                           borderRadius: (spec.shell_radius_px ?? 46) - 12, boxShadow: "none" }} />
+                           // 2026-08-26 coupled-defaults audit: the -12 offset
+                           // goes NEGATIVE below shell_radius_px 12 (invalid
+                           // CSS, dropped => square screen corners in a
+                           // rounded shell) — clamp at 0; default 46-12=34
+                           // unchanged.
+                           borderRadius: Math.max(0, (spec.shell_radius_px ?? 46) - 12),
+                           boxShadow: "none" }} />
               </div>
             </AbsoluteFill>
             {spec.label ? (
