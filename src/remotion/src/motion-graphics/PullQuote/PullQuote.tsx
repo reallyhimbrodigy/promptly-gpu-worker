@@ -97,7 +97,10 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
       : inkFor(resolvedBarColor, "#0A0A0A"));
 
   const keywordSet = useMemo(
-    () => new Set(keywords.map(normalize)),
+    // Empty normalizations are dropped: a keyword that reduces to "" (pure
+    // punctuation) must not become a match-everything member — the residual
+    // tail of the audited silent-deletion defect.
+    () => new Set(keywords.map(normalize).filter(Boolean)),
     [keywords],
   );
 
