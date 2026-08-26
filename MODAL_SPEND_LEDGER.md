@@ -324,3 +324,18 @@ Fixed by excluding it from the mount (283 MB less uploaded per deploy) with a
 gate assertion, 2 mutations RED-proven. Zero orphans: the quiet window held on
 poll 1 (1 job in the render stage) and cleared on poll 2 — the render delivered.
 `PROMPTLY_ALLOW_BUSY_DEPLOY` unused.
+
+### 2026-08-26 — offthread arm + LEGSTAT + the upload/version read
+
+| run | cost |
+|---|---|
+| offthread column read + shape probes (5 query runs) | ~$0.03 |
+| failure ranking by users (2 runs, wide + clean cohort) | ~$0.01 |
+| upload adoption by build (3 runs incl. shape probe) | ~$0.02 |
+| stall arms reads (4 runs) | ~$0.02 |
+| `secret_flip.py` PROMPTLY_OFFTHREAD_ARM (dry + apply) | ~$0.02 |
+| deploy v576 + v577 | ~$0.05 |
+| **session total to date** | **~$0.26** |
+
+Zero orphans across both deploys — the window held once and cleared on poll 6,
+then cleared on poll 1. `PROMPTLY_ALLOW_BUSY_DEPLOY` unused throughout.
