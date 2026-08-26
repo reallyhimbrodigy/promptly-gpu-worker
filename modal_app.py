@@ -442,7 +442,22 @@ image = (
         ),
     )
     # Remotion: copy source, install deps, download Chromium, pre-bundle
-    .add_local_dir("src/remotion", "/remotion", copy=True)
+    # THE WEBPACK CACHE IS EXCLUDED, AND IT IS NOT AN OPTIMISATION.
+    # node_modules/.cache/webpack is 283 MB of LOCAL BUILD DETRITUS that
+    # Remotion rewrites every time it renders — including during the render
+    # tests validate_deploy runs seconds earlier, inside deploy.sh. Modal
+    # verifies mounted files do not change mid-upload, so the gate's own
+    # renders raced the deploy that followed them:
+    #
+    #   Error: .../webpack/remotion-production-4.0.449/.../index.pack was
+    #          modified during build process
+    #
+    # Deleting the cache before deploying only shrinks the race window; a
+    # lingering webpack flush re-opens it. Excluding it CLOSES the race — an
+    # unmounted file cannot be observed changing. The image runs `npm install`
+    # and pre-bundles from source anyway, so nothing at runtime reads it.
+    .add_local_dir("src/remotion", "/remotion", copy=True,
+                   ignore=["node_modules/.cache/**"])
     .run_commands(
         "cd /remotion && npm install 2>&1 | tail -5",
         # Remove macOS Chrome cache copied from local machine, then download Linux version

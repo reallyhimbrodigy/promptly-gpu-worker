@@ -322,6 +322,28 @@ def _session_certs_registered():
             f"when adding assertions, never when losing them.")
 
 
+@check("A MOUNTED DIRECTORY MUST NOT CONTAIN A LIVE BUILD CACHE (2026-08-25, RULE-1). Modal verifies that mounted files do not change mid-upload, and `src/remotion` was mounted WHOLE — including node_modules/.cache/webpack, 283 MB that Remotion rewrites every time it renders. deploy.sh runs validate_deploy FIRST, and validate_deploy renders; a webpack flush landing after the gate returned but during the upload killed the deploy outright: 'index.pack was modified during build process'. The flip it was carrying did not land, and nothing before that point had failed — 429/429 green, quiet window clear. Deleting the cache pre-deploy only SHRINKS the race; excluding it CLOSES it, because an unmounted file cannot be observed changing. This asserts the exclusion survives, because the failure mode is a deploy that dies AFTER every gate has passed — the most expensive place to discover anything — and re-mounting the cache would silently restore an intermittent, timing-dependent deploy failure that looks like a Modal fault rather than ours.")
+def _remotion_mount_excludes_cache():
+    import ast as _ast
+    _src = open("modal_app.py", encoding="utf-8").read()
+    _found = None
+    for _n in _ast.walk(_ast.parse(_src)):
+        if (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Attribute)
+                and _n.func.attr == "add_local_dir"
+                and _n.args and isinstance(_n.args[0], _ast.Constant)
+                and _n.args[0].value == "src/remotion"):
+            _found = _n
+    assert _found is not None, "the src/remotion mount vanished — image would ship no render tree"
+    _ign = [k for k in _found.keywords if k.arg == "ignore"]
+    assert _ign, ("src/remotion is mounted WITHOUT ignore= — the webpack cache is "
+                  "back in the mount and the deploy will intermittently die with "
+                  "'was modified during build process' AFTER passing every check here")
+    _pats = " ".join(getattr(_e, "value", "") for _e in getattr(_ign[0].value, "elts", [])
+                     if isinstance(_e, _ast.Constant))
+    assert "node_modules/.cache" in _pats, (
+        f"ignore= present but does not cover node_modules/.cache: {_pats!r}")
+
+
 @check("SEAM DARK SEAMS STAY DARK + WIRED (lane 5, merged by TRUTH 2026-08-11, RULE-1): runs SEAM's three offline certs — cert_adapter_contract (5), cert_unified_core (8), cert_surgical_ops (6) — inside the deploy gate. They assert flag-OFF byte-identity (the prompt-byte fingerprint, the identity-carrier adapter, the empty premium profile, the schema-enum exclusion), that each module is MOUNTED into the image and imported unconditionally (the progressive_publish lesson: wiring shipped, module didn't), and that no flag defaults ON. Zero network, zero Modal, zero Gemini. If any seam silently arms itself, or a mount is dropped, the deploy fails here rather than at flip time.")
 def _seam_dark_certs():
     import subprocess as _sp
