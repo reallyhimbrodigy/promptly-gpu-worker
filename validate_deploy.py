@@ -301,7 +301,8 @@ def _quiet_window_gate_wired():
 def _session_certs_registered():
     import subprocess as _sp
     _here = os.path.dirname(os.path.abspath(__file__))
-    for _cert, _n in (("cert_dead_air_attrition.py", 18),
+    for _cert, _n in (("cert_falsifier_readable.py", 9),
+                      ("cert_dead_air_attrition.py", 18),
                       ("cert_offthread_evidence.py", 17),
                       ("cert_onset_snap.py", 18),
                       ("cert_doctrine_matches_schema.py", 7),

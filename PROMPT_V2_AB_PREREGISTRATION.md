@@ -106,3 +106,18 @@ this n**, not as a direction.
 
 26 cells (13 sources × 2 arms), plan-only, serial, at the ledgered $0.20/cell:
 **≈$5.20.** No render — a render cannot change what the PLANNER emits.
+
+
+---
+
+## FIELDS THIS PRE-REGISTRATION READS
+
+**SUPERSEDED** by `PROMPT_V3_BEAT_PURPOSE_PREREGISTRATION.md` — kept unedited as
+the record of what was predicted before the v3 result was known. Its readings
+are listed so the superseded document cannot quietly become the live one again
+with unreadable conditions attached.
+
+```reads
+stage_timings.v2_counts
+component_ledger
+```

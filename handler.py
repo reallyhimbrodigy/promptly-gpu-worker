@@ -6226,6 +6226,15 @@ _DEAD_AIR_PRESERVED = [0] # the model chose to KEEP (the third number)
 # denominator, instead of a log hunt that has now failed twice.
 _RENDER_OFFTHREAD = {}
 
+# ARM B'S PRE-REGISTERED READINGS, ON THE ROW. flatten_beats computes v2_counts
+# — beats_unresolvable, purpose_distribution, beat_durations_s — and handler
+# only PRINTED it. Those are exactly the numbers §4 of the v3 pre-registration
+# draws its four "worse result" conclusions from, so they were readable from a
+# harness run and UNREADABLE from production: the `preserved` defect one step
+# removed. A conclusion that can only be drawn inside a container is not a
+# production reading.
+_V2_COUNTS_LAST = {}
+
 # Resolved proxy sampling for THIS job. Holders rather than globals-by-name for
 # the same reason _lang_bundle_holder exists: the value is produced deep inside
 # the Gemini call site and read at the payload seam, and a plain global read
@@ -14631,6 +14640,9 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                     # plan", it is the repair re-ask returning a corrected
                     # object — and it still owes the full contract.
                     ensure_contract=True)
+                _V2_COUNTS_LAST.clear()
+                if isinstance(_parsed.get("v2_counts"), dict):
+                    _V2_COUNTS_LAST.update(_parsed["v2_counts"])
                 print(f"[prompt-v2] flattened: {_parsed.get('v2_counts')}", flush=True)
             # L1+L2: declared caps + repetition signatures enforced at THE
             # parse edge — every downstream consumer reads capped strings.
@@ -39911,6 +39923,7 @@ def handler(job):
         _DEAD_AIR_OFFERED[0] = 0
         _DEAD_AIR_PRESERVED[0] = 0
         _RENDER_OFFTHREAD.clear()
+        _V2_COUNTS_LAST.clear()
         _RENDER_ATTEMPTS[0] = 0
 
         # Step 1 — Download + parallel stage kickoff
@@ -43815,6 +43828,10 @@ def handler(job):
                 "render_concurrency": (sorted(set(_RENDER_OFFTHREAD.get("concurrency") or []))
                                        or None),
                 "render_legs_reporting": len(_RENDER_OFFTHREAD.get("offthread") or []),
+                # None on arm A (flatten_beats never runs) — honest, and
+                # distinguishable from "arm B ran and emitted nothing", which
+                # is itself one of the four pre-registered worse-result readings.
+                "v2_counts": (dict(_V2_COUNTS_LAST) or None),
             },
             # W2: which stages ran/skipped and WHY (effort-proportional proof)
             "stage_manifest": _stage_manifest,

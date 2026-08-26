@@ -184,3 +184,29 @@ enough to resolve a 20% difference. Any delta under ~30% is reported as
 
 26 cells (13 sources × 2 arms), plan-only, serial, at the ledgered $0.20/cell:
 **≈$5.20.** No render — a render cannot change what the PLANNER emits.
+
+
+---
+
+## FIELDS THIS PRE-REGISTRATION READS — added 2026-08-25, after the stall defect
+
+§4's four "worse result" readings all draw on `v2_counts`, which `flatten_beats`
+computes and handler, until now, only PRINTED. They were therefore readable
+inside a harness run and UNREADABLE from production — the same defect as the
+stall experiment's `preserved`, one step removed. A conclusion that can only be
+drawn inside a container is not a production reading, and §4.2 ("`purpose` is
+near-constant") and §4.4 ("uniform `t_start`/`t_end` spacing") are exactly the
+two that would have gone unanswerable had arm B ever run on real traffic.
+
+`v2_counts` is now persisted on the job row. On arm A it is `None` — honest, and
+distinguishable from "arm B ran and emitted nothing", which is itself §4.1.
+
+```reads
+stage_timings.v2_counts
+component_ledger
+stage_timings.gemini_tokens
+stage_timings.editorial_model
+```
+
+§4b's repeat count (silence as a RATE per source, not a bit) is a property of
+the RUN DESIGN, not of a field, and is not declarable here.

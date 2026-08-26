@@ -181,3 +181,27 @@ says every fix ships a check that makes its regression impossible, and a cert
 nobody runs makes nothing impossible. Now registered in the gate with their
 PASS COUNTS asserted, so a check deleted to make a red cert green fails the
 deploy instead of reading as a fix.
+
+
+---
+
+## FIELDS THIS PRE-REGISTRATION READS
+
+Declared because prose describing a falsifier looks identical whether or not
+anything writes the field — which is how `preserved` was specified, costed into
+a two-arm design, and never persisted. `cert_falsifier_readable.py` refuses any
+field here that handler.py does not actually WRITE (checked against the AST of
+the persist site, not a grep: `_v2_counts` was computed, certified, and eaten in
+transit by a `k.startswith("_")` sanitiser).
+
+```reads
+stage_timings.dead_air_spans_located
+stage_timings.dead_air_spans_offered
+stage_timings.dead_air_spans_preserved
+stage_timings.midsentence_stall_s
+```
+
+`located` is the arm-invariance self-check, `offered/located` is the gate the
+constant moves, `preserved/offered` is the FALSIFIER, and `midsentence_stall_s`
+is the arm the cohort is cut by — without it a post-flip window is a mixture of
+both arms, not a cohort.
