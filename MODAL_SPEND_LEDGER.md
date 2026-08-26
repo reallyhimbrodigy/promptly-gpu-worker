@@ -287,3 +287,24 @@ false.
 | 2026-08-25 | BUILDER | **cert-prompt-v2-ab** (v3 tail: sources 9-12, ARM B, via run_modal.sh) | 4 | plan-only | ~$0.80 est | ~$10.30 of $12.00 |
 | 2026-08-25 | BUILDER | **cert-prompt-v2-ab** (v3 tail: sources 9-12, ARM A — completes the pairing) | 4 | plan-only | ~$0.80 est | ~$11.10 of $12.00 |
 | 2026-08-25 | BUILDER | **cert-v3-snap-render** (THE ARTIFACT: v3 + onset snap, full render, cpu16+burst) | 1 | full render | ~$0.50 est | ~$11.60 of $12.00 |
+
+## 2026-08-25 — BUILDER, three-item queue (deploy + verification)
+
+| item | run | cost |
+|---|---|---|
+| deploy v574 @ 95b778b | `./deploy.sh` (image build 55.6s, layers cached) | ~$0.02 |
+| in-image verifier, attempt 1 | `cert_deployed_three_items_app.py` — ModuleNotFoundError: modal_app | ~$0.005 |
+| in-image verifier, attempt 2 | object-id mismatch (1 vs 6 dependencies) | ~$0.005 |
+| in-image verifier, attempt 3 | default image → ModuleNotFoundError: handler | ~$0.005 |
+| arms read | `query_stall_arms_app.py` — 194 rows, all pre-deploy, exit 2 | ~$0.005 |
+| **session total** | | **~$0.04** |
+
+Three of five runs were spent on a verifier that is structurally blocked (see
+the file's own header). Filed rather than repeated: the fix is a plain
+introspection function on `modal_app.py` at the next deploy, not another attempt
+from outside. Orphan check: `modal app list` shows no running task from any of
+these (the one ephemeral entry is from 08-19, 0 tasks).
+
+Deploy orphan attributed: `65a49d1d` (step=Queued, pct=0) — the one pre-render
+row in flight at deploy time. Batching all three items into a single deploy is
+why that is one orphaned job and not three.
