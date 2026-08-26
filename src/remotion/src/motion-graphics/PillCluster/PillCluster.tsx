@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
+import { inkFor } from "../shared/ink";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { PillClusterProps } from "./types";
@@ -12,6 +13,7 @@ const DEFAULT_TEXT_SHADOW =
   "0 2px 10px rgba(0,0,0,0.55), 0 1px 2px rgba(0,0,0,0.5)";
 const START = 6;
 const STAGGER = 4;
+const DEFAULT_ACCENT = "#4F9DF7";
 
 
 // Deterministic 0..1 hash (no Math.random — render must be reproducible).
@@ -52,7 +54,7 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   enterFrames,
   exitFrames,
   tags = [],
-  accentColor = "#4F9DF7",
+  accentColor = DEFAULT_ACCENT,
   accentEvery = 3,
   glass = true,
   // Corpus law 1 (pass #7b): panel measured letterforms at ~2.5% frame height
@@ -86,6 +88,11 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   const N = rendered.length;
   if (N === 0) return null;
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // computed once per tag — layout advance + span style both read these.
+  const tagFonts = rendered.map((t) => mgTextFont(t, "inter"));
+  const tagMetrics = rendered.map((t) => mgTextMetrics(t));
+
   // Shuffle the pop-in order deterministically so it doesn't read left→right.
   const orderBySeed = rendered
     .map((_, i) => i)
@@ -98,19 +105,31 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   const exitOpacity = 1 - exitProgress;
   const exitScale = 1 - 0.06 * exitProgress;
 
+  // Coupled-defaults audit (2026-08-26): the accent pill's dark ink was
+  // authored for the default mid-blue accent and survived a dark palette
+  // accent (~1.3:1, un-overridable). Ink now follows an overridden accent;
+  // the default is guarded by constant (inkFor's 0.5 threshold would flip
+  // the mid-blue default to white — default pixels must stay identical).
+  const accentInk =
+    accentColor === DEFAULT_ACCENT ? "#15151E" : inkFor(accentColor);
+
   // ── §4 pile layout: serpentine placement with overlap on both axes ──
   const PAD_X = 40;
   const PAD_Y = 21;
   const pillH = fontSize + PAD_Y * 2;
   const rowStep = Math.round(pillH * 0.78); // rows overlap ~22% of pill height — edges tuck, text stays clear
-  const estW = (t: string): number =>
-    PAD_X * 2 + Math.max(3, t.length) * fontSize * 0.56;
+  // 0.56 stays the latin advance; non-Latin uses the census estimate.
+  const estW = (t: string, ti: number): number =>
+    PAD_X * 2 +
+    Math.max(3, t.length) *
+      fontSize *
+      (tagMetrics[ti].script === "latin" ? 0.56 : tagMetrics[ti].advanceEm);
   const placed: { x: number; y: number; rot: number }[] = [];
   {
     let x = 0;
     let row = 0;
     rendered.forEach((tag, i) => {
-      const w = Math.min(estW(tag), width);
+      const w = Math.min(estW(tag, i), width);
       if (x > 0 && x + w > width) {
         row += 1;
         // Alternating row indent so the left edge staggers like a real pile.
@@ -125,7 +144,7 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   }
   const clusterW = Math.min(
     width,
-    Math.max(...rendered.map((t, i) => placed[i].x + estW(t))),
+    Math.max(...rendered.map((t, i) => placed[i].x + estW(t, i))),
   );
   const clusterH = placed[placed.length - 1].y + pillH;
 
@@ -227,13 +246,18 @@ export const PillCluster: React.FC<PillClusterProps> = ({
               >
                 <span
                   style={{
-                    fontFamily: MG_FONTS.inter,
+                    fontFamily: tagFonts[i],
                     fontSize,
                     fontWeight: 600,
-                    color: isAccent ? "#15151E" : textColor,
+                    color: isAccent ? accentInk : textColor,
                     letterSpacing: "0.005em",
-                    lineHeight: 1,
-                    textShadow: isAccent ? undefined : textShadow,
+                    lineHeight: Math.max(1, tagMetrics[i].lineHeight),
+                    // White accent ink keeps the neutral shadow (the dark
+                    // halo is what makes light ink read on a dark chip).
+                    textShadow:
+                      isAccent && accentInk !== "#FFFFFF"
+                        ? undefined
+                        : textShadow,
                   }}
                 >
                   {tag}

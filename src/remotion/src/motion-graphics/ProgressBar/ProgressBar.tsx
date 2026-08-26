@@ -1,7 +1,9 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
 import { SPRING_SNAPPY } from "../shared/springs";
+import { inkFor } from "../shared/ink";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { mgSchedule } from "../shared/schedule";
@@ -19,6 +21,8 @@ const FILL_START = 8;
 const FILL_END = 34;
 const PULSE_END = 40;
 
+const DEFAULT_TRACK = "rgba(255,255,255,0.14)";
+
 export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
   const {
     startMs,
@@ -30,13 +34,13 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
     // dragged the whole card right of center on Zac's render.
     width = 680,
     trackHeight = 18,
-    fillColor = "#FFFFFF",
+    fillColor,
     // §6 palette lock (pass #10, audited): the old default "#D4A12A" was
     // component-INVENTED gold — the live placement sent no accentColor and
     // rendered chroma no palette selected. An unspecified accent is neutral
     // chrome; jobs that want chroma pass their palette's accent.
     accentColor = "rgba(255,255,255,0.72)",
-    trackColor = "rgba(255,255,255,0.14)",
+    trackColor = DEFAULT_TRACK,
     milestones = [],
     formatValue,
     textShadowLarge = DEFAULT_TEXT_SHADOW_LARGE,
@@ -46,6 +50,15 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
     offsetY,
     scale,
   } = props;
+  // Coupled-defaults audit (2026-08-26): the white fill default was authored
+  // for the dim translucent default track; a light/solid trackColor override
+  // left fill ≈ track (~1.1:1) and erased the progress read. Unspecified fill
+  // now follows the actual track (default guarded by constant — the
+  // translucent default parses as pure white to inkFor); explicit fillColor
+  // passes through untouched.
+  const effFillColor =
+    fillColor ??
+    (trackColor === DEFAULT_TRACK ? "#FFFFFF" : inkFor(trackColor));
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
     undefined,
@@ -123,6 +136,11 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
   const fillWidth = width * currentPercent;
   const radius = trackHeight / 2;
 
+  // Font census (2026-08-26): the eyebrow + milestone labels are user/model
+  // text — routed stacks + gated caps; the hero digits stay chrome (bare Anton).
+  const labelFont = mgTextFont(label ?? "", "inter");
+  const labelMetrics = mgTextMetrics(label ?? "");
+
   return (
     <AbsoluteFill style={containerStyle}>
       <div style={wrapperStyle}>
@@ -139,13 +157,13 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
         {label ? (
           <div
             style={{
-              fontFamily: MG_FONTS.inter,
+              fontFamily: labelFont,
               fontSize: 24,
               fontWeight: 600,
               color: accentColor,
               letterSpacing: "0.28em",
-              textTransform: "uppercase",
-              lineHeight: 1,
+              textTransform: labelMetrics.uppercaseSafe ? "uppercase" : "none",
+              lineHeight: Math.max(1, labelMetrics.lineHeight),
               opacity: eyebrowFadeIn,
               textShadow: textShadowSmall,
               whiteSpace: "nowrap",
@@ -239,17 +257,20 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
               top: 0,
               height: trackHeight,
               width: fillWidth,
-              backgroundColor: fillColor,
+              backgroundColor: effFillColor,
               borderRadius: radius,
               transform: `scaleY(${fillScaleY})`,
               transformOrigin: "center",
-              boxShadow: `0 4px 12px ${withAlpha(fillColor, 0.35)}`,
+              boxShadow: `0 4px 12px ${withAlpha(effFillColor, 0.35)}`,
             }}
           />
 
           {milestones.map((m, i) => {
             const x = width * m.at;
             const reached = currentPercent >= m.at;
+            // Milestone labels are user/model text sites too (census).
+            const msFont = mgTextFont(m.label ?? "", "inter");
+            const msUppercaseSafe = mgTextMetrics(m.label ?? "").uppercaseSafe;
             return (
               <React.Fragment key={i}>
                 <div
@@ -272,14 +293,14 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
                       left: x,
                       bottom: -38,
                       transform: "translateX(-50%)",
-                      fontFamily: MG_FONTS.inter,
+                      fontFamily: msFont,
                       fontSize: 18,
                       fontWeight: 600,
                       color: reached
                         ? "#FFFFFF"
                         : "rgba(255,255,255,0.5)",
                       letterSpacing: "0.2em",
-                      textTransform: "uppercase",
+                      textTransform: msUppercaseSafe ? "uppercase" : "none",
                       whiteSpace: "nowrap",
                       textShadow: textShadowSmall,
                     }}

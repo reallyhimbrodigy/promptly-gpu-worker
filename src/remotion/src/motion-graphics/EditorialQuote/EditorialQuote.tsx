@@ -1,20 +1,48 @@
 import React, { useMemo } from "react";
 import { AbsoluteFill, interpolate } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
-import type { EditorialQuoteProps } from "./types";
+import type { EditorialQuoteFontKey, EditorialQuoteProps } from "./types";
 import { asText } from "../../shared/asText";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 const clamp = (x: number, lo: number, hi: number): number =>
   Math.max(lo, Math.min(hi, x));
 
+// Alpha'd copy of a #rgb/#rrggbb/rgb()/rgba() color; anything unparseable
+// falls back to the color itself (opaque partner ink beats an invented one).
+const withAlpha = (color: string, alpha: number): string => {
+  const hex = color.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hex) {
+    const h =
+      hex[1].length === 3 ? [...hex[1]].map((c) => c + c).join("") : hex[1];
+    return `rgba(${parseInt(h.slice(0, 2), 16)},${parseInt(h.slice(2, 4), 16)},${parseInt(h.slice(4, 6), 16)},${alpha})`;
+  }
+  const fn = color.match(/^rgba?\(([^)]+)\)$/i);
+  if (fn) {
+    const [r, g, b] = fn[1].split(",").map((p) => parseFloat(p));
+    return `rgba(${r || 0},${g || 0},${b || 0},${alpha})`;
+  }
+  return color;
+};
+
 // Corpus law 1 (pass #7b): statement cards are takeover beats — the widest
 // line runs >=95% of frame width (edge-crop legal per REF-2).
 const SIDE_INSET = 26;
 const TEXT_MAX_WIDTH = 1080 - 2 * SIDE_INSET; // 1028
-const CHAR_RATIO = 0.47; // italic serif advance estimate
+// 2026-08-26 coupled-defaults audit: the single 0.47 was the playfairDisplay
+// italic advance and survived a fontKey-only override — inter lines overshot
+// the frame (mid-glyph edge crop), oswald under-filled the takeover width.
+// Per-face table (PullQuote's idiom); playfairDisplay keeps 0.47 so the
+// default path is unchanged.
+const CHAR_RATIO: Record<EditorialQuoteFontKey, number> = {
+  playfairDisplay: 0.47, // italic serif advance estimate
+  dmSerifDisplay: 0.5,
+  inter: 0.53,
+  oswald: 0.4,
+};
 
 export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
   startMs,
@@ -26,7 +54,7 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
   role,
   accentColor = "#FFD60A",
   textColor = "#FFFFFF",
-  authorColor = "rgba(255,255,255,0.7)",
+  authorColor,
   fontKey = "playfairDisplay",
   fontSize = 108,
   maxWordsPerLine = 3,
@@ -62,6 +90,23 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
     lines.push(words.slice(i, i + m).join(" "));
   }
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // the giant quote-mark plane below keeps the bare face (chrome glyph).
+  const quoteText = words.join(" ");
+  const quoteFont = mgTextFont(quoteText, fontKey);
+  const quoteMetrics = mgTextMetrics(quoteText);
+  const authorFont = mgTextFont(author ?? "", "inter");
+  const authorCapsSafe = mgTextMetrics(author ?? "").uppercaseSafe;
+  const roleFont = mgTextFont(role ?? "", "inter");
+
+  // 2026-08-26 coupled-defaults audit: the rgba(255,255,255,0.7) authorColor
+  // default was authored for textColor's #FFFFFF default and survived a
+  // textColor-only override (dark ink above a near-invisible white role line
+  // on bright footage). The role ink now derives from the resolved textColor
+  // at the same 0.7 alpha; explicit authorColor wins, and the all-default
+  // path resolves to the identical rgba(255,255,255,0.7).
+  const resolvedAuthorColor = authorColor ?? withAlpha(textColor, 0.7);
+
   // Deterministic font-fit on the longest line (no DOM measurement).
   let maxChars = 0;
   for (const l of lines) maxChars = Math.max(maxChars, l.length);
@@ -70,8 +115,12 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
   // (render-caught: fontSize=108 bound while widthFit allowed ~130, leaving a
   // ~150px dead right margin). The bar (9) + gap (38) live inside the centered
   // block, so the text's usable width is TEXT_MAX_WIDTH minus that 47px.
+  // CHAR_RATIO follows the resolved face; non-Latin uses the
+  // census-conservative estimate.
+  const charRatio =
+    quoteMetrics.script === "latin" ? CHAR_RATIO[fontKey] : quoteMetrics.advanceEm;
   const widthFit =
-    (TEXT_MAX_WIDTH - 47) / (Math.max(1, maxChars) * CHAR_RATIO);
+    (TEXT_MAX_WIDTH - 47) / (Math.max(1, maxChars) * charRatio);
   const finalFontSize = clamp(widthFit, 56, 165);
 
   // Left accent bar draws down first.
@@ -218,12 +267,12 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
                 <div
                   key={li}
                   style={{
-                    fontFamily: MG_FONTS[fontKey],
+                    fontFamily: quoteFont,
                     fontSize: finalFontSize,
                     fontStyle: italic ? "italic" : "normal",
                     fontWeight: 500,
                     color: textColor,
-                    lineHeight: 1.16,
+                    lineHeight: Math.max(1.16, quoteMetrics.lineHeight),
                     letterSpacing: "-0.01em",
                     whiteSpace: "nowrap",
                     position: "relative",
@@ -268,12 +317,12 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
               >
                 <div
                   style={{
-                    fontFamily: MG_FONTS.inter,
+                    fontFamily: authorFont,
                     fontSize: Math.round(finalFontSize * 0.3),
                     fontWeight: 700,
                     color: textColor,
                     letterSpacing: "0.08em",
-                    textTransform: "uppercase",
+                    textTransform: authorCapsSafe ? "uppercase" : "none",
                   }}
                 >
                   {author}
@@ -281,10 +330,10 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
                 {role ? (
                   <div
                     style={{
-                      fontFamily: MG_FONTS.inter,
+                      fontFamily: roleFont,
                       fontSize: Math.round(finalFontSize * 0.22),
                       fontWeight: 500,
-                      color: authorColor,
+                      color: resolvedAuthorColor,
                       letterSpacing: "0.04em",
                       marginTop: 5,
                     }}

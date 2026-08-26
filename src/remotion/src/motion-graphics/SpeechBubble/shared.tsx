@@ -1,6 +1,7 @@
 import React from "react";
 import { Img } from "remotion";
 import { SafeImg } from "../../SafeImg";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 
 
 interface AvatarProps {
@@ -8,7 +9,6 @@ interface AvatarProps {
   src?: string;
   initials?: string;
   fallbackColor: string;
-  fontFamily: string;
   fallbackText?: string;
 }
 
@@ -17,7 +17,6 @@ export const Avatar: React.FC<AvatarProps> = ({
   src,
   initials,
   fallbackColor,
-  fontFamily,
   fallbackText,
 }) => {
   if (src) {
@@ -44,7 +43,14 @@ export const Avatar: React.FC<AvatarProps> = ({
     );
   }
 
-  const letters = (initials ?? fallbackText ?? "?").slice(0, 2).toUpperCase();
+  // Initials are USER text (derived from the name) — code-point-safe slice
+  // (.slice(0,2) on UTF-16 split surrogate pairs) and script-routed face,
+  // not the caller's latin face (font census 2026-08-26).
+  const letters = [...(initials ?? fallbackText ?? "?")]
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+  const lettersMetrics = mgTextMetrics(letters);
 
   return (
     <div
@@ -58,11 +64,11 @@ export const Avatar: React.FC<AvatarProps> = ({
         alignItems: "center",
         justifyContent: "center",
         color: "#FFFFFF",
-        fontFamily,
+        fontFamily: mgTextFont(letters, "inter"),
         fontSize: Math.round(size * 0.42),
         fontWeight: 700,
         letterSpacing: "-0.01em",
-        lineHeight: 1,
+        lineHeight: Math.max(1, lettersMetrics.lineHeight),
       }}
     >
       {letters}

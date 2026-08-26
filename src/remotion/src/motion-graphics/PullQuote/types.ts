@@ -25,7 +25,7 @@ export interface PullQuoteProps extends MGTimingProps, MGPositionProps {
   highlightStyle?: PullQuoteHighlightStyle; // Default "color".
   keywordScale?: number; // keyword size multiplier. Default 1.18.
   barColor?: string; // "bar" mode. Default = keywordColor.
-  highlightTextColor?: string; // keyword ink on bar. Default "#0A0A0A".
+  highlightTextColor?: string; // keyword ink on bar. Default: ink paired to the resolved bar color (#0A0A0A on the default yellow).
   align?: PullQuoteAlign; // Default "center".
   uppercase?: boolean; // Default true.
   wordStagger?: number; // frames @60fps. Default 6.

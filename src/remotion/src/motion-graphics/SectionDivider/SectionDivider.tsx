@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { mgSchedule } from "../shared/schedule";
@@ -83,24 +84,31 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
   const numColor = numberColor ?? accentColor;
   const isSerif = fontKey === "dmSerifDisplay" || fontKey === "playfairDisplay";
   const isLeft = align === "left";
-  const lines = asText(title).split("\n");
+  const titleText = asText(title);
+  const lines = titleText.split("\n");
 
-  // Script routing (pass #9, render-caught): the display faces are latin-only —
-  // the live Devanagari title fell back to an unstyled system face, with matras
-  // clipped at lineHeight 1.0 under the reveal mask. Detect by Unicode range
-  // (the standing rule: detect by script, never by language tag).
-  const isDevanagari = /[ऀ-ॿ]/.test(asText(title));
-  const titleFontFamily = isDevanagari
-    ? MG_FONTS.notoSansDevanagari
-    : FONT_FAMILY[fontKey];
-  const titleLineHeight = isDevanagari ? 1.3 : isSerif ? 1.08 : 1.0;
+  // Script routing (pass #9, render-caught; generalized by the 2026-08-26 font
+  // census): the display faces are latin-only — the live Devanagari title fell
+  // back to an unstyled system face, with matras clipped at lineHeight 1.0
+  // under the reveal mask. mgTextFont/mgTextMetrics detect by Unicode range
+  // (the standing rule: by script, never by language tag), now covering
+  // Bengali/Telugu/Arabic/Cyrillic too, and always carry the emoji tail.
+  const titleMetrics = mgTextMetrics(titleText);
+  const titleIsLatin = titleMetrics.script === "latin";
+  const titleFontFamily = mgTextFont(titleText, fontKey);
+  const titleLineHeight = Math.max(isSerif ? 1.08 : 1.0, titleMetrics.lineHeight);
+
+  // Eyebrow is a user/model text site too (census): routed stack + gated caps.
+  const labelFont = mgTextFont(label ?? "", "inter");
+  const labelUppercaseSafe = mgTextMetrics(label ?? "").uppercaseSafe;
 
   // Width-driven autofit (the EditorialQuote recipe): the title GROWS to the
   // safe box and can never overflow it. Per-script advance estimates are
-  // deliberate over-estimates — text may never crop.
+  // deliberate over-estimates — text may never crop (non-latin uses the
+  // census's render-proven advanceEm).
   let maxChars = 1;
   for (const l of lines) maxChars = Math.max(maxChars, [...l].length);
-  const advance = isDevanagari ? 0.4 : isSerif ? 0.58 : 0.52;
+  const advance = titleIsLatin ? (isSerif ? 0.58 : 0.52) : titleMetrics.advanceEm;
   const fitTitleSize = Math.round(
     Math.max(56, Math.min(CONTENT_MAX_WIDTH / (maxChars * advance), 170)),
   );
@@ -290,12 +298,12 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
           {label ? (
             <div
               style={{
-                fontFamily: MG_FONTS.inter,
+                fontFamily: labelFont,
                 fontSize: EYEBROW_SIZE,
                 fontWeight: 600,
                 color: ebColor,
                 letterSpacing: "0.3em",
-                textTransform: "uppercase",
+                textTransform: labelUppercaseSafe ? "uppercase" : "none",
                 lineHeight: 1.2,
                 marginBottom: 28,
                 opacity: ebEnterO * ebExitO,
@@ -373,9 +381,11 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
                     fontSize: fitTitleSize,
                     fontWeight: 400,
                     color: titleColor,
-                    letterSpacing: isSerif || isDevanagari ? "0" : "-0.01em",
+                    letterSpacing: isSerif || !titleIsLatin ? "0" : "-0.01em",
                     lineHeight: titleLineHeight,
-                    textTransform: isDevanagari ? "none" : "uppercase",
+                    textTransform: titleMetrics.uppercaseSafe
+                      ? "uppercase"
+                      : "none",
                     textAlign: isLeft ? "left" : "center",
                     whiteSpace: "nowrap",
                     opacity: lineEnterO * lineExitO,

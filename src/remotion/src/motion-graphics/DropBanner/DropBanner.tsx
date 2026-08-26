@@ -1,6 +1,8 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
+import { inkFor, isLightSurface } from "../shared/ink";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { DropBannerPoint, DropBannerProps } from "./types";
 import { asText } from "../../shared/asText";
@@ -52,16 +54,25 @@ export const DropBanner: React.FC<DropBannerProps> = ({
   exitFrames,
   title,
   subtitle,
-  count = 3,
+  count,
   points = [],
   cardColor = "#FFFFFF",
-  titleColor = "#15151E",
-  subtitleColor = "#5A5A5A",
+  titleColor,
+  subtitleColor,
   accentColor = "#F5A11E",
-  spokenColor = "#15151E",
-  mutedColor = "#C2C2CA",
+  spokenColor,
+  mutedColor,
   cardHeightPct = 0.47,
 }) => {
+  // 2026-08-26 coupled-defaults audit: the dark text defaults were authored
+  // for the white card and must not survive a cardColor-only override (dark
+  // card -> invisible title + captions that fade OUT as spoken). Explicit
+  // overrides pass through; the light-card path keeps today's constants.
+  const lightCard = isLightSurface(cardColor);
+  const effTitleColor = titleColor ?? inkFor(cardColor); // "#15151E" on light
+  const effSpokenColor = spokenColor ?? inkFor(cardColor);
+  const effSubtitleColor = subtitleColor ?? (lightCard ? "#5A5A5A" : "#B0B0B8");
+  const effMutedColor = mutedColor ?? (lightCard ? "#C2C2CA" : "#55555E");
   const { fps, height } = useVideoConfig();
   const { visible, localFrame, exitProgress } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
@@ -93,7 +104,11 @@ export const DropBanner: React.FC<DropBannerProps> = ({
     extrapolateRight: "clamp",
   });
 
-  const n = Math.max(1, Math.min(count, START_ROT.length));
+  // 2026-08-26 coupled-defaults audit: the 3-circle default applies only
+  // while points is also defaulted — a spec that sends points without count
+  // gets circles matching its points, not a fixed promise of 3.
+  const effectiveCount = count ?? (points.length > 0 ? points.length : 3);
+  const n = Math.max(1, Math.min(effectiveCount, START_ROT.length));
 
   // Multi-step scroll: each point's spring carries the column up one more
   // slide-height (clean settle, no bounce). Total = sum of steps.
@@ -106,6 +121,10 @@ export const DropBanner: React.FC<DropBannerProps> = ({
     });
   }
   const columnY = -slideHeight * stepSum;
+
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // the circle digits keep bare MG_FONTS (chrome).
+  const titleMetrics = mgTextMetrics(title);
 
   // --- Slide 0: the numbered intro ---
   const introSlide = (
@@ -121,14 +140,14 @@ export const DropBanner: React.FC<DropBannerProps> = ({
     >
       <div
         style={{
-          fontFamily: MG_FONTS.anton,
+          fontFamily: mgTextFont(title, "anton"),
           fontSize: 72,
           fontWeight: 400,
-          color: titleColor,
+          color: effTitleColor,
           letterSpacing: "-0.005em",
-          textTransform: "uppercase",
+          textTransform: titleMetrics.uppercaseSafe ? "uppercase" : "none",
           textAlign: "center",
-          lineHeight: 1.02,
+          lineHeight: Math.max(1.02, titleMetrics.lineHeight),
           opacity: titleOpacity,
         }}
       >
@@ -138,10 +157,10 @@ export const DropBanner: React.FC<DropBannerProps> = ({
       {subtitle ? (
         <div
           style={{
-            fontFamily: MG_FONTS.inter,
+            fontFamily: mgTextFont(subtitle, "inter"),
             fontSize: 32,
             fontWeight: 400,
-            color: subtitleColor,
+            color: effSubtitleColor,
             textAlign: "center",
             lineHeight: 1.3,
             marginTop: 16,
@@ -252,7 +271,10 @@ export const DropBanner: React.FC<DropBannerProps> = ({
   // --- Caption slides: one per point, word-by-word grey -> black ---
   const captionSlides = points.map((pt, k) => {
     const captionStart = FIRST_SCROLL + k * STEP + SETTLE;
-    const words = asText(pt.caption).split(" ");
+    const captionText = asText(pt.caption);
+    const words = captionText.split(" ");
+    // Point title + caption are model text (font census 2026-08-26).
+    const ptTitleMetrics = mgTextMetrics(pt.title);
     return (
       <div
         key={`pt-${k}`}
@@ -267,13 +289,13 @@ export const DropBanner: React.FC<DropBannerProps> = ({
       >
         <div
           style={{
-            fontFamily: MG_FONTS.anton,
+            fontFamily: mgTextFont(pt.title, "anton"),
             fontSize: 60,
             fontWeight: 400,
             color: accentColor,
-            textTransform: "uppercase",
+            textTransform: ptTitleMetrics.uppercaseSafe ? "uppercase" : "none",
             letterSpacing: "-0.01em",
-            lineHeight: 1.0,
+            lineHeight: Math.max(1.0, ptTitleMetrics.lineHeight),
           }}
         >
           {pt.title}
@@ -282,7 +304,7 @@ export const DropBanner: React.FC<DropBannerProps> = ({
         <div
           style={{
             marginTop: 36,
-            fontFamily: MG_FONTS.inter,
+            fontFamily: mgTextFont(captionText, "inter"),
             fontSize: 44,
             fontWeight: 600,
             lineHeight: 1.34,
@@ -293,7 +315,7 @@ export const DropBanner: React.FC<DropBannerProps> = ({
             const activation = captionStart + j * WORD_STEP;
             const t = (localFrame - activation) / WORD_FADE;
             return (
-              <span key={j} style={{ color: lerpColor(mutedColor, spokenColor, t) }}>
+              <span key={j} style={{ color: lerpColor(effMutedColor, effSpokenColor, t) }}>
                 {w}
                 {j < words.length - 1 ? " " : ""}
               </span>

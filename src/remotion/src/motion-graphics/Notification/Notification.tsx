@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { APP_ICONS } from "./icons";
@@ -31,6 +32,9 @@ interface PlatformStyle {
   iconSize: number;
   iconRadius: number;
   fontFamily: string;
+  // Platform latin face as a KEY — the preferredKey mgTextFont routes from
+  // for user/model text (font census 2026-08-26).
+  faceKey: "inter" | "roboto";
   appNameOpacity: number;
 }
 
@@ -48,6 +52,7 @@ const STYLES: Record<"ios" | "android", PlatformStyle> = {
     iconSize: 84,
     iconRadius: 24,
     fontFamily: MG_FONTS.inter,
+    faceKey: "inter",
     appNameOpacity: 0.78,
   },
   android: {
@@ -63,6 +68,7 @@ const STYLES: Record<"ios" | "android", PlatformStyle> = {
     iconSize: 88,
     iconRadius: 26,
     fontFamily: MG_FONTS.roboto,
+    faceKey: "roboto",
     appNameOpacity: 0.82,
   },
 };
@@ -75,6 +81,10 @@ interface BannerProps {
 const NotificationBanner: React.FC<BannerProps> = ({ item, style }) => {
   const Icon = APP_ICONS[item.app];
   const timestamp = item.timestamp ?? "now";
+  // appName/title/body are user/model text — script-routed face + emoji
+  // tail; the timestamp stays chrome on the platform face (font census
+  // 2026-08-26).
+  const appNameMetrics = mgTextMetrics(item.appName);
 
   return (
     <div
@@ -127,11 +137,14 @@ const NotificationBanner: React.FC<BannerProps> = ({ item, style }) => {
         >
           <div
             style={{
+              fontFamily: mgTextFont(item.appName, style.faceKey),
               fontSize: 22,
               fontWeight: 600,
               color: `rgba(255,255,255,${style.appNameOpacity})`,
               letterSpacing: "0.06em",
-              textTransform: "uppercase",
+              textTransform: appNameMetrics.uppercaseSafe
+                ? "uppercase"
+                : "none",
               whiteSpace: "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -155,6 +168,7 @@ const NotificationBanner: React.FC<BannerProps> = ({ item, style }) => {
 
         <div
           style={{
+            fontFamily: mgTextFont(item.title, style.faceKey),
             fontSize: 34,
             fontWeight: 700,
             color: "#FFFFFF",
@@ -168,6 +182,7 @@ const NotificationBanner: React.FC<BannerProps> = ({ item, style }) => {
 
         <div
           style={{
+            fontFamily: mgTextFont(item.body, style.faceKey),
             fontSize: 28,
             fontWeight: 400,
             color: "rgba(255,255,255,0.88)",

@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { RankedListItem, RankedListProps } from "./types";
@@ -127,6 +128,20 @@ export const RankedList: React.FC<RankedListProps> = ({
             const rankColor = isTop ? accentColor : "#FFFFFF";
             const rowTilt = (i % 2 === 0 ? -1 : 1) * (1.2 + (i % 3) * 0.6);
             const rankFS = isTop ? RANK_SIZE * 1.12 : RANK_SIZE;
+
+            // Font census (2026-08-26): label + value chip are user/model text
+            // — routed stacks + non-latin line-height floor; the rank numeral
+            // stays chrome (bare Anton).
+            const labelFont = mgTextFont(item.label, "inter");
+            const labelLineHeight = Math.max(
+              1.05,
+              mgTextMetrics(item.label).lineHeight,
+            );
+            const valueFont = mgTextFont(item.value ?? "", "inter");
+            const valueLineHeight = Math.max(
+              1,
+              mgTextMetrics(item.value ?? "").lineHeight,
+            );
             const rankShadow = isTop
               ? `${textShadow}, 0 0 ${(18 * bloom).toFixed(1)}px ${accentColor}, 0 0 ${(38 * bloom).toFixed(1)}px ${accentColor}66`
               : textShadow;
@@ -183,12 +198,12 @@ export const RankedList: React.FC<RankedListProps> = ({
                     <div
                       style={{
                         flexGrow: 1,
-                        fontFamily: MG_FONTS.inter,
+                        fontFamily: labelFont,
                         fontSize: 52,
                         fontWeight: 800,
                         color: labelColor,
                         letterSpacing: "-0.01em",
-                        lineHeight: 1.05,
+                        lineHeight: labelLineHeight,
                         textShadow,
                       }}
                     >
@@ -208,11 +223,11 @@ export const RankedList: React.FC<RankedListProps> = ({
                           // by fading. Full-contrast chip, accent only on #1.
                           background: isTop ? accentColor : "rgba(255,255,255,0.92)",
                           color: "#15151E",
-                          fontFamily: MG_FONTS.inter,
+                          fontFamily: valueFont,
                           fontSize: 38,
                           fontWeight: 800,
                           letterSpacing: "0.01em",
-                          lineHeight: 1,
+                          lineHeight: valueLineHeight,
                           fontVariantNumeric: "tabular-nums",
                           boxShadow: "0 6px 18px rgba(0,0,0,0.35)",
                           textShadow: isTop ? undefined : textShadow,

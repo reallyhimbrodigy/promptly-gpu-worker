@@ -4,6 +4,7 @@ import { SPRING_SNAPPY } from "../shared/springs";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { composeBubbleTransform } from "./shared";
@@ -94,27 +95,42 @@ export const IMessageBubble: React.FC<IMessageBubbleProps> = ({
 
   let displayedText = text;
   if (typewriter) {
+    // Reveal by GRAPHEME CLUSTER, not UTF-16 unit — .slice(0, chars) split
+    // surrogate pairs / ZWJ emoji / matra clusters mid-reveal (font census
+    // 2026-08-26). Intl.Segmenter is available in the render's Chrome + node.
+    const clusters = Array.from(
+      new Intl.Segmenter().segment(text),
+      (s) => s.segment,
+    );
     const typeFrame = localFrame - K(TYPING_PHASE_FRAMES);
-    const chars = Math.max(
+    const shown = Math.max(
       0,
       Math.floor(
-        interpolate(typeFrame, [0, K(TYPE_REVEAL_FRAMES)], [0, text.length], {
-          extrapolateLeft: "clamp",
-          extrapolateRight: "clamp",
-        }),
+        interpolate(
+          typeFrame,
+          [0, K(TYPE_REVEAL_FRAMES)],
+          [0, clusters.length],
+          {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+          },
+        ),
       ),
     );
-    displayedText = text.slice(0, chars);
+    displayedText = clusters.slice(0, shown).join("");
   }
 
   // Takeover for the dramatic short message (pass #11, audited: the live solo
   // "LOST" occupied ~10% of the axis). Short texts scale up toward the bubble
   // box; running text keeps the mimic's 30px. Paddings/radius are em-relative
   // so the bubble keeps its proportions at any size.
+  // Script-aware advance (font census 2026-08-26): 0.62 was the latin-only
+  // constant; mgTextMetrics keeps 0.62 for latin, conservative for non-Latin.
   const msgChars = Math.max(1, [...asText(text)].length);
+  const msgAdvanceEm = mgTextMetrics(asText(text)).advanceEm;
   const msgFontSize =
     msgChars <= 20
-      ? Math.min(64, Math.max(30, Math.round(480 / (msgChars * 0.62))))
+      ? Math.min(64, Math.max(30, Math.round(480 / (msgChars * msgAdvanceEm))))
       : 30;
 
   return (
@@ -195,6 +211,9 @@ const MessageBubble: React.FC<{
           paddingTop: "0.47em",
           paddingBottom: "0.47em",
           color: "#FFFFFF",
+          // User/model text routes by script + emoji tail (font census
+          // 2026-08-26); the status line keeps the root Inter (chrome).
+          fontFamily: mgTextFont(text, "inter"),
           fontSize,
           fontWeight: 400,
           lineHeight: 1.3,

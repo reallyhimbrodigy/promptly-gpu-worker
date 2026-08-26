@@ -1,6 +1,8 @@
 import React, { useMemo } from "react";
 import { AbsoluteFill, interpolate } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { inkFor } from "../shared/ink";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { PullQuoteFontKey, PullQuoteProps } from "./types";
@@ -26,14 +28,6 @@ const MAX_FONT = 320;
 const DEFAULT_TEXT_SHADOW =
   "0 2px 8px rgba(0,0,0,0.6), 0 8px 30px rgba(0,0,0,0.45), 0 0 2px rgba(0,0,0,0.5)";
 
-const FONT_FAMILY: Record<PullQuoteFontKey, string> = {
-  anton: MG_FONTS.anton,
-  oswald: MG_FONTS.oswald,
-  inter: MG_FONTS.inter,
-  roboto: MG_FONTS.roboto,
-  dmSerifDisplay: MG_FONTS.dmSerifDisplay,
-  playfairDisplay: MG_FONTS.playfairDisplay,
-};
 const CHAR_RATIO: Record<PullQuoteFontKey, number> = {
   anton: 0.52,
   oswald: 0.55,
@@ -43,8 +37,11 @@ const CHAR_RATIO: Record<PullQuoteFontKey, number> = {
   playfairDisplay: 0.5,
 };
 
+// Unicode-aware (font census 2026-08-26): the old [^a-zA-Z0-9] strip deleted
+// every non-Latin keyword to "" — silent content deletion (a Hindi keyword
+// could never match its word). Strip punctuation/whitespace only.
 const normalize = (w: string): string =>
-  w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  w.replace(/[^\p{L}\p{N}]/gu, "").toLocaleLowerCase();
 
 export const PullQuote: React.FC<PullQuoteProps> = ({
   startMs,
@@ -62,7 +59,7 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   highlightStyle = "color",
   keywordScale = 1.18,
   barColor,
-  highlightTextColor = "#0A0A0A",
+  highlightTextColor,
   align = "center",
   uppercase = true,
   wordStagger = 6,
@@ -88,9 +85,22 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   const resolvedKeywordColor = keywordColor ?? accentColor ?? "#FFD60A";
   const resolvedBarColor = barColor ?? resolvedKeywordColor;
   const resolvedQuoteColor = quoteMarkColor ?? resolvedKeywordColor;
+  // 2026-08-26 coupled-defaults audit: the #0A0A0A bar-mode ink was authored
+  // for the default yellow bar and survived a bar-side-only override (a dark
+  // palette accent made the EMPHASIZED words the invisible ones, and bar mode
+  // strips the textShadow rescue below). Unspecified ink now follows the
+  // resolved bar surface; the default yellow keeps #0A0A0A exactly.
+  const resolvedHighlightInk =
+    highlightTextColor ??
+    (resolvedBarColor === "#FFD60A"
+      ? "#0A0A0A"
+      : inkFor(resolvedBarColor, "#0A0A0A"));
 
   const keywordSet = useMemo(
-    () => new Set(keywords.map(normalize)),
+    // Empty normalizations are dropped: a keyword that reduces to "" (pure
+    // punctuation) must not become a match-everything member — the residual
+    // tail of the audited silent-deletion defect.
+    () => new Set(keywords.map(normalize).filter(Boolean)),
     [keywords],
   );
 
@@ -123,8 +133,16 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
     for (let i = 0; i < words.length; i += m) lines.push(words.slice(i, i + m));
   }
 
-  // Deterministic font-fit (no DOM measurement).
-  const ratio = CHAR_RATIO[fontKey];
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // computed once for the whole quote so every word carries one face.
+  const quoteText = words.join(" ");
+  const quoteFont = mgTextFont(quoteText, fontKey);
+  const quoteMetrics = mgTextMetrics(quoteText);
+
+  // Deterministic font-fit (no DOM measurement). CHAR_RATIO stays the latin
+  // advance; non-Latin uses the census-conservative estimate.
+  const ratio =
+    quoteMetrics.script === "latin" ? CHAR_RATIO[fontKey] : quoteMetrics.advanceEm;
   let maxWeight = 0;
   for (const line of lines) {
     let w = 0;
@@ -141,10 +159,14 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   );
 
   // Cap total entrance time for long lines.
+  // 2026-08-26 coupled-defaults audit: the 74-frame budget assumed wordReveal
+  // near its default 16 — an override past 74 drove the stagger NEGATIVE and
+  // played the reveal cascade backwards (last words fully up at frame 0).
+  // Floor at 0: simultaneous reveal is the worst case, never inverted order.
   const N = words.length;
-  const effStagger = Math.min(
-    wordStagger,
-    (74 - wordReveal) / Math.max(1, N - 1),
+  const effStagger = Math.max(
+    0,
+    Math.min(wordStagger, (74 - wordReveal) / Math.max(1, N - 1)),
   );
 
   // Corpus law 1 (pass #7b): the payoff LINE (the last line — the isolated
@@ -308,7 +330,7 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                 const useColor = kw && effStyle === "color";
                 const useBar = kw && effStyle === "bar";
                 const color = useBar
-                  ? highlightTextColor
+                  ? resolvedHighlightInk
                   : useColor
                     ? resolvedKeywordColor
                     : textColor;
@@ -347,13 +369,19 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                     style={{
                       position: "relative",
                       display: "inline-block",
-                      fontFamily: FONT_FAMILY[fontKey],
+                      fontFamily: quoteFont,
                       fontSize: restingSize,
                       fontWeight,
                       color,
-                      textTransform: uppercase ? "uppercase" : "none",
+                      textTransform:
+                        uppercase && quoteMetrics.uppercaseSafe
+                          ? "uppercase"
+                          : "none",
                       letterSpacing: "-0.01em",
-                      lineHeight: 0.95,
+                      lineHeight:
+                        quoteMetrics.script === "latin"
+                          ? 0.95
+                          : quoteMetrics.lineHeight,
                       opacity,
                       transform: `translateY(${riseY}px) scale(${wordScale})`,
                       transformOrigin: "center",

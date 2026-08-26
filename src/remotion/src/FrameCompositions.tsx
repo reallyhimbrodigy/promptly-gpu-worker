@@ -10,7 +10,7 @@ import { Video } from "@remotion/media";
 import { cappedEntranceProgress } from "./motion-graphics/shared/entrance-cap";
 import { dur } from "./motion-graphics/shared/motion";
 import { MotionBlurWrap } from "./motion-graphics/shared/motion-blur";
-import { MG_FONTS } from "./motion-graphics/shared/fonts";
+import { mgTextFont, mgTextMetrics } from "./motion-graphics/shared/text-font";
 
 // ── THE GENERATION-FREE COMPOSITIONS ────────────────────────────────────────
 //
@@ -134,6 +134,12 @@ const SourceStill: React.FC<{
 export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fps: number }> =
   ({ spec, sourceUrl, fps }) => {
     const e = useCardEntrance(spec, { rise: 52, scaleFrom: 0.972, rotMag: 2.2 });
+    // Claim/caption are model text — routed face, gated uppercase, opened
+    // tight line-heights for non-Latin (font census 2026-08-26).
+    const claimText = spec.claim ?? "";
+    const claimM = mgTextMetrics(claimText);
+    const captionText = spec.caption || spec.claim || "";
+    const captionM = mgTextMetrics(captionText);
     return (
       <AbsoluteFill style={{ background: spec.bg }}>
         <MotionBlurWrap>
@@ -146,10 +152,11 @@ export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
                 faux-bold class. */}
             <div style={{
               position: "absolute", top: "12%", left: "-4%", right: "-4%",
-              fontFamily: MG_FONTS.anton,
-              fontSize: spec.cap_px * 1.2, fontWeight: 400, lineHeight: 0.92,
+              fontFamily: mgTextFont(claimText, "anton"),
+              fontSize: spec.cap_px * 1.2, fontWeight: 400,
+              lineHeight: Math.max(0.92, claimM.lineHeight),
               color: spec.fg, opacity: 0.14, letterSpacing: "-0.01em",
-              textTransform: "uppercase",
+              textTransform: claimM.uppercaseSafe ? "uppercase" : "none",
             }}>{spec.claim}</div>
             {/* PLANE 2 — the user's own frame */}
             <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
@@ -163,12 +170,19 @@ export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
                 happened; bottom 19.5% puts the type over the print's corner
                 (type-over-object, occluding the GRAPHIC only). The underline
                 is the beat's ONE full-chroma hit (corpus law 2) — at 55-alpha
-                the beat had zero. */}
+                the beat had zero. 2026-08-26 coupled-defaults audit: 19.5 was
+                tuned against the 58% default only — derive the corner overlap
+                from the still's actual geometry (a 9:16 still's bottom edge
+                sits at (100-w)/2 % from the frame bottom; keep the ~1.5%
+                overlap at any width; 58 => 19.5, byte-identical). */}
             <div style={{
-              position: "absolute", bottom: "19.5%", left: "6%", right: "10%",
-              fontFamily: MG_FONTS.inter,
+              position: "absolute",
+              bottom: `${Math.max(4, (100 - (spec.still_width_pct ?? 58)) / 2 - 1.5)}%`,
+              left: "6%", right: "10%",
+              fontFamily: mgTextFont(captionText, "inter"),
               fontSize: spec.cap_px * 0.6, fontWeight: 800, color: spec.fg,
-              lineHeight: 1.02, letterSpacing: "-0.02em", ...legible(spec),
+              lineHeight: Math.max(1.02, captionM.lineHeight),
+              letterSpacing: "-0.02em", ...legible(spec),
             }}>
               <span style={{ boxShadow: `inset 0 -0.34em 0 ${spec.accent}` }}>
                 {spec.caption || spec.claim}
@@ -184,6 +198,9 @@ export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
 export const DeviceMockup: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fps: number }> =
   ({ spec, sourceUrl, fps }) => {
     const e = useCardEntrance(spec, { rise: 56, scaleFrom: 0.968, rotMag: 2.5 });
+    // The label is model text on BOTH planes (font census 2026-08-26).
+    const labelText = spec.label ?? "";
+    const labelM = mgTextMetrics(labelText);
     return (
       <AbsoluteFill style={{ background: spec.bg }}>
         <MotionBlurWrap>
@@ -193,9 +210,10 @@ export const DeviceMockup: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
               // fontFamily = browser serif; Anton's real weight is 400.
               <div style={{
                 position: "absolute", top: "9%", left: "6%",
-                fontFamily: MG_FONTS.anton,
+                fontFamily: mgTextFont(labelText, "anton"),
                 fontSize: spec.cap_px, fontWeight: 400, color: spec.accent,
-                opacity: 0.16, letterSpacing: "-0.01em", textTransform: "uppercase",
+                opacity: 0.16, letterSpacing: "-0.01em",
+                textTransform: labelM.uppercaseSafe ? "uppercase" : "none",
               }}>{spec.label}</div>
             ) : null}
             <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
@@ -207,13 +225,19 @@ export const DeviceMockup: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
                 <SourceStill sourceUrl={sourceUrl} atSeconds={spec.at_seconds} fps={fps}
                   label="DeviceMockup.still"
                   style={{ width: spec.still_width_px ?? 430, aspectRatio: "9 / 16",
-                           borderRadius: (spec.shell_radius_px ?? 46) - 12, boxShadow: "none" }} />
+                           // 2026-08-26 coupled-defaults audit: the -12 offset
+                           // goes NEGATIVE below shell_radius_px 12 (invalid
+                           // CSS, dropped => square screen corners in a
+                           // rounded shell) — clamp at 0; default 46-12=34
+                           // unchanged.
+                           borderRadius: Math.max(0, (spec.shell_radius_px ?? 46) - 12),
+                           boxShadow: "none" }} />
               </div>
             </AbsoluteFill>
             {spec.label ? (
               <div style={{
                 position: "absolute", bottom: "14%", left: "8%",
-                fontFamily: MG_FONTS.inter,
+                fontFamily: mgTextFont(labelText, "inter"),
                 fontSize: spec.cap_px * 0.5, fontWeight: 800, color: spec.fg,
                 letterSpacing: "-0.02em", ...legible(spec),
               }}>{spec.label}</div>
@@ -246,6 +270,9 @@ export const EmojiCard: React.FC<{ spec: FrameCompSpec }> = ({ spec }) => {
               `rotate` property (REMOTION_CONVENTIONS forward law). Occlusion is
               of the GRAPHIC only — user words are never covered. */}
           <div style={{
+            // Emoji render by DECLARATION, not fontconfig accident (font
+            // census 2026-08-26): pin the color-emoji face explicitly.
+            fontFamily: "'Noto Color Emoji', sans-serif",
             fontSize: spec.emoji_px ?? spec.cap_px * 3.2,
             rotate: `${spec.tilt_deg}deg`,
             filter: `drop-shadow(0 ${spec.legibility.shadow_offset_px * 6}px `
@@ -258,7 +285,17 @@ export const EmojiCard: React.FC<{ spec: FrameCompSpec }> = ({ spec }) => {
               display: "flex", flexDirection: "column", alignItems: "center",
               position: "relative", zIndex: 2,
             }}>
-              {(spec.words || []).map((w, i) => (
+              {(spec.words || []).map((w, i) => {
+                // Words are user text (font census 2026-08-26): routed face,
+                // gated uppercase, script-aware advance for the width fill.
+                const wm = mgTextMetrics(w);
+                // Advance ratio 0.80 is render-measured for Inter 900
+                // uppercase + 0.01em tracking (~0.775em/char) — the old 0.62
+                // estimate would let text run to ~99% and crop, and text may
+                // never crop. Non-Latin keeps the census's conservative
+                // per-script advance (no uppercase, routed face).
+                const adv = wm.script === "latin" ? 0.8 : wm.advanceEm;
+                return (
                 <span key={i} style={{
                   // Render-caught (2026-08-25): no fontFamily = browser SERIF —
                   // the words rendered Times-like since birth. Inter 900 is the
@@ -269,24 +306,22 @@ export const EmojiCard: React.FC<{ spec: FrameCompSpec }> = ({ spec }) => {
                   // the HIT word (line 2) carries the emphasis — palette lock
                   // (§6) forbids inventing a redder accent, so emphasis comes
                   // from SCALE at full palette chroma.
-                  fontFamily: "Inter, sans-serif",
+                  fontFamily: mgTextFont(w, "inter"),
                   // The HIT word is width-FILL driven, not cap-relative
                   // (render-caught: Math.min made cap_px the ceiling, so the
                   // fill term never bound and "CAR" sat at ~43% width). The
-                  // support word keeps cap_px. Advance ratio 0.80 is
-                  // render-measured for Inter 900 uppercase + 0.01em tracking
-                  // (~0.775em/char) — the old 0.62 estimate would let text
-                  // run to ~99% and crop, and text may never crop.
+                  // support word keeps cap_px.
                   fontSize: i === 0
                     ? Math.min(
                         spec.cap_px,
-                        (1080 * 0.92) / (Math.max(3, w.length) * 0.8)
+                        (1080 * 0.92) / (Math.max(3, w.length) * adv)
                       )
-                    : (1080 * 0.92) / (Math.max(3, w.length) * 0.8),
+                    : (1080 * 0.92) / (Math.max(3, w.length) * adv),
                   fontWeight: 900,
                   color: i === 0 ? spec.fg : spec.accent,
-                  letterSpacing: "0.01em", textTransform: "uppercase",
-                  lineHeight: 0.92,
+                  letterSpacing: "0.01em",
+                  textTransform: wm.uppercaseSafe ? "uppercase" : "none",
+                  lineHeight: Math.max(0.92, wm.lineHeight),
                   rotate: `${(i % 2 === 0 ? -1 : 1) * 2.2}deg`,
                   marginTop: i > 0 ? -spec.cap_px * 0.08 : 0,
                   // Type-over-OBJECT needs more separation than type-over-bg:
@@ -296,7 +331,8 @@ export const EmojiCard: React.FC<{ spec: FrameCompSpec }> = ({ spec }) => {
                   textShadow: `0 ${spec.legibility.shadow_offset_px * 2}px ${spec.legibility.shadow_blur_px * 2}px `
                     + `rgba(0,0,0,${Math.min(0.65, spec.legibility.shadow_opacity * 1.8)})`,
                 }}>{w}</span>
-              ))}
+                );
+              })}
             </div>
           ) : null}
         </div>
