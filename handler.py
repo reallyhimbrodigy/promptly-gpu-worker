@@ -6235,6 +6235,49 @@ _RENDER_OFFTHREAD = {}
 # production reading.
 _V2_COUNTS_LAST = {}
 
+# ── THE offthreadVideoThreads ARM ──────────────────────────────────────────
+# MEASURED FIRST, then armed (25 jobs / 25 users, post-v574): the lever IS live
+# and sets offthreadVideoThreads = resolvedConcurrency. But concurrency is NOT a
+# fixed 8 — observed {2:12, 4:7, 8:5, 16:13} across 37 legs, and 12 of those ran
+# at 2, which IS Remotion's default, so on a third of legs the "fix" is
+# byte-identical to no fix.
+#
+# AND IT CANNOT BE MEASURED AS WIRED. offthread == concurrency EXACTLY, on every
+# leg, so the two are perfectly collinear: no cut of production traffic can
+# separate the effect of the extractor from the effect of the page count. Worse,
+# the multi-value jobs ('2,16', n=8) are the jobs with MORE render legs — i.e.
+# bigger jobs — so the observational spread is mostly job size wearing the
+# lever's clothes.
+#
+# The arm therefore has to DECOUPLE them: pin the extractor to Remotion's
+# default 2 while concurrency stays whatever it resolves to, and compare render
+# wall at MATCHED concurrency.
+#
+# PER-JOB, NOT PER-CONTAINER. render-full.mjs reads process.env, which is fixed
+# at container start — arming it via the secret would be a flip, and the only
+# concurrency that produces is the warm/cold mixture whose container age
+# correlates with load. Same defect the stall experiment had. handler spawns the
+# renderer with subprocess.run, so the arm crosses as a PER-INVOCATION env and
+# assignment is per job.
+_OFFTHREAD_ARM = [None]      # None = dark: the renderer's own default path
+
+
+def _resolve_offthread_arm(job_id):
+    """50/50 on a stable hash. Returns "2" (Remotion default) or None (dark).
+
+    Salted differently from the stall split so the two experiments cannot
+    correlate: an unsalted hash would put the same jobs in both experimental
+    arms and make either result unreadable as the other's confound.
+    """
+    import os
+    if (os.environ.get("PROMPTLY_OFFTHREAD_ARM", "") or "").strip() != "1":
+        return None
+    if not job_id:
+        return None
+    import hashlib as _hl
+    _h = _hl.sha256(("offthread:" + str(job_id)).encode("utf-8")).hexdigest()
+    return "2" if (int(_h[:8], 16) % 2) else None
+
 # Resolved proxy sampling for THIS job. Holders rather than globals-by-name for
 # the same reason _lang_bundle_holder exists: the value is produced deep inside
 # the Gemini call site and read at the payload seam, and a plain global read
@@ -33482,7 +33525,15 @@ def _remotion_subprocess(label, cmd, timeout=600, _self_healed=False):
 
     _t0 = time.time()
     try:
-        _r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        # THE ARM CROSSES HERE, per invocation. os.environ in THIS process is
+        # not what the renderer reads — the child gets its own copy, so the
+        # assignment is per job rather than per container.
+        _env = None
+        if _OFFTHREAD_ARM[0]:
+            _env = dict(os.environ)
+            _env["PROMPTLY_OFFTHREAD_THREADS"] = _OFFTHREAD_ARM[0]
+        _r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                            env=_env)
     except subprocess.TimeoutExpired as _te:
         _elapsed = time.time() - _t0
         _to_out = _decode_captured(getattr(_te, "stdout", None))
@@ -39932,6 +39983,7 @@ def handler(job):
         _DEAD_AIR_OFFERED[0] = 0
         _DEAD_AIR_PRESERVED[0] = 0
         _STALL_ARM[0] = _resolve_stall_arm(job_id)
+        _OFFTHREAD_ARM[0] = _resolve_offthread_arm(job_id)
         _RENDER_OFFTHREAD.clear()
         _V2_COUNTS_LAST.clear()
         _RENDER_ATTEMPTS[0] = 0
@@ -43147,7 +43199,18 @@ def handler(job):
         # Face detection is collected LATER inside render_multi_clip so Remotion can
         # launch immediately without waiting for face detection to finish.
         _collect_t0 = time.time()
-        source_info = future_normalize.result()
+        # ITEM (2) INSTRUMENTED (2026-08-26). normalize_transcribe_upload was
+        # 49.5s at p50 — the second-largest term, larger than the whole editorial
+        # call — and its node was ABSENT FROM THE TIMELINE ENTIRELY. Not "zero
+        # children": no node. 100% of it was invisible, so it could not be
+        # decomposed, and no parallelism change could be sized against it.
+        #
+        # These are WAITS on the mega-pool, in CALL ORDER, not independent work:
+        # the first .result() absorbs the pool's critical path and later ones can
+        # read ~0 even for expensive work. That is the number wanted — it names
+        # the LONG POLE, which is the only thing a parallelism change can move.
+        source_info = _tl_wait("wait_normalize", lambda: future_normalize.result(),
+                               parent="normalize_transcribe_upload")
         source_path = source_info["source_path"]
         _normalize_vf = source_info.get("normalize_vf")
         _audio_stream_offset = float(source_info.get("audio_stream_offset") or 0.0)
@@ -43155,7 +43218,8 @@ def handler(job):
         # consumer already triggered this; here we retrieve the cached value.
         # The resolver applies the audio_stream_offset shift internally so
         # word timings are in file-time matching the video stream.
-        transcript = _get_resolved_transcript()
+        transcript = _tl_wait("wait_resolved_transcript", _get_resolved_transcript,
+                              parent="normalize_transcribe_upload")
         if not (future_url_transcript is not None or future_transcribe is not None):
             print(f"[pipeline] Using provided transcript ({len(transcript.get('words') or [])} words) — skipped Deepgram", flush=True)
         # Outermost-rung eligibility (P1a): transcript + prepared source are
@@ -43171,8 +43235,12 @@ def handler(job):
         # positions back to audio-data-time for WAV indexing).
         if isinstance(edit_plan, dict):
             edit_plan["_audio_stream_offset"] = _audio_stream_offset
-        source_loudness = future_loudness.result()
-        source_shot_changes = future_shot_changes.result()
+        source_loudness = _tl_wait("wait_loudness_collect",
+                                   lambda: future_loudness.result(),
+                                   parent="normalize_transcribe_upload")
+        source_shot_changes = _tl_wait("wait_shot_changes_collect",
+                                       lambda: future_shot_changes.result(),
+                                       parent="normalize_transcribe_upload")
         # Capture which trend context was used (fresh vs. snapshot) for persistence
         trend_used = provided_trend   # trend fetch REMOVED (never automated);
                                       # a caller-supplied snapshot still rides through
@@ -43181,7 +43249,9 @@ def handler(job):
         # here. Downstream render detects source_fps from the new file's
         # r_frame_rate (preserved at the source's native rate — 30, 24,
         # 60, etc.) and all frame-count math becomes exact.
-        source_path = future_fps_normalize.result()
+        source_path = _tl_wait("wait_fps_normalize",
+                               lambda: future_fps_normalize.result(),
+                               parent="normalize_transcribe_upload")
         # LONG-POLE readout (Zac 2026-08-04): by here every mega_pool task has
         # finished (faces "finished long before" per the note below), so the timing
         # map is complete. Sorted desc so the long pole is first — CPU-bound long
@@ -43226,6 +43296,9 @@ def handler(job):
         edit_plan["_face_trajectory"] = list(_smoothed_trajectory or [])
 
         _timings["normalize_transcribe_upload"] = time.time() - t
+        # The parent node, so the waits above are not orphaned children of `job`.
+        _tl_add_done("normalize_transcribe_upload",
+                     _timings["normalize_transcribe_upload"], parent="job")
         _dg_words = transcript.get("words", [])
         if len(_dg_words) == 0 and mode != "render_only":
             # Talking-head editor requires spoken content. Silent/no-speech sources
@@ -43842,6 +43915,9 @@ def handler(job):
                 # distinguishable from "arm B ran and emitted nothing", which
                 # is itself one of the four pre-registered worse-result readings.
                 "v2_counts": (dict(_V2_COUNTS_LAST) or None),
+                # "2" = pinned to Remotion's default; None = dark/control.
+                # Persisted so the cohort is cut by what RAN, never by clock.
+                "offthread_arm": _OFFTHREAD_ARM[0],
             },
             # W2: which stages ran/skipped and WHY (effort-proportional proof)
             "stage_manifest": _stage_manifest,

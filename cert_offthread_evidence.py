@@ -155,6 +155,52 @@ def main():
     check("distinct values are kept, not collapsed to a scalar",
           "sorted(set(_RENDER_OFFTHREAD.get(\"offthread\")" in NC)
 
+    # ── THE ARM: DECOUPLED, PER-JOB, AND SALTED ────────────────────────────
+    # MEASURED before arming: offthread == concurrency on EVERY leg
+    # ({2:12,4:7,8:5,16:13} across 37), so the two are perfectly collinear and no
+    # cut of production traffic can separate them. The arm must PIN the extractor
+    # independently of concurrency or it measures nothing.
+    check("the arm pins the extractor independently of concurrency",
+          'return "2" if' in NC and "_resolve_offthread_arm" in NC,
+          "an arm that moves with concurrency is collinear with it and unreadable")
+    # PER-JOB, NOT PER-CONTAINER. render-full.mjs reads process.env, fixed at
+    # container start — arming via the secret would be a flip, and the only
+    # concurrency that produces is the warm/cold mixture whose container age
+    # correlates with load. Exactly the defect the stall experiment shipped with.
+    check("the arm crosses as a per-invocation subprocess env",
+          'env=_env' in NC and '_env["PROMPTLY_OFFTHREAD_THREADS"] = _OFFTHREAD_ARM[0]' in NC,
+          "a per-container env is a flip, not a split")
+    check("os.environ is NOT mutated to carry the arm",
+          'os.environ["PROMPTLY_OFFTHREAD_THREADS"]' not in NC,
+          "mutating the parent env leaks the arm to every later job in a warm "
+          "container — one job's assignment would silently become permanent")
+    # SALTED. An unsalted hash puts the SAME jobs in both experimental arms, and
+    # each experiment becomes the other's confound.
+    check("the split is salted apart from the stall experiment",
+          '"offthread:" + str(job_id)' in NC,
+          "co-assignment would make both results unreadable")
+    check("dark by default behind its own flag",
+          'PROMPTLY_OFFTHREAD_ARM' in NC and '!= "1"' in NC)
+    check("the arm is persisted on the row",
+          '"offthread_arm": _OFFTHREAD_ARM[0],' in NC,
+          "cut by clock instead of by what ran")
+    check("resolved once per job, beside the other resets",
+          NC.count("_OFFTHREAD_ARM[0] = _resolve_offthread_arm(job_id)") == 1)
+
+    # ── ITEM (2): THE STAGE THAT HAD NO NODE ───────────────────────────────
+    # normalize_transcribe_upload was 49.5s p50 — larger than the whole
+    # editorial call — and ABSENT FROM THE TIMELINE TREE. Not zero children: no
+    # node. 100% invisible, so no parallelism change could be sized against it.
+    check("normalize_transcribe_upload now has a timeline node",
+          '_tl_add_done("normalize_transcribe_upload"' in NC,
+          "without a parent the waits below are orphaned onto `job`")
+    _nw = NC.count('parent="normalize_transcribe_upload"')
+    check("its blocking waits are instrumented as children",
+          _nw >= 5, f"only {_nw} wait span(s) — the stage stays mostly unattributed")
+    check("the waits use _tl_wait, which measures the WAIT not the work",
+          '_tl_wait("wait_normalize"' in NC,
+          "these are pool futures; the number wanted is the long pole")
+
     print()
     if fails:
         print(f"  CERT OFFTHREAD-EVIDENCE: FAIL ({len(fails)})")
