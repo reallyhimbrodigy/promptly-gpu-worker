@@ -286,3 +286,4 @@ false.
 | 2026-08-25 | BUILDER | **cert-prompt-v2-ab** (V3 CROSS-ARM: 13 sources x 2 arms, SERIAL) | 26 | plan-only | ~$5.20 est | ~$10.81 of $12.00 |
 | 2026-08-25 | BUILDER | **cert-prompt-v2-ab** (v3 tail: sources 9-12, ARM B, via run_modal.sh) | 4 | plan-only | ~$0.80 est | ~$10.30 of $12.00 |
 | 2026-08-25 | BUILDER | **cert-prompt-v2-ab** (v3 tail: sources 9-12, ARM A — completes the pairing) | 4 | plan-only | ~$0.80 est | ~$11.10 of $12.00 |
+| 2026-08-25 | BUILDER | **cert-v3-snap-render** (THE ARTIFACT: v3 + onset snap, full render, cpu16+burst) | 1 | full render | ~$0.50 est | ~$11.60 of $12.00 |
