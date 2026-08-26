@@ -6262,14 +6262,25 @@ _V2_COUNTS_LAST = {}
 _OFFTHREAD_ARM = [None]      # None = dark: the renderer's own default path
 
 
-def _resolve_offthread_arm(job_id):
+def _resolve_offthread_arm(job_id, input_data=None):
     """50/50 on a stable hash. Returns "2" (Remotion default) or None (dark).
+
+    PER-JOB OVERRIDE `offthread_test`: an explicit thread count forces the
+    pinned arm, the literal "control" forces control EVEN WHEN THE FLAG IS
+    ARMED. Without the explicit control token a batch could only ever force one
+    side, and a one-sided batch is not a comparison.
 
     Salted differently from the stall split so the two experiments cannot
     correlate: an unsalted hash would put the same jobs in both experimental
     arms and make either result unreadable as the other's confound.
     """
     import os
+    _t = str((input_data or {}).get("offthread_test") or "").strip()
+    if _t:
+        if _t.lower() == "control":
+            return None
+        if _t.isdigit() and 1 <= int(_t) <= 64:
+            return _t
     if (os.environ.get("PROMPTLY_OFFTHREAD_ARM", "") or "").strip() != "1":
         return None
     if not job_id:
@@ -10343,8 +10354,16 @@ _MIDSENTENCE_STALL_S = 0.70
 _STALL_ARM = [_MIDSENTENCE_STALL_S]
 
 
-def _resolve_stall_arm(job_id):
+def _resolve_stall_arm(job_id, input_data=None):
     """50/50 CONCURRENT SPLIT on a stable hash of job_id. Dark when unset.
+
+    PER-JOB OVERRIDE `stall_test` (same *_test pattern as min_output_ratio_test
+    / motion_blur_test / delivery_fps_test). The hash split is correct for
+    organic traffic and USELESS for a forced batch: you cannot choose which arm
+    a chosen test clip lands in, so a clip picked BECAUSE it contains a 250-700ms
+    mid-sentence pause has a 50% chance of landing in the arm where that pause
+    is invisible. preserved=1 in both arms is a SAMPLING problem, not a traffic
+    problem, and this is what makes it addressable.
 
     WHY A SPLIT AND NOT A FLIP. Reading the env var directly gives ONE value per
     container, so setting it puts 100% of traffic on the arm — a before/after
@@ -10362,6 +10381,16 @@ def _resolve_stall_arm(job_id):
     into the experimental arm.
     """
     import os
+    _t = str((input_data or {}).get("stall_test") or "").strip()
+    if _t:
+        try:
+            _tv = float(_t)
+        except (TypeError, ValueError):
+            _tv = None
+        # Same bound as the organic path: a value at/below the LOCATE bar makes
+        # the gate a no-op and reads as "the model refused every span".
+        if _tv is not None and _WITHIN_CLIP_TRIM_TRIGGER_S < _tv <= 2.0:
+            return _tv
     raw = (os.environ.get("PROMPTLY_MIDSENTENCE_STALL_S", "") or "").strip()
     if not raw or not job_id:
         return _MIDSENTENCE_STALL_S
@@ -39993,8 +40022,8 @@ def handler(job):
         _DEAD_AIR_LOCATED[0] = 0
         _DEAD_AIR_OFFERED[0] = 0
         _DEAD_AIR_PRESERVED[0] = 0
-        _STALL_ARM[0] = _resolve_stall_arm(job_id)
-        _OFFTHREAD_ARM[0] = _resolve_offthread_arm(job_id)
+        _STALL_ARM[0] = _resolve_stall_arm(job_id, input_data)
+        _OFFTHREAD_ARM[0] = _resolve_offthread_arm(job_id, input_data)
         _RENDER_OFFTHREAD.clear()
         _V2_COUNTS_LAST.clear()
         _RENDER_ATTEMPTS[0] = 0
