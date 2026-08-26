@@ -245,8 +245,26 @@ export const EmojiCard: React.FC<{ spec: FrameCompSpec }> = ({ spec }) => {
                   // Render-caught (2026-08-25): no fontFamily = browser SERIF —
                   // the words rendered Times-like since birth. Inter 900 is the
                   // catalogue's claim voice.
+                  // Corpus law 1 (pass #7b): the widest word spans ~92% of the
+                  // 1080 frame (REF-2's number clips the edge; ours sat at
+                  // ~50% width). Deterministic fit, no DOM measurement. Law 2:
+                  // the HIT word (line 2) carries the emphasis — palette lock
+                  // (§6) forbids inventing a redder accent, so emphasis comes
+                  // from SCALE at full palette chroma.
                   fontFamily: "Inter, sans-serif",
-                  fontSize: spec.cap_px * (i === 0 ? 1.0 : 1.15),
+                  // The HIT word is width-FILL driven, not cap-relative
+                  // (render-caught: Math.min made cap_px the ceiling, so the
+                  // fill term never bound and "CAR" sat at ~43% width). The
+                  // support word keeps cap_px. Advance ratio 0.80 is
+                  // render-measured for Inter 900 uppercase + 0.01em tracking
+                  // (~0.775em/char) — the old 0.62 estimate would let text
+                  // run to ~99% and crop, and text may never crop.
+                  fontSize: i === 0
+                    ? Math.min(
+                        spec.cap_px,
+                        (1080 * 0.92) / (Math.max(3, w.length) * 0.8)
+                      )
+                    : (1080 * 0.92) / (Math.max(3, w.length) * 0.8),
                   fontWeight: 900,
                   color: i === 0 ? spec.fg : spec.accent,
                   letterSpacing: "0.01em", textTransform: "uppercase",

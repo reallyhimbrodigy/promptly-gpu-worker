@@ -18,7 +18,10 @@ const REVEAL = 16;
 // and OCCLUDED by the label slab in front (occlusion of the graphic, never of
 // text). Rows tuck slightly into each other and alternate a restrained tilt
 // (lists die past ~2.5°). Was: a clean left-aligned vertical list — a slide.
-const RANK_SIZE = 168;
+// Corpus law 1 (pass #7b): the panel measured the list as a ~66%-wide
+// centred widget; evidence-beat grammar demands takeover — numerals bite
+// the left frame edge, the widest row reaches the right.
+const RANK_SIZE = 210;
 const ROW_GAP = -6;
 
 
@@ -32,7 +35,7 @@ export const RankedList: React.FC<RankedListProps> = ({
   highlightTop = true,
   accentColor = "#FFC53D",
   // D4: fit the symmetric center box (max 680) — oversize dragged center right
-  width = 680,
+  width = 1020,
   rankFontSize = RANK_SIZE,   // kept in the props contract; RANK_SIZE is the §4 default
   labelColor = "#FFFFFF",
   valueColor = "rgba(255,255,255,0.66)",
@@ -200,8 +203,11 @@ export const RankedList: React.FC<RankedListProps> = ({
                           padding: "8px 18px",
                           borderRadius: 12,
                           rotate: `${(i % 2 === 0 ? 1 : -1) * 3}deg`,
-                          background: isTop ? accentColor : "rgba(255,255,255,0.12)",
-                          color: isTop ? "#15151E" : valueColor,
+                          // Corpus law 2: no card in the 146 examples renders
+                          // at ghost contrast — subordination is by HUE, never
+                          // by fading. Full-contrast chip, accent only on #1.
+                          background: isTop ? accentColor : "rgba(255,255,255,0.92)",
+                          color: "#15151E",
                           fontFamily: MG_FONTS.inter,
                           fontSize: 38,
                           fontWeight: 800,
@@ -220,7 +226,7 @@ export const RankedList: React.FC<RankedListProps> = ({
                   <div
                     style={{
                       marginTop: 12,
-                      height: isTop ? 3 : 2,
+                      height: 3,
                       borderRadius: 2,
                       background: isTop
                         ? accentColor

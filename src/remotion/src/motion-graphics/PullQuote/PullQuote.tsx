@@ -147,6 +147,17 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
     (74 - wordReveal) / Math.max(1, N - 1),
   );
 
+  // Corpus law 1 (pass #7b): the payoff LINE (the last line — the isolated
+  // hit: "$100K on its own beat", "big oversized 0 as its own visual beat")
+  // lands at up to 2.8x support scale, fit to ~98% frame width. The panel
+  // measured ours at 1.2-1.4x — the isolation move never landed.
+  const lastIdx = lines.length - 1;
+  const lastWeight = lines[lastIdx].reduce((acc, w2) => acc + w2.length * (isKw(w2) ? effKeywordScale : 1), 0)
+    + (lines[lastIdx].length - 1) * 0.3;
+  const payoffScale = lines.length > 1
+    ? Math.max(1, Math.min(2.8, (TEXT_MAX_WIDTH * 0.98) / (Math.max(1, lastWeight) * ratio * finalFontSize)))
+    : 1;
+
   const RISE = finalFontSize * 0.3;
   const BLUR0 = 12;
 
@@ -290,9 +301,10 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                   : 1;
                 const wordScale = kw ? pop * stamp : scaleIn;
 
-                const restingSize = kw
+                const lineScale = li === lastIdx ? payoffScale : 1;
+                const restingSize = (kw
                   ? finalFontSize * effKeywordScale
-                  : finalFontSize;
+                  : finalFontSize) * lineScale;
                 const useColor = kw && effStyle === "color";
                 const useBar = kw && effStyle === "bar";
                 const color = useBar

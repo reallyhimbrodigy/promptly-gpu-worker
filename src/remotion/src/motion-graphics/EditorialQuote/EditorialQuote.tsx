@@ -10,8 +10,10 @@ const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
 const clamp = (x: number, lo: number, hi: number): number =>
   Math.max(lo, Math.min(hi, x));
 
-const SIDE_INSET = 92;
-const TEXT_MAX_WIDTH = 1080 - 2 * SIDE_INSET; // 896
+// Corpus law 1 (pass #7b): statement cards are takeover beats — the widest
+// line runs >=95% of frame width (edge-crop legal per REF-2).
+const SIDE_INSET = 26;
+const TEXT_MAX_WIDTH = 1080 - 2 * SIDE_INSET; // 1028
 const CHAR_RATIO = 0.47; // italic serif advance estimate
 
 export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
@@ -63,8 +65,14 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
   // Deterministic font-fit on the longest line (no DOM measurement).
   let maxChars = 0;
   for (const l of lines) maxChars = Math.max(maxChars, l.length);
-  const widthFit = TEXT_MAX_WIDTH / (Math.max(1, maxChars) * CHAR_RATIO);
-  const finalFontSize = clamp(Math.min(fontSize, widthFit), 56, 150);
+  // Corpus law 1 (pass #7b): a card that lands alone owns the frame — the
+  // autofit GROWS to the width, it doesn't treat the spec size as a ceiling
+  // (render-caught: fontSize=108 bound while widthFit allowed ~130, leaving a
+  // ~150px dead right margin). The bar (9) + gap (38) live inside the centered
+  // block, so the text's usable width is TEXT_MAX_WIDTH minus that 47px.
+  const widthFit =
+    (TEXT_MAX_WIDTH - 47) / (Math.max(1, maxChars) * CHAR_RATIO);
+  const finalFontSize = clamp(widthFit, 56, 165);
 
   // Left accent bar draws down first.
   const barScaleY = interpolate(localFrame, [0, 18], [0, 1], {
@@ -227,7 +235,21 @@ export const EditorialQuote: React.FC<EditorialQuoteProps> = ({
                     textShadow: "0 2px 16px rgba(0,0,0,0.5)",
                   }}
                 >
-                  {line}
+                  {/* Corpus law 2: the accent lands on the PAYOFF word — the
+                      corpus color-codes the emotional peak, never decoration.
+                      The final word of the quote takes the accent at weight
+                      600; everything else keeps the ink colour. */}
+                  {li === lines.length - 1 ? (() => {
+                    const ws = line.split(" ");
+                    const head = ws.slice(0, -1).join(" ");
+                    const last = ws[ws.length - 1] ?? "";
+                    return (
+                      <>
+                        {head ? head + " " : ""}
+                        <span style={{ color: accentColor, fontWeight: 600 }}>{last}</span>
+                      </>
+                    );
+                  })() : line}
                 </div>
               );
             })}

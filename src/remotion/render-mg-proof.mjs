@@ -33,6 +33,7 @@ const PROPS = {
     legibility: { shadow_offset_px: 3, shadow_blur_px: 7, shadow_opacity: 0.35 },
     emoji: "🏎️", words: ["RACE", "CAR"] } },
   Reticle: { label: "THE SPOT", accentColor: PAL.accent, anchor: "center" },
+  NamePlate: { name: "Siddharth Ramakrishnan", role: "Founder & CEO", accentColor: PAL.accent, nameColor: PAL.number, startMs: 0, durationMs: 4000 },
   EditorialQuote: { text: "most people quit right before it works", author: "JANE DOE", role: "Founder",
     accentColor: PAL.accent, textColor: PAL.number, anchor: "center" },
   PullQuote: { text: "most people quit right before the breakthrough", keywords: ["quit", "breakthrough"],
@@ -43,7 +44,7 @@ const PROPS = {
     { label: "Discipline", value: "hard" },
   ], accentColor: PAL.accent, labelColor: PAL.number, anchor: "center" },
 }[TYPE] || {};
-const FRAMES = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50] }[TYPE] || [4, 14, 28, 46];
+const FRAMES = { StatCard: [4, 14, 28, 46], Stamp: [3, 8, 16, 46], PillCluster: [3, 12, 24, 46], EmojiCard: [3, 8, 16, 40], RankedList: [8, 20, 34, 50], EditorialQuote: [6, 18, 36, 56], PullQuote: [6, 16, 30, 50], Reticle: [8, 18, 30, 50], NamePlate: [4, 10, 30, 50] }[TYPE] || [4, 14, 28, 46];
 
 console.log(`[mg-proof] ${TYPE} (${TAG}) — bundling…`);
 const serveUrl = await bundle({ entryPoint: path.resolve(__dirname, "src/index.ts") });

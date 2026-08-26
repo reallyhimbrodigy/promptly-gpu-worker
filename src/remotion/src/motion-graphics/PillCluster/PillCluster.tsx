@@ -55,8 +55,11 @@ export const PillCluster: React.FC<PillClusterProps> = ({
   accentColor = "#4F9DF7",
   accentEvery = 3,
   glass = true,
-  width = 940,
-  fontSize = 54,
+  // Corpus law 1 (pass #7b): panel measured letterforms at ~2.5% frame height
+  // vs the corpus's 5-6% — the cluster read as UI, not a graphic beat.
+  // Outermost pills may crop at the frame edges (edge-crop is corpus-legal).
+  width = 1160,
+  fontSize = 78,
   textColor = "#FFFFFF",
   textShadow = DEFAULT_TEXT_SHADOW,
   anchor,
@@ -141,7 +144,11 @@ export const PillCluster: React.FC<PillClusterProps> = ({
         >
           {rendered.map((tag, i) => {
             const act = START + delayRank[i] * STAGGER;
-            const isAccent = accentEvery > 0 && (i + 1) % accentEvery === 0;
+            // Corpus law 2: the corpus color-codes exactly ONE word per
+            // beat ("aggressive red on the pain word, back to white on the
+            // resolution") — two co-equal accent pills fused into a block on
+            // the panel's frames. Exactly one pill carries the accent.
+            const isAccent = accentEvery > 0 && i === Math.min(accentEvery - 1, N - 1);
 
             // Sticker slap: oversized above the surface, presses DOWN onto the
             // pile (1.28 → 0.97 squash → 1). The z-order makes the landing

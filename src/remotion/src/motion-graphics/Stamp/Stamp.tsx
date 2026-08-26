@@ -25,9 +25,13 @@ const STYLE_DEFAULTS: Record<
   // sizes read as a lone sticker floating mid-frame (render-proven). Sized so
   // the default stamp spans ~70% of a 1080 frame the way the reference's
   // number does.
-  seal: { fontKey: "oswald", fontSize: 64, mark: "star", distress: false, size: 620 },
-  stamp: { fontKey: "anton", fontSize: 84, mark: "none", distress: true, size: 760 },
-  ribbon: { fontKey: "anton", fontSize: 72, mark: "none", distress: false, size: 860 },
+  // Corpus law 1 (pass #7b): a card that lands alone OWNS the frame — REF-2's
+  // number runs ~95% width and clips the edge; the 2026-08-25 panel measured
+  // ours at ~58% floating in symmetric margins. Tilted corners now approach
+  // the 1080 frame edges.
+  seal: { fontKey: "oswald", fontSize: 64, mark: "star", distress: false, size: 900 },
+  stamp: { fontKey: "anton", fontSize: 84, mark: "none", distress: true, size: 1000 },
+  ribbon: { fontKey: "anton", fontSize: 72, mark: "none", distress: false, size: 1040 },
 };
 
 const FONT_FAMILY: Record<StampFontKey, string> = {
@@ -352,7 +356,9 @@ export const Stamp: React.FC<StampProps> = (props) => {
           flexDirection: "column",
           alignItems: "center",
           gap: 6,
-          opacity: 0.95,
+          // Corpus law 2: shock fragments hit at FULL ink — 0.95 read as a
+          // watermark on the panel's frames. Distress erodes; alpha doesn't.
+          opacity: 1,
           overflow: "hidden",
         }}
       >
