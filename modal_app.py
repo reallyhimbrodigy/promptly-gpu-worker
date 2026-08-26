@@ -1878,6 +1878,13 @@ _CANON_FLAGS = {
     # and refused the deploy, which is the check earning its place.
     "PROMPTLY_EDITORIAL_LIVE": "1",
     "PROMPTLY_ZERO_REJECT": "1",
+    # TIME-BOXED EXPERIMENT (owner GO 2026-08-25). 50/50 per-job split on
+    # sha256(job_id): 250ms vs the 700ms control, both arms concurrent on live
+    # traffic. MIRROR of validate_deploy.py CANON — the flag-drift sentinel
+    # compares the two dicts and blocks the deploy on divergence, which is
+    # exactly how this line came to exist: the first attempt updated one copy.
+    # Ends when the read lands (constant + delete the flag, or revert to "").
+    "PROMPTLY_MIDSENTENCE_STALL_S": "0.25",
     "PROMPTLY_WHY_DIET": "1",
     "PROMPTLY_DELIVERY_FPS": "30",
     "PROMPTLY_RENDER_FANOUT": "0",

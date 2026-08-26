@@ -3,11 +3,19 @@
 Reports located -> offered -> preserved PER ARM, cut by the value the job
 ACTUALLY RAN WITH (result.stage_timings.midsentence_stall_s), never by clock.
 
-WHY NOT BY TIMESTAMP. Modal mounts secrets at CONTAINER START, so for a window
-after any flip a warm container keeps the old value while a cold one picks up
-the new one. Production runs BOTH arms at once and a pre/post cut by created_at
-is a mixture reported as a cohort — the confound that made the proxy-fps read
-agree with its own prediction while being pure noise.
+THE ARMS ARE CONCURRENT BY DESIGN, not by accident. A per-job 50/50 split on
+sha256(job_id) puts both values on the same traffic in the same hours, so this
+is not a before/after. Reading the env var directly would have given ONE value
+per container — 100% of traffic on the arm — and the only concurrency that
+yields is the warm/cold container mixture after a flip, where container age
+correlates with load and time of day. That is the confound that made the
+proxy-fps read AGREE with its own prediction (-34.3% vs -36%) while being noise.
+
+WHY NOT BY TIMESTAMP ANYWAY. During the deploy window, containers still warm
+from before it have no env value and contribute CONTROL jobs only. Cutting by
+clock would fold those in as if they were assigned; cutting by the PERSISTED arm
+does not. The arm-invariance check below is what proves the two cohorts are
+comparable despite that transition.
 
 THE PRE-REGISTERED READINGS (NEXT_TWO_ITEMS.md item 1):
 

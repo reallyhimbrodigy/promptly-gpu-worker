@@ -10295,40 +10295,49 @@ _DEADAIR_MIN_RANGE_DB = 8.0    # below this floor->speech separation the pass NO
 _MIDSENTENCE_STALL_S = 0.70
 
 
-def _midsentence_stall_s():
-    """The mid-sentence OFFER bar, as an experiment knob. DARK: unset => 0.70,
-    byte-identical to today.
+# THE ARM IN FORCE FOR THE JOB CURRENTLY BEING HANDLED. Resolved ONCE at handler
+# entry, beside every other per-job reset.
+_STALL_ARM = [_MIDSENTENCE_STALL_S]
 
-    THE FINDING THIS EXISTS TO TEST. Exactly one gate sits between
-    dead_air_spans_located and dead_air_spans_offered, and it separates two
-    thresholds 23x apart: a sentence-final pause is offered at 30ms
-    (_WITHIN_CLIP_TRIM_TRIGGER_S), a mid-sentence pause must reach 700ms.
-    Natural mid-sentence pauses run 100-400ms and sit entirely inside that dead
-    zone. Measured on a fully-punctuated English source: 13 of 20 located spans
-    dropped, 65%, never reaching the model. That is why edits come out thin.
 
-    NOT the Arabic gate — `_punctuated` was TRUE there, so this fired at FULL
-    strength. The Arabic fix DISARMS this for ASRs that do not punctuate.
+def _resolve_stall_arm(job_id):
+    """50/50 CONCURRENT SPLIT on a stable hash of job_id. Dark when unset.
 
-    SCOPED TO THE TWO SITES THAT ARE THE SAME DECISION, deliberately:
-      * the detector's offer gate (located -> offered)
-      * the downstream trim filter, which re-applies the identical test
-    Moving only the first would raise `offered` while the cut still never
-    happened — the experiment would measure nothing and read as a null.
+    WHY A SPLIT AND NOT A FLIP. Reading the env var directly gives ONE value per
+    container, so setting it puts 100% of traffic on the arm — a before/after
+    against yesterday, not a comparison. The only concurrency that produces is
+    the warm/cold container mixture right after a flip, and container age
+    correlates with load and time of day: that is a confound, not an arm. It is
+    the same shape as the proxy-fps read that agreed with its own prediction at
+    -34.3% against a predicted -36% and was pure noise.
 
-    NOT applied to the connector-word rule (`_sentence_final_word(prev)` with
-    dead air required on BOTH sides). That is a different question — keep-when-
-    in-doubt for words like "Next"/"So" — and changing it too would make the
-    arms differ in more than one way, which is uninterpretable.
+    DETERMINISTIC ON job_id, so a RETRIED job never changes arms. A flipping
+    retry would attribute one job's spans to both arms and quietly break the
+    per-user cut, which is the cut that matters (Rule 7).
+
+    An unidentifiable job goes to CONTROL. Never put a job we cannot attribute
+    into the experimental arm.
     """
     import os
+    raw = (os.environ.get("PROMPTLY_MIDSENTENCE_STALL_S", "") or "").strip()
+    if not raw or not job_id:
+        return _MIDSENTENCE_STALL_S
     try:
-        v = float(os.environ.get("PROMPTLY_MIDSENTENCE_STALL_S", "") or _MIDSENTENCE_STALL_S)
+        v = float(raw)
     except (TypeError, ValueError):
         return _MIDSENTENCE_STALL_S
-    # Bounded: below the locate bar the gate is a no-op and `offered` would
-    # simply equal `located`, which measures the plumbing rather than the lever.
-    return v if _WITHIN_CLIP_TRIM_TRIGGER_S < v <= 2.0 else _MIDSENTENCE_STALL_S
+    # A value at or below the LOCATE bar would make the gate a no-op and read as
+    # "the model refused every span" rather than "the gate stopped gating".
+    if not (_WITHIN_CLIP_TRIM_TRIGGER_S < v <= 2.0):
+        return _MIDSENTENCE_STALL_S
+    import hashlib as _hl
+    _h = _hl.sha256(str(job_id).encode("utf-8")).hexdigest()
+    return v if (int(_h[:8], 16) % 2) else _MIDSENTENCE_STALL_S
+
+
+def _midsentence_stall_s():
+    """The resolved arm. One reader, so the two gate sites cannot disagree."""
+    return _STALL_ARM[0]
 
 
 def _sentence_final_word(w):
@@ -39922,6 +39931,7 @@ def handler(job):
         _DEAD_AIR_LOCATED[0] = 0
         _DEAD_AIR_OFFERED[0] = 0
         _DEAD_AIR_PRESERVED[0] = 0
+        _STALL_ARM[0] = _resolve_stall_arm(job_id)
         _RENDER_OFFTHREAD.clear()
         _V2_COUNTS_LAST.clear()
         _RENDER_ATTEMPTS[0] = 0

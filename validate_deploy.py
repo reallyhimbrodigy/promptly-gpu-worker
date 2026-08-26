@@ -302,7 +302,7 @@ def _session_certs_registered():
     import subprocess as _sp
     _here = os.path.dirname(os.path.abspath(__file__))
     for _cert, _n in (("cert_falsifier_readable.py", 9),
-                      ("cert_dead_air_attrition.py", 18),
+                      ("cert_dead_air_attrition.py", 23),
                       ("cert_offthread_evidence.py", 17),
                       ("cert_onset_snap.py", 18),
                       ("cert_doctrine_matches_schema.py", 7),
@@ -7448,6 +7448,20 @@ def _secret_canonical_values():
         # together, like every other value here.
         "PROMPTLY_EDITORIAL_LIVE": "1",
         "PROMPTLY_ZERO_REJECT": "1",      # ZERO-REJECT LIVE (Zac's "FLIP MINIMAL" 2026-07-25 on the minimal samples; cert 5/5; rollback = 0 here + secret + redeploy)
+        # TIME-BOXED EXPERIMENT, NOT A SETTING (owner GO 2026-08-25, key named).
+        # A 50/50 per-job split: hash(job_id) picks 250ms or the 700ms control,
+        # so BOTH arms run concurrently on live traffic and the comparison is
+        # not temporal. Registered here because a live flag watched by nothing
+        # is the class the NO-UNREGISTERED-LIVE-FLAG gate was forged to prevent.
+        #
+        # THIS ENTRY HAS AN END. When the read lands, the owner picks a number:
+        # either this becomes the constant (and the flag + split are DELETED,
+        # not left armed) or it reverts to "". Leaving it here indefinitely
+        # turns an experiment into an unowned production value.
+        #
+        # Rollback is one flag: set to "" here + secret + redeploy. Every job
+        # returns to 700ms; nothing else in the pipeline reads it.
+        "PROMPTLY_MIDSENTENCE_STALL_S": "0.25",
         "PROMPTLY_WHY_DIET": "1",         # A-L1 output diet LIVE (rationale caps 240→96; output-bound call → speed lever; =0 is the one-flag rollback)
         "PROMPTLY_DELIVERY_FPS": "30",    # FPS 30 APPROVED (Zac blanket-GO 2026-07-25 on the A/B pair): delivery target 30fps — halves the render tail; rollback = "" (60) here + secret
         "PROMPTLY_RENDER_FANOUT": "0",    # A-L4 OFF — DELIBERATE EMERGENCY LEVER (Zac 2026-07-31). Fanout bills 8-16 parallel containers/long-render for a ~19% wall-clock win (cert 3/3 SSIM 1.0) and is implicated in the $1500 wall. Held at 0 during the cost emergency. Turning it back to 1 is a PRICED trade decision (fanout=1+cpu=16 vs fanout=0+cpu=16 $/job), NOT a drift-fix. Canonical tracks the deliberate LIVE value.

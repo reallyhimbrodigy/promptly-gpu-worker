@@ -150,6 +150,37 @@ def main():
           and "and (silence_after_s or 0.0) >= _MIDSENTENCE_STALL_S" in NC,
           "the both-sides rule moved with the experiment")
 
+    # ── A SPLIT, NOT A FLIP ────────────────────────────────────────────────
+    # Reading the env var directly gives ONE value per container, so arming it
+    # puts 100% of traffic on the arm — a before/after against yesterday. The
+    # only concurrency that yields is the warm/cold container mixture after a
+    # flip, and container age correlates with load and time of day. That is the
+    # confound that made the proxy-fps read AGREE with its own prediction
+    # (-34.3% vs -36% predicted) while being pure noise.
+    check("the arm is a per-job SPLIT keyed on job_id",
+          "def _resolve_stall_arm(job_id):" in NC
+          and "sha256(str(job_id).encode(" in NC,
+          "a single env read is a flip, not a split — both arms cannot run "
+          "concurrently and the comparison is temporal")
+    check("resolved ONCE per job, beside the other per-job resets",
+          "_STALL_ARM[0] = _resolve_stall_arm(job_id)" in NC
+          and NC.count("_STALL_ARM[0] = _resolve_stall_arm(") == 1,
+          "resolved more than once, or never — a mid-job change would split one "
+          "job's spans across both arms")
+    check("the gate sites read the RESOLVED arm, not the env",
+          "return _STALL_ARM[0]" in NC
+          and NC.count('os.environ.get("PROMPTLY_MIDSENTENCE_STALL_S"') == 1,
+          "more than one reader of the env — the two gate sites could disagree "
+          "within a single job")
+    # DETERMINISTIC. A retried job that changed arms would attribute one job's
+    # spans to BOTH arms and quietly break the per-user cut (Rule 7).
+    check("assignment is deterministic — no randomness in the arm",
+          "random" not in NC.split("def _resolve_stall_arm")[1].split("def ")[0],
+          "a retry would flip arms and contaminate both")
+    check("an unidentifiable job goes to CONTROL",
+          "if not raw or not job_id:" in NC,
+          "a job we cannot attribute must never enter the experimental arm")
+
     print()
     if fails:
         print(f"  CERT DEAD-AIR-ATTRITION: FAIL ({len(fails)})")
