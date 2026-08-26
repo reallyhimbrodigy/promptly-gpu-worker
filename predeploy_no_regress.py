@@ -37,6 +37,46 @@ import sys
 # Intentional deletions: "symbol": "why it went, and what replaced it".
 # An entry here is a claim that the removal was deliberate and reviewed.
 INTENTIONAL_REMOVALS = {
+    # ── TREND REMOVAL, 2026-08-23 (8 symbols) ──────────────────────────────
+    # The trend pipeline was retired: 6,298 chars out of handler.py, the cron
+    # out of render.yaml, four scripts left .deprecated. It scraped Apify,
+    # aggregated 50 videos into ONE style-guide row in trend_profiles, and
+    # format_trend_section pasted that row into the directive as prose.
+    #
+    # WHY IT WENT: the aggregate was the defect. A guide averaged over 50 videos
+    # says "trending videos cut fast and use bold captions" — true, unconditional,
+    # unqueryable for THIS source — and it rode in an already implicitly-cached
+    # 60,540-token prompt where prompt-cutting was measured to buy nothing.
+    # Replaced by REFERENCE_CORPUS_SPEC.md: records, never an aggregate;
+    # retrieved, never recited. Ten records are landed in Supabase.
+    #
+    # CROSS-REPO CHECK, because this is the half that could break someone else:
+    # content-studio's dispatch-to-modal.js still SENDS `trendSnapshot` (the
+    # re-edit replay field). The worker no longer reads it. An ignored extra
+    # field in the payload is a NO-OP, not a break — verified by reading the
+    # call site, not assumed. The other three content-studio references
+    # (update-style-guide, analyze-reference-videos, trend-video-pipeline) are
+    # standalone scripts, required-by-server: 0.
+    "get_trend_context": "trend pipeline retired 2026-08-23; the aggregate was the defect",
+    "format_trend_section": "same — it pasted the aggregated row into the directive",
+    "trend_profiles": "the aggregated style-guide table; superseded by reference_videos/reference_beats",
+    "style_guide": "the aggregate itself",
+    "profile_json": "trend profile payload",
+    "numeric_patterns": "trend profile field",
+    "valid_until": "trend profile TTL",
+    "wait_trend": "the trend wait span; the stage no longer exists",
+
+    # ── _v2_counts -> v2_counts, 2026-08-24 (rename, not a deletion) ───────
+    # handler sanitises plans with `k.startswith("_")` filters, so the LEADING
+    # UNDERSCORE meant these metrics were STRIPPED IN TRANSIT: computed by
+    # flatten_beats, asserted by a cert, proven end to end, and deleted before
+    # any reader saw them. Two paid A/B cells reported the pre-registered
+    # metrics as ABSENT for exactly that reason. Renamed across all five
+    # files; cert_v3_beat_resolution clause 7 asserts the key survives an
+    # underscore strip. No consumer outside this repo reads it
+    # (content-studio: 0 files).
+    "_v2_counts": "renamed to v2_counts — a leading underscore was stripping it in transit",
+
     # WATCHDOG RECOVERY FIELDS RENAMED 2026-08-15. The gate fired on these and it
     # was RIGHT to — two live analytics field names vanish in this deploy. The
     # removal is deliberate and the rename is the whole point:

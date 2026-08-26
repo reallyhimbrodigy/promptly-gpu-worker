@@ -160,7 +160,8 @@ const _summary = isOverlay
   : `${inputJson.segments?.length ?? 0} segments`;
 console.log(
   `[render-full] composition=${compositionId} (ProRes 4444 ${isOverlay ? "alpha" : "no-alpha"}) ` +
-  `${frameRangeLabel}, ${_summary}, concurrency=${resolvedConcurrency}`,
+  `${frameRangeLabel}, ${_summary}, concurrency=${resolvedConcurrency}` +
+  ` offthreadVideoThreads=${Number(process.env.PROMPTLY_OFFTHREAD_THREADS || resolvedConcurrency)}` + ` (remotion default is 2)`,
 );
 
 // ── Bundle (use prebundle if present) ──────────────────────────────────────
@@ -288,6 +289,28 @@ const _progressJsonPath = `${outputPath}.progress.json`;
   outputLocation: outputPath,
   inputProps,
   concurrency: resolvedConcurrency,
+  // OFFTHREAD VIDEO THREADS — the named lead on 80% of the wall clock.
+  //
+  // Read from Remotion's own source: DEFAULT_RENDER_FRAMES_OFFTHREAD_VIDEO_THREADS
+  // = 2, and we have never set it (grep -c offthreadvideo handler.py -> 0).
+  // OffthreadVideo frames are served by ONE Node HTTP server backed by a SINGLE
+  // lazy Rust compositor whose thread count is this value — shared across every
+  // page. Our micro segments render transitions and composite zooms over source
+  // footage, so EVERY frame needs a decoded source frame.
+  //
+  // That is N Chromium pages (concurrency, default min(8, cores/2)) all queued
+  // behind 2 extraction threads: a 4:1 oversubscription on precisely the
+  // resource this composition shape is bound by, with the pages idle waiting.
+  //
+  // It also fits the null results rather than sitting beside them: decode cost
+  // is independent of what is DRAWN (components r=0.224), of cut count
+  // (r=0.064), and keyed to output frames in transition windows rather than
+  // source duration (r=0.132).
+  //
+  // Matched to concurrency so the extractor is not the narrower pipe. Overridable
+  // and REVERSIBLE without a code change: PROMPTLY_OFFTHREAD_THREADS=2 restores
+  // Remotion's default exactly.
+  offthreadVideoThreads: Number(process.env.PROMPTLY_OFFTHREAD_THREADS || resolvedConcurrency),
   muted: true,
   enforceAudioTrack: false,
   overwrite: true,
