@@ -297,6 +297,30 @@ def _quiet_window_gate_wired():
         "is how this codebase has repeatedly shipped confident false negatives.")
 
 
+@check("EVERY CERT THIS SESSION SHIPPED ACTUALLY RUNS ON A DEPLOY (RULE-1, and the TWELFTH built-not-wired instance). Rule 1 says every fix ships with a check that makes its regression impossible — and six certs written to satisfy it were registered NOWHERE: not in validate_deploy, not in deploy.sh. 77 assertions that only ever ran when an agent typed the filename by hand. A cert nobody runs makes nothing impossible; it is a comment with a shebang, and it rots exactly like the fixes that relied on memory. These now run inside the gate, and the PASS COUNT is asserted alongside the exit code so a check DELETED to make a red cert green fails the deploy instead of reading as a fix — the same reason _seam_dark_certs pins N/N. Offline, zero network, zero Modal, zero Gemini.")
+def _session_certs_registered():
+    import subprocess as _sp
+    _here = os.path.dirname(os.path.abspath(__file__))
+    for _cert, _n in (("cert_dead_air_attrition.py", 18),
+                      ("cert_offthread_evidence.py", 17),
+                      ("cert_onset_snap.py", 18),
+                      ("cert_doctrine_matches_schema.py", 7),
+                      ("cert_v3_beat_resolution.py", 9),
+                      ("cert_harness_exit_code.py", 8)):
+        _p = os.path.join(_here, _cert)
+        assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
+        _env = dict(os.environ); _env.setdefault("APP_URL", "")
+        _r = _sp.run([sys.executable, _p], capture_output=True, text=True,
+                     timeout=600, cwd=_here, env=_env)
+        assert _r.returncode == 0, (
+            f"{_cert} FAILED:\n{(_r.stdout or '')[-900:]}{(_r.stderr or '')[-300:]}")
+        _got = (_r.stdout or "").count("[PASS]")
+        assert _got >= _n, (
+            f"{_cert} reported {_got} passing assertions, expected >= {_n} — a "
+            f"check was DROPPED rather than fixed. Raise the number here only "
+            f"when adding assertions, never when losing them.")
+
+
 @check("SEAM DARK SEAMS STAY DARK + WIRED (lane 5, merged by TRUTH 2026-08-11, RULE-1): runs SEAM's three offline certs — cert_adapter_contract (5), cert_unified_core (8), cert_surgical_ops (6) — inside the deploy gate. They assert flag-OFF byte-identity (the prompt-byte fingerprint, the identity-carrier adapter, the empty premium profile, the schema-enum exclusion), that each module is MOUNTED into the image and imported unconditionally (the progressive_publish lesson: wiring shipped, module didn't), and that no flag defaults ON. Zero network, zero Modal, zero Gemini. If any seam silently arms itself, or a mount is dropped, the deploy fails here rather than at flip time.")
 def _seam_dark_certs():
     import subprocess as _sp
@@ -12590,6 +12614,39 @@ def _check_error_subcodes():
     # ...and the classifier must never raise, whatever it is handed.
     for _weird in (None, 0, object(), Exception()):
         _h.classify_error(_weird)
+
+    # ── ladder_exhausted: A DESIGN OUTCOME IS NOT A CRASH ──────────────────
+    # The ladder trying every rung and running out is not the same event as a
+    # renderer crashing, and counting it as one inflates the failure rate with
+    # a designed behaviour. It was the top UNNAMED class by users and it hid
+    # for a week inside RENDER_FATAL/unclassified.
+    #
+    # ORDERING IS LOAD-BEARING. The ladder's terminal raise embeds the
+    # underlying error in its own message, so every named mechanism is
+    # reachable THROUGH the ladder prefix — two entries in _REAL above arrive
+    # carrying it. `ladder_exhausted` must therefore be LAST; anywhere else it
+    # steals a real cause and reports a design outcome in its place. Those two
+    # _REAL entries are this assertion's RED-proof: promoting the subcode
+    # breaks them.
+    _rf = [_sub for _sub, _ in _h._ERROR_SUBCODES["RENDER_FATAL"]]
+    assert _rf[-1] == "ladder_exhausted", (
+        f"ladder_exhausted must be LAST in RENDER_FATAL (it is at {_rf.index('ladder_exhausted')} "
+        f"of {len(_rf)}) — ahead of any mechanism it swallows the real cause")
+
+    # AND IT MUST CARRY THAT CAUSE. A bare `ladder_exhausted` would absorb
+    # every never-before-seen render failure into a name we already understand,
+    # silencing the unnamed-shape detector asserted directly above while
+    # reading as an improvement — the false-green class, ninth instance.
+    _novel = ("RENDER_FATAL after full + retry + stripped renders: "
+              "KeyError: 'somethingNobodyHasEverSeen'")
+    _got = _h.classify_error(RuntimeError(_novel)).get("error_subcode")
+    assert _got == "ladder_exhausted:KeyError", (
+        f"a novel cause under the ladder resolved to {_got!r} — it must stay "
+        f"visible as a new suffix, not collapse into the class name")
+    _lever4 = ("RENDER_FATAL: degrade ladder exhausted with no "
+               "input-differing rung (last failure: Foo)")
+    assert _h.classify_error(RuntimeError(_lever4)).get("error_subcode") \
+        == "ladder_exhausted:unknown", "the Lever-4 exhaustion path is unnamed"
 
 
 @check("THE WEIGHTED PROBE BUDGET MUST ACTUALLY SCALE (errors agent 2026-08-03): _probe_weighted_timeout parsed ffprobe POSITIONALLY, assuming it echoed the requested order (r_frame_rate,width,height,duration). It does not — it emits the STREAM's own order: width,height,r_frame_rate,duration. So _vals[0]='2160' had no '/' and fps silently fell back to 30, and _int(2) on '60/1' raised and made height 0. res_factor collapsed to 1.0 and EVERY call returned base_s: the RENDER_FFMPEG:analyze_* fix was INERT while reading as shipped (60s computed where the truth is 90s on a 4K60 source). Now parsed by NAME from ffprobe -of json, which cannot be reordered. This gate asserts the SCALING, not the presence of the function — a fix that computes the base value on every input is indistinguishable from no fix at all.")

@@ -103,3 +103,81 @@ JOB_STALLED · RECIPE_INVALID · RENDER_REMOTION/component_crash
 "RuntimeError, 39 across 26 users" was never one family but **seven distinct
 raising sites**, five of them inside `render_stage` at different lines. Nobody
 had read the field.
+
+---
+
+# BUILD STATUS — 2026-08-25, all three items built and gated
+
+## (1) Stall experiment — BUILT, DARK, committed `e20ef03`
+
+`PROMPTLY_MIDSENTENCE_STALL_S`, default **0.70 = unchanged**. Bounded to
+`_WITHIN_CLIP_TRIM_TRIGGER_S < v <= 2.0`, so a value under the locate bar
+cannot silently turn the gate into a no-op and read as "the model refused
+everything". Verified dark: unset/0.02/9.9/garbage all resolve to 0.70.
+
+**Scoped to TWO sites, and that is the design.** `_MIDSENTENCE_STALL_S` has
+four read sites; only two are the SAME DECISION — the detector's offer gate
+(11096) and the downstream trim filter (27306), which re-applies an identical
+test. Moving only the first raises `offered` while the cut still never happens:
+the experiment reads as a null for a wiring reason and we conclude the constant
+is not the lever. The connector-word rule (10400/10401, dead air on BOTH sides)
+is a different question and stays on the fixed constant, so the arms differ in
+exactly one way.
+
+**The third number now exists.** `dead_air_spans_preserved` was NOT persisted —
+only located and offered were. Without it the pre-registered falsifier ("if
+preserved rises in lockstep with offered, the model is being handed spans it
+doesn't want") could not be evaluated at all. Counted from the PARSED set, not
+`len(preserved_silences)`: a duplicate or unparseable entry would inflate the
+raw list while changing nothing downstream.
+
+**The arm is on the row** (`midsentence_stall_s`). Modal mounts secrets at
+CONTAINER START, so after a flip production runs both arms at once and a cut by
+timestamp is a mixture, not a cohort.
+
+Read with `./run_modal.sh query_stall_arms_app.py`. It reports the
+arm-invariance self-check FIRST (`located` must not move between arms; if it
+does, nothing below the line is readable), then `offered/located` and
+`preserved/offered` per arm, per job AND per user, excluding pre-deploy rows
+explicitly rather than folding them in as a control.
+
+## (2) `ladder_exhausted` — BUILT
+
+A ladder exhausting itself is a design outcome, not a crash. It was landing in
+`RENDER_FATAL/unclassified`, the top unnamed class by users.
+
+**Ordering is the whole design.** The ladder's terminal raise embeds the
+underlying error inside its own message, so every named mechanism is reachable
+THROUGH the ladder prefix — two of `validate_deploy`'s pinned real jobs
+(`frame_grid`, `no_video_stream`) arrive carrying it. Placed anywhere but LAST,
+`ladder_exhausted` steals them and reports a design outcome where a real cause
+was sitting in the same string. Those two pinned jobs are the RED-proof:
+promoting the subcode breaks them.
+
+**It carries its cause** (`ladder_exhausted:TypeError`). A bare subcode would
+absorb every never-before-seen render failure into a name we already understand
+and silence the unnamed-shape detector this file explicitly relies on — while
+reading as an improvement.
+
+## (3) `offthreadVideoThreads` — the evidence path, BUILT
+
+It was never unreadable. `render-full.mjs` prints the value it used, but that
+print lands in the BURST container while the orchestrator's tee captures the
+orchestrator — twice the instrument was pointed at the wrong process, and twice
+"no evidence" was indistinguishable from "no effect". The value was in
+`_r.stdout` the whole time; `subprocess.run` captures it.
+
+It is now parsed onto the job row as `render_offthread_threads` /
+`render_concurrency` / `render_legs_reporting`, nested under `stage_timings`
+(which is in the write allowlist). A DB question on every job forever, with a
+denominator, instead of a log hunt that has now failed twice. A `2` in that
+column means the lever is NOT in force — which is the reading this settles.
+
+## The twelfth built-not-wired instance, found while doing the above
+
+Six certs — 77 assertions — were registered NOWHERE: not in `validate_deploy`,
+not in `deploy.sh`. They only ever ran when an agent typed the filename. Rule 1
+says every fix ships a check that makes its regression impossible, and a cert
+nobody runs makes nothing impossible. Now registered in the gate with their
+PASS COUNTS asserted, so a check deleted to make a red cert green fails the
+deploy instead of reading as a fix.

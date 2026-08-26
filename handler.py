@@ -6214,6 +6214,18 @@ _DEAD_AIR_LOCATED = [0]
 _DEAD_AIR_OFFERED = [0]   # survived every gate and reached the model
 _DEAD_AIR_PRESERVED = [0] # the model chose to KEEP (the third number)
 
+# WHAT THE RENDER ACTUALLY RAN WITH. offthreadVideoThreads was deployed at v573
+# and has been UNPROVEN since, for a pure instrumentation reason: render-full.mjs
+# prints the value it used, but that print lands in the BURST container's stdout
+# while the orchestrator's tee captures the orchestrator. Two attempts to read it
+# from the logs came back empty — not because the value was absent, but because
+# the reader was pointed at the wrong container.
+#
+# The number is already in _r.stdout (subprocess.run captures it). Lifting it
+# onto the job row makes it a DB question on every job forever, with a
+# denominator, instead of a log hunt that has now failed twice.
+_RENDER_OFFTHREAD = {}
+
 # Resolved proxy sampling for THIS job. Holders rather than globals-by-name for
 # the same reason _lang_bundle_holder exists: the value is produced deep inside
 # the Gemini call site and read at the payload seam, and a plain global read
@@ -33529,6 +33541,15 @@ def _remotion_subprocess(label, cmd, timeout=600, _self_healed=False):
             _ls = _line.strip()
             if _ls.startswith("[render-full]") or _ls.startswith("[gpu-info]"):
                 print(f"[{label}] {_ls}", flush=True)
+                # LIFT THE VALUE OUT OF THE CONTAINER. Every chunk render logs
+                # its own pair, so this collects a LIST: if the overlay and micro
+                # legs ever resolve differently, that difference is itself the
+                # finding and must not be flattened away here.
+                _ovt = re.search(
+                    r"concurrency=(\d+)\s+offthreadVideoThreads=(\d+)", _ls)
+                if _ovt:
+                    _RENDER_OFFTHREAD.setdefault("concurrency", []).append(int(_ovt.group(1)))
+                    _RENDER_OFFTHREAD.setdefault("offthread", []).append(int(_ovt.group(2)))
     return _elapsed
 
 
@@ -34019,6 +34040,20 @@ _ERROR_SUBCODES = {
         ("render_timeout", ("Remotion render TIMEOUT", "TimeoutExpired")),
         ("av_drift", ("|v-a|",)),
         ("caption_schema", ("CaptionStyle",)),
+        # LAST, AND THE ORDERING IS THE WHOLE DESIGN. The ladder's terminal
+        # raise embeds the UNDERLYING error inside its own message —
+        # "RENDER_FATAL after full + retry + stripped renders: <Type>: <msg>" —
+        # so every entry above is reachable THROUGH this prefix. Two of the
+        # real pinned jobs in validate_deploy's _REAL list (frame_grid,
+        # no_video_stream) arrive carrying it. Placed anywhere but last, this
+        # steals them and reports a design outcome where a real cause was
+        # sitting in the same string.
+        #
+        # WHY IT EXISTS: a ladder exhausting itself is not a crash. It counted
+        # as RENDER_FATAL/unclassified — the top unnamed class by users — and
+        # merging a design outcome into the failure rate inflates it.
+        ("ladder_exhausted", ("RENDER_FATAL after full + retry + stripped renders",
+                              "degrade ladder exhausted with no")),
     ),
     # RENDER_REMOTION is where a plan-independent render failure now lands: the
     # ladder fails fast on it, so it never reaches the RENDER_FATAL wrapper.
@@ -34094,6 +34129,27 @@ _ERROR_SUBCODES = {
 }
 
 
+def _ladder_cause(msg):
+    """The exception type the ladder died on, appended to `ladder_exhausted`.
+
+    WITHOUT THIS THE SUBCODE IS A REGRESSION. This file's own contract is that
+    "\'unclassified\' is a FINDING — a rising count for a code means a shape we
+    have never named is now firing". A bare `ladder_exhausted` matching the
+    ladder prefix would absorb every never-before-seen render failure into a
+    name we already understand, and the detector for new shapes would go quiet
+    while reading as an improvement. That is the false-green class exactly.
+
+    So the subcode carries the cause: `ladder_exhausted:TypeError`. The class is
+    named (it leaves unclassified, which is what the ranking read needs) AND a
+    new shape still surfaces as a new suffix nobody has seen before.
+    """
+    try:
+        _m2 = re.search(r"renders: ([A-Za-z_][A-Za-z0-9_.]*)\s*:", str(msg or ""))
+        return _m2.group(1) if _m2 else "unknown"
+    except Exception:
+        return "unknown"
+
+
 def _error_subcode(code, msg):
     """The mechanism under a terminal label. 'unclassified' is a FINDING.
 
@@ -34107,6 +34163,8 @@ def _error_subcode(code, msg):
         for _sub, _sigs in _ERROR_SUBCODES.get(code, ()):
             for _s in _sigs:
                 if _s in _m:
+                    if _sub == "ladder_exhausted":
+                        return _sub + ":" + _ladder_cause(_m)
                     return _sub
         return "unclassified"
     except Exception:
@@ -39852,6 +39910,7 @@ def handler(job):
         _DEAD_AIR_LOCATED[0] = 0
         _DEAD_AIR_OFFERED[0] = 0
         _DEAD_AIR_PRESERVED[0] = 0
+        _RENDER_OFFTHREAD.clear()
         _RENDER_ATTEMPTS[0] = 0
 
         # Step 1 — Download + parallel stage kickoff
@@ -43747,6 +43806,15 @@ def handler(job):
                 "dead_air_spans_offered": _DEAD_AIR_OFFERED[0],
                 "dead_air_spans_preserved": _DEAD_AIR_PRESERVED[0],
                 "midsentence_stall_s": _midsentence_stall_s(),
+                # UNMEASURED IS NOT ZERO. None means no render leg reported a
+                # value (no render, or the log line changed shape); [] can never
+                # occur. A 2 here is Remotion's default and means the lever is
+                # NOT in force — which is the reading this exists to settle.
+                "render_offthread_threads": (sorted(set(_RENDER_OFFTHREAD.get("offthread") or []))
+                                             or None),
+                "render_concurrency": (sorted(set(_RENDER_OFFTHREAD.get("concurrency") or []))
+                                       or None),
+                "render_legs_reporting": len(_RENDER_OFFTHREAD.get("offthread") or []),
             },
             # W2: which stages ran/skipped and WHY (effort-proportional proof)
             "stage_manifest": _stage_manifest,
