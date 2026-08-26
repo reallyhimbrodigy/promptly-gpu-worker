@@ -303,7 +303,7 @@ def _session_certs_registered():
     _here = os.path.dirname(os.path.abspath(__file__))
     for _cert, _n in (("cert_falsifier_readable.py", 9),
                       ("cert_dead_air_attrition.py", 23),
-                      ("cert_offthread_evidence.py", 27),
+                      ("cert_offthread_evidence.py", 33),
                       ("cert_onset_snap.py", 18),
                       ("cert_doctrine_matches_schema.py", 7),
                       ("cert_v3_beat_resolution.py", 9),
@@ -7484,6 +7484,27 @@ def _secret_canonical_values():
         # Rollback is one flag: set to "" here + secret + redeploy. Every job
         # returns to 700ms; nothing else in the pipeline reads it.
         "PROMPTLY_MIDSENTENCE_STALL_S": "0.25",
+        # TIME-BOXED EXPERIMENT (owner GO 2026-08-26, key named). 50/50 per-job
+        # split pinning offthreadVideoThreads to Remotion's default 2 against
+        # control, at MATCHED concurrency.
+        #
+        # WHY IT HAD TO BE DECOUPLED: measured on 37 legs, offthread ==
+        # concurrency EXACTLY ({2:12,4:7,8:5,16:13}), so the two were perfectly
+        # collinear and NO cut of production traffic could separate them. The
+        # arm pins the extractor independently or it measures nothing.
+        #
+        # TARGET: remotion:micro is 109.6s of a 115.5s render, and micro-00..03
+        # each run 106.6-121.0s IN PARALLEL — four-way chunking did not shorten
+        # a chunk, so this is not pool contention and chunk count is not the
+        # variable. The question is per-chunk decode cost.
+        #
+        # Salted apart from PROMPTLY_MIDSENTENCE_STALL_S (measured 25.2%
+        # co-assignment = independent), so the two live experiments do not
+        # confound each other.
+        #
+        # ENDS when the read lands: the winner becomes the default and the flag
+        # AND the split are deleted, or it reverts to "". Rollback is one flag.
+        "PROMPTLY_OFFTHREAD_ARM": "1",
         "PROMPTLY_WHY_DIET": "1",         # A-L1 output diet LIVE (rationale caps 240→96; output-bound call → speed lever; =0 is the one-flag rollback)
         "PROMPTLY_DELIVERY_FPS": "30",    # FPS 30 APPROVED (Zac blanket-GO 2026-07-25 on the A/B pair): delivery target 30fps — halves the render tail; rollback = "" (60) here + secret
         "PROMPTLY_RENDER_FANOUT": "0",    # A-L4 OFF — DELIBERATE EMERGENCY LEVER (Zac 2026-07-31). Fanout bills 8-16 parallel containers/long-render for a ~19% wall-clock win (cert 3/3 SSIM 1.0) and is implicated in the $1500 wall. Held at 0 during the cost emergency. Turning it back to 1 is a PRICED trade decision (fanout=1+cpu=16 vs fanout=0+cpu=16 $/job), NOT a drift-fix. Canonical tracks the deliberate LIVE value.

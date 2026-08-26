@@ -1900,6 +1900,12 @@ _CANON_FLAGS = {
     # exactly how this line came to exist: the first attempt updated one copy.
     # Ends when the read lands (constant + delete the flag, or revert to "").
     "PROMPTLY_MIDSENTENCE_STALL_S": "0.25",
+    # TIME-BOXED EXPERIMENT (owner GO 2026-08-26). 50/50 per-job split pinning
+    # offthreadVideoThreads=2 vs control at matched concurrency. MIRROR of
+    # validate_deploy CANON — the flag-drift sentinel blocks the deploy if these
+    # two dicts diverge, which is how the stall entry's missing mirror was
+    # caught. Ends when the read lands (default + delete the flag, or revert).
+    "PROMPTLY_OFFTHREAD_ARM": "1",
     "PROMPTLY_WHY_DIET": "1",
     "PROMPTLY_DELIVERY_FPS": "30",
     "PROMPTLY_RENDER_FANOUT": "0",

@@ -468,6 +468,22 @@ try {
   );
 } catch {
   console.log(`[render-full] DONE in ${renderElapsed.toFixed(1)}s → ${outputPath}`);
+  // WHY DOES ONE CHUNK COST ~110s? Decompose it: frames / fps. This file's own
+  // comment names Remotion's documented single-instance ~16-22 fps ceiling
+  // (issue #4664) as the reason chunking exists — but we have never persisted
+  // either term per leg, so "a chunk takes 110s" could not be told apart from
+  // "a chunk renders 2,200 frames at the ceiling" or "a chunk renders 550
+  // frames at 5 fps because four instances contend". Those point at opposite
+  // fixes: fewer frames vs fewer concurrent instances.
+  //
+  // Same shape as the offthreadVideoThreads line handler already parses off
+  // this stdout — one grep-stable line, no new channel.
+  console.log(
+    `[render-full] LEGSTAT frames=${_CLK._expectedFrames || 0}` +
+    ` elapsed=${renderElapsed.toFixed(2)}` +
+    ` fps=${(renderElapsed > 0 ? (_CLK._expectedFrames || 0) / renderElapsed : 0).toFixed(2)}` +
+    ` chunked=${isChunked ? 1 : 0} composition=${compositionId}`,
+  );
 }
 
 // browser.close() in newer @remotion/renderer destructures `silent` from

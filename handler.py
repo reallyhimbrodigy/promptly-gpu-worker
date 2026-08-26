@@ -33617,6 +33617,17 @@ def _remotion_subprocess(label, cmd, timeout=600, _self_healed=False):
                 # its own pair, so this collects a LIST: if the overlay and micro
                 # legs ever resolve differently, that difference is itself the
                 # finding and must not be flattened away here.
+                # PER-LEG frames / fps — the decomposition of "a chunk costs
+                # ~110s" into its two terms. Persisted so the question is a DB
+                # query on every job, not a log pull from a burst container.
+                _lg = re.search(r"LEGSTAT frames=(\d+) elapsed=([0-9.]+) fps=([0-9.]+)", _ls)
+                if _lg:
+                    _RENDER_OFFTHREAD.setdefault("legs", []).append({
+                        "label": label,
+                        "frames": int(_lg.group(1)),
+                        "elapsed_s": float(_lg.group(2)),
+                        "fps": float(_lg.group(3)),
+                    })
                 _ovt = re.search(
                     r"concurrency=(\d+)\s+offthreadVideoThreads=(\d+)", _ls)
                 if _ovt:
@@ -43918,6 +43929,9 @@ def handler(job):
                 # "2" = pinned to Remotion's default; None = dark/control.
                 # Persisted so the cohort is cut by what RAN, never by clock.
                 "offthread_arm": _OFFTHREAD_ARM[0],
+                # frames+fps PER LEG. None when no leg reported — UNMEASURED,
+                # never an empty list that reads as "the render did no frames".
+                "render_legs": (_RENDER_OFFTHREAD.get("legs") or None),
             },
             # W2: which stages ran/skipped and WHY (effort-proportional proof)
             "stage_manifest": _stage_manifest,

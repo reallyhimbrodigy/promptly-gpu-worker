@@ -201,6 +201,36 @@ def main():
           '_tl_wait("wait_normalize"' in NC,
           "these are pool futures; the number wanted is the long pole")
 
+    # ── LEGSTAT: THE DECOMPOSITION OF "A CHUNK COSTS ~110s" ────────────────
+    # Same cross-file contract as the offthread line, same rot risk: the .mjs
+    # FORMATS it and the .py PARSES it, in two languages. Built from the .mjs
+    # template and run against handler's own regex.
+    check("the renderer emits a LEGSTAT line", "LEGSTAT frames=" in MJS,
+          "no per-leg frames/fps — 110s stays one undecomposed number")
+    _lp = re.search(r'r"(LEGSTAT[^"]*)"', NC)
+    check("handler declares a LEGSTAT parser", _lp is not None)
+    if _lp:
+        _pat = _lp.group(1).replace("\\\\d", "\\d")
+        _synth = "[render-full] LEGSTAT frames=2184 elapsed=109.60 fps=19.93 chunked=1 composition=PromptlyMicroSegments"
+        _hit = re.search(_pat, _synth)
+        check("handler's regex matches a line built from the .mjs template",
+              _hit is not None and _hit.group(1) == "2184" and _hit.group(3) == "19.93",
+              f"{_pat!r} did not match {_synth!r} — the files have DRIFTED and "
+              f"the column goes silently NULL")
+    # COLLECTED, not just persisted. Found by mutation: replacing the append
+    # with a discard left this cert GREEN, because the persist line still
+    # referenced the key it would now never contain. Asserting the write site
+    # without the read site is half a check.
+    check("LEGSTAT is collected into the holder, not discarded",
+          '_RENDER_OFFTHREAD.setdefault("legs", []).append(' in NC,
+          "parsed and thrown away — the column would be permanently None")
+    check("per-leg stats are persisted",
+          '"render_legs": (_RENDER_OFFTHREAD.get("legs") or None)' in NC,
+          "parsed and discarded")
+    check("no leg reporting persists None, never []",
+          'or None)' in NC,
+          "an empty list reads as 'the render rendered no frames'")
+
     print()
     if fails:
         print(f"  CERT OFFTHREAD-EVIDENCE: FAIL ({len(fails)})")
