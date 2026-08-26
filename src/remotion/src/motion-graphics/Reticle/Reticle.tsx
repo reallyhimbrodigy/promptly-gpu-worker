@@ -179,10 +179,47 @@ export const Reticle: React.FC<ReticleProps> = ({
             transformOrigin: "center",
           }}
         >
+          {/* §4-for-footage (2026-08-25): the WINDOW plane. A viewfinder is
+              axis-aligned by nature — tilt/overlap read as error here. The
+              depth device for this family is selection: everything OUTSIDE
+              the region dims as the lock lands (box-shadow spill — one node,
+              no four-rect math), so the HUD occludes the footage around the
+              subject and the region reads as a window, not four floating
+              corners. Releases with the exit defocus. */}
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: 10,
+              boxShadow: `0 0 0 9999px rgba(0,0,0,${(0.26 * lockT * (1 - exitDefocus)).toFixed(3)})`,
+              pointerEvents: "none",
+            }}
+          />
+
           {/* Corner brackets */}
           <div style={{ position: "absolute", inset: 0, opacity: bracketsOpacity }}>
             {CORNERS.map((c) => (
               <div key={c} style={cornerStyle(c)} />
+            ))}
+            {/* Restrained HUD furniture: midpoint edge ticks — the marks a
+                real viewfinder carries. Corpus register is fragments, so the
+                furniture stays minimal: four ticks, no readouts. */}
+            {[
+              { left: "50%", top: -1, width: 2, height: 14, translate: "-50% 0" },
+              { left: "50%", bottom: -1, width: 2, height: 14, translate: "-50% 0" },
+              { left: -1, top: "50%", width: 14, height: 2, translate: "0 -50%" },
+              { right: -1, top: "50%", width: 14, height: 2, translate: "0 -50%" },
+            ].map((t, i) => (
+              <div
+                key={`tick-${i}`}
+                style={{
+                  position: "absolute",
+                  ...t,
+                  backgroundColor: liveColor,
+                  opacity: 0.75,
+                }}
+              />
             ))}
           </div>
 

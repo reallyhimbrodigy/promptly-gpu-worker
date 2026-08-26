@@ -3,7 +3,7 @@
 
 `[§3.1, §6.1]`
 
-Renders a FULL PREMIUM edit of golden/lumen-refs/ref2-viral-creator-doc-vertical
+Renders a FULL PREMIUM edit of a TRIGGER-BEARING frozen corpus source
 inside the BUILD LANE, where every gate is open by design:
 
   _editorial_suppressed() = (not build_lane) and (not EDITORIAL_LIVE)
@@ -28,7 +28,15 @@ import modal
 app = modal.App("lumen-first-edit")
 
 MAX_SPEND_USD = 1.20          # stated in advance; the run reports against it
-REF = "golden/lumen-refs/ref2-viral-creator-doc-vertical.mp4"
+# REF-2 IS RETIRED AS A TEST INPUT (owner ruling 2026-08-17, after watching the
+# first Lumen edit). He confirmed the source is ALREADY FULLY EDITED, so the
+# planner's refusal to decorate it was CORRECT — and a finished video cannot
+# measure whether the planner decorates a raw one. It remains the BAR an edit is
+# judged against; it is no longer a thing we run.
+#
+# The source is now fetched from S3 by key and sha256-verified, so this app takes
+# any frozen corpus entry. cert_ref2_not_a_test_input.py fails the deploy if a
+# ref2 path is mounted or planned again.
 
 # THE PRODUCTION IMAGE, IMPORTED — not a hand-rolled copy.
 #
@@ -44,13 +52,13 @@ REF = "golden/lumen-refs/ref2-viral-creator-doc-vertical.mp4"
 # impossible instead of something to keep chasing.
 import modal_app as _prod
 
-image = _prod.image.add_local_file(REF, "/ref2.mp4")
+image = _prod.image
 
 
 @app.function(image=image, cpu=8, memory=16384, timeout=1800,
               secrets=[modal.Secret.from_name("promptly-secrets"),
                        modal.Secret.from_name("gemini-vertex")])
-def render_first_lumen():
+def render_first_lumen(spec: dict):
     import sys, os, time, json, traceback
     sys.path.insert(0, "/")
     import build_lane
@@ -68,24 +76,35 @@ def render_first_lumen():
                                     "the asymmetry is broken, stop and fix that first"}
 
     t0 = time.time()
-    out = {"ok": False}
+    out = {"ok": False, "src_job_id": spec.get("job_id"), "s3_key": spec.get("s3_key")}
+    SRC = "/tmp/lumen_src.mp4"
     try:
+        import hashlib as _hl
+        H._aws_s3_client.download_file(H._fanout_s3_bucket(), spec["s3_key"], SRC)
+        if spec.get("sha256"):
+            _d = _hl.sha256(open(SRC, "rb").read()).hexdigest()
+            out["sha256_ok"] = (_d == spec["sha256"])
+            if not out["sha256_ok"]:
+                out["error"] = f"CORPUS DRIFT: sha256 {_d[:12]} != {spec['sha256'][:12]}"
+                return out
+        print(f"[first-edit] source {spec['s3_key'][-44:]} "
+              f"({os.path.getsize(SRC)/1e6:.1f}MB) sha256 verified", flush=True)
         # generate_edit_gemini is the planning path: it is where scenes are
         # planned, and where the design system / brand specs attach. Calling it
         # directly isolates the PLAN from the render, so a zero scene count is
         # attributable to the planner rather than to a render strip gate.
-        dur = H.probe_duration("/ref2.mp4") if hasattr(H, "probe_duration") else None
+        dur = H.probe_duration(SRC) if hasattr(H, "probe_duration") else None
         print(f"[first-edit] source duration: {dur}", flush=True)
         # transcribe_audio, not transcribe_with_deepgram — the latter does not
         # exist. Checked against the AST before spending a cent, because a
         # missing callable would have burned the Gemini call and then died on
         # the next line.
-        _tr = H.transcribe_audio("/ref2.mp4", keywords=None, language="multi") or {}
+        _tr = H.transcribe_audio(SRC, keywords=None, language="multi") or {}
         words = _tr.get("words") or []
         print(f"[first-edit] transcript words: {len(words)}", flush=True)
 
         plan = H.generate_edit_gemini(
-            "/ref2.mp4",
+            SRC,
             vibe="make it viral",
             duration=dur,
             trend_context=None,
@@ -120,10 +139,14 @@ def render_first_lumen():
 
 
 @app.local_entrypoint()
-def main():
+def main(spec_json: str = "/tmp/lumen_pick.json"):
     import json
-    print(f"=== FIRST LUMEN EDIT — build lane, ceiling ${MAX_SPEND_USD:.2f} ===")
-    r = render_first_lumen.remote()
+    spec = json.load(open(spec_json))
+    print(f"=== LUMEN EDIT on a TRIGGER-BEARING source — ceiling ${MAX_SPEND_USD:.2f} ===")
+    print(f"    job {str(spec.get('job_id'))[:8]}  {spec.get('duration_s')}s  "
+          f"{(spec.get('bytes') or 0)/1e6:.1f}MB")
+    print(f"    triggers: {spec.get('triggers')}")
+    r = render_first_lumen.remote(spec)
     print(json.dumps(r, indent=2, default=str)[:3000])
     if not r.get("ok"):
         print("\nFIRST LUMEN EDIT: did not complete — see error/trace above.")

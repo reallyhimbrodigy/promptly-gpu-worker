@@ -134,6 +134,18 @@ VALID_MG_TYPES = frozenset({
     # exist here so the RENDERER can dispatch them, which is the link that was
     # missing while everything else was green.
     "NamePlate", "EndCard",
+    # ── THE FOUR GENERATION-FREE COMPOSITIONS (2026-08-19) ─────────────────
+    # No image model, no Vertex call, no quota, no asset pipeline. Two are built
+    # on a frame of the USER'S OWN video; two are pure type. SPEC-BUILT like D+F
+    # — the model supplies content, frame_compositions.py derives every visual
+    # from the design system, so MG_MAP dispatches ADAPTERS, never the bare
+    # components (the NamePlate lesson: a bare component renders an empty card).
+    #
+    # WHY THIS FAMILY: measured 2026-08-19, the planner reaches for StatCard and
+    # Stamp UNPROMPTED on real footage while asking for zero generated_scenes
+    # with the directive on and stills in the payload. These ground in something
+    # it can SEE — a word index pointing at a frame that certainly exists.
+    "EvidenceCard", "DeviceMockup", "EmojiCard",
 })
 
 # ── Generated scenes (Phase E · composed premium graphics) ──────────────────

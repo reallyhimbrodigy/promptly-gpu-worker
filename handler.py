@@ -120,7 +120,25 @@ HANDLER_VERSION = "3.2.0"
 # _log_available_gemini_models below) will show the new ID and we
 # can swap to a VERIFIED name from the API, not a guessed one.
 GEMINI_MODEL = "gemini-3.1-pro-preview"
-GEMINI_EDITORIAL_MODEL = "gemini-3.1-pro-preview"
+# EDITORIAL MODEL — OVERRIDABLE, PINNED, AND DARK BY DEFAULT (2026-08-17).
+#
+# The default is UNCHANGED, so this edit is inert for every existing container:
+# production still plans on gemini-3.1-pro-preview until a secret says otherwise.
+# What it buys is the ability to stage a model behind the differ (§4.7: change
+# dark -> differ verdict -> keep or kill) without a code change per arm, which
+# is the only way an editorial-model swap can be measured before it reaches a
+# user's video.
+#
+# THE DEFAULT MUST STAY AN EXPLICIT VERSION, NEVER A `-latest` ALIAS. The chat
+# path already taught this at cost: an alias moved underneath us, the failure
+# was read as a model problem, and a pin shipped on a hypothesis that turned out
+# to be prepay depletion. A planner whose identity can change without a deploy
+# cannot be held to a differ verdict — the corpus would be scored against a
+# model that no longer exists. cert_editorial_model_pinned.py enforces both
+# halves: overridable, and pinned to a concrete version.
+GEMINI_EDITORIAL_MODEL = (
+    os.environ.get("PROMPTLY_EDITORIAL_MODEL", "").strip()
+    or "gemini-3.1-pro-preview")
 # Bump when the edit_plan schema or render pipeline changes in a way that breaks
 # replay of older persisted plans. Returned in every job response so the server
 # can tag video_jobs.render_version and gate re-edit compatibility.
@@ -928,7 +946,7 @@ def _caption_route_has_no_captions(job_id, route):
         supabase.table("analytics_events").insert({
             "event": "caption_modes_not_applicable",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "route": str(route or "?"),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "route": str(route or "?"),
                       "reason": "route builds no caption pages"},
         }).execute()
     except Exception:
@@ -958,7 +976,7 @@ def _caption_modes_liveness(job_id, pages, accent):
         supabase.table("analytics_events").insert({
             "event": "caption_modes_applied",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "accent": accent,
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "accent": accent,
                       "pages": len(_pages), "pages_with_emphasis": len(_emph),
                       "hero_number_pages": _hero, "keyword_accent_pages": _kw},
         }).execute()
@@ -1013,7 +1031,7 @@ def _plan_persist_liveness(job_id, ok, n_keys, reason=None):
         supabase.table("analytics_events").insert({
             "event": "plan_recipe_persisted",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "ok": bool(ok),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "ok": bool(ok),
                       "recipe_keys": int(n_keys or 0), "reason": reason},
         }).execute()
     except Exception:
@@ -1036,7 +1054,7 @@ def _brand_liveness(job_id, specs, had_design_system):
         supabase.table("analytics_events").insert({
             "event": "brand_components_built",
             "platform": "worker",
-            "props": {"job_id": str(job_id),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id),
                       "had_design_system": bool(had_design_system),
                       "name_plate": bool(_s.get("name_plate")),
                       "end_card": bool(_s.get("end_card")),
@@ -1074,7 +1092,7 @@ def _design_system_liveness(job_id, ok, accent=None, canvas=None, err=None):
         supabase.table("analytics_events").insert({
             "event": "design_system_built",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "ok": bool(ok),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "ok": bool(ok),
                       "accent": accent, "canvas": list(canvas) if canvas else None,
                       "error": (err or None)},
         }).execute()
@@ -1237,10 +1255,88 @@ def _audible_word_onset_s(dg_words, idx):
     shift instead — coherent AND on-time. THIS is the clock for everything,
     sharp SFX included — no component has a separate timing gate (Zac 2026-07-15)."""
     try:
-        _raw = float(dg_words[idx].get("start") or 0.0)
-        return max(0.0, _raw - (_SHARED_CLOCK_LEAD_MS / 1000.0))
+        return word_time_s(dg_words, idx, "start")
     except Exception:
         return 0.0
+
+
+def word_time_s(words, idx, edge="start"):
+    """THE ONE READER of a word's clock. `[timing authority, 2026-08-19]`
+
+    AUDITED: 26 independent inline `float(words[i].get("start"/"end"))` sites in
+    this file, each its own conversion, several reading RAW start while
+    _audible_word_onset_s above declares itself "the clock for everything". A
+    lever that one function applies and twenty-six call sites bypass is not a
+    lever, and _SHARED_CLOCK_LEAD_MS has been quietly partial ever since.
+
+    Routing every site through here is BYTE-IDENTICAL TODAY, because the lead is
+    0.0 — and it is what finally makes the lead universal, which is the whole
+    claim of the docstring above it.
+
+    `end` carries the SAME lead as `start`, so a span keeps its length: shifting
+    only one edge would silently stretch or squeeze every window in the edit.
+
+    IT RAISES ON A BAD INDEX, DELIBERATELY. The 26 sites this replaces are bare
+    `float(words[i].get("start"))` expressions that raise IndexError on an
+    out-of-range anchor. Swallowing that into 0.0 during the migration would
+    convert a loud crash into a component silently placed at t=0 — a different
+    failure, quietly, on every site at once, and precisely the silent-fail-safe
+    this repo has a standing law against. The migration changes WHERE the
+    arithmetic lives, not what happens when the input is wrong.
+
+    `_audible_word_onset_s` keeps its own try/except for ITS existing callers,
+    and now delegates the arithmetic here, so there is still one lead and one
+    formula.
+    """
+    _raw = float(words[idx].get("end" if edge == "end" else "start") or 0.0)
+    return max(0.0, _raw - (_SHARED_CLOCK_LEAD_MS / 1000.0))
+
+
+# The two POLICIES, named once. No component may pick its own — that is how the
+# ceil/round split became invisible in the first place.
+WORD_FRAME_COMPONENT = "component"    # round: SFX / zoom / MG / b-roll / overlay
+WORD_FRAME_NEVER_EARLY = "never_early"  # ceil: captions, per Zac 2026-07-15
+
+
+def word_frame(words, idx, fps, edge="start", policy=WORD_FRAME_COMPONENT):
+    """THE ONE CONVERSION from a word anchor to a FRAME INDEX.
+
+    Frames, not seconds, because the frame is the quantum every consumer
+    actually lands on — 33.3ms at 30fps. Returning seconds and letting each
+    caller quantise is precisely the seam this replaces.
+
+    TWO POLICIES, AND THE SECOND ONE IS NOT DRIFT. I originally proposed a single
+    never-late rule and it was wrong on contact with the code:
+
+      component   round(t*fps). Fires on the nearest frame, which may be up to
+                  half a frame BEFORE the onset. Correct for a zoom or a sound —
+                  they are not claiming to be a spoken word.
+      never_early ceil(t*fps). A caption word reveals ONLY when it is audible
+                  (Zac 2026-07-15, gate-enforced, measured 0% early across all 9
+                  styles). Rounding a caption down would reintroduce exactly the
+                  earliness that ruling removed.
+
+    They are two encodings of one instant under two different reveal semantics,
+    not two opinions about rounding. The epsilon keeps a value already exactly on
+    a frame boundary from being pushed to the next one by float error.
+    """
+    _t = word_time_s(words, idx, edge)
+    _f = _t * float(fps or 30.0)
+    if policy == WORD_FRAME_NEVER_EARLY:
+        return max(0, int(math.ceil(_f - 1e-9)))
+    return max(0, int(round(_f)))
+
+
+def caption_ms_for_frame(frame, fps):
+    """The ms that reveals a caption on EXACTLY `frame`.
+
+    A caption's reveal condition is `(frame/fps)*1000 >= fromMs`, so the ms must
+    be floored onto the frame or the reveal slips to the next one. MUST be an
+    int: TikTokToken.fromMs/toMs are `int` in render_schemas and a float fails
+    PromptlyRenderInput validation and kills the whole render (regression
+    2026-07-13).
+    """
+    return int((int(frame) * 1000.0) // float(fps or 30.0))
 
 
 # NOTE (Zac 2026-07-15): the sharp-vs-soft measurability gate (_sfx_may_fire /
@@ -1438,6 +1534,100 @@ def _mg_clear_region_exists(mg_type, sw_s, ew_s, face_traj, burned_bands=frozens
                    for y0, y1 in regions)
     except Exception:
         return True  # fail-open, like every face-data consumer
+
+
+_MG_MIN_WINDOW_S = 0.8          # a graphic below this is a flash, not a beat
+_MG_REPOSITION_STEP_S = 0.25
+
+
+def _mg_unplaced_note(said):
+    """The sentence a user reads when a beat was deliberately left bare.
+
+    Extracted so its WORDING is testable. The first version of the cert grepped
+    the surrounding source block for failure language and matched the comment
+    above it ("NOT AN ERROR MESSAGE") — a location check standing in for a
+    property check. The property is about THIS STRING.
+
+    Rules it must keep: names the moment in the USER'S words, never a component
+    type, never an error code, never failure language. Nothing failed here — a
+    component was considered and not placed, which is a decision an editor makes
+    constantly.
+    """
+    _s = str(said or "").strip()
+    if _s:
+        return (f"I wanted a graphic on \u201c{_s}\u201d \u2014 the frame is too tight "
+                f"there for one to sit clear of your face, so I let the line "
+                f"carry it.")
+    return ("One beat was too tight for a graphic to sit clear of your face, "
+            "so I let the line carry it.")
+
+
+def _caption_occupied_bands(edit_plan, t0_s, t1_s):
+    """The band(s) OUR OWN caption track occupies over [t0,t1]. `[2026-08-19]`
+
+    F7 excludes `burned_bands` — the bands the SOURCE's text owns — and knows
+    nothing about the captions WE are about to render. A face-only reposition
+    will happily move a card into the band the captions land in, trading a
+    collision with the speaker for a collision with our own type.
+
+    THE EXCEPTION MATTERS: when caption_style is "none" the source carries its
+    own burned captions and we render no track of our own. There is nothing of
+    ours to avoid, and source_text_regions already covers those bands — counting
+    caption occupancy here too would double-exclude and strand a card that had
+    somewhere to go.
+    """
+    try:
+        if str(edit_plan.get("caption_style") or "none").strip().lower() == "none":
+            return frozenset()
+        out = set()
+        for _seg in (edit_plan.get("caption_position_segments") or []):
+            if not isinstance(_seg, dict):
+                continue
+            _a = float(_seg.get("from_seconds") or 0.0)
+            _b = float(_seg.get("to_seconds") or 0.0)
+            _p = str(_seg.get("position") or "").strip().lower()
+            if _p in ("top", "center", "bottom") and not (_b <= t0_s or _a >= t1_s):
+                out.add(_p)
+        return frozenset(out)
+    except Exception:
+        return frozenset()      # fail-open, like every face-data consumer
+
+
+def _place_component_gracefully(mg_type, sw_start, ew_end, face_traj, edit_plan):
+    """THE LADDER: reposition -> drop-with-note. Never raises, never fails the edit.
+
+    THREE RUNGS, NOT FOUR. The `shrink` rung is impossible against this check and
+    is documented in SPEC_GRACEFUL_COMPONENT_PLACEMENT.md: F7 judges size by TYPE
+    MEMBERSHIP (`mg_type in _MG_FULLSIZE_TYPES`), so content never reaches it and
+    a shorter card gets the identical verdict.
+
+    REPOSITION MOVES THE WINDOW, NOT THE CONTENT, AND NEVER THE ANCHOR. The start
+    stays exactly where the planner grounded it; only the END contracts, looking
+    for a sub-window where a band is clear. The face moves during a shot, so a
+    shorter window frequently has a clear band the full one does not — and
+    because the anchor never moves, grounding (F5.3) is preserved by
+    construction rather than by a second check.
+
+    Returns (outcome, end_seconds, note) where outcome is
+    "placed" | "repositioned" | "dropped".
+    """
+    _burned = frozenset(edit_plan.get("source_text_regions") or ())
+    _blocked = _burned | _caption_occupied_bands(edit_plan, sw_start, ew_end)
+
+    if _mg_clear_region_exists(mg_type, sw_start, ew_end, face_traj,
+                               burned_bands=_blocked):
+        return "placed", ew_end, None
+
+    _end = ew_end
+    while (_end - sw_start) - _MG_REPOSITION_STEP_S >= _MG_MIN_WINDOW_S:
+        _end -= _MG_REPOSITION_STEP_S
+        # Re-read caption occupancy for the SHORTER window — a contracted window
+        # can fall entirely inside a segment where the captions sit elsewhere.
+        _b2 = _burned | _caption_occupied_bands(edit_plan, sw_start, _end)
+        if _mg_clear_region_exists(mg_type, sw_start, _end, face_traj,
+                                   burned_bands=_b2):
+            return "repositioned", _end, None
+    return "dropped", ew_end, "unfittable"
 
 
 _MG_FACE_BAND_YRANGES = {"top": (120.0, 640.0), "center": (640.0, 1280.0), "bottom": (1280.0, 1800.0)}
@@ -2422,6 +2612,17 @@ class _VideoPlan(BaseModel):
 
 
 class _BrandCopy(BaseModel):
+    # VETO, NOT REQUEST (2026-08-17). The plate is now TRIGGERED BY THE
+    # TRANSCRIPT: if the speaker says their name, the plate fires. This field
+    # exists so the model can say NO — a footage-aware override for the cases
+    # Python cannot see (the name is already burned on screen, the "name" is a
+    # brand not a person, the opening is not the speaker).
+    #
+    # WHY THE INVERSION. As a REQUEST, this object was emitted on 0 of 198 jobs,
+    # so the component was unreachable and the 0/198 read as a decline when it
+    # was actually an input that never arrived. A default-on trigger with a veto
+    # closes that class WITHOUT a new directive: silence now means yes.
+    suppress_name_plate: Optional[bool] = None
     """[§3.1 components D + F] The WORDS for the name-plate and the end-card.
 
     These render as the `NamePlate` and `EndCard` components. DO NOT put
@@ -2434,13 +2635,20 @@ class _BrandCopy(BaseModel):
     user's own footage (brand_components.py) — a component that picks its own
     colour is a second design system competing with the real one.
 
-    OBSERVED ONLY, NEVER INVENTED. Fill a field only from what the video itself
-    states — the speaker says their name, role or brand, or it is legible on
-    screen (an existing lower third, a slide, a wordmark, a handle). A name
-    guessed from a face, a voice or a topic is a fabrication printed on a real
-    person's video. Omit the field instead: every field is optional, an absent
-    field renders nothing, and there is no default and no placeholder.
-    """
+    WHEN THE VIDEO GIVES YOU ONE OF THESE, FILL IT:
+      • the speaker SAYS their own name, or introduces themselves by role
+        ("I'm Dana Reyes", "as managing partner here") -> speaker_name /
+        speaker_role;
+      • a NAME OR ROLE is legible on screen — an existing lower third, a slide,
+        a badge, a title card -> speaker_name / speaker_role;
+      • a BRAND, COMPANY OR HANDLE is spoken or legible — a wordmark, a URL, an
+        @handle, "here at LegalSoft" -> brand_name / handle / brand_subline.
+
+    If the video gives you one of these and you still leave it blank, say why in
+    `notes` (one clause). A silent omission is not an answer.
+
+    THE BOUNDARY — OBSERVED ONLY, NEVER INVENTED. Fill a field only from what the
+    video itself"""
     # NAME-PLATE (D): a lower third naming the speaker, held ~3s, ONCE, early.
     # speaker_name alone is a valid plate; an absent role is DROPPED, not blank.
     speaker_name: Optional[str] = Field(default=None, max_length=48)
@@ -2523,6 +2731,38 @@ class PostCutPlan(BaseModel):
     # call returns; if Gemini emits notes here, they take precedence in the
     # downstream merge (see edit_plan construction in generate_edit_gemini).
     notes: Optional[str] = Field(default=None, max_length=800)
+    # ── THE SCENE DECLINE GETS ITS OWN CHANNEL (2026-08-19) ─────────────────
+    # The v2 scenes directive demands "if a beat matches and you still decline
+    # it, SAY SO in `notes`" — and `notes` is a SHARED field. Measured across
+    # one two-source run it carried, on one source, a real editorial reason
+    # ("Video contains embedded training B-roll in source") and on the other,
+    # mechanical-cut bookkeeping ("2 located_silence, 0 filler, 0 false_start").
+    # A reason channel that sometimes carries the reason makes every future
+    # scene run unreadable: a zero with no decline text is indistinguishable
+    # from a zero whose decline text got crowded out by something else.
+    #
+    # So the decline is its OWN field. Empty means "no scene beat was declined",
+    # which is a different statement from "notes did not mention scenes", and
+    # only the dedicated field can make that distinction.
+    scenes_declined: Optional[str] = Field(default=None, max_length=300)
+    # AND A CLASS BESIDE THE PROSE. Free text cannot be COUNTED: "Video contains
+    # embedded training B-roll in source" and "the footage already shows it" are
+    # the same finding in different words, and a campaign that re-runs monthly
+    # needs to know whether declines are concentrated in one cause or spread
+    # across many. The prose stays — it is what caught "already edited" and "in
+    # favor of crisp kinetic typography" — but the class is what makes a run
+    # comparable to the last one.
+    #
+    # source_shows_it     the footage already proves the claim (a cutaway, a
+    #                     demo, the object on screen) — a CORRECT decline, and
+    #                     the one that invalidated four corpora
+    # no_trigger          nothing in the dialogue earns a scene
+    # would_collide       a scene would fight something already on the beat
+    # not_worth_it        the beat is real but a takeover would overstate it
+    # other               anything else; the prose carries it
+    scenes_decline_class: Optional[Literal[
+        "source_shows_it", "no_trigger", "would_collide", "not_worth_it", "other"
+    ]] = None
     # EDIT RATIONALE (2026-07-25) — a 1-2 sentence, USER-FACING explanation of the
     # editorial choices (why these cuts / this pacing / these moments), distinct
     # from the mechanical `notes` above. Additive + purely narrative: no renderer
@@ -2958,6 +3198,56 @@ except Exception:
 # Real-ESRGAN removed from pipeline — not needed for clean phone footage
 
 print("[startup] all import checks done", flush=True)
+
+
+def _image_module_manifest():
+    """WHICH REPO MODULES ARE ACTUALLY IN THIS CONTAINER — Rule 0, half two.
+
+    `modal app history` proves which COMMIT deployed. It does not prove the
+    running image carries the files that commit added: a mount line can be
+    missing, or a module can be committed and never mounted, and the SHA reads
+    identical either way. Every check we had for this was an INFERENCE — the
+    gate reads modal_app.py's source, git reads the commit, and an ephemeral
+    probe builds its own image from the local tree. None of them observes the
+    container that is serving traffic.
+
+    This runs INSIDE that container, on real jobs. Sizes rather than booleans,
+    because a 0-byte or truncated mount has bitten before (the models/ symlink
+    clobber shipped a file that existed and was unusable).
+
+    Costs one os.path.getsize per module at startup and nothing per job.
+    """
+    import os as _os
+    _mods = ("handler", "surgical_ops", "duration_target", "mechanical_router",
+             "prompt_v2_editor", "prompt_v2_schema", "prompt_v2_exemplars",
+             "burned_text", "hype_render", "design_system", "edit_policy")
+    out = {}
+    for _m in _mods:
+        _p = f"/{_m}.py"
+        try:
+            out[_m] = _os.path.getsize(_p) if _os.path.exists(_p) else 0
+        except Exception:
+            out[_m] = -1                      # unreadable is NOT the same as absent
+    return out
+
+
+# Printed once per container, with a grep-stable prefix, so any real job's log
+# answers "what is actually in the image?" without a synthetic probe run. The
+# ABSENT list is printed separately because that is the line worth alerting on.
+_IMAGE_MODULES = _image_module_manifest()
+# ONLY MEANINGFUL INSIDE THE WORKER IMAGE. Run from a checkout there are no /
+# mounts, so every module reads absent and this would alarm on every gate run
+# and every local import — a warning that fires when nothing is wrong is how a
+# real one gets ignored. `/handler.py` present == we are in the image.
+_IN_IMAGE = _IMAGE_MODULES.get("handler", 0) > 0
+if _IN_IMAGE:
+    print(f"[startup] image modules: "
+          f"{ {k: v for k, v in _IMAGE_MODULES.items() if v > 0} }", flush=True)
+    _absent = sorted(k for k, v in _IMAGE_MODULES.items() if v <= 0)
+    if _absent:
+        print(f"[startup] !! MODULES ABSENT FROM THIS IMAGE: {_absent} — a "
+              f"deferred import of any of these dies inside its fail-safe",
+              flush=True)
 
 # ── GPU flags ─────────────────────────────────────────────────────────────────
 # Orchestrator runs CPU-only — the H100 moved to the dedicated
@@ -4824,7 +5114,7 @@ def shot_change_word_boundaries(shot_changes, kept_words, snap_tolerance=0.60, s
             # word and the cut lands inside the word-gap. The pre-split
             # boundary is still word N (the LAST kept word before the cut).
             if _new_idx + 1 < len(kept_words):
-                _next_ws = float(kept_words[_new_idx + 1].get("start") or 0)
+                _next_ws = word_time_s(kept_words, _new_idx + 1, "start")
                 _dist_start = abs(_next_ws - _sc)
                 if _dist_start <= _best_dist:
                     _best_dist = _dist_start
@@ -5057,6 +5347,106 @@ def detect_shot_changes(source_path, threshold=7.0, out_scores=None):
 
 # ─── DEEPGRAM TRANSCRIPTION ───────────────────────────────────────────────────
 
+# ─── ASR SELF-DIAGNOSIS ───────────────────────────────────────────────────────
+#
+# WHY THIS EXISTS (2026-08-17). On the live version EVERY completed job was
+# diverted off the editorial path — 0 of 60 jobs, 0 of 60 users — and 82% of
+# those diversions were ASR-driven (no_speech / no_speech_muted / no_audio /
+# transcription_incomplete). Answering the ONLY question that matters — was the
+# audio actually silent, or did ASR fail on good audio? — cost a night of
+# downloading production sources and re-transcribing them by hand, because a
+# diverted row stored `"transcript": []` and nothing else. The measurement hole
+# WAS the outage's length.
+#
+# A row that says `no_speech` must carry the evidence for its own verdict:
+#   0 words @ -6.1 dBFS, bass-dominant   -> a music clip, correctly routed
+#   0 words @ -26 dBFS, speech-dominant  -> a MISS
+# One of each is already confirmed in production (the miss: a Japanese source a
+# replay transcribed and production did not).
+#
+# MEASURED / FAILED / ABSENT is load-bearing, not decoration. A failed
+# measurement reported as a number is the PROBE COLLAPSE class, and it has
+# already cost this project one false verdict. A level we could not measure
+# says so, in the row.
+_ASR_DIAG = {}
+
+_ASR_DIAG_FIELDS = ("word_count", "detected_language", "level_status",
+                    "mean_dbfs", "max_dbfs", "speech_band_dbfs", "bass_dbfs",
+                    "flac_bytes", "asr_model", "asr_language_opt")
+
+
+def _asr_diag_reset():
+    """One job, one diagnostic record. Called at intake, not at import."""
+    _ASR_DIAG.clear()
+    _ASR_DIAG.update({k: None for k in _ASR_DIAG_FIELDS})
+    _ASR_DIAG["level_status"] = "absent"
+
+
+def _asr_diag_set(**kw):
+    if not _ASR_DIAG:
+        _asr_diag_reset()
+    _component_ledger_reset()   # requested-vs-rendered, per component type
+    _ASR_DIAG.update(kw)
+
+
+def _asr_diag_snapshot():
+    """The block that rides EVERY result payload. Never raises, never guesses."""
+    try:
+        if not _ASR_DIAG:
+            return {"level_status": "absent", "word_count": None}
+        d = dict(_ASR_DIAG)
+        # The verdict this row justifies, computed once, stored next to its
+        # inputs so a query can count misses without re-deriving the rule.
+        sb, bs = d.get("speech_band_dbfs"), d.get("bass_dbfs")
+        if d.get("word_count") == 0 and d.get("level_status") == "measured":
+            if sb is not None and bs is not None:
+                # controls (known speech) measured +6.8 dB; diverted music -0.8
+                d["zero_words_verdict"] = (
+                    "suspect_miss" if (sb - bs) >= 4.0 else "consistent_no_speech")
+            else:
+                d["zero_words_verdict"] = "unknown"
+        return d
+    except Exception:
+        return {"level_status": "failed", "word_count": None}
+
+
+def _measure_audio_levels(flac_bytes) -> dict:
+    """Level of the EXACT bytes ASR received — full band, speech band, bass.
+
+    Two short ffmpeg passes over ALREADY-EXTRACTED audio (no video decode);
+    measured under 1s for a 2-minute source. Speech lives in 300-3400 Hz and
+    pauses; music carries bass and runs continuous, so speech_band minus bass
+    separates them. Any failure records FAILED — never a number, never silence.
+    """
+    out = {"level_status": "failed", "mean_dbfs": None, "max_dbfs": None,
+           "speech_band_dbfs": None, "bass_dbfs": None,
+           "flac_bytes": len(flac_bytes or b"")}
+    if not flac_bytes:
+        out["level_status"] = "absent"
+        return out
+
+    def _vol(af):
+        p = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-i", "pipe:0", "-af", af, "-f", "null", "-"],
+            input=flac_bytes, capture_output=True, timeout=60)
+        err = (p.stderr or b"").decode("utf-8", errors="replace")
+        m = re.search(r"mean_volume:\s*(-?[\d.]+) dB", err)
+        x = re.search(r"max_volume:\s*(-?[\d.]+) dB", err)
+        return (float(m.group(1)) if m else None, float(x.group(1)) if x else None)
+
+    try:
+        mean, mx = _vol("volumedetect")
+        if mean is None:
+            return out
+        out["mean_dbfs"], out["max_dbfs"] = mean, mx
+        sb, _ = _vol("highpass=f=300,lowpass=f=3400,volumedetect")
+        bs, _ = _vol("lowpass=f=250,volumedetect")
+        out["speech_band_dbfs"], out["bass_dbfs"] = sb, bs
+        out["level_status"] = "measured"
+    except Exception as e:
+        out["measure_error"] = "%s: %s" % (type(e).__name__, str(e)[:80])
+    return out
+
 
 def prepare_audio_for_deepgram(source_path: str) -> bytes:
     """Extract bit-perfect mono FLAC for transcription.
@@ -5093,9 +5483,19 @@ def prepare_audio_for_deepgram(source_path: str) -> bytes:
         raise RuntimeError(
             f"Deepgram audio prep failed: {(proc.stderr or b'').decode('utf-8', errors='replace')[-300:]}"
         )
+    # MEASURE THE BYTES ASR ACTUALLY RECEIVES, and carry the numbers into the
+    # row. The log prints the MEASURED values — never a constant, which is a
+    # mistake this file has already shipped once (the thinking-budget log).
+    _lv = _measure_audio_levels(proc.stdout)
+    _asr_diag_set(**_lv)
+    _mdb = _lv.get("mean_dbfs")
+    _sb, _bs = _lv.get("speech_band_dbfs"), _lv.get("bass_dbfs")
     print(
         f"[deepgram-prep] Extracted {len(proc.stdout) / 1024:.0f}KB FLAC "
-        f"(mono 48kHz, lossless — no level processing)",
+        f"(mono 48kHz, lossless — no level processing) "
+        f"level={_lv.get('level_status')} "
+        f"mean={('%.1f dBFS' % _mdb) if _mdb is not None else 'unmeasured'} "
+        f"speech-bass={('%+.1f dB' % (_sb - _bs)) if (_sb is not None and _bs is not None) else 'unmeasured'}",
         flush=True,
     )
     return proc.stdout
@@ -5603,6 +6003,19 @@ def transcribe_audio(source_path, keywords=None, language="multi"):
                 # An SDK build that does not accept `timeout` must still work.
                 resp = _tf({"buffer": audio_bytes, "mimetype": "audio/flac"}, options)
             result = _parse_deepgram_response(resp)
+            # The word count is the number the routing gate acts on. Persist it
+            # beside the level that produced it, so `no_speech` becomes a claim
+            # a query can audit instead of a verdict we have to replay by hand.
+            # model/language are READ BACK off the options object — not written
+            # as literals, which is how a log once reported a constant.
+            try:
+                _asr_diag_set(
+                    word_count=len((result or {}).get("words") or []),
+                    detected_language=(result or {}).get("detected_language"),
+                    asr_model=getattr(options, "model", None),
+                    asr_language_opt=getattr(options, "language", None))
+            except Exception:
+                pass
             print(f"[metric] stage_duration stage=transcribe_file duration_ms={int((time.time()-_t0)*1000)} attempt={attempt+1}", flush=True)
             return result
         except Exception as e:
@@ -5720,6 +6133,263 @@ def _edit_in_language_enabled():
     """Whether the multilingual render path (denylist coverage + in-language
     editorial) is live. One flag so the two move together."""
     return bool(os.environ.get("PROMPTLY_EDIT_IN_LANGUAGE", "").strip())
+
+
+# ── §6 NAME PLATE + END CARD: DETERMINISTIC, NO MODEL CALL ───────────────────
+#
+# WHY DETERMINISTIC. brand_components.build_brand_specs() has always been a pure
+# function — no model call, palette lock built in. It was simply fed from
+# `edit_plan["brand_copy"]`, which the planner emits on 0 of 198 jobs. So both
+# components were WIRED AND UNREACHABLE: the mechanism worked end to end and the
+# only input never arrived.
+#
+# The transcript already carries the trigger. On the render the owner watched,
+# the speaker says "Hey, Clippers team. My name is Sujay Ahmad" in the first six
+# words, and the plate did not fire.
+#
+# THE PATTERN IS CASE-SENSITIVE, DELIBERATELY. Matched with re.I, `[A-Z][a-z]+`
+# matches lowercase, so "I'm paying", "I'm sure" and "I'm not" all scored as
+# self-introductions — EVERY name hit in the first component corpus was a false
+# positive. A name plate built on that would caption a stranger's video with a
+# word the speaker never used as a name, which is worse than no plate.
+# Honorific is consumed so "I'm Mr. Shannon" yields "Mr. Shannon", not "Mr" —
+# measured on 400 production transcripts, where the period split the match.
+_NAME_INTRO = re.compile(
+    r"\b(?:My name is|I'?m|This is|I am)\s+"
+    r"((?:Mr\.?|Mrs\.?|Ms\.?|Dr\.?)\s+)?"
+    r"([A-Z][a-z]{1,15}(?![a-z])(?:\s+[A-Z][a-z]{1,15}(?![a-z])){0,2})")
+# A name plate is an OPENER (§6: appears within the first ~3s), so the claim is
+# only trusted where an introduction actually belongs. Measured: this is what
+# separates "Hi, my name is Rohit" from a capitalised product word 200 words in
+# ("Excel", "Aditi"), which were the precision failures on real transcripts.
+_NAME_INTRO_WORD_WINDOW = 25
+# Words that legitimately follow "I'm" capitalised at a sentence start or as a
+# nationality/adjective, and are NOT names. Without this, "I'm American" and a
+# sentence-initial "This is Great" become name plates.
+_NOT_A_NAME = frozenset({
+    "American", "British", "Indian", "Australian", "Canadian", "African",
+    "Just", "Really", "Going", "Gonna", "Trying", "Excited", "Happy", "Sorry",
+    "Here", "Back", "Still", "About", "Not", "So", "The", "A", "An", "This",
+    "That", "It", "There", "Great", "Good", "Sure", "Glad", "Very", "Super",
+    # Measured false positives on 400 production transcripts (ASR garble and
+    # product words that happened to sit after an intro phrase).
+    "My", "Nursing", "Excel", "Today", "Welcome", "Okay", "Alright", "Hello",
+})
+_ROLE_WORDS = (r"founder|co-?founder|ceo|cto|coo|president|director|manager|"
+               r"partner|coach|attorney|lawyer|realtor|agent|trainer|therapist|"
+               r"designer|developer|engineer|editor|creator|consultant|owner|"
+               r"student|nurse|doctor|teacher|chef|photographer")
+# FIRST-PERSON ONLY. "comments from the CEO" is a third party's role, not the
+# speaker's — an early corpus read matched exactly that and would have captioned
+# a stock-market clip with someone else's job title.
+_ROLE_FIRST_PERSON = re.compile(
+    r"\b(?:I'?m|I am|as)\s+(?:an?\s+|the\s+)?(" + _ROLE_WORDS + r")\b", re.I)
+
+
+def _speaker_identity_from_transcript(transcript_text):
+    """(name, role) spoken by the speaker, or (None, None). NEVER a guess.
+
+    Returning None is the correct, common outcome: most sources never state a
+    name, and a plate that invents one is a defect, not a degraded feature.
+    """
+    txt = str(transcript_text or "")
+    if not txt.strip():
+        return None, None
+    name = None
+    head = " ".join(txt.split()[:_NAME_INTRO_WORD_WINDOW])
+    for m in _NAME_INTRO.finditer(head):
+        honorific = (m.group(1) or "").strip()
+        cand = m.group(2).strip()
+        first = cand.split()[0]
+        if first in _NOT_A_NAME:
+            continue
+        # "My name is My client is..." — ASR garble that captured the next
+        # sentence's opener. A name never introduces another introduction.
+        if re.match(r"\s*name\s+is\b", head[m.end():], re.I):
+            continue
+        # "This is X" is the WEAKEST intro form — it introduces people
+        # ("This is Abhi, a third year PD student") and things equally
+        # ("this is Sea Buckthorn", a berry, which is the one false positive
+        # left at n=800). First-person forms are self-evidently about the
+        # speaker; this one needs corroboration from a first-person pronoun
+        # near it before it can name a plate.
+        if m.group(0).lower().lstrip().startswith("this is"):
+            _after = " ".join(head[m.end():].split()[:12])
+            if not re.search(r"\b(I'?m|I am|my|me|I)\b", _after, re.I):
+                continue
+        # POSSESSIVE = A CHANNEL, NOT A PERSON. "This is Bennie's Basketball".
+        # Checked in Python, not as a regex lookahead: as a lookahead the engine
+        # simply backtracked the token to "Benni" and satisfied it.
+        if re.match(r"['\u2019]s\b", head[m.end():]):
+            continue
+        # A trailing non-name token ("Sujay Ahmad And") is trimmed rather than
+        # rejected — the first 1-2 capitalised tokens are the name.
+        parts = [w for w in cand.split() if w not in _NOT_A_NAME][:2]
+        if parts:
+            name = (honorific + " " if honorific else "") + " ".join(parts)
+            break
+    role = None
+    rm = _ROLE_FIRST_PERSON.search(txt)
+    if rm:
+        role = rm.group(1).strip().title()
+    return name, role
+
+
+# ── REQUESTED vs RENDERED, PER COMPONENT TYPE ────────────────────────────────
+#
+# THE THESIS THIS EXISTS TO TEST. Every component number this campaign has acted
+# on — scenes 0/779, brand_copy 0/198, MG ~62% dropped — is a RENDERED count. Not
+# one of them distinguishes "the planner declined" from "the planner asked and we
+# dropped it". Those have opposite fixes: the first is a prompt problem, the
+# second is ours.
+#
+# The trigger-source render settled one case by hand: the model asked for a
+# StatCard and a PillCluster, wrote their props into `why` because the schema
+# gave it nowhere else, and both were dropped as empty-props — recorded as a
+# decline. That is a WE-dropped-it, misfiled as a THEY-declined.
+#
+# One job, one record: what was asked for, what survived, per type.
+_COMPONENT_LEDGER = {}
+
+
+def _component_ledger_reset():
+    _COMPONENT_LEDGER.clear()
+
+
+def _ledger_requested(kind, ctype=None, n=1):
+    """The planner ASKED for n of these."""
+    try:
+        k = f"{kind}:{ctype}" if ctype else str(kind)
+        e = _COMPONENT_LEDGER.setdefault(k, {"requested": 0, "rendered": 0, "dropped": {}})
+        e["requested"] += int(n)
+    except Exception:
+        pass
+
+
+def _ledger_rendered(kind, ctype=None, n=1):
+    """n of these SURVIVED to the render spec."""
+    try:
+        k = f"{kind}:{ctype}" if ctype else str(kind)
+        e = _COMPONENT_LEDGER.setdefault(k, {"requested": 0, "rendered": 0, "dropped": {}})
+        e["rendered"] += int(n)
+    except Exception:
+        pass
+
+
+def _ledger_dropped(kind, ctype=None, reason="unspecified", n=1):
+    """n were dropped BY US, with the reason — this is the half that was missing."""
+    try:
+        k = f"{kind}:{ctype}" if ctype else str(kind)
+        e = _COMPONENT_LEDGER.setdefault(k, {"requested": 0, "rendered": 0, "dropped": {}})
+        e["dropped"][str(reason)[:60]] = e["dropped"].get(str(reason)[:60], 0) + int(n)
+    except Exception:
+        pass
+
+
+def _ledger_absorb_plan(plan):
+    """Record what the PLANNER ASKED FOR, per type, straight off the plan.
+
+    Read from the plan rather than counted at each placement site, because a
+    placement site that never runs cannot report the request it never saw —
+    which is precisely how "the planner declined" got written for components the
+    planner did ask for.
+    """
+    if not isinstance(plan, dict):
+        return
+    for key in ("motion_graphics", "text_overlays", "broll_clips", "transitions",
+                "generated_scenes", "emphasis_moments", "sound_effects",
+                "cut_refinements", "tight_cut_overlays"):
+        arr = plan.get(key)
+        if not isinstance(arr, list):
+            continue
+        if key == "motion_graphics":
+            for it in arr:
+                _ledger_requested("motion_graphic",
+                                  (it or {}).get("type") if isinstance(it, dict) else None)
+        else:
+            _ledger_requested(key, None, len(arr))
+    if plan.get("brand_copy"):
+        _ledger_requested("brand_copy")
+
+
+def _component_ledger_snapshot():
+    """Rides the result payload. A type whose requested > rendered is OUR bug."""
+    try:
+        out = {}
+        for k, v in _COMPONENT_LEDGER.items():
+            req = int(v.get("requested", 0))
+            drops = sum(int(x) for x in (v.get("dropped") or {}).values())
+            out[k] = {"requested": req,
+                      "dropped_by_us": drops,
+                      # DERIVED, not observed at the render — labelled so it is
+                      # never mistaken for a rendered-frame count.
+                      "survived_derived": max(0, req - drops),
+                      "drop_reasons": v.get("dropped", {})}
+        return out
+    except Exception:
+        return {}
+
+
+def _burned_text_caption_block(edit_plan, vibe=None):
+    """ONE predicate for "the source already carries its own caption layer".
+    `[ART_DIRECTION §3]`
+
+    THE DEFECT THIS CLOSES (2026-08-17). Two gates read two different signals
+    for one reality:
+
+      zoom gate      _bt["regions"][].class == "captions", or wide non-corner
+                     signage  -> BROAD. Fired correctly: 4 zooms suppressed.
+      caption gate   _bt["has_burned_captions"] only              -> NARROW.
+                     Did not fire. CleanCut shipped ON TOP of the source's own
+                     white captions, in the same band.
+
+    The model had ALSO declared `source_text_regions: ["bottom"]`, but that was
+    normalised AFTER the suppression decision, so it could never influence it.
+    Three descriptions of the same fact, and the weakest one gated captions.
+
+    ART_DIRECTION §3 is absolute: burned-in text present => caption_style
+    "none". No reduce, no reposition — a second caption track over the source's
+    own makes the output read as broken regardless of every other decision in
+    it. The one exception is an EXPLICIT user request for captions, which
+    outranks our inference about their footage.
+
+    Returns (blocked: bool, band: str, signal: str) — band is where the existing
+    layer sits, so layout can respect it even when captions are off.
+    """
+    plan = edit_plan if isinstance(edit_plan, dict) else {}
+    bt = plan.get("_burned_text") if isinstance(plan.get("_burned_text"), dict) else {}
+
+    # a) the model's Stage-0 read
+    ecr = str(plan.get("existing_caption_region") or "none").strip().lower()
+    if ecr not in ("none", "bottom", "top", "other", "center"):
+        ecr = "none"
+    if ecr != "none":
+        return True, ecr, "stage0"
+
+    # b) the model's W3 declaration — normalised HERE, before any decision uses
+    #    it, which is the ordering bug that let this ship.
+    raw = plan.get("source_text_regions")
+    bands = sorted({str(b).strip().lower() for b in raw
+                    if str(b).strip().lower() in ("top", "center", "bottom")}) \
+        if isinstance(raw, list) else []
+    if bands:
+        return True, bands[0], "w3_declared"
+
+    # c) the detector — the SAME breadth the zoom gate uses, not the narrow flag
+    if bool(bt.get("has_burned_captions")):
+        b = str(bt.get("existing_caption_region") or "bottom").strip().lower()
+        return True, (b if b in ("top", "center", "bottom") else "bottom"), "detector"
+    for r in (bt.get("regions") or []):
+        if not isinstance(r, dict):
+            continue
+        if r.get("class") == "captions" or (
+                r.get("class") == "signage" and not r.get("corner")
+                and float(r.get("max_row_extent") or 0) >= 0.5):
+            return True, "bottom", "detector_region"
+    for b in (bt.get("source_text_regions") or []):
+        if str(b).strip().lower() in ("top", "center", "bottom"):
+            return True, str(b).strip().lower(), "detector_bands"
+    return False, "none", ""
 
 
 def _burned_text_enabled():
@@ -7482,6 +8152,14 @@ Props: {{ "label"?: "LOCK", "regionWidth"?: 620, "regionHeight"?: 720, "accentCo
 
 Also answers here: MouseDrag (see WHEN THE SCREEN OR APP IS THE SUBJECT).
 
+**EvidenceCard** — a STILL OF THEIR OWN FRAME, held up as evidence for the line they just said, tilted like a print on a surface with the claim behind it and a caption overlapping in front. Claim: "here is the thing I just described." **THE TRIGGER NOTHING ELSE IN THIS CATALOG SERVES: the proof is a THING, and it is already in the footage.** Every other card in this section DRAWS something — a number, a bar, a pill, a quote. Not one of them can show the receipt, the screen, the label, the keys, the face that reacted. When the sentence's evidence is visible on camera and gone in half a second, this is the only instrument that holds it still. Ask: is the speaker pointing at, holding up, or standing in front of the thing the sentence is about? If yes, that beat is THIS card — a number card there would restate the words and throw away the proof. Needs `claim` (the line it evidences); `caption` optional. NO GENERATION: the still is a frame of the video you are already editing, so it can never be wrong about what the video contains. **FITS:** demo, review, reaction, teach, walkthrough, any claim the footage itself can settle. **FIGHTS:** a beat whose power is the speaker's face; do not cover a landing with their own frame.
+
+**DeviceMockup** — their own frame inside a drawn phone shell. Claim: "this is what it looks like on the device." **THE TRIGGER NOTHING ELSE SERVES: the claim is about what a SCREEN looks like, and the screen is on camera.** A stat, a bar or a pill can tell the viewer a number about the app; none of them can show the app. When the speaker says "it looks like this", "here's the app", "watch what happens when I tap" — the words are a promise the footage already keeps, and this card frames it as the thing it is. `label` optional. The shell is drawn, never an asset. **FITS:** app walkthroughs, product demos, anything screen-recorded. **FIGHTS:** outdoor/handheld footage where a phone frame is a lie about where the shot came from.
+
+
+**EmojiCard** — one emoji at display size, tilted with a real shadow, and at most two words. Claim: "this is the thing, and it is funny/blunt/obvious." Needs `emoji`; `words` optional (max two). Uses the emoji font already in the render, so it adds nothing to the build. **FITS:** casual, creator, comedic, reaction — a shorthand the audience reads instantly. **FIGHTS:** formal-corporate, medical, financial-advice registers, where an emoji undercuts the authority the speaker is building.
+
+
 Every instrument here is an equal — the moment picks. Reading the footage fresh means the moment-type finds you before the component does.
 
 ═══════════════════════════════════════════════════════════════════════════
@@ -8100,13 +8778,80 @@ Every anchor field references the kept-only index space [0..M-1] shown in the tr
     # and source-is-its-own-evidence (the B-roll principles), the inevitable-
     # choice / component-quality bias, and the ONE committed palette from
     # editorial_vision. Threaded, not restated; used RARELY.
-    if premium:
+    if premium and _scenes_directive_v2():
+        # ── CONDITION-BOUND SCENES DIRECTIVE (2026-08-16, DARK behind
+        # PROMPTLY_SCENES_DIRECTIVE_V2) ──────────────────────────────────────
+        # MEASURED: generated_scenes has fired on 0 of 779 planned jobs. Two
+        # build-lane runs on the exact references the feature was designed for —
+        # editorial gate OPEN, premium=True — returned ZERO, and nothing was
+        # stripped (the `[two-pass] Dropping generated_scene` path never logged).
+        # The model was offered the beat and declined.
+        #
+        # THREE THINGS IN THE OLD BLOCK DEFEATED IT, AND ONE WAS FATAL:
+        #   1. It opened "You may emit" — permission, not a trigger.
+        #   2. Its green light was an AND of three conditions, one subjective
+        #      ("stock would be the WEAKER choice"), so any doubt closed it.
+        #   3. FATAL: it said leaving it empty is "correct and expected". The
+        #      prompt blessed the zero it was written to explain.
+        #
+        # This version names the beats that TRIGGER a scene and requires an
+        # honest note when one is declined [§4.5 honor-or-note], so a zero
+        # becomes a stated decision instead of silence. The RARITY ceiling and
+        # the on-palette law are preserved verbatim below — the change is the
+        # TRIGGER, not the taste.
+        system_instruction += """
+
+GENERATED SCENES (premium) — a bespoke graphic, COMPOSED not pulled.
+
+WHEN THE DIALOGUE HANDS YOU ONE OF THESE, EMIT A SCENE:
+  • a STATED NUMBER or stat that carries the point ("we did $20,000,000", "13
+    clients", "three times faster") — `typo_stat`, the count landing its final
+    value on the emphasis word;
+  • a NAMED CONCEPT or OBJECT the words make concrete (a lock, a key, a folder,
+    a graph, a product or app the speaker references);
+  • a CLAIM the footage cannot show — a before/after, a comparison, a promise
+    whose evidence is not on camera.
+
+If a beat matches and you still decline it, SAY SO in `scenes_declined` with the
+reason (one clause) — NOT in `notes`, which carries other things and has
+crowded the reason out before — and put the CLASS in `scenes_decline_class`:
+`source_shows_it` (the footage already proves it), `no_trigger`,
+`would_collide`, `not_worth_it`, or `other`. The prose is for us to read; the
+class is so declines can be counted across runs. A silent zero is not an answer: declining is a
+decision and it gets written down. Leave `scenes_declined` empty ONLY when no
+beat matched at all — an empty field means "nothing triggered", not "I chose not
+to say". That is the only thing this block asks of you that the previous one
+did not.
+
+`generated_scenes` are full-frame composed takeover beats where a"""
+    # NOT `elif premium:` — deliberately. validate_deploy's legibleOnDark check
+    # locates the premium emission block with a regex on the literal
+    # `if premium:`, and "elif premium:" CONTAINS that substring (el-if
+    # premium:), so an elif silently hijacked the match and handed the check the
+    # short control header instead of the tail that carries the 3-hex demand.
+    # Spelling the condition out keeps the first `if premium:` in the file the
+    # one the check means.
+    if premium and not _scenes_directive_v2():
         system_instruction += """
 
 GENERATED SCENES (premium) — a bespoke graphic, COMPOSED not pulled.
 **MEASURED 2026-08-04: `generated_scenes` fired on 0 of 778 planned jobs.** It has never once been used. Either this beat genuinely never applies — in which case leaving it empty is correct and expected — or it is being skipped for a reason the description above does not address.
 
 You may emit `generated_scenes`: full-frame composed takeover beats where a
+"""
+    # SHARED TAIL — identical for both arms. The A/B changes the TRIGGER, never
+    # the taste: rarity ceiling, the ONE committed palette, and the three
+    # designed types are the same text in control and variant, so any difference
+    # in the result is attributable to the trigger alone.
+    #
+    # THE COMMENT LIVES ABOVE THE GUARD ON PURPOSE. validate_deploy's
+    # legibleOnDark check locates this block by regex on `if premium:` followed
+    # DIRECTLY by the append, so a comment BETWEEN the guard and the append
+    # breaks the match — \s does not span a comment line — and the check then
+    # reads some other block and fails on a demand this text actually satisfies.
+    # Ninth instance of a check tripping on documentation rather than on code.
+    if premium:
+        system_instruction += """
 custom-made graphic serves the moment better than stock B-roll or a templated
 motion-graphic. A generated scene is a background WORLD (a gradient in the
 video's committed palette) with a bespoke rendered SUBJECT in it, kinetic type,
@@ -9440,9 +10185,43 @@ _MIDSENTENCE_STALL_S = 0.70
 
 
 def _sentence_final_word(w):
+    # NATIVE TERMINAL GLYPHS ARE TERMINAL PUNCTUATION. `؟` is the Arabic
+    # question mark and `。`/`！`/`？` are the CJK forms — a transcript that
+    # punctuates correctly in its own script was being read as UNPUNCTUATED
+    # here, which silently moved every one of its gaps onto the mid-sentence
+    # stall bar (see _transcript_is_punctuated).
     _t = str((w or {}).get("punctuated_word") or (w or {}).get("word") or "")
     _t = _t.rstrip().rstrip('"\')]”’')
-    return _t.endswith((".", "?", "!", "…"))
+    return _t.endswith((".", "?", "!", "…", "؟", "。", "！", "？"))
+
+
+def _transcript_is_punctuated(words):
+    """Does this transcript carry ANY sentence-final punctuation at all?
+
+    MEASURED 2026-08-20 on job cada6a1b (Arabic, 88 words): Deepgram populated
+    `punctuated_word` for 88 of 88 words and emitted ZERO terminal punctuation.
+
+    WHY THAT SILENTLY RAISES THE BAR 23x. The dead-air gate is "sentence-final
+    OR >= _MIDSENTENCE_STALL_S". When nothing is ever sentence-final, the first
+    half can never fire, so EVERY gap is judged against 0.70s instead of the
+    0.03s trigger — not by decision, but as a side effect of the ASR's
+    punctuation habits. On that job all 3 inter-word gaps (max 0.63s) fell
+    under it and the dead-air path returned zero.
+
+    So: when a transcript has no terminal punctuation anywhere, "not
+    sentence-final" carries NO INFORMATION and must not be used to escalate the
+    threshold. Return False and the caller skips the linguistic gate.
+
+    THIS IS NOT THE PASSTHROUGH FIX, and the size is stated so nobody mistakes
+    it for one: on cada6a1b it recovers ~0.63s of a 34.9s edit. The passthrough
+    is `cut_refinements` coming back empty (159/159 measured 2026-08-04, and
+    absent on both renders of 2026-08-19). This closes a structural hole for
+    every language whose ASR does not punctuate; it does not make an edit.
+    """
+    for _w in (words or []):
+        if _sentence_final_word(_w):
+            return True
+    return False
 
 
 def _cut_lemma(w):
@@ -10145,10 +10924,13 @@ def detect_dead_air(
             )
 
     # within-clip locator uses LEVEL silence; the flag-off tiers use VAD silence.
+    # Computed ONCE per transcript, not per gap — the linguistic gate below
+    # is only meaningful when this ASR punctuates at all.
+    _punctuated = _transcript_is_punctuated(words)
     _wc_regions = _level_regions if _WITHIN_CLIP_DEADAIR else silence_regions
     for a, b in zip(kept, kept[1:]):
-        gap_start = float(words[a].get("end") or 0.0)
-        gap_end = float(words[b].get("start") or 0.0)
+        gap_start = word_time_s(words, a, "end")
+        gap_end = word_time_s(words, b, "start")
         if gap_end <= gap_start:
             continue
         silence_in_gap = 0.0
@@ -10172,7 +10954,11 @@ def detect_dead_air(
                 continue
             # A — the linguistic gate: within a sentence, below the stall
             # threshold, this gap is rhythm — not a candidate, not offered.
-            if (not _sentence_final_word(words[a])
+            # SKIPPED ENTIRELY when the transcript carries no terminal
+            # punctuation anywhere: "not sentence-final" is then a fact about
+            # the ASR, not about the speech, and using it would put a whole
+            # language route on the 0.70s bar by accident.
+            if (_punctuated and not _sentence_final_word(words[a])
                     and silence_in_gap < _MIDSENTENCE_STALL_S):
                 continue
             out.append({
@@ -10366,7 +11152,7 @@ def detect_stutter(words: list) -> list:
         while j < n:
             lemma_j = _word_lemma(words[j])
             spk_j = int(words[j].get("speaker") or 0)
-            gap = float(words[j].get("start") or 0.0) - float(words[chain_end].get("end") or 0.0)
+            gap = word_time_s(words, j, "start") - word_time_s(words, chain_end, "end")
             if lemma_j == lemma_i and spk_j == spk_i and gap < _STUTTER_MAX_GAP_S:
                 chain_end = j
                 j += 1
@@ -12625,7 +13411,7 @@ def _seam_splice_index(awi, dg_words, cuts, removed_src):
           prices at room 0 and can only be offered as an overlay home.
     """
     try:
-        _we = float(dg_words[awi].get("end") or 0.0)
+        _we = word_time_s(dg_words, awi, "end")
     except Exception:
         return None
     _nk = awi + 1
@@ -12633,7 +13419,7 @@ def _seam_splice_index(awi, dg_words, cuts, removed_src):
         _nk += 1
     if _nk >= len(dg_words):
         return None
-    _nk_start = float(dg_words[_nk].get("start") or 0.0)
+    _nk_start = word_time_s(dg_words, _nk, "start")
     for _i in range(len(cuts) - 1):
         _cs = float(cuts[_i]["source_start"])
         _ns = float(cuts[_i + 1]["source_start"])
@@ -12664,6 +13450,38 @@ _FALSIFY_TEXT_KEYS = {"text"}   # renders verbatim on screen — truncation woul
                                 # L4 extends this into structured props.
 _COMPONENT_ARRAYS = {"text_overlays", "motion_graphics", "emphasis_moments",
                      "broll_clips", "transitions", "tight_cut_overlays"}
+
+# ── THE LAST UNBOUNDED DECODE SURFACES (2026-08-19) ─────────────────────────
+# Lever 3 capped 42 free-text STRINGS and made an in-string runaway
+# decode-impossible. The runaway moved to the axis it could not cap: LIST
+# LENGTH. Enumerated on the live schema, exactly four surfaces survive Lever 3
+# unbounded — _MotionGraphic.props and _EmphasisMotionGraphic.props (free-form
+# objects, uncappable by construction) and these two lists.
+#
+# Observed, verbatim, in a shape-abort tail: 4,096 chars of
+# "#newlaunch #exclusiveaccess #presale #booknow #downpayment …". Each ITEM was
+# already capped at 120 chars by Lever 3, so the spiral ran on the only axis
+# left — item COUNT.
+#
+# WHY THE CAP LIVES HERE AND NOT IN THE SCHEMA: Vertex's passthrough REJECTS
+# maxItems with 400 INVALID_ARGUMENT (see the response-schema builder), so the
+# bound cannot be declared where it would be enforced by decoding. This is the
+# parse edge — the same one that already enforces every string cap.
+#
+# HONEST ABOUT WHAT THIS BUYS: a post-decode cap bounds what reaches the RENDER.
+# It does NOT stop the decode — the model still generates the spiral, and the
+# in-stream shape-abort is still what bounds the wall clock. This closes the
+# correctness half; the latency half belongs to the abort.
+#
+# SIZED SO A LEGIT PLAN IS NEVER CLIPPED (the Lever 3 discipline: a generous cap
+# that no real output reaches). The prompt teaches ~1 keyword per 3-4 kept words
+# ("for 80 kept words that lands at ~20-25"). The 120s content cap at ~3.3
+# words/s bounds a transcript near 400 kept words, so a legit ceiling is ~133.
+# 250 is ~2x that and still an order of magnitude under a spiral.
+_LIST_ITEM_CAPS = {
+    "caption_keywords": 250,
+    "ref_image_keys": 12,     # a generated scene's subject references; a handful
+}
 
 
 def _schema_string_caps(schema, caps=None, name=None):
@@ -12740,6 +13558,21 @@ def _enforce_string_caps(parsed, schema, call_label):
                             _falsify_drops.append(comp_ctx)
                         else:
                             obj[_k] = _v[:_cap]
+                elif isinstance(_v, list) and _k in _LIST_ITEM_CAPS:
+                    _lcap = _LIST_ITEM_CAPS[_k]
+                    if len(_v) > _lcap:
+                        _events[0] += 1
+                        print(f"[parse-edge] LIST RUNAWAY ({call_label}.{_k}): "
+                              f"{len(_v)} items > {_lcap} — truncated. Tail: "
+                              f"{str(_v[_lcap:_lcap + 8])[:200]}", flush=True)
+                        _record_divergence(
+                            "recipe_transport",
+                            {"class": "parse-edge maxitems",
+                             "field": f"{call_label}.{_k}",
+                             "declared": _lcap, "actual": len(_v)},
+                            "maxitems_violation",
+                            reason=str(_v[_lcap:_lcap + 12])[:400])
+                        del _v[_lcap:]
                 elif isinstance(_v, list) and _k in _COMPONENT_ARRAYS:
                     for _i, _entry in enumerate(_v):
                         _walk(_entry, (_v, _i, _k))
@@ -13227,6 +14060,33 @@ def _post_cuts_response_schema():
     # on the SECOND call (a schema change busts the Vertex cache key, so the
     # first call reads 0 cached for the wrong reason). Default off -> the
     # emitted schema is byte-identical.
+    # ── props REQUIRED FOR DECODING, OPTIONAL FOR PARSING (2026-08-19) ───────
+    # MEASURED: 10 of 24 motion graphics the planner asked for across the 11-cell
+    # arm (41.7%, on 5 of 7 sources) were dropped as `empty_props` — the model
+    # emitted no props at all and wrote the card's payload into `why` instead,
+    # overflowing that field's Lever-3 cap (logged verbatim: parse-edge maxlength
+    # field=post_cuts.why declared=96 actual=122, carrying "80% 5-year
+    # post-handover"). The content existed; it landed in the wrong field, and we
+    # dropped a correct component. Combined with drop_ungrounded_text, 15/24
+    # (62.5%) of requested motion graphics never reached the screen.
+    #
+    # ASYMMETRIC ON PURPOSE. This marks props required in the schema sent to
+    # Vertex, so constrained decoding CANNOT close a motion graphic without it —
+    # while the pydantic field keeps default_factory=dict, so a response that
+    # somehow lacks props still PARSES instead of failing the whole plan. Making
+    # it required on the model too would turn one missing field into a rejected
+    # edit; that trade is never worth it (K7: the component drops, the plan
+    # survives). Required-ness here forces the field to EXIST, not to be useful —
+    # an empty {} still decodes, and the empty-props drop stays as the floor.
+    for _mgdef in ("_MotionGraphic", "_EmphasisMotionGraphic"):
+        _d = (_s.get("$defs") or {}).get(_mgdef)
+        if not _d or "props" not in (_d.get("properties") or {}):
+            continue
+        _req = list(_d.get("required") or [])
+        if "props" not in _req:
+            _req.append("props")
+            _d["required"] = _req
+
     _pad = os.environ.get("PROMPTLY_SCHEMA_PAD", "").strip()
     if _pad:
         try:
@@ -13257,9 +14117,118 @@ class EditorialSuppressed(RuntimeError):
     end in a safe edit but mean something completely different."""
 
 
+_V2_CATALOG_MARK = "=== CAPTIONS ==="
+_V2_SHAPE_MARK = "=== RESPONSE FORMAT ==="
+
+
+def _v2_catalog_slice(system_instruction):
+    """The half of the post-cuts prompt ARM B REUSES, with arm A's SHAPE removed.
+
+    MEASURED, on the first validation pair: arm B degenerated into a
+    repetition loop — `shape-abort vocab-collapse, run=2048ch`, spiralling on
+    "...as Promptly effortlessly correctly right away here today in full..." —
+    while arm A on the same source completed normally in 105s.
+
+    THE CAUSE WAS THIS SLICE. Taking everything from the first component section
+    to the END also took `=== RESPONSE FORMAT ===`, which describes arm A's
+    component-major arrays. Arm B was therefore told IN PROSE to emit
+    motion_graphics[] / text_overlays[] while its enforced response schema
+    demanded beats[]. A prompt at war with its own schema is not a doctrine
+    test; it is a contradiction, and the model came apart on it.
+
+    So the catalog — what components exist, when each fits and fights, the
+    global fields — is kept verbatim, and ONLY the response-shape section is
+    excised. Everything appended AFTER it (the editor's constraints, the
+    terse-rationale rule, the author-in-source-language rule, the burned-in-text
+    check) is preserved: those are constraints, not shape, and both arms need
+    them.
+
+    Raises rather than degrading: if either heading moves, a silent slice would
+    send a catalog-less or shape-contradicted prompt and the A/B would read the
+    wreckage as the doctrine failing.
+    """
+    cut = system_instruction.find(_V2_CATALOG_MARK)
+    if cut < 0:
+        raise RuntimeError(
+            f"prompt_v2: catalog marker {_V2_CATALOG_MARK!r} not found in the "
+            f"post-cuts system instruction ({len(system_instruction)} chars) — "
+            f"the section headings moved and the v2 slice would send a "
+            f"catalog-less prompt")
+    catalog = system_instruction[cut:]
+    shape = catalog.find(_V2_SHAPE_MARK)
+    if shape < 0:
+        raise RuntimeError(
+            f"prompt_v2: shape marker {_V2_SHAPE_MARK!r} not found — arm B would "
+            f"carry arm A's response format and contradict its own schema, which "
+            f"is what collapsed the first validation run")
+    tail = catalog.find("\n\n=== ", shape + len(_V2_SHAPE_MARK))
+    return catalog[:shape] + ("" if tail < 0 else catalog[tail:])
+
+
+def _v2_reference_still_parts():
+    """The FRAMES_PLAN stills, as media parts. `[2026-08-19]`
+
+    exemplar_block("FRAMES_PLAN") has always emitted "Stills from each reference
+    are attached" while NOTHING ATTACHED THEM — the module says the caller does
+    it and no caller did. A run on that would have measured a prompt referencing
+    absent images.
+
+    VERIFIED before wiring: probe_frames_received_app sent these to the model and
+    it described all 7 literally ("a blurred person with large text saying 'this
+    kid makes $2,000,000 a month'"), 7 full-frame graphics, 0 talking heads, 0
+    missing. I cannot see the images; that description is the audit.
+    """
+    import glob as _glob
+    from google.genai import types as _gt
+    out = []
+    for _p in sorted(_glob.glob("/stills/*.jpg")):
+        try:
+            with open(_p, "rb") as _fh:
+                out.append(_gt.Part.from_bytes(data=_fh.read(),
+                                               mime_type="image/jpeg"))
+        except Exception:
+            continue
+    return out
+
+
+# THE LABEL IS THE LOAD-BEARING PART. Reference stills sit in the same payload as
+# the user's own video, and a model that mistakes them for the user's frames will
+# place components describing SOMEBODY ELSE'S video — fabrication, and the worst
+# possible outcome of showing examples. Both boundaries are stated explicitly.
+_V2_REF_LABEL = (
+    "The images that follow are STILLS FROM TWO OTHER FINISHED EDITS. They are "
+    "reference material showing what an insert scene looks like. They are NOT "
+    "frames from the video you are editing. Never describe them, never place a "
+    "component from them, never quote their text."
+)
+_V2_SOURCE_LABEL = (
+    "That was the reference material. What follows is THE VIDEO YOU ARE EDITING "
+    "and its transcript. Everything you emit refers to THIS video only."
+)
+
+
+def _v2_response_schema():
+    """ARM B's beat-major response schema — the MODEL'S OWN, not a copy.
+
+    This was briefly hand-inlined, on the belief that this surface could not take
+    pydantic's `$defs`/`$ref` output. That belief was wrong and checkable in one
+    line: ARM A's schema IS PostCutPlan.model_json_schema(), it carries both
+    `$defs` and `$ref`, and it has been in production for months.
+
+    A hand-copied schema is a second declaration of a shape that already has one,
+    and the only thing a second declaration can do is drift — with the drift
+    surfacing as the model omitting a field nobody notices is missing. Now that a
+    beat carries seven treatments across six nested models, the copy would have
+    been ~120 lines of exactly that risk. So arm B asks the model for its own
+    schema, and there is nothing left to keep in step.
+    """
+    import prompt_v2_schema as _pv2s
+    return _pv2s.BeatMajorPlan.model_json_schema()
+
+
 def _call_gemini_post_cuts(client, system_instruction, user_content, video_part, model_name,
                            recipe_deadline_s=None, media_res_override=None,
-                           source_duration_s=None, n_words=None):
+                           source_duration_s=None, n_words=None, v2=False, v2_frames=False):
     """Second Gemini call: visual placement on the kept-only transcript.
 
     Deep-thinking budget. thinking_budget=24576 (lowered from a 60000 cap).
@@ -13274,13 +14243,34 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
     on thinking + actual JSON response. At 24K thinking, ~40K is left for
     the JSON output — typical PostCutPlan JSON is 2-4K, comfortable margin.
     """
+    # Resolved ONCE per call: empty unless FRAMES_PLAN armed AND the stills are
+    # mounted. An unmounted stills directory yields [] and the payload is
+    # byte-identical to today — the arm cannot silently half-run.
+    _v2_ref_parts = _v2_reference_still_parts() if v2_frames else []
+    if v2_frames and not _v2_ref_parts:
+        print("[prompt-v2] FRAMES_PLAN armed but NO STILLS FOUND at /stills — "
+              "sending text-only rather than claiming attachments that do not "
+              "exist", flush=True)
     if _editorial_suppressed():
         raise EditorialSuppressed(
             "PROMPTLY_EDITORIAL_LIVE is off — live traffic does not call the "
             "editorial model. Set PROMPTLY_BUILD_LANE=1 in a build/cert "
             "container, or flip the gate and redeploy.")
+    # THE LOG MUST REPORT THE VALUE, NOT A CONSTANT (2026-08-17).
+    #
+    # This printed the literal `thinking_budget=24576` while the request below
+    # reads PROMPTLY_POST_THINKING_BUDGET from the environment. So every A/B run
+    # using that dial — a dark knob since 2026-07-31 — logged 24576 no matter
+    # what it actually sent. The dial was real; its observability was fake.
+    #
+    # Found while checking whether a matrix cell's budget had taken effect: the
+    # log said 24576 for all six cells, which was consistent with the env being
+    # inert AND with it working perfectly. It answered nothing. The real evidence
+    # came from a 400 the API returned ("thinking_budget is out of range"), which
+    # is the value ARRIVING and being rejected — the opposite of inert.
+    _post_think = int(os.environ.get("PROMPTLY_POST_THINKING_BUDGET", "24576") or "24576")
     print(
-        f"[gemini-post] Calling {model_name} (thinking_budget=24576, PostCutPlan schema, "
+        f"[gemini-post] Calling {model_name} (thinking_budget={_post_think}, PostCutPlan schema, "
         f"system_instruction={len(system_instruction)} chars, user_content={len(user_content)} chars)...",
         flush=True,
     )
@@ -13309,7 +14299,14 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
         t0 = time.time()
         _stream_result = _gemini_stream_with_cache(
             client, model_name,
-            contents=[video_part, user_content],
+            contents=(
+                # References FIRST (they match the exemplars already in the
+                # system instruction), then a hard boundary, then the user's
+                # own video adjacent to its own transcript.
+                [_V2_REF_LABEL, *_v2_ref_parts, _V2_SOURCE_LABEL,
+                 video_part, user_content]
+                if _v2_ref_parts else [video_part, user_content]
+            ),
             base_config_kwargs=dict(
                 temperature=1.0,
                 # max_output_tokens is the SHARED thinking+output cap. HELD at
@@ -13328,7 +14325,12 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                 # output to 16-36K; Lever 1 cuts it at the 16K degen threshold.
                 max_output_tokens=40000,
                 response_mime_type="application/json",
-                response_json_schema=_post_cuts_response_schema(),
+                # ARM B sends the beat-major schema; ARM A is byte-identical to
+                # production. R3 measured that response_schema is part of the
+                # Vertex cache key, so the two arms cannot share a cache entry —
+                # which is correct here, they are different prompts.
+                response_json_schema=(_v2_response_schema() if v2
+                                      else _post_cuts_response_schema()),
                 # 24576 thinking budget — lowered from 60000. 60K bought no
                 # quality (every good recipe this session ran at ≤24576) and
                 # drove the model to spiral past its output budget into an
@@ -13338,7 +14340,7 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
                     # Default 24576 (byte-identical when unset). Lower = less
                     # deliberation time AND — per the r=0.59 output-vs-wallclock
                     # measurement — possibly less spiral/degen (60K drove spirals).
-                    thinking_budget=int(os.environ.get("PROMPTLY_POST_THINKING_BUDGET", "24576") or "24576")),
+                    thinking_budget=_post_think),
                 # MEDIUM (was LOW) — shipped as a production A/B. Measured
                 # token-identical to LOW on the 480p proxy (a no-op on the
                 # synthetic probe), so any real-footage output change is the
@@ -13432,6 +14434,23 @@ def _call_gemini_post_cuts(client, system_instruction, user_content, video_part,
             # degeneration-class signal the daily [REPORT] reads and the Lever-3
             # flip watches. Also does the flag-gated A/B S3 capture inside.
             _measure_rationale_lengths(_parsed)
+            # ARM B: beats[] -> the component-major arrays the rest of this file
+            # consumes, BEFORE any of the guards below. Flattening first is what
+            # keeps every downstream invariant — the string caps, the strict
+            # PostCutPlan validation, and the motion-graphics equality assertion
+            # at the render seam — applying to arm B exactly as they do to arm A.
+            # A placement dropped in the transform is dropped BY US, so it goes
+            # to the component ledger under that name rather than reading as a
+            # model decline (the distinction the ledger exists to make).
+            if v2:
+                import prompt_v2_schema as _pv2s
+                _parsed = _pv2s.flatten_beats(
+                    _parsed, ledger=(_ledger_requested, _ledger_dropped),
+                    # In arm B a plan with no beats is not "someone else's
+                    # plan", it is the repair re-ask returning a corrected
+                    # object — and it still owes the full contract.
+                    ensure_contract=True)
+                print(f"[prompt-v2] flattened: {_parsed.get('_v2_counts')}", flush=True)
             # L1+L2: declared caps + repetition signatures enforced at THE
             # parse edge — every downstream consumer reads capped strings.
             _enforce_string_caps(_parsed, _post_cuts_response_schema(), "post_cuts")
@@ -13959,6 +14978,57 @@ def build_safe_recipe(kept_words, vocal_emphasis=None, ep_off=None):
     }
 
 
+# A SAFE-EDIT FALLBACK MUST NAME ITS OWN CAUSE (2026-08-17).
+#
+# `_safe_reason` was a local: the plan came back with notes "safe-edit fallback"
+# and the REASON died with the stack frame. So a differ could report that 5 of
+# 12 control cells fell back and could not say whether that was capacity,
+# transport, or schema — three causes with three different fixes, and the
+# measurement could not distinguish them. Same class as the ASR hole closed
+# earlier today: the verdict survived, the evidence did not.
+#
+# Module-scoped for the same reason _VIDEO_REF_UPLOADED_LAST is: the reason is
+# set deep inside the recipe closure and read by callers outside it.
+_LAST_SAFE_EDIT = {"reason": None}
+
+
+def _safe_edit_deliverable_on_failure():
+    """Is a safe edit a DELIVERABLE when editorial FAILED? Default: NO.
+
+    OWNER RULING 2026-08-18: "safe_edit stops being a deliverable and becomes an
+    incident." An editorial failure that quietly ships a deterministic clean-cut
+    is a degraded product delivered as if it were the product, and it is
+    invisible in every metric — the job completes, the user gets a video, and
+    nothing counts the quality we did not deliver.
+
+    MEASURED BEFORE SHIPPING, because this converts deliveries into failures:
+      since Aug 11   216 safe_edit / 174 FAILURE-driven (148 users)
+      post-v557       41 safe_edit /   0 failure-driven
+    All 174 were the success-path TypeError class. At today's rate this change
+    costs ZERO deliveries — it is a guard for when editorial goes live, not a
+    withdrawal of something users are getting.
+
+    TWO DOORS ARE DELIBERATELY UNAFFECTED, because neither is a failure:
+      editorial_live_off  — CONFIG. Editorial is suppressed; the deterministic
+                            path IS the product today (41 of 41 post-v557).
+      recipe wall-clock   — a BUDGET guard that stops compounding before the
+                            render SIGKILL. A safe edit beats a killed job.
+
+    Rollback: PROMPTLY_SAFE_EDIT_ON_FAILURE=1 restores today's behaviour.
+    """
+    return os.environ.get("PROMPTLY_SAFE_EDIT_ON_FAILURE", "").strip().lower() in (
+        "1", "true", "yes", "on")
+
+
+def _mark_safe_edit(reason):
+    """Record WHY the deterministic path was taken, and return it unchanged.
+
+    Every assignment to `_safe_reason` goes through here — cert_safe_edit_reason
+    asserts that, so a new fallback door cannot open without naming itself."""
+    _LAST_SAFE_EDIT["reason"] = str(reason)
+    return str(reason)
+
+
 # LEVER 4: the uploaded-reference key, module-scoped (the established _LAST
 # pattern) because the upload happens inside the edit-recipe closure and the
 # teardown delete runs in handler()'s finally — closure locals don't cross.
@@ -14156,6 +15226,50 @@ def _build_lane():
     )
 
 
+def _build_stamp():
+    """The SHA this container was built from — stamped onto EVERY counter.
+
+    JUDGE'S FIX, GENERALIZED. A counter that records WHAT happened but not WHICH
+    BUILD it happened on cannot be read back later without reconstruction. That
+    bit today: two build-lane runs showed `brand_copy` declined even where a name
+    was spoken — a load-bearing input to the directive redesign — and attributing
+    those runs to an image took a walk through commit timestamps, because the run
+    record itself named no build. Reconstruction is not observation [Rule 4].
+
+    Stamped as the SHORT sha plus a dirty marker. `dirty` is not decoration: a
+    counter emitted from an uncommitted tree is attributed to a commit that does
+    not describe the code that produced it, which is worse than being unattributed
+    because it looks authoritative.
+    """
+    _s = os.environ.get("PROMPTLY_BUILD_SHA", "") or "unknown"
+    return _s[:12] + ("-dirty" if os.environ.get("PROMPTLY_BUILD_DIRTY") == "1" else "")
+
+
+def _scenes_directive_v2():
+    """Is the CONDITION-BOUND scenes directive armed? Default OFF.
+
+    generated_scenes has fired on 0 of 779 planned jobs. Two build-lane runs on
+    the exact references the feature was designed for — editorial gate OPEN,
+    premium=True — returned ZERO, and NOTHING WAS STRIPPED: the
+    `[two-pass] Dropping generated_scene` path never logged. The model was
+    offered the beat and declined it.
+
+    So the blocker is not the flag chain, not quota, and not a strip gate. It is
+    the ask. The old block opened "You may emit", gated on an AND of three
+    conditions one of which is subjective, and — fatally — told the model that
+    leaving it empty is "correct and expected". A prompt that blesses the zero it
+    was written to explain will keep getting zero.
+
+    DARK BY DEFAULT so control and variant differ by exactly ONE variable and
+    the A/B is attributable. The SHARED TAIL (rarity ceiling, the one committed
+    palette, the three designed types) is byte-identical across both arms — this
+    changes the TRIGGER, never the taste.
+    """
+    return os.environ.get("PROMPTLY_SCENES_DIRECTIVE_V2", "").strip().lower() in (
+        "1", "true", "yes", "on",
+    )
+
+
 def _editorial_suppressed():
     """Should THIS call take the deterministic path instead of the model?
 
@@ -14182,6 +15296,7 @@ def generate_edit_gemini(
     sample_fps_override=None,
     media_res_override=None,
     guidance_profiles=None,
+    prompt_v2_override=False,
 ):
     _pre_analysis = cached_response
 
@@ -14297,6 +15412,66 @@ def generate_edit_gemini(
         density_override=density_override,
         density_variant=density_variant,
     )
+    # ── PROMPT V2 (DARK — HARNESS-ONLY, and deliberately not flag-armable) ────
+    # V2 replaces the ~2,000-line doctrine with the 111-line beat-major one and
+    # REUSES this call's catalog/schema block verbatim, so the A/B measures a
+    # doctrine change rather than a different pipeline.
+    #
+    # WHY THE SECRET FLAG ALONE CANNOT ARM IT. This refusal was first written
+    # because BeatMajorPlan could express ONLY component placements, so a live
+    # job would have returned an MG-only plan. That reason is GONE: a beat now
+    # carries all seven treatments — cut, emphasis (with zoom + sound), overlay,
+    # broll, scene, caption and place — and flattens into the exact shapes
+    # PostCutPlan declares (cert_prompt_v2_families).
+    #
+    # The refusal STANDS on the reason that remains, and it is the stronger one:
+    # THIS DOCTRINE HAS NEVER BEEN MEASURED. Arming an unvalidated editorial
+    # doctrine globally would make every user's edit the experiment, before the
+    # pre-registered A/B has produced a single number — and flips happen per
+    # LAUNCH_DAY.md, on evidence, not because a schema became capable.
+    # The A/B harness passes prompt_v2_override=True per job (the burned_text_test
+    # pattern) and reads plan-only output, which is what the pre-registration
+    # specifies. When the A/B has run and won, this is the line to revisit.
+    _v2_on = bool(prompt_v2_override)
+    _v2_frames_on = False
+    if not _v2_on:
+        # The refusal notice lives in its own scope so nothing it binds can leak
+        # into the armed branch below. A `try` that imports for BOTH paths left
+        # `_pv2` possibly-undefined at its use site — safe at runtime, but that
+        # is the job-1a72b344 class and the gate refuses it on sight.
+        try:
+            import prompt_v2_editor as _pv2_probe
+            if _pv2_probe.v2_enabled():
+                print("[prompt-v2] PROMPTLY_PROMPT_V2 is SET but refused on this path: "
+                      "the beat doctrine has never been measured, and arming it "
+                      "globally would make every user's edit the experiment. "
+                      "Harness only (prompt_v2_override) until the A/B has run.",
+                      flush=True)
+        except Exception as _v2_err:
+            print(f"[prompt-v2] module unavailable ({type(_v2_err).__name__}) — arm A",
+                  flush=True)
+    if _v2_on:
+        # Armed: both imports here, so a failure surfaces to the harness as a
+        # real error rather than a quiet fall back to arm A that would silently
+        # turn the A/B into a control-vs-control run.
+        import prompt_v2_editor as _pv2
+        import prompt_v2_exemplars as _pv2x
+        # The catalog begins at the first component section. Everything above it
+        # is the doctrine v2 replaces; the catalog below it is the shared half
+        # both arms send, sliced rather than rewritten so arm A stays
+        # BYTE-IDENTICAL to production — MINUS arm A's response-shape section,
+        # which would contradict arm B's own schema (see _v2_catalog_slice).
+        _mode = os.environ.get("PROMPTLY_PROMPT_V2_EXEMPLARS", "").strip() or "PLAN_ONLY"
+        # FRAMES_PLAN is the only mode that attaches media. INLINE_VIDEO stays
+        # off the live path permanently (owner: "no video, ever") — it exists in
+        # the enum so its cost can be priced and REJECTED on evidence.
+        _v2_frames_on = (_mode == "FRAMES_PLAN")
+        post_sys = _pv2.build_v2_system_instruction(
+            _v2_catalog_slice(post_sys), _pv2x.exemplar_block(_mode))
+        print(f"[prompt-v2] ARM B — doctrine swapped, catalog reused without "
+              f"arm A's response format ({len(post_sys)} chars, exemplars={_mode})",
+              flush=True)
+
     # ── UNIFIED CORE (LANE-SEAM Step 2, DARK): additive guidance profiles.
     # guidance_profiles is None on every call unless the PROMPTLY_UNIFIED_CORE
     # selection at the call site armed it — None composes NOTHING (this block
@@ -14626,8 +15801,8 @@ def generate_edit_gemini(
         def _audio_gap_at_boundary(ni):
             if ni < 0 or ni + 1 >= len(kept_words):
                 return float("inf")
-            _a_end = float(kept_words[ni].get("end") or 0.0)
-            _b_start = float(kept_words[ni + 1].get("start") or 0.0)
+            _a_end = word_time_s(kept_words, ni, "end")
+            _b_start = word_time_s(kept_words, ni + 1, "start")
             return max(0.0, _b_start - _a_end)
         _candidate_indices = sorted(_word_removal_set | _dead_air_set | _shot_boundary_set)
 
@@ -14888,6 +16063,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
     ).strip().lower() not in ("0", "false", "no", "off")
     _use_safe = False
     _safe_reason = ""
+    _LAST_SAFE_EDIT["reason"] = None   # per-call: a stale reason is a wrong one
     # Outermost-rung re-entry (P1a): the rescue re-run forces the recipe
     # stage straight down the deterministic safe path — no Gemini call, no
     # repair loop, the exact span every recipe flows through. Honors the
@@ -14900,7 +16076,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         force_safe_reason = "editorial_live_off"
     if force_safe_reason and _safe_edit_on and kept_words:
         _use_safe = True
-        _safe_reason = str(force_safe_reason)
+        _safe_reason = _mark_safe_edit(force_safe_reason)
     for _repair_attempt in range(_repair_max + 2):
         if _repair_attempt > _repair_max and not _use_safe:
             break  # the extra slot is safe-mode only
@@ -14915,7 +16091,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         if (not _use_safe and recipe_deadline_s is not None
                 and time.time() > recipe_deadline_s and _safe_edit_on and kept_words):
             _use_safe = True
-            _safe_reason = (
+            _safe_reason = _mark_safe_edit(
                 f"recipe wall-clock budget exhausted after {_repair_attempt} "
                 f"re-ask(s) — compounding stopped before the render timeout"
             )
@@ -14954,7 +16130,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
         else:
             try:
                 try:
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []))
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on,
+                                                          v2_frames=_v2_frames_on)
                 except Exception as _ref_err:
                     if (_video_part_fallback is None
                             or type(_ref_err).__name__ != "ClientError"):
@@ -14977,20 +16154,32 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         "video_reference_fallback", reason=str(_ref_err)[:180])
                     _video_part = _video_part_fallback
                     _video_part_fallback = None
-                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []))
+                    post_cut_plan = _call_gemini_post_cuts(client, post_sys, _post_user_attempt, _video_part, GEMINI_EDITORIAL_MODEL, recipe_deadline_s=recipe_deadline_s, media_res_override=media_res_override, source_duration_s=duration, n_words=len(deepgram_words or []), v2=_v2_on,
+                                                          v2_frames=_v2_frames_on)
             except Exception as _tx_err:
                 # Transport exhaustion (backoff spent / terminal degenerate
                 # response). Retries already happened inside the call; the
                 # ladder's next rung is the safe edit.
-                if _safe_edit_on and kept_words:
+                if _safe_edit_on and kept_words and _safe_edit_deliverable_on_failure():
                     print(
                         f"[safe-edit] recipe transport exhausted "
                         f"({type(_tx_err).__name__}: {str(_tx_err)[:120]})",
                         flush=True,
                     )
                     _use_safe = True
-                    _safe_reason = f"recipe_transport:{type(_tx_err).__name__}"
+                    _safe_reason = _mark_safe_edit(f"recipe_transport:{type(_tx_err).__name__}")
                     continue
+                # THE RUNG IS GONE (owner ruling 2026-08-18). Retries already
+                # happened inside the call; an exhausted transport is an
+                # INCIDENT, and it fails with the copy that already exists
+                # rather than shipping a deterministic edit as if it were the
+                # product.
+                print(f"[safe-edit] REFUSED as a deliverable — transport exhausted "
+                      f"({type(_tx_err).__name__}); failing honestly", flush=True)
+                _record_divergence(
+                    "recipe", {"reason": f"recipe_transport:{type(_tx_err).__name__}"},
+                    "safe_edit_refused",
+                    reason="editorial failed; a safe edit is an incident, not a deliverable")
                 raise
         try:
 
@@ -15207,8 +16396,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
 
                 def _rng_secs(_ra, _rb):
                     try:
-                        _s = float(kept_words[_ra].get("start") or 0.0)
-                        _e = float(kept_words[_rb].get("end") or 0.0)
+                        _s = word_time_s(kept_words, _ra, "start")
+                        _e = word_time_s(kept_words, _rb, "end")
                         return round(_s, 2), round(max(0.0, _e - _s), 3)
                     except Exception:
                         return None, None
@@ -15270,7 +16459,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                                 if 0 <= int(new_to_src[_ki]) < len(deepgram_words)]
                     _cw_prev = (deepgram_words[_cw_src[0] - 1]
                                 if _cw_src and _cw_src[0] > 0 else None)
-                    _cw_gap = ((float(_cw_span[0].get("start") or 0.0)
+                    _cw_gap = ((word_time_s(_cw_span, 0, "start")
                                 - float((_cw_prev or {}).get("end") or 0.0))
                                if (_cw_span and _cw_prev) else 0.0)
                     # gap AFTER the span (to the next transcript word) — clause (iii)
@@ -15278,8 +16467,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # flows into the following word is kept. No following word (end of
                     # transcript) → 0.0 (conservative: never treat the last word as a
                     # cuttable dead-air fragment).
-                    _cw_gap_after = ((float(_cw_foll[0].get("start") or 0.0)
-                                      - float(_cw_span[-1].get("end") or 0.0))
+                    _cw_gap_after = ((word_time_s(_cw_foll, 0, "start")
+                                      - word_time_s(_cw_span, -1, "end"))
                                      if (_cw_span and _cw_foll) else 0.0)
                     if not _gemini_cut_span_removable(_cw_span, _cw_foll, _cw_prev, _cw_gap, _cw_gap_after):
                         _record_divergence(
@@ -15400,12 +16589,12 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             def _word_start(src_idx):
                 if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
                     return None
-                return float(_dg[int(src_idx)].get("start") or 0)
+                return word_time_s(_dg, int(src_idx), "start")
 
             def _word_end(src_idx):
                 if src_idx is None or not (0 <= int(src_idx) < len(_dg)):
                     return None
-                return float(_dg[int(src_idx)].get("end") or 0)
+                return word_time_s(_dg, int(src_idx), "end")
 
             # caption_position_segments (synthesized from caption_position_changes)
             _changes = edit_plan.get("caption_position_changes") or []
@@ -15524,10 +16713,106 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # this key is not a declared field of the response schema.
                 _brand_src = (edit_plan.get("brand_copy") or {}) if isinstance(
                     edit_plan.get("brand_copy"), dict) else {}
+                # §6 DETERMINISTIC FALLBACK. The planner's brand_copy wins when
+                # present (it has context this cannot see); when it is absent —
+                # which is 198 of 198 jobs measured — the transcript answers.
+                # No model call, no extra latency, no cost.
+                # deepgram_words is the parameter actually in scope here —
+                # `transcript` is not, and reading it would NameError on every
+                # job. Rebuilt from the words, preferring punctuated_word
+                # because capitalisation is what makes the name pattern safe.
+                _det_text = " ".join(
+                    str((_w or {}).get("punctuated_word") or (_w or {}).get("word") or "")
+                    for _w in (deepgram_words or []) if isinstance(_w, dict))
+                _det_name, _det_role = _speaker_identity_from_transcript(_det_text)
+                _bc_name = _brand_src.get("speaker_name") or _det_name
+                _bc_role = _brand_src.get("speaker_role") or _det_role
+                # THE VETO. Silence means YES — the transcript trigger stands
+                # unless the model actively objects.
+                if _brand_src.get("suppress_name_plate") is True:
+                    _record_divergence(
+                        "brand", {"name": _bc_name, "source": "model_veto"},
+                        "name_plate_vetoed",
+                        reason="the planner saw the footage and declined the "
+                               "plate; the transcript trigger defers to it")
+                    print(f"[brand] name plate VETOED by the planner "
+                          f"(would have been {_bc_name!r})", flush=True)
+                    _bc_name = _bc_role = None
+                if _det_name and not _brand_src.get("speaker_name"):
+                    print(f"[brand] name plate from TRANSCRIPT (deterministic): "
+                          f"{_det_name!r} role={_det_role!r}", flush=True)
+                    _record_divergence(
+                        "brand", {"name": _det_name, "role": _det_role,
+                                  "source": "transcript_deterministic"},
+                        "name_plate_derived",
+                        reason="planner emitted no brand_copy; the spoken name "
+                               "in the transcript supplied it (ART_DIRECTION_6)")
+                _ledger_absorb_plan(edit_plan)
+                # ── THE FOUR GENERATION-FREE COMPOSITIONS ──────────────────
+                # Same seam, same design system as D+F: the model supplied the
+                # CONTENT, the pipeline derives every visual. The spec rides in
+                # the MG's own props as `spec`, which MotionGraphicRenderer
+                # spreads, so the adapter receives it (a bare component would
+                # render an empty card — the NamePlate lesson).
+                #
+                # THE TIMING AUTHORITY, without needing fps here. The delivery
+                # fps is resolved much later in the pipeline, so this seam
+                # cannot compute a frame — and it does not need to:
+                #
+                #     word_frame(w, i, fps) == round(word_time_s(w, i) * fps)
+                #
+                # and the renderer already applies exactly that rounding to
+                # at_seconds. Passing the AUTHORITY'S SECONDS therefore lands on
+                # the identical frame as every other component on the same word,
+                # at any fps, with no second conversion to keep in step. The
+                # renderer still never sees a word index.
+                try:
+                    import frame_compositions as _fc
+                    _fc_built = 0
+                    for _mg in (edit_plan.get("motion_graphics") or []):
+                        if not isinstance(_mg, dict):
+                            continue
+                        _k = str(_mg.get("type") or "")
+                        if _k not in _fc.BUILDERS:
+                            continue
+                        _wi = _mg.get("start_word_index")
+                        try:
+                            _at_s = word_time_s(kept_words, int(_wi))
+                        except Exception:
+                            # An unanchorable index is OURS to drop, loudly —
+                            # never a component silently placed at t=0.
+                            _ledger_dropped("motion_graphic", _k,
+                                            "unanchorable_word_index")
+                            _mg["_fc_drop"] = True
+                            continue
+                        _spec = _fc.build_frame_composition(
+                            _k, edit_plan.get("_design_system"),
+                            _at_s, _mg.get("props") or {},
+                            duration_s=float(_mg.get("duration_seconds") or 2.0))
+                        if not _spec:
+                            # Content the composition needs is absent. DROP,
+                            # never fabricate — and ledger it as ours.
+                            _ledger_dropped("motion_graphic", _k,
+                                            "missing_required_props")
+                            _mg["_fc_drop"] = True
+                            continue
+                        _mg.setdefault("props", {})["spec"] = _spec
+                        _fc_built += 1
+                    if any(_m.get("_fc_drop") for _m in
+                           (edit_plan.get("motion_graphics") or [])
+                           if isinstance(_m, dict)):
+                        edit_plan["motion_graphics"] = [
+                            _m for _m in edit_plan["motion_graphics"]
+                            if not (isinstance(_m, dict) and _m.get("_fc_drop"))]
+                    if _fc_built:
+                        print(f"[frame-comp] {_fc_built} composition spec(s) built "
+                              f"from the design system", flush=True)
+                except Exception as _fc_err:
+                    _ledger_defect("missing_module", "frame_compositions", _fc_err)
                 edit_plan["_brand_specs"] = _bc.build_brand_specs(
                     edit_plan.get("_design_system"),
-                    name=_brand_src.get("speaker_name"),
-                    role=_brand_src.get("speaker_role"),
+                    name=_bc_name,
+                    role=_bc_role,
                     headline=_brand_src.get("brand_name") or _brand_src.get("handle"),
                     subline=_brand_src.get("brand_subline"),
                     duration_s=duration,
@@ -16209,7 +17494,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             _wi = int(_ch["word_index"])
                             if _wi < 0 or _wi >= len(_dg_words):
                                 continue
-                            _ch_t = float(_dg_words[_wi].get("start") or 0)
+                            _ch_t = word_time_s(_dg_words, _wi, "start")
                             if _ch_t > _cur_t:
                                 _resynth_segments.append({
                                     "from_seconds": _cur_t,
@@ -16474,7 +17759,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # const-indices (membership IS the schema); heavy-unfit →
                     # extracted-to-room-gating (natural must fit the seam's room).
                     # All three unrepresentable on the governed path.
-                    word_end = float(_dg_words[awi].get("end") or 0)
+                    word_end = word_time_s(_dg_words, awi, "end")
                     # Build extras dict — copy through all component-specific props
                     # "sound" rides _transition_sound (its own carrier);
                     # leaking it here spread into TransitionSpec (extra="forbid")
@@ -16908,8 +18193,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 if _sw_kept > _ew_kept:
                     print(f"[broll] All words [{_sw}]-[{_ew}] removed — skipping '{_br_kw}'", flush=True)
                     continue
-                _br_ts = float(_broll_dg_words[_sw_kept].get("start") or 0)
-                _br_end = float(_broll_dg_words[_ew_kept].get("end") or 0)
+                _br_ts = word_time_s(_broll_dg_words, _sw_kept, "start")
+                _br_end = word_time_s(_broll_dg_words, _ew_kept, "end")
                 # SOURCE-TIME span between the two words — INCLUDES any
                 # mechanically-removed silence/filler. Computed but no longer
                 # surfaced as the recipe `duration` field, because downstream
@@ -17080,15 +18365,31 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                       f"(Stage-0 read said none) — existing_caption_region={_ecr}",
                       flush=True)
             edit_plan["existing_caption_region"] = _ecr
-            if (_ecr != "none" and edit_plan["caption_style"] != "none"
+            # ART_DIRECTION §3 — ONE predicate, the same breadth the zoom gate
+            # uses. Reading a narrower signal here is what shipped a second
+            # caption track over the source's own.
+            _blocked, _blk_band, _blk_signal = _burned_text_caption_block(edit_plan, vibe)
+            if _blocked and _ecr == "none":
+                _ecr = _blk_band if _blk_band in ("bottom", "center", "top") else "bottom"
+                edit_plan["existing_caption_region"] = _ecr
+                print(f"[generate-edit] burned captions: {_blk_signal} signal engaged "
+                      f"(Stage-0 read said none) — existing_caption_region={_ecr}",
+                      flush=True)
+            if (_blocked and edit_plan["caption_style"] != "none"
                     and not _vibe_requests_captions(vibe)):
                 _record_divergence(
                     "caption",
                     {"style": edit_plan["caption_style"], "region": _ecr,
-                     "signal": ("analysis" if _ana_burned else "stage0"),
+                     "signal": _blk_signal, "spec": "ART_DIRECTION_3",
                      "generation": "a1a2"},
                     "burned_suppress",
                     final={"style": "none"},
+                    # LEDGER TOKEN — EXACT, NEVER DECORATED. The weekly table
+                    # counts this literal; appending "(ART_DIRECTION §3)" to it
+                    # broke the no-regress gate, correctly: a decorated ledger
+                    # token silently orphans every historical row that carried
+                    # the undecorated one. The §3 reference belongs in the
+                    # payload, which is free-form, not in the key.
                     reason="source_carries_burned_in_captions",
                 )
                 edit_plan["caption_style"] = "none"
@@ -17159,6 +18460,28 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # repair attempt carries every correction (first-raise-wins burned
             # one attempt per flaw and exhausted the budget on real plans).
             _mg_violations = []
+            # RUNG 3's user-facing half. Collected here, rendered into the
+            # edit's own summary below — the ledger is for us, this is for the
+            # person who asked for the edit.
+            _mg_user_notes = []
+
+            def _mg_words_at(_wi, _span=4):
+                """The user's OWN WORDS around an anchor — never our type names.
+
+                A note that says "StatCard at word 62" tells the user nothing;
+                they know their video by what they said in it. Falls back to an
+                empty string rather than inventing a phrase."""
+                try:
+                    _src = kept_words or deepgram_words or []
+                    _a = max(0, int(_wi) - 1)
+                    _b = min(len(_src), int(_wi) + _span)
+                    _ws = [str((_src[_k] or {}).get("punctuated_word")
+                               or (_src[_k] or {}).get("word") or "").strip()
+                           for _k in range(_a, _b)]
+                    return " ".join(w for w in _ws if w).strip(" ,.")
+                except Exception:
+                    return ""
+
             validated_mg = []
             for _i, _mg in enumerate(raw_mg):
                 if not isinstance(_mg, dict):
@@ -17190,6 +18513,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         f"nothing to rewrite from. Render continues without it.",
                         flush=True,
                     )
+                    _ledger_dropped("motion_graphic", _mg_type, "empty_props")
                     _record_divergence(
                         "motion_graphic",
                         {"type": _mg_type,
@@ -17298,8 +18622,8 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # difference between this stored value and the clip boundary,
                 # causing project_source_time_to_output to return None at render
                 # time — same precision bug class as the emphasis-moment one.
-                _sw_start = float(_dg_words[_sw].get("start") or 0)
-                _ew_end = float(_dg_words[_ew].get("end") or 0)
+                _sw_start = word_time_s(_dg_words, _sw, "start")
+                _ew_end = word_time_s(_dg_words, _ew, "end")
 
                 # ── F5: content grounding — card text must come from the
                 # dialogue (∪ vibe ∪ identity). Numerals always pass here;
@@ -17351,18 +18675,60 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                             f"Use the speaker's own numeral or remove the card."
                         )
 
-                # ── F7: clear-region rule — an oversized card with no
-                # face-clear anchor at its fitted size cannot be placed.
-                # Fail-open when face data is absent (inside the helper).
-                if not _mg_clear_region_exists(
-                    _mg_type, _sw_start, _ew_end, _smoothed_trajectory,
-                    burned_bands=frozenset(edit_plan.get("source_text_regions") or ()),
-                ):
-                    _mg_violations.append(
-                        f"{_mg_type} at word {_sw}: no face-clear region exists for "
-                        f"a card this size — reduce its content, or move it to a "
-                        f"window where the speaker sits lower/off-center."
-                    )
+                # ── F7: clear-region rule, NOW A LADDER, NOT A VERDICT
+                # (2026-08-19). Before this, an unplaceable card appended a
+                # violation -> RECIPE_INVALID -> the MODEL was asked to repair it
+                # twice -> safe_edit_refused -> the user got NOTHING, after we had
+                # paid for transcription, analysis and a full planning call. The
+                # pipeline was asking the model to compute something it can
+                # compute itself, and discarding a paid render when the model
+                # declined. One component must never cost the whole edit.
+                #
+                # Blast radius measured before building: RECIPE_INVALID fired on
+                # 2 of 7,712 jobs since 07-20 and NEITHER cited this check, so
+                # this is a LATENT class — and the V2 scenes directive, whose
+                # entire purpose is to make the planner place more, hit it on the
+                # first source tried. This is a precondition for shipping that.
+                _place_outcome, _ew_end_fitted, _place_note = (
+                    _place_component_gracefully(
+                        _mg_type, _sw_start, _ew_end, _smoothed_trajectory,
+                        edit_plan))
+                if _place_outcome == "repositioned":
+                    # The window contracted; the ANCHOR never moved, so grounding
+                    # is preserved by construction. Silent to the user on purpose:
+                    # they get a changelog of subtractions, never of successes.
+                    _record_divergence(
+                        "motion_graphic",
+                        {"type": _mg_type, "word": _sw,
+                         "from_s": round(float(_ew_end), 2),
+                         "to_s": round(float(_ew_end_fitted), 2)},
+                        "clear_region_repositioned",
+                        reason="window contracted to a face- and caption-clear span")
+                    _ew_end = _ew_end_fitted
+                if _place_outcome == "dropped":
+                    # THE FIRST CLAUSE USED TO SAY "reduce its content", WHICH IS
+                    # ADVICE THAT CANNOT WORK (2026-08-19). F7 judges size by TYPE
+                    # MEMBERSHIP — `mg_type in _MG_FULLSIZE_TYPES` — so the content
+                    # never reaches the function and a shorter card gets the
+                    # IDENTICAL verdict. We were asking the model to perform an
+                    # action with no effect, then failing the whole edit twice when
+                    # it did not succeed. Only remedies that can actually change the
+                    # answer are named now: move the window, or do not place it.
+                    # RUNG 3 — DROP, LOUDLY TO US, GENTLY TO THE USER.
+                    _ledger_dropped("motion_graphic", _mg_type,
+                                    "clear_region_unfittable")
+                    _record_divergence(
+                        "motion_graphic", {"type": _mg_type, "word": _sw},
+                        "clear_region_unfittable",
+                        reason="no face/caption-clear band at any window length")
+                    _mg_user_notes.append({
+                        "word_index": _sw,
+                        "type": _mg_type,
+                        # The USER'S OWN WORDS name the moment; the internal type
+                        # name never reaches them (cert clause 5b).
+                        "said": _mg_words_at(_sw),
+                    })
+                    continue          # the edit survives without this component
 
                 validated_mg.append({
                     "type": _mg_type,
@@ -17406,6 +18772,29 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     f"{_f6_words} words for {_f6_window:.1f}s; viewers need "
                     f"~{_f6_floor:.1f}s — shorten the text or widen the window."
                 )
+
+            # RUNG 3, USER-FACING. A beat we deliberately left bare is a
+            # JUDGMENT, and saying so is the difference between a tool that
+            # quietly did less and a collaborator that made a call and told you.
+            # It also hands the user the one thing no internal ledger can: the
+            # fix is to reframe the shot.
+            #
+            # NOT AN ERROR MESSAGE. No component type name, no error code, no
+            # failure language — the standing law is fail loudly to US, never to
+            # the user, and nothing here failed. Silence for shrink/reposition:
+            # the user gets a changelog of SUBTRACTIONS, never of successes.
+            if _mg_user_notes:
+                _said = next((str(_n.get("said") or "").strip()
+                              for _n in _mg_user_notes if _n.get("said")), "")
+                _note = _mg_unplaced_note(_said)
+                _prev = str(edit_plan.get("edit_rationale") or "").strip()
+                _joined = (f"{_prev} {_note}" if _prev else _note)
+                # edit_rationale is capped at 400 in PostCutPlan; the NOTE is the
+                # part the user did not already have, so it wins the space.
+                edit_plan["edit_rationale"] = (
+                    _joined if len(_joined) <= 400 else _note[:400])
+                print(f"[mg] {len(_mg_user_notes)} component(s) left unplaced — "
+                      f"told the user in the edit's own words", flush=True)
 
             if _mg_violations:
                 raise ValueError("\n".join(_mg_violations))
@@ -18080,7 +19469,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 # No rounding — match clip source bounds exactly. See the same
                 # comment on motion_graphics _sw_start above for the precision-bug
                 # class this avoids.
-                _source_start = float(_dg_words[_swi].get("start") or 0)
+                _source_start = word_time_s(_dg_words, _swi, "start")
                 _entry = {
                     "variant": _var,
                     "start_word_index": _swi,
@@ -18675,10 +20064,18 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     f"RECIPE_INVALID: safe-edit recipe failed validation: {_repair_err}"
                 ) from _repair_err
             if _repair_attempt >= _repair_max or not _repair_budget_ok:
-                if _safe_edit_on and kept_words:
+                # _repair_max defaults to 1, so control reaches here only AFTER
+                # the one retry the ruling allows. The safe rung is then gone.
+                if _safe_edit_on and kept_words and _safe_edit_deliverable_on_failure():
                     _use_safe = True
-                    _safe_reason = f"RECIPE_INVALID:{str(_repair_err)[:80]}"
+                    _safe_reason = _mark_safe_edit(f"RECIPE_INVALID:{str(_repair_err)[:80]}")
                     continue
+                _record_divergence(
+                    "recipe", {"reason": f"RECIPE_INVALID:{str(_repair_err)[:60]}",
+                               "attempts": _repair_attempt + 1},
+                    "safe_edit_refused",
+                    reason="editorial failed after its retry; a safe edit is an "
+                           "incident, not a deliverable")
                 raise RecipeInvalidError(
                     f"RECIPE_INVALID after {_repair_attempt + 1} attempt(s): {_repair_err}"
                 ) from _repair_err
@@ -18757,8 +20154,13 @@ def _plan_diff_ops_schema(surgical_v2=False):
     surgical_v2 (LANE-SEAM Step 3, dark): when OFF, caption_text_overrides is
     STRIPPED from the list_key enum — a flag-off model structurally cannot
     emit the new op, so flag-off behavior is byte-identical."""
+    import surgical_ops as _surgical_ops   # local: module-load order (see below)
     _lks = set(_DIFF_LIST_ANCHORS)
-    if not surgical_v2:
+    # THE SPLIT (2026-08-18): the caption text op is armed by its OWN flag, so
+    # the mechanical text swap ships without also handing the model
+    # transition-add. surgical_v2 remains a superset — see
+    # surgical_ops.caption_text_ops_enabled.
+    if not (surgical_v2 or _surgical_ops.caption_text_ops_enabled()):
         _lks.discard("caption_text_overrides")
     _op = {"type": "object", "properties": {
         "op": {"type": "string",
@@ -19043,6 +20445,159 @@ def _deterministic_reedit(old_plan, change_request):
             "deterministic": True}
 
 
+def _mechanical_reedit(old_plan, change_request):
+    """INSTRUMENT 2 — the mechanical router, for what Instrument 1 declines.
+
+    REUSE, NEVER PARALLEL (rider 4). Instrument 1 above owns category-off and
+    the caption-style swap; it returns None for everything else. This picks up
+    the rest of the mechanical vocabulary — aspect ratio, a caption TEXT SWAP,
+    denoise — and applies it through `_apply_plan_ops`, THE SAME MERGE the model
+    rail uses. It invents no op shape of its own, so anything it produces is
+    already understood by every downstream consumer.
+
+    Whole-request-or-nothing. The router disqualifies a request that ALSO asks
+    for a word-space mutation ("use Cove captions and cut the dead air"), because
+    applying the half it understands would hand the user a changed video that
+    silently ignored the rest — the worst failure this path can produce, since it
+    looks like success.
+
+    DARK behind PROMPTLY_MECHANICAL_ROUTER. Every failure returns None and the
+    request rides the model rail, which is exactly today's behaviour.
+    """
+    try:
+        import mechanical_router as _mr
+    except Exception as _mr_err:
+        _ledger_defect("missing_module", "mechanical_router", _mr_err)
+        return None
+    if not _mr.enabled():
+        return None
+    try:
+        _verdict, _ops, _why = _mr.classify(
+            change_request, valid_caption_styles=set(VALID_CAPTION_STYLES))
+    except Exception as _cls_err:
+        print(f"[plan-diff] router raised ({type(_cls_err).__name__}: "
+              f"{_cls_err}) — falling through to the model rail", flush=True)
+        return None
+    if _verdict != "mechanical" or not _ops:
+        return None
+    try:
+        _new_plan, _applied, _failed = _apply_plan_ops(old_plan, _ops)
+    except Exception as _ap_err:
+        print(f"[plan-diff] router ops failed to apply "
+              f"({type(_ap_err).__name__}) — model rail", flush=True)
+        return None
+    # A PARTIAL APPLICATION IS A SILENT WRONG ANSWER. If any op did not land,
+    # decline the whole thing and let the model handle it rather than shipping
+    # the half that worked.
+    if _failed or not _applied:
+        print(f"[plan-diff] router declined: {len(_failed or [])} op(s) failed "
+              f"to apply — the whole request goes to the model rail", flush=True)
+        return None
+    _record_divergence(
+        "reedit", {"ops": len(_applied), "why": _why[:120]},
+        "reedit_mechanical_router", reason=str(change_request)[:120])
+    print(f"[plan-diff] MECHANICAL — zero model calls: {_why}", flush=True)
+    return {"classification": "tweak", "new_plan": _new_plan,
+            "fused_vibe": None,
+            "changed_fields": sorted({str(o.get("list_key")) for o in _ops}),
+            "human_summary": f"{_why} — everything else untouched.",
+            "clarification_question": None, "deterministic": True}
+
+
+# "make it 30 seconds" / "cut it to a minute" — the ASK, not the mutation.
+_DURATION_ASK = re.compile(
+    r"\b(?:make|cut|trim|get|bring|keep)\s+(?:it|this|the video)?\s*"
+    r"(?:down\s+)?(?:to|under|below)?\s*"
+    r"(?P<n>\d+(?:\.\d+)?)\s*(?P<u>s|sec|secs|second|seconds|m|min|mins|minute|minutes)\b",
+    re.I)
+
+
+def _duration_reedit(old_plan, change_request, transcript, source_duration_s=None):
+    """INSTRUMENT 3 — "make it 30 seconds", answered HONESTLY.
+
+    THE PRODUCT LAW THIS SERVES: never over-cut to hit a number. A video that
+    reaches 30s by removing meaning is a worse answer than one that honestly
+    reports 78s and says what going further would cost.
+
+    SCOPE, STATED PLAINLY — this wires the HONEST-ANSWER half only:
+
+        impossible  the target is longer than the source. Answered here, with
+                    zero model calls, as a sentence rather than a silently
+                    unchanged video.
+        floor       the ladder is exhausted and the target is still short.
+                    Answered here with the achievable duration and what the
+                    remaining gap would cost.
+        met         reachable — and NOT applied here. Applying it mutates the
+                    kept-word space, which re-times every anchor in the
+                    document. Re-anchoring is proven
+                    (cert_reanchor_under_word_mutation) but is not integrated
+                    into this seam, and shipping a half-integrated word-space
+                    mutation is how anchors rot silently. It rides the model
+                    rail, as today, and the miss is LEDGERED rather than hidden.
+
+    DARK behind PROMPTLY_TARGET_DURATION. Any failure returns None.
+    """
+    try:
+        import duration_target as _dt
+    except Exception as _dt_err:
+        _ledger_defect("missing_module", "duration_target", _dt_err)
+        return None
+    if not _dt.enabled():
+        return None
+    _m = _DURATION_ASK.search(str(change_request or ""))
+    if not _m:
+        return None
+    _target = float(_m.group("n"))
+    if _m.group("u").lower().startswith("m"):
+        _target *= 60.0
+    _words = (transcript.get("words") if isinstance(transcript, dict)
+              else transcript if isinstance(transcript, list) else None)
+    if not _words:
+        return None
+    _src = float(source_duration_s or 0.0)
+    if not _src:
+        try:                      # derive from the word list — one clock only
+            _src = word_time_s(_words, -1, "end")
+        except Exception:
+            return None
+    _detectors = {"detect_dead_air": detect_dead_air,
+                  "detect_filler": detect_filler,
+                  "detect_false_start": detect_false_start,
+                  "detect_stutter": detect_stutter,
+                  "detect_phrase_retake": detect_phrase_retake}
+    try:
+        _res = _dt.plan_to_target(_words, _src, _target, _detectors)
+    except Exception as _pt_err:
+        print(f"[plan-diff] duration target raised ({type(_pt_err).__name__}) "
+              f"— model rail", flush=True)
+        return None
+    _verdict = _res.get("verdict")
+    if _verdict in ("no_target", "met"):
+        # `met` is reachable but not applied here — see the docstring. Ledger it
+        # so the gap between what we could answer and what we do answer is a
+        # number somebody can read, not a silence.
+        if _verdict == "met":
+            _record_divergence(
+                "reedit", {"target_s": _target, "achieved_s": _res.get("achieved_s"),
+                           "rungs": _res.get("spent_rungs")},
+                "duration_target_not_applied",
+                reason="reachable but word-space mutation is not wired at this seam")
+        return None
+    _record_divergence(
+        "reedit", {"verdict": _verdict, "target_s": _target,
+                   "achieved_s": _res.get("achieved_s")},
+        "duration_target_answered", reason=str(change_request)[:120])
+    print(f"[plan-diff] DURATION {_verdict.upper()} — zero model calls: "
+          f"{_res.get('message')}", flush=True)
+    import copy as _copy_dur
+    _plan = _copy_dur.deepcopy(
+        {k: v for k, v in old_plan.items()
+         if not (isinstance(k, str) and k.startswith("_"))})
+    return {"classification": "tweak", "new_plan": _plan, "fused_vibe": None,
+            "changed_fields": [], "human_summary": _res.get("message"),
+            "clarification_question": None, "deterministic": True}
+
+
 # ─── TIER-3b PART 3: guided_redraft SCOPED-COPY (Zac 2026-07-11) ─────────────
 # A general/creative re-edit ("make it punchier") re-authors ONLY its in-scope
 # layers; every out-of-scope layer is byte-identical to the prior plan BY
@@ -19316,11 +20871,16 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
     if _ecr == "none" and _ana_burned:
         _ecr = "bottom"
     plan["existing_caption_region"] = _ecr
-    if (_ecr != "none" and plan.get("caption_style") != "none"
+    # ART_DIRECTION §3 — the SAME predicate as the fresh span and the zoom gate.
+    _blocked_re, _blk_band_re, _blk_sig_re = _burned_text_caption_block(plan, vibe)
+    if _blocked_re and _ecr == "none":
+        _ecr = _blk_band_re if _blk_band_re in ("bottom", "center", "top") else "bottom"
+        plan["existing_caption_region"] = _ecr
+    if (_blocked_re and plan.get("caption_style") != "none"
             and not _vibe_requests_captions(vibe)):
         _record_divergence(
             "caption", {"style": plan.get("caption_style"), "region": _ecr,
-                        "signal": ("analysis" if _ana_burned else "stage0"),
+                        "signal": _blk_sig_re, "spec": "ART_DIRECTION_3",
                         "generation": "reedit"},
             "burned_suppress", final={"style": "none"},
             reason="source_carries_burned_in_captions (re-edit revalidation)")
@@ -19399,8 +20959,8 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
             try:
                 _sw = int(_mg.get("start_word_index"))
                 _ew = int(_mg.get("end_word_index"))
-                _sw_s = float(_dg[_sw].get("start") or 0) if 0 <= _sw < len(_dg) else 0.0
-                _ew_s = float(_dg[_ew].get("end") or 0) if 0 <= _ew < len(_dg) else 0.0
+                _sw_s = word_time_s(_dg, _sw, "start") if 0 <= _sw < len(_dg) else 0.0
+                _ew_s = word_time_s(_dg, _ew, "end") if 0 <= _ew < len(_dg) else 0.0
             except (TypeError, ValueError):
                 _sw_s = _ew_s = 0.0
             if not _mg_clear_region_exists(_mt, _sw_s, _ew_s, face_traj,
@@ -19486,6 +21046,15 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
     # Instrument 1: the unambiguous category-off / style-swap never pays a
     # model call — the same engine EditPolicy trusts applies it directly.
     _det = _deterministic_reedit(old_plan, change_request)
+    # THREE INSTRUMENTS, ONE SEAM, IN COST ORDER. Each returns the same shape or
+    # None; None means "not mine" and the request falls to the next, ending at
+    # the model rail — which is exactly today's behaviour when all three decline.
+    # Wired here rather than beside this function because a second entry point is
+    # how two engines start disagreeing about the same request (rider 4).
+    if _det is None:
+        _det = _mechanical_reedit(old_plan, change_request)
+    if _det is None:
+        _det = _duration_reedit(old_plan, change_request, transcript)
     if _det is not None:
         return _det
 
@@ -19572,8 +21141,10 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
         # LANE-SEAM Step 3 (dark): with surgical_v2 ON the transition-add hole
         # closes and the caption-spelling op is taught; OFF keeps the refusal
         # verbatim — byte-identical prompt text.
-        + (_surgical_ops.TRANSITION_ADD_BULLET + _surgical_ops.CAPTION_TEXT_BULLET
-           if surgical_v2 else _surgical_ops.TRANSITION_REFUSAL_BULLET) +
+        + ((_surgical_ops.TRANSITION_ADD_BULLET if surgical_v2
+            else _surgical_ops.TRANSITION_REFUSAL_BULLET)
+           + (_surgical_ops.CAPTION_TEXT_BULLET
+              if (surgical_v2 or _surgical_ops.caption_text_ops_enabled()) else "")) +
         "  • 'add a tight_cut_overlay at K' / 'add a LightLeak at the pivot'\n"
         "      → append a new tight_cut_overlays entry with after_word_index at the named cut\n"
         "        (the pipeline validates it sits on a real tight boundary). Overlays carry\n"
@@ -19701,7 +21272,8 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
         "  • replace — swap ONE anchored entry wholesale (value_json = the full new entry). Reach for set_field first; replace only when the user asked for a different entry.\n"
         "  • add — append a new entry (value_json = the full entry object).\n\n"
         "value_json is ALWAYS a JSON-encoded STRING (e.g. \"null\", \"\\\"CleanCut\\\"\", \"{\\\"word_indices\\\": [40], ...}\").\n\n"
-        + (_surgical_ops.OPS_VOCAB_ADDENDUM if surgical_v2 else "") +
+        + (_surgical_ops.OPS_VOCAB_ADDENDUM
+           if (surgical_v2 or _surgical_ops.caption_text_ops_enabled()) else "") +
         "Emit classification FIRST, then scope, then ops:\n"
         "  classification — tweak | guided_redraft | reinterpret | needs_clarification (same meanings as above)\n"
         "  layers_in_scope — which layers the request touches (captions, cuts, emphasis, sounds, broll, motion_graphics, text_overlays, transitions, pacing, vibe)\n"
@@ -21161,8 +22733,8 @@ def _broll_window_context(bc, tx_words):
                 str(tx_words[i].get("word") or "").strip()
                 for i in range(sw, ew + 1)
             ).strip()
-            mid_s = (float(tx_words[sw].get("start") or 0.0)
-                     + float(tx_words[ew].get("end") or 0.0)) / 2.0
+            mid_s = (word_time_s(tx_words, sw, "start")
+                     + word_time_s(tx_words, ew, "end")) / 2.0
         except (TypeError, ValueError, AttributeError):
             mid_s = None
     return dlg_text, mid_s
@@ -22222,6 +23794,20 @@ def compute_transition_slot_frames(transition_type, tail_room_s, head_room_s,
     if str(transition_type or "none") not in VALID_TRANSITION_TYPES:
         return 0
     _nat_f = get_transition_duration_frames(str(transition_type))
+    # NOT A word_frame CALL, AND DELIBERATELY EXEMPT FROM THE TIMING AUTHORITY
+    # (2026-08-19). word_frame answers "when does this anchor LAND?" and rounds
+    # (or ceils, for never-early). This answers a different question — "how much
+    # room is REALLY there?" — where the safe direction is DOWN: over-reporting
+    # handle by one frame lets a transition consume footage that does not exist,
+    # and the all-or-nothing rule above turns that into a 700ms ShutterFlash
+    # rendering as a 33ms flicker (job 7013697d).
+    #
+    # The +1e-9 is not a patched boundary case. 0.5 * 30 lands at
+    # 14.999999999999998 in binary floating point, and a bare floor would
+    # discard a frame of room that physically exists — the epsilon makes the
+    # floor mean "floor the REAL value", not "floor the float error".
+    #
+    # Absorbing this into the authority would be a regression, not a cleanup.
     _tail_f = int(math.floor(float(tail_room_s) * fps + 1e-9))
     _head_f = int(math.floor(float(head_room_s) * fps + 1e-9))
     return _nat_f if (_tail_f >= _nat_f and _head_f >= _nat_f) else 0
@@ -25716,7 +27302,7 @@ def align_caption_tokens(dg_words, gemini_tokens):
         elif tag == "delete":
             continue
         elif tag == "replace":
-            s = float(dg_words[i1].get("start") or 0.0); e = float(dg_words[i2 - 1].get("end") or 0.0)
+            s = word_time_s(dg_words, i1, "start"); e = word_time_s(dg_words, i2 - 1, "end")
             if e <= s:
                 e = s + 1e-3
             m = j2 - j1
@@ -25725,8 +27311,8 @@ def align_caption_tokens(dg_words, gemini_tokens):
                             "end": s + (e - s) * (k + 1) / m, "source": "split"})
         elif tag == "insert":
             m = j2 - j1
-            left = float(dg_words[i1 - 1].get("end") or 0.0) if i1 > 0 else None
-            right = float(dg_words[i1].get("start") or 0.0) if i1 < len(dg_words) else None
+            left = word_time_s(dg_words, i1 - 1, "end") if i1 > 0 else None
+            right = word_time_s(dg_words, i1, "start") if i1 < len(dg_words) else None
             if left is None or right is None:
                 dropped.append({"kind": "open_ended", "n": m}); continue
             gap = right - left
@@ -25773,7 +27359,7 @@ def _corrected_text_by_index(dg_words, gemini_tokens):
             m = j2 - j1
             if i1 <= 0 or i1 >= len(dg_words):
                 meta["dropped_spans"].append({"kind": "open_ended", "n": m}); continue
-            gap = float(dg_words[i1].get("start") or 0.0) - float(dg_words[i1 - 1].get("end") or 0.0)
+            gap = word_time_s(dg_words, i1, "start") - word_time_s(dg_words, i1 - 1, "end")
             if m <= _CAPTION_ALIGN_MAX_INSERT_TOKENS and gap <= _CAPTION_ALIGN_MAX_INSERT_GAP_S:
                 _prev = mp.get(i1 - 1)
                 _base = _prev if _prev is not None else (dg_words[i1 - 1].get("punctuated_word")
@@ -26117,7 +27703,7 @@ def _run_render_via_burst_or_local(
             supabase.table("analytics_events").insert({
                 "event": "burst_double_hold",
                 "platform": "worker",
-                "props": {
+                "props": {"build_sha": _build_stamp(), 
                     "job_id": str(job_id),
                     "blocked_s": round(_dh_s, 2),
                     # the WASTE: cores held by a process that is only waiting
@@ -27552,7 +29138,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # _audible_word_onset_s) — same correction as SFX, one derivation.
         try:
             _dgw2 = transcript.get("words") or []
-            _sh = float(_dgw2[idx].get("start") or 0.0) - _audible_word_onset_s(_dgw2, idx)
+            _sh = word_time_s(_dgw2, idx, "start") - _audible_word_onset_s(_dgw2, idx)
             if 0.0 < _sh <= 0.45:
                 _t0 = max(0.0, _t0 - _sh)
         except Exception:
@@ -27916,18 +29502,78 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
             f"explicitly skipped."
         )
 
+    # ── THE EMISSION SEAM: _brand_specs -> motion_graphics_out ──────────────
+    #
+    # THE DEFECT THIS CLOSES (2026-08-18). BrandSpecMG.tsx documents "THE
+    # CONTRACT WITH THE HANDLER" in full — append {type, fromFrame,
+    # durationInFrames, props: <the spec verbatim>} — and THE HANDLER HALF WAS
+    # NEVER WRITTEN. There was no emission site at all. So NamePlate and EndCard
+    # have never produced a pixel, even on jobs where the spec built cleanly:
+    # brand_copy at 0/198 was the visible cause, and this was the one underneath
+    # it. The v555 transcript-triggered plate would have been swallowed here
+    # identically.
+    #
+    # PLACEMENT IS THE HANDLER'S JOB, deliberately: the spec carries start_s /
+    # hold_s on the OUTPUT clock and the component window is a <Sequence>, so a
+    # component that also placed itself would do the same math twice on two
+    # different clocks (the adapter's own note).
+    #
+    # `props` is the SPEC VERBATIM — the adapter reads style/safe/anchor off it.
+    # Passing a reshaped dict here would be a fifth schema mirror.
+    _brand_specs_now = edit_plan.get("_brand_specs") or {}
+    _brand_mg_keys = (("name_plate", "NamePlate"), ("end_card", "EndCard"))
+    # DECLARED FROM THE SPECS, NOT FROM WHAT WE EMITTED. Counting emissions
+    # would make the invariant below vacuous for brand MGs — it could never
+    # fail, which is the opposite of what an integrity assertion is for. A spec
+    # that exists and does not reach the output must trip it or be ledgered.
+    _expected_brand_mgs = sum(
+        1 for _k, _t in _brand_mg_keys
+        if isinstance(_brand_specs_now.get(_k), dict))
+    for _bkey, _btype in _brand_mg_keys:
+        _bspec = _brand_specs_now.get(_bkey)
+        if not isinstance(_bspec, dict):
+            continue
+        _ledger_requested("brand_mg", _btype)
+        try:
+            _b_start = float(_bspec.get("start_s") or 0.0)
+            _b_hold = float(_bspec.get("hold_s") or 0.0)
+            if _b_hold <= 0:
+                raise ValueError("non-positive hold")
+            _b_from = max(0, int(round(_b_start * source_fps)))
+            _b_frames = max(1, int(round(_b_hold * source_fps)))
+            motion_graphics_out.append({
+                "type": _btype,
+                "fromFrame": _b_from,
+                "durationInFrames": _b_frames,
+                "props": _bspec,
+            })
+            _ledger_rendered("brand_mg", _btype)
+            print(f"[brand-mg] {_btype} -> output {_b_from}-{_b_from + _b_frames}f "
+                  f"({_b_start:.2f}s +{_b_hold:.2f}s)", flush=True)
+        except Exception as _be:
+            # LEDGERED, NEVER SILENT — the invariant below counts this drop, so
+            # a brand spec cannot vanish between builder and renderer again.
+            _mg_projection_misses += 1
+            _ledger_dropped("brand_mg", _btype, f"placement:{type(_be).__name__}")
+            _record_divergence(
+                "motion_graphic", {"type": _btype, "start_s": _bspec.get("start_s")},
+                "brand_mg_placement_failed",
+                reason=f"brand spec built but could not be placed ({_be})")
+
     _expected_emphasis_mgs = sum(
         1 for em in (edit_plan.get("_emphasis_moments") or [])
         if em.get("motion_graphic")
     )
     _expected_top_mgs = len(edit_plan.get("motion_graphics") or [])
-    _expected_total_mgs = _expected_top_mgs + _expected_emphasis_mgs
+    _expected_total_mgs = (_expected_top_mgs + _expected_emphasis_mgs
+                           + _expected_brand_mgs)
     if len(motion_graphics_out) + _mg_projection_misses != _expected_total_mgs:
         raise RuntimeError(
             f"Pipeline integrity violation: motion_graphics_out has "
             f"{len(motion_graphics_out)} entries (+{_mg_projection_misses} "
             f"ledgered projection-miss drops) but validation produced "
             f"{_expected_top_mgs} top-level + {_expected_emphasis_mgs} emphasis "
+            f"+ {_expected_brand_mgs} brand "
             f"MGs ({_expected_total_mgs} total). Every validated MG must reach "
             f"the output spec or be explicitly ledgered."
         )
@@ -28393,7 +30039,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 # shift measured in source time (speed is 1.0 by doctrine).
                 try:
                     _sfx_dgw = transcript.get("words") or []
-                    _onset_shift = (float(_sfx_dgw[_sfx_wi].get("start") or 0.0)
+                    _onset_shift = (word_time_s(_sfx_dgw, _sfx_wi, "start")
                                     - _audible_word_onset_s(_sfx_dgw, _sfx_wi))
                     if 0.0 < _onset_shift <= 0.45:
                         _projected_t = max(0.0, _projected_t - _onset_shift)
@@ -32159,7 +33805,7 @@ def _job_status_lock_timeout_event(job_id, waited_s, terminal, patch_keys):
         supabase.table("analytics_events").insert({
             "event": "job_status_lock_timeout",
             "platform": "worker",
-            "props": {"job_id": str(job_id), "waited_s": round(float(waited_s), 2),
+            "props": {"build_sha": _build_stamp(), "job_id": str(job_id), "waited_s": round(float(waited_s), 2),
                       "terminal": bool(terminal), "patch_keys": list(patch_keys or [])[:20],
                       "timeout_s": _JOB_STATUS_LOCK_TIMEOUT_S},
         }).execute()
@@ -32420,7 +34066,7 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                     supabase.table("analytics_events").insert({
                         "event": "worker_envelope_write",
                         "platform": "worker",
-                        "props": {
+                        "props": {"build_sha": _build_stamp(), 
                             "job_id": str(job_id),
                             "matched": _matched,
                             "accepted": _matched > 0,
@@ -32477,7 +34123,7 @@ def write_job_status(job_id, *, status=None, phase=None, progress=None, result=N
                     supabase.table("analytics_events").insert({
                         "event": "worker_envelope_write",
                         "platform": "worker",
-                        "props": {
+                        "props": {"build_sha": _build_stamp(), 
                             "job_id": str(job_id),
                             "matched": 0,
                             "accepted": False,
@@ -32624,7 +34270,7 @@ def _post_upload_watchdog_fire():
                 supabase.table("analytics_events").insert({
                     "event": "post_upload_watchdog_fired",
                     "platform": "worker",
-                    "props": {
+                    "props": {"build_sha": _build_stamp(), 
                         "job_id": str(_job),
                         "waited_s": round(_elapsed, 1),
                         "last_stage": _stage,
@@ -33033,11 +34679,49 @@ def _outer_safe_rescue(job, input_data, classified, state, run_fn=None):
             )
             return None
         print(f"[safe-edit] engaged reason=outer:{code}", flush=True)
-        _record_divergence(
-            "outer", {"error_code": code}, "safe_edit_rescue",
-            reason="orchestration failure outside the inner nets — "
-                   "one guarded safe-edit re-run through the normal path",
-        )
+        # ── NAME WHAT `UNKNOWN` IS HIDING ────────────────────────────────────
+        # `code` is whatever classify_error could name, and on 128 of 781 jobs
+        # it named nothing: UNKNOWN. The frame that would identify the class was
+        # never captured — traceback.print_exc() at the call site sends it to
+        # container stdout, which is not queryable across renders. So capture it
+        # HERE, structurally: the exception type, its message, and the INNERMOST
+        # frame (file:line:function), which is the line that actually raised.
+        #
+        # sys.exc_info() rather than a new parameter: this function is only ever
+        # called from inside an `except` block, so the live exception is already
+        # available, and threading it through the signature would be a second
+        # thing to keep in sync. Fail-open — a rescue must never raise (see the
+        # docstring); if the frame cannot be read, the record still ships with
+        # the code alone.
+        _detail = {"error_code": code}
+        try:
+            # LOCAL IMPORT, DELIBERATELY: `traceback` is NOT module-scope in this
+            # file. Without this line the extract_tb call below raises NameError
+            # INSIDE the fail-open except, and the frame is lost silently —
+            # which is the exact defect this block exists to fix, reintroduced
+            # one level down. The cert asserts `frame` is present so a
+            # regression here cannot pass as "captured nothing this time".
+            import traceback as _tbmod
+            _exc = sys.exc_info()[1]
+            if _exc is not None:
+                _detail["exc_type"] = type(_exc).__name__
+                _detail["exc_msg"] = str(_exc)[:300]
+                _tb = _tbmod.extract_tb(sys.exc_info()[2])
+                if _tb:
+                    _f = _tb[-1]           # innermost frame — where it raised
+                    _detail["frame"] = (f"{os.path.basename(_f.filename)}:"
+                                        f"{_f.lineno}:{_f.name}")
+                    _detail["frame_line"] = (_f.line or "")[:160]
+        except Exception:
+            pass
+        _record_divergence("outer", _detail, "safe_edit_rescue",
+                           reason="orchestration failure outside the inner nets "
+                                  "— one guarded safe-edit re-run through the "
+                                  "normal path")
+        # Carried on the input so the INNER run re-emits it after its own
+        # _DIVERGENCE_LOG.clear() — without this the record above is wiped
+        # before any ledger reaches S3 (see the re-ledger block in handler()).
+        input_data["_rescue_ledger"] = _detail
         input_data["_safe_edit_rescue"] = f"outer:{code}"
         _inner = (run_fn or handler)(job)
         if isinstance(_inner, dict) and _inner.get("status") == "success":
@@ -34566,6 +36250,16 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
         "edit_recipe": {"route": _route_name, "reason": reason,
                         "plan": _plan.model_dump()},
         "transcript": [],
+        # THE DIVERSION CARRIES ITS OWN EVIDENCE. `"transcript": []` alone made
+        # every `no_speech` row unfalsifiable — the audio level and word count
+        # that justified the divert died with the container. This is the block
+        # that lets a query separate "correctly routed music" from "ASR missed
+        # real speech" without downloading a single source.
+        "asr_diagnostics": _asr_diag_snapshot(),
+        # THE THESIS INSTRUMENT: requested vs dropped-by-us, per component type.
+        # Every component number this campaign acted on was a RENDERED count,
+        # which cannot tell a decline from a drop — opposite fixes.
+        "component_ledger": _component_ledger_snapshot(),
         "analysis_data": None,
         "resolved_broll": [],
         "trend_snapshot": None,
@@ -34595,6 +36289,12 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
             "clean_export_key": _clean_export_key,
             "edit_recipe": result_payload["edit_recipe"],
             "transcript": [],
+            # THE ALLOWLIST IS THE ROW. Putting the evidence only on
+            # result_payload would leave it unqueryable — built, not working.
+            # This route's whole purpose here is to explain WHY it diverted, so
+            # the explanation has to survive the write that the row keeps.
+            "asr_diagnostics": result_payload.get("asr_diagnostics"),
+            "component_ledger": result_payload.get("component_ledger"),
             "render_version": RENDER_VERSION,
             "thumbnail_url": _thumbnail_url,
             "capability_notes": _capability_notes,
@@ -36855,6 +38555,36 @@ def _capture_failure_corpus(source_path, job_id, klass):
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
+    # ── THE OUTER RESCUE RE-LEDGERS ITSELF HERE, AFTER THE CLEAR ─────────────
+    # MEASURED 2026-08-19: across 781 real jobs (2026-08-16..18), ZERO ledger
+    # rows carried component=outer, while 128 of those jobs (16.4%) recorded its
+    # CONSEQUENCE as recipe:safe_edit_fallback original={'reason':
+    # 'outer:UNKNOWN'}. The rescue was invisible precisely where it should have
+    # been loudest.
+    #
+    # THE MECHANISM, and why the record cannot live at the rescue site: the
+    # rescue calls handler(job) again, and the FIRST thing that call does is the
+    # clear on the line above. Anything the rescue appended is wiped, and the
+    # inner run then flushes its own (rescue-free) ledger to S3. Recording
+    # harder at the rescue site cannot fix this; the record has to be re-emitted
+    # INSIDE the run whose ledger actually flushes. That is here.
+    #
+    # This survives whatever the cause turns out to be — it is an observability
+    # fix, not a theory about UNKNOWN.
+    try:
+        _resc = input_data.get("_rescue_ledger") if isinstance(input_data, dict) else None
+        if isinstance(_resc, dict):
+            _record_divergence(
+                "outer", _resc, "safe_edit_rescue",
+                reason="orchestration failure outside the inner nets — one "
+                       "guarded safe-edit re-run through the normal path")
+    except Exception:
+        pass
+    # ASR EVIDENCE: fresh per job. Modal containers are REUSED, so without this
+    # a diverted row would inherit the previous job's audio level and word count
+    # — a row that lies with a plausible number, which is worse than a row that
+    # says nothing. Reset here, beside the other per-job accumulators.
+    _asr_diag_reset()
     # DEGEN COUNT PER JOB (Zac 2026-08-04). The degeneration spiral lives in the
     # `why` field, and PROMPTLY_LEAN_SCHEMA strips exactly that field — so the
     # A/B already running is a free test of whether the prompt change fixes a 22%
@@ -37335,6 +39065,19 @@ def handler(job):
             "source_hinted": bool(_hint_source_cached),
             "transcript_hinted": bool(_hint_transcript_cached),
         }
+        # RULE 0, HALF TWO, ON ORGANIC TRAFFIC. `modal app history` proves which
+        # COMMIT deployed; only this proves the RUNNING image carries the files
+        # that commit added. Same nesting trick as prewarm above — it rides
+        # result.stage_timings WHOLE, so "is the module actually in the image?"
+        # becomes a DB query on real jobs instead of an inference from source, a
+        # git object, or an ephemeral probe that builds its own image. Only the
+        # ABSENT names are persisted: the present set is large, static per
+        # deploy, and already in the startup log, while an absent module is the
+        # thing worth finding — a deferred import of one dies inside its
+        # fail-safe, which is how moodreel_editor and progressive_publish
+        # silently un-shipped.
+        _timings["image_absent"] = sorted(
+            k for k, v in _IMAGE_MODULES.items() if v <= 0)
 
         # Only emit the `download` token on a true cache miss — a cached copy
         # resolves in <100ms and would flash the UI label for no reason.
@@ -39571,6 +41314,12 @@ def handler(job):
                         str(input_data.get("_safe_edit_rescue") or "").strip() or None
                     ),
                     burned_text_override=bool(input_data.get("burned_text_test")),
+                    # PROMPT V2 arm B, per job. WITHOUT THIS LINE the override is
+                    # a parameter nothing passes, arm B silently runs arm A, and
+                    # the A/B reports a null result from a control-vs-control run
+                    # — the built-not-wired class, aimed at a measurement instead
+                    # of a feature. cert_prompt_v2_wiring asserts the line exists.
+                    prompt_v2_override=bool(input_data.get("prompt_v2_test")),
                     # E1 density A/B: per-job override toggles the density reshape
                     # for one job without flipping the global secret (mirrors
                     # burned_text_test / broll_gate_test). Inert for real traffic.
@@ -40839,6 +42588,12 @@ def handler(job):
             # the zoom gate. render_only replay does NOT re-run the detector, so it
             # must survive storage or a replay would re-add a suppressed zoom.
             "_burned_text",
+            # Brand specs (D + F): built in generate_edit_gemini from the design
+            # system, READ by the render path's emission seam. A render_only
+            # re-edit replay does NOT re-enter generation, so without this the
+            # name plate and end card would vanish on every re-edit — the same
+            # replay-loss class _burned_text is here for.
+            "_brand_specs",
         }
         sanitized_recipe = {
             k: v for k, v in edit_plan.items()
@@ -41001,8 +42756,26 @@ def handler(job):
             # length lets EVERY latency/cost read cohort-control by duration and
             # split fixed-vs-slope (the two-term fit); without it the 90s target
             # can't be tracked and $/job questions stay unresolved.
+            #
+            # THE MASK'S TWIN, ON THE SUCCESS PATH (2026-08-18). The error-path
+            # copy of the _timings comprehension below was guarded on 2026-08-16
+            # and this one was NOT: the gate written that day
+            # (cert_error_path_totality) inspects only except/finally blocks, and
+            # this line sits on the path where EVERYTHING WENT RIGHT. `_timings`
+            # legitimately carries nested dicts (gemini_tokens, cpu_by_stage,
+            # mem_by_stage — each nested deliberately to survive content-studio's
+            # top-level strip), so round(float(dict)) raised TypeError AFTER the
+            # render finished and the URL was already written. MEASURED: 111 of
+            # 114 rows that failed WITH A FINISHED VIDEO since Aug 16 were this
+            # one line — progress 100, step complete, rendered_video_url present,
+            # 90 users shown "Something went wrong." The largest failure class in
+            # the product. Prose lives HERE rather than inside the dict: the
+            # lean_arm gate measures proximity from `"stage_timings": {` and a
+            # comment in between silently broke it.
             "stage_timings": {
-                **{k: round(float(v), 1) for k, v in _timings.items()},
+                **{k: (round(float(v), 1) if isinstance(v, (int, float))
+                       and not isinstance(v, bool) else v)
+                   for k, v in _timings.items()},
                 "source_duration_s": round(float(source_duration), 1) if source_duration else None,
                 # Gemini token cost NESTED (Zac 2026-08-02) — the 3rd field that
                 # would have been lost to content-studio top-level stripping. The
@@ -41041,6 +42814,12 @@ def handler(job):
             "thumbnail_timestamp": round(float(thumbnail_source_ts), 3),
             # ── Re-edit persistence fields ────────────────────────────────
             "transcript": transcript,
+            # The SAME block the diverted routes carry. Present on the editorial
+            # path too, because a diversion rate needs a denominator measured
+            # the same way: what word count and audio level does a job that DOES
+            # reach editorial actually have?
+            "asr_diagnostics": _asr_diag_snapshot(),
+            "component_ledger": _component_ledger_snapshot(),
             # measurement semantics: REAL analyzer output or honest None —
             # never the plan echo (the write died; see the landmine tombstone)
             "analysis_data": _cached_analysis if isinstance(_cached_analysis, dict) else None,
@@ -41134,6 +42913,11 @@ def handler(job):
                 # thumbnail, not the re-edit path (see the Phase-3 hydration note).
                 "edit_recipe": result_payload.get("edit_recipe"),
                 "transcript": result_payload.get("transcript"),
+                # THE DENOMINATOR. A diversion rate is only readable if the jobs
+                # that DID reach editorial carry the same measurement — same
+                # allowlist discipline as clean_export_key above.
+                "asr_diagnostics": result_payload.get("asr_diagnostics"),
+                "component_ledger": result_payload.get("component_ledger"),
                 "analysis_data": result_payload.get("analysis_data"),
                 "resolved_broll": result_payload.get("resolved_broll"),
                 "trend_snapshot": result_payload.get("trend_snapshot"),
@@ -41267,8 +43051,29 @@ def handler(job):
                 "error_where": _err_where,
                 # SA-0: partial stage timings at time of death — shows how far
                 # the pipeline got and what the wall was spent on before failing.
-                "stage_timings": {k: round(float(v), 1)
-                                  for k, v in (locals().get("_timings") or {}).items()},
+                # NESTED VALUES SURVIVE, SCALARS ROUND (2026-08-16, RULE-1).
+                # This was `round(float(v), 1)` over EVERY value, and _timings
+                # legitimately carries nested DICTS — gemini_tokens, cpu_by_stage
+                # and mem_by_stage were each deliberately NESTED here by three
+                # separate persist guards, because content-studio strips unknown
+                # TOP-LEVEL result keys. So the nesting fixes and this dictcomp
+                # were on a collision course.
+                #
+                # AND IT COLLIDED IN THE ERROR HANDLER, which makes it far worse
+                # than a crash: a job failed for some REAL reason, this line
+                # raised while recording the partial timings, and the TypeError
+                # REPLACED the original cause. Every WORKER_DIED carrying
+                # "float() argument ... not 'dict'" is MASKING a different
+                # failure that was never recorded. Measured: 2 of 10 terminal
+                # jobs in the post-12:33Z cohort, both unattributable as a result.
+                #
+                # Found by the frame-persist on its FIRST real capture
+                # (handler.py:41270 in <dictcomp>) — the fix that named this is
+                # the reason it took minutes instead of another archaeology dig.
+                "stage_timings": {
+                    k: (round(float(v), 1) if isinstance(v, (int, float))
+                        and not isinstance(v, bool) else v)
+                    for k, v in (locals().get("_timings") or {}).items()},
                 "stage_manifest": locals().get("_stage_manifest") or None,
                 **_floor_markers(_floor_state),
             },

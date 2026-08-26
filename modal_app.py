@@ -622,6 +622,34 @@ image = (
     # LANE-SEAM (DARK behind PROMPTLY_SURGICAL_V2): tweak-op teaching text +
     # deterministic validators for caption-spelling / add-transition ops.
     .add_local_file("surgical_ops.py", "/surgical_ops.py")
+    # PROMPT V2 (DARK, harness-only): the beat-major doctrine, its schema and the
+    # exemplars. handler defer-imports all three, and a deferred import of an
+    # unmounted module dies INSIDE its fail-safe — the class that silently
+    # un-shipped moodreel_editor and progressive_publish. The mount law
+    # (validate_deploy _loud_failsafe_mount_law) derives this requirement from
+    # handler's source, so these three are here the day they are imported.
+    # THE MECHANICAL RE-EDIT INSTRUMENTS (DARK). Both are defer-imported by
+    # handler at the _deterministic_reedit seam, so the mount law demands them
+    # here — and both spent a day as CERT-ONLY modules: built, cert-green,
+    # deployed, and imported by nothing that ships.
+    # The four generation-free compositions' SPEC BUILDER. handler defer-imports
+    # it at the brand-spec seam, so the mount law demands it here — and it
+    # caught this within one gate run of the import being added.
+    .add_local_file("frame_compositions.py", "/frame_compositions.py")
+    .add_local_file("mechanical_router.py", "/mechanical_router.py")
+    .add_local_file("duration_target.py", "/duration_target.py")
+    .add_local_file("prompt_v2_editor.py", "/prompt_v2_editor.py")
+    .add_local_file("prompt_v2_schema.py", "/prompt_v2_schema.py")
+    .add_local_file("prompt_v2_exemplars.py", "/prompt_v2_exemplars.py")
+    # FRAMES_PLAN stills. Verified received by the model before wiring
+    # (probe_frames_received_app: 7/7 described, 7 full-frame graphics, 0
+    # talking heads, 0 missing). Absent mount => _v2_reference_still_parts()
+    # returns [] and the call says so LOUDLY rather than claiming attachments.
+    # NO copy=True: it forces a BUILD STEP, and this chain already ends in
+    # add_local_* calls — Modal then refuses the image ("tried to run a build
+    # step after using image.add_local_*"). Nothing needs to run after the
+    # stills, so they are added on container start like every other mount.
+    .add_local_dir("reference_stills", "/stills")
     # LANE-SEAM (DARK behind PROMPTLY_CAPTION_TRANSLATE): caption-page
     # translation — parser + full-or-nothing page rebuild (pure; the Gemini
     # closure lives in handler's build-site touchpoint).
@@ -942,6 +970,7 @@ def run_pipeline_bg(body: dict):
                     "event": "worker_self_terminalised",
                     "platform": "worker",
                     "props": {"job_id": str(_jid), "why": _why[:300],
+                              "build_sha": _os.environ.get("PROMPTLY_BUILD_SHA", "")[:12],
                               "stage": getattr(_H, "_CPU_STAGE", ["?"])[0]},
                 }).execute()
             except Exception:
@@ -1493,6 +1522,43 @@ class PromptlyWorker:
             print(f"[startup] shutdown-handler install skipped ({_sh_e})", flush=True)
         self._prewarm_volume = prewarm_volume
 
+    @modal.fastapi_endpoint(method="GET")
+    def build_info(self):
+        """PRODUCTION PROVENANCE, READABLE ON DEMAND (2026-08-16) [Rule 4].
+
+        The SHA has always been BAKED — modal_app injects PROMPTLY_BUILD_SHA
+        into the image at deploy time — but it was only ever READABLE from a log
+        line or a completed job's payload. So "what is actually running right
+        now?" had no direct answer, and answering it meant inference: reading
+        `modal app history` for a commit, or counting live functions and
+        identifiers to decide whether a change made it in. I did exactly that
+        earlier today (480 functions / 2108 identifiers) and it is a proxy, not
+        a fact.
+
+        Rule 4 says assert only what you can directly observe. This makes the
+        observation possible: one GET, the exact SHA the running image was built
+        from, mirroring content-studio's /api/health `rev` — the surface that
+        has repeatedly settled the same question on the server side.
+
+        DIRTY MATTERS AS MUCH AS THE SHA. A deploy from a tree with uncommitted
+        changes is a SHA that does not describe what is running; `dirty=1` says
+        the commit is a lie and the source is unrecoverable from git. Today the
+        deploy branch sat SEVEN COMMITS AHEAD of origin while serving live
+        traffic — committed and deployed but not pushed — which is the same
+        class one step out.
+        """
+        import os as _os
+        _sha = _os.environ.get("PROMPTLY_BUILD_SHA", "") or "unknown"
+        return {
+            "sha": _sha,
+            "sha_short": _sha[:12],
+            "dirty": _os.environ.get("PROMPTLY_BUILD_DIRTY", "?") == "1",
+            "built_at": _os.environ.get("PROMPTLY_BUILD_TS", ""),
+            "deployer": _os.environ.get("PROMPTLY_DEPLOYER", ""),
+            "spawn_mode": _os.environ.get("PROMPTLY_SPAWN_MODE") == "1",
+            "editorial_live": _os.environ.get("PROMPTLY_EDITORIAL_LIVE", ""),
+        }
+
     @modal.fastapi_endpoint(method="POST")
     def run_job(self, body: dict):
         # Refresh the prewarm volume view so recently-committed sources are
@@ -1772,6 +1838,16 @@ _CANON_FLAGS = {
     "PROMPTLY_BROLL_GATE": "1",
     "PROMPTLY_COVERAGE_GATE": "1",
     "PROMPTLY_LANG_ROUTING": "1",
+    # STEP B (owner GO 2026-08-17 naming the key). Mirror of validate_deploy's
+    # CANON — the deploy-time gate and this daily sentinel are two readers of
+    # ONE value set, and the gate ast-compares them precisely so a change here
+    # cannot lag. PROMPTLY_EDITORIAL_LIVE stays OFF and unregistered.
+    # CAPTION TEXT SWAP LIVE (owner ruling 2026-08-18, key named).
+    # The mechanical half of the diff path, ALONE: PROMPTLY_SURGICAL_V2
+    # stays DARK because it would also hand the model transition-add.
+    # rollback = "" here + secret + redeploy.
+    "PROMPTLY_CAPTION_TEXT_OPS": "1",
+    "PROMPTLY_EDITORIAL_MODEL": "gemini-3.7-flash",
     "PROMPTLY_ROUTE_LANGS": "hi,bn,ta,te,mr,gu,kn,ur,ar,id",
     "PROMPTLY_MOTION_BLUR": "1",
     "PROMPTLY_MIN_OUTPUT_RATIO": "0.20",
@@ -2764,9 +2840,30 @@ def burst_ab():
 # It is a BUILD-LANE function: mark_build_lane() opens the editorial gate for
 # this container only, so it needs no PROMPTLY_EDITORIAL_LIVE flip and cannot
 # affect live traffic.
-@app.function(image=image, cpu=8, memory=16384, timeout=1800,
-              secrets=[modal.Secret.from_name("promptly-secrets"),
-                       modal.Secret.from_name("gemini-vertex")],
+# IT NOW RENDERS. A plan nobody can WATCH is not evidence — JUDGE's battery and
+# the owner both need a file. The render leg calls handler.render_stage (the SAME
+# function run_pipeline_bg calls, not a copy) and returns a presigned GET URL.
+#
+# RESOURCES track an IN-PROCESS render, not a planner:
+#   cpu=16     — run_pipeline_bg's allocation; PROMPTLY_RENDER_CORE_BUDGET below
+#                MUST equal it (Remotion hard-rejects --concurrency > cores and
+#                Python cannot read the Modal cpu request).
+#   memory=48GiB — the repo's own stated in-process-render FLOOR: "the blur A/B
+#                OOM'd at 32GB, so do NOT go lower [than 48]" (run_pipeline_bg's
+#                sizing note). Production renders on the cpu=48 burst and so runs
+#                at 12GiB; this harness renders IN-PROCESS, so it needs the old
+#                in-process floor or an OOM (exit 137) eats the whole run.
+#   timeout=2700 — run_pipeline_bg's 1200s cap excludes what this adds (a cold
+#                canonicalize of a 52s landscape ref + the HLS ladder), and a
+#                harness killed at the cap loses the PLAN evidence too.
+#   secrets=secrets — the FULL deployed set, not a two-secret subset. CLAUDE.md
+#                render-determinism law: "A canary/harness that renders the
+#                pipeline MUST mount the deployed app's FULL secret set (incl.
+#                promptly-lang-flags) — a missing secret changes the render flags
+#                and confounds every comparison." The old subset was correct for a
+#                PLAN-only harness and is wrong the moment it renders.
+@app.function(image=image, cpu=16, memory=49152, timeout=2700,
+              secrets=secrets,
               volumes={"/prewarm": prewarm_volume})
 def lumen_first_edit(source_url: str = "", source_bytes: bytes = b"") -> dict:
     import sys as _sys, os as _os, time as _time, json as _json, traceback as _tb
@@ -2774,14 +2871,56 @@ def lumen_first_edit(source_url: str = "", source_bytes: bytes = b"") -> dict:
     import build_lane as _bl
     _bl.mark_build_lane()
     _os.environ["PREMIUM_PIPELINE_ENABLED"] = "1"
+    # ── BUILD-LANE CONTAINMENT ───────────────────────────────────────────────
+    # Set BEFORE `import handler` because one of these is read at MODULE IMPORT
+    # (_POST_UPLOAD_WATCHDOG_ENABLED) — after the import it would be frozen on.
+    # Per-container os.environ only: no secret is touched, no live flag changes.
+    #
+    # render_stage's delivery tail reaches the DB through three writers that do
+    # NOT go through the app server, so app_url="" alone does not contain it:
+    #   _async_job_status / write_job_status  → gated by JOB_STATUS_WRITES_ENABLED
+    #   _persist_step_token (send_progress)   → gated by PROMPTLY_STEP_DURABLE
+    #   _persist_preview (ProgressivePublisher) → gated by PROMPTLY_PREVIEW_PERSIST
+    # All three off ⇒ this harness CANNOT write video_jobs. PROMPTLY_PROGRESSIVE=0
+    # is the documented backend kill switch (the publisher never constructs, and
+    # the render is byte-identical with previews off).
+    _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16"  # MUST equal cpu= in the decorator
+    _os.environ["JOB_STATUS_WRITES_ENABLED"] = ""      # no video_jobs status writes
+    _os.environ["PROMPTLY_STEP_DURABLE"] = "0"         # no current_step/step_message writes
+    _os.environ["PROMPTLY_PREVIEW_PERSIST"] = "0"      # no video_jobs.preview writes
+    _os.environ["PROMPTLY_PROGRESSIVE"] = "0"          # publisher never starts
+    _os.environ["PROMPTLY_POST_UPLOAD_WATCHDOG"] = ""  # never os._exit(0) mid-harness
+    _os.environ["APP_URL"] = ""                        # nothing POSTs to the app server
     import handler as _H
 
-    out = {"ok": False, "build_lane": _H._build_lane(),
+    # STAGE CLOCK. One `wall_s` is not decomposable, which is the whole complaint:
+    # a 700s number cannot tell you whether Gemini or the render owns the tail.
+    # monotonic deltas, printed as they land so a killed container still leaves
+    # the decomposition in the logs.
+    _stage_s = {}
+    _T0 = _time.monotonic()
+
+    def _lap(_name, _mark):
+        _d = round(_time.monotonic() - _mark, 2)
+        _stage_s[_name] = _d
+        print(f"[lumen-first] STAGE {_name}={_d}s", flush=True)
+        return _time.monotonic()
+
+    # EVERY HARNESS RUN NAMES ITS BUILD. Attributing the two 2026-08-16 runs to an
+    # image took a walk through commit timestamps because the record named none;
+    # a finding that cannot be attributed cannot be relied on [Rule 4].
+    # `ok` is the PLAN; `render_ok` is the VIDEO. Two independent verdicts, both
+    # always present — collapsing them would hide which half failed, and
+    # render_ok=false with ok=true is a real and useful outcome.
+    out = {"ok": False, "render_ok": False, "build_lane": _H._build_lane(),
+           "build_sha": _os.environ.get("PROMPTLY_BUILD_SHA", "")[:12],
+           "build_dirty": _os.environ.get("PROMPTLY_BUILD_DIRTY") == "1",
            "editorial_suppressed": _H._editorial_suppressed()}
     if out["editorial_suppressed"]:
         out["why"] = "editorial suppressed inside the build lane — the asymmetry is broken"
         return out
     _t0 = _time.time()
+    _t = _time.monotonic()
     try:
         _src = "/tmp/lumen_src.mp4"
         if source_bytes:
@@ -2794,10 +2933,13 @@ def lumen_first_edit(source_url: str = "", source_bytes: bytes = b"") -> dict:
         else:
             import subprocess as _sp
             _sp.run(["curl", "-sL", "-o", _src, source_url], check=True, timeout=600)
+        _t = _lap("source_write", _t)
         _dur = _H.probe_duration(_src)
+        _t = _lap("probe", _t)
         _tr = _H.transcribe_audio(_src, keywords=None, language="multi") or {}
         _words = _tr.get("words") or []
         print(f"[lumen-first] dur={_dur} words={len(_words)}", flush=True)
+        _t = _lap("transcribe", _t)
         # generate_edit_gemini does NOT read the video off the path — it needs
         # the bytes inline or a pre-uploaded gemini_file. Production uploads a
         # PROXY; here the source is already a small re-encode, so inline is both
@@ -2810,6 +2952,7 @@ def lumen_first_edit(source_url: str = "", source_bytes: bytes = b"") -> dict:
             vocal_emphasis=None, source_loudness=None, face_positions=None,
             smoothed_face_trajectory=None, user_style_profile=None, premium=True,
             inline_video_bytes=_vbytes)
+        _t = _lap("editorial_plan", _t)
         _scenes = (_plan or {}).get("generated_scenes") or []
         out.update({
             "ok": True, "wall_s": round(_time.time() - _t0, 1),
@@ -2824,11 +2967,207 @@ def lumen_first_edit(source_url: str = "", source_bytes: bytes = b"") -> dict:
             "brand_specs": {k: bool(v) for k, v in
                             (((_plan or {}).get("_brand_specs")) or {}).items()},
         })
+
+        # ── RENDER LEG ───────────────────────────────────────────────────────
+        # ISOLATED ON PURPOSE. The plan above is expensive evidence (one Gemini
+        # editorial call per run); a render failure must never destroy it. Its
+        # own try/except swallows everything, so `ok` stays True and the caller
+        # reads `render_ok` separately.
+        out["render_ok"] = False
+        try:
+            import uuid as _uuid, shutil as _shutil, subprocess as _sp3, tempfile as _tmp
+            _job_id = "lumen-first-" + _uuid.uuid4().hex[:12]
+            _work = _tmp.mkdtemp(prefix=f"promptly-{_job_id}-")
+            _out_path = _os.path.join(_work, "output.mp4")
+
+            # (1) CANONICALIZE — A HARD PRECONDITION, NOT AN OPTIMISATION.
+            # render_multi_clip states the contract in its own body ("By the time
+            # we get here, source_path is a 1080x1920 ... file"), and it is
+            # load-bearing: the ffmpeg composite and the Remotion micro-segment
+            # pass are PINNED to a 1080x1920 canvas and never scale the base, so a
+            # non-1080x1920 source either concat-mismatches (transitions) or crops
+            # out of range (zooms). BOTH committed golden refs are non-canonical —
+            # ref1 is 1080x608 landscape, ref2 is 720x1280 — so skipping this would
+            # fail on every source we actually have. Mirrors the re-encode arm of
+            # handler's _do_fps_normalize: same normalize_vf (from the production
+            # helper analyze_source_video), same preset/crf, same PINNED x264
+            # thread count so the intermediate stays cpu-deterministic.
+            _canon = _os.path.join(_work, "source_canonical.mp4")
+            _sinfo = _H.analyze_source_video(_src)
+            _nvf = _sinfo.get("normalize_vf")
+            _sfps = float(_sinfo.get("fps") or 30.0) or 30.0
+            _tfps = 60.0
+            _dfps_env = (_os.environ.get("PROMPTLY_DELIVERY_FPS", "") or "").strip()
+            if _dfps_env:
+                _tfps = float(_dfps_env)
+            else:
+                _snap = int(round(_sfps))
+                if _snap in (24, 25, 30, 48, 50, 60) and abs(_sfps - _snap) < 0.01:
+                    _tfps = float(_snap)   # deliver at a clean source rate (production rule)
+            _gop = max(1, int(round(_tfps)))
+            if not _nvf:
+                # analyze_source_video returns normalize_vf=None ONLY when the
+                # source is already 1080x1920 — production passthrough-copies here.
+                _shutil.copy2(_src, _canon)
+                print("[lumen-first] canonicalize: PASSTHROUGH (already 1080x1920)", flush=True)
+            else:
+                _cr = _sp3.run(
+                    ["ffmpeg", "-y", "-v", "error", "-threads", "0", "-i", _src,
+                     "-map", "0:v:0", "-map", "0:a:0?",
+                     "-vf", _nvf + ",format=yuv420p",
+                     "-c:v", "libx264", "-preset", "fast", "-crf", "15",
+                     "-x264-params", f"threads={_H._X264_ENCODE_THREADS}",
+                     "-pix_fmt", "yuv420p",
+                     "-color_primaries", "bt709", "-color_trc", "bt709",
+                     "-colorspace", "bt709", "-color_range", "tv",
+                     "-g", str(_gop), "-keyint_min", str(_gop), "-sc_threshold", "0",
+                     "-c:a", "copy", "-video_track_timescale", "90000",
+                     "-movflags", "+negative_cts_offsets", _canon],
+                    capture_output=True, text=True,
+                    timeout=int(max(240, 8.0 * (float(_dur or 0.0) or 60.0))))
+                if _cr.returncode != 0 or not _os.path.exists(_canon):
+                    raise RuntimeError(
+                        "SOURCE_CANONICALIZE_FAILED (rc="
+                        f"{_cr.returncode}): {(_cr.stderr or '')[-500:]}")
+                print(f"[lumen-first] canonicalize: {_sinfo.get('width')}x"
+                      f"{_sinfo.get('height')} @{_sfps:.2f}fps -> 1080x1920 "
+                      f"gop={_gop} vf={str(_nvf)[:90]}", flush=True)
+            _t = _lap("normalize", _t)
+
+            # (2) DESTINATION. render_stage UPLOADS THE MP4 ITSELF: it parses
+            # upload_url with _parse_aws_s3_url into (bucket, key) and calls
+            # _aws_s3_client.upload_file — it never HTTP-PUTs to the presigned URL.
+            # So the right build-lane upload_url is a plain virtual-host S3 URL for
+            # a key we own (exactly the shape cert_burst_floor_ab already feeds the
+            # pipeline), and the harness reuses the pipeline's own uploader instead
+            # of adding a second S3 client. public_url = the same URL so the
+            # HLS/manifest naming stays on our key.
+            _bucket = (_os.environ.get("S3_BUCKET_NAME")
+                       or _os.environ.get("SUPABASE_S3_BUCKET")
+                       or "promptly-video-storage")
+            _key = f"build-lane/lumen-first/{_job_id}/edit.mp4"
+            _dest = f"https://{_bucket}.s3.amazonaws.com/{_key}"
+
+            # (3) THE 20 ARGS. Shapes copied from the production call site in
+            # handler(); the four mutable out-params are cells, not values.
+            _input_data = {
+                "job_id": _job_id, "vibe": "make it viral",
+                "upload_url": _dest, "public_url": _dest,
+                # observe-only so an integrity TRIP still leaves a watchable file
+                # (it prints "[integrity-gate] TRIP (observe-only…)" — loud, and
+                # echoed back on the result so a delivered file is never mistaken
+                # for a gate-PASSING file).
+                "integrity_observe_only": True,
+                # DELIBERATELY ABSENT: supports_progressive / progressive_test (the
+                # publisher must never construct), upload_url_thumb, export_formats,
+                # and every *_test A/B override — so the render takes the exact
+                # production default path.
+            }
+            _timings_cell = {}                                    # render_stage writes render/broll/upload_export
+            _floor_cell = {"floor": None, "floor_reason": None,   # handler()'s literal
+                           "enhancements_dropped": []}
+            _prog_pub_cell = [None]                               # 1-cell publisher holder
+            _rs_cost_cell = [0.0, 0]                              # (usd, count) QA-regen spend
+            import premium as _premium_mod
+            _meter = _premium_mod.CostMeter(_job_id)
+            _pctx = _premium_mod.PremiumContext(
+                is_premium=True, route_premium=True, cost_meter=_meter)
+            _render_est = max(60.0, min(240.0, float(_dur or 0.0) * 3.0))  # handler()'s formula
+            print(f"[lumen-first] render START cuts={len((_plan or {}).get('cuts') or [])} "
+                  f"est={_render_est:.0f}s -> s3://{_bucket}/{_key}", flush=True)
+            _rs = None
+            try:
+                _rs = _H.render_stage(
+                    _job_id, _input_data, _plan, _work, _canon, _out_path,
+                    _tr, _dur, "", [], _dest,
+                    _timings_cell, _floor_cell, True, _pctx, _meter,
+                    True, _render_est, _prog_pub_cell, _rs_cost_cell,
+                )
+            finally:
+                # handler()'s finally does this unconditionally; with progressive
+                # forced off the cell is None and the drain is a no-op, but the
+                # harness must not be the one place that leaks a publisher.
+                try:
+                    _H._drain_progressive_publisher(_prog_pub_cell)
+                except Exception as _dr:
+                    print(f"[lumen-first] publisher drain skipped ({type(_dr).__name__})", flush=True)
+            _t = _lap("render_stage", _t)
+            # DECOMPOSE from render_stage's OWN clocks: _timings["render"] is the
+            # render ladder alone, _timings["upload_export"] is the post-render
+            # fan-out alone (upload + HLS + cover) — it is measured from a `t` that
+            # render_stage resets after the render, so the two do not overlap.
+            _stage_s["render"] = round(float(_timings_cell.get("render") or 0.0), 2)
+            _stage_s["upload"] = round(float(_timings_cell.get("upload_export") or 0.0), 2)
+
+            # (4) GET IT OUT. Presign a GET on the key render_stage uploaded to —
+            # the mp4 is tens of MB and a Modal return payload cannot carry bytes.
+            # head_object first: the byte count reported is the one OBSERVED in S3,
+            # not the local file's (Rule 4 — a local file is not a delivered file).
+            _s3 = _H._aws_s3_client
+            if _s3 is None:
+                raise RuntimeError(
+                    "AWS S3 client is None in the harness container "
+                    "(AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY missing) — the "
+                    "render exists but cannot be handed out")
+            _head = _s3.head_object(Bucket=_bucket, Key=_key)
+            _obj_bytes = int(_head.get("ContentLength") or 0)
+            _get_url = _s3.generate_presigned_url(
+                "get_object", Params={"Bucket": _bucket, "Key": _key},
+                ExpiresIn=60 * 60 * 24 * 7)   # 7 days — the repo's TTL convention
+            _t = _lap("presign", _t)
+            out.update({
+                "render_ok": True,
+                "video_url": _get_url,
+                "video_bucket": _bucket,
+                "video_key": _key,
+                "video_bytes": _obj_bytes,                 # OBSERVED in S3
+                "video_local_bytes": (_os.path.getsize(_out_path)
+                                      if _os.path.exists(_out_path) else None),
+                "video_url_ttl_s": 60 * 60 * 24 * 7,
+                "hls_url": (_plan or {}).get("_hls_manifest_url"),
+                "render_elapsed_s": round(float((_rs or {}).get("render_elapsed") or 0.0), 1),
+                "output_size_mb": round(float((_rs or {}).get("output_size_mb") or 0.0), 1),
+                "render_cuts": len((_plan or {}).get("_render_cuts")
+                                   or (_plan or {}).get("cuts") or []),
+                "floor_state": _floor_cell,
+                "integrity_observe_only": True,
+                "render_asset_spend_usd": round(float(_meter.total_usd()), 4),
+                "render_timings_raw": {k: (round(v, 2) if isinstance(v, float) else v)
+                                       for k, v in _timings_cell.items()},
+            })
+            print(f"[lumen-first] RENDER OK {_obj_bytes / 1e6:.1f}MB "
+                  f"s3://{_bucket}/{_key}", flush=True)
+        except Exception as _re_err:
+            # DEEPEST FRAME IN OUR OWN CODE. A bare type+message lands you in
+            # botocore or subprocess; the frame that matters is the last one whose
+            # file is one of ours (the image mounts our modules at "/").
+            _frame = None
+            try:
+                for _fr, _ln in _tb.walk_tb(_re_err.__traceback__):
+                    _fnm = _fr.f_code.co_filename
+                    if "site-packages" in _fnm or "/lib/python" in _fnm:
+                        continue
+                    _frame = f"{_fnm}:{_ln}:{_fr.f_code.co_name}"   # last = deepest
+            except Exception:
+                _frame = None
+            out.update({
+                "render_ok": False,
+                "render_error": {"type": type(_re_err).__name__,
+                                 "message": str(_re_err)[:600],
+                                 "our_frame": _frame},
+                "render_trace": _tb.format_exc()[-2000:],
+            })
+            print(f"[lumen-first] RENDER FAILED {type(_re_err).__name__}: "
+                  f"{str(_re_err)[:300]}  @ {_frame}", flush=True)
+            print(_tb.format_exc()[-3000:], flush=True)
     except Exception as _e:
         out.update({"ok": False, "error": f"{type(_e).__name__}: {_e}",
                     "trace": _tb.format_exc()[-2000:],
                     "wall_s": round(_time.time() - _t0, 1)})
-    print("[lumen-first] RESULT " + _json.dumps(out, default=str)[:1800], flush=True)
+    _stage_s["total"] = round(_time.monotonic() - _T0, 2)
+    out["stage_s"] = _stage_s
+    print("[lumen-first] STAGE_S " + _json.dumps(_stage_s), flush=True)
+    print("[lumen-first] RESULT " + _json.dumps(out, default=str)[:2600], flush=True)
     return out
 
 
@@ -2853,6 +3192,25 @@ def lumen_first(source_url: str = "", source_path: str = ""):
         print(f"  scene spend    : ${0.14 * (n or 0):.2f}  (@ $0.14/scene)")
         print(f"  plan wall      : {r.get('wall_s')}s")
         print(f"  design system  : {r.get('has_design_system')} accent={r.get('accent')}")
+    _st = (r or {}).get("stage_s") or {}
+    if _st:
+        print("\n  stage seconds  : " + "  ".join(
+            f"{k}={_st[k]}" for k in sorted(_st, key=lambda k: -float(_st[k] or 0))))
+    # RENDER is reported SEPARATELY from `ok` on purpose: a run can plan
+    # perfectly and fail to render, and collapsing the two hides which happened.
+    if r.get("render_ok"):
+        print(f"\n  VIDEO          : {r.get('video_url')}")
+        print(f"  key            : s3://{r.get('video_bucket')}/{r.get('video_key')}")
+        print(f"  bytes (in S3)  : {r.get('video_bytes')}  "
+              f"({(r.get('video_bytes') or 0) / 1e6:.1f}MB, url TTL 7d)")
+        print(f"  render/upload  : {_st.get('render')}s / {_st.get('upload')}s")
+    elif not r.get("ok"):
+        print("\n  RENDER         : NOT ATTEMPTED — planning failed first "
+              f"({(r or {}).get('error')})")
+    else:
+        _re = (r or {}).get("render_error") or {}
+        print(f"\n  RENDER FAILED  : {_re.get('type')}: {str(_re.get('message'))[:200]}")
+        print(f"  deepest frame  : {_re.get('our_frame')}")
 
 
 # ── REGRESSION CORPUS (Zac 2026-08-04, "gone for good") ──────────────────────

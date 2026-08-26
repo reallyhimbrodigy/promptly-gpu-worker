@@ -2,6 +2,7 @@ import { useCurrentFrame, useVideoConfig, interpolate, Easing } from "remotion";
 import { msToFrames } from "./timing";
 import { useSmoothGraphics } from "./smooth-graphics-flag";
 import { trapezoidEasing, MIN_BLEND_FRACTION } from "../../zoom/shared/velocity-cap";
+import { resolveMGPhaseFrames } from "./mg-phase-frames";
 import type { MGPhaseState, MGTimingProps } from "./types";
 
 interface Options {
@@ -48,13 +49,12 @@ export function useMGPhase(
     : rawExitFrames;
 
   const localFrame = frame - startFrame;
-  const exitStartFrame = durationFrames - exitFrames;
-
-  const visible = localFrame >= -2 && localFrame <= durationFrames + 2;
+  const { visible, phase, exitStartFrame, effectiveEnterFrames } =
+    resolveMGPhaseFrames({ localFrame, durationFrames, enterFrames, exitFrames });
 
   const enterProgress = interpolate(
     localFrame,
-    [0, enterFrames],
+    [0, effectiveEnterFrames],
     [0, 1],
     {
       extrapolateLeft: "clamp",
@@ -80,13 +80,6 @@ export function useMGPhase(
     },
   );
 
-  let phase: MGPhaseState["phase"];
-  if (localFrame < 0) phase = "before";
-  else if (localFrame < enterFrames) phase = "entering";
-  else if (localFrame < exitStartFrame) phase = "holding";
-  else if (localFrame < durationFrames) phase = "exiting";
-  else phase = "after";
-
   return {
     visible,
     enterProgress,
@@ -94,5 +87,6 @@ export function useMGPhase(
     phase,
     localFrame,
     durationFrames,
+    exitStartFrame,
   };
 }

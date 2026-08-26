@@ -24,6 +24,30 @@ import importlib
 import inspect
 from typing import Any
 
+# ─── NO GATE VERDICT MAY COME FROM STALE BYTECODE (2026-08-18, RULE-1) ───────
+# A cert reported a failure that WAS NOT IN THE SOURCE. A RED-proof harness had
+# mutated duration_target.py by ONE CHARACTER (`<` -> `>`), a subprocess imported
+# the mutant and cached its bytecode, and the restore landed inside the SAME
+# mtime SECOND. CPython validates a .pyc on (mtime_seconds, size) — a one-char
+# swap leaves size identical, so both matched and the poisoned bytecode stayed
+# "valid" FOREVER. Every later run of that cert failed on code that no longer
+# existed; the source read correct while the gate read red.
+#
+# That is PROBE COLLAPSE (project_probe_collapse_class) pointed at the gate
+# itself: a failed measurement presented as a confident verdict. Suppressing
+# WRITES would not have saved us — the poison was already on disk and would
+# still be READ. Redirecting the cache prefix is what closes both directions:
+# with sys.pycache_prefix set, CPython ignores the source-adjacent __pycache__
+# entirely, and with writes off nothing accumulates in the new location either.
+# So the gate — and every cert subprocess that inherits this env — compiles from
+# SOURCE, always. Asserted behaviourally by _gate_verdict_never_stale_bytecode.
+_PYC_JAIL = os.path.join(os.path.realpath(os.environ.get("TMPDIR", "/tmp")),
+                         f"promptly_gate_pyc_{os.getpid()}")
+sys.dont_write_bytecode = True
+sys.pycache_prefix = _PYC_JAIL
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+os.environ["PYTHONPYCACHEPREFIX"] = _PYC_JAIL
+
 # Suppress noisy startup prints from handler import.
 _real_stderr = sys.stderr
 _real_stdout = sys.stdout
@@ -69,6 +93,56 @@ def _syntax_check():
 def _modal_syntax():
     with open("modal_app.py") as f:
         ast.parse(f.read())
+
+
+@check("NO GATE VERDICT MAY COME FROM STALE BYTECODE (2026-08-18, RULE-1). MEASURED: cert_duration_target reported a failure that was NOT IN THE SOURCE. A RED-proof harness had mutated duration_target.py by ONE CHARACTER (`<` -> `>`), a subprocess imported the mutant and cached its bytecode, and the restore landed inside the SAME mtime SECOND — and CPython validates a .pyc on (mtime_seconds, size), so a one-char swap leaves size identical, both matched, and the poisoned bytecode stayed 'valid' FOREVER. The source read correct while the gate read red, on code that no longer existed. This is PROBE COLLAPSE aimed at the gate itself: a failed measurement presented as a confident verdict, and it is the one failure mode that can make EVERY other check here lie. Suppressing writes would NOT have cured it (the poison was already on disk and would still be read) — only redirecting sys.pycache_prefix bypasses the source-adjacent __pycache__ in BOTH directions. Asserted BEHAVIOURALLY on the exact worst case: a one-character mutation with mtime forced back to the original, proven to reproduce the stale read on the KNOWN-BAD window (no jail) before the jailed run is believed, so a vacuous probe fails loudly instead of passing quietly.")
+def _gate_verdict_never_stale_bytecode():
+    import subprocess as _sp, tempfile as _tf, shutil as _sh
+
+    # 1. the jail is wired — in THIS process, and inherited by every child cert
+    assert sys.dont_write_bytecode is True, \
+        "sys.dont_write_bytecode must be on or this run leaves poison behind"
+    assert sys.pycache_prefix and "promptly_gate_pyc" in sys.pycache_prefix, \
+        "sys.pycache_prefix must point at the per-run jail, not __pycache__"
+    assert os.environ.get("PYTHONPYCACHEPREFIX") == sys.pycache_prefix, \
+        "cert SUBPROCESSES must inherit the jail — they are most of the gate"
+    assert os.environ.get("PYTHONDONTWRITEBYTECODE") == "1", \
+        "a child that writes bytecode re-arms this trap for the next run"
+
+    _d = _tf.mkdtemp()
+    _mod = os.path.join(_d, "pycjail_probe.py")
+    with open(_mod, "w") as _fh:
+        _fh.write("def v():\n    return 'OLD'\n")
+    _st = os.stat(_mod)
+    _jail = dict(os.environ)
+    _bare = {k: v for k, v in os.environ.items()
+             if k not in ("PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE")}
+
+    def _run(_env):
+        return _sp.run([sys.executable, "-c", "import pycjail_probe as p; print(p.v())"],
+                       cwd=_d, env=_env, capture_output=True, text=True).stdout.strip()
+
+    # 2. THE KNOWN-BAD WINDOW FIRST. Import unjailed so a .pyc for OLD exists,
+    #    then mutate one char and force the mtime back: same size, same second.
+    assert _run(_bare) == "OLD", "positive control: the probe must read OLD first"
+    with open(_mod, "w") as _fh:
+        _fh.write("def v():\n    return 'NEW'\n")
+    os.utime(_mod, (_st.st_atime, _st.st_mtime))
+    assert os.stat(_mod).st_size == _st.st_size, \
+        "the mutation must not change size — that is what defeats .pyc validation"
+    _stale = _run(_bare)
+    assert _stale == "OLD", (
+        f"VACUOUS PROBE: without the jail the poisoned bytecode did NOT reproduce "
+        f"(read {_stale!r}) — this check cannot prove the jail does anything, so "
+        f"its pass would be meaningless. No zero is believed until the same probe "
+        f"demonstrably fires on the known-bad window.")
+
+    # 3. SAME POISONED TREE, JAILED. Must read the source, not the cache.
+    _fresh = _run(_jail)
+    assert _fresh == "NEW", (
+        f"THE JAIL LEAKED: a gate subprocess read {_fresh!r} from stale bytecode "
+        f"while the source said NEW — every verdict in this file is unsafe")
+    _sh.rmtree(_d, ignore_errors=True)
 
 
 @check("INC2-TELEMETRY NEST GUARD (speed agent 2026-08-01, RULE-1): the cpu_by_stage / mem_by_stage sizing telemetry must be NESTED inside stage_timings (result.setdefault('stage_timings')), never a top-level result key — content-studio strips unknown top-level keys, so a top-level cpu_by_stage persisted 0/121 on real traffic (same class as source_duration). FAILS if it regresses to `result[\"cpu_by_stage\"] =`, which would make the inc2 burst-sizing data silently un-queryable again.")
@@ -3631,10 +3705,23 @@ def _recipe_omittable_field_contract():
         # byte-identical to the world before the field existed. Vertex DOES drop
         # empty optionals (project_vertex_migration), and that is the correct
         # outcome here: no observed name means no plate, never a blank one.
+        # scenes_declined (2026-08-19): the scene decline's OWN channel, added
+        # because `notes` is a MECHANICAL field (silence/filler/stutter counts
+        # merged from the first call) and an editorial decline placed there
+        # collides with bookkeeping — measured on one two-source run, where one
+        # source carried a real reason and the other carried "2 located_silence,
+        # 0 filler". OMISSION-TOLERANT BY DESIGN, and the collapse is the point:
+        # Vertex drops empty optionals, so ABSENT and EMPTY both mean "no
+        # decline text was written". Nothing distinguishes them and nothing
+        # needs to — the only consumers are reads (.get()) in the harness and
+        # the scene read, neither of which requires presence. It must NEVER
+        # become require-present: a plan that fails because the model had
+        # nothing to decline would be the worst possible reading of this field.
         "PostCutPlan": {"brand_copy", "cut_refinements", "existing_caption_region",
                         "edit_rationale", "generated_scenes", "notes",
                         "post_caption", "post_hook",
-                        "preserved_silences", "source_text_regions"},
+                        "preserved_silences", "scenes_declined",
+                        "scenes_decline_class", "source_text_regions"},
         # B (Zac 2026-07-11): sound rides the beat — omission IS the default
         # ("most beats are carried by the voice"); the derivation .get()s it.
         "_EmphasisMoment": {"motion_graphic", "zoom_effect"},
@@ -7324,6 +7411,22 @@ def _secret_canonical_values():
         # were the only live flags the sweep could silently regress. Growing
         # ROUTE_LANGS is a per-script graduation decision: update it here AND in
         # the secret together, like every other canonical value.
+        # STEP B (owner GO 2026-08-17 naming the key; PROMPTLY_EDITORIAL_LIVE
+        # stays OFF and is deliberately NOT registered here). Points the
+        # editorial planner at 3.7-flash. INERT WHILE EDITORIAL IS SUPPRESSED:
+        # _editorial_suppressed() is true for all live traffic with the flag off,
+        # so today this changes which model the BUILD LANE and any future flip
+        # would use, and changes nothing a user sees. Measured on the frozen
+        # goldens: paired p50 171.5s -> 62.9s (2.73x) with cut count identical
+        # 5/5 and emphasis 18 vs 18 — BUT at thinking=24576, which is NOT
+        # production's 2048; the latency claim is re-measured at 2048 before any
+        # Step C. rollback = "gemini-3.1-pro-preview" here + secret + redeploy.
+        # CAPTION TEXT SWAP LIVE (owner ruling 2026-08-18, key named).
+        # The mechanical half of the diff path, ALONE: PROMPTLY_SURGICAL_V2
+        # stays DARK because it would also hand the model transition-add.
+        # rollback = "" here + secret + redeploy.
+        "PROMPTLY_CAPTION_TEXT_OPS": "1",
+        "PROMPTLY_EDITORIAL_MODEL": "gemini-3.7-flash",
         "PROMPTLY_ROUTE_LANGS": "hi,bn,ta,te,mr,gu,kn,ur,ar,id",  # Tier-1 graduated scripts (Hindi first, Arabic 2026-07-20, +id)
         "PROMPTLY_MOTION_BLUR": "1",       # motion-blur path LIVE per readback 2026-08-09
         "PROMPTLY_MIN_OUTPUT_RATIO": "0.20",  # output-ratio floor: reject below 20% of source
@@ -9623,6 +9726,315 @@ def _installed_set_diffed_every_deploy():
     assert "installed_set_diff.py" in _sh, (
         "deploy.sh no longer runs the installed-set diff — dependency drift would "
         "again be discovered by reading failure rates 11 hours later")
+
+
+@check("EVERY KEY HANDLER STAMPS ONTO A RENDER-INPUT DICT IS DECLARED (2026-08-17, RULE-1) [Law 2]. handler.py:30889 stamps `_page[\"emphasis\"]` whenever a design-system accent exists. render_schemas.TikTokPage is extra=\"forbid\" and never declared it, so EVERY emphasised caption page failed render-input validation with extra_forbidden; the degrade ladder then tried full -> retry -> stripped, every rung carried the SAME caption pages, and it exhausted \"with no input-differing rung\". 135 RENDER_FATALs across 44 DISTINCT USERS [Rule 7], and the rate tracked the DESIGN-SYSTEM ATTACH RATE (1, 5, 5, 30, 54 per hour) rather than any deploy boundary — which is exactly why every deploy-correlation hypothesis failed to fit and it read as a mystery for a day. THIRD INSTANCE OF THIS SHAPE: motionTokens was silently blocked by the same extra=\"forbid\" mirror, and source_duration_s / cpu_by_stage / gemini_tokens were each stripped by content-studio's top-level filter and had to be re-nested. A producer adds a key, the consumer's schema does not know it, and the failure surfaces far from the edit. The cert reads the ASSIGNMENTS out of handler's source rather than a hand-kept list, and strips comments first because a key named in prose is not a key assigned.")
+def _render_input_mirror():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_render_input_mirror.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"render-input mirror FAILED\n{_out[-1600:]}"
+    assert "ALL PASS" in _out, f"cert did not report ALL PASS:\n{_out[-700:]}"
+    # the TS mirror must agree too — three mirrors, one shape
+    _ts = open(_os.path.join(_here, "src", "remotion", "src", "types.ts"), encoding="utf-8").read()
+    assert "emphasis?" in _ts, (
+        "types.ts TikTokPageLike no longer declares emphasis — the third mirror drifted")
+
+
+@check("AN ERROR HANDLER MAY NOT RAISE (2026-08-16, RULE-1) [Law 2]. handler.py:41270 sat inside an `except` and did `round(float(v), 1)` over EVERY value of _timings — which legitimately carries nested DICTS, because gemini_tokens, cpu_by_stage and mem_by_stage were each deliberately nested there by a SEPARATE persist guard (content-studio strips unknown top-level result keys). So a job failed for a real reason, the error handler raised while recording it, and the TypeError REPLACED the original cause. Two of ten terminal jobs in the post-12:33Z cohort died that way and BOTH ARE NOW PERMANENTLY UNATTRIBUTABLE. That is the worst thing an error handler can do: not merely fail, but DESTROY THE EVIDENCE of why anything failed. Nobody wrote a bug here — three nesting fixes were individually correct and the coercion was individually reasonable; they collided, and only a rule about the SHAPE of error paths catches a collision. THE RULE: inside except/finally, a coercion over DATA WHOSE SHAPE YOU DO NOT CONTROL (a subscript, a .get(), a comprehension variable) must be guarded by isinstance or its own try. Arithmetic on locals is deliberately NOT flagged — `round(time.time() - t0, 1)` cannot surprise you, and a gate that flags it too becomes un-greenable, which teaches people to route around it.")
+def _error_path_totality():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_error_path_totality.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"error-path totality FAILED\n{_out[-1600:]}"
+    assert "ALL PASS" in _out, f"cert did not report ALL PASS:\n{_out[-600:]}"
+
+
+@check("AN ASR DIVERSION CARRIES THE EVIDENCE FOR ITS OWN VERDICT (2026-08-17, RULE-1) [Rule 2, Rule 5]. On the live worker version 0 of 60 jobs (0 of 60 users) reached the editorial path, and 82% of the diversions were ASR-driven — no_speech / no_speech_muted / no_audio / transcription_incomplete. The routing gate is `if len(_dg_words) == 0`, a literal zero, so it can only ever be as right as the transcript handed to it. Deciding whether those diversions were CORRECT cost a night of downloading production sources and re-transcribing them by hand, because a diverted row stored `\"transcript\": []` and NOTHING ELSE: the word count that drove the gate and the audio level that produced the word count both died with the container. THE MEASUREMENT HOLE WAS THE OUTAGE'S LENGTH, not the bug — and the replay ultimately proved BOTH verdicts exist in production (0 words at -6.1 dBFS bass-dominant, a music clip correctly routed; and 0 words at -26.5 dBFS speech-dominant on a Japanese source the replay transcribed and production did not). With the evidence in the row that is one query. The block must also survive write_job_status(result=), which is an explicit ALLOWLIST — a field present on result_payload but missing there is BUILT, NOT WORKING, exactly how error_subcode and motionTokens were silently swallowed. FAILS if the per-job reset goes (a warm Modal container would attribute the previous job's audio to this one), if the level stops being measured on the bytes ASR actually received, if word_count stops being persisted, if any result payload records a transcript+edit_recipe without the block, or if a failed measurement is allowed to report a number instead of FAILED (the PROBE COLLAPSE class, which has already produced one false verdict here).")
+def _asr_diagnostics_ride_the_row():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_asr_diagnostics.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_asr_diagnostics FAILED\n{_out[-1600:]}"
+    assert "CERT ASR-DIAGNOSTICS: PASS" in _out, (
+        f"cert_asr_diagnostics did not report PASS:\n{_out[-600:]}")
+
+
+@check("THE EDITORIAL PLANNER IS OVERRIDABLE AND PINNED (2026-08-17, RULE-1) [§4.7]. Two halves, both load-bearing. OVERRIDABLE: §4.7 is `change dark -> differ verdict -> keep or kill`, and an editorial-model swap that needs a code edit per arm cannot be staged behind the differ at all — the measured case for gemini-3.7-flash on the editorial path (3/3 replicated, component parity, better latency) is worth nothing until it can run against the frozen goldens without reaching a user first. PINNED: a planner whose identity can change without a deploy cannot be held to a differ verdict, because a GREEN would be scored against a model that no longer exists by the time it matters; `-latest` is refused outright, while `-preview` is allowed because gemini-3.1-pro-preview is a concrete resolvable version and not a moving pointer. The chat path already paid for this — an alias was blamed, a pin shipped on that hypothesis, and the real cause was prepay depletion; the pin was right, the reasoning was not. The DEFAULT is additionally pinned by name so that merely shipping the override cannot silently re-point the live planner: changing which model production plans on stays a deliberate, reviewed edit. Finally the startup line must interpolate the variable, because this file has already shipped a log that printed a hardcoded number while the real value differed, which made a whole matrix unreadable until it was caught.")
+def _editorial_model_overridable_and_pinned():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_editorial_model_pinned.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_editorial_model_pinned FAILED\n{_out[-1200:]}"
+    assert "CERT EDITORIAL-MODEL: PASS" in _out, (
+        f"cert_editorial_model_pinned did not report PASS:\n{_out[-600:]}")
+
+
+@check("A SAFE-EDIT FALLBACK NAMES ITS OWN CAUSE (2026-08-17, RULE-1) [Rule 4]. The Step-A differ found 5 of 12 control cells falling to the deterministic safe edit, and could not say WHY: the plan carried `notes: \"safe-edit fallback\"` and nothing else, because `_safe_reason` was a local that died with its stack frame. Four doors lead there — editorial_live_off (config), recipe wall-clock budget (capacity), recipe_transport:<Error> (transport), RECIPE_INVALID:<detail> (schema) — and they have four different fixes. The run could not distinguish them even though the evidence said it was NOT one cause: the five fallback walls split 3 long (503-516s, the retry-then-timeout signature) and 2 short (113-125s, which capacity does not explain). This is the same class as the ASR diagnostics hole closed the same day — the VERDICT survived and the EVIDENCE did not — and it is the difference between 'the control model is unreliable' and 'my harness ran 24 cells at once', which are opposite conclusions with opposite actions. Every assignment to _safe_reason now routes through _mark_safe_edit(), so a NEW fallback door cannot open without naming itself, and the recorder resets per call because a stale reason attributed to the next plan is worse than no reason at all.")
+def _safe_edit_names_its_cause():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_safe_edit_reason.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_safe_edit_reason FAILED\n{_out[-1200:]}"
+    assert "CERT SAFE-EDIT-REASON: PASS" in _out, (
+        f"cert_safe_edit_reason did not report PASS:\n{_out[-600:]}")
+
+
+@check("A SAFE EDIT IS AN INCIDENT, NOT A DELIVERABLE (owner ruling 2026-08-18, RULE-1) [Rule 2]. When editorial FAILS the job now fails, with the copy that already exists, instead of quietly shipping a deterministic clean-cut as if that were the product. A degraded edit delivered silently is invisible in every metric we have: the job completes, the user gets a video, and NOTHING counts the quality we did not deliver — which is how 174 jobs across 148 users received a fallback edit while every dashboard read them as successes. MEASURED BEFORE THE CHANGE, because it converts deliveries into failures: since Aug 11, 216 safe_edit of which 174 were FAILURE-driven; POST-v557, 41 safe_edit of which ZERO were failure-driven. All 174 were the success-path TypeError class, already fixed — so at today's rate this costs zero deliveries. It is the guard for when PROMPTLY_EDITORIAL_LIVE flips, and it must land BEFORE that flip, because once editorial is live this path would ship degraded edits at scale and silently. TWO DOORS STAY OPEN AND CONFUSING THEM WITH FAILURE IS HOW THIS GETS WRONGLY 'FIXED' LATER: editorial_live_off is CONFIG (editorial is suppressed, so the deterministic path IS the product today — 41 of 41 post-v557), and the recipe wall-clock door is a BUDGET guard that stops compounding before the render SIGKILL, where a safe edit beats a killed job. The flag must also DEFAULT OFF: a default-on rollback restores the old behaviour while looking like the fix is in place.")
+def _safe_edit_is_not_a_deliverable():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_safe_edit_not_a_deliverable.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_safe_edit_not_a_deliverable FAILED\n{_out[-1400:]}"
+    assert "CERT SAFE-EDIT-DELIVERABLE: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("THE CAPTION TEXT SWAP SHIPS ALONE (owner ruling 2026-08-18, RULE-1) [secret-auth law]. PROMPTLY_SURGICAL_V2 reads like a caption flag and is not: at the call site it gates THREE things — caption_text_overrides in the op enum (MECHANICAL, wanted), TRANSITION_ADD_BULLET replacing the refusal (a CREATIVE capability the model does not have today), and OPS_VOCAB_ADDENDUM. Flipping it to ship the text swap would also hand the model transition-add on re-edit, which is a second variable inside a one-variable change and exactly how a regression gets attributed to the wrong cause. This is why the secret-auth law names KEYS rather than features: the owner said 'un-dark caption_text_overrides', and the key that does that does more than its name implies. So the text swap gets PROMPTLY_CAPTION_TEXT_OPS — it is the single most common small request there is ('you spelled my name wrong'), purely mechanical, and the first user-visible proof that the diff path works at all, carrying ONE variable. THE ASSERTION THAT MATTERS IS THE NEGATIVE ONE: the narrow flag must NOT arm transition-add, and a future edit collapsing the two flags back together fails here. The transition-add selection is checked on the PARSED tree rather than by substring, because the two flag names differ by a prefix and a substring check would pass on the wrong one. surgical_v2 stays a superset so arming the broad flag can never silently disarm the narrow one.")
+def _caption_text_ops_ships_alone():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_caption_text_ops_split.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_caption_text_ops_split FAILED\n{_out[-1200:]}"
+    assert "CERT CAPTION-TEXT-OPS SPLIT: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("THE MECHANICAL ROUTER'S FAILURE DIRECTION (2026-08-18, RULE-1) [Rule 2]. A mechanical route that mis-fires produces a WRONG EDIT with NO MODEL IN THE LOOP to catch it — silently, deterministically, every time. A creative route that handles a mechanical request wastes $0.02 and one round trip. Those costs are not comparable, so ambiguous ALWAYS falls through to the existing classifier, and every 'creative' assertion in the matrix is a SAFETY test that matters more than the coverage ones. TWO INTERSECTIONS ARE THE HARD CASES, because a request can be mechanical AND something else at once: 'use Cove captions and cut the dead air' (scalar + WORD MUTATION — every anchor in the document is a word index, so a word mutation re-times the whole plan) and 'use Cove captions but make it punchier' (scalar + JUDGEMENT). Routing either mechanically applies the scalar and SILENTLY DROPS the other half — the user gets a video that ignored what they asked and nothing records the dropped half. It looks like success, which is why it is the worst thing this router can do. Both disqualifiers are therefore checked BEFORE any recogniser and disqualify the WHOLE request. The judgement intersection exists in the matrix only because a RED proof showed the creative-intent disqualifier was never load-bearing without it: every creative case produced no mechanical op anyway and fell through at 'no op recognised', so removing the disqualifier changed nothing. An unregistered caption style is REFUSED rather than coerced, because coercing it hands the user a style they did not ask for. Dark by default.")
+def _mechanical_router_fails_toward_creative():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_mechanical_router.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_mechanical_router FAILED\n{_out[-1400:]}"
+    assert "CERT MECHANICAL-ROUTER: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("RE-ANCHORING SURVIVES A WORD-SPACE MUTATION (2026-08-18, RULE-1). THE LOAD-BEARING CORRECTNESS PROPERTY OF THE EDITABLE-DOCUMENT MODEL. edit_recipe is a durable editable document and EVERY anchor in it is a word index — emphasis_moments word_indices[0], transitions after_word_index, broll_clips and motion_graphics (start,end), text_overlays start_word_index. Those are stable ONLY while the kept-word space is unchanged, so the moment a re-edit removes words ('cut the dead air', 'make it 30 seconds') every anchor downstream of the removal points at the wrong word or at a word that no longer exists. A silent mis-anchor renders a graphic on the WRONG WORD: not a crash, not a failed job, and invisible to every other gate here — it is a quality defect the user notices and we cannot measure, which is the worst class this project has, and exactly what the parked cut-removal work would have shipped. _reanchor_entry_to_survivors claimed four properties in its docstring and nothing proved any of them. This drives the REAL function and proves eight: a surviving anchor does NOT move (the common case), a removed anchor lands on a survivor, ranges snap inward keeping start<=end, whole-span-gone is the ONLY correct drop (a span whose every word is removed drops even with neighbours alive — the distinction the drop rule turns on), idempotence (a re-edit chain re-runs the pass, so a non-idempotent snap drifts the anchor further every time), the input is never mutated (the caller keeps the prior plan for diffing), content is byte-identical so a re-anchor cannot become an edit, word_indices snap and dedupe, and the pass is actually CALLED.")
+def _reanchor_survives_word_mutation():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_reanchor_under_word_mutation.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_reanchor_under_word_mutation FAILED\n{_out[-1400:]}"
+    assert "CERT REANCHOR: PASS" in _out, f"cert did not report PASS:\n{_out[-600:]}"
+
+
+@check("\"MAKE IT 30 SECONDS\" ANSWERS HONESTLY (2026-08-18, RULE-1) [Rule 2]. A top-five request that was impossible: no duration-target field existed anywhere, and `cuts` is deliberately absent from the re-edit op vocabulary because mutating the kept-word space invalidates every anchor in the document. Re-anchoring is now proven under mutation, so the missing half is WHICH words to remove. THE DANGEROUS FAILURE IS NOT 'it did not work' — IT IS OVER-CUTTING TO HIT A NUMBER: a video that reaches 30s by removing meaning is a worse answer than one that honestly reports 78s. So the negotiation floor is the property under test, and the ladder is the mechanism that protects it: silence (removes NO words, zero semantic cost) -> filler -> false start -> stutter -> phrase retake (a whole discarded take, the first real content decision and therefore last). Each rung costs more meaning than the one above, the policy spends the cheapest seconds first and STOPS the moment the target is met, so a 2-second trim never reaches a retake. Three outcomes, all honest: met; floor (report the achievable duration and DO NOT keep cutting); impossible (the target is longer than the source — we cannot add footage, and the answer is a sentence rather than a silently unchanged video). It COMPOSES the five detectors already trusted on the fresh path rather than writing a sixth opinion to compete with them, and a rung whose detector is unavailable is SKIPPED and reported as unseen rather than treated as evaluated-and-empty.")
+def _duration_target_answers_honestly():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_duration_target.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_duration_target FAILED\n{_out[-1400:]}"
+    assert "CERT DURATION-TARGET: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("PROMPT V2 IS WIRED, AND CANNOT BE ARMED INTO A WORSE EDIT (2026-08-18, RULE-1) [Rule 2]. Arm B of the pre-registered A/B swaps the ~2,000-line doctrine for the 111-line beat-major one and REUSES this call's catalog verbatim, so the comparison measures a doctrine rather than a different pipeline. THE ONE THAT COSTS USERS: BeatMajorPlan can express component placements and four globals and NOTHING else — no cut_refinements, emphasis_moments, text_overlays, broll_clips, caption_keywords, caption_position_changes or thumbnail — while the v2 doctrine's own steps tell the model to cut for pace, vary the texture, and land the payoff with sound and zoom. A job run this way returns an MG-only plan: no zooms, no b-roll, no sound, no caption keywords. So PROMPTLY_PROMPT_V2 alone MUST NOT arm it; only the per-job harness override may, and the set-but-refused flag says so out loud rather than reading as a broken deploy. Also asserted: the catalog slice RAISES if its section heading ever moves (a silent -1 slices the whole prompt away and the A/B would read it as the doctrine failing); the hand-inlined wire schema neither misses nor invents a BeatMajorPlan field, and carries no $ref/$defs — with a negative control proving pydantic's own schema WOULD emit them, which is why it is written by hand; beats stay anchored on word_index, never a float second (a second clock has cost this repo twice); and flatten_beats is REACHABLE under `if v2:` and runs BEFORE the string caps and strict validation, so arm B inherits every downstream invariant instead of skipping them. Checks are AST-derived, not substring — the first version was grepped and three RED mutations passed GREEN, including the live-arming one, because an appended `or v2_enabled()` still contains the substring it was matched on.")
+def _prompt_v2_wiring():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_prompt_v2_wiring.py")],
+                  capture_output=True, text=True, timeout=180)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_prompt_v2_wiring FAILED\n{_out[-1600:]}"
+    assert "CERT PROMPT-V2 WIRING: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("A BEAT CARRIES THE WHOLE EDIT, IN THE SHAPES ARM A ALREADY EMITS (2026-08-18, RULE-1). The first beat schema could express ONE thing — a component placement — with no field for a cut, a zoom, an overlay, a b-roll clip, a caption beat or a generated scene, while the doctrine's own steps told the model to cut for pace, vary the texture and land the payoff with sound. The schema could not receive most of what the prompt asked for, so arm B would have returned MG-only plans and the pre-registered win condition (generated_scenes off zero) was not observable at all. All seven treatments now exist and this asserts the four ways that can still be silently wrong: a family declared on the beat but never flattened (read afterwards as 'the planner didn't ask for b-roll'); a flattened shape that is not what the pipeline consumes — every expectation here is READ OFF PostCutPlan's own resolved schema rather than written from memory, both for missing required fields AND for invented ones; a required field FABRICATED to satisfy the schema rather than the treatment being dropped and ledgered, which is the exact failure drop-never-fabricate exists to prevent, with the drop still counted as REQUESTED so it cannot read as a model decline; and a SECOND CLOCK — every span must end on a word index, never a float second, which this repo has paid for twice. Also asserted: caption keywords de-duplicate (a word emphasised at two beats is one keyword, and a duplicate double-counts the density read), and density_of reports placements and all-motion SEPARATELY, because collapsing them is the unit error that made REF-2's 0.14/sec read against a 3.5 target that counts a different thing.")
+def _prompt_v2_families():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_prompt_v2_families.py")],
+                  capture_output=True, text=True, timeout=240)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_prompt_v2_families FAILED\n{_out[-1600:]}"
+    assert "CERT PROMPT-V2 FAMILIES: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("ONE COMPONENT MUST NEVER COST THE WHOLE EDIT (2026-08-19, RULE-1) [Law 2]. An unplaceable card used to append an F7 violation -> RECIPE_INVALID -> the MODEL was asked to repair it TWICE -> safe_edit_refused -> the user got NOTHING, after we had paid for transcription, analysis and a full planning call. The pipeline was asking the model to compute something it can compute itself, and discarding a paid render when the model declined. Now a LADDER: place -> REPOSITION (contract the window toward the anchor until a band is clear) -> DROP with a ledger entry, a divergence and a user-facing note -> and rung 4 (fail) must stay unreachable from a clear-region violation alone. THREE RUNGS, NOT FOUR: the `shrink` rung I specced is IMPOSSIBLE against this check and is documented as such at the site — F7 judges size by TYPE MEMBERSHIP (mg_type in _MG_FULLSIZE_TYPES), so content never reaches it and a shorter card gets an identical verdict; building it would have been a rung that logs and never flips a decision. REPOSITION MOVES THE WINDOW, NEVER THE ANCHOR, so F5.3 grounding is preserved BY CONSTRUCTION rather than by a second check — and the search rejects a window occupied by OUR OWN CAPTION TRACK, not just by the face, with the deliberate exception that caption_style='none' contributes nothing (the source carries its own burned captions and source_text_regions already covers those bands; counting them twice would strand a placeable card). The user-facing note is asserted as a RENDERED SENTENCE against eight forbidden strings with the raw violation as negative control — the first version grepped the source block and matched its own comment 'NOT AN ERROR MESSAGE', a location check pretending to be a property check. Also reports rung-2 yield by geometry: 0/22 saved on a STATIC face (the real case — contraction cannot help a frame that never changes) vs 216/216 on a sweep, so the rung's limits are measured rather than assumed.")
+def _graceful_component_placement():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_graceful_placement.py")],
+                  capture_output=True, text=True, timeout=240)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_graceful_placement FAILED\n{_out[-1600:]}"
+    assert "CERT GRACEFUL-PLACEMENT: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("EVERY IDENTIFIER PASSED IN JSX IS BOUND (2026-08-19, RULE-1) [Law 2]. `<MotionGraphicsLayer ... sourceUrl={sourceUrl} />` was added inside PromptlyOverlay, which destructures its input and NEVER BOUND sourceUrl — PromptlyRenderInput carries it, the component just did not take it. It surfaced as `SymbolicateableError [ReferenceError]: sourceUrl is not defined` -> RENDER_FATAL, after a full image rebuild, a planning call and 196s of wall clock, and the render produced NOTHING. NOTHING IN THIS REPO COULD HAVE CAUGHT IT: there is no tsc in the tree, this gate reads Python, and brand-mg-wiring reads the MG mirrors — a TSX ReferenceError had no guard of any kind. Deliberately NARROW: it checks identifiers passed to the layers that carry the frame compositions, not everything a linter would, because the one pattern that cost a render is the one worth a check. RED-proven by re-introducing the exact defect.")
+def _frame_comp_jsx_bindings():
+    import os as _os, subprocess as _sub
+    _rt = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "src", "remotion")
+    _t = _os.path.join(_rt, "frame-comp-wiring.test.mjs")
+    assert _os.path.exists(_t), "the JSX-binding smoke is gone — the class is unguarded"
+    _r = _sub.run(["node", "frame-comp-wiring.test.mjs"], cwd=_rt,
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"frame-comp wiring FAILED\n{_out[-1200:]}"
+
+
+@check("AN ASR'S PUNCTUATION HABITS MUST NOT GATE A LANGUAGE ROUTE (2026-08-20, RULE-1) [Rule 2]. The dead-air gate reads 'sentence-final OR >= _MIDSENTENCE_STALL_S (0.70s)'. MEASURED on job cada6a1b (Arabic, 88 words): Deepgram populated punctuated_word on 88 of 88 and emitted ZERO terminal punctuation, so the first half of that gate could NEVER fire and every gap was judged against 0.70s instead of the 0.03s trim trigger — a 23x stricter bar applied to a whole live Tier-1 route as a SIDE EFFECT of the ASR's habits, never as a decision. All 3 inter-word gaps (max 0.63s) fell under it, detect_dead_air returned zero, cut_plan['located_silences'] was empty, the WITHIN-CLIP SILENCES prompt block was never appended, and preserved_silences:[] in the plan was the SCHEMA DEFAULT rather than a decision. Two halves: native terminal glyphs are now terminal punctuation (؟ 。 ！ ？ — a correctly-punctuated non-Latin transcript was being read as unpunctuated), and when a transcript has NO terminal punctuation anywhere the linguistic gate is skipped entirely because 'not sentence-final' then says nothing about the speech. SIZE STATED SO IT IS NEVER MISREAD AS THE PASSTHROUGH FIX: this recovers ~0.63s of a 34.9s edit; the passthrough is cut_refinements coming back EMPTY (159/159 on 2026-08-04, absent on both renders of 2026-08-19). RED-proven by dropping the native glyphs and by unconditioning the gate.")
+def _deadair_unpunctuated():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_deadair_unpunctuated.py")],
+                  capture_output=True, text=True, timeout=300)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_deadair_unpunctuated FAILED\n{_out[-1400:]}"
+    assert "CERT DEADAIR-UNPUNCTUATED: PASS" in _out, f"cert did not PASS:\n{_out[-500:]}"
+
+
+@check("THE LOUDEST EVENT IN A JOB'S LIFE MUST REACH THE LEDGER (2026-08-19, RULE-1) [Rule 2, Law 2]. Measured on real traffic: across 781 jobs (2026-08-16..18) ZERO divergence rows carried component=outer, while 128 of those jobs (16.4%, 96 DISTINCT USERS, 1.3 jobs/user — broad, not one retrying user) recorded the rescue's CONSEQUENCE as recipe:safe_edit_fallback original={'reason':'outer:UNKNOWN'}. 'Everything failed, we re-ran it as a bare mechanical cut so the user got something' was the one event the ledger could not see. MECHANISM, and the naive fix does not work: _outer_safe_rescue records the divergence, then calls handler(job), whose FIRST action is _DIVERGENCE_LOG.clear() — the record is wiped and the inner run flushes a rescue-free ledger to S3. Recording harder at the rescue site cannot fix it; the record must be re-emitted INSIDE the run whose ledger actually flushes, so it rides on input_data['_rescue_ledger'] and handler() re-records it immediately after the clear. The same record now NAMES what UNKNOWN hides — exc_type, exc_msg and the INNERMOST frame (file:line:function) — because traceback.print_exc() only reaches container stdout, which is not queryable across renders. Note `traceback` is NOT module-scope in handler.py: a missing local import loses the frame silently inside the fail-open except, which is why clause 4 asserts the frame is present. All four clauses RED-proven by re-introducing the real defects (deleting the re-emit block; dropping the local import) and restoring byte-identically.")
+def _outer_rescue_ledgered():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable,
+                   _os.path.join(_here, "cert_outer_rescue_ledgered.py")],
+                  capture_output=True, text=True, timeout=420)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_outer_rescue_ledgered FAILED\n{_out[-1600:]}"
+    assert "CERT OUTER-RESCUE-LEDGERED: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("EVERY DECODE SURFACE IS BOUNDED SOMEWHERE, AND props IS REQUIRED TO DECODE BUT NOT TO PARSE (2026-08-19, RULE-1) [Law 2]. Lever 3 capped 42 free-text strings and made an in-string repetition loop decode-impossible; it moved the runaway rather than ending it. Enumerated on the live schema, exactly four surfaces survived unbounded — the two free-form props objects plus caption_keywords and ref_image_keys, whose ITEMS were capped at 120/200 chars while their item COUNT was not — and a shape-abort tail caught the spiral running on exactly that axis: 4,096 chars of '#newlaunch #exclusiveaccess #presale #booknow ...'. Measured cost of the props half: 10 of 24 requested motion graphics (41.7%, 5 of 7 sources) dropped as empty_props, the model having written the card's payload into `why` and overflowed its 96-char cap (logged: parse-edge maxlength field=post_cuts.why declared=96 actual=122 carrying '80% 5-year post-handover'). The cert holds four clauses: no new uncapped string or string-list; props required in the schema SENT to Vertex but NOT on the pydantic model (required on the model would fail a whole edit over one missing field instead of dropping one component, K7); maxItems never appears in the sent schema (Vertex 400s on it — an outage on every job, so the bound must live at the parse edge); and the cap demonstrably truncates an over-long list while leaving a list at exactly the cap untouched. Vertex grammar compile with props required was verified on the REAL schema before shipping (control compiled too). All four clauses RED-proven by monkeypatch.")
+def _unbounded_decode_surfaces():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable,
+                   _os.path.join(_here, "cert_unbounded_decode_surfaces.py")],
+                  capture_output=True, text=True, timeout=420)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_unbounded_decode_surfaces FAILED\n{_out[-1600:]}"
+    assert "CERT UNBOUNDED-DECODE: PASS" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("A COMPONENT IS TAUGHT IN THE ASSEMBLED PROMPT, IN THE SECTION IT IS EMITTED FROM (2026-08-19, RULE-1) [Law 2]. The four generation-free compositions shipped with EVERY link of the chain closed — module, MG_MAP, adapter, VALID_MG_TYPES (32 types, all four in the enum), types.ts, production counter, gate green, sweep 'reachable' — and were requested ZERO times on a live render. Cause, measured in characters rather than asserted from the source: all four were present in the assembled 177,814-char instruction with intact FITS/FIGHTS, but under `=== SEAM TREATMENTS (transitions & tight-cut overlays) — AUTHORED IN A DEDICATED PASS ===`, four lines below the sentence 'You do not emit them here.' — 73,394 chars downstream of StatCard, which the same model requested twice on the same source. PRESENCE IS NOT TEACHING: a motion graphic documented in the seam section has been told not to be authored. The cert assembles the prompt via the same _build_post_cuts_prompt the pipeline calls, then requires each of the four to sit in the SAME section as StatCard (the positive control, known-reachable from live traffic), with a fabricated type name as the negative control so a loose matcher cannot report a clean sheet. RED-proven on the real defect in both premium arms before the fix.")
+def _catalog_reaches_the_model():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_catalog_reaches_model.py")],
+                  capture_output=True, text=True, timeout=420)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_catalog_reaches_model FAILED\n{_out[-1600:]}"
+    assert "PASS — all three are IN the assembled instruction" in _out, (
+        f"cert did not report PASS:\n{_out[-600:]}")
+
+
+@check("NO COMPONENT IS SCORED AGAINST A SOURCE THAT CANNOT TRIGGER IT (2026-08-17, RULE-1) [Rule 5]. Three corpora in a row were selected on properties unrelated to the component under test, and each would have reported a CORRECT DECLINE as a component failure: REF-2 was already edited (declining to decorate finished work is judgement, not a defect); the editorial_eng_* pair contained no spoken name and no stated number, so brand_copy 0/4 was N/A and a planner emitting brand copy there would have been FABRICATING, which the directive forbids; and the frozen goldens, measured 2026-08-17, can test brand_copy on 1 of 12 sources, scenes on 0 and payoff on 0 — excellent for route/language regression, closed as a component instrument. The fix is SELECTION, not inspection after the fact, because checking triggers afterwards still wastes the whole run. This asserts the component corpus keeps the properties that make it an instrument: every source carries a recorded directive trigger; every component has at least 2 sources, since one cannot separate a decline from noise; every source is durably pinned by sha256+etag+bytes in our own bucket rather than live user media, because an A/B on drifted bytes compares two different things; no two entries share sha256, because two ASR runs of ONE video produce different transcript text and the text-hash pass demonstrably let an identical 47.4s/305MB source through twice; and every source sits inside the product's own 15-90s band, because a 171s source measures a regime users do not have.")
+def _component_corpus_is_an_instrument():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_component_corpus.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_component_corpus FAILED\n{_out[-1400:]}"
+    assert "CERT COMPONENT-CORPUS: PASS" in _out, (
+        f"cert_component_corpus did not report PASS:\n{_out[-600:]}")
+
+
+@check("REF-2 IS A BAR, NOT AN INPUT (owner ruling 2026-08-17, RULE-1) [Rule 3]. The owner watched the first Lumen edit end to end and confirmed REF-2 is ALREADY FULLY EDITED — so the planner's refusal to decorate it ('already contains bespoke 3D motion graphics... declined extra scenes to prevent clutter') was CORRECT JUDGEMENT, not a defect. That settles a question this project spent real money re-asking: a finished video cannot measure whether the planner decorates a RAW one, so every run that used REF-2 as an input measured the wrong thing and read a correct decline as a failure. It is the third corpus-selection error of exactly this shape, and the only one that had to be resolved by the owner watching output himself, which is the most expensive way this project can learn anything. REF-2 is therefore RETIRED as a test input — nothing may plan, transcribe, probe or mount it — while golden/lumen-refs/ stays exactly where it is, because it remains the bar an edit is judged against by eye and deleting it would lose the reference. This check caught a live instance the moment it was written (ab_matrix_app.py still held the path constant). Prose is deliberately still allowed: comments never reach the AST and docstrings are exempted by name, so the reasoning can be written down wherever it helps; what fails is a ref2 path reaching CODE.")
+def _ref2_is_a_bar_not_an_input():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_ref2_not_a_test_input.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_ref2_not_a_test_input FAILED\n{_out[-1400:]}"
+    assert "CERT REF2-NOT-AN-INPUT: PASS" in _out, (
+        f"cert_ref2_not_a_test_input did not report PASS:\n{_out[-600:]}")
+
+
+@check("NEVER DOUBLE THE CAPTIONS (ART_DIRECTION §3, 2026-08-17, RULE-1). The owner watched the trigger-source render and found Promptly's own yellow captions stacked on top of the source's burned-in white ones, in the same band, overlapping — one defect that made the output read as broken regardless of every other decision in it. THE CAUSE WAS NOT A MISSING SIGNAL. It was THREE descriptions of one fact and the WEAKEST one gating captions: the zoom gate read _burned_text['regions'][].class=='captions' or a wide non-corner signage band (BROAD — it fired correctly, suppressing 4 zooms on that very render), while the caption gate read only _burned_text['has_burned_captions'] (NARROW — it did not fire); and the model had ALSO declared source_text_regions=['bottom'] in the same plan, but that field was normalised AFTER the suppression decision, so it could never influence it at all. A fourth `or` clause would have fixed that render and left the class alive, so the fix is structural: ONE predicate, _burned_text_caption_block(), which every caption-suppression decision routes through and which reads every signal at the zoom gate's breadth. This asserts each blocking branch still exists AND IS REACHABLE — name-presence alone was vacuous, because `for r in ():` and `if False:` both leave the return in the AST as dead code, which is precisely the shape of the original bug (a branch that existed and ran too late to matter). The explicit-user-request override is verified as a resolved CALL at both sites rather than a substring, because renaming the function left its old name as a prefix and sailed through the substring version. ART_DIRECTION §3 is absolute: burned-in text present => caption_style 'none'; there is no reduce and no reposition.")
+def _never_double_the_captions():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_never_double_captions.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_never_double_captions FAILED\n{_out[-1600:]}"
+    assert "CERT NEVER-DOUBLE-CAPTIONS: PASS" in _out, (
+        f"cert_never_double_captions did not report PASS:\n{_out[-600:]}")
+
+
+@check("THE NAME PLATE FIRES WITHOUT A MODEL CALL, AND NEVER INVENTS A NAME (ART_DIRECTION §6, 2026-08-17, RULE-1) [Rule 2]. brand_components.build_brand_specs() was ALWAYS a pure function — no model call, palette lock built in — and it was fed from edit_plan['brand_copy'], which the planner emits on 0 of 198 jobs. So the name plate and end card were WIRED AND UNREACHABLE: the mechanism worked end to end and its only input never arrived, which is why 'the component is broken' and 'the copy was never supplied' stayed confusable for weeks. On the render the owner watched, the speaker says 'My name is Sujay Ahmad' in the first six words and no plate fired. The transcript already carries the trigger, so the fallback is deterministic — no model call, no added latency, no cost — and the planner's brand_copy still wins whenever it is present. The cert is BEHAVIOURAL, not structural: it loads the real function out of handler.py and runs it against a table of real production transcripts and real measured failures, because a structural check ('the regex is case-sensitive') can be satisfied by code that does not work. It pins four failure modes measured against 800 production transcripts: re.I made [A-Z] match lowercase so 'I'm paying' / 'I'm sure' / 'I'm not' all scored as names (EVERY name hit in the first component corpus was a false positive); a trailing (?!'s) let the regex BACKTRACK so \"Bennie's\" matched as 'Benni' with the lookahead satisfied, inventing a person; 'I'm Mr. Shannon' yielded the name 'Mr'; and 'comments from the CEO' is a third party's title, not the speaker's. Final precision: 17 of 17 fires correct at n=800. A wrong plate on a stranger's video is worse than no plate, so refusing is always the safe outcome and the traps are asserted as hard as the hits.")
+def _name_plate_deterministic():
+    import os as _os, subprocess as _sub, sys as _sys
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _r = _sub.run([_sys.executable, _os.path.join(_here, "cert_name_plate_deterministic.py")],
+                  capture_output=True, text=True, timeout=120)
+    _out = (_r.stdout or "") + (_r.stderr or "")
+    assert _r.returncode == 0, f"cert_name_plate_deterministic FAILED\n{_out[-1600:]}"
+    assert "CERT NAME-PLATE: PASS" in _out, (
+        f"cert_name_plate_deterministic did not report PASS:\n{_out[-600:]}")
+
+
+@check("EVERY COUNTER NAMES ITS BUILD (2026-08-16, RULE-1) [Rule 4, JUDGE]. A counter that records WHAT happened but not WHICH BUILD it happened on cannot be read back without RECONSTRUCTION. That bit on 2026-08-16: two build-lane runs showed `brand_copy` declined even on the reference where a name is spoken — a load-bearing input to redesigning the directive — and attributing those runs to an image required walking commit timestamps, because the run record named no build. Worse, the run's own output was INSUFFICIENT to settle it: `brand_specs` appears in the result even on a commit that lacks the schema field, so the obvious evidence pointed the right way for the wrong reason. Reconstruction is not observation. Every analytics counter now carries build_sha, and the dirty marker rides with it because a counter emitted from an uncommitted tree is attributed to a commit that does NOT describe the code that produced it — which is worse than being unattributed, because it looks authoritative. FAILS if _build_stamp is removed or if any counter stops carrying it.")
+def _counters_name_their_build():
+    import os as _os
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _h = open(_os.path.join(_here, "handler.py"), encoding="utf-8").read()
+    assert "def _build_stamp(" in _h, "the build stamp helper is gone"
+    assert "PROMPTLY_BUILD_DIRTY" in _h, (
+        "the stamp no longer marks a dirty tree — an unattributable counter is better "
+        "than one attributed to a commit that does not describe it")
+    _n = _h.count('"build_sha": _build_stamp()')
+    assert _n >= 9, (
+        f"only {_n} counters carry build_sha; every analytics_events emitter must, or a "
+        "finding read back later is unattributable to an image")
+    _m = open(_os.path.join(_here, "modal_app.py"), encoding="utf-8").read()
+    assert '"build_sha": _os.environ.get("PROMPTLY_BUILD_SHA", "")[:12]' in _m, (
+        "the build-lane harness run record no longer names its build — the exact gap "
+        "that made the 2026-08-16 brand_copy finding unattributable")
+
+
+@check("PRODUCTION PROVENANCE IS READABLE, NOT INFERRED (2026-08-16, RULE-1) [Rule 4]. The build SHA has always been BAKED into the image, but it was only ever READABLE from a log line or a completed job's payload — so 'what is running right now?' had no direct answer and every attempt to answer it was INFERENCE. I inferred it twice today: once from `modal app history`, once by counting live functions and identifiers (480/2108) to decide whether a change had made it in. Both are proxies. Rule 4 says assert only what you can OBSERVE, and that is impossible without a surface to observe. build_info is that surface — one GET returning the exact SHA, mirroring content-studio's /api/health `rev`, which has settled this same question on the server side repeatedly. DIRTY IS PART OF THE ANSWER: a deploy from a tree with uncommitted changes reports a SHA that does not describe what is running, so `dirty` is returned alongside it rather than assumed false. This check FAILS if the endpoint is removed, if it stops being a GET (a POST cannot be curled by an operator mid-incident, which is exactly when it is needed), or if it stops reporting either the sha or the dirty flag.")
+def _build_provenance_readable():
+    import os as _os, ast as _ast
+    _here = _os.path.dirname(_os.path.abspath(__file__))
+    _m = open(_os.path.join(_here, "modal_app.py"), encoding="utf-8").read()
+    _t = _ast.parse(_m)
+    _fn = next((n for n in _ast.walk(_t)
+                if isinstance(n, _ast.FunctionDef) and n.name == "build_info"), None)
+    assert _fn is not None, (
+        "build_info is gone — production provenance goes back to being INFERRED from "
+        "log lines and function counts")
+    _dec = " ".join(_ast.unparse(d) for d in _fn.decorator_list)
+    assert "fastapi_endpoint" in _dec and 'method=\'GET\'' in _dec.replace('"', "'"), (
+        "build_info is not a GET endpoint — an operator cannot curl it mid-incident, "
+        "which is the only moment it matters")
+    _src = _ast.get_source_segment(_m, _fn)
+    assert "PROMPTLY_BUILD_SHA" in _src, "build_info no longer reports the SHA"
+    assert "PROMPTLY_BUILD_DIRTY" in _src, (
+        "build_info no longer reports DIRTY — a SHA from an uncommitted tree does not "
+        "describe what is running, and reporting it alone is worse than reporting nothing")
+    assert '"PROMPTLY_BUILD_SHA": _BUILD_SHA' in _m, (
+        "the SHA is no longer baked into the image env at deploy time")
 
 
 @check("THE WORKER WRITES ITS OWN TERMINAL (2026-08-16, RULE-1) [Law 2, Rule 7]. MEASURED: 48 jobs across 33 DISTINCT USERS died in the plan stage on 2026-08-16 and NOT ONE wrote a terminal status — 0/48 emitted worker_envelope_write while 45 OTHER jobs in the same window did, so the instrument works and the zero is real. Every one of those users waited 888-900s (spread ~4s across 8 samples: a TIMER, not work) for the dispatcher\'s reaper to give up and tell them the render service was unreachable. THE MECHANISM WAS run_pipeline_bg ITSELF: `_H.handler` sat in a try/FINALLY with NO except, so the finally ran telemetry, the exception kept propagating, and the completion-POST below it — the thing that settles a job in milliseconds — was never reached. A failure the worker understood in seconds cost the user a quarter of an hour, for ANY cause. This check is deliberately CAUSE-AGNOSTIC: it does not care why a pipeline dies, only that a dead pipeline terminalises itself, so the NEXT unknown failure costs ~1s instead of 900s. FOUR PROPERTIES ARE LOAD-BEARING. (1) BaseException, not Exception — a SystemExit-shaped death is exactly the case that strands a row. (2) It writes the DB DIRECTLY and never through write_job_status, because that path takes _JOB_STATUS_LOCK and a safety net must not queue behind the failure it insures against. (3) It is IDEMPOTENT — it reads status first and writes only when the row is still non-terminal, so a handler that already failed honestly keeps its own better error. (4) It RETURNS the envelope instead of re-raising: run_pipeline_bg is spawned as a RETRIABLE background function, and re-raising would hand a hard-failing job back for another full re-render.")

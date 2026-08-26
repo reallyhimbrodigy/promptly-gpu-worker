@@ -1,0 +1,178 @@
+{
+ "purpose": "sources with enough CONTENT that a pace cut is possible, with human-marked ground truth for where a lean edit cuts",
+ "population_note": "median user video is 27s / 64 words; only 22.9% reach 150 words. Pace cutting does NOT improve the median video — this corpus is deliberately the tail.",
+ "criteria": {
+  "min_words": 150,
+  "latin_script_only": true,
+  "one_per_user": true,
+  "ranking": "repeated 4-grams + type-token ratio — A RANKING, NOT A VERDICT"
+ },
+ "non_latin_skipped_unjudged": 19,
+ "ground_truth": "MARKED for the top 2 by reading (2026-08-20); remaining 6 UNCONFIRMED",
+ "sources": [
+  {
+   "id": "0c71a22d-62aa-4a79-a013-b1c95328bfde",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/ea7609f2-fbe7-4130-a223-b85698e56d72/1787176067316-F050BE50-8E2F-4DF8-8A04-ED588E45C562_L0_001.mp4",
+   "duration_s": 160.0,
+   "vibe": "Viral engaging video",
+   "signals": {
+    "words": 301,
+    "repeated_4gram_hits": 106,
+    "repeated_4gram_rate": 0.3557,
+    "type_token_ratio": 0.362,
+    "top_repeated_3gram": "this is the"
+   },
+   "transcript_text": "this is the kind of black dress that doesn't need to scream to get attention this sofia gown originally retailed for over $2,600 and what makes it special is the structure the long sleeves sculpted front and that perfectly placed waist cutout it gives you shape without feeling overdone it's elegant fitted and incredibly flattering i'll turn it around and this is where the dress completely changes the open back gives it just enough drama while still keeping the overall look sophisticated uh the floor length silhouette and subtle train make this perfect for a black tie wedding gala formal dinner or any evening where you want to look polished but memorable this is exactly what i look for when i curate reverie a dress that feels luxurious photographs beautifully and makes the woman wearing it feel like the best dressed person in the room this is the kind of black dress that doesn't scream doesn't need to scream to get attention this is a sofia gown originally retailed for over $2,600 and what makes it special is the structure the long sleeves sculpted front and the perfectly placed waist cutouts it gives you shape without feeling overdone it's elegant fitted and incredibly flattering then you turn around and this is where the dress completely changes the open back gives it just enough drama while still keeping the overall look sophisticated the floor length so you're wet and sub subtle train for or it makes for a perfect black tie wedding gala formal dinner or any evening where you want to look polished but memorable this is one this is exactly what i look for when i curate reverie a dress that feels luxurious photographs beautifully and makes the woman wearing it feel like the best dressed person in the room",
+   "cuttable": "YES",
+   "ground_truth_spans": [
+    {
+     "unit": "retake",
+     "verbatim": "this is the kind of black dress that doesn't scream doesn't need to scream to get attention ... best dressed person in the room",
+     "why": "the ENTIRE script is delivered a second time, near verbatim. A lean edit keeps the stronger take and drops the other. ~150 of 301 words."
+    }
+   ],
+   "ground_truth_units": [
+    "retake"
+   ],
+   "est_removable_pct": 48,
+   "ground_truth_note": "THIS IS A cut_refinements CATEGORY (b) RETAKE — the existing pass is taught this exact case."
+  },
+  {
+   "id": "c9ad1bbf-d318-43e6-8897-a12eda924b4e",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/1e7635ee-fe18-4bc4-a318-c4e2ed645734/1787143088564-37E0397C-1501-40CD-A19B-915560F208AC_L0_001.mp4",
+   "duration_s": 117.0,
+   "vibe": "Make it a viral video, this is part-1 . Cut silences, and make it aesthetic",
+   "signals": {
+    "words": 225,
+    "repeated_4gram_hits": 38,
+    "repeated_4gram_rate": 0.1712,
+    "type_token_ratio": 0.382,
+    "top_repeated_3gram": "if you have"
+   },
+   "transcript_text": "if you have if you have just started your fitness journey you have come across two words that is bulk and cut if you have just started your if you have just started if you have just started your fitness journey you have come across you have heard you would have heard two different two completely different opinions one person says you need to bulk and the other says no you need to lose the fat first and what if i tell you there's another third option and what do have to and what if i tell you there's another third option and it's called body recomposition that means losing fat while building muscles that means losing fat that means losing fat while building or maintaining muscle mass if you are beginner if you're beginner or someone who's getting back to the gym after a break or or you or someone who wants to or someone who want to lose some fat or someone who or someone who who want or someone who wants to lose some fat this can be a great approach for you this can be a great approach for you instead of chasing number on the scale instead of chasing instead of instead of chase instead of chasing number on the scale focus on getting stronger and improving your body composition",
+   "cuttable": "YES",
+   "ground_truth_spans": [
+    {
+     "unit": "phrasal_restart",
+     "verbatim": "if you have | if you have just started your | if you have just started",
+     "why": "abandoned starts before the completed take"
+    },
+    {
+     "unit": "phrasal_restart",
+     "verbatim": "you have come across | you have heard | you would have heard",
+     "why": "three attempts at one clause; keep the last"
+    },
+    {
+     "unit": "phrasal_restart",
+     "verbatim": "instead of chasing | instead of | instead of chase",
+     "why": "four attempts at one phrase; keep the completed one"
+    }
+   ],
+   "ground_truth_units": [
+    "phrasal_restart"
+   ],
+   "est_removable_pct": 25,
+   "ground_truth_note": "THIS IS A cut_refinements CATEGORY (a) PHRASAL RESTART — the prompt names this exact shape."
+  },
+  {
+   "id": "50a060a0-8f78-43c6-91f2-20d206b139b2",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/bfe79483-cc63-4933-87e2-f38fede870a4/1787125049097-1F0D34B8-2634-4CF1-AE97-16D6EE29949F_L0_001.mp4",
+   "duration_s": 73.5,
+   "vibe": "Fast paced, dynamic yapping reel that still feels natural and personal. Cut out pauses and dead space, use quick jump cuts, subtle punch-in zooms on important words and reactions, occasional freeze frames and playful sound effects that match what I’m saying. Add small pattern interrupts every few se",
+   "signals": {
+    "words": 210,
+    "repeated_4gram_hits": 9,
+    "repeated_4gram_rate": 0.0435,
+    "type_token_ratio": 0.486,
+    "top_repeated_3gram": "between you and"
+   },
+   "transcript_text": "the biggest gap between you and your vision is always the same no matter if it's in business in life in relationships no matter where you are the biggest gap is missing authenticity you're uploading trend posts because you think the algorithm will love it and everyone does you're using the yellow butter lemon font because everyone does but you don't even like that color you're using ai to write your posts everything to generate pictures but you're not really standing behind them the biggest gap between you and your dream audience between you and your dream clients between you and your dream life is you because if you're not authentic in real life or on social media people cannot grab your energy and build something around it because they don't see you they only see the vision of you that you're trying to be but you don't really like it yourself so the next thing you should do is upload something that is truly you that truly comes from your heart matter if they're a picture no matter if it's a story that's really close to you you have to be yourself to be recognized by other people because the only energy we can grab is the authentic energy",
+   "cuttable": "UNCONFIRMED",
+   "ground_truth_spans": []
+  },
+  {
+   "id": "1991e144-0821-4912-930a-f1d3dc447122",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/51ce883d-c4c6-4e75-a873-c83f5fb5a15d/1787131786853-193DD200-EB17-4186-B57C-B418EBD7EA52_L0_001.mp4",
+   "duration_s": 59.5,
+   "vibe": "Viral engaging video Create engaging, modern captions for this talking video.\n\n* Keep the captions short, punchy, and easy to read.\n* Highlight the most interesting or important words.\n* Emphasize key phrases to grab attention.\n* Break long sentences into natural caption segments.\n* Use a conversati",
+   "signals": {
+    "words": 165,
+    "repeated_4gram_hits": 7,
+    "repeated_4gram_rate": 0.0432,
+    "type_token_ratio": 0.552,
+    "top_repeated_3gram": "we love each"
+   },
+   "transcript_text": "as promised every day we are going to have our daily bread so today let's see what god has for us oh today's title is my love romans chapter 13 verse eight it says let no depth remain outstanding except the continuing depth to love one another for whoever loves others has fulfilled the law now let's break it down and explain what it mean if we love each other as ourselves we are fulfilling the law and what at all is the law the law is the commandment the principles the values of god's kingdom the love that we have for each other will help us not hurt each other that is specifically found in verse 10 it says love does no harm to a neighbor so if we love each other we will not think about stealing from each other we will not think about committing adultery not because it doesn't please god but because we love each other and we love god",
+   "cuttable": "UNCONFIRMED",
+   "ground_truth_spans": []
+  },
+  {
+   "id": "97971301-c37c-4a7e-95ff-46acb7375759",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/12ecda1a-1293-40d9-9ef5-39dbc67d3c11/1787248582395-6213841D-28E5-4707-A3E6-91B8D0A476C5_L0_001.mp4",
+   "duration_s": 43.1,
+   "vibe": "Edite este vídeo para Instagram Reels, mantendo o conteúdo e a fala originais.\n\nFORMATO: 9:16 vertical, 1080x1920, sem bordas pretas, sem distorção e com enquadramento centralizado. Preserve o rosto e não corte informações importantes.\n\nEDIÇÃO: cortes limpos e naturais, removendo pausas longas, erro",
+   "signals": {
+    "words": 161,
+    "repeated_4gram_hits": 6,
+    "repeated_4gram_rate": 0.038,
+    "type_token_ratio": 0.497,
+    "top_repeated_3gram": "de são paulo"
+   },
+   "transcript_text": "vai fala pessoal como vocês sabem eu sou candidato a deputado federal esse ano meu número é 4 5 meia 5 mas eu conheço gente de toda a grande são paulo tenho muitos amigos em osasco muitos amigos na capital em jandira barueri carapicuíbe e região e aí muita gente fala pra mim assim pô pedro eu acho que eu não vou conseguir votar em você esse ano porque eu não sou de osasco cara você pode votar em mim de qualquer cidade do estado de são paulo se o seu domicílio eleitoral é no estado de são paulo você pode votar em mim você pode estar em jandira em carapucuíba em limeira em piracicaba em barueri em osasco na capital qualquer lugar da capital qualquer lugar do estado inteiro se seu domicílio eleitoral é em são paulo vota em mim então se você é de são paulo você já tem número pra próxima eleição deputado federal 4 5 meia 5",
+   "cuttable": "UNCONFIRMED",
+   "ground_truth_spans": []
+  },
+  {
+   "id": "dc1148fc-820c-4bb3-9fb6-486135131e6e",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/3f7f80e8-97a3-418a-ab2e-9eab0b54a8ed/1787124581611-FB399E24-08A1-4AC1-B131-29FCFB9331B8_L0_001.mp4",
+   "duration_s": 56.6,
+   "vibe": "Viral engaging video, make it informative transcribe with highlighted keywords and icons",
+   "signals": {
+    "words": 189,
+    "repeated_4gram_hits": 6,
+    "repeated_4gram_rate": 0.0323,
+    "type_token_ratio": 0.497,
+    "top_repeated_3gram": "till august 20"
+   },
+   "transcript_text": "hey मीरा aspirin so i have two good news for you number one we have extended the sale duration till august 20 as per your request so you guys can get our batches for such a basic cost till august 20 so for अर्जुना and लक्ष्य batch you have to pay 3,700 rupees for the complete course and for the यकीन need in english batch just 4,200 rupees and the second good news is just to help you out in your backlogs we are going to start the यकीन backlog series as well and tomorrow i'm going to start the first chapter in that series so we will help you out to complete the backlogs by providing you the detailed one shot and moreover you can enroll yourself in the live course as well and you can complete your syllabus so now no if but nothing start your preparation now do enroll yourself you can check the related video link as well so tomorrow we'll start with the first backlog class and do enroll yourself in the live course as well so see you then thank you so much",
+   "cuttable": "UNCONFIRMED",
+   "ground_truth_spans": []
+  },
+  {
+   "id": "1dbf7034-4272-4aba-906b-b545029c4d49",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/8af1ec83-615f-44c6-ba33-d557430b1efa/1787260996714-5AB55687-5814-4FD7-BA4C-4B60C2E2BC1C_L0_001.mp4",
+   "duration_s": 158.9,
+   "vibe": "Edit this video into a polished, engaging, fast-paced TikTok rant. Remove all unnecessary pauses, silence, long gaps, repeated words, stutters, and filler words, but keep my original meaning, personality, expressions, and natural voice. Do not remove words that are important to the story or change w",
+   "signals": {
+    "words": 386,
+    "repeated_4gram_hits": 10,
+    "repeated_4gram_rate": 0.0261,
+    "type_token_ratio": 0.389,
+    "top_repeated_3gram": "you're almost there"
+   },
+   "transcript_text": "okay let's talk about this situation and try to reason why people actually do this because it's very very very annoying you plan is a an event with your friend and then dates the time specifically you people planned 10:00 we'll meet at a certain place and everything and then 10:00 i'm already there waiting for you i come there i didn't see you i call you hello zara where are you you tell me i am almost there that's the first thing that comes out from your mouth hello i'm almost there meanwhile you've never had your beds you are still on your bed and you're answering my call and you're telling me you are almost there as how like like i don't even know what to say because it's very annoying how can you tell me you're almost there when you are still on your bed you've not had your bed and the almost you are telling me you're almost there i will stand waiting for you waiting for you and you've not left your house is it making sense it's not making sense yes frankly speaking almost every everyone do it because it's not how you plan yourself it's how life will will give you maybe you've planned and then time waits for no one that's for sure the way time runs now is a whole lot i'm just saying that you should tell the truth if you're not almost there tell me you are not almost there that you're not there that you're you're just waking up from your bed that you're not there already that um you've never had your bed then telling me you're almost there and i'm waiting if you tell me this maybe you're on your bed and everything at least i cannot know what to do it's either i have to go back to my house wait for you or find a comfortable place for me to wait for you dont think you're almost there while you are not any anywhere near where i am that's not nice that's not nice at all it's not nice please let's learn let's let's let even if it's more yes everybody does it but let's try to curtail it let's try to cut it down it's not nice at all",
+   "cuttable": "UNCONFIRMED",
+   "ground_truth_spans": []
+  },
+  {
+   "id": "e77af8a0-d167-4aa7-b7ea-fc9d61ee3224",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/efc57c91-043a-404f-8876-a9a3aa64d860/1787163275415-E1923448-149B-4DA7-A3F6-5A7203569787_L0_001.mp4",
+   "duration_s": 58.7,
+   "vibe": "Add zooms sound effects and motion graphics don’t do colour correction in that",
+   "signals": {
+    "words": 210,
+    "repeated_4gram_hits": 3,
+    "repeated_4gram_rate": 0.0145,
+    "type_token_ratio": 0.49,
+    "top_repeated_3gram": "एक depletion phase"
+   },
+   "transcript_text": "which meal is the best meal and which meal you have to focus more ऐसे तो सभी meal पर आपका focus रहना चाहिए but according to myself a breakfast and a dinner is the most important meal for your body so first is breakfast why breakfast क्योंकि breakfast आपके दिन का पहला meal रहता है उसके पहले body एक depletion phase में रहती है जहां पर minimum four to five hours आपकी body में कोई food का intake नहीं रहता है so breakfast contain high calories especially carbs and a protein for a better start of the day second important meal is a dinner why dinner because here it is a last meal of the day and after that the body goes into a depletion phase for minimum five to six hours and in dinner you should take a high protein meal and that type of protein sources कि जिसको metabolism और digestion होना है थोड़ा time लगेगा like आपकी body पहले से ही एक depletion phase में जाने वाली है तो उसको digestion होने के लिए minimum four to five hours लगने चाहिए example chicken and for vegetarians the paneer at the end if you like this type of content then like it share it and follow for more",
+   "cuttable": "UNCONFIRMED",
+   "ground_truth_spans": []
+  }
+ ],
+ "finding": "THE TOP TWO CANDIDATES ARE NOT pace_cuts CASES. Both are textbook cut_refinements categories — (b) retake and (a) phrasal restart — which the EXISTING pass is scoped for and explicitly taught. cut_refinements came back EMPTY on 159/159 plans. So the first question is not 'build pace_cuts' but 'does the disfluency pass fire on its own textbook cases'. Building a new cut capability on top of a cut pass that does not fire would stack a capability on a broken one.",
+ "cap_conflict": "RESOLVED IN SPEC 0c: full_take_retake becomes a separate unit with its own 60% cap, gated on a MECHANICAL near-verbatim precondition (>=0.85 token similarity, span >=40% of kept words, retained twin survives in full). All other units stay inside the 25% union cap. The larger cap cannot be unlocked by the model's opinion, only by a computable duplicate take.",
+ "filter_weakness": "the latin>0.8 threshold admits code-switched transcripts (e77af8a0 carries Devanagari). Tighten or judge per-source; do NOT read it as a clean Latin set.",
+ "cutref_fires": "TESTED 2026-08-20 on c9ad1bbf (build lane, plan-only): cut_refinements FIRES. 225 words -> 167 kept (58 removals), 22 clips, 60.31s from a 117s source; two more cells at 42 and 28 removals. The 25% cap bound and DEGRADED (over_cap_logpass, largest ranges kept) rather than rejecting. The disfluency pass is NOT broken — the 159/159 and 0/160 empties were population (clean scripted reads; route plans that never run standard editorial). pace_cuts is a NEW capability on a WORKING foundation."
+}

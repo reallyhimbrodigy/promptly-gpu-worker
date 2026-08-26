@@ -1,0 +1,289 @@
+[
+ {
+  "bytes": 30947323,
+  "created_at": "2026-08-02T04:30:56.654271+00:00",
+  "duration_s": 26.6,
+  "etag": "3f89b2da654afc86e8af5caa4d9d8b21",
+  "id": "editorial_hin_a1e38092",
+  "job_id": "a1e38092-f749-42fa-b4f7-001e1b9abc44",
+  "lang": "hin",
+  "model": "flare",
+  "obedience": [
+   {
+    "check": "family_min",
+    "family": "captions",
+    "min": 1
+   },
+   {
+    "check": "family_min",
+    "family": "zooms",
+    "min": 1
+   },
+   {
+    "check": "family_min",
+    "family": "sfx",
+    "min": 1
+   }
+  ],
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/11d10886-8e7d-479d-b313-3007b22004d0/1785644975641-9C8050E5-AF2F-48FF-B9E4-4C1A194568F4_L0_001.mp4",
+  "sha256": "d6afe3a94824382a403d0eed5e563c2a17491df38004635ef535cae486d5154e",
+  "vibe": "Viral engaging video with hinglish captions cuts zooms sound effects",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/11d10886-8e7d-479d-b313-3007b22004d0/1785644975641-9C8050E5-AF2F-48FF-B9E4-4C1A194568F4_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 6160054,
+  "created_at": "2026-08-01T19:14:36.647562+00:00",
+  "duration_s": 27.0,
+  "etag": "6180cc871654cbcdb810f982fa5a7eee",
+  "id": "editorial_hin_3e01408c",
+  "job_id": "3e01408c-e512-48a1-8443-1b1cb5e73d87",
+  "lang": "hin",
+  "model": "flare",
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/1ad58fdc-8c34-414b-96c9-25a6d3766026/1785611140431-483EF18A-862D-4C1A-851A-271DA2E82973_L0_001.mp4",
+  "sha256": "382abf0c9ad696e872b88cd337da8ec430adb0e5ced9ef2c53b6a6ea4ea23e9d",
+  "vibe": "Viral engaging video",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/1ad58fdc-8c34-414b-96c9-25a6d3766026/1785611140431-483EF18A-862D-4C1A-851A-271DA2E82973_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 31899644,
+  "created_at": "2026-08-02T06:08:55.565551+00:00",
+  "duration_s": 22.6,
+  "etag": "df14407fd1439ca4eb1fbb01d9cbaf6a",
+  "id": "editorial_hin_b1b30df4",
+  "job_id": "b1b30df4-eb4e-4cb8-ab81-1d9cf63af3de",
+  "lang": "hin",
+  "model": "flare",
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/eefbcb98-b14f-467f-9363-7cfd6e4b15ed/1785650868944-3F2C00B1-115E-4711-A8A1-290FA03ADACC_L0_001.mp4",
+  "sha256": "c327e825d8647b188c13b262ac90316df4195957ca7d0c79e4e760e603466907",
+  "vibe": "Viral engaging video",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/eefbcb98-b14f-467f-9363-7cfd6e4b15ed/1785650868944-3F2C00B1-115E-4711-A8A1-290FA03ADACC_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 160936456,
+  "created_at": "2026-08-02T04:17:04.347445+00:00",
+  "duration_s": 19.6,
+  "etag": "fb8d95b526a5560df475cbe8a17defa5",
+  "id": "editorial_hin_6c9f83d5",
+  "job_id": "6c9f83d5-cc7e-444c-aec5-b47a60147120",
+  "lang": "hin",
+  "model": "flare",
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/adda36ea-1f9d-4d9f-b1e4-5f1196496d7d/1785643864740-E39326C5-07AF-4D82-A963-BAC02978C941_L0_001.mp4",
+  "sha256": "acbb6ed3337c76c3e3de8820ead9325f2f948c328ce6dd6d981dfdcda726e361",
+  "vibe": "Change the background of this video to a real looking background and also enhance the voice of this girl",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/adda36ea-1f9d-4d9f-b1e4-5f1196496d7d/1785643864740-E39326C5-07AF-4D82-A963-BAC02978C941_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 64308940,
+  "created_at": "2026-08-02T02:03:01.761332+00:00",
+  "duration_s": 33.6,
+  "etag": "ea7cabefded15a48c2098edb559fadc2",
+  "id": "editorial_hin_5e85a61b",
+  "job_id": "5e85a61b-b08d-42b6-816e-c22c133ecfce",
+  "lang": "hin",
+  "model": "flare",
+  "obedience": [
+   {
+    "check": "family_min",
+    "family": "zooms",
+    "min": 1
+   }
+  ],
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/02b598ae-86f8-4cec-84a6-923059223f7d/1785636123477-A278D0CD-52F6-4ACF-A08A-E26D5CA5CB35_L0_001.mp4",
+  "sha256": "aa6629df81f39915458fdb69ed08dfdbd6da673bef9c073984638bb9c64122ca",
+  "vibe": "Make this podcast style zoom in the girl when she speak and zoom in to boy when he speak",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/02b598ae-86f8-4cec-84a6-923059223f7d/1785636123477-A278D0CD-52F6-4ACF-A08A-E26D5CA5CB35_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 53224036,
+  "created_at": "2026-08-09T09:51:07.935588+00:00",
+  "duration_s": 27.3,
+  "etag": "d763da19e36497181a9d52ea921d1107",
+  "hard_case": "multi_speaker",
+  "id": "editorial_hin_b598d5ba",
+  "job_id": "b598d5ba-58e8-4218-ae68-1184defa7338",
+  "lang": "hin",
+  "model": "flare",
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/800884f9-d342-47ac-93e1-0c4067588da5/1786268011340-766A7100-6729-46E8-8389-67934D4FAB25_L0_001.mp4",
+  "sha256": "0b9cf6f8f1cdc90faf5c4971a1fe58a8e8fd5d408d0ca70470662fd10abb49e7",
+  "vibe": "Professional corporate style",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/800884f9-d342-47ac-93e1-0c4067588da5/1786268011340-766A7100-6729-46E8-8389-67934D4FAB25_L0_001.mp4",
+  "triggers": null
+ },
+ {
+  "bytes": 13414204,
+  "created_at": "2026-08-02T06:28:05.640594+00:00",
+  "duration_s": 24.6,
+  "etag": "fd2d00f7dbae5c0577d496fb9864aea1-3",
+  "hard_case": "burned_in_captions",
+  "id": "editorial_eng_fa3efb69",
+  "job_id": "fa3efb69-b43e-470b-b7b9-cd341b86bdfe",
+  "lang": "eng",
+  "model": "flare",
+  "obedience": [
+   {
+    "check": "family_min",
+    "family": "captions",
+    "min": 1
+   }
+  ],
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/fd79c0c7-553b-43e9-bd30-90b1e5bce94b/1785652047710-58BDDA0E-925E-435B-83C5-A8E51E511924_L0_001.mp4",
+  "sha256": "e380e999acee35ec7b1365912673a5eb35d5acbb1e4f8ace521b39334ddf15e9",
+  "vibe": "Write text for the video with some effects",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/fd79c0c7-553b-43e9-bd30-90b1e5bce94b/1785652047710-58BDDA0E-925E-435B-83C5-A8E51E511924_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 18475222,
+  "created_at": "2026-08-01T22:09:09.906995+00:00",
+  "duration_s": 28.9,
+  "etag": "b8818d8d560e957cfe29b5100bc707a4",
+  "id": "editorial_eng_a41276b2",
+  "job_id": "a41276b2-9909-46a2-8513-dcfeef3df236",
+  "lang": "eng",
+  "model": "flare",
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/17340d82-bd52-4d6d-9d5d-2116124183dc/1785621662647-AD5E8188-12D2-44D7-9745-3590D418DB23_L0_001.mp4",
+  "sha256": "8e83c00d8160348e20c7e7cf0a0e568814415a59cca771269efa4c446b4e2611",
+  "vibe": "Increase quality of video and audio enhance",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/17340d82-bd52-4d6d-9d5d-2116124183dc/1785621662647-AD5E8188-12D2-44D7-9745-3590D418DB23_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [
+    "brand/company"
+   ],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 3116524,
+  "created_at": "2026-08-02T04:35:36.772847+00:00",
+  "duration_s": 15.0,
+  "etag": "aba8d011cdaed8886b2f5ec95df90936",
+  "id": "editorial_eng_5decdf11",
+  "job_id": "5decdf11-10c4-4c84-acd8-e735a41af1fc",
+  "lang": "eng",
+  "model": "flare",
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/7413cb5b-3a34-4446-9643-d69dba1f8626/1785645188878-0250CECF-2E26-4572-BF2B-1D7E68212030_L0_001.mp4",
+  "sha256": "7a4d4ab28c04cfb9aa8af026b51d1805ef1fb5330d0507961e5c0719aa145c24",
+  "vibe": "Make this video say Jonda newbry seriously i don\u2019t wanna talk to you anymore",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/7413cb5b-3a34-4446-9643-d69dba1f8626/1785645188878-0250CECF-2E26-4572-BF2B-1D7E68212030_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 37482459,
+  "created_at": "2026-08-01T21:45:53.224894+00:00",
+  "duration_s": 16.4,
+  "etag": "1e19d9786a83cd82f394685310b2faa4",
+  "id": "editorial_spa_3de806c4",
+  "job_id": "3de806c4-d494-48f1-8ca3-ba557acb4d94",
+  "lang": "spa",
+  "model": "flare",
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/d520cb89-c8a4-4408-9d24-fd7e0e00b571/1785620423541-3DCA18DD-8119-4597-A342-556C77828A51_L0_001.mp4",
+  "sha256": "7cb1178571beb5d23cdfb9b2fbce0ed1dc95b8982f51ab2e5e5f63164abf125a",
+  "vibe": "Remove text \u201c@alessandodossetti\u201d from video",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/d520cb89-c8a4-4408-9d24-fd7e0e00b571/1785620423541-3DCA18DD-8119-4597-A342-556C77828A51_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 50785490,
+  "created_at": "2026-08-01T23:15:38.792916+00:00",
+  "duration_s": 23.2,
+  "etag": "603bf3578cd83a437e1f9f97eea934bc",
+  "id": "editorial_ben_2103a83c",
+  "job_id": "2103a83c-882d-400b-aaa7-c88836780217",
+  "lang": "ben",
+  "model": "flare",
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/8177b906-48bb-47ee-8315-77ad11a69b59/1785621259429-9D696045-1206-4407-985C-C7F759537B2D_L0_001.mp4",
+  "sha256": "75aaf7754477a92b7cab5d6f8a9661e001f2f5170dc84cdbb1f602c23ea8c91f",
+  "vibe": "Viral engaging video",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/8177b906-48bb-47ee-8315-77ad11a69b59/1785621259429-9D696045-1206-4407-985C-C7F759537B2D_L0_001.mp4",
+  "triggers": {
+   "brand_copy": [],
+   "scenes": [],
+   "payoff": []
+  }
+ },
+ {
+  "bytes": 93233798,
+  "created_at": "2026-08-10T03:13:33.33664+00:00",
+  "duration_s": 25.0,
+  "etag": "c33cda22f38ab099120f87d8cc993ccc",
+  "id": "editorial_xx_01ef2a80",
+  "job_id": "01ef2a80-9ce1-40b3-98a3-bea6d3a6c05e",
+  "lang": null,
+  "lang_note": "vibe requests Arabic subtitles; source language unverified",
+  "model": "flare",
+  "obedience": [
+   {
+    "check": "family_min",
+    "family": "captions",
+    "min": 1
+   }
+  ],
+  "route_expected": "editorial",
+  "route_reason": null,
+  "s3_key": "sources/74cac34b-cf0b-4be2-bf17-6894838c7484/1786331482452-972BEAA9-116D-421A-9F5E-84ADAAF55991_L0_001.mp4",
+  "sha256": "173f185cd0434d5de353ce5957235c3779daf7ae08276c77144676ea1e32a618",
+  "vibe": "Add Arabic subtitles.\n* Keep subtitles short and easy to read.\n* Highlight only important words.\n* Use a clean modern sans-serif font.",
+  "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/74cac34b-cf0b-4be2-bf17-6894838c7484/1786331482452-972BEAA9-116D-421A-9F5E-84ADAAF55991_L0_001.mp4",
+  "triggers": null
+ }
+]

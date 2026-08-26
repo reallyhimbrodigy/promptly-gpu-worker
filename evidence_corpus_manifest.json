@@ -1,0 +1,111 @@
+{
+ "criteria": {
+  "shot_changes": ">= 3 scene cuts (ffmpeg scdet), PROBED",
+  "duration_band": "15-90s",
+  "one_per_user": true,
+  "visual_trigger": "UNCONFIRMED until frames are inspected \u2014 clause 3 is not mechanically decidable"
+ },
+ "inverse_of": "scene_corpus_manifest.json (no-broll / claim-not-shown)",
+ "purpose": "EvidenceCard + DeviceMockup can only fire where the footage HOLDS the proof; the scene corpus selected for the opposite.",
+ "probe_failed": 0,
+ "sources": [
+  {
+   "id": "15512537-a5f5-456e-94f3-b02a03e4d712",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/c4b50b82-ca7a-4f6d-830e-2ceec4f56489/1787189983007-B5A336D0-160A-47FE-BF6C-7317A82DEC93_L0_001.mp4",
+   "duration_s": 69.4,
+   "vibe": "Using branding on second video for\nMorgan\u2019s update attached video with engaging things drawing diagrams Morgan\u2019s logo and disclaimer and also auto\nCaptions",
+   "shot_changes": 8,
+   "shot_probe_ok": true,
+   "frames": [
+    "evidence_corpus_frames/15512537_25.jpg",
+    "evidence_corpus_frames/15512537_50.jpg",
+    "evidence_corpus_frames/15512537_75.jpg"
+   ],
+   "visual_trigger": "NO",
+   "visual_note": "confirmed at 11 frames: office interview, whiteboard stays blank, nothing presented to camera"
+  },
+  {
+   "id": "694cd698-84da-4447-a00e-b01ddea2644b",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/12ecda1a-1293-40d9-9ef5-39dbc67d3c11/1787178659583-A3D79EAE-7E4C-41F9-852D-4B46ED959E02_L0_001.mp4",
+   "duration_s": 38.2,
+   "vibe": "Crie um v\u00eddeo 9:16 de 20\u201325s, s\u00e9rio, institucional e profissional. Analise todo o material e selecione apenas os melhores momentos de Pedro Henrique Barroso nas ruas de Osasco. Priorize intera\u00e7\u00f5es, cumprimentos e entrega de materiais. Corte cenas repetidas, tremidas e sem a\u00e7\u00e3o. Comece com a melhor cena e use cortes din\u00e2micos de 1\u20133s. Visual elegante e natural, sem efeitos exagerados. Preserve fala",
+   "shot_changes": 4,
+   "shot_probe_ok": true,
+   "frames": [
+    "evidence_corpus_frames/694cd698_25.jpg",
+    "evidence_corpus_frames/694cd698_50.jpg",
+    "evidence_corpus_frames/694cd698_75.jpg"
+   ],
+   "visual_trigger": "YES",
+   "visual_note": "RE-GRADED at 11 frames: a printed product/flyer is HANDED between people and held in frame by two of them \u2014 the object under discussion is on camera and handled. The 50%-frame showed only a phone in a crowd, which read as incidental b-roll."
+  },
+  {
+   "id": "4df7f32c-49c0-45b1-a4fd-e75511c20dab",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/7eac3346-cb59-4855-b73e-d03a240243b1/1787173492887-B9875F00-1C54-4D7E-B826-5098BD9DBAD9_L0_001.mp4",
+   "duration_s": 24.2,
+   "vibe": "Viral engaging video",
+   "shot_changes": 31,
+   "shot_probe_ok": true,
+   "frames": [
+    "evidence_corpus_frames/4df7f32c_25.jpg",
+    "evidence_corpus_frames/4df7f32c_50.jpg",
+    "evidence_corpus_frames/4df7f32c_75.jpg"
+   ],
+   "visual_trigger": "NO",
+   "visual_note": "confirmed at 11 frames: travel/scenery reel with burned-in text, no object presented"
+  },
+  {
+   "id": "8e68b7a2-edec-486b-9394-c5f01ccebb51",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/f64f2b66-6285-487e-9f45-c98804bf0f24/1787173482078-26E2EC49-BFAB-4561-B3E8-857AD82B0759_L0_001.mp4",
+   "duration_s": 89.4,
+   "vibe": "\u0421\u0434\u0435\u043b\u0430\u0439 \u0434\u0438\u043d\u0430\u043c\u0438\u0447\u043d\u044b\u0439, \u0441\u043c\u0435\u0448\u043d\u043e\u0439 Instagram Reels. \u0414\u043e\u0431\u0430\u0432\u043b\u044f\u0439 \u043c\u0435\u043c\u043d\u044b\u0435 \u0432\u0441\u0442\u0430\u0432\u043a\u0438, \u0440\u0435\u0430\u043a\u0446\u0438\u0438, \u0437\u0443\u043c\u044b, GIF/B-roll \u0438 \u0437\u0432\u0443\u043a\u0438 \u0442\u0430\u043c, \u0433\u0434\u0435 \u043e\u043d\u0438 \u043f\u043e\u0434\u0445\u043e\u0434\u044f\u0442 \u043f\u043e \u0441\u043c\u044b\u0441\u043b\u0443. \u041d\u0435 \u043f\u0435\u0440\u0435\u0433\u0440\u0443\u0436\u0430\u0439 \u0432\u0438\u0434\u0435\u043e.",
+   "shot_changes": 46,
+   "shot_probe_ok": true,
+   "frames": [
+    "evidence_corpus_frames/8e68b7a2_25.jpg",
+    "evidence_corpus_frames/8e68b7a2_50.jpg",
+    "evidence_corpus_frames/8e68b7a2_75.jpg"
+   ],
+   "visual_trigger": "NO",
+   "visual_note": "confirmed at 11 frames: jump-cut talking head, nothing held up"
+  },
+  {
+   "id": "127d3c07-9864-4a5b-9d2f-37ab5e9b4e3a",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/787bb8cd-71be-49e1-b9b1-fef19c230911/1787172579641-A8B14FF7-C8CA-4CEF-A20E-289EADAA546B_L0_001.mp4",
+   "duration_s": 61.5,
+   "vibe": "Remove the all watermarks nd change the video edit free copyright video edit",
+   "shot_changes": 9,
+   "shot_probe_ok": true,
+   "frames": [
+    "evidence_corpus_frames/127d3c07_25.jpg",
+    "evidence_corpus_frames/127d3c07_50.jpg",
+    "evidence_corpus_frames/127d3c07_75.jpg"
+   ],
+   "visual_trigger": "YES",
+   "visual_note": "CORRECTED 2026-08-20 after watching 11 frames (the /watch skill) instead of one. The creator inserts a transient PICTURE-IN-PICTURE close-up of the exact control being discussed (handbrake/gearstick) at the moment the claim is spoken, and it is ABSENT in frames where the claim is not being made. That is EvidenceCard, hand-built by a real user. A single mid-point frame missed it."
+  },
+  {
+   "id": "cfa5c7e3-6dde-4607-a99b-3b68d34c4b19",
+   "video_url": "https://d1iax8jos987n3.cloudfront.net/sources/32f4bb32-87ba-49f5-9a23-b2911594eb88/1787172451040-F588CCFB-2004-4F64-8D99-24CEB3F87F7B_L0_001.mp4",
+   "duration_s": 34.8,
+   "vibe": "\u0632\u062f\u0644\u064a \u0627\u0644\u0627\u0644\u0639\u0627\u0628 \u0627\u0644\u0646\u0627\u0631\u064a \u0641\u064a \u0627\u0644\u0633\u0645\u0627\u0621 \u0648\u0627\u062c\u0639\u0644\u0647\u0627 \u0648\u0627\u0636\u062d\u0627 \u0627\u0643\u062b\u0631 \u0648\u0627\u062c\u0645\u0644",
+   "shot_changes": 12,
+   "shot_probe_ok": true,
+   "frames": [
+    "evidence_corpus_frames/cfa5c7e3_25.jpg",
+    "evidence_corpus_frames/cfa5c7e3_50.jpg",
+    "evidence_corpus_frames/cfa5c7e3_75.jpg"
+   ],
+   "visual_trigger": "YES",
+   "visual_note": "a lit firework held up to camera at night \u2014 an object genuinely on screen as the subject"
+  }
+ ],
+ "visual_confirmation": {
+  "method": "11 keyframes per source via the /watch skill, local, --no-whisper. One-frame grading RETIRED.",
+  "date": "2026-08-19",
+  "result": "3 YES, 0 MARGINAL, 3 NO of 6",
+  "verdict": "THE CORPUS CAN CARRY AN ARM. Half of it (3 of 6) holds the EvidenceCard trigger. Both re-grades moved UP (MARGINAL->YES twice); the one-frame pass under-graded in the only direction it could, because a trigger that is a MOMENT is invisible to a sample that is not that moment.",
+  "also_observed": "4 of 6 carry burned-in captions or a watermark",
+  "finding": "EvidenceCard's premise is VALIDATED on real user footage: one user hand-builds it as a timed PiP inset (127d3c07); another presents the product in-frame (694cd698). The earlier 'we may have built two components for content our users do not shoot' was an artifact of one-frame grading, not a property of the users."
+ }
+}

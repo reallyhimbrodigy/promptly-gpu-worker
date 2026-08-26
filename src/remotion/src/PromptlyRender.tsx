@@ -94,6 +94,12 @@ import {
 // the bare components here would render a plate with no name (the spec's key is
 // `name` inside a different shape) — the adapter IS the wiring.
 import { NamePlateMG, EndCardMG } from "./motion-graphics/brand";
+// Generation-free compositions — ADAPTERS, never the bare components: a bare
+// component renders a card with no content because the spec's keys live in a
+// different shape (the NamePlate lesson).
+import {
+  EvidenceCardMG, DeviceMockupMG, EmojiCardMG,
+} from "./FrameCompositions";
 
 // Flare motion-token system (Workstream D). The provider gates the whole
 // system on one flag; migrated components read useMotionTokens(). GLIDE/
@@ -151,6 +157,9 @@ export const MG_MAP: Record<string, React.FC<any>> = {
   // the adapter. Gate: brand-mg-wiring.test.mjs.
   NamePlate: NamePlateMG,
   EndCard: EndCardMG,
+  EvidenceCard: EvidenceCardMG,
+  DeviceMockup: DeviceMockupMG,
+  EmojiCard: EmojiCardMG,
 };
 
 // ─── Per-clip renderer ─────────────────────────────────────────────────────
@@ -470,16 +479,35 @@ const TextOverlaysLayer: React.FC<{
 );
 
 // ─── Motion graphics ───────────────────────────────────────────────────────
+// The generation-free compositions render a FRAME OF THE USER'S OWN VIDEO, so
+// unlike every other motion graphic they need the source and the frame rate.
+// Injected ONLY for these four: spreading extra props into the other 28
+// components would change their call signature for no reason, and this layer
+// has been byte-identical for a long time. `atSeconds` is NOT computed here —
+// the worker derives it from a word index, because there is one clock in this
+// pipeline and it is not in the renderer.
+const FRAME_COMPOSITION_TYPES = new Set([
+  // ONLY these two render a frame of the user's video. EmojiCard is pure
+  // type and must NOT receive sourceUrl — injecting it would imply a
+  // dependency it does not have.
+  "EvidenceCard", "DeviceMockup",
+]);
+
 const MotionGraphicRenderer: React.FC<{
   spec: MotionGraphicSpec;
   fps: number;
-}> = ({ spec, fps }) => {
+  sourceUrl?: string;
+}> = ({ spec, fps, sourceUrl }) => {
   const Comp = MG_MAP[spec.type];
   if (!Comp) return null;
+  const frameProps = FRAME_COMPOSITION_TYPES.has(spec.type)
+    ? { sourceUrl, fps, durationInFrames: spec.durationInFrames }
+    : null;
   return (
     <Comp
       startMs={0}
       durationMs={Math.round((spec.durationInFrames / fps) * 1000)}
+      {...(frameProps || {})}
       {...spec.props}
     />
   );
@@ -488,7 +516,8 @@ const MotionGraphicRenderer: React.FC<{
 const MotionGraphicsLayer: React.FC<{
   items: MotionGraphicSpec[];
   fps: number;
-}> = ({ items, fps }) => (
+  sourceUrl?: string;
+}> = ({ items, fps, sourceUrl }) => (
   <>
     {items.map((mg, i) => (
       <Sequence
@@ -501,7 +530,7 @@ const MotionGraphicsLayer: React.FC<{
             layer); static hold frames re-render identically under the blur but
             still pay the samples× cost — see the cost note in the D2 report. */}
         <MotionBlurWrap>
-          <MotionGraphicRenderer spec={mg} fps={fps} />
+          <MotionGraphicRenderer spec={mg} fps={fps} sourceUrl={sourceUrl} />
         </MotionBlurWrap>
       </Sequence>
     ))}
@@ -867,7 +896,12 @@ const TightCutOverlayLayer: React.FC<{
 // Output is encoded with alpha (ProRes 4444) so FFmpeg can composite it
 // over the base in the final mux step.
 export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
-  const { caption, motionGraphics, textOverlays, fps, broll, tightCutOverlays, generatedScenes } = input;
+  const { caption, motionGraphics, textOverlays, fps, broll, tightCutOverlays, generatedScenes,
+    // EvidenceCard/DeviceMockup render a FRAME OF THE USER'S OWN VIDEO, so the
+    // overlay pass needs the source. It is on PromptlyRenderInput already; this
+    // component simply never bound it, and referencing it unbound cost a
+    // RENDER_FATAL (ReferenceError: sourceUrl is not defined).
+    sourceUrl } = input;
 
   return (
     <SmoothGraphicsProvider enabled={input.smoothGraphics ?? false}>
@@ -901,7 +935,7 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
         captionKeywords={caption?.keywords ?? []}
         fps={fps}
       />
-      <MotionGraphicsLayer items={motionGraphics} fps={fps} />
+      <MotionGraphicsLayer items={motionGraphics} fps={fps} sourceUrl={sourceUrl} />
       {/* Captions paint ABOVE the content-accent tier (text overlays + motion
           graphics) and BELOW only the tight-cut flash — readable over speaker,
           B-roll, accents, and any residual overlap. Captions are the dialogue

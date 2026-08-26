@@ -274,6 +274,25 @@ class TikTokPage(_RemotionModel):
     startMs: int
     durationMs: int
     tokens: List[TikTokToken]
+    # CAPTION EMPHASIS (2026-08-17) — THE FIELD THAT CAUSED THE OUTAGE.
+    #
+    # handler.py:30889 stamps `_page["emphasis"]` whenever a design-system accent
+    # exists. This model is _RemotionModel, i.e. extra="forbid", and `emphasis`
+    # was never declared here — so EVERY caption page carrying emphasis failed
+    # render-input validation with `extra_forbidden`. The degrade ladder then
+    # tried full -> retry -> stripped and every rung carried the SAME caption
+    # pages, so it exhausted "with no input-differing rung" and the job died.
+    #
+    # MEASURED: 135 failures / 44 users, and the rate tracked the design-system
+    # attach rate (1, 5, 5, 30, 54 per hour) rather than any deploy boundary —
+    # which is why every deploy-correlation hypothesis failed to fit.
+    #
+    # Dict[str, Any] rather than a declared sub-model, deliberately: the renderer
+    # does not consume this yet (nothing in src/remotion reads page.emphasis), so
+    # pinning the inner shape would just move the extra="forbid" trap one level
+    # down for the next field added to the spec. MotionGraphicSpec.props is
+    # free-form for the same reason.
+    emphasis: Optional[Dict[str, Any]] = None
 
 
 # SPEAKER-FOLLOWING CAPTIONS (Zac 2026-07-26, DARK): per-page vertical anchor

@@ -29,4 +29,7 @@ export interface MGPhaseState {
   localFrame: number;
   // Convenience: durationMs converted to frames.
   durationFrames: number;
+  // The frame exitProgress starts rising (durationFrames - computed exit
+  // frames). The pre-exit window for duration-aware schedules (mgSchedule).
+  exitStartFrame: number;
 }

@@ -57,11 +57,57 @@ def _readback() -> dict:
     return json.loads(line[len("READBACK "):])
 
 
+def _canon_values():
+    """CANON as validate_deploy actually declares it — parsed, never retyped."""
+    import ast as _ast, os as _os
+    src = open(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                             "validate_deploy.py")).read()
+    for node in _ast.walk(_ast.parse(src)):
+        if isinstance(node, _ast.Assign):
+            for t in node.targets:
+                if isinstance(t, _ast.Name) and t.id == "CANON" and isinstance(node.value, _ast.Dict):
+                    out = {}
+                    for k, v in zip(node.value.keys, node.value.values):
+                        if isinstance(k, _ast.Constant) and isinstance(v, _ast.Constant):
+                            out[k.value] = v.value
+                    return out
+    return {}
+
+
+def _write_and_verify(payload, before, key, value, expect_new=False):
+    """Write the restate, then VERIFY from a second independent container read."""
+    cmd = ["modal", "secret", "create", SECRET_NAME, "--force"] + [f"{k}={v}" for k, v in sorted(payload.items())]
+    print(f"\nWriting {len(payload)} keys...")
+    p = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    if p.returncode != 0:
+        sys.exit(f"FATAL: secret create failed (rc={p.returncode}).\n{p.stdout[-2000:]}\n{p.stderr[-2000:]}")
+    after = _readback()
+    lost = sorted(set(before) - set(after))
+    gained = sorted(set(after) - set(before))
+    problems = []
+    if lost:
+        problems.append(f"KEYS LOST: {lost}")
+    if gained != ([key] if expect_new else []):
+        problems.append(f"KEYS GAINED {gained}, expected {[key] if expect_new else []}")
+    if after.get(key) != value:
+        problems.append(f"{key} reads {after.get(key)!r}, expected {value!r}")
+    if problems:
+        print("\n".join("FAIL: " + x for x in problems), file=sys.stderr)
+        sys.exit("SECRET IS IN AN UNVERIFIED STATE — do NOT deploy. Restore from the printed before-set.")
+    print(f"VERIFIED: {len(after)} keys, 0 lost, "
+          f"{len(gained)} gained ({key!r}), value confirmed by a SECOND readback.")
+    print("NOT LIVE YET — memory snapshots freeze env at deploy time. Run ./deploy.sh to arm it.")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--key", required=True, help="exact key, e.g. PROMPTLY_HLS_COPY")
     ap.add_argument("--value", required=True, help="exact value; '' clears (exact-string law: MEDIA_RESOLUTION_LOW, never LOW)")
     ap.add_argument("--apply", action="store_true", help="without this it is a dry run")
+    ap.add_argument("--add-new", action="store_true",
+                    help="register a key the secret does not yet have. REFUSED unless "
+                         "validate_deploy CANON already asserts the same key=value, so "
+                         "the registration cannot lag behind the live secret.")
     a = ap.parse_args()
 
     if not a.key.startswith("PROMPTLY_"):
@@ -74,8 +120,33 @@ def main() -> None:
     # different, larger act than flipping a value (CANON registration must ride
     # with it), so it is refused here rather than done by accident.
     if a.key not in before:
-        sys.exit(f"FATAL: {a.key} is NOT in the live secret. Live keys:\n  "
-                 + "\n  ".join(sorted(before)) + "\nAdding a NEW key is not a flip — register it in CANON in the same change.")
+        if not a.add_new:
+            sys.exit(f"FATAL: {a.key} is NOT in the live secret. Live keys:\n  "
+                     + "\n  ".join(sorted(before)) + "\nAdding a NEW key is not a flip — register it in CANON in the same change.")
+        # THE RULE THE REFUSAL WAS PROTECTING IS NOW ENFORCED, NOT ASSUMED.
+        # "register it in CANON in the same change" was advice a hurried operator
+        # could skip by hand-typing `modal secret create`. Adding the key is
+        # allowed here ONLY when CANON already asserts the same key=value, so a
+        # live flag can never exist unregistered — which is exactly what the
+        # NO-UNREGISTERED-LIVE-FLAG gate was forged to prevent (5 strangers found
+        # at once, all live production values watched by nothing).
+        _canon = _canon_values()
+        if a.key not in _canon:
+            sys.exit(f"FATAL: --add-new refused. {a.key} is not in validate_deploy CANON.\n"
+                     f"Register it there FIRST (same change), then re-run.")
+        if _canon[a.key] != a.value:
+            sys.exit(f"FATAL: --add-new refused. CANON asserts {a.key}={_canon[a.key]!r} "
+                     f"but you are writing {a.value!r}. The gate would fail the next deploy.")
+        print(f"ADD   {a.key}: <ABSENT> -> {a.value!r}  (CANON agrees)")
+        after_intent = dict(before)
+        after_intent[a.key] = a.value
+        payload = {k: v for k, v in after_intent.items() if v != "<UNSET>"}
+        if not a.apply:
+            print(f"\nDRY RUN — nothing written. Would restate {len(payload)} keys with --force.")
+            print("Re-run with --apply. Then ./deploy.sh: not live until a redeploy.")
+            return
+        _write_and_verify(payload, before, a.key, a.value, expect_new=True)
+        return
 
     old = before[a.key]
     old_disp = "<UNSET>" if old == "<UNSET>" else repr(old)

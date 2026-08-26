@@ -100,10 +100,19 @@ export const NamePlate: React.FC<NamePlateProps> = ({
         <div style={{ position: "relative" }}>
           <div style={{ width: ruleW, height: Math.max(3, Math.round(height * 0.004)),
                         background: accentColor, borderRadius: 2 }} />
-          <div style={{ overflow: "hidden", marginTop: Math.round(nameSize * 0.34) }}>
+          {/* TRUNCATION FIX (2026-08-26, live-defect: "Siddharth" rendered
+              "Siddhart" + a stray mark in an undelivered artifact): the
+              rise-mask's overflow:hidden clipped glyph INK that exceeded the
+              text's layout box. Two causes, both removed: fontWeight 800 on
+              Anton — a single-weight 400 face, so faux-bold synthesis widens
+              ink past advance widths — and -0.02em tracking tucking the final
+              glyph's ink outside the box. Plus breathing room on the mask so
+              ink can never touch its clip edge. */}
+          <div style={{ overflow: "hidden", marginTop: Math.round(nameSize * 0.34),
+                        paddingRight: Math.round(nameSize * 0.12) }}>
             <div style={{ transform: `translateY(${nameRise}px)`, color: nameColor,
-                          fontFamily: MG_FONTS.anton, fontWeight: 800,
-                          fontSize: nameSize, lineHeight: 1.04, letterSpacing: "-0.02em",
+                          fontFamily: MG_FONTS.anton, fontWeight: 400,
+                          fontSize: nameSize, lineHeight: 1.04,
                           overflowWrap: "break-word" }}>
               {asText(name)}
             </div>

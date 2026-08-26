@@ -241,6 +241,17 @@ export interface TikTokPageLike {
   startMs: number;
   durationMs: number;
   tokens: TikTokTokenLike[];
+  /** Caption emphasis spec (keyword accent / hero number), stamped by
+   * handler.py when a design-system accent exists. Mirrors
+   * render_schemas.TikTokPage.emphasis.
+   *
+   * NOT YET CONSUMED by any component — declared here so the three mirrors
+   * agree. It was missing from render_schemas entirely, and because that model
+   * is extra="forbid" every emphasised page failed render-input validation:
+   * 135 RENDER_FATALs across 44 users. Optional and untyped-inner on purpose;
+   * pinning the shape before the renderer reads it would only relocate the
+   * same trap. */
+  emphasis?: Record<string, unknown>;
 }
 
 export type CaptionStyle =
@@ -282,6 +293,10 @@ export interface CaptionSpec {
 }
 
 // ── Motion graphics ──────────────────────────────────────────────────────────
+// NOTE: no comments INSIDE this union — brand-mg-wiring.test.mjs parses member
+// lines and stops at the first non-member line, so a comment here silently
+// truncates the mirror. Generation-free compositions (EvidenceCard,
+// DeviceMockup, EmojiCard) mirror type_registries.VALID_MG_TYPES.
 export type MotionGraphicType =
   | "AnnotationArrow"
   | "ChatThread"
@@ -316,7 +331,11 @@ export type MotionGraphicType =
   // with type_registries.VALID_MG_TYPES, which is where the Python Literals in
   // handler.py and render_schemas.py both derive from.
   | "NamePlate"
-  | "EndCard";
+  | "EndCard"
+  | "EvidenceCard"
+  | "DeviceMockup"
+  | "EmojiCard"
+;
 
 export interface MotionGraphicSpec {
   type: MotionGraphicType;

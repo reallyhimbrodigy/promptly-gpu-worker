@@ -1,0 +1,64 @@
+{
+ "built": "2026-08-19",
+ "sample_every_s": 0.5,
+ "selector": "flatness>=0.16 AND edginess>=0.045 (composed takeover: flat ground + real type)",
+ "caveat": "NOT face detection \u2014 cv2 and /models/face_detector are container-only. Numbers are reported per still so the selection can be audited, not trusted.",
+ "stills": [
+  {
+   "file": "REF1_0027.jpg",
+   "flatness": 0.481,
+   "edginess": 0.065,
+   "t_s": 13.5,
+   "path": "reference_stills/REF1_t13.5.jpg",
+   "ref": "REF1"
+  },
+  {
+   "file": "REF1_0028.jpg",
+   "flatness": 0.254,
+   "edginess": 0.1,
+   "t_s": 14.0,
+   "path": "reference_stills/REF1_t14.0.jpg",
+   "ref": "REF1"
+  },
+  {
+   "file": "REF1_0047.jpg",
+   "flatness": 0.471,
+   "edginess": 0.052,
+   "t_s": 23.5,
+   "path": "reference_stills/REF1_t23.5.jpg",
+   "ref": "REF1"
+  },
+  {
+   "file": "REF1_0058.jpg",
+   "flatness": 0.48,
+   "edginess": 0.047,
+   "t_s": 29.0,
+   "path": "reference_stills/REF1_t29.0.jpg",
+   "ref": "REF1"
+  },
+  {
+   "file": "REF2_0004.jpg",
+   "flatness": 0.61,
+   "edginess": 0.051,
+   "t_s": 2.0,
+   "path": "reference_stills/REF2_t2.0.jpg",
+   "ref": "REF2"
+  },
+  {
+   "file": "REF2_0015.jpg",
+   "flatness": 0.17,
+   "edginess": 0.102,
+   "t_s": 7.5,
+   "path": "reference_stills/REF2_t7.5.jpg",
+   "ref": "REF2"
+  },
+  {
+   "file": "REF2_0017.jpg",
+   "flatness": 0.173,
+   "edginess": 0.045,
+   "t_s": 8.5,
+   "path": "reference_stills/REF2_t8.5.jpg",
+   "ref": "REF2"
+  }
+ ]
+}

@@ -7,6 +7,7 @@ import {
 } from "remotion";
 import { SPRING_SNAPPY } from "../shared/springs";
 import { useMGPhase } from "../shared/useMGPhase";
+import { mgSchedule } from "../shared/schedule";
 import { resolveArrowEndpoint } from "./resolveEndpoints";
 import type { AnnotationArrowProps } from "./types";
 
@@ -147,10 +148,17 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
   arrowheadSize = 32,
 }) => {
   const { fps, width, height } = useVideoConfig();
-  const { visible, localFrame, exitProgress } = useMGPhase(
+  const { visible, localFrame, exitProgress, exitStartFrame } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 22, defaultExitFrames: 10 },
   );
+
+  // Pass #12 (audited absolute-frame-schedule class): the draw-in/head
+  // choreography was 60fps-authored raw frames — 2x slower in real time at
+  // production 30fps. mgSchedule: fps-relative, settled by 85% of the
+  // pre-exit window.
+  const K = mgSchedule({ fps, window: exitStartFrame, authoredEnd: 22 });
+  const k = K(1);
 
   const customPathRef = useRef<SVGPathElement | null>(null);
   const [customLength, setCustomLength] = useState<number | null>(null);
@@ -217,7 +225,7 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
     `L ${tipX.toFixed(2)} ${tipY.toFixed(2)} ` +
     `L ${armBEnd.x.toFixed(2)} ${armBEnd.y.toFixed(2)}`;
 
-  const drawInRaw = interpolate(localFrame, [0, 18], [0, 1], {
+  const drawInRaw = interpolate(localFrame, [0, K(18)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -232,12 +240,12 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
 
   const headSpring = spring({
     fps,
-    frame: localFrame - 16,
+    frame: localFrame - K(16),
     config: SPRING_SNAPPY,
-    durationInFrames: 6,
+    durationInFrames: Math.max(2, Math.round(6 * k)),
   });
   const headScale = interpolate(headSpring, [0, 1], [0, 1]);
-  const headFadeIn = interpolate(localFrame, [16, 22], [0, 1], {
+  const headFadeIn = interpolate(localFrame, [K(16), K(22)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -247,8 +255,12 @@ export const AnnotationArrow: React.FC<AnnotationArrowProps> = ({
   });
   const headOpacity = headFadeIn * headFadeOut;
 
-  const wiggleX = Math.sin(localFrame * 0.07) * 1.5;
-  const wiggleY = Math.cos(localFrame * 0.053 + 1.3) * 1.5;
+  // Hand-held tremor in radians per SECOND (pass #12, audited: the old
+  // per-frame rates doubled the wobble frequency between the 60fps probe and
+  // 30fps production). 4.2/3.18 rad/s = the authored 0.07/0.053 at 60fps.
+  const wiggleT = localFrame / fps;
+  const wiggleX = Math.sin(wiggleT * 4.2) * 1.5;
+  const wiggleY = Math.cos(wiggleT * 3.18 + 1.3) * 1.5;
 
   if (!visible) return null;
   if (isCustom && customLength === null) return null;

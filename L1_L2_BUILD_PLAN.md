@@ -305,3 +305,50 @@ run in this window.
 **5. `worker_started_at` present on only 494/1241 Modal-reaching jobs (40%).**
 The column shipped 2026-08-10; combined with Defect 2 it is not a safe basis for
 container-lifetime work. Use `started_at`.
+
+## L1 RE-SIZED AGAINST THE MEASURED EDITORIAL WAIT (2026-08-17)
+
+L1 was priced against a **6.4s** editorial slice and came out marginal
+(+$0.14/day, and exactly $0.000/day at an encode-safe cpu=8 plan leg). That
+figure rested on a measurement taken while **Vertex was down**: `gemini_call =
+0.0` on 289/289 standard-editorial jobs. L1's premise is "move the Gemini network
+wait off 16 cores", and there was no wait to move.
+
+**The first full Lumen render measured it directly: `editorial_plan = 97.1s`,
+54.3% of a 178.8s wall.**
+
+    measured wait / break-even = 7.5x
+
+L1 is no longer marginal. It is **7.5x break-even** on the axis it was
+designed for, and the same seconds appear on BOTH boards — cost AND the 120s
+latency law, which this run misses by 59s with the editorial plan as the single
+largest term.
+
+### The core-seconds, computed rather than asserted
+
+    97.1s x (16 - 2) cores = 1,360 core-seconds per job
+    x 164.3 jobs/day                = 223,372 core-s/day = 62 core-hours/day
+
+**I am deliberately NOT converting that to dollars here.** Track D's per-core-hour
+figure was derived from the invoice under a different traffic mix, and the one
+number I have that is not an estimate is `modal billing report --csv`. Turning
+core-hours into a headline dollar figure with an inferred rate is exactly the
+probe-collapse shape this project keeps paying for. The core-hours are measured;
+the rate is owed.
+
+### What must be re-checked before L1 ships
+
+Track D's blocker stands and is now MORE dangerous, not less: `proxy_encode` is a
+measured child of `edit_plan` (289/289 timelines) — the exact stage L1 moves —
+and it is the same encode that crashed completion 78.9% -> 35.7% at cpu=8. A
+cpu=2 plan leg is a quarter of those cores. `validate_deploy.py:9268` would PASS
+a plan leg that calls `_do_gemini_proxy` because its body scan stops one frame
+short. That gate must follow callees before this ships.
+
+### Caveat on the measurement itself
+
+178.8s is a BUILD-LANE upper bound: full 75MB source inline where production
+sends a proxy, and no prewarm. The 97.1s editorial wait is the least
+affected term — it is a network wait on a model call, not a function of source
+size — but it is one sample, on one reference, and it wants a second before it
+carries a spend decision.

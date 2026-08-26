@@ -32,6 +32,22 @@ import urllib.request
 # A row in any of these is user work that a deploy would orphan.
 IN_FLIGHT = ("processing", "pending", "queued")
 
+# AWAITING THE USER IS NOT LIVE WORK (2026-08-17).
+#
+# A job parked on an ask-back has NO CONTAINER RUNNING. It is waiting on a human,
+# and a human may take days. Blocking a deploy on it protects nothing — there is
+# no in-flight compute to orphan — while blocking everything.
+#
+# EXCLUDED BY STATUS, NOT BY STALENESS, and that distinction is the point.
+# `needs_input` is not in IN_FLIGHT today, and the container-cap rule below would
+# also drop a 27-day-old row, so this is not a live hazard right now — I checked
+# before writing it (one row, a619c782, 27.3 days idle at needs_clarification).
+# But both of those protections are INCIDENTAL. If `needs_input` were ever added
+# to IN_FLIGHT, a user who answers an ask-back promptly would create a FRESH
+# needs_input row that blocks deploys for 20 minutes while nothing whatsoever is
+# running. Staleness is a proxy for "no container"; status is the fact itself.
+AWAITING_USER = ("needs_input", "awaiting_input", "needs_clarification")
+
 # LIVE WORK, NOT MERELY NON-TERMINAL (2026-08-15).
 #
 # The gate protects in-flight USER WORK from being orphaned by a deploy. A row
@@ -128,10 +144,25 @@ def main():
         except Exception:
             return None                     # unparseable -> treat as LIVE
 
-    inflight, wedged = [], []
+    inflight, wedged, parked = [], [], []
     for _r in inflight_raw:
         _s = _stale_s(_r)
-        (wedged if (_s is not None and _s > CONTAINER_CAP_S) else inflight).append((_r, _s))
+        _st = str(_r.get("status") or "").strip().lower()
+        _step = str(_r.get("current_step") or "").strip().lower()
+        if _st in AWAITING_USER or _step in AWAITING_USER:
+            parked.append((_r, _s))          # waiting on a HUMAN — no container
+        elif _s is not None and _s > CONTAINER_CAP_S:
+            wedged.append((_r, _s))
+        else:
+            inflight.append((_r, _s))
+
+    if parked:
+        print(f"  NOTE: {len(parked)} row(s) are AWAITING USER INPUT — no container "
+              f"is running for them, so they are not live work and do not block "
+              f"this deploy:")
+        for _r, _s in parked[:10]:
+            _d = f"{(_s or 0) / 86400:.1f}d" if _s else "?"
+            print(f"    parked  {_r.get('id')}  idle={_d}  step={_r.get('current_step')}")
 
     if wedged:
         print(f"  NOTE: {len(wedged)} non-terminal row(s) are STALER than the "
