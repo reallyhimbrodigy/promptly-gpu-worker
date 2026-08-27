@@ -6235,6 +6235,19 @@ _RENDER_OFFTHREAD = {}
 # production reading.
 _V2_COUNTS_LAST = {}
 
+# THE NORMALIZE DECOMPOSITION, AND WHY IT IS NOT THE WAITS.
+# v576 instrumented the five `.result()` awaits inside
+# normalize_transcribe_upload on the hypothesis that the stage was await-bound.
+# Measured on organic traffic: dur 48.1s, unaccounted 48.1s, and ALL FIVE WAITS
+# ZERO. The futures were already complete when the block awaited them, so the
+# hypothesis is refuted by its own instrument.
+#
+# The work happens in the mega-pool BEFORE the awaits, and `_pool_timings`
+# has measured it per task the whole time — "logged at pool teardown", printed
+# as [long-pole], never persisted. Third instance this week of a number that was
+# already computed and only printed (offthreadVideoThreads, v2_counts, this).
+_POOL_TIMINGS_LAST = {}
+
 # ── THE offthreadVideoThreads ARM ──────────────────────────────────────────
 # MEASURED FIRST, then armed (25 jobs / 25 users, post-v574): the lever IS live
 # and sets offthreadVideoThreads = resolvedConcurrency. But concurrency is NOT a
@@ -28411,6 +28424,12 @@ def _fanout_render_chunks(ctx, render_kind, label, cmd, timeout,
         if (not os.path.exists(chunk_local_path)
                 or os.path.getsize(chunk_local_path) < 1000):
             raise RuntimeError(f"downloaded chunk missing/invalid: {chunk_local_path}")
+        # THE BURST'S OWN MEASUREMENT, carried back on its return contract.
+        # Never re-parsed from a stream this process cannot see.
+        for _leg in (_res.get("renderclock") or []):
+            if isinstance(_leg, dict):
+                _leg["label"] = label
+                _RENDER_OFFTHREAD.setdefault("legs", []).append(_leg)
         _elapsed = time.time() - _t0
         print(f"[fanout] {label} rendered remotely in {_elapsed:.1f}s "
               f"(remote {_res.get('seconds')}s) → "
@@ -40044,6 +40063,7 @@ def handler(job):
         _STALL_ARM[0] = _resolve_stall_arm(job_id, input_data)
         _OFFTHREAD_ARM[0] = _resolve_offthread_arm(job_id, input_data)
         _RENDER_OFFTHREAD.clear()
+        _POOL_TIMINGS_LAST.clear()
         _V2_COUNTS_LAST.clear()
         _RENDER_ATTEMPTS[0] = 0
 
@@ -43317,6 +43337,8 @@ def handler(job):
         # pole → move the whole subset; transcribe (network) long pole → keep it on
         # the planner and cross only the CPU tasks.
         try:
+            _POOL_TIMINGS_LAST.clear()
+            _POOL_TIMINGS_LAST.update(_pool_timings)
             _lp = sorted(_pool_timings.items(), key=lambda _x: -_x[1])
             print(f"[long-pole] mega_pool per-task durations (s): {_lp}", flush=True)
         except Exception:
@@ -43974,6 +43996,15 @@ def handler(job):
                 # distinguishable from "arm B ran and emitted nothing", which
                 # is itself one of the four pre-registered worse-result readings.
                 "v2_counts": (dict(_V2_COUNTS_LAST) or None),
+                # 1b: per-task mega-pool wall clock — the segments the zero-wait
+                # result implicated. None when the pool never ran.
+                "pool_task_s": (dict(_POOL_TIMINGS_LAST) or None),
+                # 1c: THE X-AXIS ALREADY EXISTS — `source_duration_s` is written
+                # in this same dict. It was never the persistence that was
+                # missing, it was the READ: the organic 48.1s row was reported
+                # without it and was therefore un-placeable on the affine curve.
+                # Fixed in the query, not here. Adding a second copy would have
+                # been a duplicate field papering over a reporting gap.
                 # "2" = pinned to Remotion's default; None = dark/control.
                 # Persisted so the cohort is cut by what RAN, never by clock.
                 "offthread_arm": _OFFTHREAD_ARM[0],

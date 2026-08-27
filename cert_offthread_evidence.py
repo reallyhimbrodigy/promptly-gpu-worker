@@ -243,6 +243,63 @@ def main():
               r"frames=(\d+) ms_per_frame=([0-9.]+)", _synth) is not None,
           "the .mjs and .py have DRIFTED — render_legs goes silently NULL")
 
+    # ── NO METRIC CROSSES A SPAWN BOUNDARY BY STDOUT (standing rule) ───────
+    # RENDERCLOCK is written by render-full.mjs into the BURST container's
+    # stdout. handler dispatches that render with `.spawn()` and lives on the
+    # far side, so its stdout loop never sees the stream — which is why
+    # render_legs was EMPTY on every burst render, organic and batched alike.
+    # Parsing it in the orchestrator was the original "logs in the burst
+    # container" bug, reintroduced one process closer and still on the wrong
+    # side of the boundary. Produced-where-observed, returned on the existing
+    # contract.
+    MA = open(os.path.join(HERE, "modal_app.py"), encoding="utf-8").read()
+    check("the BURST parses RENDERCLOCK, where it is produced",
+          "RENDERCLOCK" in MA and 'out.setdefault("renderclock", [])' in MA,
+          "the only process that can see the stream does not read it")
+    check("it rides the burst's existing return contract",
+          'out.setdefault("renderclock"' in MA and '"ok"' in MA,
+          "a second channel would need its own delivery guarantee")
+    check("the orchestrator READS the return value, never a remote stdout",
+          '_res.get("renderclock")' in NC,
+          "handler must consume what the burst returned")
+    # THE RULE IS ABOUT THE BOUNDARY, NOT ABOUT STDOUT. handler's in-process
+    # parse in _remotion_subprocess is LEGITIMATE and must stay: when the render
+    # is NOT bursted it runs as this process's own child and its stdout is
+    # genuinely visible here. Forbidding all stdout parsing would delete the
+    # working non-burst path.
+    #
+    # What must never regress is the BURST path silently depending on the
+    # orchestrator to read a stream it cannot see. That is asserted positively —
+    # the burst produces it and handler consumes the RETURN — because "the bad
+    # thing is absent" is unfalsifiable here while "the good path exists" is not.
+    # The literal in handler is the ESCAPED regex (\[RENDERCLOCK\]), so an
+    # unescaped needle cannot match it — the first cut of this check failed on
+    # correct code for that reason.
+    check("the non-burst in-process parse is retained",
+          "RENDERCLOCK" in NC,
+          "deleting it would strip timings from every non-burst render")
+    check("burst and non-burst BOTH feed the same holder",
+          NC.count('_RENDER_OFFTHREAD.setdefault("legs", []).append(') >= 2,
+          "one of the two render paths reports nothing")
+
+    # ── THE NORMALIZE DECOMPOSITION IS THE POOL, NOT THE WAITS ─────────────
+    # Measured: dur 48.1s, unaccounted 48.1s, all five waits ZERO. The work runs
+    # in the mega-pool BEFORE the awaits, and _pool_timings measured it the whole
+    # time while only being printed.
+    check("per-task pool timings are persisted",
+          '"pool_task_s": (dict(_POOL_TIMINGS_LAST) or None)' in NC,
+          "the segments that actually carry the 48.1s stay unqueryable")
+    check("pool timings are captured, not just printed",
+          "_POOL_TIMINGS_LAST.update(_pool_timings)" in NC)
+    check("reset per job (warm containers)",
+          "_POOL_TIMINGS_LAST.clear()" in NC and NC.count("_POOL_TIMINGS_LAST.clear()") >= 2)
+    # 1c: the x-axis must travel WITH the stage duration.
+    QA = open(os.path.join(HERE, "query_offthread_app.py"), encoding="utf-8").read()
+    check("the read returns source_s beside every stage_s",
+          '"source_s": st.get("source_duration_s")' in QA,
+          "a stage duration without its source duration cannot be placed on the "
+          "affine curve — intercept and slope are unrecoverable from y alone")
+
     print()
     if fails:
         print(f"  CERT OFFTHREAD-EVIDENCE: FAIL ({len(fails)})")

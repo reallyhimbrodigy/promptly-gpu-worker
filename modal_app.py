@@ -1255,11 +1255,41 @@ def render_chunk_fanout(s3_prefix: str, files_manifest: list, render_kind: str,
             out["seconds"] = round(time.time() - t0, 2)
             return out
         if r.stdout:
+            import re as _re_rc
             for line in r.stdout.split("\n"):
                 ls = line.strip()
                 if ls.startswith("[render-full]") or ls.startswith("[gpu-info]"):
                     print(f"[render_chunk_fanout {kind} {frame_start}-{frame_end}] {ls}",
                           flush=True)
+                # PRODUCED HERE, PARSED HERE, RETURNED ON THE EXISTING PATH.
+                #
+                # RENDERCLOCK is written by render-full.mjs into THIS process's
+                # stdout. The orchestrator that wants it is on the far side of a
+                # `.spawn()` and never sees this stream — which is exactly why
+                # `render_legs` came back empty on every burst render, organic
+                # and batched alike. Parsing it in the orchestrator was the
+                # original "logs in the burst container" bug, reintroduced one
+                # process closer and still on the wrong side of the boundary.
+                #
+                # STANDING RULE: no metric is ever parsed from another process's
+                # stdout across a spawn boundary. It rides `out`, which is the
+                # return contract the caller already checks for {"ok": ...}.
+                _rc = _re_rc.search(
+                    r"\[RENDERCLOCK\] leg=(\S+) total_ms=(\d+) bundle_ms=(\d+) "
+                    r"browser_ms=(\d+) select_ms=(\d+) render_ms=(\d+) "
+                    r"frames_ms=(\d+) stitch_ms=(-?\d+) unaccounted_ms=(-?\d+) "
+                    r"frames=(\d+) ms_per_frame=([0-9.]+)", ls)
+                if _rc:
+                    out.setdefault("renderclock", []).append({
+                        "leg": _rc.group(1), "total_ms": int(_rc.group(2)),
+                        "bundle_ms": int(_rc.group(3)), "browser_ms": int(_rc.group(4)),
+                        "select_ms": int(_rc.group(5)), "render_ms": int(_rc.group(6)),
+                        "frames_ms": int(_rc.group(7)), "stitch_ms": int(_rc.group(8)),
+                        "unaccounted_ms": int(_rc.group(9)),
+                        "frames": int(_rc.group(10)),
+                        "ms_per_frame": float(_rc.group(11)),
+                        "kind": kind, "chunk": f"{frame_start}-{frame_end}",
+                    })
         if not os.path.exists(out_local) or os.path.getsize(out_local) < 1000:
             out["error"] = f"chunk output missing/invalid at {out_local}"
             out["seconds"] = round(time.time() - t0, 2)

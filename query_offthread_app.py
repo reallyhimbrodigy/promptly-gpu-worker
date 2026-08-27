@@ -122,7 +122,8 @@ def query(since: str = "", limit: int = 4000) -> dict:
         b = by_route.setdefault(route, {"jobs": 0, "users": set(), "legs": [],
                                         "offthread": {}, "concurrency": {},
                                         "total_s": [], "render_s": [],
-                                        "norm_s": [], "by_ot": {}, "spans": {}})
+                                        "norm_s": [], "by_ot": {}, "spans": {},
+                                        "pairs": []})
         b["jobs"] += 1
         b["users"].add(r.get("user_id"))
         b["legs"].append(legs)
@@ -140,6 +141,16 @@ def query(since: str = "", limit: int = 4000) -> dict:
             b["render_s"].append(float(st["render"]))
         if isinstance(st.get("normalize_transcribe_upload"), (int, float)):
             b["norm_s"].append(float(st["normalize_transcribe_upload"]))
+            # (source_s, stage_s, spans) TOGETHER. A stage duration without its
+            # source duration cannot be placed on the affine curve — intercept
+            # and slope are unrecoverable from y alone. The organic 48.1s row
+            # was reported without its x and was un-placeable.
+            b["pairs"].append({
+                "source_s": st.get("source_duration_s"),
+                "normalize_s": st.get("normalize_transcribe_upload"),
+                "render_s": st.get("render"),
+                "pool_task_s": st.get("pool_task_s"),
+            })
         # PER-VALUE, so render time can be cut by the offthread value in force.
         _k = ",".join(str(v) for v in (ot or []))
         b["by_ot"].setdefault(_k, []).append(float(st.get("render") or 0) or None)
@@ -168,6 +179,7 @@ def query(since: str = "", limit: int = 4000) -> dict:
             "n_render_timed": len(b["render_s"]),
             "norm_s_p50": _pct(b["norm_s"], .5), "norm_s_p90": _pct(b["norm_s"], .9),
             "n_norm_timed": len(b["norm_s"]),
+            "pairs": b["pairs"][:40],
             "render_s_p50_by_offthread": {k: _pct([x for x in v if x], .5)
                                           for k, v in b["by_ot"].items()},
             "render_n_by_offthread": {k: len([x for x in v if x]) for k, v in b["by_ot"].items()},
@@ -229,3 +241,12 @@ def main(since: str = "", limit: int = 4000):
         print(f"     render p50 BY offthread value: {b['render_s_p50_by_offthread']}")
         print(f"                            n each: {b['render_n_by_offthread']}")
         print(f"     top timeline spans p50: {b['timeline_spans_p50']}")
+        _pr = [p for p in (b.get("pairs") or []) if p.get("source_s")]
+        if _pr:
+            print(f"     (source_s, normalize_s, render_s) pairs — the affine x-axis:")
+            for p in _pr[:10]:
+                print(f"        src={p['source_s']}s  norm={p['normalize_s']}s  "
+                      f"render={p['render_s']}s  pool={p.get('pool_task_s')}")
+        else:
+            print(f"     ⚠ NO (source_s, stage_s) PAIRS — rows are un-placeable "
+                  f"on the affine curve; intercept/slope unrecoverable.")
