@@ -33661,40 +33661,51 @@ def _remotion_subprocess(label, cmd, timeout=600, _self_healed=False):
             _ls = _line.strip()
             if _ls.startswith("[render-full]") or _ls.startswith("[gpu-info]"):
                 print(f"[{label}] {_ls}", flush=True)
-                # LIFT THE VALUE OUT OF THE CONTAINER. Every chunk render logs
-                # its own pair, so this collects a LIST: if the overlay and micro
-                # legs ever resolve differently, that difference is itself the
-                # finding and must not be flattened away here.
-                # PER-LEG frames / fps — the decomposition of "a chunk costs
-                # ~110s" into its two terms. Persisted so the question is a DB
-                # query on every job, not a log pull from a burst container.
-                # RENDERCLOCK, not my LEGSTAT. The renderer ALREADY emitted a
-                # complete, grep-stable leg decomposition whose children
-                # reconcile to the parent by construction — and nothing has ever
-                # parsed it. LEGSTAT was a second, poorer copy of an instrument
-                # that already existed; it is deleted rather than kept beside it.
+                # DEDENTED OUT OF THE [render-full] BRANCH. This parse sat
+                # INSIDE `if _ls.startswith("[render-full]")`, and a
+                # RENDERCLOCK line starts with "[RENDERCLOCK]" — so the
+                # condition excluded every line it was meant to read and
+                # render_legs was empty on the non-burst path too. The
+                # offthreadVideoThreads parse survived only because that
+                # value rides a [render-full] line.
                 #
-                # THE FIELD THAT DECIDES THE GPU QUESTION IS frames_ms vs
-                # stitch_ms. cert_gpu_fps measures renderMedia({codec:"h264"})
-                # end-to-end, so its overall_fps is PAINT + ENCODE fused and
-                # cannot attribute a null result to either. If stitch dominates,
-                # GPU-Chromium is irrelevant no matter what that probe returns,
-                # because paint is not the bottleneck.
-                _rc = re.search(
-                    r"\[RENDERCLOCK\] leg=(\S+) total_ms=(\d+) bundle_ms=(\d+) "
-                    r"browser_ms=(\d+) select_ms=(\d+) render_ms=(\d+) "
-                    r"frames_ms=(\d+) stitch_ms=(-?\d+) unaccounted_ms=(-?\d+) "
-                    r"frames=(\d+) ms_per_frame=([0-9.]+)", _ls)
-                if _rc:
-                    _RENDER_OFFTHREAD.setdefault("legs", []).append({
-                        "leg": _rc.group(1), "total_ms": int(_rc.group(2)),
-                        "bundle_ms": int(_rc.group(3)), "browser_ms": int(_rc.group(4)),
-                        "select_ms": int(_rc.group(5)), "render_ms": int(_rc.group(6)),
-                        "frames_ms": int(_rc.group(7)), "stitch_ms": int(_rc.group(8)),
-                        "unaccounted_ms": int(_rc.group(9)),
-                        "frames": int(_rc.group(10)),
-                        "ms_per_frame": float(_rc.group(11)),
-                    })
+                # A parser nested under a filter that cannot match it is
+                # indistinguishable from an absent parser, and reads as
+                # "the renderer emitted nothing".
+            # LIFT THE VALUE OUT OF THE CONTAINER. Every chunk render logs
+            # its own pair, so this collects a LIST: if the overlay and micro
+            # legs ever resolve differently, that difference is itself the
+            # finding and must not be flattened away here.
+            # PER-LEG frames / fps — the decomposition of "a chunk costs
+            # ~110s" into its two terms. Persisted so the question is a DB
+            # query on every job, not a log pull from a burst container.
+            # RENDERCLOCK, not my LEGSTAT. The renderer ALREADY emitted a
+            # complete, grep-stable leg decomposition whose children
+            # reconcile to the parent by construction — and nothing has ever
+            # parsed it. LEGSTAT was a second, poorer copy of an instrument
+            # that already existed; it is deleted rather than kept beside it.
+            #
+            # THE FIELD THAT DECIDES THE GPU QUESTION IS frames_ms vs
+            # stitch_ms. cert_gpu_fps measures renderMedia({codec:"h264"})
+            # end-to-end, so its overall_fps is PAINT + ENCODE fused and
+            # cannot attribute a null result to either. If stitch dominates,
+            # GPU-Chromium is irrelevant no matter what that probe returns,
+            # because paint is not the bottleneck.
+            _rc = re.search(
+                r"\[RENDERCLOCK\] leg=(\S+) total_ms=(\d+) bundle_ms=(\d+) "
+                r"browser_ms=(\d+) select_ms=(\d+) render_ms=(\d+) "
+                r"frames_ms=(\d+) stitch_ms=(-?\d+) unaccounted_ms=(-?\d+) "
+                r"frames=(\d+) ms_per_frame=([0-9.]+)", _ls)
+            if _rc:
+                _RENDER_OFFTHREAD.setdefault("legs", []).append({
+                    "leg": _rc.group(1), "total_ms": int(_rc.group(2)),
+                    "bundle_ms": int(_rc.group(3)), "browser_ms": int(_rc.group(4)),
+                    "select_ms": int(_rc.group(5)), "render_ms": int(_rc.group(6)),
+                    "frames_ms": int(_rc.group(7)), "stitch_ms": int(_rc.group(8)),
+                    "unaccounted_ms": int(_rc.group(9)),
+                    "frames": int(_rc.group(10)),
+                    "ms_per_frame": float(_rc.group(11)),
+                })
                 _ovt = re.search(
                     r"concurrency=(\d+)\s+offthreadVideoThreads=(\d+)", _ls)
                 if _ovt:

@@ -278,6 +278,25 @@ def main():
     check("the non-burst in-process parse is retained",
           "RENDERCLOCK" in NC,
           "deleting it would strip timings from every non-burst render")
+    # A PARSER NESTED UNDER A FILTER THAT CANNOT MATCH IT is indistinguishable
+    # from an absent parser, and reads as "the renderer emitted nothing". This
+    # exact shape shipped: the RENDERCLOCK parse sat inside
+    # `if _ls.startswith("[render-full]")` while every RENDERCLOCK line starts
+    # with "[RENDERCLOCK]", so it excluded 100% of its own input. The
+    # offthreadVideoThreads parse survived only because that value happens to
+    # ride a [render-full] line. Asserted by INDENTATION, because that is the
+    # property that was wrong — presence of the parse was never in doubt.
+    _lines = NC.splitlines()
+    _if_i = next((i for i, l in enumerate(_lines)
+                  if 'if _ls.startswith("[render-full]")' in l), None)
+    _rc_i = next((i for i, l in enumerate(_lines) if "_rc = re.search(" in l), None)
+    check("the RENDERCLOCK parse is NOT nested under the [render-full] filter",
+          _if_i is not None and _rc_i is not None
+          and (len(_lines[_rc_i]) - len(_lines[_rc_i].lstrip()))
+              <= (len(_lines[_if_i]) - len(_lines[_if_i].lstrip())),
+          "the parse is indented inside a branch that cannot match its own "
+          "input — it would read as 'no legs reported' forever")
+
     check("burst and non-burst BOTH feed the same holder",
           NC.count('_RENDER_OFFTHREAD.setdefault("legs", []).append(') >= 2,
           "one of the two render paths reports nothing")

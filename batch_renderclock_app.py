@@ -90,7 +90,18 @@ def render_cell(target_s: int, arm: str, rep: int) -> dict:
     _sys.path.insert(0, "/")
 
     s3 = boto3.client("s3", region_name=_os.environ.get("AWS_REGION") or "us-west-2")
-    base = STALL_CLIP if target_s <= 40 else LONG_CLIP
+    # ONE BASE CLIP ACROSS THE WHOLE CURVE. The first run picked
+    # `STALL_CLIP if target_s <= 40 else LONG_CLIP`, so the 20s cells used a
+    # DIFFERENT SOURCE than 60s/120s — different content, different frame
+    # complexity — and the 20s point was not on the same curve as the other two.
+    # It showed up as 20s rendering SLOWER (75-171s) than 60s (47-60s), which is
+    # nonsense until you notice the clips differ. An affine fit across a mixed
+    # source set measures the sources, not the duration.
+    #
+    # LONG_CLIP (59.5s) spans the whole range: trim for 20s and 60s, concat for
+    # 120s. The stall grid keeps STALL_CLIP, because ITS requirement is in-band
+    # gaps rather than length — different experiment, different source need.
+    base = LONG_CLIP
     src = f"/tmp/base_{target_s}_{arm}_{rep}.mp4"
     try:
         s3.download_file(BUCKET, f"{PREFIX}/{base}", src)
