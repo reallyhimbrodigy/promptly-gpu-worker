@@ -96,7 +96,7 @@ def render_cell(target_s: int, arm: str, rep: int) -> dict:
         s3.download_file(BUCKET, f"{PREFIX}/{base}", src)
     except Exception as e:
         return {"target_s": target_s, "arm": arm, "rep": rep,
-                "error": f"SOURCE DOWNLOAD FAILED: {type(e).__name__}: {e}"}
+                "error": f"SOURCE DOWNLOAD FAILED: {type(e).__name__}: {e}", "clip": None}
 
     _d = _sp.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
                   "-of", "default=nw=1:nk=1", src], capture_output=True, text=True)
@@ -104,7 +104,7 @@ def render_cell(target_s: int, arm: str, rep: int) -> dict:
         dur = float((_d.stdout or "").strip())
     except ValueError:
         return {"target_s": target_s, "arm": arm, "rep": rep,
-                "error": "BASE PROBE FAILED — a FAILED measurement, not a zero"}
+                "error": "BASE PROBE FAILED — a FAILED measurement, not a zero", "clip": None}
 
     cut = f"/tmp/cut_{target_s}_{arm}_{rep}.mp4"
     if target_s <= dur:
@@ -122,7 +122,7 @@ def render_cell(target_s: int, arm: str, rep: int) -> dict:
     if not _os.path.exists(cut) or _os.path.getsize(cut) < 10000:
         return {"target_s": target_s, "arm": arm, "rep": rep,
                 "error": "CONSTRUCTION FAILED — no usable cut. A render on a bad "
-                         "source would time something nobody can attribute."}
+                         "source would time something nobody can attribute.", "clip": None}
 
     key = f"{PREFIX}/_batch/{target_s}s_{arm}_{rep}.mp4"
     s3.upload_file(cut, BUCKET, key)
@@ -142,7 +142,7 @@ def render_cell(target_s: int, arm: str, rep: int) -> dict:
                 "error": f"{type(e).__name__}: {str(e)[:300]}",
                 "wall_s": round(_time.time() - t0, 1)}
     st = (r or {}).get("stage_timings") or {}
-    return {"target_s": target_s, "arm": arm, "rep": rep,
+    rec = {"target_s": target_s, "arm": arm, "rep": rep,
             "status": (r or {}).get("status"),
             "wall_s": round(_time.time() - t0, 1),
             "render_s": st.get("render"),
@@ -155,7 +155,37 @@ def render_cell(target_s: int, arm: str, rep: int) -> dict:
             "dead_air": {k: st.get(k) for k in
                          ("dead_air_spans_located", "dead_air_spans_offered",
                           "dead_air_spans_preserved", "midsentence_stall_s")},
-            "timeline": st.get("timeline")}
+            "timeline": st.get("timeline"),
+           # SELF-DESCRIBING: the record names its own cell, so a result found
+           # later needs no external index to be interpretable.
+           "clip": base, "source_duration_s": st.get("source_duration_s"),
+           "pool_task_s": st.get("pool_task_s")}
+    _persist(s3, rec)
+    return rec
+
+
+def _persist(s3, rec):
+    """DURABLE THE MOMENT IT EXISTS — written from the CELL, not the harness.
+
+    fire3 rendered 10 of 12 cells and then died on GRPCError UNAVAILABLE while
+    collecting. Every result lived only in returned dicts and died with the
+    client: the `.remote()`-dies-with-client trap already written in this repo's
+    notes. The harness printed a warning about durable records and had none.
+
+    The harness is a DISPATCHER and a READER, never a HOLDER.
+    """
+    import json as _j
+    try:
+        key = (f"{PREFIX}/_results/{rec['target_s']}s_{rec['arm']}_r{rec['rep']}.json")
+        s3.put_object(Bucket=BUCKET, Key=key,
+                      Body=_j.dumps(rec, default=str).encode(),
+                      ContentType="application/json")
+        print(f"[batch] persisted {key}", flush=True)
+    except Exception as e:
+        # A cell that rendered and could not persist must SAY so — silence here
+        # would look identical to a cell that never ran.
+        print(f"[batch] ✗ PERSIST FAILED for {rec.get('target_s')}s/"
+              f"{rec.get('arm')}: {type(e).__name__}: {e}", flush=True)
 
 
 def _find(n, want):
@@ -232,42 +262,86 @@ def _report(results):
               f"preserved={da.get('dead_air_spans_preserved')}")
 
 
+@app.function(secrets=modal_app.secrets, timeout=900)
+def collect() -> list:
+    """Read every persisted cell record back from S3.
+
+    THE RECOVERY PATH. Because each cell writes itself, results survive the
+    harness dying — which is not hypothetical: fire3 lost 10 completed renders
+    to a GRPCError while collecting. This can be run STANDALONE after any crash.
+    """
+    import boto3, json as _j, os as _os
+    s3 = boto3.client("s3", region_name=_os.environ.get("AWS_REGION") or "us-west-2")
+    out = []
+    tok = None
+    while True:
+        kw = {"Bucket": BUCKET, "Prefix": f"{PREFIX}/_results/"}
+        if tok:
+            kw["ContinuationToken"] = tok
+        r = s3.list_objects_v2(**kw)
+        for o in r.get("Contents", []):
+            try:
+                b = s3.get_object(Bucket=BUCKET, Key=o["Key"])["Body"].read()
+                out.append(_j.loads(b))
+            except Exception as e:
+                out.append({"error": f"UNREADABLE {o['Key']}: {type(e).__name__}"})
+        if not r.get("IsTruncated"):
+            break
+        tok = r.get("NextContinuationToken")
+    return out
+
+
 @app.local_entrypoint()
-def main(durations: str = "20,60,120", repeats: int = 2, dry: bool = True):
+def main(durations: str = "20,60,120", repeats: int = 3, dry: bool = True,
+         read_only: bool = False):
+    if read_only:
+        # RECOVER, don't re-render. Costs one small container.
+        _report(collect.remote())
+        return
+
     want = [int(x) for x in durations.split(",") if x.strip()]
     arms = ["2", "control"]
     cells = [(d, a, r) for d in want for a in arms for r in range(repeats)]
     print(f"  PLAN: {len(want)} durations x {len(arms)} arms x {repeats} reps "
           f"= {len(cells)} renders")
-    print(f"  bucket {BUCKET}/{PREFIX}")
+    print(f"  bucket {BUCKET}/{PREFIX}   results -> {PREFIX}/_results/")
     print(f"  PRICED ~$0.07-0.10 each -> ~${0.07 * len(cells):.2f}-"
           f"${0.10 * len(cells):.2f}")
     if dry:
         print("\n  DRY RUN — nothing rendered. Pass --no-dry to fire.")
         return
 
-    print(f"\n  firing {len(cells)} cells (parallel)...\n")
-    results = []
-    for res in render_cell.starmap(cells, order_outputs=True,
-                                   return_exceptions=True):
-        if isinstance(res, Exception):
-            results.append({"error": f"{type(res).__name__}: {str(res)[:200]}"})
-            print(f"  ✗ {results[-1]['error'][:110]}")
-            continue
-        results.append(res)
-        if res.get("error"):
-            print(f"  ✗ {res.get('target_s')}s/{res.get('arm')}/r{res.get('rep')}: "
-                  f"{res['error'][:100]}")
-        else:
-            print(f"  ✓ {res['target_s']:>4}s {res['arm']:>7} r{res['rep']}  "
-                  f"render={res.get('render_s')}s norm={res.get('normalize_s')}s "
-                  f"legs={len(res.get('render_legs') or [])}")
-    try:
-        with open("/tmp/batch_results.json", "w") as fh:
-            json.dump(results, fh, indent=1, default=str)
-        print("\n  raw -> /tmp/batch_results.json")
-    except Exception as e:
-        print(f"\n  (raw dump failed: {type(e).__name__})")
-    _report(results)
-    if not [r for r in results if not r.get("error")]:
-        sys.exit(2)
+    # SPAWN + from_id. The harness dispatches and then READS S3; it never holds
+    # a result. If this process dies, `--read-only` recovers everything.
+    print(f"\n  spawning {len(cells)} cells...\n")
+    calls = []
+    for (d, a, r) in cells:
+        c = render_cell.spawn(d, a, r)
+        calls.append((d, a, r, c.object_id))
+        print(f"  → {d:>4}s {a:>7} r{r}  {c.object_id}")
+    with open("/tmp/batch_call_ids.json", "w") as fh:
+        json.dump([{"target_s": d, "arm": a, "rep": r, "call_id": cid}
+                   for (d, a, r, cid) in calls], fh, indent=1)
+    print(f"\n  call ids -> /tmp/batch_call_ids.json "
+          f"(recover with --read-only even if this process dies)")
+
+    done = 0
+    for (d, a, r, cid) in calls:
+        try:
+            fc = modal.FunctionCall.from_id(cid)
+            res = fc.get(timeout=3600)
+            done += 1
+            if res.get("error"):
+                print(f"  ✗ {d:>4}s {a:>7} r{r}: {str(res['error'])[:90]}")
+            else:
+                print(f"  ✓ {d:>4}s {a:>7} r{r}  render={res.get('render_s')}s "
+                      f"norm={res.get('normalize_s')}s "
+                      f"legs={len(res.get('render_legs') or [])}")
+        except Exception as e:
+            # The cell may still have PERSISTED. Say which is unknown.
+            print(f"  ? {d:>4}s {a:>7} r{r}: collect failed "
+                  f"({type(e).__name__}) — the cell may still have written its "
+                  f"record; recover with --read-only")
+    print(f"\n  {done}/{len(calls)} collected in-process; "
+          f"reading the durable record for the report")
+    _report(collect.remote())
