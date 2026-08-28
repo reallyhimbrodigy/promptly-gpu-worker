@@ -319,6 +319,26 @@ def main():
           "a stage duration without its source duration cannot be placed on the "
           "affine curve — intercept and slope are unrecoverable from y alone")
 
+    # ── THE BURST STAGE BOUNDARY (measured, not theorised) ─────────────────
+    # 42 of 42 organic post-v574 jobs carried render_offthread_threads and ALL
+    # 42 were None. render_stage runs INSIDE the render_burst container on the
+    # production path, so its parse populates a holder in THAT process while the
+    # orchestrator assembles stage_timings from its own. Both instruments were
+    # dark on every bursted job, at every duration — the 60s/120s "drop" was
+    # never about duration, it was burst-vs-local.
+    #
+    # Same standing rule as the fanout chunk, one level up: produced-where-
+    # observed, returned on the contract the caller already reads.
+    check("render_stage returns its instruments",
+          '"render_instruments": {' in NC,
+          "a bursted render reports nothing however correct the parse is")
+    check("the orchestrator merges them back",
+          '_ri.get(_k) or []' in NC and '_RENDER_OFFTHREAD.setdefault(_k, []).extend(' in NC,
+          "returned and dropped is the same as never returned")
+    check("a failed merge is LOUD, never silent",
+          "INSTRUMENT MERGE FAILED" in NC,
+          "silence is indistinguishable from a burst that rendered nothing")
+
     print()
     if fails:
         print(f"  CERT OFFTHREAD-EVIDENCE: FAIL ({len(fails)})")

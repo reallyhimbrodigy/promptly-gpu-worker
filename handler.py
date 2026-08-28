@@ -28344,6 +28344,22 @@ def _run_render_via_burst_or_local(
         pass
     print(f"[render_burst] job={job_id} returned OK "
           f"(qa_regen_cost=${_rs_cost_cell[0]:.4f})", flush=True)
+    # MERGE THE BURST'S OWN INSTRUMENTS into this process's holder, so the
+    # downstream stage_timings assembly sees them exactly as it would on the
+    # local path. Without this the burst renders blind and every column reads
+    # None — which is precisely how it shipped.
+    try:
+        _ri = (_out["rs"] or {}).get("render_instruments") or {}
+        for _k in ("legs", "offthread", "concurrency"):
+            _v = _ri.get(_k) or []
+            if _v:
+                _RENDER_OFFTHREAD.setdefault(_k, []).extend(_v)
+    except Exception as _rie:
+        # A failed merge must be LOUD: silence here is indistinguishable from a
+        # burst that genuinely rendered nothing.
+        print(f"[render_burst] INSTRUMENT MERGE FAILED ({type(_rie).__name__}) — "
+              f"render_legs/offthread will read None for this job and that is "
+              f"OUR reporting gap, not the renderer's", flush=True)
     return _out["rs"]
 
 
@@ -39597,6 +39613,23 @@ def render_stage(
         pass
     return {
         "edit_plan": edit_plan, "timings": _timings, "floor_state": _floor_state,
+        # RENDER INSTRUMENTS RIDE THE RETURN, because render_stage may be
+        # executing INSIDE the render_burst container. MEASURED: 42 of 42
+        # organic post-v574 jobs carry render_offthread_threads and ALL 42 are
+        # None — on the burst path neither instrument reported, at ANY duration.
+        # The parse runs correctly in the burst's own process; the ORCHESTRATOR
+        # then assembles stage_timings and never saw it.
+        #
+        # This is the same standing rule as the fanout chunk fix, applied one
+        # level up: produced-where-observed, returned on the contract the caller
+        # already reads (_out["rs"]). The earlier offthread distribution
+        # {2:12,4:7,8:5,16:13} came from LOCAL-path jobs only — burst has been
+        # dark to us since the column shipped.
+        "render_instruments": {
+            "legs": list(_RENDER_OFFTHREAD.get("legs") or []),
+            "offthread": list(_RENDER_OFFTHREAD.get("offthread") or []),
+            "concurrency": list(_RENDER_OFFTHREAD.get("concurrency") or []),
+        },
         "render_elapsed": render_elapsed, "output_size_mb": output_size_mb,
         "cover_frame_ts": cover_frame_ts, "thumbnail_source_ts": thumbnail_source_ts,
         "cover_frame_b64": cover_frame_b64, "thumbnail_url": _thumbnail_url,
