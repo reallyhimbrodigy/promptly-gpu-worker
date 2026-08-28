@@ -80,6 +80,7 @@ def query(since: str = "", limit: int = 4000) -> dict:
         if len(r.data) < PAGE:
             break
 
+    by_route = {}
     shape = {"recipe_keys": None, "sample_event": None, "list_fields": None}
     jobs = 0
     win_counts = {}          # events-per-window histogram, occupied windows only
@@ -101,7 +102,24 @@ def query(since: str = "", limit: int = 4000) -> dict:
         # zero from a WRONG READER, which would have "refuted" the density cap
         # on evidence that was never measured. Probing the shape is what caught
         # it; the zero itself looked like a clean result.
-        if isinstance(rec.get("plan"), dict):
+        # CUT BY ROUTE (Rule 5). The first shape probe sampled ONE job, which
+        # happened to be a minimal-route recipe holding only `clips` — no
+        # component arrays at all, because that route emits none BY DESIGN.
+        # Blending routes is why density read 0.01/25s: most completed jobs are
+        # not editorial, and averaging them in measures the route mix, not the
+        # governor. A blended density is not a product metric.
+        # TWO WRITE SHAPES, CONFIRMED IN handler.py — not inferred from a sample:
+        #   diverted routes (37369): {"route":…, "reason":…, "plan": {…}}
+        #   std-editorial   (43819): sanitized_recipe = {**edit_plan}  — FLAT
+        # So editorial recipes have the component arrays at the TOP LEVEL and no
+        # `route` key at all. Descending into .plan unconditionally read an empty
+        # dict for 77% of output, and the missing route key put those same jobs
+        # in the "unknown" bucket. One cause, both symptoms.
+        #
+        # `unknown` IS std-editorial: the main path never labels itself.
+        _has_plan = isinstance(rec.get("plan"), dict)
+        _route = rec.get("route") or ("std-editorial" if not _has_plan else "unknown")
+        if _has_plan:
             rec = rec["plan"]
         st = r.get("st") or {}
         dur = st.get("source_duration_s") if isinstance(st, dict) else None
@@ -114,16 +132,26 @@ def query(since: str = "", limit: int = 4000) -> dict:
         span = out_s or (float(dur) if isinstance(dur, (int, float)) else None)
         if not span or span <= 0:
             continue
-        if shape["recipe_keys"] is None:
+        # Probe the STD-EDITORIAL shape specifically — the first job in the
+        # window was a diverted route, and sampling it is what made me infer a
+        # universal shape from one instance (third time today).
+        if shape["recipe_keys"] is None and _route == "std-editorial":
             shape["recipe_keys"] = sorted(rec.keys())[:40]
             _lf = {k: len(v) for k, v in rec.items() if isinstance(v, list) and v}
             shape["list_fields"] = _lf
-            for k, v in rec.items():
-                if isinstance(v, list) and v and isinstance(v[0], dict):
-                    shape["sample_event"] = {k: sorted(v[0].keys())[:14]}
-                    break
+            # EVERY list-of-dict field with its OWN key set — one sample was not
+            # enough: motion_graphics matched and four families did not, which
+            # means the timestamp key differs PER FAMILY. Guessing a shared key
+            # set is what produced 0.01 events/25s against a known 7.76.
+            shape["sample_event"] = {
+                k: sorted(v[0].keys())[:16]
+                for k, v in rec.items()
+                if isinstance(v, list) and v and isinstance(v[0], dict)}
         jobs += 1
         dur_total += span
+        _rt = by_route.setdefault(_route, {"jobs": 0, "s": 0.0, "ev": 0,
+                                           "fam": {k: 0 for k in FAMILIES}})
+        _rt["jobs"] += 1; _rt["s"] += span
         buckets = {}
         for fam, (field, keys) in FAMILIES.items():
             evs = rec.get(field) or []
@@ -137,6 +165,7 @@ def query(since: str = "", limit: int = 4000) -> dict:
                 buckets[int(t // WINDOW_S)] = buckets.get(int(t // WINDOW_S), 0) + 1
                 n += 1
             fam_events[fam] += n
+            _rt["fam"][fam] += n; _rt["ev"] += n
             if n:
                 fam_jobs[fam] += 1
         nwin = max(1, int(span // WINDOW_S))
@@ -161,6 +190,12 @@ def query(since: str = "", limit: int = 4000) -> dict:
         "windows_empty": empty_windows,
         "empty_window_share": round(empty_windows / total_windows, 3) if total_windows else None,
         "events_per_OCCUPIED_window": dict(sorted(win_counts.items())), "shape": shape,
+        "by_route": {k: {"jobs": v["jobs"], "output_s": round(v["s"], 1),
+                         "events": v["ev"],
+                         "events_per_25s": round(v["ev"]/v["s"]*25.0, 2) if v["s"] else None,
+                         "by_family_per_25s": {f: round(c/v["s"]*25.0, 2) if v["s"] else None
+                                               for f, c in v["fam"].items()}}
+                     for k, v in sorted(by_route.items(), key=lambda kv: -kv[1]["jobs"])},
     }
 
 
@@ -177,7 +212,14 @@ def main(since: str = "", limit: int = 4000):
           f"no_recipe {r['no_recipe']}")
     print(f"  events/25s TOTAL: {r['events_per_25s_total']}   "
           f"(Zac reference 16.7, cap ceiling 12.5)")
-    print(f"\n  by family (events/25s): {r['events_per_25s_by_family']}")
+    print(f"\n  by family (events/25s, BLENDED — not a product metric): "
+          f"{r['events_per_25s_by_family']}")
+    print(f"\n  ════ BY ROUTE (Rule 5) ════")
+    for rt, v in (r.get("by_route") or {}).items():
+        print(f"  {rt:>16}  jobs={v['jobs']:>4}  out={v['output_s']:>8}s  "
+              f"events/25s={str(v['events_per_25s']):>6}")
+        if v["events"]:
+            print(f"                    families: {v['by_family_per_25s']}")
     print(f"\n  windows {r['windows_total']}   EMPTY {r['windows_empty']} "
           f"({100*(r['empty_window_share'] or 0):.1f}%)")
     print(f"  events per OCCUPIED window: {r['events_per_OCCUPIED_window']}")
