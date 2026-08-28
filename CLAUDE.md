@@ -138,3 +138,31 @@ inflated by retries into an apparent outage.
   and `edit_recipe` was read as nested from one diverted-route sample when
   std-editorial — 77% of output — writes it FLAT. Sample the bucket you intend
   to measure, or measure the bucket you sampled.
+- **An AST scan of a closure body cannot see mutation one frame down.**
+  Enumerate what a function PASSES, not just what it assigns.
+  `_do_shot_changes` scanned clean — zero stores, zero mutating method calls on
+  any captured name — because it only *passes* `_shot_change_scores` as
+  `out_scores=`. The callee fills it; line 42506 reads it back. It is a second
+  output wearing an input's clothes, and it would have crossed a container
+  boundary and arrived EMPTY. Out-parameters, callee-side writes, anything by
+  reference: the scan is blind to all of it.
+  **And it would have failed SILENTLY** — downstream reads an empty dict, not an
+  exception. Scores quietly become nothing, the plan degrades, every gate passes.
+  Fix: return `(result, scores)`; never accept an out-parameter across a seam.
+
+## Contract rules for the three-container split (PR #1)
+
+- **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
+  local path, never a future, never an out-parameter.** Two of four relocated
+  closures carried a hidden crosser — `future_gemini_proxy` (a live Future) and
+  `_shot_change_scores` (an out-param). Neither was visible from line numbers or
+  from an AST scan of the closure body.
+- **Every relocated call asserts its outputs are non-empty and well-typed before
+  returning.** A scores dict that arrives empty must PAGE, not degrade a plan.
+  This is the check that would have caught the out-parameter with nobody reading
+  the code.
+- **TWO checks, two failure classes.** Byte-identity in-process proves the
+  SIGNATURE change is safe and proves NOTHING about the return contract — a
+  local work_dir works whether or not the contract is right. Relocation needs its
+  own verification: a job through the REAL boundary, output compared against the
+  in-process baseline. Same lesson as cert-green vs deploy-green.
