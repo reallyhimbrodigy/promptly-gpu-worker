@@ -265,3 +265,50 @@ Fix: spawn + from_id, each cell written the moment it exists.
 
 Also: batch jobs are prod-isolated (`APP_URL=""`), so they never reach
 video_jobs — the free DB read cannot be paid for by a batch. Organic rows only.
+
+---
+
+# QUEUED BEHIND LANE 3 EXTRACTION — the error census (owner, 2026-08-27)
+
+**Ordering is explicit: AFTER extraction, not before.** Extraction is the next
+session's opener; this does not displace it.
+
+## The census — a census, NOT a scan
+
+Every DISTINCT error class, last 7 days, across BOTH the worker and
+content-studio, ranked by AFFECTED USERS (Rule 7 — a user who fails five times
+and gives up is one lost user, not five failures).
+
+**The output that matters: every class with NO NAMED SUB-CODE.** Those are the
+ones nobody has a mechanism for. A class with a sub-code has been reasoned
+about; a class without one has only been observed.
+
+Existing instrument: `query_failure_ranking_app.py` already does per-user
+ranking with sub-codes and dumps full `error_detail` (NOT `error_message` — that
+is the user-facing copy and hides the mechanism; this cost one read to learn).
+It reads the WORKER only. Content-studio is not yet covered — that is the gap to
+close before the census is real.
+
+## Then ONE class, done properly
+
+Take the top UNEXPLAINED class and root-cause it the way ladder_exhausted was:
+
+  1. mechanism NAMED (ladder_exhausted: `os.path.exists(None)` RAISES where ""
+     returns False — not "renders sometimes fail")
+  2. latent siblings ENUMERATED (that one bug had 1 visible instance and 12
+     invisible ones; guarding the one that fired would have left twelve)
+  3. gate WRITTEN that bans the shape, not just the instance (banned-symbol
+     pattern; the cert found the 12 on its first run)
+
+**One class done properly beats a scan of everything.** The whole ladder_exhausted
+close — root cause, fix, twelve siblings, gate, two deploys — cost $0.02 of reads.
+
+## Regression corpus: 5 of 8 sub-codes seeded — FINISH IT
+
+`_REGRESSION_CORPUS` (modal_app.py:3304) seeds 5 and carries its own TODO for the
+rest: frame_grid, analyze_loudness, keyterm_limit. It runs on EVERY deploy, so a
+seeded class CANNOT return silently — which is exactly what makes a fixed class
+stay fixed. An unseeded class has a fix and no guard.
+
+Note `missing_artifact_path` (added 2026-08-27) is a NEW sub-code with no corpus
+seed yet — it belongs in the same pass.
