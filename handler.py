@@ -32197,7 +32197,31 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _micro_chunked = len(_micro_ranges) > 1
         _MICRO_CONCURRENCY = min(_CONTAINER_CORES,
                                  (max(2, _MICRO_TAB_BUDGET // max(1, len(_micro_ranges)))
-                                  if _micro_chunked else _PER_CHUNK_CONCURRENCY))  # clamp: never > cores
+                                  if _micro_chunked else _PER_CHUNK_CONCURRENCY))
+        # PER-JOB OVERRIDE `micro_concurrency_test` — same *_test idiom as
+        # offthread_test / stall_test / min_output_ratio_test.
+        #
+        # WHY IT EXISTS: micro frames cost 775-1,797 ms/frame in production
+        # against 108-110 ms/frame measured ISOLATED at concurrency 1
+        # (micro-seek-cost.mjs). A 7-16x gap on the same primitive, hypothesised
+        # as CONTENTION — several Chromium pages behind one lazy Rust compositor.
+        # That hypothesis has never been tested on the path production uses,
+        # because every prior batch ran handler in-process and so took the LOCAL
+        # path, never the burst.
+        #
+        # Clamped to [1, _CONTAINER_CORES]: Remotion HARD-REJECTS concurrency >
+        # cores (the third RENDER_FATAL), and 0 would render nothing.
+        try:
+            # Rides edit_plan, the dict that already carries per-job values into
+            # this function (cf. _audio_stream_offset). Underscore-prefixed so the
+            # persist sanitiser strips it — a test knob is not plan data.
+            _mct = int(str((edit_plan or {}).get("_micro_concurrency_test") or "").strip() or 0)
+        except (TypeError, ValueError):
+            _mct = 0
+        if _mct > 0:
+            _MICRO_CONCURRENCY = max(1, min(int(_CONTAINER_CORES), _mct))
+            print(f"[micro-conc] OVERRIDE micro_concurrency_test={_mct} -> "
+                  f"{_MICRO_CONCURRENCY} (cores={_CONTAINER_CORES})", flush=True)  # clamp: never > cores
         if _micro_chunked:
             for _i, (_fs, _fe) in enumerate(_micro_ranges):
                 _chunk_path = os.path.join(work_dir, f"micro_chunk_{_i:02d}.mov")
@@ -43444,6 +43468,11 @@ def handler(job):
         # positions back to audio-data-time for WAV indexing).
         if isinstance(edit_plan, dict):
             edit_plan["_audio_stream_offset"] = _audio_stream_offset
+            # Carry the per-job micro-concurrency override to render_multi_clip,
+            # which has edit_plan but not input_data.
+            _mc_ov = (input_data or {}).get("micro_concurrency_test")
+            if _mc_ov:
+                edit_plan["_micro_concurrency_test"] = str(_mc_ov)
         source_loudness = _tl_wait("wait_loudness_collect",
                                    lambda: future_loudness.result(),
                                    parent="normalize_transcribe_upload")
