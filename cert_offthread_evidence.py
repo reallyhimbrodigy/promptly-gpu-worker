@@ -345,18 +345,25 @@ def main():
     # TypeError, and because the fault is INPUT-INDEPENDENT the degrade ladder
     # reproduced it on every rung and exhausted: 10 jobs, 5 users, both
     # ladder_exhausted variants traced to this one line-shape.
+    # BANNED SYMBOL, same pattern that closed localizedTitle. One bug had ONE
+    # visible instance and TWELVE invisible ones — each a latent TypeError
+    # waiting for its own artifact to go missing. Guarding twelve sites does not
+    # stop the thirteenth being written next week; banning the bare form does.
     import re as _re2
-    _bad = []
-    for _m in _re2.finditer(r"^\s*(?:el)?if not os\.path\.exists\(([A-Za-z_][A-Za-z0-9_]*)\)",
-                            NC, _re2.M):
-        _var = _m.group(1)
-        _line = NC[_m.start():_m.end()]
-        if f"not {_var} or" not in _line:
-            _bad.append(_line.strip()[:80])
-    check("no render-path exists() call takes an unguarded name",
+    _bad = [NC[m.start():m.end()].strip()[:70] for m in _re2.finditer(
+        r"^\s*(?:el)?if not os\.path\.exists\(([A-Za-z_][A-Za-z0-9_]*)\)", NC, _re2.M)]
+    check("no bare `if not os.path.exists(<name>)` survives — use _exists()",
           not _bad,
-          f"unguarded: {_bad[:3]} — a None here raises TypeError instead of "
-          f"returning False, and the ladder cannot fix an input-independent fault")
+          f"{len(_bad)} bare site(s): {_bad[:3]}\n"
+          f"         os.path.exists(None) RAISES where '' returns False. Use the "
+          f"None-safe _exists() helper.")
+    check("the _exists helper exists and is None-safe",
+          "def _exists(p) -> bool:" in NC and "return bool(p) and _os.path.exists(p)" in NC,
+          "the ban has nothing to redirect callers to")
+    _n_ex = NC.count("_exists(")
+    check("callers actually adopted it",
+          _n_ex >= 15, f"only {_n_ex} _exists( references — the ban would just "
+                       f"push the shape somewhere else")
     check("a recurrence stays NAMED, not unclassified",
           '("missing_artifact_path"' in NC,
           "the class would slide back into ladder_exhausted with no mechanism")

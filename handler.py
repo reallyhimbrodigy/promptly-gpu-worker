@@ -15,6 +15,56 @@
 # Modal worker entrypoint
 import subprocess
 import os
+
+
+def _exists(p) -> bool:
+    """None-SAFE os.path.exists. The ONLY sanctioned existence check.
+
+    THE ASYMMETRY THIS CLOSES: os.path.exists(None) RAISES TypeError, while
+    os.path.exists("") returns False. So a missing path does not read as
+    missing — it reads as a crash, and an unclassifiable one.
+
+    ROOT-CAUSED 2026-08-27: that crash cost 10 jobs across 5 users. A missing
+    render artifact raised `TypeError: stat: path should be string, bytes,
+    os.PathLike or integer, not NoneType` instead of the NAMED RuntimeError one
+    line below it, and because a missing path is INPUT-INDEPENDENT the degrade
+    ladder reproduced it on every rung and exhausted.
+
+    ONE VISIBLE INSTANCE, TWELVE INVISIBLE ONES. Guarding the site that fired
+    would have left twelve more latent TypeErrors, each waiting for its own
+    artifact to go missing. The durable fix is not twelve guards — it is one
+    helper plus a gate that bans the bare form, so the thirteenth site cannot be
+    written next week.
+    """
+    import os as _os
+    return bool(p) and _os.path.exists(p)
+
+# ── THE offthreadVideoThreads ARM ──────────────────────────────────────────
+# MEASURED FIRST, then armed (25 jobs / 25 users, post-v574): the lever IS live
+# and sets offthreadVideoThreads = resolvedConcurrency. But concurrency is NOT a
+# fixed 8 — observed {2:12, 4:7, 8:5, 16:13} across 37 legs, and 12 of those ran
+# at 2, which IS Remotion's default, so on a third of legs the "fix" is
+# byte-identical to no fix.
+#
+# AND IT CANNOT BE MEASURED AS WIRED. offthread == concurrency EXACTLY, on every
+# leg, so the two are perfectly collinear: no cut of production traffic can
+# separate the effect of the extractor from the effect of the page count. Worse,
+# the multi-value jobs ('2,16', n=8) are the jobs with MORE render legs — i.e.
+# bigger jobs — so the observational spread is mostly job size wearing the
+# lever's clothes.
+#
+# The arm therefore has to DECOUPLE them: pin the extractor to Remotion's
+# default 2 while concurrency stays whatever it resolves to, and compare render
+# wall at MATCHED concurrency.
+#
+# PER-JOB, NOT PER-CONTAINER. render-full.mjs reads process.env, which is fixed
+# at container start — arming it via the secret would be a flip, and the only
+# concurrency that produces is the warm/cold mixture whose container age
+# correlates with load. Same defect the stall experiment had. handler spawns the
+# renderer with subprocess.run, so the arm crosses as a PER-INVOCATION env and
+# assignment is per job.
+_OFFTHREAD_ARM = [None]      # None = dark: the renderer's own default path
+
 import sys
 import ssl
 import glob
@@ -724,7 +774,7 @@ def _upscale_to_4k(src_path, out_path, timeout_s=_UPSCALE_V1_TIMEOUT_S):
     canon/concat/extract artifact checks), so the output is probed for a real
     video stream and a non-trivial size before it is called delivered."""
     try:
-        if not src_path or not os.path.exists(src_path):
+        if not _exists(src_path):
             return None
         _vf = (f"scale={_UPSCALE_V1_W}:{_UPSCALE_V1_H}:flags=lanczos,"
                "unsharp=luma_msize_x=5:luma_msize_y=5:luma_amount=0.6")
@@ -749,7 +799,7 @@ def _upscale_to_4k(src_path, out_path, timeout_s=_UPSCALE_V1_TIMEOUT_S):
                   f"{(_r.stderr or b'')[-300:]!r}", flush=True)
             return None
         # ARTIFACT CHECK — rc==0 is not success.
-        if not out_path or not os.path.exists(out_path) or os.path.getsize(out_path) < 100_000:
+        if not _exists(out_path) or os.path.getsize(out_path) < 100_000:
             print("[upscale-v1] output missing or stub — not delivered", flush=True)
             return None
         _probe = subprocess.run(
@@ -4214,7 +4264,7 @@ SFX_SOUNDS_DIR    = os.path.join(os.path.dirname(__file__), "assets", "sounds")
 # any of the 15 required families aren't resolvable by fontconfig). The
 # runtime `ensure_caption_fonts_registered()` helper was removed because its
 # fallback path contradicted "fail hard at build time, no runtime recovery."
-if not _RNNOISE_MODEL_PATH or not os.path.exists(_RNNOISE_MODEL_PATH):
+if not _exists(_RNNOISE_MODEL_PATH):
     try:
         os.makedirs(os.path.dirname(_RNNOISE_MODEL_PATH), exist_ok=True)
         import urllib.request
@@ -6247,32 +6297,6 @@ _V2_COUNTS_LAST = {}
 # as [long-pole], never persisted. Third instance this week of a number that was
 # already computed and only printed (offthreadVideoThreads, v2_counts, this).
 _POOL_TIMINGS_LAST = {}
-
-# ── THE offthreadVideoThreads ARM ──────────────────────────────────────────
-# MEASURED FIRST, then armed (25 jobs / 25 users, post-v574): the lever IS live
-# and sets offthreadVideoThreads = resolvedConcurrency. But concurrency is NOT a
-# fixed 8 — observed {2:12, 4:7, 8:5, 16:13} across 37 legs, and 12 of those ran
-# at 2, which IS Remotion's default, so on a third of legs the "fix" is
-# byte-identical to no fix.
-#
-# AND IT CANNOT BE MEASURED AS WIRED. offthread == concurrency EXACTLY, on every
-# leg, so the two are perfectly collinear: no cut of production traffic can
-# separate the effect of the extractor from the effect of the page count. Worse,
-# the multi-value jobs ('2,16', n=8) are the jobs with MORE render legs — i.e.
-# bigger jobs — so the observational spread is mostly job size wearing the
-# lever's clothes.
-#
-# The arm therefore has to DECOUPLE them: pin the extractor to Remotion's
-# default 2 while concurrency stays whatever it resolves to, and compare render
-# wall at MATCHED concurrency.
-#
-# PER-JOB, NOT PER-CONTAINER. render-full.mjs reads process.env, which is fixed
-# at container start — arming it via the secret would be a flip, and the only
-# concurrency that produces is the warm/cold mixture whose container age
-# correlates with load. Same defect the stall experiment had. handler spawns the
-# renderer with subprocess.run, so the arm crosses as a PER-INVOCATION env and
-# assignment is per job.
-_OFFTHREAD_ARM = [None]      # None = dark: the renderer's own default path
 
 
 def _resolve_offthread_arm(job_id, input_data=None):
@@ -10679,7 +10703,7 @@ def _detect_silence_regions_vad(
                 flush=True,
             )
             return []
-        if not tmp_wav or not os.path.exists(tmp_wav) or os.path.getsize(tmp_wav) < 1024:
+        if not _exists(tmp_wav) or os.path.getsize(tmp_wav) < 1024:
             print(f"[silero-vad] ffmpeg produced empty/missing wav — skipping VAD", flush=True)
             return []
         print(
@@ -24047,7 +24071,7 @@ def prefetch_and_verify_broll(
         path = by_idx.get(i)
         if not path:
             continue
-        if not path or not os.path.exists(path) or os.path.getsize(path) < 1024:
+        if not _exists(path) or os.path.getsize(path) < 1024:
             print(f"[broll] verify #{i}: file missing/tiny at {path}", flush=True)
             continue
         try:
@@ -24792,7 +24816,7 @@ def probe_audio_sample_rate(file_path):
 
 def validate_output(path, step_name, min_size_bytes=100000):
     """Check that output file exists and is not empty/corrupt. Returns True if valid."""
-    if not path or not os.path.exists(path):
+    if not _exists(path):
         print(f"[{step_name}] OUTPUT MISSING: {path} does not exist", flush=True)
         return False
     size = os.path.getsize(path)
@@ -30272,7 +30296,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         stage call in the same render (e.g. two B-rolls whose 30-char-truncated
         keywords happen to slugify to the same thing). When None, falls back
         to `os.path.basename(src_abs_path)`."""
-        if not src_abs_path or not os.path.exists(src_abs_path):
+        if not _exists(src_abs_path):
             raise RuntimeError(
                 f"Cannot stage local file for Remotion: {src_abs_path} does not exist."
             )
@@ -32594,7 +32618,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 (_mlbl, _mfut.result(timeout=_MICRO_BARRIER_S + _fanout_wait_extra)))
         if _micro_chunked:
             for _p in micro_chunk_paths:
-                if not _p or not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+                if not _exists(_p) or os.path.getsize(_p) < 1000:
                     raise RuntimeError(f"Micro chunk missing/invalid: {_p}")
             _concat_list = os.path.join(work_dir, "_micro_concat_list.txt")
             with open(_concat_list, "w") as _lf:
@@ -32646,7 +32670,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 overlay_futures[K].result(
                     timeout=_overlay_timeouts[K] + 30 + _fanout_wait_extra)
                 _ov_path = _overlay_chunk_paths[K]
-            if not _ov_path or not os.path.exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
+            if not _exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
                 raise RuntimeError(
                     f"Overlay chunk {K} missing/invalid: {_ov_path}"
                 )
@@ -32707,7 +32731,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
     # future raises at .result(timeout=60) above and skips the shutdown, so
     # wait=True can never convert a fast-fail into a hang.)
     _audio_pool.shutdown(wait=True)
-    if not _speed_audio_path or not os.path.exists(_speed_audio_path):
+    if not _exists(_speed_audio_path):
         raise RuntimeError(f"Per-cut audio pipeline produced no output at {_speed_audio_path}")
 
     # ── 11. Build final audio (SFX mix + EQ chain) → .wav (PCM) ─────────
@@ -32837,7 +32861,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         pass          # nothing rendered, nothing to concat
     elif _overlay_chunked and not _pipeline_chunks:
         for _p in _overlay_chunk_paths:
-            if not _p or not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+            if not _exists(_p) or os.path.getsize(_p) < 1000:
                 raise RuntimeError(f"Overlay chunk missing/invalid: {_p}")
         _concat_t0 = time.time()
         _concat_list = os.path.join(work_dir, "_overlay_concat_list.txt")
@@ -32887,7 +32911,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         pass
     elif _pipeline_chunks:
         for _p in _overlay_chunk_paths:
-            if not _p or not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+            if not _exists(_p) or os.path.getsize(_p) < 1000:
                 raise RuntimeError(f"Overlay chunk missing/invalid: {_p}")
     else:
         # A None PATH IS A MISSING ARTIFACT, NOT A TYPE ERROR (2026-08-27).
@@ -32904,7 +32928,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # detecting it could not help, then failing the job. Both variants
         # (RuntimeError and TypeError) are THIS bug: the RuntimeError one is the
         # Lever-4 wrapper around the same TypeError.
-        if not overlay_video_path or not os.path.exists(overlay_video_path) \
+        if not _exists(overlay_video_path) \
                 or os.path.getsize(overlay_video_path) < 1000:
             raise RuntimeError(
                 f"PromptlyOverlay output missing/invalid: {overlay_video_path!r}")
@@ -34106,7 +34130,7 @@ def _prewarm_chrome_once(timeout_s=60.0):
         return None
     _CHROME_PREWARM["done"] = True   # one attempt per container, ever
     _bin = "/usr/local/bin/chrome-headless-shell"
-    if not _bin or not os.path.exists(_bin):
+    if not _exists(_bin):
         print("[chrome-prewarm] binary missing — skipped", flush=True)
         return None
     _t0 = time.time()
@@ -38144,7 +38168,7 @@ def _validator_face_signals(sample_path, every_n_frames=6):
     verified on real traffic; only then is the honest verdict re-enabled."""
     import cv2, tempfile, glob, shutil
     _YUNET = "/models/face_detector/yunet.onnx"
-    if not _YUNET or not os.path.exists(_YUNET):
+    if not _exists(_YUNET):
         return 0, 0, 0.0
     _fdir = tempfile.mkdtemp(prefix="valface_")
     try:
@@ -38648,7 +38672,7 @@ def _assert_bundle_fresh():
     try:
         _stamp_path = "/remotion/bundle/.src_hash"
         _src = "/remotion/src"
-        if not _stamp_path or not os.path.exists(_stamp_path) or not os.path.isdir(_src):
+        if not _exists(_stamp_path) or not os.path.isdir(_src):
             return  # no stamp (pre-guard bundle / local) — fail open, never on mismatch
         _files = []
         for _root, _dirs, _fs in os.walk(_src):
@@ -38857,18 +38881,22 @@ def render_stage(
     _enc_label = "NVENC" if _HAS_NVENC else "libx264/medium crf=18 threads=auto"
     print(f"[render] Encoding: {_enc_label}", flush=True)
     # Validate render output — single ffprobe for file check + duration extraction
-    if not output_path or not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
+    if not _exists(output_path) or os.path.getsize(output_path) < 100000:
         # SAY WHICH (2026-08-03). "invalid output" collapsed two different
         # failures — the file never appeared, versus it appeared but is a stub —
         # into one unclassifiable string, and classify_error had no branch for
         # it at all, so this terminal surfaced as UNKNOWN. That is a UNKNOWN=0
         # violation on its own, and it is the code a job lands on when a render
         # dies without the ladder having raised.
-        _exists = os.path.exists(output_path)
-        _size = os.path.getsize(output_path) if _exists else -1
+        # RENAMED 2026-08-27: this local shadowed the module-level _exists()
+        # helper for the WHOLE function, so the call four lines above it
+        # became a reference-before-assignment. A blind rename of call
+        # sites cannot see a rebinding like this — pyflakes did.
+        _out_present = os.path.exists(output_path)
+        _size = os.path.getsize(output_path) if _out_present else -1
         raise RuntimeError(
             f"RENDER_EMPTY_OUTPUT: main render produced no usable file — "
-            f"{'MISSING' if not _exists else f'only {_size} bytes (floor 100000)'} "
+            f"{'MISSING' if not _out_present else f'only {_size} bytes (floor 100000)'} "
             f"at {output_path}")
     # Durable boundary: render complete (closes the heartbeat-only 90->92 gap
     # so a reconnect mid-finalize resumes correctly).
@@ -39696,7 +39724,7 @@ def _capture_failure_corpus(source_path, job_id, klass):
     survived only in one agent's local dir — luck, not process; this makes it
     process. Fail-OPEN: a corpus write must never affect the job's outcome."""
     try:
-        if not source_path or not os.path.exists(source_path) or not job_id:
+        if not _exists(source_path) or not job_id:
             return
         if _aws_s3_client is None:
             return
@@ -40799,7 +40827,7 @@ def handler(job):
             )
             if _audio_ext.returncode != 0:
                 raise RuntimeError(f"FFmpeg audio extraction failed: {(_audio_ext.stderr or '')[-300:]}")
-            if not audio_path or not os.path.exists(audio_path) or os.path.getsize(audio_path) < 100:
+            if not _exists(audio_path) or os.path.getsize(audio_path) < 100:
                 raise RuntimeError(f"FFmpeg produced empty/missing audio file: {audio_path}")
             # Boost proper-noun recognition with names extracted from the
             # user's vibe text. "Interview with Ryan" → keywords=["Ryan:5"].
