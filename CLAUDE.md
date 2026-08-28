@@ -120,3 +120,21 @@ inflated by retries into an apparent outage.
   `deploy.sh`. Other agents open their work for merge; they never touch prod.
 - Report format: what shipped, what number moved. One line per item.
 - Ask Zac only for taste calls and credentials. Never for permission to measure.
+
+## Standing rules earned 2026-08-27
+
+- **Nothing ships on a path you haven't verified in the running image.** Commit
+  truth is not truth. Precedent: the cpu=8 regression (completion 78.9%→35.7%).
+- **Mechanical rewrites require a semantic check, not just a shape check.** A
+  regex converted 19 call sites and the cert went green; pyflakes caught a
+  definition placed after its callers AND a local that rebound the name,
+  shadowing it for a whole function. A cert reasons about text; scope is not text.
+- **A clean zero is guilty until proven innocent.** Four zeros in one day were
+  all reader bugs, not measurements: 0/18 legs, 42/42 empty, 0.0 density, 0.01
+  density. A zero that looks tidy is the most expensive result to trust.
+- **Never infer a universal shape from one sampled instance.** Three times in one
+  day: `1.3.16 (234)` broke a version parser that sampled one format; a
+  `[render-full]` filter excluded 100% of the `[RENDERCLOCK]` lines it wrapped;
+  and `edit_recipe` was read as nested from one diverted-route sample when
+  std-editorial — 77% of output — writes it FLAT. Sample the bucket you intend
+  to measure, or measure the bucket you sampled.
