@@ -60,7 +60,32 @@ def _dispatch(conc, rep):
     body = {"job_id": jid, "video_url": _url(f"{PREFIX}/{CLIP}"), "vibe": "viral",
             "user_id": str(uuid.uuid4()), "upload_url": out, "public_url": out,
             "micro_concurrency_test": str(conc)}
-    return fn.spawn(body).object_id, body
+    return fn.spawn(body).object_id, jid
+
+
+@app.function(image=modal.Image.debian_slim().pip_install("supabase"),
+              secrets=[modal.Secret.from_name("promptly-secrets")], timeout=600)
+def collect(job_ids: list) -> list:
+    """Read the RESULT FROM video_jobs — the only place run_pipeline_bg puts it."""
+    import os as _os
+    from supabase import create_client
+    sb = create_client(_os.environ.get("SUPABASE_URL"),
+                       _os.environ.get("SUPABASE_SERVICE_KEY")
+                       or _os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+                       or _os.environ.get("SUPABASE_KEY"))
+    out = []
+    for jid in job_ids:
+        try:
+            r = (sb.table("video_jobs")
+                 .select("id, status, error_message, st:result->stage_timings")
+                 .eq("id", jid).limit(1).execute())
+            d = (r.data or [{}])[0]
+            out.append({"job_id": jid, "status": d.get("status"),
+                        "error": (d.get("error_message") or "")[:160],
+                        "stage_timings": d.get("st")})
+        except Exception as e:
+            out.append({"job_id": jid, "status": f"READ FAILED: {type(e).__name__}"})
+    return out
 
 
 @app.local_entrypoint()
@@ -78,26 +103,39 @@ def main(dry: bool = True, confirm_only: bool = False, repeats: int = 2):
 
     ids = []
     for (c, r) in cells:
-        cid, _ = _dispatch(c, r)
-        ids.append({"conc": c, "rep": r, "call_id": cid})
-        print(f"  → conc={c} r{r}  {cid}")
+        cid, jid = _dispatch(c, r)
+        # SAVE THE job_id. run_pipeline_bg is FIRE-AND-FORGET — the `_bg` is
+        # literal: it writes to video_jobs and returns NOTHING. The first run
+        # read the return value and got None for every field, which looked like
+        # "the render reported nothing" and was really "I read the wrong place".
+        # Without the job_id there is also no way to pin WHICH row was ours.
+        ids.append({"conc": c, "rep": r, "call_id": cid, "job_id": jid})
+        print(f"  → conc={c} r{r}  job={jid[:8]}  {cid}")
     with open("/tmp/sweep_ids.json", "w") as fh:
         json.dump(ids, fh, indent=1)
     print(f"\n  call ids -> /tmp/sweep_ids.json (recoverable if this process dies)")
 
-    rows = []
+    # Wait for the dispatched calls to finish, then read the ROWS.
     for it in ids:
         try:
-            res = modal.FunctionCall.from_id(it["call_id"]).get(timeout=2400)
+            modal.FunctionCall.from_id(it["call_id"]).get(timeout=2400)
         except Exception as e:
-            print(f"  ✗ conc={it['conc']} r{it['rep']}: {type(e).__name__}")
-            continue
-        st = (res or {}).get("stage_timings") or {}
+            print(f"  ! conc={it['conc']} r{it['rep']} call raised "
+                  f"({type(e).__name__}) — the row may still exist; reading it")
+    rows = collect.remote([i["job_id"] for i in ids])
+    for it in ids:
+        row = next((x for x in rows if x.get("job_id") == it["job_id"]), None) or {}
+        it.update(row)
+        st = row.get("stage_timings") or {}
         legs = st.get("render_legs") or []
-        rows.append({**it, "render_s": st.get("render"), "total_s": st.get("total"),
-                     "legs": legs, "conc_reported": st.get("render_concurrency")})
-        print(f"  ✓ conc={it['conc']} r{it['rep']}  render={st.get('render')}s "
-              f"legs={len(legs)}  conc_seen={st.get('render_concurrency')}")
+        it.update({"render_s": st.get("render"), "total_s": st.get("total"),
+                   "legs": legs, "conc_reported": st.get("render_concurrency")})
+        # STATUS IS REPORTED, because a FAILED job writes no timings and would
+        # otherwise read as "no legs" — a failure wearing a null result's face.
+        print(f"  {'✓' if legs else '✗'} conc={it['conc']} r{it['rep']} "
+              f"status={row.get('status')} render={st.get('render')}s "
+              f"legs={len(legs)} conc_seen={st.get('render_concurrency')}")
+    rows = ids
     with open("/tmp/sweep_rows.json", "w") as fh:
         json.dump(rows, fh, indent=1, default=str)
     _report(rows, confirm_only)
