@@ -312,3 +312,39 @@ stay fixed. An unseeded class has a fix and no guard.
 
 Note `missing_artifact_path` (added 2026-08-27) is a NEW sub-code with no corpus
 seed yet — it belongs in the same pass.
+
+## LANE 1 ORDER — REVISED (owner, 2026-08-27). Bypass BEFORE census.
+
+TWO DIFFERENT DEFECTS WEAR THE SAME FACE in a ranking:
+
+  `unclassified`  the sub-code table has no signature matching this message.
+                  ADDITIVE and cheap — add a signature, class is named.
+  `no_subcode`    the class NEVER ROUTED THROUGH `_e()` AT ALL. Structurally
+                  unnameable: no number of signatures fixes it, because the
+                  chokepoint that assigns sub-codes is never reached.
+
+UPLOAD_NEVER_STARTED is the SECOND kind, and that resolves the standing puzzle:
+it is simultaneously the LARGEST class by users and the one nobody can
+characterize. Not a mystery — a missing reporting path.
+
+CORROBORATED FROM THE OTHER CODEBASE (Frontend, same evening): 473 of 593 stuck
+users emit NOTHING AT ALL. The same defect seen from two sides — the failure has
+no reporting path on the worker OR the client.
+
+WHY THIS OUTRANKS THE CENSUS: a census that ranks a class it cannot name just
+re-reports the ranking we already have. The bypass fix is what makes the census
+able to say anything NEW about the dominant class.
+
+REVISED ORDER:
+  1. CHOKEPOINT BYPASS — make UNS emit a real sub-code from the WORKER side.
+     Coordinate with Frontend's client-side instrumentation of the silent 80%.
+     Sweep render_stage / hype-render / minimal for writes that skip `_e()`.
+  2. CORPUS 5 -> 9 — frame_grid, analyze_loudness, keyterm_limit, AND
+     missing_artifact_path (shipped 2026-08-27 with no seed; a fix without a
+     seed is a class that can return silently).
+  3. TWO-CODEBASE CENSUS — and note it is a BUILD, not a run:
+     query_failure_ranking_app.py reads the WORKER ONLY. content-studio is
+     uncovered, so a census today would be worker-shaped and would under-count
+     anything failing before dispatch.
+
+Lane 3 extraction still opens the next session. Nothing else moves.
