@@ -60,7 +60,44 @@ def _dispatch(conc, rep):
     body = {"job_id": jid, "video_url": _url(f"{PREFIX}/{CLIP}"), "vibe": "viral",
             "user_id": str(uuid.uuid4()), "upload_url": out, "public_url": out,
             "micro_concurrency_test": str(conc)}
-    return fn.spawn(body).object_id, jid
+    return fn, body, jid
+
+
+@app.function(image=modal.Image.debian_slim().pip_install("supabase"),
+              secrets=[modal.Secret.from_name("promptly-secrets")], timeout=600)
+def preinsert(rows: list) -> dict:
+    """Create the video_jobs row BEFORE dispatch.
+
+    ROOT CAUSE of two confident nulls: `write_job_status` UPDATEs a row it
+    expects to already exist (`.eq("id", job_id)`) and early-returns when there
+    is nothing to write to — it never INSERTs. The row is normally created by
+    content-studio when a real user starts a job. A synthetic job_id therefore
+    has NOWHERE to report, so a render that COMPLETED read back as status=None,
+    render=None, legs=0 — a finished job wearing an empty result's face.
+
+    REQUIRED COLUMNS, read from the OpenAPI spec rather than discovered one
+    constraint error at a time: id, status, video_url, vibe_input, demo.
+    (`demo` marks these as non-user rows, which also keeps them out of product
+    metrics — a sweep job must never be counted as a maker.)
+    """
+    import os as _os
+    from supabase import create_client
+    sb = create_client(_os.environ.get("SUPABASE_URL"),
+                       _os.environ.get("SUPABASE_SERVICE_KEY")
+                       or _os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+                       or _os.environ.get("SUPABASE_KEY"))
+    ok, errs = 0, []
+    for r in rows:
+        try:
+            sb.table("video_jobs").insert({
+                "id": r["job_id"], "status": "queued",
+                "video_url": r["video_url"], "vibe_input": "viral",
+                "demo": True,
+            }).execute()
+            ok += 1
+        except Exception as e:
+            errs.append({"job_id": r["job_id"], "err": str(e)[:200]})
+    return {"inserted": ok, "errors": errs}
 
 
 @app.function(image=modal.Image.debian_slim().pip_install("supabase"),
@@ -101,9 +138,26 @@ def main(dry: bool = True, confirm_only: bool = False, repeats: int = 2):
         print("\n  DRY RUN — nothing dispatched. Pass --no-dry to fire.")
         return
 
-    ids = []
+    # PRE-INSERT FIRST, DISPATCH SECOND. Reversing these means the worker's
+    # first status write races a row that does not exist yet.
+    _pending = []
     for (c, r) in cells:
-        cid, jid = _dispatch(c, r)
+        fn, body, jid = _dispatch(c, r)
+        _pending.append({"conc": c, "rep": r, "fn": fn, "body": body,
+                         "job_id": jid, "video_url": body["video_url"]})
+    _pre = preinsert.remote([{ "job_id": p["job_id"], "video_url": p["video_url"]}
+                             for p in _pending])
+    print(f"  pre-inserted {_pre.get('inserted')}/{len(_pending)} rows"
+          + (f"  ERRORS: {_pre['errors'][:2]}" if _pre.get("errors") else ""))
+    if _pre.get("inserted", 0) != len(_pending):
+        print("  ❌ NOT ALL ROWS EXIST — refusing to dispatch. A job with no row "
+              "reports nowhere and returns a confident null.")
+        sys.exit(2)
+
+    ids = []
+    for p in _pending:
+        c, r, jid = p["conc"], p["rep"], p["job_id"]
+        cid = p["fn"].spawn(p["body"]).object_id
         # SAVE THE job_id. run_pipeline_bg is FIRE-AND-FORGET — the `_bg` is
         # literal: it writes to video_jobs and returns NOTHING. The first run
         # read the return value and got None for every field, which looked like
