@@ -40963,17 +40963,38 @@ def handler(job):
             except Exception as e:
                 raise RuntimeError(f"Gemini proxy encode failed: {e}") from e
 
-        def _do_loudness():
-            return measure_source_loudness(_raw_source)
+        # CONTRACT-EXTRACTED (PR#1, 2026-08-28). Explicit inputs, no capture.
+        # Still in-process and byte-identical; the signature is what has to be
+        # right BEFORE relocation, because a local work_dir works either way.
+        def _do_loudness(raw_source=None):
+            raw_source = _raw_source if raw_source is None else raw_source
+            _r = measure_source_loudness(raw_source)
+            # NON-EMPTY AT THE BOUNDARY: a relocated call that returns nothing
+            # must PAGE, not hand back a degraded value that a plan silently uses.
+            assert _r is not None, "loudness returned None — refusing to degrade the plan"
+            return _r
 
         # Side-channel for scdet confidence scores (filled in the pool thread;
         # consumed by the scene-change floor's confidence gate). Kept OFF the
         # future's return value so both future_shot_changes.result() consumers
         # stay unchanged — return shape is still a plain list of times.
         _shot_change_scores = {}
-        def _do_shot_changes():
+        def _do_shot_changes(raw_source=None, scores_out=None):
+            """RETURNS (changes, scores) — the out-parameter is now an explicit
+            second return.
+
+            `_shot_change_scores` was an OUT-PARAMETER: created empty at 40973,
+            filled by the CALLEE via out_scores=, read back at 42506. The closure
+            only PASSES it, so an AST scan of this body saw zero mutation and
+            reported it clean. Across a container boundary it would arrive EMPTY
+            and downstream would read an empty dict — no exception, a silently
+            degraded plan, every gate green.
+            """
+            raw_source = _raw_source if raw_source is None else raw_source
+            scores_out = _shot_change_scores if scores_out is None else scores_out
             send_progress(job_id, "shots", 18, "Detecting shot changes", app_url)
-            return detect_shot_changes(_raw_source, out_scores=_shot_change_scores)
+            _changes = detect_shot_changes(raw_source, out_scores=scores_out)
+            return _changes, scores_out
 
         def _do_vocal_emphasis():
             return detect_vocal_emphasis(_raw_source)
@@ -42555,14 +42576,23 @@ def handler(job):
             finally:
                 _gemini_hb_stop.set()
 
-        def _do_face_detect_overlapped():
+        def _do_face_detect_overlapped(proxy_ready=None):
+            """`proxy_ready` replaces the captured `future_gemini_proxy`.
+
+            A live Future cannot cross a container boundary. Awaiting it HERE
+            (in-process) is byte-identical to awaiting it inside; once relocated
+            the caller passes the proxy RESULT instead, and the four move as one
+            unit so the overlap this function is named for is preserved.
+            """
             """Run face detection on 240p proxy (much faster than 1080p source).
             Waits for proxy encode (~1.5s), then decodes 240p instead of 1080p (~20x fewer pixels).
             Falls back to the raw source when no proxy was encoded (render_only mode)."""
             send_progress(job_id, "face_detect", 14, "Tracking faces frame-by-frame", app_url)
             _proxy_exists = False
-            if future_gemini_proxy is not None:
-                future_gemini_proxy.result()
+            _pf = future_gemini_proxy if proxy_ready is None else proxy_ready
+            if _pf is not None:
+                if hasattr(_pf, "result"):
+                    _pf.result()
                 _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
                 _proxy_exists = os.path.exists(_proxy_path)
             # Sparse sampling target: ~1 detection per 3s of source — roughly
@@ -43417,9 +43447,13 @@ def handler(job):
         source_loudness = _tl_wait("wait_loudness_collect",
                                    lambda: future_loudness.result(),
                                    parent="normalize_transcribe_upload")
-        source_shot_changes = _tl_wait("wait_shot_changes_collect",
-                                       lambda: future_shot_changes.result(),
-                                       parent="normalize_transcribe_upload")
+        source_shot_changes, _shot_change_scores_ret = _tl_wait(
+            "wait_shot_changes_collect", lambda: future_shot_changes.result(),
+            parent="normalize_transcribe_upload")
+        # Same object in-process; a DISTINCT one once relocated. Reading the
+        # RETURNED scores rather than the captured dict is what makes the
+        # boundary crossing real instead of accidental.
+        _shot_change_scores = _shot_change_scores_ret
         # Capture which trend context was used (fresh vs. snapshot) for persistence
         trend_used = provided_trend   # trend fetch REMOVED (never automated);
                                       # a caller-supplied snapshot still rides through
