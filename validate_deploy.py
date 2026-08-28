@@ -303,7 +303,7 @@ def _session_certs_registered():
     _here = os.path.dirname(os.path.abspath(__file__))
     for _cert, _n in (("cert_falsifier_readable.py", 9),
                       ("cert_dead_air_attrition.py", 23),
-                      ("cert_offthread_evidence.py", 49),
+                      ("cert_offthread_evidence.py", 51),
                       ("cert_onset_snap.py", 18),
                       ("cert_doctrine_matches_schema.py", 7),
                       ("cert_v3_beat_resolution.py", 9),

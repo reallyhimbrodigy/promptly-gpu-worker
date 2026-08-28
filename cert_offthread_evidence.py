@@ -339,6 +339,28 @@ def main():
           "INSTRUMENT MERGE FAILED" in NC,
           "silence is indistinguishable from a burst that rendered nothing")
 
+    # ── A None PATH MUST NOT BECOME A TypeError ────────────────────────────
+    # os.path.exists(None) RAISES; os.path.exists("") returns False. That
+    # asymmetry turned a missing render artifact into an unclassifiable
+    # TypeError, and because the fault is INPUT-INDEPENDENT the degrade ladder
+    # reproduced it on every rung and exhausted: 10 jobs, 5 users, both
+    # ladder_exhausted variants traced to this one line-shape.
+    import re as _re2
+    _bad = []
+    for _m in _re2.finditer(r"^\s*(?:el)?if not os\.path\.exists\(([A-Za-z_][A-Za-z0-9_]*)\)",
+                            NC, _re2.M):
+        _var = _m.group(1)
+        _line = NC[_m.start():_m.end()]
+        if f"not {_var} or" not in _line:
+            _bad.append(_line.strip()[:80])
+    check("no render-path exists() call takes an unguarded name",
+          not _bad,
+          f"unguarded: {_bad[:3]} — a None here raises TypeError instead of "
+          f"returning False, and the ladder cannot fix an input-independent fault")
+    check("a recurrence stays NAMED, not unclassified",
+          '("missing_artifact_path"' in NC,
+          "the class would slide back into ladder_exhausted with no mechanism")
+
     print()
     if fails:
         print(f"  CERT OFFTHREAD-EVIDENCE: FAIL ({len(fails)})")

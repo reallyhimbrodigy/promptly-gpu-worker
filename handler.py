@@ -749,7 +749,7 @@ def _upscale_to_4k(src_path, out_path, timeout_s=_UPSCALE_V1_TIMEOUT_S):
                   f"{(_r.stderr or b'')[-300:]!r}", flush=True)
             return None
         # ARTIFACT CHECK — rc==0 is not success.
-        if not os.path.exists(out_path) or os.path.getsize(out_path) < 100_000:
+        if not out_path or not os.path.exists(out_path) or os.path.getsize(out_path) < 100_000:
             print("[upscale-v1] output missing or stub — not delivered", flush=True)
             return None
         _probe = subprocess.run(
@@ -4214,7 +4214,7 @@ SFX_SOUNDS_DIR    = os.path.join(os.path.dirname(__file__), "assets", "sounds")
 # any of the 15 required families aren't resolvable by fontconfig). The
 # runtime `ensure_caption_fonts_registered()` helper was removed because its
 # fallback path contradicted "fail hard at build time, no runtime recovery."
-if not os.path.exists(_RNNOISE_MODEL_PATH):
+if not _RNNOISE_MODEL_PATH or not os.path.exists(_RNNOISE_MODEL_PATH):
     try:
         os.makedirs(os.path.dirname(_RNNOISE_MODEL_PATH), exist_ok=True)
         import urllib.request
@@ -10679,7 +10679,7 @@ def _detect_silence_regions_vad(
                 flush=True,
             )
             return []
-        if not os.path.exists(tmp_wav) or os.path.getsize(tmp_wav) < 1024:
+        if not tmp_wav or not os.path.exists(tmp_wav) or os.path.getsize(tmp_wav) < 1024:
             print(f"[silero-vad] ffmpeg produced empty/missing wav — skipping VAD", flush=True)
             return []
         print(
@@ -24047,7 +24047,7 @@ def prefetch_and_verify_broll(
         path = by_idx.get(i)
         if not path:
             continue
-        if not os.path.exists(path) or os.path.getsize(path) < 1024:
+        if not path or not os.path.exists(path) or os.path.getsize(path) < 1024:
             print(f"[broll] verify #{i}: file missing/tiny at {path}", flush=True)
             continue
         try:
@@ -24792,7 +24792,7 @@ def probe_audio_sample_rate(file_path):
 
 def validate_output(path, step_name, min_size_bytes=100000):
     """Check that output file exists and is not empty/corrupt. Returns True if valid."""
-    if not os.path.exists(path):
+    if not path or not os.path.exists(path):
         print(f"[{step_name}] OUTPUT MISSING: {path} does not exist", flush=True)
         return False
     size = os.path.getsize(path)
@@ -30272,7 +30272,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         stage call in the same render (e.g. two B-rolls whose 30-char-truncated
         keywords happen to slugify to the same thing). When None, falls back
         to `os.path.basename(src_abs_path)`."""
-        if not os.path.exists(src_abs_path):
+        if not src_abs_path or not os.path.exists(src_abs_path):
             raise RuntimeError(
                 f"Cannot stage local file for Remotion: {src_abs_path} does not exist."
             )
@@ -32594,7 +32594,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 (_mlbl, _mfut.result(timeout=_MICRO_BARRIER_S + _fanout_wait_extra)))
         if _micro_chunked:
             for _p in micro_chunk_paths:
-                if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+                if not _p or not os.path.exists(_p) or os.path.getsize(_p) < 1000:
                     raise RuntimeError(f"Micro chunk missing/invalid: {_p}")
             _concat_list = os.path.join(work_dir, "_micro_concat_list.txt")
             with open(_concat_list, "w") as _lf:
@@ -32646,7 +32646,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 overlay_futures[K].result(
                     timeout=_overlay_timeouts[K] + 30 + _fanout_wait_extra)
                 _ov_path = _overlay_chunk_paths[K]
-            if not os.path.exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
+            if not _ov_path or not os.path.exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
                 raise RuntimeError(
                     f"Overlay chunk {K} missing/invalid: {_ov_path}"
                 )
@@ -32837,7 +32837,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         pass          # nothing rendered, nothing to concat
     elif _overlay_chunked and not _pipeline_chunks:
         for _p in _overlay_chunk_paths:
-            if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+            if not _p or not os.path.exists(_p) or os.path.getsize(_p) < 1000:
                 raise RuntimeError(f"Overlay chunk missing/invalid: {_p}")
         _concat_t0 = time.time()
         _concat_list = os.path.join(work_dir, "_overlay_concat_list.txt")
@@ -32887,15 +32887,34 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         pass
     elif _pipeline_chunks:
         for _p in _overlay_chunk_paths:
-            if not os.path.exists(_p) or os.path.getsize(_p) < 1000:
+            if not _p or not os.path.exists(_p) or os.path.getsize(_p) < 1000:
                 raise RuntimeError(f"Overlay chunk missing/invalid: {_p}")
     else:
-        if not os.path.exists(overlay_video_path) or os.path.getsize(overlay_video_path) < 1000:
-            raise RuntimeError(f"PromptlyOverlay output missing/invalid: {overlay_video_path}")
+        # A None PATH IS A MISSING ARTIFACT, NOT A TYPE ERROR (2026-08-27).
+        # ROOT CAUSE of RENDER_FATAL:ladder_exhausted — 10 jobs / 5 users, ALL
+        # carrying `TypeError: stat: path should be string, bytes, os.PathLike
+        # or integer, not NoneType`. os.path.exists(None) RAISES instead of
+        # returning False (verified: '' returns False, None raises), so a
+        # missing path escaped as an unclassifiable TypeError rather than the
+        # NAMED RuntimeError on the very next line.
+        #
+        # WHY IT COST FIVE USERS THEIR VIDEO: the fault is INPUT-INDEPENDENT.
+        # Stripping decorations cannot conjure a path, so every degrade rung
+        # reproduced it byte-identically and the ladder exhausted — correctly
+        # detecting it could not help, then failing the job. Both variants
+        # (RuntimeError and TypeError) are THIS bug: the RuntimeError one is the
+        # Lever-4 wrapper around the same TypeError.
+        if not overlay_video_path or not os.path.exists(overlay_video_path) \
+                or os.path.getsize(overlay_video_path) < 1000:
+            raise RuntimeError(
+                f"PromptlyOverlay output missing/invalid: {overlay_video_path!r}")
     if micro_input is not None and (
-        not os.path.exists(micro_video_path) or os.path.getsize(micro_video_path) < 1000
+        not micro_video_path
+        or not os.path.exists(micro_video_path)
+        or os.path.getsize(micro_video_path) < 1000
     ):
-        raise RuntimeError(f"PromptlyMicroSegments output missing/invalid: {micro_video_path}")
+        raise RuntimeError(
+            f"PromptlyMicroSegments output missing/invalid: {micro_video_path!r}")
 
     _mux_t0 = time.time()
 
@@ -34087,7 +34106,7 @@ def _prewarm_chrome_once(timeout_s=60.0):
         return None
     _CHROME_PREWARM["done"] = True   # one attempt per container, ever
     _bin = "/usr/local/bin/chrome-headless-shell"
-    if not os.path.exists(_bin):
+    if not _bin or not os.path.exists(_bin):
         print("[chrome-prewarm] binary missing — skipped", flush=True)
         return None
     _t0 = time.time()
@@ -34217,6 +34236,15 @@ _ERROR_SUBCODES = {
         ("render_timeout", ("Remotion render TIMEOUT", "TimeoutExpired")),
         ("av_drift", ("|v-a|",)),
         ("caption_schema", ("CaptionStyle",)),
+        # ROOT-CAUSED 2026-08-27 (10 jobs / 5 users): os.path.exists(None)
+        # raises instead of returning False, so a missing render artifact
+        # escaped as an unclassifiable TypeError and the ladder — correctly
+        # unable to fix an input-independent fault — burned every rung. Guarded
+        # at all five sites; this entry keeps a RECURRENCE named rather than
+        # sliding back into ladder_exhausted with no mechanism attached.
+        ("missing_artifact_path", ("path should be string, bytes, os.PathLike",
+                                   "output missing/invalid",
+                                   "chunk missing/invalid")),
         # LAST, AND THE ORDERING IS THE WHOLE DESIGN. The ladder's terminal
         # raise embeds the UNDERLYING error inside its own message —
         # "RENDER_FATAL after full + retry + stripped renders: <Type>: <msg>" —
@@ -38116,7 +38144,7 @@ def _validator_face_signals(sample_path, every_n_frames=6):
     verified on real traffic; only then is the honest verdict re-enabled."""
     import cv2, tempfile, glob, shutil
     _YUNET = "/models/face_detector/yunet.onnx"
-    if not os.path.exists(_YUNET):
+    if not _YUNET or not os.path.exists(_YUNET):
         return 0, 0, 0.0
     _fdir = tempfile.mkdtemp(prefix="valface_")
     try:
@@ -38620,7 +38648,7 @@ def _assert_bundle_fresh():
     try:
         _stamp_path = "/remotion/bundle/.src_hash"
         _src = "/remotion/src"
-        if not os.path.exists(_stamp_path) or not os.path.isdir(_src):
+        if not _stamp_path or not os.path.exists(_stamp_path) or not os.path.isdir(_src):
             return  # no stamp (pre-guard bundle / local) — fail open, never on mismatch
         _files = []
         for _root, _dirs, _fs in os.walk(_src):
@@ -38829,7 +38857,7 @@ def render_stage(
     _enc_label = "NVENC" if _HAS_NVENC else "libx264/medium crf=18 threads=auto"
     print(f"[render] Encoding: {_enc_label}", flush=True)
     # Validate render output — single ffprobe for file check + duration extraction
-    if not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
+    if not output_path or not os.path.exists(output_path) or os.path.getsize(output_path) < 100000:
         # SAY WHICH (2026-08-03). "invalid output" collapsed two different
         # failures — the file never appeared, versus it appeared but is a stub —
         # into one unclassifiable string, and classify_error had no branch for
@@ -40771,7 +40799,7 @@ def handler(job):
             )
             if _audio_ext.returncode != 0:
                 raise RuntimeError(f"FFmpeg audio extraction failed: {(_audio_ext.stderr or '')[-300:]}")
-            if not os.path.exists(audio_path) or os.path.getsize(audio_path) < 100:
+            if not audio_path or not os.path.exists(audio_path) or os.path.getsize(audio_path) < 100:
                 raise RuntimeError(f"FFmpeg produced empty/missing audio file: {audio_path}")
             # Boost proper-noun recognition with names extracted from the
             # user's vibe text. "Interview with Ryan" → keywords=["Ryan:5"].

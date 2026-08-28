@@ -36,6 +36,7 @@ def query(since: str = "", limit: int = 6000) -> dict:
         q = (sb.table("video_jobs")
              .select("id, user_id, created_at, status, error_message, "
                      "ec:result->error_code, es:result->error_subcode, "
+                     "ed:result->error_detail, ec2:result->error_cause, "
                      "st:result->stage_timings")
              .order("created_at", desc=True).range(off, off + PAGE - 1))
         if since:
@@ -65,10 +66,18 @@ def query(since: str = "", limit: int = 6000) -> dict:
         c["users"].add(r.get("user_id"))
         if c["sample"] is None:
             c["sample"] = (r.get("error_message") or "")[:150]
+        # ROOT-CAUSE NEEDS THE WHOLE MESSAGE, not a 150-char sample. A truncated
+        # message names the label and hides the mechanism.
+        # error_message is the USER-FACING copy ("please run the job again") —
+        # it names the terminal and hides the mechanism. error_detail carries the
+        # technical string the sub-code was keyed on.
+        c.setdefault("msgs", []).append(
+            (str(r.get("ed") or "") or str(r.get("error_message") or ""))[:700])
 
     ranked = sorted(({"class": k, "users": len(v["users"]), "jobs": v["jobs"],
                       "jobs_per_user": round(v["jobs"] / max(1, len(v["users"])), 2),
-                      "sample": v["sample"]}
+                      "sample": v["sample"],
+                      "full_messages": v.get("msgs", [])[:6]}
                      for k, v in classes.items()),
                     key=lambda d: (-d["users"], -d["jobs"]))
     return {"window_since": since or "all", "rows_scanned": len(rows),
@@ -111,3 +120,12 @@ def main(since: str = "", limit: int = 6000):
           f"{sum(c['users'] for c in lad)} users / {sum(c['jobs'] for c in lad)} jobs")
     for c in lad:
         print(f"      {c['class']}  ({c['users']}u/{c['jobs']}j)")
+    # ROOT-CAUSE DUMP: the whole message for every class asked about, because a
+    # label names the terminal and hides the mechanism.
+    import os as _os
+    _want = (_os.environ.get("DUMP_CLASS") or "ladder_exhausted").split(",")
+    for c in r["classes"]:
+        if any(w.strip() and w.strip() in c["class"] for w in _want):
+            print(f"\n══ {c['class']}  ({c['users']}u / {c['jobs']}j) ══")
+            for i, msg in enumerate((c.get("full_messages") or [])[:4]):
+                print(f"  [{i}] {(msg or '')[:600]}")
