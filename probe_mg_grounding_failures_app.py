@@ -60,8 +60,10 @@ def scan(since: str) -> list:
         stt = res.get("stage_timings") if isinstance(res.get("stage_timings"), dict) else {}
         rec = {"id": x.get("id"), "arm": str(stt.get("lean_arm") or ""),
                "src_s": stt.get("source_duration_s"),
-               "lang": str((stt.get("lang_bundle") or {}).get("detected_language")
+               "lang": str((stt.get("lang_bundle") or {}).get("transcript_script")
                            if isinstance(stt.get("lang_bundle"), dict) else ""),
+               "detlang": str((stt.get("lang_bundle") or {}).get("detected_language")
+                              if isinstance(stt.get("lang_bundle"), dict) else ""),
                "route": str(res.get("route") or "std-editorial"),
                "drops": [], "n_unsnap": 0, "words": None}
         tr = res.get("transcript")
@@ -102,30 +104,44 @@ def main(since: str = "2026-08-27"):
     STOP = {"a", "an", "the", "of", "to", "in", "on", "for", "and", "or"}
 
     def content_toks(t):
+        # UNICODE-AWARE, unlike the predicate. My first classifier split on
+        # [^0-9A-Za-z.]+ — the SAME ASCII-only rule the predicate uses — so pure
+        # Devanagari / Tamil / Arabic card text produced ZERO tokens and fell
+        # into a bucket I then mislabelled "no readable text in the ledger".
+        # The ledger records text at all three drop sites; the READER was blind
+        # in exactly the way the thing it was measuring is blind.
         out = []
         for raw in str(t).split():
-            for p in re.split(r"[^0-9A-Za-z.]+", raw):
+            for p in re.split(r"[^\w]+", raw, flags=re.UNICODE):
                 p = p.strip(".").lower()
                 if p and p not in STOP:
                     out.append(p)
         return out
 
-    print(f"\n  [1] FAILING TEXT — the shortest content token in each drop")
+    def is_ascii(tok):
+        return all(ord(c) < 128 for c in tok)
+
+    print(f"\n  [1] TRUE SPLIT — script first, then token length")
     buckets = Counter()
     shorts = Counter()
     for d in drops:
         toks = [t for t in content_toks(d["text"]) if not any(c.isdigit() for c in t)]
         if not toks:
-            buckets["(no non-numeric content token)"] += 1
+            buckets["EMPTY / numeric-only text"] += 1
+            continue
+        if not all(is_ascii(t) for t in toks):
+            # The PREDICATE splits on [^0-9A-Za-z.]+ too, so non-Latin never
+            # sub-splits and can ground only by whole-string match.
+            buckets["NON-LATIN text (splitter is ASCII-only)"] += 1
             continue
         m = min(len(t) for t in toks)
         if m <= 3:
-            buckets["has a <=3-char token (prefix rule UNAVAILABLE)"] += 1
+            buckets["SHORT TOKEN <=3 chars (prefix rule unavailable)"] += 1
             for t in toks:
                 if len(t) <= 3:
                     shorts[t] += 1
         else:
-            buckets["all tokens >=4 chars (prefix rule was available)"] += 1
+            buckets["GENUINELY UNGROUNDED (ascii, all >=4)"] += 1
     for k, n in buckets.most_common():
         print(f"      {n:>4}  ({100.0*n/len(drops):>5.1f}%)  {k}")
 
@@ -152,5 +168,6 @@ def main(since: str = "2026-08-27"):
         if a and b:
             print(f"      {lbl:>18}: lean median {st.median(a):.1f} (n={len(a)})   "
                   f"control {st.median(b):.1f} (n={len(b)})")
-    print(f"      {'language':>18}: lean {dict(Counter(r['lang'] for r in L).most_common(4))}")
+    print(f"      {'script':>18}: lean {dict(Counter(r['lang'] for r in L).most_common(4))}")
     print(f"      {'':>18}  control {dict(Counter(r['lang'] for r in C).most_common(4))}")
+    print(f"      {'detected_language':>18}: {dict(Counter(r['detlang'] for r in ab).most_common(3))}")
