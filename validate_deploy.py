@@ -329,7 +329,13 @@ def _session_certs_registered():
                       # ONLY; a symmetric floor would let 'OFFICIAL' ground on
                       # 'off' and 'Tourism' on 'to', both cards that must drop.
                       # The HOLD legs pin that false-pass direction shut.
-                      ("cert_mg_abbrev_grounding.py", 31)):
+                      ("cert_mg_abbrev_grounding.py", 31),
+                      # Non-Latin grounding is CORRECT as-is (2026-08-29). Pins
+                      # the behaviour AND the trap: a "unicode-aware splitter"
+                      # SHATTERS Indic words at combining marks (virama/matras
+                      # are Mn, not \w), and the 60% recovery I measured for it
+                      # was an artifact of shattering both sides symmetrically.
+                      ("cert_mg_nonlatin_grounding.py", 13)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")
