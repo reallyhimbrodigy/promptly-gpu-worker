@@ -48,19 +48,83 @@ CLIP = "v24044gl0000d2rj4k7og65tcgn43lr0.mp4"
 ARMS = [4, 2, 1]
 
 
-def _url(key):
-    return f"https://{BUCKET}.s3.amazonaws.com/{key}"
+@app.function(image=modal.Image.debian_slim().pip_install("boto3"),
+              secrets=[modal.Secret.from_name("promptly-secrets")], timeout=600)
+def presign(cells: list) -> dict:
+    """Presigned GET for the source + presigned PUT per output, made INSIDE Modal.
 
+    THE BUG THIS FIXES (2026-08-28). This harness built a bare
+    `https://{bucket}.s3.amazonaws.com/{key}` URL. The bucket is private, so the
+    worker's HEAD returned 403 and the job died UPLOAD_STALLED at handler.py:40537
+    after 600s of polling — "Source video did not arrive on S3", which reads like
+    an upload fault and is really an ACCESS fault in the harness. Every other
+    harness in this repo presigns (ab_pair_probe, cert_cap_rendertime,
+    caption_proof); this one did not.
 
-def _dispatch(conc, rep):
-    """One job through the DEPLOYED worker. Returns (call_id, body)."""
-    fn = modal.Function.from_name("promptly-gpu-worker", "run_pipeline_bg")
-    jid = str(uuid.uuid4())
-    out = _url(f"{PREFIX}/_sweep/out_{conc}_{rep}_{jid[:8]}.mp4")
-    body = {"job_id": jid, "video_url": _url(f"{PREFIX}/{CLIP}"), "vibe": "viral",
-            "user_id": str(uuid.uuid4()), "upload_url": out, "public_url": out,
-            "micro_concurrency_test": str(conc)}
-    return fn, body, jid
+    It must be presigned HERE, not locally: the local AWS credentials are invalid
+    (InvalidClientTokenId), while `promptly-secrets` carries the working pair. A
+    presign is just an HMAC over the request — signing with a dead key yields a
+    URL that is well-formed and 403s, i.e. a broken source wearing a valid URL's
+    face, which is exactly the failure above.
+
+    NON-VACUITY: HEAD the source first and return the byte size. A presigned URL
+    for an object that does not exist is indistinguishable from one that does
+    until the worker times out 600s later — and that timeout would land as
+    UPLOAD_STALLED again and read, wrongly, as a pipeline failure.
+    """
+    import os as _os
+    import boto3
+    s3 = boto3.client("s3", region_name=_os.environ.get("AWS_REGION") or "us-west-1")
+    src_key = f"{PREFIX}/{CLIP}"
+
+    # RESOLVE THE BUCKET, DO NOT ASSUME IT. This harness hardcoded
+    # `thisismybucketagainwooo`; the canonical source is S3_BUCKET_NAME and the
+    # rest of the repo defaults to `promptly-video-storage`. probe_corpus_app.py
+    # exists because this exact ambiguity already cost a session. Try each and
+    # report which one actually holds the key — and if none does, LIST what is
+    # there, so the next reader gets an inventory instead of another 403.
+    _cands, _seen = [], set()
+    for _b in (_os.environ.get("S3_BUCKET_NAME"), BUCKET, "promptly-video-storage"):
+        if _b and _b not in _seen:
+            _seen.add(_b)
+            _cands.append(_b)
+
+    _tried, _bucket, _size = [], None, 0
+    for _b in _cands:
+        try:
+            _h = s3.head_object(Bucket=_b, Key=src_key)
+            _bucket, _size = _b, _h.get("ContentLength", 0)
+            break
+        except Exception as e:
+            _tried.append(f"{_b}: {type(e).__name__} {str(e)[:80]}")
+
+    if _bucket is None:
+        # INVENTORY, not just a failure. A 403 on one key cannot distinguish
+        # "wrong bucket" from "no access at all" from "key renamed".
+        _inv = {}
+        for _b in _cands:
+            try:
+                _r = s3.list_objects_v2(Bucket=_b, Prefix=f"{PREFIX}/", MaxKeys=15)
+                _inv[_b] = [o["Key"] for o in _r.get("Contents", [])]
+            except Exception as e:
+                _inv[_b] = f"LIST FAILED: {type(e).__name__} {str(e)[:80]}"
+        return {"ok": False, "error": "no candidate bucket holds the source key",
+                "key": src_key, "tried": _tried, "inventory": _inv,
+                "env_S3_BUCKET_NAME": _os.environ.get("S3_BUCKET_NAME")}
+    if not _size:
+        return {"ok": False, "error": f"source is 0 bytes: {_bucket}/{src_key}"}
+
+    src = s3.generate_presigned_url("get_object",
+                                    Params={"Bucket": _bucket, "Key": src_key},
+                                    ExpiresIn=14400)
+    outs = {}
+    for c in cells:
+        k = f"{PREFIX}/_sweep/out_{c['conc']}_{c['rep']}_{c['job_id'][:8]}.mp4"
+        outs[f"{c['conc']}_{c['rep']}"] = s3.generate_presigned_url(
+            "put_object", Params={"Bucket": _bucket, "Key": k,
+                                  "ContentType": "video/mp4"}, ExpiresIn=14400)
+    return {"ok": True, "source_url": src, "outs": outs, "source_bytes": _size,
+            "key": f"{_bucket}/{src_key}", "bucket": _bucket}
 
 
 @app.function(image=modal.Image.debian_slim().pip_install("supabase"),
@@ -138,13 +202,41 @@ def main(dry: bool = True, confirm_only: bool = False, repeats: int = 2):
         print("\n  DRY RUN — nothing dispatched. Pass --no-dry to fire.")
         return
 
-    # PRE-INSERT FIRST, DISPATCH SECOND. Reversing these means the worker's
+    # PRESIGN FIRST — and prove the source is READABLE before spending on any
+    # render. An unreadable source costs 600s per cell and lands UPLOAD_STALLED,
+    # which reads as a pipeline failure and is not one.
+    _cells = [{"conc": c, "rep": r, "job_id": str(uuid.uuid4())} for (c, r) in cells]
+    _ps = presign.remote(_cells)
+    if not _ps.get("ok"):
+        print(f"  ❌ SOURCE NOT READABLE — {_ps.get('error')}")
+        print(f"     key: {_ps.get('key')}   env S3_BUCKET_NAME="
+              f"{_ps.get('env_S3_BUCKET_NAME')!r}")
+        for _t in _ps.get("tried", []):
+            print(f"       tried {_t}")
+        for _b, _keys in (_ps.get("inventory") or {}).items():
+            print(f"     inventory {_b}: "
+                  + (_keys if isinstance(_keys, str) else f"{len(_keys)} keys"))
+            if isinstance(_keys, list):
+                for _k in _keys[:8]:
+                    print(f"         {_k}")
+        print("     Refusing to dispatch. This would land UPLOAD_STALLED on every "
+              "cell and be misread as a pipeline failure.")
+        sys.exit(2)
+    print(f"  source readable: {_ps['key']} ({_ps['source_bytes']/1e6:.1f} MB), "
+          f"presigned inside Modal")
+
+    # PRE-INSERT SECOND, DISPATCH THIRD. Reversing these means the worker's
     # first status write races a row that does not exist yet.
+    fn = modal.Function.from_name("promptly-gpu-worker", "run_pipeline_bg")
     _pending = []
-    for (c, r) in cells:
-        fn, body, jid = _dispatch(c, r)
-        _pending.append({"conc": c, "rep": r, "fn": fn, "body": body,
-                         "job_id": jid, "video_url": body["video_url"]})
+    for c in _cells:
+        out = _ps["outs"][f"{c['conc']}_{c['rep']}"]
+        body = {"job_id": c["job_id"], "video_url": _ps["source_url"],
+                "vibe": "viral", "user_id": str(uuid.uuid4()),
+                "upload_url": out, "public_url": out,
+                "micro_concurrency_test": str(c["conc"])}
+        _pending.append({"conc": c["conc"], "rep": c["rep"], "fn": fn, "body": body,
+                         "job_id": c["job_id"], "video_url": _ps["key"]})
     _pre = preinsert.remote([{ "job_id": p["job_id"], "video_url": p["video_url"]}
                              for p in _pending])
     print(f"  pre-inserted {_pre.get('inserted')}/{len(_pending)} rows"
@@ -176,7 +268,22 @@ def main(dry: bool = True, confirm_only: bool = False, repeats: int = 2):
         except Exception as e:
             print(f"  ! conc={it['conc']} r{it['rep']} call raised "
                   f"({type(e).__name__}) — the row may still exist; reading it")
-    rows = collect.remote([i["job_id"] for i in ids])
+    # COLLECTION MUST SURVIVE THIS APP DYING. On the 08-28 confirmation run the
+    # ephemeral app was stopped while waiting, and `collect` — a function of THIS
+    # app — raised FAILED_PRECONDITION "function is stopped". The JOB was fine;
+    # only the reader died, and the run reported a hard failure for a render that
+    # had already happened. The rendered work lives in video_jobs, so a dead
+    # reader is a recoverable state, not a lost result.
+    try:
+        rows = collect.remote([i["job_id"] for i in ids])
+    except Exception as e:
+        print(f"\n  ! collect FAILED ({type(e).__name__}: {str(e)[:120]})")
+        print("    The jobs are UNAFFECTED — they are spawned and write to "
+              "video_jobs. Read them with:")
+        print("      ./run_modal.sh read_sweep_row_app.py --jids "
+              + ",".join(i["job_id"] for i in ids))
+        print("    Do NOT read this exit as 'the renders failed'.")
+        sys.exit(3)
     for it in ids:
         row = next((x for x in rows if x.get("job_id") == it["job_id"]), None) or {}
         it.update(row)
