@@ -31,12 +31,19 @@ MODEL = "claude-sonnet-5"
 # instrument that 3.5/s was calibrated on and cannot be independent evidence
 # about it.
 _GOLDEN_SHAS = {
-    "7392d2b42f281921",   # ref2-viral-creator-doc-vertical  43.2s / 8 cuts
-    "22ef7a120c76722c",   # ref1-legalsoft-corporate-landscape 52.6s / 21 cuts
+    # Cut counts CORRECTED 2026-08-29 with the pipeline's own detector
+    # (scdet=7). The old figures came from the select-filter at 0.30 and
+    # were low by ~half on the vertical reference.
+    "7392d2b42f281921",   # ref2-viral-creator-doc-vertical  43.2s / 15 cuts (was recorded 8)
+    "22ef7a120c76722c",   # ref1-legalsoft-corporate-landscape 52.6s / 23 cuts (was recorded 21)
 }
 FPS = 2                 # matches the live proxy arm (proxy_sample_fps=2)
 WIDTH = 512             # matches MEDIA_RESOLUTION_LOW's effective vertical width
-SCENE_THRESHOLD = 0.30  # ffmpeg scdet; the same value the render pipeline uses
+# scdet threshold on ffmpeg's 0-100 scale — THE SAME CONSTANT
+# handler.detect_shot_changes passes (7.0, chosen against production sweep
+# data). The old SCENE_THRESHOLD=0.30 was a different filter on a 0-1
+# scale and under-counted vertical UGC by 30-70%.
+SCDET_THRESHOLD = 7.0
 
 # Claude bills an image at roughly (w*h)/750 tokens. A 512-wide vertical frame is
 # ~512x910. Stated as a CONSTANT rather than a guess inside a print, so the
@@ -64,16 +71,36 @@ def pass_a_shots(path):
     no cuts is exactly the counter-example the spec exists to capture, and it
     must not be indistinguishable from a failed probe (hence the None return).
     """
+    # USE THE PIPELINE'S OWN DETECTOR (corrected 2026-08-29). This ran
+    # `select='gt(scene,0.30)'` under a comment claiming it was "the same value
+    # the render pipeline uses". It is not: handler's detect_shot_changes uses
+    # `scdet=threshold=7.0`, a DIFFERENT filter on a DIFFERENT scale (0-100, not
+    # 0-1), and 7.0 was itself chosen against production sweep data after 0.30
+    # was found wrong.
+    #
+    # MEASURED on the reference set — the two disagree, and worst on exactly the
+    # content that matters:
+    #     v09044g4…  tool 5   pipeline 17
+    #     1e5eb227…  tool 8   pipeline 15     <- a GOLDEN reference
+    #     v24044gl…  tool 41  pipeline 60
+    #     56ba632…   tool 21  pipeline 23     <- the landscape ref, the only close one
+    # Vertical UGC — 8 of the 10 references — under-counts by 30-70%.
+    #
+    # These timestamps are handed to the model as GROUND TRUTH for beat
+    # segmentation. A record built on a cut list missing two-thirds of the cuts
+    # describes an edit that does not exist. And the purpose of the record is to
+    # extract rules for OUR pipeline, so the cut truth must be what OUR pipeline
+    # sees — not a second opinion from a different filter.
     try:
         p = subprocess.run(
-            ["ffmpeg", "-i", path, "-filter_complex",
-             f"select='gt(scene,{SCENE_THRESHOLD})',metadata=print:file=-",
-             "-an", "-f", "null", "-"],
+            ["ffmpeg", "-hide_banner", "-nostats", "-i", path,
+             "-vf", f"scdet=threshold={SCDET_THRESHOLD}", "-an", "-f", "null", "-"],
             capture_output=True, text=True, timeout=300)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
     return sorted({round(float(m), 3)
-                   for m in re.findall(r"pts_time:([0-9.]+)", p.stdout + p.stderr)})
+                   for m in re.findall(r"lavfi\.scd\.time:\s*([0-9.]+)",
+                                       p.stdout + p.stderr)})
 
 
 def extract_frames(path, fps=FPS, width=WIDTH, limit=200):
