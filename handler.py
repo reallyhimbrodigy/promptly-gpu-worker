@@ -17759,6 +17759,39 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         _kind = "shot change" if _awi2 in _shot_seam_src else "B-roll edge"
                         _seams.append({"awi": _awi2, "gap_ms": int(_room_s * 1000),
                                        "kind": _kind})
+                    # ── SEAM ROOM DISTRIBUTION (2026-08-29, RULE-1 instrument) ──
+                    # MEASURED: across 10 PLAN_ONLY runs on two opposite source
+                    # classes — heavily pre-cut reference edits AND raw
+                    # single-take talking heads — 73 seams were offered and
+                    # ZERO ever produced a consuming variant. Every run logged
+                    # "0 consuming variant(s)", so `cut_boundary_transitions`
+                    # was absent from the schema and the model could not emit a
+                    # transition even in principle. Delivered traffic agrees: 1
+                    # transition across 115 organic std-editorial jobs.
+                    #
+                    # The room values themselves were UNOBSERVABLE — they went
+                    # only into the prompt's seam block, never to stdout — so
+                    # "why is it always zero" could not be answered without
+                    # re-deriving the arithmetic by hand. A gate that silently
+                    # rejects 100% of its input must show its input.
+                    #
+                    # Cheap, unconditional, and it names the floor it is judged
+                    # against so a reader does not have to look it up.
+                    try:
+                        _rooms = sorted(int(_s2["gap_ms"]) for _s2 in _seams)
+                        if _rooms:
+                            _p = lambda q: _rooms[min(len(_rooms) - 1,
+                                                      int(len(_rooms) * q))]
+                            _floor_ms = min(TRANSITION_NATURAL_DURATION_MS.values())
+                            print(f"[seam-room] n={len(_rooms)} "
+                                  f"min={_rooms[0]}ms p50={_p(0.5)}ms "
+                                  f"p90={_p(0.9)}ms max={_rooms[-1]}ms | "
+                                  f"cheapest transition needs {_floor_ms}ms | "
+                                  f"seams at-or-above floor: "
+                                  f"{sum(1 for _r in _rooms if _r >= _floor_ms)}/"
+                                  f"{len(_rooms)}", flush=True)
+                    except Exception:
+                        pass
                     # Single ownership BY CONSTRUCTION: the main schema no longer
                     # carries transitions/tight_cut_overlays fields -- nothing to
                     # discard. Initialize the plan keys the downstream consumers read.
