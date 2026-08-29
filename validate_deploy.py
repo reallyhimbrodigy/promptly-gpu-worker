@@ -8838,15 +8838,47 @@ def _missing_string_does_not_kill_render():
             if "Probe" in _fn or "Specimen" in _fn or _fn.endswith(".test.ts"):
                 continue
             _p = _os.path.join(_dir, _fn)
-            for _i, _line in enumerate(open(_p, encoding="utf-8").read().split("\n"), 1):
+            _src5 = open(_p, encoding="utf-8").read()
+
+            # FILE-AWARE, NOT LINE-LOCAL (2026-08-29). This read ONE line at a
+            # time and whitelisted a hand-list of local names, so it could not
+            # see a coercion sitting on the PREVIOUS line. Merging the frame-comp
+            # lane produced five "unguarded" hits that were all already safe:
+            #
+            #   const titleText = asText(title);      <- line 87, invisible here
+            #   const lines = titleText.split("\n");  <- line 88, reported BAD
+            #
+            # Same family as the AST-scan lesson already in CLAUDE.md: a scan
+            # that cannot see one frame down (or one line up) reports confident
+            # nonsense. Five false positives would have been "fixed" by wrapping
+            # already-wrapped values, or by widening the name whitelist until the
+            # gate stopped meaning anything.
+            #
+            # A subject is SAFE when the file shows it is a real string:
+            #   (a) assigned from an expression containing asText(
+            #   (b) declared with an explicit local `: string` / `: string[]`
+            #       annotation (built in-function, not a prop that TS only
+            #       CLAIMS is a string — props are exactly what Vertex omits)
+            #   (c) the callback parameter of .map/.forEach/.flatMap over a
+            #       name already safe by (a) or (b)
+            _safe = set(_re5.findall(r"\bconst\s+(\w+)\s*(?::[^=]*)?=\s*[^;\n]*asText\(", _src5))
+            _safe |= set(_re5.findall(r"\bconst\s+(\w+)\s*:\s*string(?:\[\])?\s*=", _src5))
+            for _arr, _cb in _re5.findall(
+                    r"\b(\w+)\s*\.\s*(?:map|forEach|flatMap)\(\s*\(?\s*(\w+)", _src5):
+                if _arr in _safe:
+                    _safe.add(_cb)
+
+            for _i, _line in enumerate(_src5.split("\n"), 1):
                 _m = _re5.search(r"\b(\w+(?:\.\w+)*)\s*(?:\.trim\(\))?\.split\(", _line)
                 if not _m:
                     continue
                 _subj = _m.group(1)
-                # literals, locals and already-coerced values are fine
+                # literals and already-coerced values are fine
                 if _subj.startswith(("asText", '"', "'")) or "asText(" in _line:
                     continue
                 if _subj in ("x", "hex", "s", "str", "raw", "id", "key", "name", "path"):
+                    continue
+                if _subj in _safe:
                     continue
                 _bad.append(f"{_p}:{_i}  {_line.strip()[:90]}")
     assert not _bad, (

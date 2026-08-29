@@ -22606,12 +22606,20 @@ _MG_SEQUENCED = frozenset({  # content builds after the container arrives
 _MG_ATTACK_MS = {
     # simple pops → settle
     "AnnotationArrow": 267, "ChatThread": 167, "DropBanner": 217, "DropCard": 183,
-    "EditorialQuote": 483, "IMessageBubble": 50, "InstagramComment": 50,
+    # RE-MEASURED 2026-08-29 after the frame-comp lane's §4 catalogue passes
+    # merged (24 types rendered, 0 failures). Only THREE moved, and each traces
+    # to the commit that rewrote that component's entrance — which is exactly
+    # what the anti-drift fingerprint is for: it caught a stale table that would
+    # have back-timed these three early, silently, on every job that placed them.
+    #   EditorialQuote 483 -> 467   (1ef3571, §4 depth pass)
+    #   Reticle         83 -> 400   (a7d3427, the window-plane rewrite)
+    #   RankedList     533 -> 433   (d312967, §4 depth pass)
+    "EditorialQuote": 467, "IMessageBubble": 50, "InstagramComment": 50,
     "Notification": 167, "PillMarquee": 167, "PullQuote": 500, "RecordingFrame": 133,
-    "Reticle": 83, "SectionDivider": 167, "Stamp": 67, "StickyNotes": 150,
+    "Reticle": 400, "SectionDivider": 167, "Stamp": 67, "StickyNotes": 150,
     "StepDivider": 550, "TikTokComment": 50, "TweetBubble": 50,
     # sequenced/count-up → container-arrival min(hit, settle)
-    "BarRace": 267, "ProgressBar": 167, "RankedList": 533,
+    "BarRace": 267, "ProgressBar": 167, "RankedList": 433,
     "StatCard": 83, "Timeline": 200, "TimelineRoadmap": 233,
     # MouseDrag + PillCluster rendered blank in the battery (probe props wrong,
     # not a production defect) — unmeasured; they take _MG_ATTACK_DEFAULT_MS.
@@ -22690,7 +22698,15 @@ _MG_ATTACK_MS_SMOOTH = {
 # ignition — which means adding their catalogue entries and schema — the attack
 # table MUST be re-measured for both, or their SFX land early. That precondition
 # is recorded in LUMEN_BUILD_SHEET.md so lighting them up cannot skip it.
-_MG_ATTACK_FINGERPRINT = "sha256:c372dd23384b555ce80dc885a5160095fbac3c65b07428626294bf4633d2b54a"  # reconciled 2026-08-16: PROVEN delta is
+# RECONCILED 2026-08-29 AFTER A REAL RE-MEASURE, not a paste. The frame-comp
+# lane's §4 catalogue passes changed entrance configs across the catalogue; the
+# battery was re-run (`node src/remotion/mg-attack-battery.mjs`, 26 clips, 0
+# failures) and `measure_mg_attack.py … 60` read the presence curves. Three
+# types moved (EditorialQuote, Reticle, RankedList) and the table above carries
+# the new settle/container-arrival ms. Pasting this hash without that run is the
+# one thing the gate's FIX text forbids, because the hash would then certify a
+# table nobody measured.
+_MG_ATTACK_FINGERPRINT = "sha256:1e3c66a03cb4103978e9ed9aef92fb142d1b93018bf3474c00011f34cc814792"  # prior c372dd23 reconciled 2026-08-16: PROVEN delta is
 # ONLY NamePlate.tsx + EndCard.tsx (the useMGPhase arity fix — they called it
 # with ONE argument where it destructures TWO, a TypeError at mount, i.e.
 # RENDER_FATAL for the first job ever to request one) plus the new

@@ -61,9 +61,30 @@ def main():
     # ── 2: membership is the render ─────────────────────────────────────────
     src = open(TSX, encoding="utf-8").read()
     for t in sorted(frame_types):
-        m = re.search(r"export const " + re.escape(t) +
-                      r"\s*:\s*React\.FC[\s\S]{0,400}?<AbsoluteFill", src)
-        ok = bool(m)
+        # SCOPE THE SEARCH TO THE COMPONENT, NOT TO A CHARACTER COUNT.
+        #
+        # This was `[\s\S]{0,400}?<AbsoluteFill` — a fixed 400-char window. On
+        # 2026-08-29 the frame-comp lane added six lines of legitimate setup to
+        # EvidenceCard (useCardEntrance + mgTextMetrics for the font census) and
+        # pushed its `<AbsoluteFill` to +528. The cert failed, and the component
+        # had not changed structurally at all: it is still a full-frame
+        # AbsoluteFill, so the exemption was still correct and the gate was
+        # blocking a deploy over a magic number.
+        #
+        # A width is not the property. The property is "the first element this
+        # component renders is an AbsoluteFill", so search from the export to
+        # the NEXT export — the component's own body — which cannot leak into a
+        # neighbour and cannot rot when a line is added.
+        m0 = re.search(r"export const " + re.escape(t) + r"\s*:\s*React\.FC", src)
+        ok = False
+        if m0:
+            nxt = re.search(r"\nexport const ", src[m0.end():])
+            body = src[m0.end(): m0.end() + (nxt.start() if nxt else len(src))]
+            # FIRST JSX element in the body, so a component that renders a
+            # non-fullscreen wrapper and only later nests an AbsoluteFill still
+            # FAILS — which is the misclassification this clause exists to catch.
+            first_tag = re.search(r"<([A-Za-z][\w.]*)", body)
+            ok = bool(first_tag) and first_tag.group(1) == "AbsoluteFill"
         print(f"  [2] {t:14} renders as a full-frame AbsoluteFill: {ok}")
         if not ok:
             fails.append(f"{t} is in _MG_FRAME_REPLACING_TYPES but does not "

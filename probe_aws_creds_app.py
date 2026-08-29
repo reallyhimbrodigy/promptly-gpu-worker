@@ -118,5 +118,11 @@ def main():
         print("    C — key is ALIVE; the corpus object is missing or unreadable.")
         print("        Harness data problem. Pick a source that exists.")
     else:
-        print("    key alive AND object present — the earlier 403 was the "
-              "single-secret mount. Harness bug, now fixed.")
+        print("    KEY ALIVE and object present — self-sourcing harnesses are "
+              "unblocked.")
+        print("    NOTE: on 2026-08-28 this same key returned InvalidAccessKeyId.")
+        print("    The cause was an AWS ACCOUNT SUSPENSION during a free-tier to")
+        print("    paid transition, since resolved — NOT a rotated key and NOT a")
+        print("    mount bug. Same symptom, different cause: an account-level")
+        print("    suspension and a dead key are indistinguishable from here, so")
+        print("    re-run this probe rather than assuming either.")
