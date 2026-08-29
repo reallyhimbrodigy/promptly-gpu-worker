@@ -307,7 +307,14 @@ def _session_certs_registered():
                       ("cert_onset_snap.py", 18),
                       ("cert_doctrine_matches_schema.py", 7),
                       ("cert_v3_beat_resolution.py", 9),
-                      ("cert_harness_exit_code.py", 8)):
+                      ("cert_harness_exit_code.py", 8),
+                      # v584 __round__ regression (2026-08-28): a 2-tuple return
+                      # consumed without unpacking, 17 jobs / 7 users, all dead
+                      # before the renderer. C2 is the load-bearing leg — it
+                      # walks the AST and fails if ANY future_shot_changes
+                      # consumer binds a non-pair, and was red-proven against
+                      # 9755768 (it fingers line 41971) before the fix landed.
+                      ("cert_shot_changes_seam.py", 21)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")

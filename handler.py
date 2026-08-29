@@ -5226,6 +5226,40 @@ def _parse_scdet_output(stdout, stderr):
 _SCDET_SWEEP_THRESHOLD = 1.0
 
 
+def _assert_flat_times(label, seq):
+    """A signal crossing a seam is a FLAT list of numeric seconds, or it PAGES.
+
+    THE REGRESSION THIS EXISTS TO MAKE IMPOSSIBLE (2026-08-28, v584). 15acc4f
+    changed `_do_shot_changes` from returning a plain list to returning
+    `(changes, scores)` — the correct fix for an out-parameter that could not
+    cross a container boundary. It updated ONE of the two
+    `future_shot_changes.result()` consumers. The other kept
+    `_shots = future.result()`, so `_shots` became the 2-TUPLE, flowed into the
+    Gemini prompt as `shot_changes=`, and died 1,300 lines away at
+    `[round(s, 3) for s in _shots[:80]]` — "type list doesn't define __round__".
+
+    17 jobs / 7 users, every one landing as UNKNOWN:unclassified with no render.
+
+    The shape was WRONG AT THE SEAM and stayed silent until arithmetic touched
+    it. Everything in between — `len(_shots or [])` in the diagnostic line —
+    read 2 and looked plausible. That is why this asserts AT the seam and not
+    at the point of use: the frame that raises is not the frame that is wrong.
+
+    Empty is LEGAL (a single-take video has no cuts). Wrong-typed is not.
+    """
+    if not isinstance(seq, (list, tuple)):
+        raise TypeError(
+            f"{label}: expected a flat list of numeric seconds, got "
+            f"{type(seq).__name__} — a seam contract is broken upstream")
+    for _i, _t in enumerate(seq):
+        if isinstance(_t, bool) or not isinstance(_t, (int, float)):
+            raise TypeError(
+                f"{label}: element {_i} is {type(_t).__name__}, expected a "
+                f"number. A tuple/pair return was almost certainly consumed "
+                f"without unpacking — a seam contract is broken upstream")
+    return list(seq)
+
+
 @_optional_signal("shot_changes", list)
 def detect_shot_changes(source_path, threshold=7.0, out_scores=None):
     """Detect hard shot changes in the source video via ffmpeg's `scdet`
@@ -34914,7 +34948,32 @@ def classify_error(e):
     # ── Config / internal — user can't fix, keep it vague — log loudly
     # so we know what's landing in this bucket. If you see a category
     # repeating in [error-fallback] logs, add a specific pattern above.
-    print(f"[error-fallback] Unclassified pipeline error: {msg[:500]}", flush=True)
+    #
+    # CARRY THE FRAME (2026-08-28). `error_where` — the deepest handler.py frame
+    # — has been persisted on every terminal row since the 07-23 observability
+    # pass, and it named the __round__ regression exactly ("handler.py:7506 in
+    # <listcomp>", 17/17 rows). Nobody read it: triage read `error_cause`, saw
+    # `UNKNOWN:unclassified`, concluded "no traceback exists", and spent a
+    # campaign guessing round() sites — five eliminated, all plausible, all
+    # wrong. The instrument was never missing; it was one query away from where
+    # anyone looked.
+    #
+    # So put it on the line that ANNOUNCES the bucket. The subcode contract
+    # stays "unclassified" (a deployed cert and the board's queries pin it —
+    # not mine to change from this lane); this is additive and costs nothing.
+    _where = ""
+    try:
+        import traceback as _tbm
+        _tbf = [f for f in _tbm.extract_tb(getattr(e, "__traceback__", None))
+                if "handler.py" in (f.filename or "")]
+        if _tbf:
+            _where = (f" | frame={os.path.basename(_tbf[-1].filename)}:"
+                      f"{_tbf[-1].lineno} in {_tbf[-1].name}"
+                      f" | line={(_tbf[-1].line or '').strip()[:120]}")
+    except Exception:
+        pass
+    print(f"[error-fallback] Unclassified pipeline error: "
+          f"{type(e).__name__}: {msg[:500]}{_where}", flush=True)
     return _e(
         "UNKNOWN",
         "Something went wrong. Please try again.",
@@ -40998,10 +41057,17 @@ def handler(job):
             assert _r is not None, "loudness returned None — refusing to degrade the plan"
             return _r
 
-        # Side-channel for scdet confidence scores (filled in the pool thread;
-        # consumed by the scene-change floor's confidence gate). Kept OFF the
-        # future's return value so both future_shot_changes.result() consumers
-        # stay unchanged — return shape is still a plain list of times.
+        # scdet confidence scores (filled in the pool thread; consumed by the
+        # scene-change floor's confidence gate). They ride the future's RETURN
+        # VALUE — `(changes, scores)` — not a captured side-channel dict, which
+        # is what makes the crossing real once this relocates.
+        #
+        # THIS COMMENT USED TO SAY the scores were "kept OFF the future's return
+        # value so both future_shot_changes.result() consumers stay unchanged."
+        # 15acc4f changed the return shape and updated ONE of those two
+        # consumers. The comment stayed, and it is the whole bug in one line:
+        # it named the exact hazard ("both consumers") and was left asserting
+        # the opposite of what the code now did. BOTH consumers unpack the pair.
         _shot_change_scores = {}
         def _do_shot_changes(raw_source=None, scores_out=None):
             """RETURNS (changes, scores) — the out-parameter is now an explicit
@@ -41018,6 +41084,9 @@ def handler(job):
             scores_out = _shot_change_scores if scores_out is None else scores_out
             send_progress(job_id, "shots", 18, "Detecting shot changes", app_url)
             _changes = detect_shot_changes(raw_source, out_scores=scores_out)
+            # WELL-TYPED AT THE BOUNDARY (contract rule). Empty is legal — a
+            # single-take source has no cuts; wrong-shaped is not.
+            _assert_flat_times("shot_changes (callee return)", _changes)
             return _changes, scores_out
 
         def _do_vocal_emphasis():
@@ -41968,7 +42037,14 @@ def handler(job):
             # Shot changes + vocal emphasis + loudness all feed into Gemini's
             # placement decisions. Beats are NOT computed for talking-head
             # content — they're noise on speech audio.
-            _shots = _tl_wait("wait_shot_changes", future_shot_changes.result)
+            # UNPACK THE PAIR. This consumer read `future.result()` whole after
+            # 15acc4f made it a 2-tuple, so `_shots` was (changes, scores) and
+            # the prompt got a list-of-two-containers. Reading the RETURNED
+            # scores (not the captured `_shot_change_scores`) is what makes the
+            # boundary crossing real here, exactly as at the collect site.
+            _shots, _shot_scores_inline = _tl_wait(
+                "wait_shot_changes", future_shot_changes.result)
+            _assert_flat_times("shot_changes (edit_recipe consumer)", _shots)
             _vocal = _tl_wait("wait_vocal_emphasis", future_vocal_emphasis.result)
             _loudness = _tl_wait("wait_loudness", future_loudness.result)
             # Face detection (proxy-based) completes before Gemini — collect here
@@ -42548,7 +42624,8 @@ def handler(job):
                     deepgram_words=_seam_words,
                     guidance_profiles=_seam_profiles,
                     shot_changes=_shots,
-                    shot_change_scores=_shot_change_scores,
+                    # RETURNED, not captured — see the unpack above.
+                    shot_change_scores=_shot_scores_inline,
                     vocal_emphasis=_vocal,
                     source_loudness=_loudness,
                     face_positions=_face_positions,
@@ -44458,8 +44535,14 @@ def handler(job):
         # Best-effort, never raises: the failure is already fully recorded above.
         _page_operator = (classified.get("error_code") not in _NON_ALERTING_CODES)
         if _page_operator:
+            # THE FRAME RIDES THE PAGE. `_err_where` is already computed above and
+            # already persisted; the page carried only str(e). For UNKNOWN that
+            # meant the operator woke to "type list doesn't define __round__" with
+            # no line — which is precisely the state that produced five wrong
+            # guesses on 08-28. One f-string turns the page into the diagnosis.
             _fire_render_alert(input_data.get("job_id"), classified.get("error_code"),
-                               detail=str(e))
+                               detail=(f"{_err_class}: {str(e)[:300]}"
+                                       + (f" @ {_err_where}" if _err_where else "")))
         elif classified.get("error_code") in _CLIENT_UPLOAD_CODES:
             # Zac 2026-08-03: the client-upload family was digest-only and thus
             # invisible on the phone (49 users / 2 days). Alert under its OWN
