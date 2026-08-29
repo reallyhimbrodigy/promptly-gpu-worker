@@ -211,9 +211,19 @@ def main(n_sources: int = 2, reps: int = 1, mode: str = "cap"):
     #               transitions sub-call. The overlay class needs no room at any
     #               of them, so this is measurable with no exemption and no
     #               component change.
-    _pairs = (((0, "CAP", {}), (2, "NOCAP", {}))
-              if mode == "cap" else
-              ((0, "NARROW", {}), (0, "WIDE", {"PROMPTLY_SEAM_CANDIDATES": "wide"})))
+    if mode == "cap":
+        _pairs = ((0, "CAP", {}), (2, "NOCAP", {}))
+    elif mode == "seam":
+        _pairs = ((0, "NARROW", {}), (0, "WIDE", {"PROMPTLY_SEAM_CANDIDATES": "wide"}))
+    else:
+        # LEAN vs CONTROL at the PLAN stage. Delivered density says lean carries
+        # 41% less MG; this says whether the model EMITS fewer MGs under lean
+        # (prompt-side — the stripped per-moment prose was load-bearing scaffold)
+        # or emits the same and they are CULLED later (gate-side). An explicit
+        # PROMPTLY_LEAN_SCHEMA overrides the hash A/B, so the arm is forced
+        # rather than drawn.
+        _pairs = ((0, "CONTROL", {"PROMPTLY_LEAN_SCHEMA": "0"}),
+                  (0, "LEAN", {"PROMPTLY_LEAN_SCHEMA": "1"}))
     for ci, k in enumerate(clips):
         for r in range(reps):
             for variant, cond, env in _pairs:
@@ -254,13 +264,14 @@ def main(n_sources: int = 2, reps: int = 1, mode: str = "cap"):
         return None if not d else 25.0 * r["counts"][fam] / d
 
     print(f"\n  ══ EVENTS PER 25s OF OUTPUT, BY FAMILY (paired on the same source) ══")
-    header = f"  {'family':>18} {('CAP' if mode=='cap' else 'NARROW'):>8} {('NOCAP' if mode=='cap' else 'WIDE'):>8} {'delta':>8} {'ratio':>7}   per-source deltas"
+    header = f"  {'family':>18} {_A:>8} {_B:>8} {'delta':>8} {'ratio':>7}   per-source deltas"
     print(header)
     pairs = {}
     for r in ok:
         pairs.setdefault(r["clip"], {}).setdefault(r["label"].split("#")[0], []).append(r)
 
-    _A, _B = ("CAP", "NOCAP") if mode == "cap" else ("NARROW", "WIDE")
+    _A, _B = ({'cap': ('CAP','NOCAP'), 'seam': ('NARROW','WIDE')}
+              .get(mode, ('CONTROL','LEAN')))
     usable = [c for c, v in pairs.items() if v.get(_A) and v.get(_B)]
     print(f"  (complete pairs: {len(usable)}/{len(pairs)} sources)")
     totals = {}
