@@ -32,6 +32,7 @@ DECISION RULE, fixed before the run so it cannot be fitted after:
   ./run_modal.sh sweep_micro_concurrency_app.py --no-dry
 """
 import json
+import os
 import sys
 import uuid
 
@@ -44,7 +45,14 @@ PREFIX = "batch-corpus"
 # 59.5s owner-selected reference — long enough to clear the 45s burst floor
 # (PROMPTLY_BURST_MIN_OUTPUT_S), which is what makes the job take the BURST path
 # at all. A 20s source would silently stay local and measure the wrong thing.
-CLIP = "v24044gl0000d2rj4k7og65tcgn43lr0.mp4"
+# CLIP SELECTION IS A MEASUREMENT, NOT A PREFERENCE. v24044gl… was the original
+# pick and it renders ZERO micro segments (confirmed 2026-08-29, job 17831389:
+# 3 legs, all PromptlyOverlay) — which makes the whole sweep inert on it. The
+# four durable corpus clips are tried in order and each must pass the
+# micro-legs confirmation below before any arm is dispatched. Corpus sources
+# only: organic jobs that produce micro are real users' media and are not
+# eligible (feedback_ab_durable_sources).
+CLIP = os.environ.get("SWEEP_CLIP") or "v15044gf0000d8slpi7og65utp063oi0.mp4"
 ARMS = [4, 2, 1]
 
 
@@ -311,10 +319,41 @@ def _report(rows, confirm_only):
         print("  read this as 'concurrency has no effect'.")
         return
     if confirm_only:
-        print("  CONFIRMATION PASSED: the burst path returns legs. Sweep is unblocked.")
-        for lg in ok[0]["legs"][:6]:
+        for lg in ok[0]["legs"][:8]:
             print(f"    {str(lg.get('leg'))[:38]:>38}  frames={lg.get('frames')} "
                   f"ms/frame={lg.get('ms_per_frame')}")
+        # LEGS ARE NOT ENOUGH — THE SWEEP MEASURES *MICRO*.
+        #
+        # 2026-08-29: the first confirmation returned 3 legs, all PromptlyOverlay,
+        # and read as "CONFIRMATION PASSED: sweep unblocked". It was not. Micro
+        # segments come from transitions and complex zooms (handler.py:31786), and
+        # the micro_concurrency_test override lives INSIDE the micro render path
+        # (handler.py:32251-32273). On a source with no micro work the sweep's
+        # INDEPENDENT VARIABLE never executes and its DEPENDENT VARIABLE never
+        # exists — 6 cells of identical overlay renders reading as "concurrency
+        # has no effect". That is an instrument failure wearing a result's face,
+        # and it would have cost the whole budget to learn nothing.
+        #
+        # Measured on organic traffic: 83/94 jobs with legs produce micro (88.3%),
+        # micro p50 1047.8 ms/frame vs overlay 114.5 (9.2x). So a source with NO
+        # micro is the unusual 11.7%, not a safe default.
+        _micro = [lg for lg in ok[0]["legs"] if "Micro" in str(lg.get("leg"))]
+        _conc = ok[0].get("conc_reported")
+        print(f"\n  micro legs: {len(_micro)}   render_concurrency reported: {_conc}")
+        if not _micro:
+            print("\n  ❌ CONFIRMATION FAILED — legs, but ZERO PromptlyMicroSegments.")
+            print("     This source produces no transitions/complex zooms, so the")
+            print("     concurrency override has nothing to act on. Do NOT run the")
+            print("     sweep on it: every arm would be identical and the null")
+            print("     result would be the harness, not the renderer.")
+            print("     Pick another corpus clip and re-confirm.")
+            sys.exit(4)
+        if _conc in (None, [], ""):
+            print("\n  ⚠️  micro ran but render_concurrency is EMPTY — the arm cannot")
+            print("     be verified as applied. A sweep whose independent variable")
+            print("     is unobservable produces uninterpretable arms.")
+            sys.exit(5)
+        print("\n  CONFIRMATION PASSED: micro legs present AND concurrency observable.")
         return
     agg = {}
     for r in ok:
