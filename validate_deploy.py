@@ -335,7 +335,14 @@ def _session_certs_registered():
                       # SHATTERS Indic words at combining marks (virama/matras
                       # are Mn, not \w), and the 60% recovery I measured for it
                       # was an artifact of shattering both sides symmetrically.
-                      ("cert_mg_nonlatin_grounding.py", 13)):
+                      ("cert_mg_nonlatin_grounding.py", 13),
+                      # Seam-widening A/B arm (2026-08-29), SHIPS DARK at
+                      # split 0.0. C1 pins the darkness so a cohort cannot go
+                      # live before its GO; C4 pins DECORRELATION from the lean
+                      # A/B — both hash job_id, and without the "seamwide:"
+                      # salt every job would land on the same side of BOTH
+                      # experiments and neither effect would be separable.
+                      ("cert_seam_wide_arm.py", 16)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")

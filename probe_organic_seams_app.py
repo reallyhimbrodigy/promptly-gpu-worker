@@ -79,7 +79,13 @@ def run(since: str) -> list:
                "trans": sum(1 for c in cuts if c.get("transition_out")
                             and c["transition_out"] != "none"),
                "broll": len(rc.get("broll_clips") or []),
-               "bare": 0, "ledger": False}
+               "bare": 0, "ledger": False,
+               # RENDER SECONDS — the guardrail. More overlays means more
+               # compositing; the question is whether it costs latency. A
+               # non-inferiority margin invented without this variance would be
+               # a threshold with no arithmetic behind it.
+               "render_s": (res.get("stage_timings") or {}).get("render")
+               if isinstance(res.get("stage_timings"), dict) else None}
         try:
             body = s3.get_object(Bucket=bucket,
                                  Key=f"divergences/{x['id']}.jsonl")["Body"].read()
@@ -141,6 +147,33 @@ def main(since: str = "2026-08-27"):
     print(f"  If organic p50 offered is near 0-1 the fixtures are representative")
     print(f"  and the 3.37x carries. If organic already offers many, it does not.")
 
+    # POWER INPUTS — measured, not assumed. A cohort duration proposed from an
+    # invented SD is a guess wearing arithmetic.
+    import math
+    print(f"\n  DISTRIBUTION OF THE OUTCOME METRICS (per 25s of output):")
+    for lbl, key in (("tight_ovl", "tight_ovl"), ("transitions", "trans")):
+        v = [25.0 * r[key] / r["out_s"] for r in rows]
+        m = st.mean(v); sd = st.pstdev(v)
+        zeros = sum(1 for z in v if z == 0)
+        print(f"      {lbl:>12}: mean {m:.3f}  sd {sd:.3f}  "
+              f"zeros {zeros}/{len(v)} ({100.0*zeros/len(v):.0f}%)")
+        for eff in (1.5, 2.0, 3.37):
+            delta = m * (eff - 1.0)
+            if delta > 0:
+                n = 16.0 * (sd / delta) ** 2
+                print(f"          to detect {eff:.2f}x (delta {delta:.3f}): "
+                      f"n>={math.ceil(n)}/arm")
+    _rs = [r["render_s"] for r in rows if isinstance(r.get("render_s"), (int, float))]
+    if _rs:
+        _m, _sd = st.mean(_rs), st.pstdev(_rs)
+        print(f"\n  RENDER SECONDS (guardrail): n={len(_rs)}  mean {_m:.1f}s  "
+              f"sd {_sd:.1f}s  p50 {st.median(_rs):.1f}s  "
+              f"p90 {sorted(_rs)[int(len(_rs)*0.9)]:.1f}s")
+        for margin in (0.10, 0.15, 0.20):
+            d = _m * margin
+            n = 16.0 * (_sd / d) ** 2
+            print(f"      non-inferiority margin +{margin*100:.0f}% "
+                  f"(+{d:.1f}s): n>={math.ceil(n)}/arm to rule out")
     print(f"\n  per 25s of output:")
     for lbl, key in (("offered", "offered"), ("mechanical", "mechanical")):
         v = [25.0 * r[key] / r["out_s"] for r in rows]

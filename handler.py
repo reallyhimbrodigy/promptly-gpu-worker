@@ -14122,6 +14122,48 @@ def _apply_why_diet(schema):
 # way to force an arm for a cert.
 _LEAN_AB_SPLIT = 0.5
 
+# ── SEAM-CANDIDATE WIDENING A/B (2026-08-29) ─────────────────────────────────
+# DARK: 0.0 puts nobody in the wide arm, so this ships inert and the flip is a
+# one-constant change under Zac's GO.
+#
+# WHY AN ARM AND NOT THE GLOBAL FLAG. PROMPTLY_SEAM_CANDIDATES=wide is
+# all-or-nothing; a cohort needs a per-job split so both arms run CONCURRENTLY
+# over the same population and the cut is clean (the same reason the lean A/B
+# exists — sequential windows gave two contaminated cohorts).
+#
+# THE SALT IS LOAD-BEARING. The lean A/B hashes the bare job_id. Hashing it
+# again here would put every job on the SAME side of both experiments —
+# perfectly correlated arms, and neither effect separable from the other. The
+# "seamwide:" prefix decorrelates them.
+_SEAM_WIDE_SPLIT = 0.0
+
+
+def _seam_wide_arm():
+    """'wide' or 'narrow' for the job in flight, stable per job_id.
+
+    Deterministic so a retry lands in the same arm (a job that flips between
+    attempts pollutes both). Returns 'narrow' with no job_id, so anything off
+    the job path is unaffected.
+    """
+    _jid = str(_ACTIVE_JOB_ID or "")
+    if not _jid:
+        return "narrow"
+    _h = int(hashlib.sha1(("seamwide:" + _jid).encode("utf-8", "ignore"))
+             .hexdigest()[:8], 16)
+    return "wide" if (_h % 10000) < int(_SEAM_WIDE_SPLIT * 10000) else "narrow"
+
+
+def _seam_candidates_wide():
+    """Is this job in the wide seam-candidate arm?
+
+    An explicit PROMPTLY_SEAM_CANDIDATES wins — that is the kill switch and the
+    way a cert forces an arm. Unset => the A/B decides.
+    """
+    _v = str(os.environ.get("PROMPTLY_SEAM_CANDIDATES", "") or "").strip().lower()
+    if _v:
+        return _v == "wide"
+    return _seam_wide_arm() == "wide"
+
 
 def _lean_ab_arm():
     """'lean' or 'control' for the job in flight, stable per job_id.
@@ -17842,7 +17884,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                               flush=True)
                     except Exception:
                         pass
-                    _wide = os.environ.get("PROMPTLY_SEAM_CANDIDATES", "").strip().lower() == "wide"
+                    _wide = _seam_candidates_wide()
                     _cand_set = _shot_seam_src | _broll_edges_for_seams
                     if _wide:
                         _cand_set = _cand_set | _mech_new
@@ -44318,6 +44360,12 @@ def handler(job):
                 # render was invisible.
                 "render_attempts": int(_RENDER_ATTEMPTS[0]),
                 "lean_arm": _lean_ab_arm(),
+                # SEAM ARM ON THE ROW. An A/B whose arm is not persisted is
+                # not an A/B — this repo has _lang_bundle 0/3000 and
+                # source_duration 0/149 as precedent. Nested inside
+                # stage_timings so content-studio cannot strip it.
+                "seam_arm": _seam_wide_arm(),
+                "seam_wide_on": bool(_seam_candidates_wide()),
                 "lean_schema_on": bool(_lean_schema_enabled()),
                 "lean_decor_ground_on": bool(_lean_decor_ground_enabled()),
                 # WHICH BRAIN RENDERED THIS JOB (2026-08-22).
