@@ -98,6 +98,18 @@ def scan(since: str) -> dict:
         # family counts from the DELIVERED recipe
         res = r.get("result") if isinstance(r.get("result"), dict) else {}
         rc = res.get("edit_recipe")
+        # PLAN-SHAPE EVIDENCE for the MG gap. If off-contract plans are
+        # systematically shorter or truncated, that is a lead on why MG emits at
+        # 0.28-0.45 against a reference that uses it heavily.
+        _st = res.get("stage_timings") if isinstance(res, dict) else None
+        _st = _st if isinstance(_st, dict) else {}
+        _gt = _st.get("gemini_tokens") if isinstance(_st.get("gemini_tokens"), dict) else {}
+        rec["out_tok"] = _gt.get("output")
+        rec["prompt_tok"] = _gt.get("prompt")
+        rec["degen_retries"] = _st.get("degen_retries")
+        rec["source_s"] = _st.get("source_duration_s")
+        rec["lean_arm"] = _st.get("lean_arm")
+        rec["n_km"] = len(rec.get("errs") or [])   # 1 pydantic error per key_moment
         rc = rc.get("plan") if isinstance(rc, dict) and isinstance(rc.get("plan"), dict) else rc
         if isinstance(rc, dict):
             cuts = [c for c in (rc.get("cuts") or []) if isinstance(c, dict)
@@ -153,13 +165,17 @@ def main(since: str = "2026-08-27"):
             print(f"        {_ln[:110]}")
 
     print(f"\n  [3] DELIVERED FAMILY MIX — rejected vs clean")
-    A = [r["m"] for r in have if r.get("reject") and r.get("m")]
-    B = [r["m"] for r in have if not r.get("reject") and r.get("m")]
-    print(f"      rejected n={len(A)}   clean n={len(B)}")
+    # CUT BY THE ARM, NOT BY THE PROXY. 63 of 67 rejections are lean_arm=lean
+    # and only 1 lean job is clean, so reject/clean is a near-perfect stand-in
+    # for lean/control — but a stand-in is not the variable. The lean A/B assigns
+    # deterministically, so cutting on the arm itself is the real read.
+    A = [r["m"] for r in have if str(r.get("lean_arm")) == "lean" and r.get("m")]
+    B = [r["m"] for r in have if str(r.get("lean_arm")) == "control" and r.get("m")]
+    print(f"      lean n={len(A)}   control n={len(B)}")
     if not A or not B:
         print("      one side is empty — no comparison possible.")
         return
-    print(f"      {'family':>11} {'REJECTED':>10} {'CLEAN':>8} {'ratio':>7}")
+    print(f"      {'family':>11} {'LEAN':>10} {'CONTROL':>8} {'ratio':>7}")
     for f in FAM:
         a = st.mean([25.0 * m[f] / m["out_s"] for m in A])
         b = st.mean([25.0 * m[f] / m["out_s"] for m in B])
@@ -169,6 +185,24 @@ def main(since: str = "2026-08-27"):
     tb = sum(st.mean([25.0 * m[f] / m["out_s"] for m in B]) for f in FAM)
     print(f"      {'TOTAL':>11} {ta:>10.2f} {tb:>8.2f} "
           f"{(ta/tb if tb else float('inf')):>7.2f}x")
+    print(f"\n  [4] PLAN SHAPE — is an off-contract plan shorter or truncated?")
+    def _num(rs, k):
+        v = [r[k] for r in rs if isinstance(r.get(k), (int, float))]
+        return (st.median(v), len(v)) if v else (None, 0)
+    RJ = [r for r in have if r.get("reject")]
+    CL = [r for r in have if not r.get("reject")]
+    for k in ("out_tok", "prompt_tok", "degen_retries", "source_s"):
+        a, na = _num(RJ, k); b, nb = _num(CL, k)
+        if a is None and b is None:
+            print(f"      {k:>14}: ABSENT on both sides — not measurable here")
+            continue
+        print(f"      {k:>14}: rejected {a} (n={na})   clean {b} (n={nb})")
+    from collections import Counter as _C
+    print(f"      {'lean_arm':>14}: rejected {dict(_C(str(r.get('lean_arm')) for r in RJ))}")
+    print(f"      {'':>14}  clean    {dict(_C(str(r.get('lean_arm')) for r in CL))}")
+    _kmr = [r['n_km'] for r in RJ if r.get('n_km')]
+    print(f"      {'key_moments':>14}: rejected median {st.median(_kmr) if _kmr else None} "
+          f"(one validation error per moment)")
     print(f"\n      If these mixes match, the gate is noise on a decorative field.")
     print(f"      If rejected plans are thinner, the campaign's density numbers")
     print(f"      describe the fallback rather than the editorial brain.")
