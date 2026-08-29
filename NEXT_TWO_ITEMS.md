@@ -348,3 +348,37 @@ REVISED ORDER:
      anything failing before dispatch.
 
 Lane 3 extraction still opens the next session. Nothing else moves.
+
+---
+
+# FIRST TOMORROW — `type list doesn't define __round__` (11u / 21j, no sub-code)
+
+**NOT caused by the v574 instrument work.** I asserted it was mine on a plausible
+story and the story was wrong: measured since 2026-08-20 it is 11 users / 21 jobs
+at 1.91 jobs/user, which PREDATES those changes. One query refuted it. Four wrong
+inferences in a day, same shape each time — a strong candidate accepted without
+the check that could refute it.
+
+## Sites already ELIMINATED (do not re-check these)
+
+  handler.py:37383   `_mini_t` — only ever receives normalize/plan/render, all
+                     floats. Never sees a list. NOT the thrower.
+  handler.py:44060   GUARDED: round(float(v),1) if isinstance(v,(int,float))
+                     and not isinstance(v,bool) else v
+  handler.py:44443   GUARDED, same shape.
+  modal_app.py:3243  GUARDED: round(v,2) if isinstance(v,float) else v
+
+All four stage_timings round sites are safe. The thrower is SOMEWHERE ELSE —
+`round()` on a list, in a path that 11 users reach.
+
+## How to find it
+
+The message has no traceback in `error_detail`. Get one: the class is
+UNKNOWN:unclassified, so it is escaping the `_e()` chokepoint too — which means
+fixing the CHOKEPOINT BYPASS (already top of Lane 1) may surface the frame for
+free. Those two items are the same investigation.
+
+Profile matches `ladder_exhausted` before root-cause: large, unnamed, no
+mechanism, retry multiplier ~1.9. That one took $0.02 of reads once the
+technical string was read from `error_detail` rather than `error_message` — the
+user-facing copy hides the mechanism, and that trap has now cost two sessions.
