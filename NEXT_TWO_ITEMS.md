@@ -371,6 +371,31 @@ the check that could refute it.
 All four stage_timings round sites are safe. The thrower is SOMEWHERE ELSE —
 `round()` on a list, in a path that 11 users reach.
 
+## MORE ELIMINATED (2026-08-28, do not re-check)
+
+  handler.py:24601-24602  `round(_snr,1)` / `round(_nf,1)` — BARE, no float()
+                          wrapper, and they LOOK like the thrower next to their
+                          float()-guarded siblings. They are NOT: _rms and _nf
+                          are both `float(_loud.get(...))` two lines up, so _snr
+                          is a float. Second wrong candidate in this hunt.
+
+## THE SWEEP IS BLOCKED BY THIS BUG — measured, not inferred
+
+Confirmation job 49142d76: status=failed, UNKNOWN/unclassified,
+`type list doesn't define __round__ method`.
+
+Its stage_timings keys show WHERE it dies:
+  present: download, fps_normalize, source_fps, target_fps, shake_score,
+           source_poll, prewarm, image_absent
+  absent : normalize_transcribe_upload, edit_plan, gemini_call, render
+
+It dies AFTER fps_normalize and BEFORE the editorial stage, so NO RENDER EVER
+HAPPENS. That is why every sweep cell returns no legs — they never reach the
+renderer. Firing the 4/2/1 sweep would buy TWELVE identical failures for ~$1.50.
+
+ORDER INVERTED ON THAT EVIDENCE: __round__ before the sweep. The sweep cannot
+produce a number until a job can reach the render stage.
+
 ## How to find it
 
 The message has no traceback in `error_detail`. Get one: the class is
