@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { inkFor } from "../shared/ink";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { CursorArrow } from "./cursor";
@@ -20,7 +21,7 @@ export const MouseDrag: React.FC<MouseDragProps> = ({
   exitFrames,
   label,
   cardColor = "#F2C211",
-  cardTextColor = "#1C1C1C",
+  cardTextColor,
   regionWidth = 720,
   regionHeight = 360,
   showCursor = true,
@@ -39,6 +40,19 @@ export const MouseDrag: React.FC<MouseDragProps> = ({
   );
 
   if (!visible) return null;
+
+  // User/model text routes by script + emoji tail (font census 2026-08-26).
+  const labelFont = mgTextFont(label, "inter");
+  const labelMetrics = mgTextMetrics(label);
+
+  // 2026-08-26 coupled-defaults audit: the #1C1C1C ink was authored for the
+  // yellow default card and survived a cardColor-only override (dark brand
+  // card → invisible label, and the span carries no textShadow rescue).
+  // Unspecified ink now follows the card surface; the default card keeps
+  // #1C1C1C exactly.
+  const resolvedCardTextColor =
+    cardTextColor ??
+    (cardColor === "#F2C211" ? "#1C1C1C" : inkFor(cardColor, "#1C1C1C"));
 
   const lf = localFrame;
   const cx = regionWidth / 2;
@@ -156,12 +170,12 @@ export const MouseDrag: React.FC<MouseDragProps> = ({
           >
             <span
               style={{
-                fontFamily: MG_FONTS.inter,
+                fontFamily: labelFont,
                 fontSize: 46,
                 fontWeight: 800,
-                color: cardTextColor,
+                color: resolvedCardTextColor,
                 letterSpacing: "0.01em",
-                lineHeight: 1,
+                lineHeight: Math.max(1, labelMetrics.lineHeight),
               }}
             >
               {label}

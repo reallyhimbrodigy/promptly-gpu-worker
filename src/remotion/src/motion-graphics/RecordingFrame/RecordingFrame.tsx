@@ -5,7 +5,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { useMGPhase } from "../shared/useMGPhase";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
@@ -136,35 +136,44 @@ export const RecordingFrame: React.FC<RecordingFrameProps> = ({
         />
       ) : null}
 
-      {annotations.map((a, i) => (
-        <div key={i} style={cornerToStyle(a.corner)}>
-          <div
-            style={{
-              fontFamily: MG_FONTS.jetBrainsMono,
-              fontSize: annotationFontSize * 0.75,
-              fontWeight: 400,
-              color: `${textColor}80`,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              lineHeight: 1.4,
-            }}
-          >
-            {a.label}
+      {annotations.map((a, i) => {
+        // Spec-driven label + free-string value are user/model text — routed
+        // by script + emoji tail (font census 2026-08-26); the generated
+        // timestamp/count values are latin digits and keep the mono face.
+        const value = resolveValue(a.value);
+        const labelFont = mgTextFont(a.label, "jetBrainsMono");
+        const labelCapsSafe = mgTextMetrics(a.label).uppercaseSafe;
+        const valueFont = mgTextFont(value, "jetBrainsMono");
+        return (
+          <div key={i} style={cornerToStyle(a.corner)}>
+            <div
+              style={{
+                fontFamily: labelFont,
+                fontSize: annotationFontSize * 0.75,
+                fontWeight: 400,
+                color: `${textColor}80`,
+                letterSpacing: "0.08em",
+                textTransform: labelCapsSafe ? "uppercase" : "none",
+                lineHeight: 1.4,
+              }}
+            >
+              {a.label}
+            </div>
+            <div
+              style={{
+                fontFamily: valueFont,
+                fontSize: annotationFontSize,
+                fontWeight: 500,
+                color: accentColor,
+                letterSpacing: "0.02em",
+                lineHeight: 1.2,
+              }}
+            >
+              {value}
+            </div>
           </div>
-          <div
-            style={{
-              fontFamily: MG_FONTS.jetBrainsMono,
-              fontSize: annotationFontSize,
-              fontWeight: 500,
-              color: accentColor,
-              letterSpacing: "0.02em",
-              lineHeight: 1.2,
-            }}
-          >
-            {resolveValue(a.value)}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </AbsoluteFill>
   );
 };

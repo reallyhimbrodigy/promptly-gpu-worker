@@ -15,7 +15,7 @@ export interface EditorialQuoteProps extends MGTimingProps, MGPositionProps {
 
   accentColor?: string; // left bar. Default "#FFD60A".
   textColor?: string; // Default "#FFFFFF".
-  authorColor?: string; // role line. Default "rgba(255,255,255,0.7)".
+  authorColor?: string; // role line. Default: textColor at 0.7 alpha.
   fontKey?: EditorialQuoteFontKey; // Default "playfairDisplay".
   fontSize?: number; // base px before auto-fit. Default 92.
   maxWordsPerLine?: number; // Default 3.

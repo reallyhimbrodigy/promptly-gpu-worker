@@ -1,6 +1,6 @@
 import React from "react";
 import { AbsoluteFill, interpolate, interpolateColors, useVideoConfig } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { ReticleProps } from "./types";
@@ -107,6 +107,10 @@ export const Reticle: React.FC<ReticleProps> = ({
     { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
   );
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26).
+  const tagFont = mgTextFont(label ?? "", "inter");
+  const tagMetrics = mgTextMetrics(label ?? "");
+
   // Tag spring-in at the corner (eased gently so it doesn't snap-pop).
   const tagScale = easeOutBack(clamp01((localFrame - LOCK) / 28));
   const tagOpacity = interpolate(localFrame, [LOCK, LOCK + 18], [0, 1], {
@@ -140,11 +144,24 @@ export const Reticle: React.FC<ReticleProps> = ({
   const exitOpacity = 1 - clamp01(exitProgress * 1.15);
   const exitScale = 1 + 0.05 * exitDefocus;
 
+  // Coupled-defaults audit (2026-08-26): armLength 64 was authored for the
+  // 620x720 default region; a tight region override (< ~128px) crossed the
+  // opposing corner arms into solid bars. Clamp the arm to the region's
+  // half-extents — inert at the defaults (min(64, 305, 355) = 64).
+  const arm = Math.max(
+    0,
+    Math.min(
+      armLength,
+      regionWidth / 2 - thickness,
+      regionHeight / 2 - thickness,
+    ),
+  );
+
   const cornerStyle = (c: Corner): React.CSSProperties => {
     const base: React.CSSProperties = {
       position: "absolute",
-      width: armLength,
-      height: armLength,
+      width: arm,
+      height: arm,
       boxSizing: "border-box",
     };
     const dx = c === "tl" || c === "bl" ? -spread : spread;
@@ -179,10 +196,47 @@ export const Reticle: React.FC<ReticleProps> = ({
             transformOrigin: "center",
           }}
         >
+          {/* §4-for-footage (2026-08-25): the WINDOW plane. A viewfinder is
+              axis-aligned by nature — tilt/overlap read as error here. The
+              depth device for this family is selection: everything OUTSIDE
+              the region dims as the lock lands (box-shadow spill — one node,
+              no four-rect math), so the HUD occludes the footage around the
+              subject and the region reads as a window, not four floating
+              corners. Releases with the exit defocus. */}
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: 0,
+              borderRadius: 10,
+              boxShadow: `0 0 0 9999px rgba(0,0,0,${(0.26 * lockT * (1 - exitDefocus)).toFixed(3)})`,
+              pointerEvents: "none",
+            }}
+          />
+
           {/* Corner brackets */}
           <div style={{ position: "absolute", inset: 0, opacity: bracketsOpacity }}>
             {CORNERS.map((c) => (
               <div key={c} style={cornerStyle(c)} />
+            ))}
+            {/* Restrained HUD furniture: midpoint edge ticks — the marks a
+                real viewfinder carries. Corpus register is fragments, so the
+                furniture stays minimal: four ticks, no readouts. */}
+            {[
+              { left: "50%", top: -1, width: 2, height: 14, translate: "-50% 0" },
+              { left: "50%", bottom: -1, width: 2, height: 14, translate: "-50% 0" },
+              { left: -1, top: "50%", width: 14, height: 2, translate: "0 -50%" },
+              { right: -1, top: "50%", width: 14, height: 2, translate: "0 -50%" },
+            ].map((t, i) => (
+              <div
+                key={`tick-${i}`}
+                style={{
+                  position: "absolute",
+                  ...t,
+                  backgroundColor: liveColor,
+                  opacity: 0.75,
+                }}
+              />
             ))}
           </div>
 
@@ -274,13 +328,15 @@ export const Reticle: React.FC<ReticleProps> = ({
               />
               <span
                 style={{
-                  fontFamily: MG_FONTS.inter,
+                  fontFamily: tagFont,
                   fontSize: 30,
                   fontWeight: 700,
                   color: "#FFFFFF",
                   letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                  lineHeight: 1,
+                  textTransform: tagMetrics.uppercaseSafe
+                    ? "uppercase"
+                    : "none",
+                  lineHeight: Math.max(1, tagMetrics.lineHeight),
                   textShadow,
                 }}
               >

@@ -4,16 +4,24 @@ import { SPRING_SNAPPY } from "../shared/springs";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { composeBubbleTransform } from "./shared";
+import { mgSchedule } from "../shared/schedule";
+import { asText } from "../../shared/asText";
 import type { IMessageBubbleProps } from "./types";
 
 
 const OUTGOING_GRADIENT = "linear-gradient(180deg, #1E9BF0 0%, #0479D9 100%)";
-const OUTGOING_FALLBACK = "#0A84FF"; // used for the tail solid fill
+// The tail abuts the bubble's BOTTOM edge, so it must match the gradient's
+// end stop — the old #0A84FF painted a visibly brighter seam where the tail
+// met the bubble (pass #11, audited).
+const OUTGOING_FALLBACK = "#0479D9";
 const INCOMING_COLOR = "#2C2C2E";
 
+// 60fps-authored; scaled by mgSchedule at render time (pass #11 — the raw
+// constants meant the typewriter could not complete inside short live windows).
 const TYPING_PHASE_FRAMES = 30;
 const TYPE_REVEAL_FRAMES = 60;
 
@@ -34,16 +42,27 @@ export const IMessageBubble: React.FC<IMessageBubbleProps> = ({
 }) => {
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
-    { anchor: "top", offsetY: 820 },
+    // The 820 default was AUTHORED for the default "top" anchor (bubble in
+    // the lower half). It must not survive an anchor-only override — the live
+    // "center" placement rendered 615px below center with the status line in
+    // the TikTok nav zone (pass #11, audited).
+    { anchor: "top", offsetY: anchor == null ? 820 : 0 },
     "IMessageBubble",
   );
   const { fps } = useVideoConfig();
-  const { visible, localFrame, exitProgress } = useMGPhase(
+  const { visible, localFrame, exitProgress, exitStartFrame } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 12, defaultExitFrames: 8 },
   );
 
   if (!visible) return null;
+
+  const K = mgSchedule({
+    fps,
+    window: exitStartFrame,
+    authoredEnd: typewriter ? TYPING_PHASE_FRAMES + TYPE_REVEAL_FRAMES : 22,
+  });
+  const k = K(1);
 
   const isOutgoing = messageType === "outgoing";
   const bubbleFill = isOutgoing ? OUTGOING_GRADIENT : INCOMING_COLOR;
@@ -54,14 +73,17 @@ export const IMessageBubble: React.FC<IMessageBubbleProps> = ({
   // effective positions) — the worst stepper in the MG set despite being one of
   // the LONGEST entrances. OFF => today's exact spring.
   const smoothEntrance = useSmoothGraphics();
+  // 12 was authored at 60fps (200ms) — raw, it ran 2x slower at production
+  // 30fps (pass #11, audited).
+  const enterF = Math.max(3, Math.round((12 / 60) * fps));
   const springProgress = spring({
     fps,
     frame: localFrame,
     config: SPRING_SNAPPY,
-    durationInFrames: 12,
+    durationInFrames: enterF,
   });
   const enterProgress = smoothEntrance
-    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: 12 })
+    ? cappedEntranceProgress({ localFrame, fps, authoredFrames: enterF })
     : springProgress;
   const { transform, opacity } = composeBubbleTransform(
     enterProgress,
@@ -69,22 +91,47 @@ export const IMessageBubble: React.FC<IMessageBubbleProps> = ({
   );
 
   const showTypingIndicator =
-    typewriter && localFrame < TYPING_PHASE_FRAMES;
+    typewriter && localFrame < K(TYPING_PHASE_FRAMES);
 
   let displayedText = text;
   if (typewriter) {
-    const typeFrame = localFrame - TYPING_PHASE_FRAMES;
-    const chars = Math.max(
+    // Reveal by GRAPHEME CLUSTER, not UTF-16 unit — .slice(0, chars) split
+    // surrogate pairs / ZWJ emoji / matra clusters mid-reveal (font census
+    // 2026-08-26). Intl.Segmenter is available in the render's Chrome + node.
+    const clusters = Array.from(
+      new Intl.Segmenter().segment(text),
+      (s) => s.segment,
+    );
+    const typeFrame = localFrame - K(TYPING_PHASE_FRAMES);
+    const shown = Math.max(
       0,
       Math.floor(
-        interpolate(typeFrame, [0, TYPE_REVEAL_FRAMES], [0, text.length], {
-          extrapolateLeft: "clamp",
-          extrapolateRight: "clamp",
-        }),
+        interpolate(
+          typeFrame,
+          [0, K(TYPE_REVEAL_FRAMES)],
+          [0, clusters.length],
+          {
+            extrapolateLeft: "clamp",
+            extrapolateRight: "clamp",
+          },
+        ),
       ),
     );
-    displayedText = text.slice(0, chars);
+    displayedText = clusters.slice(0, shown).join("");
   }
+
+  // Takeover for the dramatic short message (pass #11, audited: the live solo
+  // "LOST" occupied ~10% of the axis). Short texts scale up toward the bubble
+  // box; running text keeps the mimic's 30px. Paddings/radius are em-relative
+  // so the bubble keeps its proportions at any size.
+  // Script-aware advance (font census 2026-08-26): 0.62 was the latin-only
+  // constant; mgTextMetrics keeps 0.62 for latin, conservative for non-Latin.
+  const msgChars = Math.max(1, [...asText(text)].length);
+  const msgAdvanceEm = mgTextMetrics(asText(text)).advanceEm;
+  const msgFontSize =
+    msgChars <= 20
+      ? Math.min(64, Math.max(30, Math.round(480 / (msgChars * msgAdvanceEm))))
+      : 30;
 
   return (
     <AbsoluteFill style={containerStyle}>
@@ -116,6 +163,7 @@ export const IMessageBubble: React.FC<IMessageBubbleProps> = ({
             bubbleFill={bubbleFill}
             tailColor={tailColor}
             text={displayedText}
+            fontSize={msgFontSize}
           />
         )}
 
@@ -145,7 +193,8 @@ const MessageBubble: React.FC<{
   bubbleFill: string;
   tailColor: string;
   text: string;
-}> = ({ isOutgoing, bubbleFill, tailColor, text }) => {
+  fontSize?: number;
+}> = ({ isOutgoing, bubbleFill, tailColor, text, fontSize = 30 }) => {
   return (
     <div
       style={{
@@ -156,19 +205,22 @@ const MessageBubble: React.FC<{
       <div
         style={{
           background: bubbleFill,
-          borderRadius: 26,
-          paddingLeft: 18,
-          paddingRight: 18,
-          paddingTop: 14,
-          paddingBottom: 14,
+          borderRadius: "0.87em",
+          paddingLeft: "0.6em",
+          paddingRight: "0.6em",
+          paddingTop: "0.47em",
+          paddingBottom: "0.47em",
           color: "#FFFFFF",
-          fontSize: 30,
+          // User/model text routes by script + emoji tail (font census
+          // 2026-08-26); the status line keeps the root Inter (chrome).
+          fontFamily: mgTextFont(text, "inter"),
+          fontSize,
           fontWeight: 400,
           lineHeight: 1.3,
           letterSpacing: "-0.005em",
           wordBreak: "break-word",
           boxShadow: "0 2px 8px rgba(0,0,0,0.18)",
-          minHeight: 30 * 1.3,
+          minHeight: "1.3em",
         }}
       >
         {text}

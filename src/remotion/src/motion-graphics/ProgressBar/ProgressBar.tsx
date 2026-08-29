@@ -1,9 +1,12 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
 import { SPRING_SNAPPY } from "../shared/springs";
+import { inkFor } from "../shared/ink";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
+import { mgSchedule } from "../shared/schedule";
 import type { ProgressBarProps } from "./types";
 
 
@@ -18,6 +21,8 @@ const FILL_START = 8;
 const FILL_END = 34;
 const PULSE_END = 40;
 
+const DEFAULT_TRACK = "rgba(255,255,255,0.14)";
+
 export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
   const {
     startMs,
@@ -29,9 +34,13 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
     // dragged the whole card right of center on Zac's render.
     width = 680,
     trackHeight = 18,
-    fillColor = "#FFFFFF",
-    accentColor = "#D4A12A",
-    trackColor = "rgba(255,255,255,0.14)",
+    fillColor,
+    // §6 palette lock (pass #10, audited): the old default "#D4A12A" was
+    // component-INVENTED gold — the live placement sent no accentColor and
+    // rendered chroma no palette selected. An unspecified accent is neutral
+    // chrome; jobs that want chroma pass their palette's accent.
+    accentColor = "rgba(255,255,255,0.72)",
+    trackColor = DEFAULT_TRACK,
     milestones = [],
     formatValue,
     textShadowLarge = DEFAULT_TEXT_SHADOW_LARGE,
@@ -41,18 +50,34 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
     offsetY,
     scale,
   } = props;
+  // Coupled-defaults audit (2026-08-26): the white fill default was authored
+  // for the dim translucent default track; a light/solid trackColor override
+  // left fill ≈ track (~1.1:1) and erased the progress read. Unspecified fill
+  // now follows the actual track (default guarded by constant — the
+  // translucent default parses as pure white to inkFor); explicit fillColor
+  // passes through untouched.
+  const effFillColor =
+    fillColor ??
+    (trackColor === DEFAULT_TRACK ? "#FFFFFF" : inkFor(trackColor));
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
     undefined,
     "ProgressBar",
   );
   const { fps } = useVideoConfig();
-  const { visible, localFrame, exitProgress } = useMGPhase(
+  const { visible, localFrame, exitProgress, exitStartFrame } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 40, defaultExitFrames: 12 },
   );
 
   if (!visible) return null;
+
+  // Pass #10 (audited absolute-frame-schedule class): the raw constants ran
+  // the count-up 2x slower in real time at production 30fps than the 60fps
+  // probe, and any window under ~1.53s exited mid-count. mgSchedule: the
+  // count-up + pulse settle by 85% of the pre-exit window at any fps.
+  const K = mgSchedule({ fps, window: exitStartFrame, authoredEnd: PULSE_END });
+  const k = K(1);
 
   const isValueMode = "value" in props && props.value !== undefined;
   const targetPercent = isValueMode
@@ -63,19 +88,19 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
     fps,
     frame: localFrame,
     config: SPRING_SNAPPY,
-    durationInFrames: 8,
+    durationInFrames: Math.max(2, Math.round(8 * k)),
   });
   const trackScaleX = trackSpring;
-  const eyebrowFadeIn = interpolate(localFrame, [0, 6], [0, 1], {
+  const eyebrowFadeIn = interpolate(localFrame, [0, 6 * k], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const heroFadeIn = interpolate(localFrame, [6, 12], [0, 1], {
+  const heroFadeIn = interpolate(localFrame, [6 * k, 12 * k], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
-  const fillRaw = interpolate(localFrame, [FILL_START, FILL_END], [0, 1], {
+  const fillRaw = interpolate(localFrame, [K(FILL_START), K(FILL_END)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -98,7 +123,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
       : Math.round(props.total).toLocaleString()
     : null;
 
-  const pulsePhase = interpolate(localFrame, [FILL_END, PULSE_END], [0, 1], {
+  const pulsePhase = interpolate(localFrame, [K(FILL_END), K(PULSE_END)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -110,6 +135,11 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
 
   const fillWidth = width * currentPercent;
   const radius = trackHeight / 2;
+
+  // Font census (2026-08-26): the eyebrow + milestone labels are user/model
+  // text — routed stacks + gated caps; the hero digits stay chrome (bare Anton).
+  const labelFont = mgTextFont(label ?? "", "inter");
+  const labelMetrics = mgTextMetrics(label ?? "");
 
   return (
     <AbsoluteFill style={containerStyle}>
@@ -127,13 +157,13 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
         {label ? (
           <div
             style={{
-              fontFamily: MG_FONTS.inter,
+              fontFamily: labelFont,
               fontSize: 24,
               fontWeight: 600,
               color: accentColor,
               letterSpacing: "0.28em",
-              textTransform: "uppercase",
-              lineHeight: 1,
+              textTransform: labelMetrics.uppercaseSafe ? "uppercase" : "none",
+              lineHeight: Math.max(1, labelMetrics.lineHeight),
               opacity: eyebrowFadeIn,
               textShadow: textShadowSmall,
               whiteSpace: "nowrap",
@@ -227,17 +257,20 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
               top: 0,
               height: trackHeight,
               width: fillWidth,
-              backgroundColor: fillColor,
+              backgroundColor: effFillColor,
               borderRadius: radius,
               transform: `scaleY(${fillScaleY})`,
               transformOrigin: "center",
-              boxShadow: `0 4px 12px ${withAlpha(fillColor, 0.35)}`,
+              boxShadow: `0 4px 12px ${withAlpha(effFillColor, 0.35)}`,
             }}
           />
 
           {milestones.map((m, i) => {
             const x = width * m.at;
             const reached = currentPercent >= m.at;
+            // Milestone labels are user/model text sites too (census).
+            const msFont = mgTextFont(m.label ?? "", "inter");
+            const msUppercaseSafe = mgTextMetrics(m.label ?? "").uppercaseSafe;
             return (
               <React.Fragment key={i}>
                 <div
@@ -260,14 +293,14 @@ export const ProgressBar: React.FC<ProgressBarProps> = (props) => {
                       left: x,
                       bottom: -38,
                       transform: "translateX(-50%)",
-                      fontFamily: MG_FONTS.inter,
+                      fontFamily: msFont,
                       fontSize: 18,
                       fontWeight: 600,
                       color: reached
                         ? "#FFFFFF"
                         : "rgba(255,255,255,0.5)",
                       letterSpacing: "0.2em",
-                      textTransform: "uppercase",
+                      textTransform: msUppercaseSafe ? "uppercase" : "none",
                       whiteSpace: "nowrap",
                       textShadow: textShadowSmall,
                     }}

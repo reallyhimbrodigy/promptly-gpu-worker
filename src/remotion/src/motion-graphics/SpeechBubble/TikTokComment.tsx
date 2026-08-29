@@ -4,6 +4,7 @@ import { SPRING_SNAPPY } from "../shared/springs";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import { HeartIcon } from "./icons";
@@ -25,14 +26,19 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
   width = 620,
   avatarSrc,
   initials,
-  avatarColor = "#FE2C55",
+  // §6: brand-red was invented chroma (the InstagramComment precedent) —
+  // neutral disc unless the spec sends a palette color.
+  avatarColor = "rgba(255,255,255,0.22)",
   username,
   comment,
   likes,
 }) => {
   const { containerStyle, wrapperStyle } = resolveMGPosition(
     { anchor, offsetX, offsetY, scale },
-    { anchor: "top", offsetY: 820 },
+    // The 820 default pairs with the default "top" anchor only — it must not
+    // survive an anchor-only override (the audited IMessageBubble class; this
+    // was the third sibling carrying it).
+    { anchor: "top", offsetY: anchor == null ? 820 : 0 },
     "TikTokComment",
   );
   const { fps } = useVideoConfig();
@@ -83,7 +89,6 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
           src={avatarSrc}
           initials={initials}
           fallbackColor={avatarColor}
-          fontFamily={MG_FONTS.inter}
           fallbackText={username}
         />
 
@@ -98,6 +103,9 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
         >
           <div
             style={{
+              // User text routes by script + emoji tail (font census
+              // 2026-08-26); the like count keeps the root Inter (chrome).
+              fontFamily: mgTextFont(username, "inter"),
               fontSize: 22,
               fontWeight: 500,
               color: "#A8A8A8",
@@ -111,6 +119,7 @@ export const TikTokComment: React.FC<TikTokCommentProps> = ({
 
           <div
             style={{
+              fontFamily: mgTextFont(comment, "inter"),
               fontSize: 24,
               fontWeight: 400,
               color: "#FFFFFF",

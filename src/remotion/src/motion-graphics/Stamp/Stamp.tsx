@@ -1,11 +1,12 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useVideoConfig } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { StampFontKey, StampMark, StampProps, StampStyle } from "./types";
 import { useSmoothGraphics } from "../shared/smooth-graphics-flag";
 import { cappedEntranceProgress } from "../shared/entrance-cap";
+import { MotionBlurWrap } from "../shared/motion-blur";
 
 
 const easeInCubic = (t: number): number => t * t * t;
@@ -20,16 +21,19 @@ const STYLE_DEFAULTS: Record<
   StampStyle,
   { fontKey: StampFontKey; fontSize: number; mark: StampMark; distress: boolean; size: number }
 > = {
-  seal: { fontKey: "oswald", fontSize: 64, mark: "star", distress: false, size: 380 },
-  stamp: { fontKey: "anton", fontSize: 84, mark: "none", distress: true, size: 440 },
-  ribbon: { fontKey: "anton", fontSize: 72, mark: "none", distress: false, size: 520 },
+  // §4 presence (2026-08-24): REF-2's mark commands the frame — the previous
+  // sizes read as a lone sticker floating mid-frame (render-proven). Sized so
+  // the default stamp spans ~70% of a 1080 frame the way the reference's
+  // number does.
+  // Corpus law 1 (pass #7b): a card that lands alone OWNS the frame — REF-2's
+  // number runs ~95% width and clips the edge; the 2026-08-25 panel measured
+  // ours at ~58% floating in symmetric margins. Tilted corners now approach
+  // the 1080 frame edges.
+  seal: { fontKey: "oswald", fontSize: 64, mark: "star", distress: false, size: 900 },
+  stamp: { fontKey: "anton", fontSize: 84, mark: "none", distress: true, size: 1000 },
+  ribbon: { fontKey: "anton", fontSize: 72, mark: "none", distress: false, size: 1040 },
 };
 
-const FONT_FAMILY: Record<StampFontKey, string> = {
-  oswald: MG_FONTS.oswald,
-  anton: MG_FONTS.anton,
-  inter: MG_FONTS.inter,
-};
 const FONT_WEIGHT: Record<StampFontKey, number> = {
   oswald: 700,
   anton: 400,
@@ -80,6 +84,11 @@ const renderMark = (
 };
 
 // Main word size in the rectangular-stamp viewBox (560 wide).
+// These are VIEWBOX-space sizes (the seal renders in a fixed 560-wide
+// viewBox): presence scaling comes from the `size` prop scaling the whole
+// SVG, NEVER from these — at 140 the word overflowed the frame and the
+// border rects struck through the glyphs ("SOLD" read as "$OLD",
+// render-proven 2026-08-24).
 const rectFontFit = (len: number): number =>
   len <= 6 ? 122 : len <= 8 ? 104 : len <= 10 ? 88 : len <= 12 ? 74 : 64;
 
@@ -169,7 +178,16 @@ export const Stamp: React.FC<StampProps> = (props) => {
 
   // --- Badge content ---
   const stampFont =
-    fontSizeProp ?? (text.length > 14 ? 58 : text.length > 11 ? 70 : d.fontSize);
+    fontSizeProp ?? (text.length > 14 ? 78 : text.length > 11 ? 94 : d.fontSize);
+
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // caps-transform is gated and tight line boxes open up for non-Latin.
+  const textFont = mgTextFont(text, fontKey);
+  const textMetrics = mgTextMetrics(text);
+  const subTopFont = mgTextFont(subtextTop ?? "", "oswald");
+  const subTopMetrics = mgTextMetrics(subtextTop ?? "");
+  const subBottomFont = mgTextFont(subtextBottom ?? "", "oswald");
+  const subBottomMetrics = mgTextMetrics(subtextBottom ?? "");
 
   let badge: React.ReactNode;
 
@@ -258,13 +276,13 @@ export const Stamp: React.FC<StampProps> = (props) => {
               x={W / 2}
               y={72}
               textAnchor="middle"
-              fontFamily={FONT_FAMILY.oswald}
+              fontFamily={subTopFont}
               fontWeight={700}
               fontSize={27}
               letterSpacing={9}
               fill={ink}
             >
-              {subtextTop.toUpperCase()}
+              {subTopMetrics.uppercaseSafe ? subtextTop.toUpperCase() : subtextTop}
             </text>
           ) : null}
 
@@ -272,13 +290,13 @@ export const Stamp: React.FC<StampProps> = (props) => {
             x={W / 2}
             y={hasSub ? 186 : 176}
             textAnchor="middle"
-            fontFamily={FONT_FAMILY[fontKey]}
+            fontFamily={textFont}
             fontWeight={FONT_WEIGHT[fontKey]}
             fontSize={mainFont}
             letterSpacing={2}
             fill={ink}
           >
-            {text.toUpperCase()}
+            {textMetrics.uppercaseSafe ? text.toUpperCase() : text}
           </text>
 
           {subtextBottom ? (
@@ -286,13 +304,15 @@ export const Stamp: React.FC<StampProps> = (props) => {
               x={W / 2}
               y={242}
               textAnchor="middle"
-              fontFamily={FONT_FAMILY.oswald}
+              fontFamily={subBottomFont}
               fontWeight={700}
               fontSize={27}
               letterSpacing={9}
               fill={ink}
             >
-              {subtextBottom.toUpperCase()}
+              {subBottomMetrics.uppercaseSafe
+                ? subtextBottom.toUpperCase()
+                : subtextBottom}
             </text>
           ) : null}
         </g>
@@ -315,13 +335,13 @@ export const Stamp: React.FC<StampProps> = (props) => {
       >
         <div
           style={{
-            fontFamily: FONT_FAMILY[fontKey],
+            fontFamily: textFont,
             fontWeight: FONT_WEIGHT[fontKey],
             fontSize: stampFont,
             color: textColor ?? "#FFFFFF",
             letterSpacing: "0.04em",
-            textTransform: "uppercase",
-            lineHeight: 1,
+            textTransform: textMetrics.uppercaseSafe ? "uppercase" : "none",
+            lineHeight: Math.max(1, textMetrics.lineHeight),
             textShadow,
           }}
         >
@@ -342,7 +362,9 @@ export const Stamp: React.FC<StampProps> = (props) => {
           flexDirection: "column",
           alignItems: "center",
           gap: 6,
-          opacity: 0.95,
+          // Corpus law 2: shock fragments hit at FULL ink — 0.95 read as a
+          // watermark on the panel's frames. Distress erodes; alpha doesn't.
+          opacity: 1,
           overflow: "hidden",
         }}
       >
@@ -374,13 +396,14 @@ export const Stamp: React.FC<StampProps> = (props) => {
         ) : null}
         <div
           style={{
-            fontFamily: FONT_FAMILY[fontKey],
+            fontFamily: textFont,
             fontWeight: FONT_WEIGHT[fontKey],
             fontSize: stampFont,
             color: ink,
             letterSpacing: "0.04em",
-            textTransform: "uppercase",
-            lineHeight: 0.95,
+            textTransform: textMetrics.uppercaseSafe ? "uppercase" : "none",
+            lineHeight:
+              textMetrics.script === "latin" ? 0.95 : textMetrics.lineHeight,
             textShadow,
             whiteSpace: "nowrap",
           }}
@@ -388,7 +411,9 @@ export const Stamp: React.FC<StampProps> = (props) => {
           {text}
         </div>
         {subtextBottom ? (
-          <div style={subStyle(ink, textShadow)}>{subtextBottom}</div>
+          <div style={subStyle(ink, textShadow, subBottomFont, subBottomMetrics)}>
+            {subtextBottom}
+          </div>
         ) : null}
       </div>
     );
@@ -397,43 +422,77 @@ export const Stamp: React.FC<StampProps> = (props) => {
   return (
     <AbsoluteFill style={containerStyle}>
       <div style={wrapperStyle}>
-        <div
-          style={{
-            position: "relative",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            transform: `translate(0px, ${exitY.toFixed(2)}px) scale(${finalScale.toFixed(4)})`,
-            transformOrigin: "center",
-            opacity: groupOpacity,
-          }}
-        >
-          {/* Rotation group */}
+        {/* The bounce-in press (scale overshoot + rotation settle) renders through
+            the film-shutter blur. Wraps the WHOLE self-contained stamp group (the
+            only child of wrapperStyle) — never a single flex child, per the
+            MotionBlurWrap subtree constraint. */}
+        <MotionBlurWrap>
           <div
             style={{
               position: "relative",
-              transform: `rotate(${finalRot}deg)`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transform: `translate(0px, ${exitY.toFixed(2)}px) scale(${finalScale.toFixed(4)})`,
               transformOrigin: "center",
-              filter: BADGE_SHADOW,
+              opacity: groupOpacity,
             }}
           >
-            {badge}
+            {/* Rotation group. §4 second plane (2026-08-24): a stamp struck
+                once is a graphic; struck twice it's a physical act. The ghost
+                impression sits BEHIND at an offset + its own small rotation,
+                soft and inkier; the crisp strike occludes it. Both live inside
+                the press group so they land as one object. Shadow moved onto
+                the crisp strike only — the ghost is ink, not an object. */}
+            <div
+              style={{
+                position: "relative",
+                transform: `rotate(${finalRot}deg)`,
+                transformOrigin: "center",
+              }}
+            >
+              <div
+                aria-hidden
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  // Scaled-up rather than laterally offset: a lateral offset
+                  // puts the ghost's frame BORDER through the crisp glyphs
+                  // (render-proven: "SOLD" read as "$OLD"). Scaling keeps the
+                  // ghost frame outside the crisp frame on every side.
+                  transform: "translate(7px, 12px) scale(1.05) rotate(2.2deg)",
+                  transformOrigin: "center",
+                  opacity: 0.14,
+                  filter: "blur(1.4px)",
+                }}
+              >
+                {badge}
+              </div>
+              <div style={{ position: "relative", filter: BADGE_SHADOW }}>
+                {badge}
+              </div>
+            </div>
           </div>
-        </div>
+        </MotionBlurWrap>
       </div>
     </AbsoluteFill>
   );
 };
 
-function subStyle(color: string, textShadow: string): React.CSSProperties {
+function subStyle(
+  color: string,
+  textShadow: string,
+  fontFamily: string,
+  metrics: ReturnType<typeof mgTextMetrics>,
+): React.CSSProperties {
   return {
-    fontFamily: MG_FONTS.oswald,
+    fontFamily,
     fontWeight: 600,
     fontSize: 26,
     color,
     letterSpacing: "0.2em",
-    textTransform: "uppercase",
-    lineHeight: 1,
+    textTransform: metrics.uppercaseSafe ? "uppercase" : "none",
+    lineHeight: Math.max(1, metrics.lineHeight),
     opacity: 0.92,
     textShadow,
   };

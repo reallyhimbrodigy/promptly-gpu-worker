@@ -1,9 +1,11 @@
 import React from "react";
-import { AbsoluteFill, interpolate } from "remotion";
+import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
-import type { StepDividerFontKey, StepDividerProps } from "./types";
+import { mgSchedule } from "../shared/schedule";
+import type { StepDividerProps } from "./types";
 import { asText } from "../../shared/asText";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
@@ -12,16 +14,12 @@ const easeInOutCubic = (t: number): number =>
 
 const TEXT_SHADOW =
   "0 2px 12px rgba(0,0,0,0.62), 0 14px 48px rgba(0,0,0,0.45)";
-const CONTENT_MAX = 900;
+// 680 = the position resolver's symmetric safe box (1080 − 2×200); the old 900
+// exceeded it, so wide lines ran under the TikTok action rail (pass #9).
+const CONTENT_MAX = 680;
 const SEG_W = 52;
 const SEG_H = 11;
 const SEG_GAP = 12;
-
-const FONT_FAMILY: Record<StepDividerFontKey, string> = {
-  anton: MG_FONTS.anton,
-  oswald: MG_FONTS.oswald,
-  inter: MG_FONTS.inter,
-};
 
 const withAlpha = (hex: string, a: number): string => {
   const x = hex.replace("#", "");
@@ -39,7 +37,7 @@ export const StepDivider: React.FC<StepDividerProps> = ({
   exitFrames,
   title,
   step = 1,
-  totalSteps = 5,
+  totalSteps,
   kicker = "STEP",
   showProgress = true,
   showCount = true,
@@ -58,7 +56,8 @@ export const StepDivider: React.FC<StepDividerProps> = ({
     { anchor, offsetX, offsetY, scale },
     { anchor: "center" },
   );
-  const { visible, localFrame, exitProgress, phase } = useMGPhase(
+  const { fps } = useVideoConfig();
+  const { visible, localFrame, exitProgress, exitStartFrame } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 48, defaultExitFrames: 22 },
   );
@@ -66,10 +65,50 @@ export const StepDivider: React.FC<StepDividerProps> = ({
   if (!visible) return null;
 
   const lf = localFrame;
-  const steps = Math.max(1, totalSteps);
+  // Coupled-defaults audit (2026-08-26): the defaulted total of 5 clamped an
+  // overridden step to a wrong "STEP 05 / 05" from beat 6 on. An unspecified
+  // totalSteps now grows with the step; an explicit totalSteps keeps today's
+  // clamp (and the plain default stays 5).
+  const steps = Math.max(1, totalSteps ?? Math.max(5, step));
   const cur = Math.max(1, Math.min(step, steps));
-  const holding = phase === "holding";
-  const lines = asText(title).split("\n");
+  const titleText = asText(title);
+  const lines = titleText.split("\n");
+
+  // Font census (2026-08-26): title + kicker are user/model text — routed
+  // stacks (+ emoji tail); the padded step digits stay chrome (bare Inter).
+  const titleMetrics = mgTextMetrics(titleText);
+  const titleFont = mgTextFont(titleText, fontKey);
+  const kickerFont = mgTextFont(kicker, "inter");
+  const kickerUppercaseSafe = mgTextMetrics(kicker).uppercaseSafe;
+
+  // Width-driven autofit (pass #9, takeover law): the fixed 122px title sat at
+  // ~32% of the frame — a divider that lands alone owns its axis. The title
+  // now fills the resolver's 680px safe box; the advance estimate (0.52em/char
+  // for the condensed faces, measured ~0.47) over-estimates so text can never
+  // crop.
+  let maxChars = 1;
+  for (const l of lines) maxChars = Math.max(maxChars, [...l].length);
+  // Latin keeps the measured constants; non-latin uses the census's
+  // render-proven advanceEm (deliberate over-estimate — never crops).
+  const advance =
+    titleMetrics.script === "latin"
+      ? fontKey === "inter"
+        ? 0.62
+        : 0.52
+      : titleMetrics.advanceEm;
+  const fitTitleSize = Math.round(
+    Math.max(56, Math.min(CONTENT_MAX / (maxChars * advance), 240)),
+  );
+
+  // Duration-aware fps-relative schedule (mgSchedule, the DropCard recipe):
+  // the raw-frame choreography scaled with totalSteps and could still be
+  // mid-reveal at exit onset for short live windows.
+  const authoredKStart = steps * 3 + 6;
+  const K = mgSchedule({
+    fps,
+    window: exitStartFrame,
+    authoredEnd: authoredKStart + 10 + 7 * (lines.length - 1) + 18,
+  });
 
   const exitFade = interpolate(exitProgress, [0, 0.7], [1, 0], {
     extrapolateLeft: "clamp",
@@ -81,13 +120,12 @@ export const StepDivider: React.FC<StepDividerProps> = ({
   });
 
   // Kicker timing follows the progress segments.
-  const kStart = steps * 3 + 6;
   const kickerO =
-    interpolate(lf, [kStart, kStart + 12], [0, 1], {
+    interpolate(lf, [K(authoredKStart), K(authoredKStart + 12)], [0, 1], {
       extrapolateLeft: "clamp",
       extrapolateRight: "clamp",
     }) * exitFade;
-  const kickerY = interpolate(lf, [kStart, kStart + 14], [12, 0], {
+  const kickerY = interpolate(lf, [K(authoredKStart), K(authoredKStart + 14)], [12, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,
@@ -117,12 +155,12 @@ export const StepDivider: React.FC<StepDividerProps> = ({
             >
               {Array.from({ length: steps }).map((_, i) => {
                 const segStart = i * 3;
-                const sx = interpolate(lf, [segStart, segStart + 10], [0, 1], {
+                const sx = interpolate(lf, [K(segStart), K(segStart + 10)], [0, 1], {
                   extrapolateLeft: "clamp",
                   extrapolateRight: "clamp",
                   easing: easeOutCubic,
                 });
-                const so = interpolate(lf, [segStart, segStart + 6], [0, 1], {
+                const so = interpolate(lf, [K(segStart), K(segStart + 6)], [0, 1], {
                   extrapolateLeft: "clamp",
                   extrapolateRight: "clamp",
                 });
@@ -136,7 +174,7 @@ export const StepDivider: React.FC<StepDividerProps> = ({
                 const glow = isCur
                   ? interpolate(
                       lf,
-                      [steps * 3 + 4, steps * 3 + 12, steps * 3 + 24],
+                      [K(steps * 3 + 4), K(steps * 3 + 12), K(steps * 3 + 24)],
                       [0, 1, 0.45],
                       { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
                     )
@@ -169,7 +207,7 @@ export const StepDivider: React.FC<StepDividerProps> = ({
               fontSize: 32,
               fontWeight: 700,
               letterSpacing: "0.28em",
-              textTransform: "uppercase",
+              textTransform: kickerUppercaseSafe ? "uppercase" : "none",
               marginBottom: 26,
               opacity: kickerO,
               transform: `translateY(${kickerY.toFixed(2)}px)`,
@@ -177,7 +215,9 @@ export const StepDivider: React.FC<StepDividerProps> = ({
               whiteSpace: "nowrap",
             }}
           >
-            <span style={{ color: kickerColor }}>{kicker} </span>
+            <span style={{ color: kickerColor, fontFamily: kickerFont }}>
+              {kicker}{" "}
+            </span>
             <span style={{ color: accentColor }}>
               {String(cur).padStart(2, "0")}
             </span>
@@ -191,8 +231,8 @@ export const StepDivider: React.FC<StepDividerProps> = ({
 
           {/* Title (mask-reveal per line) */}
           {lines.map((line, li) => {
-            const tStart = kStart + 10 + li * 7;
-            const revealP = interpolate(lf, [tStart, tStart + 18], [0, 1], {
+            const tStart = authoredKStart + 10 + li * 7;
+            const revealP = interpolate(lf, [K(tStart), K(tStart + 18)], [0, 1], {
               extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
               easing: easeOutCubic,
@@ -205,7 +245,7 @@ export const StepDivider: React.FC<StepDividerProps> = ({
             });
             const lineTY = enterTY - 100 * exitTYp;
             const lineO =
-              interpolate(lf, [tStart, tStart + 9], [0, 1], {
+              interpolate(lf, [K(tStart), K(tStart + 9)], [0, 1], {
                 extrapolateLeft: "clamp",
                 extrapolateRight: "clamp",
               }) *
@@ -217,20 +257,29 @@ export const StepDivider: React.FC<StepDividerProps> = ({
               <div
                 key={li}
                 style={{
-                  overflow: holding ? "visible" : "hidden",
+                  // Keyed off REVEAL COMPLETION, not the phase label (pass #9):
+                  // the smooth-path enter window (48f authored → 1600ms) kept
+                  // the mask on ~50 frames after the choreography settled —
+                  // the heavy text-shadow clipped into visible rectangular
+                  // plates around the settled title (render-caught).
+                  overflow: revealP >= 1 ? "visible" : "hidden",
                   maxWidth: CONTENT_MAX,
                 }}
               >
                 <div
                   style={{
-                    fontFamily: FONT_FAMILY[fontKey],
-                    fontSize: titleFontSize,
+                    fontFamily: titleFont,
+                    fontSize: fitTitleSize,
                     fontWeight: 400,
                     color: titleColor,
                     letterSpacing: "-0.01em",
-                    lineHeight: 1.02,
-                    textTransform: uppercase ? "uppercase" : "none",
+                    lineHeight: Math.max(1.02, titleMetrics.lineHeight),
+                    textTransform:
+                      uppercase && titleMetrics.uppercaseSafe
+                        ? "uppercase"
+                        : "none",
                     textAlign: "center",
+                    whiteSpace: "nowrap",
                     opacity: lineO,
                     transform: `translateY(${lineTY.toFixed(2)}%)`,
                     textShadow: TEXT_SHADOW,

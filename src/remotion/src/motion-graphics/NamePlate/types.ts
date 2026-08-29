@@ -15,7 +15,7 @@ export interface NamePlateProps extends MGTimingProps {
   role?: string;
   // Rule + role colour. Comes from the edit's locked palette, never hardcoded.
   accentColor?: string;   // default "#F5A11E"
-  nameColor?: string;     // default "#FFFFFF"
+  nameColor?: string;     // default: ink paired to backdropColor ("#FFFFFF" when no backdrop)
   // Which third the plate sits in. Resolved to pixels by the renderer against
   // the canvas's own safe zones, so this is correct on landscape too.
   anchor?: "lower_third_safe" | "upper_third_safe";

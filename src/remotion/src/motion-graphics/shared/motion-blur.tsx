@@ -92,6 +92,15 @@ export const useMotionBlur = (): MotionBlurConfig => useContext(MotionBlurContex
  * extra DOM, no extra paint — so the OFF path is byte-identical.
  *
  * Put this around the SPECIFIC moving element, never the whole composition.
+ *
+ * LAYOUT CONSTRAINT (learned on StatCard, 2026-08-20). When ON, CameraMotionBlur
+ * RE-LAYS-OUT the subtree it wraps — it renders the children `samples` times into
+ * its own compositing surface, so the wrapped node no longer participates in its
+ * parent's normal flow. Wrap a SELF-CONTAINED layout group (a whole card, a whole
+ * stack), NOT a single child of a flex/grid whose siblings size or position off
+ * it — those siblings collapse onto the wrapped element (StatCard's accent + label
+ * rode up onto the number until the wrap moved to the whole card). Rule of thumb:
+ * if removing this node from the DOM would move its siblings, don't wrap just it.
  */
 export const MotionBlurWrap: React.FC<{ children: React.ReactNode }> = ({
   children,

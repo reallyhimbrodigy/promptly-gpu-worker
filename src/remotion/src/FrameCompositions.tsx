@@ -11,6 +11,7 @@ import { Video } from "@remotion/media";
 import { cappedEntranceProgress } from "./motion-graphics/shared/entrance-cap";
 import { dur } from "./motion-graphics/shared/motion";
 import { MotionBlurWrap } from "./motion-graphics/shared/motion-blur";
+import { mgTextFont, mgTextMetrics } from "./motion-graphics/shared/text-font";
 
 // ── THE GENERATION-FREE COMPOSITIONS ────────────────────────────────────────
 //
@@ -150,16 +151,29 @@ const SourceStill: React.FC<{
 export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fps: number }> =
   ({ spec, sourceUrl, fps }) => {
     const e = useCardEntrance(spec, { rise: 52, scaleFrom: 0.972, rotMag: 2.2 });
+    // Claim/caption are model text — routed face, gated uppercase, opened
+    // tight line-heights for non-Latin (font census 2026-08-26).
+    const claimText = spec.claim ?? "";
+    const claimM = mgTextMetrics(claimText);
+    const captionText = spec.caption || spec.claim || "";
+    const captionM = mgTextMetrics(captionText);
     return (
       <AbsoluteFill style={{ background: spec.bg }}>
         <MotionBlurWrap>
           <AbsoluteFill style={groupStyle(e, "50% 56%")}>
-            {/* PLANE 1 — background type, cropped by the frame edge on purpose */}
+            {/* PLANE 1 — background type, cropped by the frame edge on purpose.
+                Render-caught (pass #8): no fontFamily = browser SERIF — both
+                text planes rendered Times-like in the live placement (the
+                EmojiCard birth defect, again). Anton at its REAL weight 400 —
+                fontWeight 800 on a single-weight face is the NamePlate
+                faux-bold class. */}
             <div style={{
               position: "absolute", top: "12%", left: "-4%", right: "-4%",
-              fontSize: spec.cap_px * 1.2, fontWeight: 800, lineHeight: 0.92,
-              color: spec.fg, opacity: 0.14, letterSpacing: "-0.03em",
-              textTransform: "uppercase",
+              fontFamily: mgTextFont(claimText, "anton"),
+              fontSize: spec.cap_px * 1.2, fontWeight: 400,
+              lineHeight: Math.max(0.92, claimM.lineHeight),
+              color: spec.fg, opacity: 0.14, letterSpacing: "-0.01em",
+              textTransform: claimM.uppercaseSafe ? "uppercase" : "none",
             }}>{spec.claim}</div>
             {/* PLANE 2 — the user's own frame */}
             <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
@@ -167,13 +181,27 @@ export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
                 tiltDeg={spec.tilt_deg} label="EvidenceCard.still"
                 style={{ width: `${spec.still_width_pct ?? 58}%`, aspectRatio: "9 / 16" }} />
             </AbsoluteFill>
-            {/* PLANE 3 — foreground type OVERLAPPING the still */}
+            {/* PLANE 3 — foreground type OVERLAPPING the still. Render-caught
+                (pass #8): at the default 58% still width the caption sat fully
+                BELOW the print — the overlap this comment promises never
+                happened; bottom 19.5% puts the type over the print's corner
+                (type-over-object, occluding the GRAPHIC only). The underline
+                is the beat's ONE full-chroma hit (corpus law 2) — at 55-alpha
+                the beat had zero. 2026-08-26 coupled-defaults audit: 19.5 was
+                tuned against the 58% default only — derive the corner overlap
+                from the still's actual geometry (a 9:16 still's bottom edge
+                sits at (100-w)/2 % from the frame bottom; keep the ~1.5%
+                overlap at any width; 58 => 19.5, byte-identical). */}
             <div style={{
-              position: "absolute", bottom: "16%", left: "6%", right: "10%",
-              fontSize: spec.cap_px * 0.56, fontWeight: 800, color: spec.fg,
-              lineHeight: 1.02, letterSpacing: "-0.02em", ...legible(spec),
+              position: "absolute",
+              bottom: `${Math.max(4, (100 - (spec.still_width_pct ?? 58)) / 2 - 1.5)}%`,
+              left: "6%", right: "10%",
+              fontFamily: mgTextFont(captionText, "inter"),
+              fontSize: spec.cap_px * 0.6, fontWeight: 800, color: spec.fg,
+              lineHeight: Math.max(1.02, captionM.lineHeight),
+              letterSpacing: "-0.02em", ...legible(spec),
             }}>
-              <span style={{ boxShadow: `inset 0 -0.34em 0 ${spec.accent}55` }}>
+              <span style={{ boxShadow: `inset 0 -0.34em 0 ${spec.accent}` }}>
                 {spec.caption || spec.claim}
               </span>
             </div>
@@ -187,15 +215,22 @@ export const EvidenceCard: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
 export const DeviceMockup: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fps: number }> =
   ({ spec, sourceUrl, fps }) => {
     const e = useCardEntrance(spec, { rise: 56, scaleFrom: 0.968, rotMag: 2.5 });
+    // The label is model text on BOTH planes (font census 2026-08-26).
+    const labelText = spec.label ?? "";
+    const labelM = mgTextMetrics(labelText);
     return (
       <AbsoluteFill style={{ background: spec.bg }}>
         <MotionBlurWrap>
           <AbsoluteFill style={groupStyle(e, "50% 52%")}>
             {spec.label ? (
+              // Same render-caught class as EvidenceCard (pass #8): no
+              // fontFamily = browser serif; Anton's real weight is 400.
               <div style={{
                 position: "absolute", top: "9%", left: "6%",
-                fontSize: spec.cap_px, fontWeight: 800, color: spec.accent,
-                opacity: 0.16, letterSpacing: "-0.03em", textTransform: "uppercase",
+                fontFamily: mgTextFont(labelText, "anton"),
+                fontSize: spec.cap_px, fontWeight: 400, color: spec.accent,
+                opacity: 0.16, letterSpacing: "-0.01em",
+                textTransform: labelM.uppercaseSafe ? "uppercase" : "none",
               }}>{spec.label}</div>
             ) : null}
             <AbsoluteFill style={{ alignItems: "center", justifyContent: "center" }}>
@@ -207,12 +242,19 @@ export const DeviceMockup: React.FC<{ spec: FrameCompSpec; sourceUrl: string; fp
                 <SourceStill sourceUrl={sourceUrl} atSeconds={spec.at_seconds} fps={fps}
                   label="DeviceMockup.still"
                   style={{ width: spec.still_width_px ?? 430, aspectRatio: "9 / 16",
-                           borderRadius: (spec.shell_radius_px ?? 46) - 12, boxShadow: "none" }} />
+                           // 2026-08-26 coupled-defaults audit: the -12 offset
+                           // goes NEGATIVE below shell_radius_px 12 (invalid
+                           // CSS, dropped => square screen corners in a
+                           // rounded shell) — clamp at 0; default 46-12=34
+                           // unchanged.
+                           borderRadius: Math.max(0, (spec.shell_radius_px ?? 46) - 12),
+                           boxShadow: "none" }} />
               </div>
             </AbsoluteFill>
             {spec.label ? (
               <div style={{
                 position: "absolute", bottom: "14%", left: "8%",
+                fontFamily: mgTextFont(labelText, "inter"),
                 fontSize: spec.cap_px * 0.5, fontWeight: 800, color: spec.fg,
                 letterSpacing: "-0.02em", ...legible(spec),
               }}>{spec.label}</div>
@@ -235,24 +277,79 @@ export const EmojiCard: React.FC<{ spec: FrameCompSpec }> = ({ spec }) => {
       <MotionBlurWrap>
         <div style={{ ...groupStyle(e, "50% 50%"), display: "flex",
                       flexDirection: "column", alignItems: "center" }}>
+          {/* §4 pass (2026-08-25, craft lane): two planes, not a stack. The
+              emoji is the OBJECT; the words are FOREGROUND TYPE that OVERLAPS
+              and occludes its lower third — REF-2's grammar (type over object,
+              heavy shadow separation). Was: a small centred caption UNDER the
+              emoji at 0.62×cap — centred non-overlapping boxes, the named §4
+              defect. Words stack as a slab (line 2 in the accent, slightly
+              larger, tucked up under line 1), opposing tilts via the individual
+              `rotate` property (REMOTION_CONVENTIONS forward law). Occlusion is
+              of the GRAPHIC only — user words are never covered. */}
           <div style={{
+            // Emoji render by DECLARATION, not fontconfig accident (font
+            // census 2026-08-26): pin the color-emoji face explicitly.
+            fontFamily: "'Noto Color Emoji', sans-serif",
             fontSize: spec.emoji_px ?? spec.cap_px * 3.2,
-            transform: `rotate(${spec.tilt_deg}deg)`,
+            rotate: `${spec.tilt_deg}deg`,
             filter: `drop-shadow(0 ${spec.legibility.shadow_offset_px * 6}px `
               + `${spec.legibility.shadow_blur_px * 5}px rgba(0,0,0,0.45))`,
             lineHeight: 1,
           }}>{spec.emoji}</div>
           {(spec.words || []).length ? (
             <div style={{
-              marginTop: spec.cap_px * 0.3, display: "flex", gap: spec.cap_px * 0.22,
+              marginTop: -(spec.emoji_px ?? spec.cap_px * 3.2) * 0.28,
+              display: "flex", flexDirection: "column", alignItems: "center",
+              position: "relative", zIndex: 2,
             }}>
-              {(spec.words || []).map((w, i) => (
+              {(spec.words || []).map((w, i) => {
+                // Words are user text (font census 2026-08-26): routed face,
+                // gated uppercase, script-aware advance for the width fill.
+                const wm = mgTextMetrics(w);
+                // Advance ratio 0.80 is render-measured for Inter 900
+                // uppercase + 0.01em tracking (~0.775em/char) — the old 0.62
+                // estimate would let text run to ~99% and crop, and text may
+                // never crop. Non-Latin keeps the census's conservative
+                // per-script advance (no uppercase, routed face).
+                const adv = wm.script === "latin" ? 0.8 : wm.advanceEm;
+                return (
                 <span key={i} style={{
-                  fontSize: spec.cap_px * 0.62, fontWeight: 900,
+                  // Render-caught (2026-08-25): no fontFamily = browser SERIF —
+                  // the words rendered Times-like since birth. Inter 900 is the
+                  // catalogue's claim voice.
+                  // Corpus law 1 (pass #7b): the widest word spans ~92% of the
+                  // 1080 frame (REF-2's number clips the edge; ours sat at
+                  // ~50% width). Deterministic fit, no DOM measurement. Law 2:
+                  // the HIT word (line 2) carries the emphasis — palette lock
+                  // (§6) forbids inventing a redder accent, so emphasis comes
+                  // from SCALE at full palette chroma.
+                  fontFamily: mgTextFont(w, "inter"),
+                  // The HIT word is width-FILL driven, not cap-relative
+                  // (render-caught: Math.min made cap_px the ceiling, so the
+                  // fill term never bound and "CAR" sat at ~43% width). The
+                  // support word keeps cap_px.
+                  fontSize: i === 0
+                    ? Math.min(
+                        spec.cap_px,
+                        (1080 * 0.92) / (Math.max(3, w.length) * adv)
+                      )
+                    : (1080 * 0.92) / (Math.max(3, w.length) * adv),
+                  fontWeight: 900,
                   color: i === 0 ? spec.fg : spec.accent,
-                  letterSpacing: "0.02em", textTransform: "uppercase", ...legible(spec),
+                  letterSpacing: "0.01em",
+                  textTransform: wm.uppercaseSafe ? "uppercase" : "none",
+                  lineHeight: Math.max(0.92, wm.lineHeight),
+                  rotate: `${(i % 2 === 0 ? -1 : 1) * 2.2}deg`,
+                  marginTop: i > 0 ? -spec.cap_px * 0.08 : 0,
+                  // Type-over-OBJECT needs more separation than type-over-bg:
+                  // the spec's legibility numbers are calibrated for the card
+                  // ground, so the overlapping slab doubles them (§2.4 scaled,
+                  // the StatCard contrast-floor precedent).
+                  textShadow: `0 ${spec.legibility.shadow_offset_px * 2}px ${spec.legibility.shadow_blur_px * 2}px `
+                    + `rgba(0,0,0,${Math.min(0.65, spec.legibility.shadow_opacity * 1.8)})`,
                 }}>{w}</span>
-              ))}
+                );
+              })}
             </div>
           ) : null}
         </div>

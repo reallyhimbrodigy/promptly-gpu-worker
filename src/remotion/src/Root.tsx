@@ -19,6 +19,7 @@ import { ZoomTagProbe } from "./ZoomTagProbe";
 import { ZoomEaseProbe } from "./ZoomEaseProbe";
 import { GenSceneProbe } from "./GenSceneProbe";
 import { FrameCompProbe } from "./FrameCompProbe";
+import { MGCraftProbe } from "./MGCraftProbe";
 
 /**
  * Remotion root — two production compositions:
@@ -146,6 +147,40 @@ export const RemotionRoot: React.FC = () => {
           kind: "EmojiCard",
           spec: {},
           sourceUrl: "",
+          motionBlur: true,
+        } as unknown as Record<string, unknown>}
+      />
+      {/* MGCraftProbe — catalogue-pass render-proof (blur + smooth-graphics on a
+          gray plate). 1080x1920@60fps to match MGAttackProbe's timing grid so
+          before/after frames are directly comparable. Not used in production. */}
+      <Composition
+        id="MGCraftProbe"
+        component={MGCraftProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={60}
+        durationInFrames={96}
+        defaultProps={{
+          type: "StatCard",
+          props: {},
+          motionBlur: true,
+        } as unknown as Record<string, unknown>}
+      />
+      {/* MGCraftProbe30 — the SAME probe at production's 30fps. The 60fps grid
+          masks the absolute-frame-schedule class (raw frame constants run 2x
+          faster in real time and short live windows collide with exit) — pair
+          this with durationMs = the live placement's window to prove those
+          defects and their fixes. Not used in production. */}
+      <Composition
+        id="MGCraftProbe30"
+        component={MGCraftProbe as unknown as React.FC<Record<string, unknown>>}
+        width={1080}
+        height={1920}
+        fps={30}
+        durationInFrames={240}
+        defaultProps={{
+          type: "StatCard",
+          props: {},
           motionBlur: true,
         } as unknown as Record<string, unknown>}
       />

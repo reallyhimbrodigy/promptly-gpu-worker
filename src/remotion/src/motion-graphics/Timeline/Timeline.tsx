@@ -1,8 +1,15 @@
 import React from "react";
-import { AbsoluteFill, interpolate, interpolateColors } from "remotion";
+import {
+  AbsoluteFill,
+  interpolate,
+  interpolateColors,
+  useVideoConfig,
+} from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
+import { mgSchedule } from "../shared/schedule";
 import type { TimelineProps, TimelineStep } from "./types";
 
 const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
@@ -52,7 +59,8 @@ export const Timeline: React.FC<TimelineProps> = ({
     { anchor, offsetX, offsetY, scale },
     { anchor: "center", offsetY: 0 },
   );
-  const { visible, localFrame, exitProgress } = useMGPhase(
+  const { fps } = useVideoConfig();
+  const { visible, localFrame, exitProgress, exitStartFrame } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 18, defaultExitFrames: 22 },
   );
@@ -62,6 +70,20 @@ export const Timeline: React.FC<TimelineProps> = ({
   const rendered = steps.slice(0, 5);
   const N = rendered.length;
   if (N === 0) return null;
+
+  // Pass #10 (data family) — the audited absolute-frame-schedule class: the
+  // raw schedule was fps- and duration-blind, so at the live 3.12s/30fps
+  // placement card 3 finished settling on the EXACT frame exit began (0
+  // frames of settled hold). mgSchedule (the DropCard recipe): 60fps-authored
+  // keyframes, fps-relative, compressed so the last card settles by 85% of
+  // the pre-exit window. K is linear through 0, so k = K(1) scales every
+  // authored offset.
+  const K = mgSchedule({
+    fps,
+    window: exitStartFrame,
+    authoredEnd: START + (N - 1) * SEG + 30,
+  });
+  const k = K(1);
 
   const R = nodeSize / 2;
   const inactiveColor = "rgba(255,255,255,0.5)";
@@ -74,28 +96,29 @@ export const Timeline: React.FC<TimelineProps> = ({
   const cardWidth = width - cardLeft;
   const blockHeight = railLen + nodeSize + 60;
 
-  // Rail fill travels node-to-node, easing each segment.
-  const reach = (i: number): number => START + i * SEG;
+  // Rail fill travels node-to-node, easing each segment (k-scaled frames).
+  const reach = (i: number): number => (START + i * SEG) * k;
+  const segF = SEG * k;
   const segCount = N - 1;
   let fillDist = 0;
   if (segCount > 0) {
     const sIndex = Math.max(
       0,
-      Math.min(segCount - 1, Math.floor((localFrame - START) / SEG)),
+      Math.min(segCount - 1, Math.floor((localFrame - START * k) / segF)),
     );
-    const tSeg = clamp01((localFrame - reach(sIndex)) / SEG);
+    const tSeg = clamp01((localFrame - reach(sIndex)) / segF);
     fillDist = rowGap * (sIndex + easeInOutCubic(tSeg));
   }
   const headY = R + fillDist;
   const lastReach = reach(N - 1);
 
   // Rail draw-on, then group entrance/exit.
-  const railDraw = interpolate(localFrame, [0, 12], [0, 1], {
+  const railDraw = interpolate(localFrame, [0, 12 * k], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,
   });
-  const enterOpacity = interpolate(localFrame, [0, 8], [0, 1], {
+  const enterOpacity = interpolate(localFrame, [0, 8 * k], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -110,7 +133,7 @@ export const Timeline: React.FC<TimelineProps> = ({
     segCount > 0
       ? interpolate(
           localFrame,
-          [START, START + 5, lastReach, lastReach + 12],
+          [START * k, (START + 5) * k, lastReach, lastReach + 12 * k],
           [0, 1, 1, 0],
           { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
         )
@@ -176,14 +199,16 @@ export const Timeline: React.FC<TimelineProps> = ({
                 pointerEvents: "none",
               }}
             >
-              {/* Tail */}
+              {/* Tail — clamped to the travelled rail (pass #10, audited):
+                  a fixed 90px tail painted accent ink ABOVE the rail's top
+                  end during the first segment. */}
               <div
                 style={{
                   position: "absolute",
                   left: -RAIL_W / 2,
-                  top: headY - 90,
+                  top: headY - Math.min(90, fillDist),
                   width: RAIL_W,
-                  height: 90,
+                  height: Math.min(90, fillDist),
                   borderRadius: RAIL_W / 2,
                   background: `linear-gradient(180deg, ${accentColor}00 0%, ${accentColor}cc 100%)`,
                 }}
@@ -224,7 +249,7 @@ export const Timeline: React.FC<TimelineProps> = ({
             const act = reach(i);
             const cardOpacity = interpolate(
               localFrame,
-              [act + 3, act + 16],
+              [act + 3 * k, act + 16 * k],
               [0, 1],
               {
                 extrapolateLeft: "clamp",
@@ -232,46 +257,64 @@ export const Timeline: React.FC<TimelineProps> = ({
                 easing: easeOutCubic,
               },
             );
-            const cardX = interpolate(localFrame, [act + 3, act + 22], [50, 0], {
+            const cardX = interpolate(localFrame, [act + 3 * k, act + 22 * k], [50, 0], {
               extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
               easing: easeOutBack,
             });
             // The accent slab settles out from behind for a lively "stacking" beat.
-            const offset = interpolate(localFrame, [act + 6, act + 22], [0, 14], {
+            const offset = interpolate(localFrame, [act + 6 * k, act + 22 * k], [0, 14], {
               extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
               easing: easeOutBack,
             });
             // Title rises up behind a clip mask; subline + ghost numeral stagger in.
-            const titleRise = interpolate(localFrame, [act + 5, act + 24], [108, 0], {
+            const titleRise = interpolate(localFrame, [act + 5 * k, act + 24 * k], [108, 0], {
               extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
               easing: easeOutCubic,
             });
-            const descOpacity = interpolate(localFrame, [act + 16, act + 28], [0, 1], {
+            const descOpacity = interpolate(localFrame, [act + 16 * k, act + 28 * k], [0, 1], {
               extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
             });
-            const descY = interpolate(localFrame, [act + 16, act + 30], [14, 0], {
-              extrapolateLeft: "clamp",
-              extrapolateRight: "clamp",
-              easing: easeOutCubic,
-            });
-            const ruleGrow = interpolate(localFrame, [act + 10, act + 26], [0, 1], {
+            const descY = interpolate(localFrame, [act + 16 * k, act + 30 * k], [14, 0], {
               extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
               easing: easeOutCubic,
             });
-            const ghostOpacity = interpolate(localFrame, [act + 8, act + 26], [0, 1], {
-              extrapolateLeft: "clamp",
-              extrapolateRight: "clamp",
-            });
-            const ghostX = interpolate(localFrame, [act + 8, act + 28], [40, 0], {
+            const ruleGrow = interpolate(localFrame, [act + 10 * k, act + 26 * k], [0, 1], {
               extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
               easing: easeOutCubic,
             });
+            const ghostOpacity = interpolate(localFrame, [act + 8 * k, act + 26 * k], [0, 1], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+            });
+            const ghostX = interpolate(localFrame, [act + 8 * k, act + 28 * k], [40, 0], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+              easing: easeOutCubic,
+            });
+            // Measured single-line autofit (pass #10, audited): fixed 48px
+            // wrapped the live "Step 2: Understand Process" to 3 lines (151px)
+            // inside this fixed 138px card and sliced the glyphs. 0.62em/char
+            // over-estimates Inter 800 uppercase w/ -0.015em tracking
+            // (measured 0.604 from the font's own advances) — never crops.
+            // Font census (2026-08-26): label + description are user/model
+            // text — routed stacks; latin keeps the 0.62 constant, non-latin
+            // uses the census's render-proven advanceEm.
+            const labelText = String(step.label ?? "");
+            const labelMetrics = mgTextMetrics(labelText);
+            const labelFont = mgTextFont(labelText, "inter");
+            const descFont = step.description
+              ? mgTextFont(step.description, "inter")
+              : undefined;
+            const advance =
+              labelMetrics.script === "latin" ? 0.62 : labelMetrics.advanceEm;
+            const titleChars = Math.max(1, [...labelText].length);
+            const titleSize = Math.min(48, (cardWidth - 60) / (titleChars * advance));
             const ghostNum = step.index ?? String(i + 1).padStart(2, "0");
             return (
               <div
@@ -348,13 +391,16 @@ export const Timeline: React.FC<TimelineProps> = ({
                         style={{
                           display: "block",
                           transform: `translateY(${titleRise.toFixed(2)}%)`,
-                          fontFamily: MG_FONTS.inter,
-                          fontSize: 48,
+                          fontFamily: labelFont,
+                          fontSize: titleSize,
                           fontWeight: 800,
                           color: labelColor,
                           letterSpacing: "-0.015em",
-                          lineHeight: 1.0,
-                          textTransform: "uppercase",
+                          lineHeight: Math.max(1.0, labelMetrics.lineHeight),
+                          textTransform: labelMetrics.uppercaseSafe
+                            ? "uppercase"
+                            : "none",
+                          whiteSpace: "nowrap",
                           textShadow,
                         }}
                       >
@@ -377,7 +423,7 @@ export const Timeline: React.FC<TimelineProps> = ({
                     {step.description ? (
                       <span
                         style={{
-                          fontFamily: MG_FONTS.inter,
+                          fontFamily: descFont,
                           fontSize: 26,
                           fontWeight: 500,
                           color: "rgba(20,22,28,0.6)",
@@ -402,22 +448,22 @@ export const Timeline: React.FC<TimelineProps> = ({
             const act = reach(i);
             const reached = localFrame >= act;
             const nodeScale = reached
-              ? interpolate(localFrame, [act, act + POP], [0.5, 1], {
+              ? interpolate(localFrame, [act, act + POP * k], [0.5, 1], {
                   extrapolateLeft: "clamp",
                   extrapolateRight: "clamp",
                   easing: easeOutBack,
                 })
               : 0.5;
             const nodeOpacity = reached
-              ? interpolate(localFrame, [act, act + 6], [0, 1], {
+              ? interpolate(localFrame, [act, act + 6 * k], [0, 1], {
                   extrapolateLeft: "clamp",
                   extrapolateRight: "clamp",
                 })
-              : interpolate(localFrame, [act - 10, act], [0, 0.4], {
+              : interpolate(localFrame, [act - 10 * k, act], [0, 0.4], {
                   extrapolateLeft: "clamp",
                   extrapolateRight: "clamp",
                 });
-            const colorT = reached ? clamp01((localFrame - act) / 12) : 0;
+            const colorT = reached ? clamp01((localFrame - act) / (12 * k)) : 0;
             const ringColor = interpolateColors(
               colorT,
               [0, 1],
@@ -429,11 +475,11 @@ export const Timeline: React.FC<TimelineProps> = ({
               [inactiveColor, indexColor],
             );
             const fillScale = reached
-              ? easeOutBack(clamp01((localFrame - act) / POP))
+              ? easeOutBack(clamp01((localFrame - act) / (POP * k)))
               : 0;
             // The solid fill rotates into alignment with the ghost diamond.
             const fillRot = reached
-              ? interpolate(localFrame, [act, act + POP], [0, 45], {
+              ? interpolate(localFrame, [act, act + POP * k], [0, 45], {
                   extrapolateLeft: "clamp",
                   extrapolateRight: "clamp",
                   easing: easeOutBack,
@@ -441,13 +487,13 @@ export const Timeline: React.FC<TimelineProps> = ({
               : 0;
 
             // Arrival square ring-pulse on every node when it lights up.
-            const ringScale = interpolate(localFrame, [act, act + 20], [0.9, 1.9], {
+            const ringScale = interpolate(localFrame, [act, act + 20 * k], [0.9, 1.9], {
               extrapolateLeft: "clamp",
               extrapolateRight: "clamp",
               easing: easeOutCubic,
             });
             const ringOpacity = reached
-              ? interpolate(localFrame, [act, act + 4, act + 22], [0, 0.5, 0], {
+              ? interpolate(localFrame, [act, act + 4 * k, act + 22 * k], [0, 0.5, 0], {
                   extrapolateLeft: "clamp",
                   extrapolateRight: "clamp",
                 })

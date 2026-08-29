@@ -1,8 +1,10 @@
 import React from "react";
-import { AbsoluteFill, interpolate } from "remotion";
+import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
+import { mgSchedule } from "../shared/schedule";
 import type { SectionDividerFontKey, SectionDividerProps } from "./types";
 import { asText } from "../../shared/asText";
 
@@ -16,7 +18,9 @@ const easeOutBack = (t: number): number => {
   return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
 };
 
-const CONTENT_MAX_WIDTH = 840;
+// 680 = the position resolver's symmetric safe box (1080 − 2×200); the old 840
+// exceeded it, so wide lines ran under the TikTok action rail (pass #9).
+const CONTENT_MAX_WIDTH = 680;
 const NUMBER_SIZE = 110;
 const EYEBROW_SIZE = 36;
 const RULE_THICKNESS = 3;
@@ -64,23 +68,63 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
     { anchor, offsetX, offsetY, scale },
     { anchor: "center" },
   );
-  const { visible, localFrame, exitProgress, phase } = useMGPhase(
+  const { fps } = useVideoConfig();
+  const { visible, localFrame, exitProgress, exitStartFrame } = useMGPhase(
     { startMs, durationMs, enterFrames, exitFrames },
     { defaultEnterFrames: 50, defaultExitFrames: 24 },
   );
 
   if (!visible) return null;
 
-  const ebColor = eyebrowColor ?? accentColor;
+  // Pass #9 — corpus law 2: eyebrow + number + rule all defaulted to the
+  // accent (three simultaneous chroma elements). The NUMBER is the beat's one
+  // hit; the eyebrow defaults to neutral ink; the hairline rule stays accent
+  // chrome.
+  const ebColor = eyebrowColor ?? "rgba(255,255,255,0.78)";
   const numColor = numberColor ?? accentColor;
   const isSerif = fontKey === "dmSerifDisplay" || fontKey === "playfairDisplay";
-  const titleLineHeight = isSerif ? 1.08 : 1.0;
   const isLeft = align === "left";
-  const lines = asText(title).split("\n");
-  const holding = phase === "holding";
+  const titleText = asText(title);
+  const lines = titleText.split("\n");
+
+  // Script routing (pass #9, render-caught; generalized by the 2026-08-26 font
+  // census): the display faces are latin-only — the live Devanagari title fell
+  // back to an unstyled system face, with matras clipped at lineHeight 1.0
+  // under the reveal mask. mgTextFont/mgTextMetrics detect by Unicode range
+  // (the standing rule: by script, never by language tag), now covering
+  // Bengali/Telugu/Arabic/Cyrillic too, and always carry the emoji tail.
+  const titleMetrics = mgTextMetrics(titleText);
+  const titleIsLatin = titleMetrics.script === "latin";
+  const titleFontFamily = mgTextFont(titleText, fontKey);
+  const titleLineHeight = Math.max(isSerif ? 1.08 : 1.0, titleMetrics.lineHeight);
+
+  // Eyebrow is a user/model text site too (census): routed stack + gated caps.
+  const labelFont = mgTextFont(label ?? "", "inter");
+  const labelUppercaseSafe = mgTextMetrics(label ?? "").uppercaseSafe;
+
+  // Width-driven autofit (the EditorialQuote recipe): the title GROWS to the
+  // safe box and can never overflow it. Per-script advance estimates are
+  // deliberate over-estimates — text may never crop (non-latin uses the
+  // census's render-proven advanceEm).
+  let maxChars = 1;
+  for (const l of lines) maxChars = Math.max(maxChars, [...l].length);
+  const advance = titleIsLatin ? (isSerif ? 0.58 : 0.52) : titleMetrics.advanceEm;
+  const fitTitleSize = Math.round(
+    Math.max(56, Math.min(CONTENT_MAX_WIDTH / (maxChars * advance), 170)),
+  );
+
+  // Duration-aware fps-relative schedule (the DropCard recipe via mgSchedule):
+  // the authored 60fps choreography compresses so the last title reveal
+  // completes by 85% of the pre-exit window — the live 1.52s placement showed
+  // the title only mid-translate, half-clipped, AFTER exit had begun.
+  const K = mgSchedule({
+    fps,
+    window: exitStartFrame,
+    authoredEnd: 42 + 8 * (lines.length - 1),
+  });
 
   // --- Scrim ---
-  const scrimEnter = interpolate(localFrame, [0, 18], [0, 1], {
+  const scrimEnter = interpolate(localFrame, [K(0), K(18)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,
@@ -92,7 +136,7 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
   const scrimOpacity = scrimEnter * scrimExit;
 
   // --- Rule ---
-  const ruleEnter = interpolate(localFrame, [4, 22], [0, 1], {
+  const ruleEnter = interpolate(localFrame, [K(4), K(22)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,
@@ -103,18 +147,18 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
     easing: easeInOutCubic,
   });
   const ruleScaleX = ruleEnter * (1 - ruleRetract);
-  const ruleOpacity = interpolate(localFrame, [4, 12], [0, 1], {
+  const ruleOpacity = interpolate(localFrame, [K(4), K(12)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
 
   // --- Number ---
-  const numScale = interpolate(localFrame, [10, 28], [0.7, 1], {
+  const numScale = interpolate(localFrame, [K(10), K(28)], [0.7, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutBack,
   });
-  const numEnterO = interpolate(localFrame, [10, 22], [0, 1], {
+  const numEnterO = interpolate(localFrame, [K(10), K(22)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
@@ -122,18 +166,18 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const numTY = interpolate(localFrame, [10, 24], [10, 0], {
+  const numTY = interpolate(localFrame, [K(10), K(24)], [10, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,
   });
 
   // --- Eyebrow ---
-  const ebEnterO = interpolate(localFrame, [16, 30], [0, 1], {
+  const ebEnterO = interpolate(localFrame, [K(16), K(30)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const ebTYenter = interpolate(localFrame, [16, 30], [14, 0], {
+  const ebTYenter = interpolate(localFrame, [K(16), K(30)], [14, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,
@@ -155,13 +199,13 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
   });
 
   // --- Band ---
-  const bandScaleY = interpolate(localFrame, [0, 16], [0, 1], {
+  const bandScaleY = interpolate(localFrame, [K(0), K(16)], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
     easing: easeOutCubic,
   });
   const bandOpacity =
-    interpolate(localFrame, [0, 10], [0, 1], {
+    interpolate(localFrame, [K(0), K(10)], [0, 1], {
       extrapolateLeft: "clamp",
       extrapolateRight: "clamp",
     }) * scrimExit;
@@ -254,12 +298,12 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
           {label ? (
             <div
               style={{
-                fontFamily: MG_FONTS.inter,
+                fontFamily: labelFont,
                 fontSize: EYEBROW_SIZE,
                 fontWeight: 600,
                 color: ebColor,
                 letterSpacing: "0.3em",
-                textTransform: "uppercase",
+                textTransform: labelUppercaseSafe ? "uppercase" : "none",
                 lineHeight: 1.2,
                 marginBottom: 28,
                 opacity: ebEnterO * ebExitO,
@@ -291,7 +335,7 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
           {lines.map((line, li) => {
             const revealP = interpolate(
               localFrame,
-              [24 + 8 * li, 42 + 8 * li],
+              [K(24 + 8 * li), K(42 + 8 * li)],
               [0, 1],
               {
                 extrapolateLeft: "clamp",
@@ -308,7 +352,7 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
             const lineTY = enterTY - 100 * exitTYp;
             const lineEnterO = interpolate(
               localFrame,
-              [24 + 8 * li, 32 + 8 * li],
+              [K(24 + 8 * li), K(32 + 8 * li)],
               [0, 1],
               { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
             );
@@ -321,20 +365,29 @@ export const SectionDivider: React.FC<SectionDividerProps> = ({
               <div
                 key={li}
                 style={{
-                  overflow: holding ? "visible" : "hidden",
+                  // The mask keys off REVEAL COMPLETION, not the phase label
+                  // (pass #9): 'holding' was unreachable whenever the computed
+                  // enter window outlived the pre-exit window, so the mask
+                  // never lifted — fallback-face matras stayed clipped for the
+                  // component's whole life, and the old holding→exiting flip
+                  // re-clipped settled text with a visible pop.
+                  overflow: revealP >= 1 ? "visible" : "hidden",
                   maxWidth: CONTENT_MAX_WIDTH,
                 }}
               >
                 <div
                   style={{
-                    fontFamily: FONT_FAMILY[fontKey],
-                    fontSize: titleFontSize,
+                    fontFamily: titleFontFamily,
+                    fontSize: fitTitleSize,
                     fontWeight: 400,
                     color: titleColor,
-                    letterSpacing: isSerif ? "0" : "-0.01em",
+                    letterSpacing: isSerif || !titleIsLatin ? "0" : "-0.01em",
                     lineHeight: titleLineHeight,
-                    textTransform: "uppercase",
+                    textTransform: titleMetrics.uppercaseSafe
+                      ? "uppercase"
+                      : "none",
                     textAlign: isLeft ? "left" : "center",
+                    whiteSpace: "nowrap",
                     opacity: lineEnterO * lineExitO,
                     transform: `translateY(${lineTY}%)`,
                     textShadow,

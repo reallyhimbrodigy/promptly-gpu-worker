@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, useVideoConfig } from "remotion";
-import { MG_FONTS } from "../shared/fonts";
+import { inkFor } from "../shared/ink";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { useMGPhase } from "../shared/useMGPhase";
 import { asText } from "../../shared/asText";
 import type { NamePlateProps } from "./types";
@@ -19,7 +20,7 @@ export const NamePlate: React.FC<NamePlateProps> = ({
   name,
   role,
   accentColor = "#F5A11E",
-  nameColor = "#FFFFFF",
+  nameColor,
   anchor = "lower_third_safe",
   widthPct = 0.42,
   namePx,
@@ -81,6 +82,25 @@ export const NamePlate: React.FC<NamePlateProps> = ({
   const blockMaxWidth = Math.max(120, width - sideMargin * 2);
   const pad = Math.round(nameSize * 0.28);
 
+  // User/model text routes by script + emoji tail (font census 2026-08-26):
+  // Anton has no Devanagari/Cyrillic — a non-Latin name routes to a covering
+  // face; matras need the taller line box, and caps-transform is gated off.
+  const nameText = asText(name);
+  const nameFont = mgTextFont(nameText, "anton");
+  const nameMetrics = mgTextMetrics(nameText);
+  const roleText = role ? asText(role) : "";
+  const roleFont = mgTextFont(roleText, "inter");
+  const roleCapsSafe = mgTextMetrics(roleText).uppercaseSafe;
+
+  // 2026-08-26 coupled-defaults audit: the #FFFFFF default was authored for
+  // the no-backdrop over-footage case and survived a backdrop-only override —
+  // the ../brand adapter forwards style.color and style.backdrop independently
+  // (either can arrive None), so a light palette base drew its scrim under
+  // white ink. Unspecified ink now follows the scrim's luminance; no backdrop
+  // (or an unparseable one, which reads as dark) keeps white exactly.
+  const resolvedNameColor =
+    nameColor ?? (backdropColor ? inkFor(backdropColor) : "#FFFFFF");
+
   return (
     <AbsoluteFill style={{ opacity: out }}>
       <div style={{
@@ -100,22 +120,33 @@ export const NamePlate: React.FC<NamePlateProps> = ({
         <div style={{ position: "relative" }}>
           <div style={{ width: ruleW, height: Math.max(3, Math.round(height * 0.004)),
                         background: accentColor, borderRadius: 2 }} />
-          <div style={{ overflow: "hidden", marginTop: Math.round(nameSize * 0.34) }}>
-            <div style={{ transform: `translateY(${nameRise}px)`, color: nameColor,
-                          fontFamily: MG_FONTS.anton, fontWeight: 800,
-                          fontSize: nameSize, lineHeight: 1.04, letterSpacing: "-0.02em",
+          {/* TRUNCATION FIX (2026-08-26, live-defect: "Siddharth" rendered
+              "Siddhart" + a stray mark in an undelivered artifact): the
+              rise-mask's overflow:hidden clipped glyph INK that exceeded the
+              text's layout box. Two causes, both removed: fontWeight 800 on
+              Anton — a single-weight 400 face, so faux-bold synthesis widens
+              ink past advance widths — and -0.02em tracking tucking the final
+              glyph's ink outside the box. Plus breathing room on the mask so
+              ink can never touch its clip edge. */}
+          <div style={{ overflow: "hidden", marginTop: Math.round(nameSize * 0.34),
+                        paddingRight: Math.round(nameSize * 0.12) }}>
+            <div style={{ transform: `translateY(${nameRise}px)`, color: resolvedNameColor,
+                          fontFamily: nameFont, fontWeight: 400,
+                          fontSize: nameSize,
+                          lineHeight: Math.max(1.04, nameMetrics.lineHeight),
                           overflowWrap: "break-word" }}>
-              {asText(name)}
+              {nameText}
             </div>
           </div>
           {role ? (
             <div style={{ overflow: "hidden",
                           marginTop: Math.round(roleSize * 0.32) + TEXT_STAGGER }}>
               <div style={{ transform: `translateY(${roleRise}px)`, color: accentColor,
-                            fontFamily: MG_FONTS.inter, fontWeight: 600,
+                            fontFamily: roleFont, fontWeight: 600,
                             fontSize: roleSize, letterSpacing: "0.06em",
-                            textTransform: "uppercase", overflowWrap: "break-word" }}>
-                {asText(role)}
+                            textTransform: roleCapsSafe ? "uppercase" : "none",
+                            overflowWrap: "break-word" }}>
+                {roleText}
               </div>
             </div>
           ) : null}

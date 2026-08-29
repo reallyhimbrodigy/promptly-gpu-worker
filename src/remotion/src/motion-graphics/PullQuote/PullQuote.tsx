@@ -1,6 +1,8 @@
 import React, { useMemo } from "react";
 import { AbsoluteFill, interpolate } from "remotion";
 import { MG_FONTS } from "../shared/fonts";
+import { inkFor } from "../shared/ink";
+import { mgTextFont, mgTextMetrics } from "../shared/text-font";
 import { resolveMGPosition } from "../shared/positioning";
 import { useMGPhase } from "../shared/useMGPhase";
 import type { PullQuoteFontKey, PullQuoteProps } from "./types";
@@ -26,14 +28,6 @@ const MAX_FONT = 320;
 const DEFAULT_TEXT_SHADOW =
   "0 2px 8px rgba(0,0,0,0.6), 0 8px 30px rgba(0,0,0,0.45), 0 0 2px rgba(0,0,0,0.5)";
 
-const FONT_FAMILY: Record<PullQuoteFontKey, string> = {
-  anton: MG_FONTS.anton,
-  oswald: MG_FONTS.oswald,
-  inter: MG_FONTS.inter,
-  roboto: MG_FONTS.roboto,
-  dmSerifDisplay: MG_FONTS.dmSerifDisplay,
-  playfairDisplay: MG_FONTS.playfairDisplay,
-};
 const CHAR_RATIO: Record<PullQuoteFontKey, number> = {
   anton: 0.52,
   oswald: 0.55,
@@ -43,8 +37,11 @@ const CHAR_RATIO: Record<PullQuoteFontKey, number> = {
   playfairDisplay: 0.5,
 };
 
+// Unicode-aware (font census 2026-08-26): the old [^a-zA-Z0-9] strip deleted
+// every non-Latin keyword to "" — silent content deletion (a Hindi keyword
+// could never match its word). Strip punctuation/whitespace only.
 const normalize = (w: string): string =>
-  w.replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
+  w.replace(/[^\p{L}\p{N}]/gu, "").toLocaleLowerCase();
 
 export const PullQuote: React.FC<PullQuoteProps> = ({
   startMs,
@@ -62,7 +59,7 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   highlightStyle = "color",
   keywordScale = 1.18,
   barColor,
-  highlightTextColor = "#0A0A0A",
+  highlightTextColor,
   align = "center",
   uppercase = true,
   wordStagger = 6,
@@ -88,9 +85,22 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   const resolvedKeywordColor = keywordColor ?? accentColor ?? "#FFD60A";
   const resolvedBarColor = barColor ?? resolvedKeywordColor;
   const resolvedQuoteColor = quoteMarkColor ?? resolvedKeywordColor;
+  // 2026-08-26 coupled-defaults audit: the #0A0A0A bar-mode ink was authored
+  // for the default yellow bar and survived a bar-side-only override (a dark
+  // palette accent made the EMPHASIZED words the invisible ones, and bar mode
+  // strips the textShadow rescue below). Unspecified ink now follows the
+  // resolved bar surface; the default yellow keeps #0A0A0A exactly.
+  const resolvedHighlightInk =
+    highlightTextColor ??
+    (resolvedBarColor === "#FFD60A"
+      ? "#0A0A0A"
+      : inkFor(resolvedBarColor, "#0A0A0A"));
 
   const keywordSet = useMemo(
-    () => new Set(keywords.map(normalize)),
+    // Empty normalizations are dropped: a keyword that reduces to "" (pure
+    // punctuation) must not become a match-everything member — the residual
+    // tail of the audited silent-deletion defect.
+    () => new Set(keywords.map(normalize).filter(Boolean)),
     [keywords],
   );
 
@@ -101,6 +111,13 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
 
   if (!visible) return null;
   if (words.length === 0) return null;
+
+  // Fail-open (render-caught 2026-08-25): an unrecognized highlightStyle
+  // silently rendered keywords PLAIN — no colour, no bar, indistinguishable
+  // from body words at a glance. The handler's contract is color|bar|scale;
+  // anything else now degrades to "color" (some highlight, never none).
+  const effStyle = highlightStyle === "bar" || highlightStyle === "scale"
+    ? highlightStyle : "color";
 
   const isKw = (w: string): boolean => keywordSet.has(normalize(w));
   const kwCount = words.filter(isKw).length;
@@ -116,8 +133,16 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
     for (let i = 0; i < words.length; i += m) lines.push(words.slice(i, i + m));
   }
 
-  // Deterministic font-fit (no DOM measurement).
-  const ratio = CHAR_RATIO[fontKey];
+  // User/model text routes by script + emoji tail (font census 2026-08-26);
+  // computed once for the whole quote so every word carries one face.
+  const quoteText = words.join(" ");
+  const quoteFont = mgTextFont(quoteText, fontKey);
+  const quoteMetrics = mgTextMetrics(quoteText);
+
+  // Deterministic font-fit (no DOM measurement). CHAR_RATIO stays the latin
+  // advance; non-Latin uses the census-conservative estimate.
+  const ratio =
+    quoteMetrics.script === "latin" ? CHAR_RATIO[fontKey] : quoteMetrics.advanceEm;
   let maxWeight = 0;
   for (const line of lines) {
     let w = 0;
@@ -134,11 +159,26 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
   );
 
   // Cap total entrance time for long lines.
+  // 2026-08-26 coupled-defaults audit: the 74-frame budget assumed wordReveal
+  // near its default 16 — an override past 74 drove the stagger NEGATIVE and
+  // played the reveal cascade backwards (last words fully up at frame 0).
+  // Floor at 0: simultaneous reveal is the worst case, never inverted order.
   const N = words.length;
-  const effStagger = Math.min(
-    wordStagger,
-    (74 - wordReveal) / Math.max(1, N - 1),
+  const effStagger = Math.max(
+    0,
+    Math.min(wordStagger, (74 - wordReveal) / Math.max(1, N - 1)),
   );
+
+  // Corpus law 1 (pass #7b): the payoff LINE (the last line — the isolated
+  // hit: "$100K on its own beat", "big oversized 0 as its own visual beat")
+  // lands at up to 2.8x support scale, fit to ~98% frame width. The panel
+  // measured ours at 1.2-1.4x — the isolation move never landed.
+  const lastIdx = lines.length - 1;
+  const lastWeight = lines[lastIdx].reduce((acc, w2) => acc + w2.length * (isKw(w2) ? effKeywordScale : 1), 0)
+    + (lines[lastIdx].length - 1) * 0.3;
+  const payoffScale = lines.length > 1
+    ? Math.max(1, Math.min(2.8, (TEXT_MAX_WIDTH * 0.98) / (Math.max(1, lastWeight) * ratio * finalFontSize)))
+    : 1;
 
   const RISE = finalFontSize * 0.3;
   const BLUR0 = 12;
@@ -183,7 +223,10 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
             display: "flex",
             flexDirection: "column",
             alignItems: flexAlign,
-            gap: finalFontSize * 0.06,
+            // §4 interlock: adjacent display lines tuck slightly (was +0.06em
+            // of air) so ascenders/descenders interleave like a composed title
+            // card. lineHeight 0.95 keeps every glyph fully legible.
+            gap: -finalFontSize * 0.025,
             transform: `translateY(${exitY}px) scale(${exitScale})`,
             transformOrigin: "center",
             opacity: exitOpacity,
@@ -220,6 +263,11 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                 justifyContent: flexAlign,
                 gap: finalFontSize * 0.26,
                 whiteSpace: "nowrap",
+                // §4 (2026-08-25): a perfectly-centred stack of straight lines
+                // reads as a slide. Alternating ±1.2° per line — restraint is
+                // the treatment at display sizes; the interlock below does the
+                // rest. Individual rotate property (REMOTION_CONVENTIONS).
+                rotate: `${((li % 2 === 0 ? -1 : 1) * 1.2).toFixed(1)}deg`,
               }}
             >
               {line.map((word, wi) => {
@@ -275,13 +323,14 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                   : 1;
                 const wordScale = kw ? pop * stamp : scaleIn;
 
-                const restingSize = kw
+                const lineScale = li === lastIdx ? payoffScale : 1;
+                const restingSize = (kw
                   ? finalFontSize * effKeywordScale
-                  : finalFontSize;
-                const useColor = kw && highlightStyle === "color";
-                const useBar = kw && highlightStyle === "bar";
+                  : finalFontSize) * lineScale;
+                const useColor = kw && effStyle === "color";
+                const useBar = kw && effStyle === "bar";
                 const color = useBar
-                  ? highlightTextColor
+                  ? resolvedHighlightInk
                   : useColor
                     ? resolvedKeywordColor
                     : textColor;
@@ -320,13 +369,19 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                     style={{
                       position: "relative",
                       display: "inline-block",
-                      fontFamily: FONT_FAMILY[fontKey],
+                      fontFamily: quoteFont,
                       fontSize: restingSize,
                       fontWeight,
                       color,
-                      textTransform: uppercase ? "uppercase" : "none",
+                      textTransform:
+                        uppercase && quoteMetrics.uppercaseSafe
+                          ? "uppercase"
+                          : "none",
                       letterSpacing: "-0.01em",
-                      lineHeight: 0.95,
+                      lineHeight:
+                        quoteMetrics.script === "latin"
+                          ? 0.95
+                          : quoteMetrics.lineHeight,
                       opacity,
                       transform: `translateY(${riseY}px) scale(${wordScale})`,
                       transformOrigin: "center",
@@ -348,6 +403,11 @@ export const PullQuote: React.FC<PullQuoteProps> = ({
                           transformOrigin: "left center",
                           zIndex: 0,
                           borderRadius: 4,
+                          // §4: the bar is a physical label slapped over the
+                          // word — its own small tilt + a hard offset shadow
+                          // (an axis-aligned glow reads as a UI hover).
+                          rotate: `${((li % 2 === 0 ? 1 : -1) * 2.2).toFixed(1)}deg`,
+                          boxShadow: "0 6px 16px rgba(0,0,0,0.4)",
                         }}
                       />
                     ) : null}

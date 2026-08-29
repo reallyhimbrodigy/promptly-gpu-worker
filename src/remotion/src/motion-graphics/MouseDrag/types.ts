@@ -5,7 +5,7 @@ export interface MouseDragProps extends MGTimingProps, MGPositionProps {
   label: string; // the dragged card text, e.g. "Lace Quick Fix"
 
   cardColor?: string; // card fill. Default "#F2C211".
-  cardTextColor?: string; // Default "#1C1C1C".
+  cardTextColor?: string; // Default: ink paired to cardColor ("#1C1C1C" on the default yellow).
 
   regionWidth?: number; // Default 720.
   regionHeight?: number; // Default 360.
