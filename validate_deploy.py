@@ -314,7 +314,15 @@ def _session_certs_registered():
                       # walks the AST and fails if ANY future_shot_changes
                       # consumer binds a non-pair, and was red-proven against
                       # 9755768 (it fingers line 41971) before the fix landed.
-                      ("cert_shot_changes_seam.py", 21)):
+                      ("cert_shot_changes_seam.py", 21),
+                      # Lean-schema backfill nesting (2026-08-29): the loop read
+                      # a top-level key_moments that never exists, so it was
+                      # INERT and 27% of organic plans failed strict validation
+                      # on video_plan.key_moments.N.what_lands. Silent by
+                      # construction — the outcome gate runs in shadow, so a
+                      # regression alerts nothing and the rate just climbs back.
+                      # RED-proven against 321fb04: 6 failures, exit 1.
+                      ("cert_lean_backfill_nesting.py", 14)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")

@@ -14197,10 +14197,37 @@ def _backfill_lean_fields(_parsed):
     reasons exactly as intended. No-op when the fields are already present."""
     if not isinstance(_parsed, dict):
         return _parsed
-    for _km in (_parsed.get("key_moments") or []):
-        if isinstance(_km, dict):
-            for _f in _LEAN_DROP_FIELDS["_VideoPlanMoment"]:
-                _km.setdefault(_f, "")
+    # KEY_MOMENTS IS NESTED UNDER video_plan, NOT TOP-LEVEL (fixed 2026-08-29).
+    #
+    # This read `_parsed.get("key_moments")`. PostCutPlan declares
+    # `video_plan: _VideoPlan` and _VideoPlan owns key_moments, whose items are
+    # _VideoPlanMoment — the model that actually carries what_lands /
+    # why_emphasis / what_i_saw / viewer_feeling. So the lookup returned None on
+    # every job and this loop NEVER RAN: the backfill was inert for the exact
+    # field class it exists to restore, while its two sibling loops below read
+    # genuinely top-level fields and worked.
+    #
+    # MEASURED: 66 of 244 organic completions (27.0%) failed strict
+    # PostCutPlan.model_validate, and every one of the 69 field-level failures
+    # was `video_plan.key_moments.N.what_lands  Field required` — 12-24 errors
+    # per plan, one per key_moment. Harmless only because the outcome gate runs
+    # in shadow; at PROMPTLY_OUTCOME_GATE=enforce, 27% of jobs would pay a retry
+    # for a telemetry-only field.
+    #
+    # BOTH SHAPES ARE WALKED, deliberately. The nested path is the schema truth;
+    # the top-level read is retained because the v2/flatten arm restructures the
+    # plan and asserting one shape from one sample is how this bug was born.
+    _km_lists = []
+    _vp = _parsed.get("video_plan")
+    if isinstance(_vp, dict) and isinstance(_vp.get("key_moments"), list):
+        _km_lists.append(_vp["key_moments"])
+    if isinstance(_parsed.get("key_moments"), list):
+        _km_lists.append(_parsed["key_moments"])
+    for _kml in _km_lists:
+        for _km in _kml:
+            if isinstance(_km, dict):
+                for _f in _LEAN_DROP_FIELDS["_VideoPlanMoment"]:
+                    _km.setdefault(_f, "")
     for _em in (_parsed.get("emphasis_moments") or []):
         if isinstance(_em, dict):
             _em.setdefault("viewer_feeling", "")
