@@ -227,6 +227,19 @@ SEMANTIC_TO_MG_ANCHOR = {
 # absent from the dialogue, on screen too briefly to read, over the face.
 
 _MG_GROUNDING_THRESHOLD = 0.6   # F5: min fraction of content words in the known set
+# ABBREVIATION FLOOR (2026-08-29). The prefix rule required BOTH sides >= 4
+# chars, so a 2-3 char display abbreviation could never prefix-match its own
+# dialogue word: "MIN" cannot reach "minutes". MEASURED on 56 real MG drops —
+# 13 (23.2%) carried a <=3-char token, against 13 genuinely-ungrounded cards.
+#
+# LOWERED ON THE CARD SIDE ONLY, and that asymmetry is the whole safety
+# argument. Lowering it symmetrically opens the OPPOSITE direction — a LONG card
+# word grounding on a SHORT dialogue word — and the observed ungrounded set is
+# full of exactly that hazard: at floor 3 'OFFICIAL'.startswith('off') passes,
+# at floor 2 'Tourism'.startswith('to') passes. Both are cards that SHOULD drop.
+# An abbreviation is short-for-long; there is no legitimate reading in which a
+# long card word is grounded by a 2-letter utterance.
+_MG_ABBREV_MIN_CHARS = 2
 _MG_READ_BASE_S = 0.8           # F6: base reading time
 _MG_READ_PER_WORD_S = 0.35      # F6: per content word
 _MG_READ_FLOOR_S = 1.5          # F6: absolute minimum window
@@ -1540,8 +1553,13 @@ def _mg_grounding_fraction(text, known_tokens):
             hits += 1
         elif _mg_token_variants(tok) & known_tokens:
             hits += 1
-        elif len(tok) >= 4 and any(
-                (k.startswith(tok) or tok.startswith(k)) and min(len(k), len(tok)) >= 4
+        elif any(
+                # (a) ABBREVIATION — the CARD token is short, the DIALOGUE word
+                #     is long. "MIN" abbreviates "minutes"; a designer writes the
+                #     short form and the speaker says the long one.
+                (len(tok) >= _MG_ABBREV_MIN_CHARS and len(k) >= 4 and k.startswith(tok))
+                # (b) the ORIGINAL symmetric rule, unchanged, for long<->long.
+                or (len(tok) >= 4 and len(k) >= 4 and tok.startswith(k))
                 for k in known_tokens):
             hits += 1
     return hits / len(content)

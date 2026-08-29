@@ -322,7 +322,14 @@ def _session_certs_registered():
                       # construction — the outcome gate runs in shadow, so a
                       # regression alerts nothing and the rate just climbs back.
                       # RED-proven against 321fb04: 6 failures, exit 1.
-                      ("cert_lean_backfill_nesting.py", 14)):
+                      ("cert_lean_backfill_nesting.py", 14),
+                      # MG abbreviation floor (2026-08-29): the prefix rule
+                      # required BOTH sides >=4, so "MIN" could never reach
+                      # "minutes" — 13 of 56 real MG drops. Lowered CARD-SIDE
+                      # ONLY; a symmetric floor would let 'OFFICIAL' ground on
+                      # 'off' and 'Tourism' on 'to', both cards that must drop.
+                      # The HOLD legs pin that false-pass direction shut.
+                      ("cert_mg_abbrev_grounding.py", 31)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")

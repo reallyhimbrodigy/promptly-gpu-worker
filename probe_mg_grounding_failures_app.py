@@ -145,6 +145,20 @@ def main(since: str = "2026-08-27"):
     for k, n in buckets.most_common():
         print(f"      {n:>4}  ({100.0*n/len(drops):>5.1f}%)  {k}")
 
+    print(f"\n  [1b] TEXTS BY BUCKET — cert fixtures come from production, not invention")
+    _byb = {}
+    for d in drops:
+        toks = [t for t in content_toks(d["text"]) if not any(c.isdigit() for c in t)]
+        if not toks: b = "EMPTY"
+        elif not all(is_ascii(t) for t in toks): b = "NONLATIN"
+        elif min(len(t) for t in toks) <= 3: b = "SHORT"
+        else: b = "UNGROUNDED"
+        _byb.setdefault(b, []).append((d["type"], d["text"]))
+    for b in ("SHORT", "UNGROUNDED"):
+        print(f"      --- {b} ({len(_byb.get(b, []))}) ---")
+        for t, tx in _byb.get(b, []):
+            print(f"        {t:>14}  {tx!r}")
+
     print(f"\n  [2] THE SHORT TOKENS THEMSELVES")
     for t, n in shorts.most_common(18):
         print(f"      {n:>4}  {t!r}")
