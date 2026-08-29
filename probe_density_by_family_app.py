@@ -84,6 +84,14 @@ def _measure(rec):
         "overlay": len(r.get("text_overlays") or []),
         "sfx": len(r.get("sound_effects") or []),
         "broll": len(r.get("broll_clips") or []),
+        # tight_cut_overlays was MISSING from this query while emitting at
+        # 0.25/25s — a family nobody counted. It is the DESIGNED substitute for
+        # transitions on tight footage (compute_transition_slot_frames: "on tight
+        # footage they go extinct and tight-cut overlays + bare cuts own the
+        # seams"), so whether it DELIVERS is the load-bearing question, not an
+        # afterthought. Emission without delivery here would mean the substitute
+        # is failing silently and seams are simply undressed.
+        "tight_ovl": len(r.get("tight_cut_overlays") or []),
         "cuts": len(cuts),
     }
 
@@ -92,7 +100,7 @@ def _measure(rec):
 def main(since: str = "2026-08-27"):
     d = scan.remote(since)
     rows = [r for r in d["rows"] if not r.get("demo")]
-    FAM = ("emphasis", "mg", "overlay", "transition", "sfx", "broll")
+    FAM = ("emphasis", "mg", "overlay", "transition", "tight_ovl", "sfx", "broll")
 
     buckets = {}
     norec = 0

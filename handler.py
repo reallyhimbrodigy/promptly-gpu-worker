@@ -17741,7 +17741,67 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     # EditPolicy (kill-site inventory 2026-07-10): with
                     # transitions=off the sub-call must not author — the Step-2
                     # strip ran BEFORE this wire-in and was silently undone.
-                    _seam_candidates = (sorted(_shot_seam_src | _broll_edges_for_seams)
+                    # ── SEAM CANDIDATE POPULATION (2026-08-29) ──────────────
+                    # TODAY a candidate is a SHOT CHANGE or a B-ROLL EDGE. On
+                    # single-take talking-head footage — the product's core
+                    # input — there are almost no shot changes (measured
+                    # 0.0-0.7 hard cuts/25s on the three staged raw sources),
+                    # so 4 of 6 clean PLAN_ONLY runs logged "zero qualifying
+                    # seams" and skipped the sub-call entirely.
+                    #
+                    # But THE CUTTER IS MAKING SPLICES CONSTANTLY. Every
+                    # adjacent pair in validated_cuts is a real junction it
+                    # created — filler removal, dead-air trim, span split —
+                    # and the OVERLAY class (LightLeak / ShutterFlash via
+                    # OverlayCutEffect) needs NO room at any of them: it
+                    # composites over an unmodified hard cut, inserts no time,
+                    # touches no audio. Those splices are seams by
+                    # construction and are simply not being offered.
+                    #
+                    # OBSERVE-ONLY BY DEFAULT. The counts print on every job so
+                    # the population is measurable before anything changes;
+                    # PROMPTLY_SEAM_CANDIDATES=wide unions the mechanical
+                    # splices in. Off => byte-identical candidate set.
+                    _mech_seam_src = set()
+                    try:
+                        _wi_cursor = 0
+                        for _ci in range(max(0, len(validated_cuts) - 1)):
+                            _ce = float(validated_cuts[_ci].get("source_end") or 0.0)
+                            _best = None
+                            while (_wi_cursor < len(_dg_words)
+                                   and float(_dg_words[_wi_cursor].get("end") or 0.0)
+                                   <= _ce + 0.05):
+                                _best = _wi_cursor
+                                _wi_cursor += 1
+                            if _best is not None:
+                                _mech_seam_src.add(int(_best))
+                    except Exception:
+                        pass
+                    # Mechanical splices that are NOT already offered.
+                    _mech_new = _mech_seam_src - _shot_seam_src - _broll_edges_for_seams
+                    _mech_new = {_a for _a in _mech_new
+                                 if isinstance(_a, int) and 0 <= _a and _a not in _seam_removed_src}
+                    try:
+                        # WHERE THEY LAND. A splice on a sentence-final word is
+                        # a different editorial object from one mid-clause; the
+                        # overlay class is cheap but not free, and dressing a
+                        # mid-clause splice is how an edit reads busy.
+                        _sf = sum(1 for _a in _mech_new
+                                  if _a < len(_dg_words) and _sentence_final_word(_dg_words[_a]))
+                        print(f"[seam-candidates] shot={len(_shot_seam_src)} "
+                              f"broll={len(_broll_edges_for_seams)} "
+                              f"mechanical_new={len(_mech_new)} "
+                              f"(sentence-final {_sf}/{len(_mech_new)}) | "
+                              f"offered_today={len(_shot_seam_src | _broll_edges_for_seams)} "
+                              f"offered_wide={len(_shot_seam_src | _broll_edges_for_seams | _mech_new)}",
+                              flush=True)
+                    except Exception:
+                        pass
+                    _wide = os.environ.get("PROMPTLY_SEAM_CANDIDATES", "").strip().lower() == "wide"
+                    _cand_set = _shot_seam_src | _broll_edges_for_seams
+                    if _wide:
+                        _cand_set = _cand_set | _mech_new
+                    _seam_candidates = (sorted(_cand_set)
                                         if not _transitions_off else [])
                     for _awi2 in _seam_candidates:
                         if not isinstance(_awi2, int) or _awi2 < 0 or _awi2 + 1 >= len(_dg_words):

@@ -100,6 +100,12 @@ def run_arm(arm: dict) -> dict:
     mark_build_lane("density_delete_test_app.py")
     os.environ["APP_URL"] = ""                    # no callback, no push, no analytics
     os.environ["JOB_STATUS_WRITES_ENABLED"] = ""  # no phantom video_jobs rows
+    # PER-ARM ENV. Flags like PROMPTLY_SEAM_CANDIDATES are read INSIDE the
+    # container at plan time, so an arm that differs by flag must set it here —
+    # setting it locally would change nothing and the arms would be identical
+    # while reading as a comparison.
+    for _k, _v in (arm.get("env") or {}).items():
+        os.environ[str(_k)] = str(_v)
     sys.path.insert(0, "/")
     import handler as H
 
@@ -192,22 +198,31 @@ def _out_dur(plan):
 
 
 @app.local_entrypoint()
-def main(n_sources: int = 2, reps: int = 1):
+def main(n_sources: int = 2, reps: int = 1, mode: str = "cap"):
     import statistics as st
     import uuid
 
     clips = CLIPS[:max(1, min(n_sources, len(CLIPS)))]
     urls = presign.remote(clips)
     arms = []
+    # mode="cap"  : the rarity-doctrine delete-test (variant 0 vs 2)
+    # mode="seam" : the seam-candidate widening — BOTH arms at variant 0, so the
+    #               only difference is which splices are OFFERED to the
+    #               transitions sub-call. The overlay class needs no room at any
+    #               of them, so this is measurable with no exemption and no
+    #               component change.
+    _pairs = (((0, "CAP", {}), (2, "NOCAP", {}))
+              if mode == "cap" else
+              ((0, "NARROW", {}), (0, "WIDE", {"PROMPTLY_SEAM_CANDIDATES": "wide"})))
     for ci, k in enumerate(clips):
         for r in range(reps):
-            for variant, cond in ((0, "CAP"), (2, "NOCAP")):
+            for variant, cond, env in _pairs:
                 arms.append({
                     "label": f"{cond}#{ci}.{r}", "clip": k.split('/')[-1][:24],
                     "variant": variant, "src": urls[k], "job_id": str(uuid.uuid4()),
-                    "stagger_s": len(arms) * 12,
+                    "stagger_s": len(arms) * 12, "env": env,
                 })
-    print(f"=== DENSITY DELETE-TEST — cap PRESENT (variant 0) vs REMOVED (variant 2) ===")
+    print(f"=== {'DENSITY DELETE-TEST — cap PRESENT vs REMOVED' if mode == 'cap' else 'SEAM-CANDIDATE WIDENING — shot+broll only vs +mechanical splices'} ===")
     print(f"    {len(clips)} source(s) x {reps} rep(s) x 2 arms = {len(arms)} PLAN_ONLY runs, "
           f"no renders (~$0.10 each)")
 
@@ -239,20 +254,21 @@ def main(n_sources: int = 2, reps: int = 1):
         return None if not d else 25.0 * r["counts"][fam] / d
 
     print(f"\n  ══ EVENTS PER 25s OF OUTPUT, BY FAMILY (paired on the same source) ══")
-    header = f"  {'family':>18} {'CAP':>8} {'NOCAP':>8} {'delta':>8} {'ratio':>7}   per-source deltas"
+    header = f"  {'family':>18} {('CAP' if mode=='cap' else 'NARROW'):>8} {('NOCAP' if mode=='cap' else 'WIDE'):>8} {'delta':>8} {'ratio':>7}   per-source deltas"
     print(header)
     pairs = {}
     for r in ok:
-        pairs.setdefault(r["clip"], {}).setdefault("CAP" if r["variant"] == 0 else "NOCAP", []).append(r)
+        pairs.setdefault(r["clip"], {}).setdefault(r["label"].split("#")[0], []).append(r)
 
-    usable = [c for c, v in pairs.items() if v.get("CAP") and v.get("NOCAP")]
+    _A, _B = ("CAP", "NOCAP") if mode == "cap" else ("NARROW", "WIDE")
+    usable = [c for c, v in pairs.items() if v.get(_A) and v.get(_B)]
     print(f"  (complete pairs: {len(usable)}/{len(pairs)} sources)")
     totals = {}
     for fam in FAMILIES:
         capv, nocapv, deltas = [], [], []
         for c in usable:
-            a = [per25(r, fam) for r in pairs[c]["CAP"] if per25(r, fam) is not None]
-            b = [per25(r, fam) for r in pairs[c]["NOCAP"] if per25(r, fam) is not None]
+            a = [per25(r, fam) for r in pairs[c][_A] if per25(r, fam) is not None]
+            b = [per25(r, fam) for r in pairs[c][_B] if per25(r, fam) is not None]
             if not a or not b:
                 continue
             am, bm = st.mean(a), st.mean(b)
