@@ -4002,6 +4002,12 @@ def check_concurrency_gate(user_id, job_id, tier=None):
     # Non-premium with an in-flight job — reject this one.
     return {
         "error": "tier_concurrency_limit",
+        # LOCALIZATION CONTRACT: the app OVERRIDES user_message by error_code
+        # (content-studio lib/failure-copy.js). A site with no code falls back
+        # to this free text, which renders ENGLISH no matter what the String
+        # Catalog contains — that fallback is the entire localization gap for
+        # server-produced copy.
+        "error_code": "TIER_CONCURRENCY_LIMIT",
         "user_message": (
             "Your current plan renders one video at a time. Wait for your "
             "in-progress render to finish, or upgrade to render multiple "
@@ -38711,6 +38717,7 @@ def validate_handler(job):
             return {
                 "error": "missing sample_url",
                 "is_talking_head": None,
+                "error_code": "SAMPLE_MISSING",
                 "user_message": "Validation failed — please try again.",
             }
 
@@ -38724,6 +38731,7 @@ def validate_handler(job):
             return {
                 "error": "invalid sample_url",
                 "is_talking_head": None,
+                "error_code": "SAMPLE_UNREADABLE",
                 "user_message": "We couldn't read the sample file. Please try again.",
             }
 
@@ -38733,6 +38741,7 @@ def validate_handler(job):
             return {
                 "error": f"download failed: {_dl_err}",
                 "is_talking_head": None,
+                "error_code": "SAMPLE_UNREADABLE",
                 "user_message": "We couldn't read the sample file. Please try again.",
             }
 
@@ -38826,6 +38835,9 @@ def validate_handler(job):
                     f"({_face_ratio*100:.0f}%) sampled frames"
                     + ("; advisory — routing to minimal edit" if _advisory else "")
                 ),
+                # NOT_TALKING_HEAD already exists in failure-copy.js's table —
+                # reused rather than minted, so one code keeps one sentence.
+                "error_code": None if _advisory else "NOT_TALKING_HEAD",
                 "user_message": None if _advisory else (
                     "This app edits videos of someone talking on camera. "
                     "Please choose a different video."

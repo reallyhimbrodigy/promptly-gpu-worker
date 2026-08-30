@@ -410,6 +410,34 @@ def _run_pipeline_cpu_requires_ingest_bundle():
             "keep running in-process while a report claimed they had moved")
 
 
+@check("EVERY user_message THE WORKER EMITS MUST CARRY AN error_code (2026-08-30, RULE-1, localization). The app OVERRIDES the worker's sentence by error_code (content-studio lib/failure-copy.js REJECTION_COPY) so the words live in the iOS String Catalog, where the localization gate already covers twelve languages. An emitting site with NO code falls through to the worker's free text — which renders ENGLISH to a Hindi or Arabic reader no matter what the catalog contains. That fallback IS the localization gap for server-produced copy, and it is invisible: the job succeeds, the string arrives, nothing errors. Five such sites existed when this was written (tier-concurrency, sample-missing, two sample-unreadable, not-talking-head). This walks the AST for dict literals emitting a non-None user_message and FAILS on any without error_code/error_subcode — a comment or docstring cannot emit anything, so text scanning over-counts and a naive grep read 14 where the truth was 5.")
+def _user_message_sites_carry_a_code():
+    import ast as _a
+    _t = _a.parse(open("handler.py").read())
+    _un = []
+    for _n in _a.walk(_t):
+        if not isinstance(_n, _a.Dict):
+            continue
+        _keys = {_k.value for _k in _n.keys
+                 if isinstance(_k, _a.Constant) and isinstance(_k.value, str)}
+        if "user_message" not in _keys:
+            continue
+        for _k, _v in zip(_n.keys, _n.values):
+            if not (isinstance(_k, _a.Constant) and _k.value == "user_message"):
+                continue
+            # An explicit None is NOT a message — nothing reaches the user.
+            if isinstance(_v, _a.Constant) and _v.value is None:
+                continue
+            if not (_keys & {"error_code", "error_subcode", "code"}):
+                _un.append(_k.lineno)
+    assert not _un, (
+        f"handler.py emits a user_message with NO error_code at line(s) {_un}. "
+        f"The app cannot override an uncoded message, so it renders the English "
+        f"free text to every reader regardless of their language. Add an "
+        f"error_code and give it a sentence in content-studio "
+        f"lib/failure-copy.js REJECTION_COPY.")
+
+
 @check("A MOUNTED DIRECTORY MUST NOT CONTAIN A LIVE BUILD CACHE (2026-08-25, RULE-1). Modal verifies that mounted files do not change mid-upload, and `src/remotion` was mounted WHOLE — including node_modules/.cache/webpack, 283 MB that Remotion rewrites every time it renders. deploy.sh runs validate_deploy FIRST, and validate_deploy renders; a webpack flush landing after the gate returned but during the upload killed the deploy outright: 'index.pack was modified during build process'. The flip it was carrying did not land, and nothing before that point had failed — 429/429 green, quiet window clear. Deleting the cache pre-deploy only SHRINKS the race; excluding it CLOSES it, because an unmounted file cannot be observed changing. This asserts the exclusion survives, because the failure mode is a deploy that dies AFTER every gate has passed — the most expensive place to discover anything — and re-mounting the cache would silently restore an intermittent, timing-dependent deploy failure that looks like a Modal fault rather than ours.")
 def _remotion_mount_excludes_cache():
     import ast as _ast
