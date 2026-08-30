@@ -773,6 +773,22 @@ def run_pipeline_bg(body: dict):
     # RIGHT number for in-process sub-floor renders here. MUST equal cpu= in this
     # function's decorator — validate_deploy pins the pair.
     _os.environ["PROMPTLY_RENDER_CORE_BUDGET"] = "16"  # tracks cpu=16 (CPU-starvation correction 2026-08-03 PM); validate_deploy pins budget==cpu
+    # ── LANE 3 ARM, STEP 1 of 2 (2026-08-30) ────────────────────────────────
+    # The four ingest tasks now run on the cpu=8 `ingest_bundle` instead of in
+    # this container's pool. Armed HERE and not by flipping a value in the
+    # shared `promptly-secrets`: a code arm deploys atomically with its gate,
+    # is revertable by `git revert`, and cannot half-apply to some functions
+    # and not others the way a secret read at import time can.
+    #
+    # STEP 1 ARMS ONLY — cpu stays 16 and this step COSTS MORE, because a
+    # second container is now started for work this box was already sized for.
+    # That is deliberate: it proves the bundle on organic traffic while the
+    # variable that can actually hurt users (the cpu drop) is still held fixed.
+    # STEP 2 drops cpu 16->8, which is where the saving is and where the risk
+    # is — cpu=8 took completion 78.9% -> 35.7% when these four tasks were
+    # still running here. _run_pipeline_cpu_requires_ingest_bundle in
+    # validate_deploy makes cpu<16 WITHOUT this arm impossible to deploy.
+    _os.environ["PROMPTLY_INGEST_BUNDLE"] = "1"
     try:
         _H._install_shutdown_handler()  # Phase 1 safety net on this container too
     except Exception:

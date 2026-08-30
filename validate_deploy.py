@@ -382,6 +382,34 @@ def _session_certs_registered():
             f"when adding assertions, never when losing them.")
 
 
+@check("THE ORCHESTRATOR MAY NOT DROP BELOW cpu=16 UNLESS THE INGEST BUNDLE IS ARMED (2026-08-30, RULE-1). cpu 16->8 on run_pipeline_bg is the change that CRASHED completion 78.9% -> 35.7%: a 480p proxy encode starved of cores blew its 30s probe timeout. Lane 3 removes that specific cause by moving the four CPU-heavy ingest tasks (proxy, loudness, shot-changes, face-detect) onto their own cpu=8 box — so the cpu drop is safe ONLY while the bundle is armed. The two are ONE decision and nothing in the code said so: someone tuning cost could lower cpu= in the decorator, never look at the body, and re-create the exact outage. This asserts the coupling in BOTH directions that matter — cpu<16 requires the arm, and the declared core budget still tracks cpu=. It does NOT require the arm at cpu=16, because arming alone (step 1) is a deliberate, safe, more-expensive state we deploy through on the way.")
+def _run_pipeline_cpu_requires_ingest_bundle():
+    import re as _re
+    msrc = open("modal_app.py").read()
+    _i = msrc.index("def run_pipeline_bg(")
+    _decor = msrc[msrc.rfind("@app.function", 0, _i):_i]
+    _body = msrc[_i:_i + 4000]
+    _cpu = _re.findall(r"cpu=(\d+),\s*memory=", _decor)
+    assert _cpu, "run_pipeline_bg: no 'cpu=N, memory=' resource arg in its decorator"
+    _cpu = int(_cpu[0])
+    _armed = _re.search(
+        r'PROMPTLY_INGEST_BUNDLE"\]\s*=\s*"(1|true|yes|on)"', _body, _re.I) is not None
+    assert _cpu >= 16 or _armed, (
+        f"run_pipeline_bg declares cpu={_cpu} but does NOT arm the ingest bundle "
+        f"in its body. That is the 78.9% -> 35.7% configuration exactly: the "
+        f"proxy encode runs HERE, starved of cores. Either restore cpu>=16 or "
+        f'set _os.environ["PROMPTLY_INGEST_BUNDLE"] = "1".')
+    # The bundle must actually exist to be armed into.
+    if _armed:
+        assert "def ingest_bundle(" in msrc, (
+            "run_pipeline_bg arms PROMPTLY_INGEST_BUNDLE but ingest_bundle is not "
+            "defined in modal_app.py — the flag would dispatch to nothing")
+        assert "def _ingest_bundle_enabled(" in open("handler.py").read(), (
+            "nothing READS PROMPTLY_INGEST_BUNDLE — an armed flag with no reader "
+            "is the unread-flag false-green, and the four tasks would silently "
+            "keep running in-process while a report claimed they had moved")
+
+
 @check("A MOUNTED DIRECTORY MUST NOT CONTAIN A LIVE BUILD CACHE (2026-08-25, RULE-1). Modal verifies that mounted files do not change mid-upload, and `src/remotion` was mounted WHOLE — including node_modules/.cache/webpack, 283 MB that Remotion rewrites every time it renders. deploy.sh runs validate_deploy FIRST, and validate_deploy renders; a webpack flush landing after the gate returned but during the upload killed the deploy outright: 'index.pack was modified during build process'. The flip it was carrying did not land, and nothing before that point had failed — 429/429 green, quiet window clear. Deleting the cache pre-deploy only SHRINKS the race; excluding it CLOSES it, because an unmounted file cannot be observed changing. This asserts the exclusion survives, because the failure mode is a deploy that dies AFTER every gate has passed — the most expensive place to discover anything — and re-mounting the cache would silently restore an intermittent, timing-dependent deploy failure that looks like a Modal fault rather than ours.")
 def _remotion_mount_excludes_cache():
     import ast as _ast
