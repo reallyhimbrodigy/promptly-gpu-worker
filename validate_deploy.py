@@ -349,7 +349,25 @@ def _session_certs_registered():
                       # no evidence either way. C4 pins that the SUMMARY line
                       # stays unledgered — ledgering it too would double-count
                       # every overlay conflict.
-                      ("cert_broll_drops_ledgered.py", 18)):
+                      ("cert_broll_drops_ledgered.py", 18),
+                      # LANE 3 ingest-bundle contract (2026-08-30). SHIPS DARK.
+                      # Four ingest tasks -> one cpu=8 box. C2 is the load-
+                      # bearing leg: it fails if any of the four closures stops
+                      # DELEGATING to the shared implementation, because a copy
+                      # is what 15acc4f was (one of two call sites updated, 17
+                      # jobs / 7 users, __round__). C8 pins the /prewarm mount —
+                      # 61% of jobs hit that cache and an unmounted volume turns
+                      # every hit into a full 480p encode, so the relocation
+                      # would ADD cost while every gate stayed green. C3 binds
+                      # the scores dict by IDENTITY, not by grepping for
+                      # "_scores = {}": the text check passed a mutation that
+                      # handed the callee a throwaway literal.
+                      # RED-PROVEN: 19/19 deliberate contract breaks fail this
+                      # cert (drifting copy, restored out-param, throwaway dict,
+                      # re-assign-after-call, armed-by-default, dropped
+                      # /prewarm mount, cpu=16 resize, dropped reload, local
+                      # path in the payload, and each boundary page removed).
+                      ("cert_ingest_bundle_contract.py", 33)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")
@@ -12544,9 +12562,43 @@ def _render_ffmpeg_probe_timeout_scaling():
         "the probe must be metadata-only — -count_frames would DECODE the whole source"
     # the 4 heavy-decode probe sites must use the scaled timeout, not a fixed one
     assert "timeout=_face_to" in src, "face-frame extraction must use the scaled timeout"
-    assert "timeout=_scdet_to" in src, "scdet (both cmd + legacy) must use the scaled timeout"
+    # COUNTED, not merely present. This said `"timeout=_scdet_to" in src` while
+    # its own text claims it covers BOTH the cmd and legacy scdet sites — so
+    # reverting either one to a fixed timeout left the other satisfying the
+    # substring and the check passed. Found by mutating one site during the
+    # Lane 3 RED-proof. A presence test cannot count; this one does.
+    assert src.count("timeout=_scdet_to") >= 2, (
+        f"scdet must use the scaled timeout at BOTH the cmd and legacy sites — "
+        f"found {src.count('timeout=_scdet_to')}, expected >= 2")
     assert "_probe_weighted_timeout(source_path, 30, 180)" in src, "loudness astats must use the scaled timeout"
-    assert "_probe_weighted_timeout(_raw_source, 30, 180)" in src, "gemini proxy encode must use the scaled timeout"
+    # GEMINI PROXY ENCODE — asserted on the AST, not on the spelling. This was
+    # a literal string match on "_probe_weighted_timeout(_raw_source, 30, 180)"
+    # and it broke the moment the Lane 3 relocation renamed the captured
+    # `_raw_source` to an explicit `raw_source` parameter — a check that fires
+    # on a RENAME while the property it guards is untouched. The property is
+    # "the proxy encode's subprocess timeout is the SCALED one with base 30 and
+    # ceiling 180", so assert exactly that: walk to the encode's subprocess.run
+    # and read its timeout= kwarg. A fixed timeout, a different base/ceiling, or
+    # a dropped scaling helper all still fail; renaming the variable does not.
+    import ast as _ast2
+    _t2 = _ast2.parse(src)
+    _pxy = next((n for n in _t2.body
+                 if isinstance(n, _ast2.FunctionDef)
+                 and n.name in ("_ingest_gemini_proxy_impl", "_do_gemini_proxy_impl")), None)
+    assert _pxy is not None, (
+        "the gemini proxy encode implementation is not a module-level function — "
+        "it must be, or the cpu=8 ingest bundle cannot call it")
+    _runs = [c for c in _ast2.walk(_pxy) if isinstance(c, _ast2.Call)
+             and isinstance(c.func, _ast2.Attribute) and c.func.attr == "run"]
+    assert _runs, "the gemini proxy encode no longer runs a subprocess"
+    _to = next((k.value for c in _runs for k in c.keywords if k.arg == "timeout"), None)
+    assert isinstance(_to, _ast2.Call) and isinstance(_to.func, _ast2.Name) \
+        and _to.func.id == "_probe_weighted_timeout", (
+        "the gemini proxy encode's subprocess timeout is not _probe_weighted_timeout(...) "
+        "— a FIXED timeout here is what blew 30s on 60/100fps sources")
+    assert [getattr(a, "value", None) for a in _to.args[1:3]] == [30, 180], (
+        "the gemini proxy encode's scaled timeout must keep base=30, ceiling=180; "
+        f"got {[getattr(a, 'value', None) for a in _to.args[1:3]]}")
 
 
 @check("PREWARM RE-ENABLED (Zac 2026-08-03 PM): the scaledown 600->30 A/B DID NOT SURVIVE — it doubled editorial latency (P50 300s vs the 120-180s law; 248 prewarm-frozen events/6h) because the prewarm container scaled to zero between uploads, so download+transcribe+audio+proxy (~150-200s) fell back onto the render's critical path. run_pipeline_bg mounts /prewarm and reads that cache, so a WARM prewarm container (scaledown 600) is what makes the hide-behind-upload work. Prewarm was NEVER the ~$56/day cost culprit (that is the orchestrator double-hold). FAILS if PromptlyPrewarmWorker regresses to a short scaledown that re-opens the latency doubling.")

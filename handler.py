@@ -40218,6 +40218,357 @@ def _capture_failure_corpus(source_path, job_id, klass):
               f"{str(_e)[:120]})", flush=True)
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# LANE 3 — INGEST BUNDLE CONTRACT
+# ══════════════════════════════════════════════════════════════════════════════
+# The four ingest tasks (proxy, loudness, shot-changes, face-detect) move to a
+# cpu=8 box as ONE UNIT so the planner can drop cpu=16 -> cpu=8 for the whole
+# job. They are NOT four independent units: face-detect reads the PROXY as a
+# file out of work_dir, so moving them together keeps that dependency INTERNAL
+# rather than serialising an overlap that was built deliberately.
+#
+# WHAT CROSSES THE BOUNDARY: plain data and bytes. Never a local path, never a
+# future, never an out-parameter. work_dir is NOT an input — the far side makes
+# its own, and the proxy file lives and dies inside it.
+#
+# WHY A SHARED IMPLEMENTATION AND NOT A COPY. The in-process closures and the
+# remote bundle call THE SAME module-level functions below. A copy is free to
+# drift, and this is the exact code whose last extraction updated one of two
+# call sites and cost 67% of organic traffic.
+#
+# PREWARM IS LOAD-BEARING: 75 of 122 jobs (61%) hit the proxy cache on the
+# /prewarm Modal volume. The bundle function MUST mount it, or every one of
+# those hits degrades into a full 480p encode — which ADDS cost, not saves it.
+
+
+def _ingest_loudness(raw_source):
+    """Loudness stats.
+
+    NON-EMPTY AT THE BOUNDARY: a relocated call that returns nothing must PAGE,
+    not hand back a degraded value that a plan silently uses.
+    """
+    _r = measure_source_loudness(raw_source)
+    assert _r is not None, "loudness returned None — refusing to degrade the plan"
+    return _r
+
+
+def _ingest_shot_changes(raw_source, job_id=None, app_url=None):
+    """Shot changes. RETURNS (changes, scores) — never fills a caller's dict.
+
+    The scores dict is created HERE, so nothing crosses by reference on either
+    path. The out-parameter an AST scan could not see is gone by construction
+    rather than by discipline. Empty `changes` is legal (a single-take source
+    has no cuts); wrong-SHAPED is not, hence the flat-times assertion.
+    """
+    send_progress(job_id, "shots", 18, "Detecting shot changes", app_url)
+    _scores = {}
+    _changes = detect_shot_changes(raw_source, out_scores=_scores)
+    _assert_flat_times("shot_changes (callee return)", _changes)
+    return _changes, _scores
+
+
+def _ingest_gemini_proxy_impl(raw_source, work_dir, proxy_video_url=None,
+                              dl_bucket=None, dl_key=None):
+    """Provide low-res video bytes for inline Gemini API call.
+
+    Three paths, in priority order:
+      1. Client provided `proxy_video_url` — download the small
+         pre-uploaded proxy from S3/CloudFront (~3-6 MB, lands
+         in under a second). Skips the on-server encode entirely.
+      2. Prewarm cache hit — proxy was encoded during the iOS
+         upload window and sits in the Modal volume. Reading
+         from local disk is ~10-100ms vs. a fresh re-encode.
+      3. No client proxy AND no prewarm cache — encode 480p@16fps
+         proxy ourselves from the high-res source (~7-10s on
+         the orchestrator).
+    """
+    _proxy_t = time.time()
+    if proxy_video_url:
+        try:
+            _resp = safe_media_get(proxy_video_url, timeout=30)
+            _resp.raise_for_status()
+            _proxy_bytes = _resp.content
+            _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
+            print(
+                f"[pipeline] Gemini proxy: client-uploaded {_proxy_mb:.1f}MB "
+                f"downloaded in {time.time()-_proxy_t:.1f}s (no on-server encode)",
+                flush=True,
+            )
+            return _proxy_bytes
+        except Exception as _client_proxy_err:
+            # Surface but fall through to prewarm cache / on-server encode.
+            print(f"[pipeline] Client proxy download failed ({_client_proxy_err}) — checking prewarm cache", flush=True)
+
+    # Prewarm cache check — the proxy was encoded during the iOS
+    # upload window (~7-10s of work done at upload time instead of
+    # render time, fully hidden behind upload latency).
+    try:
+        _prewarm_proxy = _prewarm_cached_proxy_path(dl_bucket, dl_key)
+        if os.path.exists(_prewarm_proxy) and os.path.getsize(_prewarm_proxy) > 1024:
+            with open(_prewarm_proxy, "rb") as f:
+                _proxy_bytes = f.read()
+            _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
+            print(
+                f"[pipeline] Gemini proxy: prewarm-cache hit {_proxy_mb:.1f}MB "
+                f"in {time.time()-_proxy_t:.1f}s (no on-server encode)",
+                flush=True,
+            )
+            return _proxy_bytes
+    except (NameError, AttributeError):
+        # dl_bucket / dl_key not in scope on this path — fall through
+        pass
+    except Exception as _pc_err:
+        print(f"[pipeline] prewarm proxy read failed ({_pc_err}) — falling back to on-server encode", flush=True)
+
+    try:
+        _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
+        # 480p @ 18fps proxy. Paired with video_metadata.fps=18 on
+        # the Gemini Part so Gemini SAMPLES at 18fps — without that
+        # metadata the SDK defaults to ~1fps and bumping the encoder
+        # is performative. 24 is the API's hard cap (validated
+        # 2026-06-13: fps>24 returns INVALID_ARGUMENT). At 18fps the
+        # model sees micro-expression transitions (the half-beat
+        # face shift before a line lands), gesture velocity (where
+        # the hand actually moves vs. settles), and eye-direction
+        # changes between blinks — the editorial signal that lives
+        # between frames at 10fps. Trade-off: more video tokens per
+        # call than 16fps, accepted because arc-aware placement
+        # quality is the bottleneck, not API latency — and the
+        # primary 504 driver (X-Server-Timeout=120s) is now fixed
+        # at the client level (see _get_genai_client).
+        _proxy_venc = (["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "32"]
+                       if _HAS_NVENC else
+                       ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
+             "-x264-params", f"threads={_PROXY_X264_THREADS}"])
+        _hw_dec = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
+        # Audio: Opus mono @ 64kbps. Opus at 64k beats AAC at 96k for
+        # speech intelligibility AND prosodic detail (voice rise/drop,
+        # micro-pauses, laugh/gasp texture) — the acoustic signal the
+        # prompt explicitly tells Gemini to listen for. The previous
+        # AAC @ 48kbps smeared that texture. Modern ffmpeg writes
+        # Opus into MP4 natively; Gemini's MP4 ingestion accepts it.
+        # RENDER_FFMPEG timeout fix (Zac 2026-08-03): the proxy decodes the
+        # FULL source to emit an 18fps/480p copy; a 60fps/100fps or 4K source
+        # CPU-decodes far more and blew the fixed 30s (coded INVALID_FORMAT).
+        # Scale by real source weight; normal 30fps clips stay at base 30s.
+        _proxy_cmd = subprocess.run(
+            # MAP EXPLICITLY (2026-08-04). THIRD copy of the Core Media
+            # Metadata class, found by the cert_input_matrix cell built
+            # to test the SECOND one. An iPhone metadata track is
+            # classified as audio with codec `none`, so auto stream
+            # selection hands libopus a stream nothing can decode:
+            # "[aist#0:2/none] Decoding requested, but no decoder found
+            # for: none". 14d758c fixed audio extraction, 5f19901 fixed
+            # hype_render's canon, and this encode still had it — the
+            # whole job died at the Gemini proxy. `?` on the audio map
+            # keeps genuinely silent sources working.
+            ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", raw_source,
+             "-map", "0:v:0", "-map", "0:a:0?",
+             "-vf", "scale=480:-2,fps=18"] + _proxy_venc + [
+             "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
+             _proxy_path],
+            capture_output=True, text=True,
+            timeout=_probe_weighted_timeout(raw_source, 30, 180),
+        )
+        if _proxy_cmd.returncode != 0 or not os.path.exists(_proxy_path):
+            raise RuntimeError(f"Gemini proxy encode failed: {(_proxy_cmd.stderr or '')[-300:]}")
+        with open(_proxy_path, "rb") as f:
+            _proxy_bytes = f.read()
+        _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
+        print(f"[pipeline] Gemini proxy: 480p@16fps {_proxy_mb:.1f}MB in {time.time()-_proxy_t:.1f}s (on-server encode, no client proxy)", flush=True)
+        return _proxy_bytes
+    except Exception as e:
+        raise RuntimeError(f"Gemini proxy encode failed: {e}") from e
+
+
+def _ingest_face_detect_impl(raw_source, work_dir, source_duration,
+                             proxy_ready=None, job_id=None, app_url=None):
+    """Face trajectory off the 480p proxy. RETURNS (dense, smoothed).
+
+    `proxy_ready` replaces the captured `future_gemini_proxy` — a live
+    Future cannot cross a container boundary. Inside the bundle the proxy
+    task runs on the SAME box, so the overlap this function is named for
+    is preserved rather than serialised.
+
+    Empty is LEGAL here (a source with no visible face), so the boundary
+    check is shape-only: two lists, never None.
+    """
+    send_progress(job_id, "face_detect", 14, "Tracking faces frame-by-frame", app_url)
+    _proxy_exists = False
+    _pf = proxy_ready
+    if _pf is not None:
+        if hasattr(_pf, "result"):
+            _pf.result()
+        _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
+        _proxy_exists = os.path.exists(_proxy_path)
+    # Sparse sampling target: ~1 detection per 3s of source — roughly
+    # one sample per cut at typical short-form pacing (~20 cuts per
+    # 60s video → 20 detections). The EMA smoothing in
+    # smooth_face_trajectory interpolates between samples and coasts
+    # through gaps, so coarse samples still produce a continuous
+    # trajectory. Trade-off accepted: fast head movement (~1s spans)
+    # will be missed and the source-reframe crop will be less
+    # precise on high-motion content.
+    if _proxy_exists:
+        # Proxy is 10fps — every 30 frames ≈ 1 detection per 3s.
+        dense = detect_face_positions_dense(
+            os.path.join(work_dir, "gemini_proxy.mp4"), every_n_frames=30,
+            target_w=1080, target_h=1920,
+        )
+    else:
+        # No proxy (render_only) or proxy missing — use raw source.
+        # Source is up to 60fps; every 180 frames ≈ 1 detection per 3s.
+        dense = detect_face_positions_dense(raw_source, every_n_frames=180)
+    if dense:
+        smoothed = smooth_face_trajectory(dense, total_duration=source_duration)
+        print(f"[dense-face] Smoothed trajectory: {len(smoothed)} keyframes", flush=True)
+        return dense, smoothed
+    return [], []
+
+
+def _ingest_gemini_proxy(raw_source, work_dir, proxy_video_url=None,
+                         dl_bucket=None, dl_key=None):
+    """NON-EMPTY AT THE BOUNDARY. A proxy that arrives empty must PAGE, not be
+    handed to Gemini as a zero-frame video — that degrades a plan silently and
+    every gate stays green."""
+    _b = _ingest_gemini_proxy_impl(raw_source, work_dir, proxy_video_url,
+                                   dl_bucket, dl_key)
+    assert isinstance(_b, (bytes, bytearray)) and len(_b) > 1024, (
+        "gemini proxy returned %d bytes — refusing to hand Gemini an empty video"
+        % (len(_b) if _b is not None else -1))
+    return _b
+
+
+def _ingest_face_detect(raw_source, work_dir, source_duration,
+                        proxy_ready=None, job_id=None, app_url=None):
+    """WELL-TYPED AT THE BOUNDARY. Empty is legal (no visible face); a None or
+    a non-list is not — that is the shape that arrives silently wrong."""
+    _d, _s = _ingest_face_detect_impl(raw_source, work_dir, source_duration,
+                                      proxy_ready, job_id, app_url)
+    assert isinstance(_d, list) and isinstance(_s, list), (
+        "face detect returned %s/%s — expected two lists"
+        % (type(_d).__name__, type(_s).__name__))
+    return _d, _s
+
+
+
+
+
+class _IngestBundleView:
+    """A lazy view on ONE remote bundle call, exposing the Future API the 11
+    existing consumers already call (`.result()`, `.done()`).
+
+    WHY A VIEW AND NOT FOUR REMOTE CALLS. The invisible-second-consumer bug
+    (15acc4f: the return shape changed and ONE of two `.result()` sites was
+    updated; 17 jobs / 7 users died 1,300 lines away) is removed STRUCTURALLY
+    here rather than by care. Every consumer of every relocated task reads the
+    SAME single bundle result through its own slice, so there is no second
+    value that can drift from the first, and no per-task future whose shape can
+    change under a consumer nobody grepped for.
+    """
+
+    __slots__ = ("_f", "_keys", "_label")
+
+    def __init__(self, bundle_future, keys, label):
+        self._f = bundle_future
+        self._keys = tuple(keys)
+        self._label = label
+
+    def done(self):
+        return self._f.done()
+
+    def result(self, timeout=None):
+        _d = self._f.result() if timeout is None else self._f.result(timeout)
+        if not isinstance(_d, dict):
+            raise RuntimeError(
+                "ingest bundle returned %s, not a dict — refusing to hand %s a "
+                "degraded value" % (type(_d).__name__, self._label))
+        for _k in self._keys:
+            if _k not in _d:
+                raise RuntimeError(
+                    "ingest bundle has no %r for %s — the boundary dropped it "
+                    "SILENTLY, which is the exact failure this view exists to "
+                    "make loud" % (_k, self._label))
+        _v = tuple(_d[_k] for _k in self._keys)
+        return _v[0] if len(_v) == 1 else _v
+
+
+def _ingest_bundle_validate(_r, payload):
+    """EVERY RELOCATED OUTPUT, CHECKED ONCE, before any of the 11 consumers can
+    read it. A second failure class from the in-process assertions: those prove
+    the SIGNATURE is right and prove nothing about what survives the crossing.
+
+    NOTE ON WHAT IS DELIBERATELY *NOT* ASSERTED. `shot_scores` may legitimately
+    be EMPTY while `shot_changes` is not — detect_shot_changes' legacy-parse
+    path recovers timestamps but no parsable scores and leaves out_scores empty
+    on purpose. So `len(scores) == len(changes)` is NOT an invariant, and
+    asserting it would page on a real, documented path. The invariant is SHAPE.
+    """
+    if not isinstance(_r, dict):
+        raise RuntimeError("ingest bundle returned %s, not a dict" % type(_r).__name__)
+    if _r.get("error"):
+        raise RuntimeError("ingest bundle failed on the far side: %s" % _r["error"])
+
+    # ── shot_changes: the exact shape that killed 17 jobs / 7 users. ────────
+    _assert_flat_times("shot_changes (ingest bundle boundary)", _r.get("shot_changes"))
+    if not isinstance(_r.get("shot_scores"), dict):
+        raise RuntimeError(
+            "ingest bundle shot_scores is %s, expected dict — the out-parameter "
+            "that could not cross a boundary must arrive as a real second return"
+            % type(_r.get("shot_scores")).__name__)
+
+    # ── proxy: non-empty or PAGE. An empty proxy is a zero-frame video that
+    #    Gemini accepts and plans blindly from — silent, every gate green.
+    if (payload or {}).get("want_proxy"):
+        _pb = _r.get("gemini_proxy")
+        if not isinstance(_pb, (bytes, bytearray)) or len(_pb) <= 1024:
+            raise RuntimeError(
+                "ingest bundle proxy is %d bytes — refusing to hand Gemini an "
+                "empty video" % (len(_pb) if _pb is not None else -1))
+
+    # ── loudness: non-empty or PAGE (the plan reads it and would degrade). ──
+    if not _r.get("loudness"):
+        raise RuntimeError(
+            "ingest bundle loudness is empty — refusing to degrade the plan")
+
+    # ── faces: empty is LEGAL (no visible face); wrong-typed is not. ────────
+    for _k in ("faces_dense", "faces_smoothed"):
+        if not isinstance(_r.get(_k), list):
+            raise RuntimeError(
+                "ingest bundle %s is %s, expected list"
+                % (_k, type(_r.get(_k)).__name__))
+    return _r
+
+
+def _ingest_bundle_dispatch(payload):
+    """Run the four ingest tasks on the cpu=8 bundle. Called INSIDE a pool
+    thread, so the single remote call overlaps normalize/transcribe exactly the
+    way the four local futures did.
+    """
+    import modal as _modal
+    _t0 = time.time()
+    _fn = _modal.Function.from_name("promptly-gpu-worker", "ingest_bundle")
+    _r = _ingest_bundle_validate(_fn.remote(payload), payload)
+    _r["_near_wall_s"] = round(time.time() - _t0, 1)
+    print("[ingest-bundle] %d shots, %d face keyframes, %s proxy bytes, "
+          "source=%s far=%ss near=%ss"
+          % (len(_r["shot_changes"]), len(_r["faces_smoothed"]),
+             len(_r.get("gemini_proxy") or b""), _r.get("source_from"),
+             _r.get("_far_wall_s"), _r["_near_wall_s"]), flush=True)
+    return _r
+
+def _ingest_bundle_enabled(input_data=None):
+    """Run the four ingest tasks on the cpu=8 bundle instead of in-process.
+
+    DARK by default -> the in-process path runs and the plan is byte-identical.
+    The per-job override (`ingest_bundle_test`) is how the real-boundary
+    verification job runs WITHOUT flipping any live traffic.
+    """
+    if isinstance(input_data, dict) and input_data.get("ingest_bundle_test"):
+        return True
+    return str(os.environ.get("PROMPTLY_INGEST_BUNDLE", "") or "").strip().lower() in (
+        "1", "true", "yes", "on")
+
 def handler(job):
     input_data = job["input"]
     _DIVERGENCE_LOG.clear()   # LEDGER: fresh accumulator per job (flushed in finally)
@@ -41331,127 +41682,20 @@ def handler(job):
                 _tl_end(_pe_span)
 
         def _do_gemini_proxy_impl():
-            """Provide low-res video bytes for inline Gemini API call.
-
-            Three paths, in priority order:
-              1. Client provided `proxy_video_url` — download the small
-                 pre-uploaded proxy from S3/CloudFront (~3-6 MB, lands
-                 in under a second). Skips the on-server encode entirely.
-              2. Prewarm cache hit — proxy was encoded during the iOS
-                 upload window and sits in the Modal volume. Reading
-                 from local disk is ~10-100ms vs. a fresh re-encode.
-              3. No client proxy AND no prewarm cache — encode 480p@16fps
-                 proxy ourselves from the high-res source (~7-10s on
-                 the orchestrator).
-            """
-            _proxy_t = time.time()
-            if proxy_video_url:
-                try:
-                    _resp = safe_media_get(proxy_video_url, timeout=30)
-                    _resp.raise_for_status()
-                    _proxy_bytes = _resp.content
-                    _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
-                    print(
-                        f"[pipeline] Gemini proxy: client-uploaded {_proxy_mb:.1f}MB "
-                        f"downloaded in {time.time()-_proxy_t:.1f}s (no on-server encode)",
-                        flush=True,
-                    )
-                    return _proxy_bytes
-                except Exception as _client_proxy_err:
-                    # Surface but fall through to prewarm cache / on-server encode.
-                    print(f"[pipeline] Client proxy download failed ({_client_proxy_err}) — checking prewarm cache", flush=True)
-
-            # Prewarm cache check — the proxy was encoded during the iOS
-            # upload window (~7-10s of work done at upload time instead of
-            # render time, fully hidden behind upload latency).
-            try:
-                _prewarm_proxy = _prewarm_cached_proxy_path(_dl_bucket, _dl_key)
-                if os.path.exists(_prewarm_proxy) and os.path.getsize(_prewarm_proxy) > 1024:
-                    with open(_prewarm_proxy, "rb") as f:
-                        _proxy_bytes = f.read()
-                    _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
-                    print(
-                        f"[pipeline] Gemini proxy: prewarm-cache hit {_proxy_mb:.1f}MB "
-                        f"in {time.time()-_proxy_t:.1f}s (no on-server encode)",
-                        flush=True,
-                    )
-                    return _proxy_bytes
-            except (NameError, AttributeError):
-                # _dl_bucket / _dl_key not in scope on this path — fall through
-                pass
-            except Exception as _pc_err:
-                print(f"[pipeline] prewarm proxy read failed ({_pc_err}) — falling back to on-server encode", flush=True)
-
-            try:
-                _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
-                # 480p @ 18fps proxy. Paired with video_metadata.fps=18 on
-                # the Gemini Part so Gemini SAMPLES at 18fps — without that
-                # metadata the SDK defaults to ~1fps and bumping the encoder
-                # is performative. 24 is the API's hard cap (validated
-                # 2026-06-13: fps>24 returns INVALID_ARGUMENT). At 18fps the
-                # model sees micro-expression transitions (the half-beat
-                # face shift before a line lands), gesture velocity (where
-                # the hand actually moves vs. settles), and eye-direction
-                # changes between blinks — the editorial signal that lives
-                # between frames at 10fps. Trade-off: more video tokens per
-                # call than 16fps, accepted because arc-aware placement
-                # quality is the bottleneck, not API latency — and the
-                # primary 504 driver (X-Server-Timeout=120s) is now fixed
-                # at the client level (see _get_genai_client).
-                _proxy_venc = (["-c:v", "h264_nvenc", "-preset", "p1", "-rc", "vbr", "-cq", "32"]
-                               if _HAS_NVENC else
-                               ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "30",
-                     "-x264-params", f"threads={_PROXY_X264_THREADS}"])
-                _hw_dec = ["-hwaccel", "cuda"] if _HAS_HWACCEL else []
-                # Audio: Opus mono @ 64kbps. Opus at 64k beats AAC at 96k for
-                # speech intelligibility AND prosodic detail (voice rise/drop,
-                # micro-pauses, laugh/gasp texture) — the acoustic signal the
-                # prompt explicitly tells Gemini to listen for. The previous
-                # AAC @ 48kbps smeared that texture. Modern ffmpeg writes
-                # Opus into MP4 natively; Gemini's MP4 ingestion accepts it.
-                # RENDER_FFMPEG timeout fix (Zac 2026-08-03): the proxy decodes the
-                # FULL source to emit an 18fps/480p copy; a 60fps/100fps or 4K source
-                # CPU-decodes far more and blew the fixed 30s (coded INVALID_FORMAT).
-                # Scale by real source weight; normal 30fps clips stay at base 30s.
-                _proxy_cmd = subprocess.run(
-                    # MAP EXPLICITLY (2026-08-04). THIRD copy of the Core Media
-                    # Metadata class, found by the cert_input_matrix cell built
-                    # to test the SECOND one. An iPhone metadata track is
-                    # classified as audio with codec `none`, so auto stream
-                    # selection hands libopus a stream nothing can decode:
-                    # "[aist#0:2/none] Decoding requested, but no decoder found
-                    # for: none". 14d758c fixed audio extraction, 5f19901 fixed
-                    # hype_render's canon, and this encode still had it — the
-                    # whole job died at the Gemini proxy. `?` on the audio map
-                    # keeps genuinely silent sources working.
-                    ["ffmpeg", "-y", "-threads", "0"] + _hw_dec + ["-i", _raw_source,
-                     "-map", "0:v:0", "-map", "0:a:0?",
-                     "-vf", "scale=480:-2,fps=18"] + _proxy_venc + [
-                     "-c:a", "libopus", "-b:a", "64k", "-ac", "1",
-                     _proxy_path],
-                    capture_output=True, text=True,
-                    timeout=_probe_weighted_timeout(_raw_source, 30, 180),
-                )
-                if _proxy_cmd.returncode != 0 or not os.path.exists(_proxy_path):
-                    raise RuntimeError(f"Gemini proxy encode failed: {(_proxy_cmd.stderr or '')[-300:]}")
-                with open(_proxy_path, "rb") as f:
-                    _proxy_bytes = f.read()
-                _proxy_mb = len(_proxy_bytes) / (1024 * 1024)
-                print(f"[pipeline] Gemini proxy: 480p@16fps {_proxy_mb:.1f}MB in {time.time()-_proxy_t:.1f}s (on-server encode, no client proxy)", flush=True)
-                return _proxy_bytes
-            except Exception as e:
-                raise RuntimeError(f"Gemini proxy encode failed: {e}") from e
+            # Delegates to the SHARED implementation the bundle also calls,
+            # so the two paths cannot drift. work_dir is passed EXPLICITLY:
+            # the far side makes its own, and the proxy file lives and dies
+            # inside it — a local path never crosses the boundary.
+            return _ingest_gemini_proxy(_raw_source, work_dir, proxy_video_url,
+                                        _dl_bucket, _dl_key)
 
         # CONTRACT-EXTRACTED (PR#1, 2026-08-28). Explicit inputs, no capture.
         # Still in-process and byte-identical; the signature is what has to be
         # right BEFORE relocation, because a local work_dir works either way.
         def _do_loudness(raw_source=None):
-            raw_source = _raw_source if raw_source is None else raw_source
-            _r = measure_source_loudness(raw_source)
-            # NON-EMPTY AT THE BOUNDARY: a relocated call that returns nothing
-            # must PAGE, not hand back a degraded value that a plan silently uses.
-            assert _r is not None, "loudness returned None — refusing to degrade the plan"
-            return _r
+            # Delegates to the SHARED implementation the bundle also calls, so
+            # the two paths cannot drift. The non-empty assertion lives there.
+            return _ingest_loudness(_raw_source if raw_source is None else raw_source)
 
         # scdet confidence scores (filled in the pool thread; consumed by the
         # scene-change floor's confidence gate). They ride the future's RETURN
@@ -41476,14 +41720,16 @@ def handler(job):
             and downstream would read an empty dict — no exception, a silently
             degraded plan, every gate green.
             """
-            raw_source = _raw_source if raw_source is None else raw_source
-            scores_out = _shot_change_scores if scores_out is None else scores_out
-            send_progress(job_id, "shots", 18, "Detecting shot changes", app_url)
-            _changes = detect_shot_changes(raw_source, out_scores=scores_out)
-            # WELL-TYPED AT THE BOUNDARY (contract rule). Empty is legal — a
-            # single-take source has no cuts; wrong-shaped is not.
-            _assert_flat_times("shot_changes (callee return)", _changes)
-            return _changes, scores_out
+            # Delegates to the SHARED implementation. scores_out stays in the
+            # signature so the in-process call site is untouched, but the shared
+            # function makes its OWN dict — nothing crosses by reference.
+            _changes, _scores = _ingest_shot_changes(
+                _raw_source if raw_source is None else raw_source, job_id, app_url)
+            if scores_out is None:
+                scores_out = _shot_change_scores
+            if scores_out is not None:
+                scores_out.update(_scores)
+            return _changes, _scores
 
         def _do_vocal_emphasis():
             return detect_vocal_emphasis(_raw_source)
@@ -43077,44 +43323,14 @@ def handler(job):
             """`proxy_ready` replaces the captured `future_gemini_proxy`.
 
             A live Future cannot cross a container boundary. Awaiting it HERE
-            (in-process) is byte-identical to awaiting it inside; once relocated
-            the caller passes the proxy RESULT instead, and the four move as one
-            unit so the overlap this function is named for is preserved.
+            (in-process) is byte-identical to awaiting it inside; in the bundle
+            the four move as ONE UNIT, so the proxy task runs on the same box
+            and the overlap this function is named for is preserved.
             """
-            """Run face detection on 240p proxy (much faster than 1080p source).
-            Waits for proxy encode (~1.5s), then decodes 240p instead of 1080p (~20x fewer pixels).
-            Falls back to the raw source when no proxy was encoded (render_only mode)."""
-            send_progress(job_id, "face_detect", 14, "Tracking faces frame-by-frame", app_url)
-            _proxy_exists = False
-            _pf = future_gemini_proxy if proxy_ready is None else proxy_ready
-            if _pf is not None:
-                if hasattr(_pf, "result"):
-                    _pf.result()
-                _proxy_path = os.path.join(work_dir, "gemini_proxy.mp4")
-                _proxy_exists = os.path.exists(_proxy_path)
-            # Sparse sampling target: ~1 detection per 3s of source — roughly
-            # one sample per cut at typical short-form pacing (~20 cuts per
-            # 60s video → 20 detections). The EMA smoothing in
-            # smooth_face_trajectory interpolates between samples and coasts
-            # through gaps, so coarse samples still produce a continuous
-            # trajectory. Trade-off accepted: fast head movement (~1s spans)
-            # will be missed and the source-reframe crop will be less
-            # precise on high-motion content.
-            if _proxy_exists:
-                # Proxy is 10fps — every 30 frames ≈ 1 detection per 3s.
-                dense = detect_face_positions_dense(
-                    os.path.join(work_dir, "gemini_proxy.mp4"), every_n_frames=30,
-                    target_w=1080, target_h=1920,
-                )
-            else:
-                # No proxy (render_only) or proxy missing — use raw source.
-                # Source is up to 60fps; every 180 frames ≈ 1 detection per 3s.
-                dense = detect_face_positions_dense(_raw_source, every_n_frames=180)
-            if dense:
-                smoothed = smooth_face_trajectory(dense, total_duration=source_duration)
-                print(f"[dense-face] Smoothed trajectory: {len(smoothed)} keyframes", flush=True)
-                return dense, smoothed
-            return [], []
+            return _ingest_face_detect(
+                _raw_source, work_dir, source_duration,
+                future_gemini_proxy if proxy_ready is None else proxy_ready,
+                job_id, app_url)
 
         # Manual pool management — do NOT use `with` block because it calls
         # shutdown(wait=True) on exit, which would block on future_faces and defeat
@@ -43187,9 +43403,38 @@ def handler(job):
         # those wastes ~10-15s of GPU compute and contends for resources
         # with fps_normalize / RIFE. See the gated-dispatch block in
         # _get_resolved_transcript above for the speaker-count logic.
-        future_gemini_proxy = None if _skip_proxy else mega_pool.submit(_timed("gemini_proxy", _do_gemini_proxy))
-        future_loudness = mega_pool.submit(_timed("loudness", _do_loudness))
-        future_shot_changes = mega_pool.submit(_timed("shot_changes", _do_shot_changes))
+        # ── LANE 3: four ingest tasks -> ONE cpu=8 bundle call (flag-gated) ──
+        # DARK by default: _bundle_future stays None, every submit below is the
+        # in-process one, and the plan is byte-identical.
+        #
+        # SUBMIT ORDER IS LOAD-BEARING and deliberately unchanged on the dark
+        # path. mega_pool has max_workers=10 against 13 submits, so moving
+        # `faces` up here to sit with its three siblings would change which
+        # tasks queue behind which — a timing change on the path that is
+        # supposed to be untouched. The bundle view is therefore built AT each
+        # original submit site, not in one relocated block.
+        _bundle_future = None
+        if _ingest_bundle_enabled(input_data):
+            _bundle_future = mega_pool.submit(
+                _timed("ingest_bundle", _ingest_bundle_dispatch),
+                {"job_id": job_id, "app_url": app_url,
+                 "dl_bucket": _dl_bucket, "dl_key": _dl_key,
+                 "proxy_video_url": proxy_video_url,
+                 "source_duration": source_duration,
+                 "want_proxy": not _skip_proxy})
+
+        def _ingest_future(name, fn, keys):
+            """Bundle view when armed, the in-process future when dark."""
+            if _bundle_future is not None:
+                return _IngestBundleView(_bundle_future, keys, name)
+            return mega_pool.submit(_timed(name, fn))
+
+        future_gemini_proxy = (
+            None if _skip_proxy
+            else _ingest_future("gemini_proxy", _do_gemini_proxy, ("gemini_proxy",)))
+        future_loudness = _ingest_future("loudness", _do_loudness, ("loudness",))
+        future_shot_changes = _ingest_future(
+            "shot_changes", _do_shot_changes, ("shot_changes", "shot_scores"))
         future_vocal_emphasis = mega_pool.submit(_timed("vocal_emphasis", _do_vocal_emphasis))
         # Shake probe runs early (own future) so the input-quality pass can read
         # it pre-recipe; _do_fps_normalize reuses the same cached score.
@@ -43211,7 +43456,8 @@ def handler(job):
         # Edit recipe waits on transcript + upload + face/signals internally — skipped entirely in render_only
         future_edit = None if _skip_edit_gen else mega_pool.submit(_do_edit_recipe_overlapped)
         # Face detection runs directly on raw source (no normalize dependency)
-        future_faces = mega_pool.submit(_timed("faces", _do_face_detect_overlapped))
+        future_faces = _ingest_future(
+            "faces", _do_face_detect_overlapped, ("faces_dense", "faces_smoothed"))
 
         # ── EditPolicy resolve (Phase 2 · Step 1: flag-gated, NO consumer yet) ──
         # Flag is per-job (input_data["edit_policy_enabled"]) OR global env

@@ -1159,6 +1159,134 @@ def run_pipeline_bg(body: dict):
         print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
               f"EXCEPTION ({type(_e).__name__}: {_e}) — dispatch fallback + reaper will settle", flush=True)
     return result
+@app.function(
+    # LANE 3 — the four ingest tasks as ONE cpu=8 unit. The POINT of the move is
+    # that the orchestrator can then floor at cpu=8 instead of holding cpu=16 for
+    # ~450s of planner wall on cores only these four tasks ever needed. Sized at
+    # 8 because the 480p proxy encode is the one real CPU consumer and cpu=8 is
+    # where it was measured safe; memory 8GiB against a non-render peak of
+    # 5.9-8.2GiB observed on the orchestrator, whose heaviest stage is not here.
+    #
+    # NOT a render function: it sets no PROMPTLY_RENDER_CORE_BUDGET and the
+    # validate_deploy core-budget check iterates an explicit two-function list
+    # (run_pipeline_bg, render_burst), so this cannot drift into that pin.
+    cpu=8, memory=8192, region="us", timeout=900, retries=0,
+    # PREWARM IS LOAD-BEARING. 75 of 122 jobs (61%) hit the proxy cache. An
+    # UNMOUNTED volume turns every one of those reads into a full 480p encode —
+    # the move would ADD cost instead of saving it, and would do so silently.
+    volumes={"/prewarm": prewarm_volume},
+)
+def ingest_bundle(payload: dict) -> dict:
+    """Proxy + loudness + shot-changes + face-detect, on one box, before the plan.
+
+    WHY ONE CALL AND NOT FOUR. face-detect reads the PROXY as a file out of
+    work_dir. Split across containers that dependency becomes a serialised S3
+    round trip; kept together it stays internal and the overlap the in-process
+    code was built around is preserved exactly.
+
+    WHAT CROSSES: plain data and bytes, both ways. The SOURCE is not handed
+    over as a path — this function resolves the same bytes from the same two
+    places the orchestrator would (prewarm cache, then S3), so no local path
+    ever crosses the boundary.
+
+    Returns a dict; `error` is set (never raised) so the near side can report a
+    far-side failure as a far-side failure rather than a mangled result.
+    """
+    import concurrent.futures as _cf
+    import os as _os
+    import shutil as _shutil
+    import sys as _sys
+    import tempfile as _tf
+    import time as _t
+    import traceback as _tb
+    _sys.path.insert(0, "/")
+    import handler as _H
+
+    _t0 = _t.time()
+    out = {"gemini_proxy": None, "loudness": {}, "shot_changes": [],
+           "shot_scores": {}, "faces_dense": [], "faces_smoothed": [],
+           "pool_task_s": {}, "source_from": None, "error": None}
+    work_dir = None
+    try:
+        # Refresh the volume view so a source/proxy committed by the prewarm
+        # container is visible here. ~50ms; without it a cache HIT reads as a
+        # miss and silently becomes a full encode.
+        try:
+            prewarm_volume.reload()
+        except Exception as _ve:
+            print(f"[ingest-bundle] prewarm reload failed: {_ve}", flush=True)
+
+        bucket, key = payload["dl_bucket"], payload["dl_key"]
+        work_dir = _tf.mkdtemp(prefix="ingest_bundle_")
+        _src = _H._prewarm_cached_source_path(bucket, key)
+        if _os.path.exists(_src) and _os.path.getsize(_src) > 1024:
+            out["source_from"] = "prewarm"
+            print(f"[ingest-bundle] source: prewarm-cache hit "
+                  f"({_os.path.getsize(_src)/1e6:.1f}MB)", flush=True)
+        else:
+            out["source_from"] = "s3"
+            _src = _os.path.join(work_dir, "source.mp4")
+            _d0 = _t.time()
+            _H._aws_s3_client.download_file(
+                bucket, key, _src,
+                Config=getattr(_H, "_S3_TRANSFER_CONFIG", None))
+            print(f"[ingest-bundle] source: S3 download "
+                  f"{_os.path.getsize(_src)/1e6:.1f}MB in {_t.time()-_d0:.1f}s",
+                  flush=True)
+
+        def _timed(_name, _fn, *_a):
+            def _w():
+                _s = _t.time()
+                try:
+                    return _fn(*_a)
+                finally:
+                    out["pool_task_s"][_name] = round(_t.time() - _s, 1)
+            return _w
+
+        _jid, _url = payload.get("job_id"), payload.get("app_url")
+        pool = _cf.ThreadPoolExecutor(max_workers=4)
+        f_proxy = (pool.submit(_timed(
+            "gemini_proxy", _H._ingest_gemini_proxy, _src, work_dir,
+            payload.get("proxy_video_url"), bucket, key))
+            if payload.get("want_proxy") else None)
+        f_loud = pool.submit(_timed("loudness", _H._ingest_loudness, _src))
+        f_shots = pool.submit(_timed(
+            "shot_changes", _H._ingest_shot_changes, _src, _jid, _url))
+        # FACES OVERLAPS THE PROXY exactly as it did in-process: the proxy
+        # FUTURE is handed in, faces awaits it and reads the encoded proxy off
+        # THIS box's work_dir. That overlap is the whole reason the four move
+        # together instead of one at a time.
+        f_faces = pool.submit(_timed(
+            "faces", _H._ingest_face_detect, _src, work_dir,
+            payload.get("source_duration") or 0, f_proxy, _jid, _url))
+
+        if f_proxy is not None:
+            out["gemini_proxy"] = f_proxy.result()
+        out["loudness"] = f_loud.result()
+        out["shot_changes"], out["shot_scores"] = f_shots.result()
+        out["faces_dense"], out["faces_smoothed"] = f_faces.result()
+        pool.shutdown(wait=True)
+        print(f"[ingest-bundle] done: {len(out['shot_changes'])} shots, "
+              f"{len(out['faces_smoothed'])} face keyframes, "
+              f"{len(out['gemini_proxy'] or b'')} proxy bytes, "
+              f"tasks={out['pool_task_s']}", flush=True)
+    except Exception as _e:
+        # RETURNED, not raised: a far-side failure must arrive at the near side
+        # labelled as one. A raised exception crosses as a Modal error whose
+        # traceback names the boundary, not the stage that actually broke.
+        out["error"] = f"{type(_e).__name__}: {_e}"
+        print("[ingest-bundle] FAILED\n" + _tb.format_exc(), flush=True)
+    finally:
+        if work_dir:
+            try:
+                _shutil.rmtree(work_dir, ignore_errors=True)
+            except Exception:
+                pass
+    out["_far_wall_s"] = round(_t.time() - _t0, 1)
+    return out
+
+
+
 
 
 # ── A-L4 RENDER FAN-OUT chunk worker (DARK behind PROMPTLY_RENDER_FANOUT) ──────

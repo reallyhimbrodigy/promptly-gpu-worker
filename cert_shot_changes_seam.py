@@ -132,8 +132,32 @@ check("_do_shot_changes returns a 2-tuple (contract both sides agree on)",
       len(_ret_tuples) >= 1, "callee no longer returns a pair — consumers unpack air")
 
 # The callee guards its own output before returning it.
-check("_do_shot_changes asserts its return is well-typed before returning",
-      _do is not None and "_assert_flat_times" in ast.dump(_do),
+def _guard_reachable_from(fnnode):
+    """The guard may now live one frame deeper: since the Lane 3 relocation
+    `_do_shot_changes` DELEGATES to the module-level `_ingest_shot_changes`
+    that the cpu=8 bundle also calls, and the guard moved with it.
+
+    So follow the delegation instead of pinning the guard's address — but only
+    through a call that ACTUALLY EXISTS in the body. Deleting the guard from
+    the shared implementation, or cutting the delegation and re-implementing
+    locally without it, both still fail. What must not fail is the code moving
+    to where both paths can share it, which is the whole point of the move.
+    """
+    if fnnode is None:
+        return False
+    if "_assert_flat_times" in ast.dump(fnnode):
+        return True
+    _called = {t.func.id for t in ast.walk(fnnode)
+               if isinstance(t, ast.Call) and isinstance(t.func, ast.Name)}
+    return any(isinstance(n, ast.FunctionDef) and n.name in _called
+               and n.name.startswith("_ingest_")
+               and "_assert_flat_times" in ast.dump(n)
+               for n in _TREE.body)
+
+
+check("_do_shot_changes asserts its return is well-typed before returning "
+      "(directly, or in the shared impl it delegates to)",
+      _guard_reachable_from(_do),
       "a relocated call must page on a bad return, not hand it downstream")
 
 print("\n=== C3: the arithmetic site is now unreachable with a bad shape ===")
