@@ -226,6 +226,53 @@ SEMANTIC_TO_MG_ANCHOR = {
 # ("1. The Missing Piece" genre advice) onto a real user's video — content
 # absent from the dialogue, on screen too briefly to read, over the face.
 
+_OVERLAP_PROMPT_OLD = 'the pipeline drops any B-roll overlapping an MG or overlay window, so clear windows are the ones that ship.'
+_OVERLAP_PROMPT_NEW = 'a cutaway may share its window with an MG or overlay when BOTH serve the same moment — a card over the b-roll it labels is one thought, not two (the reference corpus does this on 17 of 70 cutaways, 24%). What does not ship is a cutaway that collides with an element serving a DIFFERENT moment; that is the collision to avoid when you choose the window.'
+
+
+_WINDOW_ARM_PLACEMENT_BLOCK = """
+
+═══════════════════════════════════════════════════════════════════════════
+WHERE COMPONENTS BELONG — measured on ten reference edits (193 beats)
+═══════════════════════════════════════════════════════════════════════════
+Density is a CONSEQUENCE of placing each element where it belongs. It is not a
+target to hit. These are the placements the reference corpus actually makes.
+
+**CARDS REPLACE THE FRAME.** A card lands with the speaker OFF screen — it is
+the picture, not a decoration on the picture (measured: 10 of 35 reference cards
+have the speaker visible, 29%). Its strongest home is the CLOSE (10 of 35, more
+than any other arc position), then evidence and hook. A card is rarely alone on
+its beat (8 of 35 solo, 23%) — it normally arrives with the cutaway or the text
+that completes the same thought.
+
+**TEXT RIDES THE SPEAKER.** A text placement sits ON the speaker's shot — the
+opposite of a card (measured: 31 of 46, 67% with the speaker visible). Its home
+is the CLAIM and the EVIDENCE backing it (29 of 46, 63%), almost never the
+payoff (2 of 46). Almost never alone (8 of 46 solo, 17%).
+
+**CUTAWAYS ARE THE CORPUS'S LARGEST FAMILY, and they layer.** 75 cutaways
+across the ten references — more than cards and text placements each. 17 of 70
+(24%) sit on a beat that ALSO carries a card or a text placement. A cutaway
+under its own label is one moment, not two.
+
+**RESTRAINT IS A PLACEMENT TOO.** 31 of 193 reference beats (16%) carry NOTHING
+beyond the running captions — the editor holding on the speaker because the line
+carries itself. A bare beat is a choice with a reason, not a gap to fill.
+"""
+
+
+_WINDOW_DOCTRINE_SWAPS = (
+    ('The cure for all three is one discipline: at most one dominant visual event owns any ~2-second window — the ceiling that keeps events legible — each',
+     'The cure for all three is one discipline: every visual event in a ~2-second window serves the SAME moment — the test that keeps events legible — each'),
+    ('**A window holds at most one dominant event.** Stacked events bury each other; an empty window is the footage breathing.',
+     "**A window's elements must serve one moment together.** Elements that serve the same beat REINFORCE each other and layering them is normal craft — the reference corpus layers 77% of its cards and 83% of its text placements onto beats that already carry something. What buries a beat is elements that serve DIFFERENT moments competing for the eye. An empty window is the footage breathing."),
+    ('Within any window the craft is the same one the whole prompt turns on: one dominant element owning that beat, chosen for what that exact moment is doing. The movement decides how quickly windows fill; the window decides which single element leads.',
+     'Within any window the craft is the same one the whole prompt turns on: every element present is there for what that exact moment is doing. The movement decides how quickly windows fill; the window decides whether the elements in it are pulling together or competing.'),
+    ("A window holds one dominant visual event — the thing the eye goes to: a zoom\n    landing, B-roll entering, a transition firing, an MG dropping, an overlay\n    revealing. Two dominant events in one window split the viewer's attention and\n    neither lands; the window is where the eye looks, so give it one thing to look at.",
+     'A window has ONE JOB — the moment it is serving: a number landing, a\n    referent arriving, a turn happening. One or several elements may carry that\n    job together (a card over its own b-roll, a label on the shot it names), and\n    the corpus does exactly this on most of its placements. What splits attention\n    is two elements serving DIFFERENT moments in one window; the window is where\n    the eye looks, so give it one thing to understand.'),
+)
+
+
 _MG_GROUNDING_THRESHOLD = 0.6   # F5: min fraction of content words in the known set
 # ABBREVIATION FLOOR (2026-08-29). The prefix rule required BOTH sides >= 4
 # chars, so a 2-3 char display abbreviation could never prefix-match its own
@@ -9323,6 +9370,88 @@ already follow) and return when the face leads again."""
     # 100% LOSSLESS BY CONSTRUCTION, and asserted: the move is a pure permutation
     # of lines. If the line multiset changes by even one line the swap RAISES
     # rather than silently shipping a lossy reorder.
+    # ── WINDOW-DOCTRINE ARM (density_variant=4, 2026-08-29) ────────────────
+    # THE DOCTRINE UNDER TEST. "At most one dominant visual event owns any
+    # ~2-second window" is stated FOUR times and framed as the discipline
+    # "everything else in this prompt serves". It is a CEILING with no floor.
+    #
+    # WHY IT IS NOW WORTH TESTING — corpus evidence, not inference. Ten reference
+    # edits, 193 beats: 77% of cards and 83% of text placements SHARE their beat
+    # with another element, and 24% of reference cutaways sit on a beat that also
+    # carries a card or text placement. The references do not treat co-occurrence
+    # as a defect; it is their normal composition. Our pipeline additionally
+    # ENFORCES the ceiling in code by dropping b-roll that overlaps an MG or
+    # overlay window.
+    #
+    # THE REPLACEMENT IS A FLOOR, NOT A DELETION. The legibility concern is real
+    # — what the corpus contradicts is "one element per window", not "the window
+    # must make sense". Variant 4 swaps the ceiling for the test the corpus
+    # actually passes: every element in a window must serve the SAME moment.
+    # Two elements on one beat is craft; two moments on one beat is mud.
+    #
+    # STATED LIMIT: beat-level co-occurrence is not identical to the ~2s window
+    # the doctrine names, so the mapping is close but not exact.
+    if _dv == 4:
+        for _wd_old, _wd_new in _WINDOW_DOCTRINE_SWAPS:
+            if _wd_old not in system_instruction:
+                raise ValueError(
+                    "window-doctrine arm: anchor missing from the assembled "
+                    "prompt — the swap would silently no-op, which is the "
+                    "built-not-wired class this repo keeps re-learning")
+            system_instruction = system_instruction.replace(_wd_old, _wd_new, 1)
+    # VARIANT 5 — PLACEMENT ONLY, CEILING INTACT (2026-08-29). The separating
+    # measurement. Variant 4 (ceiling removed + placement) moved emission the
+    # WRONG WAY on the three staged sources: emphasis 1.34x and SFX 1.27x — the
+    # two families already oversupplied — while cards 0.74x, cutaways 0.49x and
+    # tight overlays 0.24x all FELL. Total rose 1.12x, so the arm bought volume
+    # in the cheapest families and lost the ones the reference distribution
+    # actually wants.
+    #
+    # Two readings fit that, and they have opposite fixes:
+    #   (a) the CEILING was never the constraint, and removing it just freed the
+    #       model to add whatever is cheapest to justify (a zoom needs no asset,
+    #       no window, no grounding);
+    #   (b) PLACEMENT guidance cannot reach families that are ASSET-GATED —
+    #       b-roll still needs a Pexels clip past the match floor, a card still
+    #       needs text past the grounding predicate — so telling the model where
+    #       they belong changes nothing about whether they can land.
+    #
+    # Variant 5 holds the ceiling and supplies placement alone. If cards and
+    # cutaways rise here, (a) is right and the ceiling was a red herring. If they
+    # stay flat, (b) is right and no prompt arm reaches them.
+    if _dv in (4, 5):
+        # ZAC'S RULING (2026-08-29): the ceiling is not relaxed by degrees — it
+        # is the wrong instrument, and DENSITY IS A CONSEQUENCE OF CORRECT
+        # PLACEMENT, NOT A DIAL. So the arm removes the ceiling AND supplies the
+        # measured placement rules TOGETHER; either alone is worse than both.
+        # Removing the ceiling without telling the model where things belong
+        # buys volume without composition, which is the failure the ceiling was
+        # written to prevent in the first place.
+        #
+        # Every number below is measured off ten reference edits, 193 beats.
+        # Evidence rides the rule (validate_deploy pins this house style): a bare
+        # rule gets cut in a diet and nobody learns why it was there.
+        system_instruction += _WINDOW_ARM_PLACEMENT_BLOCK
+    # ── OVERLAP-EXCLUSION ARM (density_variant=6, 2026-08-29) ──────────────
+    # BOTH HALVES OR NEITHER. The exclusion is enforced twice — once as prompt
+    # text telling the model its overlapping b-roll will be discarded, and once
+    # as a code drop that discards it. Changing only the prompt leaves the code
+    # silently deleting what the model now believes is allowed; changing only
+    # the code leaves the model still self-censoring. Zac's ruling: together.
+    #
+    # CORPUS EVIDENCE: 17 of 70 reference cutaways (24%) sit on a beat that also
+    # carries a card or a text placement. The references treat a card over its
+    # own b-roll as ONE thought. Our pipeline treats it as a collision.
+    if _dv == 6:
+        if _OVERLAP_PROMPT_OLD not in system_instruction:
+            raise ValueError(
+                "overlap arm: prompt anchor missing — the swap would silently "
+                "no-op while the code half still changed, which is the exact "
+                "half-applied state this arm exists to avoid")
+        system_instruction = system_instruction.replace(
+            _OVERLAP_PROMPT_OLD, _OVERLAP_PROMPT_NEW, 1)
+
+
     if os.environ.get("PROMPTLY_PROMPT_ORDER", "").strip() == "v2":
         _blk_start = system_instruction.find(
             "═══════════════════════════════════════════════════════════════════════════\n"
@@ -30877,6 +31006,12 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         _kept_indices: list = []
         for _i, _br in enumerate(broll_out):
             _bf0 = int(_br["fromFrame"])
+            # ARM FLAG, read from the plan (render_multi_clip has edit_plan,
+            # NOT input_data — reaching for input_data here is a documented
+            # pyflakes failure). Underscore-prefixed so the persist sanitiser
+            # strips it; a test knob is not plan data.
+            _overlap_arm_on = str(
+                (edit_plan or {}).get("_density_variant") or "") == "6"
             _bf1 = _bf0 + int(_br["durationInFrames"])
             _conflict = None
             for (_of0, _of1, _kind, _name) in _overlay_frame_ranges:
@@ -30884,7 +31019,7 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 if max(_bf0, _of0) < min(_bf1, _of1):
                     _conflict = (_kind, _name, _of0, _of1)
                     break
-            if _conflict:
+            if _conflict and not _overlap_arm_on:
                 _ck, _cn, _co0, _co1 = _conflict
                 print(
                     f"[broll] Dropping cutaway window=[{_bf0}-{_bf1}]f — "
@@ -43771,6 +43906,14 @@ def handler(job):
             _mc_ov = (input_data or {}).get("micro_concurrency_test")
             if _mc_ov:
                 edit_plan["_micro_concurrency_test"] = str(_mc_ov)
+            # Same carry for the density variant. The OVERLAP arm (variant 6)
+            # has a CODE half in render_multi_clip, which sees edit_plan and not
+            # input_data — without this the prompt half would apply and the code
+            # half would not, leaving exactly the half-applied state the arm's
+            # own guard raises about.
+            _dv_ov = (input_data or {}).get("density_variant")
+            if _dv_ov not in (None, ""):
+                edit_plan["_density_variant"] = str(_dv_ov)
         source_loudness = _tl_wait("wait_loudness_collect",
                                    lambda: future_loudness.result(),
                                    parent="normalize_transcribe_upload")

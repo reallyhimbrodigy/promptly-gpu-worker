@@ -163,6 +163,29 @@ def main(since: str = "2026-08-27"):
                 n = 16.0 * (sd / delta) ** 2
                 print(f"          to detect {eff:.2f}x (delta {delta:.3f}): "
                       f"n>={math.ceil(n)}/arm")
+    # RESTRICTED POPULATION — jobs offered >=1 seam in CONTROL terms. 44% of
+    # jobs are offered ZERO seams today, and the widening cannot move a job that
+    # never reaches the sub-call, so including them dilutes BOTH arms equally and
+    # buries the effect. Pre-registering the restricted cut as primary and the
+    # unrestricted as the real-world figure.
+    import math as _m
+    _restr = [r for r in rows if r["offered"] >= 1]
+    print(f"\n  ══ PRE-REGISTRATION INPUTS ══")
+    for _lbl, _set in (("UNRESTRICTED (real-world)", rows),
+                       ("RESTRICTED offered>=1 (primary)", _restr)):
+        _v = [25.0 * r["tight_ovl"] / r["out_s"] for r in _set]
+        _mu, _sd = st.mean(_v), st.pstdev(_v)
+        _z = sum(1 for x in _v if x == 0)
+        print(f"    {_lbl}: n={len(_set)}  mean {_mu:.3f}  sd {_sd:.3f}  "
+              f"zeros {100.0*_z/max(1,len(_v)):.0f}%")
+        for _eff in (1.5, 2.0, 3.37):
+            _d = _mu * (_eff - 1.0)
+            if _d > 0:
+                print(f"        {_eff:.2f}x -> n>={_m.ceil(16.0*(_sd/_d)**2)}/arm")
+    _fr = 100.0 * len(_restr) / max(1, len(rows))
+    print(f"    restricted share of traffic: {_fr:.0f}%  "
+          f"(so a 50/50 split yields ~{_fr/100*51/2:.0f} restricted jobs/arm/day)")
+
     _rs = [r["render_s"] for r in rows if isinstance(r.get("render_s"), (int, float))]
     if _rs:
         _m, _sd = st.mean(_rs), st.pstdev(_rs)
