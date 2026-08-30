@@ -367,7 +367,20 @@ def _session_certs_registered():
                       # re-assign-after-call, armed-by-default, dropped
                       # /prewarm mount, cpu=16 resize, dropped reload, local
                       # path in the payload, and each boundary page removed).
-                      ("cert_ingest_bundle_contract.py", 34)):
+                      ("cert_ingest_bundle_contract.py", 34),
+                      # reply_language (2026-08-30). Implemented TWICE — Python
+                      # here, JS in content-studio — so BOTH repos pin the same
+                      # literal twelve independently rather than reaching across
+                      # checkouts (a cross-repo path needs a skip branch, and a
+                      # check that can silently not run is the false-green
+                      # family). C6 is the load-bearing leg: the never-translate
+                      # clause is what stops the model translating the
+                      # transcript it echoes back, which would mistranslate
+                      # every clip whose audio is not the reader's language.
+                      # RED-PROVEN 11 ways. Note the first table mutation PASSED
+                      # and was wrong: '"bn": "Bengali"' occurs 4x in handler.py
+                      # and replace(...,1) hit an unrelated language table.
+                      ("cert_reply_language_parity.py", 56)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")

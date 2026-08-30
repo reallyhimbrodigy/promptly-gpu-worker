@@ -21955,6 +21955,66 @@ def _revalidate_reedit_plan(plan, dg_words, face_traj, vibe, duration,
     return _applied
 
 
+# ── reply_language — the language the USER reads, for re-edit replies ────────
+# MIRRORS content-studio lib/reply-language.js. Two implementations is a cost I
+# am taking deliberately and naming: they are in different LANGUAGES in
+# different REPOS, so sharing code is not available, and a drift check is. The
+# twelve are pinned by cert_reply_language_parity, which fails if either side
+# gains, loses or renames a language.
+#
+# THE DISTINCTION THAT MUST NOT BE MERGED: the reply follows the USER, the
+# captions follow the CONTENT. A Hindi speaker editing an English clip wants the
+# assistant's words in Hindi and the burned-in captions left in English. So this
+# governs `human_summary` and `clarification_question` ONLY — never caption
+# text, never transcript excerpts, never the vibe echo.
+_REPLY_LANGUAGES = {
+    "en": "English", "es": "Spanish", "pt-BR": "Brazilian Portuguese",
+    "fr": "French", "de": "German", "ja": "Japanese", "hi": "Hindi",
+    "bn": "Bengali", "ne": "Nepali", "ur": "Urdu", "ar": "Arabic",
+    "id": "Indonesian",
+}
+
+
+def _parse_reply_language(input_data):
+    """Validate against the twelve. NEVER returns an unvalidated string — this is
+    interpolated into a prompt, so an arbitrary value is prompt injection with
+    extra steps. Unknown/missing/hostile all collapse to 'en'."""
+    raw = (input_data or {}).get("reply_language") if isinstance(input_data, dict) else None
+    if not isinstance(raw, str):
+        return "en"
+    norm = raw.strip().replace("_", "-").lower()
+    if not norm:
+        return "en"
+    for code in _REPLY_LANGUAGES:
+        if code.lower() == norm:
+            return code
+    primary = norm.split("-")[0]
+    hits = [c for c in _REPLY_LANGUAGES if c.lower().split("-")[0] == primary]
+    return hits[0] if len(hits) == 1 else "en"
+
+
+def _reply_language_instruction(code):
+    """EMPTY FOR ENGLISH on purpose — the majority path keeps today's exact
+    prompt, so this cannot regress it. Only a non-English reader sees a change.
+
+    The second clause is load-bearing: without it the model translates the
+    transcript quotes it echoes back, turning CONTENT into chrome."""
+    c = code if code in _REPLY_LANGUAGES else "en"
+    if c == "en":
+        return ""
+    name = _REPLY_LANGUAGES[c]
+    return (
+        "\n\nLANGUAGE OF YOUR REPLY\n"
+        f"Write `human_summary` and `clarification_question` in {name}. The user "
+        f"reads {name}. This is independent of the language spoken in their "
+        "video, which you must never translate or comment on unless asked.\n"
+        "Everything else stays EXACTLY as it is: transcript text, caption text, "
+        "keyword strings, the vibe wording and every plan field you echo are "
+        f"CONTENT and must NOT be translated into {name}. Only the two sentences "
+        "addressed to the user are.\n"
+    )
+
+
 def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
                        surgical_v2=False, input_data=None, source_duration_s=None):
     """Call Gemini to produce a new plan from (old_plan, change_request).
@@ -22231,9 +22291,13 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
         "  human_summary — one sentence the user reads\n"
     )
 
-    prompt = "".join(prompt_parts)
+    # The user reads `human_summary` and `clarification_question`. Answer them
+    # in THEIR language, not the clip's. Empty string for English.
+    _reply_lang = _parse_reply_language(input_data)
+    prompt = "".join(prompt_parts) + _reply_language_instruction(_reply_lang)
 
-    print(f"[plan-diff] change_request: {change_request[:200]}", flush=True)
+    print(f"[plan-diff] change_request: {change_request[:200]} "
+          f"reply_language={_reply_lang}", flush=True)
     _t0 = time.time()
     response = client.models.generate_content(
         model=GEMINI_MODEL,
