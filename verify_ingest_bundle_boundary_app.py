@@ -46,19 +46,89 @@ BUCKET = "thisismybucketagainwooo"
 SRC_KEY = "ab-sources/talking-head-v1/625dfdc5-73s.mp4"
 
 
+IMG_FF = (modal.Image.debian_slim()
+          .apt_install("ffmpeg")
+          .pip_install(["boto3"]))
+
+# A CONSTRUCTED DURABLE SOURCE, per the A/B law — never user media, and never a
+# source whose properties we only hope are right. Three real talking-head clips
+# concatenated: two HARD CUTS the scene detector must find, and real faces so
+# the face-detect arm is exercised instead of comparing [] against [].
+# The first attempt used a single 73s talking head and the fixture guard caught
+# it: no shot changes, so both arms returned [] and the comparison would have
+# read as a perfect relocation.
+CONCAT_PARTS = [
+    "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
+    "ab-sources/talking-head-v1/3b2e5346-35s.mp4",
+    "ab-sources/talking-head-v1/0c17b20b-35s.mp4",
+]
+BUILT_KEY = "ab-sources/lane3-boundary/concat-3clip-2cut.mp4"
+
+
+@app.function(image=IMG_FF, secrets=S, timeout=1800, cpu=8, memory=8192)
+def build_source(parts: list, dest: str) -> dict:
+    """Concatenate real clips into one durable source with known hard cuts."""
+    import subprocess
+    import tempfile
+
+    import boto3
+    s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION") or "us-west-1")
+    b = os.environ.get("S3_BUCKET_NAME") or BUCKET
+    wd = tempfile.mkdtemp()
+    local = []
+    for i, k in enumerate(parts):
+        p = os.path.join(wd, f"p{i}.mp4")
+        s3.download_file(b, k, p)
+        local.append(p)
+        print(f"  fetched {k} ({os.path.getsize(p)/1e6:.1f}MB)", flush=True)
+    out = os.path.join(wd, "concat.mp4")
+    # Normalise to one geometry/fps so concat is legal; the CUTS between clips
+    # are what this source exists to provide.
+    fc = "".join(
+        f"[{i}:v]scale=1080:1920:force_original_aspect_ratio=decrease,"
+        f"pad=1080:1920:-1:-1,setsar=1,fps=30[v{i}];" for i in range(len(local)))
+    fc += "".join(f"[v{i}][{i}:a]" for i in range(len(local)))
+    fc += f"concat=n={len(local)}:v=1:a=1[v][a]"
+    cmd = ["ffmpeg", "-y", "-loglevel", "error"]
+    for p in local:
+        cmd += ["-i", p]
+    cmd += ["-filter_complex", fc, "-map", "[v]", "-map", "[a]",
+            "-c:v", "libx264", "-preset", "medium", "-crf", "20",
+            "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "128k", out]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=1500)
+    if r.returncode != 0 or not os.path.exists(out):
+        return {"ok": False, "why": (r.stderr or "")[-500:]}
+    s3.upload_file(out, b, dest, ExtraArgs={"ContentType": "video/mp4"})
+    return {"ok": True, "bucket": b, "key": dest, "bytes": os.path.getsize(out),
+            "parts": len(local)}
+
+
 @app.function(image=IMG, secrets=S, timeout=300)
 def resolve(key: str) -> dict:
     """Confirm the source exists BEFORE any compute is spent on it."""
     import boto3
     s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION") or "us-west-1")
     b = os.environ.get("S3_BUCKET_NAME") or BUCKET
-    h = s3.head_object(Bucket=b, Key=key)
+    try:
+        h = s3.head_object(Bucket=b, Key=key)
+    except Exception as e:
+        return {"missing": True, "bucket": b, "key": key, "why": str(e)[:120]}
     return {"bucket": b, "key": key, "bytes": h["ContentLength"]}
 
 
 @app.local_entrypoint()
-def main(key: str = SRC_KEY):
+def main(key: str = BUILT_KEY, rebuild: bool = False):
     src = resolve.remote(key)
+    if src.get("missing") or rebuild:
+        print(f"  building the durable source ({len(CONCAT_PARTS)} clips -> "
+              f"{len(CONCAT_PARTS) - 1} hard cuts)...")
+        bres = build_source.remote(CONCAT_PARTS, key)
+        if not bres.get("ok"):
+            print(f"  ❌ source build failed: {bres.get('why')}")
+            sys.exit(2)
+        print(f"  built s3://{bres['bucket']}/{bres['key']} "
+              f"({bres['bytes'] / 1e6:.1f} MB)")
+        src = resolve.remote(key)
     print(f"\n  source: s3://{src['bucket']}/{src['key']}  "
           f"({src['bytes'] / 1e6:.1f} MB)")
 
@@ -92,6 +162,9 @@ def main(key: str = SRC_KEY):
         bad.append("baseline produced NO proxy — the encode path never ran")
     if not b.get("loudness"):
         bad.append("baseline produced NO loudness")
+    if not b.get("faces_dense"):
+        bad.append("baseline detected NO faces — comparing [] against [] says "
+                   "nothing about whether the face arm survives the crossing")
     if bad:
         print("  ❌ FIXTURE FAILURE — not a result:")
         for x in bad:
