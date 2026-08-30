@@ -256,7 +256,24 @@ def main():
     if not m:
         print("  no JSON in response — record NOT written")
         return 1
-    rec = json.loads(m.group(0))
+    # SAVE THE RAW RESPONSE BEFORE PARSING (2026-08-29). A malformed JSON body
+    # used to raise straight out of main(), losing a response that was already
+    # PAID FOR — v09044g4 died at char 6009 and left nothing behind, so the
+    # failure could not be diagnosed without buying the call again. The record is
+    # the product; the response is the evidence. Keep both.
+    _raw_path = a.out + ".raw.txt"
+    try:
+        with open(_raw_path, "w", encoding="utf-8") as _fh:
+            _fh.write(txt)
+    except Exception:
+        pass
+    try:
+        rec = json.loads(m.group(0))
+    except json.JSONDecodeError as _je:
+        print(f"  JSON PARSE FAILED ({_je}) — raw response kept at {_raw_path}")
+        print(f"  This is a FAILED EXTRACTION, not an empty one. Do not read the")
+        print(f"  missing record as 'this reference has no beats'.")
+        return 1
     # PROVENANCE ON THE ROW. records-not-aggregates already makes one bad
     # reference a single DELETABLE ROW rather than a contaminated mean — but only
     # if the row names its source. Without this the deletion is untargetable and

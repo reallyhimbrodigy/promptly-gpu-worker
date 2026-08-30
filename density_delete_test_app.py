@@ -215,6 +215,15 @@ def main(n_sources: int = 2, reps: int = 1, mode: str = "cap"):
         _pairs = ((0, "CAP", {}), (2, "NOCAP", {}))
     elif mode == "seam":
         _pairs = ((0, "NARROW", {}), (0, "WIDE", {"PROMPTLY_SEAM_CANDIDATES": "wide"}))
+    elif mode == "placement":
+        # PLACEMENT ONLY vs BASE — ceiling intact in both arms. The separator.
+        _pairs = ((0, "BASE", {}), (5, "PLACE", {}))
+    elif mode == "window":
+        # THE WINDOW DOCTRINE — a ceiling ("at most one dominant event per
+        # ~2s window", stated four times) vs a floor ("every element in a
+        # window serves the SAME moment"). Corpus evidence: 77% of reference
+        # cards and 83% of text placements share their beat.
+        _pairs = ((0, "CEILING", {}), (4, "FLOOR", {}))
     else:
         # LEAN vs CONTROL at the PLAN stage. Delivered density says lean carries
         # 41% less MG; this says whether the model EMITS fewer MGs under lean
@@ -264,14 +273,15 @@ def main(n_sources: int = 2, reps: int = 1, mode: str = "cap"):
         return None if not d else 25.0 * r["counts"][fam] / d
 
     print(f"\n  ══ EVENTS PER 25s OF OUTPUT, BY FAMILY (paired on the same source) ══")
+    _A, _B = ({'cap': ('CAP','NOCAP'), 'seam': ('NARROW','WIDE'),
+               'window': ('CEILING','FLOOR'), 'placement': ('BASE','PLACE')}
+              .get(mode, ('CONTROL','LEAN')))
     header = f"  {'family':>18} {_A:>8} {_B:>8} {'delta':>8} {'ratio':>7}   per-source deltas"
     print(header)
     pairs = {}
     for r in ok:
         pairs.setdefault(r["clip"], {}).setdefault(r["label"].split("#")[0], []).append(r)
 
-    _A, _B = ({'cap': ('CAP','NOCAP'), 'seam': ('NARROW','WIDE')}
-              .get(mode, ('CONTROL','LEAN')))
     usable = [c for c, v in pairs.items() if v.get(_A) and v.get(_B)]
     print(f"  (complete pairs: {len(usable)}/{len(pairs)} sources)")
     totals = {}
