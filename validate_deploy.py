@@ -367,7 +367,7 @@ def _session_certs_registered():
                       # re-assign-after-call, armed-by-default, dropped
                       # /prewarm mount, cpu=16 resize, dropped reload, local
                       # path in the payload, and each boundary page removed).
-                      ("cert_ingest_bundle_contract.py", 33)):
+                      ("cert_ingest_bundle_contract.py", 34)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")

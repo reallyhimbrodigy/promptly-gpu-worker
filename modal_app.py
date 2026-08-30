@@ -1159,24 +1159,7 @@ def run_pipeline_bg(body: dict):
         print(f"[completion-post] call={_call_id} job={body.get('job_id')} "
               f"EXCEPTION ({type(_e).__name__}: {_e}) — dispatch fallback + reaper will settle", flush=True)
     return result
-@app.function(
-    # LANE 3 — the four ingest tasks as ONE cpu=8 unit. The POINT of the move is
-    # that the orchestrator can then floor at cpu=8 instead of holding cpu=16 for
-    # ~450s of planner wall on cores only these four tasks ever needed. Sized at
-    # 8 because the 480p proxy encode is the one real CPU consumer and cpu=8 is
-    # where it was measured safe; memory 8GiB against a non-render peak of
-    # 5.9-8.2GiB observed on the orchestrator, whose heaviest stage is not here.
-    #
-    # NOT a render function: it sets no PROMPTLY_RENDER_CORE_BUDGET and the
-    # validate_deploy core-budget check iterates an explicit two-function list
-    # (run_pipeline_bg, render_burst), so this cannot drift into that pin.
-    cpu=8, memory=8192, region="us", timeout=900, retries=0,
-    # PREWARM IS LOAD-BEARING. 75 of 122 jobs (61%) hit the proxy cache. An
-    # UNMOUNTED volume turns every one of those reads into a full 480p encode —
-    # the move would ADD cost instead of saving it, and would do so silently.
-    volumes={"/prewarm": prewarm_volume},
-)
-def ingest_bundle(payload: dict) -> dict:
+def _run_ingest_bundle(payload: dict) -> dict:
     """Proxy + loudness + shot-changes + face-detect, on one box, before the plan.
 
     WHY ONE CALL AND NOT FOUR. face-detect reads the PROXY as a file out of
@@ -1284,6 +1267,45 @@ def ingest_bundle(payload: dict) -> dict:
                 pass
     out["_far_wall_s"] = round(_t.time() - _t0, 1)
     return out
+
+
+@app.function(
+    # LANE 3 — the four ingest tasks as ONE cpu=8 unit. The POINT of the move is
+    # that the orchestrator can then floor at cpu=8 instead of holding cpu=16 for
+    # ~450s of planner wall on cores only these four tasks ever needed. Sized at
+    # 8 because the 480p proxy encode is the one real CPU consumer and cpu=8 is
+    # where it was measured safe; memory 8GiB against a non-render peak of
+    # 5.9-8.2GiB observed on the orchestrator, whose heaviest stage is not here.
+    #
+    # NOT a render function: it sets no PROMPTLY_RENDER_CORE_BUDGET and the
+    # validate_deploy core-budget check iterates an explicit two-function list
+    # (run_pipeline_bg, render_burst), so this cannot drift into that pin.
+    cpu=8, memory=8192, region="us", timeout=900, retries=0,
+    # PREWARM IS LOAD-BEARING. 75 of 122 jobs (61%) hit the proxy cache. An
+    # UNMOUNTED volume turns every one of those reads into a full 480p encode —
+    # the move would ADD cost instead of saving it, and would do so silently.
+    volumes={"/prewarm": prewarm_volume},
+)
+def ingest_bundle(payload: dict) -> dict:
+    """The cpu=8 relocation target. Body is SHARED with the baseline probe —
+    see _run_ingest_bundle. Two copies of this would be the same mistake the
+    relocation itself exists to remove."""
+    return _run_ingest_bundle(payload)
+
+
+# ── LANE 3 VERIFICATION BASELINE (test fixture, never on a user path) ────────
+# The SECOND check needs an in-process baseline to compare the boundary against,
+# on the orchestrator's shape: cpu=16, /prewarm mounted. It runs the SAME body
+# as ingest_bundle, so the only variables between the two are the box size and
+# the crossing itself — which is exactly what the comparison is meant to isolate.
+# A separate implementation here would test my fixture, not the relocation.
+@app.function(
+    cpu=16, memory=12288, region="us", timeout=900, retries=0,
+    volumes={"/prewarm": prewarm_volume},
+)
+def ingest_baseline_probe(payload: dict) -> dict:
+    return _run_ingest_bundle(payload)
+
 
 
 

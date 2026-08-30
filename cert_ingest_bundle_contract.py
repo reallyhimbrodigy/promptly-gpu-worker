@@ -334,6 +334,13 @@ print("\n=== C8 — the far side mounts /prewarm and is sized cpu=8 ===")
 print("    (61% of jobs hit the proxy cache; unmounted turns each into a re-encode)")
 _i = MSRC.index("def ingest_bundle(")
 _dec = MSRC[MSRC.rfind("@app.function", 0, _i):_i]
+# The BODY lives in the shared _run_ingest_bundle that the cpu=16 verification
+# baseline calls too — a second copy of it here would be the very mistake this
+# relocation removes. Follow the delegation for the body checks; the DECORATOR
+# checks stay pinned to ingest_bundle, because the mount and the cpu= are
+# properties of that function and not of the shared body.
+_bi = MSRC.index("def _run_ingest_bundle(")
+_body = MSRC[_bi:_bi + 7000]
 check("ingest_bundle mounts the prewarm volume at /prewarm",
       lambda: (_ for _ in ()).throw(AssertionError(
           "no /prewarm mount — every one of the 61% cache hits becomes a full "
@@ -347,7 +354,7 @@ check("ingest_bundle reloads the prewarm volume before reading it",
       lambda: (_ for _ in ()).throw(AssertionError(
           "no prewarm_volume.reload() — a source committed by the prewarm "
           "container is invisible and the cache hit reads as a miss"))
-      if "prewarm_volume.reload()" not in MSRC[_i:_i + 6000] else None)
+      if "prewarm_volume.reload()" not in _body else None)
 
 print("\n=== C9 — NO LOCAL PATH CROSSES THE BOUNDARY ===")
 print("    (the contract rule: artifacts + plain data, never a path/future/out-param)")
@@ -374,7 +381,7 @@ check("the bundle payload is plain data only (no path, no future, no out-param)"
 
 
 def _far_side_fetches_its_own_source():
-    seg = MSRC[_i:_i + 6000]
+    seg = _body
     assert "_prewarm_cached_source_path" in seg and "download_file" in seg, (
         "the far side does not resolve the source itself — if the source is not "
         "fetched there, someone will be tempted to pass a path")
@@ -384,6 +391,42 @@ def _far_side_fetches_its_own_source():
 
 
 check("the far side resolves its OWN source and work_dir", _far_side_fetches_its_own_source)
+
+
+def _no_second_copy_of_the_body():
+    """ingest_bundle and the cpu=16 verification baseline must call ONE body.
+
+    Two copies is the exact mistake the relocation removes, and a fixture that
+    re-implements the thing under test measures the fixture. Also pins the
+    baseline's shape: it must be cpu=16 with /prewarm mounted, or the boundary
+    comparison is confounded by a different box AND a different source path,
+    and a proxy mismatch could not be attributed to the crossing.
+    """
+    import ast as _a
+    t = _a.parse(MSRC)
+    fns = {n.name: n for n in t.body if isinstance(n, _a.FunctionDef)}
+    for f in ("ingest_bundle", "ingest_baseline_probe"):
+        assert f in fns, f"{f} is missing from modal_app.py"
+        called = {c.func.id for c in _a.walk(fns[f])
+                  if isinstance(c, _a.Call) and isinstance(c.func, _a.Name)}
+        assert "_run_ingest_bundle" in called, (
+            f"{f} does not call the shared _run_ingest_bundle — a second copy "
+            f"of the ingest body can now drift from the one under test")
+    assert fns["ingest_bundle"].decorator_list, (
+        "ingest_bundle lost its @app.function decorator — it would vanish from "
+        "the deployed app while still existing as a plain Python function")
+    bdec = MSRC[MSRC.rfind("@app.function", 0, MSRC.index("def ingest_baseline_probe(")):
+                MSRC.index("def ingest_baseline_probe(")]
+    assert "cpu=16, memory=" in bdec, (
+        "the verification baseline must be cpu=16 — the orchestrator's shape")
+    assert '"/prewarm": prewarm_volume' in bdec, (
+        "the verification baseline must mount /prewarm too, or the two sides "
+        "resolve the source differently and the comparison is confounded")
+
+
+check("ingest_bundle and the verification baseline share ONE body",
+      _no_second_copy_of_the_body)
+
 
 print(f"\n{'=' * 70}\n  cert_ingest_bundle_contract: {PASS} passed, {FAIL} failed\n{'=' * 70}")
 if FAIL:
