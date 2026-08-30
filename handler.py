@@ -22005,13 +22005,25 @@ def _reply_language_instruction(code):
     name = _REPLY_LANGUAGES[c]
     return (
         "\n\nLANGUAGE OF YOUR REPLY\n"
-        f"Write `human_summary` and `clarification_question` in {name}. The user "
-        f"reads {name}. This is independent of the language spoken in their "
-        "video, which you must never translate or comment on unless asked.\n"
+        f"Write `human_summary` and `clarification_question` ENTIRELY in {name}. "
+        f"The user reads {name}. This is independent of the language spoken in "
+        "their video, which you must never translate or comment on unless "
+        "asked.\n"
+        # MEASURED, NOT ANTICIPATED. With only the sentence above, hi and ar both
+        # came back as an in-language clause followed by a verbatim English tail
+        # — "...كما طلبت — everything else untouched." A global script check
+        # scored that 71% and PASSED it; the failure is a MIX, not a language
+        # swap, and it is exactly what Frontend's spec said to watch for.
+        f"Do NOT mix languages inside those two sentences. Every word of them is "
+        f"{name} — including any closing clause such as 'everything else "
+        f"untouched'. If you would end with an English phrase, write that phrase "
+        f"in {name} instead. A reply that opens in {name} and finishes in "
+        "English is WRONG.\n"
         "Everything else stays EXACTLY as it is: transcript text, caption text, "
         "keyword strings, the vibe wording and every plan field you echo are "
-        f"CONTENT and must NOT be translated into {name}. Only the two sentences "
-        "addressed to the user are.\n"
+        f"CONTENT and must NOT be translated into {name}. Style and product "
+        f"names (Hormozi, Pop, B-roll) are names — leave them as they are. Only "
+        "the two sentences addressed to the user are translated.\n"
     )
 
 

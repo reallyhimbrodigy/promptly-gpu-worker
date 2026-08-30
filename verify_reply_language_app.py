@@ -40,7 +40,14 @@ import modal
 sys.path.insert(0, "/")
 import modal_app as _prod                                          # noqa: E402
 
-app = modal.App("verify-reply-language", image=_prod.image, secrets=_prod.secrets)
+# modal_app.py must be ADDED to the image, not just imported locally: this file
+# is imported INSIDE the container too, and the production image carries
+# handler.py but not modal_app.py. Without this the remote import dies with
+# ModuleNotFoundError before any arm runs — which looks like a harness that
+# hangs, not one that failed.
+_IMAGE = _prod.image.add_local_file("modal_app.py", "/modal_app.py")
+
+app = modal.App("verify-reply-language", image=_IMAGE, secrets=_prod.secrets)
 S = _prod.secrets
 
 # Devanagari, and Arabic incl. its supplement/extended blocks.
@@ -57,6 +64,30 @@ def _frac(text, blocks):
     hit = sum(1 for c in ch
               if any(lo <= ord(c) <= hi for lo, hi in blocks))
     return hit / len(ch)
+
+
+def _english_tail(text):
+    """Find any run of >=2 consecutive LATIN WORDS in a non-Latin reply.
+
+    A GLOBAL FRACTION CANNOT SEE THIS, and that is not a hypothetical: the first
+    run of this harness scored an Arabic reply at 71% and PASSED it, when the
+    string was
+
+        'تم تغيير نمط ... كما طلبت — everything else untouched.'
+
+    Arabic acknowledgement, English content — the exact failure Frontend's spec
+    named, waved through by a threshold. The Arabic dominates by character
+    count, so no percentage floor low enough to accept real replies would have
+    caught it.
+
+    Single Latin tokens are LEGITIMATE — product and style names ('Hormozi',
+    'B-roll') are not translated and should not be. Two or more in a row is an
+    English PHRASE, which is the thing that must not appear.
+    """
+    import re as _re
+    runs = _re.findall(r"[A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*)+",
+                       text or "")
+    return [r for r in runs if len(r.split()) >= 2]
 
 
 @app.function(timeout=1800, cpu=4, memory=8192)
@@ -153,11 +184,24 @@ def main(job: str = "", arms: str = "en,hi,ar"):
         if cq:
             print(f"     clarification  : {cq[:150]!r}")
             print(f"       -> {name} letters: {f_cq*100:.0f}%")
-        # 60% tolerates product names and numerals inside a translated sentence.
-        okhs = f_hs >= 0.60
+        # TWO conditions, because a fraction alone waved through a reply that
+        # was half English. The fraction catches "answered entirely in the
+        # wrong language"; the phrase check catches "acknowledged in-language,
+        # then finished in English" — the failure the spec actually named.
+        okfrac = f_hs >= 0.60
+        tails = [] if code == "en" else _english_tail(hs)
+        okhs = okfrac and not tails
         verdicts[code] = okhs
-        print(f"     {'✅' if okhs else '❌'} human_summary is "
-              f"{'in ' + name if okhs else 'NOT in ' + name}")
+        if tails:
+            print(f"     ❌ UNTRANSLATED ENGLISH PHRASE(S) in human_summary: "
+                  f"{tails}")
+            print(f"        A single Latin token would be fine (product/style "
+                  f"names are not translated). Two or more in a row is English "
+                  f"content in a reply that was supposed to be {name}.")
+        elif not okfrac:
+            print(f"     ❌ human_summary is NOT in {name} ({f_hs*100:.0f}%)")
+        else:
+            print(f"     ✅ human_summary is in {name}, with no English phrase")
 
     print(f"\n  ── VERDICT ──")
     if verdicts.get("en") is False:
