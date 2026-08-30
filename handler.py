@@ -11911,6 +11911,12 @@ def _translate_post_cut_anchors_to_src(post_cut_plan, new_to_src):
         e = _xlate(bc.get("end_word_index"))
         if s is None or e is None:
             print(f"[two-pass] Dropping broll_clip: index out of kept-range", flush=True)
+            _record_divergence(
+                "broll",
+                {"keyword": (bc.get("keyword") if isinstance(bc, dict) else None),
+                 "start_word_index": (bc.get("start_word_index") if isinstance(bc, dict) else None),
+                 "end_word_index": (bc.get("end_word_index") if isinstance(bc, dict) else None)},
+                "drop", final=None, reason="index_out_of_kept_range")
             continue
         bc_out.append({**bc, "start_word_index": s, "end_word_index": e})
     out["broll_clips"] = bc_out
@@ -18873,6 +18879,10 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     _ew_kept -= 1
                 if _sw_kept > _ew_kept:
                     print(f"[broll] All words [{_sw}]-[{_ew}] removed — skipping '{_br_kw}'", flush=True)
+                    _record_divergence(
+                        "broll",
+                        {"keyword": _br_kw, "start_word_index": _sw, "end_word_index": _ew},
+                        "drop", final=None, reason="anchor_words_all_removed_by_cut")
                     continue
                 _br_ts = word_time_s(_broll_dg_words, _sw_kept, "start")
                 _br_end = word_time_s(_broll_dg_words, _ew_kept, "end")
@@ -23964,6 +23974,10 @@ def fetch_broll_clip(broll_entry, duration_needed, work_dir, dialogue_reason="",
 
     if not best_match:
         print(f"[broll] No portrait video files found across {len(videos)} results for '{keyword}' — SKIPPING", flush=True)
+        _record_divergence(
+            "broll",
+            {"keyword": keyword, "n_results": len(videos)},
+            "drop", final=None, reason="no_portrait_candidate")
         return None
 
     # ── Match-score floor ─────────────────────────────────────────────
@@ -24070,6 +24084,10 @@ def _download_and_validate_broll(chosen_url, keyword, work_dir, broll_entry=None
 
     if total_bytes > _MAX_BROLL_BYTES:
         print(f"[broll] SKIPPED '{keyword}': file too large ({total_bytes / 1024 / 1024:.1f}MB > 30MB cap)", flush=True)
+        _record_divergence(
+            "broll",
+            {"keyword": keyword, "bytes": int(total_bytes), "cap": int(_MAX_BROLL_BYTES)},
+            "drop", final=None, reason="asset_over_byte_cap")
         try:
             os.remove(dest)
         except OSError:
@@ -30874,6 +30892,13 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                     f"Overlay wins (more deliberate editorial moment).",
                     flush=True,
                 )
+                _record_divergence(
+                    "broll",
+                    {"keyword": (_br.get("keyword") if isinstance(_br, dict) else None),
+                     "broll_frames": [int(_bf0), int(_bf1)],
+                     "conflict_kind": _ck, "conflict_name": _cn,
+                     "conflict_frames": [int(_co0), int(_co1)]},
+                    "drop", final=None, reason="overlay_window_conflict")
             else:
                 _kept_indices.append(_i)
         if len(_kept_indices) != len(broll_out):

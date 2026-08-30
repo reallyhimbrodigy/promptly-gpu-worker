@@ -129,7 +129,8 @@ Return JSON only, matching exactly:
       "t_start": <float>, "t_end": <float>,
       "purpose": "hook|claim|evidence|turn|payoff|close|breath",
       "speaker_on_screen": <bool>,
-      "treatment": ["cut"|"punch_in"|"cutaway"|"card"|"overlay_text"|"sfx"],
+      "caption_layer": "running"|"absent",
+      "treatment": ["cut"|"punch_in"|"cutaway"|"card"|"text_placement"|"sfx"],
       "cutaway_subject": "<what the b-roll literally SHOWS>" or null,
       "card_text": "<verbatim on-screen text>" or null,
       "read": "<one sentence: why this treatment, here>"
@@ -138,10 +139,21 @@ Return JSON only, matching exactly:
 }
 
 RULES THAT MATTER:
-- `treatment: []` is a REAL AND EXPECTED ANSWER. A beat that received nothing is
-  a deliberate choice by the editor and must be recorded as such. Do NOT invent a
-  treatment to avoid an empty list. A bare beat still requires a `read` saying
-  why it is bare.
+- CAPTIONS ARE NOT A TREATMENT. `caption_layer` records whether word-by-word
+  captions are running under this beat. They usually are, for the whole video —
+  that is a property of the edit, NOT a per-beat decision. Recording them as a
+  treatment made every beat non-bare and made restraint unmeasurable: on a first
+  pass over 10 references, 126 of 175 beats carried "overlay_text" and ZERO beats
+  came back bare. Put running captions in `caption_layer` and leave them out of
+  `treatment`.
+- `text_placement` is a DISCRETE text event only — a title, a callout, a label
+  that appears for this beat and is not part of the running caption track.
+- `treatment: []` is a REAL AND EXPECTED ANSWER, and on a well-edited video it
+  should be COMMON — the editor holding on the speaker with only captions running
+  is the most frequent choice in the corpus. A beat that received nothing beyond
+  captions is a deliberate act of restraint and must be recorded as such. Do NOT
+  invent a treatment to avoid an empty list. A bare beat still requires a `read`
+  saying WHY it is bare — what made holding correct there.
 - `first_visual_change_s` is when ANYTHING first changes on screen — a cut, a
   cutaway, a card, a title. If nothing changes for the whole video, return null.
   Null is a finding, not a failure.

@@ -342,7 +342,14 @@ def _session_certs_registered():
                       # A/B — both hash job_id, and without the "seamwide:"
                       # salt every job would land on the same side of BOTH
                       # experiments and neither effect would be separable.
-                      ("cert_seam_wide_arm.py", 16)):
+                      ("cert_seam_wide_arm.py", 16),
+                      # B-roll drops reach the ledger (2026-08-29). SIX of seven
+                      # drop sites were print-only, so the cutaway funnel was
+                      # invisible and "13x from culling" was an inference with
+                      # no evidence either way. C4 pins that the SUMMARY line
+                      # stays unledgered — ledgering it too would double-count
+                      # every overlay conflict.
+                      ("cert_broll_drops_ledgered.py", 18)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")
