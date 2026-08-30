@@ -14270,7 +14270,16 @@ _LEAN_AB_SPLIT = 0.5
 # again here would put every job on the SAME side of both experiments —
 # perfectly correlated arms, and neither effect separable from the other. The
 # "seamwide:" prefix decorrelates them.
-_SEAM_WIDE_SPLIT = 0.0
+# ARMED 2026-08-30 under Zac's explicit GO. Was 0.0 (dark) from 2026-08-29.
+# 50/50, deterministic per job_id, both arms concurrent over one population.
+# Analysis PRE-REGISTERED before arming: primary endpoint is delivered
+# tight_cut_overlays per 25s RESTRICTED to jobs offered >=1 seam in control
+# terms (n=128/arm at 10 days, MDE 1.38x); the unrestricted figure rides
+# alongside as the real-world number (255/arm, MDE 1.45x); transitions are
+# DESCRIPTIVE ONLY (98% zeros); render seconds p50/p90 carry a non-inferiority
+# bound of +19% (+34.7s), derived from the 231-job baseline variance rather
+# than chosen. Revert to 0.0 to disarm — no deploy needed beyond the constant.
+_SEAM_WIDE_SPLIT = 0.5
 
 
 def _seam_wide_arm():

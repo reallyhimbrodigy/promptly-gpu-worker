@@ -342,7 +342,7 @@ def _session_certs_registered():
                       # A/B — both hash job_id, and without the "seamwide:"
                       # salt every job would land on the same side of BOTH
                       # experiments and neither effect would be separable.
-                      ("cert_seam_wide_arm.py", 16),
+                      ("cert_seam_wide_arm.py", 17),
                       # B-roll drops reach the ledger (2026-08-29). SIX of seven
                       # drop sites were print-only, so the cutaway funnel was
                       # invisible and "13x from culling" was an inference with

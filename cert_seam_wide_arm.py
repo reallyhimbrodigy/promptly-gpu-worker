@@ -50,12 +50,24 @@ def arm_for(jid, split):
         H._SEAM_WIDE_SPLIT, H._ACTIVE_JOB_ID = _old_split, _old_jid
 
 
-print("=== C1: SHIPS DARK ===")
-check("_SEAM_WIDE_SPLIT is 0.0", H._SEAM_WIDE_SPLIT == 0.0,
-      f"got {H._SEAM_WIDE_SPLIT} — the cohort is LIVE before its GO")
+print("=== C1: ARMED AT THE PRE-REGISTERED SPLIT ===")
+# This asserted 0.0 (dark) from 2026-08-29 until Zac's GO on 2026-08-30. The
+# assertion MOVED with the ruling rather than being deleted: it still pins the
+# split to exactly one intended value, so an accidental change in either
+# direction — silently disarming, or drifting off 50/50 mid-cohort — fails the
+# deploy. A cohort whose split changes underneath it produces two windows that
+# cannot be pooled.
+check("_SEAM_WIDE_SPLIT is 0.5 (the pre-registered split)",
+      H._SEAM_WIDE_SPLIT == 0.5,
+      f"got {H._SEAM_WIDE_SPLIT} — the cohort is not running at its "
+      f"pre-registered fraction")
+check("the GO and the prior dark state are recorded at the constant",
+      "ARMED 2026-08-30" in open(H.__file__.replace(".pyc", ".py"),
+                                 encoding="utf-8").read())
+# The dark path must still WORK, so disarming is a one-constant revert.
 _dark = [arm_for(j, 0.0) for j in IDS[:500]]
-check("at split 0.0 every job is narrow", set(_dark) == {"narrow"},
-      f"got {set(_dark)}")
+check("split 0.0 still puts every job in narrow (disarm path intact)",
+      set(_dark) == {"narrow"}, f"got {set(_dark)}")
 
 print("\n=== C2: DETERMINISM — a retry lands in the same arm ===")
 _a = [arm_for(j, 0.5) for j in IDS[:300]]
