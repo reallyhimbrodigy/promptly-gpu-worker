@@ -135,5 +135,48 @@ check("_seam_candidates_wide() is what the candidate gate reads",
       "_wide = _seam_candidates_wide()" in _src,
       "the gate still reads the raw env — the arm is decorative")
 
+print("\n=== C8: THE RESTRICTION KEY IS ARM-INVARIANT ===")
+# The cohort's PRIMARY endpoint restricts to jobs "offered >=1 seam in CONTROL
+# terms". If that count came from the arm's own offered set, the wide arm would
+# be larger by construction and the arms would be restricted to DIFFERENT
+# populations — the restriction would become the treatment. This is the hazard
+# named in the pre-registration; these legs make it structural.
+_S = open(H.__file__.replace(".pyc", ".py"), encoding="utf-8").read()
+check("a narrow candidate set is computed separately",
+      "_cand_narrow = _shot_seam_src | _broll_edges_for_seams" in _S,
+      "the arm-invariant count does not exist")
+_in = _S.find("_cand_narrow = ")
+_wi = _S.find("_cand_set = _cand_set | _mech_new")
+check("narrow is computed BEFORE the widening is applied",
+      0 < _in < _wi,
+      "narrow is derived after the union — it would carry the arm's effect")
+check("the widening does not mutate the narrow set",
+      "_cand_set = set(_cand_narrow)" in _S,
+      "_cand_set aliases _cand_narrow — the union would mutate the key in place")
+# ONE computation, hoisted above the diagnostic so the printed count and the
+# persisted restriction key cannot diverge. The first version allowed 2 (the
+# assignment plus a diagnostic that recomputed the same union) — which is
+# exactly the drift this leg exists to prevent, so it was hoisted instead.
+_n_narrow = _S.count("_shot_seam_src | _broll_edges_for_seams")
+check("exactly ONE narrow computation exists (no per-arm copy)",
+      _n_narrow == 1,
+      f"found {_n_narrow} — a second copy means the diagnostic, the restriction "
+      f"key, or an arm can drift apart")
+check("the diagnostic READS the same set it persists",
+      "offered_today={len(_cand_narrow)}" in _S,
+      "the printed count is recomputed — it can disagree with the stored key")
+
+print("\n=== C9: IT IS PERSISTED, so the restriction is auditable ===")
+for _k in ("seams_narrow", "seams_offered", "seams_mech_new"):
+    check(f'  {_k} rides stage_timings', f'"{_k}": _SEAM_COUNTS_LAST' in _S,
+          "the analysis would have to RECONSTRUCT it from bare+overlay+"
+          "transition — a derivation that can drift after the fact")
+check("the holder is module-level, not an edit_plan underscore key",
+      "_SEAM_COUNTS_LAST = {}" in _S and 'edit_plan["_seam_counts"]' not in _S,
+      "an underscore key on edit_plan is stripped by the persist sanitiser "
+      "(the _lang_bundle 0/3000 precedent)")
+check("counts are CLEARED per job (no bleed between jobs on a warm container)",
+      "_SEAM_COUNTS_LAST.clear()" in _S)
+
 print(f"\n{PASS} passed, {FAIL} failed")
 sys.exit(1 if FAIL else 0)

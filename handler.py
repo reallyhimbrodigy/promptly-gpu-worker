@@ -230,6 +230,13 @@ _OVERLAP_PROMPT_OLD = 'the pipeline drops any B-roll overlapping an MG or overla
 _OVERLAP_PROMPT_NEW = 'a cutaway may share its window with an MG or overlay when BOTH serve the same moment — a card over the b-roll it labels is one thought, not two (the reference corpus does this on 17 of 70 cutaways, 24%). What does not ship is a cutaway that collides with an element serving a DIFFERENT moment; that is the collision to avoid when you choose the window.'
 
 
+# Seam counts for the cohort restriction. Holder rather than edit_plan:
+# the value is produced inside the transitions sub-call block and read at
+# the terminal write, and an underscore key on edit_plan would be stripped
+# by the persist sanitiser (the _lang_bundle 0/3000 failure).
+_SEAM_COUNTS_LAST = {}
+
+
 _WINDOW_ARM_PLACEMENT_BLOCK = """
 
 ═══════════════════════════════════════════════════════════════════════════
@@ -18012,6 +18019,10 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                     _mech_new = _mech_seam_src - _shot_seam_src - _broll_edges_for_seams
                     _mech_new = {_a for _a in _mech_new
                                  if isinstance(_a, int) and 0 <= _a and _a not in _seam_removed_src}
+                    # ONE computation of the arm-invariant narrow set, hoisted
+                    # above the diagnostic so the print and the restriction key
+                    # cannot diverge.
+                    _cand_narrow = _shot_seam_src | _broll_edges_for_seams
                     try:
                         # WHERE THEY LAND. A splice on a sentence-final word is
                         # a different editorial object from one mid-clause; the
@@ -18023,15 +18034,35 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                               f"broll={len(_broll_edges_for_seams)} "
                               f"mechanical_new={len(_mech_new)} "
                               f"(sentence-final {_sf}/{len(_mech_new)}) | "
-                              f"offered_today={len(_shot_seam_src | _broll_edges_for_seams)} "
-                              f"offered_wide={len(_shot_seam_src | _broll_edges_for_seams | _mech_new)}",
+                              f"offered_today={len(_cand_narrow)} "
+                              f"offered_wide={len(_cand_narrow | _mech_new)}",
                               flush=True)
                     except Exception:
                         pass
                     _wide = _seam_candidates_wide()
-                    _cand_set = _shot_seam_src | _broll_edges_for_seams
+                    # ── THE RESTRICTION MUST NOT DEPEND ON THE ARM ─────────
+                    # The cohort's PRIMARY endpoint restricts to jobs "offered
+                    # >=1 seam in control terms". If that count is taken from the
+                    # arm's OWN offered set, the wide arm is larger BY
+                    # CONSTRUCTION and the two arms are restricted to different
+                    # populations — the restriction becomes the treatment.
+                    #
+                    # So the narrow count is computed here, IDENTICALLY in both
+                    # arms, before the widening is applied, and persisted. One
+                    # expression, one call site: neither arm can grow its own
+                    # copy, and the analysis reads a recorded number instead of
+                    # reconstructing it from bare+overlay+transition (a
+                    # derivation that can drift after the fact).
+                    _cand_set = set(_cand_narrow)
                     if _wide:
                         _cand_set = _cand_set | _mech_new
+                    _SEAM_COUNTS_LAST.clear()
+                    _SEAM_COUNTS_LAST.update({
+                        "narrow": len(_cand_narrow),      # arm-invariant: THE restriction key
+                        "offered": len(_cand_set),        # what this arm actually offered
+                        "mech_new": len(_mech_new),
+                        "wide": bool(_wide),
+                    })
                     _seam_candidates = (sorted(_cand_set)
                                         if not _transitions_off else [])
                     for _awi2 in _seam_candidates:
@@ -44542,6 +44573,14 @@ def handler(job):
                 # source_duration 0/149 as precedent. Nested inside
                 # stage_timings so content-studio cannot strip it.
                 "seam_arm": _seam_wide_arm(),
+                # AUDITABLE AFTER THE FACT. seams_narrow is the restriction key
+                # and is arm-invariant by construction; seams_offered is what the
+                # arm actually offered. Recording both means the cohort's
+                # restricted cut can be re-derived from the row rather than
+                # recomputed from a formula that may have changed.
+                "seams_narrow": _SEAM_COUNTS_LAST.get("narrow"),
+                "seams_offered": _SEAM_COUNTS_LAST.get("offered"),
+                "seams_mech_new": _SEAM_COUNTS_LAST.get("mech_new"),
                 "seam_wide_on": bool(_seam_candidates_wide()),
                 "lean_schema_on": bool(_lean_schema_enabled()),
                 "lean_decor_ground_on": bool(_lean_decor_ground_enabled()),
