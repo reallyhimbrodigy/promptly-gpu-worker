@@ -93,7 +93,7 @@ def read(job_id: str) -> dict:
 
 @app.local_entrypoint()
 def main(dry: bool = True, read_only: bool = False, job_id: str = "",
-         key: str = SRC_KEY):
+         key: str = SRC_KEY, micro: int = 0):
     if read_only:
         jid = job_id or json.load(open("/tmp/arm_confirm_job.json"))["job_id"]
         r = read.remote(jid)
@@ -135,9 +135,17 @@ def main(dry: bool = True, read_only: bool = False, job_id: str = "",
         return
     fn = modal.Function.from_name("promptly-gpu-worker", "run_pipeline_bg")
     fn.hydrate()
-    cid = fn.spawn({"job_id": jid, "video_url": u["src"], "vibe": "viral",
-                    "user_id": str(uuid.uuid4()),
-                    "upload_url": u["dst"], "public_url": u["dst"]}).object_id
+    _body = {"job_id": jid, "video_url": u["src"], "vibe": "viral",
+             "user_id": str(uuid.uuid4()),
+             "upload_url": u["dst"], "public_url": u["dst"]}
+    # MICRO-CONCURRENCY CONFIRMATION. The 4/2/1 sweep has never run because no
+    # durable source was known to PRODUCE micro segments — the four batch-corpus
+    # clips render zero, so a sweep over them would compare nothing against
+    # nothing and read as "concurrency does not matter". This job answers the
+    # precondition before any money is spent on the arms.
+    if micro:
+        _body["micro_concurrency_test"] = str(micro)
+    cid = fn.spawn(_body).object_id
     with open("/tmp/arm_confirm_job.json", "w") as fh:
         json.dump({"job_id": jid, "call": cid}, fh)
     print(f"  → dispatched {jid[:8]}  {cid}")
