@@ -978,8 +978,19 @@ export const PromptlyOverlay: React.FC<PromptlyRenderProps> = ({ input }) => {
 //     FFmpeg analog).
 //   - Composite-effect zoom clips (FocusWindow, LetterboxPush, DepthPull —
 //     multi-layer overlays, blur masks, bokeh orbs, etc.).
-// Pure scale-only zooms (SmoothPush, SnapReframe, StepZoom) and no-zoom clips
-// are produced directly by FFmpeg in handler.py.
+// STALE UNTIL 2026-08-31, and it mattered: this used to read "Pure scale-only
+// zooms (SmoothPush, SnapReframe, StepZoom) and no-zoom clips are produced
+// directly by FFmpeg in handler.py." That has not been true since the FFmpeg
+// crop+lanczos path was retired — ffmpeg_base.SIMPLE_ZOOM_TYPES is now an EMPTY
+// SET, so categorize_clip() returns "remotion" for EVERY clip carrying a
+// zoomEffect and every zoom paints here. (n7.1 stopped re-evaluating
+// out_w/out_h per frame, so crop dims locked at full source and no zoom
+// actually rendered — see the note on SIMPLE_ZOOM_TYPES.)
+//
+// Only NO-ZOOM clips go to FFmpeg. A measured plan that read as "3 SnapReframe
+// + 1 StepZoom + 1 LetterboxPush" put FOUR scale-only zooms through this
+// composition at ~1000 ms/frame, which is invisible if you trust the sentence
+// above.
 //
 // Segments are concatenated end-to-end in the composition timeline so Python
 // can render them all in ONE Remotion process (no per-segment subprocess
