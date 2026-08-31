@@ -3504,7 +3504,23 @@ _REGRESSION_CORPUS = [
     ("analyze_shot_changes", "failure-corpus/RENDER_FFMPEG/41403891-1953-4a5b-85a6-e247eb9932bd.mp4", True),
     ("analyze_face_detect",  "failure-corpus/RENDER_FFMPEG/dc48a05a-9ef4-431c-a711-050de7fdec71.mp4", True),
     ("write_timeout",        "failure-corpus/TRANSCRIPTION/94306a2e-85e0-484c-b71a-6f85af57c242.mp4", False),
-    # TODO seed as the corpus captures them: frame_grid, analyze_loudness, keyterm_limit
+    # SEEDED 2026-08-30. Source VERIFIED present in the corpus before adding —
+    # a manifest entry pointing at a missing key makes the gate green against
+    # nothing, which is worse than the gap it was meant to close.
+    ("keyterm_limit",        "failure-corpus/TRANSCRIPTION/b5d0cbcd-7eca-47ff-9920-eccf929467c9.mp4", True),
+    # NOT SEEDABLE, and this is a MEASURED result rather than a TODO nobody
+    # revisits (probe_corpus_seeds_app.py, window to 2026-08-30):
+    #   frame_grid            0 failed jobs   no captured source
+    #   analyze_loudness      0 failed jobs   no captured source
+    #   missing_artifact_path 0 failed jobs   no captured source
+    # Zero occurrences means the corpus never had one to keep. These cannot be
+    # seeded by wanting them; they seed themselves the next time they fire.
+    #
+    # WHAT THE CORPUS ACTUALLY LACKS, by live frequency in the same window —
+    # these are recurring and unrepresented, and are the better next seeds:
+    #   freeze 35 · dead_moment 13 · ladder_exhausted:RuntimeError 12 ·
+    #   audio_extract_stream_map 9 · black 7
+    # Each still needs its source confirmed present before it is added here.
 ]
 
 

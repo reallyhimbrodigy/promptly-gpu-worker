@@ -451,6 +451,44 @@ def _user_message_sites_carry_a_code():
         f"lib/failure-copy.js REJECTION_COPY.")
 
 
+@check("EVERY REGRESSION-CORPUS ENTRY MUST NAME A KEY THAT EXISTS IN THE MANIFEST FORMAT (2026-08-30, RULE-1). The corpus re-runs one saved source per FIXED sub-code on every deploy so no fixed class can return silently. Its whole value rests on the key being a REAL captured file: a manifest entry pointing at a missing object does not fail loudly — cert_regression_corpus renders it, the fetch 404s, and the run reports a status that is not the founding sub-code, which its own pass rule reads as 'the original defect is gone'. A typo or an aspirational key therefore scores as a PASS. That is the false-green family exactly, and it is why 3 of the 4 sub-codes queued for seeding were left OUT rather than named: frame_grid, analyze_loudness and missing_artifact_path have ZERO failed jobs and no captured source, so naming them would make the gate green against nothing. This asserts the shape every entry must have (a 3-tuple whose key sits under failure-corpus/ and ends .mp4) and that the seeded count only ever grows.")
+def _regression_corpus_entries_are_well_formed():
+    import ast as _ast
+    _src = open("modal_app.py").read()
+    _t = _ast.parse(_src)
+    _lst = None
+    for _n in _ast.walk(_t):
+        if (isinstance(_n, _ast.Assign)
+                and any(getattr(_x, "id", None) == "_REGRESSION_CORPUS" for _x in _n.targets)):
+            _lst = _n.value
+    assert isinstance(_lst, _ast.List), "_REGRESSION_CORPUS is not a list literal"
+    _entries = []
+    for _e in _lst.elts:
+        assert isinstance(_e, _ast.Tuple) and len(_e.elts) == 3, (
+            "every corpus entry must be (sub_code, corpus_key, deterministic)")
+        _sub, _key, _det = _e.elts
+        assert isinstance(_sub, _ast.Constant) and isinstance(_sub.value, str) and _sub.value, \
+            "corpus entry has an empty sub_code"
+        assert isinstance(_key, _ast.Constant) and isinstance(_key.value, str), \
+            f"{_sub.value}: corpus key is not a string literal"
+        assert _key.value.startswith("failure-corpus/") and _key.value.endswith(".mp4"), (
+            f"{_sub.value}: corpus key {_key.value!r} is not a failure-corpus/*.mp4 "
+            f"object. An entry that does not resolve renders a 404, reports a "
+            f"status that is not its founding sub-code, and PASSES — green "
+            f"against nothing.")
+        assert isinstance(_det, _ast.Constant) and isinstance(_det.value, bool), \
+            f"{_sub.value}: deterministic flag must be a literal True/False"
+        _entries.append(_sub.value)
+    assert len(set(_entries)) == len(_entries), (
+        f"duplicate sub_code in the corpus: {_entries} — a second entry for a "
+        f"class silently replaces the first in the results dict")
+    # MONOTONIC. The corpus only grows; losing a seed is losing the only proof
+    # that a fixed class stays fixed.
+    assert len(_entries) >= 6, (
+        f"the regression corpus shrank to {len(_entries)} entries ({_entries}). "
+        f"Raise this floor when you seed, never when you drop one.")
+
+
 @check("A MOUNTED DIRECTORY MUST NOT CONTAIN A LIVE BUILD CACHE (2026-08-25, RULE-1). Modal verifies that mounted files do not change mid-upload, and `src/remotion` was mounted WHOLE — including node_modules/.cache/webpack, 283 MB that Remotion rewrites every time it renders. deploy.sh runs validate_deploy FIRST, and validate_deploy renders; a webpack flush landing after the gate returned but during the upload killed the deploy outright: 'index.pack was modified during build process'. The flip it was carrying did not land, and nothing before that point had failed — 429/429 green, quiet window clear. Deleting the cache pre-deploy only SHRINKS the race; excluding it CLOSES it, because an unmounted file cannot be observed changing. This asserts the exclusion survives, because the failure mode is a deploy that dies AFTER every gate has passed — the most expensive place to discover anything — and re-mounting the cache would silently restore an intermittent, timing-dependent deploy failure that looks like a Modal fault rather than ours.")
 def _remotion_mount_excludes_cache():
     import ast as _ast
