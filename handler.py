@@ -21252,7 +21252,7 @@ def _enforce_sound_negatives(edit_plan, sounds):
     return _n
 
 
-def _deterministic_reedit(old_plan, change_request):
+def _deterministic_reedit(old_plan, change_request, input_data=None):
     """Instrument 1 (rider 4 — reuse, never parallel): when the ENTIRE
     request is an unambiguous category-off (or caption-style swap), apply it
     with ZERO model calls via the same deterministic engine EditPolicy uses.
@@ -21298,7 +21298,15 @@ def _deterministic_reedit(old_plan, change_request):
     if _style:
         plan["caption_style"] = _style
         _parts.append(f"captions switched to {_style}")
-    _summary = (" and ".join(_parts)).capitalize() + " — everything else untouched."
+    # SIBLING of the 22407 suffix: English assembled in CODE, so no prompt can
+    # reach it — this path makes ZERO model calls. Gating the tail is the same
+    # treatment, and it is PARTIAL BY CONSTRUCTION: the clause before it
+    # ("removed …", "captions switched to …") is still English prose built here.
+    # Fixing that properly needs a summary CODE the app renders, the same
+    # mechanism the error copy uses. Filed, not faked.
+    _summary = (" and ".join(_parts)).capitalize()
+    if _parse_reply_language(input_data) == "en":
+        _summary += " — everything else untouched."
     _record_divergence(
         "reedit", {"off": sorted(_off), "style": _style},
         "reedit_deterministic",
@@ -21416,7 +21424,11 @@ def _mechanical_reedit(old_plan, change_request, input_data=None,
     return {"classification": "tweak", "new_plan": _new_plan,
             "fused_vibe": None,
             "changed_fields": sorted({str(o.get("list_key")) for o in _ops}),
-            "human_summary": f"{_why} — everything else untouched.",
+            # Same sibling, same partial fix: `_why` above is English built
+            # in code. Tail gated; the prose behind it still needs a code.
+            "human_summary": (f"{_why} — everything else untouched."
+                              if _parse_reply_language(input_data) == "en"
+                              else _why),
             "clarification_question": None, "deterministic": True}
 
 
@@ -22061,7 +22073,7 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
 
     # Instrument 1: the unambiguous category-off / style-swap never pays a
     # model call — the same engine EditPolicy trusts applies it directly.
-    _det = _deterministic_reedit(old_plan, change_request)
+    _det = _deterministic_reedit(old_plan, change_request, input_data)
     # THREE INSTRUMENTS, ONE SEAM, IN COST ORDER. Each returns the same shape or
     # None; None means "not mine" and the request falls to the next, ending at
     # the model rail — which is exactly today's behaviour when all three decline.
@@ -22372,9 +22384,14 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
                 _surg_notes.append(
                     "the caption spelling change couldn't be applied: %s" % _why)
         if _surg_notes:
-            parsed["human_summary"] = (
-                str(parsed.get("human_summary") or "").rstrip(". ")
-                + " (note: " + "; ".join(_surg_notes[:3]) + ")")
+            # Appended to a sentence the MODEL wrote in-language; an English
+            # "(note: …)" bolted on is the 22407 shape exactly. Dropped for a
+            # non-English reader rather than mixed into their sentence — the
+            # note is also recorded as a divergence below, so it is not lost.
+            if _parse_reply_language(input_data) == "en":
+                parsed["human_summary"] = (
+                    str(parsed.get("human_summary") or "").rstrip(". ")
+                    + " (note: " + "; ".join(_surg_notes[:3]) + ")")
             _record_divergence(
                 "reedit", {"notes": _surg_notes[:5]},
                 "surgical_op_enforcement", reason=str(change_request)[:140])
@@ -22399,9 +22416,10 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
               f"diff_entries={len(_diff_entries or [])}", flush=True)
         if _op_failed:
             # a partially-applied tweak is reported, never silent
-            parsed["human_summary"] = (str(parsed.get("human_summary") or "").rstrip(". ")
-                + f" (note: {len(_op_failed)} requested change(s) could not be "
-                  f"matched to the plan and were skipped).")
+            if _reply_lang == "en":
+                parsed["human_summary"] = (str(parsed.get("human_summary") or "").rstrip(". ")
+                    + f" (note: {len(_op_failed)} requested change(s) could not be "
+                      f"matched to the plan and were skipped).")
         elif parsed.get("human_summary"):
             # THE ENGLISH TAIL WAS OURS, NOT THE MODEL'S. This suffix was
             # appended UNCONDITIONALLY, so a Hindi reply came back as

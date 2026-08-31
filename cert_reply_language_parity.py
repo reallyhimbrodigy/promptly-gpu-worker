@@ -139,18 +139,55 @@ check("generate_plan_diff calls _reply_language_instruction",
       "_reply_language_instruction" in _called,
       "the language is parsed and then never reaches the prompt")
 
-print("\n=== C8 — the ENGLISH SUFFIX is language-gated ===")
-print("    (the tail was OURS, appended in code after the model returned)")
+print("\n=== C8 — EVERY hardcoded English tail is language-gated ===")
+print("    (five sites; the tails are OURS, appended in code after the fact)")
 _src = open("handler.py").read()
-_i = _src.index("elif parsed.get(\"human_summary\"):")
-_seg = _src[_i:_i + 1400]
-check("the ' — everything else untouched.' suffix is gated on the reply language",
-      '_reply_lang == "en"' in _seg and "everything else untouched" in _seg,
-      "the suffix is appended unconditionally again. It is OUR text, not the "
-      "model's: a Hindi reply came back as '…रखा गया है। — everything else "
-      "untouched.' — the model had already said it, in Hindi, and the code "
-      "bolted the English on. Two rounds of prompt-strengthening moved nothing, "
-      "because the prompt was never the mechanism.")
+_lines = _src.split("\n")
+
+# The English fragments this codebase bolts onto a user-facing sentence. Each
+# occurrence must sit under an `== "en"` guard, or a Hindi reader gets an
+# English clause welded to their Hindi sentence — which is what shipped until
+# 2026-08-30 and what two rounds of prompt-strengthening could not touch,
+# because the prompt was never the mechanism.
+_FRAGMENTS = ("everything else untouched", "(note: ")
+_GUARDS = ('_reply_lang == "en"', '_parse_reply_language(input_data) == "en"')
+
+_sites, _ungated = [], []
+for _n, _l in enumerate(_lines):
+    if _l.lstrip().startswith("#"):
+        continue                      # a comment cannot reach a user
+    if not any(_f in _l for _f in _FRAGMENTS):
+        continue
+    _sites.append(_n + 1)
+    # LOOK FORWARD TOO. A ternary puts its condition AFTER the fragment
+    #     "human_summary": (f"{_why} — everything else untouched."
+    #                       if _parse_reply_language(input_data) == "en" ...
+    # so a backward-only window called a correctly-gated site UNGATED. The
+    # guard's position is a formatting detail; its presence is the contract.
+    _win = "\n".join(_lines[max(0, _n - 8):_n + 4])
+    if not any(_g in _win for _g in _GUARDS):
+        _ungated.append(_n + 1)
+
+check("every hardcoded English tail sits under a reply-language guard",
+      not _ungated,
+      f"UNGATED at handler.py line(s) {_ungated}. These are OUR words, appended "
+      f"in code after the model returned — the Hindi arm came back as "
+      f"'…रखा गया है। — everything else untouched.', the model having already "
+      f"said it in Hindi. Gate it on the reply language or drop it.")
+
+# COUNT PIN so a SIXTH site cannot be added un-noticed. A new English tail is a
+# deliberate act; it must come here and be counted, not appear silently.
+check(f"exactly 5 English-tail sites exist (found {len(_sites)}: {_sites})",
+      len(_sites) == 5,
+      f"the number of hardcoded English tails changed to {len(_sites)} at "
+      f"{_sites}. If you ADDED one, gate it and raise this number. If you "
+      f"REMOVED one, lower it. Silence here is how the sixth ships in English.")
+
+print("    NOTE, recorded honestly: two of the five (the deterministic and")
+print("    mechanical re-edit paths) build their WHOLE sentence in English with")
+print("    ZERO model calls, so gating the tail is a PARTIAL fix — the prose")
+print("    before it is still English. Localising those needs a summary CODE the")
+print("    app renders, the same mechanism the error copy uses. Filed, not faked.")
 
 print(f"\n{'=' * 70}\n  cert_reply_language_parity: {PASS} passed, {FAIL} failed\n{'=' * 70}")
 sys.exit(1 if FAIL else 0)
