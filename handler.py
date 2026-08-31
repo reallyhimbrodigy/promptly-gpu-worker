@@ -32945,13 +32945,37 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
         # PER-JOB OVERRIDE `micro_concurrency_test` — same *_test idiom as
         # offthread_test / stall_test / min_output_ratio_test.
         #
-        # WHY IT EXISTS: micro frames cost 775-1,797 ms/frame in production
-        # against 108-110 ms/frame measured ISOLATED at concurrency 1
-        # (micro-seek-cost.mjs). A 7-16x gap on the same primitive, hypothesised
-        # as CONTENTION — several Chromium pages behind one lazy Rust compositor.
-        # That hypothesis has never been tested on the path production uses,
-        # because every prior batch ran handler in-process and so took the LOCAL
-        # path, never the burst.
+        # WHY IT EXISTED — and BOTH halves of the premise turned out wrong when
+        # it was finally measured (2026-08-31). The note used to read: "micro
+        # frames cost 775-1,797 ms/frame in production against 108-110 ms/frame
+        # measured ISOLATED at concurrency 1 (micro-seek-cost.mjs). A 7-16x gap
+        # ON THE SAME PRIMITIVE, hypothesised as CONTENTION."
+        #
+        # 1. CONTENTION IS REFUTED. 4/2/1 on an IDENTICAL plan (render_only, the
+        #    same 271 micro frames in the same 4 chunks): 974 / 1044 / 1003
+        #    ms/frame. A 7% spread with no monotonic order. An earlier sweep
+        #    showed 4->1 halving the cost, but its arms rendered 239/634/272/287
+        #    frames because the plan regenerates per run — frame-count
+        #    confounding, not concurrency.
+        # 2. IT WAS NEVER THE SAME PRIMITIVE. micro-seek-cost.mjs renders the
+        #    CrossfadeProbe composition to h264. Production renders
+        #    PromptlyMicroSegments to ProRes 4444 yuv444p10le at 1080x1920 with
+        #    5 segments per chunk. Different composition, different codec — so
+        #    108-110 ms/frame was never a control for this number. That harness
+        #    answered the question it was built for (seek distance is not the
+        #    cost) and was then read as a baseline for a different thing.
+        #
+        # WHERE THE COST ACTUALLY IS, from Remotion's own counters: paint p50
+        # 1.00 fps (~1000 ms/frame) vs encode p50 43.7 fps (~23 ms/frame) —
+        # ENCODE IS 44x FASTER THAN PAINT, so ProRes is not the bottleneck
+        # either. And it is UNIFORM, not concentrated: the top-10 slowest frames
+        # carry only 20% of chunk wall, and the remaining frames still cost
+        # ~939 ms each. The SLOWEST_FRAMES "CONCENTRATED->component-cost" label
+        # is computed within the top 10 and points at the wrong explanation.
+        #
+        # The open question is now what PromptlyMicroSegments PAINTS per frame,
+        # which is a Remotion-side profiling job, not a concurrency knob.
+        # The override below stays: it is how the above was measured.
         #
         # Clamped to [1, _CONTAINER_CORES]: Remotion HARD-REJECTS concurrency >
         # cores (the third RENDER_FATAL), and 0 would render nothing.
