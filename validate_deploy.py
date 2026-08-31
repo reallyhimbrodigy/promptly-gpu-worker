@@ -380,7 +380,7 @@ def _session_certs_registered():
                       # RED-PROVEN 11 ways. Note the first table mutation PASSED
                       # and was wrong: '"bn": "Bengali"' occurs 4x in handler.py
                       # and replace(...,1) hit an unrelated language table.
-                      ("cert_reply_language_parity.py", 56)):
+                      ("cert_reply_language_parity.py", 57)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")

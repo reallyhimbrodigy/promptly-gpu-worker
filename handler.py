@@ -22403,8 +22403,21 @@ def generate_plan_diff(old_plan, change_request, old_vibe=None, transcript=None,
                 + f" (note: {len(_op_failed)} requested change(s) could not be "
                   f"matched to the plan and were skipped).")
         elif parsed.get("human_summary"):
-            parsed["human_summary"] = (str(parsed["human_summary"]).rstrip(". ")
-                                       + " — everything else untouched.")
+            # THE ENGLISH TAIL WAS OURS, NOT THE MODEL'S. This suffix was
+            # appended UNCONDITIONALLY, so a Hindi reply came back as
+            #   "…बाकी सब कुछ वैसा ही रखा गया है। — everything else untouched."
+            # The model had already said it, in Hindi, and then our code bolted
+            # the English on. Two rounds of prompt-strengthening moved nothing
+            # because the prompt was never the mechanism — measurement pointed
+            # at the model and the model was innocent.
+            #
+            # For a non-English reader the suffix is simply dropped: the model
+            # is instructed to convey completeness itself and demonstrably does.
+            # A translated suffix table would be a second place for these words
+            # to live and drift from the sentence they attach to.
+            if _reply_lang == "en":
+                parsed["human_summary"] = (str(parsed["human_summary"]).rstrip(". ")
+                                           + " — everything else untouched.")
     elif classification in ("guided_redraft", "reinterpret"):
         # Both shape Gemini's response the same way: emit a fused_vibe
         # carrying the user's directional change_request. The downstream

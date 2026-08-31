@@ -139,5 +139,18 @@ check("generate_plan_diff calls _reply_language_instruction",
       "_reply_language_instruction" in _called,
       "the language is parsed and then never reaches the prompt")
 
+print("\n=== C8 — the ENGLISH SUFFIX is language-gated ===")
+print("    (the tail was OURS, appended in code after the model returned)")
+_src = open("handler.py").read()
+_i = _src.index("elif parsed.get(\"human_summary\"):")
+_seg = _src[_i:_i + 1400]
+check("the ' — everything else untouched.' suffix is gated on the reply language",
+      '_reply_lang == "en"' in _seg and "everything else untouched" in _seg,
+      "the suffix is appended unconditionally again. It is OUR text, not the "
+      "model's: a Hindi reply came back as '…रखा गया है। — everything else "
+      "untouched.' — the model had already said it, in Hindi, and the code "
+      "bolted the English on. Two rounds of prompt-strengthening moved nothing, "
+      "because the prompt was never the mechanism.")
+
 print(f"\n{'=' * 70}\n  cert_reply_language_parity: {PASS} passed, {FAIL} failed\n{'=' * 70}")
 sys.exit(1 if FAIL else 0)
