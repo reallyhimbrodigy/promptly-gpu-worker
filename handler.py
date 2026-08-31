@@ -40297,13 +40297,28 @@ def render_stage(
     # client never sees a half-baked job that's missing the streaming
     # variants.
     def _upload_hls():
+        # STD-EDITORIAL RECORDED stage_timings.hls ON 0 OF 1,350 COMPLETIONS
+        # (2026-08-31) while every diverted route recorded it on 100%. So the
+        # HLS distribution was readable for 55% of output and BLIND on the
+        # majority route — and the ~80s reports land exactly where the comment
+        # below predicts ("30-50s encode, 10-30s segment upload"), on the route
+        # nobody could measure. Sixth never-persisted telemetry field after
+        # cpu_by_stage, source_duration, gemini_tokens, vad_coverage,
+        # _lang_bundle and prewarm_hit; every one of them hid a real question.
+
         # HLS ladder tuning history (bitrates/preset rationale) lives with the
         # implementation, now module-scope (_encode_and_upload_hls) so the
         # minimal route shares ONE delivery path. Body extracted verbatim —
         # same ladder, same keys, same errors; this wrapper only binds the
         # TH tail's locals and keeps the edit_plan assignment.
-        hls_url = _encode_and_upload_hls(
-            output_path, work_dir, upload_url, input_data.get("public_url"))
+        # try/finally so a FAILED hls is timed too — a slow failure is the most
+        # interesting case and exactly the one a success-only stamp loses.
+        _hls_t_std = time.time()
+        try:
+            hls_url = _encode_and_upload_hls(
+                output_path, work_dir, upload_url, input_data.get("public_url"))
+        finally:
+            _timings["hls"] = round(time.time() - _hls_t_std, 1)
         edit_plan["_hls_manifest_url"] = hls_url
         return hls_url
 

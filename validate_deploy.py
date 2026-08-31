@@ -586,6 +586,40 @@ def _reedit_summary_clauses_all_coded():
         f"number — otherwise it ships English-only and nothing fails.")
 
 
+@check("EVERY ROUTE THAT ENCODES HLS MUST TIME IT (2026-08-31, RULE-1). MEASURED: std-editorial recorded stage_timings.hls on 0 of 1,350 completions while moodreel/minimal/minimal_speech_uncut/hype recorded it on 100% of theirs. So the HLS distribution was readable for 55% of output and BLIND on the majority route — and the ~80s reports land exactly where render_stage's own comment predicts (30-50s encode + 10-30s segment upload), on the route nobody could measure. Asking 'why is HLS sometimes 80s' was unanswerable from persisted data, and a p50 over the routes that DO record it describes a different population. This is the SIXTH never-persisted telemetry field after cpu_by_stage, source_duration, gemini_tokens, vad_coverage, _lang_bundle and prewarm_hit; each hid a real question until someone noticed the absence. Asserts every _encode_and_upload_hls call site is wrapped in a timer that writes a `hls` key, so a new delivery route cannot ship unmeasured.")
+def _every_hls_call_site_is_timed():
+    import ast as _ast
+    _src = open("handler.py").read()
+    _t = _ast.parse(_src)
+    _tops = [(n.lineno, n.end_lineno, n.name) for n in _ast.walk(_t)
+             if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))]
+    _sites = []
+    for _n in _ast.walk(_t):
+        if (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name)
+                and _n.func.id == "_encode_and_upload_hls"):
+            # innermost enclosing function
+            _encl = sorted([f for f in _tops if f[0] <= _n.lineno <= f[1]],
+                           key=lambda f: f[1] - f[0])
+            _sites.append((_n.lineno, _encl[0][2] if _encl else "?"))
+    assert _sites, "no _encode_and_upload_hls call sites found — the scan is broken"
+    _untimed = []
+    for _ln, _fn in _sites:
+        _node = next((n for n in _ast.walk(_t)
+                      if isinstance(n, (_ast.FunctionDef, _ast.AsyncFunctionDef))
+                      and n.name == _fn), None)
+        _body = _ast.get_source_segment(_src, _node) or ""
+        # the enclosing function, or the one that wraps it, must stamp an hls key
+        _timed = ('["hls"]' in _body or "'hls'" in _body
+                  or '"hls":' in _body)
+        if not _timed:
+            _untimed.append(f"{_fn}:{_ln}")
+    assert not _untimed, (
+        f"HLS is encoded but NOT timed at {_untimed}. That route's HLS cost is "
+        f"invisible in stage_timings, so its distribution cannot be read and a "
+        f"regression there is unmeasurable — exactly the std-editorial gap "
+        f"(0 of 1,350) this check was written for.")
+
+
 @check("A MOUNTED DIRECTORY MUST NOT CONTAIN A LIVE BUILD CACHE (2026-08-25, RULE-1). Modal verifies that mounted files do not change mid-upload, and `src/remotion` was mounted WHOLE — including node_modules/.cache/webpack, 283 MB that Remotion rewrites every time it renders. deploy.sh runs validate_deploy FIRST, and validate_deploy renders; a webpack flush landing after the gate returned but during the upload killed the deploy outright: 'index.pack was modified during build process'. The flip it was carrying did not land, and nothing before that point had failed — 429/429 green, quiet window clear. Deleting the cache pre-deploy only SHRINKS the race; excluding it CLOSES it, because an unmounted file cannot be observed changing. This asserts the exclusion survives, because the failure mode is a deploy that dies AFTER every gate has passed — the most expensive place to discover anything — and re-mounting the cache would silently restore an intermittent, timing-dependent deploy failure that looks like a Modal fault rather than ours.")
 def _remotion_mount_excludes_cache():
     import ast as _ast
