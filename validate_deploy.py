@@ -380,7 +380,23 @@ def _session_certs_registered():
                       # RED-PROVEN 11 ways. Note the first table mutation PASSED
                       # and was wrong: '"bn": "Bengali"' occurs 4x in handler.py
                       # and replace(...,1) hit an unrelated language table.
-                      ("cert_reply_language_parity.py", 58)):
+                      ("cert_reply_language_parity.py", 58),
+                      # Freeze motion parity (2026-08-31). freezedetect uses an
+                      # ABSOLUTE threshold, so dark footage reads as frozen: job
+                      # 579dcbe6 tripped on a span where the subject BLINKS and
+                      # the caption CHANGES, 1 of 30 frames identical, flagged
+                      # median 0.000217 vs the unflagged neighbour's 0.000215,
+                      # YAVG 25 against a normal 90-140. _IG_DARK_SCENE_YAVG
+                      # already existed but was wired to the BLACK check only —
+                      # the same sibling-scoping bug as the integrity diagnostic.
+                      # NOT extended as a dark skip: that would let a genuinely
+                      # frozen dark render ship, which is where a freeze is
+                      # hardest to notice. The test is RELATIVE (output vs its
+                      # own source at the mapped window) with a ZERO-GUARD that
+                      # trips a standstill regardless. C3 is the load-bearing
+                      # leg. RED-proven 5 ways incl. removing the guard and
+                      # dropping output_path at the call site.
+                      ("cert_freeze_motion_parity.py", 19)):
         _p = os.path.join(_here, _cert)
         assert os.path.exists(_p), f"{_cert} is missing — a fix lost its check"
         _env = dict(os.environ); _env.setdefault("APP_URL", "")

@@ -25702,7 +25702,57 @@ def _ig_source_echo_hole(source_path, spans, out_to_src):
     return defects, downgraded
 
 
-def _ig_source_echo(source_path, spans, out_to_src):
+# ── MOTION PARITY (2026-08-31) ───────────────────────────────────────────────
+# freezedetect uses an ABSOLUTE noise threshold, so on very dark footage genuine
+# motion produces sub-threshold inter-frame differences and reads as frozen.
+# MEASURED on job 579dcbe6 (ab-sources/talking-head-v1/625dfdc5-73s.mp4): across
+# the flagged 1.0s span the subject BLINKS and the caption CHANGES, only 1 of 30
+# frames is byte-identical to its predecessor, and the flagged span's median
+# inter-frame delta (0.000217) is INDISTINGUISHABLE from the unflagged window
+# immediately after it (0.000215). The footage sits at YAVG 25-27 where normal
+# exposure is 90-140.
+#
+# WHY NOT A DARK-SCENE SKIP. _IG_DARK_SCENE_YAVG already exists and this footage
+# qualifies (25.0 <= 32.0) — but it is wired into the BLACK discriminator only.
+# Extending it to freeze would mean a genuinely frozen DARK render ships, which
+# is precisely where a freeze is hardest for a user to notice and easiest for us
+# to miss. So the test is RELATIVE instead: does the output still move roughly as
+# much as its own source did at the mapped window? Comparable -> dark, not
+# frozen. Output at a standstill while the source moves -> really frozen, trips.
+# That works in bright footage too and cannot silently swallow a real freeze.
+_IG_MOTION_PARITY = 0.25      # output median delta >= this x source's -> comparable
+_IG_MOTION_FROZEN_MAX = 2e-5  # output median at/below this -> GENUINELY frozen,
+                              # trips no matter what the source did. This is the
+                              # guard that keeps the escape from swallowing the
+                              # class the gate exists to catch.
+
+
+def _ig_window_motion(path, start, dur):
+    """Median per-frame inter-frame delta over a window, or None if unreadable.
+
+    MEDIAN, not mean: a single cut or flash inside the window swings a mean by
+    an order of magnitude, and the question here is what the window does
+    TYPICALLY. Returns None on any failure so the caller fails CLOSED — an
+    unreadable window must never be read as 'moving enough'.
+    """
+    if not path or dur <= 0:
+        return None
+    try:
+        _p = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostats", "-ss", str(max(0.0, start)),
+             "-t", str(dur), "-i", path, "-vf",
+             "select='gte(scene,0)',metadata=print:file=-", "-f", "null", "-"],
+            capture_output=True, text=True, timeout=120)
+        _v = [float(m) for m in re.findall(r"scene_score=([0-9.]+)", _p.stdout or "")]
+        if not _v:
+            return None
+        _v.sort()
+        return _v[len(_v) // 2]
+    except Exception:
+        return None
+
+
+def _ig_source_echo(source_path, spans, out_to_src, output_path=None):
     """Content-stillness discriminator for residual freeze spans: a frozen
     OUTPUT span whose mapped SOURCE window is also frozen is source content
     (screen recording, static shot — an organic input class per
@@ -25760,8 +25810,38 @@ def _ig_source_echo(source_path, spans, out_to_src):
         if cover >= (src_e - src_s) * _IG_SOURCE_ECHO_COVER:
             downgraded.append({"span": (s, e), "src": (src_s, src_e),
                                "src_frozen_cover_s": round(cover, 3)})
-        else:
-            defects.append((s, e))
+            continue
+        # ── MOTION PARITY, second discriminator ─────────────────────────────
+        # The source is not frozen by freezedetect's ABSOLUTE threshold, so the
+        # old code filed this as our defect. On dark footage that is wrong: the
+        # same absolute threshold flagged the OUTPUT for the same reason. Ask
+        # the relative question instead — is the output still moving about as
+        # much as its own source at the mapped window?
+        _om = _ig_window_motion(output_path, s, e - s) if output_path else None
+        _sm = _ig_window_motion(source_path, src_s, src_e - src_s)
+        if _om is not None and _sm is not None:
+            if _om <= _IG_MOTION_FROZEN_MAX:
+                # AT A STANDSTILL. Genuinely frozen — trips no matter how
+                # little the source moved. This is the guard that stops the
+                # escape swallowing the class the gate exists to catch.
+                defects.append((s, e))
+                continue
+            if _om >= _sm * _IG_MOTION_PARITY:
+                downgraded.append({"span": (s, e), "src": (src_s, src_e),
+                                   "motion_parity": True,
+                                   "out_med": round(_om, 6),
+                                   "src_med": round(_sm, 6)})
+                continue
+        # FALL-THROUGH, and its INDENTATION is load-bearing. This line sat at
+        # 12 spaces (the body of the removed `else:`), which after the parity
+        # block made it the last statement INSIDE `if _om is not None ...` — so
+        # a span with an unreadable motion read was neither tripped NOR
+        # downgraded, it silently VANISHED from both lists and the gate went
+        # blind to it. Legal indentation, parsed fine, and
+        # test_integrity_freeze_echo_boundary.py F0 caught it.
+        # Unreadable on either side, or the output really is much quieter than
+        # its source: FAIL CLOSED, exactly as before.
+        defects.append((s, e))
     return defects, downgraded
 
 
@@ -26014,7 +26094,7 @@ def _integrity_gate(output_path, v_dur, a_dur, expected_frames, nb_frames,
     downgraded = []
     if freeze_resid and source_path and out_to_src:
         freeze_resid, downgraded = _ig_source_echo(
-            source_path, freeze_resid, out_to_src)
+            source_path, freeze_resid, out_to_src, output_path=output_path)
     black_resid = _ig_subtract(black, masks.get("black", []))
     black_downgraded = []
     if black_resid and source_path and out_to_src:
