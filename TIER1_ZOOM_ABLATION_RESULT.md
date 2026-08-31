@@ -57,3 +57,41 @@ FFmpeg.
   a class* until they are measured.
 - SnapReframe's ms/frame was not captured in the log window; its render-stage
   wall (102.8s vs 103.5s baseline) carries the same conclusion.
+
+
+---
+
+# The mix, and the conclusion (2026-08-31, after SmoothPush was measured)
+
+The ablation above **omitted the most common type**. Organic plans since 08-20
+(670 completed, 297,394 micro frames) are:
+
+| type | kind | frames | frame% | ms/frame | paint | share of paint |
+|---|---|---|---|---|---|---|
+| SmoothPush | scale-only | 135,382 | 45.5% | **840** | 113,721s | 42.9% |
+| SnapReframe | scale-only | 83,646 | 28.1% | 785 | 65,662s | 24.8% |
+| StepZoom | scale-only | 53,427 | 18.0% | 785 | 41,940s | 15.8% |
+| LetterboxPush | composite | 23,136 | 7.8% | 1796 | 41,552s | 15.7% |
+| FocusWindow | composite | 1,804 | 0.6% | 1164 | 2,100s | 0.8% |
+
+**Scale-only is uniform: 785–840 ms/frame across 91.6% of frames** — a 7%
+spread, which is noise at n=1 per arm.
+
+## Conclusion: do not do Tier 2
+
+A **perfect** fix to both composites — every one costing what StepZoom costs —
+saves **24,074s, 9.1% of micro paint**. Cutting micro *frame count* by 10% saves
+**26,498s**: more, and it applies to 100% of frames rather than 8.4%.
+
+So the lever is **not any component**. It is frame count or resolution. Per-frame
+cost is essentially flat wherever the frames actually are.
+
+## What this cost to learn, and what it saved
+
+Two ablations (~$1.10) and one free organic read. It stopped a multi-hour
+Remotion profiling job aimed at LetterboxPush — a component that is genuinely
+2.3× its neighbours and genuinely almost irrelevant.
+
+The first ablation's five arms never touched SmoothPush, because the harvested
+plan happened not to contain it. It was presented as a survey of the space. It
+was a survey of one plan's contents.

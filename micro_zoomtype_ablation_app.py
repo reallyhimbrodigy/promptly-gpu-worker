@@ -41,7 +41,12 @@ S = [modal.Secret.from_name("promptly-secrets")]
 BUCKET = "thisismybucketagainwooo"
 SRC_KEY = "ab-sources/talking-head-v1/625dfdc5-73s.mp4"
 # scale-only first, then composite. NONE removes the moments entirely.
-ARMS = ("SnapReframe", "StepZoom", "LetterboxPush", "FocusWindow", "NONE")
+# SmoothPush added 2026-08-31: it is 45.5% of all organic micro frames and the
+# original five-arm ablation OMITTED IT ENTIRELY — the harvested plan happened
+# to carry 3 SnapReframe + 1 StepZoom + 1 LetterboxPush and no SmoothPush, so a
+# survey of the space was presented that never touched its most common member.
+ARMS = ("SmoothPush", "SnapReframe", "StepZoom", "LetterboxPush",
+        "FocusWindow", "DepthPull", "StagedPush", "NONE")
 
 
 def _arm_plan(base, zoom_type):
