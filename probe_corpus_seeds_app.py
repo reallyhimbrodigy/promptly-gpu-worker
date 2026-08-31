@@ -8,6 +8,13 @@ keyterm_limit / missing_artifact_path can be seeded TODAY:
   1. Did any job ever die with that sub-code?          (is the class real here)
   2. Is that job's source sitting in failure-corpus/?  (is there a file to run)
 
+THIS ANSWERS ONLY HALF THE QUESTION, and the other half is the dangerous one.
+The corpus re-runs each source and asserts it NOW COMPLETES, so a seed requires
+the class to be **FIXED**. A still-ACTIVE class reproduces its founding sub-code
+and fails cert_regression_corpus on EVERY DEPLOY. A high "failed jobs" count
+here is therefore a reason NOT to seed, not a reason to — it means the class is
+alive. Read this output as "is a seed POSSIBLE", never as "should I seed".
+
 A sub-code with no captured source cannot be seeded, and saying so is the
 result — inventing a key would make the gate green against a file that does not
 exist, which is worse than the gap.
@@ -17,7 +24,12 @@ from collections import Counter
 app = modal.App("probe-corpus-seeds")
 img = modal.Image.debian_slim().pip_install(["supabase", "boto3"])
 S=[modal.Secret.from_name("promptly-secrets")]
-WANT = ("frame_grid", "analyze_loudness", "keyterm_limit", "missing_artifact_path")
+# The classes that ACTUALLY recur and have no seed, by live frequency — not the
+# four that were queued by name, three of which have never fired. A seed only
+# means something for a class that can come back.
+WANT = ("freeze", "dead_moment", "black", "audio_extract_stream_map",
+        "ladder_exhausted:RuntimeError", "ladder_exhausted:TypeError",
+        "component_crash", "delay_render", "unclassified")
 
 @app.function(image=img, secrets=S, timeout=900)
 def scan(bucket: str):
@@ -67,7 +79,11 @@ def main(bucket: str = "thisismybucketagainwooo"):
     for w,v in d["per"].items():
         if v["seedable"]:
             ready.append((w,v["seedable"][0]))
-            print(f"  ✅ {w:<22} {v['jobs']} failed job(s), SOURCE CAPTURED")
+            # A class with recent failures is ALIVE — seeding it breaks every
+            # deploy. Flag that here rather than letting a green tick imply go.
+            _flag = ("  ⚠️  STILL ACTIVE — do NOT seed" if v["jobs"] > 0 else "")
+            print(f"  {'⚠️ ' if v['jobs'] else '✅'} {w:<22} {v['jobs']} failed job(s), "
+                  f"SOURCE CAPTURED{_flag}")
             print(f"       {v['seedable'][0]}")
         else:
             print(f"  ❌ {w:<22} {v['jobs']} failed job(s), no source in the corpus")

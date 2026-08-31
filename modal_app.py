@@ -3516,11 +3516,25 @@ _REGRESSION_CORPUS = [
     # Zero occurrences means the corpus never had one to keep. These cannot be
     # seeded by wanting them; they seed themselves the next time they fire.
     #
-    # WHAT THE CORPUS ACTUALLY LACKS, by live frequency in the same window —
-    # these are recurring and unrepresented, and are the better next seeds:
-    #   freeze 35 · dead_moment 13 · ladder_exhausted:RuntimeError 12 ·
-    #   audio_extract_stream_map 9 · black 7
-    # Each still needs its source confirmed present before it is added here.
+    # A SEED REQUIRES THE CLASS TO BE **FIXED**, NOT MERELY CAPTURED — the
+    # precondition an earlier note here got wrong, and it is a foot-gun that
+    # would break the whole lane. This corpus re-runs each source and asserts it
+    # NOW COMPLETES (or cleanly rejects for a DIFFERENT reason). An entry whose
+    # class is still ACTIVE reproduces its founding sub-code, `_ok` is False,
+    # and cert_regression_corpus fails EVERY DEPLOY until someone removes it.
+    #
+    # That earlier note named freeze / dead_moment / ladder_exhausted /
+    # audio_extract_stream_map / black as "the better next seeds" because they
+    # recur and have captured sources. Both facts are true and the conclusion
+    # was wrong: recurring means NOT FIXED. Measured 2026-08-31 — freeze 36,
+    # unclassified 119, ladder_exhausted:RuntimeError 14, dead_moment 13, all
+    # still failing today. The freeze source the probe picked (579dcbe6) is a
+    # job from that same night that tripped freeze TWICE.
+    #
+    # So probe_corpus_seeds_app.py answers only HALF the question ("is there a
+    # source?"). The other half — "has this class actually been fixed?" — is a
+    # judgement about a shipped fix and cannot be read off the corpus bucket.
+    # Seed a class only after its fix has landed and its rate has gone to zero.
 ]
 
 
