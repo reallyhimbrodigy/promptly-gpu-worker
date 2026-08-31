@@ -21252,6 +21252,58 @@ def _enforce_sound_negatives(edit_plan, sounds):
     return _n
 
 
+# ── DETERMINISTIC RE-EDIT SUMMARY CODES ──────────────────────────────────────
+# The two ZERO-MODEL re-edit paths assemble their user-facing sentence in Python,
+# so no prompt can reach them and reply_language cannot help: a Hindi reader gets
+# "Removed captions" no matter what. The fix is the mechanism the error copy
+# already uses — the worker emits a CODE plus parameters, the client renders the
+# sentence from its String Catalog, where the localization gate covers twelve
+# languages.
+#
+# ENUMERATED FIRST, then coded. Every sentence those two paths can produce:
+#   _deterministic_reedit : "removed {features}"        7 features
+#                           "captions switched to {s}"  9 styles
+#   _mechanical_reedit    : "audio_denoise=True"
+#                           "captions off"
+#                           "caption_style={name}"
+#                           "text swap 'X'->'Y'"
+# (mechanical_router's six other `why` strings are DECLINE paths — verdict
+# 'creative' makes the caller return None — so they never reach a user. Checked,
+# not assumed: they read exactly like user copy.)
+#
+# THE ENUMERATION FOUND TWO DEFECTS BEYOND LANGUAGE, which is why it came first:
+#   1. DUPLICATE CLAUSES. "captions off" / "caption_style=X" say the same thing
+#      as the deterministic path's "removed captions" / "captions switched to X"
+#      in different words. Same user action, different sentence, decided by which
+#      instrument happened to handle it.
+#   2. DEBUG STRINGS AS USER COPY. "audio_denoise=True" and "caption_style=Lumen"
+#      are not sentences. They are internal representations that reached a human.
+# One code per ACTION collapses both: the client renders one sentence per action
+# regardless of which instrument produced it.
+_REEDIT_SUMMARY_CODES = {
+    # code                        params it carries
+    "REEDIT_FEATURES_REMOVED":    ("features",),   # list of the 7 feature names
+    "REEDIT_CAPTION_STYLE_SET":   ("style",),      # one of VALID_CAPTION_STYLES
+    "REEDIT_CAPTIONS_OFF":        (),
+    "REEDIT_DENOISE_ON":          (),
+    "REEDIT_CAPTION_TEXT_SWAP":   ("find", "replace"),
+}
+
+
+def _reedit_summary_op(code, **params):
+    """One structured summary clause. A job's `summary_ops` is a LIST of these,
+    because a request can carry several ("remove zooms and switch to Cove") and
+    the client joins them — the joining word is itself language-specific and does
+    not belong in Python."""
+    assert code in _REEDIT_SUMMARY_CODES, f"unregistered summary code {code!r}"
+    _want = set(_REEDIT_SUMMARY_CODES[code])
+    _got = set(params)
+    assert _got == _want, (
+        f"{code} expects params {sorted(_want)}, got {sorted(_got)} — a client "
+        f"rendering this code would have a hole in its sentence")
+    return {"code": code, **params}
+
+
 def _deterministic_reedit(old_plan, change_request, input_data=None):
     """Instrument 1 (rider 4 — reuse, never parallel): when the ENTIRE
     request is an unambiguous category-off (or caption-style swap), apply it
@@ -21304,9 +21356,26 @@ def _deterministic_reedit(old_plan, change_request, input_data=None):
     # ("removed …", "captions switched to …") is still English prose built here.
     # Fixing that properly needs a summary CODE the app renders, the same
     # mechanism the error copy uses. Filed, not faked.
-    _summary = (" and ".join(_parts)).capitalize()
+    # str.capitalize() UPPERCASES the first character and LOWERCASES every
+    # other one, so "captions switched to Cove" became "…to cove" and Gadzhi
+    # became gadzhi — real style names mangled in the user's own sentence.
+    # Found by printing the output rather than reading the code. Uppercase the
+    # first character ONLY and leave the rest alone.
+    _joined = " and ".join(_parts)
+    _summary = (_joined[:1].upper() + _joined[1:]) if _joined else _joined
     if _parse_reply_language(input_data) == "en":
         _summary += " — everything else untouched."
+    # STRUCTURED, alongside the English. human_summary is UNCHANGED so no
+    # consumer breaks; summary_ops is what a client renders in the reader's
+    # language. Emitted from the same `_off`/`_style` values the sentence is
+    # built from — not re-derived by parsing the sentence back, which would be a
+    # second source of truth that can disagree with the first.
+    _sops = []
+    if _off:
+        _sops.append(_reedit_summary_op("REEDIT_FEATURES_REMOVED",
+                                        features=sorted(_off)))
+    if _style:
+        _sops.append(_reedit_summary_op("REEDIT_CAPTION_STYLE_SET", style=_style))
     _record_divergence(
         "reedit", {"off": sorted(_off), "style": _style},
         "reedit_deterministic",
@@ -21315,7 +21384,8 @@ def _deterministic_reedit(old_plan, change_request, input_data=None):
     return {"classification": "tweak", "new_plan": plan,
             "fused_vibe": None, "changed_fields": sorted(
                 list(_off) + (["caption_style"] if _style else [])),
-            "human_summary": _summary, "clarification_question": None,
+            "human_summary": _summary, "summary_ops": _sops,
+            "clarification_question": None,
             "deterministic": True}
 
 
@@ -21417,8 +21487,40 @@ def _mechanical_reedit(old_plan, change_request, input_data=None,
               f"({type(_cv_err).__name__}) — model rail", flush=True)
         return None
 
+    # Built from the APPLIED OPS, not by parsing `_why` — `_why` is a debug
+    # string ("audio_denoise=True", "caption_style=Lumen") and parsing it back
+    # into structure would make the debug format a load-bearing contract.
+    _summary_ops = []
+    try:
+        for _o in (_ops or []):
+            _lk = str(_o.get("list_key") or "")
+            _val = _o.get("value")
+            if _lk == "caption_style":
+                if str(_val) == "none":
+                    _summary_ops.append(_reedit_summary_op("REEDIT_CAPTIONS_OFF"))
+                else:
+                    _summary_ops.append(_reedit_summary_op(
+                        "REEDIT_CAPTION_STYLE_SET", style=str(_val)))
+            elif _lk == "audio_denoise":
+                _summary_ops.append(_reedit_summary_op("REEDIT_DENOISE_ON"))
+            elif _lk == _cto_key:
+                for _sw in (_val or []):
+                    if isinstance(_sw, dict):
+                        _summary_ops.append(_reedit_summary_op(
+                            "REEDIT_CAPTION_TEXT_SWAP",
+                            find=str(_sw.get("find") or ""),
+                            replace=str(_sw.get("replace") or "")))
+    except Exception as _sop_err:
+        # NEVER fail a working re-edit to build a summary. An empty list is
+        # honest: the client falls back to human_summary, which is what ships
+        # today anyway.
+        _summary_ops = []
+        print(f"[plan-diff] summary_ops build failed "
+              f"({type(_sop_err).__name__}) — falling back to human_summary",
+              flush=True)
     _record_divergence(
-        "reedit", {"ops": len(_applied), "why": _why[:120]},
+        "reedit", {"ops": len(_applied), "why": _why[:120],
+                   "summary_ops": [o["code"] for o in _summary_ops]},
         "reedit_mechanical_router", reason=str(change_request)[:120])
     print(f"[plan-diff] MECHANICAL — zero model calls: {_why}", flush=True)
     return {"classification": "tweak", "new_plan": _new_plan,
@@ -21429,6 +21531,7 @@ def _mechanical_reedit(old_plan, change_request, input_data=None,
             "human_summary": (f"{_why} — everything else untouched."
                               if _parse_reply_language(input_data) == "en"
                               else _why),
+            "summary_ops": _summary_ops,
             "clarification_question": None, "deterministic": True}
 
 

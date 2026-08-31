@@ -529,6 +529,63 @@ def _integrity_echo_covers_every_check():
         "the exact regression this check exists to prevent")
 
 
+@check("EVERY DETERMINISTIC RE-EDIT SUMMARY CLAUSE MUST HAVE A CODE (2026-08-31, RULE-1, localization). The two zero-model re-edit paths ASSEMBLE their user-facing sentence in Python, so no prompt reaches them and reply_language cannot help — a Hindi reader gets 'Removed captions' whatever their device says. They now emit `summary_ops`, structured codes a client renders from its String Catalog. The regression this prevents is a NEW clause added to either path without a code: the sentence still renders in English, nothing errors, and the gap is invisible because the English path looks perfect. Both producers are COUNTED against the codes they emit — _deterministic_reedit's `_parts.append` sites and mechanical_router's `why.append` sites — so adding a clause to either without registering a code fails the deploy. Counts are pinned rather than inferred because a set-comparison would need to parse prose back into structure, which is the second source of truth this design exists to avoid.")
+def _reedit_summary_clauses_all_coded():
+    import ast as _ast
+    _h = open("handler.py").read()
+    _t = _ast.parse(_h)
+
+    _codes = None
+    for _n in _t.body:
+        if (isinstance(_n, _ast.Assign)
+                and any(getattr(_x, "id", None) == "_REEDIT_SUMMARY_CODES" for _x in _n.targets)):
+            _codes = {_k.value for _k in _n.value.keys if isinstance(_k, _ast.Constant)}
+    assert _codes, "_REEDIT_SUMMARY_CODES is missing — the summary vocabulary is gone"
+
+    # every _reedit_summary_op(...) call must use a REGISTERED code
+    _used = set()
+    for _n in _ast.walk(_t):
+        if (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name)
+                and _n.func.id == "_reedit_summary_op" and _n.args
+                and isinstance(_n.args[0], _ast.Constant)):
+            _used.add(_n.args[0].value)
+    _bad = sorted(_used - _codes)
+    assert not _bad, f"unregistered summary code(s) emitted: {_bad}"
+
+    # both zero-model paths must RETURN summary_ops, or the codes never ship
+    for _fn in ("_deterministic_reedit", "_mechanical_reedit"):
+        _node = next((_x for _x in _t.body
+                      if isinstance(_x, _ast.FunctionDef) and _x.name == _fn), None)
+        assert _node is not None, f"{_fn} is gone"
+        _src = _ast.get_source_segment(_h, _node) or ""
+        assert '"summary_ops"' in _src, (
+            f"{_fn} no longer returns summary_ops — its sentence would be "
+            f"English-only again with nothing for a client to render")
+
+    # CLAUSE COUNTS. A new clause in either producer must come here.
+    _det = next(_x for _x in _t.body
+                if isinstance(_x, _ast.FunctionDef) and _x.name == "_deterministic_reedit")
+    _parts = sum(1 for _c in _ast.walk(_det)
+                 if isinstance(_c, _ast.Call) and isinstance(_c.func, _ast.Attribute)
+                 and _c.func.attr == "append"
+                 and isinstance(_c.func.value, _ast.Name) and _c.func.value.id == "_parts")
+    assert _parts == 2, (
+        f"_deterministic_reedit builds {_parts} sentence clauses, expected 2 "
+        f"(removed-features, caption-style). A new clause needs a code in "
+        f"_REEDIT_SUMMARY_CODES and an emit beside it, then raise this number.")
+
+    _mr = _ast.parse(open("mechanical_router.py").read())
+    _whys = sum(1 for _c in _ast.walk(_mr)
+                if isinstance(_c, _ast.Call) and isinstance(_c.func, _ast.Attribute)
+                and _c.func.attr == "append"
+                and isinstance(_c.func.value, _ast.Name) and _c.func.value.id == "why")
+    assert _whys == 4, (
+        f"mechanical_router appends {_whys} user-facing clauses, expected 4 "
+        f"(denoise, captions-off, caption-style, text-swap). A new one must map "
+        f"to a summary code in handler._mechanical_reedit, then raise this "
+        f"number — otherwise it ships English-only and nothing fails.")
+
+
 @check("A MOUNTED DIRECTORY MUST NOT CONTAIN A LIVE BUILD CACHE (2026-08-25, RULE-1). Modal verifies that mounted files do not change mid-upload, and `src/remotion` was mounted WHOLE — including node_modules/.cache/webpack, 283 MB that Remotion rewrites every time it renders. deploy.sh runs validate_deploy FIRST, and validate_deploy renders; a webpack flush landing after the gate returned but during the upload killed the deploy outright: 'index.pack was modified during build process'. The flip it was carrying did not land, and nothing before that point had failed — 429/429 green, quiet window clear. Deleting the cache pre-deploy only SHRINKS the race; excluding it CLOSES it, because an unmounted file cannot be observed changing. This asserts the exclusion survives, because the failure mode is a deploy that dies AFTER every gate has passed — the most expensive place to discover anything — and re-mounting the cache would silently restore an intermittent, timing-dependent deploy failure that looks like a Modal fault rather than ours.")
 def _remotion_mount_excludes_cache():
     import ast as _ast
