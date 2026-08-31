@@ -489,6 +489,46 @@ def _regression_corpus_entries_are_well_formed():
         f"Raise this floor when you seed, never when you drop one.")
 
 
+@check("THE INTEGRITY DIAGNOSTIC MUST COVER EVERY CHECK THE GATE CAN TRIP ON (2026-08-31, RULE-1). INTEGRITY_TRIP is a standing 1.77% class (38 trips / 29 users) that had NEVER been examined, and the reason was not difficulty — it was that the diagnostic opened with `[t for t in trips if t[\'check\'] == \'black\']` and emitted NOTHING for any other check. That was right when written (2026-08-02: black was 23 of 25 trips). The black discriminator then worked; black fell to 6 of 39 (16%) while freeze rose to 22 (55%) and dead_moment to 11. So 0 of 22 freeze trips carried any diagnostic and every one persisted as an empty echo gap — the evidence was never generated, not truncated. A fix scoped to the shape dominant at the time it was written goes blind the moment the mix moves, silently, while still passing every test. This asserts every `{\'check\': NAME}` the verdict builder can emit has an entry in _IG_DOWNGRADE_KEY, so a SEVENTH check cannot be added without deciding whether it has a discriminator to report. A key mapped to None is an explicit 'no per-span discriminator', which reports down=? rather than a misleading 0.")
+def _integrity_echo_covers_every_check():
+    import ast as _ast
+    _src = open("handler.py").read()
+    _t = _ast.parse(_src)
+    # Every literal check name the verdict builder appends.
+    _emitted = set()
+    for _n in _ast.walk(_t):
+        if not isinstance(_n, _ast.Dict):
+            continue
+        for _k, _v in zip(_n.keys, _n.values):
+            if (isinstance(_k, _ast.Constant) and _k.value == "check"
+                    and isinstance(_v, _ast.Constant) and isinstance(_v.value, str)):
+                _emitted.add(_v.value)
+    assert _emitted, "no {'check': ...} literals found — the scan is broken, not the code"
+    # The diagnostic's coverage map.
+    _covered = None
+    for _n in _t.body:
+        if (isinstance(_n, _ast.Assign)
+                and any(getattr(_x, "id", None) == "_IG_DOWNGRADE_KEY" for _x in _n.targets)):
+            _covered = {_k.value for _k in _n.value.keys
+                        if isinstance(_k, _ast.Constant)}
+    assert _covered is not None, (
+        "_IG_DOWNGRADE_KEY is gone — the integrity diagnostic has no coverage map "
+        "and cannot report which discriminator ran")
+    _missing = sorted(_emitted - _covered)
+    assert not _missing, (
+        f"the integrity gate can trip on {_missing} but the diagnostic has no "
+        f"entry for them, so those trips persist with an EMPTY echo and are "
+        f"undiagnosable from the job row — exactly how freeze went 22 trips "
+        f"without evidence. Add each to _IG_DOWNGRADE_KEY: a downgrade-counter "
+        f"key if the check has a per-span discriminator, or None if it does not.")
+    # And the diagnostic must NOT be re-scoped to a single check.
+    _i = _src.index("_ig_why = \"\"")
+    _blk = _src[_i:_i + 2600]
+    assert 'if t["check"] == "black"' not in _blk and "== 'black'" not in _blk, (
+        "the integrity diagnostic is scoped to a single check again — that is "
+        "the exact regression this check exists to prevent")
+
+
 @check("A MOUNTED DIRECTORY MUST NOT CONTAIN A LIVE BUILD CACHE (2026-08-25, RULE-1). Modal verifies that mounted files do not change mid-upload, and `src/remotion` was mounted WHOLE — including node_modules/.cache/webpack, 283 MB that Remotion rewrites every time it renders. deploy.sh runs validate_deploy FIRST, and validate_deploy renders; a webpack flush landing after the gate returned but during the upload killed the deploy outright: 'index.pack was modified during build process'. The flip it was carrying did not land, and nothing before that point had failed — 429/429 green, quiet window clear. Deleting the cache pre-deploy only SHRINKS the race; excluding it CLOSES it, because an unmounted file cannot be observed changing. This asserts the exclusion survives, because the failure mode is a deploy that dies AFTER every gate has passed — the most expensive place to discover anything — and re-mounting the cache would silently restore an intermittent, timing-dependent deploy failure that looks like a Modal fault rather than ours.")
 def _remotion_mount_excludes_cache():
     import ast as _ast

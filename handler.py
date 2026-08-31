@@ -25707,6 +25707,24 @@ def _ig_window_is_black(source_path, src_s, src_e):
     return sum(_be - _bs for _bs, _be in _blk) >= _dur * _IG_SOURCE_ECHO_COVER
 
 
+# Per-check downgrade counter, so the integrity diagnostic can report WHICH
+# discriminator ran and how much it explained away — for whichever check
+# tripped, not only for black. A check absent from this map reports "down=?"
+# rather than silently reporting 0, because "the discriminator downgraded
+# nothing" and "there is no discriminator wired here" are different facts and
+# must not look identical in the one durable record of the failure.
+_IG_DOWNGRADE_KEY = {
+    "freeze": "content_stillness_downgraded",
+    "black": "content_black_downgraded",
+    "dead_moment": "content_dead_moment_downgraded",
+    # av_duration_delta / frame_count / timestamps are WHOLE-OUTPUT checks with
+    # no per-span content discriminator; they legitimately have no counter.
+    "av_duration_delta": None,
+    "frame_count": None,
+    "timestamps": None,
+}
+
+
 def _ig_source_echo_black(source_path, spans, out_to_src):
     """Black-tail discriminator (mirror of _ig_source_echo, for BLACK): an OUTPUT
     black span whose mapped SOURCE window is ALSO black is source content — the
@@ -39906,35 +39924,71 @@ def render_stage(
         #
         # Front-loaded so it survives the [:300] truncation into
         # result.error_detail — the only durable copy.
+        # GENERIC OVER THE CHECK THAT TRIPPED (2026-08-31). This block used to
+        # open with
+        #     _ig_black_spans = [t for t in _ig_verdict["trips"] if t["check"] == "black"]
+        #     if _ig_black_spans:
+        # so it emitted NOTHING unless the trip included a BLACK check. That was
+        # correct when it was written on 2026-08-02 — black was 23 of 25 trips.
+        # The black discriminator then WORKED: black is now 6 of 39 (16%) while
+        # FREEZE is 22 (55%) and dead_moment 11. So the diagnostic went blind to
+        # the majority of its own class by construction, and every freeze trip
+        # persisted as
+        #     "INTEGRITY_TRIP: freeze=[[20.5, 21.8]] masks=0/0/0"
+        # with an EMPTY gap where the echo belongs. 0 of 22 freeze trips carried
+        # a diagnostic. That is why this 1.77% standing class was never examined:
+        # the evidence was not truncated, it was never generated.
+        #
+        # A fix scoped to the shape that was dominant WHEN IT WAS WRITTEN rots
+        # the moment the mix moves. So this reports whichever checks actually
+        # tripped, and _integrity_echo_covers_every_check fails the deploy if a
+        # seventh check is added without a downgrade counter here.
         _ig_why = ""
         try:
-            _ig_black_spans = [t for t in _ig_verdict["trips"] if t["check"] == "black"]
-            if _ig_black_spans:
-                _b0 = (_ig_black_spans[0].get("spans") or [[None, None]])[0]
-                _src_ok = bool(source_path and os.path.exists(source_path))
-                _map0 = _ig_out_to_src(_b0[0]) if (_b0 and _b0[0] is not None) else None
-                _ndown = len(_ig_verdict["detail"].get("content_black_downgraded") or [])
-                # PER-SPAN MAPPINGS (2026-08-02): the aggregate counts said the
-                # echo "ran and downgraded 4", which was true and still left the
-                # question of WHY two survived. The answer was that survivors
-                # cross a cut (src_e <= src_s). Emit start->end mappings for the
-                # surviving spans so that distinction is readable from the job
-                # row instead of needing a fixture to prove it.
+            _src_ok = bool(source_path and os.path.exists(source_path))
+            _echo = []
+            for _t in (_ig_verdict.get("trips") or [])[:3]:
+                _chk = str(_t.get("check") or "?")
+                _dk = _IG_DOWNGRADE_KEY.get(_chk)
+                _nd = (len(_ig_verdict["detail"].get(_dk) or [])
+                       if _dk else None)
                 _sp = []
-                for _bs, _be in (_ig_black_spans[0].get("spans") or [])[:3]:
+                for _pair in (_t.get("spans") or [])[:2]:
                     try:
+                        _bs, _be = float(_pair[0]), float(_pair[1])
                         _ms, _me = _ig_out_to_src(_bs), _ig_out_to_src(_be)
+                        # A span whose mapped source END precedes its START
+                        # crosses a CUT — the output span is stitched from two
+                        # source regions, which is why the source echo cannot
+                        # explain it away. That distinction is the whole reason
+                        # per-span mappings are emitted rather than a count.
                         _sp.append(
-                            f"{_bs:.2f}-{_be:.2f}->"
-                            f"{'?' if _ms is None else '%.2f' % _ms}/"
-                            f"{'?' if _me is None else '%.2f' % _me}"
+                            f"{_bs:.1f}-{_be:.1f}->"
+                            f"{'?' if _ms is None else '%.1f' % _ms}/"
+                            f"{'?' if _me is None else '%.1f' % _me}"
                             + ("(CUT)" if (_ms is not None and _me is not None
                                            and _me <= _ms) else ""))
                     except Exception:
-                        _sp.append(f"{_bs:.2f}-{_be:.2f}->err")
-                _ig_why = (f" [echo: source={'Y' if _src_ok else 'MISSING'}"
-                           f" map={'%.2f' % _map0 if _map0 is not None else 'UNRESOLVED'}"
-                           f" downgraded={_ndown} spans={','.join(_sp)}]")
+                        _sp.append("err")
+                # `map=` and UNRESOLVED are the vocabulary two OLDER checks
+                # pin by text (_integrity_black_echo_diag and the cut-crossing
+                # one). Their assertions are crude, but the PROPERTIES they
+                # protect are right — did out->src resolve at all, and are the
+                # per-span mappings emitted — so the generalisation keeps their
+                # exact terms rather than being made to fit by weakening them.
+                _m0 = None
+                try:
+                    _first = (_t.get("spans") or [[None]])[0]
+                    _m0 = _ig_out_to_src(float(_first[0])) if _first and _first[0] is not None else None
+                except Exception:
+                    _m0 = None
+                _echo.append(
+                    f"{_chk}:downgraded={'?' if _nd is None else _nd}"
+                    f" map={'%.1f' % _m0 if _m0 is not None else 'UNRESOLVED'}"
+                    + (f" spans={','.join(_sp)}" if _sp else ""))
+            if _echo:
+                _ig_why = (f" [echo: source={'Y' if _src_ok else 'MISSING'} "
+                           + "; ".join(_echo) + "]")
         except Exception:
             _ig_why = " [echo: diag-failed]"
         if integrity_observe_only:
