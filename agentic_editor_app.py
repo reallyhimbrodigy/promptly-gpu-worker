@@ -35,7 +35,7 @@ NEVER GET BUILT:
 """
 import json
 import os
-import re
+
 import time
 
 import modal
@@ -46,9 +46,59 @@ app = modal.App("agentic-editor")
 # `match` statements, so the import dies with a SyntaxError before any agent work
 # happens. First entry in the failure taxonomy, and an ENVIRONMENT failure rather
 # than an agent one — worth separating in the ledger.
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
+
+# Remotion needs a real project on disk plus Chrome Headless Shell. Both are
+# BAKED INTO THE IMAGE, not fetched at render time — a 150MB chrome download
+# inside the agent loop would land as an opaque timeout in the middle of an edit.
+_PKG = (
+    '{"name":"agentic-mg","version":"1.0.0","private":true,"dependencies":'
+    '{"@remotion/cli":"4.0.517","remotion":"4.0.517",'
+    '"react":"19.0.0","react-dom":"19.0.0"}}'
+)
+_ROOT_TSX = (
+    'import {Composition} from "remotion";\n'
+    'import {Comp} from "./Comp";\n'
+    'export const RemotionRoot: React.FC = () => (\n'
+    '  <Composition id="Comp" component={Comp as any} durationInFrames={90}\n'
+    '    fps={30} width={1080} height={1920} />\n'
+    ');\n'
+)
+_INDEX_TS = (
+    'import {registerRoot} from "remotion";\n'
+    'import {RemotionRoot} from "./Root";\n'
+    'registerRoot(RemotionRoot);\n'
+)
+# Placeholder the agent OVERWRITES. Transparent background is the contract: the
+# MG is composited over the ffmpeg cut, it does not replace it.
+_COMP_TSX = (
+    'export const Comp: React.FC = () => <div style={{flex:1}} />;\n'
+)
+
 IMG = (modal.Image.debian_slim(python_version="3.11")
-       .apt_install("ffmpeg")
-       .pip_install(["anthropic", "deepgram-sdk==3.*", "boto3"]))
+       .apt_install(
+           "ffmpeg", "curl", "ca-certificates",
+           # Chrome Headless Shell runtime deps — without these the remotion
+           # render dies with a bare "browser failed to launch".
+           "libnss3", "libdbus-1-3", "libatk1.0-0", "libasound2", "libxrandr2",
+           "libxkbcommon0", "libxfixes3", "libxcomposite1", "libxdamage1",
+           "libgbm1", "libpango-1.0-0", "libcairo2", "libatk-bridge2.0-0",
+           "libcups2", "libxext6", "libx11-6", "libglib2.0-0")
+       .run_commands(
+           "curl -fsSL https://deb.nodesource.com/setup_20.x | bash -",
+           "apt-get install -y nodejs",
+           "mkdir -p /remotion/src",
+           f"cat > /remotion/package.json <<'EOF'\n{_PKG}\nEOF",
+           f"cat > /remotion/src/Root.tsx <<'EOF'\n{_ROOT_TSX}EOF",
+           f"cat > /remotion/src/index.ts <<'EOF'\n{_INDEX_TS}EOF",
+           f"cat > /remotion/src/Comp.tsx <<'EOF'\n{_COMP_TSX}EOF",
+           "cd /remotion && npm install --no-audit --no-fund",
+           # Bake the browser so the agent loop never pays for it.
+           "cd /remotion && npx remotion browser ensure",
+       )
+       .pip_install(["anthropic", "deepgram-sdk==3.*", "boto3"])
+       .add_local_dir(_KNOWLEDGE_DIR, "/knowledge", copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
 BUCKET = "thisismybucketagainwooo"
@@ -82,6 +132,52 @@ HARD RULES
 - Work in /work. The source is /work/source.mp4. Write /work/out.mp4.
 """
 
+# The editorial knowledge is served as a TOOL, not pasted into the prompt. It is
+# 171k characters — inlining it would cost ~43k tokens on every single turn and
+# make the $0.10/job law further out of reach, which is the opposite of the point.
+# The agent reads the two or three files its edit actually needs.
+_KNOWLEDGE_SYSTEM = """
+EDITORIAL KNOWLEDGE — READ IT BEFORE YOU CUT
+
+You have `read_knowledge`. It serves the editorial standard this product is
+built on: the component catalogue with its FITS/FIGHTS lines, arc structure,
+caption rules, grounding rules, the sound-effect library with attack timings,
+and where the families actually land in reference edits.
+
+This is not background reading. It is the difference between an edit that cuts
+silence and an edit that is DIRECTED. Read `_index` first, then the two or three
+files your edit needs. At minimum read the placement findings and the captions
+rules before you build.
+
+TWO RULES FROM THAT KNOWLEDGE THAT OVERRIDE YOUR INSTINCTS:
+- Overlay text is the WORKHORSE (~7.5 per 25s). Emphasis and SFX are RARE
+  (~0.5 per 25s). If your edit has more zooms than text, it is inverted.
+- Every component you place must be GROUNDED in something the speaker actually
+  said. A card is a quoted line. If you cannot point at the words, do not place
+  it.
+
+MOTION GRAPHICS — ffmpeg FIRST, Remotion ONLY when ffmpeg cannot express it
+
+Cuts, crops, zooms, captions, transitions and text overlays are ffmpeg work.
+ffmpeg composites orders of magnitude faster than headless Chromium, and that
+speed is the whole reason this architecture is worth having.
+
+For a GENUINE motion graphic — spring animation, a counting StatCard, a drawing
+divider — you may author a Remotion component:
+  1. Write the component to /remotion/src/Comp.tsx. Export `Comp`. Use a
+     TRANSPARENT background: it is composited OVER your ffmpeg cut, not instead
+     of it. Import from "remotion" (useCurrentFrame, interpolate, spring).
+  2. Render with alpha:
+     cd /remotion && npx remotion render Comp /work/mg.webm \\
+       --codec=vp8 --pixel-format=yuva420p --log=error
+  3. Composite with ffmpeg:
+     ffmpeg -i /work/base.mp4 -i /work/mg.webm -filter_complex \\
+       "[0][1]overlay=enable='between(t,S,E)'" -c:a copy /work/out.mp4
+
+If the Remotion render fails, SHIP THE FFMPEG EDIT. A missing motion graphic is
+a weaker video; a missing video is a failure. Never let step 2 cost you step 1.
+"""
+
 TOOLS = [
     {"name": "shell",
      "description": "Run a shell command (ffmpeg/ffprobe/python3). Returns "
@@ -96,9 +192,20 @@ TOOLS = [
      "input_schema": {"type": "object", "properties": {}}},
 ]
 
+KNOWLEDGE_TOOL = {
+    "name": "read_knowledge",
+    "description": "Read a file of Promptly's editorial standard. Pass '_index' "
+                   "to list what is available. Extracted verbatim from the "
+                   "production editorial prompt.",
+    "input_schema": {"type": "object",
+                     "properties": {"file": {"type": "string"}},
+                     "required": ["file"]},
+}
+
 
 @app.function(image=IMG, secrets=SECRETS, timeout=3600, cpu=8, memory=16384)
-def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS) -> dict:
+def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
+         use_knowledge: bool = True) -> dict:
     import subprocess
     import boto3
     from anthropic import Anthropic
@@ -241,6 +348,42 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS) -> dict:
                 else "SUSPECT — verify this was a deliberate cut")
         return res
 
+    # ── knowledge served from the image, read on demand ────────────────────
+    led["knowledge_reads"] = []
+
+    def read_knowledge(name: str) -> dict:
+        d = "/knowledge"
+        if not os.path.isdir(d):
+            fail("knowledge_dir_missing", d)
+            return {"error": "knowledge not mounted"}
+        avail = sorted(f for f in os.listdir(d) if f.endswith(".md"))
+        if name in ("_index", "index", ""):
+            idx = []
+            for f in avail:
+                p = os.path.join(d, f)
+                head = ""
+                try:
+                    with open(p) as fh:
+                        for line in fh:
+                            if line.strip():
+                                head = line.strip()[:90]
+                                break
+                except Exception:
+                    pass
+                idx.append({"file": f, "chars": os.path.getsize(p), "starts": head})
+            return {"files": idx}
+        cand = name if name in avail else next(
+            (f for f in avail if name.lower() in f.lower()), None)
+        if not cand:
+            fail("knowledge_file_missing", f"{name} not in {avail}")
+            return {"error": f"no such file: {name}", "available": avail}
+        body = open(os.path.join(d, cand)).read()
+        led["knowledge_reads"].append(cand)
+        # Truncated per read: the MG catalogue alone is 35k chars and a single
+        # unbounded read would blow the turn's budget on one file.
+        return {"file": cand, "chars": len(body), "content": body[:24000],
+                "truncated": len(body) > 24000}
+
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     tl = "\n".join(f"[{w['s']:.2f}-{w['e']:.2f}] {w['w']}" for w in words)
     meta = probe(src)
@@ -251,13 +394,22 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS) -> dict:
             f"TRANSCRIPT ({len(words)} words):\n{tl}\n\n"
             f"Produce /work/out.mp4. Verify with inspect_output before DONE.")
 
+    # cache_control on the system block: run 2 reported cache_read 0 and cost
+    # $0.5351 against a $0.10 law. The system text is identical across every turn
+    # of every job, so it is the one block that can actually be reused.
+    sys_text = SYSTEM + (_KNOWLEDGE_SYSTEM if use_knowledge else "")
+    sys_blocks = [{"type": "text", "text": sys_text,
+                   "cache_control": {"type": "ephemeral"}}]
+    tools = TOOLS + ([KNOWLEDGE_TOOL] if use_knowledge else [])
+    led["use_knowledge"] = use_knowledge
+
     msgs = [{"role": "user", "content": user}]
     final_text = ""
     for it in range(max_iters):
         led["iters"] = it + 1
         try:
             r = client.messages.create(
-                model=MODEL, max_tokens=8000, system=SYSTEM, tools=TOOLS,
+                model=MODEL, max_tokens=8000, system=sys_blocks, tools=tools,
                 messages=msgs)
         except Exception as e:
             fail("model_call_failed", e)
@@ -285,11 +437,17 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS) -> dict:
                 out = run_shell(tu.input.get("cmd", ""))
             elif tu.name == "inspect_output":
                 out = inspect()
+            elif tu.name == "read_knowledge":
+                out = read_knowledge(tu.input.get("file", "_index"))
             else:
                 out = {"error": f"unknown tool {tu.name}"}
                 fail("unknown_tool", tu.name)
+            # Knowledge reads get a wider cap than shell output. At 6000 the
+            # 24k-char read above would arrive as a quarter of a file and the
+            # agent would silently act on a fragment.
+            cap = 26000 if tu.name == "read_knowledge" else 6000
             results.append({"type": "tool_result", "tool_use_id": tu.id,
-                            "content": json.dumps(out)[:6000]})
+                            "content": json.dumps(out)[:cap]})
         msgs.append({"role": "user", "content": results})
 
     final = inspect() if os.path.exists("/work/out.mp4") else {"exists": False}
@@ -298,6 +456,13 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS) -> dict:
         key = f"agentic-editor/{int(time.time())}-{os.path.basename(source_key)}"
         s3.upload_file("/work/out.mp4", b, key,
                        ExtraArgs={"ContentType": "video/mp4"})
+    if use_knowledge and not led["knowledge_reads"]:
+        # The knowledge arm that never opened a file is NOT an arm. Without this
+        # the A/B could report "no effect" when the real finding is "the tool was
+        # never called" — the two are indistinguishable in the output alone.
+        fail("knowledge_never_read",
+             "use_knowledge=True but the agent called read_knowledge zero times "
+             "— this arm is not a knowledge arm and must not be compared as one")
     return {"ok": bool(final.get("exists")), "wall_s": round(time.time() - t0, 1),
             "download_s": dl_s, "transcript_s": transcript_s,
             "source_words": len(words), "final": final, "ledger": led,
@@ -305,15 +470,18 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS) -> dict:
 
 
 @app.local_entrypoint()
-def main(source: str = "failure-corpus/INTEGRITY_TRIP/579dcbe6-5ca5-4e6f-b2f2-3c70da557358.mp4",
+def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
          brief: str = "Cut this into a punchy vertical short. Remove silence and "
                       "filler. Keep the meaning intact. Burn readable captions.",
-         iters: int = MAX_ITERS):
-    r = edit.remote(source, brief, iters)
+         iters: int = MAX_ITERS,
+         knowledge: bool = True):
+    r = edit.remote(source, brief, iters, knowledge)
     print("\n" + "=" * 66)
-    print("  AGENTIC EDITOR — first render")
+    print(f"  AGENTIC EDITOR — knowledge={'ON' if knowledge else 'OFF'}")
     print("=" * 66)
     print(f"  source          : {source}")
+    kr = r["ledger"].get("knowledge_reads", [])
+    print(f"  knowledge reads : {len(kr)}  {kr}")
     print(f"  ok              : {r['ok']}")
     print(f"  WALL            : {r['wall_s']}s  "
           f"(download {r['download_s']}s, transcript {r['transcript_s']}s)")

@@ -1,0 +1,12 @@
+=== GLOBAL FIELDS ===
+═══════════════════════════════════════════════════════════════════════════
+
+notes         — string ≤50 words. Brief rationale.
+audio_denoise — bool. true when noise_floor > -40 dB.
+outro         — "none" | "fade_black" | "fade_white". "none" best for looping.
+aspect_ratio  — always "9:16".
+edit_rationale — string, 1-2 SENTENCES, written TO THE USER about THIS edit. **WRITE IT LAST, AFTER the arrays above are final, and describe ONLY what those arrays actually contain.** If broll_clips is empty you did not add a cutaway; if motion_graphics is empty you did not add a graphic; if text_overlays is empty there is no on-screen text; if transitions is empty there are no transitions. Naming one you did not emit tells the user the product does not know what it made — measured on real deliveries, 33 of the 53 rationales that mentioned b-roll sat on a plan with ZERO b-roll. Saying what you DIDN'T do is fine and often right ("kept it clean, no graphics"); claiming what isn't there is not. Cuts, pacing and emphasis are always present — lead with those. Content: why you cut where you did, the pacing you chose, the moments you leaned into. Plain and specific ("Tightened the intro and held on the reveal at 0:14 so the punchline lands"). Describe what the viewer SEES, in words the user would say — NEVER an internal component or style name (say "a quick punch-in on the reveal" or "captions that type on as you speak", not "StepZoom", "TypewriterReveal", or a caption-style name — those mean nothing to the user). If the material is thin (very short, low-energy, or little happens), SAY SO honestly and suggest recording a longer talking-head next time. Never generic — name a real choice.
+post_caption — string, ≤120 chars, user-facing: the ready-to-post caption for THIS video — one line in the speaker's own voice that sells the CONTENT (never the edit), plus 1-2 hashtags drawn from what the video is actually about ("Behind every launch is a spreadsheet nobody saw #startup #buildinpublic" — never "An edit with zooms and captions").
+post_hook — string, ≤60 chars, user-facing: the scroll-stopping first line for the post — the video's sharpest claim or question, in the speaker's own words. Plain text, no hashtags.
+
+═══════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,4 @@
+=== SEAM TREATMENTS (transitions & tight-cut overlays) — AUTHORED IN A DEDICATED PASS ===
+═══════════════════════════════════════════════════════════════════════════
+
+Transitions and tight-cut overlays are decided by a dedicated seam-dressing pass that reads your editorial_vision, story_shape, arc_segments, and key_moments against the footage's actual picture changes. You do not emit them here. Write your vision's transition intent as INTENT (the energy, the register) — the seam pass consumes it. Same-scene splices need nothing from you: the hard cut owns them, and their energy goes where it belongs — a mask-zoom on the first word back, a caption that leans in, an SFX that lands the beat.
