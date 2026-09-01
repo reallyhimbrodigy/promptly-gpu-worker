@@ -28537,6 +28537,114 @@ def _parse_caption_position_lock(text):
     return _b
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# CAPTION PROFANITY MASK (Zac's ruling 2026-08-31: mask, never omit or leave)
+# ═══════════════════════════════════════════════════════════════════════════
+# THE AUDIO IS UNTOUCHED. Only on-screen caption TEXT is masked, and the word
+# keeps its timing and its slot so nothing downstream shifts.
+#
+# THE VOCABULARY IS DEEPGRAM'S, NOT A LIST WE MAINTAIN. `profanity_filter=True`
+# returns the same words with profane ones replaced by asterisks; diffing that
+# against the unfiltered stream yields the set of profane surface forms for THIS
+# job. Probed on a real 73s source before any of this was written:
+#   171 vs 171 words (count identical) · 20 changed, all containing '*'
+#   0 words with shifted timing, max delta 0.0000s
+# The zero-shift result is the whole reason this is safe: captions are
+# Deepgram-verbatim BECAUSE the timings are the cut clock.
+#
+# MATCHED BY TEXT, NOT BY INDEX. _apply_caption_text_overrides COLLAPSES a
+# multi-word phrase into one caption word, so transcript indices do not survive
+# into the caption stream. An index-keyed mask would drift silently onto the
+# wrong words — visible on every frame it appears.
+_PROFANITY_MASK_ENABLED = (
+    os.environ.get("PROMPTLY_CAPTION_PROFANITY_MASK", "1").strip() != "0")
+
+
+def _transcribe_profanity_filtered(source_path):
+    """The SAME audio through Deepgram with profanity_filter=True.
+
+    A second call rather than replacing the first: the unfiltered stream is what
+    the cutter and the editorial model read, and masking their input would
+    degrade both (a model shown '*****' loses the meaning it plans around).
+    Best-effort — any failure returns [] and _profanity_vocab yields an empty
+    set, so the render proceeds unmasked rather than not at all."""
+    if DeepgramClient is None or PrerecordedOptions is None:
+        return []
+    dg = DeepgramClient(api_key=os.environ["DEEPGRAM_API_KEY"])
+    # Options MUST match the production call exactly except for the one variable
+    # under test, or the pair will not align and the vocab is refused.
+    resp = dg.listen.prerecorded.v("1").transcribe_file(
+        {"buffer": prepare_audio_for_deepgram(source_path),
+         "mimetype": "audio/flac"},
+        PrerecordedOptions(model="nova-3", language="multi", smart_format=True,
+                           punctuate=True, profanity_filter=True))
+    return (_parse_deepgram_response(resp) or {}).get("words") or []
+
+
+def _profanity_vocab(baseline_words, filtered_words):
+    """Surface forms Deepgram masked, from a same-audio filtered/unfiltered pair.
+
+    Returns an EMPTY set when the pair does not line up — a mismatched pair means
+    the index correspondence is not trustworthy, and masking the wrong word is
+    worse than masking none. Fails closed, loudly."""
+    if not baseline_words or not filtered_words:
+        return set()
+    if len(baseline_words) != len(filtered_words):
+        print(f"[caption-mask] REFUSED: word count {len(baseline_words)} vs "
+              f"{len(filtered_words)} — filtered pair does not align",
+              flush=True)
+        return set()
+    vocab = set()
+    for b, f in zip(baseline_words, filtered_words):
+        bw = str((b or {}).get("word") or "")
+        fw = str((f or {}).get("word") or "")
+        # A masked token is asterisks; anything else that differs is a
+        # transcription difference, not a mask, and must NOT enter the vocab.
+        if bw and fw and bw != fw and set(fw) == {"*"}:
+            vocab.add(bw.lower())
+    return vocab
+
+
+def _mask_word_text(w):
+    """First letter, then asterisks for the rest — Zac's ruling. Deepgram's own
+    output is FULLY masked ('*****'); the first letter is recovered from the
+    unfiltered stream, which is why the pair is diffed rather than the filtered
+    stream simply being used as the caption text."""
+    core = "".join(ch for ch in w if ch.isalnum())
+    if not core:
+        return w
+    return core[0] + "*" * (len(core) - 1)
+
+
+def _mask_caption_profanity(caption_words, vocab):
+    """Mask caption TEXT only. start/end are copied through untouched — the slot
+    and its timing are the contract with every downstream stage."""
+    if not vocab or not caption_words:
+        return caption_words
+    out, n = [], 0
+    for w in caption_words:
+        raw = str((w or {}).get("word") or "")
+        norm = "".join(ch for ch in raw.lower() if ch.isalnum())
+        if norm and norm in vocab:
+            m = dict(w)
+            masked = _mask_word_text(raw)
+            m["word"] = masked
+            # punctuated_word carries the rendered form; leaving it unmasked
+            # would render the slur anyway on every style that reads it.
+            pw = str(w.get("punctuated_word") or raw)
+            lead = pw[:len(pw) - len(pw.lstrip())]
+            trail_punct = "".join(c for c in pw if not c.isalnum())[-2:] if pw else ""
+            m["punctuated_word"] = lead + masked + (
+                trail_punct if trail_punct and not trail_punct.isspace() else "")
+            out.append(m)
+            n += 1
+        else:
+            out.append(w)
+    if n:
+        print(f"[caption-mask] masked {n} caption word(s)", flush=True)
+    return out
+
+
 def _apply_caption_text_overrides(projected_words, overrides):
     """Apply the user's literal spelling overrides to the caption word stream: each
     specified phrase (1+ words) collapses to a single caption word carrying the exact
@@ -30442,6 +30550,26 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                         _cal_map = {}; edit_plan["_caption_align_map"] = {}
                 if _cal_map:
                     _caption_words = _apply_caption_alignment(_caption_words, _cal_map)
+        # PROFANITY MASK — LAST, after overrides and alignment, so no path
+        # reaches the screen unmasked. Caption text only; the audio is untouched
+        # and every slot keeps its timing. Computed once per job and cached on
+        # edit_plan, exactly like _caption_align_map.
+        if _PROFANITY_MASK_ENABLED:
+            _pf_vocab = edit_plan.get("_profanity_vocab")
+            if _pf_vocab is None:
+                try:
+                    _pf_vocab = _profanity_vocab(
+                        (transcript or {}).get("words") or [],
+                        _transcribe_profanity_filtered(source_path))
+                except Exception as _pf_e:
+                    # Fail OPEN on the mask, never on the render: a transcription
+                    # hiccup must not cost the user their video. Loud, per the
+                    # fail-loudly-to-us law.
+                    print(f"[caption-mask] vocab build failed: {_pf_e}", flush=True)
+                    _pf_vocab = set()
+                edit_plan["_profanity_vocab"] = sorted(_pf_vocab)
+            _caption_words = _mask_caption_profanity(
+                _caption_words, set(_pf_vocab or ()))
         # The accent comes from the DESIGN SYSTEM built for this job — the
         # user's own footage, not a constant. If the palette failed to build,
         # _caption_accent_for returns None and captions render exactly as they do
