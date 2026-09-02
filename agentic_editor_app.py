@@ -799,30 +799,55 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
              f"{led.get('knowledge_reads')}) — this run is NOT the arm it claims "
              f"to be and must not be compared as one")
 
-    # FAMILY MIX, counted from the ffmpeg ops the agent actually RAN. Prose about
-    # what it placed is not evidence; the command log is.
+    # ── FAMILY MIX — THE MANIFEST IS THE INSTRUMENT. OP-COUNTING IS RETIRED ──
+    # Op-counting was always a guess wearing a number's clothes, and this run
+    # measured the gap directly: the ops said `caption_burn: 3` where the
+    # manifest said ONE caption track. A filter name cannot tell a caption burn
+    # from an overlay text, cannot tell WHICH beat a placement serves, and
+    # cannot see a placement rendered by Remotion at all. Four runs were misread
+    # that way. `declare_placement` carries type + method + why, so it answers
+    # all three, and it is now what the rates are computed from.
+    #
+    # The op-count SURVIVES ONLY AS A CROSS-CHECK below — never as a reported
+    # family rate. A manifest nobody audits is just prose with a schema.
     _c = " ".join(led.get("cmds") or [])
     _dur = float((final or {}).get("duration_s") or 0) or 1.0
     _per25 = lambda n: round(n / _dur * 25.0, 2)
+    _pl = led.get("placements") or []
+    _n_of = lambda t: sum(1 for p in _pl if p.get("type") == t)
     _mix = {
-        # captions ride subtitles/ASS; overlay TEXT is drawtext. Counted apart so
-        # a caption burn cannot masquerade as seven text placements.
-        "text_ops": _c.count("drawtext"),
-        "card_ops": _c.count("drawbox"),
-        "cutaway_ops": max(0, _c.count(" -i ") - _c.count("ffmpeg")),
-        "caption_burn": _c.count("subtitles=") + _c.count(".ass"),
-        # WHICH composition, not just whether Remotion ran. A probe render is
-        # the harness, not the product catalogue -- Zac's open question.
+        "source": "manifest",           # never 'ops' again
+        "declared": len(_pl),
+        "text": _n_of("overlay_text"),
+        "cards": _n_of("card"),
+        "cutaways": _n_of("cutaway"),
+        "caption_tracks": _n_of("caption_track"),
+        "emphasis": _n_of("emphasis"),
+        "sfx": _n_of("sfx"),
+        "by_remotion": sum(1 for p in _pl if p.get("method") == "remotion"),
+        "by_ffmpeg": sum(1 for p in _pl if p.get("method") == "ffmpeg"),
+        # COMMAND FACTS, kept because they are about what RAN, not what was
+        # placed. WHICH composition, not just whether Remotion ran — a probe
+        # render is the harness, the product comp is the catalogue.
         "remotion_renders": _c.count("remotion render"),
         "product_comp": _c.count("PromptlyOverlay") + _c.count("PromptlyMicroSegments"),
         "probe_comp": _c.count("FrameCompProbe") + _c.count("MGCraftProbe"),
-        "overlay_composites": _c.count("overlay="),
         "shell_cmds": len(led.get("cmds") or []),
     }
-    _mix["text_per_25s"] = _per25(_mix["text_ops"])
-    _mix["card_per_25s"] = _per25(_mix["card_ops"])
-    _mix["cutaway_per_25s"] = _per25(_mix["cutaway_ops"])
+    _mix["text_per_25s"] = _per25(_mix["text"])
+    _mix["card_per_25s"] = _per25(_mix["cards"])
+    _mix["cutaway_per_25s"] = _per25(_mix["cutaways"])
     led["family_mix"] = _mix
+
+    # RECONCILIATION — the manifest is the instrument, so it has to be audited
+    # in BOTH directions or it is unfalsifiable prose.
+    #   under-declaring: drawing ops ran with nothing declared (below).
+    #   over-declaring: a remotion placement claimed with no render command.
+    if _mix["by_remotion"] and _mix["remotion_renders"] == 0:
+        fail("placement_declared_without_render",
+             f"{_mix['by_remotion']} placement(s) declared method='remotion' but "
+             f"ZERO `remotion render` commands ran — the manifest is claiming a "
+             f"component that was never rendered.")
 
     if not (final or {}).get("duration_s") and not led["failures"]:
         fail("no_output_no_reason",
@@ -859,13 +884,16 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
              "a Remotion component rendered but no overlay= composite ran — the "
              "graphic was paid for and never reached the output.")
 
-    _drew = (led.get("family_mix") or {}).get("text_ops", 0) + \
-            (led.get("family_mix") or {}).get("card_ops", 0)
-    if _drew and not (led.get("placements") or []):
+    # THE UNDER-DECLARING HALF. This one MUST read the raw ops, not family_mix —
+    # family_mix is now derived FROM the manifest, so checking it against the
+    # manifest would be circular and could never fire. The op-count's surviving
+    # job is exactly this: catching drawing that nobody declared.
+    _drew = _c.count("drawtext") + _c.count("drawbox")
+    if _drew and not _pl:
         fail("placements_undeclared",
              f"{_drew} drawtext/drawbox op(s) ran but ZERO placements were "
-             f"declared — the manifest cannot be trusted as a count, and the "
-             f"op-count is the guess it was meant to replace")
+             f"declared — the manifest is the instrument now, so an undeclared "
+             f"placement is an unmeasured one.")
 
     if use_knowledge and not led["knowledge_reads"]:
         # The knowledge arm that never opened a file is NOT an arm. Without this
@@ -931,14 +959,17 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     print(f"  s3 key          : {r.get('output_key')}")
     mx = r["ledger"].get("family_mix") or {}
     if mx:
-        print(f"\n  FAMILY MIX (counted from {mx.get('shell_cmds')} shell commands)")
-        print(f"    text     {mx['text_per_25s']:>6} /25s   (reference 7.56)   ops={mx['text_ops']}")
-        print(f"    cards    {mx['card_per_25s']:>6} /25s   (reference 2.57)   ops={mx['card_ops']}")
-        print(f"    cutaways {mx['cutaway_per_25s']:>6} /25s   (reference 3.32)   ops={mx['cutaway_ops']}")
-        print(f"    caption burn ops: {mx['caption_burn']}")
-        print(f"    remotion renders: {mx.get('remotion_renders')}  "
-              f"(product comp {mx.get('product_comp')}, PROBE comp {mx.get('probe_comp')})")
-        print(f"    overlay composites: {mx.get('overlay_composites')}")
+        print(f"\n  FAMILY MIX — from the PLACEMENT MANIFEST ({mx.get('declared')} "
+              f"declared). Op-counting retired: a filter name cannot tell a "
+              f"caption burn from an overlay text.")
+        print(f"    text     {mx['text_per_25s']:>6} /25s   (reference 7.56)   n={mx['text']}")
+        print(f"    cards    {mx['card_per_25s']:>6} /25s   (reference 2.57)   n={mx['cards']}")
+        print(f"    cutaways {mx['cutaway_per_25s']:>6} /25s   (reference 3.32)   n={mx['cutaways']}")
+        print(f"    caption tracks: {mx['caption_tracks']}   emphasis: {mx['emphasis']}   sfx: {mx['sfx']}")
+        print(f"    method: {mx['by_ffmpeg']} ffmpeg / {mx['by_remotion']} remotion")
+        print(f"    [ran] remotion renders: {mx.get('remotion_renders')}  "
+              f"(product comp {mx.get('product_comp')}, PROBE comp {mx.get('probe_comp')})"
+              f"  over {mx.get('shell_cmds')} shell commands")
     tns = r["ledger"].get("turns") or []
     if tns:
         from collections import Counter as _TC
