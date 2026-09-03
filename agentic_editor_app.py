@@ -231,6 +231,17 @@ Violating any of them produces a BROKEN video that still exits 0.
       point for one card. MGCraftProbe30 is NOT a fake: its `type` field selects
       the real StatCard/ProgressBar/etc. from the catalogue by name.
 
+  C7. SEARCH THE REFERENCE BEFORE YOUR FIRST RENDER — ENFORCED, NOT ADVISED.
+      Your first `remotion render` is BLOCKED until you have called
+      `search_skills` at least once. This is a precondition in the tool layer,
+      not a preference: the previous run had the reference mounted, the tool
+      available and a paragraph recommending it, and made zero calls. One
+      search costs one turn; a guessed prop costs a whole render round-trip.
+
+        search_skills("--props")      search_skills("interpolate")
+
+      The block lifts after one call — re-issue your command unchanged.
+
   COST: ~343 ms/frame. 2s of component at 30fps = 60 frames = ~21s of paint on
   top of your ffmpeg edit. Use a component when the graphic MOVES (count-up,
   filling bar, staged reveal). Static text stays ffmpeg — correct and far cheaper.
@@ -423,6 +434,11 @@ REQUIRED_KNOWLEDGE = ["14_card_text_placement_rules.md",
 # RED-PROVEN: deleting the "C2." line raises; re-adding "--codec=prores" raises.
 # A check that has never failed is not yet a check.
 _REQUIRED_CONSTRAINTS = ["C1.", "C2.", "C3.", "C4.", "C5.", "C6.",
+                         # C7 is ENFORCED in the tool layer. It is listed here
+                         # so the prompt cannot stop TELLING the agent about a
+                         # gate that still blocks it — an unannounced
+                         # precondition burns a turn on a collision.
+                         "C7.",
                          "MGCraftProbe30", "colorkey=0x808080",
                          # INPUT 4 — Karpathy behaviour is RESIDENT, not a tool
                          # read. It governs every turn, so "did the agent read
@@ -865,8 +881,39 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         for tu in tool_uses:
             if tu.name == "shell":
                 _c = tu.input.get("cmd", "")
-                led["cmds"].append(_c[:4000])
-                out = run_shell(_c)
+                # ── THE PRECONDITION GATE ───────────────────────────────────
+                # Mounting and prompting were BOTH insufficient: run 11 had
+                # /skills mounted, `search_skills` in the tool list and a
+                # prompt paragraph telling it to search instead of guessing,
+                # and made ZERO calls. Same shape as the rules in runs 8/9 —
+                # presence, then even reading, produced no behaviour change.
+                # What this agent follows is REQUIREMENTS, so the reference is
+                # now a precondition of the render rather than advice about it.
+                #
+                # Blocks the FIRST component render only, and opens on one CALL
+                # rather than one HIT — a hitless query must not deadlock the
+                # run. `remotion_skills` still reports searched_no_hits in that
+                # case, so opening the gate can never be mistaken for value.
+                if ("remotion render" in _c
+                        and not (led.get("skill_searches") or [])):
+                    led["skill_gate_blocks"] = led.get("skill_gate_blocks", 0) + 1
+                    fail("skill_gate_blocked_render",
+                         "first `remotion render` attempted with zero "
+                         "search_skills calls — blocked, agent redirected")
+                    out = {"blocked": True, "ran": False,
+                           "error": "PRECONDITION: call search_skills at least "
+                                    "once before your first `remotion render`.",
+                           "why": "Guessing a prop or flag costs a full render "
+                                  "round-trip, and you have a turn budget. The "
+                                  "reference is 276 files of official Remotion "
+                                  "docs and it is one tool call away.",
+                           "try": ["--props", "MGCraftProbe30", "StatCard",
+                                   "--frames", "interpolate"],
+                           "then": "re-issue this exact command; it is not "
+                                   "blocked again."}
+                else:
+                    led["cmds"].append(_c[:4000])
+                    out = run_shell(_c)
             elif tu.name == "inspect_output":
                 out = inspect()
             elif tu.name == "declare_placement":
@@ -957,6 +1004,16 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     for _name, _i in _inputs.items():
         _i["status"] = ("not_mounted" if not _i["mounted"]
                         else "read" if _i["used"] else "mounted_unread")
+    # SEARCHED BUT FOUND NOTHING is its own state. The C7 gate opens on one
+    # CALL (a hitless query must not deadlock a run), so without this a search
+    # that returned zero hits would satisfy the gate and then report as plain
+    # `mounted_unread` — indistinguishable from never having searched, which is
+    # the exact collapse the three-status split exists to prevent.
+    _rs = _inputs["remotion_skills"]
+    if _rs["status"] == "mounted_unread" and (led.get("skill_searches") or []):
+        _rs["status"] = "searched_no_hits"
+        _rs["queries_tried"] = [s["q"] for s in led["skill_searches"]]
+    led["skill_gate_blocks"] = led.get("skill_gate_blocks", 0)
     led["inputs"] = _inputs
     # CLIP-BRAIN IS DELIBERATELY ABSENT, recorded so its absence is a DECISION in
     # the ledger rather than an omission someone rediscovers. See CLIP_BRAIN_
@@ -974,6 +1031,15 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                  f"{_unmounted} are NOT IN THE IMAGE — the agent could not have "
                  f"used them at any price. This is not an unread input, it is an "
                  f"absent one, and no prompt change can fix it.")
+        # Distinct from unread, because the remedies are opposite: unread means
+        # push the agent at it, no-hits means the queries or the MOUNT are
+        # wrong. 276 files should answer a plausible Remotion question.
+        if _rs["status"] == "searched_no_hits":
+            fail("skills_searched_zero_hits",
+                 f"{len(led.get('skill_searches') or [])} search(es) returned "
+                 f"NOTHING: {_rs.get('queries_tried')}. Either the queries were "
+                 f"unanswerable or /skills is not carrying what it should — "
+                 f"check the mount before blaming the agent.")
         if _unread:
             fail("required_input_unread",
                  f"{_unread} mounted but never touched (rules read: "
@@ -1132,6 +1198,9 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _ss:
         print(f"    skill searches: {len(_ss)} -> "
               + ", ".join(f"{s['q']}({s['hits']})" for s in _ss[:8]))
+    _gb = r["ledger"].get("skill_gate_blocks", 0)
+    print(f"    C7 gate       : {_gb} render(s) blocked before first search"
+          + ("  (gate did the work)" if _gb else "  (searched unprompted)"))
     print(f"  ok              : {r['ok']}")
     print(f"  WALL            : {r['wall_s']}s  "
           f"(download {r['download_s']}s, transcript {r['transcript_s']}s)")
