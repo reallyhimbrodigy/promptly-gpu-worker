@@ -49,6 +49,20 @@ app = modal.App("agentic-editor")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
 _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion"))
+# INPUT 4 — the Remotion skills. 276 markdown files, ~11MB, and until now they
+# lived ONLY in ~/.claude/skills on the laptop: the agent runs in a Modal
+# container, so they were not "unread", they were UNREACHABLE. Mounting them is
+# what makes "did the agent read them" a question that can even be asked.
+#
+# Served by SEARCH, not by browsing (see search_skills). A 276-file index is not
+# something an agent reads; run 10 proved extra reading burden makes the edit
+# WORSE, not better. Grep is the right interface for an API reference.
+_SKILLS_SRC = os.path.expanduser("~/.claude/skills")
+_SKILLS_IGNORE = ["arcads-*", "awesome-claude-skills", "claude-video",
+                  "interactivity-best-practices", "superpowers",
+                  "ui-ux-pro-max-skill", "watch",
+                  "**/node_modules", "**/.git", "**/*.png", "**/*.jpg",
+                  "**/*.gif", "**/*.mp4", "**/*.webm"]
 
 # Remotion needs a real project on disk plus Chrome Headless Shell. Both are
 # BAKED INTO THE IMAGE, not fetched at render time — a 150MB chrome download
@@ -109,6 +123,7 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
            "cd /promptly-remotion && npm install --no-audit --no-fund",
            "cd /promptly-remotion && npx remotion browser ensure")
        .pip_install(["anthropic", "deepgram-sdk==3.*", "boto3"])
+       .add_local_dir(_SKILLS_SRC, "/skills", copy=True, ignore=_SKILLS_IGNORE)
        .add_local_dir(_KNOWLEDGE_DIR, "/knowledge", copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
@@ -149,6 +164,14 @@ Do NOT reimplement graphics in ffmpeg. The production components live there and
 render standalone (measured: ~290 ms/frame at 1080x1920).
 
   cd /promptly-remotion && npx remotion compositions        # what exists
+
+THE REMOTION API REFERENCE IS A TOOL: `search_skills`
+276 files of official Remotion docs. Use it INSTEAD OF GUESSING at a prop name,
+a hook, a CLI flag, or an error string — one wrong prop costs a whole render
+round-trip, and you have a turn budget. `search_skills("--props")`,
+`search_skills("spring(")`. Do not browse it; ask it one question at a time.
+/promptly-remotion is the truth for WHAT EXISTS; the reference is the truth for
+HOW to call it.
 
 WHICH TOOL FOR WHICH GRAPHIC — the rule, because "don't reimplement" was not one
 ffmpeg drawtext/drawbox is CORRECT and cheaper for anything STATIC: a line of
@@ -227,6 +250,33 @@ DECLARE EVERY PLACEMENT
 After the command that renders a graphic succeeds, call `declare_placement`
 once for it. Counting ffmpeg filter names cannot tell a caption burn from an
 overlay text; four runs were misread that way. Your declaration is the record.
+
+WORKING DISCIPLINE — K1 THROUGH K4
+Behavioural, not editorial. Measured: 0 of the 999 editing terms in the
+knowledge set appear in this material, and none of these four appear in the
+knowledge set at all — it answers "how to work", never "how to cut".
+
+  K1. STATE ASSUMPTIONS, DO NOT SILENTLY PICK. If a beat could be read two
+      ways, say which you chose and why in your final message.
+
+  K2. VERIFIABLE SUCCESS CRITERIA, THEN LOOP. "Make it good" is not a goal.
+      Yours are already concrete: inspect_output shows the speech intact,
+      the output is 1080x1920 H.264 with audio, every graphic is declared.
+      Loop until those hold — do not stop at the first render that exits 0.
+
+  K3. NEVER DECLARE COMPLETE WHAT YOU HAVE NOT VERIFIED. Exit code 0 is not
+      verification. A 60fps graphic on a 30fps cut and an unkeyed grey
+      rectangle BOTH exit 0. Say DONE only after inspect_output.
+
+  K4. DO NOT INVENT AN API. If you are unsure of a prop, a flag or a
+      composition name, use `search_skills` or `npx remotion compositions`.
+      A guessed prop name costs a whole render round-trip.
+
+  NOT ADOPTED — "simplicity first / nothing beyond what was asked". It is good
+  advice for writing code and it is WRONG FOR THIS JOB, measured: across five
+  runs this agent placed 0-1 cards against a reference rate of 2.57 per 25s.
+  The failure mode here is UNDER-doing, not over-building. Placing the graphic a
+  beat calls for is the task, not scope creep.
 
 HARD RULES
 - The output must be 1080x1920, H.264, with audio.
@@ -337,6 +387,22 @@ KNOWLEDGE_TOOLS = [{
     "input_schema": {"type": "object",
                      "properties": {"file": {"type": "string"}},
                      "required": ["file"]},
+}, {
+    "name": "search_skills",
+    "description": (
+        "Search the Remotion API reference (276 files) for how to call "
+        "something: a prop name, a hook, a CLI flag, an error string. Returns "
+        "matching lines with context. This is the HOW; /promptly-remotion is "
+        "the WHAT-EXISTS. Use it before guessing at an API — a wrong prop name "
+        "costs a full render round-trip."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "query": {"type": "string",
+                                   "description": "literal substring, e.g. "
+                                                  "'spring(' or '--props' or "
+                                                  "'interpolate'"},
+                         "max_hits": {"type": "integer"}},
+                     "required": ["query"]},
 }]
 
 
@@ -357,7 +423,12 @@ REQUIRED_KNOWLEDGE = ["14_card_text_placement_rules.md",
 # RED-PROVEN: deleting the "C2." line raises; re-adding "--codec=prores" raises.
 # A check that has never failed is not yet a check.
 _REQUIRED_CONSTRAINTS = ["C1.", "C2.", "C3.", "C4.", "C5.", "C6.",
-                         "MGCraftProbe30", "colorkey=0x808080"]
+                         "MGCraftProbe30", "colorkey=0x808080",
+                         # INPUT 4 — Karpathy behaviour is RESIDENT, not a tool
+                         # read. It governs every turn, so "did the agent read
+                         # it" is the wrong question; "is it in the prompt" is
+                         # the right one, and that is a static check.
+                         "K1.", "K2.", "K3.", "K4."]
 # Every one of these was tried against this image and FAILED. If a future edit
 # reintroduces them the agent inherits 31 failed attempts again.
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
@@ -624,6 +695,52 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         return {"file": cand, "chars": len(body), "content": body[:24000],
                 "truncated": len(body) > 24000}
 
+    # ── INPUT 4: the Remotion skills, served by SEARCH ─────────────────────
+    # 276 files / ~11MB cannot be browsed by an agent with a 32-turn budget, and
+    # run 10 measured what extra reading burden does: MORE material produced
+    # ok=False and zero shell commands. So this is grep, not a file list — the
+    # agent asks "how do I X" and gets the lines that answer it.
+    led["skill_searches"] = []
+    led["skill_hits"] = 0
+
+    def search_skills(query: str, max_hits: int = 12) -> dict:
+        d = "/skills"
+        if not os.path.isdir(d):
+            fail("skills_dir_missing", d)
+            return {"error": "skills not mounted"}
+        q = (query or "").strip()
+        if not q:
+            return {"error": "empty query"}
+        hits, scanned = [], 0
+        for root, _dirs, files in os.walk(d):
+            for fn in files:
+                if not fn.endswith((".md", ".mdx")):
+                    continue
+                p = os.path.join(root, fn)
+                scanned += 1
+                try:
+                    with open(p, errors="ignore") as fh:
+                        lines = fh.read().splitlines()
+                except Exception:
+                    continue
+                for i, line in enumerate(lines):
+                    if q.lower() in line.lower():
+                        ctx = "\n".join(lines[max(0, i - 2):i + 6])
+                        hits.append({"file": os.path.relpath(p, d),
+                                     "line": i + 1, "context": ctx[:900]})
+                        if len(hits) >= max_hits:
+                            break
+                if len(hits) >= max_hits:
+                    break
+            if len(hits) >= max_hits:
+                break
+        led["skill_searches"].append({"q": q, "hits": len(hits)})
+        led["skill_hits"] += len(hits)
+        return {"query": q, "files_scanned": scanned, "hits": hits,
+                "note": "Remotion API reference. Verify against "
+                        "/promptly-remotion — the catalogue is the truth for "
+                        "what EXISTS; these docs are the truth for HOW to call it."}
+
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     tl = "\n".join(f"[{w['s']:.2f}-{w['e']:.2f}] {w['w']}" for w in words)
     meta = probe(src)
@@ -759,6 +876,9 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             elif tu.name == "read_knowledge":
                 out = read_knowledge(tu.input.get("file", "_index"))
                 _knowledge_result_ids[tu.id] = tu.input.get("file", "_index")
+            elif tu.name == "search_skills":
+                out = search_skills(tu.input.get("query", ""),
+                                    int(tu.input.get("max_hits") or 12))
             else:
                 out = {"error": f"unknown tool {tu.name}"}
                 fail("unknown_tool", tu.name)
@@ -791,13 +911,77 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     # this check stayed green — so the render was reported as a rules arm when the
     # rules were never opened. "Some knowledge was read" is not the claim being
     # tested; "THIS file was read" is.
-    _missing = [f for f in REQUIRED_KNOWLEDGE
-                if f not in (led.get("knowledge_reads") or [])]
-    if use_knowledge and _missing:
-        fail("required_knowledge_unread",
-             f"{_missing} was never read (read: "
-             f"{led.get('knowledge_reads')}) — this run is NOT the arm it claims "
-             f"to be and must not be compared as one")
+    # PER-INPUT, NOT PER-FILE. The lane has four named inputs and until now only
+    # ONE of them (the rules) was asserted, so a run could be reported as "all
+    # four wired" while three were never touched. Each input reports one of:
+    #   read           — the agent actually used it
+    #   mounted_unread — present in the image, never touched  -> FAIL
+    #   not_mounted    — structurally unreachable             -> FAIL, different
+    # Those last two are DIFFERENT failures and must not collapse into one: for
+    # ten weeks the skills were not "ignored", they were on a laptop the
+    # container could not see, and calling that "unread" would have sent someone
+    # to fix the prompt.
+    _cmds_join = " ".join(led.get("cmds") or [])
+    _inputs = {
+        # 1. the rules — the two files that say WHERE families go and HOW to draw
+        "rules": {
+            "mounted": os.path.isdir("/knowledge"),
+            "used": [f for f in REQUIRED_KNOWLEDGE
+                     if f in (led.get("knowledge_reads") or [])],
+            "want": REQUIRED_KNOWLEDGE,
+        },
+        # 2. the component catalogue — reading it means RUNNING against it
+        "remotion_catalogue": {
+            "mounted": os.path.isdir("/promptly-remotion"),
+            "used": ["/promptly-remotion"] if "/promptly-remotion" in _cmds_join else [],
+            "want": ["/promptly-remotion"],
+        },
+        # 3. the API reference — used means at least one search returned hits
+        "remotion_skills": {
+            "mounted": os.path.isdir("/skills"),
+            "used": [s["q"] for s in (led.get("skill_searches") or []) if s["hits"]],
+            "want": [">=1 search with hits"],
+        },
+        # 4. Karpathy behaviour — RESIDENT in the SYSTEM prompt, not a tool read.
+        # It governs every turn, so a read-count is the wrong instrument; the
+        # question is whether it is in the prompt the model was actually sent.
+        # Verified against sys_text, NOT the module constant, so an arm that
+        # ships a stripped prompt cannot pass on the constant's behalf.
+        "karpathy_behaviour": {
+            "mounted": all(k in sys_text for k in ("K1.", "K2.", "K3.", "K4.")),
+            "used": [k for k in ("K1.", "K2.", "K3.", "K4.") if k in sys_text],
+            "want": ["K1.", "K2.", "K3.", "K4."],
+            "resident": True,
+        },
+    }
+    for _name, _i in _inputs.items():
+        _i["status"] = ("not_mounted" if not _i["mounted"]
+                        else "read" if _i["used"] else "mounted_unread")
+    led["inputs"] = _inputs
+    # CLIP-BRAIN IS DELIBERATELY ABSENT, recorded so its absence is a DECISION in
+    # the ledger rather than an omission someone rediscovers. See CLIP_BRAIN_
+    # VERDICT.md: both findings are negatives, and the surviving one describes a
+    # stage this editor does not perform.
+    led["inputs"]["clip_brain"] = {"mounted": False, "used": [],
+                                   "status": "parked_permanently",
+                                   "why": "no rule survives; see CLIP_BRAIN_VERDICT.md"}
+
+    if use_knowledge:
+        _unmounted = [k for k, v in _inputs.items() if v["status"] == "not_mounted"]
+        _unread = [k for k, v in _inputs.items() if v["status"] == "mounted_unread"]
+        if _unmounted:
+            fail("required_input_not_mounted",
+                 f"{_unmounted} are NOT IN THE IMAGE — the agent could not have "
+                 f"used them at any price. This is not an unread input, it is an "
+                 f"absent one, and no prompt change can fix it.")
+        if _unread:
+            fail("required_input_unread",
+                 f"{_unread} mounted but never touched (rules read: "
+                 f"{led.get('knowledge_reads')}; skill searches: "
+                 f"{len(led.get('skill_searches') or [])}; "
+                 f"/promptly-remotion in cmds: "
+                 f"{'/promptly-remotion' in _cmds_join}) — this run is NOT the "
+                 f"arm it claims to be and must not be compared as one")
 
     # ── FAMILY MIX — THE MANIFEST IS THE INSTRUMENT. OP-COUNTING IS RETIRED ──
     # Op-counting was always a guess wearing a number's clothes, and this run
@@ -923,6 +1107,18 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     print(f"  source          : {source}")
     kr = r["ledger"].get("knowledge_reads", [])
     print(f"  knowledge reads : {len(kr)}  {kr}")
+    # THE FOUR INPUTS, each with its own status. Reported here because "all four
+    # are wired" was previously an impression — only the rules were ever
+    # asserted, so three could be absent while the run was described as complete.
+    print("  ── the four inputs ──")
+    for _n, _i in (r["ledger"].get("inputs") or {}).items():
+        _u = _i.get("used") or []
+        _shown = (", ".join(str(x) for x in _u)[:60]) if _u else "—"
+        print(f"    {_n:<20} {_i.get('status','?'):<18} {_shown}")
+    _ss = r["ledger"].get("skill_searches") or []
+    if _ss:
+        print(f"    skill searches: {len(_ss)} -> "
+              + ", ".join(f"{s['q']}({s['hits']})" for s in _ss[:8]))
     print(f"  ok              : {r['ok']}")
     print(f"  WALL            : {r['wall_s']}s  "
           f"(download {r['download_s']}s, transcript {r['transcript_s']}s)")
