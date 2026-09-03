@@ -1015,7 +1015,11 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         # render is the harness, the product comp is the catalogue.
         "remotion_renders": _c.count("remotion render"),
         "product_comp": _c.count("PromptlyOverlay") + _c.count("PromptlyMicroSegments"),
-        "probe_comp": _c.count("FrameCompProbe") + _c.count("MGCraftProbe"),
+        # RENDER commands only — same false-positive class as the C1 check
+        # below: a `grep -i MGCraftProbe` used to discover what exists counted
+        # as a probe render, so this reported 2 where 1 render ran.
+        "probe_comp": sum(x.count("FrameCompProbe") + x.count("MGCraftProbe")
+                          for x in (led.get("cmds") or []) if "remotion render" in x),
         "shell_cmds": len(led.get("cmds") or []),
     }
     _mix["text_per_25s"] = _per25(_mix["text"])
@@ -1048,7 +1052,16 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     # speed and ffmpeg exits 0; an unkeyed composite pastes a grey rectangle
     # and ffmpeg exits 0. Nothing downstream raises, so the ledger has to.
     import re as _re2
-    _bare_probe = _re2.findall(r"MGCraftProbe(?!30)(?![A-Za-z0-9_])", _c)
+    # SCOPED TO RENDER COMMANDS. Unscoped, this scanned the whole command log
+    # and fired on `npx remotion compositions | grep -i MGCraftProbe` — a
+    # DISCOVERY command, which is exactly what C1 wants the agent to run. The
+    # first run with all four inputs wired reported c1_violation while the only
+    # actual render was the correct `render MGCraftProbe30`.
+    # A check that cries wolf costs the same trust as one that never fires:
+    # the next real C1 violation would be read as "that check is noisy".
+    _render_cmds = " ".join(x for x in (led.get("cmds") or [])
+                            if "remotion render" in x)
+    _bare_probe = _re2.findall(r"MGCraftProbe(?!30)(?![A-Za-z0-9_])", _render_cmds)
     if _bare_probe:
         fail("c1_violation_60fps_probe",
              f"agent rendered bare MGCraftProbe {len(_bare_probe)}x — it is "
