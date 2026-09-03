@@ -262,6 +262,36 @@ After the command that renders a graphic succeeds, call `declare_placement`
 once for it. Counting ffmpeg filter names cannot tell a caption burn from an
 overlay text; four runs were misread that way. Your declaration is the record.
 
+EFFICIENCY — E1 THROUGH E4, REQUIREMENTS NOT PREFERENCES
+Output tokens are 40-44% of this job's cost and turns are the multiplier on it.
+These are not about doing less work; they are about not doing the SAME work
+twice.
+
+  E1. READ ONLY WHAT THE CURRENT TASK NEEDS. Do not survey the knowledge set.
+      Open the file that answers the question in front of you. `_index` first
+      if you do not know which one that is — not four files "for context".
+
+  E2. ONE RENDER, ONE COMPOSITE, VERIFY ONCE. Re-render only when verification
+      actually FAILED. A second render "to be safe" is ~21s of paint and a
+      turn of output tokens buying nothing.
+
+  E3. DO NOT RE-DERIVE WHAT THE RECIPES ALREADY STATE. The commands in
+      15_ffmpeg_placement_recipes.md and C1-C6 above are VERIFIED against this
+      exact image. Use them verbatim. A previous run spent FOURTEEN commands
+      rediscovering C1 and C2 from scratch, including dumping raw pixel values
+      to identify a grey that C2 states outright.
+
+  E4. NO EXPLORATORY COMMANDS WHERE A DOCUMENTED ANSWER EXISTS. Probing to
+      learn something already written down is a turn spent buying a fact you
+      were given.
+
+  WHAT THE REFERENCE DOES AND DOES NOT COVER — measured, so you do not spend
+  searches finding out: /skills is 282 files of COMPONENT-AUTHORING docs.
+  `interpolate` appears in 46 of them. It does NOT document the CLI: `--props`
+  appears in ZERO files. So search it for component and prop questions, and
+  take CLI invocation from C4 and recipe 15, which are verified against this
+  image. Do not search twice for a CLI flag.
+
 WORKING DISCIPLINE — K1 THROUGH K4
 Behavioural, not editorial. Measured: 0 of the 999 editing terms in the
 knowledge set appear in this material, and none of these four appear in the
@@ -444,7 +474,10 @@ _REQUIRED_CONSTRAINTS = ["C1.", "C2.", "C3.", "C4.", "C5.", "C6.",
                          # read. It governs every turn, so "did the agent read
                          # it" is the wrong question; "is it in the prompt" is
                          # the right one, and that is a static check.
-                         "K1.", "K2.", "K3.", "K4."]
+                         "K1.", "K2.", "K3.", "K4.",
+                         # E1-E4 — efficiency. Same reason as C1-C6: this agent
+                         # follows numbered requirements and ignores prose.
+                         "E1.", "E2.", "E3.", "E4."]
 # Every one of these was tried against this image and FAILED. If a future edit
 # reintroduces them the agent inherits 31 failed attempts again.
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
@@ -1035,11 +1068,18 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         # push the agent at it, no-hits means the queries or the MOUNT are
         # wrong. 276 files should answer a plausible Remotion question.
         if _rs["status"] == "searched_no_hits":
+            # THE MOUNT IS NOT THE SUSPECT — that was checked and cleared
+            # 2026-09-03: 282 md files land at /skills, `interpolate` hits 46
+            # of them. The corpus is COMPONENT-AUTHORING docs and does not
+            # document the CLI (`--props`: 0 files), which is what the first
+            # gated run searched for twice. So zero hits means query/corpus
+            # MISFIT, and the fix is the prompt telling the agent what the
+            # reference covers — not remounting anything.
             fail("skills_searched_zero_hits",
                  f"{len(led.get('skill_searches') or [])} search(es) returned "
-                 f"NOTHING: {_rs.get('queries_tried')}. Either the queries were "
-                 f"unanswerable or /skills is not carrying what it should — "
-                 f"check the mount before blaming the agent.")
+                 f"NOTHING: {_rs.get('queries_tried')}. The mount is known good "
+                 f"(282 files); this is a query/corpus misfit. CLI flags are not "
+                 f"in there — they are in C4 and recipe 15.")
         if _unread:
             fail("required_input_unread",
                  f"{_unread} mounted but never touched (rules read: "
