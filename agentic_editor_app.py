@@ -72,6 +72,17 @@ _INVENTORY_JSON = os.path.join(_HERE, "_asset_inventory.json")
 
 
 def _write_asset_inventory():
+    """LOCAL ONLY. Modal re-imports this module INSIDE the container, where
+    neither build_asset_inventory.py nor handler.py exists — so an unguarded
+    call here is a ModuleNotFoundError at container start, before any agent
+    work, which is exactly how this first shipped. The container does not need
+    to build anything: it reads the JSON already mounted at
+    /assets/inventory.json.
+
+    Deliberately NOT a try/except. A failure to extract on the DEPLOY side must
+    still raise loudly — that is the guard that stops an empty inventory
+    shipping — so the guard is "am I local", not "did it work".
+    """
     import build_asset_inventory
     import json as _json
     inv = build_asset_inventory.build()      # raises on empty/mismatched tables
@@ -80,7 +91,7 @@ def _write_asset_inventory():
     return inv
 
 
-_ASSET_INV = _write_asset_inventory()
+_ASSET_INV = _write_asset_inventory() if modal.is_local() else None
 
 _SKILLS_SRC = os.path.expanduser("~/.claude/skills")
 _SKILLS_IGNORE = ["arcads-*", "awesome-claude-skills", "claude-video",
