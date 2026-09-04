@@ -334,9 +334,14 @@ twice.
       it cut placement density 6.9 -> 3.34 text/25s while reading stayed flat
       at 4 files, so it was suppressing the edit, not the survey.)
 
-  E2. ONE RENDER, ONE COMPOSITE, VERIFY ONCE. Re-render only when verification
-      actually FAILED. A second render "to be safe" is ~21s of paint and a
-      turn of output tokens buying nothing.
+  E2. ONE RENDER, ONE COMPOSITE, VERIFY ONCE — ENFORCED, NOT ADVISED.
+      `inspect_output` is CAPPED: one call, plus one retry ONLY if that call
+      failed. A third is refused by the tool. Re-render only when verification
+      actually FAILED; a second render "to be safe" is ~21s of paint and a turn
+      of output tokens buying nothing.
+      (Enforced 2026-09-03. As advice E2 did not bind: with the prep work gone,
+      the agent spent the freed budget on SIX inspect_output calls, so turns
+      fell 26 -> 21 while shell calls fell 19 -> 12. Budget expands to fill.)
 
   E3. DO NOT RE-DERIVE WHAT THE RECIPES ALREADY STATE. The commands in
       15_ffmpeg_placement_recipes.md and C1-C6 above are VERIFIED against this
@@ -1161,7 +1166,41 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                     led["cmds"].append(_c[:4000])
                     out = run_shell(_c)
             elif tu.name == "inspect_output":
-                out = inspect()
+                # ── THE VERIFICATION CAP (E2, ENFORCED) ─────────────────────
+                # Run 14 measured the problem: removing the prep work took
+                # shell calls 19 -> 12 but turns only 26 -> 21, because
+                # inspect_output went 1 -> 6. The agent expanded to fill the
+                # budget, verifying six times against E2's "verify once". So
+                # the floor is set by turns the agent CHOOSES to take, not by
+                # how much mechanical work exists — and E2 as advice did not
+                # bind. Same as C7: enforce it in the tool layer.
+                #
+                # ONE PASS, plus ONE retry ONLY if the pass actually failed.
+                # A verification that came back OK has nothing to re-check;
+                # a second look at a passing output is pure cost.
+                _iv = led.setdefault("inspect_verdicts", [])
+                _first_failed = bool(_iv) and _iv[0] != "OK"
+                _allowed = 1 + (1 if _first_failed else 0)
+                if len(_iv) >= _allowed:
+                    led["inspect_cap_blocks"] = led.get("inspect_cap_blocks", 0) + 1
+                    fail("inspect_cap_blocked",
+                         f"inspect_output call {len(_iv) + 1} refused "
+                         f"(allowed {_allowed}; first verdict {_iv[0]!r})")
+                    out = {"blocked": True,
+                           "error": f"VERIFICATION BUDGET SPENT ({_allowed} of "
+                                    f"{_allowed} used).",
+                           "first_verdict": _iv[0],
+                           "why": "One pass, plus one retry only if the pass "
+                                  "failed. Re-checking an output that already "
+                                  "verified buys nothing and costs a turn.",
+                           "do_now": "If the last verdict was OK, say DONE. If "
+                                     "it was not, FIX the edit and finish — you "
+                                     "have no further checks."}
+                else:
+                    out = inspect()
+                    _v = ((out.get("speech_check") or {}).get("VERDICT")
+                          or ("NO_OUTPUT" if out.get("exists") is False else "OK"))
+                    _iv.append("OK" if str(_v).startswith("OK") else str(_v)[:40])
             elif tu.name == "declare_placement":
                 _p = dict(tu.input or {})
                 led.setdefault("placements", []).append(_p)
