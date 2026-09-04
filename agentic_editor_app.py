@@ -57,6 +57,31 @@ _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion
 # Served by SEARCH, not by browsing (see search_skills). A 276-file index is not
 # something an agent reads; run 10 proved extra reading burden makes the edit
 # WORSE, not better. Grep is the right interface for an API reference.
+# INPUT 5 — THE REAL ASSET LIBRARY. The component catalogue was mounted; the
+# rest of the inventory was not. The 15 SFX files live in src/assets/sounds,
+# which is a SIBLING of src/remotion, so the existing mount never carried them,
+# and the tables that make them usable — attack timings, transition and caption
+# enums — live in handler.py and type_registries.py, which the container has
+# never seen. The agent could describe a sound it had no file for.
+_ASSETS_SOUNDS = os.path.abspath(
+    os.path.join(_HERE, "..", "..", "src", "assets", "sounds"))
+# EXTRACTED FROM SOURCE AT DEPLOY TIME, never transcribed — see
+# build_asset_inventory.py. Three _MG_ATTACK_MS entries were re-measured on
+# 2026-08-29; a hand-copied table would have gone stale silently.
+_INVENTORY_JSON = os.path.join(_HERE, "_asset_inventory.json")
+
+
+def _write_asset_inventory():
+    import build_asset_inventory
+    import json as _json
+    inv = build_asset_inventory.build()      # raises on empty/mismatched tables
+    with open(_INVENTORY_JSON, "w") as fh:
+        _json.dump(inv, fh, indent=1)
+    return inv
+
+
+_ASSET_INV = _write_asset_inventory()
+
 _SKILLS_SRC = os.path.expanduser("~/.claude/skills")
 _SKILLS_IGNORE = ["arcads-*", "awesome-claude-skills", "claude-video",
                   "interactivity-best-practices", "superpowers",
@@ -124,6 +149,8 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
            "cd /promptly-remotion && npx remotion browser ensure")
        .pip_install(["anthropic", "deepgram-sdk==3.*", "boto3"])
        .add_local_dir(_SKILLS_SRC, "/skills", copy=True, ignore=_SKILLS_IGNORE)
+       .add_local_dir(_ASSETS_SOUNDS, "/assets/sounds", copy=True)
+       .add_local_file(_INVENTORY_JSON, "/assets/inventory.json", copy=True)
        .add_local_dir(_KNOWLEDGE_DIR, "/knowledge", copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
@@ -261,6 +288,25 @@ DECLARE EVERY PLACEMENT
 After the command that renders a graphic succeeds, call `declare_placement`
 once for it. Counting ffmpeg filter names cannot tell a caption burn from an
 overlay text; four runs were misread that way. Your declaration is the record.
+
+THE REAL ASSET LIBRARY IS MOUNTED AT /assets — A1 THROUGH A3
+This is the inventory the production pipeline ships, not a description of one.
+
+  A1. /assets/inventory.json IS THE INDEX. Read it once. It lists every sound
+      file, every motion-graphic type, every transition and every caption
+      style THAT ACTUALLY EXISTS, extracted from the pipeline's own source at
+      deploy time. Do not invent an asset name; if it is not in there, it is
+      not real.
+
+  A2. SOUNDS ARE REAL FILES at /assets/sounds/*.mp3 (15 of them). Mix one in
+      with ffmpeg like any other audio input.
+
+  A3. THE ATTACK TABLE IS NOT OPTIONAL — it is how many ms EARLIER a sound must
+      start so its PEAK lands on the target word. `popsfx` peaks 32ms in;
+      `imposter` peaks 935ms in. Start both at the word and the second one
+      lands nearly a second late, audibly, with ffmpeg exiting 0. Offset every
+      sound by its own `attack_ms`. Motion graphics have the same table for
+      their entrance.
 
 EFFICIENCY — E1 THROUGH E4, REQUIREMENTS NOT PREFERENCES
 Output tokens are 40-44% of this job's cost and turns are the multiplier on it.
@@ -477,7 +523,9 @@ _REQUIRED_CONSTRAINTS = ["C1.", "C2.", "C3.", "C4.", "C5.", "C6.",
                          "K1.", "K2.", "K3.", "K4.",
                          # E1-E4 — efficiency. Same reason as C1-C6: this agent
                          # follows numbered requirements and ignores prose.
-                         "E1.", "E2.", "E3.", "E4."]
+                         "E1.", "E2.", "E3.", "E4.",
+                         # A1-A3 — the real asset library. Same reason again.
+                         "A1.", "A2.", "A3."]
 # Every one of these was tried against this image and FAILED. If a future edit
 # reintroduces them the agent inherits 31 failed attempts again.
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
@@ -1021,6 +1069,15 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             "mounted": os.path.isdir("/skills"),
             "used": [s["q"] for s in (led.get("skill_searches") or []) if s["hits"]],
             "want": [">=1 search with hits"],
+        },
+        # 5. the real asset library — sounds on disk plus the tables that make
+        # them placeable. "Used" means a command actually referenced /assets;
+        # reading the inventory alone is not using the library.
+        "asset_library": {
+            "mounted": os.path.isdir("/assets/sounds")
+                       and os.path.isfile("/assets/inventory.json"),
+            "used": ["/assets"] if "/assets" in _cmds_join else [],
+            "want": ["/assets"],
         },
         # 4. Karpathy behaviour — RESIDENT in the SYSTEM prompt, not a tool read.
         # It governs every turn, so a read-count is the wrong instrument; the
