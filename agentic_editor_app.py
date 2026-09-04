@@ -313,9 +313,15 @@ Output tokens are 40-44% of this job's cost and turns are the multiplier on it.
 These are not about doing less work; they are about not doing the SAME work
 twice.
 
-  E1. READ ONLY WHAT THE CURRENT TASK NEEDS. Do not survey the knowledge set.
-      Open the file that answers the question in front of you. `_index` first
-      if you do not know which one that is — not four files "for context".
+  E1. USE `build_cut` — NEVER HAND-BUILD A CONCAT FILTER OR A SUBTITLE FILE.
+      You choose the spans; it does the segment maths, the output-time remap
+      and the .srt, and returns the exact ffmpeg command. Measured: hand-
+      building these took ~7 shell commands per run and got the caption remap
+      wrong twice. Dead air over 0.35s is already listed in your brief — do
+      not recompute it.
+      (E1 was "read only what the task needs" until 2026-09-03. It was dropped:
+      it cut placement density 6.9 -> 3.34 text/25s while reading stayed flat
+      at 4 files, so it was suppressing the edit, not the survey.)
 
   E2. ONE RENDER, ONE COMPOSITE, VERIFY ONCE. Re-render only when verification
       actually FAILED. A second render "to be safe" is ~21s of paint and a
@@ -327,9 +333,12 @@ twice.
       rediscovering C1 and C2 from scratch, including dumping raw pixel values
       to identify a grey that C2 states outright.
 
-  E4. NO EXPLORATORY COMMANDS WHERE A DOCUMENTED ANSWER EXISTS. Probing to
-      learn something already written down is a turn spent buying a fact you
-      were given.
+  E4. (RETIRED 2026-09-03 — "no exploratory commands where a documented answer
+      exists". Dropped with E1 for the same measured reason: the pair halved
+      placements, 19 -> 10. Exploration is how this agent finds beats worth
+      placing, and this lane exists to raise placement density, not lower it.
+      Kept as a numbered slot so its absence is deliberate and visible rather
+      than looking like a renumbering accident.)
 
   WHAT THE REFERENCE DOES AND DOES NOT COVER — measured, so you do not spend
   searches finding out: /skills is 282 files of COMPONENT-AUTHORING docs.
@@ -475,6 +484,23 @@ KNOWLEDGE_TOOLS = [{
                      "properties": {"file": {"type": "string"}},
                      "required": ["file"]},
 }, {
+    "name": "build_cut",
+    "description": (
+        "Turn the spans you decide to KEEP into the concat filter AND an "
+        "output-time subtitle file, in one call. YOU choose the spans — that is "
+        "the edit. This does the arithmetic: segment maths, the output-time "
+        "remap of every word, and the .srt. Measured: this replaces ~7 shell "
+        "commands per run. Returns the exact ffmpeg command to run next."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "keep_spans": {
+                             "type": "array",
+                             "description": "[[start,end],...] in SOURCE seconds, "
+                                            "ascending, non-overlapping",
+                             "items": {"type": "array", "items": {"type": "number"}}},
+                         "words_per_cue": {"type": "integer"}},
+                     "required": ["keep_spans"]},
+}, {
     "name": "search_skills",
     "description": (
         "Search the Remotion API reference (276 files) for how to call "
@@ -499,6 +525,29 @@ KNOWLEDGE_TOOLS = [{
 # where a card belongs is not knowing the command that renders one.
 REQUIRED_KNOWLEDGE = ["14_card_text_placement_rules.md",
                       "15_ffmpeg_placement_recipes.md"]
+
+
+def remap_words(spans, words):
+    """Words inside `spans`, re-timed to the CONCATENATED output's clock.
+
+    Pure and module-level so it can be tested without a container. This is the
+    arithmetic the agent hand-wrote every run and got wrong twice, and its
+    failure mode is silent: wrong offsets drift the captions against the speech
+    and every command still exits 0.
+
+    A word belongs to the first span that fully contains it. Its output time is
+    its offset within that span, plus the total duration of all EARLIER kept
+    spans — never its source time, which is the bug both hand versions had.
+    """
+    kept, off = [], 0.0
+    for a, b in spans:
+        for w in words:
+            if w["s"] >= a - 1e-6 and w["e"] <= b + 1e-6:
+                kept.append({"w": w["w"],
+                             "s": w["s"] - a + off,
+                             "e": w["e"] - a + off})
+        off += (b - a)
+    return kept
 
 
 # ── CHECK 1 (STATIC): the constraints cannot silently decay back to prose ─────
@@ -838,14 +887,104 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                         "/promptly-remotion — the catalogue is the truth for "
                         "what EXISTS; these docs are the truth for HOW to call it."}
 
+    # ── THE HARNESS DOES THE MECHANICS ──────────────────────────────────────
+    # Measured on run 13: only 5 of 19 shell calls produced an artifact. The
+    # dominant class was PREP — seven commands re-deriving cut boundaries and a
+    # subtitle file from a word list the agent was already handed. That is
+    # arithmetic, not editing, and it was being paid for at model rates.
+    #
+    # THE SPLIT IS DELIBERATE: the agent still decides WHICH spans to keep, which
+    # is the whole editorial judgement. The harness does the segment maths, the
+    # output-time remap and the subtitle generation, which have exactly one
+    # correct answer. Nothing about what the edit SAYS moves into code here.
+    led["build_cut_calls"] = 0
+
+    def _srt_ts(t):
+        h = int(t // 3600); m = int(t % 3600 // 60); s = t % 60
+        return f"{h:02d}:{m:02d}:{s:06.3f}".replace(".", ",")
+
+    def build_cut(keep_spans, words_per_cue=4):
+        """keep_spans -> concat filter + output-time SRT. Returns the command."""
+        try:
+            spans = sorted([[float(a), float(b)] for a, b in keep_spans])
+        except Exception as e:
+            return {"error": f"keep_spans must be [[start,end],...]: {e}"}
+        if not spans:
+            return {"error": "keep_spans is empty"}
+        dur = float(meta.get("format", {}).get("duration") or 0)
+        bad = [s for s in spans if s[1] <= s[0] or s[0] < 0 or s[1] > dur + 0.05]
+        if bad:
+            return {"error": f"spans outside 0..{dur:.2f}s or non-increasing: {bad[:3]}"}
+        for a, b in zip(spans, spans[1:]):
+            if b[0] < a[1] - 1e-6:
+                return {"error": f"overlapping spans: {a} and {b}"}
+
+        # concat filter — the shape the agent hand-wrote every run
+        parts, n = [], len(spans)
+        for i, (a, b) in enumerate(spans):
+            parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS[v{i}]")
+            parts.append(f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS[a{i}]")
+        cat = "".join(f"[v{i}][a{i}]" for i in range(n))
+        parts.append(f"{cat}concat=n={n}:v=1:a=1[outv][outa]")
+        filt = ";".join(parts)
+        with open("/work/filter.txt", "w") as fh:
+            fh.write(filt)
+
+        # OUTPUT-TIME REMAP — module-level and unit-tested, because this is the
+        # step the agent got wrong twice by hand and the failure is SILENT: the
+        # captions simply drift against the speech and ffmpeg exits 0.
+        kept, cues = remap_words(spans, words), []
+        for i in range(0, len(kept), words_per_cue):
+            grp = kept[i:i + words_per_cue]
+            cues.append((grp[0]["s"], grp[-1]["e"],
+                         " ".join(g["w"] for g in grp).upper()))
+        with open("/work/captions.srt", "w") as fh:
+            for i, (s, e, txt) in enumerate(cues, 1):
+                fh.write(f"{i}\n{_srt_ts(s)} --> {_srt_ts(e)}\n{txt}\n\n")
+
+        led["build_cut_calls"] += 1
+        out_dur = sum(b - a for a, b in spans)
+        return {
+            "ok": True,
+            "output_duration_s": round(out_dur, 3),
+            "kept_words": len(kept), "source_words": len(words),
+            "cues": len(cues),
+            "filter_file": "/work/filter.txt",
+            "captions_srt": "/work/captions.srt",
+            "run_this": ("cd /work && filt=$(cat filter.txt) && ffmpeg -y -i source.mp4 "
+                         "-filter_complex \"$filt\" -map '[outv]' -map '[outa]' "
+                         "-c:v libx264 -crf 18 -preset veryfast -c:a aac cut.mp4"),
+            "then_captions": ("cd /work && ffmpeg -y -i cut.mp4 -vf "
+                              "\"subtitles=captions.srt:force_style='Fontname=DejaVu Sans,"
+                              "Bold=1,FontSize=18,PrimaryColour=&H00FFFFFF,"
+                              "OutlineColour=&H00000000,Outline=2,Alignment=2,MarginV=120'\" "
+                              "-c:v libx264 -crf 18 -preset veryfast -c:a copy capped.mp4"),
+            "note": "Captions are already remapped to OUTPUT time. Do not shift them.",
+        }
+
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     tl = "\n".join(f"[{w['s']:.2f}-{w['e']:.2f}] {w['w']}" for w in words)
     meta = probe(src)
     vs = next((s for s in meta.get("streams", []) if s.get("codec_type") == "video"), {})
+    # PRECOMPUTED DEAD AIR — mechanical, so the harness does it. Run 13 spent
+    # commands 1/2/4 deriving exactly this from the word list it was given.
+    _gaps = []
+    for a, b in zip(words, words[1:]):
+        g = b["s"] - a["e"]
+        if g >= 0.35:
+            _gaps.append((round(a["e"], 2), round(b["s"], 2), round(g, 2)))
+    _gap_txt = ("\n".join(f"  [{s:.2f}-{e:.2f}] {g:.2f}s" for s, e, g in _gaps)
+                or "  (none over 0.35s)")
+    _src_dur = float(meta.get('format', {}).get('duration') or 0)
     user = (f"BRIEF: {brief}\n\n"
             f"SOURCE: /work/source.mp4 — {vs.get('width')}x{vs.get('height')}, "
-            f"{float(meta.get('format', {}).get('duration') or 0):.1f}s\n\n"
+            f"{_src_dur:.1f}s\n\n"
             f"TRANSCRIPT ({len(words)} words):\n{tl}\n\n"
+            f"DEAD AIR ALREADY DETECTED ({len(_gaps)} gaps >=0.35s) — you do not "
+            f"need to compute these:\n{_gap_txt}\n\n"
+            f"Decide the spans to KEEP, then call `build_cut` with them. It "
+            f"returns the ffmpeg command and an output-time .srt — do not build "
+            f"either by hand.\n\n"
             f"Produce /work/out.mp4. Verify with inspect_output before DONE.")
 
     # cache_control on the system block: run 2 reported cache_read 0 and cost
@@ -1004,6 +1143,9 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             elif tu.name == "read_knowledge":
                 out = read_knowledge(tu.input.get("file", "_index"))
                 _knowledge_result_ids[tu.id] = tu.input.get("file", "_index")
+            elif tu.name == "build_cut":
+                out = build_cut(tu.input.get("keep_spans") or [],
+                                int(tu.input.get("words_per_cue") or 4))
             elif tu.name == "search_skills":
                 out = search_skills(tu.input.get("query", ""),
                                     int(tu.input.get("max_hits") or 12))
