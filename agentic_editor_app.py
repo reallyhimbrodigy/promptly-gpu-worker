@@ -170,7 +170,7 @@ MODEL = "claude-sonnet-5"
 # 5 -> 12 -> 22. Run 3 (knowledge ON) spent 4 of its 12 turns READING and died
 # at "Now burn the captions" — the budget has to cover the reading AND the edit,
 # or the knowledge arm is structurally unable to finish what the control finishes.
-MAX_ITERS = 32
+MAX_ITERS = 8
 # 8000 was the ceiling the agent kept hitting MID-TOOL-CALL. stop_reason came
 # back 'max_tokens' with an incomplete tool_use block, so tool_uses was empty,
 # so the loop broke -- silently, for three runs and ~$0.72. The recipes made it
@@ -324,12 +324,18 @@ Output tokens are 40-44% of this job's cost and turns are the multiplier on it.
 These are not about doing less work; they are about not doing the SAME work
 twice.
 
-  E1. USE `build_cut` — NEVER HAND-BUILD A CONCAT FILTER OR A SUBTITLE FILE.
+  E1. USE `build_cut` AND `build_overlays` — NEVER HAND-BUILD A FILTERGRAPH.
       You choose the spans; it does the segment maths, the output-time remap
       and the .srt, and returns the exact ffmpeg command. Measured: hand-
       building these took ~7 shell commands per run and got the caption remap
-      wrong twice. Dead air over 0.35s is already listed in your brief — do
-      not recompute it.
+      wrong twice. `build_overlays` does the same for text: you give words,
+      timings and position, it escapes them and burns the captions in the SAME
+      pass. Run 15 hand-wrote a drawtext graph and then sed-patched it to fix
+      apostrophes — that is a turn you do not have. Dead air over 0.35s is
+      already listed in your brief; do not recompute it.
+      YOUR TURN BUDGET IS 8. Plan the whole edit up front, then execute: read
+      what you need, decide the spans, build_cut, render, build_overlays,
+      composite, verify once. There is no budget for exploration.
       (E1 was "read only what the task needs" until 2026-09-03. It was dropped:
       it cut placement density 6.9 -> 3.34 text/25s while reading stayed flat
       at 4 files, so it was suppressing the edit, not the survey.)
@@ -516,6 +522,29 @@ KNOWLEDGE_TOOLS = [{
                              "items": {"type": "array", "items": {"type": "number"}}},
                          "words_per_cue": {"type": "integer"}},
                      "required": ["keep_spans"]},
+}, {
+    "name": "build_overlays",
+    "description": (
+        "Turn the text overlays you have decided on into a SAFE ffmpeg "
+        "filtergraph, with captions burned in the same pass. YOU choose the "
+        "words, timings and position — that is the edit. This escapes them "
+        "(apostrophes, colons, commas) and returns the exact command. Hand-"
+        "escaping cost a turn and a re-encode last run."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "items": {"type": "array", "items": {"type": "object",
+                             "properties": {
+                                 "text": {"type": "string"},
+                                 "t_start": {"type": "number"},
+                                 "t_end": {"type": "number"},
+                                 "position": {"type": "string",
+                                              "enum": ["top", "bottom"]}},
+                             "required": ["text", "t_start", "t_end"]}},
+                         "burn_captions": {"type": "boolean"},
+                         "input_file": {"type": "string"},
+                         "output_file": {"type": "string"},
+                         "extra_input": {"type": "string"}},
+                     "required": ["items"]},
 }, {
     "name": "search_skills",
     "description": (
@@ -978,6 +1007,66 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             "note": "Captions are already remapped to OUTPUT time. Do not shift them.",
         }
 
+    # ── OVERLAY FILTERGRAPH, BUILT BY THE HARNESS ───────────────────────────
+    # Run 15's commands 7 and 8: the agent hand-wrote a drawtext filtergraph and
+    # then `sed`-patched it to fix APOSTROPHE ESCAPING ("I''M EMPLOYED"). ffmpeg
+    # filter syntax escaping is a mechanical rule with exactly one right answer,
+    # it is famously easy to get wrong, and getting it wrong costs a turn plus a
+    # re-encode. Same argument as build_cut: the agent picks the words and the
+    # timings — the editorial content — and the harness renders them safely.
+    _FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+
+    def _esc(t):
+        """Escape text for an ffmpeg drawtext value. Order matters: backslash
+        first or it re-escapes everything it just inserted."""
+        return (str(t).replace("\\", r"\\\\").replace(":", r"\:")
+                .replace("'", r"’" if False else "’")   # curly quote
+                .replace("%", r"\%").replace(",", r"\,"))
+
+    def build_overlays(items, burn_captions=True, input_file="cut.mp4",
+                       output_file="out.mp4", extra_input=None):
+        if not isinstance(items, list):
+            return {"error": "items must be a list of {text,t_start,t_end}"}
+        chain, errs = [], []
+        if burn_captions and os.path.exists("/work/captions.srt"):
+            chain.append(
+                "subtitles=/work/captions.srt:force_style='Fontname=DejaVu Sans"
+                ",Bold=1,FontSize=18,PrimaryColour=&H00FFFFFF"
+                ",OutlineColour=&H00000000,Outline=2,Alignment=2,MarginV=120'")
+        for i, it in enumerate(items):
+            try:
+                t0 = float(it["t_start"]); t1 = float(it["t_end"])
+                txt = _esc(it["text"])
+            except Exception as e:
+                errs.append(f"item {i}: {e}"); continue
+            if t1 <= t0:
+                errs.append(f"item {i}: t_end <= t_start"); continue
+            y = {"top": "h*0.14", "bottom": "h*0.78"}.get(
+                str(it.get("position") or "top").lower(), "h*0.14")
+            chain.append(
+                f"drawtext=fontfile={_FONT}:text='{txt}':fontcolor=white"
+                f":fontsize=64:borderw=6:bordercolor=black@0.9"
+                f":x=(w-text_w)/2:y={y}"
+                f":enable='between(t,{t0:.2f},{t1:.2f})'")
+        if errs:
+            return {"error": "bad items", "details": errs[:5]}
+        if not chain:
+            return {"error": "nothing to draw and no captions.srt"}
+        with open("/work/overlays.txt", "w") as fh:
+            fh.write(",".join(chain))
+        led["build_overlays_calls"] = led.get("build_overlays_calls", 0) + 1
+        extra = f" -i {extra_input}" if extra_input else ""
+        return {
+            "ok": True, "overlays": len(items),
+            "captions_burned": burn_captions,
+            "filter_file": "/work/overlays.txt",
+            "run_this": (f"cd /work && filt=$(cat overlays.txt) && ffmpeg -y "
+                         f"-i {input_file}{extra} -vf \"$filt\" -c:v libx264 "
+                         f"-crf 18 -preset veryfast -c:a copy {output_file}"),
+            "note": "Apostrophes and colons are already escaped. Do not sed this "
+                    "file — hand-patching escaping is what cost a turn last run.",
+        }
+
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     tl = "\n".join(f"[{w['s']:.2f}-{w['e']:.2f}] {w['w']}" for w in words)
     meta = probe(src)
@@ -1211,6 +1300,12 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             elif tu.name == "build_cut":
                 out = build_cut(tu.input.get("keep_spans") or [],
                                 int(tu.input.get("words_per_cue") or 4))
+            elif tu.name == "build_overlays":
+                out = build_overlays(tu.input.get("items") or [],
+                                     bool(tu.input.get("burn_captions", True)),
+                                     tu.input.get("input_file") or "cut.mp4",
+                                     tu.input.get("output_file") or "out.mp4",
+                                     tu.input.get("extra_input"))
             elif tu.name == "search_skills":
                 out = search_skills(tu.input.get("query", ""),
                                     int(tu.input.get("max_hits") or 12))
