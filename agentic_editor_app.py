@@ -979,13 +979,28 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     vs = next((s for s in meta.get("streams", []) if s.get("codec_type") == "video"), {})
     # PRECOMPUTED DEAD AIR — mechanical, so the harness does it. Run 13 spent
     # commands 1/2/4 deriving exactly this from the word list it was given.
+    # NOTE THE VARIABLE NAMES. `b` at function scope is the S3 BUCKET (line
+    # ~666), and an earlier version of this loop used `for a, b in ...`, which
+    # rebound it to a word dict and killed the upload 300s later with
+    # "expected string or bytes-like object, got 'dict'". pyflakes cannot see
+    # it — a rebind is legal — and it is the exact shadowing class this repo
+    # has already paid for once.
     _gaps = []
-    for a, b in zip(words, words[1:]):
-        g = b["s"] - a["e"]
-        if g >= 0.35:
-            _gaps.append((round(a["e"], 2), round(b["s"], 2), round(g, 2)))
-    _gap_txt = ("\n".join(f"  [{s:.2f}-{e:.2f}] {g:.2f}s" for s, e, g in _gaps)
+    for _w0, _w1 in zip(words, words[1:]):
+        _g = _w1["s"] - _w0["e"]
+        if _g >= 0.35:
+            _gaps.append((round(_w0["e"], 2), round(_w1["s"], 2), round(_g, 2)))
+    _gap_txt = ("\n".join(f"  [{_s:.2f}-{_e:.2f}] {_g2:.2f}s"
+                          for _s, _e, _g2 in _gaps)
                 or "  (none over 0.35s)")
+    # THE CHECK for the shadowing class above: `b` must still be the bucket
+    # string by the time we reach the agent loop. Costs nothing, and turns a
+    # 300s-later TypeError inside s3transfer into an immediate, named failure.
+    if not isinstance(b, str):
+        raise AssertionError(
+            f"S3 bucket `b` was rebound to {type(b).__name__} before the agent "
+            f"loop — a loop variable shadowed it. Upload would fail after the "
+            f"whole edit had already been paid for.")
     _src_dur = float(meta.get('format', {}).get('duration') or 0)
     user = (f"BRIEF: {brief}\n\n"
             f"SOURCE: /work/source.mp4 — {vs.get('width')}x{vs.get('height')}, "
