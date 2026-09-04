@@ -289,9 +289,20 @@ Violating any of them produces a BROKEN video that still exits 0.
 
       The block lifts after one call — re-issue your command unchanged.
 
-  COST: ~343 ms/frame. 2s of component at 30fps = 60 frames = ~21s of paint on
-  top of your ffmpeg edit. Use a component when the graphic MOVES (count-up,
-  filling bar, staged reveal). Static text stays ffmpeg — correct and far cheaper.
+  COST, RE-MEASURED 2026-09-04 — the old figure here was WRONG BY ~9x and it
+  was arguing against components. It said "~343 ms/frame, so 2s of component =
+  ~21s of paint". That was STARTUP AMORTISED OVER A SHORT RENDER, not paint.
+  Separated by rendering 30/60/150 frames and taking the slope:
+
+      STARTUP  13.8s  per `remotion render` INVOCATION
+      PAINT      39ms per frame
+
+  So 2s of component (60 frames) is 2.3s of paint behind a 13.8s startup. The
+  startup dominates and it is PER INVOCATION — the cost is in the NUMBER OF
+  RENDER CALLS, not the number of components. Ten components rendered one at a
+  time is ~161s; the same ten in ONE pass is ~82s and does not grow with the
+  eleventh. Do not skip a component because you think paint is expensive.
+  Static text still stays ffmpeg — that is a taste call, not a cost one.
 
 A COMPONENT IS REQUIRED WHEN THE GRAPHIC MOVES. ffmpeg cannot express these at
 all, and approximating them with a static box is the wrong edit, not a cheaper
