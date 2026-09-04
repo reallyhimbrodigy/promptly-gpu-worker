@@ -170,7 +170,7 @@ MODEL = "claude-sonnet-5"
 # 5 -> 12 -> 22. Run 3 (knowledge ON) spent 4 of its 12 turns READING and died
 # at "Now burn the captions" — the budget has to cover the reading AND the edit,
 # or the knowledge arm is structurally unable to finish what the control finishes.
-MAX_ITERS = 12
+MAX_ITERS = 16
 # 8000 was the ceiling the agent kept hitting MID-TOOL-CALL. stop_reason came
 # back 'max_tokens' with an incomplete tool_use block, so tool_uses was empty,
 # so the loop broke -- silently, for three runs and ~$0.72. The recipes made it
@@ -409,13 +409,7 @@ HARD RULES
 # make the $0.10/job law further out of reach, which is the opposite of the point.
 # The agent reads the two or three files its edit actually needs.
 _KNOWLEDGE_SYSTEM = """
-EDITORIAL KNOWLEDGE — THE LOAD-BEARING FILES ARE ALREADY BELOW
-The four files that matter for placement are RESIDENT at the end of this prompt:
-14 (where families go), 15 (the verified ffmpeg recipes), 03 (captions) and 13
-(placement findings). They are already in front of you. Do NOT spend a turn
-calling read_knowledge on them — at a budget of 8 turns that is 12% of the run
-each, and it re-writes ~1,750 tokens into the expensive cache tier.
-`read_knowledge` remains for the OTHER ten files if you genuinely need one.
+EDITORIAL KNOWLEDGE — READ IT BEFORE YOU CUT
 
 You have `read_knowledge`. It serves the editorial standard this product is
 built on: the component catalogue with its FITS/FIGHTS lines, arc structure,
@@ -1116,36 +1110,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     # cache_control on the system block: run 2 reported cache_read 0 and cost
     # $0.5351 against a $0.10 law. The system text is identical across every turn
     # of every job, so it is the one block that can actually be reused.
-    # ── KNOWLEDGE RESIDENCY ─────────────────────────────────────────────────
-    # Measured on run 16: 5 of 8 turns were read_knowledge, and cache_write was
-    # 41% of the bill ($0.1515 of $0.3697) at 12.5x the cache-read price. The
-    # driver is that a knowledge read returns ~1,750 tokens INTO THE MESSAGE
-    # TAIL, where the rolling breakpoint re-writes it. Reading is not just
-    # costing turns; it is costing the most expensive token class there is.
-    #
-    # THE FOUR FILES THE AGENT ACTUALLY READS are 28,006 of 192,135 chars — 15%.
-    # The five largest (05 motion_graphics 36.7k, 01 cut_pass 26.8k, 00
-    # job_and_arc 22.2k, 11 thumbnail 20.5k, 06 emphasis_zoom 20.2k) have never
-    # been opened on any run. So residency does not mean inlining the corpus; it
-    # means inlining the 15% that is load-bearing.
-    #
-    # Written ONCE into the cached prefix ($0.0263) and read at $0.0021/turn
-    # thereafter, instead of re-written into the tail on every turn that follows
-    # the read. NOTHING IS REMOVED: read_knowledge still serves all 14 files, so
-    # the other ten stay reachable on demand.
-    _resident, _res_names = "", []
-    if use_knowledge and os.path.isdir("/knowledge"):
-        for _f in REQUIRED_KNOWLEDGE + ["03_captions.md", "13_placement_findings.md"]:
-            _p = os.path.join("/knowledge", _f)
-            if os.path.isfile(_p) and _f not in _res_names:
-                _resident += (f"\n\n===== {_f} (RESIDENT — already in front of "
-                              f"you, do NOT read_knowledge it) =====\n"
-                              + open(_p, errors="ignore").read())
-                _res_names.append(_f)
-    led["resident_knowledge"] = _res_names
-    led["resident_chars"] = len(_resident)
-
-    sys_text = SYSTEM + (_KNOWLEDGE_SYSTEM if use_knowledge else "") + _resident
+    sys_text = SYSTEM + (_KNOWLEDGE_SYSTEM if use_knowledge else "")
     sys_blocks = [{"type": "text", "text": sys_text,
                    "cache_control": {"type": "ephemeral"}}]
     tools = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
@@ -1389,17 +1354,11 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     _cmds_join = " ".join(led.get("cmds") or [])
     _inputs = {
         # 1. the rules — the two files that say WHERE families go and HOW to draw
-        # RESIDENT since 2026-09-03 — in the cached prefix, not a tool read.
-        # "used" therefore means PRESENT IN THE PROMPT SENT, exactly as
-        # karpathy_behaviour does; counting reads here would now always be 0
-        # and would report the arm as broken while it was working correctly.
         "rules": {
             "mounted": os.path.isdir("/knowledge"),
             "used": [f for f in REQUIRED_KNOWLEDGE
-                     if f in (led.get("resident_knowledge") or [])
-                     or f in (led.get("knowledge_reads") or [])],
+                     if f in (led.get("knowledge_reads") or [])],
             "want": REQUIRED_KNOWLEDGE,
-            "resident": True,
         },
         # 2. the component catalogue — reading it means RUNNING against it
         "remotion_catalogue": {
