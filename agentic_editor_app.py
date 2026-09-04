@@ -35,6 +35,7 @@ NEVER GET BUILT:
 """
 import json
 import os
+import re
 
 import time
 
@@ -268,6 +269,14 @@ Violating any of them produces a BROKEN video that still exits 0.
       composition and wants a WHOLE EDIT PLAN as props — it is the wrong entry
       point for one card. MGCraftProbe30 is NOT a fake: its `type` field selects
       the real StatCard/ProgressBar/etc. from the catalogue by name.
+
+  C8. YOU MUST RULE ON EVERY NUMBER BEAT BEFORE YOU FINISH — ENFORCED.
+      A number the speaker says is the one case these rules make MANDATORY, and
+      four runs have skipped it by simply never placing a card. The beats are
+      listed in your brief. For each, either render a component per C1-C6 or
+      call `component_verdict` with decision='skip' and a `why` about THAT
+      beat. Saying DONE with beats unruled and no component rendered is refused.
+      A `why` repeated verbatim across beats is not a ruling and is ledgered.
 
   C7. SEARCH THE REFERENCE BEFORE YOUR FIRST RENDER — ENFORCED, NOT ADVISED.
       Your first `remotion render` is BLOCKED until you have called
@@ -546,6 +555,20 @@ KNOWLEDGE_TOOLS = [{
                          "extra_input": {"type": "string"}},
                      "required": ["items"]},
 }, {
+    "name": "component_verdict",
+    "description": (
+        "Rule on ONE number beat: does it get a moving component, or not, and "
+        "WHY. You must rule on every beat the brief lists before you finish. "
+        "This is not paperwork — it is the decision the edit has been skipping. "
+        "`why` must say something about THIS beat's content; 'not warranted' "
+        "repeated is not a ruling."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "t": {"type": "number", "description": "the beat's timestamp"},
+                         "decision": {"type": "string", "enum": ["render", "skip"]},
+                         "why": {"type": "string"}},
+                     "required": ["t", "decision", "why"]},
+}, {
     "name": "search_skills",
     "description": (
         "Search the Remotion API reference (276 files) for how to call "
@@ -608,7 +631,7 @@ _REQUIRED_CONSTRAINTS = ["C1.", "C2.", "C3.", "C4.", "C5.", "C6.",
                          # so the prompt cannot stop TELLING the agent about a
                          # gate that still blocks it — an unannounced
                          # precondition burns a turn on a collision.
-                         "C7.",
+                         "C7.", "C8.",
                          "MGCraftProbe30", "colorkey=0x808080",
                          # INPUT 4 — Karpathy behaviour is RESIDENT, not a tool
                          # read. It governs every turn, so "did the agent read
@@ -1084,6 +1107,23 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         _g = _w1["s"] - _w0["e"]
         if _g >= 0.35:
             _gaps.append((round(_w0["e"], 2), round(_w1["s"], 2), round(_g, 2)))
+    # ── NUMBER BEATS — the candidates for a component, found MECHANICALLY ───
+    # The standing open problem in this lane: C1-C6 fix HOW to render a card and
+    # nothing makes the card EXIST. The rule is conditioned ("if you place a
+    # CARD whose hero is a NUMBER...") and the agent simply never places one, so
+    # the condition never fires. The harness therefore identifies the candidates
+    # itself — a word that IS a number is not a judgement call — and the gate
+    # below makes the agent rule on each one. It still decides; it can no longer
+    # decline to consider.
+    _NUMWORD = re.compile(
+        r"^(?:\d[\d,.]*|one|two|three|four|five|six|seven|eight|nine|ten|"
+        r"eleven|twelve|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|"
+        r"hundred|thousand|million|billion|percent|half|double|triple)$", re.I)
+    _number_beats = [{"t": round(w["s"], 2), "word": w["w"]}
+                     for w in words if _NUMWORD.match(str(w["w"]).strip(".,!?"))]
+    led["number_beats"] = _number_beats
+    led["component_verdicts"] = []
+
     _gap_txt = ("\n".join(f"  [{_s:.2f}-{_e:.2f}] {_g2:.2f}s"
                           for _s, _e, _g2 in _gaps)
                 or "  (none over 0.35s)")
@@ -1212,6 +1252,45 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                      f"turn {it + 1}/{max_iters}: no tool_use and no /work/out.mp4. "
                      f"stop_reason={_sr!r}, text={(texts or '')[:300]!r}, "
                      f"shell_cmds_run={len(led.get('cmds') or [])}")
+                break
+
+            # ── THE COMPONENT GATE ──────────────────────────────────────────
+            # Three levers in a row bought cost by removing the step where the
+            # agent DELIBERATED (E1/E4, knowledge residency, build_overlays) and
+            # each one cost placements. The component path is the survivor of
+            # that: with the ffmpeg edit down to two commands, the agent now
+            # finishes before it ever asks whether a graphic belongs.
+            #
+            # So DONE is a PRECONDITION, not a statement — the one mechanism
+            # that has bound this agent every time (C7, the verify cap, A1-A3).
+            # Satisfied by EITHER rendering a component OR ruling on every
+            # number beat. It cannot be satisfied by silence.
+            #
+            # FIRES ONCE. A gate that can re-prompt forever is a spend loop, and
+            # a second refusal would be arguing rather than gating.
+            _ruled = {round(float(v.get("t") or -1), 1)
+                      for v in led.get("component_verdicts") or []}
+            _unruled = [b for b in _number_beats
+                        if round(b["t"], 1) not in _ruled]
+            _rendered = any("remotion render" in c for c in (led.get("cmds") or []))
+            if (_number_beats and _unruled and not _rendered
+                    and not led.get("component_gate_fired")):
+                led["component_gate_fired"] = True
+                fail("component_gate_blocked_done",
+                     f"finished with {len(_unruled)} of {len(_number_beats)} "
+                     f"number beats unruled and zero component renders")
+                _lst = "\n".join(f"  t={b['t']:.2f}  \"{b['word']}\"" for b in _unruled[:12])
+                msgs.append({"role": "user", "content": [{"type": "text", "text":
+                    "NOT DONE. You rendered no moving component, and these number "
+                    "beats have no ruling:\n" + _lst + "\n\n"
+                    "A number the speaker says is the one case the rules make "
+                    "MANDATORY: if it carries a card, that card must be a StatCard "
+                    "count-up (C1-C6). You have skipped the question, not answered "
+                    "it.\n\nFor EACH beat above call `component_verdict` with "
+                    "decision='render' or 'skip' and a `why` that refers to THAT "
+                    "beat's content. If any deserves a component, build it now per "
+                    "C1-C6 and composite it. Then finish."}]})
+                continue
             break
         if it == max_iters - 1:
             fail("iteration_budget_exhausted",
@@ -1306,6 +1385,14 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                                      tu.input.get("input_file") or "cut.mp4",
                                      tu.input.get("output_file") or "out.mp4",
                                      tu.input.get("extra_input"))
+            elif tu.name == "component_verdict":
+                _v = {"t": tu.input.get("t"),
+                      "decision": tu.input.get("decision"),
+                      "why": str(tu.input.get("why") or "")}
+                led["component_verdicts"].append(_v)
+                out = {"recorded": True,
+                       "ruled": len(led["component_verdicts"]),
+                       "of": len(_number_beats)}
             elif tu.name == "search_skills":
                 out = search_skills(tu.input.get("query", ""),
                                     int(tu.input.get("max_hits") or 12))
@@ -1491,6 +1578,43 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     _mix["card_per_25s"] = _per25(_mix["cards"])
     _mix["cutaway_per_25s"] = _per25(_mix["cutaways"])
     led["family_mix"] = _mix
+
+    # ── ARE THE VERDICTS SUBSTANTIVE, OR JUST CLEARING THE GATE? ─────────────
+    # The gate's own failure mode, named before it ran: an agent that writes
+    # "no component warranted" nine times has SATISFIED it without being
+    # changed by it. A gate that cannot tell those apart is decoration, so the
+    # meter ships with the gate rather than after it.
+    #   distinct_ratio — unique `why` texts over total. 1.0 = every beat got its
+    #                    own reasoning; 0.11 on 9 beats = one sentence copied.
+    #   quotes_beat    — does the `why` name a word from THAT beat's context?
+    #                    Boilerplate cannot, without being about the beat.
+    _vs = led.get("component_verdicts") or []
+    if _vs:
+        _whys = [str(v.get("why") or "").strip().lower() for v in _vs]
+        _uniq = len(set(_whys))
+        _bywd = {round(b["t"], 1): str(b["word"]).strip(".,!?").lower()
+                 for b in (led.get("number_beats") or [])}
+        _refs = sum(1 for v in _vs
+                    if _bywd.get(round(float(v.get("t") or -1), 1), "\x00")
+                    in str(v.get("why") or "").lower())
+        led["verdict_quality"] = {
+            "n": len(_vs),
+            "distinct_whys": _uniq,
+            "distinct_ratio": round(_uniq / max(len(_vs), 1), 2),
+            "mentions_own_beat": _refs,
+            "median_why_chars": sorted(len(w) for w in _whys)[len(_whys) // 2],
+            "decisions": {d: sum(1 for v in _vs if v.get("decision") == d)
+                          for d in ("render", "skip")},
+            "sample": [{"t": v.get("t"), "d": v.get("decision"),
+                        "why": str(v.get("why"))[:150]} for v in _vs[:6]],
+        }
+        # PERFUNCTORY IS A LEDGER EVENT, not a footnote. If it fires the gate is
+        # being satisfied rather than working, which is a different problem and
+        # must not read as a pass.
+        if _uniq <= max(1, len(_vs) // 3) and len(_vs) >= 3:
+            fail("component_verdicts_perfunctory",
+                 f"{len(_vs)} verdicts, only {_uniq} distinct rationale(s) — the "
+                 f"gate was cleared, not answered")
 
     # RECONCILIATION — the manifest is the instrument, so it has to be audited
     # in BOTH directions or it is unfalsifiable prose.
