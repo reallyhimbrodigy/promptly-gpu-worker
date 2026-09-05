@@ -1190,6 +1190,66 @@ def segment_beats_visual(video_path, duration_s, shot_changes=None, **kw):
 _BEAT_CORE_KEYS = {"i", "t_start", "t_end", "text"}
 
 
+def _assert_speech_check_is_always_a_dict():
+    """speech_check must have ONE shape on every path.
+
+    RED-PROVEN BY PRODUCTION, not by imagination: it was a bare string on the
+    no-speech path and a dict on the normal one, and the consumer does
+    `(out.get("speech_check") or {}).get("VERDICT")`. Four of five round-1
+    fixtures died with AttributeError AFTER the entire edit had run — the work
+    was done and paid for, and the SUMMARY threw it away.
+
+    Checked by AST over the real source: every assignment to res["speech_check"]
+    must be a dict literal carrying VERDICT. A polymorphic field is one the
+    reader cannot sample its way to understanding — the same lesson as reading
+    edit_recipe as nested from one diverted-route sample.
+    """
+    import ast as _ast
+    src = open(__file__).read() if os.path.exists(__file__) else ""
+    if not src:
+        return
+    tree = _ast.parse(src)
+    seen = 0
+    for n in _ast.walk(tree):
+        if not isinstance(n, _ast.Assign):
+            continue
+        for t in n.targets:
+            if not (isinstance(t, _ast.Subscript)
+                    and getattr(t.value, "id", "") == "res"):
+                continue
+            k = getattr(t.slice, "value", None)
+            if k != "speech_check":
+                continue
+            seen += 1
+            if not isinstance(n.value, _ast.Dict):
+                raise AssertionError(
+                    f"line {n.lineno}: res['speech_check'] is assigned a "
+                    f"{type(n.value).__name__}, not a dict. The consumer calls "
+                    f".get('VERDICT') on it, so a string there is an "
+                    f"AttributeError AFTER the whole edit has been paid for.")
+            # VERDICT is NOT required in the literal: the normal path builds
+            # the dict first and sets VERDICT in a later statement, which is
+            # fine because the consumer reads it off the finished object. What
+            # must hold is that the TERMINAL paths — the ones that return
+            # without a later VERDICT write — carry one inline.
+            keys = [getattr(kk, "value", None) for kk in n.value.keys]
+            if "VERDICT" not in keys and "kept_ratio" not in keys:
+                raise AssertionError(
+                    f"line {n.lineno}: res['speech_check'] is a terminal dict "
+                    f"with no VERDICT ({keys}). The measuring path sets VERDICT "
+                    f"in a later statement; a short-circuit path has no later "
+                    f"statement, so the consumer would read None.")
+    if 'res["speech_check"]["VERDICT"] = ' not in src:
+        raise AssertionError(
+            "the measuring path no longer writes VERDICT onto speech_check — "
+            "every run would report no verdict at all")
+    if seen < 2:
+        raise AssertionError(
+            f"only {seen} speech_check assignment(s) found — this check "
+            f"protects a specific field; re-point it rather than passing "
+            f"vacuously.")
+
+
 def _assert_beat_contract_identical():
     w = [{"s": 0.0, "e": 0.5, "w": "a"}, {"s": 0.5, "e": 1.0, "w": "b"},
          {"s": 2.0, "e": 2.5, "w": "c"}]
@@ -1371,6 +1431,7 @@ _assert_treatment_surface_agrees(open(__file__).read()
 # be skipped. The two beat sources must stay interchangeable or the verdict
 # machinery silently rules on a field one of them does not supply.
 _assert_beat_contract_identical()
+_assert_speech_check_is_always_a_dict()
 
 
 # THINKING IS ON BY DEFAULT on claude-sonnet-5 when the `thinking` param is
@@ -1562,10 +1623,27 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             # false GREEN. Neither number means anything here, so neither is
             # reported. The visual path is verified by the beat/build checks,
             # not by transcription.
-            res["speech_check"] = ("NOT APPLICABLE — source carries no speech; "
-                                   "beats were derived from video motion")
+            # ONE SHAPE, ALWAYS A DICT WITH A VERDICT. This was a bare
+            # string, and line ~2563 does
+            # (out.get("speech_check") or {}).get("VERDICT") — so every
+            # no-speech run died with AttributeError AFTER the whole edit had
+            # been paid for. 4 of 5 round-1 fixtures, ~$1.80 of Modal, and the
+            # failure was in the SUMMARY, not the work.
+            #
+            # The pre-existing "UNAVAILABLE — ..." string below carried the same
+            # latent bug on the transcription-failed path; it is a dict now too.
+            # A field that is sometimes a dict and sometimes a string is a
+            # shape the reader cannot sample its way to knowing.
+            res["speech_check"] = {
+                "applicable": False,
+                "VERDICT": ("NOT APPLICABLE — source carries no speech; beats "
+                            "were derived from video motion"),
+            }
         elif got is None:
-            res["speech_check"] = "UNAVAILABLE — transcription failed, treat as UNVERIFIED"
+            res["speech_check"] = {
+                "applicable": True,
+                "VERDICT": "UNAVAILABLE — transcription failed, treat as UNVERIFIED",
+            }
         else:
             src_words = norm([w["w"] for w in words])
             got_set = {}
