@@ -257,8 +257,13 @@ Violating any of them produces a BROKEN video that still exits 0.
       authoring the list. Do C8, then call this once with everything that
       earned a component.
 
-  C8. RULE ON EVERY BEAT — ONE DECISION EACH, ENFORCED.
-      Your brief lists the beats. For each, call `beat_verdict` with:
+  C8. RULE ON EVERY BEAT — ONE DECISION EACH, IN ONE CALL, ENFORCED.
+      Call `rule_all_beats` ONCE with the complete list — every beat in your
+      brief, in a single call. Ruling them one at a time costs one TURN per
+      beat (17-19 turns before any editing happens) and grows the message
+      history by a verdict every turn, which is billed again on every turn
+      after it. Same decisions, one turn.
+      Each entry carries:
         treatment — "card" | "text" | "none"
         cut       — "keep" | "cut"
         why       — about THAT beat's content
@@ -543,6 +548,26 @@ KNOWLEDGE_TOOLS = [{
                                  "props": {"type": "object"}},
                              "required": ["type", "t_start"]}}},
                      "required": ["items"]},
+}, {
+    "name": "rule_all_beats",
+    "description": (
+        "Rule on EVERY beat in ONE call. Pass the complete list — one entry per "
+        "beat in your brief, each with treatment ('card'|'text'|'none'), cut "
+        "('keep'|'cut') and a why about that beat. This is one turn instead of "
+        "one turn per beat, and the message history stops growing by a verdict "
+        "every turn. If you miss any it tells you which; call again with only "
+        "those."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "verdicts": {"type": "array", "items": {"type": "object",
+                             "properties": {
+                                 "beat": {"type": "integer"},
+                                 "treatment": {"type": "string",
+                                               "enum": ["card", "text", "none"]},
+                                 "cut": {"type": "string", "enum": ["keep", "cut"]},
+                                 "why": {"type": "string"}},
+                             "required": ["beat", "treatment", "cut", "why"]}}},
+                     "required": ["verdicts"]},
 }, {
     "name": "beat_verdict",
     "description": (
@@ -1613,6 +1638,22 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                        "of": len(_number_beats)}
             elif tu.name == "render_components":
                 out = render_components(tu.input.get("items") or [])
+            elif tu.name == "rule_all_beats":
+                _incoming = tu.input.get("verdicts") or []
+                _seen = {v.get("beat") for v in led["beat_verdicts"]}
+                _added = 0
+                for _v in _incoming:
+                    if not isinstance(_v, dict) or _v.get("beat") is None:
+                        continue
+                    if _v.get("beat") in _seen:
+                        continue        # first ruling wins; a re-call tops up
+                    led["beat_verdicts"].append({
+                        "beat": _v.get("beat"), "treatment": _v.get("treatment"),
+                        "cut": _v.get("cut"), "why": str(_v.get("why") or "")})
+                    _seen.add(_v.get("beat")); _added += 1
+                _missing = [b["i"] for b in _beats if b["i"] not in _seen]
+                out = {"recorded": _added, "ruled": len(_seen),
+                       "of": len(_beats), "still_missing": _missing[:30]}
             elif tu.name == "beat_verdict":
                 _bv = {"beat": tu.input.get("beat"),
                        "treatment": tu.input.get("treatment"),
