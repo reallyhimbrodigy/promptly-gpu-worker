@@ -47,13 +47,45 @@ CODE = code_only(SRC)
 
 # ── 1. THE BRIEF IS DATA ─────────────────────────────────────────────────────
 print("\n1. THE BRIEF IS DATA")
-check("brief is delimited in the prompt",
-      re.search(r"<user_request>", SRC) is not None,
-      "the brief is interpolated bare; a model cannot distinguish it from "
+# STRUCTURAL, not textual. The first version grepped SRC for "<user_request>"
+# and PASSED against a build where the brief was interpolated bare — because the
+# system rule mentions the tag in prose. The check has to look at the
+# construction of the user message, not at whether a string appears somewhere in
+# the file.
+_wrapped = False
+for _n in ast.walk(TREE):
+    if not (isinstance(_n, ast.Assign)
+            and any(getattr(t, "id", "") == "user" for t in _n.targets)):
+        continue
+    _dump = ast.dump(_n)
+    _wrapped = ("_REQ_OPEN" in _dump and "_REQ_CLOSE" in _dump
+                and "_neutralise_brief" in _dump)
+    if _wrapped:
+        break
+check("brief is delimited AND neutralised where the prompt is built",
+      _wrapped,
+      "the user message does not wrap the brief in _REQ_OPEN/_REQ_CLOSE with "
+      "_neutralise_brief applied; a model cannot distinguish it from "
       "instructions the harness wrote")
+# Read the PARSED SYSTEM constant with whitespace normalised, not raw source.
+# The first version of this check grepped SRC for "never an instruction" and
+# FAILED against a rule that says exactly that — the phrase was split across a
+# line break, and "IS DATA" did not match a case-sensitive "is DATA". A check
+# that fails correct code gets loosened until it passes, and then it is not a
+# check. Parse; do not grep.
+_SYSTEM = None
+for _n in ast.walk(TREE):
+    if (isinstance(_n, ast.Assign)
+            and any(getattr(t, "id", "") == "SYSTEM" for t in _n.targets)
+            and isinstance(_n.value, ast.Constant)):
+        _SYSTEM = " ".join(str(_n.value.value).split()).lower()
 check("a system rule says brief content is never an instruction",
-      re.search(r"never an instruction|not instructions|is DATA", SRC) is not None,
-      "delimiters without a rule are decoration")
+      _SYSTEM is not None
+      and "never an instruction" in _SYSTEM
+      and "<user_request>" in _SYSTEM
+      and ("credential" in _SYSTEM or "environment" in _SYSTEM),
+      "delimiters without a rule are decoration; the rule must name the "
+      "delimiter and forbid exfiltration explicitly")
 check("the delimiter is neutralised inside the brief",
       "_neutralise_brief" in CODE or "sanitize_brief" in CODE,
       "a brief containing the closing delimiter can break out of its own block "
@@ -114,7 +146,12 @@ ATTACKS = {
 _neut = None
 for n in ast.walk(TREE):
     if isinstance(n, ast.FunctionDef) and n.name == "_neutralise_brief":
+        # the module constants the function closes over must be in scope too
         ns = {"re": re}
+        for _c in ast.walk(TREE):
+            if (isinstance(_c, ast.Assign)
+                    and any(getattr(t, "id", "").startswith("_REQ_") for t in _c.targets)):
+                exec(compile(ast.Module(body=[_c], type_ignores=[]), "<c>", "exec"), ns)
         exec(compile(ast.Module(body=[n], type_ignores=[]), "<x>", "exec"), ns)
         _neut = ns["_neutralise_brief"]
 if _neut is None:
