@@ -10,8 +10,10 @@
 # Two fixes, both structural:
 #   1. --detach : Modal owns the run's lifetime, not the local client. Killing
 #      this script can no longer strand a container or discard a result.
-#   2. setsid   : the collector is its own session leader, so a parent exiting
-#      cannot signal it.
+#   2. no setsid : it does not exist on macOS, and `nohup setsid ...` fails
+#      OUTRIGHT rather than degrading — which is how round 1's "collector" never
+#      ran at all. Detachment is the caller's job (the harness backgrounds this
+#      script); this file must stay portable.
 # And the completion test is `modal app list` showing zero tasks — never "the
 # local process returned", which is exactly the assumption that failed.
 set -uo pipefail
