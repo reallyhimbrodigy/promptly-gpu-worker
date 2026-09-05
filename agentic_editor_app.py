@@ -646,21 +646,35 @@ SYSTEM = """You are a video editor. You are given a raw talking-head clip and a
 word-level transcript with exact timings. You produce a finished vertical
 (1080x1920) short-form video.
 
-You do this by CALLING TOOLS. Each one does a real piece of the edit —
-probe_source measures, build_cut cuts, build_overlays writes text,
-build_zoom pushes, place_sfx lands a sound, render_components renders
-components. There is no shell: the tools ARE the interface, and anything
-they do not cover is a tool to be built, not a command to be improvised.
-There is no schema and no downstream renderer interpreting a plan. What you
-write is what ships.
+YOUR JOB IS THE JUDGEMENT, NOT THE PLUMBING. You decide what each beat gets
+and why. The harness then builds the whole video from those decisions — timing,
+zoom velocity, how early a sound must start so its peak lands on the beat, file
+ordering, the composite. None of that is your problem, and reasoning about it
+is the single most expensive thing you can do.
 
-HOW TO WORK
-1. Read the transcript. Decide which words to keep and which to cut. Silence,
-   filler and false starts are the usual cuts; keep the meaning intact.
-2. Build the edit with ffmpeg. Concatenate the kept spans, crop/scale to
-   1080x1920, and burn captions if they improve it.
-3. CALL the tool for the job and read what it returns. A tool that fails
-   tells you why in its result — read that, do not guess.
+WHAT ONLY YOU CAN DECIDE, because it cannot be derived from the source:
+  - which beats get a card, text, sound, zoom, cutaway, or nothing
+  - which beats are kept and which are cut
+  - the WORDS on a text overlay — they do not exist until you write them
+  - a card's hero number and what it means
+  - what a cutaway should SHOW
+  - which sound fits the moment
+  - what the request is asking for
+
+HOW TO WORK — FOUR STEPS, NOT FOURTEEN
+1. `set_spec` — read the request and say what it specifies.
+2. Read the beats. Rule on EVERY one with `rule_all_beats`, in a single call,
+   carrying the words, the hero number, the cutaway subject and the sound name
+   for each beat you are placing something on. Everything you decide here is
+   built; anything you leave out cannot be.
+3. `execute_plan` — one call. The harness runs the whole pipeline from your
+   verdicts and hands back `ruled_but_not_built`: anything you decided that did
+   not reach the video.
+4. `inspect_output` — verify. If something is wrong or missing, re-rule the
+   affected beats and call `execute_plan` again.
+
+Do not orchestrate. There is no shell, and the per-step tools exist for repair,
+not for building the edit one command at a time.
 4. VERIFY with `inspect_output`: it probes the file AND transcribes it, and
    tells you which intended words are MISSING from the result.
 5. If words are missing or the output is wrong, FIX IT AND RUN AGAIN. Say
@@ -972,6 +986,16 @@ edit.
 """
 
 TOOLS = [
+    {"name": "execute_plan",
+     "description": (
+         "Run the ENTIRE pipeline from your verdicts — cut, text, zooms, sound "
+         "— in one call. You have already made every decision that cannot be "
+         "derived; timing, zoom velocity, sound attack offsets, file ordering "
+         "and the composite are mechanical and the harness does them. Call this "
+         "ONCE after rule_all_beats, then inspect_output. It returns "
+         "`ruled_but_not_built`: anything you decided that did not reach the "
+         "video."),
+     "input_schema": {"type": "object", "properties": {}, "required": []}},
     {"name": "probe_source",
      "description": (
          "Measure the source: dimensions, fps, duration, audio presence, and "
@@ -1223,6 +1247,27 @@ KNOWLEDGE_TOOLS = [{
                                          "description": "REQUIRED on hook and "
                                                         "close beats: does this "
                                                         "beat take a sound?"},
+                                 # ── THE FIELDS THE HARNESS CANNOT DERIVE ────
+                                 # Everything else about a placement — where it
+                                 # sits, how fast a zoom travels, how early a
+                                 # sound starts so its peak lands on the beat —
+                                 # is derivable and IS derived. These four are
+                                 # not: words do not exist until written, and
+                                 # what to SHOW is a semantic choice.
+                                 "sfx_name": {"type": "string",
+                                     "description": "which catalogue sound, when "
+                                                    "sfx is 'yes'. Pick by ROLE "
+                                                    "from the table."},
+                                 "card_hero": {"type": "string",
+                                     "description": "when treatment includes "
+                                                    "'card': the number or short "
+                                                    "phrase the card is ABOUT"},
+                                 "card_label": {"type": "string",
+                                     "description": "the card's supporting line"},
+                                 "cutaway_keyword": {"type": "string",
+                                     "description": "when treatment includes "
+                                                    "'cutaway': WHAT TO SHOW, in "
+                                                    "two or three words"},
                                  "why": {"type": "string"}},
                              "required": ["beat", "treatment", "cut", "why"]}}},
                      "required": ["verdicts"]},
@@ -2528,6 +2573,184 @@ def edit(source_key: str, brief: str,
     # fetch or place b-roll at all.
     led["cutaways_fetched"] = 0
 
+    def run_ffmpeg_from_recipe(recipe, out_name):
+        """Execute a harness recipe as ARGV, reading its filter from the file.
+
+        build_cut and build_overlays hand back a `run_this` shell string because
+        the AGENT used to run it — `filt=$(cat filter.txt) && ffmpeg ...`. There
+        is no shell any more, and reconstructing that string here would put one
+        back. Instead the filter is read from the file the recipe already wrote
+        and passed as a single argv element, which is what the shell was doing
+        anyway. Same command, no metacharacters, no interpolation.
+        """
+        ff = recipe.get("filter_file") or recipe.get("overlay_file")
+        outp = os.path.join("/work", os.path.basename(out_name))
+        if ff and os.path.exists(ff):
+            filt = open(ff).read().strip()
+        else:
+            return {"error": f"recipe names no readable filter file ({ff})"}
+        complex_ = "[outv]" in filt or "[outa]" in filt
+        if complex_:
+            cmd = ["ffmpeg", "-y", "-v", "error", "-i", "/work/source.mp4",
+                   "-filter_complex", filt, "-map", "[outv]", "-map", "[outa]",
+                   "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                   "-c:a", "aac", outp]
+        else:
+            inp = os.path.join("/work", os.path.basename(
+                recipe.get("input_file") or "cut.mp4"))
+            cmd = ["ffmpeg", "-y", "-v", "error", "-i", inp, "-vf", filt,
+                   "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                   "-c:a", "copy", outp]
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=1200,
+                           env=_SUBPROCESS_ENV)
+        if r.returncode != 0:
+            fail("recipe_render_failed", (r.stderr or "")[-300:])
+            return {"error": (r.stderr or "")[-400:]}
+        if not os.path.exists(outp) or os.path.getsize(outp) < 1000:
+            return {"error": f"{out_name} was not produced"}
+        return {"ok": True, "output": os.path.basename(outp)}
+
+    def execute_plan():
+        """Run the WHOLE pipeline from the verdicts. One call, no orchestration.
+
+        WHY. Measured on an identical fixture and brief, hardening took the run
+        from $0.1008/36.6s to $0.3450/132.2s. Cache_read — the prompt and the
+        fifteen tool schemas, re-read every turn — grew only 1.2x, so the
+        schemas are not the cost. OUTPUT TOKENS grew 4.7x at the SAME turn
+        count. The agent was not thinking harder about the edit; it was
+        thinking about ORCHESTRATION — which tool next, in what order, against
+        which file — and every one of those decisions is derivable.
+        So the harness derives them. The agent rules; the pipeline executes.
+
+        WHAT STAYS WITH THE AGENT, because it genuinely cannot be derived:
+          treatment per beat   editorial judgement, the whole job
+          cut/keep per beat    judgement, informed by derived candidates
+          text_content         the words do not exist until written
+          card_hero/label      which number matters and what it means
+          cutaway_keyword      what to SHOW is semantic
+          sfx_name             which sound fits this moment
+          the spec             what the request asks for
+        Everything else — timing from beat bounds, zoom velocity under the
+        11px/frame ceiling, sfx attack offsets from the measured table, file
+        ordering, filtergraphs, the composite, verification — is mechanical and
+        is now done here, once, without a turn each.
+        """
+        vs = led.get("beat_verdicts") or []
+        if not vs:
+            return {"error": "no verdicts yet — call rule_all_beats first"}
+        beats = led.get("beats") or []
+        by_i = {b["i"]: b for b in beats}
+        steps, built = [], {"cut": 0, "text": 0, "card": 0, "zoom": 0,
+                            "sfx": 0, "cutaway": 0}
+
+        # 1. THE CUT, derived from the keep rulings.
+        keep = []
+        for v in sorted(vs, key=lambda x: x.get("beat", 0)):
+            b = by_i.get(v.get("beat"))
+            if b is None:
+                continue
+            if str(v.get("cut", "keep")).lower() != "cut":
+                keep.append([b["t_start"], b["t_end"]])
+        merged = []
+        for a, z in keep:
+            if merged and a - merged[-1][1] < 0.05:
+                merged[-1][1] = z
+            else:
+                merged.append([a, z])
+        if not merged:
+            return {"error": "every beat was ruled 'cut' — that is not an edit"}
+        cutr = build_cut(merged)
+        if cutr.get("error"):
+            return {"error": f"cut failed: {cutr['error']}"}
+        steps.append({"step": "cut", "spans": len(merged),
+                      "output_duration_s": cutr.get("output_duration_s")})
+        built["cut"] = len(beats) - len(merged)
+        cur = "cut.mp4"
+        r = run_ffmpeg_from_recipe(cutr, cur)
+        if r.get("error"):
+            return {"error": f"cut render failed: {r['error']}"}
+
+        # 2. TEXT, derived from the text rulings + their copy.
+        items = []
+        for v in vs:
+            b = by_i.get(v.get("beat"))
+            tr = [str(t).lower() for t in (v.get("treatment") or [])]
+            if b is None or "text" not in tr:
+                continue
+            copy = str(v.get("text_content") or "").strip()
+            if not copy:
+                continue          # accounted below, never silent
+            out_t = src_to_out(b["t_start"], merged)
+            if out_t is None:
+                continue
+            items.append({"t_start": round(out_t, 2), "text": copy,
+                          "duration_s": min(3.0, b["t_end"] - b["t_start"])})
+        if items:
+            ov = build_overlays(items, True, cur, "overlaid.mp4")
+            if not ov.get("error"):
+                r2 = run_ffmpeg_from_recipe(ov, "overlaid.mp4")
+                if not r2.get("error"):
+                    cur = "overlaid.mp4"
+                    built["text"] = len(items)
+                    steps.append({"step": "text", "n": len(items)})
+
+        # 3. ZOOMS, one per zoom ruling, velocity capped by build_zoom itself.
+        for v in vs:
+            b = by_i.get(v.get("beat"))
+            tr = [str(t).lower() for t in (v.get("treatment") or [])]
+            if b is None or "zoom" not in tr:
+                continue
+            a2 = src_to_out(b["t_start"], merged)
+            z2 = src_to_out(b["t_end"], merged)
+            if a2 is None or z2 is None or z2 <= a2:
+                continue
+            zr = build_zoom(a2, z2, 1.12, cur, "zoomed.mp4")
+            if not zr.get("error"):
+                cur = "zoomed.mp4"
+                built["zoom"] += 1
+                steps.append({"step": "zoom", "t": [round(a2, 2), round(z2, 2)],
+                              "capped": zr.get("velocity_capped")})
+
+        # 4. SFX, attack offsets applied by place_sfx from the measured table.
+        for v in vs:
+            b = by_i.get(v.get("beat"))
+            if b is None or str(v.get("sfx", "no")).lower() != "yes":
+                continue
+            nm = str(v.get("sfx_name") or "").strip()
+            if not nm:
+                continue
+            at = src_to_out(b["t_start"], merged)
+            if at is None:
+                continue
+            sr = place_sfx(nm, at, -6.0, cur, "with_sfx.mp4")
+            if not sr.get("error"):
+                cur = "with_sfx.mp4"
+                built["sfx"] += 1
+                steps.append({"step": "sfx", "name": nm, "t": round(at, 2)})
+
+        subprocess.run(["cp", os.path.join("/work", cur), "/work/out.mp4"],
+                       capture_output=True, text=True, timeout=120,
+                       env=_SUBPROCESS_ENV)
+        # ACCOUNTING, always. A ruling that produced nothing is the defect this
+        # lane keeps rediscovering, and silence about it is how it survives.
+        ruled = {"text": sum(1 for v in vs if "text" in [str(t).lower() for t in (v.get("treatment") or [])]),
+                 "zoom": sum(1 for v in vs if "zoom" in [str(t).lower() for t in (v.get("treatment") or [])]),
+                 "card": sum(1 for v in vs if "card" in [str(t).lower() for t in (v.get("treatment") or [])]),
+                 "cutaway": sum(1 for v in vs if "cutaway" in [str(t).lower() for t in (v.get("treatment") or [])]),
+                 "sfx": sum(1 for v in vs if str(v.get("sfx", "no")).lower() == "yes")}
+        gap = {k: [ruled.get(k, 0), built.get(k, 0)]
+               for k in ("text", "zoom", "sfx", "card", "cutaway")
+               if ruled.get(k, 0) != built.get(k, 0)}
+        led["execute_plan"] = {"steps": steps, "built": built, "ruled": ruled,
+                               "ruled_but_not_built": gap}
+        for k, (rl, bl) in gap.items():
+            fail("ruled_not_built", f"{k}: ruled {rl}, built {bl}")
+        return {"ok": True, "steps": steps, "built": built, "ruled": ruled,
+                "ruled_but_not_built": gap, "output": "out.mp4",
+                "note": ("The pipeline ran from your verdicts. Anything in "
+                         "ruled_but_not_built was decided and did NOT reach the "
+                         "video — inspect_output, then re-rule if it matters.")}
+
     def probe_source(file="source.mp4", shot_changes=True):
         """Measure the source. Replaces the most common `shell` use.
 
@@ -3304,6 +3527,8 @@ def edit(source_key: str, brief: str,
                 out = author_component(tu.input.get("tsx"),
                                        tu.input.get("frames") or 45,
                                        tu.input.get("name") or "authored")
+            elif tu.name == "execute_plan":
+                out = execute_plan()
             elif tu.name == "probe_source":
                 out = probe_source(tu.input.get("file") or "source.mp4",
                                    bool(tu.input.get("shot_changes", True)))
