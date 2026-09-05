@@ -169,6 +169,36 @@ SECRETS = [modal.Secret.from_name("promptly-secrets")]
 BUCKET = "thisismybucketagainwooo"
 MODEL = "claude-sonnet-5"
 
+# ── THE RUBRIC — all seven families, re-extracted 2026-09-05 ─────────────────
+# Source: reference_beats joined to reference_videos, 10 videos / 426s / 153
+# beats, treatment is an array per beat so every family is countable.
+#
+# THE RATES IN USE UNTIL NOW (7.56 text / 2.57 cards / 3.32 cutaways) DO NOT
+# REPRODUCE from this corpus on any cut I can find — the full set gives
+# 7.28/2.35/4.22 and the in_instrument subset (2 videos, 96s) gives
+# 7.83/2.61/5.74. Their denominator is undocumented. These use the FULL corpus:
+# it is the larger sample and it is reproducible from a query.
+#
+# Four families were counted in every run and never reported against anything.
+# Text at 97% means nothing while zooms sit at 0.
+REFERENCE_PER_25S = {
+    "text":       7.28,   # overlay_text, 124 beats
+    "cut":        4.75,   # 81
+    "cutaway":    4.22,   # 72
+    "card":       2.35,   # 40
+    "sfx":        0.82,   # 14
+    "zoom":       0.35,   # punch_in, 6
+    "transition": 0.00,   # ZERO in the corpus — not a gap, an absence
+}
+# Which beat PURPOSE each family lands on, from the same 153 beats. This is the
+# rule the agent can act on, and it is what "corpus says" should mean.
+REFERENCE_BEAT_FIT = {
+    "sfx":     {"hook": 5, "close": 4, "claim": 2, "breath": 1, "evidence": 1, "turn": 1},
+    "card":    {"evidence": 18, "close": 11, "turn": 4, "hook": 3, "claim": 2},
+    "cutaway": {"evidence": 44, "turn": 8, "claim": 7, "close": 4, "payoff": 4},
+    "zoom":    {"hook": 3, "evidence": 3},
+}
+
 
 def _supports_effort(model_id: str) -> bool:
     """Does this model accept output_config.effort?
@@ -313,6 +343,23 @@ overlay text; four runs were misread that way. Your declaration is the record.
 THE REAL ASSET LIBRARY IS MOUNTED AT /assets — A1 THROUGH A3
 This is the inventory the production pipeline ships, not a description of one.
 
+
+  S1. SOUND IS A FAMILY YOU HAVE NEVER USED. Corpus rate is 0.82 per 25s and
+      every run so far has placed ZERO. /assets/inventory.json carries
+      `sfx_catalogue`: 15 real files, each with a ROLE (the moment it belongs
+      on), what it FITS, what it FIGHTS, its duration and its attack offset.
+      Pick by ROLE, not by name.
+      WHERE THEY LAND, from the 153-beat corpus: 64% of all SFX sit on a HOOK
+      or a CLOSE. If your edit has a hook and a close and no sound, that is the
+      gap — not a style choice.
+      `voice` is a real entry with no file: the signed bare choice, for a beat
+      whose delivery already lands it. Choosing it is an answer; ignoring the
+      family is not.
+      ATTACK IS NOT OPTIONAL: start the file `attack_ms` EARLIER than the target
+      word so its PEAK lands on the word. popsfx peaks at 32ms, imposter at
+      935ms — start both at the word and the second lands a second late, and
+      ffmpeg exits 0.
+      Mix with ffmpeg: -i /assets/sounds/<file> and an adelay on the sound leg.
 
 EFFICIENCY — E1 THROUGH E4, REQUIREMENTS NOT PREFERENCES
 Output tokens are 40-44% of this job's cost and turns are the multiplier on it.
@@ -758,7 +805,7 @@ _REQUIRED_CONSTRAINTS = [
     # asset library that reported mounted_unread on every run; E4 was a
     # tombstone for a retired rule. ~4,200 chars describing paths the agent no
     # longer takes, billed on every turn of every render.
-    "C8.", "C9.", "E1.", "E2.", "E3.", "K1.", "K2.", "K3.", "K4."]
+    "C8.", "C9.", "S1.", "E1.", "E2.", "E3.", "K1.", "K2.", "K3.", "K4."]
 # Every one of these was tried against this image and FAILED. If a future edit
 # reintroduces them the agent inherits 31 failed attempts again.
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
@@ -1852,6 +1899,11 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         "probe_comp": sum(x.count("FrameCompProbe") + x.count("MGCraftProbe")
                           for x in (led.get("cmds") or []) if "remotion render" in x),
         "shell_cmds": len(led.get("cmds") or []),
+        # Counted so the rubric has a number for them. cut_spans is the real
+        # cut count — a cut is a SPAN BOUNDARY, not a placement, which is why
+        # it was never in the manifest and never reported.
+        "cut_spans": max(0, len(led.get("keep_spans") or []) - 1),
+        "transitions": _n_of("transition"),
     }
     _mix["text_per_25s"] = _per25(_mix["text"])
     _mix["card_per_25s"] = _per25(_mix["cards"])
@@ -2144,9 +2196,16 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         print(f"\n  FAMILY MIX — from the PLACEMENT MANIFEST ({mx.get('declared')} "
               f"declared). Op-counting retired: a filter name cannot tell a "
               f"caption burn from an overlay text.")
-        print(f"    text     {mx['text_per_25s']:>6} /25s   (reference 7.56)   n={mx['text']}")
-        print(f"    cards    {mx['card_per_25s']:>6} /25s   (reference 2.57)   n={mx['cards']}")
-        print(f"    cutaways {mx['cutaway_per_25s']:>6} /25s   (reference 3.32)   n={mx['cutaways']}")
+        _dur = float((r.get("final") or {}).get("duration_s") or 0) or 1.0
+        _n = {"text": mx["text"], "cut": mx.get("cut_spans", 0),
+              "cutaway": mx["cutaways"], "card": mx["cards"],
+              "sfx": mx["sfx"], "zoom": mx.get("emphasis", 0),
+              "transition": mx.get("transitions", 0)}
+        for _f, _ref in REFERENCE_PER_25S.items():
+            _rate = round(_n.get(_f, 0) / _dur * 25.0, 2)
+            _pct = f"{100*_rate/_ref:3.0f}%" if _ref else "  — "
+            _bar = "#" * min(20, int(round((_rate/_ref)*10))) if _ref else ""
+            print(f"    {_f:<10} {_rate:>6} /25s   ref {_ref:>5}   {_pct}  n={_n.get(_f,0):<3} {_bar}")
         print(f"    caption tracks: {mx['caption_tracks']}   emphasis: {mx['emphasis']}   sfx: {mx['sfx']}")
         print(f"    method: {mx['by_ffmpeg']} ffmpeg / {mx['by_remotion']} remotion")
         # BOTH PATHS. The audit was fixed to read shell+reel and this line was

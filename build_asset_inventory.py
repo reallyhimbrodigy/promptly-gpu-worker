@@ -53,7 +53,55 @@ def build():
     sounds = sorted(f for f in os.listdir(sounds_dir) if f.endswith(".mp3")) \
         if os.path.isdir(sounds_dir) else []
 
+    # ── SFX AS A LOOKUP TABLE, NOT PROSE ────────────────────────────────────
+    # The catalogue lived as ~15 paragraphs of prose in handler.py, and SFX has
+    # been placed ZERO times on every run ever measured against a corpus rate of
+    # 0.82/25s. Prose is what the agent reads and ignores; a table keyed by ROLE
+    # is what it can pick from. Parsed from the prose rather than transcribed,
+    # so the two cannot drift.
+    import re as _re
+    import subprocess as _sp
+    hdl_src = open(hdl, encoding="utf-8", errors="ignore").read()
+    catalogue = {}
+    for line in hdl_src.splitlines():
+        mm = _re.match(r"^\*\*([a-z0-9\-]+)\*\* — (.*)$", line.strip())
+        if not mm:
+            continue
+        nm, body = mm.group(1), mm.group(2)
+
+        def _grab(tag, _b=body):
+            g = _re.search(rf"\*\*{tag}:\*\*\s*(.*?)(?=\*\*[A-Z ]+:\*\*|$)", _b, _re.S)
+            return g.group(1).strip().rstrip(".") if g else ""
+        row = {"role": _grab("THE MOMENT")[:220],
+               "fits": _grab("FITS")[:120],
+               "fights": _grab("FIGHTS")[:120]}
+        f = os.path.join(sounds_dir, nm + ".mp3")
+        if os.path.isfile(f):
+            pr = _sp.run(f'ffprobe -v error -show_entries format=duration -of csv=p=0 "{f}"',
+                         shell=True, capture_output=True, text=True)
+            try:
+                row["duration_s"] = round(float(pr.stdout.strip()), 2)
+            except Exception:
+                row["duration_s"] = None
+            row["file"] = nm + ".mp3"
+        else:
+            # `voice` is the signed BARE choice — a real option with no file.
+            row["file"] = None
+            row["duration_s"] = None
+        catalogue[nm] = row
+
+    # WHICH BEAT PURPOSE EACH FAMILY LANDS ON — measured from the 153-beat
+    # reference corpus, not asserted. 64% of corpus SFX are on hook or close.
+    beat_fit = {
+        "sfx":     {"hook": 5, "close": 4, "claim": 2, "breath": 1, "evidence": 1, "turn": 1},
+        "card":    {"evidence": 18, "close": 11, "turn": 4, "hook": 3, "claim": 2},
+        "cutaway": {"evidence": 44, "turn": 8, "claim": 7, "close": 4, "payoff": 4},
+        "zoom":    {"hook": 3, "evidence": 3},
+    }
+
     inv = {
+        "beat_fit": beat_fit,
+        "sfx_catalogue": catalogue,
         "sfx": {
             "files": sounds,
             "dir": "/assets/sounds",
@@ -85,6 +133,7 @@ def build():
         "motion_graphics.attack_ms": inv["motion_graphics"]["attack_ms"],
         "transitions.types": inv["transitions"]["types"],
         "caption_styles.types": inv["caption_styles"]["types"],
+        "sfx_catalogue": catalogue,
     }.items() if not v]
     if empties:
         raise AssertionError(
