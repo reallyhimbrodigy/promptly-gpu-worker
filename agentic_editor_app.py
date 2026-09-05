@@ -361,11 +361,15 @@ This is the inventory the production pipeline ships, not a description of one.
                      -filter_complex "[1:a]adelay=D|D[s];[0:a][s]amix=inputs=2:duration=first" \
                      -c:v copy final.mp4
                    D = (beat_time - attack_ms/1000) * 1000, in ms, clamped at 0.
-        zoom    -> ffmpeg on the FOOTAGE, not a component. The catalogue's zoom
-                   family (SmoothPush, StepZoom, DepthPull...) is a camera-move
+        zoom    -> AUTHOR IT. There is no PunchIn component and the catalogue's
+                   zoom family (SmoothPush, StepZoom...) is a camera-move
                    subsystem, not an MG type — do not look for it in
-                   `remotion compositions`. A punch-in is:
-                     scale=1080*1.08:-1,crop=1080:1920 over the beat's span.
+                   `remotion compositions`. Write one with `author_component`:
+                   a transparent 1080x1920 comp that scales its content with
+                   `useCurrentFrame` and `interpolate`, render it, composite it
+                   at the beat. `search_skills` is the API reference for this —
+                   it is an AUTHORING corpus, which is why catalogue questions
+                   have always returned nothing from it.
 
   S1. SOUND IS A FAMILY YOU HAVE NEVER USED. Corpus rate is 0.82 per 25s and
       every run so far has placed ZERO. /assets/inventory.json carries
@@ -622,6 +626,24 @@ KNOWLEDGE_TOOLS = [{
                                  "props": {"type": "object"}},
                              "required": ["type", "t_start"]}}},
                      "required": ["items"]},
+}, {
+    "name": "author_component",
+    "description": (
+        "WRITE a Remotion component when the catalogue has none, then render it. "
+        "Zoom is the case: there is no PunchIn component, so author one. Pass the "
+        "full TSX exporting `Comp` — that is the name the project registers — at "
+        "1080x1920, 30fps, TRANSPARENT background so it composites over the "
+        "footage. It renders to an alpha PNG sequence and returns a .mov plus the "
+        "overlay filter. If it fails to compile you get the error back; "
+        "`search_skills` is the Remotion API reference and this is what it is for."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "tsx": {"type": "string",
+                                 "description": "full file, exporting `Comp`"},
+                         "frames": {"type": "integer",
+                                    "description": "1-90 at 30fps"},
+                         "name": {"type": "string"}},
+                     "required": ["tsx"]},
 }, {
     "name": "place_cutaway",
     "description": (
@@ -1588,6 +1610,70 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                     "which is what a cutaway is. Do not touch the audio leg.",
         }
 
+    # ── AUTHORING: when the catalogue cannot serve the family ───────────────
+    # Zoom has no component — there is no PunchIn among the 31 MG types, and the
+    # zoom family (SmoothPush, StepZoom...) is a camera-move subsystem, not
+    # something the reel can render. So the agent WRITES one. This is also the
+    # first real use for /skills: 282 files of Remotion authoring documentation
+    # that answered zero of the 11 catalogue questions ever asked of it, because
+    # every one of those was a catalogue question. Authoring is what it is for.
+    #
+    # The scaffold has been in the image since the beginning and never used:
+    # /remotion is a SEPARATE project at 4.0.517/react19 whose Comp.tsx is a
+    # transparent placeholder registered as composition "Comp". Kept apart from
+    # /promptly-remotion (4.0.450/react18) on purpose — react 19 is a major, and
+    # mixing them makes a working component look broken.
+    led["components_authored"] = 0
+
+    def author_component(tsx, frames=45, name="authored"):
+        src = str(tsx or "")
+        if "export const Comp" not in src:
+            return {"error": "the component must be `export const Comp` — that "
+                             "is the name Root.tsx registers.",
+                    "shape": "export const Comp: React.FC = () => { ... }"}
+        try:
+            nframes = max(1, min(90, int(frames)))
+        except Exception:
+            nframes = 45
+        with open("/remotion/src/Comp.tsx", "w") as fh:
+            fh.write(src)
+        out_dir = f"/work/authored_{led['components_authored']}"
+        subprocess.run(f"rm -rf {out_dir}", shell=True)
+        r = subprocess.run(
+            f"cd /remotion && npx remotion render Comp {out_dir} "
+            f"--sequence --image-format=png --frames=0-{nframes - 1}",
+            shell=True, capture_output=True, text=True, timeout=1200)
+        if r.returncode != 0:
+            # The compile error is the useful part — hand it back whole so the
+            # agent can fix the TSX rather than guess.
+            fail("authored_render_failed", (r.stderr or "")[-300:])
+            return {"error": "render failed", "name": name,
+                    "stderr": (r.stderr or "")[-1200:],
+                    "note": "Fix the component and call again. `search_skills` "
+                            "is the reference for Remotion APIs — this is what "
+                            "it is for."}
+        pngs = sorted(f for f in os.listdir(out_dir)
+                      if f.endswith(".png")) if os.path.isdir(out_dir) else []
+        if not pngs:
+            fail("authored_no_frames", f"{name}: render exited 0 with no frames")
+            return {"error": "render produced no frames"}
+        mov = f"/work/{name}.mov"
+        subprocess.run(
+            f"cd {out_dir} && ffmpeg -y -v error -framerate 30 -pattern_type glob "
+            f"-i '*.png' -c:v qtrle -pix_fmt argb {mov}",
+            shell=True, capture_output=True, text=True, timeout=600)
+        led["components_authored"] += 1
+        led.setdefault("authored_meta", []).append(
+            {"name": name, "frames": len(pngs), "chars": len(src)})
+        return {
+            "ok": True, "name": name, "frames": len(pngs), "file": mov,
+            "seconds": round(len(pngs) / 30, 2),
+            "composite_at": ("[1:v]setpts=PTS-STARTPTS+<T>/TB[a];"
+                             "[0:v][a]overlay=0:0:enable='between(t,<T>,<T+dur>)'"),
+            "note": "PNG sequence -> argb qtrle, so ALPHA survives. Composite it "
+                    "at the beat's OUTPUT timestamp like any other layer.",
+        }
+
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     tl = "\n".join(f"[{w['s']:.2f}-{w['e']:.2f}] {w['w']}" for w in words)
     meta = probe(src)
@@ -1954,6 +2040,10 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                        "of": len(_number_beats)}
             elif tu.name == "render_components":
                 out = render_components(tu.input.get("items") or [])
+            elif tu.name == "author_component":
+                out = author_component(tu.input.get("tsx"),
+                                       tu.input.get("frames") or 45,
+                                       tu.input.get("name") or "authored")
             elif tu.name == "place_cutaway":
                 out = place_cutaway(tu.input.get("keyword"),
                                     tu.input.get("t_start"),
@@ -1974,9 +2064,23 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                         "text_content": _v.get("text_content"),
                         "why": str(_v.get("why") or "")})
                     _seen.add(_v.get("beat")); _added += 1
+                _nocopy = [v.get("beat") for v in led["beat_verdicts"]
+                           if "text" in (v.get("treatment") or [])
+                           and not v.get("text_content")]
                 _missing = [b["i"] for b in _beats if b["i"] not in _seen]
                 out = {"recorded": _added, "ruled": len(_seen),
                        "of": len(_beats), "still_missing": _missing[:30]}
+                # AA ruled 19 beats `text` and supplied copy for ONE. The schema
+                # could not express "required only when treatment includes
+                # text", so it went unenforced and 18 overlays could not be
+                # derived. Caught HERE, in the same turn, instead of as a
+                # post-hoc ledger note.
+                if _nocopy:
+                    out["ERROR_text_content_missing"] = _nocopy[:25]
+                    out["fix"] = ("These beats are ruled 'text' with no "
+                                  "text_content. The overlay is DERIVED from "
+                                  "that field — without it nothing is built. "
+                                  "Re-call with copy for each.")
             elif tu.name == "beat_verdict":
                 _bv = {"beat": tu.input.get("beat"),
                        "treatment": tu.input.get("treatment"),
