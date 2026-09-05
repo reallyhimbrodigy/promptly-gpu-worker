@@ -245,43 +245,6 @@ scratch, including dumping raw pixel values to identify the grey. They are
 numbered here because numbered requirements got followed and prose did not.
 Violating any of them produces a BROKEN video that still exits 0.
 
-  C1. RENDER MGCraftProbe30 — NEVER bare MGCraftProbe. MGCraftProbe is 60fps
-      and your edit is 30fps. A 60fps render composited onto a 30fps cut plays
-      the graphic at HALF SPEED and the count-up never lands on its beat.
-
-  C2. THE PROBE OUTPUT IS OPAQUE, NOT ALPHA. It paints a neutral grey field
-      (0x808080) behind the component — it is a craft harness, not a
-      transparent overlay. You MUST key that grey out before compositing:
-
-        cd /work && ffmpeg -y -i mg.mov \
-          -vf "colorkey=0x808080:0.15:0.05,format=yuva420p" -c:v qtrle mg_keyed.mov
-
-      Compositing mg.mov directly pastes a GREY RECTANGLE over your footage.
-
-  C3. NEVER pass --codec=prores or --pix-fmt=yuva444p10le. Those flags were
-      never tested against this image and 31 consecutive attempts failed
-      against them. Render with the defaults in C4 and key with C2 instead.
-
-  C4. PROPS GO IN A FILE. Inline JSON in a shell command is its own failure
-      mode. A staged, valid props file is already in the image:
-
-        cp /promptly-remotion/example-statcard-props.json /work/mg-props.json
-        # edit value / fromValue / prefix / label to YOUR quoted number
-        cd /promptly-remotion && npx remotion render MGCraftProbe30 /work/mg.mov \
-          --props=/work/mg-props.json --frames=0-59
-
-  C5. COMPOSITE THE KEYED FILE — mg_keyed.mov, not mg.mov — at the beat's
-      OUTPUT timestamp:
-
-        cd /work && ffmpeg -y -i cut.mp4 -i mg_keyed.mov -filter_complex \
-          "[1:v]setpts=PTS+13.6/TB[mg];[0:v][mg]overlay=0:0:enable='between(t,13.6,15.6)'" \
-          -c:a copy out.mp4
-
-  C6. DO NOT drive PromptlyOverlay for a single graphic. It is the product
-      composition and wants a WHOLE EDIT PLAN as props — it is the wrong entry
-      point for one card. MGCraftProbe30 is NOT a fake: its `type` field selects
-      the real StatCard/ProgressBar/etc. from the catalogue by name.
-
   C9. ALL COMPONENTS IN ONE PASS — author the whole list, then `render_components`.
       This is a DIFFERENT SHAPE from place-one-check-one: decide every moving
       graphic in the edit FIRST, then make a single call with all of them. It
@@ -310,16 +273,6 @@ Violating any of them produces a BROKEN video that still exits 0.
       a number that is a joke, an ordinal, or an operand feeding a later total
       is usually "text" or "none".
 
-  C7. SEARCH THE REFERENCE BEFORE YOUR FIRST RENDER — ENFORCED, NOT ADVISED.
-      Your first `remotion render` is BLOCKED until you have called
-      `search_skills` at least once. This is a precondition in the tool layer,
-      not a preference: the previous run had the reference mounted, the tool
-      available and a paragraph recommending it, and made zero calls. One
-      search costs one turn; a guessed prop costs a whole render round-trip.
-
-        search_skills("--props")      search_skills("interpolate")
-
-      The block lifts after one call — re-issue your command unchanged.
 
   COST, RE-MEASURED 2026-09-04 — the old figure here was WRONG BY ~9x and it
   was arguing against components. It said "~343 ms/frame, so 2s of component =
@@ -355,21 +308,6 @@ overlay text; four runs were misread that way. Your declaration is the record.
 THE REAL ASSET LIBRARY IS MOUNTED AT /assets — A1 THROUGH A3
 This is the inventory the production pipeline ships, not a description of one.
 
-  A1. /assets/inventory.json IS THE INDEX. Read it once. It lists every sound
-      file, every motion-graphic type, every transition and every caption
-      style THAT ACTUALLY EXISTS, extracted from the pipeline's own source at
-      deploy time. Do not invent an asset name; if it is not in there, it is
-      not real.
-
-  A2. SOUNDS ARE REAL FILES at /assets/sounds/*.mp3 (15 of them). Mix one in
-      with ffmpeg like any other audio input.
-
-  A3. THE ATTACK TABLE IS NOT OPTIONAL — it is how many ms EARLIER a sound must
-      start so its PEAK lands on the target word. `popsfx` peaks 32ms in;
-      `imposter` peaks 935ms in. Start both at the word and the second one
-      lands nearly a second late, audibly, with ffmpeg exiting 0. Offset every
-      sound by its own `attack_ms`. Motion graphics have the same table for
-      their entrance.
 
 EFFICIENCY — E1 THROUGH E4, REQUIREMENTS NOT PREFERENCES
 Output tokens are 40-44% of this job's cost and turns are the multiplier on it.
@@ -407,19 +345,6 @@ twice.
       rediscovering C1 and C2 from scratch, including dumping raw pixel values
       to identify a grey that C2 states outright.
 
-  E4. (RETIRED 2026-09-03 — "no exploratory commands where a documented answer
-      exists". Dropped with E1 for the same measured reason: the pair halved
-      placements, 19 -> 10. Exploration is how this agent finds beats worth
-      placing, and this lane exists to raise placement density, not lower it.
-      Kept as a numbered slot so its absence is deliberate and visible rather
-      than looking like a renumbering accident.)
-
-  WHAT THE REFERENCE DOES AND DOES NOT COVER — measured, so you do not spend
-  searches finding out: /skills is 282 files of COMPONENT-AUTHORING docs.
-  `interpolate` appears in 46 of them. It does NOT document the CLI: `--props`
-  appears in ZERO files. So search it for component and prop questions, and
-  take CLI invocation from C4 and recipe 15, which are verified against this
-  image. Do not search twice for a CLI flag.
 
 WORKING DISCIPLINE — K1 THROUGH K4
 Behavioural, not editorial. Measured: 0 of the 999 editing terms in the
@@ -520,8 +445,7 @@ TOOLS = [
      "description": "Probe /work/out.mp4 AND transcribe it, reporting duration, "
                     "resolution, and which intended words are missing from the "
                     "rendered audio. Call this before saying DONE.",
-     "input_schema": {"type": "object", "properties": {}}},
-]
+     "input_schema": {"type": "object", "properties": {}}}]
 
 # TWO tools, as a LIST. This was written as `KNOWLEDGE_TOOL = {...}, {...}`,
 # which is a TUPLE of two dicts -- valid Python, and the API rejected the
@@ -802,23 +726,14 @@ def remap_words(spans, words):
 #
 # RED-PROVEN: deleting the "C2." line raises; re-adding "--codec=prores" raises.
 # A check that has never failed is not yet a check.
-_REQUIRED_CONSTRAINTS = ["C1.", "C2.", "C3.", "C4.", "C5.", "C6.",
-                         # C7 is ENFORCED in the tool layer. It is listed here
-                         # so the prompt cannot stop TELLING the agent about a
-                         # gate that still blocks it — an unannounced
-                         # precondition burns a turn on a collision.
-                         "C7.", "C8.", "C9.",
-                         "MGCraftProbe30", "colorkey=0x808080",
-                         # INPUT 4 — Karpathy behaviour is RESIDENT, not a tool
-                         # read. It governs every turn, so "did the agent read
-                         # it" is the wrong question; "is it in the prompt" is
-                         # the right one, and that is a static check.
-                         "K1.", "K2.", "K3.", "K4.",
-                         # E1-E4 — efficiency. Same reason as C1-C6: this agent
-                         # follows numbered requirements and ignores prose.
-                         "E1.", "E2.", "E3.", "E4.",
-                         # A1-A3 — the real asset library. Same reason again.
-                         "A1.", "A2.", "A3."]
+_REQUIRED_CONSTRAINTS = [
+    # Trimmed 2026-09-04. C1-C6 (the single-component MGCraftProbe grey-key
+    # path) were superseded by C9's reel; C7 mandated a search that logged
+    # skills_searched_zero_hits on every run that ran it; A1-A3 described an
+    # asset library that reported mounted_unread on every run; E4 was a
+    # tombstone for a retired rule. ~4,200 chars describing paths the agent no
+    # longer takes, billed on every turn of every render.
+    "C8.", "C9.", "E1.", "E2.", "E3.", "K1.", "K2.", "K3.", "K4."]
 # Every one of these was tried against this image and FAILED. If a future edit
 # reintroduces them the agent inherits 31 failed attempts again.
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
@@ -880,7 +795,9 @@ DEFAULT_EFFORT = "high"
 @app.function(image=IMG, secrets=SECRETS, timeout=3600, cpu=8, memory=16384)
 def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
          use_knowledge: bool = True, effort: str = DEFAULT_EFFORT,
-         model: str = MODEL) -> dict:
+         model: str = MODEL, route_models: bool = False,
+         cheap_model: str = "claude-haiku-4-5",
+         exec_model: str = MODEL) -> dict:
     import subprocess
     import boto3
     from anthropic import Anthropic
@@ -1440,6 +1357,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     # class of unfalsifiable claim.
     led["effort"] = effort
     led["model"] = model
+    led["route_models"] = route_models
     led["max_iters"] = max_iters
 
     # List form, not a bare string: a string content block cannot carry a
@@ -1477,6 +1395,29 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 if isinstance(tail, dict):
                     tail["cache_control"] = {"type": "ephemeral"}
                 break
+        # ── MODEL ROUTING ───────────────────────────────────────────────────
+        # Measured on run M: Haiku's VERDICTS are indistinguishable from
+        # Sonnet's — 19/19 ruled, 19/19 distinct, and 19 of 19 cited their own
+        # beat against Sonnet's 17 — but it then never executed them. It ruled
+        # 2 beats "card" and rendered nothing. Judgement is cheap; execution is
+        # not, and 78% of the bill sits on the side that held up.
+        #
+        # So the phase boundary is "are all beats ruled yet". While any beat is
+        # unruled the run is still deciding -> cheap. Once every beat has a
+        # verdict the run is building -> expensive. C8/C9 already push the agent
+        # to rule everything before rendering, so the routing follows the
+        # workflow rather than fighting it.
+        #
+        # NOTE: build_cut can land in EITHER phase depending on when the agent
+        # calls it. The ledger records the model per turn, so the actual split
+        # is reported rather than assumed.
+        if route_models:
+            _all_ruled = bool(_beats) and not [
+                b for b in _beats
+                if b["i"] not in {v.get("beat") for v in led.get("beat_verdicts") or []}]
+            model = exec_model if _all_ruled else cheap_model
+        led.setdefault("turn_models", []).append(model)
+
         # output_config.effort is a 4.6+/5 parameter. Haiku 4.5 rejects the whole
         # request with a 400, so the cheaper-model arm died at turn 1 for $0.00.
         # Worth stating plainly: "same config, cheaper model" is NOT literally
@@ -1497,6 +1438,17 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             led["tokens"]["out"] += getattr(u, "output_tokens", 0) or 0
             led["tokens"]["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
             led["tokens"]["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
+            # PER-MODEL BUCKETS. A routed run mixes two rate cards, so costing
+            # aggregate tokens at one rate is wrong — the same class of error as
+            # billing Haiku at Sonnet rates, and it lands on the arm's headline
+            # number. Attribute each turn's tokens to the model that produced
+            # them.
+            _pm = led.setdefault("tokens_by_model", {}).setdefault(
+                model, {"in": 0, "out": 0, "cache_read": 0, "cache_write": 0})
+            _pm["in"] += getattr(u, "input_tokens", 0) or 0
+            _pm["out"] += getattr(u, "output_tokens", 0) or 0
+            _pm["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
+            _pm["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
         msgs.append({"role": "assistant", "content": r.content})
         tool_uses = [c for c in r.content if getattr(c, "type", "") == "tool_use"]
         led["turns"].append({
@@ -1594,23 +1546,8 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 # rather than one HIT — a hitless query must not deadlock the
                 # run. `remotion_skills` still reports searched_no_hits in that
                 # case, so opening the gate can never be mistaken for value.
-                if ("remotion render" in _c
-                        and not (led.get("skill_searches") or [])):
-                    led["skill_gate_blocks"] = led.get("skill_gate_blocks", 0) + 1
-                    fail("skill_gate_blocked_render",
-                         "first `remotion render` attempted with zero "
-                         "search_skills calls — blocked, agent redirected")
-                    out = {"blocked": True, "ran": False,
-                           "error": "PRECONDITION: call search_skills at least "
-                                    "once before your first `remotion render`.",
-                           "why": "Guessing a prop or flag costs a full render "
-                                  "round-trip, and you have a turn budget. The "
-                                  "reference is 276 files of official Remotion "
-                                  "docs and it is one tool call away.",
-                           "try": ["--props", "MGCraftProbe30", "StatCard",
-                                   "--frames", "interpolate"],
-                           "then": "re-issue this exact command; it is not "
-                                   "blocked again."}
+                if False:  # C7 search gate retired with its prompt block
+                    out = {}
                 else:
                     led["cmds"].append(_c[:4000])
                     out = run_shell(_c)
@@ -2034,8 +1971,9 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
          iters: int = MAX_ITERS,
          knowledge: bool = True,
          effort: str = DEFAULT_EFFORT,
-         model: str = MODEL):
-    r = edit.remote(source, brief, iters, knowledge, effort, model)
+         model: str = MODEL,
+         route: bool = False):
+    r = edit.remote(source, brief, iters, knowledge, effort, model, route)
     print("\n" + "=" * 66)
     print(f"  AGENTIC EDITOR — knowledge={'ON' if knowledge else 'OFF'}  "
           f"effort={r['ledger'].get('effort')}  model={r['ledger'].get('model')}")
@@ -2115,10 +2053,32 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _model not in _RATES:
         print(f"  ⚠️  no rate table for {_model} — costing it at Sonnet rates, "
               f"which is a GUESS, not a measurement")
-    cost = (t["in"] * _ri + t["out"] * _ro + t["cache_read"] * _rr
-            + t["cache_write"] * _rw) / 1e6
-    _out_cost = t["out"] * _ro / 1e6
+    def _cost_of(tt, rates):
+        a, b, c, d = rates
+        return (tt["in"] * a + tt["out"] * b + tt["cache_read"] * c
+                + tt["cache_write"] * d) / 1e6
+    _tbm = r["ledger"].get("tokens_by_model") or {}
+    if len(_tbm) > 1:
+        cost = sum(_cost_of(tt, _RATES.get(mm, _RATES["claude-sonnet-5"]))
+                   for mm, tt in _tbm.items())
+        _out_cost = sum(tt["out"] * _RATES.get(mm, _RATES["claude-sonnet-5"])[1]
+                        for mm, tt in _tbm.items()) / 1e6
+        print("  ROUTED          : " + "  ".join(
+            f"{mm.replace('claude-','')} ${_cost_of(tt, _RATES.get(mm, _RATES['claude-sonnet-5'])):.4f}"
+            f" ({tt['out']:,} out)" for mm, tt in _tbm.items()))
+    else:
+        cost = _cost_of(t, (_ri, _ro, _rr, _rw))
+        _out_cost = t["out"] * _ro / 1e6
     print(f"  COST ({_model.replace('claude-','')})   : ${cost:.4f}")
+    # THE TAIL. cache_write is 12.5x the read price, so a 7.7% token share is
+    # ~half the input bill. The cached PREFIX is written once; everything else
+    # is the growing message tail being re-written every turn. That is the lever.
+    _cwc = t["cache_write"] * _rw / 1e6
+    _crc = t["cache_read"] * _rr / 1e6
+    print(f"    tail          : cache_write {t['cache_write']:,} tok = ${_cwc:.4f} "
+          f"({100*_cwc/max(cost,1e-9):.0f}% of cost)   "
+          f"cache_read {t['cache_read']:,} = ${_crc:.4f} "
+          f"({100*_crc/max(cost,1e-9):.0f}%)")
     # THE TERM THIS ARM TARGETS. Output is 5x the input rate, so an output-token
     # share is the only part of the bill `effort` can move. Report it as a share
     # of cost, not of tokens — tokens are not what is being spent.
