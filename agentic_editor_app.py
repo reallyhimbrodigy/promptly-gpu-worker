@@ -1321,6 +1321,27 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 f":enable='between(t,{t0:.2f},{t1:.2f})'")
         if errs:
             return {"error": "bad items", "details": errs[:5]}
+        # A CAPTION-ONLY CALL IS NOT A TEXT PASS. burn_captions defaults True, so
+        # an EMPTY items list still produced a valid filter and returned ok —
+        # which is how run W ruled 13 beats `text`, called this once, built
+        # captions, and declared zero overlays with nothing failing. Both halves
+        # looked satisfied while no overlay existed.
+        _ruled_text = sum(1 for v in (led.get("beat_verdicts") or [])
+                          if "text" in (v.get("treatment") or []))
+        if not items and _ruled_text:
+            fail("overlays_skipped_ruled_text",
+                 f"build_overlays called with NO items while {_ruled_text} "
+                 f"beat(s) were ruled 'text'")
+            return {"error": f"{_ruled_text} beat(s) are ruled 'text' and you "
+                             f"passed no items.",
+                    "why": "Captions are not overlays. A caption-only call "
+                           "silently drops every text ruling you made.",
+                    "do_now": "Pass one item per beat you ruled 'text' — its "
+                              "words, its t_start/t_end, its position. If a "
+                              "ruling was wrong, re-rule that beat instead.",
+                    "ruled_text_beats": [v.get("beat") for v in
+                                         (led.get("beat_verdicts") or [])
+                                         if "text" in (v.get("treatment") or [])][:20]}
         if not chain:
             return {"error": "nothing to draw and no captions.srt"}
         with open("/work/overlays.txt", "w") as fh:
@@ -2073,6 +2094,30 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     _mix["cutaway_per_25s"] = _per25(_mix["cutaways"])
     led["family_mix"] = _mix
 
+    # ── RULED vs BUILT, PER FAMILY ──────────────────────────────────────────
+    # The manifest was audited against RENDERS and the verdicts against NOTHING.
+    # So a run could rule 13 beats `text`, build none, and every check stayed
+    # green — the two halves of the run were never compared. Same class as
+    # placement_declared_without_render, one layer out.
+    _fam_ruled = {}
+    for _v in (led.get("beat_verdicts") or []):
+        for _t in (_v.get("treatment") or []):
+            if _t != "none":
+                _fam_ruled[_t] = _fam_ruled.get(_t, 0) + 1
+    _fam_built = {"card": _mix["cards"], "text": _mix["text"],
+                  "sfx": _mix["sfx"], "cutaway": _mix["cutaways"],
+                  "zoom": _mix.get("emphasis", 0)}
+    led["ruled_vs_built"] = {f: {"ruled": _fam_ruled.get(f, 0),
+                                 "built": _fam_built.get(f, 0)}
+                             for f in set(_fam_ruled) | {"card", "text", "sfx"}}
+    _unbuilt = {f: v for f, v in led["ruled_vs_built"].items()
+                if v["ruled"] > 0 and v["built"] == 0}
+    if _unbuilt:
+        fail("ruled_but_never_built",
+             f"{ {f: v['ruled'] for f, v in _unbuilt.items()} } beat(s) were "
+             f"ruled for these families and ZERO were built. The decision was "
+             f"made and the artifact does not exist.")
+
     # ── WAS THE FAMILY EVER CONSIDERED? ─────────────────────────────────────
     # Four families read zero on every run. That has two completely different
     # causes with completely different fixes: weighed and rejected (a taste
@@ -2310,6 +2355,11 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     print(f"  TURN BUDGET     : used {r['ledger']['iters']} of {r['ledger'].get('max_iters','?')}"
           f"   renders: shell {_fm.get('remotion_renders',0)} + reel {_fm.get('reel_renders',0)}"
           f" = {_fm.get('renders_total',0)}")
+    _rvb = r["ledger"].get("ruled_vs_built") or {}
+    if _rvb:
+        print("  RULED vs BUILT  : " + "  ".join(
+            f"{f} {v['ruled']}->{v['built']}" + ("  <-- GAP" if v["ruled"] and not v["built"] else "")
+            for f, v in sorted(_rvb.items())))
     _fm2 = r["ledger"].get("family_mentions") or {}
     if _fm2:
         print(f"  FAMILY MENTIONS : {_fm2}  over {r['ledger'].get('trace_chars',0):,} "
