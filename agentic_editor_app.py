@@ -213,7 +213,7 @@ def _supports_effort(model_id: str) -> bool:
 # 5 -> 12 -> 22. Run 3 (knowledge ON) spent 4 of its 12 turns READING and died
 # at "Now burn the captions" — the budget has to cover the reading AND the edit,
 # or the knowledge arm is structurally unable to finish what the control finishes.
-MAX_ITERS = 16
+MAX_ITERS = 24
 # 8000 was the ceiling the agent kept hitting MID-TOOL-CALL. stop_reason came
 # back 'max_tokens' with an incomplete tool_use block, so tool_uses was empty,
 # so the loop broke -- silently, for three runs and ~$0.72. The recipes made it
@@ -1650,6 +1650,12 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         texts = " ".join(getattr(c, "text", "") for c in r.content
                          if getattr(c, "type", "") == "text")
         final_text = texts or final_text
+        # THE TRACE, kept so "was this family ever considered" is answerable.
+        # It was computed and thrown away, so the only evidence of what the
+        # agent weighed was whatever survived into a tool call — which is
+        # exactly the families that produced no tool calls.
+        if texts:
+            led.setdefault("turn_texts", []).append(texts[:4000])
         if not tool_uses:
             # THE SILENT DEATH, runs 10 and 11 (~$0.46 for zero information).
             # A model turn with no tool_use is AMBIGUOUS: it is either the agent
@@ -2033,6 +2039,26 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     _mix["cutaway_per_25s"] = _per25(_mix["cutaways"])
     led["family_mix"] = _mix
 
+    # ── WAS THE FAMILY EVER CONSIDERED? ─────────────────────────────────────
+    # Four families read zero on every run. That has two completely different
+    # causes with completely different fixes: weighed and rejected (a taste
+    # problem, answerable from the rationales) or never entertained at all (a
+    # surface problem). Nothing has been able to tell them apart, because the
+    # reasoning text was discarded.
+    _corpus = " ".join((led.get("turn_texts") or [])
+                       + [str(v.get("why") or "")
+                          for v in (led.get("beat_verdicts") or [])]).lower()
+    _TERMS = {
+        "sfx": ("sfx", "sound effect", "sound-effect", "audio hit", "whoosh",
+                "boom", "ding", "sting"),
+        "cutaway": ("cutaway", "cut-away", "b-roll", "broll", "stock footage",
+                    "pexels"),
+        "zoom": ("zoom", "punch-in", "punch in", "push in"),
+    }
+    led["family_mentions"] = {
+        f: sum(_corpus.count(t) for t in terms) for f, terms in _TERMS.items()}
+    led["trace_chars"] = len(_corpus)
+
     # ── ARE THE VERDICTS SUBSTANTIVE, OR JUST CLEARING THE GATE? ─────────────
     # The gate's own failure mode, named before it ran: an agent that writes
     # "no component warranted" nine times has SATISFIED it without being
@@ -2250,6 +2276,10 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     print(f"  TURN BUDGET     : used {r['ledger']['iters']} of {r['ledger'].get('max_iters','?')}"
           f"   renders: shell {_fm.get('remotion_renders',0)} + reel {_fm.get('reel_renders',0)}"
           f" = {_fm.get('renders_total',0)}")
+    _fm2 = r["ledger"].get("family_mentions") or {}
+    if _fm2:
+        print(f"  FAMILY MENTIONS : {_fm2}  over {r['ledger'].get('trace_chars',0):,} "
+              f"chars of reasoning   (0 = never considered, >0 = weighed)")
     _gb = r["ledger"].get("skill_gate_blocks", 0)
     print(f"    C7 gate       : {_gb} render(s) blocked before first search"
           + ("  (gate did the work)" if _gb else "  (searched unprompted)"))
