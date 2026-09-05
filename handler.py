@@ -41792,6 +41792,56 @@ def handler(job):
                 provided_plan = diff["new_plan"]
                 change_summary = diff.get("human_summary")
                 mode = "render_only"
+                # ── ENUM GATE ON THE TWEAK PATH ─────────────────────────────
+                # ROOT CAUSE of RENDER_FATAL "[overlay] render input failed
+                # schema validation ... caption.style" — 2 jobs / 2 users, and
+                # BOTH were reedit_mode='tweak' (verified 2026-09-05, not
+                # inferred). Observed bad values: 'TwoToneBlue' and 'Blue'.
+                #
+                # generate_edit_gemini validates caption_style against
+                # VALID_CAPTION_STYLES and, on failure, re-asks the model with
+                # the validator's complaint (the _repair loop). A tweak never
+                # runs that function: it takes the diff model's new_plan and
+                # goes straight to render_only, so the ONE gate that catches an
+                # invented enum is on a path tweaks skip. The value then dies
+                # in Pydantic after the full render has been paid for.
+                #
+                # REVERT TO THE PRIOR VALUE, which is known-valid by
+                # construction — it already passed the generation gate. This is
+                # not a degrade: the user gets their tweak, with one invented
+                # enum ignored, instead of a fatal. And it is LOUD to us via
+                # _record_divergence, so an invented style is a tunable signal
+                # rather than a silent substitution.
+                try:
+                    _prior_plan = input_data.get("edit_plan")
+                    _prior_plan = _prior_plan if isinstance(_prior_plan, dict) else {}
+                    for _fld, _valid in (
+                        ("caption_style", VALID_CAPTION_STYLES),
+                    ):
+                        _v = provided_plan.get(_fld)
+                        if _v is None or _v in _valid:
+                            continue
+                        _fallback = _prior_plan.get(_fld)
+                        if _fallback not in _valid:
+                            # The prior is unusable too — do not invent one.
+                            # Let the existing validation raise, loudly, rather
+                            # than guessing at the user's taste.
+                            continue
+                        _record_divergence(
+                            _fld, {"invalid": str(_v)[:40], "reverted_to": _fallback},
+                            "tweak_invalid_enum_reverted",
+                            final=_fallback,
+                            reason=("the tweak model emitted an enum outside the "
+                                    "registry; the prior plan's value is known-"
+                                    "valid and renders"))
+                        print(f"[tweak-enum] {_fld}={_v!r} is not in the registry "
+                              f"— reverting to prior {_fallback!r}", flush=True)
+                        provided_plan[_fld] = _fallback
+                except Exception as _enum_err:
+                    # Fail OPEN, consistent with the validator net below: a bug
+                    # in this guard must never block a render that would
+                    # otherwise succeed.
+                    print(f"[tweak-enum] guard error (non-fatal): {_enum_err}", flush=True)
                 print(f"[plan-diff] Tweak accepted — rendering with new plan. Summary: {change_summary}", flush=True)
                 # ── Layer 3 safety net: diff the tweak's new_plan against the
                 # original prior plan + scope-classify each change. In
