@@ -298,6 +298,11 @@ Violating any of them produces a BROKEN video that still exits 0.
                     ["card"] ["text"] ["sfx"] ["zoom"] ["cutaway"] ["none"]
                     or combinations — a corpus hook routinely carries BOTH
                     text and a sound hit. F1 above maps each to its mechanism.
+        text_content — REQUIRED when treatment includes "text": the words to
+                    burn for that beat. The overlay is DERIVED from this — you
+                    do not hand build_overlays a list, it reads your rulings and
+                    builds every one, on the output clock, skipping beats you cut.
+        sfx       — "yes" | "no", REQUIRED on the hook and close beats
         cut       — "keep" | "cut"
         why       — about THAT beat's content
       "none" and "keep" are legitimate answers. Not deciding is not, and DONE
@@ -385,6 +390,10 @@ These are not about doing less work; they are about not doing the SAME work
 twice.
 
   E1. USE `build_cut` AND `build_overlays` — NEVER HAND-BUILD A FILTERGRAPH.
+      `build_overlays` takes NO list from you: it derives one overlay per beat
+      you ruled `text`, using that beat's `text_content` and its timing mapped
+      to the output clock. Call it ONCE after ruling. Passing items is optional
+      and additive, for an overlay that is not a beat.
       You choose the spans; it does the segment maths, the output-time remap
       and the .srt, and returns the exact ffmpeg command. Measured: hand-
       building these took ~7 shell commands per run and got the caption remap
@@ -655,6 +664,13 @@ KNOWLEDGE_TOOLS = [{
                                                "enum": ["card", "text", "sfx",
                                                         "zoom", "cutaway", "none"]}},
                                  "cut": {"type": "string", "enum": ["keep", "cut"]},
+                                 "text_content": {
+                                     "type": "string",
+                                     "description": "REQUIRED when treatment "
+                                                    "includes 'text': the words "
+                                                    "to burn on screen for this "
+                                                    "beat. Short, punchy, upper "
+                                                    "case reads best."},
                                  "sfx": {"type": "string", "enum": ["yes", "no"],
                                          "description": "REQUIRED on hook and "
                                                         "close beats: does this "
@@ -705,6 +721,24 @@ KNOWLEDGE_TOOLS = [{
 # where a card belongs is not knowing the command that renders one.
 REQUIRED_KNOWLEDGE = ["14_card_text_placement_rules.md",
                       "15_ffmpeg_placement_recipes.md"]
+
+
+def src_to_out(t, spans):
+    """A SOURCE timestamp on the CONCATENATED output's clock, or None if cut.
+
+    Same two-clock problem as pack_reel and remap_words, and the same silent
+    failure: an overlay placed at its source time on a cut edit drifts later and
+    later through the video while every command exits 0.
+    """
+    off = 0.0
+    for a, b in (spans or []):
+        a, b = float(a), float(b)
+        if t < a:
+            return None                      # inside a removed region
+        if t <= b:
+            return round(t - a + off, 3)
+        off += (b - a)
+    return None
 
 
 def beat_cut_status(beats, spans, kept_threshold=0.5):
@@ -1333,49 +1367,48 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 f":enable='between(t,{t0:.2f},{t1:.2f})'")
         if errs:
             return {"error": "bad items", "details": errs[:5]}
-        # A CAPTION-ONLY CALL IS NOT A TEXT PASS. burn_captions defaults True, so
-        # an EMPTY items list still produced a valid filter and returned ok —
-        # which is how run W ruled 13 beats `text`, called this once, built
-        # captions, and declared zero overlays with nothing failing. Both halves
-        # looked satisfied while no overlay existed.
-        _ruled_text = sum(1 for v in (led.get("beat_verdicts") or [])
-                          if "text" in (v.get("treatment") or []))
-        # UNDER-SUPPLY IS THE SAME BUG AS NONE. The first version of this guard
-        # tested `not items`, so run Y passed ONE item against 18 rulings and
-        # nothing fired. Build what was ruled.
-        if items and _ruled_text >= 2 and len(items) < 0.5 * _ruled_text:
-            _have = {round(float(i.get("t_start", -1)), 1) for i in items
-                     if isinstance(i, dict)}
-            fail("overlays_underbuilt",
-                 f"{len(items)} item(s) passed against {_ruled_text} beats ruled "
-                 f"'text'")
-            return {"error": f"You ruled {_ruled_text} beats 'text' and passed "
-                             f"{len(items)} item(s).",
-                    "why": "Every text ruling needs its own overlay. Passing a "
-                           "few silently drops the rest of the decisions you "
-                           "already made.",
-                    "do_now": "Pass one item per beat ruled 'text' — words, "
-                              "t_start/t_end, position. If some rulings were "
-                              "wrong, re-rule those beats instead of dropping "
-                              "them.",
-                    "ruled_text_beats": [v.get("beat") for v in
-                                         (led.get("beat_verdicts") or [])
-                                         if "text" in (v.get("treatment") or [])],
-                    "t_starts_you_passed": sorted(_have)[:20]}
-        if not items and _ruled_text:
-            fail("overlays_skipped_ruled_text",
-                 f"build_overlays called with NO items while {_ruled_text} "
-                 f"beat(s) were ruled 'text'")
-            return {"error": f"{_ruled_text} beat(s) are ruled 'text' and you "
-                             f"passed no items.",
-                    "why": "Captions are not overlays. A caption-only call "
-                           "silently drops every text ruling you made.",
-                    "do_now": "Pass one item per beat you ruled 'text' — its "
-                              "words, its t_start/t_end, its position. If a "
-                              "ruling was wrong, re-rule that beat instead.",
-                    "ruled_text_beats": [v.get("beat") for v in
-                                         (led.get("beat_verdicts") or [])
-                                         if "text" in (v.get("treatment") or [])][:20]}
+        # DERIVE FROM THE RULINGS. Refusing an empty or short list cost a full
+        # turn round-trip per correction — run Z hit 24 of 24 turns and $0.7885
+        # doing exactly that, and still built only 7 of 19. The harness already
+        # derives the cut and the reel from decisions; overlays are the same
+        # shape. The agent rules a beat `text` and supplies its copy in the
+        # ruling; everything mechanical — which beats, what timing, output-clock
+        # mapping — is computed here.
+        _tv = [v for v in (led.get("beat_verdicts") or [])
+               if "text" in (v.get("treatment") or []) and v.get("text_content")]
+        _by_i = {b["i"]: b for b in (_beats or [])}
+        _derived, _cut_out, _no_copy = [], 0, 0
+        for v in _tv:
+            b = _by_i.get(v.get("beat"))
+            if not b:
+                continue
+            t0 = src_to_out(b["t_start"], led.get("keep_spans") or [])
+            if t0 is None:
+                _cut_out += 1          # the beat was cut; no overlay belongs
+                continue
+            t1 = src_to_out(b["t_end"], led.get("keep_spans") or [])
+            if t1 is None or t1 <= t0:
+                t1 = t0 + 2.0
+            _derived.append({"text": v["text_content"], "t_start": t0,
+                             "t_end": min(t1, t0 + 4.0), "position": "top"})
+        _no_copy = sum(1 for v in (led.get("beat_verdicts") or [])
+                       if "text" in (v.get("treatment") or [])
+                       and not v.get("text_content"))
+        # Anything the caller passed is additive — a hand-authored overlay that
+        # is not a beat ruling still lands.
+        _seen_t = {round(d["t_start"], 1) for d in _derived}
+        for it in (items or []):
+            try:
+                if round(float(it.get("t_start")), 1) not in _seen_t:
+                    _derived.append(it)
+            except Exception:
+                pass
+        items = _derived
+        led["overlays_derived"] = len(_derived)
+        if _no_copy:
+            fail("text_ruling_without_copy",
+                 f"{_no_copy} beat(s) ruled 'text' carry no text_content, so no "
+                 f"overlay could be derived for them")
         if not chain:
             return {"error": "nothing to draw and no captions.srt"}
         with open("/work/overlays.txt", "w") as fh:
@@ -1938,6 +1971,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                     led["beat_verdicts"].append({
                         "beat": _v.get("beat"), "treatment": _v.get("treatment"),
                         "cut": _v.get("cut"), "sfx": _v.get("sfx"),
+                        "text_content": _v.get("text_content"),
                         "why": str(_v.get("why") or "")})
                     _seen.add(_v.get("beat")); _added += 1
                 _missing = [b["i"] for b in _beats if b["i"] not in _seen]
