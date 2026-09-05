@@ -7317,6 +7317,61 @@ def _loud_failsafe_mount_law():
         f"die SILENTLY inside their fail-safes): {_missing}")
 
 
+@check("OVERLAY-SKIP IS NEVER ASSERTED AGAINST (root cause of RENDER_FATAL 'Overlay chunk 0 missing/invalid: None' — 22 jobs / 16 users, 2026-08-28..09-04, the largest LIVE render failure class): _overlay_skip means the overlay was DELIBERATELY not rendered (empty canvas), so EVERY site that reads it must skip its existence assertion. _build_composite_cmd already emits the pass-through filtergraph for a None overlay; the bug was an assertion sitting between the None assignment and that use, which turned the skip into a fatal on exactly the jobs it exists to help. Three of four sites guarded it correctly and one was missed — so this check enumerates ALL of them by construction rather than trusting a reviewer to notice the fourth.")
+def _overlay_skip_never_asserted():
+    import ast as _ast
+    _src = open("handler.py").read()
+    _tree = _ast.parse(_src)
+    # PARENT LINKS, so "is this raise guarded" is answered by DOMINANCE rather
+    # than by proximity. Three checks written today failed exactly here: the
+    # guard's NAME appears within a few hundred characters of the raise whether
+    # or not it guards it, so a text window reports GREEN on the reverted bug.
+    # Control flow is structure; only the tree knows it.
+    for _n in _ast.walk(_tree):
+        for _c in _ast.iter_child_nodes(_n):
+            _c._parent = _n
+
+    def _guarded_by_skip(node):
+        """Walk to the root; is some enclosing `if` conditioned on _overlay_skip
+        in a way that EXCLUDES the skip path from reaching this node?"""
+        cur = node
+        while getattr(cur, "_parent", None) is not None:
+            par = cur._parent
+            if isinstance(par, _ast.If) and "_overlay_skip" in _ast.dump(par.test):
+                neg = isinstance(par.test, _ast.UnaryOp) and isinstance(par.test.op, _ast.Not)
+                in_body = any(cur is x for x in par.body)
+                in_else = any(cur is x for x in par.orelse)
+                # reachable only when skip is FALSE: `if not _overlay_skip:` body,
+                # or `if _overlay_skip: ... else:` orelse
+                if (neg and in_body) or (not neg and in_else):
+                    return True
+            cur = par
+        return False
+
+    found = 0
+    for _n in _ast.walk(_tree):
+        if not isinstance(_n, _ast.Raise):
+            continue
+        txt = _ast.dump(_n)
+        if "missing/invalid" not in txt or "Overlay chunk" not in txt:
+            continue
+        found += 1
+        assert _guarded_by_skip(_n), (
+            f"handler.py line {_n.lineno}: an 'Overlay chunk missing/invalid' "
+            f"raise is NOT dominated by a `not _overlay_skip` guard. An "
+            f"empty-canvas job (no captions, MG, text or b-roll) renders no "
+            f"overlay, so the path is None BY DESIGN and _build_composite_cmd "
+            f"already emits the pass-through filtergraph for it. Asserting the "
+            f"file exists turns the skip into a RENDER_FATAL on exactly the "
+            f"jobs it exists to help — 22 jobs / 16 users before it was found.")
+    assert found >= 2, (
+        f"only {found} Overlay-chunk raises found — this check protects a "
+        f"specific guard; re-point it rather than letting it pass vacuously")
+    assert _src.count("_overlay_skip = _overlay_paints_nothing(") == 1, (
+        "_overlay_skip must be derived ONCE and read everywhere — deciding it "
+        "twice is how a filtergraph references an input nobody rendered")
+
+
 @check("MOODREEL ROUTE + ADOPTED MINIMAL PACING (Zac verdicts 2026-07-25: MOODREEL APPROVED + PAIR1 B + PAIR2 B): the route ladder inside _run_minimal_pipeline is hype (confident beat) -> MOODREEL (cinematic motion-resolve cut for no_speech/not_talking_head/no_audio clips >=8s without confident music; motion curve -> build_moodreel_prompt -> Gemini HypePlan) -> minimal; EVERY miss fail-safes to minimal (a moodreel attempt can never cost a user their video). The motion curve is extracted ONCE (fail-safe []) and shared: moodreel doctrine + the ADOPTED minimal pacing — boundaries at motion PEAKS (pair 2) + low-motion boundary skip-trims 0.4-0.8s median-relative (pair 1); no curve -> today's even pacing byte-identical. Flag PROMPTLY_MOODREEL (Secret canonical =1), per-job override moodreel_test; moodreel_editor.py baked into the image (the progressive-mount lesson: an unmounted module dies silently inside the fail-safe).")
 def _moodreel_route_wiring():
     _h = open("handler.py").read()

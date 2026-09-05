@@ -37,6 +37,16 @@ def round_is_green(round_result):
             return False, f"{src}: NO RESULT (absent — never treated as a pass)"
         if v.get("ok") is not True:
             return False, f"{src}: {v.get('why') or 'not ok'}"
+        # GREEN MEANS THE FULL VIDEO (2026-09-05). There is no partial credit.
+        # A result that shipped something lesser — components dropped, a stage
+        # skipped, an output flagged degraded — is NOT a pass, because the user
+        # asked for their video and got a substitute. Any of these markers fails
+        # the round even though `ok` is True, so a future degrade path cannot
+        # quietly satisfy this gate.
+        for marker in ("degraded", "partial", "components_dropped", "fallback"):
+            if v.get(marker):
+                return False, (f"{src}: ok but {marker}={v[marker]!r} — green "
+                               f"means the FULL video, not a lesser one")
     extra = sorted(set(r) - set(REQUIRED_SOURCES))
     if extra:
         return False, (f"unknown source(s) {extra} in the round — the test set "
@@ -70,20 +80,27 @@ def evaluate(rounds):
     }
 
 
-def assert_fallbacks_tested(pipeline_stages, tested):
-    """A DECLARED FALLBACK WITH NO TEST IS A LIE.
+def assert_no_degrade_paths(sources):
+    """NO DEGRADED OUTPUT, EVER — enforced against the code, not remembered.
 
-    Contract point 1 is "every stage has a fallback, and the fallback is
-    tested". The second half is the half that rots: a fallback nobody exercised
-    is a comment. This makes the pair structural — declaring a fallback creates
-    an obligation to test it, and the gate fails until that obligation is met.
+    Replaces assert_fallbacks_tested (2026-09-05). That function made declaring a
+    fallback create an obligation to TEST it; the contract has since changed to
+    forbid degraded output outright, so the obligation is now the opposite one:
+    no degrade path may exist to be tested. External calls retry to success,
+    internal failures get root-caused, and the only terminal state is a clean
+    refund-and-retry.
     """
-    declared = {n: m["fallback"] for n, m in pipeline_stages if m.get("fallback")}
-    missing = sorted(set(declared) - set(tested or ()))
-    if missing:
+    banned = ("degraded_composite_plan", "render_degraded", '"degraded": True',
+              "ships_degraded")
+    hits = []
+    for name, src in (sources or {}).items():
+        for b in banned:
+            if b in src:
+                hits.append(f"{name}: {b}")
+    if hits:
         raise AssertionError(
-            f"stage(s) {missing} declare a fallback with NO TEST exercising it. "
-            f"An untested fallback is a comment, not a fallback — it has never "
-            f"been shown to produce a degraded result rather than a crash. "
-            f"Declared: { {k: declared[k] for k in missing} }")
-    return {"fallbacks_declared": len(declared), "tested": sorted(declared)}
+            f"degrade path(s) present: {hits}. A degraded result is a defect "
+            f"wearing a success's clothes — it converts a diagnosable failure "
+            f"into an invisible quality loss the user never asked for. Fix the "
+            f"cause or refund and let them retry.")
+    return {"checked": sorted((sources or {})), "degrade_paths": 0}

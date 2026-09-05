@@ -33462,10 +33462,28 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 overlay_futures[K].result(
                     timeout=_overlay_timeouts[K] + 30 + _fanout_wait_extra)
                 _ov_path = _overlay_chunk_paths[K]
-            if not _exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
-                raise RuntimeError(
-                    f"Overlay chunk {K} missing/invalid: {_ov_path}"
-                )
+            # ROOT CAUSE of RENDER_FATAL "Overlay chunk 0 missing/invalid:
+            # None" — 22 jobs / 16 users, 2026-08-28 through 09-04, the largest
+            # LIVE render failure class.
+            #
+            # `_overlay_skip` means the overlay was DELIBERATELY not rendered
+            # (empty canvas: no captions, MG, text, b-roll). The lines above set
+            # _ov_path = None for exactly that case, and _build_composite_cmd
+            # ALREADY handles None correctly — it sets c_overlay_idx = None and
+            # build_final_filtergraph emits the `[cur]null[composited]`
+            # pass-through. Passing None is right; validating it was not.
+            #
+            # This assertion ran UNCONDITIONALLY between the assignment and the
+            # use, so _exists(None) was False and every empty-canvas job died —
+            # turning the skip into a fatal on precisely the jobs it exists to
+            # help. The other THREE _overlay_skip sites (33285, 33780, 33826)
+            # all guard this correctly and one of them says so in a comment;
+            # this was the site that was missed.
+            if not _overlay_skip:
+                if not _exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
+                    raise RuntimeError(
+                        f"Overlay chunk {K} missing/invalid: {_ov_path}"
+                    )
             # micro is rendered as N parallel Remotion processes (4-way
             # chunked when totalDurationInFrames >= 200; otherwise single
             # process) and concat'd into micro_video_path by a shared

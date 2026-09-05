@@ -204,53 +204,6 @@ REFERENCE_BEAT_FIT = {
 }
 
 
-# ── THE RENDER FALLBACK: COMPOSITE WITHOUT COMPONENTS ────────────────────────
-# THE CLASS THIS REPLACES. RENDER_FATAL "ladder exhausted" is 46 jobs / 26 users
-# / 2.4% over 14d — the largest our-end failure once the client upload seam is
-# excluded. Every one of those users got NOTHING. The cut existed; only the
-# component layer failed, and the pipeline threw away a perfectly good edit
-# because the decoration on top of it did not render.
-#
-# A user's video ships DEGRADED before it fails outright. The cut IS the edit —
-# the timing, the pacing, the removed dead air, the captions. Motion graphics
-# and overlays are the layer on top. Losing the layer is a worse video; losing
-# the job is no video.
-#
-# AND SAY SO — the second half of the contract, and the half that rots. A silent
-# degrade is a defect that looks like a success, which is the exact shape this
-# repo keeps re-learning. The result carries `degraded: True` and the reason, the
-# ledger records it, and the stage reports `fallback` rather than `ok`.
-#
-# PURE so the fallback itself is testable without a renderer. An untested
-# fallback is a comment, and reliability_gate.assert_fallbacks_tested() will fail
-# the gate until a test has actually exercised this.
-def degraded_composite_plan(why, components_dropped, out="out.mp4", cut="cut.mp4"):
-    """Ship the cut alone. Returns the same shape render_components returns.
-
-    `-c copy` on both streams: nothing is re-encoded, so the degraded path
-    cannot introduce a quality loss of its own on top of the components it
-    already lost. It is also the fastest possible exit from a failure, which
-    matters because this runs after a render has ALREADY burned its time.
-    """
-    if not why or not str(why).strip():
-        raise ValueError("a degrade with no stated reason is a silent degrade — "
-                         "the reason is the half of the contract that rots")
-    n = int(components_dropped or 0)
-    return {
-        "ok": True,
-        "degraded": True,
-        "components": 0,
-        "components_dropped": n,
-        "why": str(why)[:300],
-        "run_this": f"cd /work && ffmpeg -y -v error -i {cut} -c copy {out}",
-        "note": (f"DEGRADED: the component layer failed, so {n} placement(s) "
-                 f"were dropped and the CUT ships without them. This is a worse "
-                 f"video, not a failed job. Tell the user plainly in your final "
-                 f"summary that the graphics did not render — do not present "
-                 f"this as a complete edit."),
-    }
-
-
 # ── RELIABILITY AS A CONTRACT, NOT A LANE ────────────────────────────────────
 # MEASURED 2026-09-05 over 14d (n=1,912 jobs) rather than recalled. Our-end
 # failure is 7.0% of jobs / ~83 users once the client-side upload seam (11.3%,
@@ -275,14 +228,33 @@ def degraded_composite_plan(why, components_dropped, out="out.mp4", cut="cut.mp4
 # outright. A stage with fallback=None is one where no degraded output exists
 # (there is no edit without a source), and that is a deliberate, named choice
 # rather than an oversight.
+# NO DEGRADED OUTPUT, EVER (2026-09-05). This previously declared a "fallback"
+# per stage and a `degrades` flag marking the ones that would ship the user a
+# worse video. That was the wrong contract and it is deleted. A degraded result
+# is a defect wearing a success's clothes — the user asked for their video, not
+# a lesser version of it, and shipping one quietly converts a diagnosable
+# failure into an invisible quality loss.
+#
+# THREE MECHANISMS, and which one applies is a property of the stage:
+#   external — a call to something we do not control (S3, Deepgram, Pexels,
+#              RevenueCat). These fail transiently, so they RETRY TO SUCCESS.
+#              Retry is correct here precisely because the failure is not ours
+#              and not deterministic.
+#   internal — our own code. These NEVER retry: a deterministic failure retried
+#              is the same failure again, more expensively. Every one gets
+#              root-caused and eliminated. `Overlay chunk 0 missing/invalid:
+#              None` (22 jobs / 16 users) was one of these, and the fix was one
+#              guard, not a retry and not a fallback.
+# The only terminal state is a clean refund-and-retry: the user is made whole
+# automatically and the job is retryable. Never a degraded deliverable.
 PIPELINE_STAGES = (
-    ("download",   {"fallback": "s3 re-fetch, then cache bypass", "degrades": False}),
-    ("transcribe", {"fallback": "alternate provider, then VISUAL beats", "degrades": True}),
-    ("beats",      {"fallback": "even pacing from duration", "degrades": True}),
-    ("agent",      {"fallback": "mechanical cut from dead air only", "degrades": True}),
-    ("render",     {"fallback": "composite WITHOUT components, and say so", "degrades": True}),
-    ("verify",     {"fallback": None, "degrades": False}),
-    ("upload",     {"fallback": "re-sign and retry once", "degrades": False}),
+    ("download",   {"kind": "external", "retry_to_success": True}),
+    ("transcribe", {"kind": "external", "retry_to_success": True}),
+    ("beats",      {"kind": "internal", "retry_to_success": False}),
+    ("agent",      {"kind": "external", "retry_to_success": True}),
+    ("render",     {"kind": "internal", "retry_to_success": False}),
+    ("verify",     {"kind": "internal", "retry_to_success": False}),
+    ("upload",     {"kind": "external", "retry_to_success": True}),
 )
 STAGE_NAMES = tuple(n for n, _ in PIPELINE_STAGES)
 
@@ -315,20 +287,26 @@ class stage:
         self.t = time.time()
         return self
 
-    def fallback(self, why):
-        """Mark that this stage produced DEGRADED output rather than failing."""
-        self._fb = str(why)[:200]
+    def retry(self, attempt, why):
+        """Record a RETRY of an external call. Not a degrade: the stage still
+        has to succeed, and the output is the same output. Retries are visible
+        so a stage that only ever succeeds on attempt 3 is a root-cause target
+        rather than a quiet tax."""
+        self._retries = getattr(self, "_retries", [])
+        self._retries.append({"attempt": int(attempt), "why": str(why)[:160]})
 
     def __exit__(self, et, ev, tb):
         rec = {"wall_s": round(time.time() - self.t, 2), "note": self.note}
-        fb = getattr(self, "_fb", None)
+        rt = getattr(self, "_retries", None)
+        if rt:
+            rec["retries"] = rt
         if et is not None:
             rec["status"] = "failed"
             rec["error"] = f"{et.__name__}: {str(ev)[:300]}"
-        elif fb:
-            rec["status"] = "fallback"
-            rec["fallback"] = fb
         else:
+            # ok or ok-after-retry. There is no third status: a stage either
+            # produced its real output or it failed. "Degraded" is not a state
+            # this pipeline can be in.
             rec["status"] = "ok"
         self.led["stages"][self.name] = rec
         return False          # never swallow
@@ -348,9 +326,9 @@ def assert_stages_complete(led, expected=None, strict=True):
     got = dict(led.get("stages") or {})
     silent = [n for n in exp if n not in got]
     failed = sorted(n for n, r in got.items() if r.get("status") == "failed")
-    degraded = sorted(n for n, r in got.items() if r.get("status") == "fallback")
+    retried = sorted(n for n, r in got.items() if r.get("retries"))
     summary = {"expected": list(exp), "reported": sorted(got),
-               "silent": silent, "failed": failed, "degraded": degraded,
+               "silent": silent, "failed": failed, "retried": retried,
                "ok": not silent and not failed}
     led["reliability"] = summary
     if strict and silent:
@@ -1974,10 +1952,14 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             # {"error": ...} here made the render failure the AGENT's problem to
             # solve mid-run, and it has no better option than the one below —
             # so the harness takes it, records it, and says so.
-            led["render_degraded"] = True
-            return degraded_composite_plan(
-                f"Remotion reel render exited {r.returncode}: "
-                f"{(r.stderr or '')[-160:]}", len(items))
+            # NO DEGRADED OUTPUT. If the reel fails there is a REASON, and the
+            # reason gets fixed — the largest live cause was the overlay-skip
+            # assertion (22 jobs / 16 users), now root-caused and gate-pinned.
+            # Raising here keeps the failure diagnosable instead of laundering
+            # it into a worse video the user did not ask for.
+            raise RuntimeError(
+                f"reel render exited {r.returncode} — root-cause this, do not "
+                f"degrade: {(r.stderr or '')[-300:]}")
         pngs = sorted(f for f in os.listdir("/work/reel") if f.endswith(".png")) \
             if os.path.isdir("/work/reel") else []
         if len(pngs) < packed["reel_frames"]:
@@ -1988,10 +1970,11 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             # trims reference nothing, and the result is components landing on
             # the wrong content rather than a missing component. Previously this
             # recorded the failure and then built the composite anyway.
-            led["render_degraded"] = True
-            return degraded_composite_plan(
-                f"reel rendered {len(pngs)} of {packed['reel_frames']} frames — "
-                f"too short to place windows accurately", len(items))
+            raise RuntimeError(
+                f"reel rendered {len(pngs)} of {packed['reel_frames']} frames. "
+                f"The composite trims by reel TIME, so missing frames make those "
+                f"trims reference nothing and components land on the WRONG "
+                f"content. Root-cause the short render.")
         led["reel_renders"] += 1
         # Reel PNGs -> one alpha-carrying mov. qtrle is fine in FFMPEG (it is
         # only the REMOTION --codec flag that rejects it).
@@ -2006,9 +1989,9 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         if _mov.returncode != 0 or not os.path.isfile("/work/reel.mov") \
                 or os.path.getsize("/work/reel.mov") == 0:
             fail("reel_mov_failed", (_mov.stderr or "")[-300:])
-            led["render_degraded"] = True
-            return degraded_composite_plan(
-                f"alpha .mov assembly failed (exit {_mov.returncode})", len(items))
+            raise RuntimeError(
+                f"alpha .mov assembly failed (exit {_mov.returncode}): "
+                f"{(_mov.stderr or '')[-300:]}")
 
         # THE COMPOSITE. Each reel window is trimmed and shifted to the OUTPUT
         # time the agent authored — two clocks, and pack_reel is the only thing
