@@ -1101,6 +1101,15 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
 
         led["build_cut_calls"] += 1
         out_dur = sum(b - a for a, b in spans)
+        # DIAGNOSTIC: was nothing cut because the agent ran out of turns, or
+        # because it CHOSE to keep everything? Coverage answers it directly —
+        # one span covering the source is a decision, not an omission.
+        led["cut_coverage"] = {
+            "spans": len(spans),
+            "kept_s": round(out_dur, 2),
+            "source_s": round(dur, 2),
+            "coverage": round(out_dur / dur, 3) if dur else None,
+        }
         return {
             "ok": True,
             "output_duration_s": round(out_dur, 3),
@@ -1331,6 +1340,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     # knowledge; an effort arm that does not record its effort is the same
     # class of unfalsifiable claim.
     led["effort"] = effort
+    led["max_iters"] = max_iters
 
     # List form, not a bare string: a string content block cannot carry a
     # cache_control marker, and this message holds the full transcript.
@@ -1794,11 +1804,30 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     # in BOTH directions or it is unfalsifiable prose.
     #   under-declaring: drawing ops ran with nothing declared (below).
     #   over-declaring: a remotion placement claimed with no render command.
-    if _mix["by_remotion"] and _mix["remotion_renders"] == 0:
+    # THE AUDIT MUST SEE BOTH RENDER PATHS. `remotion_renders` counts the string
+    # in led["cmds"], which is the SHELL log — but render_components runs the
+    # reel via subprocess INSIDE the tool, so it never appears there. Run F
+    # declared 4 remotion placements, rendered them correctly in one reel, and
+    # this check called it a false over-declaration. The manifest was right and
+    # the auditor was blind to the path it was auditing.
+    _renders_total = _mix["remotion_renders"] + int(led.get("reel_renders") or 0)
+    _mix["reel_renders"] = int(led.get("reel_renders") or 0)
+    _mix["renders_total"] = _renders_total
+    if _mix["by_remotion"] and _renders_total == 0:
         fail("placement_declared_without_render",
              f"{_mix['by_remotion']} placement(s) declared method='remotion' but "
-             f"ZERO `remotion render` commands ran — the manifest is claiming a "
-             f"component that was never rendered.")
+             f"ZERO renders ran on EITHER path (shell `remotion render` "
+             f"{_mix['remotion_renders']}, reel {_mix['reel_renders']}) — the "
+             f"manifest is claiming a component that was never rendered.")
+    # THE INVERSE, which nothing checked before: a reel WAS rendered and nothing
+    # was declared against it. That is paint bought and thrown away — ~72s and
+    # a container's disk for components the manifest does not know exist — and
+    # it is exactly as silent as the over-declaring half.
+    if _mix["reel_renders"] and _mix["by_remotion"] == 0:
+        fail("reel_rendered_without_declaration",
+             f"{_mix['reel_renders']} reel render(s) ran but ZERO placements are "
+             f"declared method='remotion' — components were painted and never "
+             f"claimed, so the manifest under-reports what the edit contains.")
 
     if not (final or {}).get("duration_s") and not led["failures"]:
         fail("no_output_no_reason",
@@ -1907,6 +1936,19 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"median {_vq['median_why_chars']} chars  {_vq['decisions']}")
         for _v in (_vq.get("sample") or []):
             print(f"     t={_v['t']}  {_v['d']}  {_v['why']}")
+    # THE TWO QUESTIONS RUN F RAISED, answered in the report rather than inferred:
+    # was nothing cut because turns ran out (harness) or because the agent chose
+    # to keep everything (prompt)? And did the components crowd out the text?
+    _cc = r["ledger"].get("cut_coverage")
+    if _cc:
+        print(f"  CUT DECISION    : kept {_cc['kept_s']}s of {_cc['source_s']}s "
+              f"({_cc['coverage']}) across {_cc['spans']} span(s)"
+              + ("   <- kept EVERYTHING; a choice, not a timeout"
+                 if (_cc.get('coverage') or 0) >= 0.995 else ""))
+    _fm = r["ledger"].get("family_mix") or {}
+    print(f"  TURN BUDGET     : used {r['ledger']['iters']} of {r['ledger'].get('max_iters','?')}"
+          f"   renders: shell {_fm.get('remotion_renders',0)} + reel {_fm.get('reel_renders',0)}"
+          f" = {_fm.get('renders_total',0)}")
     _gb = r["ledger"].get("skill_gate_blocks", 0)
     print(f"    C7 gate       : {_gb} render(s) blocked before first search"
           + ("  (gate did the work)" if _gb else "  (searched unprompted)"))
