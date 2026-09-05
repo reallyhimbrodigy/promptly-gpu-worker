@@ -270,6 +270,13 @@ Violating any of them produces a BROKEN video that still exits 0.
       point for one card. MGCraftProbe30 is NOT a fake: its `type` field selects
       the real StatCard/ProgressBar/etc. from the catalogue by name.
 
+  C10. RULE ON THE CUT BEFORE YOU FINISH — ENFORCED.
+      If you keep essentially the whole source you must call `cut_verdict`
+      saying why. Two runs kept 109.5s of 109.78s in ONE span with six turns of
+      budget spare — that is not a timeout, it is skipping the first thing the
+      job asks for. "keep_all" is a legitimate verdict on a source with no dead
+      air; not deciding is not. Your brief lists the dead air already detected.
+
   C9. ALL COMPONENTS IN ONE PASS — author the whole list, then `render_components`.
       This is a DIFFERENT SHAPE from place-one-check-one: decide every moving
       graphic in the edit FIRST, then make a single call with all of them. It
@@ -614,6 +621,18 @@ KNOWLEDGE_TOOLS = [{
                              "required": ["type", "t_start"]}}},
                      "required": ["items"]},
 }, {
+    "name": "cut_verdict",
+    "description": (
+        "Rule on the CUT: did this source warrant trimming, and why. Required "
+        "before you finish if you kept essentially all of it. Your brief lists "
+        "the dead air already detected — 'keep everything' is a legitimate "
+        "answer, but it has to be an answer."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "decision": {"type": "string", "enum": ["cut", "keep_all"]},
+                         "why": {"type": "string"}},
+                     "required": ["decision", "why"]},
+}, {
     "name": "search_skills",
     "description": (
         "Search the Remotion API reference (276 files) for how to call "
@@ -720,7 +739,7 @@ _REQUIRED_CONSTRAINTS = ["C1.", "C2.", "C3.", "C4.", "C5.", "C6.",
                          # so the prompt cannot stop TELLING the agent about a
                          # gate that still blocks it — an unannounced
                          # precondition burns a turn on a collision.
-                         "C7.", "C8.", "C9.",
+                         "C7.", "C8.", "C9.", "C10.",
                          "MGCraftProbe30", "colorkey=0x808080",
                          # INPUT 4 — Karpathy behaviour is RESIDENT, not a tool
                          # read. It governs every turn, so "did the agent read
@@ -1436,6 +1455,36 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                      f"shell_cmds_run={len(led.get('cmds') or [])}")
                 break
 
+            # ── THE CUT GATE ────────────────────────────────────────────────
+            # Runs F and G both kept 109.5s of 109.78s — coverage 0.997, ONE
+            # span, with SIX turns of budget spare. So keeping everything was a
+            # choice, not a timeout, and the diagnostic proved it before this
+            # gate was written.
+            #
+            # Same shape as C8 and for the same reason: what is ENFORCED gets
+            # done and what is merely asked for competes badly against it. This
+            # does NOT force a cut — "keep_all" is a legitimate verdict on a
+            # source with no dead air. It forces the DECISION to be made.
+            # Fires once.
+            _cov = (led.get("cut_coverage") or {}).get("coverage")
+            if (_cov is not None and _cov >= 0.995
+                    and not led.get("cut_verdict")
+                    and not led.get("cut_gate_fired")):
+                led["cut_gate_fired"] = True
+                fail("cut_gate_blocked_done",
+                     f"finished with cut coverage {_cov} (kept essentially "
+                     f"everything) and no cut_verdict")
+                msgs.append({"role": "user", "content": [{"type": "text", "text":
+                    f"NOT DONE. You kept {_cov:.3f} of the source — essentially "
+                    f"all of it — in a single span, and your brief listed "
+                    f"{len(_gaps)} dead-air gap(s) of 0.35s or more.\n\n"
+                    "Cutting silence and filler is the first thing this job asks "
+                    "for. Either re-cut with tighter spans and rebuild, or call "
+                    "`cut_verdict` with decision='keep_all' and a `why` that says "
+                    "what about THIS source made an uncut edit the right one. "
+                    "Keeping everything is allowed; not deciding is not."}]})
+                continue
+
             # ── THE COMPONENT GATE ──────────────────────────────────────────
             # Three levers in a row bought cost by removing the step where the
             # agent DELIBERATED (E1/E4, knowledge residency, build_overlays) and
@@ -1577,6 +1626,10 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                        "of": len(_number_beats)}
             elif tu.name == "render_components":
                 out = render_components(tu.input.get("items") or [])
+            elif tu.name == "cut_verdict":
+                led["cut_verdict"] = {"decision": tu.input.get("decision"),
+                                      "why": str(tu.input.get("why") or "")}
+                out = {"recorded": True}
             elif tu.name == "search_skills":
                 out = search_skills(tu.input.get("query", ""),
                                     int(tu.input.get("max_hits") or 12))
@@ -1943,8 +1996,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _cc:
         print(f"  CUT DECISION    : kept {_cc['kept_s']}s of {_cc['source_s']}s "
               f"({_cc['coverage']}) across {_cc['spans']} span(s)"
-              + ("   <- kept EVERYTHING; a choice, not a timeout"
-                 if (_cc.get('coverage') or 0) >= 0.995 else ""))
+              + ("   <- kept EVERYTHING" if (_cc.get('coverage') or 0) >= 0.995 else ""))
+    _cv = r["ledger"].get("cut_verdict")
+    if _cv:
+        print(f"  CUT VERDICT     : {_cv['decision']}  {_cv['why'][:180]}")
+    elif _cc and (_cc.get('coverage') or 0) >= 0.995:
+        print("  CUT VERDICT     : (none — gate should have blocked)")
     _fm = r["ledger"].get("family_mix") or {}
     print(f"  TURN BUDGET     : used {r['ledger']['iters']} of {r['ledger'].get('max_iters','?')}"
           f"   renders: shell {_fm.get('remotion_renders',0)} + reel {_fm.get('reel_renders',0)}"
@@ -1996,8 +2053,13 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         print(f"    cutaways {mx['cutaway_per_25s']:>6} /25s   (reference 3.32)   n={mx['cutaways']}")
         print(f"    caption tracks: {mx['caption_tracks']}   emphasis: {mx['emphasis']}   sfx: {mx['sfx']}")
         print(f"    method: {mx['by_ffmpeg']} ffmpeg / {mx['by_remotion']} remotion")
-        print(f"    [ran] remotion renders: {mx.get('remotion_renders')}  "
-              f"(product comp {mx.get('product_comp')}, PROBE comp {mx.get('probe_comp')})"
+        # BOTH PATHS. The audit was fixed to read shell+reel and this line was
+        # not, so a reader still saw "renders: 0" printed next to "4 remotion".
+        # Fixing the check and leaving the display is half a fix — the display
+        # is what a person actually reads.
+        print(f"    [ran] renders: {mx.get('renders_total', 0)} "
+              f"(shell {mx.get('remotion_renders', 0)} + reel {mx.get('reel_renders', 0)})"
+              f"  (product comp {mx.get('product_comp')}, PROBE comp {mx.get('probe_comp')})"
               f"  over {mx.get('shell_cmds')} shell commands")
     tns = r["ledger"].get("turns") or []
     if tns:
