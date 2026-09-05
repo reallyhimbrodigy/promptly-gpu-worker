@@ -1092,11 +1092,22 @@ def beats_from_visual(motion_curve, shot_changes, duration_s,
         if t - last >= min_beat_s and dur - t >= min_beat_s:
             kept.append(t)
             last = t
+    # EVEN DIVISION, not a greedy max-stride. Striding by max_beat_s leaves the
+    # REMAINDER as the last piece, so a 6.5s run at max 6.0 yields 6.0 + 0.5 —
+    # a beat below min_beat_s, created by the very pass meant to fix lengths.
+    # Found by the product_shot fixture, NOT by the unit test, which asserted
+    # this invariant and passed because its curve never reached this path.
+    # Splitting a run of length L into ceil(L / max) EQUAL parts keeps every
+    # piece <= max and as long as possible, so the short-remainder cannot exist.
+    import math as _math
     bounds, prev = [], 0.0
     for t in kept + [dur]:
-        while t - prev > max_beat_s:
-            prev = round(prev + max_beat_s, 2)
-            bounds.append(prev)
+        run = t - prev
+        if run > max_beat_s:
+            parts = int(_math.ceil(run / max_beat_s))
+            step = run / parts
+            for k in range(1, parts):
+                bounds.append(round(prev + k * step, 2))
         if t < dur:
             bounds.append(t)
         prev = t
