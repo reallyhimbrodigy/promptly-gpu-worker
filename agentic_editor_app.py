@@ -270,6 +270,18 @@ Violating any of them produces a BROKEN video that still exits 0.
       point for one card. MGCraftProbe30 is NOT a fake: its `type` field selects
       the real StatCard/ProgressBar/etc. from the catalogue by name.
 
+  C9. ALL COMPONENTS IN ONE PASS — author the whole list, then `render_components`.
+      This is a DIFFERENT SHAPE from place-one-check-one: decide every moving
+      graphic in the edit FIRST, then make a single call with all of them. It
+      packs them into one reel, renders once and hands you the composite
+      command with each offset already computed.
+      Measured: ten components in one pass ~72s; ten separate renders ~161s,
+      and rendering them spread across the full timeline is ~169s — WORSE than
+      doing them separately. The reel is what makes this cheap.
+      C8 below is where that decision gets made: ruling on every number beat IS
+      authoring the list. Do C8, then call this once with everything that
+      earned a component.
+
   C8. YOU MUST RULE ON EVERY NUMBER BEAT BEFORE YOU FINISH — ENFORCED.
       A number the speaker says is the one case these rules make MANDATORY, and
       four runs have skipped it by simply never placing a card. The beats are
@@ -580,6 +592,28 @@ KNOWLEDGE_TOOLS = [{
                          "why": {"type": "string"}},
                      "required": ["t", "decision", "why"]},
 }, {
+    "name": "render_components",
+    "description": (
+        "Render ALL your moving components in ONE pass. Author the complete "
+        "list first — every card, every animated graphic — then call this once. "
+        "It packs them into a contiguous reel, renders once, and returns the "
+        "ffmpeg command that composites each one at its own timestamp. "
+        "Measured: one render for ten components is ~72s; ten separate renders "
+        "are ~161s. Do NOT call it per component, and do not shift the offsets "
+        "by hand — they are computed."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "items": {"type": "array", "items": {"type": "object",
+                             "properties": {
+                                 "type": {"type": "string",
+                                          "description": "MG type, e.g. StatCard"},
+                                 "t_start": {"type": "number",
+                                             "description": "OUTPUT seconds"},
+                                 "duration_s": {"type": "number"},
+                                 "props": {"type": "object"}},
+                             "required": ["type", "t_start"]}}},
+                     "required": ["items"]},
+}, {
     "name": "search_skills",
     "description": (
         "Search the Remotion API reference (276 files) for how to call "
@@ -604,6 +638,50 @@ KNOWLEDGE_TOOLS = [{
 # where a card belongs is not knowing the command that renders one.
 REQUIRED_KNOWLEDGE = ["14_card_text_placement_rules.md",
                       "15_ffmpeg_placement_recipes.md"]
+
+
+def pack_reel(items, fps=30):
+    """Pack authored placements into a CONTIGUOUS reel + the composite offsets.
+
+    Batching only pays in the packed form. Measured 2026-09-04 on PromptlyOverlay
+    as a PNG sequence: painting the FULL 58s timeline to get 10 components is
+    1,740 frames / 169.3s / 128MB — WORSE than ten separate renders (~161s).
+    Packing the same ten back-to-back is 600 frames / 72.2s / 75MB. So the reel
+    is not an optimisation on top of batching; it is the thing that makes
+    batching worth doing at all.
+
+    Two clocks, and confusing them is the whole risk:
+      REEL time   — where a component sits in the single rendered strip.
+      OUTPUT time — where it must appear in the finished edit.
+    A component that lands 2s off does not look like a bug, it looks like a
+    placement decision, so this is pure and unit-tested rather than inlined.
+
+    Returns reel entries (for PromptlyRenderInput.motionGraphics) and segments
+    (for the ffmpeg composite), one per item, in author order.
+    """
+    out_reel, out_seg, cursor = [], [], 0
+    for i, it in enumerate(items):
+        dur_s = float(it.get("duration_s") or 2.0)
+        dur_f = max(1, int(round(dur_s * fps)))
+        at_s = float(it.get("t_start") or 0.0)
+        out_reel.append({
+            "type": it.get("type") or "StatCard",
+            # CUMULATIVE, never i * dur_f. With variable durations a fixed
+            # stride silently overlaps or gaps every component after the first
+            # one whose length differs — and the render still exits 0.
+            "fromFrame": cursor,
+            "durationInFrames": dur_f,
+            "props": dict(it.get("props") or {}),
+        })
+        out_seg.append({
+            "i": i,
+            "reel_from_s": round(cursor / fps, 4),
+            "reel_to_s": round((cursor + dur_f) / fps, 4),
+            "out_at_s": round(at_s, 4),
+            "duration_s": round(dur_f / fps, 4),
+        })
+        cursor += dur_f
+    return {"fps": fps, "reel_frames": cursor, "reel": out_reel, "segments": out_seg}
 
 
 def remap_words(spans, words):
@@ -642,7 +720,7 @@ _REQUIRED_CONSTRAINTS = ["C1.", "C2.", "C3.", "C4.", "C5.", "C6.",
                          # so the prompt cannot stop TELLING the agent about a
                          # gate that still blocks it — an unannounced
                          # precondition burns a turn on a collision.
-                         "C7.", "C8.",
+                         "C7.", "C8.", "C9.",
                          "MGCraftProbe30", "colorkey=0x808080",
                          # INPUT 4 — Karpathy behaviour is RESIDENT, not a tool
                          # read. It governs every turn, so "did the agent read
@@ -1101,6 +1179,89 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                     "file — hand-patching escaping is what cost a turn last run.",
         }
 
+    # ── BATCHED COMPONENTS: one plan, one render, one composite ─────────────
+    # Measured 2026-09-04, and the measurement changed the design. As a PNG
+    # sequence PromptlyOverlay carries REAL alpha (empty frame mean alpha 0.00,
+    # card frame 17.73), so it composites. But painting the FULL 58s timeline to
+    # get 10 components is 1,740 frames / 169.3s / 128MB — WORSE than ten
+    # separate renders (~161s). Packed back-to-back the same ten are 600 frames
+    # / 72.2s / 75MB. The reel is what makes batching pay; batching over the
+    # timeline does not.
+    led["reel_renders"] = 0
+
+    def render_components(items):
+        if not isinstance(items, list) or not items:
+            return {"error": "items must be a non-empty list of placements"}
+        for i, it in enumerate(items):
+            if not isinstance(it, dict) or "t_start" not in it:
+                return {"error": f"item {i} needs t_start (output seconds)"}
+        packed = pack_reel(items, 30)
+        plan = {
+            "sourceUrl": "", "fps": 30, "width": 1080, "height": 1920,
+            "totalDurationInFrames": max(1, packed["reel_frames"]),
+            "clips": [], "transitions": [], "broll": [], "textOverlays": [],
+            "caption": {"style": "CleanCut", "pages": [], "keywords": [],
+                        "positionSegments": [{"fromFrame": 0,
+                                              "toFrame": max(1, packed["reel_frames"]),
+                                              "position": "bottom"}]},
+            "motionGraphics": packed["reel"], "outro": "none",
+        }
+        with open("/work/reel-plan.json", "w") as fh:
+            json.dump({"input": plan}, fh)
+        # ONE render. --sequence to a DIRECTORY with NO extension: any extension
+        # is refused ("sequence cannot have an extension"), and every VIDEO codec
+        # available here flattens the alpha (prores/vp8/vp9 all yuv, and
+        # --pixel-format=yuva* is rejected outright). PNG is the only path that
+        # keeps it.
+        subprocess.run("rm -rf /work/reel", shell=True)
+        r = subprocess.run(
+            "cd /promptly-remotion && npx remotion render PromptlyOverlay /work/reel "
+            "--props=/work/reel-plan.json --sequence --image-format=png",
+            shell=True, capture_output=True, text=True, timeout=1800)
+        if r.returncode != 0:
+            fail("reel_render_failed", (r.stderr or "")[-300:])
+            return {"error": "reel render failed", "stderr": (r.stderr or "")[-400:]}
+        pngs = sorted(f for f in os.listdir("/work/reel") if f.endswith(".png")) \
+            if os.path.isdir("/work/reel") else []
+        if len(pngs) < packed["reel_frames"]:
+            fail("reel_short", f"{len(pngs)} frames rendered, expected "
+                               f"{packed['reel_frames']}")
+        led["reel_renders"] += 1
+        # Reel PNGs -> one alpha-carrying mov. qtrle is fine in FFMPEG (it is
+        # only the REMOTION --codec flag that rejects it).
+        subprocess.run(
+            "cd /work/reel && ffmpeg -y -v error -framerate 30 -pattern_type glob "
+            "-i '*.png' -c:v qtrle -pix_fmt argb /work/reel.mov",
+            shell=True, capture_output=True, text=True, timeout=900)
+
+        # THE COMPOSITE. Each reel window is trimmed and shifted to the OUTPUT
+        # time the agent authored — two clocks, and pack_reel is the only thing
+        # that maps between them.
+        parts, last = [], "0:v"
+        for k, sg in enumerate(packed["segments"]):
+            parts.append(
+                f"[1:v]trim=start={sg['reel_from_s']}:end={sg['reel_to_s']},"
+                f"setpts=PTS-STARTPTS+{sg['out_at_s']}/TB[c{k}]")
+            parts.append(
+                f"[{last}][c{k}]overlay=0:0:enable='between(t,{sg['out_at_s']},"
+                f"{round(sg['out_at_s'] + sg['duration_s'], 4)})'[m{k}]")
+            last = f"m{k}"
+        with open("/work/reel-filter.txt", "w") as fh:
+            fh.write(";".join(parts))
+        return {
+            "ok": True, "components": len(items),
+            "reel_frames": packed["reel_frames"],
+            "reel_seconds": round(packed["reel_frames"] / 30, 2),
+            "rendered_frames": len(pngs),
+            "segments": packed["segments"],
+            "run_this": (f"cd /work && filt=$(cat reel-filter.txt) && ffmpeg -y -i "
+                         f"cut.mp4 -i reel.mov -filter_complex \"$filt\" "
+                         f"-map '[{last}]' -map 0:a -c:v libx264 -crf 18 "
+                         f"-preset veryfast -c:a copy out.mp4"),
+            "note": "ONE render for all components. Offsets are already computed "
+                    "— do not shift anything by hand.",
+        }
+
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     tl = "\n".join(f"[{w['s']:.2f}-{w['e']:.2f}] {w['w']}" for w in words)
     meta = probe(src)
@@ -1404,6 +1565,8 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 out = {"recorded": True,
                        "ruled": len(led["component_verdicts"]),
                        "of": len(_number_beats)}
+            elif tu.name == "render_components":
+                out = render_components(tu.input.get("items") or [])
             elif tu.name == "search_skills":
                 out = search_skills(tu.input.get("query", ""),
                                     int(tu.input.get("max_hits") or 12))
