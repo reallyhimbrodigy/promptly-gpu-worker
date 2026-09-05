@@ -166,6 +166,10 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
        .add_local_dir(_KNOWLEDGE_DIR, "/knowledge", copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
+# The source cache must OUTLIVE the container or it is inert — /cache on a fresh
+# container is always empty, which is the "shipped and does nothing" shape this
+# repo has nine precedents for. A Volume is what makes the hit possible.
+SOURCE_CACHE = modal.Volume.from_name("agentic-source-cache", create_if_missing=True)
 BUCKET = "thisismybucketagainwooo"
 MODEL = "claude-sonnet-5"
 
@@ -361,15 +365,23 @@ This is the inventory the production pipeline ships, not a description of one.
                      -filter_complex "[1:a]adelay=D|D[s];[0:a][s]amix=inputs=2:duration=first" \
                      -c:v copy final.mp4
                    D = (beat_time - attack_ms/1000) * 1000, in ms, clamped at 0.
-        zoom    -> AUTHOR IT. There is no PunchIn component and the catalogue's
-                   zoom family (SmoothPush, StepZoom...) is a camera-move
-                   subsystem, not an MG type — do not look for it in
-                   `remotion compositions`. Write one with `author_component`:
-                   a transparent 1080x1920 comp that scales its content with
-                   `useCurrentFrame` and `interpolate`, render it, composite it
-                   at the beat. `search_skills` is the API reference for this —
-                   it is an AUTHORING corpus, which is why catalogue questions
-                   have always returned nothing from it.
+        zoom    -> ffmpeg on the FOOTAGE. A punch-in is a camera move on the
+                   video, so it canNOT be an authored overlay — a transparent
+                   layer cannot scale the layer beneath it. There is no PunchIn
+                   component either; the catalogue's zoom family (SmoothPush,
+                   StepZoom...) is a camera-move subsystem, not an MG type.
+                   COPY THIS. A 1.08x push over beat span T0..T1, everything
+                   outside it untouched:
+
+                     cd /work && ffmpeg -y -i in.mp4 -filter_complex \
+                       "[0:v]scale=iw*1.08:ih*1.08,crop=1080:1920,\
+                        setpts=PTS-STARTPTS[z];\
+                        [0:v][z]overlay=0:0:enable='between(t,T0,T1)'" \
+                       -c:a copy out.mp4
+
+                   Corpus rate is 0.35/25s and it lands on hooks and evidence —
+                   about one punch per short. Use 1.05-1.10; more reads as a
+                   glitch.
 
   S1. SOUND IS A FAMILY YOU HAVE NEVER USED. Corpus rate is 0.82 per 25s and
       every run so far has placed ZERO. /assets/inventory.json carries
@@ -412,6 +424,15 @@ twice.
       (E1 was "read only what the task needs" until 2026-09-03. It was dropped:
       it cut placement density 6.9 -> 3.34 text/25s while reading stayed flat
       at 4 files, so it was suppressing the edit, not the survey.)
+
+  E5. ONE CALL PER FAMILY, NOT ONE PER PLACEMENT. Each of these takes the
+      WHOLE set and is designed to be called ONCE:
+        build_cut          — every keep span
+        render_components  — every card, one reel, one render
+        build_overlays     — derived from ALL your text rulings; takes no list
+        place_cutaway      — once per clip, but decide them all first
+      Then ONE composite chain. Batching the verdicts cut the tail 65% and took
+      19 turns to 1; execution is the same shape and is now where the turns are.
 
   E2. ONE RENDER, ONE COMPOSITE, VERIFY ONCE — ENFORCED, NOT ADVISED.
       `inspect_output` is CAPPED: one call, plus one retry ONLY if that call
@@ -916,7 +937,7 @@ _REQUIRED_CONSTRAINTS = [
     # asset library that reported mounted_unread on every run; E4 was a
     # tombstone for a retired rule. ~4,200 chars describing paths the agent no
     # longer takes, billed on every turn of every render.
-    "C8.", "C9.", "F1.", "S1.", "E1.", "E2.", "E3.", "K1.", "K2.", "K3.", "K4."]
+    "C8.", "C9.", "F1.", "S1.", "E1.", "E2.", "E3.", "E5.", "K1.", "K2.", "K3.", "K4."]
 # Every one of these was tried against this image and FAILED. If a future edit
 # reintroduces them the agent inherits 31 failed attempts again.
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
@@ -1004,10 +1025,12 @@ _assert_treatment_surface_agrees(open(__file__).read()
 DEFAULT_EFFORT = "high"
 
 
-@app.function(image=IMG, secrets=SECRETS, timeout=3600, cpu=8, memory=16384)
+@app.function(image=IMG, secrets=SECRETS, timeout=3600, cpu=8, memory=16384,
+              volumes={"/cache": SOURCE_CACHE})
 def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
          use_knowledge: bool = True, effort: str = DEFAULT_EFFORT,
          model: str = MODEL, route_models: bool = False,
+         cap_exec_effort: bool = True,
          cheap_model: str = "claude-haiku-4-5",
          exec_model: str = MODEL) -> dict:
     import subprocess
@@ -1028,7 +1051,25 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     s3 = boto3.client("s3", region_name=os.environ.get("AWS_REGION") or "us-west-1")
     b = os.environ.get("S3_BUCKET_NAME") or BUCKET
     src = "/work/source.mp4"
-    s3.download_file(b, source_key, src)
+    # PRE-STAGE / CACHE. Download on this same source across 8 runs: 2.1 2.2 2.2
+    # 3.2 4.8 6.2 15.0 62.3s — median ~4.8s, so the 62s that motivated this is a
+    # 10x outlier rather than a systematic cost. Caching still earns its place
+    # for the case that produced the outlier: repeated runs of one source during
+    # a measurement sweep, where every re-download is pure wait before any
+    # editorial work starts.
+    _cache = os.path.join("/cache", source_key.replace("/", "_"))
+    if os.path.isfile(_cache) and os.path.getsize(_cache) > 0:
+        subprocess.run(f"cp {_cache} {src}", shell=True)
+        led["source_cache"] = "hit"
+    else:
+        s3.download_file(b, source_key, src)
+        led["source_cache"] = "miss"
+        try:
+            os.makedirs("/cache", exist_ok=True)
+            subprocess.run(f"cp {src} {_cache}", shell=True, timeout=120)
+            SOURCE_CACHE.commit()      # without this the next container sees nothing
+        except Exception:
+            pass          # a cache that fails to fill must never fail a run
     dl_s = round(time.time() - t0, 1)
 
     # ── TRANSCRIPT (Deepgram — reused, not reinvented) ─────────────────────
@@ -1820,7 +1861,18 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         # Worth stating plainly: "same config, cheaper model" is NOT literally
         # available — dropping effort is itself a second variable, and the arm
         # has to be read as such.
-        _kw = {"output_config": {"effort": effort}} if _supports_effort(model) else {}
+        # THINKING IS FOR DECIDING. Once every beat is ruled the run is issuing
+        # ffmpeg commands and reading exit codes — a composite does not need
+        # reasoning, and output is ~41% of the bill. Drop to low effort for the
+        # execution phase. Same phase boundary the model routing used; unlike
+        # routing this does NOT switch models, so the prompt cache is untouched
+        # (that is what made routing cost 29% more, not less).
+        _exec_phase = bool(_beats) and not [
+            b for b in _beats
+            if b["i"] not in {v.get("beat") for v in led.get("beat_verdicts") or []}]
+        _eff = "low" if (_exec_phase and cap_exec_effort) else effort
+        led.setdefault("turn_effort", []).append(_eff)
+        _kw = {"output_config": {"effort": _eff}} if _supports_effort(model) else {}
         led["effort_sent"] = bool(_kw)
         try:
             r = client.messages.create(
