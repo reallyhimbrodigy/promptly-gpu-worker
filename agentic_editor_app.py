@@ -270,13 +270,6 @@ Violating any of them produces a BROKEN video that still exits 0.
       point for one card. MGCraftProbe30 is NOT a fake: its `type` field selects
       the real StatCard/ProgressBar/etc. from the catalogue by name.
 
-  C10. RULE ON THE CUT BEFORE YOU FINISH — ENFORCED.
-      If you keep essentially the whole source you must call `cut_verdict`
-      saying why. Two runs kept 109.5s of 109.78s in ONE span with six turns of
-      budget spare — that is not a timeout, it is skipping the first thing the
-      job asks for. "keep_all" is a legitimate verdict on a source with no dead
-      air; not deciding is not. Your brief lists the dead air already detected.
-
   C9. ALL COMPONENTS IN ONE PASS — author the whole list, then `render_components`.
       This is a DIFFERENT SHAPE from place-one-check-one: decide every moving
       graphic in the edit FIRST, then make a single call with all of them. It
@@ -289,13 +282,21 @@ Violating any of them produces a BROKEN video that still exits 0.
       authoring the list. Do C8, then call this once with everything that
       earned a component.
 
-  C8. YOU MUST RULE ON EVERY NUMBER BEAT BEFORE YOU FINISH — ENFORCED.
-      A number the speaker says is the one case these rules make MANDATORY, and
-      four runs have skipped it by simply never placing a card. The beats are
-      listed in your brief. For each, either render a component per C1-C6 or
-      call `component_verdict` with decision='skip' and a `why` about THAT
-      beat. Saying DONE with beats unruled and no component rendered is refused.
-      A `why` repeated verbatim across beats is not a ruling and is ledgered.
+  C8. RULE ON EVERY BEAT — ONE DECISION EACH, ENFORCED.
+      Your brief lists the beats. For each, call `beat_verdict` with:
+        treatment — "card" | "text" | "none"
+        cut       — "keep" | "cut"
+        why       — about THAT beat's content
+      "none" and "keep" are legitimate answers. Not deciding is not, and DONE
+      is refused while any beat is unruled.
+      THIS IS ONE QUESTION, NOT THREE. It replaced separate gates for numbers,
+      components and the cut. Each of those forced a family and starved the
+      rest — adding the third took cards from 0.91 to 0.23 per 25s on a source
+      where the two runs before it had each rendered four. Decide the BEAT and
+      the families take care of themselves.
+      Beats marked "(has a number)" are candidates for a card, not obligations:
+      a number that is a joke, an ordinal, or an operand feeding a later total
+      is usually "text" or "none".
 
   C7. SEARCH THE REFERENCE BEFORE YOUR FIRST RENDER — ENFORCED, NOT ADVISED.
       Your first `remotion render` is BLOCKED until you have called
@@ -585,20 +586,6 @@ KNOWLEDGE_TOOLS = [{
                          "extra_input": {"type": "string"}},
                      "required": ["items"]},
 }, {
-    "name": "component_verdict",
-    "description": (
-        "Rule on ONE number beat: does it get a moving component, or not, and "
-        "WHY. You must rule on every beat the brief lists before you finish. "
-        "This is not paperwork — it is the decision the edit has been skipping. "
-        "`why` must say something about THIS beat's content; 'not warranted' "
-        "repeated is not a ruling."),
-    "input_schema": {"type": "object",
-                     "properties": {
-                         "t": {"type": "number", "description": "the beat's timestamp"},
-                         "decision": {"type": "string", "enum": ["render", "skip"]},
-                         "why": {"type": "string"}},
-                     "required": ["t", "decision", "why"]},
-}, {
     "name": "render_components",
     "description": (
         "Render ALL your moving components in ONE pass. Author the complete "
@@ -621,17 +608,23 @@ KNOWLEDGE_TOOLS = [{
                              "required": ["type", "t_start"]}}},
                      "required": ["items"]},
 }, {
-    "name": "cut_verdict",
+    "name": "beat_verdict",
     "description": (
-        "Rule on the CUT: did this source warrant trimming, and why. Required "
-        "before you finish if you kept essentially all of it. Your brief lists "
-        "the dead air already detected — 'keep everything' is a legitimate "
-        "answer, but it has to be an answer."),
+        "Rule on ONE beat — the whole decision, once. What goes here (a card, a "
+        "text overlay, or nothing), whether the beat is kept or cut, and WHY. "
+        "Every beat in your brief needs one before you finish. This replaced "
+        "three separate gates: each of those forced a family, and forcing one "
+        "family measurably starved the others. There is one question per beat "
+        "so nothing can be satisfied at another family's expense."),
     "input_schema": {"type": "object",
                      "properties": {
-                         "decision": {"type": "string", "enum": ["cut", "keep_all"]},
-                         "why": {"type": "string"}},
-                     "required": ["decision", "why"]},
+                         "beat": {"type": "integer", "description": "the beat index"},
+                         "treatment": {"type": "string",
+                                       "enum": ["card", "text", "none"]},
+                         "cut": {"type": "string", "enum": ["keep", "cut"]},
+                         "why": {"type": "string",
+                                 "description": "about THIS beat's content"}},
+                     "required": ["beat", "treatment", "cut", "why"]},
 }, {
     "name": "search_skills",
     "description": (
@@ -657,6 +650,42 @@ KNOWLEDGE_TOOLS = [{
 # where a card belongs is not knowing the command that renders one.
 REQUIRED_KNOWLEDGE = ["14_card_text_placement_rules.md",
                       "15_ffmpeg_placement_recipes.md"]
+
+
+def segment_beats(words, gap_s=0.35, max_beat_s=6.0):
+    """Cut the transcript into BEATS — the unit the agent rules on.
+
+    ONE DECISION PER BEAT replaced three competing gates (2026-09-04). C8
+    (numbers), C9 (components) and C10 (the cut) each forced a family, and each
+    one measurably starved the families that were not gated: adding C10 took
+    cards 0.91 -> 0.23 per 25s on an identical source where F and G had both
+    rendered 4. There is no way to satisfy a cards gate at the expense of text
+    when there is only one gate and it asks about the BEAT.
+
+    Split on dead air first — a pause is a real boundary. But gaps alone are not
+    enough and the finance source proves it: 110s of scripted explainer with
+    ZERO gaps >= 0.35s would collapse to a single beat, which is no segmentation
+    at all. So any run longer than max_beat_s is also split, on word boundaries,
+    never mid-word.
+    """
+    if not words:
+        return []
+    beats, cur = [], [words[0]]
+    for prev, w in zip(words, words[1:]):
+        gap = w["s"] - prev["e"]
+        span = w["e"] - cur[0]["s"]
+        if gap >= gap_s or span > max_beat_s:
+            beats.append(cur)
+            cur = [w]
+        else:
+            cur.append(w)
+    if cur:
+        beats.append(cur)
+    return [{"i": i,
+             "t_start": round(b[0]["s"], 2),
+             "t_end": round(b[-1]["e"], 2),
+             "text": " ".join(str(x["w"]) for x in b)[:180]}
+            for i, b in enumerate(beats)]
 
 
 def pack_reel(items, fps=30):
@@ -739,7 +768,7 @@ _REQUIRED_CONSTRAINTS = ["C1.", "C2.", "C3.", "C4.", "C5.", "C6.",
                          # so the prompt cannot stop TELLING the agent about a
                          # gate that still blocks it — an unannounced
                          # precondition burns a turn on a collision.
-                         "C7.", "C8.", "C9.", "C10.",
+                         "C7.", "C8.", "C9.",
                          "MGCraftProbe30", "colorkey=0x808080",
                          # INPUT 4 — Karpathy behaviour is RESIDENT, not a tool
                          # read. It governs every turn, so "did the agent read
@@ -1322,7 +1351,13 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     _number_beats = [{"t": round(w["s"], 2), "word": w["w"]}
                      for w in words if _NUMWORD.match(str(w["w"]).strip(".,!?"))]
     led["number_beats"] = _number_beats
-    led["component_verdicts"] = []
+    _beats = segment_beats(words)
+    _numeric_ts = {b["t"] for b in _number_beats}
+    for _b in _beats:
+        _b["has_number"] = any(_b["t_start"] <= t <= _b["t_end"] for t in _numeric_ts)
+    led["beats"] = _beats
+    led["beat_verdicts"] = []
+    led["component_verdicts"] = []   # legacy field, retained so old runs still parse
 
     _gap_txt = ("\n".join(f"  [{_s:.2f}-{_e:.2f}] {_g2:.2f}s"
                           for _s, _e, _g2 in _gaps)
@@ -1342,6 +1377,10 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             f"TRANSCRIPT ({len(words)} words):\n{tl}\n\n"
             f"DEAD AIR ALREADY DETECTED ({len(_gaps)} gaps >=0.35s) — you do not "
             f"need to compute these:\n{_gap_txt}\n\n"
+            f"BEATS ({len(_beats)}) — rule on EVERY one with `beat_verdict`:\n"
+            + "\n".join(f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
+                        + ("  (has a number)" if b["has_number"] else "")
+                        + f"  {b['text'][:90]}" for b in _beats) + "\n\n"
             f"Decide the spans to KEEP, then call `build_cut` with them. It "
             f"returns the ffmpeg command and an output-time .srt — do not build "
             f"either by hand.\n\n"
@@ -1455,73 +1494,36 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                      f"shell_cmds_run={len(led.get('cmds') or [])}")
                 break
 
-            # ── THE CUT GATE ────────────────────────────────────────────────
-            # Runs F and G both kept 109.5s of 109.78s — coverage 0.997, ONE
-            # span, with SIX turns of budget spare. So keeping everything was a
-            # choice, not a timeout, and the diagnostic proved it before this
-            # gate was written.
+            # ── THE ONE GATE: every beat ruled ──────────────────────────────
+            # Replaced three gates (C8 numbers, C9 components, C10 the cut).
+            # Each forced a FAMILY, and forcing one starved the others —
+            # measured: adding the cut gate took cards 0.91 -> 0.23 per 25s on a
+            # source where the two prior runs had both rendered 4. Competition
+            # was the structure, not the agent.
             #
-            # Same shape as C8 and for the same reason: what is ENFORCED gets
-            # done and what is merely asked for competes badly against it. This
-            # does NOT force a cut — "keep_all" is a legitimate verdict on a
-            # source with no dead air. It forces the DECISION to be made.
-            # Fires once.
-            _cov = (led.get("cut_coverage") or {}).get("coverage")
-            if (_cov is not None and _cov >= 0.995
-                    and not led.get("cut_verdict")
-                    and not led.get("cut_gate_fired")):
-                led["cut_gate_fired"] = True
-                fail("cut_gate_blocked_done",
-                     f"finished with cut coverage {_cov} (kept essentially "
-                     f"everything) and no cut_verdict")
+            # One question per beat — card, text or nothing, kept or cut —
+            # so there is nothing to trade off against. Fires once; a gate that
+            # can re-prompt forever is a spend loop.
+            _ruled_beats = {v.get("beat") for v in (led.get("beat_verdicts") or [])}
+            _unruled = [b for b in _beats if b["i"] not in _ruled_beats]
+            if _beats and _unruled and not led.get("beat_gate_fired"):
+                led["beat_gate_fired"] = True
+                fail("beat_gate_blocked_done",
+                     f"finished with {len(_unruled)} of {len(_beats)} beats unruled")
+                _lst = "\n".join(
+                    f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
+                    + ("  (has a number)" if b["has_number"] else "")
+                    + f"  {b['text'][:80]}" for b in _unruled[:20])
                 msgs.append({"role": "user", "content": [{"type": "text", "text":
-                    f"NOT DONE. You kept {_cov:.3f} of the source — essentially "
-                    f"all of it — in a single span, and your brief listed "
-                    f"{len(_gaps)} dead-air gap(s) of 0.35s or more.\n\n"
-                    "Cutting silence and filler is the first thing this job asks "
-                    "for. Either re-cut with tighter spans and rebuild, or call "
-                    "`cut_verdict` with decision='keep_all' and a `why` that says "
-                    "what about THIS source made an uncut edit the right one. "
-                    "Keeping everything is allowed; not deciding is not."}]})
+                    f"NOT DONE. {len(_unruled)} of {len(_beats)} beats have no "
+                    f"ruling:\n" + _lst + "\n\nFor EACH, call `beat_verdict` "
+                    "with treatment ('card' | 'text' | 'none'), cut ('keep' | "
+                    "'cut') and a `why` about THAT beat's content. 'none' and "
+                    "'keep' are legitimate answers — not deciding is not. If any "
+                    "beat earns a card, render them ALL in one `render_components` "
+                    "call, then composite."}]})
                 continue
 
-            # ── THE COMPONENT GATE ──────────────────────────────────────────
-            # Three levers in a row bought cost by removing the step where the
-            # agent DELIBERATED (E1/E4, knowledge residency, build_overlays) and
-            # each one cost placements. The component path is the survivor of
-            # that: with the ffmpeg edit down to two commands, the agent now
-            # finishes before it ever asks whether a graphic belongs.
-            #
-            # So DONE is a PRECONDITION, not a statement — the one mechanism
-            # that has bound this agent every time (C7, the verify cap, A1-A3).
-            # Satisfied by EITHER rendering a component OR ruling on every
-            # number beat. It cannot be satisfied by silence.
-            #
-            # FIRES ONCE. A gate that can re-prompt forever is a spend loop, and
-            # a second refusal would be arguing rather than gating.
-            _ruled = {round(float(v.get("t") or -1), 1)
-                      for v in led.get("component_verdicts") or []}
-            _unruled = [b for b in _number_beats
-                        if round(b["t"], 1) not in _ruled]
-            _rendered = any("remotion render" in c for c in (led.get("cmds") or []))
-            if (_number_beats and _unruled and not _rendered
-                    and not led.get("component_gate_fired")):
-                led["component_gate_fired"] = True
-                fail("component_gate_blocked_done",
-                     f"finished with {len(_unruled)} of {len(_number_beats)} "
-                     f"number beats unruled and zero component renders")
-                _lst = "\n".join(f"  t={b['t']:.2f}  \"{b['word']}\"" for b in _unruled[:12])
-                msgs.append({"role": "user", "content": [{"type": "text", "text":
-                    "NOT DONE. You rendered no moving component, and these number "
-                    "beats have no ruling:\n" + _lst + "\n\n"
-                    "A number the speaker says is the one case the rules make "
-                    "MANDATORY: if it carries a card, that card must be a StatCard "
-                    "count-up (C1-C6). You have skipped the question, not answered "
-                    "it.\n\nFor EACH beat above call `component_verdict` with "
-                    "decision='render' or 'skip' and a `why` that refers to THAT "
-                    "beat's content. If any deserves a component, build it now per "
-                    "C1-C6 and composite it. Then finish."}]})
-                continue
             break
         if it == max_iters - 1:
             fail("iteration_budget_exhausted",
@@ -1626,6 +1628,15 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                        "of": len(_number_beats)}
             elif tu.name == "render_components":
                 out = render_components(tu.input.get("items") or [])
+            elif tu.name == "beat_verdict":
+                _bv = {"beat": tu.input.get("beat"),
+                       "treatment": tu.input.get("treatment"),
+                       "cut": tu.input.get("cut"),
+                       "why": str(tu.input.get("why") or "")}
+                led["beat_verdicts"].append(_bv)
+                out = {"recorded": True,
+                       "ruled": len({v["beat"] for v in led["beat_verdicts"]}),
+                       "of": len(_beats)}
             elif tu.name == "cut_verdict":
                 led["cut_verdict"] = {"decision": tu.input.get("decision"),
                                       "why": str(tu.input.get("why") or "")}
@@ -1687,7 +1698,12 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         # 2. the component catalogue — reading it means RUNNING against it
         "remotion_catalogue": {
             "mounted": os.path.isdir("/promptly-remotion"),
-            "used": ["/promptly-remotion"] if "/promptly-remotion" in _cmds_join else [],
+            # THIRD TIME THIS CLASS BIT. render_components drives the catalogue
+            # via subprocess, so it never appears in the shell log — the audit
+            # had the same hole, and so did the renders display. A reel render
+            # IS use of /promptly-remotion.
+            "used": (["/promptly-remotion"] if "/promptly-remotion" in _cmds_join
+                     else (["reel render"] if led.get("reel_renders") else [])),
             "want": ["/promptly-remotion"],
         },
         # 3. the API reference — used means at least one search returned hits
@@ -1825,25 +1841,32 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     #                    own reasoning; 0.11 on 9 beats = one sentence copied.
     #   quotes_beat    — does the `why` name a word from THAT beat's context?
     #                    Boilerplate cannot, without being about the beat.
-    _vs = led.get("component_verdicts") or []
+    _vs = led.get("beat_verdicts") or led.get("component_verdicts") or []
     if _vs:
         _whys = [str(v.get("why") or "").strip().lower() for v in _vs]
         _uniq = len(set(_whys))
-        _bywd = {round(b["t"], 1): str(b["word"]).strip(".,!?").lower()
-                 for b in (led.get("number_beats") or [])}
-        _refs = sum(1 for v in _vs
-                    if _bywd.get(round(float(v.get("t") or -1), 1), "\x00")
-                    in str(v.get("why") or "").lower())
+        # Does the rationale name a word from ITS OWN beat? Boilerplate cannot,
+        # without being about the beat.
+        _btxt = {b["i"]: str(b.get("text") or "").lower()
+                 for b in (led.get("beats") or [])}
+        def _cites(v):
+            words = [w for w in _btxt.get(v.get("beat"), "").split() if len(w) > 4]
+            why = str(v.get("why") or "").lower()
+            return any(w.strip(".,!?'\"") in why for w in words)
+        _refs = sum(1 for v in _vs if _cites(v))
         led["verdict_quality"] = {
             "n": len(_vs),
             "distinct_whys": _uniq,
             "distinct_ratio": round(_uniq / max(len(_vs), 1), 2),
             "mentions_own_beat": _refs,
             "median_why_chars": sorted(len(w) for w in _whys)[len(_whys) // 2],
-            "decisions": {d: sum(1 for v in _vs if v.get("decision") == d)
-                          for d in ("render", "skip")},
-            "sample": [{"t": v.get("t"), "d": v.get("decision"),
-                        "why": str(v.get("why"))[:150]} for v in _vs[:6]],
+            "treatments": {t: sum(1 for v in _vs if v.get("treatment") == t)
+                           for t in ("card", "text", "none")},
+            "cuts": {c: sum(1 for v in _vs if v.get("cut") == c)
+                     for c in ("keep", "cut")},
+            "sample": [{"b": v.get("beat"), "t": v.get("treatment"),
+                        "c": v.get("cut"), "why": str(v.get("why"))[:150]}
+                       for v in _vs[:8]],
         }
         # PERFUNCTORY IS A LEDGER EVENT, not a footnote. If it fires the gate is
         # being satisfied rather than working, which is a different problem and
@@ -1983,12 +2006,14 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # cannot see is the same as no meter.
     _vq = r["ledger"].get("verdict_quality")
     if _vq:
-        print(f"  C8 VERDICTS     : {_vq['n']} ruled, {_vq['distinct_whys']} distinct "
-              f"rationale(s) (ratio {_vq['distinct_ratio']}), "
-              f"{_vq['mentions_own_beat']} mention their own beat, "
-              f"median {_vq['median_why_chars']} chars  {_vq['decisions']}")
+        _nb = len(r["ledger"].get("beats") or [])
+        print(f"  BEAT VERDICTS   : {_vq['n']} ruled of {_nb} beats, "
+              f"{_vq['distinct_whys']} distinct (ratio {_vq['distinct_ratio']}), "
+              f"{_vq['mentions_own_beat']} cite their own beat, "
+              f"median {_vq['median_why_chars']} chars")
+        print(f"     treatments {_vq.get('treatments')}   cuts {_vq.get('cuts')}")
         for _v in (_vq.get("sample") or []):
-            print(f"     t={_v['t']}  {_v['d']}  {_v['why']}")
+            print(f"     [{_v.get('b')}] {_v.get('t')}/{_v.get('c')}  {_v['why']}")
     # THE TWO QUESTIONS RUN F RAISED, answered in the report rather than inferred:
     # was nothing cut because turns ran out (harness) or because the agent chose
     # to keep everything (prompt)? And did the components crowd out the text?
