@@ -135,6 +135,60 @@ check("the prompt does not describe the job as running shell commands",
       "shell command" not in _sys_txt.lower(),
       "the prompt's framing still tells the agent its job is running shell")
 
+# ── TWO RULES EARNED 2026-09-05 ──────────────────────────────────────────────
+# A. A CAPABILITY IN THE SCHEMA WILL BE USED. The prompt said "do not
+#    orchestrate" and the agent orchestrated anyway — build_cut before the
+#    pipeline, build_zoom x3 and build_overlays after it — because the per-step
+#    tools were available. Telling a model not to use a tool it has is a
+#    preference; not giving it the tool is a property.
+# B. A DERIVED SIGNAL THAT IS NOT PRINTED CANNOT BE VERIFIED.
+#    visual_cut_candidates was computed and ledgered but never shown, so a run
+#    that kept 100% was indistinguishable from a detector that found nothing,
+#    errored, or never ran — and I concluded "unwired" from its absence in a log
+#    that never contained it.
+print("\n7. THE TWO RULES")
+_repair = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
+           "render_components", "place_cutaway", "author_component",
+           "beat_verdict"}
+check("repair tools are withheld until there is something to repair",
+      "_REPAIR_ONLY" in CODE and "led.get(\"execute_plan\")" in CODE,
+      "the per-step tools are in the default schema, so the agent will build "
+      "with them one command at a time however the prompt is worded")
+check("the tool list is recomputed per turn",
+      "tools=_tools_for_turn()" in CODE,
+      "a tool list computed once cannot widen after execute_plan runs, so "
+      "repair would be impossible")
+# STRUCTURAL: the variable that READS the signal must be referenced by a print()
+# in the same function. The first version searched for the signal NAME anywhere
+# after `def main(` — but the read itself contains the name, so deleting the
+# print left the check green. Seventh text-match false green; the fix is the
+# same every time.
+def _signal_is_printed(sig):
+    for fn in ast.walk(TREE):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        var = None
+        for nd in ast.walk(fn):
+            if (isinstance(nd, ast.Assign) and sig in ast.dump(nd.value)
+                    and getattr(nd.targets[0], "id", None)):
+                var = nd.targets[0].id
+        if not var:
+            continue
+        for nd in ast.walk(fn):
+            if (isinstance(nd, ast.Call)
+                    and getattr(nd.func, "id", "") == "print"
+                    and any(getattr(x, "id", "") == var
+                            for x in ast.walk(nd))):
+                return True
+    return False
+
+
+_unprinted = [x for x in ("visual_cut_candidates",) if not _signal_is_printed(x)]
+check("every derived signal is printed in the summary",
+      not _unprinted,
+      f"signal(s) {_unprinted} are computed and ledgered but never shown — a "
+      f"run cannot be distinguished from a detector that never ran")
+
 print("\n3. SUBPROCESS ENVIRONMENT IS CLEAN")
 check("a minimal env is constructed for subprocesses",
       "_SUBPROCESS_ENV" in CODE,

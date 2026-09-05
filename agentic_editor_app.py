@@ -2741,6 +2741,22 @@ def edit(source_key: str, brief: str,
         gap = {k: [ruled.get(k, 0), built.get(k, 0)]
                for k in ("text", "zoom", "sfx", "card", "cutaway")
                if ruled.get(k, 0) != built.get(k, 0)}
+        # THE HARNESS DECLARES WHAT IT BUILT. Manifests read 0 declared while
+        # treatments showed a dozen rulings, because declaring was a separate
+        # turn the agent skipped. The harness knows exactly what it placed —
+        # asking the model to restate it was always redundant, and a step that
+        # is redundant is a step that gets dropped.
+        for _s in steps:
+            _k = _s.get("step")
+            if _k in ("text", "zoom", "sfx"):
+                led.setdefault("placements", []).append(
+                    {"type": {"text": "overlay_text", "zoom": "emphasis",
+                              "sfx": "sfx"}[_k],
+                     "family": {"text": "text", "zoom": "zoom", "sfx": "sfx"}[_k],
+                     "t_start": _s.get("t", [None])[0] if isinstance(_s.get("t"), list)
+                                else _s.get("t"),
+                     "method": "ffmpeg", "declared_by": "execute_plan",
+                     "content": _s.get("name") or ""})
         led["execute_plan"] = {"steps": steps, "built": built, "ruled": ruled,
                                "ruled_but_not_built": gap}
         for k, (rl, bl) in gap.items():
@@ -3187,7 +3203,23 @@ def edit(source_key: str, brief: str,
                 + (_KNOWLEDGE_SYSTEM if use_knowledge else ""))
     sys_blocks = [{"type": "text", "text": sys_text,
                    "cache_control": {"type": "ephemeral"}}]
-    tools = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
+    # A CAPABILITY IN THE SCHEMA WILL BE USED. The prompt said "do not
+    # orchestrate" and the agent orchestrated anyway — build_cut before the
+    # pipeline, then build_zoom x3 and build_overlays after it — because the
+    # per-step tools were sitting there. Telling a model not to use a tool it
+    # has is a preference; not giving it the tool is a property. The per-step
+    # tools are for REPAIR, so they appear only once there is something to
+    # repair: after execute_plan has run.
+    _REPAIR_ONLY = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
+                    "render_components", "place_cutaway", "author_component",
+                    "beat_verdict"}
+
+    def _tools_for_turn():
+        base = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
+        if led.get("execute_plan"):
+            return base
+        return [t for t in base if t.get("name") not in _REPAIR_ONLY]
+
     led["use_knowledge"] = use_knowledge
     # ARM LABEL. Run 3 was reported as a knowledge arm without having read the
     # knowledge; an effort arm that does not record its effort is the same
@@ -3275,7 +3307,8 @@ def edit(source_key: str, brief: str,
         led["effort_sent"] = bool(_kw)
         try:
             r = client.messages.create(
-                model=model, max_tokens=MAX_TOKENS, system=sys_blocks, tools=tools,
+                model=model, max_tokens=MAX_TOKENS, system=sys_blocks,
+                tools=_tools_for_turn(),
                 messages=msgs, **_kw)
         except Exception as e:
             fail("model_call_failed", e)
@@ -4217,6 +4250,18 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"(shell {mx.get('remotion_renders', 0)} + reel {mx.get('reel_renders', 0)})"
               f"  (product comp {mx.get('product_comp')}, PROBE comp {mx.get('probe_comp')})"
               f"  over {mx.get('shell_cmds')} shell commands")
+    # A DERIVED SIGNAL THAT IS NOT PRINTED CANNOT BE VERIFIED.
+    # visual_cut_candidates was computed, ledgered, and never shown — so when a
+    # run kept 100% there was no way to tell whether the detector found nothing,
+    # errored, or never ran. I then wrongly concluded it was unwired, from its
+    # absence in a log that never contained it. Absence of evidence, produced by
+    # my own instrument.
+    _vc = (r.get("ledger") or {}).get("visual_cut_candidates")
+    if _vc is not None:
+        _tot = sum(x["duration_s"] for x in _vc)
+        print(f"  STILLNESS       : {len(_vc)} span(s), {_tot:.1f}s offered"
+              + ("  (evenly paced — nothing to cut on)" if not _vc else ""))
+
     # PER-TURN SEQUENCE. Aggregate tool COUNTS cannot show where a run went
     # from deciding to building, which is exactly the question when N beats are
     # ruled and one is built.
