@@ -655,6 +655,10 @@ KNOWLEDGE_TOOLS = [{
                                                "enum": ["card", "text", "sfx",
                                                         "zoom", "cutaway", "none"]}},
                                  "cut": {"type": "string", "enum": ["keep", "cut"]},
+                                 "sfx": {"type": "string", "enum": ["yes", "no"],
+                                         "description": "REQUIRED on hook and "
+                                                        "close beats: does this "
+                                                        "beat take a sound?"},
                                  "why": {"type": "string"}},
                              "required": ["beat", "treatment", "cut", "why"]}}},
                      "required": ["verdicts"]},
@@ -759,11 +763,19 @@ def segment_beats(words, gap_s=0.35, max_beat_s=6.0):
             cur.append(w)
     if cur:
         beats.append(cur)
-    return [{"i": i,
-             "t_start": round(b[0]["s"], 2),
-             "t_end": round(b[-1]["e"], 2),
-             "text": " ".join(str(x["w"]) for x in b)[:180]}
-            for i, b in enumerate(beats)]
+    out = [{"i": i,
+            "t_start": round(b[0]["s"], 2),
+            "t_end": round(b[-1]["e"], 2),
+            "text": " ".join(str(x["w"]) for x in b)[:180]}
+           for i, b in enumerate(beats)]
+    # HOOK and CLOSE, marked mechanically as first and last. 64% of corpus SFX
+    # land on one of these two, and sound has been variance (present on 2 of 3
+    # identical runs) rather than a decision. Marking them is what lets the gate
+    # demand a ruling exactly where the corpus says sound belongs.
+    if out:
+        out[0]["role"] = "hook"
+        out[-1]["role"] = "close"
+    return out
 
 
 def pack_reel(items, fps=30):
@@ -1328,6 +1340,28 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         # looked satisfied while no overlay existed.
         _ruled_text = sum(1 for v in (led.get("beat_verdicts") or [])
                           if "text" in (v.get("treatment") or []))
+        # UNDER-SUPPLY IS THE SAME BUG AS NONE. The first version of this guard
+        # tested `not items`, so run Y passed ONE item against 18 rulings and
+        # nothing fired. Build what was ruled.
+        if items and _ruled_text >= 2 and len(items) < 0.5 * _ruled_text:
+            _have = {round(float(i.get("t_start", -1)), 1) for i in items
+                     if isinstance(i, dict)}
+            fail("overlays_underbuilt",
+                 f"{len(items)} item(s) passed against {_ruled_text} beats ruled "
+                 f"'text'")
+            return {"error": f"You ruled {_ruled_text} beats 'text' and passed "
+                             f"{len(items)} item(s).",
+                    "why": "Every text ruling needs its own overlay. Passing a "
+                           "few silently drops the rest of the decisions you "
+                           "already made.",
+                    "do_now": "Pass one item per beat ruled 'text' — words, "
+                              "t_start/t_end, position. If some rulings were "
+                              "wrong, re-rule those beats instead of dropping "
+                              "them.",
+                    "ruled_text_beats": [v.get("beat") for v in
+                                         (led.get("beat_verdicts") or [])
+                                         if "text" in (v.get("treatment") or [])],
+                    "t_starts_you_passed": sorted(_have)[:20]}
         if not items and _ruled_text:
             fail("overlays_skipped_ruled_text",
                  f"build_overlays called with NO items while {_ruled_text} "
@@ -1756,6 +1790,29 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             # can re-prompt forever is a spend loop.
             _ruled_beats = {v.get("beat") for v in (led.get("beat_verdicts") or [])}
             _unruled = [b for b in _beats if b["i"] not in _ruled_beats]
+            # The two beats the corpus says carry sound must carry a DECISION
+            # about sound. "no" is a fine answer; silence is not — that is what
+            # turned cards from variance into consistent placement.
+            _by_i = {v.get("beat"): v for v in (led.get("beat_verdicts") or [])}
+            _needs_sfx = [b for b in _beats if b.get("role") in ("hook", "close")
+                          and b["i"] in _ruled_beats
+                          and (_by_i.get(b["i"], {}).get("sfx") not in ("yes", "no"))]
+            if _needs_sfx and not led.get("sfx_gate_fired"):
+                led["sfx_gate_fired"] = True
+                fail("sfx_ruling_missing",
+                     f"{[b['i'] for b in _needs_sfx]} are hook/close beats with "
+                     f"no sfx ruling")
+                msgs.append({"role": "user", "content": [{"type": "text", "text":
+                    "NOT DONE. These are your HOOK and CLOSE beats and neither "
+                    "has a ruling on sound:\n"
+                    + "\n".join(f"  [{b['i']}] {b.get('role')} "
+                                 f"{b['t_start']:.2f}-{b['t_end']:.2f}  "
+                                 f"{b['text'][:70]}" for b in _needs_sfx)
+                    + "\n\n64% of the reference corpus's sound sits on a hook or "
+                      "a close. Re-rule each with sfx:'yes' or sfx:'no' and a why. "
+                      "'no' is a legitimate answer — not deciding is not. If yes, "
+                      "pick from sfx_catalogue by ROLE and mix it per F1."}]})
+                continue
             if _beats and _unruled and not led.get("beat_gate_fired"):
                 led["beat_gate_fired"] = True
                 fail("beat_gate_blocked_done",
@@ -1880,7 +1937,8 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                         continue        # first ruling wins; a re-call tops up
                     led["beat_verdicts"].append({
                         "beat": _v.get("beat"), "treatment": _v.get("treatment"),
-                        "cut": _v.get("cut"), "why": str(_v.get("why") or "")})
+                        "cut": _v.get("cut"), "sfx": _v.get("sfx"),
+                        "why": str(_v.get("why") or "")})
                     _seen.add(_v.get("beat")); _added += 1
                 _missing = [b["i"] for b in _beats if b["i"] not in _seen]
                 out = {"recorded": _added, "ruled": len(_seen),
@@ -2110,13 +2168,26 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     led["ruled_vs_built"] = {f: {"ruled": _fam_ruled.get(f, 0),
                                  "built": _fam_built.get(f, 0)}
                              for f in set(_fam_ruled) | {"card", "text", "sfx"}}
-    _unbuilt = {f: v for f, v in led["ruled_vs_built"].items()
-                if v["ruled"] > 0 and v["built"] == 0}
+    # PROPORTION, not zero. Run Y ruled 18 beats `text` and built ONE, and both
+    # this audit and the build_overlays guard passed it — each tested for zero
+    # and one is not zero. A family ruled N and built far fewer is the same
+    # failure as building none, just quieter.
+    _unbuilt, _under = {}, {}
+    for f, v in led["ruled_vs_built"].items():
+        if v["ruled"] <= 0:
+            continue
+        if v["built"] == 0:
+            _unbuilt[f] = v["ruled"]
+        elif v["ruled"] >= 2 and v["built"] < 0.5 * v["ruled"]:
+            _under[f] = f"{v['ruled']}->{v['built']}"
     if _unbuilt:
         fail("ruled_but_never_built",
-             f"{ {f: v['ruled'] for f, v in _unbuilt.items()} } beat(s) were "
-             f"ruled for these families and ZERO were built. The decision was "
-             f"made and the artifact does not exist.")
+             f"{_unbuilt} beat(s) were ruled for these families and ZERO were "
+             f"built. The decision was made and the artifact does not exist.")
+    if _under:
+        fail("ruled_but_underbuilt",
+             f"{_under} — ruled for these families and fewer than half were "
+             f"built. Not a taste change: the rulings were made and dropped.")
 
     # ── WAS THE FAMILY EVER CONSIDERED? ─────────────────────────────────────
     # Four families read zero on every run. That has two completely different
