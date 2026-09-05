@@ -396,6 +396,33 @@ def derive_rubric(declared, mode="full_edit"):
             "vibe_directed": sorted(k for k, v in source.items() if v == "vibe")}
 
 
+# ── EVERY RETURN FROM edit() HAS THE SAME SHAPE ──────────────────────────────
+# The printer indexes r.get('download_s'), r.get('transcript_s') and
+# r.get('agent_last_message') unconditionally, and the early-failure return carried
+# none of them. So any failure before the success return died with
+# `KeyError: 'download_s'` — and the KeyError REPLACED the real error. Four A/B
+# runs failed this way and their actual causes are still unknown.
+#
+# That is the fifth time in this campaign that a consumer indexed a key present
+# on only one path. Fixing the printer alone would leave the next consumer to
+# rediscover it, so the SHAPE is guaranteed at construction: every key the
+# printer can reach exists on every path, None where it does not apply. None is
+# printable; absent is an exception that hides the thing you needed to read.
+def _result(**kw):
+    base = {"ok": False, "why": "", "ledger": None, "wall_s": None,
+            "download_s": None, "transcript_s": None,
+            "agent_last_message": "", "s3_key": None, "output": None,
+            "output_key": None, "final": None, "source_words": None}
+    unknown = sorted(set(kw) - set(base))
+    base.update(kw)
+    if unknown:
+        # Not an error: extra fields are fine and several are expected. Recorded
+        # so a NEW printer-facing key is added to the guaranteed set on purpose
+        # rather than discovered by a KeyError in production.
+        base["_extra_keys"] = unknown
+    return base
+
+
 # ── SUBPROCESSES INHERIT NOTHING SECRET ──────────────────────────────────────
 # ffmpeg, ffprobe and remotion need PATH and a writable HOME. They do not need
 # ANTHROPIC_API_KEY, DEEPGRAM_API_KEY or PEXELS_API_KEY, and every one of them
@@ -1798,8 +1825,8 @@ def edit(source_key: str, brief: str,
         # here crashes the container and the failure taxonomy learns nothing —
         # the exact opposite of why the ledger exists.
         fail("source_transcribe_failed", e)
-        return {"ok": False, "why": f"source transcribe failed: {e}",
-                "ledger": led, "wall_s": round(time.time() - t0, 1)}
+        return _result(ok=False, why=f"source transcribe failed: {e}",
+                       ledger=led, wall_s=round(time.time() - t0, 1))
     transcript_s = round(time.time() - tw0, 1)
     # NO SPEECH IS A ROUTE, NOT A REJECTION (2026-09-05). This used to
     # `return {"ok": False}` — a hard refusal — and it is the single biggest
@@ -3447,10 +3474,11 @@ def edit(source_key: str, brief: str,
         fail("knowledge_never_read",
              "use_knowledge=True but the agent called read_knowledge zero times "
              "— this arm is not a knowledge arm and must not be compared as one")
-    return {"ok": bool(final.get("exists")), "wall_s": round(time.time() - t0, 1),
-            "download_s": dl_s, "transcript_s": transcript_s,
-            "source_words": len(words), "final": final, "ledger": led,
-            "output_key": key, "agent_last_message": final_text[:1200]}
+    return _result(ok=bool(final.get("exists")), wall_s=round(time.time() - t0, 1),
+                   download_s=dl_s, transcript_s=transcript_s,
+                   source_words=len(words), final=final, ledger=led,
+                   output_key=key, s3_key=key,
+                   agent_last_message=final_text[:1200])
 
 
 @app.local_entrypoint()
@@ -3479,7 +3507,7 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                     iters, knowledge, effort, model, route)
     print("\n" + "=" * 66)
     print(f"  AGENTIC EDITOR — knowledge={'ON' if knowledge else 'OFF'}  "
-          f"effort={r['ledger'].get('effort')}  model={r['ledger'].get('model')}")
+          f"effort={r.get('ledger').get('effort')}  model={r.get('ledger').get('model')}")
     print("=" * 66)
     print(f"  source          : {source}")
     kr = r["ledger"].get("knowledge_reads", [])
@@ -3528,7 +3556,7 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     elif _cc and (_cc.get('coverage') or 0) >= 0.995:
         print("  CUT VERDICT     : (none — gate should have blocked)")
     _fm = r["ledger"].get("family_mix") or {}
-    print(f"  TURN BUDGET     : used {r['ledger']['iters']} of {r['ledger'].get('max_iters','?')}"
+    print(f"  TURN BUDGET     : used {r.get('ledger')['iters']} of {r.get('ledger').get('max_iters','?')}"
           f"   renders: shell {_fm.get('remotion_renders',0)} + reel {_fm.get('reel_renders',0)}"
           f" = {_fm.get('renders_total',0)}")
     _oa = r["ledger"].get("overlay_accounting")
@@ -3545,15 +3573,15 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             for f, v in sorted(_rvb.items())))
     _fm2 = r["ledger"].get("family_mentions") or {}
     if _fm2:
-        print(f"  FAMILY MENTIONS : {_fm2}  over {r['ledger'].get('trace_chars',0):,} "
+        print(f"  FAMILY MENTIONS : {_fm2}  over {r.get('ledger').get('trace_chars',0):,} "
               f"chars of reasoning   (0 = never considered, >0 = weighed)")
     _gb = r["ledger"].get("skill_gate_blocks", 0)
     print(f"    C7 gate       : {_gb} render(s) blocked before first search"
           + ("  (gate did the work)" if _gb else "  (searched unprompted)"))
-    print(f"  ok              : {r['ok']}")
-    print(f"  WALL            : {r['wall_s']}s  "
-          f"(download {r['download_s']}s, transcript {r['transcript_s']}s)")
-    print(f"  self-review     : {r['ledger']['iters']} iteration(s)")
+    print(f"  ok              : {r.get('ok')}")
+    print(f"  WALL            : {r.get('wall_s')}s  "
+          f"(download {r.get('download_s')}s, transcript {r.get('transcript_s')}s)")
+    print(f"  self-review     : {r.get('ledger')['iters']} iteration(s)")
     t = r["ledger"]["tokens"]
     print(f"  TOKENS          : in {t['in']:,}  out {t['out']:,}  "
           f"cache_read {t['cache_read']:,}  cache_write {t['cache_write']:,}")
@@ -3603,7 +3631,7 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # of cost, not of tokens — tokens are not what is being spent.
     print(f"    output share  : ${_out_cost:.4f} = "
           f"{100 * _out_cost / max(cost, 1e-9):.1f}% of cost   "
-          f"({t['out']:,} out tokens over {r['ledger']['iters']} turns)")
+          f"({t['out']:,} out tokens over {r.get('ledger')['iters']} turns)")
     f = r["final"]
     if f.get("exists"):
         print(f"  output          : {f['duration_s']}s  {f['width']}x{f['height']}  "
@@ -3685,4 +3713,4 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     print(f"\n  FAILURE LEDGER  : {len(fs)} event(s)")
     for x in fs:
         print(f"    [{x['t']:>6}s] {x['kind']}: {x['detail'][:110]}")
-    print(f"\n  agent said      : {r['agent_last_message'][:400]}")
+    print(f"\n  agent said      : {r.get('agent_last_message')[:400]}")
