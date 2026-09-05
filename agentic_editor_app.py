@@ -867,7 +867,8 @@ DEFAULT_EFFORT = "high"
 
 @app.function(image=IMG, secrets=SECRETS, timeout=3600, cpu=8, memory=16384)
 def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
-         use_knowledge: bool = True, effort: str = DEFAULT_EFFORT) -> dict:
+         use_knowledge: bool = True, effort: str = DEFAULT_EFFORT,
+         model: str = MODEL) -> dict:
     import subprocess
     import boto3
     from anthropic import Anthropic
@@ -1426,6 +1427,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     # knowledge; an effort arm that does not record its effort is the same
     # class of unfalsifiable claim.
     led["effort"] = effort
+    led["model"] = model
     led["max_iters"] = max_iters
 
     # List form, not a bare string: a string content block cannot carry a
@@ -1465,7 +1467,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 break
         try:
             r = client.messages.create(
-                model=MODEL, max_tokens=MAX_TOKENS, system=sys_blocks, tools=tools,
+                model=model, max_tokens=MAX_TOKENS, system=sys_blocks, tools=tools,
                 output_config={"effort": effort},
                 messages=msgs)
         except Exception as e:
@@ -2013,11 +2015,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                       "filler. Keep the meaning intact. Burn readable captions.",
          iters: int = MAX_ITERS,
          knowledge: bool = True,
-         effort: str = DEFAULT_EFFORT):
-    r = edit.remote(source, brief, iters, knowledge, effort)
+         effort: str = DEFAULT_EFFORT,
+         model: str = MODEL):
+    r = edit.remote(source, brief, iters, knowledge, effort, model)
     print("\n" + "=" * 66)
     print(f"  AGENTIC EDITOR — knowledge={'ON' if knowledge else 'OFF'}  "
-          f"effort={r['ledger'].get('effort')}")
+          f"effort={r['ledger'].get('effort')}  model={r['ledger'].get('model')}")
     print("=" * 66)
     print(f"  source          : {source}")
     kr = r["ledger"].get("knowledge_reads", [])
@@ -2079,14 +2082,25 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     t = r["ledger"]["tokens"]
     print(f"  TOKENS          : in {t['in']:,}  out {t['out']:,}  "
           f"cache_read {t['cache_read']:,}  cache_write {t['cache_write']:,}")
-    # Sonnet 5: $3/M in, $15/M out, cache read $0.30/M, write $3.75/M. The
-    # $2/$10 introductory rate EXPIRED 2026-08-31 — these are the live numbers
-    # as of today, and a cost compared against a pre-09-01 run is comparing
-    # two price regimes, not two arms.
-    cost = (t["in"] * 3 + t["out"] * 15 + t["cache_read"] * 0.30
-            + t["cache_write"] * 3.75) / 1e6
-    _out_cost = t["out"] * 15 / 1e6
-    print(f"  COST (sonnet)   : ${cost:.4f}")
+    # PER-MODEL RATES. Hardcoding Sonnet's numbers made the cost line a lie the
+    # moment a cheaper-model arm ran — and the cost line IS the comparison that
+    # arm exists to make. The $2/$10 Sonnet introductory rate EXPIRED
+    # 2026-08-31; a cost compared against a pre-09-01 run is comparing two price
+    # regimes, not two arms.
+    _RATES = {   # in, out, cache_read, cache_write   ($ per 1M tokens)
+        "claude-sonnet-5":  (3.0, 15.0, 0.30, 3.75),
+        "claude-opus-5":    (5.0, 25.0, 0.50, 6.25),
+        "claude-haiku-4-5": (1.0,  5.0, 0.10, 1.25),
+    }
+    _model = r["ledger"].get("model") or "claude-sonnet-5"
+    _ri, _ro, _rr, _rw = _RATES.get(_model, _RATES["claude-sonnet-5"])
+    if _model not in _RATES:
+        print(f"  ⚠️  no rate table for {_model} — costing it at Sonnet rates, "
+              f"which is a GUESS, not a measurement")
+    cost = (t["in"] * _ri + t["out"] * _ro + t["cache_read"] * _rr
+            + t["cache_write"] * _rw) / 1e6
+    _out_cost = t["out"] * _ro / 1e6
+    print(f"  COST ({_model.replace('claude-','')})   : ${cost:.4f}")
     # THE TERM THIS ARM TARGETS. Output is 5x the input rate, so an output-token
     # share is the only part of the bill `effort` can move. Report it as a share
     # of cost, not of tokens — tokens are not what is being spent.
