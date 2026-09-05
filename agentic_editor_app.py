@@ -168,6 +168,18 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
 BUCKET = "thisismybucketagainwooo"
 MODEL = "claude-sonnet-5"
+
+
+def _supports_effort(model_id: str) -> bool:
+    """Does this model accept output_config.effort?
+
+    A 4.5-era model 400s on it, which killed the first cheaper-model arm at
+    turn 1. Allowlist rather than denylist: an unknown model gets the SAFE
+    shape (no effort) instead of a request that cannot be sent.
+    """
+    m = str(model_id or "")
+    return any(k in m for k in ("sonnet-5", "opus-5", "opus-4-8", "opus-4-7",
+                                "opus-4-6", "sonnet-4-6", "fable-5"))
 # 5 -> 12 -> 22. Run 3 (knowledge ON) spent 4 of its 12 turns READING and died
 # at "Now burn the captions" — the budget has to cover the reading AND the edit,
 # or the knowledge arm is structurally unable to finish what the control finishes.
@@ -1465,11 +1477,17 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 if isinstance(tail, dict):
                     tail["cache_control"] = {"type": "ephemeral"}
                 break
+        # output_config.effort is a 4.6+/5 parameter. Haiku 4.5 rejects the whole
+        # request with a 400, so the cheaper-model arm died at turn 1 for $0.00.
+        # Worth stating plainly: "same config, cheaper model" is NOT literally
+        # available — dropping effort is itself a second variable, and the arm
+        # has to be read as such.
+        _kw = {"output_config": {"effort": effort}} if _supports_effort(model) else {}
+        led["effort_sent"] = bool(_kw)
         try:
             r = client.messages.create(
                 model=model, max_tokens=MAX_TOKENS, system=sys_blocks, tools=tools,
-                output_config={"effort": effort},
-                messages=msgs)
+                messages=msgs, **_kw)
         except Exception as e:
             fail("model_call_failed", e)
             break
