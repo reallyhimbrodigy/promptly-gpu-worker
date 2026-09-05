@@ -391,6 +391,108 @@ def derive_rubric(declared, mode="full_edit"):
             "vibe_directed": sorted(k for k, v in source.items() if v == "vibe")}
 
 
+# ── SCOPE IS ENFORCED, NOT SCORED ────────────────────────────────────────────
+# "Add zooms and light transitions" must produce zooms and transitions and touch
+# NOTHING else. score_targeted() measures that after the fact, which is the
+# wrong instrument for a promise: a number that says "you also changed 4 beats
+# you shouldn't have" is a report, not a guarantee. The user did not ask for a
+# grade, they asked for a bounded change.
+#
+# So the agent DECLARES its scope at step 0 and the harness REFUSES anything
+# outside it. Refusal beats measurement here because the failure is silent
+# otherwise — an extra overlay looks exactly like a good edit unless someone
+# reads the manifest against the request.
+#
+# WHY A DECLARATION RATHER THAN PARSING THE BRIEF. "Light transitions" has no
+# keyword a regex can own, and "make the intro punchier" names no family at all.
+# The agent reasons about the request; the harness holds it to what it said. A
+# brief-parser here would be a second, dumber authority silently overriding the
+# reasoning it was meant to support — the same trap derive_rubric avoids.
+SCOPE_MODES = ("full_edit", "targeted_change", "question")
+
+
+def normalize_scope(declared):
+    """Validate the agent's step-0 scope declaration. Raises on anything vague.
+
+    A scope that cannot be checked is not a scope. `families` must name real
+    families; `beats` may be None (meaning "wherever these families belong") but
+    must be a list of ints when present.
+    """
+    d = dict(declared or {})
+    mode = d.get("mode")
+    if mode not in SCOPE_MODES:
+        raise ValueError(f"scope.mode must be one of {SCOPE_MODES}, got {mode!r}")
+    if mode != "targeted_change":
+        return {"mode": mode, "families": None, "beats": None}
+    fams = d.get("families")
+    if not isinstance(fams, list) or not fams:
+        raise ValueError(
+            "a targeted_change must name the families it is allowed to touch — "
+            "an unbounded 'targeted' change is a full edit wearing a smaller name")
+    unknown = sorted(set(fams) - set(REFERENCE_PER_25S))
+    if unknown:
+        raise ValueError(
+            f"scope names unknown famil(ies) {unknown}; valid: "
+            f"{sorted(REFERENCE_PER_25S)}")
+    beats = d.get("beats")
+    if beats is not None:
+        if not isinstance(beats, list) or not all(
+                isinstance(b, int) and not isinstance(b, bool) for b in beats):
+            raise ValueError("scope.beats must be a list of integer beat indices "
+                             "or omitted entirely")
+    return {"mode": mode, "families": sorted(set(fams)),
+            "beats": sorted(set(beats)) if beats is not None else None}
+
+
+def enforce_scope(scope, placements):
+    """Return (allowed, refused). A placement outside scope is REFUSED, not scored.
+
+    Refusals carry the reason so the agent is told WHY on its next turn and can
+    correct, rather than discovering at the end that its work was discarded.
+    """
+    sc = normalize_scope(scope)
+    if sc["mode"] != "targeted_change":
+        return list(placements or []), []
+    fams, beats = set(sc["families"]), sc["beats"]
+    allowed, refused = [], []
+    for p in (placements or []):
+        fam = (p or {}).get("family")
+        bt = (p or {}).get("beat")
+        if fam not in fams:
+            refused.append({**(p or {}), "_refused":
+                            f"family {fam!r} is outside the declared scope "
+                            f"{sorted(fams)} — the request did not ask for it"})
+            continue
+        if beats is not None and bt is not None and bt not in beats:
+            refused.append({**(p or {}), "_refused":
+                            f"beat {bt} is outside the declared scope {beats}"})
+            continue
+        allowed.append(p)
+    return allowed, refused
+
+
+def scope_report(scope, placements, refused):
+    """What actually happened, in the shape the gate reads."""
+    sc = normalize_scope(scope)
+    fams_built = sorted({(p or {}).get("family") for p in (placements or [])
+                         if (p or {}).get("family")})
+    out = {"mode": sc["mode"], "declared_families": sc["families"],
+           "declared_beats": sc["beats"], "built_families": fams_built,
+           "refused": len(refused or []),
+           "refusals": [r.get("_refused") for r in (refused or [])][:10]}
+    if sc["mode"] == "targeted_change":
+        asked = set(sc["families"] or ())
+        built = set(fams_built)
+        out["delivered"] = sorted(asked & built)
+        out["asked_but_absent"] = sorted(asked - built)
+        out["out_of_scope_built"] = sorted(built - asked)
+        # BOTH halves, because either alone is satisfiable by a degenerate edit:
+        # build nothing (nothing out of scope) or build everything (all asked
+        # families present).
+        out["ok"] = (not out["out_of_scope_built"]) and (not out["asked_but_absent"])
+    return out
+
+
 def score_targeted(scope_beats, changed_beats, total_beats):
     """The targeted-edit rubric: did it do the thing, did it leave the rest alone.
 
@@ -1190,64 +1292,80 @@ def segment_beats_visual(video_path, duration_s, shot_changes=None, **kw):
 _BEAT_CORE_KEYS = {"i", "t_start", "t_end", "text"}
 
 
-def _assert_speech_check_is_always_a_dict():
-    """speech_check must have ONE shape on every path.
+def set_speech_check(res, verdict, **fields):
+    """THE ONLY WAY TO WRITE speech_check. Typed at the PRODUCER.
 
-    RED-PROVEN BY PRODUCTION, not by imagination: it was a bare string on the
-    no-speech path and a dict on the normal one, and the consumer does
-    `(out.get("speech_check") or {}).get("VERDICT")`. Four of five round-1
-    fixtures died with AttributeError AFTER the entire edit had run — the work
-    was done and paid for, and the SUMMARY threw it away.
+    The consumer does `(out.get("speech_check") or {}).get("VERDICT")`. When a
+    producer wrote a bare string, the consumer raised AttributeError — at the
+    END of a run, after four complete edits had been paid for. The failure
+    surfaced three seams away from the mistake, which is why it cost four runs
+    instead of one line.
 
-    Checked by AST over the real source: every assignment to res["speech_check"]
-    must be a dict literal carrying VERDICT. A polymorphic field is one the
-    reader cannot sample its way to understanding — the same lesson as reading
-    edit_recipe as nested from one diverted-route sample.
+    A boundary that only the READER checks reports the error in the wrong place.
+    This refuses a malformed write AT THE WRITE, where the fix is obvious and
+    the cost is zero. `_assert_speech_check_writes_go_through_setter` then makes
+    the setter unbypassable, because a typed constructor nobody is required to
+    use is a suggestion.
+    """
+    if not isinstance(verdict, str) or not verdict.strip():
+        raise TypeError(
+            f"speech_check needs a non-empty string VERDICT, got "
+            f"{type(verdict).__name__} {verdict!r}. The consumer reads .VERDICT "
+            f"off this dict; anything else is an AttributeError three seams "
+            f"downstream, at the end of a paid-for run.")
+    bad = [k for k in fields if not isinstance(k, str)]
+    if bad:
+        raise TypeError(f"speech_check field names must be strings: {bad}")
+    res["speech_check"] = {"VERDICT": verdict, **fields}
+    return res["speech_check"]
+
+
+def _assert_speech_check_writes_go_through_setter():
+    """The setter must be UNBYPASSABLE, or it is a suggestion.
+
+    A typed constructor nobody is required to use does not prevent the bug it
+    was written for — the next author writes res["speech_check"] = "..." and the
+    consumer raises three seams away, at the end of a paid-for run. This scans
+    the real source by AST and fails on any direct assignment.
     """
     import ast as _ast
     src = open(__file__).read() if os.path.exists(__file__) else ""
     if not src:
         return
     tree = _ast.parse(src)
-    seen = 0
+    # The setter's OWN write is the one legitimate direct assignment — exclude
+    # its line range rather than special-casing a line number, which would rot
+    # the moment anything above it moves.
+    _setter_span = None
+    for n in _ast.walk(tree):
+        if isinstance(n, _ast.FunctionDef) and n.name == "set_speech_check":
+            _setter_span = (n.lineno, getattr(n, "end_lineno", n.lineno))
+            break
+    direct = []
     for n in _ast.walk(tree):
         if not isinstance(n, _ast.Assign):
             continue
+        if _setter_span and _setter_span[0] <= n.lineno <= _setter_span[1]:
+            continue
         for t in n.targets:
-            if not (isinstance(t, _ast.Subscript)
-                    and getattr(t.value, "id", "") == "res"):
-                continue
-            k = getattr(t.slice, "value", None)
-            if k != "speech_check":
-                continue
-            seen += 1
-            if not isinstance(n.value, _ast.Dict):
-                raise AssertionError(
-                    f"line {n.lineno}: res['speech_check'] is assigned a "
-                    f"{type(n.value).__name__}, not a dict. The consumer calls "
-                    f".get('VERDICT') on it, so a string there is an "
-                    f"AttributeError AFTER the whole edit has been paid for.")
-            # VERDICT is NOT required in the literal: the normal path builds
-            # the dict first and sets VERDICT in a later statement, which is
-            # fine because the consumer reads it off the finished object. What
-            # must hold is that the TERMINAL paths — the ones that return
-            # without a later VERDICT write — carry one inline.
-            keys = [getattr(kk, "value", None) for kk in n.value.keys]
-            if "VERDICT" not in keys and "kept_ratio" not in keys:
-                raise AssertionError(
-                    f"line {n.lineno}: res['speech_check'] is a terminal dict "
-                    f"with no VERDICT ({keys}). The measuring path sets VERDICT "
-                    f"in a later statement; a short-circuit path has no later "
-                    f"statement, so the consumer would read None.")
-    if 'res["speech_check"]["VERDICT"] = ' not in src:
+            if (isinstance(t, _ast.Subscript)
+                    and getattr(t.value, "id", "") == "res"
+                    and getattr(t.slice, "value", None) == "speech_check"):
+                direct.append(n.lineno)
+    if direct:
         raise AssertionError(
-            "the measuring path no longer writes VERDICT onto speech_check — "
-            "every run would report no verdict at all")
-    if seen < 2:
+            f"speech_check assigned DIRECTLY at line(s) {direct}. Write it "
+            f"through set_speech_check(), which types the boundary at the "
+            f"producer — a direct assignment can put a string where the "
+            f"consumer expects a dict, and that failure surfaces at the END of "
+            f"a completed run.")
+    if "def set_speech_check(" not in src:
+        raise AssertionError("set_speech_check is gone — re-point this check")
+    if src.count("set_speech_check(res,") < 3:
         raise AssertionError(
-            f"only {seen} speech_check assignment(s) found — this check "
-            f"protects a specific field; re-point it rather than passing "
-            f"vacuously.")
+            f"only {src.count('set_speech_check(res,')} setter call(s) — the "
+            f"three producing paths (no-speech, transcription-failed, measured) "
+            f"must all route through it")
 
 
 def _assert_beat_contract_identical():
@@ -1431,7 +1549,7 @@ _assert_treatment_surface_agrees(open(__file__).read()
 # be skipped. The two beat sources must stay interchangeable or the verdict
 # machinery silently rules on a field one of them does not supply.
 _assert_beat_contract_identical()
-_assert_speech_check_is_always_a_dict()
+_assert_speech_check_writes_go_through_setter()
 
 
 # THINKING IS ON BY DEFAULT on claude-sonnet-5 when the `thinking` param is
@@ -1634,16 +1752,13 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             # latent bug on the transcription-failed path; it is a dict now too.
             # A field that is sometimes a dict and sometimes a string is a
             # shape the reader cannot sample its way to knowing.
-            res["speech_check"] = {
-                "applicable": False,
-                "VERDICT": ("NOT APPLICABLE — source carries no speech; beats "
-                            "were derived from video motion"),
-            }
+            set_speech_check(res,
+                "NOT APPLICABLE — source carries no speech; beats were derived "
+                "from video motion", applicable=False)
         elif got is None:
-            res["speech_check"] = {
-                "applicable": True,
-                "VERDICT": "UNAVAILABLE — transcription failed, treat as UNVERIFIED",
-            }
+            set_speech_check(res,
+                "UNAVAILABLE — transcription failed, treat as UNVERIFIED",
+                applicable=True)
         else:
             src_words = norm([w["w"] for w in words])
             got_set = {}
@@ -1656,7 +1771,14 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 else:
                     missing.append(w)
             kept_ratio = 1.0 - (len(missing) / max(1, len(src_words)))
-            res["speech_check"] = {
+            # VERDICT computed BEFORE construction so the dict is never
+            # briefly verdict-less. A two-step build is what let a producer
+            # write a shape the consumer could not read.
+            _verdict = ("FAIL — most of the speech is gone" if kept_ratio < 0.5
+                        else "OK" if kept_ratio >= 0.8
+                        else "SUSPECT — verify this was a deliberate cut")
+            set_speech_check(res, _verdict, **{
+                "applicable": True,
                 "source_words": len(src_words), "output_words": len(got),
                 "source_words_absent_from_output": len(missing),
                 "kept_ratio": round(kept_ratio, 3),
@@ -1665,7 +1787,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                          "What must not happen is losing speech you meant to KEEP. "
                          "If output_words is far below what your edit should "
                          "contain, the render dropped audio."),
-            }
+            })
             # THE GAP THE FIRST RUN EXPOSED. I ledgered only the total-loss
             # case, so a run that kept 12.7% of the speech recorded ZERO
             # failures — the ledger said clean while the content said
@@ -1677,10 +1799,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 fail("speech_loss_severe",
                      f"kept_ratio {kept_ratio:.3f}: {len(missing)} of "
                      f"{len(src_words)} source words absent from the output")
-            res["speech_check"]["VERDICT"] = (
-                "FAIL — most of the speech is gone" if kept_ratio < 0.5
-                else "OK" if kept_ratio >= 0.8
-                else "SUSPECT — verify this was a deliberate cut")
+
         return res
 
     # ── knowledge served from the image, read on demand ────────────────────
