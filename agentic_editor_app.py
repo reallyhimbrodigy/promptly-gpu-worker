@@ -1467,6 +1467,79 @@ def beats_from_visual(motion_curve, shot_changes, duration_s,
     return out
 
 
+def visual_cut_candidates(motion_curve, duration_s, window_s=1.0,
+                          quiet_frac=0.35, min_span_s=1.0, keep_head_s=0.5,
+                          max_share=0.40):
+    """Spans of sustained stillness — the visual analogue of dead air.
+
+    WHY THIS EXISTS. Every no-speech run kept 100% of its source, on fixtures and
+    on real user footage. The cause is structural: the speech path has dead air
+    and filler to tell build_cut what to remove, and the visual path had NO cut
+    signal at all. An agent asked for "snappy cuts" with nothing to cut on
+    correctly keeps everything, and the gate then calls it a passthrough.
+
+    THRESHOLD IS A PERCENTILE OF THE CLIP'S OWN DISTRIBUTION, not a fraction of
+    its peak. Peak-relative was the first design and my own positive control
+    killed it: a screen recording that is still by nature with two brief moves
+    has a peak 20x its typical, so 87% of the clip fell below peak*0.35 and the
+    signal proposed cutting almost all of it. The quietest quarter is quiet
+    relative to how this clip actually behaves.
+
+    AND A CAP. If the signal proposes removing more than `max_share` of the
+    video, the signal is wrong — that is not a taste judgement, it is a
+    structural one: a clip is not mostly dead air, and a detector saying so has
+    mis-measured. It returns nothing rather than a confident bad answer.
+
+    CANDIDATES, NOT DECISIONS. The agent rules on each. A held shot is sometimes
+    the point, and a harness that silently trims one has taken an editorial
+    decision it was not asked to take.
+    """
+    c = [float(x) for x in (motion_curve or [])]
+    dur = float(duration_s or 0)
+    if dur <= 0 or len(c) < 4 or max(c) <= 0:
+        return []
+    # MEDIAN-RELATIVE, and both of the alternatives were tried and rejected by
+    # the tests. Peak-relative: one brief move in an otherwise still clip makes
+    # 87% of it "dead". Percentile-of-values: a clip with a single dip has a
+    # HIGH 25th percentile, so the threshold swallows most of the clip. The
+    # median is what this clip typically does, and a fraction of it is genuinely
+    # quiet for this clip — robust to an outlier in either direction.
+    srt = sorted(c)
+    med = srt[len(srt) // 2]
+    thresh = med * float(quiet_frac)
+    # A clip with no spread has no quiet PART — it is uniformly paced, and the
+    # quietest quarter of it is not dead, just the clip.
+    if thresh <= 0 or (max(c) - min(c)) < 0.05:
+        return []
+    spans, run_start = [], None
+    for i, v in enumerate(c):
+        t = i * window_s
+        if v <= thresh:
+            if run_start is None:
+                run_start = t
+        else:
+            if run_start is not None and t - run_start >= min_span_s:
+                spans.append((run_start, t))
+            run_start = None
+    if run_start is not None and dur - run_start >= min_span_s:
+        spans.append((run_start, dur))
+
+    out = []
+    for a, b in spans:
+        a2 = max(a, keep_head_s)          # never propose the opening beat
+        b2 = min(b, dur)
+        if b2 - a2 < min_span_s:
+            continue
+        seg = c[int(a2 / window_s):max(int(a2 / window_s) + 1, int(b2 / window_s))]
+        out.append({"t_start": round(a2, 2), "t_end": round(b2, 2),
+                    "duration_s": round(b2 - a2, 2),
+                    "mean_motion": round(sum(seg) / len(seg), 3) if seg else 0.0,
+                    "why": "sustained stillness vs this clip's quietest quarter"})
+    if sum(x["duration_s"] for x in out) > dur * max_share:
+        return []
+    return out
+
+
 def segment_beats_visual(video_path, duration_s, shot_changes=None, **kw):
     """Extract the curve, then segment. FAIL-SAFE to even pacing, never to []."""
     curve = []
@@ -2786,7 +2859,17 @@ def edit(source_key: str, brief: str,
         # Duration from the probe we already have; shot changes are best-effort
         # and an empty list simply means motion is the only boundary source.
         _vdur = float(meta.get("format", {}).get("duration") or 0)
+        _vcurve = []
+        try:
+            import moodreel_editor as _mre_c
+            _vcurve = _mre_c.extract_motion_curve(src, duration=_vdur) or []
+        except Exception:
+            pass
         _beats = segment_beats_visual(src, _vdur)
+        # THE CUT SIGNAL. Without this the agent has boundaries but nothing to
+        # cut ON, and every no-speech run kept 100% of its source.
+        _vcuts = visual_cut_candidates(_vcurve, _vdur)
+        led["visual_cut_candidates"] = _vcuts
         if not _beats:
             # A clean zero is guilty. An empty beat list here is a broken
             # extractor, not a source with nothing in it — every video has
@@ -2827,6 +2910,16 @@ def edit(source_key: str, brief: str,
                "you would rule on spoken beats: a high-motion beat is a moment "
                "landing, a shot change is a boundary the edit should respect. "
                "Do NOT place captions — there is nothing to caption.\n\n")
+            + (("STILLNESS ALREADY DETECTED — these are the visual equivalent of "
+                "dead air: stretches where this clip is much quieter than it "
+                "typically is. They are CANDIDATES to remove, not instructions; "
+                "a held shot is sometimes the point, so rule on each.\n"
+                + "\n".join(f"  [{_v['t_start']:.2f}-{_v['t_end']:.2f}] "
+                             f"{_v['duration_s']:.1f}s, motion {_v['mean_motion']}"
+                             for _v in (led.get("visual_cut_candidates") or []))
+                + ("\n  (none — this clip is evenly paced; cut on shot changes "
+                   "or not at all)" if not led.get("visual_cut_candidates") else "")
+                + "\n\n") if _beat_source == "visual" else "")
             + f"DEAD AIR ALREADY DETECTED ({len(_gaps)} gaps >=0.35s) — you do not "
             f"need to compute these:\n{_gap_txt}\n\n"
             f"BEATS ({len(_beats)}) — rule on EVERY one with `beat_verdict`:\n"
