@@ -391,7 +391,7 @@ def derive_rubric(declared, mode="full_edit"):
             "vibe_directed": sorted(k for k, v in source.items() if v == "vibe")}
 
 
-# ── SCOPE IS ENFORCED, NOT SCORED ────────────────────────────────────────────
+# ── THE REQUEST IS THE SPEC ────────────────────────────────────────────
 # "Add zooms and light transitions" must produce zooms and transitions and touch
 # NOTHING else. score_targeted() measures that after the fact, which is the
 # wrong instrument for a promise: a number that says "you also changed 4 beats
@@ -408,7 +408,7 @@ def derive_rubric(declared, mode="full_edit"):
 # The agent reasons about the request; the harness holds it to what it said. A
 # brief-parser here would be a second, dumber authority silently overriding the
 # reasoning it was meant to support — the same trap derive_rubric avoids.
-SCOPE_MODES = ("full_edit", "targeted_change", "question")
+SPEC_MODES = ("full_edit", "targeted_change", "question")
 
 # The declare_placement `type` vocabulary is NOT the family vocabulary, and the
 # gap is where a scope check would silently pass everything: `emphasis` is the
@@ -420,11 +420,11 @@ PLACEMENT_FAMILY = {
 }
 # `caption` is scopeable but has no corpus rate — captions are the base layer,
 # not a decoration counted per 25s.
-SCOPE_FAMILIES = set(REFERENCE_PER_25S) | {"caption"}
+SPEC_FAMILIES = set(REFERENCE_PER_25S) | {"caption"}
 
 
-def normalize_scope(declared):
-    """Validate the agent's step-0 scope declaration. Raises on anything vague.
+def normalize_spec(declared):
+    """Validate the step-0 spec. Raises on anything too vague to check.
 
     A scope that cannot be checked is not a scope. `families` must name real
     families; `beats` may be None (meaning "wherever these families belong") but
@@ -432,8 +432,8 @@ def normalize_scope(declared):
     """
     d = dict(declared or {})
     mode = d.get("mode")
-    if mode not in SCOPE_MODES:
-        raise ValueError(f"scope.mode must be one of {SCOPE_MODES}, got {mode!r}")
+    if mode not in SPEC_MODES:
+        raise ValueError(f"scope.mode must be one of {SPEC_MODES}, got {mode!r}")
     if mode != "targeted_change":
         return {"mode": mode, "families": None, "beats": None}
     fams = d.get("families")
@@ -441,11 +441,11 @@ def normalize_scope(declared):
         raise ValueError(
             "a targeted_change must name the families it is allowed to touch — "
             "an unbounded 'targeted' change is a full edit wearing a smaller name")
-    unknown = sorted(set(fams) - SCOPE_FAMILIES)
+    unknown = sorted(set(fams) - SPEC_FAMILIES)
     if unknown:
         raise ValueError(
             f"scope names unknown famil(ies) {unknown}; valid: "
-            f"{sorted(SCOPE_FAMILIES)}")
+            f"{sorted(SPEC_FAMILIES)}")
     beats = d.get("beats")
     if beats is not None:
         if not isinstance(beats, list) or not all(
@@ -456,13 +456,13 @@ def normalize_scope(declared):
             "beats": sorted(set(beats)) if beats is not None else None}
 
 
-def enforce_scope(scope, placements):
+def enforce_spec(scope, placements):
     """Return (allowed, refused). A placement outside scope is REFUSED, not scored.
 
     Refusals carry the reason so the agent is told WHY on its next turn and can
     correct, rather than discovering at the end that its work was discarded.
     """
-    sc = normalize_scope(scope)
+    sc = normalize_spec(scope)
     if sc["mode"] != "targeted_change":
         return list(placements or []), []
     fams, beats = set(sc["families"]), sc["beats"]
@@ -483,9 +483,9 @@ def enforce_scope(scope, placements):
     return allowed, refused
 
 
-def scope_report(scope, placements, refused):
+def spec_report(scope, placements, refused):
     """What actually happened, in the shape the gate reads."""
-    sc = normalize_scope(scope)
+    sc = normalize_spec(scope)
     fams_built = sorted({(p or {}).get("family") for p in (placements or [])
                          if (p or {}).get("family")})
     out = {"mode": sc["mode"], "declared_families": sc["families"],
@@ -880,32 +880,38 @@ TOOLS = [
 # whole request with `tools.2: Input should be...`. pyflakes cannot see it;
 # only the wire format can. Failed in 5.4s for $0.00 with 3 ledger events.
 KNOWLEDGE_TOOLS = [{
-    "name": "set_scope",
+    "name": "set_spec",
     "description": (
-        "FIRST CALL OF EVERY RUN. Read the user's request and say what kind of "
-        "change it is and what you are allowed to touch.\n"
-        "  full_edit       — build the whole edit (the brief describes a vibe, "
-        "not a specific change)\n"
+        "FIRST CALL OF EVERY RUN. The user's request is the COMPLETE "
+        "SPECIFICATION of this job. Everything you place derives from it — "
+        "there is nothing else to satisfy.\n\n"
+        "Read the request and say what it specifies:\n"
+        "  full_edit       — the request describes a VIBE ('punchy and direct', "
+        "'clean and professional', 'like a movie trailer'). The vibe is the "
+        "spec: derive the whole edit from it, and derive your own density "
+        "targets from it rather than reaching for corpus averages.\n"
         "  targeted_change — the request names a specific change ('add zooms and "
         "light transitions', 'make the captions bigger', 'shorten the intro'). "
-        "List ONLY the families that change. Everything else stays untouched, "
-        "and the harness will REFUSE placements outside what you list here.\n"
-        "  question        — the user asked something; answer it, edit nothing.\n"
-        "Be honest about scope: naming extra families to give yourself room is "
-        "how a targeted change becomes an unrequested re-edit."),
+        "List the families it asks for. If they asked for zooms, the output has "
+        "zooms and is OTHERWISE UNCHANGED.\n"
+        "  question        — the user asked something. Answer it; edit nothing.\n\n"
+        "Name what the request asks for, not what you could add. Anything you "
+        "did not derive from the request was not asked for, and what is not "
+        "asked for is not built."),
     "input_schema": {
         "type": "object",
         "properties": {
             "mode": {"type": "string",
                      "enum": ["full_edit", "targeted_change", "question"]},
             "families": {"type": "array", "items": {"type": "string"},
-                         "description": "targeted_change ONLY: the families you "
-                                        "may touch. One of: text, card, cutaway, "
-                                        "sfx, zoom, transition, cut, caption"},
+                         "description": "targeted_change ONLY: the families the "
+                                        "request asks for. One of: text, card, "
+                                        "cutaway, sfx, zoom, transition, cut, "
+                                        "caption"},
             "beats": {"type": "array", "items": {"type": "integer"},
-                      "description": "optional: restrict to these beat indices"},
+                      "description": "optional: the beat indices the request names"},
             "why": {"type": "string",
-                    "description": "one sentence: what the request asks for"},
+                    "description": "one sentence: what the request specifies"},
         },
         "required": ["mode"]},
 }, {
@@ -1357,7 +1363,22 @@ def set_speech_check(res, verdict, **fields):
     bad = [k for k in fields if not isinstance(k, str)]
     if bad:
         raise TypeError(f"speech_check field names must be strings: {bad}")
-    res["speech_check"] = {"VERDICT": verdict, **fields}
+    # GUARANTEED KEYS, not just a guaranteed type. Typing VERDICT fixed the
+    # AttributeError and immediately exposed the next link: the printer does
+    # sc['output_words'], which exists only on the MEASURING path, so every
+    # no-speech run died with KeyError — again at the SUMMARY, again after the
+    # whole edit was paid for. A dict that is polymorphic in its KEYS is the
+    # same defect as one polymorphic in its TYPE; a consumer cannot sample its
+    # way to knowing which shape it holds.
+    #
+    # Every consumer-facing field exists on every path, None where it does not
+    # apply. None is readable; absent is an exception.
+    shape = {"VERDICT": verdict, "applicable": True,
+             "source_words": None, "output_words": None,
+             "source_words_absent_from_output": None, "kept_ratio": None,
+             "sample_missing": [], "note": ""}
+    shape.update(fields)
+    res["speech_check"] = shape
     return res["speech_check"]
 
 
@@ -1402,6 +1423,26 @@ def _assert_speech_check_writes_go_through_setter():
             f"a completed run.")
     if "def set_speech_check(" not in src:
         raise AssertionError("set_speech_check is gone — re-point this check")
+    # EVERY KEY A CONSUMER INDEXES MUST BE IN THE GUARANTEED SHAPE.
+    # Typing the value fixed AttributeError and revealed the next link: the
+    # printer indexed sc['output_words'], a key present only on the measuring
+    # path, so every no-speech run died with KeyError — at the summary, after a
+    # full paid-for edit. Polymorphic KEYS are the same defect as a polymorphic
+    # TYPE. This reads the promised keys out of the setter and the demanded keys
+    # out of the printer, and fails when the printer wants more than the setter
+    # promises.
+    _shape = re.search(r"shape = \{(.*?)\}\n", src, re.S)
+    if _shape:
+        promised = set(re.findall(r'"([a-zA-Z_]+)":', _shape.group(1)))
+        demanded = set(re.findall(r"sc\['([a-z_]+)'\]", src))
+        missing = sorted(demanded - promised)
+        if missing:
+            raise AssertionError(
+                f"the SPEECH CHECK printer indexes {missing}, which "
+                f"set_speech_check does not guarantee (it promises "
+                f"{sorted(promised)}). A key that exists on only one path is a "
+                f"KeyError at the summary, after the whole edit has been paid "
+                f"for — exactly the failure typing VERDICT was meant to end.")
     if src.count("set_speech_check(res,") < 3:
         raise AssertionError(
             f"only {src.count('set_speech_check(res,')} setter call(s) — the "
@@ -2801,12 +2842,12 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                     _v = ((out.get("speech_check") or {}).get("VERDICT")
                           or ("NO_OUTPUT" if out.get("exists") is False else "OK"))
                     _iv.append("OK" if str(_v).startswith("OK") else str(_v)[:40])
-            elif tu.name == "set_scope":
+            elif tu.name == "set_spec":
                 try:
-                    _sc = normalize_scope(dict(tu.input or {}))
+                    _sc = normalize_spec(dict(tu.input or {}))
                     _sc["why"] = str((tu.input or {}).get("why") or "")[:200]
-                    led["scope"] = _sc
-                    out = {"scope_set": True, **_sc}
+                    led["spec"] = _sc
+                    out = {"spec_set": True, **_sc}
                 except ValueError as _se:
                     # Handed BACK to the agent, not raised: a vague scope is
                     # something it can fix on the next turn.
@@ -2814,39 +2855,42 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             elif tu.name == "declare_placement":
                 _p = dict(tu.input or {})
                 _fam = PLACEMENT_FAMILY.get(_p.get("type"))
-                _sc = led.get("scope")
-                # ENFORCED, NOT SCORED. Out-of-scope work is REFUSED here, with
-                # the reason, so the agent corrects on its next turn instead of
-                # learning at the end that its work was discarded. Scoring this
-                # afterwards would let "add zooms" quietly ship four new
-                # overlays — which looks like a good edit to anyone not reading
-                # the manifest against the request.
+                _sc = led.get("spec")
+                # NOT ASKED FOR, NOT BUILT — and enforced here rather than
+                # scored afterwards. "Add zooms" that also ships four new
+                # overlays looks like a good edit to anyone not reading the
+                # manifest against the request, so a number reported at the end
+                # is the wrong instrument: the user asked for a bounded change,
+                # not a grade. Telling the agent NOW, with the reason, lets it
+                # correct on its next turn instead of learning at the end that
+                # its work was discarded.
                 if _sc and _sc.get("mode") == "targeted_change":
                     _allowed = set(_sc.get("families") or ())
                     _bts = _sc.get("beats")
                     if _fam not in _allowed:
-                        led.setdefault("scope_refusals", []).append(
+                        led.setdefault("not_asked_for", []).append(
                             {"type": _p.get("type"), "family": _fam,
-                             "why": "family out of scope"})
-                        out = {"refused": True,
-                               "why": (f"'{_p.get('type')}' is the {_fam!r} family, "
-                                       f"which is outside this run's declared scope "
-                                       f"{sorted(_allowed)}. The request did not ask "
-                                       f"for it. Do not place it."),
-                               "declared_scope": sorted(_allowed)}
+                             "why": "not asked for"})
+                        out = {"not_built": True,
+                               "why": (f"The request did not ask for {_fam!r}. It "
+                                       f"specifies {sorted(_allowed)}. What is not "
+                                       f"asked for is not built — leave the rest of "
+                                       f"the video unchanged."),
+                               "the_request_specifies": sorted(_allowed)}
                         results.append({"type": "tool_result",
                                         "tool_use_id": tu.id,
                                         "content": json.dumps(out)})
                         continue
                     if _bts is not None and _p.get("beat") is not None \
                             and _p.get("beat") not in _bts:
-                        led.setdefault("scope_refusals", []).append(
+                        led.setdefault("not_asked_for", []).append(
                             {"type": _p.get("type"), "beat": _p.get("beat"),
-                             "why": "beat out of scope"})
-                        out = {"refused": True,
-                               "why": (f"beat {_p.get('beat')} is outside the "
-                                       f"declared beats {_bts}"),
-                               "declared_beats": _bts}
+                             "why": "beat not asked for"})
+                        out = {"not_built": True,
+                               "why": (f"The request does not name beat "
+                                       f"{_p.get('beat')}; it names {_bts}. Leave "
+                                       f"the other beats unchanged."),
+                               "the_request_specifies_beats": _bts}
                         results.append({"type": "tool_result",
                                         "tool_use_id": tu.id,
                                         "content": json.dumps(out)})
@@ -3479,8 +3523,11 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"{f['vcodec']}  audio={f['has_audio']}  {f['size_mb']}MB")
         sc = f.get("speech_check")
         if isinstance(sc, dict):
-            print(f"  SPEECH CHECK    : {sc['output_words']} words in output vs "
-                  f"{sc['source_words']} in source (kept_ratio {sc['kept_ratio']})")
+            if sc.get("output_words") is None:
+                print(f"  SPEECH CHECK    : {sc.get('VERDICT')}")
+            else:
+                print(f"  SPEECH CHECK    : {sc['output_words']} words in output vs "
+                      f"{sc['source_words']} in source (kept_ratio {sc['kept_ratio']})")
             if sc["sample_missing"]:
                 print(f"    absent sample : {' '.join(sc['sample_missing'][:14])}")
         else:
