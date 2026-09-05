@@ -1895,6 +1895,18 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _ss:
         print(f"    skill searches: {len(_ss)} -> "
               + ", ".join(f"{s['q']}({s['hits']})" for s in _ss[:8]))
+    # THE VERDICTS, PRINTED. The substantiveness meter existed in the ledger and
+    # nowhere else, so the one question the C8 gate was built to answer — "is it
+    # being answered or just cleared" — was unreadable from a run. A meter you
+    # cannot see is the same as no meter.
+    _vq = r["ledger"].get("verdict_quality")
+    if _vq:
+        print(f"  C8 VERDICTS     : {_vq['n']} ruled, {_vq['distinct_whys']} distinct "
+              f"rationale(s) (ratio {_vq['distinct_ratio']}), "
+              f"{_vq['mentions_own_beat']} mention their own beat, "
+              f"median {_vq['median_why_chars']} chars  {_vq['decisions']}")
+        for _v in (_vq.get("sample") or []):
+            print(f"     t={_v['t']}  {_v['d']}  {_v['why']}")
     _gb = r["ledger"].get("skill_gate_blocks", 0)
     print(f"    C7 gate       : {_gb} render(s) blocked before first search"
           + ("  (gate did the work)" if _gb else "  (searched unprompted)"))
