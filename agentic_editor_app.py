@@ -387,7 +387,7 @@ This is the inventory the production pipeline ships, not a description of one.
       every run so far has placed ZERO. /assets/inventory.json carries
       `sfx_catalogue`: 15 real files, each with a ROLE (the moment it belongs
       on), what it FITS, what it FIGHTS, its duration and its attack offset.
-      Pick by ROLE, not by name.
+      Pick by ROLE from the TABLE BELOW — do not shell out to parse the JSON.
       WHERE THEY LAND, from the 153-beat corpus: 64% of all SFX sit on a HOOK
       or a CLOSE. If your edit has a hook and a close and no sound, that is the
       gap — not a style choice.
@@ -1437,26 +1437,55 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         # shape. The agent rules a beat `text` and supplies its copy in the
         # ruling; everything mechanical — which beats, what timing, output-clock
         # mapping — is computed here.
-        _tv = [v for v in (led.get("beat_verdicts") or [])
-               if "text" in (v.get("treatment") or []) and v.get("text_content")]
+        # EVERY RULING IS ACCOUNTED FOR. Both skip paths below used to `continue`
+        # silently and `overlays_derived` was recorded and never printed, so a
+        # run could derive ZERO and the only trace was a downstream
+        # ruled_but_underbuilt — which is how AC's 16->1 cost a diff to
+        # attribute and still could not be attributed. Same lesson this lane has
+        # paid for four times: instrument the SEAM, not just the outcome.
         _by_i = {b["i"]: b for b in (_beats or [])}
-        _derived, _cut_out, _no_copy = [], 0, 0
-        for v in _tv:
-            b = _by_i.get(v.get("beat"))
+        _spans = led.get("keep_spans") or []
+        _acct = {"ruled": 0, "derived": 0, "skipped_cut": 0,
+                 "skipped_no_beat": 0, "skipped_no_copy": 0}
+        _derived, _skipped = [], []
+        for v in (led.get("beat_verdicts") or []):
+            if "text" not in (v.get("treatment") or []):
+                continue
+            _acct["ruled"] += 1
+            bi = v.get("beat")
+            if not v.get("text_content"):
+                _acct["skipped_no_copy"] += 1
+                _skipped.append((bi, "no_copy")); continue
+            b = _by_i.get(bi)
             if not b:
-                continue
-            t0 = src_to_out(b["t_start"], led.get("keep_spans") or [])
+                _acct["skipped_no_beat"] += 1
+                _skipped.append((bi, "no_beat")); continue
+            # NO SPANS = NOTHING CUT. src_to_out over an empty span list returns
+            # None for everything, which would silently drop every overlay if
+            # build_cut had not run yet. An uncut timeline is the identity map.
+            t0 = src_to_out(b["t_start"], _spans) if _spans else b["t_start"]
             if t0 is None:
-                _cut_out += 1          # the beat was cut; no overlay belongs
-                continue
-            t1 = src_to_out(b["t_end"], led.get("keep_spans") or [])
+                _acct["skipped_cut"] += 1
+                _skipped.append((bi, "cut")); continue
+            t1 = (src_to_out(b["t_end"], _spans) if _spans else b["t_end"])
             if t1 is None or t1 <= t0:
                 t1 = t0 + 2.0
+            _acct["derived"] += 1
             _derived.append({"text": v["text_content"], "t_start": t0,
                              "t_end": min(t1, t0 + 4.0), "position": "top"})
-        _no_copy = sum(1 for v in (led.get("beat_verdicts") or [])
-                       if "text" in (v.get("treatment") or [])
-                       and not v.get("text_content"))
+        led["overlay_accounting"] = _acct
+        led["overlay_skips"] = _skipped[:25]
+        _no_copy = _acct["skipped_no_copy"]
+        # Any skip is a NAMED failure. skipped_cut is legitimate (the beat is
+        # gone); the other two are bugs and must not read as taste.
+        if _acct["skipped_no_beat"]:
+            fail("overlay_beat_index_unknown",
+                 f"{_acct['skipped_no_beat']} text ruling(s) name a beat index "
+                 f"that does not exist: {[b for b, r in _skipped if r=='no_beat']}")
+        if _acct["skipped_cut"]:
+            fail("overlay_on_cut_beat",
+                 f"{_acct['skipped_cut']} text ruling(s) are on beats removed by "
+                 f"the cut — no overlay belongs there, but the ruling was made")
         # Anything the caller passed is additive — a hand-authored overlay that
         # is not a beat ruling still lands.
         _seen_t = {round(d["t_start"], 1) for d in _derived}
@@ -1468,6 +1497,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 pass
         items = _derived
         led["overlays_derived"] = len(_derived)
+        _acct["passed_in"] = len(items or [])
         if _no_copy:
             fail("text_ruling_without_copy",
                  f"{_no_copy} beat(s) ruled 'text' carry no text_content, so no "
@@ -1785,7 +1815,34 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     # cache_control on the system block: run 2 reported cache_read 0 and cost
     # $0.5351 against a $0.10 law. The system text is identical across every turn
     # of every job, so it is the one block that can actually be reused.
-    sys_text = SYSTEM + (_KNOWLEDGE_SYSTEM if use_knowledge else "")
+    # THE SFX TABLE, IN THE PROMPT. Run AC spent FIVE shell commands (6-10)
+    # writing ad-hoc python to read sfx_catalogue out of /assets/inventory.json —
+    # a type() probe, a pprint, and the TypeError: unhashable type: 'slice' that
+    # cost a turn. Fifteen rows should not require a program to look at, and the
+    # harness is supposed to be doing the mechanics.
+    # Built at RUNTIME because the inventory is generated deploy-side and the
+    # container only has the JSON. ~490 tok into the CACHED prefix, written
+    # once, against five shell round-trips whose output lands in the expensive
+    # tail on every turn that follows.
+    _sfx_table = ""
+    try:
+        _inv = json.load(open("/assets/inventory.json"))
+        _cat = _inv.get("sfx_catalogue") or {}
+        _att = (_inv.get("sfx") or {}).get("attack_ms") or {}
+        _rows = ["", "SFX CATALOGUE — pick by ROLE. `ms` is how many ms EARLIER "
+                 "to start the file so its PEAK lands on the word.",
+                 f"{'file':<24}{'ms':>5}  role"]
+        for _n in sorted(_cat):
+            _r = _cat[_n]
+            _f = _r.get("file") or "(no file — the signed bare choice)"
+            _rows.append(f"{_f:<24}{_att.get(_n, 0):>5}  {(_r.get('role') or '')[:88]}")
+        _sfx_table = "\n".join(_rows) + "\n"
+    except Exception:
+        _sfx_table = ""      # a missing table must never fail a run
+    led["sfx_table_chars"] = len(_sfx_table)
+
+    sys_text = (SYSTEM + _sfx_table
+                + (_KNOWLEDGE_SYSTEM if use_knowledge else ""))
     sys_blocks = [{"type": "text", "text": sys_text,
                    "cache_control": {"type": "ephemeral"}}]
     tools = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
@@ -2616,6 +2673,13 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     print(f"  TURN BUDGET     : used {r['ledger']['iters']} of {r['ledger'].get('max_iters','?')}"
           f"   renders: shell {_fm.get('remotion_renders',0)} + reel {_fm.get('reel_renders',0)}"
           f" = {_fm.get('renders_total',0)}")
+    _oa = r["ledger"].get("overlay_accounting")
+    if _oa:
+        print(f"  OVERLAY DERIVE  : ruled {_oa.get('ruled')} -> derived "
+              f"{_oa.get('derived')}   skipped: cut {_oa.get('skipped_cut')}, "
+              f"no_beat {_oa.get('skipped_no_beat')}, "
+              f"no_copy {_oa.get('skipped_no_copy')}   "
+              f"(+{_oa.get('passed_in', 0)} passed in)")
     _rvb = r["ledger"].get("ruled_vs_built") or {}
     if _rvb:
         print("  RULED vs BUILT  : " + "  ".join(
