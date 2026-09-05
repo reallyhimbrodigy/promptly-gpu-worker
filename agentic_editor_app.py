@@ -344,6 +344,21 @@ THE REAL ASSET LIBRARY IS MOUNTED AT /assets — A1 THROUGH A3
 This is the inventory the production pipeline ships, not a description of one.
 
 
+  F1. FOUR FAMILIES, FOUR MECHANISMS — none of them need inventing:
+        card    -> render_components (the reel), then composite
+        text    -> build_overlays
+        cutaway -> place_cutaway (fetches b-roll, returns the command)
+        sfx     -> ffmpeg, one audio leg. NO TOOL NEEDED:
+                   ffmpeg -y -i out.mp4 -i /assets/sounds/<file> \
+                     -filter_complex "[1:a]adelay=D|D[s];[0:a][s]amix=inputs=2:duration=first" \
+                     -c:v copy final.mp4
+                   D = (beat_time - attack_ms/1000) * 1000, in ms, clamped at 0.
+        zoom    -> ffmpeg on the FOOTAGE, not a component. The catalogue's zoom
+                   family (SmoothPush, StepZoom, DepthPull...) is a camera-move
+                   subsystem, not an MG type — do not look for it in
+                   `remotion compositions`. A punch-in is:
+                     scale=1080*1.08:-1,crop=1080:1920 over the beat's span.
+
   S1. SOUND IS A FAMILY YOU HAVE NEVER USED. Corpus rate is 0.82 per 25s and
       every run so far has placed ZERO. /assets/inventory.json carries
       `sfx_catalogue`: 15 real files, each with a ROLE (the moment it belongs
@@ -596,6 +611,24 @@ KNOWLEDGE_TOOLS = [{
                              "required": ["type", "t_start"]}}},
                      "required": ["items"]},
 }, {
+    "name": "place_cutaway",
+    "description": (
+        "Fetch a b-roll clip for a beat and get the command that composites it "
+        "over the speaker. Give the KEYWORD of what should be SHOWN — a "
+        "concrete noun, not the sentence. Video only; the speaker's audio keeps "
+        "running underneath, which is what a cutaway is. 61% of corpus cutaways "
+        "sit on `evidence` beats: a claim spoken, the proof shown. If nothing "
+        "matches it says so — take the honest empty rather than forcing a bad "
+        "clip."),
+    "input_schema": {"type": "object",
+                     "properties": {
+                         "keyword": {"type": "string"},
+                         "t_start": {"type": "number",
+                                     "description": "OUTPUT seconds"},
+                         "duration_s": {"type": "number"},
+                         "beat": {"type": "integer"}},
+                     "required": ["keyword", "t_start"]},
+}, {
     "name": "rule_all_beats",
     "description": (
         "Rule on EVERY beat in ONE call. Pass the complete list — one entry per "
@@ -609,8 +642,14 @@ KNOWLEDGE_TOOLS = [{
                          "verdicts": {"type": "array", "items": {"type": "object",
                              "properties": {
                                  "beat": {"type": "integer"},
-                                 "treatment": {"type": "string",
-                                               "enum": ["card", "text", "none"]},
+                                 "treatment": {
+                                     "type": "array",
+                                     "description": "one or more families for "
+                                                    "this beat; [] or ['none'] "
+                                                    "is a real answer",
+                                     "items": {"type": "string",
+                                               "enum": ["card", "text", "sfx",
+                                                        "zoom", "cutaway", "none"]}},
                                  "cut": {"type": "string", "enum": ["keep", "cut"]},
                                  "why": {"type": "string"}},
                              "required": ["beat", "treatment", "cut", "why"]}}},
@@ -805,7 +844,7 @@ _REQUIRED_CONSTRAINTS = [
     # asset library that reported mounted_unread on every run; E4 was a
     # tombstone for a retired rule. ~4,200 chars describing paths the agent no
     # longer takes, billed on every turn of every render.
-    "C8.", "C9.", "S1.", "E1.", "E2.", "E3.", "K1.", "K2.", "K3.", "K4."]
+    "C8.", "C9.", "F1.", "S1.", "E1.", "E2.", "E3.", "K1.", "K2.", "K3.", "K4."]
 # Every one of these was tried against this image and FAILED. If a future edit
 # reintroduces them the agent inherits 31 failed attempts again.
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
@@ -1349,6 +1388,85 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                     "— do not shift anything by hand.",
         }
 
+    # ── CUTAWAY: the largest family, and nothing could place one ────────────
+    # 72 corpus placements (4.22/25s, the biggest by count) and ZERO on every
+    # run ever measured. Not a source constraint — the finance source has five
+    # worked examples, which is exactly the `evidence` beat 61% of corpus
+    # cutaways land on. The gap was that this agent's tool surface had no way to
+    # fetch or place b-roll at all.
+    led["cutaways_fetched"] = 0
+
+    def place_cutaway(keyword, t_start, duration_s=2.5, beat=None):
+        key = os.environ.get("PEXELS_API_KEY")
+        if not key:
+            fail("pexels_key_missing", "PEXELS_API_KEY not in the mounted secret")
+            return {"error": "PEXELS_API_KEY is not set in this container",
+                    "note": "cutaways cannot be fetched; rule the beat 'none' "
+                            "and say so rather than pretending"}
+        kw = str(keyword or "").strip()
+        if not kw:
+            return {"error": "keyword is required — what should be SHOWN"}
+        try:
+            t0 = float(t_start); dur = max(0.5, float(duration_s or 2.5))
+        except Exception:
+            return {"error": "t_start/duration_s must be numbers"}
+        import urllib.parse as _up
+        import urllib.request as _ur
+        q = _up.urlencode({"query": kw, "per_page": 15,
+                           "orientation": "portrait", "size": "large"})
+        req = _ur.Request(f"https://api.pexels.com/videos/search?{q}",
+                          headers={"Authorization": key})
+        try:
+            with _ur.urlopen(req, timeout=25) as fh:
+                vids = (json.loads(fh.read().decode()) or {}).get("videos") or []
+        except Exception as e:
+            fail("pexels_search_failed", f"{kw}: {e}")
+            return {"error": f"pexels search failed: {e}"}
+        if not vids:
+            # HONEST EMPTY. A thin keyword returning nothing is a real answer —
+            # the product's own law is an honest fallback, never a bad cutaway.
+            return {"ok": False, "reason": "no_results", "keyword": kw,
+                    "note": "no clip matched. Pick a more concrete noun or rule "
+                            "the beat without a cutaway — do not force one."}
+        # Portrait first, then nearest to 1080 wide.
+        best, bestfile = None, None
+        for v in vids:
+            for f in (v.get("video_files") or []):
+                if (f.get("height") or 0) < (f.get("width") or 0):
+                    continue                      # landscape, wrong shape
+                if bestfile is None or abs((f.get("width") or 0) - 1080) < \
+                        abs((bestfile.get("width") or 0) - 1080):
+                    best, bestfile = v, f
+        if not bestfile:
+            return {"ok": False, "reason": "no_portrait_file", "keyword": kw}
+        n = led["cutaways_fetched"]
+        dst = f"/work/cutaway{n}.mp4"
+        try:
+            with _ur.urlopen(bestfile["link"], timeout=60) as r_, open(dst, "wb") as w_:
+                w_.write(r_.read())
+        except Exception as e:
+            fail("pexels_download_failed", f"{kw}: {e}")
+            return {"error": f"download failed: {e}"}
+        led["cutaways_fetched"] += 1
+        led.setdefault("cutaway_meta", []).append(
+            {"beat": beat, "keyword": kw, "t_start": t0, "duration_s": dur,
+             "file": dst, "pexels_id": best.get("id"),
+             "credit": (best.get("user") or {}).get("name")})
+        return {
+            "ok": True, "file": dst, "keyword": kw,
+            "pexels_id": best.get("id"),
+            "credit": (best.get("user") or {}).get("name"),
+            "src_wh": [bestfile.get("width"), bestfile.get("height")],
+            "run_this": (
+                f"cd /work && ffmpeg -y -i out_base.mp4 -i {dst} -filter_complex "
+                f"\"[1:v]scale=1080:1920:force_original_aspect_ratio=increase,"
+                f"crop=1080:1920,setpts=PTS-STARTPTS+{t0}/TB[cw];"
+                f"[0:v][cw]overlay=0:0:enable='between(t,{t0},"
+                f"{round(t0 + dur, 3)})'\" -c:a copy out.mp4"),
+            "note": "Video only — the speaker's AUDIO keeps running underneath, "
+                    "which is what a cutaway is. Do not touch the audio leg.",
+        }
+
     client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     tl = "\n".join(f"[{w['s']:.2f}-{w['e']:.2f}] {w['w']}" for w in words)
     meta = probe(src)
@@ -1685,6 +1803,11 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                        "of": len(_number_beats)}
             elif tu.name == "render_components":
                 out = render_components(tu.input.get("items") or [])
+            elif tu.name == "place_cutaway":
+                out = place_cutaway(tu.input.get("keyword"),
+                                    tu.input.get("t_start"),
+                                    tu.input.get("duration_s") or 2.5,
+                                    tu.input.get("beat"))
             elif tu.name == "rule_all_beats":
                 _incoming = tu.input.get("verdicts") or []
                 _seen = {v.get("beat") for v in led["beat_verdicts"]}
@@ -1942,8 +2065,14 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             "distinct_ratio": round(_uniq / max(len(_vs), 1), 2),
             "mentions_own_beat": _refs,
             "median_why_chars": sorted(len(w) for w in _whys)[len(_whys) // 2],
-            "treatments": {t: sum(1 for v in _vs if v.get("treatment") == t)
-                           for t in ("card", "text", "none")},
+            # A beat can carry MORE THAN ONE family — a corpus hook often has
+            # text AND a hit. Counting one treatment per beat made four of the
+            # seven families unrepresentable, which is why they read zero on
+            # every run: the decision surface had no slot for them.
+            "treatments": {t: sum(1 for v in _vs
+                                  if t in (v.get("treatment") or []))
+                           for t in ("card", "text", "sfx", "zoom",
+                                     "cutaway", "none")},
             # SELF-REPORT, kept for comparison only.
             "cuts_reported": {c: sum(1 for v in _vs if v.get("cut") == c)
                               for c in ("keep", "cut")},
