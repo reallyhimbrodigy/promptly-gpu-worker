@@ -410,6 +410,18 @@ def derive_rubric(declared, mode="full_edit"):
 # reasoning it was meant to support — the same trap derive_rubric avoids.
 SCOPE_MODES = ("full_edit", "targeted_change", "question")
 
+# The declare_placement `type` vocabulary is NOT the family vocabulary, and the
+# gap is where a scope check would silently pass everything: `emphasis` is the
+# zoom family and `overlay_text` is text. Declared once, here, so the scope
+# check and the family-mix report cannot disagree about what a placement IS.
+PLACEMENT_FAMILY = {
+    "overlay_text": "text", "card": "card", "cutaway": "cutaway",
+    "sfx": "sfx", "emphasis": "zoom", "caption_track": "caption",
+}
+# `caption` is scopeable but has no corpus rate — captions are the base layer,
+# not a decoration counted per 25s.
+SCOPE_FAMILIES = set(REFERENCE_PER_25S) | {"caption"}
+
 
 def normalize_scope(declared):
     """Validate the agent's step-0 scope declaration. Raises on anything vague.
@@ -429,11 +441,11 @@ def normalize_scope(declared):
         raise ValueError(
             "a targeted_change must name the families it is allowed to touch — "
             "an unbounded 'targeted' change is a full edit wearing a smaller name")
-    unknown = sorted(set(fams) - set(REFERENCE_PER_25S))
+    unknown = sorted(set(fams) - SCOPE_FAMILIES)
     if unknown:
         raise ValueError(
             f"scope names unknown famil(ies) {unknown}; valid: "
-            f"{sorted(REFERENCE_PER_25S)}")
+            f"{sorted(SCOPE_FAMILIES)}")
     beats = d.get("beats")
     if beats is not None:
         if not isinstance(beats, list) or not all(
@@ -868,6 +880,35 @@ TOOLS = [
 # whole request with `tools.2: Input should be...`. pyflakes cannot see it;
 # only the wire format can. Failed in 5.4s for $0.00 with 3 ledger events.
 KNOWLEDGE_TOOLS = [{
+    "name": "set_scope",
+    "description": (
+        "FIRST CALL OF EVERY RUN. Read the user's request and say what kind of "
+        "change it is and what you are allowed to touch.\n"
+        "  full_edit       — build the whole edit (the brief describes a vibe, "
+        "not a specific change)\n"
+        "  targeted_change — the request names a specific change ('add zooms and "
+        "light transitions', 'make the captions bigger', 'shorten the intro'). "
+        "List ONLY the families that change. Everything else stays untouched, "
+        "and the harness will REFUSE placements outside what you list here.\n"
+        "  question        — the user asked something; answer it, edit nothing.\n"
+        "Be honest about scope: naming extra families to give yourself room is "
+        "how a targeted change becomes an unrequested re-edit."),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "mode": {"type": "string",
+                     "enum": ["full_edit", "targeted_change", "question"]},
+            "families": {"type": "array", "items": {"type": "string"},
+                         "description": "targeted_change ONLY: the families you "
+                                        "may touch. One of: text, card, cutaway, "
+                                        "sfx, zoom, transition, cut, caption"},
+            "beats": {"type": "array", "items": {"type": "integer"},
+                      "description": "optional: restrict to these beat indices"},
+            "why": {"type": "string",
+                    "description": "one sentence: what the request asks for"},
+        },
+        "required": ["mode"]},
+}, {
     "name": "declare_placement",
     "description": (
         "Declare a graphic you have placed. Call this ONCE per placement, right "
@@ -2760,8 +2801,57 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                     _v = ((out.get("speech_check") or {}).get("VERDICT")
                           or ("NO_OUTPUT" if out.get("exists") is False else "OK"))
                     _iv.append("OK" if str(_v).startswith("OK") else str(_v)[:40])
+            elif tu.name == "set_scope":
+                try:
+                    _sc = normalize_scope(dict(tu.input or {}))
+                    _sc["why"] = str((tu.input or {}).get("why") or "")[:200]
+                    led["scope"] = _sc
+                    out = {"scope_set": True, **_sc}
+                except ValueError as _se:
+                    # Handed BACK to the agent, not raised: a vague scope is
+                    # something it can fix on the next turn.
+                    out = {"error": str(_se)}
             elif tu.name == "declare_placement":
                 _p = dict(tu.input or {})
+                _fam = PLACEMENT_FAMILY.get(_p.get("type"))
+                _sc = led.get("scope")
+                # ENFORCED, NOT SCORED. Out-of-scope work is REFUSED here, with
+                # the reason, so the agent corrects on its next turn instead of
+                # learning at the end that its work was discarded. Scoring this
+                # afterwards would let "add zooms" quietly ship four new
+                # overlays — which looks like a good edit to anyone not reading
+                # the manifest against the request.
+                if _sc and _sc.get("mode") == "targeted_change":
+                    _allowed = set(_sc.get("families") or ())
+                    _bts = _sc.get("beats")
+                    if _fam not in _allowed:
+                        led.setdefault("scope_refusals", []).append(
+                            {"type": _p.get("type"), "family": _fam,
+                             "why": "family out of scope"})
+                        out = {"refused": True,
+                               "why": (f"'{_p.get('type')}' is the {_fam!r} family, "
+                                       f"which is outside this run's declared scope "
+                                       f"{sorted(_allowed)}. The request did not ask "
+                                       f"for it. Do not place it."),
+                               "declared_scope": sorted(_allowed)}
+                        results.append({"type": "tool_result",
+                                        "tool_use_id": tu.id,
+                                        "content": json.dumps(out)})
+                        continue
+                    if _bts is not None and _p.get("beat") is not None \
+                            and _p.get("beat") not in _bts:
+                        led.setdefault("scope_refusals", []).append(
+                            {"type": _p.get("type"), "beat": _p.get("beat"),
+                             "why": "beat out of scope"})
+                        out = {"refused": True,
+                               "why": (f"beat {_p.get('beat')} is outside the "
+                                       f"declared beats {_bts}"),
+                               "declared_beats": _bts}
+                        results.append({"type": "tool_result",
+                                        "tool_use_id": tu.id,
+                                        "content": json.dumps(out)})
+                        continue
+                _p["family"] = _fam
                 led.setdefault("placements", []).append(_p)
                 out = {"recorded": True, "total": len(led["placements"])}
             elif tu.name == "read_knowledge":
