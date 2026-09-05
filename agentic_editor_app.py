@@ -204,6 +204,117 @@ REFERENCE_BEAT_FIT = {
 }
 
 
+# ── RELIABILITY AS A CONTRACT, NOT A LANE ────────────────────────────────────
+# MEASURED 2026-09-05 over 14d (n=1,912 jobs) rather than recalled. Our-end
+# failure is 7.0% of jobs / ~83 users once the client-side upload seam (11.3%,
+# 130 users, Frontend's) is excluded. Two of the remembered classes are already
+# structurally dead and the numbers say so:
+#   - projection failure (render OK, completed_at NULL): 0 of 1,522 completions
+#   - not_talking_head false rejection: already a ROUTE in the worker and a
+#     non-blocking warning in the client (99.3% of 7,416 events proceed)
+# The class that is NOT dead is the one with no name: "Something went wrong.
+# Please try again." — 21 jobs / 10 users, a bucket with no diagnosis in it.
+#
+# THE DECLARED STAGE LIST. This is the spine of "nothing fails silently": every
+# stage must REPORT, and a stage that does not report is itself a failure. The
+# old pipeline's worst defects were absences — an unmounted module, an unset
+# flag, an unallowlisted event — and every one of them presented as silence
+# while every gate stayed green. Silence is the thing being made impossible
+# here, so the check is on the ABSENCE of a record, never on its contents.
+#
+# `fallback` names what happens when the stage fails. `degrades` marks the
+# stages where a fallback ships the user a WORSE video rather than no video —
+# the standing rule is that a user's video ships degraded before it fails
+# outright. A stage with fallback=None is one where no degraded output exists
+# (there is no edit without a source), and that is a deliberate, named choice
+# rather than an oversight.
+PIPELINE_STAGES = (
+    ("download",   {"fallback": "s3 re-fetch, then cache bypass", "degrades": False}),
+    ("transcribe", {"fallback": "alternate provider, then VISUAL beats", "degrades": True}),
+    ("beats",      {"fallback": "even pacing from duration", "degrades": True}),
+    ("agent",      {"fallback": "mechanical cut from dead air only", "degrades": True}),
+    ("render",     {"fallback": "composite WITHOUT components, and say so", "degrades": True}),
+    ("verify",     {"fallback": None, "degrades": False}),
+    ("upload",     {"fallback": "re-sign and retry once", "degrades": False}),
+)
+STAGE_NAMES = tuple(n for n, _ in PIPELINE_STAGES)
+
+
+class stage:
+    """Context manager that FORCES a stage to leave a record.
+
+    Used as `with stage(led, "render"):`. On exit it appends a record whether
+    the body succeeded, fell back, or raised — so the only way to have no record
+    is to never enter the stage at all, which `assert_stages_complete` then
+    catches. That is the whole design: absence is detectable because presence is
+    automatic.
+
+    A raising body is recorded as FAILED and the exception PROPAGATES. This is
+    not a swallow-and-continue wrapper; the caller decides whether a fallback
+    exists. Recording is orthogonal to handling, and conflating them is how the
+    old pipeline got failures that were logged and then ignored.
+    """
+
+    def __init__(self, led, name, note=""):
+        if name not in STAGE_NAMES:
+            raise ValueError(
+                f"stage {name!r} is not declared in PIPELINE_STAGES "
+                f"{STAGE_NAMES} — declare it or the reliability gate cannot "
+                f"know it was supposed to run.")
+        self.led, self.name, self.note = led, name, note
+        led.setdefault("stages", {})
+
+    def __enter__(self):
+        self.t = time.time()
+        return self
+
+    def fallback(self, why):
+        """Mark that this stage produced DEGRADED output rather than failing."""
+        self._fb = str(why)[:200]
+
+    def __exit__(self, et, ev, tb):
+        rec = {"wall_s": round(time.time() - self.t, 2), "note": self.note}
+        fb = getattr(self, "_fb", None)
+        if et is not None:
+            rec["status"] = "failed"
+            rec["error"] = f"{et.__name__}: {str(ev)[:300]}"
+        elif fb:
+            rec["status"] = "fallback"
+            rec["fallback"] = fb
+        else:
+            rec["status"] = "ok"
+        self.led["stages"][self.name] = rec
+        return False          # never swallow
+
+
+def assert_stages_complete(led, expected=None, strict=True):
+    """A STAGE THAT DID NOT REPORT IS A FAILURE. The whole point of the spine.
+
+    Returns the reliability summary and, when strict, raises on a silent stage.
+    `expected` lets a run declare a shorter path (a question needs no render)
+    without weakening the check for the stages it DOES claim to run.
+    """
+    exp = tuple(expected or STAGE_NAMES)
+    bad = [n for n in exp if n not in STAGE_NAMES]
+    if bad:
+        raise ValueError(f"undeclared stage(s) in expected: {bad}")
+    got = dict(led.get("stages") or {})
+    silent = [n for n in exp if n not in got]
+    failed = sorted(n for n, r in got.items() if r.get("status") == "failed")
+    degraded = sorted(n for n, r in got.items() if r.get("status") == "fallback")
+    summary = {"expected": list(exp), "reported": sorted(got),
+               "silent": silent, "failed": failed, "degraded": degraded,
+               "ok": not silent and not failed}
+    led["reliability"] = summary
+    if strict and silent:
+        raise AssertionError(
+            f"SILENT STAGE(S) {silent} — these were expected to run and left no "
+            f"record. A stage that does not report is a failure: this is exactly "
+            f"the shape every silent defect took (unmounted module, unset flag, "
+            f"unallowlisted event), and it must never present as success.")
+    return summary
+
+
 # ── THE VIBE IS THE FIRST INPUT, NOT A STYLE HINT ────────────────────────────
 # Until now every run was scored against REFERENCE_PER_25S — the corpus rates —
 # no matter what the user asked for. That makes the corpus the TARGET, which is
