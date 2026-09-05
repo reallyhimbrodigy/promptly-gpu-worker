@@ -294,7 +294,10 @@ Violating any of them produces a BROKEN video that still exits 0.
       history by a verdict every turn, which is billed again on every turn
       after it. Same decisions, one turn.
       Each entry carries:
-        treatment — "card" | "text" | "none"
+        treatment — a LIST, and a beat may carry more than one:
+                    ["card"] ["text"] ["sfx"] ["zoom"] ["cutaway"] ["none"]
+                    or combinations — a corpus hook routinely carries BOTH
+                    text and a sound hit. F1 above maps each to its mechanism.
         cut       — "keep" | "cut"
         why       — about THAT beat's content
       "none" and "keep" are legitimate answers. Not deciding is not, and DONE
@@ -632,7 +635,8 @@ KNOWLEDGE_TOOLS = [{
     "name": "rule_all_beats",
     "description": (
         "Rule on EVERY beat in ONE call. Pass the complete list — one entry per "
-        "beat in your brief, each with treatment ('card'|'text'|'none'), cut "
+        "beat in your brief, each with treatment (a LIST from card|text|sfx|"
+        "zoom|cutaway|none — more than one allowed), cut "
         "('keep'|'cut') and a why about that beat. This is one turn instead of "
         "one turn per beat, and the message history stops growing by a verdict "
         "every turn. If you miss any it tells you which; call again with only "
@@ -850,6 +854,33 @@ _REQUIRED_CONSTRAINTS = [
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
 
 
+_TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "cutaway", "none"]
+
+
+def _assert_treatment_surface_agrees(module_src: str) -> None:
+    """The PROSE must not offer a narrower family set than the SCHEMA.
+
+    Shipped exactly this bug 2026-09-05: the enum was widened to six families in
+    an array while THREE prose sites still said treatment — "card" | "text" |
+    "none". The agent reads the prose, so it was told two contradictory things
+    and went with the narrower one. Two runs then reported sfx/zoom/cutaway at
+    zero and I read that as the agent declining them — it had never been
+    offered them.
+
+    A stale narrow list is invisible: everything parses, the schema accepts the
+    wide form, and the only symptom is a family that never appears.
+    """
+    import re as _re
+    stale = _re.findall(r"'card'\s*\|\s*'text'\s*\|\s*'none'"
+                        r"|\"card\" \| \"text\" \| \"none\""
+                        r"|'card'\|'text'\|'none'", module_src)
+    if stale:
+        raise AssertionError(
+            f"{len(stale)} prose site(s) still offer only card|text|none while "
+            f"the schema offers {_TREATMENT_FAMILIES}. The agent reads the "
+            f"prose; a narrower list there silently removes families.")
+
+
 def _assert_constraints_intact(system_text: str) -> None:
     missing = [c for c in _REQUIRED_CONSTRAINTS if c not in system_text]
     if missing:
@@ -889,6 +920,8 @@ def _assert_constraints_intact(system_text: str) -> None:
 
 
 _assert_constraints_intact(SYSTEM)
+_assert_treatment_surface_agrees(open(__file__).read()
+                                 if os.path.exists(__file__) else "")
 
 
 # THINKING IS ON BY DEFAULT on claude-sonnet-5 when the `thinking` param is
@@ -1713,7 +1746,8 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
                 msgs.append({"role": "user", "content": [{"type": "text", "text":
                     f"NOT DONE. {len(_unruled)} of {len(_beats)} beats have no "
                     f"ruling:\n" + _lst + "\n\nFor EACH, call `beat_verdict` "
-                    "with treatment ('card' | 'text' | 'none'), cut ('keep' | "
+                    "with treatment (a LIST from card|text|sfx|zoom|cutaway|"
+                    "none, more than one allowed), cut ('keep' | "
                     "'cut') and a `why` about THAT beat's content. 'none' and "
                     "'keep' are legitimate answers — not deciding is not. If any "
                     "beat earns a card, render them ALL in one `render_components` "
@@ -2375,6 +2409,13 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"(shell {mx.get('remotion_renders', 0)} + reel {mx.get('reel_renders', 0)})"
               f"  (product comp {mx.get('product_comp')}, PROBE comp {mx.get('probe_comp')})"
               f"  over {mx.get('shell_cmds')} shell commands")
+    # PER-TURN SEQUENCE. Aggregate tool COUNTS cannot show where a run went
+    # from deciding to building, which is exactly the question when N beats are
+    # ruled and one is built.
+    _seq = r["ledger"].get("turns") or []
+    if _seq:
+        print("  TURN SEQUENCE   : " + " -> ".join(
+            f"{t['n']}:{'+'.join(t.get('tools') or ['-'])}" for t in _seq))
     tns = r["ledger"].get("turns") or []
     if tns:
         from collections import Counter as _TC
