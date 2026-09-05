@@ -44,6 +44,14 @@ def code_only(s):
 
 
 CODE = code_only(SRC)
+# Words that would be TOOL names if backticked in the prompt. Kept explicit so
+# an ordinary backticked word (a filename, a flag) is not mistaken for a tool.
+_KNOWN_TOOL_WORDS = {
+    "shell", "probe_source", "build_cut", "build_overlays", "build_zoom",
+    "place_sfx", "place_cutaway", "render_components", "author_component",
+    "read_knowledge", "search_skills", "rule_all_beats", "beat_verdict",
+    "declare_placement", "inspect_output", "set_spec", "set_scope",
+}
 
 # ── 1. THE BRIEF IS DATA ─────────────────────────────────────────────────────
 print("\n1. THE BRIEF IS DATA")
@@ -104,6 +112,29 @@ check("no tool named shell in the dispatch",
       "the handler is still wired even if the schema entry moved")
 
 # ── 3. SECRETS ARE NOT IN THE SUBPROCESS ENVIRONMENT ─────────────────────────
+# ── THE PROMPT AND THE SCHEMA AGREE ──────────────────────────────────────────
+# Deleting `shell` from the schema left the SYSTEM prompt still telling the agent
+# "You do this by WRITING AND RUNNING SHELL COMMANDS" and "RUN your command with
+# the `shell` tool". The agent obeyed a prompt describing a tool that no longer
+# existed, and burned turns finding out. Prompt/schema drift is silent by
+# construction — nothing errors, the run just costs more and does less.
+_declared = set(re.findall(r'"name":\s*"([a-z_]+)"', SRC))
+_sys_txt = ""
+for _n in ast.walk(TREE):
+    if (isinstance(_n, ast.Assign)
+            and any(getattr(t, "id", "") == "SYSTEM" for t in _n.targets)
+            and isinstance(_n.value, ast.Constant)):
+        _sys_txt = str(_n.value.value)
+_backticked = set(re.findall(r"`([a-z_]{3,})`", _sys_txt))
+_ghosts = sorted(n for n in (_backticked & _KNOWN_TOOL_WORDS) if n not in _declared)
+check("the prompt names no tool the schema lacks",
+      not _ghosts,
+      f"SYSTEM references tool(s) {_ghosts} that are not declared — the agent "
+      f"will try to call them and waste turns discovering they are gone")
+check("the prompt does not describe the job as running shell commands",
+      "shell command" not in _sys_txt.lower(),
+      "the prompt's framing still tells the agent its job is running shell")
+
 print("\n3. SUBPROCESS ENVIRONMENT IS CLEAN")
 check("a minimal env is constructed for subprocesses",
       "_SUBPROCESS_ENV" in CODE,

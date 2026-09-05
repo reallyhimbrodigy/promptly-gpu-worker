@@ -646,7 +646,11 @@ SYSTEM = """You are a video editor. You are given a raw talking-head clip and a
 word-level transcript with exact timings. You produce a finished vertical
 (1080x1920) short-form video.
 
-You do this by WRITING AND RUNNING SHELL COMMANDS — ffmpeg, ffprobe, python3.
+You do this by CALLING TOOLS. Each one does a real piece of the edit —
+probe_source measures, build_cut cuts, build_overlays writes text,
+build_zoom pushes, place_sfx lands a sound, render_components renders
+components. There is no shell: the tools ARE the interface, and anything
+they do not cover is a tool to be built, not a command to be improvised.
 There is no schema and no downstream renderer interpreting a plan. What you
 write is what ships.
 
@@ -655,7 +659,8 @@ HOW TO WORK
    filler and false starts are the usual cuts; keep the meaning intact.
 2. Build the edit with ffmpeg. Concatenate the kept spans, crop/scale to
    1080x1920, and burn captions if they improve it.
-3. RUN your command with the `shell` tool. Read the stderr.
+3. CALL the tool for the job and read what it returns. A tool that fails
+   tells you why in its result — read that, do not guess.
 4. VERIFY with `inspect_output`: it probes the file AND transcribes it, and
    tells you which intended words are MISSING from the result.
 5. If words are missing or the output is wrong, FIX IT AND RUN AGAIN. Say
@@ -804,7 +809,8 @@ This is the inventory the production pipeline ships, not a description of one.
       every run so far has placed ZERO. /assets/inventory.json carries
       `sfx_catalogue`: 15 real files, each with a ROLE (the moment it belongs
       on), what it FITS, what it FIGHTS, its duration and its attack offset.
-      Pick by ROLE from the TABLE BELOW — do not shell out to parse the JSON.
+      Pick by ROLE from the TABLE BELOW — the table is already here, in the
+      prompt; nothing needs to be read or parsed to use it.
       WHERE THEY LAND, from the 153-beat corpus: 64% of all SFX sit on a HOOK
       or a CLOSE. If your edit has a hook and a close and no sound, that is the
       gap — not a style choice.
@@ -829,7 +835,7 @@ twice.
       and additive, for an overlay that is not a beat.
       You choose the spans; it does the segment maths, the output-time remap
       and the .srt, and returns the exact ffmpeg command. Measured: hand-
-      building these took ~7 shell commands per run and got the caption remap
+      building these by hand took ~7 separate steps per run and got the caption remap
       wrong twice. `build_overlays` does the same for text: you give words,
       timings and position, it escapes them and burns the captions in the SAME
       pass. Run 15 hand-wrote a drawtext graph and then sed-patched it to fix
@@ -858,7 +864,7 @@ twice.
       of output tokens buying nothing.
       (Enforced 2026-09-03. As advice E2 did not bind: with the prep work gone,
       the agent spent the freed budget on SIX inspect_output calls, so turns
-      fell 26 -> 21 while shell calls fell 19 -> 12. Budget expands to fill.)
+      fell 26 -> 21 while hand-built steps fell 19 -> 12. Budget expands to fill.)
 
   E3. DO NOT RE-DERIVE WHAT THE RECIPES ALREADY STATE. The commands in
       15_ffmpeg_placement_recipes.md and C1-C6 above are VERIFIED against this
@@ -966,6 +972,49 @@ edit.
 """
 
 TOOLS = [
+    {"name": "probe_source",
+     "description": (
+         "Measure the source: dimensions, fps, duration, audio presence, and "
+         "SHOT CHANGES with their timestamps. This is what `shell` was used for "
+         "most often — ffprobe and scdet — and it is a measurement, not a "
+         "command, so it is a tool."),
+     "input_schema": {"type": "object",
+                      "properties": {"file": {"type": "string",
+                                              "description": "default source.mp4"},
+                                     "shot_changes": {"type": "boolean"}},
+                      "required": []}},
+    {"name": "build_zoom",
+     "description": (
+         "Build a zoom/push filtergraph over a time range and apply it. Zoom is "
+         "a MOTION decision (which moment earns emphasis), not a filter-syntax "
+         "exercise — give the window and the strength; the harness writes the "
+         "graph. Velocity is capped so a push cannot exceed the smoothness "
+         "limit."),
+     "input_schema": {"type": "object",
+                      "properties": {
+                          "t_start": {"type": "number"},
+                          "t_end": {"type": "number"},
+                          "strength": {"type": "number",
+                                       "description": "1.0-1.35; >1.35 is clamped"},
+                          "input_file": {"type": "string"},
+                          "output_file": {"type": "string"}},
+                      "required": ["t_start", "t_end"]}},
+    {"name": "place_sfx",
+     "description": (
+         "Mix a catalogue sound in at a time. The ATTACK OFFSET is applied for "
+         "you from the measured attack table — a sound placed without it puts "
+         "the hit in the wrong place, audibly, and nothing errors. Name must be "
+         "one from the inventory."),
+     "input_schema": {"type": "object",
+                      "properties": {
+                          "name": {"type": "string",
+                                   "description": "catalogue name, no .mp3"},
+                          "t": {"type": "number",
+                                "description": "OUTPUT seconds where the hit should LAND"},
+                          "gain_db": {"type": "number"},
+                          "input_file": {"type": "string"},
+                          "output_file": {"type": "string"}},
+                      "required": ["name", "t"]}},
     {"name": "inspect_output",
      "description": "Probe /work/out.mp4 AND transcribe it, reporting duration, "
                     "resolution, and which intended words are missing from the "
@@ -2406,6 +2455,154 @@ def edit(source_key: str, brief: str,
     # fetch or place b-roll at all.
     led["cutaways_fetched"] = 0
 
+    def probe_source(file="source.mp4", shot_changes=True):
+        """Measure the source. Replaces the most common `shell` use.
+
+        ffprobe and scdet were the two things the agent shelled out for on every
+        run. They are MEASUREMENTS with a fixed shape, so they belong behind a
+        tool: the agent gets numbers instead of a command line, and there is no
+        string for anything to be injected into.
+        """
+        path = os.path.join("/work", os.path.basename(str(file or "source.mp4")))
+        if not os.path.exists(path):
+            return {"error": f"{os.path.basename(path)} does not exist in /work"}
+        p = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries",
+             "stream=codec_type,width,height,r_frame_rate,duration",
+             "-show_entries", "format=duration", "-of", "json", path],
+            capture_output=True, text=True, timeout=120, env=_SUBPROCESS_ENV)
+        try:
+            meta = json.loads(p.stdout or "{}")
+        except Exception:
+            return {"error": "ffprobe returned unparseable output",
+                    "stderr": (p.stderr or "")[-300:]}
+        v = next((x for x in meta.get("streams", []) if x.get("codec_type") == "video"), {})
+        a = next((x for x in meta.get("streams", []) if x.get("codec_type") == "audio"), None)
+        fps = None
+        if v.get("r_frame_rate") and "/" in str(v["r_frame_rate"]):
+            _n, _d = str(v["r_frame_rate"]).split("/")
+            fps = round(float(_n) / float(_d), 3) if float(_d) else None
+        out = {"width": v.get("width"), "height": v.get("height"), "fps": fps,
+               "duration_s": round(float(meta.get("format", {}).get("duration") or 0), 2),
+               "has_audio": a is not None}
+        if shot_changes:
+            r = subprocess.run(
+                ["ffmpeg", "-v", "info", "-i", path, "-vf",
+                 "select='gt(scene,0.3)',metadata=print", "-f", "null", "-"],
+                capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
+            ts = []
+            for line in (r.stderr or "").splitlines():
+                if "pts_time:" in line:
+                    try:
+                        ts.append(round(float(line.split("pts_time:")[1].split()[0]), 2))
+                    except Exception:
+                        pass
+            out["shot_changes"] = sorted(set(ts))
+            out["shot_change_count"] = len(out["shot_changes"])
+            # A source with NO detected shot changes is a real answer (a locked-off
+            # single take), not a failure — say so, or the agent reads the empty
+            # list as a broken probe and works around a measurement that is right.
+            out["note"] = ("no shot changes detected — this is a continuous take"
+                           if not ts else f"{len(ts)} shot change(s)")
+        return out
+
+    def build_zoom(t_start, t_end, strength=1.12,
+                   input_file="cut.mp4", output_file="zoomed.mp4"):
+        """Apply a push over a window. The harness writes the filtergraph.
+
+        VELOCITY IS CAPPED at the measured smoothness limit rather than trusted
+        to the caller: a push that travels more than ~11px/frame reads as a
+        lurch, and that ceiling is a property of the eye, not of the request.
+        """
+        try:
+            a, b_ = float(t_start), float(t_end)
+            z = float(strength or 1.12)
+        except Exception:
+            return {"error": "t_start, t_end and strength must be numbers"}
+        if b_ <= a:
+            return {"error": f"t_end ({b_}) must be after t_start ({a})"}
+        z = max(1.0, min(1.35, z))
+        dur = b_ - a
+        # 1080-wide frame: a zoom of z over `dur` seconds at 30fps travels
+        # 1080*(z-1) px over dur*30 frames.
+        px_per_frame = (1080 * (z - 1)) / max(1.0, dur * 30)
+        capped = False
+        if px_per_frame > 11.0:
+            z = 1.0 + (11.0 * dur * 30) / 1080
+            z = max(1.0, min(1.35, z))
+            capped = True
+        inp = os.path.join("/work", os.path.basename(str(input_file)))
+        outp = os.path.join("/work", os.path.basename(str(output_file)))
+        if not os.path.exists(inp):
+            return {"error": f"{os.path.basename(inp)} does not exist in /work"}
+        f = (f"[0:v]scale=1080:1920,setsar=1,"
+             f"zoompan=z='if(between(in_time,{a},{b_}),"
+             f"min(zoom+{(z - 1) / max(1.0, dur * 30):.6f},{z:.4f}),1)':"
+             f"d=1:s=1080x1920:fps=30[outv]")
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-i", inp, "-filter_complex", f,
+             "-map", "[outv]", "-map", "0:a?", "-c:v", "libx264", "-crf", "18",
+             "-preset", "veryfast", "-c:a", "copy", outp],
+            capture_output=True, text=True, timeout=900, env=_SUBPROCESS_ENV)
+        if r.returncode != 0:
+            fail("build_zoom_failed", (r.stderr or "")[-300:])
+            return {"error": "zoom render failed", "stderr": (r.stderr or "")[-500:]}
+        return {"ok": True, "output_file": os.path.basename(outp),
+                "strength_applied": round(z, 4),
+                "velocity_px_per_frame": round(min(px_per_frame, 11.0), 2),
+                "velocity_capped": capped,
+                "note": ("strength was reduced to hold the 11px/frame smoothness "
+                         "ceiling" if capped else "within the smoothness ceiling")}
+
+    def place_sfx(name, t, gain_db=-6.0, input_file="out.mp4",
+                  output_file="out_sfx.mp4"):
+        """Mix a catalogue sound so its PEAK lands on `t`.
+
+        The attack offset is applied HERE, from the measured table. That table
+        is the whole reason the library is not just fifteen mp3s: placing a
+        sound without it puts the hit in the wrong place, audibly, and nothing
+        errors. Making the agent do the subtraction is how it gets skipped.
+        """
+        nm = re.sub(r"[^A-Za-z0-9_-]", "", str(name or ""))
+        try:
+            inv = (json.load(open("/assets/inventory.json")) or {}).get("sfx") or {}
+        except Exception as _e:
+            return {"error": f"asset inventory unreadable: {_e}"}
+        files = set(os.path.splitext(f)[0] for f in (inv.get("files") or []))
+        if nm not in files:
+            return {"error": f"{nm!r} is not in the catalogue",
+                    "available": sorted(files)[:20]}
+        try:
+            at = float(t)
+        except Exception:
+            return {"error": "t must be a number (OUTPUT seconds)"}
+        attack_ms = float((inv.get("attack_ms") or {}).get(nm, 0) or 0)
+        start = max(0.0, at - attack_ms / 1000.0)
+        inp = os.path.join("/work", os.path.basename(str(input_file)))
+        outp = os.path.join("/work", os.path.basename(str(output_file)))
+        sfx = os.path.join("/assets/sounds", nm + ".mp3")
+        if not os.path.exists(inp):
+            return {"error": f"{os.path.basename(inp)} does not exist in /work"}
+        try:
+            g = max(-40.0, min(6.0, float(gain_db)))
+        except Exception:
+            g = -6.0
+        f = (f"[1:a]adelay={int(start * 1000)}|{int(start * 1000)},"
+             f"volume={g}dB[s];[0:a][s]amix=inputs=2:duration=first:"
+             f"dropout_transition=0[outa]")
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-i", inp, "-i", sfx,
+             "-filter_complex", f, "-map", "0:v", "-map", "[outa]",
+             "-c:v", "copy", "-c:a", "aac", outp],
+            capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
+        if r.returncode != 0:
+            fail("place_sfx_failed", (r.stderr or "")[-300:])
+            return {"error": "sfx mix failed", "stderr": (r.stderr or "")[-500:]}
+        return {"ok": True, "output_file": os.path.basename(outp), "sfx": nm,
+                "lands_at_s": round(at, 3), "started_at_s": round(start, 3),
+                "attack_ms_applied": attack_ms,
+                "note": "the file starts EARLY by its attack so the peak lands on t"}
+
     def place_cutaway(keyword, t_start, duration_s=2.5, beat=None):
         key = os.environ.get("PEXELS_API_KEY")
         if not key:
@@ -3014,6 +3211,19 @@ def edit(source_key: str, brief: str,
                 out = author_component(tu.input.get("tsx"),
                                        tu.input.get("frames") or 45,
                                        tu.input.get("name") or "authored")
+            elif tu.name == "probe_source":
+                out = probe_source(tu.input.get("file") or "source.mp4",
+                                   bool(tu.input.get("shot_changes", True)))
+            elif tu.name == "build_zoom":
+                out = build_zoom(tu.input.get("t_start"), tu.input.get("t_end"),
+                                 tu.input.get("strength", 1.12),
+                                 tu.input.get("input_file") or "cut.mp4",
+                                 tu.input.get("output_file") or "zoomed.mp4")
+            elif tu.name == "place_sfx":
+                out = place_sfx(tu.input.get("name"), tu.input.get("t"),
+                                tu.input.get("gain_db", -6.0),
+                                tu.input.get("input_file") or "out.mp4",
+                                tu.input.get("output_file") or "out_sfx.mp4")
             elif tu.name == "place_cutaway":
                 out = place_cutaway(tu.input.get("keyword"),
                                     tu.input.get("t_start"),
@@ -3489,20 +3699,36 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
          knowledge: bool = True,
          effort: str = DEFAULT_EFFORT,
          model: str = MODEL,
-         route: bool = False):
+         route: bool = False,
+         src_url: str = "", out_url: str = "", out_key: str = ""):
     # PRESIGN LOCALLY, where the credentials belong. The container receives two
     # URLs that each permit exactly one operation on exactly one key, and
     # expire. It gets no identity, so there is none to steal — and it cannot
     # choose where output lands.
-    import boto3 as _b3
-    _s3 = _b3.client("s3", region_name=os.environ.get("AWS_REGION") or "us-west-1")
-    _bucket = os.environ.get("S3_BUCKET_NAME") or BUCKET
-    _out_key = f"agentic-editor/{int(time.time())}-{os.path.basename(source)}"
-    _src_url = _s3.generate_presigned_url(
-        "get_object", Params={"Bucket": _bucket, "Key": source}, ExpiresIn=3600)
-    _out_url = _s3.generate_presigned_url(
-        "put_object", Params={"Bucket": _bucket, "Key": _out_key,
-                              "ContentType": "video/mp4"}, ExpiresIn=3600)
+    # SIGNED OUTSIDE THE MODAL PROCESS. The modal CLI ships its own interpreter
+    # and it does NOT have boto3 — the first presigned smoke test failed here
+    # with ModuleNotFoundError, which is exactly what a smoke test is for. So a
+    # caller may pass the URLs in (run_round.sh / ab_run.sh mint them with the
+    # system python3), and the in-process path is a convenience fallback that
+    # says plainly what to do when boto3 is absent.
+    _out_key, _src_url, _out_url = out_key, src_url, out_url
+    if not (_src_url and _out_url and _out_key):
+        try:
+            import boto3 as _b3
+        except ModuleNotFoundError:
+            raise SystemExit(
+                "boto3 is not available in the modal CLI's interpreter, so this "
+                "entrypoint cannot presign. Pass --src-url/--out-url/--out-key "
+                "(the round harnesses mint them with the system python3), or "
+                "install boto3 for this interpreter.")
+        _s3 = _b3.client("s3", region_name=os.environ.get("AWS_REGION") or "us-west-1")
+        _bucket = os.environ.get("S3_BUCKET_NAME") or BUCKET
+        _out_key = f"agentic-editor/{int(time.time())}-{os.path.basename(source)}"
+        _src_url = _s3.generate_presigned_url(
+            "get_object", Params={"Bucket": _bucket, "Key": source}, ExpiresIn=3600)
+        _out_url = _s3.generate_presigned_url(
+            "put_object", Params={"Bucket": _bucket, "Key": _out_key,
+                                  "ContentType": "video/mp4"}, ExpiresIn=3600)
     r = edit.remote(source, brief, _src_url, _out_url, _out_key,
                     iters, knowledge, effort, model, route)
     print("\n" + "=" * 66)
