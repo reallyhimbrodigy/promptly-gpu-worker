@@ -652,6 +652,33 @@ REQUIRED_KNOWLEDGE = ["14_card_text_placement_rules.md",
                       "15_ffmpeg_placement_recipes.md"]
 
 
+def beat_cut_status(beats, spans, kept_threshold=0.5):
+    """Which beats SURVIVED the cut, from the spans actually passed to build_cut.
+
+    The agent's own `cut` field is a self-report and run J proved it unreliable:
+    every beat was reported "keep" while build_cut received 17 spans covering
+    0.789 of the source. The cut happened; the verdict field did not see it. Two
+    different truths, and only the spans are ground truth.
+
+    A beat counts as kept when more than `kept_threshold` of its duration falls
+    inside some keep span — a beat clipped at one edge is still kept, a beat
+    mostly removed is cut.
+    """
+    out = []
+    for b in beats or []:
+        b0, b1 = float(b["t_start"]), float(b["t_end"])
+        dur = max(b1 - b0, 1e-9)
+        covered = 0.0
+        for a, z in (spans or []):
+            lo, hi = max(b0, float(a)), min(b1, float(z))
+            if hi > lo:
+                covered += (hi - lo)
+        frac = covered / dur
+        out.append({"i": b["i"], "covered": round(frac, 3),
+                    "kept": frac > kept_threshold})
+    return out
+
+
 def segment_beats(words, gap_s=0.35, max_beat_s=6.0):
     """Cut the transcript into BEATS — the unit the agent rules on.
 
@@ -1152,6 +1179,7 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         # DIAGNOSTIC: was nothing cut because the agent ran out of turns, or
         # because it CHOSE to keep everything? Coverage answers it directly —
         # one span covering the source is a decision, not an omission.
+        led["keep_spans"] = [[round(a, 3), round(b, 3)] for a, b in spans]
         led["cut_coverage"] = {
             "spans": len(spans),
             "kept_s": round(out_dur, 2),
@@ -1842,6 +1870,10 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     #   quotes_beat    — does the `why` name a word from THAT beat's context?
     #                    Boilerplate cannot, without being about the beat.
     _vs = led.get("beat_verdicts") or led.get("component_verdicts") or []
+    # GROUND TRUTH from the spans, computed before the meter so it can compare.
+    _bcs = beat_cut_status(led.get("beats") or [], led.get("keep_spans") or [])
+    _kept_actual = sum(1 for x in _bcs if x["kept"])
+    led["cuts_actual"] = {"keep": _kept_actual, "cut": len(_bcs) - _kept_actual}
     if _vs:
         _whys = [str(v.get("why") or "").strip().lower() for v in _vs]
         _uniq = len(set(_whys))
@@ -1862,8 +1894,10 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             "median_why_chars": sorted(len(w) for w in _whys)[len(_whys) // 2],
             "treatments": {t: sum(1 for v in _vs if v.get("treatment") == t)
                            for t in ("card", "text", "none")},
-            "cuts": {c: sum(1 for v in _vs if v.get("cut") == c)
-                     for c in ("keep", "cut")},
+            # SELF-REPORT, kept for comparison only.
+            "cuts_reported": {c: sum(1 for v in _vs if v.get("cut") == c)
+                              for c in ("keep", "cut")},
+            "cuts_actual": led.get("cuts_actual"),
             "sample": [{"b": v.get("beat"), "t": v.get("treatment"),
                         "c": v.get("cut"), "why": str(v.get("why"))[:150]}
                        for v in _vs[:8]],
@@ -2011,7 +2045,11 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"{_vq['distinct_whys']} distinct (ratio {_vq['distinct_ratio']}), "
               f"{_vq['mentions_own_beat']} cite their own beat, "
               f"median {_vq['median_why_chars']} chars")
-        print(f"     treatments {_vq.get('treatments')}   cuts {_vq.get('cuts')}")
+        _ca, _cr = _vq.get('cuts_actual'), _vq.get('cuts_reported')
+        print(f"     treatments {_vq.get('treatments')}")
+        print(f"     cuts ACTUAL (from build_cut spans) {_ca}   self-reported {_cr}"
+              + ("   <- SELF-REPORT DISAGREES" if _ca and _cr
+                 and _ca.get('cut') != _cr.get('cut') else ""))
         for _v in (_vq.get("sample") or []):
             print(f"     [{_v.get('b')}] {_v.get('t')}/{_v.get('c')}  {_v['why']}")
     # THE TWO QUESTIONS RUN F RAISED, answered in the report rather than inferred:
