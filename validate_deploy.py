@@ -7317,6 +7317,100 @@ def _loud_failsafe_mount_law():
         f"die SILENTLY inside their fail-safes): {_missing}")
 
 
+@check("OVERLAY-SKIP IS NEVER ASSERTED AGAINST (root cause of RENDER_FATAL 'Overlay chunk 0 missing/invalid: None' — 22 jobs / 16 users, 2026-08-28..09-04, the largest LIVE render failure class): _overlay_skip means the overlay was DELIBERATELY not rendered (empty canvas), so EVERY site that reads it must skip its existence assertion. _build_composite_cmd already emits the pass-through filtergraph for a None overlay; the bug was an assertion sitting between the None assignment and that use, turning the skip into a fatal on exactly the jobs it exists to help. Three of four sites guarded it and one was missed — so this enumerates ALL of them by AST DOMINANCE, not by text proximity (three proximity checks written on 2026-09-05 each reported green against the reverted bug).")
+def _overlay_skip_never_asserted():
+    import ast as _ast
+    _src = open("handler.py").read()
+    _tree = _ast.parse(_src)
+    for _n in _ast.walk(_tree):
+        for _c in _ast.iter_child_nodes(_n):
+            _c._parent = _n
+
+    def _guarded_by_skip(node):
+        cur = node
+        while getattr(cur, "_parent", None) is not None:
+            par = cur._parent
+            if isinstance(par, _ast.If) and "_overlay_skip" in _ast.dump(par.test):
+                neg = isinstance(par.test, _ast.UnaryOp) and isinstance(par.test.op, _ast.Not)
+                in_body = any(cur is x for x in par.body)
+                in_else = any(cur is x for x in par.orelse)
+                if (neg and in_body) or (not neg and in_else):
+                    return True
+            cur = par
+        return False
+
+    found = 0
+    for _n in _ast.walk(_tree):
+        if not isinstance(_n, _ast.Raise):
+            continue
+        txt = _ast.dump(_n)
+        if "missing/invalid" not in txt or "Overlay chunk" not in txt:
+            continue
+        found += 1
+        assert _guarded_by_skip(_n), (
+            f"handler.py line {_n.lineno}: an 'Overlay chunk missing/invalid' "
+            f"raise is NOT dominated by a `not _overlay_skip` guard. An "
+            f"empty-canvas job renders no overlay, so the path is None BY "
+            f"DESIGN and _build_composite_cmd already emits the pass-through "
+            f"filtergraph. Asserting the file exists turns the skip into a "
+            f"RENDER_FATAL on exactly the jobs it exists to help.")
+    assert found >= 2, (
+        f"only {found} Overlay-chunk raises found — this check protects a "
+        f"specific guard; re-point it rather than letting it pass vacuously")
+    assert _src.count("_overlay_skip = _overlay_paints_nothing(") == 1, (
+        "_overlay_skip must be derived ONCE and read everywhere")
+
+
+@check("TWEAK PATH ENUM GATE (root cause of RENDER_FATAL 'caption.style' schema validation — 2 jobs / 2 users, BOTH reedit_mode='tweak', values 'TwoToneBlue' and 'Blue'): generate_edit_gemini validates caption_style and re-asks on failure, but a tweak takes diff['new_plan'] straight to render_only and never runs it. The invented enum then dies in Pydantic AFTER the render is paid for. The tweak install site must revert an out-of-registry enum to the PRIOR plan's value (known-valid by construction) and ledger it.")
+def _tweak_enum_gate():
+    import ast as _ast
+    _src = open("handler.py").read()
+    assert "tweak_invalid_enum_reverted" in _src, (
+        "the tweak path no longer reverts an invalid enum — an invented "
+        "caption_style would reach Pydantic and become a RENDER_FATAL after a "
+        "full render")
+    # The guard must sit in the SAME block that installs the tweak plan, or it
+    # guards nothing. Checked structurally: find the assignment
+    # `provided_plan = diff["new_plan"]` and require the revert inside the same
+    # enclosing If body.
+    _tree = _ast.parse(_src)
+
+    def _installs_plan(node):
+        """Does this If DIRECTLY assign provided_plan = diff[...]?
+
+        Matching on "mentions new_plan and provided_plan" was too broad: it also
+        caught the validate_reedit_changes net, which merely PASSES
+        new_plan=provided_plan as a kwarg and installs nothing. A check that
+        flags code doing the right thing gets muted, and a muted check is worse
+        than no check.
+        """
+        for _x in node.body:
+            for _y in _ast.walk(_x):
+                if not isinstance(_y, _ast.Assign):
+                    continue
+                if not any(getattr(t, "id", "") == "provided_plan" for t in _y.targets):
+                    continue
+                if isinstance(_y.value, _ast.Subscript) and \
+                        getattr(_y.value.value, "id", "") == "diff":
+                    return True
+        return False
+
+    _hits = 0
+    for _n in _ast.walk(_tree):
+        if not isinstance(_n, _ast.If) or not _installs_plan(_n):
+            continue
+        _body = "".join(_ast.dump(x) for x in _n.body)
+        _hits += 1
+        assert "tweak_invalid_enum_reverted" in _body, (
+            f"handler.py line {_n.lineno}: this branch installs diff['new_plan'] "
+            f"as provided_plan WITHOUT the enum gate in the same block. A gate "
+            f"outside this branch does not run on the path that skips "
+            f"generate_edit_gemini.")
+    assert _hits >= 1, (
+        "no branch installing diff['new_plan'] was found — re-point this check "
+        "rather than letting it pass vacuously")
+
+
 @check("MOODREEL ROUTE + ADOPTED MINIMAL PACING (Zac verdicts 2026-07-25: MOODREEL APPROVED + PAIR1 B + PAIR2 B): the route ladder inside _run_minimal_pipeline is hype (confident beat) -> MOODREEL (cinematic motion-resolve cut for no_speech/not_talking_head/no_audio clips >=8s without confident music; motion curve -> build_moodreel_prompt -> Gemini HypePlan) -> minimal; EVERY miss fail-safes to minimal (a moodreel attempt can never cost a user their video). The motion curve is extracted ONCE (fail-safe []) and shared: moodreel doctrine + the ADOPTED minimal pacing — boundaries at motion PEAKS (pair 2) + low-motion boundary skip-trims 0.4-0.8s median-relative (pair 1); no curve -> today's even pacing byte-identical. Flag PROMPTLY_MOODREEL (Secret canonical =1), per-job override moodreel_test; moodreel_editor.py baked into the image (the progressive-mount lesson: an unmounted module dies silently inside the fail-safe).")
 def _moodreel_route_wiring():
     _h = open("handler.py").read()

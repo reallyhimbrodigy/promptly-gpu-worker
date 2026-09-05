@@ -33590,10 +33590,27 @@ def render_multi_clip(source_path, cuts, edit_plan, output_path, transcript, wor
                 overlay_futures[K].result(
                     timeout=_overlay_timeouts[K] + 30 + _fanout_wait_extra)
                 _ov_path = _overlay_chunk_paths[K]
-            if not _exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
-                raise RuntimeError(
-                    f"Overlay chunk {K} missing/invalid: {_ov_path}"
-                )
+            # ROOT CAUSE of RENDER_FATAL "Overlay chunk 0 missing/invalid:
+            # None" — 22 jobs / 16 users, 2026-08-28..09-04, the largest LIVE
+            # render failure class.
+            #
+            # `_overlay_skip` means the overlay was DELIBERATELY not rendered
+            # (empty canvas: no captions, MG, text, b-roll). The lines above set
+            # _ov_path = None for exactly that case, and _build_composite_cmd
+            # ALREADY handles None correctly — it sets c_overlay_idx = None and
+            # build_final_filtergraph emits the `[cur]null[composited]`
+            # pass-through. Passing None is right; validating it was not.
+            #
+            # This assertion ran UNCONDITIONALLY between the assignment and the
+            # use, so _exists(None) was False and every empty-canvas job died —
+            # turning the skip into a fatal on precisely the jobs it exists to
+            # help. The other THREE _overlay_skip sites all guard this
+            # correctly; this was the site that was missed.
+            if not _overlay_skip:
+                if not _exists(_ov_path) or os.path.getsize(_ov_path) < 1000:
+                    raise RuntimeError(
+                        f"Overlay chunk {K} missing/invalid: {_ov_path}"
+                    )
             # micro is rendered as N parallel Remotion processes (4-way
             # chunked when totalDurationInFrames >= 200; otherwise single
             # process) and concat'd into micro_video_path by a shared
@@ -41902,6 +41919,49 @@ def handler(job):
                 provided_plan = diff["new_plan"]
                 change_summary = diff.get("human_summary")
                 mode = "render_only"
+                # ── ENUM GATE ON THE TWEAK PATH ─────────────────────────────
+                # ROOT CAUSE of RENDER_FATAL "[overlay] render input failed
+                # schema validation ... caption.style" — 2 jobs / 2 users, and
+                # BOTH were reedit_mode='tweak' (verified, not inferred).
+                # Observed bad values: 'TwoToneBlue' and 'Blue'.
+                #
+                # generate_edit_gemini validates caption_style against
+                # VALID_CAPTION_STYLES and re-asks the model on failure. A tweak
+                # never runs that function — it takes diff["new_plan"] and goes
+                # straight to render_only — so the ONE gate that catches an
+                # invented enum sits on a path tweaks skip, and the value dies
+                # in Pydantic AFTER the full render has been paid for.
+                #
+                # Reverts to the PRIOR value, known-valid by construction (it
+                # already passed the generation gate). Not a degrade: the user
+                # gets their tweak with one invented enum ignored, instead of a
+                # fatal. LOUD to us via _record_divergence. If the prior is also
+                # invalid the guard declines to guess and lets the real
+                # validator raise.
+                try:
+                    _prior_plan = input_data.get("edit_plan")
+                    _prior_plan = _prior_plan if isinstance(_prior_plan, dict) else {}
+                    for _fld, _valid in (
+                        ("caption_style", VALID_CAPTION_STYLES),
+                    ):
+                        _v = provided_plan.get(_fld)
+                        if _v is None or _v in _valid:
+                            continue
+                        _fallback = _prior_plan.get(_fld)
+                        if _fallback not in _valid:
+                            continue
+                        _record_divergence(
+                            _fld, {"invalid": str(_v)[:40], "reverted_to": _fallback},
+                            "tweak_invalid_enum_reverted",
+                            final=_fallback,
+                            reason=("the tweak model emitted an enum outside the "
+                                    "registry; the prior plan's value is known-"
+                                    "valid and renders"))
+                        print(f"[tweak-enum] {_fld}={_v!r} is not in the registry "
+                              f"— reverting to prior {_fallback!r}", flush=True)
+                        provided_plan[_fld] = _fallback
+                except Exception as _enum_err:
+                    print(f"[tweak-enum] guard error (non-fatal): {_enum_err}", flush=True)
                 print(f"[plan-diff] Tweak accepted — rendering with new plan. Summary: {change_summary}", flush=True)
                 # ── Layer 3 safety net: diff the tweak's new_plan against the
                 # original prior plan + scope-classify each change. In
@@ -45128,6 +45188,13 @@ def handler(job):
             # name plate and end card would vanish on every re-edit — the same
             # replay-loss class _burned_text is here for.
             "_brand_specs",
+            # Profanity vocab (2026-09-05, gate K4). Built in the RENDER path
+            # and cached into edit_plan. Without persistence a render_only
+            # replay rebuilds it via a SECOND Deepgram transcription — and that
+            # call fails OPEN to an empty set, so a hiccup on a re-edit would
+            # silently UNMASK captions that were masked on the first render.
+            # Same replay-loss class as _burned_text and _brand_specs.
+            "_profanity_vocab",
         }
         sanitized_recipe = {
             k: v for k, v in edit_plan.items()
