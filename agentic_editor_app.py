@@ -204,6 +204,80 @@ REFERENCE_BEAT_FIT = {
 }
 
 
+# ── THE VIBE IS THE FIRST INPUT, NOT A STYLE HINT ────────────────────────────
+# Until now every run was scored against REFERENCE_PER_25S — the corpus rates —
+# no matter what the user asked for. That makes the corpus the TARGET, which is
+# wrong whenever the request is specific: "clean and professional" scored
+# against a corpus that cuts 4.75x/25s is graded as a failure for doing exactly
+# what was asked. The corpus is the FALLBACK for a vague brief, nothing more.
+#
+# Three modes, because "what does a good result look like" has three different
+# answers and one rubric cannot serve them:
+#   full_edit      — density against the DERIVED targets (vibe, else corpus)
+#   targeted_change— fidelity: did it do the named thing, did it leave the rest
+#   question       — no edit at all; an answer is the deliverable
+RUBRIC_MODES = ("full_edit", "targeted_change", "question")
+
+
+def derive_rubric(declared, mode="full_edit"):
+    """Merge the agent's vibe-derived targets over the corpus fallback.
+
+    `declared` is what the agent ruled at step 0 after reading the brief — a
+    partial dict of per-25s targets. Families it did not name fall back to the
+    corpus, and `source` records WHICH per family so a run can be read as
+    "vibe-directed on cut and text, corpus elsewhere" instead of a single
+    undifferentiated number.
+
+    Deliberately NOT keyword-matching the brief here. "Make it look like a movie
+    trailer" has no keyword to match and the agent reasoning about it is the
+    entire point; a regex over vibe words would be a second, dumber authority
+    that silently overrides the reasoning it was meant to support.
+    """
+    if mode not in RUBRIC_MODES:
+        raise ValueError(f"unknown rubric mode {mode!r}; expected one of {RUBRIC_MODES}")
+    targets, source = {}, {}
+    d = dict(declared or {})
+    for fam, ref in REFERENCE_PER_25S.items():
+        v = d.get(fam)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
+            targets[fam], source[fam] = float(v), "vibe"
+        else:
+            targets[fam], source[fam] = float(ref), "corpus"
+    unknown = sorted(set(d) - set(REFERENCE_PER_25S))
+    if unknown:
+        # LOUD, not dropped. A target for a family that does not exist means the
+        # agent believes it can ask for something the renderer cannot build, and
+        # silently ignoring it is how a declared intent becomes a no-op.
+        raise ValueError(
+            f"rubric declares unknown famil(ies) {unknown} — not in "
+            f"REFERENCE_PER_25S {sorted(REFERENCE_PER_25S)}")
+    return {"mode": mode, "targets": targets, "source": source,
+            "vibe_directed": sorted(k for k, v in source.items() if v == "vibe")}
+
+
+def score_targeted(scope_beats, changed_beats, total_beats):
+    """The targeted-edit rubric: did it do the thing, did it leave the rest alone.
+
+    Density is meaningless here. "Shorten the intro" is satisfied by changing
+    beat 0 and NOTHING else, which under the corpus rubric scores as a near-total
+    failure on every family. Two numbers instead:
+      did_the_thing — of the beats the request named, how many actually changed
+      left_alone    — of the beats it did NOT name, how many were untouched
+    Both are proportions in [0,1] and both must be high; either alone is
+    satisfiable by a degenerate edit (change everything / change nothing).
+    """
+    scope = set(scope_beats or [])
+    changed = set(changed_beats or [])
+    n = int(total_beats or 0)
+    out_of_scope = set(range(n)) - scope
+    did = (len(scope & changed) / len(scope)) if scope else None
+    left = (len(out_of_scope - changed) / len(out_of_scope)) if out_of_scope else None
+    return {"did_the_thing": None if did is None else round(did, 3),
+            "left_alone": None if left is None else round(left, 3),
+            "in_scope": sorted(scope), "changed": sorted(changed),
+            "collateral": sorted(changed - scope)}
+
+
 def _supports_effort(model_id: str) -> bool:
     """Does this model accept output_config.effort?
 
@@ -855,6 +929,141 @@ def segment_beats(words, gap_s=0.35, max_beat_s=6.0):
     return out
 
 
+# ── BEATS WITHOUT SPEECH ─────────────────────────────────────────────────────
+# MEASURED 2026-09-05, 14d completed jobs: 46.5% (706/1518) never reach the
+# verdict machinery at all. They route to moodreel (453), minimal_speech_uncut
+# (202), hype (32) or minimal (19) because there is no usable transcript, and
+# every one of those routes runs a REDUCED pipeline. The verdict machinery was
+# never the blocker — the BEAT SOURCE was. A beat is "a stretch of source the
+# agent rules on once". A transcript is ONE way to find those boundaries.
+#
+# REUSED, NOT REINVENTED. moodreel_editor.extract_motion_curve / motion_features
+# already segment no-speech video at motion peaks IN PRODUCTION and are pinned
+# by validate_deploy check 7320. A second motion extractor here would be a
+# second source of truth for the same measurement and the two would drift — the
+# exact class the asset-inventory extractor exists to prevent.
+#
+# PURE, so it is testable without a video. The wrapper does the extraction; this
+# does the segmentation, and every boundary rule is visible in one place.
+def beats_from_visual(motion_curve, shot_changes, duration_s,
+                      window_s=1.0, min_beat_s=1.2, max_beat_s=6.0):
+    """Beats from the VIDEO — motion resolves and shot changes as boundaries.
+
+    Returns the SAME shape as segment_beats(). That identity is the whole point
+    and `_assert_beat_contract_identical()` enforces it: the agent reads `text`
+    to rule on a beat, so a visual beat renders its features INTO `text` rather
+    than adding a field the prompt would have to learn.
+
+    Boundaries are motion RESOLVES, not peaks — the moodreel doctrine is "cut
+    where motion resolves", never on the rise, and reusing resolves keeps this
+    consistent with what already ships. Shot changes are unioned in because a
+    hard cut is a boundary no motion curve can argue with.
+    """
+    dur = float(duration_s or 0)
+    if dur <= 0:
+        return []
+    try:
+        import moodreel_editor as _mre
+        _resolves = _mre.motion_features(list(motion_curve or []), window_s)[1]
+    except Exception:
+        _resolves = []
+
+    # Union the two boundary sources, keep only interior points, sort.
+    cand = sorted({round(float(t), 2) for t in list(_resolves or []) + list(shot_changes or [])
+                   if 0.0 < float(t) < dur})
+
+    # MIN LENGTH FIRST, then MAX. Order matters: dropping a crowded boundary can
+    # leave a run longer than max_beat_s, so the max pass must run after and see
+    # the surviving boundaries. Doing it the other way inserts a split and then
+    # immediately deletes it as too close.
+    kept, last = [], 0.0
+    for t in cand:
+        if t - last >= min_beat_s and dur - t >= min_beat_s:
+            kept.append(t)
+            last = t
+    bounds, prev = [], 0.0
+    for t in kept + [dur]:
+        while t - prev > max_beat_s:
+            prev = round(prev + max_beat_s, 2)
+            bounds.append(prev)
+        if t < dur:
+            bounds.append(t)
+        prev = t
+    bounds = sorted(set(b for b in bounds if 0.0 < b < dur))
+
+    edges = [0.0] + bounds + [round(dur, 2)]
+    curve = list(motion_curve or [])
+
+    def _motion_for(a, bb):
+        """Mean normalized motion over [a, bb) — the thing the agent rules on."""
+        if not curve:
+            return None
+        i0 = int(a / window_s)
+        i1 = max(i0 + 1, int(bb / window_s))
+        seg = curve[i0:i1] or curve[i0:i0 + 1]
+        return round(sum(seg) / len(seg), 3) if seg else None
+
+    _shots = {round(float(t), 2) for t in (shot_changes or [])}
+    out = []
+    for i in range(len(edges) - 1):
+        a, bb = round(edges[i], 2), round(edges[i + 1], 2)
+        if bb - a < 0.01:
+            continue
+        m = _motion_for(a, bb)
+        cut_here = any(a <= s < bb for s in _shots)
+        # `text` carries the DESCRIPTOR so the verdict machinery is byte-for-byte
+        # the same prompt shape it uses for speech. Nothing downstream learns a
+        # new field; it reads `text` exactly as before.
+        desc = "[visual] motion %s%s" % (
+            ("%.2f" % m) if m is not None else "unknown",
+            " · shot change" if cut_here else "")
+        out.append({"i": len(out), "t_start": a, "t_end": bb, "text": desc,
+                    "motion": m, "shot_change": cut_here, "beat_source": "visual"})
+    if out:
+        out[0]["role"] = "hook"
+        out[-1]["role"] = "close"
+    return out
+
+
+def segment_beats_visual(video_path, duration_s, shot_changes=None, **kw):
+    """Extract the curve, then segment. FAIL-SAFE to even pacing, never to []."""
+    curve = []
+    try:
+        import moodreel_editor as _mre
+        curve = _mre.extract_motion_curve(video_path, duration=duration_s) or []
+    except Exception as e:
+        print(f"[beats] motion curve unavailable ({e}) — even pacing", flush=True)
+    return beats_from_visual(curve, shot_changes or [], duration_s, **kw)
+
+
+# THE CHECK (Rule 1). The two extractors must stay interchangeable, because the
+# verdict machinery reads beats without knowing which one produced them. A key
+# added to one and not the other is a silent divergence: the prompt renders a
+# missing field as empty and the agent rules on nothing, with every gate green.
+_BEAT_CORE_KEYS = {"i", "t_start", "t_end", "text"}
+
+
+def _assert_beat_contract_identical():
+    w = [{"s": 0.0, "e": 0.5, "w": "a"}, {"s": 0.5, "e": 1.0, "w": "b"},
+         {"s": 2.0, "e": 2.5, "w": "c"}]
+    a = segment_beats(w)
+    b = beats_from_visual([0.1, 0.9, 0.2, 0.8, 0.15], [1.5], 5.0)
+    if not a or not b:
+        raise AssertionError(
+            f"beat contract check produced an EMPTY side (speech={len(a)}, "
+            f"visual={len(b)}) — it proves nothing empty. Fix the fixture.")
+    for nm, beats in (("speech", a), ("visual", b)):
+        missing = _BEAT_CORE_KEYS - set(beats[0])
+        if missing:
+            raise AssertionError(
+                f"{nm} beats are missing core key(s) {sorted(missing)} — the "
+                f"two beat sources are no longer interchangeable and the "
+                f"verdict machinery would rule on an absent field.")
+    if a[0].get("role") != "hook" or a[-1].get("role") != "close" \
+            or b[0].get("role") != "hook" or b[-1].get("role") != "close":
+        raise AssertionError("hook/close roles are not marked on both sources")
+
+
 def pack_reel(items, fps=30):
     """Pack authored placements into a CONTIGUOUS reel + the composite offsets.
 
@@ -1011,6 +1220,10 @@ def _assert_constraints_intact(system_text: str) -> None:
 _assert_constraints_intact(SYSTEM)
 _assert_treatment_surface_agrees(open(__file__).read()
                                  if os.path.exists(__file__) else "")
+# Runs at IMPORT, in the container, on every run — not in a test file that can
+# be skipped. The two beat sources must stay interchangeable or the verdict
+# machinery silently rules on a field one of them does not supply.
+_assert_beat_contract_identical()
 
 
 # THINKING IS ON BY DEFAULT on claude-sonnet-5 when the `thinking` param is
@@ -1111,9 +1324,27 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
         return {"ok": False, "why": f"source transcribe failed: {e}",
                 "ledger": led, "wall_s": round(time.time() - t0, 1)}
     transcript_s = round(time.time() - tw0, 1)
+    # NO SPEECH IS A ROUTE, NOT A REJECTION (2026-09-05). This used to
+    # `return {"ok": False}` — a hard refusal — and it is the single biggest
+    # population in the product: 46.5% of completed jobs (706/1518 over 14d)
+    # reach production with no usable transcript and are served by the reduced
+    # moodreel/minimal routes. Refusing them here meant the agentic editor could
+    # never be the path for nearly half of all real traffic.
+    #
+    # The verdict machinery is UNCHANGED. Only the beat source changes: beats
+    # come from the transcript when there is speech and from the video's own
+    # motion and shot changes when there is not. `_assert_beat_contract_identical`
+    # pins the two outputs to the same shape so nothing downstream can tell
+    # which produced them.
+    _beat_source = "transcript" if words else "visual"
+    led["beat_source"] = _beat_source
     if not words:
-        fail("no_transcript", "Deepgram returned zero words")
-        return {"ok": False, "why": "no transcript", "ledger": led}
+        # Recorded, not failed. The ledger still learns that this source had no
+        # speech — that is a routing fact worth keeping — but it no longer ends
+        # the run.
+        led.setdefault("notes", []).append(
+            "no transcript — beats derived from video (motion + shot changes)")
+        print("[route] no speech → VISUAL beats", flush=True)
 
     def probe(path):
         p = subprocess.run(
@@ -1176,7 +1407,17 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
             fail("wrong_resolution", f"{v.get('width')}x{v.get('height')}")
         # ── THE SPEECH CHECK ───────────────────────────────────────────────
         got = transcribe_words(out)
-        if got is None:
+        if not words:
+            # NOT APPLICABLE, and deliberately not "OK". A no-speech source has
+            # no speech to preserve, so `len(got)==0` below would fire
+            # `output_has_no_speech` on a CORRECT render — a false failure — and
+            # `kept_ratio` would compute 1.0 from an empty numerator, which is a
+            # false GREEN. Neither number means anything here, so neither is
+            # reported. The visual path is verified by the beat/build checks,
+            # not by transcription.
+            res["speech_check"] = ("NOT APPLICABLE — source carries no speech; "
+                                   "beats were derived from video motion")
+        elif got is None:
             res["speech_check"] = "UNAVAILABLE — transcription failed, treat as UNVERIFIED"
         else:
             src_words = norm([w["w"] for w in words])
@@ -1777,7 +2018,21 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     _number_beats = [{"t": round(w["s"], 2), "word": w["w"]}
                      for w in words if _NUMWORD.match(str(w["w"]).strip(".,!?"))]
     led["number_beats"] = _number_beats
-    _beats = segment_beats(words)
+    if _beat_source == "visual":
+        # Duration from the probe we already have; shot changes are best-effort
+        # and an empty list simply means motion is the only boundary source.
+        _vdur = float(meta.get("format", {}).get("duration") or 0)
+        _beats = segment_beats_visual(src, _vdur)
+        if not _beats:
+            # A clean zero is guilty. An empty beat list here is a broken
+            # extractor, not a source with nothing in it — every video has
+            # SOME duration to divide — so it must page rather than hand the
+            # agent nothing to rule on and score a tidy zero.
+            raise AssertionError(
+                f"visual beat extraction returned ZERO beats for a "
+                f"{_vdur:.1f}s source — the extractor is broken, not the video.")
+    else:
+        _beats = segment_beats(words)
     _numeric_ts = {b["t"] for b in _number_beats}
     for _b in _beats:
         _b["has_number"] = any(_b["t_start"] <= t <= _b["t_end"] for t in _numeric_ts)
@@ -1800,8 +2055,15 @@ def edit(source_key: str, brief: str, max_iters: int = MAX_ITERS,
     user = (f"BRIEF: {brief}\n\n"
             f"SOURCE: /work/source.mp4 — {vs.get('width')}x{vs.get('height')}, "
             f"{_src_dur:.1f}s\n\n"
-            f"TRANSCRIPT ({len(words)} words):\n{tl}\n\n"
-            f"DEAD AIR ALREADY DETECTED ({len(_gaps)} gaps >=0.35s) — you do not "
+            + (f"TRANSCRIPT ({len(words)} words):\n{tl}\n\n" if words else
+               "NO SPEECH. This source carries no transcript, so the beats below "
+               "were derived from the VIDEO ITSELF — motion energy and shot "
+               "changes. Each beat's text shows its mean motion (0-1) and "
+               "whether a shot change falls inside it. Rule on them exactly as "
+               "you would rule on spoken beats: a high-motion beat is a moment "
+               "landing, a shot change is a boundary the edit should respect. "
+               "Do NOT place captions — there is nothing to caption.\n\n")
+            + f"DEAD AIR ALREADY DETECTED ({len(_gaps)} gaps >=0.35s) — you do not "
             f"need to compute these:\n{_gap_txt}\n\n"
             f"BEATS ({len(_beats)}) — rule on EVERY one with `beat_verdict`:\n"
             + "\n".join(f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
