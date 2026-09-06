@@ -506,6 +506,17 @@ CONTRACT_FAILURES = frozenset({
     # An accounting gap means a number we steer by is wrong; that has to fail
     # the round, not annotate it.
     "accounting_unbalanced",
+    # THE SPEC'S DENSITY IS A FLOOR, NOT A HOPE. It was computed, reported once,
+    # and then the run PROCEEDED with a ledger note — so a brief resolving text
+    # to 10/25s came back with 7 and scored green. Round 16 measured exactly
+    # that: text 81% of reference on the same fixture and brief that produced
+    # 116% a round earlier, with nothing failing.
+    #
+    # Satisfied two ways, and one of them is always available: rule to the
+    # floor, or name the declined beats in shortfall_reasons. Because naming is
+    # always possible, this can never become the unsatisfiable refusal that
+    # burned two 24-turn budgets.
+    "spec_shortfall_unresolved",
 })
 
 
@@ -531,6 +542,8 @@ def _contract_violations(ledger):
     # accounting_unbalanced is the exception and stays ledger-derived: it is a
     # fact about the RUN's bookkeeping, not a property of the artifact, and
     # there is no final state to re-measure it from.
+    # spec_shortfall_unresolved is a RUN fact like accounting_unbalanced — it is
+    # about what was ruled, not about the artifact — so it stays ledger-derived.
     _final_kinds = {"wrong_resolution", "no_audio_stream",
                     "output_has_no_speech", "speech_loss_severe", "no_output"}
     out = [f"{f['kind']}: {f['detail'][:80]}"
@@ -1421,6 +1434,19 @@ KNOWLEDGE_TOOLS = [{
                                  "than your own spec target — say which, and say "
                                  "why in the verdicts. Only needed when the "
                                  "harness reports a shortfall.")},
+                         "shortfall_reasons": {
+                             "type": "array",
+                             "description": (
+                                 "PER BEAT, why this family is NOT placed there. "
+                                 "Your spec's density is a FLOOR: rule to it, or "
+                                 "name the beats you are leaving empty and why. "
+                                 "One entry per beat you are declining."),
+                             "items": {"type": "object",
+                                       "properties": {
+                                           "beat": {"type": "integer"},
+                                           "family": {"type": "string"},
+                                           "why": {"type": "string"}},
+                                       "required": ["beat", "family", "why"]}},
                          "verdicts": {"type": "array", "items": {"type": "object",
                              "properties": {
                                  "beat": {"type": "integer"},
@@ -1926,6 +1952,46 @@ def _assert_beat_contract_identical():
     if a[0].get("role") != "hook" or a[-1].get("role") != "close" \
             or b[0].get("role") != "hook" or b[-1].get("role") != "close":
         raise AssertionError("hook/close roles are not marked on both sources")
+
+
+def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
+    """Which families fall below the spec's own floor, and by how much.
+
+    PURE AND MODULE-LEVEL so it can be tested without a container — the same
+    reason pack_reel and remap_words are. It was inline in the dispatch, and a
+    smoke could only REPLAY it: I wrote a local copy of the arithmetic, mutated
+    the shipped code, and the test stayed green because it was never reading the
+    shipped code at all. Two mutations passed that way before this refactor.
+
+    THE FLOOR IS SATISFIED TWO WAYS, and one of them is always available:
+      * rule to it, or
+      * name the declined beats in `reasons` (beat + family + a real why).
+    Because naming is always possible the refusal can never be unsatisfiable,
+    which is what turned an earlier density check into a livelock that burned
+    two 24-turn budgets.
+
+    CAPPED AT THE BEAT COUNT. A rate is per-25s and a source has a fixed number
+    of beats; one family lands at most once per beat. text=10/25s over 38.5s
+    implies 15, and on an 11-beat source that is unreachable by construction.
+    """
+    dur_25 = max(0.001, float(dur_s or 0)) / 25.0
+    out = {}
+    for fam, rate in (targets or {}).items():
+        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
+            continue
+        implied = min(int(n_beats), max(1, int(round(float(rate) * dur_25))))
+        have = int((ruled or {}).get(fam, 0))
+        # A gap named without a reason is not named.
+        named = len({r.get("beat") for r in (reasons or [])
+                     if str(r.get("family", "")).lower() == str(fam).lower()
+                     and str(r.get("why") or "").strip()})
+        if have + named < implied:
+            out[fam] = {"target_per_25s": float(rate),
+                        "implied_over_%.1fs" % float(dur_s or 0): implied,
+                        "implied": implied, "ruled": have,
+                        "gaps_named": named,
+                        "still_unexplained": implied - have - named}
+    return out
 
 
 def pack_reel(items, fps=30):
@@ -4168,36 +4234,35 @@ def edit(source_key: str, brief: str,
                 # accept_shortfall — a deliberate zero is a real decision and
                 # stays available, it just has to be stated.
                 _acc = {str(x).lower() for x in (tu.input.get("accept_shortfall") or [])}
-                _spec_t = ((led.get("spec") or {}).get("targets") or {})
-                _dur_25 = max(0.001, float(_src_dur or 0)) / 25.0
-                _short = {}
-                for _fam, _rate in _spec_t.items():
-                    if _fam in _acc or not isinstance(_rate, (int, float)) or _rate <= 0:
-                        continue
-                    # CAPPED AT THE NUMBER OF BEATS. A rate is per-25s; a
-                    # source has a fixed number of beats, and one family can be
-                    # placed at most once per beat. text=10/25s over 38.5s
-                    # implies 15 — on an 11-beat source that is UNSATISFIABLE,
-                    # and an unsatisfiable target is an infinite loop: the agent
-                    # re-ruled 23 times chasing a number it could never reach
-                    # and died at the turn budget having built nothing. Twice,
-                    # on two different fixtures, before I saw it.
-                    _implied = min(len(_beats),
-                                   max(1, int(round(float(_rate) * _dur_25))))
-                    if _fam == "sfx":
-                        _have = sum(1 for v in led["beat_verdicts"]
-                                    if str(v.get("sfx", "no")).lower() == "yes")
-                    elif _fam == "cut":
-                        _have = sum(1 for v in led["beat_verdicts"]
-                                    if str(v.get("cut", "keep")).lower() == "cut")
+                _reasons = [r for r in (tu.input.get("shortfall_reasons") or [])
+                            if isinstance(r, dict)]
+                if _reasons:
+                    led.setdefault("shortfall_reasons", []).extend(_reasons)
+                _reasons = led.get("shortfall_reasons") or []
+                _spec_t = {k: v for k, v in
+                           (((led.get("spec") or {}).get("targets") or {})).items()
+                           if str(k).lower() not in _acc}
+                # ONE CALL to the pure function. This arithmetic used to be
+                # inline here, which meant its smoke could only replay a copy of
+                # it — and a replay stays green no matter what the shipped code
+                # does. Two mutations passed that way.
+                _ruled_by_fam = {}
+                for _f6 in list(_spec_t):
+                    if _f6 == "sfx":
+                        _ruled_by_fam[_f6] = sum(
+                            1 for v in led["beat_verdicts"]
+                            if str(v.get("sfx", "no")).lower() == "yes")
+                    elif _f6 == "cut":
+                        _ruled_by_fam[_f6] = sum(
+                            1 for v in led["beat_verdicts"]
+                            if str(v.get("cut", "keep")).lower() == "cut")
                     else:
-                        _have = sum(1 for v in led["beat_verdicts"]
-                                    if _fam in [str(t).lower()
-                                                for t in (v.get("treatment") or [])])
-                    if _have < _implied:
-                        _short[_fam] = {"target_per_25s": float(_rate),
-                                        "implied_over_%.1fs" % float(_src_dur or 0): _implied,
-                                        "ruled": _have}
+                        _ruled_by_fam[_f6] = sum(
+                            1 for v in led["beat_verdicts"]
+                            if _f6 in [str(t).lower()
+                                       for t in (v.get("treatment") or [])])
+                _short = spec_shortfall(_spec_t, _ruled_by_fam, _reasons,
+                                        len(_beats), _src_dur)
                 # BOUNDED PER FAMILY. Even a satisfiable shortfall must not be
                 # reported forever: the bound in execute_plan never fired here
                 # because the agent never REACHED execute_plan — it looped
