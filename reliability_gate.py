@@ -22,6 +22,61 @@ REQUIRED_SOURCES = ("talking_head", "music", "screen_recording",
                     "product_shot", "pet_video")
 REQUIRED_GREEN_ROUNDS = 10
 
+# ── PER-ROUTE GATE SETS ──────────────────────────────────────────────────────
+# A route arms on ITS OWN fixtures. The no-speech route is the cutover target —
+# 46.5% of completed jobs, served by a reduced pipeline today — and it must not
+# be held hostage to the speech path, which is not part of this cutover and is
+# the harder problem.
+#
+# Splitting the gate is not weakening it: each route still needs ten consecutive
+# green rounds over every fixture in ITS set, and a fixture missing from a round
+# still fails that round. What changes is that a red talking_head no longer
+# blocks a no-speech route that has been green for ten rounds on its own
+# sources.
+ROUTE_FIXTURES = {
+    "no_speech": ("music", "screen_recording", "product_shot", "pet_video"),
+    "speech":    ("talking_head",),
+}
+
+
+def route_of(source):
+    for _route, _fx in ROUTE_FIXTURES.items():
+        if source in _fx:
+            return _route
+    return None
+
+
+def evaluate_route(rounds, route):
+    """Consecutive green rounds for ONE route's fixtures.
+
+    A round is green FOR A ROUTE when every fixture in that route's set is
+    present and ok. Absence still fails — the whole point of the gate is that an
+    unrun fixture is never a pass, and narrowing the set must not smuggle that
+    back in.
+    """
+    fixtures = ROUTE_FIXTURES.get(route)
+    if not fixtures:
+        raise ValueError(f"unknown route {route!r}; known: {sorted(ROUTE_FIXTURES)}")
+    streak, broke = 0, None
+    for i in range(len(rounds) - 1, -1, -1):
+        subset = {k: v for k, v in (rounds[i] or {}).items() if k in fixtures}
+        missing = [f for f in fixtures if f not in subset]
+        if missing:
+            broke = {"index": i, "why": f"missing {missing} — absence is not a pass"}
+            break
+        green, why = round_is_green({**subset,
+                                     **{f: {"ok": True, "placements": 1,
+                                            "kept_ratio": 0.5}
+                                        for f in REQUIRED_SOURCES if f not in fixtures}})
+        if green:
+            streak += 1
+        else:
+            broke = {"index": i, "why": why}
+            break
+    return {"route": route, "fixtures": list(fixtures),
+            "consecutive_green": streak, "required": REQUIRED_GREEN_ROUNDS,
+            "arms": streak >= REQUIRED_GREEN_ROUNDS, "streak_broken_by": broke}
+
 
 def round_is_green(round_result):
     """One round: every required source present, and every one of them ok.

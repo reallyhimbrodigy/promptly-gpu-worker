@@ -7317,6 +7317,42 @@ def _loud_failsafe_mount_law():
         f"die SILENTLY inside their fail-safes): {_missing}")
 
 
+@check("AGENTIC RUNG IS FAIL-SAFE AND ITS FLAG IS READ PER JOB: the rung sits ahead of hype->moodreel->minimal for the _MinimalRouteSignal no-speech family (46.5% of completed jobs). Every failure path — flag off, app undeployed, call error, empty output — must fall through to the existing ladder, which is the CURRENT product and not a degraded deliverable. The flag must be read from os.environ INSIDE the function: Modal memory-snapshots os.environ at deploy time, so a module-level read makes the kill switch require a redeploy, which is the wrong shape for a kill switch. And every fallthrough must be ledgered — a rung that silently never fires is indistinguishable from one that works.")
+def _agentic_rung_failsafe():
+    import ast as _ast
+    _h = open("handler.py").read()
+    _t = _ast.parse(_h)
+    _fn = next((n for n in _ast.walk(_t)
+                if isinstance(n, _ast.FunctionDef) and n.name == "_run_minimal_pipeline"), None)
+    assert _fn is not None, "_run_minimal_pipeline not found — re-point this check"
+    _seg = "\n".join(_h.split("\n")[_fn.lineno - 1:_fn.end_lineno])
+    assert "_agentic_on" in _seg, "the agentic rung is not in _run_minimal_pipeline"
+    # flag read INSIDE the function, not at module level
+    assert 'os.environ.get("PROMPTLY_AGENTIC_ROUTE"' in _seg, (
+        "the agentic flag is not read inside _run_minimal_pipeline — a "
+        "module-level read is memory-snapshotted at deploy and the kill switch "
+        "would need a redeploy")
+    # the rung's try must have an except that does NOT re-raise
+    _rung_try = None
+    for _n in _ast.walk(_fn):
+        if isinstance(_n, _ast.Try) and "_ag_fn" in _ast.dump(_n):
+            _rung_try = _n
+    assert _rung_try is not None, "the agentic call is not wrapped in try/except"
+    for _hnd in _rung_try.handlers:
+        for _x in _ast.walk(_hnd):
+            assert not isinstance(_x, _ast.Raise), (
+                "the agentic rung re-raises — a failure here must FALL THROUGH to "
+                "the ladder, never terminalise a job the old path would have served")
+    assert "agentic_rung_fellthrough" in _seg, (
+        "fallthroughs are not ledgered — a rung that never fires would look "
+        "exactly like one that works")
+    assert "agentic_rung_served" in _seg, "successful service is not ledgered"
+    # it must sit BEFORE the hype decision, or it is not the first rung
+    assert _seg.index("_agentic_on") < _seg.index("_hype_on"), (
+        "the agentic rung is not ahead of hype — it would only see jobs the "
+        "existing ladder declined")
+
+
 @check("OVERLAY-SKIP IS NEVER ASSERTED AGAINST (root cause of RENDER_FATAL 'Overlay chunk 0 missing/invalid: None' — 22 jobs / 16 users, 2026-08-28..09-04, the largest LIVE render failure class): _overlay_skip means the overlay was DELIBERATELY not rendered (empty canvas), so EVERY site that reads it must skip its existence assertion. _build_composite_cmd already emits the pass-through filtergraph for a None overlay; the bug was an assertion sitting between the None assignment and that use, which turned the skip into a fatal on exactly the jobs it exists to help. Three of four sites guarded it correctly and one was missed — so this check enumerates ALL of them by construction rather than trusting a reviewer to notice the fourth.")
 def _overlay_skip_never_asserted():
     import ast as _ast

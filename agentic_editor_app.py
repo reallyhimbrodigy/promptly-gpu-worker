@@ -4050,7 +4050,36 @@ def edit(source_key: str, brief: str,
                 _nocard = [v.get("beat") for v in led["beat_verdicts"]
                            if "card" in [str(t).lower() for t in (v.get("treatment") or [])]
                            and not str(v.get("card_hero") or "").strip()]
+                # TWO ATTEMPTS, THEN TERMINAL. Rejection alone is neither
+                # satisfiable nor terminal when the agent keeps producing the
+                # same half-rulings: reject, report still_missing, it re-rules
+                # the same way, reject again — the loop that burned two 24-turn
+                # budgets. The rule earned from the shortfall applies here
+                # unchanged: EVERY REFUSAL MUST BE SATISFIABLE OR TERMINAL.
+                #
+                # Attempt 1 rejects and asks. Attempt 2 keeps whatever is
+                # complete, DROPS the incomplete ones as named skips, and
+                # proceeds. An incomplete ruling still cannot be built — that
+                # has not changed — but it is now dropped ONCE with a reason
+                # instead of being asked for forever.
                 _reject = set(_nocopy) | set(_nosfx) | set(_nocard)
+                led["half_ruling_attempts"] = led.get("half_ruling_attempts", 0) + 1
+                _attempt = led["half_ruling_attempts"]
+                if _reject and _attempt >= 2:
+                    for _b2 in sorted(_reject):
+                        led.setdefault("half_ruling_dropped", []).append(_b2)
+                        fail("half_ruling_dropped",
+                             f"beat {_b2}: incomplete after {_attempt} attempts — "
+                             f"dropped so the run can proceed")
+                    led["beat_verdicts"] = [v for v in led["beat_verdicts"]
+                                            if v.get("beat") not in _reject]
+                    _seen3 = {v.get("beat") for v in led["beat_verdicts"]}
+                    out["DROPPED_after_two_attempts"] = sorted(_reject)
+                    out["ruled"] = len(_seen3)
+                    out["note_dropped"] = (
+                        "These beats were incomplete twice and have been DROPPED, "
+                        "not asked for again. Continue with execute_plan.")
+                    _reject = set()
                 if _reject:
                     led["beat_verdicts"] = [v for v in led["beat_verdicts"]
                                             if v.get("beat") not in _reject]

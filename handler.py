@@ -37726,6 +37726,65 @@ def _run_minimal_pipeline(job_id, input_data, work_dir, source_path,
                 "motion_curve_fallback",
                 reason="curve extraction failed — even pacing, moodreel ineligible")
     _hype_bpm = None  # S-PACKAGE: measured tempo for the deterministic hype package
+    # ── THE AGENTIC RUNG ────────────────────────────────────────────────────
+    # First rung of the no-speech ladder, ahead of hype -> moodreel -> minimal.
+    # This is the cutover: 46.5% of completed jobs (706/1518 over 14d) reach
+    # these routes because there is no usable transcript, and every one of them
+    # is served by a REDUCED pipeline today.
+    #
+    # FLAG READ PER JOB, NOT AT IMPORT. Modal memory-snapshots os.environ at
+    # deploy time, so a module-level read makes the kill switch need a redeploy —
+    # which is the wrong shape for a kill switch. os.environ is consulted HERE,
+    # on every job, and a per-job override exists for testing.
+    #
+    # FAIL-SAFE BY CONSTRUCTION. Any failure — flag off, app not deployed, call
+    # error, empty output — falls through to the ladder below and the user gets
+    # exactly what they get today. That is not a degraded deliverable; it is the
+    # current product. Every fallthrough is LEDGERED, because a rung that
+    # silently never fires looks identical to one that is working.
+    _agentic_on = bool(input_data.get("agentic_test")) or \
+        str(os.environ.get("PROMPTLY_AGENTIC_ROUTE", "")).strip() == "1"
+    _agentic_eligible = reason in ("no_speech", "no_speech_muted", "no_audio",
+                                   "not_talking_head")
+    if _agentic_on and _agentic_eligible:
+        _ag_t0 = time.time()
+        _ag_why = None
+        try:
+            import modal as _modal_ag
+            _ag_fn = _modal_ag.Function.from_name("agentic-editor", "edit")
+            _ag_res = _ag_fn.remote(
+                input_data.get("source_key") or "", 
+                str(input_data.get("vibe_input") or "")[:2000],
+                "", "", "",          # src_url/out_url/out_key: presigned by the caller
+            )
+            if not isinstance(_ag_res, dict) or not _ag_res.get("ok"):
+                _ag_why = f"agentic returned not-ok: {str(_ag_res)[:120]}"
+            elif not _ag_res.get("output_key"):
+                _ag_why = "agentic returned ok with no output_key"
+            else:
+                _record_divergence(
+                    "route", {"reason": reason, "rung": "agentic",
+                              "wall_s": round(time.time() - _ag_t0, 1)},
+                    "agentic_rung_served",
+                    reason="the agentic editor produced the deliverable")
+                print(f"[agentic-rung] SERVED job={job_id} reason={reason} "
+                      f"wall={time.time() - _ag_t0:.1f}s", flush=True)
+                return _ag_res
+        except Exception as _ag_e:
+            _ag_why = f"{type(_ag_e).__name__}: {str(_ag_e)[:140]}"
+        # EVERY FALLTHROUGH IS RECORDED. Without this, "the rung never fired"
+        # and "the rung fired and worked" are the same silence.
+        _record_divergence(
+            "route", {"reason": reason, "rung": "agentic",
+                      "why": _ag_why, "wall_s": round(time.time() - _ag_t0, 1)},
+            "agentic_rung_fellthrough",
+            reason="agentic rung did not produce a deliverable — the existing "
+                   "ladder serves this job unchanged")
+        print(f"[agentic-rung] FELL THROUGH job={job_id} reason={reason}: "
+              f"{_ag_why}", flush=True)
+    elif _agentic_on and not _agentic_eligible:
+        print(f"[agentic-rung] not eligible: reason={reason}", flush=True)
+
     _hype_on = bool(input_data.get("hype_test")) or _ge._hype_mode_enabled()
     if _hype_on and reason in ("no_speech", "not_talking_head") and _dur >= 8.0:
         try:
