@@ -675,6 +675,15 @@ HOW TO WORK — FOUR STEPS, NOT FOURTEEN
 
 Do not orchestrate. There is no shell, and the per-step tools exist for repair,
 not for building the edit one command at a time.
+
+SOFT MODIFIERS ARE QUANTITIES, AND RESOLVING THEM IS YOUR JOB.
+Requests almost never carry numbers. "Subtle overlays", "few cuts", "fast
+paced", "clean and minimal" — each of those is a RATE, and you set it in
+`set_spec.targets` as a per-25s number. "Subtle", "few", "minimal" and "light"
+mean FEWER THAN USUAL. They do not mean none. If you genuinely intend zero of
+something the request named, say so in `why` — that is a real decision, but it
+is a different one and it has to be stated rather than arrived at by placing
+nothing.
 4. VERIFY with `inspect_output`: it probes the file AND transcribes it, and
    tells you which intended words are MISSING from the result.
 5. If words are missing or the output is wrong, FIX IT AND RUN AGAIN. Say
@@ -1078,6 +1087,18 @@ KNOWLEDGE_TOOLS = [{
                                         "request asks for. One of: text, card, "
                                         "cutaway, sfx, zoom, transition, cut, "
                                         "caption"},
+            "targets": {"type": "object",
+                        "description": (
+                            "RESOLVE THE SOFT MODIFIERS. A request rarely gives "
+                            "numbers — it says 'subtle overlays', 'few cuts', "
+                            "'fast paced', 'clean'. Those are QUANTITIES, and "
+                            "they are your call to make: give a per-25s rate for "
+                            "each family the request implies. 'Subtle' and 'few' "
+                            "and 'minimal' mean FEWER THAN USUAL, never NONE — "
+                            "if you intend zero of something the request asked "
+                            "for, that is a different decision and you must say "
+                            "so in `why`. Families you do not name fall back to "
+                            "the corpus rate.")},
             "beats": {"type": "array", "items": {"type": "integer"},
                       "description": "optional: the beat indices the request names"},
             "why": {"type": "string",
@@ -1438,6 +1459,7 @@ _REQUIRED_PROMPT_BLOCKS = {
     "the four-step flow": "FOUR STEPS, NOT FOURTEEN",
     "non-derivable list": "WHAT ONLY YOU CAN DECIDE",
     "no-orchestration rule": "Do not orchestrate",
+    "soft-modifier rule": "SOFT MODIFIERS ARE QUANTITIES",
     "delimiter names itself": "<user_request>",
 }
 
@@ -2789,6 +2811,21 @@ def edit(source_key: str, brief: str,
                                "ruled_but_not_built": gap}
         for k, (rl, bl) in gap.items():
             fail("ruled_not_built", f"{k}: ruled {rl}, built {bl}")
+        # A FAMILY THE SPEC ASKED FOR THAT BUILT ZERO IS A FAILURE, not a taste
+        # call. "Clean and professional. Few cuts, SUBTLE OVERLAYS ONLY, no
+        # sound effects" produced zero overlays — and "subtle" means fewer, not
+        # none. Zero of something the request named is a decision that has to be
+        # stated, so if it was not stated it is a miss.
+        _spec = led.get("spec") or {}
+        for _fam, _rate in (_spec.get("targets") or {}).items():
+            try:
+                _want = float(_rate)
+            except Exception:
+                continue
+            if _want > 0 and built.get(_fam, 0) == 0:
+                fail("spec_family_built_zero",
+                     f"the spec set {_fam}={_want}/25s and NOTHING was built. A "
+                     f"soft modifier means fewer, not none.")
         return {"ok": True, "steps": steps, "built": built, "ruled": ruled,
                 "ruled_but_not_built": gap, "output": "out.mp4",
                 "note": ("The pipeline ran from your verdicts. Anything in "
@@ -3361,10 +3398,17 @@ def edit(source_key: str, brief: str,
             _pm["cache_write"] += getattr(u, "cache_creation_input_tokens", 0) or 0
         msgs.append({"role": "assistant", "content": r.content})
         tool_uses = [c for c in r.content if getattr(c, "type", "") == "tool_use"]
+        # PER-TURN CACHE, not just per-run. cache_write was 74% of a run's cost
+        # and the only figure available was the TOTAL, so "is one turn rewriting
+        # the whole prefix, or is every turn writing a little?" was unanswerable
+        # — two different problems with two different fixes, indistinguishable
+        # from a sum. Captured here so the next question is a read, not a re-run.
         led["turns"].append({
             "n": it + 1,
             "tools": [getattr(c, "name", "?") for c in tool_uses],
             "out_tokens": getattr(u, "output_tokens", 0) if u else 0,
+            "cache_write": getattr(u, "cache_creation_input_tokens", 0) or 0 if u else 0,
+            "cache_read": getattr(u, "cache_read_input_tokens", 0) or 0 if u else 0,
             "stop": getattr(r, "stop_reason", None),
         })
         texts = " ".join(getattr(c, "text", "") for c in r.content
@@ -3525,6 +3569,9 @@ def edit(source_key: str, brief: str,
                 try:
                     _sc = normalize_spec(dict(tu.input or {}))
                     _sc["why"] = str((tu.input or {}).get("why") or "")[:200]
+                    _tg = (tu.input or {}).get("targets")
+                    _sc["targets"] = _tg if isinstance(_tg, dict) else {}
+                    led["rubric"] = derive_rubric(_sc.get("targets"), _sc["mode"])
                     led["spec"] = _sc
                     out = {"spec_set": True, **_sc}
                 except ValueError as _se:
@@ -4327,6 +4374,15 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         _tot = sum(x["duration_s"] for x in _vc)
         print(f"  STILLNESS       : {len(_vc)} span(s), {_tot:.1f}s offered"
               + ("  (evenly paced — nothing to cut on)" if not _vc else ""))
+
+    _tt = (r.get("ledger") or {}).get("turns") or []
+    if any(t.get("cache_write") for t in _tt):
+        print("  CACHE BY TURN   : " + "  ".join(
+            f"{t['n']}:w{t.get('cache_write', 0) // 1000}k/r{t.get('cache_read', 0) // 1000}k"
+            for t in _tt))
+        _w = [t.get("cache_write", 0) for t in _tt]
+        print(f"     first turn writes {_w[0]:,}; turns 2+ write {sum(_w[1:]):,} "
+              f"total — a stable prefix writes ONCE and reads after")
 
     # PER-TURN SEQUENCE. Aggregate tool COUNTS cannot show where a run went
     # from deciding to building, which is exactly the question when N beats are
