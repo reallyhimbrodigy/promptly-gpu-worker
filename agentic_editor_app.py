@@ -409,10 +409,16 @@ def derive_rubric(declared, mode="full_edit"):
 # printer can reach exists on every path, None where it does not apply. None is
 # printable; absent is an exception that hides the thing you needed to read.
 def _result(**kw):
-    base = {"ok": False, "why": "", "ledger": None, "wall_s": None,
+    base = {"ok": False, "why": "", "ledger": {}, "wall_s": None,
             "download_s": None, "transcript_s": None,
             "agent_last_message": "", "s3_key": None, "output": None,
-            "output_key": None, "final": None, "source_words": None}
+            "output_key": None, "source_words": None,
+            # DICT-SHAPED FIELDS DEFAULT TO {}, NOT None. `final` was None and
+            # the printer does f.get("exists") — AttributeError on every early
+            # failure, which is the same defect as the download_s KeyError one
+            # layer along. None is readable for a scalar; for a field the
+            # consumer treats as a mapping it is just a different exception.
+            "final": {}, "ledger_extra": {}}
     unknown = sorted(set(kw) - set(base))
     base.update(kw)
     if unknown:
@@ -2692,6 +2698,11 @@ def edit(source_key: str, brief: str,
         by_i = {b["i"]: b for b in beats}
         steps, built = [], {"cut": 0, "text": 0, "card": 0, "zoom": 0,
                             "sfx": 0, "cutaway": 0}
+        # EVERY SKIP RECORDS ITS REASON. The aggregate gap (ruled 3, built 1)
+        # says something was dropped; it does not say WHY, and three of the
+        # drops here were bare `continue`s. A count without a reason is the same
+        # dead end as no count at all.
+        _skips = []
 
         # 1. THE CUT, derived from the keep rulings.
         keep = []
@@ -2729,9 +2740,13 @@ def edit(source_key: str, brief: str,
                 continue
             copy = str(v.get("text_content") or "").strip()
             if not copy:
-                continue          # accounted below, never silent
+                _skips.append({"family": "text", "beat": v.get("beat"),
+                               "why": "ruled 'text' with no text_content"})
+                continue
             out_t = src_to_out(b["t_start"], merged)
             if out_t is None:
+                _skips.append({"family": "text", "beat": v.get("beat"),
+                               "why": "beat was cut, so it has no output time"})
                 continue
             items.append({"t_start": round(out_t, 2), "text": copy,
                           "duration_s": min(3.0, b["t_end"] - b["t_start"])})
@@ -2753,6 +2768,8 @@ def edit(source_key: str, brief: str,
             a2 = src_to_out(b["t_start"], merged)
             z2 = src_to_out(b["t_end"], merged)
             if a2 is None or z2 is None or z2 <= a2:
+                _skips.append({"family": "zoom", "beat": v.get("beat"),
+                               "why": f"no usable output window (a={a2}, b={z2})"})
                 continue
             zr = build_zoom(a2, z2, 1.12, cur, "zoomed.mp4")
             if not zr.get("error"):
@@ -2768,9 +2785,14 @@ def edit(source_key: str, brief: str,
                 continue
             nm = str(v.get("sfx_name") or "").strip()
             if not nm:
+                _skips.append({"family": "sfx", "beat": v.get("beat"),
+                               "why": "ruled sfx 'yes' but gave no sfx_name — "
+                                      "the sound to play is not derivable"})
                 continue
             at = src_to_out(b["t_start"], merged)
             if at is None:
+                _skips.append({"family": "sfx", "beat": v.get("beat"),
+                               "why": "beat was cut, so it has no output time"})
                 continue
             sr = place_sfx(nm, at, -6.0, cur, "with_sfx.mp4")
             if not sr.get("error"):
@@ -2808,7 +2830,7 @@ def edit(source_key: str, brief: str,
                      "method": "ffmpeg", "declared_by": "execute_plan",
                      "content": _s.get("name") or ""})
         led["execute_plan"] = {"steps": steps, "built": built, "ruled": ruled,
-                               "ruled_but_not_built": gap}
+                               "ruled_but_not_built": gap, "skips": _skips}
         for k, (rl, bl) in gap.items():
             fail("ruled_not_built", f"{k}: ruled {rl}, built {bl}")
         # A FAMILY THE SPEC ASKED FOR THAT BUILT ZERO IS A FAILURE, not a taste
@@ -2826,8 +2848,10 @@ def edit(source_key: str, brief: str,
                 fail("spec_family_built_zero",
                      f"the spec set {_fam}={_want}/25s and NOTHING was built. A "
                      f"soft modifier means fewer, not none.")
+        for _sk in _skips:
+            fail("execute_plan_skip", f"{_sk['family']} beat {_sk['beat']}: {_sk['why']}")
         return {"ok": True, "steps": steps, "built": built, "ruled": ruled,
-                "ruled_but_not_built": gap, "output": "out.mp4",
+                "ruled_but_not_built": gap, "skips": _skips, "output": "out.mp4",
                 "note": ("The pipeline ran from your verdicts. Anything in "
                          "ruled_but_not_built was decided and did NOT reach the "
                          "video — inspect_output, then re-rule if it matters.")}
@@ -4364,6 +4388,8 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                 + "   <- decided and never reached the video")
         else:
             print("     every ruling reached the video")
+        for _sk in (_ep.get("skips") or [])[:8]:
+            print(f"       skip: {_sk['family']} beat {_sk['beat']} — {_sk['why']}")
         _steps = _ep.get("steps") or []
         print(f"     steps: {' -> '.join(str(x.get('step')) for x in _steps) or '(none)'}")
     _rbp = (r.get("ledger") or {}).get("repair_before_plan")
