@@ -2795,8 +2795,16 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "text", "beat": v.get("beat"),
                                "why": "beat was cut, so it has no output time"})
                 continue
-            items.append({"t_start": round(out_t, 2), "text": copy,
-                          "duration_s": min(3.0, b["t_end"] - b["t_start"])})
+            # t_end, NOT duration_s. build_overlays reads it["t_end"] and
+            # raises KeyError on anything else — every item then lands in `errs`
+            # and the batch returns "bad items". That single field mismatch is
+            # why text ruled 10 built 0 on three consecutive equivalence runs:
+            # two functions in this file disagreeing about the shape between
+            # them, with the disagreement surfacing as an opaque batch error.
+            _dur = min(3.0, max(0.6, b["t_end"] - b["t_start"]))
+            items.append({"t_start": round(out_t, 2),
+                          "t_end": round(out_t + _dur, 2),
+                          "text": copy})
         if not items and ruled_text_n:
             _skips.append({"family": "text", "beat": None,
                            "why": f"{ruled_text_n} text ruling(s) collected into "
@@ -2805,13 +2813,20 @@ def edit(source_key: str, brief: str,
         if items:
             ov = build_overlays(items, True, cur, "overlaid.mp4")
             if ov.get("error"):
-                _skips.append({"family": "text", "beat": None,
-                               "why": f"build_overlays failed: {ov['error']}"[:160]})
+                # ONE SKIP PER LOST RULING. A batch failure loses len(items)
+                # rulings; recording a single skip made the balance report
+                # "9 unexplained" for a drop that was entirely explained, which
+                # is a false alarm — and a check that cries wolf gets loosened.
+                _why = (f"build_overlays failed: {ov.get('error')} "
+                        f"{str(ov.get('details') or '')[:80]}")[:200]
+                for _it in items:
+                    _skips.append({"family": "text", "beat": None, "why": _why})
             else:
                 r2 = run_ffmpeg_from_recipe(ov, "overlaid.mp4")
                 if r2.get("error"):
-                    _skips.append({"family": "text", "beat": None,
-                                   "why": f"overlay render failed: {r2['error']}"[:160]})
+                    _why2 = f"overlay render failed: {r2['error']}"[:200]
+                    for _it in items:
+                        _skips.append({"family": "text", "beat": None, "why": _why2})
                 else:
                     cur = "overlaid.mp4"
                     built["text"] = len(items)
@@ -2875,8 +2890,9 @@ def edit(source_key: str, brief: str,
         if _cards:
             rc = render_components(_cards)
             if rc.get("error"):
-                _skips.append({"family": "card", "beat": None,
-                               "why": f"render_components failed: {rc['error']}"[:160]})
+                _whyc = f"render_components failed: {rc['error']}"[:200]
+                for _c2 in _cards:
+                    _skips.append({"family": "card", "beat": None, "why": _whyc})
             else:
                 _filt = "/work/reel-filter.txt"
                 _rr = None
@@ -2891,10 +2907,11 @@ def edit(source_key: str, brief: str,
                         capture_output=True, text=True, timeout=1200,
                         env=_SUBPROCESS_ENV)
                 if _rr is None or _rr.returncode != 0:
-                    _skips.append({"family": "card", "beat": None,
-                                   "why": ("card composite failed: " + (
-                                       (_rr.stderr or "")[-140:] if _rr
-                                       else "no reel filter was written"))})
+                    _whyc2 = ("card composite failed: " + (
+                        (_rr.stderr or "")[-140:] if _rr
+                        else "no reel filter was written"))
+                    for _c2 in _cards:
+                        _skips.append({"family": "card", "beat": None, "why": _whyc2})
                 else:
                     cur = "carded.mp4"
                     built["card"] = len(_cards)

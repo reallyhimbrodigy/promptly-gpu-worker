@@ -211,6 +211,38 @@ try:
 except Exception as _e:
     check("reliability_gate is readable for producer checking", False, str(_e)[:110])
 
+# ── 6d. THE HARNESS AGREES WITH ITSELF ───────────────────────────────────────
+# execute_plan built items with `duration_s`; build_overlays reads `t_end`.
+# Every item raised KeyError, the batch returned an opaque "bad items", and text
+# ruled 10 built 0 on THREE consecutive equivalence runs. Two functions in one
+# file disagreeing about the shape passed between them — no type, no schema, and
+# nothing that reads source could see it.
+print("\n6d. INTERNAL SHAPES AGREE")
+def _keys_required(fn_name):
+    for _n in ast.walk(TREE):
+        if isinstance(_n, ast.FunctionDef) and _n.name == fn_name:
+            seg = "\n".join(SRC.split("\n")[_n.lineno - 1:_n.end_lineno])
+            return set(re.findall(r'it\["([a-z_]+)"\]', seg))
+    return set()
+
+
+def _keys_supplied(fn_name, appended_to):
+    for _n in ast.walk(TREE):
+        if isinstance(_n, ast.FunctionDef) and _n.name == fn_name:
+            seg = "\n".join(SRC.split("\n")[_n.lineno - 1:_n.end_lineno])
+            m = re.search(appended_to + r"\.append\(\{(.*?)\}\)", seg, re.S)
+            return set(re.findall(r'"([a-z_]+)":', m.group(1))) if m else set()
+    return set()
+
+
+_req = _keys_required("build_overlays")
+_sup = _keys_supplied("execute_plan", "items")
+_gap = sorted(_req - _sup)
+check("execute_plan supplies every key build_overlays requires", not _gap,
+      f"build_overlays reads {sorted(_req)}; execute_plan supplies "
+      f"{sorted(_sup)} — missing {_gap}, which surfaces only as an opaque "
+      f"batch error at runtime")
+
 print("\n7. THE TWO RULES")
 _repair = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
            "render_components", "place_cutaway", "author_component",
