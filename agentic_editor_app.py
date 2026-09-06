@@ -408,6 +408,35 @@ def derive_rubric(declared, mode="full_edit"):
 # rediscover it, so the SHAPE is guaranteed at construction: every key the
 # printer can reach exists on every path, None where it does not apply. None is
 # printable; absent is an exception that hides the thing you needed to read.
+# ── WHAT IS A CONTRACT VIOLATION, AS OPPOSED TO A QUALITY MISS ───────────────
+# The reliability gate refuses a round carrying any of these. They are the
+# pipeline's OWN promises about its output — not taste, not density, not whether
+# the edit is good. Every fixture rendered at 540x960 against a 1080x1920
+# contract for three rounds while this was a ledger note and the gate called
+# those rounds green.
+CONTRACT_FAILURES = frozenset({
+    "wrong_resolution",        # not 1080x1920
+    "no_audio_stream",         # output has no audio
+    "output_has_no_speech",    # a speech source rendered mute
+    "no_output",               # nothing was produced
+    "speech_loss_severe",      # most of the speech is gone
+})
+
+
+def _contract_violations(ledger):
+    """Pull the contract failures out of the failure ledger.
+
+    A FIELD THE GATE READS MUST HAVE A PRODUCER. `contract_violations` was added
+    to reliability_gate and nothing ever wrote it, so the rule "a contract
+    violation fails the round" was inert from the moment it was committed —
+    consumed, never produced. The gate could not have failed a round for a
+    violation it was never handed.
+    """
+    return [f"{f['kind']}: {f['detail'][:80]}"
+            for f in (ledger or {}).get("failures", [])
+            if f.get("kind") in CONTRACT_FAILURES]
+
+
 def _result(**kw):
     base = {"ok": False, "why": "", "ledger": {}, "wall_s": None,
             "download_s": None, "transcript_s": None,
@@ -418,7 +447,7 @@ def _result(**kw):
             # failure, which is the same defect as the download_s KeyError one
             # layer along. None is readable for a scalar; for a field the
             # consumer treats as a mapping it is just a different exception.
-            "final": {}, "ledger_extra": {}}
+            "final": {}, "ledger_extra": {}, "contract_violations": []}
     unknown = sorted(set(kw) - set(base))
     base.update(kw)
     if unknown:
@@ -4220,6 +4249,7 @@ def edit(source_key: str, brief: str,
                    download_s=dl_s, transcript_s=transcript_s,
                    source_words=len(words), final=final, ledger=led,
                    output_key=key, s3_key=key,
+                   contract_violations=_contract_violations(led),
                    agent_last_message=final_text[:1200])
 
 

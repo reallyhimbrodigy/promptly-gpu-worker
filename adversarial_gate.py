@@ -186,6 +186,31 @@ except Exception as _e:
     check("the module is importable for symbol checking", False,
           f"{type(_e).__name__}: {str(_e)[:120]}")
 
+# ── 6c. EVERY FIELD THE GATE READS HAS A PRODUCER ────────────────────────────
+# `contract_violations` was added to reliability_gate.round_is_green and NOTHING
+# ever wrote it. The standing rule "a contract violation fails the round" was
+# inert from the commit that introduced it: consumed, never produced, so the
+# gate could not fail a round for a violation it was never handed. Same family
+# as the docstring case — the code was present and could not run — in a
+# different shape. A consumer without a producer is a check that always passes.
+print("\n6c. GATE FIELDS HAVE PRODUCERS")
+try:
+    _rg = io.open(os.path.join(HERE, "reliability_gate.py"), encoding="utf-8").read()
+    _consumed = set(re.findall(r'v\.get\("([a-z_]+)"\)', _rg))
+    _consumed -= {"ok", "why"}                     # supplied by the runner itself
+    # WORD BOUNDARY, not substring. The first version used `f not in SRC` and
+    # passed against a producer renamed to contract_violations_DISABLED —
+    # because the disabled name CONTAINS the enabled one. A substring test
+    # cannot tell a symbol from a symbol that merely starts the same way.
+    _orphans = sorted(f for f in _consumed
+                      if not re.search(rf"\b{re.escape(f)}\b", SRC))
+    check("every per-source field the gate reads is produced by the app",
+          not _orphans,
+          f"reliability_gate reads {_orphans}, which the app never writes — the "
+          f"rule they enforce cannot fire")
+except Exception as _e:
+    check("reliability_gate is readable for producer checking", False, str(_e)[:110])
+
 print("\n7. THE TWO RULES")
 _repair = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
            "render_components", "place_cutaway", "author_component",
