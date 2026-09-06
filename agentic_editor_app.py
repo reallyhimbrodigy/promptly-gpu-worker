@@ -4808,7 +4808,15 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             print("     -- per tool --")
             for _k, _v in sorted(_tools.items(), key=lambda kv: -kv[1]):
                 print(f"     {_k:18} {_v:7.2f}s  {100*_v/_tot:5.1f}%")
-        _un = _tot - sum(_named.values()) - sum(_tools.values())
+        # NESTED INTERVALS ARE NOT ADDITIVE. build_* run INSIDE the execute_plan
+        # tool call, so summing both buckets double-counts and the remainder
+        # printed -8.67s — a negative remainder is arithmetic saying the model
+        # is wrong, not that time went missing. Only top-level intervals are
+        # subtracted; build_* stay in the table as the breakdown of that time.
+        _NESTED = ("build_cut", "build_overlays", "build_zoom", "build_reel",
+                   "build_sfx", "audio_extract")
+        _top_level = sum(v for k, v in _named.items() if k not in _NESTED)
+        _un = _tot - _top_level - sum(_tools.values())
         print(f"     {'(unattributed)':18} {_un:7.2f}s  {100*_un/_tot:5.1f}%")
     else:
         # LOUD. An empty table means the marks did not run, not that the run had
