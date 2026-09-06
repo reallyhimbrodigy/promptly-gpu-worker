@@ -2876,6 +2876,21 @@ def edit(source_key: str, brief: str,
                             "rule_all_beats with accept_shortfall naming them. "
                             "THIS IS ASKED ONCE — call execute_plan again and it "
                             "will build with the gap recorded.")}
+        # THE MANIFEST DESCRIBES THE VIDEO THAT EXISTS, NOT EVERY VIDEO BUILT.
+        # execute_plan rebuilds the WHOLE pipeline from the verdicts, so a
+        # second call replaces the first one's output entirely — but placements
+        # were APPENDED, so calling it twice declared both builds while `built`
+        # reported only the last.
+        #
+        # MEASURED, round 13: screen_recording called execute_plan 3 times and
+        # read text BUILT 2 / DECLARED 4; pet_video called it twice and read
+        # 3 / 5; talking_head called it ONCE and showed no gap at all. That is
+        # the signature — the discrepancy tracked the call count exactly.
+        #
+        # Removing declare_placement made the harness the sole PRODUCER; this
+        # makes it the sole producer of ONE manifest rather than a growing
+        # union of every attempt.
+        led["placements"] = []
         if led.get("spec_shortfall"):
             fail("spec_shortfall_unresolved",
                  f"built with a shortfall the agent did not close or accept: "
@@ -3613,7 +3628,27 @@ def edit(source_key: str, brief: str,
     # invalidation.
     _REPAIR_ONLY = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
                     "render_components", "author_component", "beat_verdict"}
+    # Haiku reaches the same verdicts as Sonnet and pays nine extra turns to
+    # read first. The role is judgment; the readers serve an execution job the
+    # agent no longer has.
+    _judgment_only = "haiku" in str(model).lower()
     tools = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
+    # THE READERS COME OUT FOR THE JUDGMENT-ONLY ROLE.
+    #
+    # MEASURED, rounds 12 and 13: Sonnet called read_knowledge and search_skills
+    # ZERO times and produced a byte-identical cut and speech check; Haiku spent
+    # NINE turns on them (read_knowledge 5, search_skills 4) and reached the same
+    # place. That is nine turns of reading that changes nothing, and turns are
+    # ~75% of wall.
+    #
+    # WITHHELD, NOT DISCOURAGED — this lane's own law: a capability in the schema
+    # will be used, and telling a model not to use a tool it has is a preference,
+    # not a property. Filtered ONCE before the loop so the cached prefix stays
+    # constant for the whole run; changing the tool list mid-run cost 43,222
+    # cache_write tokens on a previous measurement.
+    if _judgment_only:
+        _READERS = {"read_knowledge", "search_skills"}
+        tools = [t for t in tools if t.get("name") not in _READERS]
 
 
 
@@ -4140,68 +4175,55 @@ def edit(source_key: str, brief: str,
                 # proceeds. An incomplete ruling still cannot be built — that
                 # has not changed — but it is now dropped ONCE with a reason
                 # instead of being asked for forever.
-                _reject = set(_nocopy) | set(_nosfx) | set(_nocard)
-                # PER BEAT, NOT PER CALL. The counter was a single global
-                # incremented on EVERY rule_all_beats call, so it measured how
-                # many times the tool ran, not how many chances a beat had.
-                # Two consequences, both wrong and in opposite directions:
-                # a beat incomplete on calls 1 and 2 was dropped correctly, but
-                # the message read "after 7 attempts" (round 12, beat 10) because
-                # it printed the CALL count; and once the global passed 2, any
-                # beat that first went incomplete later was dropped on its FIRST
-                # offence with no second chance at all.
+                # STRIP THE FAMILY, KEEP THE BEAT — ON THE FIRST PASS.
                 #
-                # Keyed on the beat, so "two attempts then terminal" means
-                # exactly that for every beat independently.
-                # ONCE DROPPED, STAYS DROPPED. Without this a beat the agent
-                # re-rules after its drop is counted again and dropped again —
-                # "terminal" that repeats is just a slower loop, and the ledger
-                # fills with duplicate drops for one beat.
-                _already = set(led.get("half_ruling_dropped") or [])
-                _reject = {_b for _b in _reject if _b not in _already}
-                _att = led.setdefault("half_ruling_attempts_by_beat", {})
-                for _b3 in _reject:
-                    _att[str(_b3)] = _att.get(str(_b3), 0) + 1
-                _spent = {_b3 for _b3 in _reject if _att[str(_b3)] >= 2}
-                led["half_ruling_attempts"] = max(
-                    [0] + [v for v in _att.values()])
-                if _spent:
-                    for _b2 in sorted(_spent):
-                        led.setdefault("half_ruling_dropped", []).append(_b2)
-                        fail("half_ruling_dropped",
-                             f"beat {_b2}: incomplete on {_att[str(_b2)]} of its "
-                             f"own attempts — dropped so the run can proceed")
-                    # DROP the spent ones; the first-offence ones are still
-                    # ASKED. Collapsing both into one set lost the beats that had
-                    # only just gone incomplete — they would neither be retried
-                    # nor dropped, which is the silent-third-state this bound
-                    # exists to prevent.
-                    led["beat_verdicts"] = [v for v in led["beat_verdicts"]
-                                            if v.get("beat") not in _spent]
-                    _seen3 = {v.get("beat") for v in led["beat_verdicts"]}
-                    out["DROPPED_after_two_attempts"] = sorted(_spent)
-                    out["ruled"] = len(_seen3)
-                    out["note_dropped"] = (
-                        "These beats were incomplete on both of their own "
-                        "attempts and have been DROPPED, not asked for again. "
-                        "Continue with execute_plan.")
-                _reject = _reject - _spent
-                if _reject:
-                    led["beat_verdicts"] = [v for v in led["beat_verdicts"]
-                                            if v.get("beat") not in _reject]
-                    led["rejected_half_rulings"] = (
-                        led.get("rejected_half_rulings", 0) + len(_reject))
-                    _seen2 = {v.get("beat") for v in led["beat_verdicts"]}
-                    out["REJECTED_incomplete"] = sorted(_reject)
-                    out["ruled"] = len(_seen2)
-                    out["still_missing"] = sorted(
-                        b["i"] for b in _beats if b["i"] not in _seen2)[:30]
-                    out["fix_rejected"] = (
-                        "These verdicts were DISCARDED, not flagged. A ruling "
-                        "that names a family without naming its content cannot "
-                        "be built, so it is not a ruling: text needs "
-                        "text_content, card needs card_hero, sfx needs "
-                        "sfx_name. Re-rule these beats complete.")
+                # This block used to REJECT the whole verdict and ask again, up
+                # to two attempts. Two things were wrong with that, both
+                # measured in round 13:
+                #
+                # 1. It dropped the BEAT, not the family. Beats ruled
+                #    ['card','text'] with no card_hero lost their TEXT as well —
+                #    seven beats discarded entirely at 39.6s, for a missing
+                #    field on one of their families.
+                # 2. It bounced. The agent re-ruled the same way, and the run
+                #    spent 24 of 24 turns and three execute_plan calls getting
+                #    to the same place. An informed agent repeating an
+                #    incomplete ruling was already the documented case; asking a
+                #    third time cannot help.
+                #
+                # A family that names no content is not a ruling for that
+                # family, and it never was. So it is removed from the treatment,
+                # NAMED once, and everything else on that beat proceeds. No
+                # second attempt, no discarded beat, and the count that reaches
+                # execute_plan is the count that can actually be built.
+                _incomplete = {"text": set(_nocopy), "sfx": set(_nosfx),
+                               "card": set(_nocard)}
+                _stripped = []
+                for _v4 in led["beat_verdicts"]:
+                    _bi = _v4.get("beat")
+                    _tr = [str(t).lower() for t in (_v4.get("treatment") or [])]
+                    for _famx, _bad in _incomplete.items():
+                        if _bi in _bad and _famx in _tr:
+                            _tr = [t for t in _tr if t != _famx]
+                            _stripped.append({"beat": _bi, "family": _famx})
+                    if _bi in _incomplete["sfx"]:
+                        _v4["sfx"] = "no"
+                    _v4["treatment"] = _tr or ["none"]
+                if _stripped:
+                    led["half_ruling_stripped"] = _stripped
+                    for _st in _stripped:
+                        fail("half_ruling_stripped",
+                             f"beat {_st['beat']}: {_st['family']} named without "
+                             f"its content, removed from the treatment — the rest "
+                             f"of the beat still builds")
+                    out["STRIPPED_incomplete_families"] = _stripped
+                    out["fix_stripped"] = (
+                        "A family that names no content cannot be built, so it "
+                        "was removed from those beats and the rest of each beat "
+                        "kept. This is NOT asked again. text needs text_content, "
+                        "card needs card_hero, sfx needs sfx_name — supply them "
+                        "in the SAME call as the treatment or do not name the "
+                        "family. Continue with execute_plan.")
                 if _nosfx:
                     out["ERROR_sfx_name_missing"] = _nosfx[:25]
                 if _nocard:

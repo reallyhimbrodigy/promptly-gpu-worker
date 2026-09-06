@@ -195,6 +195,35 @@ ok("cutaway" not in str(_r),
 ok(set(_r["targets"]) == {"text", "cut", "card", "sfx", "zoom", "transition"},
    f"the rubric target set changed: {sorted(_r['targets'])}")
 
+# ── 6. ONE MANIFEST PER RUN, NOT A UNION OF EVERY ATTEMPT ──────────────────
+# execute_plan rebuilds the whole pipeline, so a second call REPLACES the first
+# one's output — but placements were appended, so two calls declared both builds
+# while `built` reported only the last. Round 13 measured it exactly: 3 calls ->
+# text BUILT 2 / DECLARED 4, 2 calls -> 3 / 5, 1 call -> no gap.
+_ep = [n for n in ast.walk(TREE)
+       if isinstance(n, ast.FunctionDef) and n.name == "execute_plan"]
+ok(len(_ep) == 1, "execute_plan not found (or defined more than once)")
+if _ep:
+    _resets = [n for n in ast.walk(_ep[0])
+               if isinstance(n, ast.Assign)
+               and any(isinstance(t, ast.Subscript)
+                       and getattr(t.value, "id", "") == "led"
+                       and getattr(getattr(t, "slice", None), "value", None) == "placements"
+                       for t in n.targets)
+               and isinstance(n.value, ast.List) and not n.value.elts]
+    ok(len(_resets) == 1,
+       "execute_plan does not reset led['placements'] to [] — a second call "
+       "appends to the first call's manifest, so the declared count becomes a "
+       "union of every attempt while `built` reports only the last")
+    _appends = [n for n in ast.walk(_ep[0])
+                if isinstance(n, ast.Call)
+                and getattr(n.func, "attr", "") == "append"
+                and "placements" in ast.dump(n.func)]
+    if _resets and _appends:
+        ok(_resets[0].lineno < min(a.lineno for a in _appends),
+           "the placements reset runs AFTER the declare loop — it would erase "
+           "the manifest it just wrote")
+
 if FAIL:
     print("FAIL smoke_five_families:")
     for f in FAIL:
