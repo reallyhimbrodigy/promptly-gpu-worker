@@ -2409,6 +2409,7 @@ def edit(source_key: str, brief: str,
                               "Bold=1,FontSize=18,PrimaryColour=&H00FFFFFF,"
                               "OutlineColour=&H00000000,Outline=2,Alignment=2,MarginV=120'\" "
                               "-c:v libx264 -crf 18 -preset veryfast -c:a copy capped.mp4"),
+
             "note": "Captions are already remapped to OUTPUT time. Do not shift them.",
         }
 
@@ -2433,7 +2434,15 @@ def edit(source_key: str, brief: str,
         if not isinstance(items, list):
             return {"error": "items must be a list of {text,t_start,t_end}"}
         chain, errs = [], []
-        if burn_captions and os.path.exists("/work/captions.srt"):
+        # EXISTS IS NOT NON-EMPTY. build_cut writes captions.srt even when
+        # there are ZERO cues, so on a no-speech source the file is PRESENT and
+        # EMPTY — and libass fails to initialise on it, which surfaced as
+        # "Error initializing filter 'subtitles'" and killed every text overlay
+        # on the screen_recording fixture for the whole campaign. The guard
+        # asked whether the file was there, not whether it had anything in it.
+        _srt = "/work/captions.srt"
+        _have_cues = os.path.exists(_srt) and os.path.getsize(_srt) > 0
+        if burn_captions and _have_cues:
             chain.append(
                 "subtitles=/work/captions.srt:force_style='Fontname=DejaVu Sans"
                 ",Bold=1,FontSize=18,PrimaryColour=&H00FFFFFF"
@@ -2740,13 +2749,28 @@ def edit(source_key: str, brief: str,
         # Refuse while the rulings fall short of the agent's OWN spec and it has
         # not said that is deliberate. Building first and reporting after is how
         # round 4 shipped a passthrough with every gate green.
-        if led.get("spec_shortfall"):
+        # BOUNDED. This refusal livelocked pet_video: execute_plan refused,
+        # the agent re-ruled, the shortfall persisted, it re-ruled again — 19
+        # rule_all_beats calls until the 24-turn budget ran out, producing
+        # nothing. I gave the refusal no exit and the agent never reached for
+        # accept_shortfall, so "you may acknowledge this" was not a way out.
+        #
+        # A blocking check must be satisfiable or terminal. It now reports ONCE
+        # and then proceeds, recording the gap — an unbuilt placement is worth
+        # far less than a whole run spent asking for it.
+        if led.get("spec_shortfall") and not led.get("shortfall_reported"):
+            led["shortfall_reported"] = True
             return {"error": "rulings fall short of your own spec",
                     "shortfall": led["spec_shortfall"],
+                    "asked_once": True,
                     "fix": ("Rule more beats for those families, or re-call "
                             "rule_all_beats with accept_shortfall naming them. "
-                            "Nothing is built until the spec and the rulings "
-                            "agree or you say the gap is intended.")}
+                            "THIS IS ASKED ONCE — call execute_plan again and it "
+                            "will build with the gap recorded.")}
+        if led.get("spec_shortfall"):
+            fail("spec_shortfall_unresolved",
+                 f"built with a shortfall the agent did not close or accept: "
+                 f"{led['spec_shortfall']}")
         beats = led.get("beats") or []
         by_i = {b["i"]: b for b in beats}
         steps, built = [], {"cut": 0, "text": 0, "card": 0, "zoom": 0,
@@ -2828,7 +2852,10 @@ def edit(source_key: str, brief: str,
                                   f"ZERO items — every one was filtered before "
                                   f"the build step"})
         if items:
-            ov = build_overlays(items, True, cur, "overlaid.mp4")
+            # Captions only where speech exists. Asking for them on a visual
+            # beat source is asking libass to render an empty file.
+            _want_caps = bool(words)
+            ov = build_overlays(items, _want_caps, cur, "overlaid.mp4")
             if ov.get("error"):
                 # ONE SKIP PER LOST RULING. A batch failure loses len(items)
                 # rulings; recording a single skip made the balance report
