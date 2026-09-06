@@ -3980,7 +3980,16 @@ def edit(source_key: str, brief: str,
                 for _fam, _rate in _spec_t.items():
                     if _fam in _acc or not isinstance(_rate, (int, float)) or _rate <= 0:
                         continue
-                    _implied = max(1, int(round(float(_rate) * _dur_25)))
+                    # CAPPED AT THE NUMBER OF BEATS. A rate is per-25s; a
+                    # source has a fixed number of beats, and one family can be
+                    # placed at most once per beat. text=10/25s over 38.5s
+                    # implies 15 — on an 11-beat source that is UNSATISFIABLE,
+                    # and an unsatisfiable target is an infinite loop: the agent
+                    # re-ruled 23 times chasing a number it could never reach
+                    # and died at the turn budget having built nothing. Twice,
+                    # on two different fixtures, before I saw it.
+                    _implied = min(len(_beats),
+                                   max(1, int(round(float(_rate) * _dur_25))))
                     if _fam == "sfx":
                         _have = sum(1 for v in led["beat_verdicts"]
                                     if str(v.get("sfx", "no")).lower() == "yes")
@@ -3995,9 +4004,17 @@ def edit(source_key: str, brief: str,
                         _short[_fam] = {"target_per_25s": float(_rate),
                                         "implied_over_%.1fs" % float(_src_dur or 0): _implied,
                                         "ruled": _have}
-                if _short:
+                # BOUNDED PER FAMILY. Even a satisfiable shortfall must not be
+                # reported forever: the bound in execute_plan never fired here
+                # because the agent never REACHED execute_plan — it looped
+                # inside rule_all_beats. A gate that only bounds the downstream
+                # refusal does not bound the loop.
+                _told = set(led.get("shortfall_told") or [])
+                _new_short = {k: v for k, v in _short.items() if k not in _told}
+                led["shortfall_told"] = sorted(_told | set(_short))
+                if _short and _new_short:
                     led["spec_shortfall"] = _short
-                    out["SPEC_SHORTFALL"] = _short
+                    out["SPEC_SHORTFALL"] = _new_short
                     out["fix_shortfall"] = (
                         "Your own spec set these rates and your rulings do not "
                         "reach them. Either rule more beats for those families, "
