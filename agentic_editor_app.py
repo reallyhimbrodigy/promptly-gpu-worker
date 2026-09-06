@@ -2644,7 +2644,7 @@ def edit(source_key: str, brief: str,
         with open("/work/reel-filter.txt", "w") as fh:
             fh.write(";".join(parts))
         return {
-            "ok": True, "components": len(items),
+            "ok": True, "components": len(items), "final_label": last,
             "reel_frames": packed["reel_frames"],
             "reel_seconds": round(packed["reel_frames"] / 30, 2),
             "rendered_frames": len(pngs),
@@ -2774,6 +2774,8 @@ def edit(source_key: str, brief: str,
 
         # 2. TEXT, derived from the text rulings + their copy.
         items = []
+        ruled_text_n = sum(1 for v in vs
+                           if "text" in [str(t).lower() for t in (v.get("treatment") or [])])
         for v in vs:
             b = by_i.get(v.get("beat"))
             tr = [str(t).lower() for t in (v.get("treatment") or [])]
@@ -2795,11 +2797,22 @@ def edit(source_key: str, brief: str,
                 continue
             items.append({"t_start": round(out_t, 2), "text": copy,
                           "duration_s": min(3.0, b["t_end"] - b["t_start"])})
+        if not items and ruled_text_n:
+            _skips.append({"family": "text", "beat": None,
+                           "why": f"{ruled_text_n} text ruling(s) collected into "
+                                  f"ZERO items — every one was filtered before "
+                                  f"the build step"})
         if items:
             ov = build_overlays(items, True, cur, "overlaid.mp4")
-            if not ov.get("error"):
+            if ov.get("error"):
+                _skips.append({"family": "text", "beat": None,
+                               "why": f"build_overlays failed: {ov['error']}"[:160]})
+            else:
                 r2 = run_ffmpeg_from_recipe(ov, "overlaid.mp4")
-                if not r2.get("error"):
+                if r2.get("error"):
+                    _skips.append({"family": "text", "beat": None,
+                                   "why": f"overlay render failed: {r2['error']}"[:160]})
+                else:
                     cur = "overlaid.mp4"
                     built["text"] = len(items)
                     steps.append({"step": "text", "n": len(items)})
@@ -2821,11 +2834,71 @@ def edit(source_key: str, brief: str,
                                "why": f"no usable output window (a={a2}, b={z2})"})
                 continue
             zr = build_zoom(a2, z2, 1.12, cur, "zoomed.mp4")
-            if not zr.get("error"):
+            if zr.get("error"):
+                _skips.append({"family": "zoom", "beat": v.get("beat"),
+                               "why": f"build_zoom failed: {zr['error']}"[:160]})
+            else:
                 cur = "zoomed.mp4"
                 built["zoom"] += 1
                 steps.append({"step": "zoom", "t": [round(a2, 2), round(z2, 2)],
                               "capped": zr.get("velocity_capped")})
+
+        # 3b. CARDS — a family the agent could RULE and the harness could not
+        # BUILD. execute_plan handled cut, text, zoom and sfx; card and cutaway
+        # had no path at all, so "card ruled 2, built 0" reported a drop for
+        # something that was never implemented. A family the agent can rule must
+        # be a family the harness can build, or the ruling is a question nobody
+        # answers.
+        _cards = []
+        for v in vs:
+            b = by_i.get(v.get("beat"))
+            tr = [str(t).lower() for t in (v.get("treatment") or [])]
+            if b is None:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": "verdict names a beat index that does not exist"})
+                continue
+            if "card" not in tr:
+                continue          # not ruled for this family — filtering, not a drop
+            hero = str(v.get("card_hero") or "").strip()
+            if not hero:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": "ruled 'card' with no card_hero"})
+                continue
+            at = src_to_out(b["t_start"], merged)
+            if at is None:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": "beat was cut, so it has no output time"})
+                continue
+            _cards.append({"t_start": round(at, 2), "type": "StatCard",
+                           "duration_s": min(2.5, b["t_end"] - b["t_start"]),
+                           "hero": hero, "label": str(v.get("card_label") or "")[:60]})
+        if _cards:
+            rc = render_components(_cards)
+            if rc.get("error"):
+                _skips.append({"family": "card", "beat": None,
+                               "why": f"render_components failed: {rc['error']}"[:160]})
+            else:
+                _filt = "/work/reel-filter.txt"
+                _rr = None
+                if os.path.exists(_filt):
+                    _rr = subprocess.run(
+                        ["ffmpeg", "-y", "-v", "error",
+                         "-i", os.path.join("/work", cur), "-i", "/work/reel.mov",
+                         "-filter_complex", open(_filt).read().strip(),
+                         "-map", f"[{rc.get('final_label') or '0:v'}]", "-map", "0:a?",
+                         "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                         "-c:a", "copy", "/work/carded.mp4"],
+                        capture_output=True, text=True, timeout=1200,
+                        env=_SUBPROCESS_ENV)
+                if _rr is None or _rr.returncode != 0:
+                    _skips.append({"family": "card", "beat": None,
+                                   "why": ("card composite failed: " + (
+                                       (_rr.stderr or "")[-140:] if _rr
+                                       else "no reel filter was written"))})
+                else:
+                    cur = "carded.mp4"
+                    built["card"] = len(_cards)
+                    steps.append({"step": "card", "n": len(_cards)})
 
         # 4. SFX, attack offsets applied by place_sfx from the measured table.
         for v in vs:
@@ -2848,7 +2921,10 @@ def edit(source_key: str, brief: str,
                                "why": "beat was cut, so it has no output time"})
                 continue
             sr = place_sfx(nm, at, -6.0, cur, "with_sfx.mp4")
-            if not sr.get("error"):
+            if sr.get("error"):
+                _skips.append({"family": "sfx", "beat": v.get("beat"),
+                               "why": f"place_sfx failed: {sr['error']}"[:160]})
+            else:
                 cur = "with_sfx.mp4"
                 built["sfx"] += 1
                 steps.append({"step": "sfx", "name": nm, "t": round(at, 2)})
@@ -2866,6 +2942,32 @@ def edit(source_key: str, brief: str,
         gap = {k: [ruled.get(k, 0), built.get(k, 0)]
                for k in ("text", "zoom", "sfx", "card", "cutaway")
                if ruled.get(k, 0) != built.get(k, 0)}
+        # ── THE ACCOUNTING MUST BALANCE ──────────────────────────────────────
+        # ruled = built + skipped, per family. Anything else means a ruling left
+        # by a path that recorded nothing.
+        #
+        # This replaces finding silent paths ONE RUN AT A TIME at ~$0.50 each.
+        # Three equivalence runs produced three different causes — a silent
+        # build failure, an unimplemented family, then an uninstrumented
+        # empty-collection branch — and each fix revealed the next link. An
+        # arithmetic identity catches the NEXT one without my having to predict
+        # where it is, including paths added later by someone else.
+        _sk_by_fam = {}
+        for _s2 in _skips:
+            _sk_by_fam[_s2["family"]] = _sk_by_fam.get(_s2["family"], 0) + 1
+        _unbalanced = {}
+        for _f in ("text", "zoom", "sfx", "card", "cutaway"):
+            _r, _b, _s3 = ruled.get(_f, 0), built.get(_f, 0), _sk_by_fam.get(_f, 0)
+            if _r != _b + _s3:
+                _unbalanced[_f] = {"ruled": _r, "built": _b, "skipped": _s3,
+                                   "unexplained": _r - _b - _s3}
+        if _unbalanced:
+            for _f, _d in _unbalanced.items():
+                fail("accounting_unbalanced",
+                     f"{_f}: ruled {_d['ruled']} = built {_d['built']} + skipped "
+                     f"{_d['skipped']}? NO — {_d['unexplained']} ruling(s) left "
+                     f"by a path that recorded nothing.")
+        led["accounting_unbalanced"] = _unbalanced
         # THE HARNESS DECLARES WHAT IT BUILT. Manifests read 0 declared while
         # treatments showed a dozen rulings, because declaring was a separate
         # turn the agent skipped. The harness knows exactly what it placed —
@@ -2883,7 +2985,8 @@ def edit(source_key: str, brief: str,
                      "method": "ffmpeg", "declared_by": "execute_plan",
                      "content": _s.get("name") or ""})
         led["execute_plan"] = {"steps": steps, "built": built, "ruled": ruled,
-                               "ruled_but_not_built": gap, "skips": _skips}
+                               "ruled_but_not_built": gap, "skips": _skips,
+                               "unbalanced": _unbalanced}
         for k, (rl, bl) in gap.items():
             fail("ruled_not_built", f"{k}: ruled {rl}, built {bl}")
         # A FAMILY THE SPEC ASKED FOR THAT BUILT ZERO IS A FAILURE, not a taste
@@ -3649,8 +3752,36 @@ def edit(source_key: str, brief: str,
                 try:
                     _sc = normalize_spec(dict(tu.input or {}))
                     _sc["why"] = str((tu.input or {}).get("why") or "")[:200]
+                    # TARGETS ARE NUMBERS. The agent answered
+                    # text='10 per 25s - near every kept beat gets a bold
+                    # caption, this is the workhorse per the brief' — the
+                    # reasoning belongs in `why`, and prose in a numeric field
+                    # made every target unparseable, which silently disabled
+                    # spec_family_built_zero: the guarantee was defeated by its
+                    # own input format. Rejected HERE, where one line fixes it.
                     _tg = (tu.input or {}).get("targets")
-                    _sc["targets"] = _tg if isinstance(_tg, dict) else {}
+                    _tg = _tg if isinstance(_tg, dict) else {}
+                    _bad_t, _good_t = {}, {}
+                    for _k, _v2 in _tg.items():
+                        try:
+                            _good_t[_k] = float(_v2)
+                        except (TypeError, ValueError):
+                            _bad_t[_k] = str(_v2)[:60]
+                    if _bad_t:
+                        out = {"error": "targets must be NUMBERS",
+                               "unparseable": _bad_t,
+                               "fix": ("A target is a rate, e.g. "
+                                       "{\"text\": 10, \"sfx\": 2}. Put the "
+                                       "reasoning in `why`, not in the value — "
+                                       "a target that will not parse cannot be "
+                                       "compared to what you build, so the "
+                                       "family silently loses its floor.")}
+                        led.setdefault("spec_rejected", []).append(_bad_t)
+                        results.append({"type": "tool_result",
+                                        "tool_use_id": tu.id,
+                                        "content": json.dumps(out)})
+                        continue
+                    _sc["targets"] = _good_t
                     led["rubric"] = derive_rubric(_sc.get("targets"), _sc["mode"])
                     led["spec"] = _sc
                     out = {"spec_set": True, **_sc}
