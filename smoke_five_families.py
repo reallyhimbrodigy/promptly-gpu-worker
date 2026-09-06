@@ -159,6 +159,42 @@ ok(len(_break) == 1,
    "the _unsupported_stop branch does not BREAK the turn loop — it would fall "
    "through and keep spending turns")
 
+# ── 5. THE UNSUPPORTED BRANCH MUST SHORT-CIRCUIT derive_rubric ─────────────
+# derive_rubric REJECTS mode 'unsupported' (RUBRIC_MODES is the three editing
+# modes), which is correct — an unsupported request has no rubric. It is safe
+# only because the handler `continue`s first. Reorder those and every
+# unsupported request raises ValueError instead of answering the user, so the
+# ordering is asserted rather than remembered.
+_ifs = [n for n in ast.walk(TREE)
+        if isinstance(n, ast.If)
+        and any(isinstance(c, ast.Constant) and c.value == "unsupported"
+                for c in ast.walk(n.test))]
+_guard = [n for n in _ifs if any(isinstance(x, ast.Continue) for x in ast.walk(n))]
+ok(len(_guard) >= 1,
+   "the set_spec 'unsupported' branch does not `continue` — control would fall "
+   "through to derive_rubric, which rejects the mode, and the user would get a "
+   "ValueError instead of the plain answer")
+_dr = [n for n in ast.walk(TREE)
+       if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "derive_rubric"]
+ok(_dr and _guard and min(g.lineno for g in _guard) < min(d.lineno for d in _dr),
+   "derive_rubric is called BEFORE the unsupported branch short-circuits")
+# And the rubric never carries the removed family.
+_rm = {}
+for _n in TREE.body:
+    if isinstance(_n, ast.Assign) and isinstance(_n.targets[0], ast.Name):
+        try:
+            exec(compile(ast.Module([_n], []), "<s>", "exec"), _rm)
+        except Exception:
+            pass
+for _n in TREE.body:
+    if isinstance(_n, ast.FunctionDef) and _n.name == "derive_rubric":
+        exec(compile(ast.Module([_n], []), "<s>", "exec"), _rm)
+_r = _rm["derive_rubric"](None, "full_edit")
+ok("cutaway" not in str(_r),
+   f"derive_rubric still emits a cutaway target: {_r}")
+ok(set(_r["targets"]) == {"text", "cut", "card", "sfx", "zoom", "transition"},
+   f"the rubric target set changed: {sorted(_r['targets'])}")
+
 if FAIL:
     print("FAIL smoke_five_families:")
     for f in FAIL:
