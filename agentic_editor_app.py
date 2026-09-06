@@ -3074,12 +3074,19 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "zoom", "beat": v.get("beat"),
                                "why": f"no usable output window (a={a2}, b={z2})"})
                 continue
-            zr = build_zoom(a2, z2, 1.12, cur, "zoomed.mp4")
+            # UNIQUE OUTPUT PER ITERATION. This was a fixed "zoomed.mp4" while
+            # `cur` becomes that same name after the first success — so the
+            # SECOND zoom passed ffmpeg the same path as input and output and
+            # died with "Output ... same as Input #0 - exiting". Round 15
+            # measured it as zoom ruled 2, built 1: the family silently lost
+            # every placement after its first.
+            _zout = f"zoomed{built['zoom']}.mp4"
+            zr = build_zoom(a2, z2, 1.12, cur, _zout)
             if zr.get("error"):
                 _skips.append({"family": "zoom", "beat": v.get("beat"),
                                "why": f"build_zoom failed: {zr['error']}"[:160]})
             else:
-                cur = "zoomed.mp4"
+                cur = _zout
                 built["zoom"] += 1
                 steps.append({"step": "zoom", "t": [round(a2, 2), round(z2, 2)],
                               "capped": zr.get("velocity_capped")})
@@ -3170,12 +3177,17 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "sfx", "beat": v.get("beat"),
                                "why": "beat was cut, so it has no output time"})
                 continue
-            sr = place_sfx(nm, at, -6.0, cur, "with_sfx.mp4")
+            # SAME LATENT DEFECT AS ZOOM, not yet fired only because the
+            # corpus sfx rate is 0.82/25s so runs place ONE. A second sound on
+            # a longer video would have passed input == output and lost every
+            # sfx after the first, exactly as zoom did.
+            _sout = f"with_sfx{built['sfx']}.mp4"
+            sr = place_sfx(nm, at, -6.0, cur, _sout)
             if sr.get("error"):
                 _skips.append({"family": "sfx", "beat": v.get("beat"),
                                "why": f"place_sfx failed: {sr['error']}"[:160]})
             else:
-                cur = "with_sfx.mp4"
+                cur = _sout
                 built["sfx"] += 1
                 steps.append({"step": "sfx", "name": nm, "t": round(at, 2)})
 
