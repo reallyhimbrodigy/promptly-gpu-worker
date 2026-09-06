@@ -255,6 +255,19 @@ REFERENCE_BEAT_FIT = {
 #              guard, not a retry and not a fallback.
 # The only terminal state is a clean refund-and-retry: the user is made whole
 # automatically and the job is retryable. Never a degraded deliverable.
+# SUB-STAGE WALL. The 7-stage spine below is the RELIABILITY contract — every
+# stage must leave a record. This is the SPEED instrument, and it is finer:
+# talking head runs 140-190s and until now nobody could say where, because
+# `stage` had a definition, a strict completeness check, and ZERO call sites.
+# A consumer with no producer, which is the same defect class as
+# contract_violations being read and never written.
+def _mark(led, name, t_start):
+    """Record seconds for one sub-stage. Cheap, unconditional, additive."""
+    led.setdefault("wall_by_stage", {})
+    led["wall_by_stage"][name] = round(
+        led["wall_by_stage"].get(name, 0.0) + (time.time() - t_start), 2)
+
+
 PIPELINE_STAGES = (
     ("download",   {"kind": "external", "retry_to_success": True}),
     ("transcribe", {"kind": "external", "retry_to_success": True}),
@@ -2107,6 +2120,7 @@ def edit(source_key: str, brief: str,
         raise RuntimeError("source download produced an empty file")
     led["source_bytes"] = os.path.getsize(src)
     dl_s = round(time.time() - t0, 1)
+    _mark(led, "download", t0)
 
     # ── TRANSCRIPT (Deepgram — reused, not reinvented) ─────────────────────
     tw0 = time.time()
@@ -2119,10 +2133,12 @@ def edit(source_key: str, brief: str,
         AFTER a working edit, losing everything, because this call sat outside
         the ledger. Sending ~1MB of mono 16k instead removes the timeout class
         rather than retrying through it."""
+        _ta = time.time()
         a = path.rsplit(".", 1)[0] + ".dg.m4a"
         p = subprocess.run(
             ["ffmpeg", "-y", "-i", path, "-vn", "-ac", "1", "-ar", "16000",
              "-b:a", "64k", a], capture_output=True, text=True, timeout=300, env=_SUBPROCESS_ENV)
+        _mark(led, "audio_extract", _ta)
         if p.returncode != 0 or not os.path.exists(a):
             fail("audio_extract_failed", p.stderr[-400:])
             return path          # fall back to the video; worse, not fatal
@@ -2147,6 +2163,7 @@ def edit(source_key: str, brief: str,
         return _result(ok=False, why=f"source transcribe failed: {e}",
                        ledger=led, wall_s=round(time.time() - t0, 1))
     transcript_s = round(time.time() - tw0, 1)
+    _mark(led, "transcribe", tw0)
     # NO SPEECH IS A ROUTE, NOT A REJECTION (2026-09-05). This used to
     # `return {"ok": False}` — a hard refusal — and it is the single biggest
     # population in the product: 46.5% of completed jobs (706/1518 over 14d)
@@ -2834,6 +2851,7 @@ def edit(source_key: str, brief: str,
         # dead end as no count at all.
         _skips = []
 
+        _tc0 = time.time()
         # 1. THE CUT, derived from the keep rulings.
         keep = []
         for v in sorted(vs, key=lambda x: x.get("beat", 0)):
@@ -2858,6 +2876,7 @@ def edit(source_key: str, brief: str,
         cutr = build_cut(merged)
         if cutr.get("error"):
             return {"error": f"cut failed: {cutr['error']}"}
+        _mark(led, "build_cut", _tc0)
         steps.append({"step": "cut", "spans": len(merged),
                       "output_duration_s": cutr.get("output_duration_s")})
         built["cut"] = len(beats) - len(merged)
@@ -2866,6 +2885,7 @@ def edit(source_key: str, brief: str,
         if r.get("error"):
             return {"error": f"cut render failed: {r['error']}"}
 
+        _tov0 = time.time()
         # 2. TEXT, derived from the text rulings + their copy.
         items = []
         ruled_text_n = sum(1 for v in vs
@@ -2926,12 +2946,14 @@ def edit(source_key: str, brief: str,
                         _skips.append({"family": "text", "beat": None, "why": _why2})
                 else:
                     cur = "overlaid.mp4"
+                    _mark(led, "build_overlays", _tov0)
                     built["text"] = len(items)
                     steps.append({"step": "text", "n": len(items),
                                   "items": [{"t": _i.get("t_start"),
                                              "content": str(_i.get("text") or "")[:80]}
                                             for _i in items]})
 
+        _tz0 = time.time()
         # 3. ZOOMS, one per zoom ruling, velocity capped by build_zoom itself.
         for v in vs:
             b = by_i.get(v.get("beat"))
@@ -2958,6 +2980,8 @@ def edit(source_key: str, brief: str,
                 steps.append({"step": "zoom", "t": [round(a2, 2), round(z2, 2)],
                               "capped": zr.get("velocity_capped")})
 
+        _mark(led, "build_zoom", _tz0)
+        _tcd0 = time.time()
         # 3b. CARDS — a family the agent could RULE and the harness could not
         # BUILD. execute_plan handled cut, text, zoom and sfx; card had no
         # path at all, so "card ruled 2, built 0" reported a drop for something
@@ -3014,12 +3038,14 @@ def edit(source_key: str, brief: str,
                         _skips.append({"family": "card", "beat": None, "why": _whyc2})
                 else:
                     cur = "carded.mp4"
+                    _mark(led, "build_reel", _tcd0)
                     built["card"] = len(_cards)
                     steps.append({"step": "card", "n": len(_cards),
                                   "items": [{"t": _c3.get("t_start"),
                                              "content": str(_c3.get("hero") or "")[:80]}
                                             for _c3 in _cards]})
 
+        _ts0 = time.time()
         # 4. SFX, attack offsets applied by place_sfx from the measured table.
         for v in vs:
             b = by_i.get(v.get("beat"))
@@ -3127,6 +3153,7 @@ def edit(source_key: str, brief: str,
                                 else _s.get("t"),
                      "method": "ffmpeg", "declared_by": "execute_plan",
                      "content": _s.get("name") or ""})
+        _mark(led, "build_sfx", _ts0)
         led["execute_plan"] = {"steps": steps, "built": built, "ruled": ruled,
                                "ruled_but_not_built": gap, "skips": _skips,
                                "unbalanced": _unbalanced}
@@ -3399,6 +3426,7 @@ def edit(source_key: str, brief: str,
     _number_beats = [{"t": round(w["s"], 2), "word": w["w"]}
                      for w in words if _NUMWORD.match(str(w["w"]).strip(".,!?"))]
     led["number_beats"] = _number_beats
+    _tb0 = time.time()
     if _beat_source == "visual":
         # Duration from the probe we already have; shot changes are best-effort
         # and an empty list simply means motion is the only boundary source.
@@ -3424,6 +3452,7 @@ def edit(source_key: str, brief: str,
                 f"{_vdur:.1f}s source — the extractor is broken, not the video.")
     else:
         _beats = segment_beats(words)
+    _mark(led, "beats", _tb0)
     _numeric_ts = {b["t"] for b in _number_beats}
     for _b in _beats:
         _b["has_number"] = any(_b["t_start"] <= t <= _b["t_end"] for t in _numeric_ts)
@@ -3615,6 +3644,7 @@ def edit(source_key: str, brief: str,
         _kw = {"output_config": {"effort": _eff}} if _supports_effort(model) else {}
         led["effort_sent"] = bool(_kw)
         try:
+            _tm0 = time.time()
             r = client.messages.create(
                 model=model, max_tokens=MAX_TOKENS, system=sys_blocks,
                 tools=tools,
@@ -3622,6 +3652,7 @@ def edit(source_key: str, brief: str,
         except Exception as e:
             fail("model_call_failed", e)
             break
+        _mark(led, "model_thinking", _tm0)
         u = getattr(r, "usage", None)
         if u:
             led["tokens"]["in"] += getattr(u, "input_tokens", 0) or 0
@@ -3757,7 +3788,11 @@ def edit(source_key: str, brief: str,
                  f"stopped after {max_iters} turns with the agent still working "
                  f"— it never reached its own self-review")
         results = []
+        # Every tool's execution time, by name. set_spec and rule_all_beats are
+        # the agent's only real jobs now; everything else is harness work, and
+        # separating them is what makes "the model is slow" falsifiable.
         for tu in tool_uses:
+            _tt0 = time.time()
             if tu.name in _REPAIR_ONLY and not led.get("execute_plan"):
                 # REFUSED, not absent. The tool stays in the schema so the cached
                 # prefix never changes; what changes is whether the call is
@@ -4157,6 +4192,7 @@ def edit(source_key: str, brief: str,
             cap = 26000 if tu.name == "read_knowledge" else 6000
             results.append({"type": "tool_result", "tool_use_id": tu.id,
                             "content": json.dumps(out)[:cap]})
+            _mark(led, f"tool:{tu.name}", _tt0)
         msgs.append({"role": "user", "content": results})
         # TERMINAL: the request asked for something this editor does not do. Stop
         # before spending another turn, a render, or the user's credit on an

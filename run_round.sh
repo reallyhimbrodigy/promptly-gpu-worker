@@ -27,8 +27,15 @@ d = json.load(open("/tmp/fixtures/staged.json"))
 missing = sorted(set(BRIEFS) - set(d))
 if missing:
     sys.stderr.write(f"FIXTURE(S) NOT STAGED: {missing}\n"); sys.exit(1)
+# PER-FIXTURE MODEL. The agent's only job is judgement now — set_spec and
+# rule_all_beats — because execution moved into the harness. Run M measured
+# Haiku's verdicts as indistinguishable from Sonnet's (19/19 distinct, 19/19
+# citing their own beat) at 78% less; the reason Haiku failed then was
+# EXECUTION, and the agent no longer executes. talking_head is the expensive
+# source, so it is the one that carries the test.
+MODELS = {"talking_head": "claude-haiku-4-5"}
 for name, brief in BRIEFS.items():
-    print(f"{name}\t{d[name]['key']}\t{brief}")
+    print(f"{name}\t{d[name]['key']}\t{brief}\t{MODELS.get(name, 'claude-sonnet-5')}")
 PY
 [ -s "$OUT/plan.tsv" ] || { echo "no plan — fixtures not staged"; exit 1; }
 
@@ -46,7 +53,7 @@ MOUNT_SHA="$(shasum -a 256 agentic_editor_app.py | cut -c1-16)"
 echo "[mount] agentic_editor_app.py @ $MOUNT_SHA"
 echo "$MOUNT_SHA" > "$OUT/mount_sha.txt"
 
-while IFS=$'\t' read -r name key brief; do
+while IFS=$'\t' read -r name key brief model; do
   [ -z "$name" ] && continue
   IFS=$'\t' read -r S O K < <(python3 presign.py "$key")
   if [ -z "${S:-}" ]; then
@@ -60,8 +67,9 @@ while IFS=$'\t' read -r name key brief; do
     echo "$name MOUNT_DRIFT" >> "$OUT/appmap.txt"
     exit 2
   fi
-  echo "[launch] $name"
+  echo "[launch] $name  model=${model:-claude-sonnet-5}"
   modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
+    --model "${model:-claude-sonnet-5}" \
     --src-url "$S" --out-url "$O" --out-key "$K" > "$OUT/$name.log" 2>&1
   id="$(grep -oE 'ap-[A-Za-z0-9]+' "$OUT/$name.log" | head -1)"
   [ -n "$id" ] && echo "$name $id" >> "$OUT/appmap.txt" \
