@@ -150,14 +150,18 @@ print("\n7. THE TWO RULES")
 _repair = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
            "render_components", "place_cutaway", "author_component",
            "beat_verdict"}
-check("repair tools are withheld until there is something to repair",
-      "_REPAIR_ONLY" in CODE and "led.get(\"execute_plan\")" in CODE,
-      "the per-step tools are in the default schema, so the agent will build "
-      "with them one command at a time however the prompt is worded")
-check("the tool list is recomputed per turn",
-      "tools=_tools_for_turn()" in CODE,
-      "a tool list computed once cannot widen after execute_plan runs, so "
-      "repair would be impossible")
+check("repair tools are refused until there is something to repair",
+      "_REPAIR_ONLY" in CODE and "repair_before_plan" in CODE,
+      "the per-step tools are honoured before execute_plan, so the agent will "
+      "build with them one command at a time however the prompt is worded")
+check("the tool SCHEMA is constant for the whole run",
+      "_tools_for_turn" not in CODE and "tools=tools," in CODE,
+      "a tool list that changes mid-run changes the CACHED PREFIX and forces a "
+      "rewrite — that cost 43,222 cache_write tokens, 74% of a run")
+check("the pipeline accounting is printed",
+      "PIPELINE        :" in SRC and "RULED BUT NOT BUILT" in SRC,
+      "ruled/built exist in the ledger and are not shown, so a 0-declared "
+      "manifest cannot be told from a correct zero")
 # STRUCTURAL: the variable that READS the signal must be referenced by a print()
 # in the same function. The first version searched for the signal NAME anywhere
 # after `def main(` — but the read itself contains the name, so deleting the

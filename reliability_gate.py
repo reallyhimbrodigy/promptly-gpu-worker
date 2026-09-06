@@ -43,6 +43,35 @@ def round_is_green(round_result):
         # asked for their video and got a substitute. Any of these markers fails
         # the round even though `ok` is True, so a future degrade path cannot
         # quietly satisfy this gate.
+        # A PASSTHROUGH IS NOT A PASS (2026-09-05). Round 3 returned ok=True on
+        # all five fixtures, and four of them kept 100% of the source with 0-3
+        # placements — `music` produced a byte-for-byte passthrough with ZERO
+        # placements against a brief that asked for "cuts landing on the beat".
+        # `ok` means the pipeline did not crash. It does not mean it did the
+        # job, and a gate that conflates the two would have armed a production
+        # cutover after ten consecutive rounds of unedited video.
+        #
+        # Evidence of WORK is therefore part of green: a full edit must have
+        # changed something. Both signals count, because a legitimate edit may
+        # be all-cuts (a tighten) or all-placements (an overlay pass) — but not
+        # neither.
+        placed = v.get("placements")
+        kept = v.get("kept_ratio")
+        if placed is not None and kept is not None:
+            did_nothing = (placed == 0) and (kept is not None and kept >= 0.999)
+            if did_nothing:
+                return False, (f"{src}: PASSTHROUGH — kept {kept} of the source "
+                               f"and declared {placed} placements. ok=True only "
+                               f"means it did not crash.")
+        # A CONTRACT VIOLATION FAILS THE ROUND, it does not warn. Every fixture
+        # rendered at 540x960 against a 1080x1920 contract for three rounds while
+        # the harness logged `wrong_resolution` as a ledger event and the gate
+        # called those rounds green. A violation the gate tolerates is a
+        # violation that ships.
+        for v_ in (v.get("contract_violations") or []):
+            return False, (f"{src}: CONTRACT VIOLATION {v_!r} — the output does "
+                           f"not meet the pipeline's own contract, which is not "
+                           f"a warning")
         for marker in ("degraded", "partial", "components_dropped", "fallback"):
             if v.get(marker):
                 return False, (f"{src}: ok but {marker}={v[marker]!r} — green "

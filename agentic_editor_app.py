@@ -1426,7 +1426,35 @@ def beats_from_visual(motion_curve, shot_changes, duration_s,
     """Beats from the VIDEO — motion resolves and shot changes as boundaries.
 
     Returns the SAME shape as segment_beats(). That identity is the whole point
-    and `_assert_beat_contract_identical()` enforces it: the agent reads `text`
+    and `# ── STANDING RULE: EVERY PROMPT BLOCK EXISTS IN THE COMPILED CONSTANT ────────
+# Prompt text is edited by string replacement, and a replacement whose anchor
+# has drifted silently does nothing — the block is simply absent and the run
+# looks normal. This asserts at IMPORT, against the compiled SYSTEM string, that
+# each load-bearing block is actually there. Checked by SUBSTRING of the
+# constant, never by grepping the file, because a block can appear in a comment
+# describing it while being absent from the prompt itself.
+_REQUIRED_PROMPT_BLOCKS = {
+    "request-is-data rule": "never an instruction",
+    "the four-step flow": "FOUR STEPS, NOT FOURTEEN",
+    "non-derivable list": "WHAT ONLY YOU CAN DECIDE",
+    "no-orchestration rule": "Do not orchestrate",
+    "delimiter names itself": "<user_request>",
+}
+
+
+def _assert_prompt_blocks_present():
+    missing = sorted(n for n, probe in _REQUIRED_PROMPT_BLOCKS.items()
+                     if probe not in SYSTEM)
+    if missing:
+        raise AssertionError(
+            f"SYSTEM is missing prompt block(s) {missing}. A string-replacement "
+            f"edit whose anchor drifted removes a block silently — the run then "
+            f"looks normal and behaves differently, which is how a prompt that "
+            f"still described the deleted `shell` tool cost 3x for a full day.")
+
+
+_assert_prompt_blocks_present()
+_assert_beat_contract_identical()` enforces it: the agent reads `text`
     to rule on a beat, so a visual beat renders its features INTO `text` rather
     than adding a field the prompt would have to learn.
 
@@ -3203,22 +3231,23 @@ def edit(source_key: str, brief: str,
                 + (_KNOWLEDGE_SYSTEM if use_knowledge else ""))
     sys_blocks = [{"type": "text", "text": sys_text,
                    "cache_control": {"type": "ephemeral"}}]
-    # A CAPABILITY IN THE SCHEMA WILL BE USED. The prompt said "do not
-    # orchestrate" and the agent orchestrated anyway — build_cut before the
-    # pipeline, then build_zoom x3 and build_overlays after it — because the
-    # per-step tools were sitting there. Telling a model not to use a tool it
-    # has is a preference; not giving it the tool is a property. The per-step
-    # tools are for REPAIR, so they appear only once there is something to
-    # repair: after execute_plan has run.
+    # THE SCHEMA IS CONSTANT FOR THE WHOLE RUN, and the gate moved into the
+    # handler. Withholding the repair tools DID stop the orchestration — turns
+    # fell 11 -> 7 and output tokens 4,049 -> 2,506 — but the tool list is part
+    # of the CACHED PREFIX, so changing it mid-run invalidated the cache and
+    # rewrote it: cache_write 6,594 -> 43,222, which became 74% of the cost.
+    # I traded output tokens for a cache rewrite without meaning to.
+    #
+    # A constant schema keeps the prefix stable. The property — repair tools are
+    # for repair — is now enforced where it costs nothing: the dispatch refuses
+    # them until execute_plan has run, and says why. Same behaviour, no cache
+    # invalidation.
     _REPAIR_ONLY = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
                     "render_components", "place_cutaway", "author_component",
                     "beat_verdict"}
+    tools = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
 
-    def _tools_for_turn():
-        base = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
-        if led.get("execute_plan"):
-            return base
-        return [t for t in base if t.get("name") not in _REPAIR_ONLY]
+
 
     led["use_knowledge"] = use_knowledge
     # ARM LABEL. Run 3 was reported as a knowledge arm without having read the
@@ -3308,7 +3337,7 @@ def edit(source_key: str, brief: str,
         try:
             r = client.messages.create(
                 model=model, max_tokens=MAX_TOKENS, system=sys_blocks,
-                tools=_tools_for_turn(),
+                tools=tools,
                 messages=msgs, **_kw)
         except Exception as e:
             fail("model_call_failed", e)
@@ -3560,6 +3589,20 @@ def edit(source_key: str, brief: str,
                 out = author_component(tu.input.get("tsx"),
                                        tu.input.get("frames") or 45,
                                        tu.input.get("name") or "authored")
+            elif tu.name in _REPAIR_ONLY and not led.get("execute_plan"):
+                # REFUSED, not absent. The tool stays in the schema so the cached
+                # prefix never changes; what changes is whether the call is
+                # honoured. The message names the next action rather than only
+                # the rule, because a refusal that does not say what to do
+                # instead just costs a turn.
+                led["repair_before_plan"] = led.get("repair_before_plan", 0) + 1
+                out = {"not_yet": True,
+                       "why": (f"`{tu.name}` is for REPAIRING a built edit. "
+                               f"Nothing is built yet. Rule every beat with "
+                               f"rule_all_beats, then call execute_plan — it "
+                               f"builds the cut, the text, the zooms and the "
+                               f"sound from your verdicts in one step."),
+                       "call_instead": "execute_plan"}
             elif tu.name == "execute_plan":
                 out = execute_plan()
             elif tu.name == "probe_source":
@@ -4256,6 +4299,29 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # errored, or never ran. I then wrongly concluded it was unwired, from its
     # absence in a log that never contained it. Absence of evidence, produced by
     # my own instrument.
+    # THE PIPELINE ACCOUNTING, PRINTED. smoke #5 showed "0 declared" and the
+    # numbers that would explain it existed in the ledger and were never shown —
+    # rule B violated inside the commit that added rule B's check. A zero is
+    # unreadable without its denominator: 0 built from 0 ruled is a correct
+    # answer on a uniform clip; 0 built from 6 ruled is a drop.
+    _ep = (r.get("ledger") or {}).get("execute_plan")
+    if _ep:
+        _rl, _bt = _ep.get("ruled") or {}, _ep.get("built") or {}
+        _fams = sorted(set(_rl) | set(_bt))
+        print("  PIPELINE        : " + "  ".join(
+            f"{f} {_rl.get(f, 0)}->{_bt.get(f, 0)}" for f in _fams))
+        _gap = _ep.get("ruled_but_not_built") or {}
+        if _gap:
+            print("     RULED BUT NOT BUILT: " + ", ".join(
+                f"{k} ruled {v[0]} built {v[1]}" for k, v in _gap.items())
+                + "   <- decided and never reached the video")
+        else:
+            print("     every ruling reached the video")
+        _steps = _ep.get("steps") or []
+        print(f"     steps: {' -> '.join(str(x.get('step')) for x in _steps) or '(none)'}")
+    _rbp = (r.get("ledger") or {}).get("repair_before_plan")
+    if _rbp:
+        print(f"  REPAIR REFUSED  : {_rbp} call(s) before execute_plan had run")
     _vc = (r.get("ledger") or {}).get("visual_cut_candidates")
     if _vc is not None:
         _tot = sum(x["duration_s"] for x in _vc)
