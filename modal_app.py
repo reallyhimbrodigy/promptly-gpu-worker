@@ -2148,7 +2148,22 @@ def _check_run_auth(body, endpoint):
           flush=True)
     if not _armed or _v == "ok":
         return None
-    return {"ok": False, "error": "unauthorized", "verdict": _v}
+    # A REAL 403, NOT A 200 WITH AN ERROR BODY.
+    #
+    # The first armed build returned a plain dict, which FastAPI serialises as
+    # HTTP 200. content-studio's dispatch judges success with `if (r.ok)`, so a
+    # refused dispatch was recorded as SUCCESSFUL and the job would silently
+    # never run — a lost job with no error anywhere, the exact inverse of "fail
+    # loudly to us, never to the user". PROVEN on the live endpoint: 8 of 8
+    # unauthenticated POSTs returned HTTP 200 carrying {"error":"unauthorized"}.
+    #
+    # 403 also lands in the caller's `status >= 400 && < 500` branch, which does
+    # NOT retry — correct, because a wrong secret is not transient and retrying
+    # only multiplies the failure.
+    from fastapi.responses import JSONResponse as _JSONResponse
+    return _JSONResponse(status_code=403,
+                         content={"ok": False, "error": "unauthorized",
+                                  "verdict": _v})
 
 
 # ── Canonical flag values — the janitor's daily drift sentinel reads these ────

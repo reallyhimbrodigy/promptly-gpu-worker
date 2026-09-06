@@ -12,6 +12,24 @@ never seen its failure branch is not yet a check.
 import ast
 import os
 import sys
+import types
+
+# fastapi is an IMAGE dependency, not a local one — modal_app imports
+# JSONResponse only on the refusal path. Stubbed so this smoke can drive that
+# branch and read the status code; the stub records exactly what the real class
+# is constructed with, which is all this check needs.
+if "fastapi" not in sys.modules:
+    _fa = types.ModuleType("fastapi")
+    _far = types.ModuleType("fastapi.responses")
+
+    class _JSONResponse:                      # noqa: N801 - mirrors fastapi
+        def __init__(self, status_code=200, content=None):
+            self.status_code, self.content = status_code, content
+
+    _far.JSONResponse = _JSONResponse
+    _fa.responses = _far
+    sys.modules["fastapi"] = _fa
+    sys.modules["fastapi.responses"] = _far
 
 FAIL = []
 
@@ -87,15 +105,27 @@ if _found == _wanted:
     env(secret=SECRET, enforce="1")
     ok(check({FIELD: SECRET}, "run_job") is None,
        "ARMED mode refused a CORRECT secret — this would 403 all real dispatch")
+    # STATUS CODE, not just a body. The first armed build returned a plain dict,
+    # which FastAPI serialises as HTTP 200 — and content-studio's dispatch judges
+    # success with `if (r.ok)`, so a refusal read as a SUCCESSFUL dispatch and
+    # the job silently never ran. Asserting only the body would have passed that
+    # build: 8 of 8 live unauthenticated POSTs returned 200 with
+    # {"error":"unauthorized"} while this smoke was green.
     for body, label in (({}, "missing"), ({FIELD: "wrong"}, "wrong"), (None, "null body")):
         r = check(body, "run_job")
-        ok(isinstance(r, dict) and r.get("error") == "unauthorized",
-           f"ARMED mode ALLOWED a request with a {label} secret")
+        ok(r is not None, f"ARMED mode ALLOWED a request with a {label} secret")
+        ok(getattr(r, "status_code", None) == 403,
+           f"a {label} secret is refused with status "
+           f"{getattr(r, 'status_code', '200 (a plain dict)')}, not 403 — the "
+           f"caller checks r.ok, so a 200 makes a refused dispatch look "
+           f"successful and the job is lost with no error anywhere")
     env(secret=None, enforce="1")
     r = check({FIELD: SECRET}, "run_job")
-    ok(isinstance(r, dict) and r.get("verdict") == "server_secret_unset",
-       "ARMED with an UNSET server secret ALLOWED the request — an unset secret "
-       "must never mean 'let everyone in'")
+    _c = getattr(r, "content", None) if r is not None else None
+    ok(isinstance(_c, dict) and _c.get("verdict") == "server_secret_unset"
+       and getattr(r, "status_code", None) == 403,
+       "ARMED with an UNSET server secret ALLOWED the request (or refused it "
+       "without a 403) — an unset secret must never mean 'let everyone in'")
 
     # ── timing safety, asserted on the AST ─────────────────────────────────
     # NOT a substring search. The first version of this check was
