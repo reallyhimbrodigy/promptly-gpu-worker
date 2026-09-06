@@ -1,0 +1,169 @@
+"""SMOKE — five families, and an unsupported request is ANSWERED not edited.
+
+CUTAWAY WAS REMOVED (2026-09-06), not left unbuilt. It had been the largest
+corpus family (72 placements, 4.22/25s) building ZERO on every run, which read
+as the pipeline's biggest gap. It is a scope decision: this editor works with
+the footage the user uploaded.
+
+WHY A SMOKE AND NOT A NOTE. This lane's own law is that A CAPABILITY IN THE
+SCHEMA WILL BE USED — the prompt said "do not orchestrate" and the agent
+orchestrated anyway. Removal therefore has to be checked as an ABSENCE from the
+tool surface, the enums and the rubric, or the next person to widen an enum
+quietly restores a family with no implementation behind it.
+"""
+import ast
+import sys
+
+SRC = open("agentic_editor_app.py", encoding="utf-8").read()
+TREE = ast.parse(SRC)
+FAIL = []
+ok = lambda c, m: None if c else FAIL.append(m)
+
+_top = {}
+for _n in TREE.body:
+    if isinstance(_n, ast.Assign) and isinstance(_n.targets[0], ast.Name):
+        try:
+            _top[_n.targets[0].id] = ast.literal_eval(_n.value)
+        except Exception:
+            pass
+
+# ── 1. the family vocabulary ────────────────────────────────────────────────
+fams = _top.get("_TREATMENT_FAMILIES")
+ok(fams is not None, "_TREATMENT_FAMILIES is gone")
+ok("cutaway" not in (fams or []), "cutaway is back in _TREATMENT_FAMILIES")
+ok(set(fams or []) == {"card", "text", "sfx", "zoom", "none"},
+   f"the family set changed: {fams}")
+
+ref = _top.get("REFERENCE_PER_25S") or {}
+ok("cutaway" not in ref,
+   "the corpus cutaway rate is back in REFERENCE_PER_25S — every run would "
+   "again report 0% against a capability this pipeline deliberately lacks, "
+   "which reads as a gap rather than a scope decision")
+fit = _top.get("REFERENCE_BEAT_FIT") or {}
+ok("cutaway" not in fit, "cutaway is back in REFERENCE_BEAT_FIT")
+ok("cutaway" not in (_top.get("PLACEMENT_FAMILY") or {}),
+   "cutaway is back in PLACEMENT_FAMILY")
+
+# ── 2. THE TOOL IS GONE FROM THE SURFACE ────────────────────────────────────
+# Withholding the capability is the property; forbidding it in prose is only a
+# preference.
+ok("def place_cutaway" not in SRC, "place_cutaway is implemented again")
+# BOTH LISTS. The agent's surface is `TOOLS + KNOWLEDGE_TOOLS` (see the
+# dispatch), and TOOLS holds only 5 entries — execute_plan, probe_source,
+# build_zoom, place_sfx, inspect_output. set_spec, rule_all_beats and
+# place_cutaway all live in KNOWLEDGE_TOOLS. The first version of this smoke
+# read TOOLS alone, so "place_cutaway not in names" was TRUE about a list that
+# never contained it, and a mutation re-adding the tool passed clean. Checking
+# the wrong collection is indistinguishable from checking nothing.
+tools = list(_top.get("TOOLS") or []) + list(_top.get("KNOWLEDGE_TOOLS") or [])
+ok(_top.get("TOOLS") is not None, "TOOLS could not be read")
+ok(_top.get("KNOWLEDGE_TOOLS") is not None, "KNOWLEDGE_TOOLS could not be read")
+names = [t.get("name") for t in tools]
+# Non-vacuity: the surface must contain the tools we know are there.
+for _must in ("set_spec", "rule_all_beats", "execute_plan"):
+    ok(_must in names,
+       f"{_must!r} is not in the tool surface this smoke reads — it is "
+       f"inspecting the wrong collection and every absence check below is vacuous")
+ok("place_cutaway" not in names,
+   "place_cutaway is back in the TOOLS schema — the agent will call it")
+ok(len(names) == len(set(names)), f"duplicate tool names: {names}")
+
+# Every enum the agent reads must be free of it — RECURSIVELY. The first
+# version of this walked only input_schema.properties and MISSED the one that
+# matters: `treatment` is an array, so its enum lives at
+# properties.beats.items.properties.treatment.items.enum, two levels down. A
+# mutation re-adding "cutaway" there passed cleanly. Depth is exactly where a
+# schema check gets fooled, so walk the whole tree.
+def _enums(node, path="input_schema"):
+    if isinstance(node, dict):
+        if isinstance(node.get("enum"), list):
+            yield path, node["enum"]
+        for k, v in node.items():
+            yield from _enums(v, f"{path}.{k}")
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _enums(v, f"{path}[{i}]")
+
+_seen_enums = 0
+for t in (tools or []):
+    for path, vals in _enums(t.get("input_schema") or {}):
+        _seen_enums += 1
+        ok("cutaway" not in vals,
+           f"tool {t.get('name')!r} still offers 'cutaway' at {path}")
+# A walk that finds nothing asserts nothing.
+ok(_seen_enums >= 5,
+   f"only {_seen_enums} enums found in the tool schemas — the walk is not "
+   f"reaching them, so this check passes vacuously")
+
+# ── 3. THE UNSUPPORTED CLASS ────────────────────────────────────────────────
+modes = _top.get("SPEC_MODES") or ()
+ok("unsupported" in modes, "set_spec has no 'unsupported' mode")
+classes = _top.get("UNSUPPORTED_CLASSES") or ()
+ok(set(classes) == {"generate_footage", "change_in_frame"},
+   f"UNSUPPORTED_CLASSES changed: {classes}")
+
+_ns = {}
+for _n in TREE.body:
+    if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "") in (
+            "SPEC_MODES", "SPEC_FAMILIES", "UNSUPPORTED_CLASSES",
+            "REFERENCE_PER_25S"):
+        exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
+_nsf = next(n for n in TREE.body
+            if isinstance(n, ast.FunctionDef) and n.name == "normalize_spec")
+exec(compile(ast.Module([_nsf], []), "<s>", "exec"), _ns)
+norm = _ns["normalize_spec"]
+
+got = norm({"mode": "unsupported", "unsupported_class": "generate_footage"})
+ok(got.get("unsupported_class") == "generate_footage",
+   "normalize_spec drops the unsupported class")
+try:
+    norm({"mode": "unsupported"})
+    FAIL.append("an unsupported request with NO class is accepted — an unnamed "
+                "refusal cannot be counted, and the count is the demand signal")
+except ValueError:
+    pass
+try:
+    norm({"mode": "unsupported", "unsupported_class": "make_it_cool"})
+    FAIL.append("an arbitrary unsupported_class is accepted")
+except ValueError:
+    pass
+ok("cutaway" not in _ns["SPEC_FAMILIES"],
+   "cutaway is back in SPEC_FAMILIES — a targeted_change could scope to it")
+
+# ── 4. THE TERMINAL PATH IS REAL ────────────────────────────────────────────
+# A flag that nothing reads is the producer-with-no-consumer defect this repo
+# keeps rediscovering; assert BOTH ends exist.
+ok(SRC.count("_unsupported_stop = False") == 1,
+   "_unsupported_stop is not initialised before the loop — the ordinary path "
+   "would raise NameError")
+ok(SRC.count("_unsupported_stop = True") == 1,
+   "nothing SETS _unsupported_stop")
+ok(SRC.count("if _unsupported_stop:") == 1,
+   "nothing READS _unsupported_stop — the run would continue and produce an "
+   "edit that ignores the request, and charge for it")
+# BOTH sites, and the absence of the opposite. A substring test for
+# '"credit_charged": False' passed while one of the two was flipped to True,
+# because the other still matched — an existence check cannot see a change it
+# does not count.
+ok(SRC.count('"credit_charged": False') == 2,
+   f'expected credit_charged:False at BOTH the ledger and the tool-result '
+   f'site, found {SRC.count(chr(34) + "credit_charged" + chr(34) + ": False")} '
+   f'— the user must not be charged for a request we cannot serve')
+ok('"credit_charged": True' not in SRC,
+   "something records credit_charged: True on the unsupported path")
+_break = [n for n in ast.walk(TREE)
+          if isinstance(n, ast.If)
+          and any(getattr(t, "id", "") == "_unsupported_stop" for t in ast.walk(n.test))
+          and any(isinstance(b, ast.Break) for b in ast.walk(n))]
+ok(len(_break) == 1,
+   "the _unsupported_stop branch does not BREAK the turn loop — it would fall "
+   "through and keep spending turns")
+
+if FAIL:
+    print("FAIL smoke_five_families:")
+    for f in FAIL:
+        print("  - " + f)
+    sys.exit(1)
+print("ok smoke_five_families — 5 families, cutaway absent from tools/enums/"
+      "rates/rubric, unsupported class validated, terminal path breaks the loop "
+      "and charges nothing")

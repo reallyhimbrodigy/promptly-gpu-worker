@@ -182,6 +182,11 @@ MODEL = "claude-sonnet-5"
 # Source: reference_beats joined to reference_videos, 10 videos / 426s / 153
 # beats, treatment is an array per beat so every family is countable.
 #
+# CUTAWAY IS DELIBERATELY ABSENT (2026-09-06). Its corpus rate was 4.22/25s —
+# the second-largest family — and reporting 0% against it on every run read as a
+# capability gap when it is a scope decision. A reference rate for something the
+# pipeline cannot do is not a target; it is a standing false alarm.
+#
 # THE RATES IN USE UNTIL NOW (7.56 text / 2.57 cards / 3.32 cutaways) DO NOT
 # REPRODUCE from this corpus on any cut I can find — the full set gives
 # 7.28/2.35/4.22 and the in_instrument subset (2 videos, 96s) gives
@@ -193,7 +198,6 @@ MODEL = "claude-sonnet-5"
 REFERENCE_PER_25S = {
     "text":       7.28,   # overlay_text, 124 beats
     "cut":        4.75,   # 81
-    "cutaway":    4.22,   # 72
     "card":       2.35,   # 40
     "sfx":        0.82,   # 14
     "zoom":       0.35,   # punch_in, 6
@@ -204,7 +208,6 @@ REFERENCE_PER_25S = {
 REFERENCE_BEAT_FIT = {
     "sfx":     {"hook": 5, "close": 4, "claim": 2, "breath": 1, "evidence": 1, "turn": 1},
     "card":    {"evidence": 18, "close": 11, "turn": 4, "hook": 3, "claim": 2},
-    "cutaway": {"evidence": 44, "turn": 8, "claim": 7, "close": 4, "payoff": 4},
     "zoom":    {"hook": 3, "evidence": 3},
 }
 
@@ -536,14 +539,33 @@ def _neutralise_brief(s):
 # The agent reasons about the request; the harness holds it to what it said. A
 # brief-parser here would be a second, dumber authority silently overriding the
 # reasoning it was meant to support — the same trap derive_rubric avoids.
-SPEC_MODES = ("full_edit", "targeted_change", "question")
+SPEC_MODES = ("full_edit", "targeted_change", "question", "unsupported")
+
+# REQUEST CLASSES THIS EDITOR CANNOT SERVE, named so they can be ANSWERED rather
+# than half-attempted. Measured over 14d of no-speech traffic: 20.0% of no-speech
+# jobs and 16.4% of ALL jobs ask for something no editor working from the
+# uploaded footage can deliver — roughly 150-190 users a fortnight.
+#
+# Both classes below need footage that does not exist in the source:
+#   generate_footage — "add a shot of X", "put in b-roll", "make a scene where"
+#   change_in_frame  — "remove the background", "change my shirt", "make it
+#                      night", "put me on a beach"
+#
+# The failure they replace is worse than a refusal: the pipeline would return a
+# competent edit that ignored the actual request, the user would read it as the
+# product not working, and they would be charged. An honest "this editor works
+# with what you uploaded", with NO CREDIT TAKEN, is the better product.
+#
+# When generated footage ships it is a NEW family with its own tool, gated on
+# tier and priced per second — not a quiet widening of this one.
+UNSUPPORTED_CLASSES = ("generate_footage", "change_in_frame")
 
 # The declare_placement `type` vocabulary is NOT the family vocabulary, and the
 # gap is where a scope check would silently pass everything: `emphasis` is the
 # zoom family and `overlay_text` is text. Declared once, here, so the scope
 # check and the family-mix report cannot disagree about what a placement IS.
 PLACEMENT_FAMILY = {
-    "overlay_text": "text", "card": "card", "cutaway": "cutaway",
+    "overlay_text": "text", "card": "card",
     "sfx": "sfx", "emphasis": "zoom", "caption_track": "caption",
 }
 # `caption` is scopeable but has no corpus rate — captions are the base layer,
@@ -562,6 +584,16 @@ def normalize_spec(declared):
     mode = d.get("mode")
     if mode not in SPEC_MODES:
         raise ValueError(f"scope.mode must be one of {SPEC_MODES}, got {mode!r}")
+    if mode == "unsupported":
+        _cls = d.get("unsupported_class")
+        if _cls not in UNSUPPORTED_CLASSES:
+            raise ValueError(
+                f"an unsupported request must name WHICH class it is, one of "
+                f"{list(UNSUPPORTED_CLASSES)}, got {_cls!r} — an unnamed refusal "
+                f"cannot be counted, and the count is the demand signal that "
+                f"decides whether the generated-footage family gets built")
+        return {"mode": mode, "families": None, "beats": None,
+                "unsupported_class": _cls}
     if mode != "targeted_change":
         return {"mode": mode, "families": None, "beats": None}
     fams = d.get("families")
@@ -688,18 +720,17 @@ ordering, the composite. None of that is your problem, and reasoning about it
 is the single most expensive thing you can do.
 
 WHAT ONLY YOU CAN DECIDE, because it cannot be derived from the source:
-  - which beats get a card, text, sound, zoom, cutaway, or nothing
+  - which beats get a card, text, sound, zoom, or nothing
   - which beats are kept and which are cut
   - the WORDS on a text overlay — they do not exist until you write them
   - a card's hero number and what it means
-  - what a cutaway should SHOW
   - which sound fits the moment
   - what the request is asking for
 
 HOW TO WORK — FOUR STEPS, NOT FOURTEEN
 1. `set_spec` — read the request and say what it specifies.
 2. Read the beats. Rule on EVERY one with `rule_all_beats`, in a single call,
-   carrying the words, the hero number, the cutaway subject and the sound name
+   carrying the words, the hero number and the sound name
    for each beat you are placing something on. Everything you decide here is
    built; anything you leave out cannot be.
 3. `execute_plan` — one call. The harness runs the whole pipeline from your
@@ -779,7 +810,7 @@ Violating any of them produces a BROKEN video that still exits 0.
       after it. Same decisions, one turn.
       Each entry carries:
         treatment — a LIST, and a beat may carry more than one:
-                    ["card"] ["text"] ["sfx"] ["zoom"] ["cutaway"] ["none"]
+                    ["card"] ["text"] ["sfx"] ["zoom"] ["none"]
                     or combinations — a corpus hook routinely carries BOTH
                     text and a sound hit. F1 above maps each to its mechanism.
         text_content — REQUIRED when treatment includes "text": the words to
@@ -836,10 +867,12 @@ THE REAL ASSET LIBRARY IS MOUNTED AT /assets — A1 THROUGH A3
 This is the inventory the production pipeline ships, not a description of one.
 
 
-  F1. FOUR FAMILIES, FOUR MECHANISMS — none of them need inventing:
+  F1. FIVE FAMILIES, AND YOU WORK WITH WHAT WAS UPLOADED. There is no
+      b-roll, no stock footage, no generated shot. If a beat would only work
+      with footage that does not exist in the source, rule it `none` and say
+      why — that is the honest answer, not a failure.
         card    -> render_components (the reel), then composite
         text    -> build_overlays
-        cutaway -> place_cutaway (fetches b-roll, returns the command)
         sfx     -> ffmpeg, one audio leg. NO TOOL NEEDED:
                    ffmpeg -y -i out.mp4 -i /assets/sounds/<file> \
                      -filter_complex "[1:a]adelay=D|D[s];[0:a][s]amix=inputs=2:duration=first" \
@@ -911,7 +944,6 @@ twice.
         build_cut          — every keep span
         render_components  — every card, one reel, one render
         build_overlays     — derived from ALL your text rulings; takes no list
-        place_cutaway      — once per clip, but decide them all first
       Then ONE composite chain. Batching the verdicts cut the tail 65% and took
       19 turns to 1; execution is the same shape and is now where the turns are.
 
@@ -1108,7 +1140,20 @@ KNOWLEDGE_TOOLS = [{
         "light transitions', 'make the captions bigger', 'shorten the intro'). "
         "List the families it asks for. If they asked for zooms, the output has "
         "zooms and is OTHERWISE UNCHANGED.\n"
-        "  question        — the user asked something. Answer it; edit nothing.\n\n"
+        "  question        — the user asked something. Answer it; edit nothing.\n"
+        "  unsupported     — the request needs footage that does not exist in "
+        "the upload. This editor works with what the user gave you: it cuts, "
+        "times, and adds text, cards, sound and zooms to THEIR footage. It "
+        "cannot generate a shot, fetch stock b-roll, or change what is in the "
+        "frame. Two classes:\n"
+        "      generate_footage — 'add a shot of a city', 'put some b-roll "
+        "over this', 'make a scene where...'\n"
+        "      change_in_frame  — 'remove the background', 'change my shirt', "
+        "'make it night', 'put me on a beach'\n"
+        "    Say so plainly and stop. Do NOT deliver a competent edit that "
+        "ignores what they asked for — that reads as the product not working. "
+        "No credit is charged. This is not a failure and not a refusal to try; "
+        "it is the honest shape of the tool.\n\n"
         "Name what the request asks for, not what you could add. Anything you "
         "did not derive from the request was not asked for, and what is not "
         "asked for is not built."),
@@ -1116,12 +1161,15 @@ KNOWLEDGE_TOOLS = [{
         "type": "object",
         "properties": {
             "mode": {"type": "string",
-                     "enum": ["full_edit", "targeted_change", "question"]},
+                     "enum": ["full_edit", "targeted_change", "question",
+                              "unsupported"]},
+            "unsupported_class": {"type": "string",
+                                  "enum": ["generate_footage", "change_in_frame"],
+                                  "description": "unsupported ONLY: which class"},
             "families": {"type": "array", "items": {"type": "string"},
                          "description": "targeted_change ONLY: the families the "
                                         "request asks for. One of: text, card, "
-                                        "cutaway, sfx, zoom, transition, cut, "
-                                        "caption"},
+                                        "sfx, zoom, transition, cut, caption"},
             "targets": {"type": "object",
                         "description": (
                             "RESOLVE THE SOFT MODIFIERS. A request rarely gives "
@@ -1152,7 +1200,7 @@ KNOWLEDGE_TOOLS = [{
         "type": "object",
         "properties": {
             "type": {"type": "string",
-                     "enum": ["card", "overlay_text", "cutaway", "caption_track",
+                     "enum": ["card", "overlay_text", "caption_track",
                               "emphasis", "sfx"]},
             "t_start": {"type": "number", "description": "seconds in the OUTPUT"},
             "t_end": {"type": "number"},
@@ -1251,29 +1299,11 @@ KNOWLEDGE_TOOLS = [{
                          "name": {"type": "string"}},
                      "required": ["tsx"]},
 }, {
-    "name": "place_cutaway",
-    "description": (
-        "Fetch a b-roll clip for a beat and get the command that composites it "
-        "over the speaker. Give the KEYWORD of what should be SHOWN — a "
-        "concrete noun, not the sentence. Video only; the speaker's audio keeps "
-        "running underneath, which is what a cutaway is. 61% of corpus cutaways "
-        "sit on `evidence` beats: a claim spoken, the proof shown. If nothing "
-        "matches it says so — take the honest empty rather than forcing a bad "
-        "clip."),
-    "input_schema": {"type": "object",
-                     "properties": {
-                         "keyword": {"type": "string"},
-                         "t_start": {"type": "number",
-                                     "description": "OUTPUT seconds"},
-                         "duration_s": {"type": "number"},
-                         "beat": {"type": "integer"}},
-                     "required": ["keyword", "t_start"]},
-}, {
     "name": "rule_all_beats",
     "description": (
         "Rule on EVERY beat in ONE call. Pass the complete list — one entry per "
         "beat in your brief, each with treatment (a LIST from card|text|sfx|"
-        "zoom|cutaway|none — more than one allowed), cut "
+        "zoom|none — more than one allowed), cut "
         "('keep'|'cut') and a why about that beat. This is one turn instead of "
         "one turn per beat, and the message history stops growing by a verdict "
         "every turn. If you miss any it tells you which; call again with only "
@@ -1297,7 +1327,7 @@ KNOWLEDGE_TOOLS = [{
                                                     "is a real answer",
                                      "items": {"type": "string",
                                                "enum": ["card", "text", "sfx",
-                                                        "zoom", "cutaway", "none"]}},
+                                                        "zoom", "none"]}},
                                  "cut": {"type": "string", "enum": ["keep", "cut"]},
                                  "text_content": {
                                      "type": "string",
@@ -1327,10 +1357,6 @@ KNOWLEDGE_TOOLS = [{
                                                     "phrase the card is ABOUT"},
                                  "card_label": {"type": "string",
                                      "description": "the card's supporting line"},
-                                 "cutaway_keyword": {"type": "string",
-                                     "description": "when treatment includes "
-                                                    "'cutaway': WHAT TO SHOW, in "
-                                                    "two or three words"},
                                  "why": {"type": "string"}},
                              "required": ["beat", "treatment", "cut", "why"]}}},
                      "required": ["verdicts"]},
@@ -1886,7 +1912,12 @@ _REQUIRED_CONSTRAINTS = [
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
 
 
-_TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "cutaway", "none"]
+# FIVE FAMILIES. Cutaway was removed 2026-09-06: this editor works with the
+# footage the user uploaded, and fetching stock b-roll is a different product
+# with a different cost model. It is not a gap to be closed later in this lane —
+# when generated footage arrives it is a NEW family with its own tool, gated on
+# tier and priced per second.
+_TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "none"]
 
 
 def _assert_treatment_surface_agrees(module_src: str) -> None:
@@ -2673,13 +2704,14 @@ def edit(source_key: str, brief: str,
                     "— do not shift anything by hand.",
         }
 
-    # ── CUTAWAY: the largest family, and nothing could place one ────────────
-    # 72 corpus placements (4.22/25s, the biggest by count) and ZERO on every
-    # run ever measured. Not a source constraint — the finance source has five
-    # worked examples, which is exactly the `evidence` beat 61% of corpus
-    # cutaways land on. The gap was that this agent's tool surface had no way to
-    # fetch or place b-roll at all.
-    led["cutaways_fetched"] = 0
+    # ── CUTAWAY WAS REMOVED, NOT LEFT UNBUILT (2026-09-06) ─────────────────
+    # It had been the largest corpus family (72 placements, 4.22/25s) and built
+    # ZERO on every run, which read as the pipeline's biggest gap. It is not a
+    # gap: this editor works with the footage the user uploaded. Fetching stock
+    # b-roll is a different product with a different cost model, and generated
+    # footage will arrive as its own family — own tool, gated on tier, priced
+    # per second. The corpus rate is gone from the report with it, because a
+    # reference for a capability we deliberately lack is a standing false alarm.
 
     def run_ffmpeg_from_recipe(recipe, out_name):
         """Execute a harness recipe as ARGV, reading its filter from the file.
@@ -2735,7 +2767,6 @@ def edit(source_key: str, brief: str,
           cut/keep per beat    judgement, informed by derived candidates
           text_content         the words do not exist until written
           card_hero/label      which number matters and what it means
-          cutaway_keyword      what to SHOW is semantic
           sfx_name             which sound fits this moment
           the spec             what the request asks for
         Everything else — timing from beat bounds, zoom velocity under the
@@ -2774,7 +2805,7 @@ def edit(source_key: str, brief: str,
         beats = led.get("beats") or []
         by_i = {b["i"]: b for b in beats}
         steps, built = [], {"cut": 0, "text": 0, "card": 0, "zoom": 0,
-                            "sfx": 0, "cutaway": 0}
+                            "sfx": 0}
         # EVERY SKIP RECORDS ITS REASON. The aggregate gap (ruled 3, built 1)
         # says something was dropped; it does not say WHY, and three of the
         # drops here were bare `continue`s. A count without a reason is the same
@@ -2903,10 +2934,10 @@ def edit(source_key: str, brief: str,
                               "capped": zr.get("velocity_capped")})
 
         # 3b. CARDS — a family the agent could RULE and the harness could not
-        # BUILD. execute_plan handled cut, text, zoom and sfx; card and cutaway
-        # had no path at all, so "card ruled 2, built 0" reported a drop for
-        # something that was never implemented. A family the agent can rule must
-        # be a family the harness can build, or the ruling is a question nobody
+        # BUILD. execute_plan handled cut, text, zoom and sfx; card had no
+        # path at all, so "card ruled 2, built 0" reported a drop for something
+        # that was never implemented. A family the agent can rule must be a
+        # family the harness can build, or the ruling is a question nobody
         # answers.
         _cards = []
         for v in vs:
@@ -2998,10 +3029,9 @@ def edit(source_key: str, brief: str,
         ruled = {"text": sum(1 for v in vs if "text" in [str(t).lower() for t in (v.get("treatment") or [])]),
                  "zoom": sum(1 for v in vs if "zoom" in [str(t).lower() for t in (v.get("treatment") or [])]),
                  "card": sum(1 for v in vs if "card" in [str(t).lower() for t in (v.get("treatment") or [])]),
-                 "cutaway": sum(1 for v in vs if "cutaway" in [str(t).lower() for t in (v.get("treatment") or [])]),
                  "sfx": sum(1 for v in vs if str(v.get("sfx", "no")).lower() == "yes")}
         gap = {k: [ruled.get(k, 0), built.get(k, 0)]
-               for k in ("text", "zoom", "sfx", "card", "cutaway")
+               for k in ("text", "zoom", "sfx", "card")
                if ruled.get(k, 0) != built.get(k, 0)}
         # ── THE ACCOUNTING MUST BALANCE ──────────────────────────────────────
         # ruled = built + skipped, per family. Anything else means a ruling left
@@ -3017,7 +3047,7 @@ def edit(source_key: str, brief: str,
         for _s2 in _skips:
             _sk_by_fam[_s2["family"]] = _sk_by_fam.get(_s2["family"], 0) + 1
         _unbalanced = {}
-        for _f in ("text", "zoom", "sfx", "card", "cutaway"):
+        for _f in ("text", "zoom", "sfx", "card"):
             _r, _b, _s3 = ruled.get(_f, 0), built.get(_f, 0), _sk_by_fam.get(_f, 0)
             if _r != _b + _s3:
                 _unbalanced[_f] = {"ruled": _r, "built": _b, "skipped": _s3,
@@ -3223,92 +3253,6 @@ def edit(source_key: str, brief: str,
                 "lands_at_s": round(at, 3), "started_at_s": round(start, 3),
                 "attack_ms_applied": attack_ms,
                 "note": "the file starts EARLY by its attack so the peak lands on t"}
-
-    def place_cutaway(keyword, t_start, duration_s=2.5, beat=None):
-        key = os.environ.get("PEXELS_API_KEY")
-        if not key:
-            fail("pexels_key_missing", "PEXELS_API_KEY not in the mounted secret")
-            return {"error": "PEXELS_API_KEY is not set in this container",
-                    "note": "cutaways cannot be fetched; rule the beat 'none' "
-                            "and say so rather than pretending"}
-        kw = str(keyword or "").strip()
-        if not kw:
-            return {"error": "keyword is required — what should be SHOWN"}
-        try:
-            t0 = float(t_start); dur = max(0.5, float(duration_s or 2.5))
-        except Exception:
-            return {"error": "t_start/duration_s must be numbers"}
-        import urllib.parse as _up
-        import urllib.request as _ur
-        q = _up.urlencode({"query": kw, "per_page": 15,
-                           "orientation": "portrait", "size": "large"})
-        req = _ur.Request(f"https://api.pexels.com/videos/search?{q}",
-                          headers={"Authorization": key})
-        try:
-            with _ur.urlopen(req, timeout=25) as fh:
-                vids = (json.loads(fh.read().decode()) or {}).get("videos") or []
-        except Exception as e:
-            fail("pexels_search_failed", f"{kw}: {e}")
-            return {"error": f"pexels search failed: {e}"}
-        if not vids:
-            # HONEST EMPTY. A thin keyword returning nothing is a real answer —
-            # the product's own law is an honest fallback, never a bad cutaway.
-            return {"ok": False, "reason": "no_results", "keyword": kw,
-                    "note": "no clip matched. Pick a more concrete noun or rule "
-                            "the beat without a cutaway — do not force one."}
-        # Portrait first, then nearest to 1080 wide.
-        best, bestfile = None, None
-        for v in vids:
-            for f in (v.get("video_files") or []):
-                if (f.get("height") or 0) < (f.get("width") or 0):
-                    continue                      # landscape, wrong shape
-                if bestfile is None or abs((f.get("width") or 0) - 1080) < \
-                        abs((bestfile.get("width") or 0) - 1080):
-                    best, bestfile = v, f
-        if not bestfile:
-            return {"ok": False, "reason": "no_portrait_file", "keyword": kw}
-        n = led["cutaways_fetched"]
-        dst = f"/work/cutaway{n}.mp4"
-        try:
-            with _ur.urlopen(bestfile["link"], timeout=60) as r_, open(dst, "wb") as w_:
-                w_.write(r_.read())
-        except Exception as e:
-            fail("pexels_download_failed", f"{kw}: {e}")
-            return {"error": f"download failed: {e}"}
-        led["cutaways_fetched"] += 1
-        led.setdefault("cutaway_meta", []).append(
-            {"beat": beat, "keyword": kw, "t_start": t0, "duration_s": dur,
-             "file": dst, "pexels_id": best.get("id"),
-             "credit": (best.get("user") or {}).get("name")})
-        return {
-            "ok": True, "file": dst, "keyword": kw,
-            "pexels_id": best.get("id"),
-            "credit": (best.get("user") or {}).get("name"),
-            "src_wh": [bestfile.get("width"), bestfile.get("height")],
-            "run_this": (
-                f"cd /work && ffmpeg -y -i out_base.mp4 -i {dst} -filter_complex "
-                f"\"[1:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-                f"crop=1080:1920,setpts=PTS-STARTPTS+{t0}/TB[cw];"
-                f"[0:v][cw]overlay=0:0:enable='between(t,{t0},"
-                f"{round(t0 + dur, 3)})'\" -c:a copy out.mp4"),
-            "note": "Video only — the speaker's AUDIO keeps running underneath, "
-                    "which is what a cutaway is. Do not touch the audio leg.",
-        }
-
-    # ── AUTHORING: when the catalogue cannot serve the family ───────────────
-    # Zoom has no component — there is no PunchIn among the 31 MG types, and the
-    # zoom family (SmoothPush, StepZoom...) is a camera-move subsystem, not
-    # something the reel can render. So the agent WRITES one. This is also the
-    # first real use for /skills: 282 files of Remotion authoring documentation
-    # that answered zero of the 11 catalogue questions ever asked of it, because
-    # every one of those was a catalogue question. Authoring is what it is for.
-    #
-    # The scaffold has been in the image since the beginning and never used:
-    # /remotion is a SEPARATE project at 4.0.517/react19 whose Comp.tsx is a
-    # transparent placeholder registered as composition "Comp". Kept apart from
-    # /promptly-remotion (4.0.450/react18) on purpose — react 19 is a major, and
-    # mixing them makes a working component look broken.
-    led["components_authored"] = 0
 
     def author_component(tsx, frames=45, name="authored"):
         # `name` IS MODEL-SUPPLIED AND REACHED A SHELL. It was interpolated into
@@ -3524,8 +3468,7 @@ def edit(source_key: str, brief: str,
     # them until execute_plan has run, and says why. Same behaviour, no cache
     # invalidation.
     _REPAIR_ONLY = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
-                    "render_components", "place_cutaway", "author_component",
-                    "beat_verdict"}
+                    "render_components", "author_component", "beat_verdict"}
     tools = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
 
 
@@ -3543,6 +3486,10 @@ def edit(source_key: str, brief: str,
     # cache_control marker, and this message holds the full transcript.
     msgs = [{"role": "user", "content": [{"type": "text", "text": user}]}]
     final_text = ""
+    # Set by set_spec when the request needs footage that does not exist. Read
+    # at the bottom of the turn loop to stop the run. Initialised HERE, not at
+    # the assignment, so the read is never a NameError on the ordinary path.
+    _unsupported_stop = False
     for it in range(max_iters):
         led["iters"] = it + 1
         # KNOWLEDGE EVICTION: TRIED AND REVERTED 2026-09-01. Modelled $0.51 ->
@@ -3744,7 +3691,7 @@ def edit(source_key: str, brief: str,
                 msgs.append({"role": "user", "content": [{"type": "text", "text":
                     f"NOT DONE. {len(_unruled)} of {len(_beats)} beats have no "
                     f"ruling:\n" + _lst + "\n\nFor EACH, call `beat_verdict` "
-                    "with treatment (a LIST from card|text|sfx|zoom|cutaway|"
+                    "with treatment (a LIST from card|text|sfx|zoom|"
                     "none, more than one allowed), cut ('keep' | "
                     "'cut') and a `why` about THAT beat's content. 'none' and "
                     "'keep' are legitimate answers — not deciding is not. If any "
@@ -3842,6 +3789,38 @@ def edit(source_key: str, brief: str,
                                         "tool_use_id": tu.id,
                                         "content": json.dumps(out)})
                         continue
+                    # ── AN UNSUPPORTED REQUEST IS ANSWERED, NOT EDITED ───
+                    # Terminal on the FIRST call, before any work: the whole
+                    # point is that we do not spend a render, a Modal container
+                    # or the user's credit producing an edit that ignores what
+                    # they asked for. Recorded as a named class so the demand is
+                    # countable — that count is what decides whether the
+                    # generated-footage family is worth building.
+                    if _sc["mode"] == "unsupported":
+                        _cls = _sc.get("unsupported_class")
+                        led["unsupported_request"] = {
+                            "class": _cls,
+                            "why": _sc.get("why") or "",
+                            "credit_charged": False,
+                        }
+                        led["terminal"] = "unsupported_request"
+                        _msg = ("This editor works with the footage you "
+                                "uploaded — it cuts and times it and adds text, "
+                                "cards, sound and zooms. It can't "
+                                + ("generate new footage or fetch stock clips."
+                                   if _cls == "generate_footage"
+                                   else "change what's in the frame.")
+                                + " Nothing was charged for this.")
+                        led["user_message"] = _msg
+                        results.append({"type": "tool_result",
+                                        "tool_use_id": tu.id,
+                                        "content": json.dumps(
+                                            {"terminal": True,
+                                             "user_message": _msg,
+                                             "credit_charged": False,
+                                             "note": "Stop here. Do not edit."})})
+                        _unsupported_stop = True
+                        continue
                     _sc["targets"] = _good_t
                     led["rubric"] = derive_rubric(_sc.get("targets"), _sc["mode"])
                     led["spec"] = _sc
@@ -3937,11 +3916,6 @@ def edit(source_key: str, brief: str,
                                 tu.input.get("gain_db", -6.0),
                                 tu.input.get("input_file") or "out.mp4",
                                 tu.input.get("output_file") or "out_sfx.mp4")
-            elif tu.name == "place_cutaway":
-                out = place_cutaway(tu.input.get("keyword"),
-                                    tu.input.get("t_start"),
-                                    tu.input.get("duration_s") or 2.5,
-                                    tu.input.get("beat"))
             elif tu.name == "rule_all_beats":
                 _incoming = tu.input.get("verdicts") or []
                 _seen = {v.get("beat") for v in led["beat_verdicts"]}
@@ -4132,6 +4106,12 @@ def edit(source_key: str, brief: str,
             results.append({"type": "tool_result", "tool_use_id": tu.id,
                             "content": json.dumps(out)[:cap]})
         msgs.append({"role": "user", "content": results})
+        # TERMINAL: the request asked for something this editor does not do. Stop
+        # before spending another turn, a render, or the user's credit on an
+        # edit that would ignore what they asked for.
+        if _unsupported_stop:
+            final_text = led.get("user_message") or ""
+            break
 
     final = inspect() if os.path.exists("/work/out.mp4") else {"exists": False}
     key = None
@@ -4297,7 +4277,6 @@ def edit(source_key: str, brief: str,
         "declared": len(_pl),
         "text": _n_of("overlay_text"),
         "cards": _n_of("card"),
-        "cutaways": _n_of("cutaway"),
         "caption_tracks": _n_of("caption_track"),
         "emphasis": _n_of("emphasis"),
         "sfx": _n_of("sfx"),
@@ -4322,7 +4301,6 @@ def edit(source_key: str, brief: str,
     }
     _mix["text_per_25s"] = _per25(_mix["text"])
     _mix["card_per_25s"] = _per25(_mix["cards"])
-    _mix["cutaway_per_25s"] = _per25(_mix["cutaways"])
     led["family_mix"] = _mix
 
     # ── RULED vs BUILT, PER FAMILY ──────────────────────────────────────────
@@ -4336,8 +4314,7 @@ def edit(source_key: str, brief: str,
             if _t != "none":
                 _fam_ruled[_t] = _fam_ruled.get(_t, 0) + 1
     _fam_built = {"card": _mix["cards"], "text": _mix["text"],
-                  "sfx": _mix["sfx"], "cutaway": _mix["cutaways"],
-                  "zoom": _mix.get("emphasis", 0)}
+                  "sfx": _mix["sfx"], "zoom": _mix.get("emphasis", 0)}
     led["ruled_vs_built"] = {f: {"ruled": _fam_ruled.get(f, 0),
                                  "built": _fam_built.get(f, 0)}
                              for f in set(_fam_ruled) | {"card", "text", "sfx"}}
@@ -4374,8 +4351,12 @@ def edit(source_key: str, brief: str,
     _TERMS = {
         "sfx": ("sfx", "sound effect", "sound-effect", "audio hit", "whoosh",
                 "boom", "ding", "sting"),
-        "cutaway": ("cutaway", "cut-away", "b-roll", "broll", "stock footage",
-                    "pexels"),
+        # Kept AFTER the family was removed, and renamed to say what it now
+        # measures: how often the agent reaches for footage that does not
+        # exist. Zero here means the scope decision is landing; a rising number
+        # is the demand signal for the generated-footage family, not a defect.
+        "wants_footage_we_lack": ("cutaway", "cut-away", "b-roll", "broll",
+                                  "stock footage", "pexels"),
         "zoom": ("zoom", "punch-in", "punch in", "push in"),
     }
     led["family_mentions"] = {
@@ -4420,8 +4401,7 @@ def edit(source_key: str, brief: str,
             # every run: the decision surface had no slot for them.
             "treatments": {t: sum(1 for v in _vs
                                   if t in (v.get("treatment") or []))
-                           for t in ("card", "text", "sfx", "zoom",
-                                     "cutaway", "none")},
+                           for t in ("card", "text", "sfx", "zoom", "none")},
             # SELF-REPORT, kept for comparison only.
             "cuts_reported": {c: sum(1 for v in _vs if v.get("cut") == c)
                               for c in ("keep", "cut")},
@@ -4727,7 +4707,7 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"caption burn from an overlay text.")
         _dur = float((r.get("final") or {}).get("duration_s") or 0) or 1.0
         _n = {"text": mx["text"], "cut": mx.get("cut_spans", 0),
-              "cutaway": mx["cutaways"], "card": mx["cards"],
+              "card": mx["cards"],
               "sfx": mx["sfx"], "zoom": mx.get("emphasis", 0),
               "transition": mx.get("transitions", 0)}
         for _f, _ref in REFERENCE_PER_25S.items():
