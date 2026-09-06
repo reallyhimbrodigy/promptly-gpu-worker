@@ -468,9 +468,44 @@ def _contract_violations(ledger):
     consumed, never produced. The gate could not have failed a round for a
     violation it was never handed.
     """
-    return [f"{f['kind']}: {f['detail'][:80]}"
-            for f in (ledger or {}).get("failures", [])
-            if f.get("kind") in CONTRACT_FAILURES]
+    # FINAL-ONLY. These are promises about the OUTPUT, and the agent calls
+    # inspect_output on intermediates — so a mid-run measurement of a
+    # half-built file was being read as the run's verdict.
+    #
+    # MEASURED, round 12 talking_head: speech_loss_severe fired at 88.7s with
+    # kept_ratio 0.479, and the FINAL output measured 0.932 with only "um uh um
+    # so" absent, which is correct for a cut-the-filler brief. Contract failures
+    # now fail rounds, so that stale reading would have failed every
+    # talking-head round on evidence the finished video disproves.
+    #
+    # accounting_unbalanced is the exception and stays ledger-derived: it is a
+    # fact about the RUN's bookkeeping, not a property of the artifact, and
+    # there is no final state to re-measure it from.
+    _final_kinds = {"wrong_resolution", "no_audio_stream",
+                    "output_has_no_speech", "speech_loss_severe", "no_output"}
+    out = [f"{f['kind']}: {f['detail'][:80]}"
+           for f in (ledger or {}).get("failures", [])
+           if f.get("kind") in CONTRACT_FAILURES and f.get("kind") not in _final_kinds]
+
+    # Re-derive the artifact promises from the FINAL state only.
+    _f = (ledger or {}).get("final_inspect") or {}
+    if _f:
+        if not _f.get("exists"):
+            out.append("no_output: the final artifact does not exist")
+        else:
+            _w, _h = _f.get("width"), _f.get("height")
+            if _w and _h and (int(_w), int(_h)) != (1080, 1920):
+                out.append(f"wrong_resolution: final output is {_w}x{_h}, not 1080x1920")
+            if _f.get("audio") is False:
+                out.append("no_audio_stream: the final output carries no audio")
+        _sc = _f.get("speech_check") or {}
+        if _sc.get("applicable"):
+            _kr = _sc.get("kept_ratio")
+            if _sc.get("output_words") == 0:
+                out.append("output_has_no_speech: 0 words transcribed from the final output")
+            elif isinstance(_kr, (int, float)) and _kr < 0.5:
+                out.append(f"speech_loss_severe: final kept_ratio {_kr:.3f}")
+    return out
 
 
 def _result(**kw):
@@ -900,10 +935,9 @@ If the beat calls for a moving graphic, render the component at
 /promptly-remotion and composite it. Do NOT downgrade a moving graphic to static
 text because ffmpeg is easier — that is a quality decision, and quality wins.
 
-DECLARE EVERY PLACEMENT
-After the command that renders a graphic succeeds, call `declare_placement`
-once for it. Counting ffmpeg filter names cannot tell a caption burn from an
-overlay text; four runs were misread that way. Your declaration is the record.
+THE HARNESS RECORDS WHAT IT PLACED. You do not declare anything. It executes
+every placement, so it already knows the type, the time and the method — and
+two producers writing one manifest is how a run reported 16 overlays for 10.
 
 THE REAL ASSET LIBRARY IS MOUNTED AT /assets — A1 THROUGH A3
 This is the inventory the production pipeline ships, not a description of one.
@@ -1230,28 +1264,6 @@ KNOWLEDGE_TOOLS = [{
                     "description": "one sentence: what the request specifies"},
         },
         "required": ["mode"]},
-}, {
-    "name": "declare_placement",
-    "description": (
-        "Declare a graphic you have placed. Call this ONCE per placement, right "
-        "after the command that renders it succeeds. This is the record of what "
-        "the edit contains — an op-count of ffmpeg filters cannot tell a caption "
-        "burn from an overlay text, and guessing from filter names is how four "
-        "runs were misread."),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "type": {"type": "string",
-                     "enum": ["card", "overlay_text", "caption_track",
-                              "emphasis", "sfx"]},
-            "t_start": {"type": "number", "description": "seconds in the OUTPUT"},
-            "t_end": {"type": "number"},
-            "content": {"type": "string", "description": "the text/number shown"},
-            "method": {"type": "string", "enum": ["ffmpeg", "remotion"]},
-            "why": {"type": "string",
-                    "description": "the beat this serves (claim/evidence/close/...)"},
-        },
-        "required": ["type", "t_start", "method"]},
 }, {
     "name": "read_knowledge",
     "description": "Read a file of Promptly's editorial standard. Pass '_index' "
@@ -2607,12 +2619,25 @@ def edit(source_key: str, brief: str,
         # Anything the caller passed is additive — a hand-authored overlay that
         # is not a beat ruling still lands.
         _seen_t = {round(d["t_start"], 1) for d in _derived}
+        _dropped_passthru = []
         for it in (items or []):
             try:
                 if round(float(it.get("t_start")), 1) not in _seen_t:
                     _derived.append(it)
-            except Exception:
-                pass
+            except Exception as _de:
+                # A DROPPED OVERLAY MUST LEAVE A RECORD. An unparseable t_start
+                # skipped the append and said NOTHING, so a caller-supplied
+                # overlay vanished here with the ledger reading clean — the same
+                # silent-loss shape as the manifest step-count and the unmounted
+                # motion curve, and invisible to every gate for the same reason.
+                _dropped_passthru.append(
+                    {"t_start": str(it.get("t_start"))[:40],
+                     "why": f"t_start unusable ({type(_de).__name__})"})
+        if _dropped_passthru:
+            led["overlay_passthrough_dropped"] = _dropped_passthru
+            fail("overlay_dropped_bad_t_start",
+                 f"{len(_dropped_passthru)} caller-supplied overlay(s) dropped "
+                 f"for an unparseable t_start: {_dropped_passthru[:3]}")
         items = _derived
         led["overlays_derived"] = len(_derived)
         _acct["passed_in"] = len(items or [])
@@ -3152,6 +3177,19 @@ def edit(source_key: str, brief: str,
             _k = _s.get("step")
             if _k not in _TYPE:
                 continue
+            # NOT ASKED FOR, NOT BUILT — moved here from declare_placement's
+            # dispatch when the agent stopped declaring. The rule outlived the
+            # tool that carried it: a targeted_change that also ships four new
+            # overlays looks like a good edit to anyone not reading the manifest
+            # against the request. The harness is the sole declarer, so the
+            # harness is where the scope is enforced.
+            _sc2 = led.get("spec")
+            if _sc2 and _sc2.get("mode") == "targeted_change":
+                _allowed2 = set(_sc2.get("families") or ())
+                if _k not in _allowed2:
+                    led.setdefault("not_asked_for", []).append(
+                        {"family": _k, "why": "not asked for", "n": _s.get("n", 1)})
+                    continue
             _items = _s.get("items")
             if isinstance(_items, list) and _items:
                 for _it2 in _items:
@@ -3941,52 +3979,6 @@ def edit(source_key: str, brief: str,
                     # Handed BACK to the agent, not raised: a vague scope is
                     # something it can fix on the next turn.
                     out = {"error": str(_se)}
-            elif tu.name == "declare_placement":
-                _p = dict(tu.input or {})
-                _fam = PLACEMENT_FAMILY.get(_p.get("type"))
-                _sc = led.get("spec")
-                # NOT ASKED FOR, NOT BUILT — and enforced here rather than
-                # scored afterwards. "Add zooms" that also ships four new
-                # overlays looks like a good edit to anyone not reading the
-                # manifest against the request, so a number reported at the end
-                # is the wrong instrument: the user asked for a bounded change,
-                # not a grade. Telling the agent NOW, with the reason, lets it
-                # correct on its next turn instead of learning at the end that
-                # its work was discarded.
-                if _sc and _sc.get("mode") == "targeted_change":
-                    _allowed = set(_sc.get("families") or ())
-                    _bts = _sc.get("beats")
-                    if _fam not in _allowed:
-                        led.setdefault("not_asked_for", []).append(
-                            {"type": _p.get("type"), "family": _fam,
-                             "why": "not asked for"})
-                        out = {"not_built": True,
-                               "why": (f"The request did not ask for {_fam!r}. It "
-                                       f"specifies {sorted(_allowed)}. What is not "
-                                       f"asked for is not built — leave the rest of "
-                                       f"the video unchanged."),
-                               "the_request_specifies": sorted(_allowed)}
-                        results.append({"type": "tool_result",
-                                        "tool_use_id": tu.id,
-                                        "content": json.dumps(out)})
-                        continue
-                    if _bts is not None and _p.get("beat") is not None \
-                            and _p.get("beat") not in _bts:
-                        led.setdefault("not_asked_for", []).append(
-                            {"type": _p.get("type"), "beat": _p.get("beat"),
-                             "why": "beat not asked for"})
-                        out = {"not_built": True,
-                               "why": (f"The request does not name beat "
-                                       f"{_p.get('beat')}; it names {_bts}. Leave "
-                                       f"the other beats unchanged."),
-                               "the_request_specifies_beats": _bts}
-                        results.append({"type": "tool_result",
-                                        "tool_use_id": tu.id,
-                                        "content": json.dumps(out)})
-                        continue
-                _p["family"] = _fam
-                led.setdefault("placements", []).append(_p)
-                out = {"recorded": True, "total": len(led["placements"])}
             elif tu.name == "read_knowledge":
                 out = read_knowledge(tu.input.get("file", "_index"))
                 _knowledge_result_ids[tu.id] = tu.input.get("file", "_index")
@@ -4149,23 +4141,51 @@ def edit(source_key: str, brief: str,
                 # has not changed — but it is now dropped ONCE with a reason
                 # instead of being asked for forever.
                 _reject = set(_nocopy) | set(_nosfx) | set(_nocard)
-                led["half_ruling_attempts"] = led.get("half_ruling_attempts", 0) + 1
-                _attempt = led["half_ruling_attempts"]
-                if _reject and _attempt >= 2:
-                    for _b2 in sorted(_reject):
+                # PER BEAT, NOT PER CALL. The counter was a single global
+                # incremented on EVERY rule_all_beats call, so it measured how
+                # many times the tool ran, not how many chances a beat had.
+                # Two consequences, both wrong and in opposite directions:
+                # a beat incomplete on calls 1 and 2 was dropped correctly, but
+                # the message read "after 7 attempts" (round 12, beat 10) because
+                # it printed the CALL count; and once the global passed 2, any
+                # beat that first went incomplete later was dropped on its FIRST
+                # offence with no second chance at all.
+                #
+                # Keyed on the beat, so "two attempts then terminal" means
+                # exactly that for every beat independently.
+                # ONCE DROPPED, STAYS DROPPED. Without this a beat the agent
+                # re-rules after its drop is counted again and dropped again —
+                # "terminal" that repeats is just a slower loop, and the ledger
+                # fills with duplicate drops for one beat.
+                _already = set(led.get("half_ruling_dropped") or [])
+                _reject = {_b for _b in _reject if _b not in _already}
+                _att = led.setdefault("half_ruling_attempts_by_beat", {})
+                for _b3 in _reject:
+                    _att[str(_b3)] = _att.get(str(_b3), 0) + 1
+                _spent = {_b3 for _b3 in _reject if _att[str(_b3)] >= 2}
+                led["half_ruling_attempts"] = max(
+                    [0] + [v for v in _att.values()])
+                if _spent:
+                    for _b2 in sorted(_spent):
                         led.setdefault("half_ruling_dropped", []).append(_b2)
                         fail("half_ruling_dropped",
-                             f"beat {_b2}: incomplete after {_attempt} attempts — "
-                             f"dropped so the run can proceed")
+                             f"beat {_b2}: incomplete on {_att[str(_b2)]} of its "
+                             f"own attempts — dropped so the run can proceed")
+                    # DROP the spent ones; the first-offence ones are still
+                    # ASKED. Collapsing both into one set lost the beats that had
+                    # only just gone incomplete — they would neither be retried
+                    # nor dropped, which is the silent-third-state this bound
+                    # exists to prevent.
                     led["beat_verdicts"] = [v for v in led["beat_verdicts"]
-                                            if v.get("beat") not in _reject]
+                                            if v.get("beat") not in _spent]
                     _seen3 = {v.get("beat") for v in led["beat_verdicts"]}
-                    out["DROPPED_after_two_attempts"] = sorted(_reject)
+                    out["DROPPED_after_two_attempts"] = sorted(_spent)
                     out["ruled"] = len(_seen3)
                     out["note_dropped"] = (
-                        "These beats were incomplete twice and have been DROPPED, "
-                        "not asked for again. Continue with execute_plan.")
-                    _reject = set()
+                        "These beats were incomplete on both of their own "
+                        "attempts and have been DROPPED, not asked for again. "
+                        "Continue with execute_plan.")
+                _reject = _reject - _spent
                 if _reject:
                     led["beat_verdicts"] = [v for v in led["beat_verdicts"]
                                             if v.get("beat") not in _reject]
@@ -4227,6 +4247,10 @@ def edit(source_key: str, brief: str,
             break
 
     final = inspect() if os.path.exists("/work/out.mp4") else {"exists": False}
+    # THE ONE MEASUREMENT THE CONTRACT IS JUDGED ON. Recorded separately from the
+    # agent's intermediate inspect_output calls, because those measure half-built
+    # files and were being read as the run's verdict.
+    led["final_inspect"] = final
     key = None
     if final.get("exists"):
         # PUT to the presigned destination. The key was chosen by the CALLER;
