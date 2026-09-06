@@ -423,6 +423,12 @@ CONTRACT_FAILURES = frozenset({
     "output_has_no_speech",    # a speech source rendered mute
     "no_output",               # nothing was produced
     "speech_loss_severe",      # most of the speech is gone
+    # A LEDGER NOTE WITH NO POWER IS A WARNING THAT GETS READ PAST. This was
+    # written, printed and ignored for four rounds while `wrong_resolution`
+    # named the exact defect in the log and the gate called those rounds green.
+    # An accounting gap means a number we steer by is wrong; that has to fail
+    # the round, not annotate it.
+    "accounting_unbalanced",
 })
 
 
@@ -4329,10 +4335,47 @@ def edit(source_key: str, brief: str,
         for _t in (_v.get("treatment") or []):
             if _t != "none":
                 _fam_ruled[_t] = _fam_ruled.get(_t, 0) + 1
-    _fam_built = {"card": _mix["cards"], "text": _mix["text"],
-                  "sfx": _mix["sfx"], "zoom": _mix.get("emphasis", 0)}
+    # DECLARED, not built. The manifest is what the agent SAYS it placed; the
+    # harness's own count of what it BUILT lives in led["execute_plan"]["built"].
+    # Naming them apart is the whole point: they were conflated, so the gap
+    # between them could not be seen.
+    _fam_declared = {"card": _mix["cards"], "text": _mix["text"],
+                     "sfx": _mix["sfx"], "zoom": _mix.get("emphasis", 0)}
+    _fam_built = dict((led.get("execute_plan") or {}).get("built") or {})
+
+    # ── BUILT = DECLARED, ACROSS THE SEAM ──────────────────────────────────
+    # ruled = built + skipped is checked inside execute_plan and balanced there.
+    # It spans a different seam: it cannot see what happens between BUILDING a
+    # placement and DECLARING it in the manifest.
+    #
+    # MEASURED, round 10 screen_recording: ruled 2 text, OVERLAY DERIVE derived
+    # 2 with zero skips, and the manifest declared ONE. Frame-diffing the output
+    # against the source found overlays at 1.0s/3.0s AND at 17.0s — two distinct
+    # regions of different sizes — so the video was CORRECT and the instrument
+    # under-reported. Since op-counting was retired the manifest is the only
+    # instrument, so an undeclared placement silently deflates every rate we
+    # steer by, and the round still scored green.
+    #
+    # The old heuristic could not catch it by construction: it fired on
+    # `built < 0.5 * ruled`, and 2 -> 1 is exactly 1 < 1.0, false. A threshold
+    # that a two-item family can never trip is not a check for small families.
+    # Any gap, named per family.
+    _declare_gap = {}
+    for _f in set(_fam_built) | set(_fam_declared):
+        _b = int(_fam_built.get(_f, 0) or 0)
+        _d = int(_fam_declared.get(_f, 0) or 0)
+        if _b != _d:
+            _declare_gap[_f] = {"built": _b, "declared": _d, "unexplained": _b - _d}
+    if _declare_gap:
+        led["declare_unbalanced"] = _declare_gap
+        for _f, _g in _declare_gap.items():
+            fail("accounting_unbalanced",
+                 f"{_f}: harness BUILT {_g['built']} but the manifest DECLARED "
+                 f"{_g['declared']} ({_g['unexplained']:+d} unexplained) — the "
+                 f"manifest is the only instrument, so this deflates the "
+                 f"family rate whether or not the video is right")
     led["ruled_vs_built"] = {f: {"ruled": _fam_ruled.get(f, 0),
-                                 "built": _fam_built.get(f, 0)}
+                                 "built": _fam_declared.get(f, 0)}
                              for f in set(_fam_ruled) | {"card", "text", "sfx"}}
     # PROPORTION, not zero. Run Y ruled 18 beats `text` and built ONE, and both
     # this audit and the build_overlays guard passed it — each tested for zero
