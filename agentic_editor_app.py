@@ -727,6 +727,15 @@ WHAT ONLY YOU CAN DECIDE, because it cannot be derived from the source:
   - which sound fits the moment
   - what the request is asking for
 
+NO TRANSCRIPT IS NOT NO GROUNDS. Many sources have no speech at all — music,
+screen recordings, product shots, pet video. On those, text overlays derive from
+THE REQUEST and THE VISIBLE CONTENT. You are never withholding text because
+there is nothing to quote: the words on an overlay do not exist until you write
+them, and that is as true of a silent clip as a spoken one. What you can see is
+grounds. What the request asks for is grounds. "There is no transcript to ground
+this in" is not a reason, and a silent source is not a reason to hand back the
+source unchanged.
+
 HOW TO WORK — FOUR STEPS, NOT FOURTEEN
 1. `set_spec` — read the request and say what it specifies.
 2. Read the beats. Rule on EVERY one with `rule_all_beats`, in a single call,
@@ -1995,6 +2004,13 @@ _REQUIRED_PROMPT_BLOCKS = {
     "non-derivable list": "WHAT ONLY YOU CAN DECIDE",
     "no-orchestration rule": "Do not orchestrate",
     "soft-modifier rule": "SOFT MODIFIERS ARE QUANTITIES",
+    # Registered the day it was written. screen_recording came back a
+    # PASSTHROUGH in rounds 8 AND 9 — kept 1.0, zero placements — with all four
+    # beats ruled `none` for "no transcript to ground any overlay text in",
+    # while its own spec had asked for text at 2.0/25s. The route exists
+    # precisely for sources with no speech; a belief that text needs a
+    # transcript makes the whole route unable to place anything.
+    "no-transcript-is-not-no-grounds": "NO TRANSCRIPT IS NOT NO GROUNDS",
     "delimiter names itself": "<user_request>",
 }
 
