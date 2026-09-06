@@ -51,6 +51,9 @@ app = modal.App("agentic-editor")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
 _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion"))
+_REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
+_MOODREEL_SRC = os.path.join(_REPO_ROOT, "moodreel_editor.py")
+_TYPEREG_SRC = os.path.join(_REPO_ROOT, "type_registries.py")
 # INPUT 4 — the Remotion skills. 276 markdown files, ~11MB, and until now they
 # lived ONLY in ~/.claude/skills on the laptop: the agent runs in a Modal
 # container, so they were not "unread", they were UNREACHABLE. Mounting them is
@@ -164,7 +167,18 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
        .add_local_dir(_SKILLS_SRC, "/skills", copy=True, ignore=_SKILLS_IGNORE)
        .add_local_dir(_ASSETS_SOUNDS, "/assets/sounds", copy=True)
        .add_local_file(_INVENTORY_JSON, "/assets/inventory.json", copy=True)
-       .add_local_dir(_KNOWLEDGE_DIR, "/knowledge", copy=True))
+       .add_local_dir(_KNOWLEDGE_DIR, "/knowledge", copy=True)
+       # THE MOTION-CURVE EXTRACTOR, MOUNTED — a deferred import must be backed
+       # by an image mount or it is a silent degrade wearing a try/except.
+       # MEASURED, round 12 pet_video: "[beats] motion curve unavailable (No
+       # module named 'moodreel_editor') — even pacing". Every no-speech run has
+       # been segmenting on EVEN SPACING rather than motion peaks, which is the
+       # one signal that makes visual beats better than arbitrary ones. Both
+       # files are stdlib-only (moodreel_editor shells out to ffmpeg for the
+       # scene score; type_registries is its only import), so nothing else has
+       # to come with them.
+       .add_local_file(_MOODREEL_SRC, "/root/moodreel_editor.py", copy=True)
+       .add_local_file(_TYPEREG_SRC, "/root/type_registries.py", copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
 # The source cache must OUTLIVE the container or it is inert — /cache on a fresh
@@ -3435,8 +3449,19 @@ def edit(source_key: str, brief: str,
         try:
             import moodreel_editor as _mre_c
             _vcurve = _mre_c.extract_motion_curve(src, duration=_vdur) or []
-        except Exception:
-            pass
+        except Exception as _mce:
+            # LOUD. This was `except Exception: pass` with a print, and it
+            # swallowed "No module named 'moodreel_editor'" on EVERY no-speech
+            # run — the module was never mounted into the image. Beats fell back
+            # to even spacing, which is the difference between segmenting on
+            # motion and segmenting arbitrarily, and no gate could see it.
+            fail("motion_curve_unavailable",
+                 f"{type(_mce).__name__}: {str(_mce)[:160]} — visual beats fall "
+                 f"back to EVEN PACING, losing the motion signal entirely")
+        if not _vcurve:
+            fail("motion_curve_empty",
+                 "extract_motion_curve returned nothing — a clean zero here is "
+                 "a broken extractor, not a still video")
         _beats = segment_beats_visual(src, _vdur)
         # THE CUT SIGNAL. Without this the agent has boundaries but nothing to
         # cut ON, and every no-speech run kept 100% of its source.
