@@ -275,6 +275,56 @@ REFERENCE_BEAT_FIT = {
 # `stage` had a definition, a strict completeness check, and ZERO call sites.
 # A consumer with no producer, which is the same defect class as
 # contract_violations being read and never written.
+# ── DERIVED FLOORS FOR THE TWO CONTENT FIELDS ───────────────────────────────
+# The agent's value always wins. These only fill a field it left empty, and only
+# where the answer is genuinely IN THE DATA — never invented.
+#
+# WHY A FLOOR AND NOT A FALLBACK. Round 13 ruled 5 cards and 4 sfx and built
+# NONE: every one named the family and omitted its content, so the harness had a
+# decision with no subject. Stripping is correct — an unnamed card cannot be
+# rendered — but a card on a beat whose own words carry the number is not
+# unnamed, it is unstated. Deriving that is reading the data we already have.
+#
+# AND THE API CANNOT HELP. Measured 2026-09-06 against the live endpoint: a tool
+# schema carrying allOf/if-then conditionals is ACCEPTED and NOT ENFORCED (asked
+# for a card with no hero, got one back), and plain nested `required` is not
+# enforced either. There is no boundary above the dispatch, so the dispatch is
+# where this belongs.
+
+# hook and close are the only roles marked mechanically (first and last beat),
+# and 64% of corpus SFX land on exactly those two. The choices are the
+# catalogue's own: swoosh is "the safe motion cue, any vibe"; boom is "the
+# payoff line the whole video was built to deliver". Sonnet chose precisely
+# these two, unprompted, in round 8 — this makes the floor match the measured
+# precedent rather than inventing a mapping.
+_SFX_BY_ROLE = {"hook": "swoosh-sound-effects", "close": "boom"}
+
+
+def _derive_sfx_name(beat):
+    """The sound for a beat whose ROLE the corpus already answers, else None."""
+    return _SFX_BY_ROLE.get(str((beat or {}).get("role") or "").lower())
+
+
+def _derive_card_hero(beat, number_beats):
+    """The hero number spoken INSIDE this beat, else None.
+
+    A card is "the close instrument for proof" and the proof is the figure the
+    speaker said. When the beat carries no number there is nothing to derive and
+    the ruling stays stripped — which is the honest half of this.
+    """
+    if not beat:
+        return None
+    t0, t1 = beat.get("t_start"), beat.get("t_end")
+    if t0 is None or t1 is None:
+        return None
+    for n in (number_beats or []):
+        if t0 <= n.get("t", -1) <= t1:
+            w = str(n.get("word") or "").strip()
+            if w:
+                return w
+    return None
+
+
 def _mark(led, name, t_start):
     """Record seconds for one sub-stage. Cheap, unconditional, additive."""
     led.setdefault("wall_by_stage", {})
@@ -4196,6 +4246,45 @@ def edit(source_key: str, brief: str,
                 # NAMED once, and everything else on that beat proceeds. No
                 # second attempt, no discarded beat, and the count that reaches
                 # execute_plan is the count that can actually be built.
+                # DERIVE BEFORE STRIPPING. The agent's value always wins; this
+                # only fills what it left empty, and only where the answer is in
+                # the data. A card on a beat whose own words carry the number is
+                # not unnamed, it is unstated.
+                _byi = {b["i"]: b for b in (led.get("beats") or [])}
+                _nums = led.get("number_beats") or []
+                _derived_fields = []
+                for _v5 in led["beat_verdicts"]:
+                    _bi5 = _v5.get("beat")
+                    _b5 = _byi.get(_bi5)
+                    _tr5 = [str(t).lower() for t in (_v5.get("treatment") or [])]
+                    if "card" in _tr5 and not str(_v5.get("card_hero") or "").strip():
+                        _h = _derive_card_hero(_b5, _nums)
+                        if _h:
+                            _v5["card_hero"] = _h
+                            _derived_fields.append(
+                                {"beat": _bi5, "field": "card_hero", "value": _h,
+                                 "from": "number spoken in this beat"})
+                    if str(_v5.get("sfx", "no")).lower() == "yes" \
+                            and not str(_v5.get("sfx_name") or "").strip():
+                        _n5 = _derive_sfx_name(_b5)
+                        if _n5:
+                            _v5["sfx_name"] = _n5
+                            _derived_fields.append(
+                                {"beat": _bi5, "field": "sfx_name", "value": _n5,
+                                 "from": f"beat role {_b5.get('role')!r}"})
+                if _derived_fields:
+                    led["derived_content"] = _derived_fields
+                    out["DERIVED"] = _derived_fields
+
+                # Recompute AFTER derivation — a field that was just filled is
+                # no longer missing, and stripping it would discard the floor we
+                # just established.
+                _nosfx = [v.get("beat") for v in led["beat_verdicts"]
+                          if str(v.get("sfx", "no")).lower() == "yes"
+                          and not str(v.get("sfx_name") or "").strip()]
+                _nocard = [v.get("beat") for v in led["beat_verdicts"]
+                           if "card" in [str(t).lower() for t in (v.get("treatment") or [])]
+                           and not str(v.get("card_hero") or "").strip()]
                 _incomplete = {"text": set(_nocopy), "sfx": set(_nosfx),
                                "card": set(_nocard)}
                 _stripped = []

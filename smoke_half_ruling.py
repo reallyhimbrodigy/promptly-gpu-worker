@@ -125,3 +125,82 @@ if FAIL:
 print("ok smoke_half_ruling — family stripped not beat dropped, sfx field "
       "cleared, emptied treatment becomes 'none', complete rulings untouched, "
       "no bounce, readers withheld from the judgment-only schema")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# DERIVED FLOORS. The agent's value wins; derivation only fills what it left
+# empty, and only where the answer is in the data.
+#
+# Round 13 built ZERO cards and ZERO sfx from 5 and 4 rulings — every one named
+# the family and omitted its content. Stripping is right for a card nobody can
+# name; it is wrong for a card on a beat whose own words carry the number.
+# ══════════════════════════════════════════════════════════════════════════
+_ns = {}
+for _n in TREE.body:
+    if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "") == "_SFX_BY_ROLE":
+        exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
+    if isinstance(_n, ast.FunctionDef) and _n.name in ("_derive_card_hero", "_derive_sfx_name"):
+        exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
+ok("_derive_card_hero" in _ns and "_derive_sfx_name" in _ns,
+   "the derivation helpers are not defined at module level")
+
+if "_derive_card_hero" in _ns:
+    hero, sfxn = _ns["_derive_card_hero"], _ns["_derive_sfx_name"]
+
+    NUMS = [{"t": 9.4, "word": "$400"}, {"t": 17.2, "word": "30,000"}]
+    NUMBER_BEAT = {"i": 1, "t_start": 8.0, "t_end": 12.0, "has_number": True}
+    PLAIN_BEAT = {"i": 4, "t_start": 20.0, "t_end": 24.0, "has_number": False}
+    HOOK = {"i": 0, "t_start": 0.0, "t_end": 3.0, "role": "hook"}
+    CLOSE = {"i": 9, "t_start": 30.0, "t_end": 34.0, "role": "close"}
+
+    # 1. a card without a hero ON A NUMBER BEAT builds with the number
+    ok(hero(NUMBER_BEAT, NUMS) == "$400",
+       f"a card on a beat carrying '$400' derived {hero(NUMBER_BEAT, NUMS)!r} — "
+       f"the hero is in the beat's own words")
+
+    # 2. on a NON-number beat there is nothing to derive: stripped and named
+    ok(hero(PLAIN_BEAT, NUMS) is None,
+       f"a card on a beat with NO number derived {hero(PLAIN_BEAT, NUMS)!r} — "
+       f"inventing a hero is exactly the fallback this must not be")
+
+    # only numbers INSIDE the beat count
+    ok(hero({"i": 2, "t_start": 0.0, "t_end": 5.0}, NUMS) is None,
+       "a number outside the beat's own span was used as its hero")
+
+    # 3. sfx yes on a HOOK with no name builds with the hook file
+    ok(sfxn(HOOK) == "swoosh-sound-effects",
+       f"a hook derived {sfxn(HOOK)!r} — the catalogue calls swoosh 'the safe "
+       f"motion cue, any vibe', and Sonnet chose it unprompted at the hook")
+    ok(sfxn(CLOSE) == "boom",
+       f"a close derived {sfxn(CLOSE)!r} — boom is 'the payoff line the whole "
+       f"video was built to deliver'")
+    ok(sfxn({"i": 5, "role": "evidence"}) is None,
+       "a mid-video role derived a sound — only hook and close are answered by "
+       "the corpus (64% of SFX), the rest is not derivable")
+    ok(sfxn({"i": 5}) is None and sfxn(None) is None,
+       "a beat with no role derived a sound")
+
+    # THE AGENT'S VALUE WINS. Derivation must never overwrite.
+    _src_seg = SRC[SRC.index("# DERIVE BEFORE STRIPPING"):]
+    _seg = _src_seg[:_src_seg.index("_incomplete = {")]
+    ok('not str(_v5.get("card_hero") or "").strip()' in _seg,
+       "derivation does not check that card_hero is EMPTY first — it would "
+       "overwrite the agent's own hero")
+    ok('not str(_v5.get("sfx_name") or "").strip()' in _seg,
+       "derivation does not check that sfx_name is EMPTY first")
+
+    # AND THE STRIP MUST BE RECOMPUTED AFTER. A field just filled is no longer
+    # missing; stripping on the stale list would discard the floor.
+    _after = SRC.index("Recompute AFTER derivation")
+    ok(_after > SRC.index("# DERIVE BEFORE STRIPPING"),
+       "the incomplete lists are not recomputed after derivation — a derived "
+       "field would be stripped immediately after being filled")
+
+if FAIL:
+    print("FAIL smoke_half_ruling (derivation):")
+    for f in FAIL:
+        print("  - " + f)
+    sys.exit(1)
+print("ok derivation — hero from the beat's own number, stripped when there is "
+      "none, sfx from hook/close role, agent values never overwritten, strip "
+      "recomputed after")
