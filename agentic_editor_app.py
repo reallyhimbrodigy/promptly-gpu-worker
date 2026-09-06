@@ -1280,6 +1280,13 @@ KNOWLEDGE_TOOLS = [{
         "those."),
     "input_schema": {"type": "object",
                      "properties": {
+                         "accept_shortfall": {
+                             "type": "array", "items": {"type": "string"},
+                             "description": (
+                                 "Families you are DELIBERATELY placing fewer of "
+                                 "than your own spec target — say which, and say "
+                                 "why in the verdicts. Only needed when the "
+                                 "harness reports a shortfall.")},
                          "verdicts": {"type": "array", "items": {"type": "object",
                              "properties": {
                                  "beat": {"type": "integer"},
@@ -2730,6 +2737,16 @@ def edit(source_key: str, brief: str,
         vs = led.get("beat_verdicts") or []
         if not vs:
             return {"error": "no verdicts yet — call rule_all_beats first"}
+        # Refuse while the rulings fall short of the agent's OWN spec and it has
+        # not said that is deliberate. Building first and reporting after is how
+        # round 4 shipped a passthrough with every gate green.
+        if led.get("spec_shortfall"):
+            return {"error": "rulings fall short of your own spec",
+                    "shortfall": led["spec_shortfall"],
+                    "fix": ("Rule more beats for those families, or re-call "
+                            "rule_all_beats with accept_shortfall naming them. "
+                            "Nothing is built until the spec and the rulings "
+                            "agree or you say the gap is intended.")}
         beats = led.get("beats") or []
         by_i = {b["i"]: b for b in beats}
         steps, built = [], {"cut": 0, "text": 0, "card": 0, "zoom": 0,
@@ -3916,6 +3933,52 @@ def edit(source_key: str, brief: str,
                 _nocopy = [v.get("beat") for v in led["beat_verdicts"]
                            if "text" in (v.get("treatment") or [])
                            and not v.get("text_content")]
+                # ── THE RULINGS MUST MEET THE SPEC THE AGENT ITSELF SET ──
+                # spec_family_built_zero fires AFTER the build, which is the
+                # wrong end: by then the run is paid for and the only remedy is
+                # another turn. Round 4 failed on exactly this — the spec said
+                # text=10/25s and the rulings contained none, and the pipeline
+                # faithfully built the nothing it was handed.
+                #
+                # Reported HERE, with the implied count, while re-ruling costs
+                # one turn. Not rejected: the verdicts are COMPLETE, just sparse,
+                # and discarding good rulings over density would be heavy-handed.
+                # The agent must either add rulings or name the family in
+                # accept_shortfall — a deliberate zero is a real decision and
+                # stays available, it just has to be stated.
+                _acc = {str(x).lower() for x in (tu.input.get("accept_shortfall") or [])}
+                _spec_t = ((led.get("spec") or {}).get("targets") or {})
+                _dur_25 = max(0.001, float(_src_dur or 0)) / 25.0
+                _short = {}
+                for _fam, _rate in _spec_t.items():
+                    if _fam in _acc or not isinstance(_rate, (int, float)) or _rate <= 0:
+                        continue
+                    _implied = max(1, int(round(float(_rate) * _dur_25)))
+                    if _fam == "sfx":
+                        _have = sum(1 for v in led["beat_verdicts"]
+                                    if str(v.get("sfx", "no")).lower() == "yes")
+                    elif _fam == "cut":
+                        _have = sum(1 for v in led["beat_verdicts"]
+                                    if str(v.get("cut", "keep")).lower() == "cut")
+                    else:
+                        _have = sum(1 for v in led["beat_verdicts"]
+                                    if _fam in [str(t).lower()
+                                                for t in (v.get("treatment") or [])])
+                    if _have < _implied:
+                        _short[_fam] = {"target_per_25s": float(_rate),
+                                        "implied_over_%.1fs" % float(_src_dur or 0): _implied,
+                                        "ruled": _have}
+                if _short:
+                    led["spec_shortfall"] = _short
+                    out["SPEC_SHORTFALL"] = _short
+                    out["fix_shortfall"] = (
+                        "Your own spec set these rates and your rulings do not "
+                        "reach them. Either rule more beats for those families, "
+                        "or pass accept_shortfall with the family names and say "
+                        "why in the verdicts. A deliberate zero is a decision; "
+                        "an accidental one is a miss.")
+                else:
+                    led.pop("spec_shortfall", None)
                 _missing = [b["i"] for b in _beats if b["i"] not in _seen]
                 out = {"recorded": _added, "ruled": len(_seen),
                        "of": len(_beats), "still_missing": _missing[:30]}
