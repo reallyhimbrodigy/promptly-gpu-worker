@@ -8413,16 +8413,35 @@ def _inbound_run_auth_wired():
         if _saved is not None:
             _os.environ["MODAL_RUN_SECRET"] = _saved
 
-    # (4) armed + no secret in the deployed set is UNSHIPPABLE.
-    # Reading the flag from the canonical secret mirror, not from this shell.
-    _canon = re.search(r"PROMPTLY_RUN_AUTH_ENFORCE\"?\s*[:=]\s*\"?([01])", _src)
-    if _canon and _canon.group(1) == "1":
-        _out = subprocess.run(
-            ["modal", "secret", "list"], capture_output=True, text=True, timeout=60).stdout
-        assert "promptly-secrets" in _out, (
-            "enforcement is ARMED but the promptly-secrets set could not be read "
-            "to confirm MODAL_RUN_SECRET exists — arming without the secret 403s "
-            "every dispatch")
+    # (4) ARMING MUST BE A SECRET FLIP, NEVER A CODE EDIT.
+    #
+    # The first version of this leg regex-searched the source for
+    # PROMPTLY_RUN_AUTH_ENFORCE=1 and shelled out to `modal secret list` when it
+    # matched. It matched the COMMENT four lines above the function that
+    # explains the flag — so a prose sentence armed the branch, which then died
+    # on a NameError. That is the third time in one session that a check reading
+    # SOURCE was satisfied by text describing the code rather than the code, and
+    # it is why this leg now reads the AST only.
+    #
+    # The property that actually protects us: enforcement is read from the
+    # ENVIRONMENT at call time. That makes arming a secret flip plus a redeploy —
+    # reversible in one step, with no code change to review — and makes it
+    # impossible to ship enforcement on by editing a literal.
+    _ef = _top["_run_auth_enforcing"]
+    _envget = [c for c in _ast.walk(_ef)
+               if isinstance(c, _ast.Call)
+               and getattr(c.func, "attr", "") == "get"
+               and any(isinstance(a, _ast.Constant)
+                       and a.value == "PROMPTLY_RUN_AUTH_ENFORCE" for a in c.args)]
+    assert len(_envget) == 1, (
+        "_run_auth_enforcing does not read PROMPTLY_RUN_AUTH_ENFORCE from the "
+        "environment — arming must be a secret flip plus redeploy, never a code "
+        "edit, so it can be reverted without a deploy of new code")
+    _rets = [n for n in _ast.walk(_ef) if isinstance(n, _ast.Return)]
+    assert _rets and not any(
+        isinstance(r.value, _ast.Constant) and r.value.value is True for r in _rets), (
+        "_run_auth_enforcing returns a hardcoded True — enforcement would be "
+        "armed by code, with no way to disarm without shipping a new image")
 
 
 @check("MODELS-NOT-SYMLINK LAW (Zac RULE-1, 2026-08-03, forged from the recurring 'Symlink loop from .../models' deploy death): `models/` is a GITIGNORED asset directory add_local_file-mounted into the image, but it was committed to HEAD as a self-referential symlink blob (the 4254ac7 clobber), so any `git checkout`/stash reverts the working tree to `models -> models` and `modal deploy` dies traversing the loop — while every source gate still passes. This gate closes the class: (1) `models` MUST be a real directory, never a symlink; (2) every `models/...` path modal_app.py mounts via add_local_file MUST exist as a real non-symlink file; (3) the RIFE weights (flownet.pkl) must be the real ~22MB blob, not a stub. Derived dynamically from modal_app.py so a new mounted asset is covered the day it is written.")
