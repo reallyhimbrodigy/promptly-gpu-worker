@@ -3123,7 +3123,26 @@ def edit(source_key: str, brief: str,
                            "duration_s": min(2.5, b["t_end"] - b["t_start"]),
                            "hero": hero, "label": str(v.get("card_label") or "")[:60]})
         if _cards:
-            rc = render_components(_cards)
+            # DO NOT RE-RENDER AN IDENTICAL REEL. execute_plan rebuilds the whole
+            # pipeline, and the agent calls it more than once — round 15's
+            # talking_head called it THREE times and rendered the reel TWICE.
+            # The reel is the single most expensive stage in the run
+            # (render_components 47.96s, 15.1% of wall on round 13), and
+            # re-painting the same components from the same cards produces the
+            # same PNGs by construction.
+            #
+            # Keyed on the CARD CONTENT, not a call count: if the agent re-rules
+            # and the cards genuinely change, the key changes and it re-renders.
+            # That is the difference between a cache and a skip.
+            _ckey = json.dumps(_cards, sort_keys=True)
+            if led.get("_reel_key") == _ckey and os.path.exists("/work/reel.mov"):
+                rc = dict(led.get("_reel_result") or {})
+                led["reel_reused"] = led.get("reel_reused", 0) + 1
+            else:
+                rc = render_components(_cards)
+                if not rc.get("error"):
+                    led["_reel_key"] = _ckey
+                    led["_reel_result"] = dict(rc)
             if rc.get("error"):
                 _whyc = f"render_components failed: {rc['error']}"[:200]
                 for _c2 in _cards:
