@@ -150,10 +150,28 @@ print("\n7. THE TWO RULES")
 _repair = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
            "render_components", "place_cutaway", "author_component",
            "beat_verdict"}
-check("repair tools are refused until there is something to repair",
-      "_REPAIR_ONLY" in CODE and "repair_before_plan" in CODE,
-      "the per-step tools are honoured before execute_plan, so the agent will "
-      "build with them one command at a time however the prompt is worded")
+# REACHABILITY, not presence. The first version asserted "repair_before_plan"
+# appears in the source — it did, in a branch placed AFTER `elif tu.name ==
+# "build_cut"`, so the chain matched build_cut first and the gate never ran. The
+# agent called build_cut before execute_plan and was allowed to. A guard that
+# exists but cannot be reached is indistinguishable from no guard.
+_repair_line = _first_line = None
+for _n in ast.walk(TREE):
+    if not isinstance(_n, ast.If):
+        continue
+    _d = ast.dump(_n.test)
+    if "_REPAIR_ONLY" in _d and _repair_line is None:
+        _repair_line = _n.lineno
+    if ('"build_cut"' in _d or "'build_cut'" in _d) and _first_line is None:
+        _first_line = _n.lineno
+check("the repair refusal is REACHABLE — it precedes the repair branches",
+      _repair_line is not None and (_first_line is None or _repair_line < _first_line),
+      f"the _REPAIR_ONLY guard is at line {_repair_line} but a repair tool "
+      f"branch is at {_first_line}; the elif chain matches the tool first and "
+      f"the guard never runs")
+check("the refusal is ledgered so it is visible",
+      "repair_before_plan" in CODE and "REPAIR REFUSED" in SRC,
+      "a refusal nobody can see cannot be told from a call that never happened")
 check("the tool SCHEMA is constant for the whole run",
       "_tools_for_turn" not in CODE and "tools=tools," in CODE,
       "a tool list that changes mid-run changes the CACHED PREFIX and forces a "

@@ -3471,7 +3471,21 @@ def edit(source_key: str, brief: str,
                  f"— it never reached its own self-review")
         results = []
         for tu in tool_uses:
-            if tu.name == "inspect_output":
+            if tu.name in _REPAIR_ONLY and not led.get("execute_plan"):
+                # REFUSED, not absent. The tool stays in the schema so the cached
+                # prefix never changes; what changes is whether the call is
+                # honoured. The message names the next action rather than only
+                # the rule, because a refusal that does not say what to do
+                # instead just costs a turn.
+                led["repair_before_plan"] = led.get("repair_before_plan", 0) + 1
+                out = {"not_yet": True,
+                       "why": (f"`{tu.name}` is for REPAIRING a built edit. "
+                               f"Nothing is built yet. Rule every beat with "
+                               f"rule_all_beats, then call execute_plan — it "
+                               f"builds the cut, the text, the zooms and the "
+                               f"sound from your verdicts in one step."),
+                       "call_instead": "execute_plan"}
+            elif tu.name == "inspect_output":
                 # ── THE VERIFICATION CAP (E2, ENFORCED) ─────────────────────
                 # Run 14 measured the problem: removing the prep work took
                 # shell calls 19 -> 12 but turns only 26 -> 21, because
@@ -3589,20 +3603,6 @@ def edit(source_key: str, brief: str,
                 out = author_component(tu.input.get("tsx"),
                                        tu.input.get("frames") or 45,
                                        tu.input.get("name") or "authored")
-            elif tu.name in _REPAIR_ONLY and not led.get("execute_plan"):
-                # REFUSED, not absent. The tool stays in the schema so the cached
-                # prefix never changes; what changes is whether the call is
-                # honoured. The message names the next action rather than only
-                # the rule, because a refusal that does not say what to do
-                # instead just costs a turn.
-                led["repair_before_plan"] = led.get("repair_before_plan", 0) + 1
-                out = {"not_yet": True,
-                       "why": (f"`{tu.name}` is for REPAIRING a built edit. "
-                               f"Nothing is built yet. Rule every beat with "
-                               f"rule_all_beats, then call execute_plan — it "
-                               f"builds the cut, the text, the zooms and the "
-                               f"sound from your verdicts in one step."),
-                       "call_instead": "execute_plan"}
             elif tu.name == "execute_plan":
                 out = execute_plan()
             elif tu.name == "probe_source":
