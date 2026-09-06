@@ -25,6 +25,17 @@ if [ -f adversarial_gate.py ]; then
   else say "adversarial gate: PASS"; fi
 fi
 
+# FIVE FAMILIES. Cutaway was removed from the pipeline 2026-09-06 (scope, not a
+# gap), and removal is only durable if it is checked as an ABSENCE — this lane's
+# law is that a capability in the schema WILL be used, so a widened enum quietly
+# restores a family with no implementation behind it.
+if [ -f smoke_five_families.py ]; then
+  if ! out=$(python3 smoke_five_families.py 2>&1); then
+    echo "BLOCKED — five-families smoke failed:"; echo "$out" | grep '^  - ' | head -8
+    fail=1
+  else say "five families: PASS"; fi
+fi
+
 # IMPORT-TIME ASSERTS, RUN THE ONLY WAY THAT IS HONEST: import the module.
 # My first version exec'd each _assert_* in a hand-built namespace and blocked
 # on `NameError: segment_beats is not defined` — it reported a failure that did
