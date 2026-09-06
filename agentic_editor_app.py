@@ -4766,6 +4766,30 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     print(f"  ok              : {r.get('ok')}")
     print(f"  WALL            : {r.get('wall_s')}s  "
           f"(download {r.get('download_s')}s, transcript {r.get('transcript_s')}s)")
+    # A DERIVED SIGNAL THAT IS NOT PRINTED CANNOT BE VERIFIED. wall_by_stage
+    # answers "talking head is 140-190s and nobody has said where", so it prints
+    # every run, sorted by cost, with the UNATTRIBUTED REMAINDER named — an
+    # unattributed remainder is where the next optimisation lives, and leaving
+    # it out of the table is how an uninstrumented stage stays invisible.
+    _wbs = (r.get("ledger") or {}).get("wall_by_stage") or {}
+    _tot = float(r.get("wall_s") or 0) or 1.0
+    if _wbs:
+        _named = {k: v for k, v in _wbs.items() if not k.startswith("tool:")}
+        _tools = {k[5:]: v for k, v in _wbs.items() if k.startswith("tool:")}
+        print(f"  WALL BY STAGE   : {_tot:.1f}s total")
+        for _k, _v in sorted(_named.items(), key=lambda kv: -kv[1]):
+            print(f"     {_k:18} {_v:7.2f}s  {100*_v/_tot:5.1f}%")
+        if _tools:
+            print("     -- per tool --")
+            for _k, _v in sorted(_tools.items(), key=lambda kv: -kv[1]):
+                print(f"     {_k:18} {_v:7.2f}s  {100*_v/_tot:5.1f}%")
+        _un = _tot - sum(_named.values()) - sum(_tools.values())
+        print(f"     {'(unattributed)':18} {_un:7.2f}s  {100*_un/_tot:5.1f}%")
+    else:
+        # LOUD. An empty table means the marks did not run, not that the run had
+        # no stages — and a silently absent instrument is how this block was
+        # lost once already.
+        print("  WALL BY STAGE   : EMPTY — _mark never populated the ledger")
     print(f"  self-review     : {r.get('ledger')['iters']} iteration(s)")
     t = r["ledger"]["tokens"]
     print(f"  TOKENS          : in {t['in']:,}  out {t['out']:,}  "
