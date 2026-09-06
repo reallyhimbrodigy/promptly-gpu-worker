@@ -5090,6 +5090,26 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         cost = _cost_of(t, (_ri, _ro, _rr, _rw))
         _out_cost = t["out"] * _ro / 1e6
     print(f"  COST ({_model.replace('claude-','')})   : ${cost:.4f}")
+    # ── RUN SIGNATURE — one line, for reading rounds side by side ──────────
+    # THE SHORT-RUN SIGNAL. A run that comes in at half the turns and two-thirds
+    # the placements of its neighbours ON IDENTICAL INPUT is green for the wrong
+    # reason: it did less, and every gate passed because everything it DID do was
+    # correct. Measured across three frozen-mount runs of one fixture: 14 turns /
+    # $0.0580 / 18 placements, 19 / $0.0863 / 17, then 8 / $0.0366 / 15 — the
+    # third ruled no zoom at all and still scored green.
+    #
+    # Printed as one line precisely so it can be eyeballed across ten rounds
+    # without reading ten logs.
+    _pl_all = (r.get("ledger") or {}).get("placements") or []
+    _by_fam = {}
+    for _p9 in _pl_all:
+        _f9 = _p9.get("family") or PLACEMENT_FAMILY.get(_p9.get("type")) or "?"
+        _by_fam[_f9] = _by_fam.get(_f9, 0) + 1
+    _famstr = " ".join(f"{k}={v}" for k, v in sorted(_by_fam.items()))
+    print(f"  RUN SIGNATURE   : turns {(r.get('ledger') or {}).get('iters')}  "
+          f"cost ${cost:.4f}  "
+          f"placements {len(_pl_all)}  [{_famstr}]")
+
     # THE TAIL. cache_write is 12.5x the read price, so a 7.7% token share is
     # ~half the input bill. The cached PREFIX is written once; everything else
     # is the growing message tail being re-written every turn. That is the lever.
