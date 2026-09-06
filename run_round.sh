@@ -32,11 +32,33 @@ for name, brief in BRIEFS.items():
 PY
 [ -s "$OUT/plan.tsv" ] || { echo "no plan — fixtures not staged"; exit 1; }
 
+# ── THE MOUNT MUST BE IDENTICAL ACROSS EVERY ARM ────────────────────────────
+# Modal mounts agentic_editor_app.py per LAUNCH, and launches here are
+# sequential. Editing the file mid-round therefore gives different arms
+# different code — a mixed cohort that cannot be scored. That has now
+# invalidated two rounds (2 and 7): both times I fixed something real while a
+# round was still launching, and both times the round became unreadable.
+#
+# The hash is captured BEFORE the first launch and re-checked before each one.
+# A round that cannot guarantee one codebase refuses to continue rather than
+# producing a number nobody can trust.
+MOUNT_SHA="$(shasum -a 256 agentic_editor_app.py | cut -c1-16)"
+echo "[mount] agentic_editor_app.py @ $MOUNT_SHA"
+echo "$MOUNT_SHA" > "$OUT/mount_sha.txt"
+
 while IFS=$'\t' read -r name key brief; do
   [ -z "$name" ] && continue
   IFS=$'\t' read -r S O K < <(python3 presign.py "$key")
   if [ -z "${S:-}" ]; then
     echo "$name PRESIGN_FAILED" >> "$OUT/appmap.txt"; continue
+  fi
+  now_sha="$(shasum -a 256 agentic_editor_app.py | cut -c1-16)"
+  if [ "$now_sha" != "$MOUNT_SHA" ]; then
+    echo "[ABORT] agentic_editor_app.py changed mid-round ($MOUNT_SHA -> $now_sha)."
+    echo "        Arms would mount different code and the round is unscoreable."
+    echo "        Re-run the whole round on a frozen tree."
+    echo "$name MOUNT_DRIFT" >> "$OUT/appmap.txt"
+    exit 2
   fi
   echo "[launch] $name"
   modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
