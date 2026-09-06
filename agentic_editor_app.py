@@ -2709,6 +2709,11 @@ def edit(source_key: str, brief: str,
         for v in sorted(vs, key=lambda x: x.get("beat", 0)):
             b = by_i.get(v.get("beat"))
             if b is None:
+                # A verdict for a beat that does not exist. Silently ignoring it
+                # loses a decision AND hides that the agent is ruling on a beat
+                # list it does not actually have.
+                _skips.append({"family": "cut", "beat": v.get("beat"),
+                               "why": "verdict names a beat index that does not exist"})
                 continue
             if str(v.get("cut", "keep")).lower() != "cut":
                 keep.append([b["t_start"], b["t_end"]])
@@ -2736,8 +2741,12 @@ def edit(source_key: str, brief: str,
         for v in vs:
             b = by_i.get(v.get("beat"))
             tr = [str(t).lower() for t in (v.get("treatment") or [])]
-            if b is None or "text" not in tr:
+            if b is None:
+                _skips.append({"family": "text", "beat": v.get("beat"),
+                               "why": "verdict names a beat index that does not exist"})
                 continue
+            if "text" not in tr:
+                continue          # not ruled for this family — filtering, not a drop
             copy = str(v.get("text_content") or "").strip()
             if not copy:
                 _skips.append({"family": "text", "beat": v.get("beat"),
@@ -2763,8 +2772,12 @@ def edit(source_key: str, brief: str,
         for v in vs:
             b = by_i.get(v.get("beat"))
             tr = [str(t).lower() for t in (v.get("treatment") or [])]
-            if b is None or "zoom" not in tr:
+            if b is None:
+                _skips.append({"family": "zoom", "beat": v.get("beat"),
+                               "why": "verdict names a beat index that does not exist"})
                 continue
+            if "zoom" not in tr:
+                continue          # not ruled for this family — filtering, not a drop
             a2 = src_to_out(b["t_start"], merged)
             z2 = src_to_out(b["t_end"], merged)
             if a2 is None or z2 is None or z2 <= a2:
@@ -2781,8 +2794,12 @@ def edit(source_key: str, brief: str,
         # 4. SFX, attack offsets applied by place_sfx from the measured table.
         for v in vs:
             b = by_i.get(v.get("beat"))
-            if b is None or str(v.get("sfx", "no")).lower() != "yes":
+            if b is None:
+                _skips.append({"family": "sfx", "beat": v.get("beat"),
+                               "why": "verdict names a beat index that does not exist"})
                 continue
+            if str(v.get("sfx", "no")).lower() != "yes":
+                continue          # ruled no sound — filtering, not a drop
             nm = str(v.get("sfx_name") or "").strip()
             if not nm:
                 _skips.append({"family": "sfx", "beat": v.get("beat"),
@@ -2843,6 +2860,9 @@ def edit(source_key: str, brief: str,
             try:
                 _want = float(_rate)
             except Exception:
+                # A target that will not parse is a spec the agent believes it
+                # set. Swallowing it means the family silently loses its floor.
+                fail("spec_target_unparseable", f"{_fam}={_rate!r} is not a number")
                 continue
             if _want > 0 and built.get(_fam, 0) == 0:
                 fail("spec_family_built_zero",
