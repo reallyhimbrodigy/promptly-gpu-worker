@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# A MESSAGE THAT NAMES A SYMBOL MUST SHIP THAT SYMBOL.
+#
+# EARNED 2026-09-05, one step after "verification output that contradicts the
+# message blocks the commit". A message claimed "HALF-RULINGS REFUSED AT RULING
+# TIME" and named the mechanism; a `cp` restore during unrelated hook testing
+# had reverted the work, and the commit contained none of it. `git log -S` finds
+# it in NO commit. Every gate passed — the code was internally consistent, it
+# was simply absent, and the message described something built an hour earlier
+# and lost.
+#
+# This lives in commit-msg, not pre-commit: git passes the message path only to
+# commit-msg. The first version was in pre-commit, read an empty $1, and silently
+# checked nothing — a checker that cannot see its input is a checker that always
+# passes.
+#
+# Prose stays free. A `backticked_identifier` that looks like a symbol is a
+# CLAIM, and a claim gets checked.
+set -uo pipefail
+MSG="${1:?}"
+LANE="$(git rev-parse --show-toplevel)/.worktrees/lane-agentic"
+[ -d "$LANE" ] || LANE="$(git rev-parse --show-toplevel)"
+cd "$LANE" 2>/dev/null || exit 0
+
+missing=$(python3 - "$MSG" <<'PY'
+import re, sys, glob
+msg = open(sys.argv[1], encoding="utf-8", errors="ignore").read()
+msg = msg.split("# ------------------------ >8")[0]
+msg = "\n".join(l for l in msg.split("\n") if not l.startswith("#"))
+syms = {t for t in re.findall(r"`([A-Za-z_][A-Za-z0-9_]{3,})`", msg)
+        if ("_" in t or not t.islower())}
+src = ""
+for f in glob.glob("*.py") + glob.glob("*.sh") + glob.glob("fixtures/*.sh"):
+    try:
+        src += open(f, encoding="utf-8", errors="ignore").read()
+    except Exception:
+        pass
+print(" ".join(sorted(t for t in syms if t not in src)))
+PY
+)
+if [ -n "$missing" ]; then
+  echo "BLOCKED — the message names symbol(s) this commit does not contain:"
+  for m in $missing; do echo "    $m"; done
+  echo
+  echo "A message describing work that is not here is the same failure as a"
+  echo "message contradicting a check. Ship the work, or drop the claim."
+  exit 1
+fi
+echo "  message/symbol agreement: PASS"
+exit 0

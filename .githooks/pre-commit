@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# VERIFICATION OUTPUT THAT CONTRADICTS THE COMMIT BLOCKS THE COMMIT.
+#
+# EARNED 2026-09-05. A commit message said "zero bare continues remain in
+# execute_plan". The verification run in the same step printed five, at named
+# line numbers, and the commit went through anyway. Same shape as reading past
+# `wrong_resolution: 540x960` for three rounds: output contradicting the claim,
+# and not stopping.
+#
+# This is deliberately NOT a judgement call. If the gates fail, the commit does
+# not happen — the message cannot be right about code the checks say is wrong.
+set -uo pipefail
+LANE="$(git rev-parse --show-toplevel)/.worktrees/lane-agentic"
+[ -d "$LANE" ] || LANE="$(git rev-parse --show-toplevel)"
+cd "$LANE" 2>/dev/null || exit 0
+[ -f agentic_editor_app.py ] || exit 0
+
+fail=0
+say() { printf '  %s\n' "$1"; }
+
+if [ -f adversarial_gate.py ]; then
+  if ! out=$(python3 adversarial_gate.py 2>&1); then
+    echo "BLOCKED — adversarial gate failed:"; echo "$out" | grep -E "^  FAIL|^   x" | head -12
+    fail=1
+  else say "adversarial gate: PASS"; fi
+fi
+
+# IMPORT-TIME ASSERTS, RUN THE ONLY WAY THAT IS HONEST: import the module.
+# My first version exec'd each _assert_* in a hand-built namespace and blocked
+# on `NameError: segment_beats is not defined` — it reported a failure that did
+# not exist while the REAL mutation went unnoticed. A checker that fabricates
+# failures is worse than none: it trains you to bypass it.
+if ! out=$(python3 - <<'PY' 2>&1
+import sys, types
+# modal is not needed to evaluate the asserts; stub it so the import reaches them
+mod = types.ModuleType("modal")
+class _Stub:
+    def __init__(self, *a, **k): pass
+    def __getattr__(self, n): return _Stub()
+    def __call__(self, *a, **k): return _Stub()
+    def function(self, *a, **k): return lambda f: f
+    def local_entrypoint(self, *a, **k): return lambda f: f
+for n in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
+    setattr(mod, n, _Stub())
+mod.is_local = lambda: True
+mod.enable_output = _Stub()
+sys.modules.setdefault("modal", mod)
+try:
+    import agentic_editor_app          # noqa: F401  -- import runs every assert
+except AssertionError as e:
+    print(f"IMPORT ASSERT FAILED: {e}"); sys.exit(1)
+except Exception as e:
+    # An unrelated import error must NOT block a commit — that is the
+    # fabricated-failure trap again. Report it and pass.
+    print(f"(import not evaluable here: {type(e).__name__}: {str(e)[:90]})")
+PY
+); then
+  echo "BLOCKED — an import-time assert failed:"; echo "$out" | head -4; fail=1
+else
+  say "import-time asserts: ${out:-PASS}"
+fi
+
+if [ "$fail" != "0" ]; then
+  echo
+  echo "The commit message cannot be right about code the checks say is wrong."
+  echo "Fix the code, or fix the message and the check together."
+  exit 1
+fi
+exit 0
