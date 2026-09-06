@@ -8347,6 +8347,84 @@ def _timeline_slice2_cutover():
     assert 'add_local_file("render_timeline.py"' in open("modal_app.py").read()
 
 
+@check("INBOUND RUN AUTH — WIRED, FAIL-CLOSED, AND NEVER ARMED WITHOUT A SECRET (2026-09-06, RULE-1). run_job and warmup are modal.fastapi_endpoint POSTs reachable from the OPEN INTERNET with no auth: a plain curl returned {\"spawned\": true} and started a real job on a GPU worker — unauthenticated compute execution, billed to us. This gate asserts (1) both endpoints call _check_run_auth as their FIRST executable statement (work done before the check is work done for an anonymous caller); (2) the comparison is a real hmac.compare_digest CALL in the AST, not a substring — the first version of this assertion passed against an `==` mutant because the COMMENT explaining compare_digest satisfied it, the repo`s own text-match false-green class; (3) an unset server secret is never treated as `ok`; and (4) the DANGEROUS COMBINATION is unshippable: enforcement armed while MODAL_RUN_SECRET is absent from the deployed secret set would 403 every dispatch, so arming requires the secret to be present.")
+def _inbound_run_auth_wired():
+    import ast as _ast
+    _src = open("modal_app.py", encoding="utf-8").read()
+    _tree = _ast.parse(_src)
+
+    _top = {n.name: n for n in _tree.body if isinstance(n, _ast.FunctionDef)}
+    for _n in ("_run_auth_verdict", "_run_auth_enforcing", "_check_run_auth"):
+        assert _n in _top, f"{_n} is missing from modal_app.py top level"
+
+    # (1) both endpoints check FIRST
+    _methods = {}
+    for _c in _tree.body:
+        if isinstance(_c, _ast.ClassDef):
+            for _f in _c.body:
+                if isinstance(_f, _ast.FunctionDef):
+                    _methods[_f.name] = _f
+    for _name in ("run_job", "warmup"):
+        _f = _methods.get(_name)
+        assert _f is not None, f"{_name} not found — the endpoint moved; re-wire the auth check"
+        _body = [st for st in _f.body
+                 if not (isinstance(st, _ast.Expr) and isinstance(st.value, _ast.Constant))]
+        assert _body, f"{_name} has an empty body"
+        _first = _body[0]
+        assert isinstance(_first, _ast.Assign) and any(
+            isinstance(c, _ast.Call) and getattr(c.func, "id", "") == "_check_run_auth"
+            for c in _ast.walk(_first)), (
+            f"{_name} does WORK before checking auth — an unauthenticated caller "
+            f"reaches it. The check must be the first executable statement.")
+        assert any(isinstance(st, _ast.If) and any(isinstance(x, _ast.Return)
+                                                   for x in _ast.walk(st))
+                   for st in _body[:2]), (
+            f"{_name} computes the auth verdict but never RETURNS on denial — "
+            f"the check is decorative")
+
+    # (2) a real compare_digest CALL, asserted on the AST (never a substring)
+    _v = _top["_run_auth_verdict"]
+    assert len([c for c in _ast.walk(_v) if isinstance(c, _ast.Call)
+                and getattr(c.func, "attr", "") == "compare_digest"]) == 1, (
+        "_run_auth_verdict does not call hmac.compare_digest — a wrong secret "
+        "becomes recoverable a byte at a time from response timing")
+    assert not [c for c in _ast.walk(_v) if isinstance(c, _ast.Compare)
+                and any(isinstance(o, (_ast.Eq, _ast.NotEq)) for o in c.ops)
+                and any(getattr(n, "id", "") in ("_given", "_expected")
+                        for n in _ast.walk(c))], (
+        "_run_auth_verdict compares the secret with ==/!= — timing leak")
+
+    # (3) an unset server secret must never read as ok
+    # The module-level constant must come along, or the exec'd function raises
+    # NameError and this leg silently tests nothing.
+    _consts = [n for n in _tree.body if isinstance(n, _ast.Assign)
+               and getattr(n.targets[0], "id", "") == "_RUN_AUTH_FIELD"]
+    assert _consts, "_RUN_AUTH_FIELD is not defined at module level"
+    _ns = {}
+    exec(compile(_ast.Module(_consts + [_top["_run_auth_verdict"]], []),
+                 "<gate>", "exec"), _ns)
+    import os as _os
+    _saved = _os.environ.pop("MODAL_RUN_SECRET", None)
+    try:
+        assert _ns["_run_auth_verdict"]({"_worker_auth": "anything"}) == "server_secret_unset", (
+            "an UNSET server secret does not produce server_secret_unset — an "
+            "unset secret must never mean 'let everyone in'")
+    finally:
+        if _saved is not None:
+            _os.environ["MODAL_RUN_SECRET"] = _saved
+
+    # (4) armed + no secret in the deployed set is UNSHIPPABLE.
+    # Reading the flag from the canonical secret mirror, not from this shell.
+    _canon = re.search(r"PROMPTLY_RUN_AUTH_ENFORCE\"?\s*[:=]\s*\"?([01])", _src)
+    if _canon and _canon.group(1) == "1":
+        _out = subprocess.run(
+            ["modal", "secret", "list"], capture_output=True, text=True, timeout=60).stdout
+        assert "promptly-secrets" in _out, (
+            "enforcement is ARMED but the promptly-secrets set could not be read "
+            "to confirm MODAL_RUN_SECRET exists — arming without the secret 403s "
+            "every dispatch")
+
+
 @check("MODELS-NOT-SYMLINK LAW (Zac RULE-1, 2026-08-03, forged from the recurring 'Symlink loop from .../models' deploy death): `models/` is a GITIGNORED asset directory add_local_file-mounted into the image, but it was committed to HEAD as a self-referential symlink blob (the 4254ac7 clobber), so any `git checkout`/stash reverts the working tree to `models -> models` and `modal deploy` dies traversing the loop — while every source gate still passes. This gate closes the class: (1) `models` MUST be a real directory, never a symlink; (2) every `models/...` path modal_app.py mounts via add_local_file MUST exist as a real non-symlink file; (3) the RIFE weights (flownet.pkl) must be the real ~22MB blob, not a stub. Derived dynamically from modal_app.py so a new mounted asset is covered the day it is written.")
 def _models_not_symlink():
     import os as _os

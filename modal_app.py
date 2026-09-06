@@ -1818,6 +1818,9 @@ class PromptlyWorker:
 
     @modal.fastapi_endpoint(method="POST")
     def run_job(self, body: dict):
+        _deny = _check_run_auth(body, "run_job")
+        if _deny is not None:
+            return _deny
         # Refresh the prewarm volume view so recently-committed sources are
         # visible even if another container did the prewarm. ~50ms when new
         # data is available; free when nothing changed.
@@ -1850,6 +1853,9 @@ class PromptlyWorker:
         app server at upload-start — mirrors PromptlyPrewarmWorker hiding the
         CPU prework behind the upload, but for the GPU render container.
         Idempotent and ~free; the value is the side effect of a warm container."""
+        _deny = _check_run_auth(body, "warmup")
+        if _deny is not None:
+            return _deny
         # COST A/B (Zac GO 2026-08-03): warmup is NEUTERED — it returns instantly
         # instead of importing torch to probe a GPU this CPU-only container never
         # has (always returned cuda=False after a ~1-2s import). The value warmup
@@ -2065,6 +2071,68 @@ def cancel_call(body: dict):
         print(f"[cancel-call] {_call_id} not cancelled: {type(_e).__name__}: {_e}", flush=True)
         return {"ok": False, "call_id": _call_id, "cancelled": False,
                 "error": f"{type(_e).__name__}: {str(_e)[:200]}"}
+
+
+# ── INBOUND AUTH for the public worker endpoints ─────────────────────────────
+# WHAT WAS OPEN. run_job and warmup are modal.fastapi_endpoint POSTs reachable
+# from the open internet with NO authentication of any kind — a plain curl
+# returned {"spawned": true} and started a real job on a GPU worker. That is
+# unauthenticated compute execution, billed to us. cancel_call already carried a
+# shared secret; these two never did.
+#
+# TWO-PHASE, DELIBERATELY. Turning enforcement on in the same deploy that
+# teaches the caller to send the secret would 403 every dispatch if ANY call
+# site were missed — and one was: warmDispatcherOnIntent posted a bare {} and
+# would have failed silently as "warming just stopped working". So this ships
+# DARK: it records what arrives and allows everything, giving a real denominator
+# before anything is refused.
+#
+# FAIL CLOSED WHEN ARMED. With PROMPTLY_RUN_AUTH_ENFORCE=1 a missing or wrong
+# secret is refused, and so is a request when the server's own secret is UNSET —
+# an unset secret must never mean "let everyone in". The deploy gate is what
+# keeps that combination unshippable, so the fail-closed branch cannot become a
+# self-inflicted outage.
+_RUN_AUTH_FIELD = "_worker_auth"
+
+
+def _run_auth_verdict(body):
+    """Classify an inbound body: ok | missing | mismatch | server_secret_unset.
+
+    Pure and side-effect free, so the smoke can drive every branch directly
+    instead of asserting on log text.
+    """
+    import hmac as _hmac
+    import os as _os
+    _expected = str(_os.environ.get("MODAL_RUN_SECRET", "") or "")
+    _given = str((body or {}).get(_RUN_AUTH_FIELD) or "")
+    if not _expected:
+        return "server_secret_unset"
+    if not _given:
+        return "missing"
+    # compare_digest, not ==, so a wrong secret cannot be recovered a byte at a
+    # time from response timing.
+    return "ok" if _hmac.compare_digest(_given, _expected) else "mismatch"
+
+
+def _run_auth_enforcing():
+    import os as _os
+    return str(_os.environ.get("PROMPTLY_RUN_AUTH_ENFORCE", "") or "").strip() == "1"
+
+
+def _check_run_auth(body, endpoint):
+    """Observe always; refuse only when armed.
+
+    Returns None to proceed, or a dict to return to the caller verbatim. The log
+    line is the step-2 instrument: it is what turns "we believe every dispatch
+    carries it" into a count with a denominator.
+    """
+    _v = _run_auth_verdict(body)
+    _armed = _run_auth_enforcing()
+    print(f"[runauth] endpoint={endpoint} verdict={_v} enforcing={int(_armed)}",
+          flush=True)
+    if not _armed or _v == "ok":
+        return None
+    return {"ok": False, "error": "unauthorized", "verdict": _v}
 
 
 # ── Canonical flag values — the janitor's daily drift sentinel reads these ────
