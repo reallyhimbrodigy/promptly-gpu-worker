@@ -150,6 +150,52 @@ inflated by retries into an apparent outage.
   exception. Scores quietly become nothing, the plan degrades, every gate passes.
   Fix: return `(result, scores)`; never accept an out-parameter across a seam.
 
+## Standing rules earned 2026-09-05 (agentic lane)
+
+- **A check that reads SOURCE cannot tell code from string content.** The rule
+  that prevents unmounted prompt blocks was itself unmounted: a
+  string-replacement anchor matched prose inside a docstring, so the definition
+  AND its call were inserted into that string. The file parsed, every text and
+  AST-over-source check passed, and the rule never ran once — committed as the
+  fix for the exact class it then exemplified. Eight text-match false greens
+  preceded it, each fixed with a more careful regex or an AST walk. The
+  categorical fix is to **IMPORT THE MODULE AND ASSERT THE SYMBOL EXISTS**.
+  Source is where code might be; runtime is where it is.
+
+- **A checker that invents failures trains you to bypass it.** The first
+  pre-commit hook exec'd each `_assert_*` in a hand-built namespace and blocked
+  on a `NameError` that did not exist, while the real mutation went unnoticed.
+  Replace a lying checker; never tune around it. Same principle as *a check that
+  cries wolf gets loosened until it is not a check* — both failures end with the
+  check switched off, one by hand and one by habit.
+
+- **Verification output that contradicts the commit message BLOCKS the commit.**
+  Not a judgement call. A message claimed "zero bare continues remain"; the
+  verification printed five, at named line numbers, in the same step, and the
+  commit went through. Enforced by `.githooks/pre-commit`, which runs the
+  adversarial gate and imports the module for its asserts.
+
+- **A half-ruling is refused where it is made.** A beat ruled `sfx: yes` with no
+  `sfx_name` decided the moment needs SOUND and never said which — and which
+  sound is not derivable, so the beat silently built nothing while the aggregate
+  read "sfx ruled 2, built 0". Every family that carries content (text→copy,
+  card→hero, sfx→name, cutaway→keyword) is completed at ruling time, when it
+  costs one line, not discovered at build time when it costs the placement.
+
+- **A capability in the schema will be used.** The prompt said "do not
+  orchestrate" and the agent orchestrated anyway. Telling a model not to use a
+  tool it has is a preference; not giving it the tool is a property. Withhold
+  the capability, or enforce in the dispatch — but do not rely on the prompt.
+  (Corollary, measured: the tool list is part of the CACHED PREFIX. Changing it
+  mid-run cost 43,222 cache_write tokens, 74% of a run. Gate in the handler, not
+  the schema.)
+
+- **A derived signal that is not printed cannot be verified.** `visual_cut
+  _candidates` was computed and ledgered and never shown, so a run that kept
+  100% was indistinguishable from a detector that found nothing, errored, or
+  never ran — and its absence from a log that never contained it was read as
+  evidence it was unwired.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a

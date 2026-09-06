@@ -3747,6 +3747,46 @@ def edit(source_key: str, brief: str,
                 # text", so it went unenforced and 18 overlays could not be
                 # derived. Caught HERE, in the same turn, instead of as a
                 # post-hoc ledger note.
+                # HALF-RULINGS ARE REJECTED, NOT ANNOTATED. A beat ruled
+                # sfx 'yes' with no sfx_name decided the moment needs SOUND and
+                # never said which; 'card' with no card_hero decided a card and
+                # never said what it is about. Neither is derivable, so the beat
+                # silently built nothing while the aggregate read "sfx ruled 4,
+                # built 0" with no reason attached.
+                #
+                # ANNOTATING WAS NOT ENOUGH, and that is MEASURED: the
+                # equivalence run was told in turn 3 that four beats were
+                # incomplete, called rule_all_beats again in turn 4, and shipped
+                # the same four. An informed agent repeating an incomplete
+                # ruling is precisely the case this exists for — so the verdict
+                # is DISCARDED, reported still-missing, and must be re-made.
+                _nosfx = [v.get("beat") for v in led["beat_verdicts"]
+                          if str(v.get("sfx", "no")).lower() == "yes"
+                          and not str(v.get("sfx_name") or "").strip()]
+                _nocard = [v.get("beat") for v in led["beat_verdicts"]
+                           if "card" in [str(t).lower() for t in (v.get("treatment") or [])]
+                           and not str(v.get("card_hero") or "").strip()]
+                _reject = set(_nocopy) | set(_nosfx) | set(_nocard)
+                if _reject:
+                    led["beat_verdicts"] = [v for v in led["beat_verdicts"]
+                                            if v.get("beat") not in _reject]
+                    led["rejected_half_rulings"] = (
+                        led.get("rejected_half_rulings", 0) + len(_reject))
+                    _seen2 = {v.get("beat") for v in led["beat_verdicts"]}
+                    out["REJECTED_incomplete"] = sorted(_reject)
+                    out["ruled"] = len(_seen2)
+                    out["still_missing"] = sorted(
+                        b["i"] for b in _beats if b["i"] not in _seen2)[:30]
+                    out["fix_rejected"] = (
+                        "These verdicts were DISCARDED, not flagged. A ruling "
+                        "that names a family without naming its content cannot "
+                        "be built, so it is not a ruling: text needs "
+                        "text_content, card needs card_hero, sfx needs "
+                        "sfx_name. Re-rule these beats complete.")
+                if _nosfx:
+                    out["ERROR_sfx_name_missing"] = _nosfx[:25]
+                if _nocard:
+                    out["ERROR_card_hero_missing"] = _nocard[:25]
                 if _nocopy:
                     out["ERROR_text_content_missing"] = _nocopy[:25]
                     out["fix"] = ("These beats are ruled 'text' with no "
