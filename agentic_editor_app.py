@@ -2927,7 +2927,10 @@ def edit(source_key: str, brief: str,
                 else:
                     cur = "overlaid.mp4"
                     built["text"] = len(items)
-                    steps.append({"step": "text", "n": len(items)})
+                    steps.append({"step": "text", "n": len(items),
+                                  "items": [{"t": _i.get("t_start"),
+                                             "content": str(_i.get("text") or "")[:80]}
+                                            for _i in items]})
 
         # 3. ZOOMS, one per zoom ruling, velocity capped by build_zoom itself.
         for v in vs:
@@ -3012,7 +3015,10 @@ def edit(source_key: str, brief: str,
                 else:
                     cur = "carded.mp4"
                     built["card"] = len(_cards)
-                    steps.append({"step": "card", "n": len(_cards)})
+                    steps.append({"step": "card", "n": len(_cards),
+                                  "items": [{"t": _c3.get("t_start"),
+                                             "content": str(_c3.get("hero") or "")[:80]}
+                                            for _c3 in _cards]})
 
         # 4. SFX, attack offsets applied by place_sfx from the measured table.
         for v in vs:
@@ -3086,13 +3092,37 @@ def edit(source_key: str, brief: str,
         # turn the agent skipped. The harness knows exactly what it placed —
         # asking the model to restate it was always redundant, and a step that
         # is redundant is a step that gets dropped.
+        # ONE ENTRY PER PLACEMENT, NOT PER STEP.
+        #
+        # This loop declared one manifest entry per STEP, and text and card are
+        # BATCHED — build_overlays is a single step that burns every overlay at
+        # once. So a run that placed 10 overlays declared ONE, and since
+        # op-counting was retired the manifest is the only instrument we have.
+        #
+        # MEASURED, round 11 talking_head: the pipeline reported
+        # "text 10->10, every ruling reached the video" while the manifest
+        # declared 3 and the family mix printed text at 2.53/25s — 35% of the
+        # 7.28 reference. The true rate was ~8.4/25s, about 115%. Every round
+        # that read "text well under reference" was reading a step count.
+        #
+        # zoom and sfx were already correct: those emit one step per ruling.
+        _TYPE = {"text": "overlay_text", "zoom": "emphasis", "sfx": "sfx",
+                 "card": "card"}
         for _s in steps:
             _k = _s.get("step")
-            if _k in ("text", "zoom", "sfx"):
+            if _k not in _TYPE:
+                continue
+            _items = _s.get("items")
+            if isinstance(_items, list) and _items:
+                for _it2 in _items:
+                    led.setdefault("placements", []).append(
+                        {"type": _TYPE[_k], "family": _k,
+                         "t_start": _it2.get("t"),
+                         "method": "ffmpeg", "declared_by": "execute_plan",
+                         "content": _it2.get("content") or ""})
+            else:
                 led.setdefault("placements", []).append(
-                    {"type": {"text": "overlay_text", "zoom": "emphasis",
-                              "sfx": "sfx"}[_k],
-                     "family": {"text": "text", "zoom": "zoom", "sfx": "sfx"}[_k],
+                    {"type": _TYPE[_k], "family": _k,
                      "t_start": _s.get("t", [None])[0] if isinstance(_s.get("t"), list)
                                 else _s.get("t"),
                      "method": "ffmpeg", "declared_by": "execute_plan",
@@ -4360,8 +4390,16 @@ def edit(source_key: str, brief: str,
     # `built < 0.5 * ruled`, and 2 -> 1 is exactly 1 < 1.0, false. A threshold
     # that a two-item family can never trip is not a check for small families.
     # Any gap, named per family.
+    # CUT IS NOT A PLACEMENT AND MUST NOT BE COMPARED HERE. It is a set of
+    # SPANS, counted from _mix["cut_spans"], and it has no manifest entry by
+    # design — so comparing built-cut against a manifest that structurally
+    # cannot hold it reported an unexplained gap on EVERY fixture in round 11,
+    # five for five. A check that fires on everything is one you learn to
+    # ignore, which is how wrong_resolution went unread for four rounds.
+    # Restricted to the families the manifest can actually represent.
+    _DECLARABLE = ("text", "card", "sfx", "zoom")
     _declare_gap = {}
-    for _f in set(_fam_built) | set(_fam_declared):
+    for _f in _DECLARABLE:
         _b = int(_fam_built.get(_f, 0) or 0)
         _d = int(_fam_declared.get(_f, 0) or 0)
         if _b != _d:
