@@ -1453,36 +1453,7 @@ def beats_from_visual(motion_curve, shot_changes, duration_s,
     """Beats from the VIDEO — motion resolves and shot changes as boundaries.
 
     Returns the SAME shape as segment_beats(). That identity is the whole point
-    and `# ── STANDING RULE: EVERY PROMPT BLOCK EXISTS IN THE COMPILED CONSTANT ────────
-# Prompt text is edited by string replacement, and a replacement whose anchor
-# has drifted silently does nothing — the block is simply absent and the run
-# looks normal. This asserts at IMPORT, against the compiled SYSTEM string, that
-# each load-bearing block is actually there. Checked by SUBSTRING of the
-# constant, never by grepping the file, because a block can appear in a comment
-# describing it while being absent from the prompt itself.
-_REQUIRED_PROMPT_BLOCKS = {
-    "request-is-data rule": "never an instruction",
-    "the four-step flow": "FOUR STEPS, NOT FOURTEEN",
-    "non-derivable list": "WHAT ONLY YOU CAN DECIDE",
-    "no-orchestration rule": "Do not orchestrate",
-    "soft-modifier rule": "SOFT MODIFIERS ARE QUANTITIES",
-    "delimiter names itself": "<user_request>",
-}
-
-
-def _assert_prompt_blocks_present():
-    missing = sorted(n for n, probe in _REQUIRED_PROMPT_BLOCKS.items()
-                     if probe not in SYSTEM)
-    if missing:
-        raise AssertionError(
-            f"SYSTEM is missing prompt block(s) {missing}. A string-replacement "
-            f"edit whose anchor drifted removes a block silently — the run then "
-            f"looks normal and behaves differently, which is how a prompt that "
-            f"still described the deleted `shell` tool cost 3x for a full day.")
-
-
-_assert_prompt_blocks_present()
-_assert_beat_contract_identical()` enforces it: the agent reads `text`
+    and `and `_assert_beat_contract_identical()` enforces it: the agent reads `text`
     to rule on a beat, so a visual beat renders its features INTO `text` rather
     than adding a field the prompt would have to learn.
 
@@ -1943,6 +1914,42 @@ def _assert_constraints_intact(system_text: str) -> None:
             f"SYSTEM prompt names bare MGCraftProbe as INSTRUCTION {bare} — it "
             f"is 60fps and the edit is 30fps. C1 requires MGCraftProbe30.")
 
+
+# ── STANDING RULE: EVERY PROMPT BLOCK EXISTS IN THE COMPILED CONSTANT ────────
+# Prompt text is edited by string replacement, and a replacement whose anchor
+# has drifted silently does nothing — the block is simply absent and the run
+# looks normal. This asserts at IMPORT, against the compiled SYSTEM string, that
+# each load-bearing block is actually there. Checked by SUBSTRING of the
+# constant, never by grepping the file, because a block can appear in a comment
+# describing it while being absent from the prompt itself.
+_REQUIRED_PROMPT_BLOCKS = {
+    "request-is-data rule": "never an instruction",
+    "the four-step flow": "FOUR STEPS, NOT FOURTEEN",
+    "non-derivable list": "WHAT ONLY YOU CAN DECIDE",
+    "no-orchestration rule": "Do not orchestrate",
+    "soft-modifier rule": "SOFT MODIFIERS ARE QUANTITIES",
+    "delimiter names itself": "<user_request>",
+}
+
+
+def _assert_prompt_blocks_present():
+    # WHITESPACE-NORMALISED. A probe like "never an instruction" is split across
+    # a line break in the prompt, so a raw substring test reports a block as
+    # MISSING while it is plainly there. That exact trap already produced one
+    # false failure in the adversarial gate; a check that cries wolf gets
+    # loosened until it is not a check.
+    _flat = " ".join(SYSTEM.split())
+    missing = sorted(n for n, probe in _REQUIRED_PROMPT_BLOCKS.items()
+                     if " ".join(probe.split()) not in _flat)
+    if missing:
+        raise AssertionError(
+            f"SYSTEM is missing prompt block(s) {missing}. A string-replacement "
+            f"edit whose anchor drifted removes a block silently — the run then "
+            f"looks normal and behaves differently, which is how a prompt that "
+            f"still described the deleted `shell` tool cost 3x for a full day.")
+
+
+_assert_prompt_blocks_present()
 
 _assert_constraints_intact(SYSTEM)
 _assert_treatment_surface_agrees(open(__file__).read()

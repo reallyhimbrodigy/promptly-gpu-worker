@@ -146,6 +146,46 @@ check("the prompt does not describe the job as running shell commands",
 #    that kept 100% was indistinguishable from a detector that found nothing,
 #    errored, or never ran — and I concluded "unwired" from its absence in a log
 #    that never contained it.
+# ── 6b. SYMBOLS MUST EXIST AT RUNTIME, NOT IN THE TEXT ───────────────────────
+# Every check above reads SOURCE. _REQUIRED_PROMPT_BLOCKS and
+# _assert_prompt_blocks_present were both present in the source and BOTH INERT —
+# a string-replacement anchor matched inside a docstring, so the entire block,
+# its definition and its call, lived as string content. Text checks passed. The
+# standing rule they were meant to enforce never ran once.
+# The only way to know a symbol exists is to import the module and ask.
+print("\n6b. SYMBOLS EXIST AT RUNTIME")
+_rt_missing = []
+try:
+    import sys as _sys, types as _types
+    _m = _types.ModuleType("modal")
+
+    class _S:
+        def __init__(self, *a, **k): pass
+        def __getattr__(self, n): return _S()
+        def __call__(self, *a, **k): return _S()
+        def function(self, *a, **k): return lambda f: f
+        def local_entrypoint(self, *a, **k): return lambda f: f
+    for _n in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
+        setattr(_m, _n, _S())
+    _m.is_local = lambda: True
+    _sys.modules.setdefault("modal", _m)
+    _sys.path.insert(0, HERE)
+    import agentic_editor_app as _A
+    for _n in ("_REQUIRED_PROMPT_BLOCKS", "_assert_prompt_blocks_present",
+               "_neutralise_brief", "beats_from_visual", "visual_cut_candidates",
+               "set_speech_check", "derive_rubric", "normalize_spec",
+               "enforce_spec", "_result", "PLACEMENT_FAMILY"):
+        if not hasattr(_A, _n):
+            _rt_missing.append(_n)
+    check("every load-bearing symbol is DEFINED at runtime", not _rt_missing,
+          f"{_rt_missing} appear in the source and do not exist when the module "
+          f"is imported — inert inside a string, which every text check passes")
+except AssertionError as _e:
+    check("the module imports with its asserts passing", False, str(_e)[:160])
+except Exception as _e:
+    check("the module is importable for symbol checking", False,
+          f"{type(_e).__name__}: {str(_e)[:120]}")
+
 print("\n7. THE TWO RULES")
 _repair = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
            "render_components", "place_cutaway", "author_component",
