@@ -723,6 +723,22 @@ secrets = [
     # PROMPTLY_ASR_SCRIBE=1 AND this key is present (empty key => SCRIBE_UNAVAILABLE,
     # Deepgram stands). Recovers the zero-word / TRANSCRIPTION_INCOMPLETE class.
     modal.Secret.from_name("promptly-elevenlabs"),
+    # promptly-run-auth — MODAL_RUN_SECRET, the shared secret content-studio puts
+    # in every run_job / warmup body. ISOLATED, and LAST, for three reasons.
+    #
+    # 1. `modal secret create` replaces a secret WHOLESALE. promptly-secrets
+    #    carries the AWS keys, Pexels, Deepgram and more; rewriting all of it to
+    #    rotate one value is an outage waiting to happen. Same reasoning that
+    #    already isolated promptly-elevenlabs above.
+    # 2. LAST because promptly-secrets still holds a STALE MODAL_RUN_SECRET from
+    #    the inbound-auth work that was half-built and stashed. Later secrets
+    #    override earlier ones on a key conflict, so this one wins — and the
+    #    claim is not taken on trust: the dark [runauth] observer reads
+    #    verdict=mismatch if it loses and verdict=ok if it wins. MEASURED at
+    #    18/18 mismatch before this secret existed.
+    # 3. Rotation is now a one-key operation with no other credential in blast
+    #    radius.
+    modal.Secret.from_name("promptly-run-auth"),
 ]
 
 # ── App ────────────────────────────────────────────────────────────────────────
