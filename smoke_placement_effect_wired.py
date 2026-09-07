@@ -79,6 +79,25 @@ check("the coarse leg is only consulted when it says False",
       "if _chg is False:" in src,
       "acting on None would fail every run where ffmpeg could not measure")
 
+# ── 5. THE CHECK REPORTS ITSELF ────────────────────────────────────────────
+# Round 27 fired placement_inert zero times and that was indistinguishable from
+# the check never running — no tool-result field reached the log. The zoom being
+# real had to be proven by pulling the shipped object from S3 and measuring it
+# by hand. A check nobody can read the output of is not yet a check.
+check("the effect measurement is RECORDED on the ledger",
+      'led.setdefault("placement_effects"' in src,
+      "otherwise zero firings and a dead check are the same log line")
+check("it is PRINTED in the run summary",
+      "PLACEMENT EFFECT:" in src)
+check("zero measurements prints a line rather than nothing",
+      "none measured" in src,
+      "silence is what made round 27 unreadable")
+check("UNMEASURED is reported distinctly from moved and INERT",
+      "UNMEASURED=" in src and "INERT=" in src)
+check("reel_frames is recorded and printed",
+      'led["reel_frames"] = rc.get("reel_frames")' in src and "REEL            :" in src,
+      "the startup-vs-paint split of build_reel could not be settled without it")
+
 if fails:
     print(f"PLACEMENT-EFFECT-WIRED: {len(fails)} FAILED")
     for f in fails: print("  - " + f)

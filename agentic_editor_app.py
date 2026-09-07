@@ -3609,6 +3609,13 @@ def edit(source_key: str, brief: str,
                 else:
                     cur = "carded.mp4"
                     _mark(led, "build_reel", _tcd0)
+                    # THE FRAME COUNT, PRINTED. build_reel is 40% of
+                    # talking_head's wall and the split between startup and
+                    # paint could not be settled because nobody logged how many
+                    # frames were painted. 48.3s is 12.2s of one-off plus
+                    # painting, and "how much painting" is this number.
+                    led["reel_frames"] = rc.get("reel_frames")
+                    led["reel_seconds"] = rc.get("reel_seconds")
                     built["card"] = len(_cards)
                     steps.append({"step": "card", "n": len(_cards),
                                   "items": [{"t": _c3.get("t_start"),
@@ -3869,6 +3876,16 @@ def edit(source_key: str, brief: str,
         # cert_placement_effect.py owns the geometry. UNMEASURED is recorded as
         # UNMEASURED, never as a pass.
         _chg, _db = step_changed_output(inp, outp, a, b_, env=_SUBPROCESS_ENV)
+        # RECORDED, so "did the check run?" is a read and not a re-run. Round 27
+        # fired placement_inert zero times and I could not tell that from the
+        # check never having executed — no tool-result field reached the log at
+        # all, not even the pre-existing strength_applied. Zero firings and a
+        # dead check are the same log line, which is this lane's oldest defect
+        # wearing the newest check's clothes.
+        led.setdefault("placement_effects", []).append({
+            "family": "zoom", "t": [round(a, 2), round(b_, 2)],
+            "changed": _chg, "psnr_db": _db,
+        })
         if _chg is False:
             fail("placement_inert",
                  f"build_zoom wrote {os.path.basename(outp)} but the frames over "
@@ -5657,6 +5674,37 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # same rule the CONTRACT VIOLATIONS line earned when a reader with a
     # hardcoded five-kind enum scored four rounds green against a seven-member
     # CONTRACT_FAILURES.
+    # ── PLACEMENT EFFECT — the check reports itself ────────────────────────
+    # Round 27 fired placement_inert zero times and that was indistinguishable
+    # from the check never running: no tool-result field reached the log, not
+    # even the pre-existing strength_applied. The zoom being real had to be
+    # established by pulling the shipped object out of S3 and measuring it by
+    # hand. A check whose output nobody can read is not yet a check, and this
+    # lane has a law for it — a derived signal that is not printed cannot be
+    # verified — which the check itself broke.
+    _eff = (r.get("ledger") or {}).get("placement_effects") or []
+    if _eff:
+        _moved = sum(1 for e in _eff if e.get("changed") is True)
+        _inert = sum(1 for e in _eff if e.get("changed") is False)
+        _unk = sum(1 for e in _eff if e.get("changed") is None)
+        print(f"  PLACEMENT EFFECT: {len(_eff)} measured  "
+              f"moved={_moved}  INERT={_inert}  UNMEASURED={_unk}")
+        for e in _eff:
+            _v = ("moved" if e.get("changed") is True
+                  else "INERT" if e.get("changed") is False else "UNMEASURED")
+            print(f"     {e.get('family','?'):8} t={e.get('t')}  {_v}  "
+                  f"psnr={e.get('psnr_db')} dB")
+    else:
+        # NOT SILENCE. Zero measurements is a fact about the run, and printing
+        # nothing is what made round 27 unreadable.
+        print("  PLACEMENT EFFECT: none measured "
+              "(no step with a span ran, or the check did not execute)")
+    _rf = (r.get("ledger") or {}).get("reel_frames")
+    if _rf is not None:
+        print(f"  REEL            : {_rf} frames "
+              f"({(r.get('ledger') or {}).get('reel_seconds')}s) — "
+              f"the paint half of build_reel")
+
     _regs = (r.get("ledger") or {}).get("rate_regimes") or {}
     print("  RATE REGIMES    : " + json.dumps({
         "dur_s": round(float((r.get("ledger") or {}).get("source_duration_s") or 0), 2),
