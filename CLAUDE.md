@@ -150,6 +150,32 @@ inflated by retries into an apparent outage.
   exception. Scores quietly become nothing, the plan degrades, every gate passes.
   Fix: return `(result, scores)`; never accept an out-parameter across a seam.
 
+## Standing rules earned 2026-09-07 (measurement hygiene)
+
+- **Read exit codes without a pipe.** `cmd | head` reports *head's* status, not
+  the command's. Twice in one session a RED-proof printed `exit=0` while the
+  check had actually failed, and the second time was after the error had already
+  been flagged. Pipe for the human-readable output, then re-run bare for the
+  status — or capture to a file and check `$?` before touching it.
+
+- **Ledgering a signal is not observing it.** A counter written to the ledger and
+  printed nowhere answers nothing: round 29 ran specifically to learn whether a
+  gate fired and could not, because `refused_second_execute` reached the ledger
+  and no output. Tool results do not reach the log either. **Any counter added to
+  answer a question gets PRINTED in the same commit that adds it** — three
+  instances in one session, each with the diagnosis fresh from the previous one.
+
+- **An edit above a rebinding is not an edit.** A corrected `out = ...` was
+  silently shadowed by `out = sys.argv[1]` six lines below, carried in by an
+  extraction; the fix looked right and the failure was byte-identical. Tightest
+  form yet of *scope is not text* — grep for every assignment to the name before
+  believing a fix to one of them.
+
+- **Measure the prize again after the lever before it lands.** Lever 3 was scoped
+  at "four renders become one"; lever 2 collapsed the loop first and left ~two
+  real renders, so half that prize was already collected. Re-derive the saving
+  from the CURRENT numbers, never from the estimate that justified the queue.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
