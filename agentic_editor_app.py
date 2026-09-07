@@ -54,6 +54,7 @@ _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion
 _REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 _MOODREEL_SRC = os.path.join(_REPO_ROOT, "moodreel_editor.py")
 _TYPEREG_SRC = os.path.join(_REPO_ROOT, "type_registries.py")
+_BATCH_MJS = os.path.join(_HERE, "remotion_batch.mjs")
 # INPUT 4 — the Remotion skills. 276 markdown files, ~11MB, and until now they
 # lived ONLY in ~/.claude/skills on the laptop: the agent runs in a Modal
 # container, so they were not "unread", they were UNREACHABLE. Mounting them is
@@ -178,7 +179,12 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
        # scene score; type_registries is its only import), so nothing else has
        # to come with them.
        .add_local_file(_MOODREEL_SRC, "/root/moodreel_editor.py", copy=True)
-       .add_local_file(_TYPEREG_SRC, "/root/type_registries.py", copy=True))
+       .add_local_file(_TYPEREG_SRC, "/root/type_registries.py", copy=True)
+       # THE SHARED-PROCESS RENDERER. `npx remotion render` pays bundle (9.79s)
+       # + browser launch + renderMedia overhead = 12.24s measured, EVERY call.
+       # This script bundles once and renders a queue, so captions, cards and
+       # zooms pay it between them instead of each.
+       .add_local_file(_BATCH_MJS, "/promptly-remotion/remotion_batch.mjs", copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
 # The source cache must OUTLIVE the container or it is inert — /cache on a fresh
@@ -2279,6 +2285,57 @@ def caption_pages(kept_words, words_per_page=3):
         })
     return pages
 
+
+
+def render_remotion_batch(jobs, env=None, timeout=1800):
+    """Render N compositions in ONE Remotion process. Returns {id: {...}}.
+
+    THE COST IT REMOVES, measured in-container: bundle 9.79s + selectComposition
+    2.05s + renderMedia overhead 0.40s = 12.24s per PROCESS, paid in full by
+    every `npx remotion render`. Captions, cards and zooms each spawning their
+    own pays it three times.
+
+    HONEST ABOUT TODAY'S SAVING. With lever 2 collapsing the rule/execute loop,
+    talking_head now makes ~2 real renders rather than 4, so half the "four
+    renders become one" prize was already collected by the change before this
+    one. Wiring the reel through here alone is close to NEUTRAL. It pays when
+    captions (~885 frames) and zooms join the same process — which is the reason
+    to build it, and the number to quote is the one measured after they land,
+    not the one that justified the queue.
+
+    PER-JOB STATUS, not a batch verdict: one bad composition must not lose the
+    others, and a failure has to name which job failed.
+    """
+    import subprocess
+    if not jobs:
+        return {}
+    qf = "/work/remotion-jobs.json"
+    with open(qf, "w") as fh:
+        json.dump(jobs, fh)
+    r = subprocess.run(["node", "remotion_batch.mjs", qf],
+                       cwd="/promptly-remotion", capture_output=True,
+                       text=True, timeout=timeout, env=env)
+    out, res = (r.stdout or "") + (r.stderr or ""), {}
+    for line in out.splitlines():
+        if line.startswith("JOB "):
+            try:
+                d = json.loads(line[4:])
+                res[d.get("id")] = d
+            except Exception:
+                pass
+    _b = re.search(r"^BUNDLE (\d+)", out, re.M)
+    _t = re.search(r"^TOTAL (\d+)", out, re.M)
+    res["_batch"] = {
+        "returncode": r.returncode,
+        "bundle_ms": int(_b.group(1)) if _b else None,
+        "total_ms": int(_t.group(1)) if _t else None,
+        "jobs": len(jobs),
+        # THE WHOLE POINT, PRINTED: startup paid once across N jobs. A counter
+        # added to answer a question gets printed in the commit that adds it.
+        "startup_amortised_over": len(jobs),
+        "stderr_tail": (r.stderr or "")[-300:] if r.returncode != 0 else "",
+    }
+    return res
 
 
 def zoom_filtergraph(t_start, t_end, strength, fps=30):
