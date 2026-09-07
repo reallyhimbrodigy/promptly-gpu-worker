@@ -33,7 +33,13 @@ if missing:
 # citing their own beat) at 78% less; the reason Haiku failed then was
 # EXECUTION, and the agent no longer executes. talking_head is the expensive
 # source, so it is the one that carries the test.
-MODELS = {"talking_head": "claude-haiku-4-5"}
+# ALL FIVE ON HAIKU. Measured on pet_video, one frozen mount, viral brief:
+# Sonnet $0.2856 for 3 placements, Haiku $0.0331 for 6 — 88% cheaper and TWICE
+# the output, with the extra entirely `text`, the family Sonnet placed ZERO of
+# on a brief demanding captions on every claim. No-speech is 46.5% of real
+# traffic and it was the expensive half; talking_head at $0.0667 was already the
+# cheapest of the five.
+MODELS = {k: "claude-haiku-4-5" for k in BRIEFS}
 for name, brief in BRIEFS.items():
     print(f"{name}\t{d[name]['key']}\t{brief}\t{MODELS.get(name, 'claude-sonnet-5')}")
 PY

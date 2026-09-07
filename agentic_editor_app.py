@@ -1954,6 +1954,34 @@ def _assert_beat_contract_identical():
         raise AssertionError("hook/close roles are not marked on both sources")
 
 
+def detect_shot_changes(path, env=None, threshold=0.3, timeout=600):
+    """Hard cuts in the source, as output seconds. [] when there are none.
+
+    LIFTED OUT OF probe_source because the visual beat path needs this BEFORE
+    the agent runs, and probe_source is a TOOL — it only executes if the agent
+    chooses to call it. beats_from_visual documents its boundaries as "motion
+    resolves UNIONED WITH shot changes, because a hard cut is a boundary no
+    motion curve can argue with", and segment_beats_visual was called without
+    them, so that union was motion resolves alone on every no-speech run.
+    """
+    import subprocess as _sp
+    try:
+        r = _sp.run(["ffmpeg", "-v", "info", "-i", path, "-vf",
+                     f"select='gt(scene,{threshold})',metadata=print",
+                     "-f", "null", "-"],
+                    capture_output=True, text=True, timeout=timeout, env=env)
+    except Exception:
+        return []
+    ts = []
+    for line in (r.stderr or "").splitlines():
+        if "pts_time:" in line:
+            try:
+                ts.append(round(float(line.split("pts_time:")[1].split()[0]), 2))
+            except Exception:
+                pass
+    return sorted(set(ts))
+
+
 def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
     """Which families fall below the spec's own floor, and by how much.
 
@@ -3662,9 +3690,25 @@ def edit(source_key: str, brief: str,
             fail("motion_curve_empty",
                  "extract_motion_curve returned nothing — a clean zero here is "
                  "a broken extractor, not a still video")
-        _beats = segment_beats_visual(src, _vdur)
+        # SHOT CHANGES, DETECTED HERE. beats_from_visual unions motion resolves
+        # with shot changes; segment_beats_visual was called WITHOUT them, so
+        # the union was resolves alone on every no-speech run. probe_source can
+        # find them but it is a TOOL — it runs only if the agent calls it, and
+        # by then the beats are already cut.
+        _shots = detect_shot_changes(src, env=_SUBPROCESS_ENV)
+        led["shot_changes"] = _shots
+        _beats = segment_beats_visual(src, _vdur, shot_changes=_shots)
         # THE CUT SIGNAL. Without this the agent has boundaries but nothing to
         # cut ON, and every no-speech run kept 100% of its source.
+        #
+        # STILLNESS IS NOT THE ONLY SIGNAL, and on these sources it is usually
+        # the WRONG one: visual_cut_candidates is median-relative (quiet_frac
+        # 0.35), so a clip with continuous motion — a pet video, music, a screen
+        # recording — has nothing below 35% of its own median and returns ZERO.
+        # Measured round 17: 0 spans on 4 of 5 no-speech fixtures, after which
+        # the prompt told the agent verbatim "evenly paced; cut on shot changes
+        # or not at all" — naming a fallback that was never wired. The agent
+        # obeyed, and cut came back 0.00 under a brief demanding hard cuts.
         _vcuts = visual_cut_candidates(_vcurve, _vdur)
         led["visual_cut_candidates"] = _vcuts
         if not _beats:
@@ -3715,8 +3759,24 @@ def edit(source_key: str, brief: str,
                 + "\n".join(f"  [{_v['t_start']:.2f}-{_v['t_end']:.2f}] "
                              f"{_v['duration_s']:.1f}s, motion {_v['mean_motion']}"
                              for _v in (led.get("visual_cut_candidates") or []))
-                + ("\n  (none — this clip is evenly paced; cut on shot changes "
-                   "or not at all)" if not led.get("visual_cut_candidates") else "")
+                + ("\n  (none — this clip never drops below 35% of its own "
+                   "median motion, which is common on continuously-moving "
+                   "footage and does NOT mean there is nothing to cut)"
+                   if not led.get("visual_cut_candidates") else "")
+                # SHOT CHANGES, OFFERED — not merely named. The old text told
+                # the agent to "cut on shot changes" and shot changes were never
+                # computed for this path, so it was advice pointing at nothing.
+                # Measured round 17: stillness found 0 spans on 4 of 5 no-speech
+                # fixtures and cut came back 0.00 under a hard-cuts brief.
+                + (("\n\nHARD CUTS ALREADY DETECTED — the source changes shot at "
+                    "these times. A shot change is a boundary no motion curve "
+                    "can argue with, and cutting on one is invisible:\n"
+                    + "\n".join(f"  [{_t:.2f}s]" for _t in
+                                (led.get("shot_changes") or [])[:40]))
+                   if led.get("shot_changes") else
+                   "\n\nNo shot changes in this source — it is one continuous "
+                   "take, so any cut you make is a jump cut. That is a real "
+                   "option on a fast brief; it is a decision, not a default.")
                 + "\n\n") if _beat_source == "visual" else "")
             + f"DEAD AIR ALREADY DETECTED ({len(_gaps)} gaps >=0.35s) — you do not "
             f"need to compute these:\n{_gap_txt}\n\n"
@@ -5200,8 +5260,15 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     _vc = (r.get("ledger") or {}).get("visual_cut_candidates")
     if _vc is not None:
         _tot = sum(x["duration_s"] for x in _vc)
+        _sc9 = (r.get("ledger") or {}).get("shot_changes")
         print(f"  STILLNESS       : {len(_vc)} span(s), {_tot:.1f}s offered"
-              + ("  (evenly paced — nothing to cut on)" if not _vc else ""))
+              + ("  (below-median stillness not found — NOT the same as "
+                 "nothing to cut)" if not _vc else ""))
+        # PRINTED BESIDE IT, because "0 stillness spans" was read as "no cut
+        # signal" when the other signal was simply never computed.
+        if _sc9 is not None:
+            print(f"  SHOT CHANGES    : {len(_sc9)} detected"
+                  + ("  (continuous take — any cut is a jump cut)" if not _sc9 else ""))
 
     _tt = (r.get("ledger") or {}).get("turns") or []
     if any(t.get("cache_write") for t in _tt):
