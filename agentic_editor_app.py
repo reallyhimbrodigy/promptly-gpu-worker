@@ -592,6 +592,26 @@ def _contract_violations(ledger):
            for f in (ledger or {}).get("failures", [])
            if f.get("kind") in CONTRACT_FAILURES and f.get("kind") not in _final_kinds]
 
+    # AN OUTSTANDING SHORTFALL IS READ FROM THE LEDGER AT THE END, not from
+    # whether execute_plan happened to be called a second time.
+    #
+    # MEASURED, round 22: music and pet_video finished with
+    # spec_shortfall outstanding (sfx; sfx+zoom) and NO contract violation. The
+    # escalation lived inside execute_plan — report once, fail on the NEXT call —
+    # so a shortfall recorded by a rule_all_beats that ran AFTER the last
+    # execute_plan was never escalated at all. The record was right; nothing
+    # read it.
+    #
+    # Evaluated here it cannot be dodged by call ordering or call count: at the
+    # end of the run the question is simply whether the spec was met, and the
+    # persistent record answers it.
+    _out_short = (ledger or {}).get("spec_shortfall") or {}
+    if _out_short:
+        _dirs = {f: (d or {}).get("direction", "under") for f, d in _out_short.items()}
+        out.append("spec_shortfall_unresolved: " + ", ".join(
+            f"{f} {v}" for f, v in sorted(_dirs.items()))[:80])
+
+
     # Re-derive the artifact promises from the FINAL state only.
     _f = (ledger or {}).get("final_inspect") or {}
     if _f:

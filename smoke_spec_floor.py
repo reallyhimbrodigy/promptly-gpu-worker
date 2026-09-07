@@ -253,6 +253,34 @@ _pi = SRC.index('if _short:\n                    led["spec_shortfall"] = _short'
 _ai = SRC.index('out["SPEC_SHORTFALL"] = _new_short')
 ok(_pi < _ai, "the record is written after the ask is decided")
 
+# ── AN OUTSTANDING SHORTFALL ESCALATES AT END OF RUN ──────────────────────
+# MEASURED, round 22: music finished with spec_shortfall outstanding on sfx and
+# pet_video on sfx+zoom, and BOTH scored viol=[]. The escalation lived inside
+# execute_plan — report once, fail on the NEXT call — so a shortfall recorded by
+# a rule_all_beats that ran AFTER the last execute_plan was never escalated. The
+# record was right; nothing read it.
+_cfn = next((n for n in TREE.body
+             if isinstance(n, ast.FunctionDef) and n.name == "_contract_violations"), None)
+ok(_cfn is not None, "_contract_violations is gone")
+if _cfn:
+    _cns = {"CONTRACT_FAILURES": _S}
+    exec(compile(ast.Module([_cfn], []), "<s>", "exec"), _cns)
+    _cv = _cns["_contract_violations"]
+    _ok_final = {"exists": True, "width": 1080, "height": 1920, "audio": True}
+    _v = _cv({"failures": [], "final_inspect": _ok_final,
+              "spec_shortfall": {"sfx": {"direction": "absent"}}})
+    ok(any("spec_shortfall_unresolved" in x for x in _v),
+       "an outstanding shortfall did not become a contract violation at end of "
+       "run — it can still be dodged by never calling execute_plan again, which "
+       "is round 22 exactly")
+    _v2 = _cv({"failures": [], "final_inspect": _ok_final,
+               "spec_shortfall": {"sfx": {"direction": "absent"},
+                                  "zoom": {"direction": "over"}}})
+    ok(any("zoom over" in x for x in _v2),
+       f"the direction is not carried into the violation: {_v2}")
+    ok(_cv({"failures": [], "final_inspect": _ok_final}) == [],
+       "a run that MET its spec was reported as violating it")
+
 if FAIL:
     print("FAIL smoke_spec_floor:")
     for f in FAIL:
