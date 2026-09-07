@@ -4372,8 +4372,29 @@ def edit(source_key: str, brief: str,
                 _told = set(led.get("shortfall_told") or [])
                 _new_short = {k: v for k, v in _short.items() if k not in _told}
                 led["shortfall_told"] = sorted(_told | set(_short))
-                if _short and _new_short:
+
+                # ASKING IS BOUNDED. RECORDING IS NOT. These were the same
+                # thing, and the bound erased the record it was bounding: the
+                # agent was told once, shortfall_told filled, and the NEXT
+                # rule_all_beats took the else branch and popped
+                # led["spec_shortfall"] — so execute_plan saw no shortfall and
+                # spec_shortfall_unresolved, a CONTRACT failure, could never
+                # fire.
+                #
+                # MEASURED, round 19 screen_recording: the agent set text=0.4
+                # and zoom=0.2 per 25s, ruled all four beats `none`, and built
+                # NOTHING. spec_family_built_zero fired four times and the round
+                # still passed that leg, because the one check with the power to
+                # fail it had been cleared by the check that only warns.
+                #
+                # The shortfall is now cleared ONLY when it is genuinely gone —
+                # ruled up to the floor, or named per beat. Being told about it
+                # is not resolving it.
+                if _short:
                     led["spec_shortfall"] = _short
+                else:
+                    led.pop("spec_shortfall", None)
+                if _short and _new_short:
                     out["SPEC_SHORTFALL"] = _new_short
                     out["fix_shortfall"] = (
                         "Your own spec set these rates and your rulings do not "
@@ -4381,8 +4402,6 @@ def edit(source_key: str, brief: str,
                         "or pass accept_shortfall with the family names and say "
                         "why in the verdicts. A deliberate zero is a decision; "
                         "an accidental one is a miss.")
-                else:
-                    led.pop("spec_shortfall", None)
                 _missing = [b["i"] for b in _beats if b["i"] not in _seen]
                 out = {"recorded": _added, "ruled": len(_seen),
                        "of": len(_beats), "still_missing": _missing[:30]}

@@ -119,6 +119,23 @@ json.dump({"result": res, "green": green, "why": why},
           open(os.path.join(out, "score.json"), "w"), indent=1)
 print(f"\nROUND {out[-1]} GREEN={green}")
 print(f"  {why}")
+# THE SIGNATURE ON EVERY FIXTURE, not just the one being read closely. A run at
+# half the turns and two-thirds the placements of its neighbours is green for
+# the wrong reason — it did less, and every gate passes because everything it
+# DID do was correct. Printed per fixture so the variance question accumulates
+# evidence across rounds instead of being re-litigated from one log at a time.
+import re as _re
+print()
+print(f"  {'fixture':18} {'turns':>6} {'cost':>9} {'placed':>7}  families")
+for _n in sorted(res):
+    _p = os.path.join(out, f"{_n}.log")
+    _t = open(_p, encoding='utf-8', errors='ignore').read() if os.path.exists(_p) else ''
+    _m = _re.search(r"RUN SIGNATURE   : turns (\d+)\s+cost \$([\d.]+)\s+placements (\d+)\s+\[([^\]]*)\]", _t)
+    if _m:
+        print(f"  {_n:18} {_m.group(1):>6} {'$'+_m.group(2):>9} {_m.group(3):>7}  [{_m.group(4)}]")
+    else:
+        print(f"  {_n:18} {'—':>6} {'—':>9} {'—':>7}  (no signature — run did not reach the summary)")
+print()
 for n, v in sorted(res.items()):
     print(f"  {n:<18} ok={v['ok']} kept={v['kept_ratio']} placements={v['placements']}"
           + (f" VIOLATIONS={v['contract_violations']}" if v["contract_violations"] else ""))

@@ -118,6 +118,64 @@ ok(len(_dispatch_calls) >= 1,
    "nothing CALLS spec_shortfall — the pure function exists and the dispatch "
    "computes its own copy, so the tested code is not the running code")
 
+# ══════════════════════════════════════════════════════════════════════════
+# ASKING IS BOUNDED; RECORDING IS NOT.
+#
+# MEASURED, round 19 screen_recording: the agent set text=0.4 and zoom=0.2 per
+# 25s, ruled all four beats `none`, built NOTHING — and the round passed this
+# leg. spec_family_built_zero fired four times (a warning) while
+# spec_shortfall_unresolved (the CONTRACT failure) never fired at all.
+#
+# Because they were the same variable. The agent is told once, shortfall_told
+# fills, and the next rule_all_beats hit `else: led.pop("spec_shortfall")` —
+# so execute_plan saw no shortfall. The bound erased the record it was bounding,
+# and the only check with the power to fail the round was cleared by the
+# mechanism meant to stop it nagging.
+# ══════════════════════════════════════════════════════════════════════════
+def replay(short_by_call):
+    """Replay the shipped bookkeeping across successive rule_all_beats calls."""
+    led, told = {}, set()
+    seen_asks = []
+    for short in short_by_call:
+        new_short = {k: v for k, v in short.items() if k not in told}
+        told |= set(short)
+        if short:
+            led["spec_shortfall"] = short
+        else:
+            led.pop("spec_shortfall", None)
+        seen_asks.append(bool(short and new_short))
+    return led, seen_asks
+
+SHORT = {"text": {"implied": 1, "ruled": 0}}
+
+# the round-19 sequence: shortfall present on both calls, agent never closes it
+led, asks = replay([SHORT, SHORT])
+ok(led.get("spec_shortfall") is not None,
+   "the shortfall was CLEARED on the second call merely because the agent had "
+   "already been told — execute_plan then sees nothing and "
+   "spec_shortfall_unresolved can never fire, which is round 19 exactly")
+ok(asks == [True, False],
+   f"asking is not bounded: {asks} — the agent must be told once, not every call")
+
+# resolved -> cleared. Being told is not resolving; ruling up IS.
+led2, asks2 = replay([SHORT, {}])
+ok(led2.get("spec_shortfall") is None,
+   "a shortfall the agent actually CLOSED was still recorded — the contract "
+   "would fail a run that met its own floor")
+
+# three calls, still unresolved, still recorded and still asked only once
+led3, asks3 = replay([SHORT, SHORT, SHORT])
+ok(led3.get("spec_shortfall") is not None and asks3 == [True, False, False],
+   f"over three calls: recorded={led3.get('spec_shortfall') is not None} asks={asks3}")
+
+# and the shipped source must not re-couple them
+ok(SRC.count('led.pop("spec_shortfall", None)') == 1,
+   "spec_shortfall is popped in more than one place — the bounded ASK is "
+   "clearing the persistent RECORD again")
+_pi = SRC.index('if _short:\n                    led["spec_shortfall"] = _short')
+_ai = SRC.index('out["SPEC_SHORTFALL"] = _new_short')
+ok(_pi < _ai, "the record is written after the ask is decided")
+
 if FAIL:
     print("FAIL smoke_spec_floor:")
     for f in FAIL:
