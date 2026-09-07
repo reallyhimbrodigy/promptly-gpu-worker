@@ -93,7 +93,24 @@ while IFS=$'\t' read -r name key brief model; do
   #
   # LOGGED, never silent: the retry appears in appmap.txt and in the round
   # output, so "green" can always be read against how many fixtures needed one.
-  if grep -q "cancellation signal" "$OUT/$name.log" 2>/dev/null; then
+  # INFRASTRUCTURE SIGNATURES, ENUMERATED — never matched loosely.
+  #
+  # The test each one passes: NO AGENT RAN, NO OUTPUT EXISTED, and nothing
+  # about the pipeline was exercised. A crash, a contract violation, a
+  # passthrough or a real failure is the RESULT and must never be retried —
+  # "retry anything that looks like infra" is how a pipeline launders its
+  # own defects.
+  #
+  #   cancellation signal    Modal cancelled mid-run, no exception, no ledger
+  #                          entry (music r19, talking_head r22; both passed
+  #                          on a manual retry of the identical mount)
+  #   modified during build  five fixtures launch in sequence and each
+  #                          `modal run` re-imports the app, so one build read
+  #                          _asset_inventory.json while the next import
+  #                          rewrote it (pet_video r31 — never launched). The
+  #                          race is fixed by writing that file only on
+  #                          change; this stays as the backstop.
+  if grep -qE "cancellation signal|was modified during build process" "$OUT/$name.log" 2>/dev/null; then
     echo "[retry] $name — Modal cancelled the run (infrastructure, no exception); retrying ONCE"
     echo "$name CANCELLED_RETRIED" >> "$OUT/appmap.txt"
     mv "$OUT/$name.log" "$OUT/$name.cancelled.log"
@@ -101,7 +118,7 @@ while IFS=$'\t' read -r name key brief model; do
     modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
       --model "${model:-claude-sonnet-5}" \
       --src-url "$S" --out-url "$O" --out-key "$K" > "$OUT/$name.log" 2>&1
-    if grep -q "cancellation signal" "$OUT/$name.log" 2>/dev/null; then
+    if grep -qE "cancellation signal|was modified during build process" "$OUT/$name.log" 2>/dev/null; then
       echo "[retry] $name — cancelled TWICE; that is a real failure, not infrastructure"
     fi
   fi

@@ -92,8 +92,27 @@ def _write_asset_inventory():
     import build_asset_inventory
     import json as _json
     inv = build_asset_inventory.build()      # raises on empty/mismatched tables
+    _new = _json.dumps(inv, indent=1)
+    # WRITE ONLY ON CHANGE — this file is MOUNTED into the image, and this
+    # function runs at module import, which every `modal run` does.
+    #
+    # MEASURED, round 31: five fixtures launch in sequence, so fixture N's image
+    # build was reading _asset_inventory.json while fixture N+1's import
+    # rewrote it. Modal refused the build — "_asset_inventory.json was modified
+    # during build process" — and pet_video never launched. No agent ran, no
+    # output existed, and the round scored it as a genuine failure.
+    #
+    # An unconditional write touches the mtime on every import even when the
+    # bytes are identical, which is the whole race. Comparing first makes the
+    # steady state a no-op, so the retry never has to fire.
+    try:
+        with open(_INVENTORY_JSON) as fh:
+            if fh.read() == _new:
+                return inv
+    except FileNotFoundError:
+        pass
     with open(_INVENTORY_JSON, "w") as fh:
-        _json.dump(inv, fh, indent=1)
+        fh.write(_new)
     return inv
 
 
@@ -2285,6 +2304,43 @@ def caption_pages(kept_words, words_per_page=3):
         })
     return pages
 
+
+
+def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=()):
+    """The PromptlyOverlay input for a CAPTIONS-ONLY alpha pass.
+
+    PromptlyOverlay already renders "captions + motion graphics + text overlays
+    on a transparent background" — production's own overlay composition. So the
+    caption port needs no new component: drive it with a caption spec and an
+    EMPTY motionGraphics list and it paints the nine real styles over alpha.
+
+    NOT SHARED WITH THE CARD REEL, deliberately. The reel is PACKED — components
+    laid back-to-back in reel time and composited back to their real times by a
+    filtergraph — because painting a 58s timeline to place ten components cost
+    169.3s against 72.2s packed. Captions are the opposite shape: they span the
+    whole output at REAL time and cannot be packed without losing their clock.
+    Two renders, one PROCESS. That distinction is what render_remotion_batch is
+    for, and it is why "captions join the reel" would have been wrong.
+
+    HALF RATE IS THE CALLER'S CHOICE, not made here: 8 of 9 styles measured
+    80-97% static at full rate already, so halving adds 0-5% held frames — but
+    TypewriterReveal is 42% static (a per-character cursor) and halving adds
+    17%. The style decides, and the caller passes the fps it wants.
+    """
+    n = max(1, int(out_frames))
+    return {"input": {
+        "sourceUrl": "", "fps": int(fps), "width": 1080, "height": 1920,
+        "totalDurationInFrames": n,
+        "clips": [], "transitions": [], "broll": [],
+        "motionGraphics": [], "textOverlays": [], "outro": "none",
+        "caption": {
+            "style": str(style),
+            "pages": list(pages or []),
+            "keywords": list(keywords or []),
+            "positionSegments": [{"fromFrame": 0, "toFrame": n,
+                                  "position": "bottom"}],
+        },
+    }}
 
 
 def render_remotion_batch(jobs, env=None, timeout=1800):
