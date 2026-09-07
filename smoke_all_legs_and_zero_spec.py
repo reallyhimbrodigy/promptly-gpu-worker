@@ -126,8 +126,8 @@ for _c in _calls:
           "accepted families are removed from _spec_t; a spec that excused one "
           "still SET it, and judging the bar on what remains after the excuses "
           "fires on correct behaviour")
-    check("it reads the spec's own targets",
-          "targets" in _ast.dump(_first or _ast.Constant(None)),
+    check("it reads the SCOPED target set (full targets minus out_of_scope)",
+          isinstance(_first, _ast.Name) and _first.id == "_scoped_t",
           _ast.dump(_first)[:120] if _first else "no argument")
 
 if fails:

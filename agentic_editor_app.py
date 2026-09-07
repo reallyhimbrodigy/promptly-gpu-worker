@@ -2091,6 +2091,76 @@ def detect_shot_changes(path, env=None, threshold=0.3, timeout=600):
     return sorted(set(ts))
 
 
+# ── THE THREE REGIMES (measured 2026-09-07) ─────────────────────────────────
+# A rate is per-25s and placements are integers, so over a source of duration D
+# the continuous target exact = rate*D/25 must be met by round(exact). Measured
+# against 3,740 production jobs and the five fixtures:
+#
+#   family  rate   D_zero   D_fit    prod scoreable / within 20%
+#   text    7.28     1.7s     8.6s      100.0%  /  82.3%
+#   cut     4.75     2.6s    13.2s       99.2%  /  65.6%
+#   card    2.35     5.3s    26.6s       91.8%  /  38.3%
+#   sfx     0.82    15.2s    76.2s       57.9%  /   7.5%
+#   zoom    0.35    35.7s   178.6s       27.9%  /   0.5%
+#
+# zoom needs a 178.6s source to be within 20% of its own rate; production's
+# LONGEST job is 180.0s. It is not that the fixtures are short — production p50
+# is 19.0s and the fixtures span 15.0-38.5s, already typical. sfx (0.82) and
+# zoom (0.35) are SUB-UNIT rates: the corpus measured 14 sfx and 6 zooms in 124
+# beats. A rate below ~0.5/25s is a rarity, not a density, and a rarity cannot
+# be expressed as an integer count on a 20-second clip. Scoring it per-run
+# measures which fixture you drew, not what the pipeline did — which is exactly
+# what round 25's contradictory directions were ('sfx under, text under, zoom
+# under' on one fixture and 'zoom over' on another, same round).
+REGIME_PER_RUN, REGIME_AGGREGATE, REGIME_OUT_OF_SCOPE = (
+    "per_run", "aggregate", "out_of_scope")
+_FIT_EXACT = 2.5      # worst-case rounding error 0.5/exact <= 20%
+_ZERO_EXACT = 0.5     # below this, round() gives 0
+
+
+def rate_regime(rate, dur_s):
+    """Which of the three regimes this family falls in at this duration.
+
+    per_run       exact >= 2.5  — round() is within 20% of the rate NO MATTER
+                                  where the duration falls. Score per fixture.
+    aggregate     0.5 <= exact  — the family belongs on this source but its
+                    < 2.5         count cannot be scored precisely here. Score
+                                  the SUM across the round instead.
+    out_of_scope  exact < 0.5   — round() is 0. The family cannot appear on
+                                  this source at all. It must NOT be asked for,
+                                  and its absence must NOT read as a satisfied
+                                  spec — that silent pass is the hole
+                                  spec_targets_all_zero was built for.
+    """
+    if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
+        return REGIME_OUT_OF_SCOPE
+    exact = float(rate) * max(0.0, float(dur_s or 0)) / 25.0
+    if exact >= _FIT_EXACT:
+        return REGIME_PER_RUN
+    if exact >= _ZERO_EXACT:
+        return REGIME_AGGREGATE
+    return REGIME_OUT_OF_SCOPE
+
+
+def family_regimes(targets, dur_s):
+    """{family: {regime, rate, expected}} — the whole spec, classified.
+
+    `expected` is the CONTINUOUS target, kept unrounded on purpose: it is what
+    the round-level aggregate sums. Rounding per fixture and then summing is
+    what made the per-run numbers meaningless in the first place.
+    """
+    out = {}
+    for fam, rate in (targets or {}).items():
+        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
+            continue
+        out[str(fam)] = {
+            "regime": rate_regime(rate, dur_s),
+            "rate": float(rate),
+            "expected": round(float(rate) * max(0.0, float(dur_s or 0)) / 25.0, 3),
+        }
+    return out
+
+
 def spec_implies_nothing(targets, n_beats, dur_s):
     """True when the spec, resolved against THIS source, asks for zero placements
     in every family — an agent that has set itself a bar it cannot fail.
@@ -4513,9 +4583,24 @@ def edit(source_key: str, brief: str,
                 if _reasons:
                     led.setdefault("shortfall_reasons", []).extend(_reasons)
                 _reasons = led.get("shortfall_reasons") or []
-                _spec_t = {k: v for k, v in
-                           (((led.get("spec") or {}).get("targets") or {})).items()
-                           if str(k).lower() not in _acc}
+                # CLASSIFY THE WHOLE SPEC FIRST, then score only what is
+                # per-run scoreable at THIS duration. Recorded on the ledger so
+                # the round collector can sum the aggregate families across
+                # fixtures — the only scale at which a sub-unit rate means
+                # anything.
+                _full_t = ((led.get("spec") or {}).get("targets") or {})
+                led["rate_regimes"] = family_regimes(_full_t, _src_dur)
+                _per_run_fams = {f for f, d in led["rate_regimes"].items()
+                                 if d["regime"] == REGIME_PER_RUN}
+                # PER-RUN SCORING TOUCHES PER-RUN FAMILIES ONLY. Round 25 fired
+                # 'zoom over' on one fixture and 'zoom under' on another in the
+                # same round; both were quantisation, not behaviour. zoom needs
+                # a 178.6s source to be within 20% of 0.35/25s and production's
+                # longest job is 180.0s, so no per-run verdict on it can mean
+                # anything. It is scored across the round instead.
+                _spec_t = {k: v for k, v in _full_t.items()
+                           if str(k).lower() not in _acc
+                           and str(k) in _per_run_fams}
                 # ONE CALL to the pure function. This arithmetic used to be
                 # inline here, which meant its smoke could only replay a copy of
                 # it — and a replay stays green no matter what the shipped code
@@ -4558,9 +4643,16 @@ def edit(source_key: str, brief: str,
                 # it — and accepting a shortfall on a family is itself proof
                 # that family carried a target. Same family of mistake as the
                 # collector reading a filtered view of the producer's verdict.
+                # EVALUATED OVER IN-SCOPE FAMILIES ONLY. Predicted before
+                # building it: judging "did the spec ask for anything?" over
+                # families that CANNOT be asked for at this duration would fire
+                # on correct behaviour, which is how a check gets switched off.
+                # A spec is empty when nothing it set is per-run scoreable here
+                # AND nothing rolls to the aggregate either.
+                _scoped_t = {f: d["rate"] for f, d in led["rate_regimes"].items()
+                             if d["regime"] != REGIME_OUT_OF_SCOPE}
                 led["spec_implies_nothing"] = spec_implies_nothing(
-                    ((led.get("spec") or {}).get("targets") or {}),
-                    len(_beats), _src_dur)
+                    _scoped_t, len(_beats), _src_dur)
                 # BOUNDED PER FAMILY. Even a satisfiable shortfall must not be
                 # reported forever: the bound in execute_plan never fired here
                 # because the agent never REACHED execute_plan — it looped
@@ -5452,6 +5544,31 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     print(f"  RUN SIGNATURE   : turns {(r.get('ledger') or {}).get('iters')}  "
           f"cost ${cost:.4f}  "
           f"placements {len(_pl_all)}  [{_famstr}]")
+
+    # ── RATE REGIMES — one JSON line, for the ROUND to sum ──────────────────
+    # A sub-unit rate is a corpus statistic, not a per-source target: 0.35/25s
+    # is "6 zooms in 124 beats", and on a 20s clip its whole expectation is
+    # 0.28 of one placement. Rounding that per fixture and judging the result
+    # measures the fixture. Summed over the round's 111.5s it becomes 1.56, and
+    # over two rounds it clears the 2.5 fittability bar and starts to mean
+    # something.
+    #
+    # EXPECTED IS CARRIED UNROUNDED. Rounding per fixture and then summing is
+    # precisely the error this exists to undo.
+    #
+    # ONE PARSEABLE LINE, and the collector owns no vocabulary of its own — the
+    # same rule the CONTRACT VIOLATIONS line earned when a reader with a
+    # hardcoded five-kind enum scored four rounds green against a seven-member
+    # CONTRACT_FAILURES.
+    _regs = (r.get("ledger") or {}).get("rate_regimes") or {}
+    print("  RATE REGIMES    : " + json.dumps({
+        "dur_s": round(float((r.get("ledger") or {}).get("source_duration_s") or 0), 2),
+        "families": {_f: {"regime": _d["regime"],
+                          "rate": _d["rate"],
+                          "expected": _d["expected"],
+                          "actual": int(_by_fam.get(_f, 0))}
+                     for _f, _d in sorted(_regs.items())},
+    }, separators=(",", ":")))
 
     # THE TAIL. cache_write is 12.5x the read price, so a 7.7% token share is
     # ~half the input bill. The cached PREFIX is written once; everything else
