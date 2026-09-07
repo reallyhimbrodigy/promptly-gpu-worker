@@ -3200,6 +3200,13 @@ def edit(source_key: str, brief: str,
             grp = kept[i:i + words_per_cue]
             cues.append((grp[0]["s"], grp[-1]["e"],
                          " ".join(g["w"] for g in grp).upper()))
+        # THE OUTPUT-TIME WORDS, KEPT. The Remotion caption pass rebuilds pages
+        # from these — the SAME remap the SRT is written from — because caption
+        # drift against speech is silent and ffmpeg exits 0 either way. One
+        # clock is what makes the two paths comparable rather than merely both
+        # present.
+        led["kept_words_out"] = [{"s": float(k["s"]), "e": float(k["e"]),
+                                  "w": str(k["w"])} for k in kept]
         with open("/work/captions.srt", "w") as fh:
             for i, (s, e, txt) in enumerate(cues, 1):
                 fh.write(f"{i}\n{_srt_ts(s)} --> {_srt_ts(e)}\n{txt}\n\n")
@@ -3264,7 +3271,16 @@ def edit(source_key: str, brief: str,
         # asked whether the file was there, not whether it had anything in it.
         _srt = "/work/captions.srt"
         _have_cues = os.path.exists(_srt) and os.path.getsize(_srt) > 0
-        if burn_captions and _have_cues:
+        # ── THE ffmpeg BURN IS THE FALLBACK NOW, NOT THE PATH ──────────────
+        # Real captions render through PromptlyOverlay — production's own
+        # composition, nine styles, per-word animation — and composite as an
+        # alpha .mov. This chain entry survives ONLY for when that pass could
+        # not run (no words, or the batch failed), because shipping no captions
+        # at all is worse than shipping plain ones, and silently shipping plain
+        # ones while claiming nine styles is worse than both. led["caption_path"]
+        # records which one actually painted.
+        if burn_captions and _have_cues and not led.get("caption_mov"):
+            led["caption_path"] = "ffmpeg_fallback"
             chain.append(
                 "subtitles=/work/captions.srt:force_style='Fontname=DejaVu Sans"
                 ",Bold=1,FontSize=18,PrimaryColour=&H00FFFFFF"
@@ -3708,6 +3724,64 @@ def edit(source_key: str, brief: str,
             # Captions only where speech exists. Asking for them on a visual
             # beat source is asking libass to render an empty file.
             _want_caps = bool(words)
+            # ── REAL CAPTIONS, THROUGH PRODUCTION'S OWN COMPOSITION ────────
+            # PromptlyOverlay renders "captions + motion graphics + text
+            # overlays on a transparent background" — so the nine styles need
+            # no new component, just a caption spec and an empty
+            # motionGraphics list.
+            #
+            # ENQUEUED THROUGH THE BATCH so bundle+browser (12.24s measured) is
+            # paid once across this and the card reel rather than twice. Not
+            # merged INTO the reel: the reel is packed back-to-back in reel
+            # time and captions span the output at real time — two renders, one
+            # process, which is the distinction render_remotion_batch exists
+            # for.
+            #
+            # HALF RATE ON THE EIGHT FREE STYLES. Measured against the native
+            # 30fps layer: 8 of 9 are already 80-97% static, so halving adds
+            # 0-5% held frames. TypewriterReveal is 42% static (a per-character
+            # cursor) and halving adds 17%, so it renders full-rate.
+            _cap_words = led.get("kept_words_out") or []
+            if _want_caps and _cap_words:
+                _cap_style = pick_caption_style(brief)
+                _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
+                _cap_pages = caption_pages(_cap_words, 3)
+                _cap_end = max(float(w["e"]) for w in _cap_words)
+                _cap_frames = max(1, int(round(_cap_end * _cap_fps)))
+                _cap_plan = "/work/caption-plan.json"
+                with open(_cap_plan, "w") as fh:
+                    json.dump(caption_overlay_plan(_cap_pages, _cap_style,
+                                                   _cap_frames, fps=_cap_fps), fh)
+                _cap_t0 = time.time()
+                _cap_res = render_remotion_batch([{
+                    "id": "captions", "composition": "PromptlyOverlay",
+                    "propsFile": _cap_plan, "out": "/work/captions.mov",
+                    "alpha": True,
+                }], env=_SUBPROCESS_ENV)
+                _mark(led, "build_captions", _cap_t0)
+                _cj = (_cap_res or {}).get("captions") or {}
+                led["caption_render"] = {
+                    "style": _cap_style, "fps": _cap_fps,
+                    "pages": len(_cap_pages), "frames": _cap_frames,
+                    "ok": bool(_cj.get("ok")),
+                    "paint_ms": _cj.get("ms"),
+                    "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
+                                     if _cj.get("ms") and _cap_frames else None),
+                    "bundle_ms": (_cap_res.get("_batch") or {}).get("bundle_ms"),
+                    "error": _cj.get("error"),
+                }
+                if _cj.get("ok") and os.path.exists("/work/captions.mov"):
+                    led["caption_mov"] = "/work/captions.mov"
+                    led["caption_path"] = "remotion"
+                else:
+                    # LOUD, not silent. A failed caption render falls back to
+                    # the ffmpeg burn below, and says so — shipping plain
+                    # captions while the ledger claims nine styles is the
+                    # failure this whole port exists to end.
+                    fail("caption_render_failed",
+                         f"style={_cap_style} fps={_cap_fps}: "
+                         f"{str(_cj.get('error'))[:200]} — falling back to the "
+                         f"ffmpeg burn")
             ov = build_overlays(items, _want_caps, cur, "overlaid.mp4")
             if ov.get("error"):
                 # ONE SKIP PER LOST RULING. A batch failure loses len(items)
@@ -3727,6 +3801,39 @@ def edit(source_key: str, brief: str,
                 else:
                     cur = "overlaid.mp4"
                     _mark(led, "build_overlays", _tov0)
+                    # COMPOSITE THE CAPTION ALPHA. One .mov, one ffmpeg input —
+                    # the CLI's refusal of yuva* had forced the old path into
+                    # PNG sequences, which for captions would be ~885 files.
+                    # scale2ref because the caption layer may be half-rate: the
+                    # overlay filter holds each caption frame across the video
+                    # frames between, which is exactly the 0-5% added holds the
+                    # eight free styles measured.
+                    if led.get("caption_mov"):
+                        _cc0 = time.time()
+                        _cco = "/work/captioned.mp4"
+                        _ccr = subprocess.run(
+                            ["ffmpeg", "-y", "-v", "error",
+                             "-i", os.path.join("/work", cur),
+                             "-i", led["caption_mov"],
+                             "-filter_complex",
+                             "[1:v]fps=30,format=yuva444p[cap];"
+                             "[0:v][cap]overlay=0:0:shortest=1[outv]",
+                             "-map", "[outv]", "-map", "0:a?",
+                             "-c:v", "libx264", "-crf", "18",
+                             "-preset", "veryfast", "-c:a", "copy", _cco],
+                            capture_output=True, text=True, timeout=900,
+                            env=_SUBPROCESS_ENV)
+                        _mark(led, "composite_captions", _cc0)
+                        if _ccr.returncode == 0 and os.path.exists(_cco):
+                            cur = "captioned.mp4"
+                            led["caption_composited"] = True
+                        else:
+                            # The render succeeded and the composite did not, so
+                            # the video has NO captions at all — worse than the
+                            # fallback, and it must not pass quietly.
+                            led["caption_composited"] = False
+                            fail("caption_composite_failed",
+                                 (_ccr.stderr or "")[-200:])
                     built["text"] = len(items)
                     steps.append({"step": "text", "n": len(items),
                                   "items": [{"t": _i.get("t_start"),
@@ -5994,6 +6101,19 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
           f"contract_repair={'used' if _rp else 'no'}"
           + ("   <-- CONTESTED: the agent retried a refused call"
              if _rf > 1 else ""))
+
+    # ── CAPTIONS — printed in the commit that adds the counter ────────────
+    _cr = (r.get("ledger") or {}).get("caption_render")
+    if _cr:
+        print(f"  CAPTIONS        : {_cr.get('style')} @ {_cr.get('fps')}fps  "
+              f"{_cr.get('pages')} pages / {_cr.get('frames')} frames  "
+              f"paint {(_cr.get('paint_ms') or 0)/1000:.1f}s "
+              f"({_cr.get('ms_per_frame')} ms/frame)  "
+              f"path={(r.get('ledger') or {}).get('caption_path')}  "
+              f"composited={(r.get('ledger') or {}).get('caption_composited')}"
+              + (f"  ERROR={_cr.get('error')}" if _cr.get("error") else ""))
+    elif (r.get("ledger") or {}).get("caption_path") == "ffmpeg_fallback":
+        print("  CAPTIONS        : ffmpeg burn (no Remotion pass ran)")
 
     _eff = (r.get("ledger") or {}).get("placement_effects") or []
     if _eff:
