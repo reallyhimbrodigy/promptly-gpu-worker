@@ -565,6 +565,14 @@ CONTRACT_FAILURES = frozenset({
     # shortfall check passed honestly, and a run that built nothing reported no
     # violations. The bar has to be one the run can fail, or it is not a bar.
     "spec_targets_all_zero",
+    # A DECLARED PLACEMENT THAT CHANGES NOTHING IS NOT A PLACEMENT.
+    # Every zoom in every round of this corpus was inert — 0.2% of frame where
+    # it claimed 12% — and three of five fixtures in round 26 declared zoom as
+    # their only family with kept=1.0, shipping visually unchanged video that
+    # scored ok=True. The passthrough leg could not see it: it requires
+    # placements == 0 and these declared one or two. A count of declarations is
+    # not a measure of work.
+    "placement_inert",
 })
 
 
@@ -2116,6 +2124,85 @@ REGIME_PER_RUN, REGIME_AGGREGATE, REGIME_OUT_OF_SCOPE = (
     "per_run", "aggregate", "out_of_scope")
 _FIT_EXACT = 2.5      # worst-case rounding error 0.5/exact <= 20%
 _ZERO_EXACT = 0.5     # below this, round() gives 0
+
+
+def step_changed_output(before_path, after_path, t0, t1, env=None,
+                       identical_db=50.0):
+    """Did this build step change the frames it claimed to touch?
+
+    Returns (changed: bool|None, psnr_db: float|None). None means UNMEASURED —
+    never False, because "could not measure" and "did nothing" are different
+    facts and collapsing them is how absence gets rendered as success.
+
+    SCOPE, STATED HONESTLY. This catches a step that did LITERALLY NOTHING. It
+    does NOT catch a step that did something other than what it claimed, and the
+    numbers say so plainly — measured against the same source:
+
+        INERT zoom (1.002x)   33.46 dB    <-- a diff CANNOT separate this
+        REAL zoom  (1.118x)   31.19 dB
+        re-encode, no change  68.25 dB    <-- only this is separable
+
+    A 1.002x scale still shifts every pixel, and on detailed content that reads
+    as a large diff. So this is the coarse leg; cert_placement_effect.py is the
+    one that measures whether the CLAIMED geometry happened. Shipping only this
+    leg would have been the fifth false green in this lane, sold as the fix for
+    the fourth.
+    """
+    import subprocess          # not a module-level import in this file
+    try:
+        if not (os.path.exists(before_path) and os.path.exists(after_path)):
+            return None, None
+        dur = max(0.1, float(t1) - float(t0))
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-ss", f"{float(t0):.3f}", "-t", f"{dur:.3f}",
+             "-i", before_path, "-ss", f"{float(t0):.3f}", "-t", f"{dur:.3f}",
+             "-i", after_path, "-lavfi", "[0:v][1:v]psnr=stats_file=-",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=180, env=env)
+        vals = []
+        for tok in re.findall(r"psnr_avg:(inf|[0-9.]+)", (r.stdout or "") + (r.stderr or "")):
+            vals.append(float("inf") if tok == "inf" else float(tok))
+        if not vals:
+            return None, None
+        finite = [v for v in vals if v != float("inf")]
+        # All-infinite means byte-identical frames: nothing happened at all.
+        if not finite:
+            return False, float("inf")
+        avg = sum(finite) / len(finite)
+        return (avg < identical_db), round(avg, 2)
+    except Exception:
+        return None, None
+
+
+def zoom_filtergraph(t_start, t_end, strength, fps=30):
+    """The zoom filtergraph, as a PURE STRING — so a cert can render the shipped
+    one rather than a copy of it.
+
+    IT WAS INLINE IN THE TOOL AND INERT FOR EVERY ROUND OF THIS CORPUS. Measured
+    2026-09-07 on a constructed static pattern, the old expression travelled
+    0.2% of frame where it claimed 12%, and anchored at (-169, 38) — off-frame,
+    diagonally. Two independent bugs, neither visible in any log:
+
+      1. ACCUMULATION NEVER HAPPENED. With d=1 every input frame is its own
+         zoompan sequence, so `zoom` RESETS to 1 each frame and
+         min(zoom+INC, Z) is 1+INC forever. z is now a function of TIME, which
+         needs no state to carry.
+      2. NO x/y, so zoompan used its default top-left origin instead of
+         pushing toward the centre.
+
+    Hoisted for the same reason spec_shortfall was: a smoke over an inline
+    expression can only REPLAY a copy, and a copy stays green no matter what
+    the shipped code does. Two mutations passed that way before.
+    """
+    a, b_ = float(t_start), float(t_end)
+    z = float(strength)
+    dur = max(1e-6, b_ - a)
+    prog = f"(in_time-{a})/{dur:.6f}"
+    return (f"[0:v]scale=1080:1920,setsar=1,"
+            f"zoompan=z='if(between(in_time,{a},{b_}),"
+            f"1+{(z - 1):.6f}*min(1,max(0,{prog})),1)':"
+            f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"d=1:s=1080x1920:fps={int(fps)}[outv]")
 
 
 def rate_regime(rate, dur_s):
@@ -3766,10 +3853,8 @@ def edit(source_key: str, brief: str,
         outp = os.path.join("/work", os.path.basename(str(output_file)))
         if not os.path.exists(inp):
             return {"error": f"{os.path.basename(inp)} does not exist in /work"}
-        f = (f"[0:v]scale=1080:1920,setsar=1,"
-             f"zoompan=z='if(between(in_time,{a},{b_}),"
-             f"min(zoom+{(z - 1) / max(1.0, dur * 30):.6f},{z:.4f}),1)':"
-             f"d=1:s=1080x1920:fps=30[outv]")
+        # ONE CALL to the pure function — the cert renders THIS string.
+        f = zoom_filtergraph(a, b_, z)
         r = subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", inp, "-filter_complex", f,
              "-map", "[outv]", "-map", "0:a?", "-c:v", "libx264", "-crf", "18",
@@ -3778,7 +3863,19 @@ def edit(source_key: str, brief: str,
         if r.returncode != 0:
             fail("build_zoom_failed", (r.stderr or "")[-300:])
             return {"error": "zoom render failed", "stderr": (r.stderr or "")[-500:]}
+        # DID IT ACTUALLY DO ANYTHING? Coarse leg only — it separates "nothing
+        # happened" from "something happened", not "the right thing happened"
+        # (a 1.002x inert zoom measured 33.46 dB against a real one's 31.19).
+        # cert_placement_effect.py owns the geometry. UNMEASURED is recorded as
+        # UNMEASURED, never as a pass.
+        _chg, _db = step_changed_output(inp, outp, a, b_, env=_SUBPROCESS_ENV)
+        if _chg is False:
+            fail("placement_inert",
+                 f"build_zoom wrote {os.path.basename(outp)} but the frames over "
+                 f"{a:.2f}-{b_:.2f}s are unchanged (psnr {_db} dB) — a declared "
+                 f"placement that changes nothing is not a placement")
         return {"ok": True, "output_file": os.path.basename(outp),
+                "changed_output": _chg, "psnr_db": _db,
                 "strength_applied": round(z, 4),
                 "velocity_px_per_frame": round(min(px_per_frame, 11.0), 2),
                 "velocity_capped": capped,
