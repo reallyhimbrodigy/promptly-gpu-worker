@@ -559,6 +559,12 @@ CONTRACT_FAILURES = frozenset({
     # always possible, this can never become the unsatisfiable refusal that
     # burned two 24-turn budgets.
     "spec_shortfall_unresolved",
+    # A SPEC THAT IMPLIES ZERO PLACEMENTS IN EVERY FAMILY IS NOT A SPEC.
+    # Round 24 screen_recording set three families at rates that, over a 20s
+    # source, implied zero each — so there was nothing to fall short OF, the
+    # shortfall check passed honestly, and a run that built nothing reported no
+    # violations. The bar has to be one the run can fail, or it is not a bar.
+    "spec_targets_all_zero",
 })
 
 
@@ -605,6 +611,10 @@ def _contract_violations(ledger):
     # Evaluated here it cannot be dodged by call ordering or call count: at the
     # end of the run the question is simply whether the spec was met, and the
     # persistent record answers it.
+    if (ledger or {}).get("spec_implies_nothing"):
+        out.append("spec_targets_all_zero: the spec's rates imply zero "
+                   "placements in EVERY family over this source — a bar the "
+                   "run cannot fail is not a bar")
     _out_short = (ledger or {}).get("spec_shortfall") or {}
     if _out_short:
         _dirs = {f: (d or {}).get("direction", "under") for f, d in _out_short.items()}
@@ -2079,6 +2089,43 @@ def detect_shot_changes(path, env=None, threshold=0.3, timeout=600):
             except Exception:
                 pass
     return sorted(set(ts))
+
+
+def spec_implies_nothing(targets, n_beats, dur_s):
+    """True when the spec, resolved against THIS source, asks for zero placements
+    in every family — an agent that has set itself a bar it cannot fail.
+
+    MEASURED, round 24 screen_recording. The spec set text=0.4, card=0.1 and
+    zoom=0.2 per 25s. Over a 20s source those imply round(0.32)=0, round(0.08)=0
+    and round(0.16)=0. `spec_shortfall` then found gap=0 and over=0 for all
+    three and returned {} — correctly, by its own arithmetic — so the run built
+    NOTHING, reported `CONTRACT VIOLATIONS: 0 — none`, and was refused only by
+    the passthrough backstop. `spec_family_built_zero` fired three times and has
+    no power to fail a round.
+
+    THIS IS NOT THE max(1, ...) FLOOR RETURNING. That ruling stands and is
+    right: a rate is a rate, and 0.2/25s over 20s IS zero — forcing it to one
+    made the gate invent work the brief never asked for. Per-family zero is
+    legitimate (text and sfx are 0.00/25s on the measured no-speech corpus).
+    What cannot be legitimate is EVERY family at zero: that is not a modest
+    spec, it is the absence of one. The check is on the TOTAL, which is why it
+    does not re-impose a floor on any individual family.
+
+    PURE AND MODULE-LEVEL so a smoke reads the shipped arithmetic. A local copy
+    of this logic let two mutations pass green before spec_shortfall was hoisted
+    out of the dispatch for exactly this reason.
+    """
+    if not targets:
+        return False        # no spec at all is a different failure, not this one
+    dur_25 = max(0.001, float(dur_s or 0)) / 25.0
+    total = 0
+    saw_rate = False
+    for _fam, rate in (targets or {}).items():
+        if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
+            continue
+        saw_rate = True
+        total += min(int(n_beats), int(round(float(rate) * dur_25)))
+    return bool(saw_rate) and total <= 0
 
 
 def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
@@ -4490,6 +4537,13 @@ def edit(source_key: str, brief: str,
                                        for t in (v.get("treatment") or [])])
                 _short = spec_shortfall(_spec_t, _ruled_by_fam, _reasons,
                                         len(_beats), _src_dur)
+                # A SPEC THAT ASKS FOR NOTHING CANNOT BE MISSED. Recorded here
+                # because this is where the targets, the beat count and the
+                # source duration are all in scope; read at end of run by
+                # _contract_violations, so it cannot be dodged by call ordering
+                # the way the shortfall escalation was.
+                led["spec_implies_nothing"] = spec_implies_nothing(
+                    _spec_t, len(_beats), _src_dur)
                 # BOUNDED PER FAMILY. Even a satisfiable shortfall must not be
                 # reported forever: the bound in execute_plan never fired here
                 # because the agent never REACHED execute_plan — it looped

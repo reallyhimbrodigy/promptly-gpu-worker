@@ -84,20 +84,29 @@ def round_is_green(round_result):
     `round_result` maps source -> {"ok": bool, ...}. A source that is missing,
     None, or not a dict is NOT green — it is unproven, and unproven is the same
     as failed for shipping purposes.
+
+    EVERY FAILING LEG, NOT THE FIRST (2026-09-07). This returned on the first
+    failure it found, so round 24 — red on talking_head's unresolved shortfall
+    AND on screen_recording's passthrough — reported one of the two, and the
+    second was found only because someone re-ran the gate by hand with the other
+    fixtures stubbed clean. Reporting one leg makes a multi-cause round look
+    like a single-cause one, and the fix for the reported cause then reads as a
+    fix for the round. The whole point of this session was that what a scorer
+    cannot show, nobody sees.
     """
     r = round_result or {}
+    fails = []
     for src in REQUIRED_SOURCES:
         v = r.get(src)
         if not isinstance(v, dict):
-            return False, f"{src}: NO RESULT (absent — never treated as a pass)"
+            fails.append(f"{src}: NO RESULT (absent — never treated as a pass)")
+            continue          # nothing further is knowable about this source
         if v.get("ok") is not True:
-            return False, f"{src}: {v.get('why') or 'not ok'}"
+            fails.append(f"{src}: {v.get('why') or 'not ok'}")
         # GREEN MEANS THE FULL VIDEO (2026-09-05). There is no partial credit.
         # A result that shipped something lesser — components dropped, a stage
         # skipped, an output flagged degraded — is NOT a pass, because the user
-        # asked for their video and got a substitute. Any of these markers fails
-        # the round even though `ok` is True, so a future degrade path cannot
-        # quietly satisfy this gate.
+        # asked for their video and got a substitute.
         # A PASSTHROUGH IS NOT A PASS (2026-09-05). Round 3 returned ok=True on
         # all five fixtures, and four of them kept 100% of the source with 0-3
         # placements — `music` produced a byte-for-byte passthrough with ZERO
@@ -105,37 +114,47 @@ def round_is_green(round_result):
         # `ok` means the pipeline did not crash. It does not mean it did the
         # job, and a gate that conflates the two would have armed a production
         # cutover after ten consecutive rounds of unedited video.
-        #
-        # Evidence of WORK is therefore part of green: a full edit must have
-        # changed something. Both signals count, because a legitimate edit may
-        # be all-cuts (a tighten) or all-placements (an overlay pass) — but not
-        # neither.
         placed = v.get("placements")
         kept = v.get("kept_ratio")
         if placed is not None and kept is not None:
-            did_nothing = (placed == 0) and (kept is not None and kept >= 0.999)
-            if did_nothing:
-                return False, (f"{src}: PASSTHROUGH — kept {kept} of the source "
-                               f"and declared {placed} placements. ok=True only "
-                               f"means it did not crash.")
+            if (placed == 0) and (kept >= 0.999):
+                fails.append(f"{src}: PASSTHROUGH — kept {kept} of the source "
+                             f"and declared {placed} placements. ok=True only "
+                             f"means it did not crash.")
         # A CONTRACT VIOLATION FAILS THE ROUND, it does not warn. Every fixture
         # rendered at 540x960 against a 1080x1920 contract for three rounds while
         # the harness logged `wrong_resolution` as a ledger event and the gate
         # called those rounds green. A violation the gate tolerates is a
         # violation that ships.
-        for v_ in (v.get("contract_violations") or []):
-            return False, (f"{src}: CONTRACT VIOLATION {v_!r} — the output does "
-                           f"not meet the pipeline's own contract, which is not "
-                           f"a warning")
+        cvs = list(v.get("contract_violations") or [])
+        if cvs:
+            # DEDUPED FOR DISPLAY, COUNTED IN FULL. talking_head reported the
+            # same unresolved shortfall from three separate execute_plan calls;
+            # printing it three times buries the distinct second violation
+            # underneath. The count stays honest either way.
+            seen, distinct = set(), []
+            for c in cvs:
+                if c not in seen:
+                    seen.add(c); distinct.append(c)
+            shown = "; ".join(repr(c) for c in distinct[:3])
+            more = f" (+{len(distinct) - 3} more distinct)" if len(distinct) > 3 else ""
+            fails.append(f"{src}: CONTRACT VIOLATION x{len(cvs)} "
+                         f"({len(distinct)} distinct): {shown}{more} — the output "
+                         f"does not meet the pipeline's own contract, which is "
+                         f"not a warning")
         for marker in ("degraded", "partial", "components_dropped", "fallback"):
             if v.get(marker):
-                return False, (f"{src}: ok but {marker}={v[marker]!r} — green "
-                               f"means the FULL video, not a lesser one")
+                fails.append(f"{src}: ok but {marker}={v[marker]!r} — green "
+                             f"means the FULL video, not a lesser one")
     extra = sorted(set(r) - set(REQUIRED_SOURCES))
     if extra:
-        return False, (f"unknown source(s) {extra} in the round — the test set "
-                       f"is a contract; a renamed source must not silently "
-                       f"replace a required one")
+        fails.append(f"unknown source(s) {extra} in the round — the test set "
+                     f"is a contract; a renamed source must not silently "
+                     f"replace a required one")
+    if fails:
+        srcs = len({f.split(":", 1)[0] for f in fails})
+        return False, (f"{len(fails)} failing leg(s) across {srcs} source(s):\n"
+                       + "\n".join(f"  - {f}" for f in fails))
     return True, "all five green"
 
 
