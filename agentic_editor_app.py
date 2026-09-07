@@ -2050,12 +2050,41 @@ def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
         named = len({r.get("beat") for r in (reasons or [])
                      if str(r.get("family", "")).lower() == str(fam).lower()
                      and str(r.get("why") or "").strip()})
-        if have + named < implied:
-            out[fam] = {"target_per_25s": float(rate),
-                        "implied_over_%.1fs" % float(dur_s or 0): implied,
-                        "implied": implied, "ruled": have,
-                        "gaps_named": named,
-                        "still_unexplained": implied - have - named}
+        # A MIX, NOT A FLOOR PER FAMILY. set_spec resolves a DISTRIBUTION, and a
+        # run that places three zooms against an implied 1 while placing zero
+        # text against an implied 3 has satisfied neither — it is over on one
+        # and absent on the other, and both are misses of the same spec.
+        #
+        # MEASURED, round 20: four of five fixtures came back [zoom=3],
+        # [sfx=2 zoom=3], [zoom=1], [zoom=1] — every no-speech fixture placing
+        # one family and calling it an edit, with every gate green, because
+        # only the UNDER direction was ever checked.
+        #
+        # UNDER stays exactly as strict as it shipped: any unexplained gap at
+        # all. My first pass at adding the OVER direction also introduced a
+        # "one off is not a miss" tolerance, which quietly LOOSENED a check that
+        # was already RED-proven — adding a direction is not a licence to widen
+        # the one that worked, and a run one short of every family would have
+        # passed.
+        #
+        # OVER needs a threshold because it has no natural zero: placing one
+        # more than implied is rounding, not a miss. Two or more is the run
+        # substituting the family it finds easy for the one the brief asked for.
+        gap = implied - have - named
+        over = have - implied
+        if gap >= 1:
+            direction = 'absent' if have == 0 else 'under'
+        elif over >= 2:
+            direction = 'over'
+        else:
+            continue
+        out[fam] = {"target_per_25s": float(rate),
+                    "implied_over_%.1fs" % float(dur_s or 0): implied,
+                    "implied": implied, "ruled": have,
+                    "gaps_named": named,
+                    "direction": direction,
+                    # kept for the existing consumers; negative means overshoot
+                    "still_unexplained": gap}
     return out
 
 

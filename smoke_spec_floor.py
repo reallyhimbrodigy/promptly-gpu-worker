@@ -119,6 +119,46 @@ ok(len(_dispatch_calls) >= 1,
    "computes its own copy, so the tested code is not the running code")
 
 # ══════════════════════════════════════════════════════════════════════════
+# THE SPEC IS A MIX, NOT A FLOOR PER FAMILY.
+#
+# MEASURED, round 20: four of five fixtures came back [zoom=3], [sfx=2 zoom=3],
+# [zoom=1], [zoom=1] — every no-speech fixture placing one family and calling it
+# an edit, with all five green. Only the UNDER direction was ever checked, so a
+# run that placed 3 zooms against an implied 1 and ZERO text against an implied
+# 3 satisfied the check by overshooting the family it found easy.
+# ══════════════════════════════════════════════════════════════════════════
+# the exact round-20 screen_recording shape
+_r20 = shortfall({"text": 4.0, "zoom": 0.35}, {"text": 0, "zoom": 3}, [], 4, 20.0)
+ok(_r20.get("text", {}).get("direction") == "absent",
+   f"text placed 0 against an implied 3 was not flagged: {_r20.get('text')}")
+ok(_r20.get("zoom", {}).get("direction") == "over",
+   f"zoom placed 3 against an implied 1 was not flagged — overshooting the "
+   f"easy family is how a run satisfies a one-sided check: {_r20.get('zoom')}")
+# a run that MATCHES its mix says nothing
+ok(shortfall({"text": 4.0, "zoom": 0.35}, {"text": 3, "zoom": 1}, [], 4, 20.0) == {},
+   "a run that hit its own distribution was reported as a miss")
+# UNDER stays strict — any unexplained gap. Adding the over direction must not
+# widen the check that already worked: a run one short of every family passing
+# is the loosening this repo has been bitten by.
+ok(shortfall({"text": 4.0}, {"text": 2}, [], 4, 20.0).get("text", {}).get("direction") == "under",
+   "one under the implied count is no longer reported — the over direction was "
+   "added by loosening the under one")
+# one OVER is rounding, not a miss: over has no natural zero the way under does
+ok(shortfall({"zoom": 0.35}, {"zoom": 2}, [], 6, 20.0) == {},
+   "one over the implied count was flagged as a miss")
+# two or more over IS a miss
+ok(shortfall({"zoom": 0.35}, {"zoom": 3}, [], 6, 20.0).get("zoom", {}).get("direction") == "over",
+   "a 3x overshoot was not flagged")
+# ZERO is always a miss even when the implied count is 1 — the case a
+# threshold-only rule lets through
+ok(shortfall({"sfx": 0.82}, {"sfx": 0}, [], 6, 20.0).get("sfx", {}).get("direction") == "absent",
+   "placing NOTHING for a family the spec asked for passed, because 1 - 0 < 2")
+# and naming the gap still excuses an absence
+ok(shortfall({"sfx": 0.82}, {"sfx": 0},
+             [{"beat": 1, "family": "sfx", "why": "no moment lands"}], 6, 20.0) == {},
+   "a named gap no longer satisfies the mix — naming must stay a real exit")
+
+# ══════════════════════════════════════════════════════════════════════════
 # ASKING IS BOUNDED; RECORDING IS NOT.
 #
 # MEASURED, round 19 screen_recording: the agent set text=0.4 and zoom=0.2 per
