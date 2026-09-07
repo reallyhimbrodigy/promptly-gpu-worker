@@ -234,4 +234,11 @@ if _agg:
     print("  (per_run families are judged per fixture above; aggregate/out_of_scope "
           "families are judged only here)")
 PY
+# ── ARCHIVE, EVERY ROUND, AUTOMATICALLY ────────────────────────────────────
+# /tmp was wiped between rounds 25 and 26 and took rounds 6-25 with it — every
+# per-fixture log, every score.json. The streak audit that reset the count from
+# 3 to 0 was derived from those logs and can no longer be re-derived by anyone.
+# A one-time manual upload would rot the same way; this runs on every round or
+# it is not a record.
+python3 archive_round.py "$ROUND" || echo "  [archive] round $ROUND NOT staged — the record is only in /tmp"
 echo "ROUND $ROUND COLLECTED"
