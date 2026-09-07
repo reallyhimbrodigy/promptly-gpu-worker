@@ -16,13 +16,26 @@
 #
 # Prose stays free. A `backticked_identifier` that looks like a symbol is a
 # CLAIM, and a claim gets checked.
+#
+# 2026-09-06 — THIS HOOK HAD THE BUG ITS OWN HEADER WARNS ABOUT, and had never
+# validated a single commit from the main checkout. Git passes the message path
+# RELATIVE to the repo root (".git/COMMIT_EDITMSG"). The hook then cd'd into the
+# lane worktree, where `.git` is a FILE, so the read raised NotADirectoryError,
+# `missing` came back EMPTY, and empty is indistinguishable from "nothing
+# missing" — so it printed PASS. Absence rendered as success, for the third time
+# in this lane. Three fixes, in order of how quietly each failed:
+#   1. resolve the message path BEFORE any cd;
+#   2. a read that fails now BLOCKS — a checker that cannot see its input must
+#      never be the one that says PASS;
+#   3. check the tree the commit is actually IN. It forced .worktrees/lane-
+#      agentic unconditionally, so a handler.py commit in the main checkout had
+#      its symbols validated against a different worktree's files.
 set -uo pipefail
-MSG="${1:?}"
-LANE="$(git rev-parse --show-toplevel)/.worktrees/lane-agentic"
-[ -d "$LANE" ] || LANE="$(git rev-parse --show-toplevel)"
-cd "$LANE" 2>/dev/null || exit 0
+MSG="$(cd "$(dirname "${1:?}")" && pwd)/$(basename "${1:?}")"
+[ -r "$MSG" ] || { echo "BLOCKED — commit-msg cannot read its own input: $1"; exit 1; }
+cd "$(git rev-parse --show-toplevel)" 2>/dev/null || exit 0
 
-missing=$(python3 - "$MSG" <<'PY'
+if ! missing=$(python3 - "$MSG" <<'PY'
 import re, sys, glob
 msg = open(sys.argv[1], encoding="utf-8", errors="ignore").read()
 msg = msg.split("# ------------------------ >8")[0]
@@ -30,14 +43,29 @@ msg = "\n".join(l for l in msg.split("\n") if not l.startswith("#"))
 syms = {t for t in re.findall(r"`([A-Za-z_][A-Za-z0-9_]{3,})`", msg)
         if ("_" in t or not t.islower())}
 src = ""
-for f in glob.glob("*.py") + glob.glob("*.sh") + glob.glob("fixtures/*.sh"):
+# .githooks/* included 2026-09-06: the hooks are now part of the checked
+# surface, and a commit that FIXES a hook names hook symbols. Without this the
+# check blocks every such commit — a checker that cannot be repaired without
+# lying to it gets bypassed, which is how checks die.
+for f in (glob.glob("*.py") + glob.glob("*.sh") + glob.glob("fixtures/*.sh")
+          + glob.glob(".githooks/*")):
     try:
         src += open(f, encoding="utf-8", errors="ignore").read()
     except Exception:
         pass
+if not src.strip():
+    # No source read at all: the glob found nothing, so EVERY symbol would look
+    # present. That is the same absence-as-success failure; refuse instead.
+    print("commit-msg read NO source files — cannot judge symbols", file=sys.stderr)
+    sys.exit(2)
 print(" ".join(sorted(t for t in syms if t not in src)))
 PY
-)
+); then
+  echo "BLOCKED — the symbol check could not run:"
+  echo "    $missing"
+  echo "A checker that cannot see its input must never be the one that says PASS."
+  exit 1
+fi
 if [ -n "$missing" ]; then
   echo "BLOCKED — the message names symbol(s) this commit does not contain:"
   for m in $missing; do echo "    $m"; done
