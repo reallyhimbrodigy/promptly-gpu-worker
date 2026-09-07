@@ -105,6 +105,31 @@ cv0 = A._contract_violations({"spec_implies_nothing": False, "failures": []})
 check("and stays quiet when the spec asks for something",
       not any("spec_targets_all_zero" in c for c in cv0), str(cv0))
 
+# ── 7. THE CALL SITE READS THE FULL SPEC, NOT THE SHORTFALL-FILTERED ONE ───
+# Round 25 caught this on the check's first live run. `_spec_t` has ACCEPTED
+# families removed — right for the shortfall, wrong here. music and
+# screen_recording had both accepted a shortfall on `cut`, so cut left the set,
+# the remaining rates implied zero over a 20s source, and the check fired on two
+# specs that HAD asked for cuts: two false positives of three firings. A check
+# that fires on correct behaviour gets switched off, so this is pinned by AST,
+# not by hoping the comment is read.
+import ast as _ast, pathlib as _pl
+_tree = _ast.parse(_pl.Path(A.__file__).read_text())
+_calls = [n for n in _ast.walk(_tree)
+          if isinstance(n, _ast.Call)
+          and getattr(n.func, "id", None) == "spec_implies_nothing"]
+check("spec_implies_nothing is called", len(_calls) >= 1)
+for _c in _calls:
+    _first = _c.args[0] if _c.args else None
+    check("its target argument is NOT the shortfall-filtered `_spec_t`",
+          not (isinstance(_first, _ast.Name) and _first.id == "_spec_t"),
+          "accepted families are removed from _spec_t; a spec that excused one "
+          "still SET it, and judging the bar on what remains after the excuses "
+          "fires on correct behaviour")
+    check("it reads the spec's own targets",
+          "targets" in _ast.dump(_first or _ast.Constant(None)),
+          _ast.dump(_first)[:120] if _first else "no argument")
+
 if fails:
     print(f"ALL-LEGS/ZERO-SPEC: {len(fails)} FAILED")
     for f in fails:

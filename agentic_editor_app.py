@@ -4542,8 +4542,25 @@ def edit(source_key: str, brief: str,
                 # source duration are all in scope; read at end of run by
                 # _contract_violations, so it cannot be dodged by call ordering
                 # the way the shortfall escalation was.
+                # THE FULL TARGET SET, NOT THE SHORTFALL-FILTERED ONE.
+                #
+                # `_spec_t` has the ACCEPTED families removed — correct for the
+                # shortfall computation (an excused family must not be reported
+                # short again) and wrong for this question. Round 25 caught it
+                # on its first run: music and screen_recording both accepted a
+                # shortfall on `cut`, so cut left `_spec_t`, the remaining rates
+                # (zoom 0.4, sfx 0.2 / text 0.5, zoom 0.2) implied zero over a
+                # 20s source, and the check fired on two specs that HAD asked
+                # for cuts. Two false positives out of three firings.
+                #
+                # "Did the agent set a bar it can fail?" is a question about the
+                # bar it SET, not about what is left after it excuses parts of
+                # it — and accepting a shortfall on a family is itself proof
+                # that family carried a target. Same family of mistake as the
+                # collector reading a filtered view of the producer's verdict.
                 led["spec_implies_nothing"] = spec_implies_nothing(
-                    _spec_t, len(_beats), _src_dur)
+                    ((led.get("spec") or {}).get("targets") or {}),
+                    len(_beats), _src_dur)
                 # BOUNDED PER FAMILY. Even a satisfiable shortfall must not be
                 # reported forever: the bound in execute_plan never fired here
                 # because the agent never REACHED execute_plan — it looped
