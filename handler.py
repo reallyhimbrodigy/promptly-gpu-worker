@@ -27521,7 +27521,7 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
     no clip ever requests source frames past the actual end of the video.
     """
     if not deepgram_words:
-        return []
+        return [], set(), {}   # ARITY: caller unpacks 3 (see 3-tuple return below)
 
     _vd = float(video_duration or 0.0)
 
