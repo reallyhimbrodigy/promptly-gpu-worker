@@ -5868,6 +5868,20 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # hand. A check whose output nobody can read is not yet a check, and this
     # lane has a law for it — a derived signal that is not printed cannot be
     # verified — which the check itself broke.
+    # ── EXECUTION PASSES — printed, because ledgered is not readable ───────
+    # Round 29 could not answer "did the one-execution gate fire?" — the counter
+    # was written to the ledger and never printed, and tool results do not reach
+    # the log either. That is the SAME defect as placement_effects, shipped one
+    # commit after the commit that fixed it and quoted the law. Ledgering a
+    # signal is not observing it.
+    _ep = (r.get("ledger") or {}).get("execute_plan_calls") or 0
+    _rf = (r.get("ledger") or {}).get("refused_second_execute") or 0
+    _rp = bool((r.get("ledger") or {}).get("_exec_repair_used"))
+    print(f"  EXECUTION PASSES: {_ep} call(s)  refused={_rf}  "
+          f"contract_repair={'used' if _rp else 'no'}"
+          + ("   <-- CONTESTED: the agent retried a refused call"
+             if _rf > 1 else ""))
+
     _eff = (r.get("ledger") or {}).get("placement_effects") or []
     if _eff:
         _moved = sum(1 for e in _eff if e.get("changed") is True)

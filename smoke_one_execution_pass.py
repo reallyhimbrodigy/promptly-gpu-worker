@@ -75,6 +75,20 @@ check("the count is compared in real code, not only in a comment", found,
       "a check that reads source cannot tell code from string content — this "
       "lane has shipped that exact bug")
 
+# ── PRINTED, NOT MERELY LEDGERED ──────────────────────────────────────────
+# Round 29 could not answer whether the gate fired: the counter went to the
+# ledger and nowhere else, and tool results do not reach the log. Shipped ONE
+# COMMIT AFTER the commit that fixed exactly this for placement_effects and
+# quoted the law in its own message. Ledgering a signal is not observing it.
+check("the execution-pass counters are PRINTED",
+      "EXECUTION PASSES:" in src,
+      "a gate whose firing leaves no trace cannot be read on the round it runs")
+check("a contested refusal is called out by name",
+      "CONTESTED" in src,
+      "the failure mode of this change is the agent retrying the refused call, "
+      "and it has to be visible on the first round rather than inferred from "
+      "a cost number three rounds later")
+
 if fails:
     print(f"ONE-EXECUTION-PASS: {len(fails)} FAILED")
     for f in fails: print("  - " + f)
