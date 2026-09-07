@@ -89,6 +89,28 @@ def _syntax_check():
         ast.parse(f.read())
 
 
+@check("every tuple-unpack call site matches its callee's return arity")
+def _unpack_arity_matches():
+    """Six jobs / five users died on `not enough values to unpack (expected 3,
+    got 0)`: build_clips_from_words returned a bare `[]` on two guard paths
+    while the caller unpacked three, so both GUARDS were crashes.
+
+    The cost was the laundering, not the crash. The repair loop catches
+    (ValueError, RuntimeError) because that is how the plan validator signals a
+    bad plan — 57 raise sites — so an arity ValueError was re-asked to Gemini
+    twice, at full planning cost, as "the validator rejected one element of the
+    previous plan", and the user was told their edit plan failed validation.
+    Nothing about that re-ask could ever address a Python bug: all six jobs
+    failed identically on both attempts.
+
+    This cert found a SECOND live instance on its first run
+    (_build_face_signals: `duration <= 0` returned 4, caller unpacks 5)."""
+    import subprocess as _sp
+    _r = _sp.run([sys.executable, "cert_unpack_arity.py", "handler.py"],
+                 capture_output=True, text=True)
+    assert _r.returncode == 0, _r.stdout.strip() or _r.stderr.strip()
+
+
 @check("modal_app.py parses as valid Python")
 def _modal_syntax():
     with open("modal_app.py") as f:

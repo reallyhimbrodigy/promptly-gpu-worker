@@ -48,8 +48,15 @@ class Stub:
     def __init__(self, plans):
         self.plans = list(plans)
         self.post_users = []
-    def __call__(self, client, post_sys, post_user, video_part, model):
+    def __call__(self, client, post_sys, post_user, video_part, model, **kwargs):
+        # **kwargs ON PURPOSE: this stub used to pin handler's exact call
+        # signature, so every keyword handler.py later added (recipe_deadline_s,
+        # media_res_override, source_duration_s, n_words, v2, ...) raised
+        # TypeError INSIDE the call — before any assertion ran. 18 of 30 checks
+        # had been red on the harness, not the code, and the suite could not
+        # distinguish a change under test from its absence. Never re-pin this.
         self.post_users.append(post_user)
+        self.kwargs_seen = kwargs
         return copy.deepcopy(self.plans.pop(0))
 
 
@@ -122,7 +129,8 @@ check("repaired plan delivered", err is None and plan is not None)
 check("re-ask carried the F5 message to Gemini",
       len(stub.post_users) == 2 and expected in stub.post_users[1])
 check("repaired card survived",
-      plan and plan["motion_graphics"][0]["props"]["title"] == "hit send")
+      bool(plan) and bool(plan.get("motion_graphics"))
+      and plan["motion_graphics"][0]["props"]["title"] == "hit send")
 
 print("\n=== F5-3: grounded StickyNotes pass untouched (the burn-in case) ===")
 grounded = clean_plan(motion_graphics=[mg("StickyNotes", {
@@ -156,17 +164,25 @@ verbatim = clean_plan(motion_graphics=[mg("Stamp", {"text": "FREE"}, sw=11, ew=1
 plan, err, stub, out = run_gen([verbatim])
 check("the verbatim rewrite ('FREE') passes", err is None and plan is not None)
 
-print("\n=== F6-1: the reading-time floor raises with the verbatim message ===")
+print("\n=== F6-1: the reading-time floor DROPS the card (ladder, not verdict) ===")
 short = clean_plan(motion_graphics=[mg("ProgressBar",
     {"value": 50, "total": 100, "label": "completely free"}, sw=9, ew=10)])
 # kept 9..10 -> source words 10..11 ("completely free") = 4.0..4.75 → 0.75s;
 # 2 content words → floor 1.5s. ProgressBar isolates F6 (no number check).
 plan, err, stub, out = run_gen([short])
-check("short window raises",
-      err is not None and re.search(
-          r"ProgressBar at word 10 shows 2 words for 0\.8s; viewers need ~1\.5s — "
-          r"shorten the text or widen the window", str(err)) is not None,
-      str(err)[:200])
+# F6 IS A LADDER, NOT A VERDICT (2026-09-06). This check used to assert the
+# RAISE. It now asserts the drop, because the raise is what killed job
+# 792eaea1: a StatCard 0.2s short of its reading floor took down a whole paid
+# edit after two planning calls. F7 got this ruling on 2026-08-19 and named F6
+# a latent instance of the same class; this is that instance, closed.
+check("unreadable card is DROPPED, the edit survives (not a raise)",
+      err is None and plan is not None, str(err)[:200])
+check("the card is actually gone from the plan",
+      plan is not None and len(plan.get("motion_graphics") or []) == 0,
+      str((plan or {}).get("motion_graphics"))[:160])
+check("the drop is LOUD to us: divergence + [mg] line name the reason",
+      "f6_reading_floor_unreachable" in out and "F6 dropped" in out,
+      out[-400:])
 
 print("\n=== F6-1b: short window WITH free space passes (render backstop extends) ===")
 spacey = clean_plan(motion_graphics=[mg("ProgressBar",

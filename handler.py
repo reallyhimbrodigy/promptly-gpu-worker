@@ -7324,6 +7324,7 @@ def _build_face_signals(face_positions, deepgram_words, duration, premium=False)
             [{"from_s": 0.0, "to_s": max(0.0, float(duration)), "visible": False}],
             {}, False,
             {"median_w": 0.0, "median_h": 0.0, "label": "unknown"},
+            [],   # ARITY: _v_zones — the caller unpacks 5 (handler.py:15959)
         )
 
     # 0.5s buckets — small enough to catch brief face-leaves-frame moments,
@@ -19617,6 +19618,7 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             # even that extension cannot reach the floor (next MG start or the
             # end of the video caps it; B-roll/clip caps are render-refined).
             _mg_starts_sorted = sorted(m["_source_start"] for m in validated_mg)
+            _f6_drop_ids = set()
             for _vm in validated_mg:
                 _f6_words = _mg_content_word_count(_vm["type"], _vm["props"])
                 if _f6_words <= 0:
@@ -19633,11 +19635,47 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                 _f6_space = (min(_f6_nexts) if _f6_nexts else float(duration)) - _vm["_source_start"]
                 if _f6_space >= _f6_floor:
                     continue  # the render backstop will extend; logs [mg-fit]
-                _mg_violations.append(
-                    f"{_vm['type']} at word {_vm['start_word_index']} shows "
-                    f"{_f6_words} words for {_f6_window:.1f}s; viewers need "
-                    f"~{_f6_floor:.1f}s — shorten the text or widen the window."
-                )
+                # ── F6 IS A LADDER, NOT A VERDICT (2026-09-06) ──────────
+                # The same ruling F7 received on 2026-08-19, applied at last to
+                # the one check that never got it. Until now a card whose
+                # reading window fell SHORT BY 0.2s appended a violation ->
+                # RECIPE_INVALID -> the model was re-asked twice -> the user got
+                # NOTHING, after we had paid for transcription, analysis and two
+                # full planning calls. That is verbatim job 792eaea1: StatCard
+                # at word 78, 3 content words, 1.6s window, 1.8s floor. The F7
+                # comment forty lines above PREDICTED this — it called the class
+                # latent and shipped the ladder for its own check only.
+                #
+                # The re-ask cannot carry it: both remedies the old message
+                # named ("shorten the text or widen the window") are the MODEL's
+                # to apply, so a model that declines twice kills the whole edit
+                # for one card. We can decide it ourselves — a card that cannot
+                # reach its reading floor is unreadable, and an unreadable card
+                # is dropped exactly like an unplaceable one.
+                #
+                # IDENTITY, not equality: two cards with identical props and
+                # spans are distinct placements, and `in`/`remove` on dicts
+                # compares BY VALUE — it would drop both.
+                _f6_drop_ids.add(id(_vm))
+                _record_divergence(
+                    "mg",
+                    {"type": _vm["type"], "word": _vm["start_word_index"],
+                     "content_words": _f6_words,
+                     "window_s": round(_f6_window, 2),
+                     "floor_s": round(_f6_floor, 2),
+                     "space_s": round(_f6_space, 2)},
+                    "drop",
+                    reason="f6_reading_floor_unreachable")
+                _mg_user_notes.append({
+                    "word_index": _vm["start_word_index"],
+                    "type": _vm["type"],
+                    "said": _mg_words_at(_vm["start_word_index"]),
+                })
+            if _f6_drop_ids:
+                validated_mg = [m for m in validated_mg if id(m) not in _f6_drop_ids]
+                edit_plan["motion_graphics"] = validated_mg
+                print(f"[mg] F6 dropped {len(_f6_drop_ids)} unreadable "
+                      f"component(s) — the edit survives without them", flush=True)
 
             # RUNG 3, USER-FACING. A beat we deliberately left bare is a
             # JUDGMENT, and saying so is the difference between a tool that
@@ -27664,7 +27702,7 @@ def build_clips_from_words(deepgram_words, remove_words, video_duration=0.0,
     _gap_compress_pairs = set()
 
     if not kept_words:
-        return []
+        return [], set(), {}   # ARITY: caller unpacks 3 (see 3-tuple return below)
 
     clips = []
     current_words = [kept_words[0]]
