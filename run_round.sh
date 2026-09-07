@@ -110,10 +110,25 @@ while IFS=$'\t' read -r name key brief model; do
                 || echo "$name LAUNCH_FAILED" >> "$OUT/appmap.txt"
 done < "$OUT/plan.tsv"
 
-echo "[wait] polling until 0 agentic tasks"
+# WAIT ON THIS ROUND'S APPS, NOT EVERY APP NAMED "agentic".
+#
+# Round 30 hung for 35 polls after all five fixtures had finished. `modal app
+# list` still showed an orphaned agentic-editor app from THREE DAYS EARLIER
+# holding 1 task, and the name filter counted it. Rule 6 names this exact case
+# — ".spawn()ed containers outlive the local orchestrator; a batch is dead only
+# when `modal app list` shows 0 tasks" — but "0 tasks" has to mean 0 tasks IN
+# THIS BATCH. A name match makes every future round hostage to every past one.
+#
+# appmap.txt already holds this round's app ids, which is the scoping key.
+echo "[wait] polling until THIS round's apps are idle"
+_ids="$(awk '{print $2}' "$OUT/appmap.txt" 2>/dev/null | grep -E '^ap-' | tr '\n' '|' | sed 's/|$//')"
+if [ -z "$_ids" ]; then
+  echo "[wait] no app ids in appmap.txt — cannot scope the wait; falling back to the name filter"
+  _ids="agentic"
+fi
 for i in $(seq 1 100); do
-  live="$(modal app list 2>/dev/null | awk '/agentic/' | grep -cE '│ +[1-9][0-9]* +│')"
-  echo "[poll $i] holding tasks: ${live:-?}"
+  live="$(modal app list 2>/dev/null | grep -E "$_ids" | grep -cE '│ +[1-9][0-9]* +│')"
+  echo "[poll $i] holding tasks: ${live:-?}  (scoped to $(echo "$_ids" | tr '|' '\n' | grep -c ap-) app id(s))"
   [ "${live:-1}" = "0" ] && break
   sleep 30
 done

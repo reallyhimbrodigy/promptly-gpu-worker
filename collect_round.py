@@ -12,10 +12,22 @@ import os, sys, json, re
 import re as _re
 import reliability_gate as rg
 
-out = f"/tmp/fixtures/round{sys.argv[1]}" if len(sys.argv) > 1 else sys.argv[1]
+if len(sys.argv) < 2:
+    print(__doc__)
+    sys.exit(2)
+_arg = sys.argv[1]
+# Accept a ROUND NUMBER (the documented form) or an explicit path. It used to
+# accept both by accident and resolve neither correctly — `collect_round.py 30`
+# wrote 30/score.json into the cwd rather than scoring round 30. A scorer that
+# silently scores the wrong directory is not re-runnable, which is the whole
+# reason this was extracted from run_round.sh.
+out = _arg if os.path.isdir(_arg) else f"/tmp/fixtures/round{_arg}"
+if not os.path.isdir(out):
+    print(f"no such round: {out}")
+    sys.exit(2)
 
 import json, re, sys, os, importlib.util
-out = sys.argv[1]
+# (out is resolved above from a round number or a path — do not rebind it)
 spec = importlib.util.spec_from_file_location("rg", "reliability_gate.py")
 rg = importlib.util.module_from_spec(spec); spec.loader.exec_module(rg)
 res = {}
