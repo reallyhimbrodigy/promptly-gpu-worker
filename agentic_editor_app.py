@@ -2182,6 +2182,105 @@ def step_changed_output(before_path, after_path, t0, t1, env=None,
 ZOOM_RAMP_FRACTION = 0.35
 
 
+# ── CAPTIONS: THE NINE STYLES, AND WHAT PICKS BETWEEN THEM ──────────────────
+#
+# The agentic path burned ONE ffmpeg subtitle track — `subtitles=captions.srt:
+# force_style='Fontname=DejaVu Sans'` — where production has nine real Remotion
+# styles with per-word animation. Not a lower-fidelity caption: a different
+# renderer, different typography, no per-word timing at all.
+#
+# MEASURED before porting: 112-133 ms/frame in-container across all nine
+# (CleanCut 112.4 ... TypewriterReveal 132.9), a 1.7x container multiplier
+# rather than SmoothPush's 4.4x because captions paint over transparency with
+# no video decode. The 18% spread means STYLE CHOICE IS NOT A COST DECISION,
+# which is what makes the rotation rule below free to honour.
+#
+# The fit clauses are production's own, lifted from handler.py's per-style
+# teach; cert_caption_style_parity.py reads them back out and fails on drift,
+# the same way the zoom ramp fraction is pinned. They are NOT my paraphrase.
+CAPTION_STYLE_FITS = {
+    "CleanCut":         ("serious", "restrained", "cinematic", "measured", "deliberate", "neutral"),
+    "Gadzhi":           ("business", "hustle", "smma", "pitch", "product", "numbers", "money"),
+    "Prime":            ("aspirational", "self-improvement", "premium", "branding"),
+    "Cove":             ("premium", "luxury", "wellness", "brand", "storytelling", "slow"),
+    "Lumen":            ("hustle", "motivational", "money", "business", "success"),
+    "Pulse":            ("sung", "musical", "rapid", "lyric", "rhythm", "beat"),
+    "Quintessence":     ("poetry", "mantra", "dramatic", "pause", "slow", "deliberate"),
+    "TwoTone":          ("hook", "shouted", "short", "punchy", "two-part"),
+    "TypewriterReveal": ("tech", "coding", "documentary", "narration", "hacker", "retro"),
+}
+
+
+def pick_caption_style(vibe, recent=(), fallback="CleanCut"):
+    """Choose a caption style from the vibe, honouring production's rotation rule.
+
+    PRODUCTION'S RULE, ported verbatim from handler.py: "AVOID picking whichever
+    style ranks #1 in their history if it appeared in either of their last 2
+    videos. Variety is itself a quality signal — top creators rotate caption
+    styles across videos to keep their feed visually fresh."
+
+    `recent` is the user's last two style picks, most recent first.
+
+    HONEST ABOUT ITS DENOMINATOR: the fixture harness has no user history, so
+    `recent` is empty there and the rotation leg is STRUCTURALLY PRESENT AND
+    UNEXERCISED until a real caller passes one. That is a wiring gap, not a
+    working feature, and saying so is the difference between a ported rule and
+    a rule that ships green and does nothing.
+
+    Ties break by the order in CAPTION_STYLE_FITS so the choice is deterministic
+    — a caption style that changes between two runs of the same brief would make
+    every A/B on this path unreadable.
+    """
+    v = " ".join(str(vibe or "").lower().replace("/", " ").split())
+    if not v:
+        return fallback
+    scored = []
+    for style, fits in CAPTION_STYLE_FITS.items():
+        hits = sum(1 for f in fits if f in v)
+        if hits:
+            scored.append((-hits, list(CAPTION_STYLE_FITS).index(style), style))
+    if not scored:
+        return fallback
+    scored.sort()
+    _recent = [str(r) for r in (recent or [])][:2]
+    for _, _, style in scored:
+        if style not in _recent:
+            return style
+    # Every fitting style was used in the last two videos: the rotation rule
+    # cannot be satisfied without abandoning fit, and fit wins.
+    return scored[0][2]
+
+
+def caption_pages(kept_words, words_per_page=3):
+    """Output-time words -> Remotion TikTokPage[], on the SAME clock as the SRT.
+
+    Built from the identical `remap_words` output the ffmpeg subtitle path used,
+    because the failure mode here is silent: captions that drift against speech
+    render perfectly and ffmpeg exits 0. Sharing one clock is what makes the two
+    paths comparable rather than merely both present.
+
+    fromMs/toMs are INTEGER ms — a caption token carrying a float lands
+    mid-frame and the gate round-trips one to prove it.
+    """
+    pages = []
+    for i in range(0, len(kept_words or []), max(1, int(words_per_page))):
+        grp = kept_words[i:i + max(1, int(words_per_page))]
+        if not grp:
+            continue
+        start_ms = int(round(float(grp[0]["s"]) * 1000))
+        end_ms = int(round(float(grp[-1]["e"]) * 1000))
+        pages.append({
+            "startMs": start_ms,
+            "durationMs": max(1, end_ms - start_ms),
+            "text": " ".join(str(g["w"]) for g in grp),
+            "tokens": [{"text": str(g["w"]),
+                        "fromMs": int(round(float(g["s"]) * 1000)),
+                        "toMs": int(round(float(g["e"]) * 1000))} for g in grp],
+        })
+    return pages
+
+
+
 def zoom_filtergraph(t_start, t_end, strength, fps=30):
     """The zoom filtergraph, as a PURE STRING — so a cert can render the shipped
     one rather than a copy of it.
@@ -4657,7 +4756,63 @@ def edit(source_key: str, brief: str,
                                        tu.input.get("frames") or 45,
                                        tu.input.get("name") or "authored")
             elif tu.name == "execute_plan":
-                out = execute_plan()
+                # ── ONE RULING PASS, ONE EXECUTION PASS ────────────────────
+                #
+                # MEASURED, round 28 talking_head: the agent ran
+                #   rule -> rule -> cut -> EXEC -> rule -> EXEC -> inspect
+                #   -> rule -> EXEC -> inspect -> rule -> EXEC
+                # Four execute_plan calls and five rule_all_beats, 15 turns,
+                # 88.0s of model time and 94.9s of render. The loop is induced
+                # by the spec floor: the shortfall is reported, the agent
+                # re-rules to close it, and executes again.
+                #
+                # The floor is already satisfiable TWO ways and one of them is
+                # always available — rule to it, or NAME the declined beats in
+                # shortfall_reasons. Re-ruling is the expensive way; naming is
+                # free and is what the check actually asks for.
+                #
+                # ENFORCED IN THE DISPATCH, NOT THE PROMPT. This lane's law:
+                # "a capability in the schema WILL be used" — telling a model
+                # not to loop is a preference, refusing the call is a property.
+                # The tool list is part of the cached prefix, so it cannot be
+                # withheld mid-run without a 43k-token cache write; the gate
+                # belongs here.
+                led["execute_plan_calls"] = led.get("execute_plan_calls", 0) + 1
+                if led["execute_plan_calls"] > 1 and not led.get("_exec_repair_ok"):
+                    out = {
+                        "refused": "one execution pass",
+                        "why": ("The plan was already executed. A second pass "
+                                "re-renders everything to change a ruling that "
+                                "could have been named instead."),
+                        "close_the_shortfall_by_naming": (
+                            "If a family is short, call rule_all_beats ONCE more "
+                            "with shortfall_reasons naming the declined beats and "
+                            "a real reason for each — that satisfies the floor "
+                            "without another render."),
+                        "executions_used": led["execute_plan_calls"] - 1,
+                    }
+                    led.setdefault("refused_second_execute", 0)
+                    led["refused_second_execute"] += 1
+                else:
+                    out = execute_plan()
+                    # ONE REPAIR IS ALLOWED, and only for a CONTRACT failure.
+                    # A refusal with no repair path would make a genuinely
+                    # broken first render unfixable, which is worse than the
+                    # loop it replaces. Not "the agent wants another go" — a
+                    # named contract failure: wrong resolution, no audio, no
+                    # output, speech lost, an inert placement. Quality misses
+                    # and shortfalls do NOT qualify; those are what naming is
+                    # for, and letting them re-execute would restore the loop
+                    # through the back door.
+                    _cv_now = _contract_violations(led)
+                    led["_exec_repair_ok"] = bool(_cv_now) and not led.get("_exec_repair_used")
+                    if led.get("_exec_repair_ok"):
+                        led["_exec_repair_used"] = True
+                        out = dict(out or {})
+                        out["repair_permitted"] = (
+                            "This render violated the pipeline's contract: "
+                            + "; ".join(_cv_now)[:220]
+                            + " — ONE more execute_plan is allowed to fix it.")
             elif tu.name == "probe_source":
                 out = probe_source(tu.input.get("file") or "source.mp4",
                                    bool(tu.input.get("shot_changes", True)))
