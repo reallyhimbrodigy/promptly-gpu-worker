@@ -224,6 +224,42 @@ if _ep:
            "the placements reset runs AFTER the declare loop — it would erase "
            "the manifest it just wrote")
 
+# ── 7. A SILENT CLIP IS NOT A TALKING HEAD WITH THE SOUND OFF ─────────────
+# REFERENCE_PER_25S is a TALKING-HEAD corpus — its text rate is
+# transcript-derived. Round 20 was GREEN with four of five fixtures placing one
+# family, and the mix check would have fired forever against a target never
+# measured for these sources.
+#
+# MEASURED over 1,463 shipped no-speech jobs (moodreel + minimal, 30 days):
+# cut 4.26, card 0.23 (91.7% place zero), transition 0.27, and text 0.00 —
+# because the no-speech plan shape has NO text field at all.
+_ns_ref = _top.get("REFERENCE_PER_25S_NOSPEECH")
+ok(isinstance(_ns_ref, dict) and _ns_ref,
+   "there is no no-speech reference — silent sources are being scored against a "
+   "talking-head corpus whose text rate is transcript-derived")
+if isinstance(_ns_ref, dict):
+    ok(set(_ns_ref) == set(_top.get("REFERENCE_PER_25S") or {}),
+       f"the two references cover different families: {sorted(_ns_ref)} vs "
+       f"{sorted(_top.get('REFERENCE_PER_25S') or {})} — derive_rubric iterates "
+       f"one of them, so a family present in only one silently loses its target")
+    ok(_ns_ref.get("text") == 0.0,
+       f"no-speech text reference is {_ns_ref.get('text')}, not 0.0 — production "
+       f"cannot place text on these sources at all")
+    ok(_ns_ref.get("cut", 0) > 3.0,
+       "the no-speech cut reference collapsed — cut is the one family that "
+       "transfers between the two corpora (4.26 vs 4.75)")
+
+_dr = next((n for n in TREE.body
+            if isinstance(n, ast.FunctionDef) and n.name == "derive_rubric"), None)
+ok(_dr is not None and any(a.arg == "beat_source" for a in _dr.args.args),
+   "derive_rubric cannot tell which corpus applies — it takes no beat_source")
+_calls = [n for n in ast.walk(TREE)
+          if isinstance(n, ast.Call) and getattr(n.func, "id", "") == "derive_rubric"]
+ok(_calls and all(any(k.arg == "beat_source" for k in c.keywords) for c in _calls),
+   "a derive_rubric call site does not pass beat_source — it would silently "
+   "score a silent clip against the talking-head corpus, which is the defect "
+   "this exists to remove")
+
 if FAIL:
     print("FAIL smoke_five_families:")
     for f in FAIL:

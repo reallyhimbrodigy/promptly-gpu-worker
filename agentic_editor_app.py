@@ -217,6 +217,44 @@ REFERENCE_PER_25S = {
     "zoom":       0.35,   # punch_in, 6
     "transition": 0.00,   # ZERO in the corpus — not a gap, an absence
 }
+# ── THE NO-SPEECH REFERENCE, MEASURED FROM SHIPPED OUTPUT ───────────────────
+# REFERENCE_PER_25S above is a TALKING-HEAD corpus: its text rate is
+# transcript-derived, and holding a screen recording or a pet video to 7.28/25s
+# is measuring one thing against another thing's yardstick. Round 20 was green
+# with four of five fixtures placing one family, and the mix check would have
+# fired forever against a target never measured for these sources.
+#
+# MEASURED 2026-09-07 over 1,463 SHIPPED no-speech jobs (routes moodreel + minimal,
+# 30 days, avg source 21.5s):
+#     cut         4.26 /25s     (talking-head 4.75 — nearly the same)
+#     card/MG     0.23 /25s     (talking-head 2.35 — 10x lower; 1,341 of 1,463
+#                                jobs, 91.7%, place ZERO motion graphics)
+#     transition  0.27 /25s     (talking-head 0.00)
+#     text        0.00          NOT a judgement: the no-speech plan shape has
+#                               keys clips / motion_graphics / transitions /
+#                               notes / outro and NO text field at all. Production
+#                               cannot place text on these sources.
+#     sfx, zoom   absent from the plan shape entirely.
+#
+# THIS IS A FLOOR, NOT A CEILING, and the distinction matters. These are the
+# rates of the REDUCED routes the agentic editor exists to replace — treating
+# them as targets would aim it at parity with the thing it is meant to beat. The
+# agentic lane has already put 2 text placements on screen_recording (round 10),
+# so text on a silent clip is possible; production simply has nowhere to put it.
+#
+# So: corpus is what ships today, and a vibe-directed target from the brief
+# OVERRIDES it (derive_rubric marks those "vibe"). The mix check then enforces
+# what the request actually asked for, and falls back to a rate that is real
+# rather than to one borrowed from a different kind of source.
+REFERENCE_PER_25S_NOSPEECH = {
+    "text":       0.00,
+    "cut":        4.26,
+    "card":       0.23,
+    "sfx":        0.00,
+    "zoom":       0.00,
+    "transition": 0.27,
+}
+
 # Which beat PURPOSE each family lands on, from the same 153 beats. This is the
 # rule the agent can act on, and it is what "corpus says" should mean.
 REFERENCE_BEAT_FIT = {
@@ -440,7 +478,7 @@ def assert_stages_complete(led, expected=None, strict=True):
 RUBRIC_MODES = ("full_edit", "targeted_change", "question")
 
 
-def derive_rubric(declared, mode="full_edit"):
+def derive_rubric(declared, mode="full_edit", beat_source="transcript"):
     """Merge the agent's vibe-derived targets over the corpus fallback.
 
     `declared` is what the agent ruled at step 0 after reading the brief — a
@@ -458,20 +496,24 @@ def derive_rubric(declared, mode="full_edit"):
         raise ValueError(f"unknown rubric mode {mode!r}; expected one of {RUBRIC_MODES}")
     targets, source = {}, {}
     d = dict(declared or {})
-    for fam, ref in REFERENCE_PER_25S.items():
+    # THE RIGHT CORPUS FOR THE SOURCE. A silent clip is not a talking head with
+    # the sound off; its shipped rates were measured separately.
+    _ref = (REFERENCE_PER_25S_NOSPEECH if str(beat_source) == "visual"
+            else REFERENCE_PER_25S)
+    for fam, ref in _ref.items():
         v = d.get(fam)
         if isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0:
             targets[fam], source[fam] = float(v), "vibe"
         else:
             targets[fam], source[fam] = float(ref), "corpus"
-    unknown = sorted(set(d) - set(REFERENCE_PER_25S))
+    unknown = sorted(set(d) - set(_ref))
     if unknown:
         # LOUD, not dropped. A target for a family that does not exist means the
         # agent believes it can ask for something the renderer cannot build, and
         # silently ignoring it is how a declared intent becomes a no-op.
         raise ValueError(
             f"rubric declares unknown famil(ies) {unknown} — not in "
-            f"REFERENCE_PER_25S {sorted(REFERENCE_PER_25S)}")
+            f"the reference {sorted(_ref)}")
     return {"mode": mode, "targets": targets, "source": source,
             "vibe_directed": sorted(k for k, v in source.items() if v == "vibe")}
 
@@ -4284,7 +4326,8 @@ def edit(source_key: str, brief: str,
                         _unsupported_stop = True
                         continue
                     _sc["targets"] = _good_t
-                    led["rubric"] = derive_rubric(_sc.get("targets"), _sc["mode"])
+                    led["rubric"] = derive_rubric(_sc.get("targets"), _sc["mode"],
+                                                  beat_source=_beat_source)
                     led["spec"] = _sc
                     out = {"spec_set": True, **_sc}
                 except ValueError as _se:
