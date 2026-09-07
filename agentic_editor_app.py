@@ -2086,7 +2086,21 @@ def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
     for fam, rate in (targets or {}).items():
         if not isinstance(rate, (int, float)) or isinstance(rate, bool) or rate <= 0:
             continue
-        implied = min(int(n_beats), max(1, int(round(float(rate) * dur_25))))
+        # NO max(1, ...) FLOOR. A rate is a rate: 0.2/25s over a 20s source is
+        # 0.16 placements, and the correct answer is ZERO. Forcing it to one made
+        # the gate invent work the brief never asked for — "subtle overlays only"
+        # became "at least one overlay", and screen_recording spent rounds 19-21
+        # declining a target it should never have been given, with per-beat
+        # reasoning that was sound every time ("stillness provides visual rest;
+        # no text needed").
+        #
+        # It also made accept_shortfall a ROUTINE exit rather than the exception
+        # it was meant to be: the agent had to argue its way out of a demand the
+        # arithmetic invented.
+        #
+        # The over direction is unaffected and gets sharper — a family placed 3
+        # times against an implied 0 is still caught, and now the 0 is real.
+        implied = min(int(n_beats), int(round(float(rate) * dur_25)))
         have = int((ruled or {}).get(fam, 0))
         # A gap named without a reason is not named.
         named = len({r.get("beat") for r in (reasons or [])
@@ -4407,6 +4421,26 @@ def edit(source_key: str, brief: str,
                 # accept_shortfall — a deliberate zero is a real decision and
                 # stays available, it just has to be stated.
                 _acc = {str(x).lower() for x in (tu.input.get("accept_shortfall") or [])}
+                # AN EXCUSE MUST BE AS VISIBLE AS A MISS. accept_shortfall
+                # removes a family from the floor entirely, and it was invisible:
+                # the log records tool NAMES and outputs, never inputs, so a run
+                # that excused itself from its own spec read identically to one
+                # that met it.
+                #
+                # Round 21 screen_recording placed nothing against text=0.2,
+                # card=0.1 and zoom=0.2, and spec_shortfall_unresolved never
+                # fired. Whether the agent accepted the shortfall or the floor
+                # failed to reach it could not be answered from the log at all —
+                # which is its own defect, independent of the answer.
+                if _acc:
+                    led.setdefault("shortfall_accepted", [])
+                    for _a in sorted(_acc):
+                        if _a not in led["shortfall_accepted"]:
+                            led["shortfall_accepted"].append(_a)
+                    fail("spec_shortfall_accepted",
+                         f"the agent excused itself from {sorted(_acc)} — a "
+                         f"deliberate zero is a decision, and it is now on the "
+                         f"record rather than silently satisfying the floor")
                 _reasons = [r for r in (tu.input.get("shortfall_reasons") or [])
                             if isinstance(r, dict)]
                 if _reasons:
@@ -5220,6 +5254,14 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # every run, sorted by cost, with the UNATTRIBUTED REMAINDER named — an
     # unattributed remainder is where the next optimisation lives, and leaving
     # it out of the table is how an uninstrumented stage stays invisible.
+    # THE EXCUSES, PRINTED. A family the agent talked its way out of is not the
+    # same as a family it satisfied, and only one of those is visible in a
+    # placement count.
+    _acc9 = (r.get("ledger") or {}).get("shortfall_accepted")
+    _sf9 = (r.get("ledger") or {}).get("spec_shortfall")
+    if _acc9 or _sf9:
+        print(f"  SPEC EXITS      : accepted={sorted(_acc9) if _acc9 else '—'}  "
+              f"outstanding={sorted(_sf9) if _sf9 else '—'}")
     _wbs = (r.get("ledger") or {}).get("wall_by_stage") or {}
     _tot = float(r.get("wall_s") or 0) or 1.0
     if _wbs:

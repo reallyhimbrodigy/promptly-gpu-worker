@@ -143,9 +143,15 @@ ok(shortfall({"text": 4.0, "zoom": 0.35}, {"text": 3, "zoom": 1}, [], 4, 20.0) =
 ok(shortfall({"text": 4.0}, {"text": 2}, [], 4, 20.0).get("text", {}).get("direction") == "under",
    "one under the implied count is no longer reported — the over direction was "
    "added by loosening the under one")
-# one OVER is rounding, not a miss: over has no natural zero the way under does
-ok(shortfall({"zoom": 0.35}, {"zoom": 2}, [], 6, 20.0) == {},
-   "one over the implied count was flagged as a miss")
+# ONE over is rounding, not a miss — and with the max(1,...) floor gone the
+# implied count here is genuinely 0, so "one over" is one placement, not two.
+# The old fixture used 2 because the floor forced implied to 1; it now reads as
+# a real 2x overshoot and is correctly flagged.
+ok(shortfall({"zoom": 0.35}, {"zoom": 1}, [], 6, 20.0) == {},
+   "a single placement against an implied 0 was flagged — that is rounding, "
+   "not the run substituting an easy family")
+ok(shortfall({"zoom": 0.35}, {"zoom": 2}, [], 6, 20.0).get("zoom", {}).get("direction") == "over",
+   "two placements against an implied 0 were NOT flagged")
 # two or more over IS a miss
 ok(shortfall({"zoom": 0.35}, {"zoom": 3}, [], 6, 20.0).get("zoom", {}).get("direction") == "over",
    "a 3x overshoot was not flagged")
@@ -157,6 +163,37 @@ ok(shortfall({"sfx": 0.82}, {"sfx": 0}, [], 6, 20.0).get("sfx", {}).get("directi
 ok(shortfall({"sfx": 0.82}, {"sfx": 0},
              [{"beat": 1, "family": "sfx", "why": "no moment lands"}], 6, 20.0) == {},
    "a named gap no longer satisfies the mix — naming must stay a real exit")
+
+# ══════════════════════════════════════════════════════════════════════════
+# A RATE IS A RATE — NO max(1, ...) FLOOR.
+#
+# 0.2/25s over a 20s source is 0.16 placements and the correct answer is ZERO.
+# Forcing it to one made the gate invent work the brief never asked for:
+# "subtle overlays only" became "at least one overlay", and screen_recording
+# spent rounds 19, 20 and 21 declining a target it should never have been given,
+# with per-beat reasoning that was sound every time.
+#
+# It also turned accept_shortfall into a ROUTINE exit rather than the exception
+# it was meant to be — the agent had to argue its way out of a demand the
+# arithmetic invented.
+# ══════════════════════════════════════════════════════════════════════════
+# the exact round-21 screen_recording spec: three small rates, nothing placed
+ok(shortfall({"text": 0.2, "card": 0.1, "zoom": 0.2},
+             {"text": 0, "card": 0, "zoom": 0}, [], 4, 20.0) == {},
+   "small rates still demand a placement — max(1, ...) is back, and the gate is "
+   "inventing work the brief did not ask for")
+# a rate that genuinely implies one still binds
+ok(shortfall({"sfx": 0.82}, {"sfx": 0}, [], 6, 20.0).get("sfx", {}).get("implied") == 1,
+   "0.82/25s over 20s rounds to 1 and must still be demanded — removing the "
+   "floor must not round every small rate away")
+# a real ask still binds hard
+_ra = shortfall({"text": 4.0}, {"text": 0}, [], 4, 20.0)
+ok(_ra.get("text", {}).get("implied") == 3 and _ra["text"]["direction"] == "absent",
+   f"text at 4/25s over 20s must imply 3: {_ra.get('text')}")
+# OVERSHOOT IS SHARPER, not weaker: 3 placed against a real implied 0
+_ov = shortfall({"zoom": 0.35}, {"zoom": 3}, [], 6, 20.0)
+ok(_ov.get("zoom", {}).get("implied") == 0 and _ov["zoom"]["direction"] == "over",
+   f"a family placed 3 times against an implied ZERO must still be flagged: {_ov.get('zoom')}")
 
 # ══════════════════════════════════════════════════════════════════════════
 # ASKING IS BOUNDED; RECORDING IS NOT.
