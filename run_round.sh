@@ -135,17 +135,33 @@ for name in rg.REQUIRED_SOURCES:
     ok = bool(re.search(r"^  ok +: True", t, re.M))
     kept = re.search(r"kept [\d.]+s of [\d.]+s \(([\d.]+)\)", t)
     pm = re.search(r"PLACEMENT MANIFEST — (\d+) declared", t)
-    cv = re.findall(r"(wrong_resolution|no_audio_stream|output_has_no_speech|"
-                    r"no_output|speech_loss_severe): ?([^\n]{0,50})", t)
-    unbal = re.findall(r"accounting_unbalanced: ([^\n]{0,70})", t)
+    # READ THE PRODUCER'S VERDICT, DO NOT RE-DERIVE IT.
+    #
+    # This used to scrape the log for a hardcoded enum of five violation kinds.
+    # CONTRACT_FAILURES has SEVEN, and the two it did not know were invisible —
+    # round 23 carried 12 spec_shortfall_unresolved across 4 fixtures and scored
+    # "all five green". A reader that re-declares the producer's vocabulary
+    # falls behind it silently, because a kind it has never heard of looks
+    # exactly like a clean run.
+    cvm = re.search(r"CONTRACT VIOLATIONS: (\d+)((?:\n\s+- [^\n]*)*)", t)
+    if cvm:
+        cv_list = [l.strip()[2:] for l in cvm.group(2).split("\n") if l.strip().startswith("- ")]
+        if len(cv_list) != int(cvm.group(1)):
+            cv_list.append(f"COLLECTOR_MISPARSE: line said {cvm.group(1)}, parsed {len(cv_list)}")
+    else:
+        # NO LINE AT ALL is not "no violations" — it is a run that never reached
+        # its own summary, or a binary predating the line. Absence must never
+        # render as success; say so and let the round go red.
+        cv_list = ([] if not ok else
+                   ["no_contract_verdict: run produced no CONTRACT VIOLATIONS line"])
     res[name] = {"ok": ok,
                  "kept_ratio": float(kept.group(1)) if kept else None,
                  "placements": int(pm.group(1)) if pm else 0,
-                 "contract_violations": [f"{a}: {b}" for a, b in cv] + unbal}
+                 "contract_violations": cv_list}
 green, why = rg.round_is_green(res)
 json.dump({"result": res, "green": green, "why": why},
           open(os.path.join(out, "score.json"), "w"), indent=1)
-print(f"\nROUND {out[-1]} GREEN={green}")
+print(f"\nROUND {os.environ.get('PROMPTLY_ROUND') or os.path.basename(out).replace('round','')} GREEN={green}")
 print(f"  {why}")
 # THE SIGNATURE ON EVERY FIXTURE, not just the one being read closely. A run at
 # half the turns and two-thirds the placements of its neighbours is green for

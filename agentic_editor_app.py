@@ -5282,6 +5282,23 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _acc9 or _sf9:
         print(f"  SPEC EXITS      : accepted={sorted(_acc9) if _acc9 else '—'}  "
               f"outstanding={sorted(_sf9) if _sf9 else '—'}")
+    # THE VERDICT, PRINTED IN ONE PARSEABLE LINE.
+    #
+    # MEASURED, round 23: the escalation fired 12 times across 4 fixtures and
+    # the round still scored "all five green". The collector did not scrape a
+    # violations LIST — it scraped the log for a HARDCODED ENUM of five kinds,
+    # and spec_shortfall_unresolved was not among them. CONTRACT_FAILURES has
+    # seven members; the reader knew five. Adding a contract failure therefore
+    # did nothing, silently, which is the same shape as every other member of
+    # this family: written, printed, and read past.
+    #
+    # A reader that re-declares the producer's vocabulary drifts from it the
+    # moment either side changes, and drifts SILENTLY because a missing kind
+    # looks exactly like a clean run. So the producer now states the verdict and
+    # the reader takes it verbatim — no enum on the reading side to fall behind.
+    _cv = list(r.get("contract_violations") or [])
+    print(f"  CONTRACT VIOLATIONS: {len(_cv)}"
+          + ("".join(f"\n     - {c}" for c in _cv) if _cv else "  — none"))
     _wbs = (r.get("ledger") or {}).get("wall_by_stage") or {}
     _tot = float(r.get("wall_s") or 0) or 1.0
     if _wbs:
