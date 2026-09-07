@@ -77,6 +77,34 @@ while IFS=$'\t' read -r name key brief model; do
   modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
     --model "${model:-claude-sonnet-5}" \
     --src-url "$S" --out-url "$O" --out-key "$K" > "$OUT/$name.log" 2>&1
+
+  # ONE AUTOMATIC RETRY, FOR CANCELLATION ONLY.
+  #
+  # Modal has cancelled a fixture mid-run twice in four rounds — music in 19,
+  # talking_head in 22 — with NO exception, NO ledger entry, and ~69 lines of
+  # log: "Received a cancellation signal" and nothing else. Both passed on a
+  # manual retry on the identical mount, so it is infrastructure, and failing a
+  # whole round on it throws away the other four fixtures' evidence.
+  #
+  # NARROW ON PURPOSE. Only a cancellation retries. A crash, a contract
+  # violation, a passthrough or any real failure is the result — retrying those
+  # would be the pipeline laundering its own defects, which is the opposite of
+  # what this harness is for.
+  #
+  # LOGGED, never silent: the retry appears in appmap.txt and in the round
+  # output, so "green" can always be read against how many fixtures needed one.
+  if grep -q "cancellation signal" "$OUT/$name.log" 2>/dev/null; then
+    echo "[retry] $name — Modal cancelled the run (infrastructure, no exception); retrying ONCE"
+    echo "$name CANCELLED_RETRIED" >> "$OUT/appmap.txt"
+    mv "$OUT/$name.log" "$OUT/$name.cancelled.log"
+    IFS=$'\t' read -r S O K < <(python3 presign.py "$key")
+    modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
+      --model "${model:-claude-sonnet-5}" \
+      --src-url "$S" --out-url "$O" --out-key "$K" > "$OUT/$name.log" 2>&1
+    if grep -q "cancellation signal" "$OUT/$name.log" 2>/dev/null; then
+      echo "[retry] $name — cancelled TWICE; that is a real failure, not infrastructure"
+    fi
+  fi
   id="$(grep -oE 'ap-[A-Za-z0-9]+' "$OUT/$name.log" | head -1)"
   [ -n "$id" ] && echo "$name $id" >> "$OUT/appmap.txt" \
                 || echo "$name LAUNCH_FAILED" >> "$OUT/appmap.txt"
