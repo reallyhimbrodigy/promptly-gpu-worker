@@ -1954,6 +1954,43 @@ def _assert_beat_contract_identical():
         raise AssertionError("hook/close roles are not marked on both sources")
 
 
+def count_cuts(keep_spans, source_duration_s, eps=0.05):
+    """How many REMOVALS the edit made — head trim, tail trim and internal joins.
+
+    THE OLD COUNT WAS len(keep_spans) - 1, i.e. internal joins only. That is
+    right for a cut BETWEEN two kept regions and blind to a cut at either EDGE:
+    trimming six seconds off the end leaves ONE keep span, so it reported zero.
+    Round 18 measured exactly that — pet_video kept 12.0s of 18.0s across 1
+    span, its own ledger said {'keep': 2, 'cut': 1}, and the family mix reported
+    cut 0.0/25s. The video lost a third of its length and the meter said nothing
+    was cut.
+
+    A removal is a maximal region of the source that survives into no keep span:
+    before the first, between any two, and after the last.
+    """
+    dur = float(source_duration_s or 0)
+    spans = sorted((float(a), float(b)) for a, b in (keep_spans or [])
+                   if b is not None and a is not None and float(b) > float(a))
+    if dur <= 0 or not spans:
+        return 0
+    # merge touching/overlapping spans so an adjacency is not counted as a cut
+    merged = [list(spans[0])]
+    for a, b in spans[1:]:
+        if a - merged[-1][1] <= eps:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    n = 0
+    if merged[0][0] > eps:                      # head trim
+        n += 1
+    for i in range(1, len(merged)):             # internal joins
+        if merged[i][0] - merged[i - 1][1] > eps:
+            n += 1
+    if dur - merged[-1][1] > eps:               # tail trim
+        n += 1
+    return n
+
+
 def detect_shot_changes(path, env=None, threshold=0.3, timeout=600):
     """Hard cuts in the source, as output seconds. [] when there are none.
 
@@ -3741,6 +3778,10 @@ def edit(source_key: str, brief: str,
     # variable rebinding a name used 300s later — is now carried by the
     # `_w0/_w1` naming in the dead-air loop itself.
     _src_dur = float(meta.get('format', {}).get('duration') or 0)
+    # LEDGERED because count_cuts needs it at report time, and a counter given a
+    # duration of 0 returns 0 silently — the same shape as the cost_usd key that
+    # would have printed $0.0000 forever.
+    led["source_duration_s"] = _src_dur
     user = (f"{_REQ_OPEN}\n{_neutralise_brief(brief)}\n{_REQ_CLOSE}\n\n"
             f"SOURCE: /work/source.mp4 — {vs.get('width')}x{vs.get('height')}, "
             f"{_src_dur:.1f}s\n\n"
@@ -4700,7 +4741,8 @@ def edit(source_key: str, brief: str,
         # Counted so the rubric has a number for them. cut_spans is the real
         # cut count — a cut is a SPAN BOUNDARY, not a placement, which is why
         # it was never in the manifest and never reported.
-        "cut_spans": max(0, len(led.get("keep_spans") or []) - 1),
+        "cut_spans": count_cuts(led.get("keep_spans"),
+                                led.get("source_duration_s")),
         "transitions": _n_of("transition"),
     }
     _mix["text_per_25s"] = _per25(_mix["text"])
