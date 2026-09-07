@@ -121,6 +121,29 @@ with tempfile.TemporaryDirectory() as tmp:
                 fails.append(
                     f"zoom claims {Z:.3f}x but reaches {peak:.4f}x — "
                     f"{100*got/want:.1f}% of the claimed travel. THE PLACEMENT IS INERT.")
+            # ── THE DWELL, WHICH IS THE WHOLE POINT ────────────────────
+            # handler.py's zoom teach: "The commitment IS the dwell, not the
+            # arrival speed... one that cuts away the instant it lands does not,
+            # however slowly it came." The old shape reached peak at t=1.9s of a
+            # 2.0s window — it landed and the window ended, the literal
+            # disqualified case. Peak must arrive EARLY and be HELD.
+            n0, n1 = int(T0*FPS), int(T1*FPS)
+            win = curve[n0:n1]
+            if win:
+                pk = max(win)
+                first_peak = next(i for i, v in enumerate(win) if v >= pk - 0.002)
+                frac = first_peak / max(1, len(win))
+                if frac > 0.55:
+                    fails.append(
+                        f"zoom reaches its peak {100*frac:.0f}% into the window — "
+                        f"it lands as the window ends and never holds. "
+                        f"Production ramps in {100*A.ZOOM_RAMP_FRACTION:.0f}%.")
+                # HELD THROUGH TO THE CUT, not released before it.
+                tail = win[int(0.85*len(win)):]
+                if tail and min(tail) < pk - 0.01:
+                    fails.append(
+                        f"zoom releases before the cut (tail {min(tail):.4f} vs "
+                        f"peak {pk:.4f}) — the landed state is not held through")
             # MONOTONIC: a push that goes backwards is a lurch.
             ramp = curve[int(T0*FPS):int(T1*FPS)]
             backs = sum(1 for i in range(1, len(ramp)) if ramp[i] < ramp[i-1] - 1e-6)
@@ -138,6 +161,30 @@ with tempfile.TemporaryDirectory() as tmp:
                 fails.append(
                     f"zoom anchors at ({cx:.0f}, {cy:.0f}), not the frame centre "
                     f"({W//2}, {H//2}) — it is drifting, not pushing in")
+
+# ── THE RAMP FRACTION IS PRODUCTION'S, AND MUST NOT DRIFT ──────────────────
+# It is not a taste parameter to pick. handler.py:
+#   ZOOM_PEAK_REACH_MS["SmoothPush"] = 420   # 35% x 1200ms (ramp-in end)
+# My first version used 40% because it made the point; that was a guess and is
+# exactly the kind of invented constant that silently becomes doctrine.
+import re as _re
+_hp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "handler.py")
+if os.path.exists(_hp):
+    _hs = open(_hp, encoding="utf-8", errors="ignore").read()
+    _m = _re.search(r'"SmoothPush":\s*(\d+),\s*#\s*(\d+)%\s*.\s*(\d+)ms', _hs)
+    if not _m:
+        fails.append("could not read ZOOM_PEAK_REACH_MS['SmoothPush'] from handler.py "
+                     "— the ramp fraction is unverifiable, which is not a pass")
+    else:
+        _reach, _pct, _natural = int(_m.group(1)), int(_m.group(2)), int(_m.group(3))
+        _want = _reach / _natural
+        if abs(A.ZOOM_RAMP_FRACTION - _want) > 0.005:
+            fails.append(
+                f"ZOOM_RAMP_FRACTION is {A.ZOOM_RAMP_FRACTION} but production's "
+                f"SmoothPush reaches peak at {_reach}/{_natural} = {_want:.3f} "
+                f"({_pct}%) — the agentic shape has drifted from the doctrine it cites")
+else:
+    fails.append("handler.py not found — cannot verify the ramp fraction against production")
 
 if fails:
     print(f"CERT-PLACEMENT-EFFECT: {len(fails)} FAILED")

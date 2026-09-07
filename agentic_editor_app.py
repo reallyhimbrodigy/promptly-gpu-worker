@@ -2174,6 +2174,14 @@ def step_changed_output(before_path, after_path, t0, t1, env=None,
         return None, None
 
 
+# THE RAMP FRACTION IS PRODUCTION'S, NOT A GUESS.
+# handler.py: ZOOM_PEAK_REACH_MS["SmoothPush"] = 420  # 35% x 1200ms (ramp-in end)
+# so the push reaches its peak 35% of the way through the event and HOLDS the
+# landed state for the remaining 65%. cert_zoom_ramp_matches_production.py reads
+# that table and fails if the two drift.
+ZOOM_RAMP_FRACTION = 0.35
+
+
 def zoom_filtergraph(t_start, t_end, strength, fps=30):
     """The zoom filtergraph, as a PURE STRING — so a cert can render the shipped
     one rather than a copy of it.
@@ -2197,7 +2205,23 @@ def zoom_filtergraph(t_start, t_end, strength, fps=30):
     a, b_ = float(t_start), float(t_end)
     z = float(strength)
     dur = max(1e-6, b_ - a)
-    prog = f"(in_time-{a})/{dur:.6f}"
+    # RAMP THEN DWELL, not a constant-velocity creep across the whole window.
+    #
+    # MEASURED on the hero beat (talking_head 16.0-18.0s): the old shape reached
+    # 1.12x at t=1.9s of a 2.0s window — it landed and the window was over. The
+    # pipeline's own doctrine, from handler.py's zoom teach:
+    #
+    #   "The commitment IS the dwell, not the arrival speed: a move that holds
+    #    its landed peak commits whether it arrived punchy or slow; one that
+    #    cuts away the instant it lands does not, however slowly it came."
+    #
+    # The old shape was literally the disqualified case. This was never a
+    # smoothness problem or an ffmpeg-versus-Remotion problem — it was a shape
+    # problem, and the shape costs nothing. Measured against SmoothPush on the
+    # same beat, this holds its peak THROUGH the cut where SmoothPush releases
+    # back to 1.03 before it.
+    ramp = max(1e-6, dur * ZOOM_RAMP_FRACTION)
+    prog = f"(in_time-{a})/{ramp:.6f}"
     return (f"[0:v]scale=1080:1920,setsar=1,"
             f"zoompan=z='if(between(in_time,{a},{b_}),"
             f"1+{(z - 1):.6f}*min(1,max(0,{prog})),1)':"
@@ -3848,12 +3872,19 @@ def edit(source_key: str, brief: str,
             return {"error": f"t_end ({b_}) must be after t_start ({a})"}
         z = max(1.0, min(1.35, z))
         dur = b_ - a
-        # 1080-wide frame: a zoom of z over `dur` seconds at 30fps travels
-        # 1080*(z-1) px over dur*30 frames.
-        px_per_frame = (1080 * (z - 1)) / max(1.0, dur * 30)
+        # THE CAP IS AGAINST THE RAMP, NOT THE WINDOW.
+        #
+        # The travel happens during the ramp-in — 35% of the window, matching
+        # production's ZOOM_PEAK_REACH_MS — and the remaining 65% is a hold at
+        # constant scale, which moves nothing. Measuring velocity over the whole
+        # window understates it by 1/0.35 = 2.86x, so an 11px/frame ceiling
+        # computed that way would pass moves travelling 31px/frame. The ceiling
+        # is a property of the eye and has to be applied where the motion is.
+        _ramp_s = max(1e-6, dur * ZOOM_RAMP_FRACTION)
+        px_per_frame = (1080 * (z - 1)) / max(1.0, _ramp_s * 30)
         capped = False
         if px_per_frame > 11.0:
-            z = 1.0 + (11.0 * dur * 30) / 1080
+            z = 1.0 + (11.0 * _ramp_s * 30) / 1080
             z = max(1.0, min(1.35, z))
             capped = True
         inp = os.path.join("/work", os.path.basename(str(input_file)))
