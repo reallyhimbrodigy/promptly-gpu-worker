@@ -20,8 +20,34 @@ import boto3, hashlib, json, os, sys
 
 ROUND = str(sys.argv[1]) if len(sys.argv) > 1 else ""
 BUCKET = sys.argv[2] if len(sys.argv) > 2 else "promptly-video-storage"
-PREFIX = f"ab-sources/reliability-fixtures-v1/rounds/round{ROUND}/"
 SRC = f"/tmp/fixtures/round{ROUND}"
+
+# THE ARCHIVE PREFIX FOLLOWS THE CORPUS THE ROUND ACTUALLY RAN.
+#
+# This was hardcoded to reliability-fixtures-v1, which was harmless only while
+# every round happened to run v1 — the very fact nobody could see, because no
+# round printed its corpus. Filing a v3 round under v1 would put the provenance
+# error back one layer up from where it was just fixed, and the archive is the
+# ONLY copy: /tmp was wiped between rounds 25 and 26 and took rounds 6-25 with
+# it. Derived from the round's own plan.tsv, the same source the collector uses.
+def _corpus_of(src_dir):
+    plan = os.path.join(src_dir, "plan.tsv")
+    if not os.path.exists(plan):
+        return None
+    keys = [l.split("\t")[1] for l in open(plan, encoding="utf-8")
+            if len(l.split("\t")) > 1]
+    corpora = {"/".join(k.split("/")[:-1]) for k in keys}
+    return corpora.pop() if len(corpora) == 1 else None
+
+
+_CORPUS = _corpus_of(SRC)
+if _CORPUS is None:
+    # NOT a fallback to v1. A round whose corpus cannot be established must not
+    # be filed under a guess — that is how the record starts lying.
+    print(f"[archive] round {ROUND}: cannot establish the corpus from plan.tsv "
+          f"— refusing to file it under a guess", flush=True)
+    sys.exit(1)
+PREFIX = f"{_CORPUS}/rounds/round{ROUND}/"
 
 if not ROUND or not os.path.isdir(SRC):
     print(f"[archive] nothing at {SRC} — nothing to stage", flush=True)

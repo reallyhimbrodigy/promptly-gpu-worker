@@ -3905,11 +3905,18 @@ def render_remotion_batch(jobs, env=None, timeout=1800):
     # ABSENT, which is a binary predating the cache, NOT a cache miss: a missing
     # measurement must never render as a measured zero.
     _bc = re.search(r"^BUNDLE_CACHED ([01]) (\S+)", out, re.M)
+    # PUBLIC_SYNCED <n> — runtime-written public assets reconciled into a cached
+    # bundle's serve root. None means ABSENT (no cache hit, or a binary predating
+    # the sync), which is NOT the same as zero synced; a missing measurement must
+    # never render as a measured zero. This is the line that would have settled
+    # the zoom 404 in one round instead of six.
+    _ps = re.search(r"^PUBLIC_SYNCED (\d+)", out, re.M)
     res["_batch"] = {
         "returncode": r.returncode,
         "bundle_ms": int(_b.group(1)) if _b else None,
         "bundle_cached": (bool(int(_bc.group(1))) if _bc else None),
         "bundle_key": _bc.group(2) if _bc else None,
+        "public_synced": (int(_ps.group(1)) if _ps else None),
         "total_ms": int(_t.group(1)) if _t else None,
         "jobs": len(jobs),
         # THE WHOLE POINT, PRINTED: startup paid once across N jobs. A counter
@@ -6153,8 +6160,18 @@ def edit(source_key: str, brief: str,
             # times. This is the whole reason render_remotion_batch exists.
             _zres = render_remotion_batch(_zoom_jobs, env=_SUBPROCESS_ENV,
                                           timeout=2400)
+            # seq + bundle_cached + public_synced, THE SAME FIELDS THE REEL
+            # RECORDS. This record had neither, and zoom_render was not in the
+            # REMOTION PROCS table at all, so when every zoom type 404'd on
+            # public/zsrc0.mp4 for six rounds there was no way to ask whether
+            # the render had reused a cached bundle. The instrument was blind
+            # exactly where the failure was.
+            led["_render_seq"] = led.get("_render_seq", 0) + 1
             led["zoom_render"] = {
+                "seq": led["_render_seq"],
                 "jobs": len(_zoom_jobs),
+                "bundle_cached": (_zres.get("_batch") or {}).get("bundle_cached"),
+                "public_synced": (_zres.get("_batch") or {}).get("public_synced"),
                 "bundle_ms": (_zres.get("_batch") or {}).get("bundle_ms"),
                 "segments": [dict(s2) for s2 in _zoom_segs],
             }
@@ -9115,7 +9132,11 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # cannot be used to infer sequence, so the sequence is now recorded at the
     # call site and printed.
     _procs = []
-    for _label, _key in (("reel", "reel_render"), ("captions", "caption_render")):
+    # EVERY REMOTION PROCESS, not the two that happened to be wired. zoom and
+    # transition were absent, which is why a six-round zoom outage in the
+    # bundler could not be read off the table built to show bundler behaviour.
+    for _label, _key in (("reel", "reel_render"), ("captions", "caption_render"),
+                         ("zoom", "zoom_render"), ("transition", "transition_render")):
         _d = (r.get("ledger") or {}).get(_key)
         if _d and _d.get("bundle_ms") is not None:
             _procs.append((_label, _d))
@@ -9129,9 +9150,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             _cach = _d.get("bundle_cached")
             _cs = ("CACHE HIT" if _cach is True else
                    "bundled" if _cach is False else "UNKNOWN (no BUNDLE_CACHED line)")
+            _psn = _d.get("public_synced")
             print(f"     #{_d.get('seq') or '?'} {_label:10} "
                   f"bundle {(_d.get('bundle_ms') or 0)/1000:5.1f}s "
-                  f"paint {(_d.get('paint_ms') or 0)/1000:6.1f}s  {_cs}")
+                  f"paint {(_d.get('paint_ms') or 0)/1000:6.1f}s  {_cs}"
+                  + (f"  public_synced={_psn}" if _psn is not None
+                     else "  public_synced=ABSENT"))
 
     _eff = (r.get("ledger") or {}).get("placement_effects") or []
     if _eff:

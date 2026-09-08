@@ -39,8 +39,20 @@ check("an EMPTY round directory is a finding, not a clean archive",
       "zero files uploaded must never print as a successful archive")
 check("it writes a manifest with per-file digests",
       "MANIFEST.json" in arch and "sha256" in arch)
-check("it is keyed by round, alongside the fixtures",
-      "reliability-fixtures-v1/rounds/round" in arch)
+# THIS PINNED THE BUG. It asserted the literal
+# "reliability-fixtures-v1/rounds/round" appeared in the archiver — so it
+# required the v1 hardcode, and would have gone RED on the fix and green on a
+# v3 round filed under v1's prefix. A check that pins a constant cannot tell a
+# correct constant from a wrong one; assert the PROPERTY instead: the prefix is
+# derived from the round's own plan, and an unestablished corpus refuses.
+check("the archive prefix is keyed by round",
+      "rounds/round{ROUND}/" in arch or 'rounds/round" + ROUND' in arch
+      or "/rounds/round" in arch)
+check("the corpus is DERIVED from the round's plan, not hardcoded",
+      "plan.tsv" in arch and "_corpus_of" in arch
+      and "reliability-fixtures-v1/rounds" not in arch)
+check("a round whose corpus cannot be established is REFUSED, not filed under a guess",
+      "refusing to file it under a guess" in arch)
 
 # It must not be able to silently skip when the round DID produce logs.
 tree = ast.parse(arch)
