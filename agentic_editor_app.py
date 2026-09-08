@@ -74,6 +74,57 @@ app = modal.App("agentic-editor")
 # than an agent one — worth separating in the ledger.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
+
+# ── A BARE ENUM IS A LIST OF WORDS ──────────────────────────────────────────
+# THE MECHANISM BEHIND "1 distinct of 29 selectable, StatCard=4" on two rounds
+# running. The agent saw 29 NAMES in the enum and had semantic information about
+# exactly one of them: StatCard is named in the system prompt, ProgressBar is
+# named once, and the other 27 appear nowhere in the cached prefix. Learning
+# what a PullQuote or a RankedList is for costs a read_knowledge turn, and the
+# agent does not spend it — so it picks the only component it has been told
+# anything about. That is not taste, and it is not incumbency in the agent; it
+# is the harness offering a vocabulary it never defined.
+#
+# The claims are the catalogue's OWN one-line "Claim:" per entry, extracted from
+# the mounted file rather than paraphrased, so the index cannot drift from the
+# teach. ~364 tokens for all 29 — about $0.0009 a run at twelve turns — against
+# ~6,600 for the full prose. The prose stays where it is; this is the part that
+# has to be in front of the agent at the moment it chooses.
+def _mg_claim_index():
+    """{type: one-line claim} read from the mounted catalogue.
+
+    RAISES rather than returning a partial index. A missing claim means a type
+    the agent can name and cannot understand, which is the exact condition this
+    exists to end — degrading quietly would restore it for that type alone and
+    nobody would see which.
+    """
+    _p = os.path.join("/knowledge", "05_motion_graphics.md")
+    if not os.path.isfile(_p):
+        _p = os.path.join(_KNOWLEDGE_DIR, "05_motion_graphics.md")
+    try:
+        _txt = open(_p, encoding="utf-8").read()
+    except Exception as _e:
+        raise RuntimeError(
+            f"the motion-graphic catalogue is unreadable ({_e}); the schema "
+            f"would offer 29 bare names again") from _e
+    _out = {}
+    for _t in MG_SELECTABLE_TYPES:
+        _m = re.search(r"\*\*" + re.escape(_t) + r"\*\*.*?Claim:\s*[\"\u201c]"
+                       r"([^\"\u201d]+)[\"\u201d]", _txt, re.S)
+        if _m:
+            _out[_t] = " ".join(_m.group(1).split())
+    _missing = [t for t in MG_SELECTABLE_TYPES if t not in _out]
+    if _missing:
+        raise RuntimeError(
+            f"no Claim: line in the catalogue for {_missing} — those types "
+            f"would be offered as bare names, which is how StatCard won two "
+            f"rounds running")
+    return _out
+
+
+MG_CLAIM_INDEX = _mg_claim_index()
+MG_CLAIM_LINES = "\n".join(f"  {k} — {v}" for k, v in sorted(MG_CLAIM_INDEX.items()))
+
 _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion"))
 _REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 _MOODREEL_SRC = os.path.join(_REPO_ROOT, "moodreel_editor.py")
@@ -1879,14 +1930,26 @@ KNOWLEDGE_TOOLS = [{
                                  # its props shape.
                                  "card_type": {"type": "string",
                                      "enum": list(MG_SELECTABLE_TYPES),
-                                     "description": "when treatment includes "
-                                                    "'card': WHICH motion "
-                                                    "graphic. Defaults to "
-                                                    "StatCard only if you do "
-                                                    "not say — and StatCard on "
-                                                    "a beat with no quoted "
-                                                    "number is the wrong "
-                                                    "component."},
+                                     # THE CLAIM, NOT JUST THE NAME. This
+                                     # description used to say "defaults to
+                                     # StatCard", which taught the incumbency
+                                     # rather than the choice — and the other 28
+                                     # types appeared nowhere in the cached
+                                     # prefix, so the agent had no way to know
+                                     # what they were for without spending a
+                                     # read_knowledge turn it never spent.
+                                     "description": (
+                                         "REQUIRED when treatment includes "
+                                         "'card'. Match the component to what "
+                                         "the beat SAYS — each line below is "
+                                         "the claim that component makes, and "
+                                         "the beat must actually be making it. "
+                                         "There is no default: StatCard is for "
+                                         "a QUOTED NUMBER and nothing else.\n"
+                                         + MG_CLAIM_LINES +
+                                         "\nread_knowledge('05_motion_graphics')"
+                                         " for the full teach and each one's "
+                                         "props shape.")},
                                  "card_props": {"type": "object",
                                      "description": "the component's own props, "
                                                     "in the shape its catalogue "
@@ -3806,6 +3869,16 @@ def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
     return out
 
 
+def _require_mg_type(item):
+    """The component this item names, or a raise. Never a default."""
+    _t = str((item or {}).get("type") or "").strip()
+    if not _t:
+        raise ValueError(
+            "a reel item carries no `type` — defaulting it to StatCard is how "
+            "a component nobody chose reaches the video and reports as chosen")
+    return _t
+
+
 def pack_reel(items, fps=30):
     """Pack authored placements into a CONTIGUOUS reel + the composite offsets.
 
@@ -3831,7 +3904,11 @@ def pack_reel(items, fps=30):
         dur_f = max(1, int(round(dur_s * fps)))
         at_s = float(it.get("t_start") or 0.0)
         out_reel.append({
-            "type": it.get("type") or "StatCard",
+            # NO DEFAULT HERE EITHER. This silently made an untyped item a
+            # StatCard, so a caller bug arrived as a rendered StatCard nobody
+            # chose. Both surfaces above refuse an untyped card now; this is
+            # the last place the old default could have survived.
+            "type": _require_mg_type(it),
             # CUMULATIVE, never i * dur_f. With variable durations a fixed
             # stride silently overlaps or gaps every component after the first
             # one whose length differs — and the render still exits 0.
@@ -6064,7 +6141,19 @@ def edit(source_key: str, brief: str,
             # the entire time — 29 entries with claims, FITS/FIGHTS and props —
             # and the agent could read it but not act on it, because the harness
             # placed a StatCard whatever it said.
-            _ctype = str(v.get("card_type") or "").strip() or "StatCard"
+            # NO SILENT DEFAULT. It fell back to StatCard, which meant a
+            # ruling that named nothing became a StatCard and the run reported
+            # a StatCard the agent never chose — indistinguishable from one it
+            # did. The schema now says there is no default; the build has to
+            # agree or the schema is describing a pipeline that does not exist.
+            _ctype = str(v.get("card_type") or "").strip()
+            if not _ctype:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": "ruled 'card' with no card_type — WHICH "
+                                      "component reads the dialogue and cannot "
+                                      "be derived. The enum carries each one's "
+                                      "claim; pick the one the beat is making."})
+                continue
             if _ctype in MG_BRAND_ONLY:
                 # Production's own prompt: "DO NOT put NamePlate or EndCard in
                 # motion_graphics yourself — the pipeline builds [them]". They
@@ -7458,7 +7547,14 @@ def edit(source_key: str, brief: str,
                     if _why6 is None and "card" in _tr6:
                         # A card whose figure is not a figure renders BLANK and
                         # exits 0 — four of them shipped invisible in round 35.
-                        _ct6 = str(_v.get("card_type") or "StatCard").strip()
+                        _ct6 = str(_v.get("card_type") or "").strip()
+                        if not _ct6:
+                            _why6 = (
+                                f"beat {_v.get('beat')}: ruled 'card' with no "
+                                f"card_type. WHICH component reads what the "
+                                f"beat SAYS and cannot be derived — the enum "
+                                f"carries each one's claim. There is no "
+                                f"default; StatCard is for a quoted number.")
                         _pr6 = _v.get("card_props")
                         if not isinstance(_pr6, dict) or not _pr6:
                             _pr6 = {"value": str(_v.get("card_hero") or "").strip()}
