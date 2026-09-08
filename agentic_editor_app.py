@@ -8098,11 +8098,42 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         # printed -8.67s — a negative remainder is arithmetic saying the model
         # is wrong, not that time went missing. Only top-level intervals are
         # subtracted; build_* stay in the table as the breakdown of that time.
-        _NESTED = ("build_cut", "build_overlays", "build_zoom", "build_reel",
-                   "build_sfx", "audio_extract")
-        _top_level = sum(v for k, v in _named.items() if k not in _NESTED)
+        # NESTED STAGES ARE DERIVED BY PREFIX, NOT LISTED BY HAND.
+        #
+        # The hand-kept tuple rotted the moment the port added stages. It named
+        # six; the port introduced build_captions, composite_captions,
+        # build_transitions and build_reel_paint, none of them in it. All four
+        # were then counted BOTH as top-level and inside execute_plan, and the
+        # remainder printed -79.82s — which is almost exactly
+        # build_captions (76.32) + composite_captions (6.06).
+        #
+        # The comment above this once recorded fixing a -8.67s remainder with
+        # that same list. It came back bigger, because a list of what nests is a
+        # list somebody has to remember to update, and the whole point of the
+        # table is to show work nobody remembered.
+        _NESTED_PREFIXES = ("build_", "composite_")
+        # Nested stages whose names do not carry a prefix. This set may still go
+        # stale — which is exactly what the guard below is for.
+        _NESTED_EXTRA = ("audio_extract",)
+        _top_level = sum(v for k, v in _named.items()
+                         if not k.startswith(_NESTED_PREFIXES)
+                         and k not in _NESTED_EXTRA)
         _un = _tot - _top_level - sum(_tools.values())
-        print(f"     {'(unattributed)':18} {_un:7.2f}s  {100*_un/_tot:5.1f}%")
+        if _un < 0:
+            # LOUD, NOT PRINTED AS A NUMBER. A negative remainder is arithmetic
+            # saying the model of what nests is WRONG — time cannot go missing
+            # in the negative direction. Printing it as a value invites reading
+            # a share off a table that does not add up, which is how -79.82s sat
+            # in a decomposition that was quoted as 66.4% render.
+            _sus = sorted((k for k in _named
+                           if k.startswith(_NESTED_PREFIXES) or k in _NESTED_EXTRA),
+                          key=lambda k: -_named[k])[:4]
+            print(f"     {'(unattributed)':18} UNACCOUNTABLE — the nesting model is "
+                  f"wrong by {abs(_un):.2f}s")
+            print(f"        every share above is SUSPECT. Double-counting "
+                  f"candidates: {_sus}")
+        else:
+            print(f"     {'(unattributed)':18} {_un:7.2f}s  {100*_un/_tot:5.1f}%")
     else:
         # LOUD. An empty table means the marks did not run, not that the run had
         # no stages — and a silently absent instrument is how this block was
