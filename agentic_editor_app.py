@@ -392,6 +392,65 @@ RATIONALE_KEYS = ("why", "reason", "rationale", "note", "notes", "because",
                   "justification", "explanation")
 
 
+RULING_DECISION_FIELDS = ("treatment", "cut", "text_content", "sfx",
+                          "sfx_name", "card_hero", "card_label")
+
+
+def ruling_fingerprint(tool_input):
+    """{beat: (decision_sig, why_sig)} for one rule_all_beats payload.
+
+    WHY TWO SIGNATURES. "5 distinct payloads" (a whole-payload hash) proves the
+    calls are not byte-identical and NOTHING about how much of the 3,982 tokens
+    is new information — a payload restating 20 beats while rewording one `why`
+    hashes as distinct. Splitting DECISION from WHY is what separates the ruling
+    record from churn: a beat whose treatment/cut/copy is unchanged but whose
+    rationale was rewritten is a restatement, however different it looks.
+
+    BEAT-SET AWARE, because the tool's own description invites a partial call —
+    "if you miss any it tells you which; call again with only those". A second
+    call carrying 3 beats is not a restatement of 21, and a diff that assumed
+    full payloads would score it as 18 deletions.
+    """
+    import hashlib as _hl
+    out = {}
+    for v in (tool_input or {}).get("verdicts") or []:
+        if not isinstance(v, dict):
+            continue
+        b = v.get("beat")
+        if b is None:
+            continue
+        _dec = json.dumps({k: v.get(k) for k in RULING_DECISION_FIELDS},
+                          sort_keys=True, default=str)
+        _why = json.dumps(v.get("why"), sort_keys=True, default=str)
+        out[int(b)] = (_hl.sha1(_dec.encode()).hexdigest()[:8],
+                       _hl.sha1(_why.encode()).hexdigest()[:8])
+    return out
+
+
+def diff_rulings(prev_state, call):
+    """Classify one call against everything ruled before it.
+
+    Returns (counts, new_state). Counts are MEASURED, never inferred: a beat is
+    NEW, DECISION-CHANGED, WHY-ONLY (decision identical, rationale rewritten) or
+    IDENTICAL. WHY-ONLY is the category the coarse hash could not see, and the
+    one that decides whether 45s is record or restatement.
+    """
+    c = {"beats": len(call), "new": 0, "decision_changed": 0,
+         "why_only": 0, "identical": 0}
+    st = dict(prev_state)
+    for b, (dec, why) in call.items():
+        if b not in st:
+            c["new"] += 1
+        elif st[b][0] != dec:
+            c["decision_changed"] += 1
+        elif st[b][1] != why:
+            c["why_only"] += 1
+        else:
+            c["identical"] += 1
+        st[b] = (dec, why)
+    return c, st
+
+
 def rationale_bytes(o):
     """JSON bytes sitting under rationale-ish keys, recursively.
 
@@ -4964,6 +5023,8 @@ def edit(source_key: str, brief: str,
         # token count downstream, and is labelled an estimate wherever it is
         # printed. Measuring bytes exactly beats estimating tokens vaguely.
         _tool_json = {}
+        _tool_sig = {}
+        _ruling_fp = None
         _rat = 0
         for c in tool_uses:
             _inp = getattr(c, "input", None) or {}
@@ -4971,6 +5032,19 @@ def edit(source_key: str, brief: str,
                 _tool_json[getattr(c, "name", "?")] = (
                     _tool_json.get(getattr(c, "name", "?"), 0) + len(json.dumps(_inp)))
                 _rat += rationale_bytes(_inp)
+                # A STABLE SIGNATURE PER CALL, so a RE-EMISSION is
+                # distinguishable from an AMENDMENT. rule_all_beats ran 5 times
+                # in one run for 6,014 output tokens — 80% of the run — and
+                # nothing recorded whether calls 2-5 restated the same rulings
+                # or changed them. That is the difference between 49s of slack
+                # and 49s of the ruling record, and it decides whether there is
+                # anything to cut at all.
+                import hashlib as _hl
+                if getattr(c, "name", "") == "rule_all_beats":
+                    _ruling_fp = ruling_fingerprint(_inp)
+                _tool_sig[getattr(c, "name", "?")] = _hl.sha1(
+                    json.dumps(_inp, sort_keys=True, default=str).encode()
+                ).hexdigest()[:8]
             except Exception:
                 # A tool input that will not serialise is a MEASUREMENT failure,
                 # not a zero. Recorded as None so the reader can say ABSENT
@@ -4981,6 +5055,8 @@ def edit(source_key: str, brief: str,
             "tools": [getattr(c, "name", "?") for c in tool_uses],
             "out_tokens": getattr(u, "output_tokens", 0) if u else 0,
             "tool_json_bytes": _tool_json,
+            "tool_sig": _tool_sig,
+            "ruling_fp": _ruling_fp,
             "rationale_bytes": _rat,
             "text_chars": len(" ".join(getattr(c, "text", "") for c in r.content
                                        if getattr(c, "type", "") == "text")),
@@ -6616,6 +6692,55 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             print("  TOKENS BY TOOL  : " + "  ".join(
                 f"{k} {v:,.0f} ({100*v/_tot_out:.0f}%)"
                 for k, v in sorted(_by_tool.items(), key=lambda kv: -kv[1])))
+            # REPEATED CALLS, PRINTED. Same tool, same signature = the agent
+            # re-emitted an identical payload; same tool, different signature =
+            # it changed something. Printed because a counter that answers a
+            # question and reaches only the ledger answers nothing.
+            _by_sig = {}
+            for x in tns:
+                for _t, _sg in (x.get("tool_sig") or {}).items():
+                    _by_sig.setdefault(_t, []).append((x["n"], _sg, x["out_tokens"]))
+            for _t, _calls in sorted(_by_sig.items(), key=lambda kv: -len(kv[1])):
+                if len(_calls) < 2:
+                    continue
+                _uniq = len({sg for _, sg, _ in _calls})
+                _after = sum(tk for _, _, tk in _calls[1:])
+                print(f"  REPEATED CALL   : {_t} x{len(_calls)}  "
+                      f"{_uniq} distinct payload(s)  "
+                      f"turns {[n for n, _, _ in _calls]}  "
+                      f"calls 2+ cost {_after:,} tok "
+                      f"(~{_after * 0.01137:.0f}s)"
+                      + ("   <-- IDENTICAL RE-EMISSION" if _uniq == 1 else ""))
+            # ── RULING DIFF — the number that decides whether the
+            # re-rulings are the record or restatement of it. Printed in the
+            # commit that adds the counter.
+            _fps = [(x["n"], x.get("ruling_fp")) for x in tns if x.get("ruling_fp")]
+            if len(_fps) >= 2:
+                _st, _rows, _churn = {}, [], 0
+                for _n, _fp in _fps:
+                    _c, _st = diff_rulings(_st, {int(k): tuple(v)
+                                                 for k, v in _fp.items()})
+                    _rows.append((_n, _c))
+                print(f"  RULING DIFF     : {len(_fps)} rule_all_beats call(s), "
+                      f"{len(_st)} distinct beat(s) ruled")
+                print(f"     {'turn':>5}{'beats':>7}{'new':>6}{'decision':>10}"
+                      f"{'why-only':>10}{'identical':>11}")
+                for _n, _c in _rows:
+                    print(f"     {_n:>5}{_c['beats']:>7}{_c['new']:>6}"
+                          f"{_c['decision_changed']:>10}{_c['why_only']:>10}"
+                          f"{_c['identical']:>11}")
+                _after = _rows[1:]
+                _tot = sum(c["beats"] for _, c in _after)
+                _real = sum(c["new"] + c["decision_changed"] for _, c in _after)
+                _restate = sum(c["why_only"] + c["identical"] for _, c in _after)
+                if _tot:
+                    print(f"     calls 2+: {_tot} beat-rulings emitted — "
+                          f"{_real} carried a NEW or CHANGED decision, "
+                          f"{_restate} were restatement "
+                          f"({100*_restate/_tot:.0f}% restated)")
+                    print("     restatement = same decision re-emitted (why-only "
+                          "rewrite or byte-identical). It is not the record; the "
+                          "record is the decision, and it did not move.")
             print("  OUT BY TURN     : " + " ".join(
                 f"{x['n']}:{x['out_tokens']:,}" for x in tns))
             _rb = sum(x.get("rationale_bytes") or 0 for x in tns)
