@@ -47,10 +47,24 @@ def check(l,c,d=""):
 check("a second execute_plan is REFUSED",
       'led["execute_plan_calls"] > 1' in src and '"refused": "one execution pass"' in src,
       "the gate must be in the dispatch, not the prompt")
-check("the refusal tells the agent how to close the shortfall WITHOUT a render",
-      "close_the_shortfall_by_naming" in src,
-      "an unsatisfiable refusal burns the turn budget — that is what the "
-      "shortfall livelock did before")
+# WAS: "the refusal tells the agent how to close the shortfall WITHOUT a
+# render". That leg asserted a density remedy — retired by the 2026-09-07
+# ruling — and it pointed at shortfall_reasons, a schema field now deleted, so
+# the instruction had become unfollowable as well as unwanted.
+#
+# THE POINT IT WAS MAKING SURVIVES: an unsatisfiable refusal burns the turn
+# budget, which is what the shortfall livelock did. A refusal must still name
+# what IS available. The difference is that the available path is now the
+# repair hatch, which exists, rather than a floor to discharge, which does not.
+check("the refusal names what is available rather than only saying no",
+      '"what_is_available"' in src,
+      "a bare refusal costs a turn and teaches the agent nothing")
+check("and it points at the repair hatch, which is real",
+      "repair_permitted" in src.split('"what_is_available"')[1][:500],
+      "naming a path that does not exist is worse than naming none")
+check("the refusal names NO density remedy",
+      "shortfall" not in src.split('"what_is_available"')[1][:500],
+      "the rubric grades; it must not reappear as the thing a refusal asks for")
 check("the refusal is counted, not silent",
       'led["refused_second_execute"]' in src,
       "a gate whose firing nobody can read is not a gate")

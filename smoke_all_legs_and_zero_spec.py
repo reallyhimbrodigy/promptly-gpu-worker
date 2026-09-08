@@ -95,15 +95,26 @@ check("the same tiny rate over a LONG source does NOT trip it",
 check("no spec at all is a different failure, not this one",
       A.spec_implies_nothing({}, 4, 20.0) is False)
 
-# ── 6. and it is a CONTRACT failure that reaches the gate ──────────────────
-check("spec_targets_all_zero is a contract failure",
-      "spec_targets_all_zero" in A.CONTRACT_FAILURES)
+# ── 6. and it OBSERVES, it does not fail the round ────────────────────────
+# INVERTED BY THE RULING (2026-09-07). This asserted that spec_targets_all_zero
+# was a CONTRACT failure — a demand that the spec ASK for something, which is
+# the same rate-as-demand from the other direction. A brief that resolves to
+# small rates over a short source implies zero placements and that is a real
+# answer, not a bar the agent dodged.
+#
+# The observation survives: "did the agent set a bar it can fail?" is worth
+# recording and reporting. It just does not refuse anything.
+check("spec_targets_all_zero no longer fails the round",
+      "spec_targets_all_zero" not in A.CONTRACT_FAILURES,
+      "a spec that implies nothing is an observation about the brief, not a "
+      "defect in the edit")
 cv = A._contract_violations({"spec_implies_nothing": True, "failures": []})
-check("_contract_violations emits it from the ledger flag",
-      any("spec_targets_all_zero" in c for c in cv), str(cv))
-cv0 = A._contract_violations({"spec_implies_nothing": False, "failures": []})
-check("and stays quiet when the spec asks for something",
-      not any("spec_targets_all_zero" in c for c in cv0), str(cv0))
+check("a spec implying nothing produces NO violation",
+      not any("spec_targets_all_zero" in c for c in cv), str(cv))
+check("and the observation is still RECORDED",
+      'led["spec_implies_nothing"]' in open(A.__file__, encoding="utf-8").read(),
+      "removing the failure must not remove the measurement — a grade nobody "
+      "keeps is not a grade")
 
 # ── 7. THE CALL SITE READS THE FULL SPEC, NOT THE SHORTFALL-FILTERED ONE ───
 # Round 25 caught this on the check's first live run. `_spec_t` has ACCEPTED
