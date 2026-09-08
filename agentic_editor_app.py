@@ -447,7 +447,7 @@ def rationale_bytes(o):
 # releases the GIL, so the parallel arm measures real cores rather than threads.
 _BENCH_MIB = 8
 _BENCH_ITERS = 12
-BENCH_DIGEST = "56e346f0b67f2c173e04e1f24a6c4a3dc09a4439238032d1ec82f86598b6ff1d"
+BENCH_DIGEST = "b3dd2cd413edff0002fae56d1cf588e4ba61410bacd768faabd568e2be0db119"
 
 
 def _bench_buffer():
@@ -458,11 +458,23 @@ def _bench_buffer():
 
 
 def _bench_once(buf):
+    """Hash the buffer _BENCH_ITERS times, releasing the GIL throughout.
+
+    THE FIRST VERSION DID `hashlib.sha256(buf + h)`. That concatenation
+    allocates and copies 8 MiB IN PYTHON on every iteration, holding the GIL —
+    so the parallel arm serialised on memcpy and read 2.07-3.22 effective cores
+    on containers with cgroup quotas from 18 to 80. Flat across a 32x range,
+    because it was measuring the GIL, not the machine. It nearly produced the
+    finding "Modal does not give you the cores you pay for".
+
+    .update() takes the GIL only to enter the C call and releases it for the
+    hashing, and allocates nothing per iteration, so N threads use N cores.
+    """
     import hashlib
-    h = b""
+    h = hashlib.sha256()
     for _ in range(_BENCH_ITERS):
-        h = hashlib.sha256(buf + h).digest()
-    return h
+        h.update(buf)
+    return h.digest()
 
 
 def cgroup_cpu_quota():

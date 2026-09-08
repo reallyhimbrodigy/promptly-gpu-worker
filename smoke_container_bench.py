@@ -103,6 +103,32 @@ ok("wall time is sane for an idle machine (informational)",
    f"{b['single_ms']+b['par_ms']:.0f}ms — if this fires the HOST is saturated, "
    "not the instrument")
 
+# ── THE PARALLEL ARM MUST NOT BE GIL-BOUND ────────────────────────────────
+# Structural, not timing-based: the first version hashed `buf + h`, a Python
+# 8 MiB concatenation per iteration that holds the GIL. The parallel arm then
+# serialised on memcpy and read 2.07-3.22 effective cores on containers whose
+# cgroup quotas ranged 18 to 80 — flat across a 32x range — and very nearly
+# produced the finding "Modal does not provision the cores you pay for".
+#
+# Asserted on the AST rather than by timing, because a timing assertion would
+# fire on a busy machine and get waved through — the lesson from effective_cores
+# >= 1 firing at load average 382.
+import ast as _ast, inspect as _inspect
+_src = _inspect.getsource(A._bench_once)
+_fn = _ast.parse(_src.lstrip()).body[0]
+_buf_arg = _fn.args.args[0].arg
+_concats = [n for n in _ast.walk(_fn)
+            if isinstance(n, _ast.BinOp) and isinstance(n.op, _ast.Add)
+            and any(getattr(x, "id", "") == _buf_arg for x in _ast.walk(n))]
+ok("the benchmark loop does no Python-level buffer concatenation", not _concats,
+   "`buf + ...` allocates and copies the whole buffer under the GIL every "
+   "iteration, so the parallel arm measures the GIL instead of the cores and "
+   "reads flat effective_cores no matter how many cores the container has")
+ok("it hashes via update(), which releases the GIL",
+   any(isinstance(n, _ast.Call) and getattr(n.func, "attr", "") == "update"
+       for n in _ast.walk(_fn)),
+   "no .update() call — the incremental, allocation-free path is gone")
+
 if fails:
     print(f"CONTAINER-BENCH: {len(fails)} FAILED")
     for f in fails: print("  - " + f)
