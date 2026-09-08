@@ -61,12 +61,35 @@ src = open(A.__file__, encoding="utf-8").read()
 # ── 1. NO RATE ON ANY SURFACE THE AGENT READS ───────────────────────────────
 # The agent sees exactly two cached surfaces: the system prompt and the tool
 # schemas. A rate on either is a target, whatever the surrounding words say.
-_i, _j = src.index("SYSTEM = "), src.index("_KNOWLEDGE_SYSTEM")
-SURFACES = {
-    "system prompt": src[_i:_j],
-    "tool schemas": json.dumps(list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS)),
-}
-RATE = r"/25\s?s|per[ _]25s|density is a FLOOR|rule to it"
+# EVERY PROMPT CONSTANT, DERIVED — not a hand-cut slice.
+#
+# THE MISS THIS FIXES, found by Builder-1 on my own output. I defined the
+# "system prompt" surface as src[SYSTEM : _KNOWLEDGE_SYSTEM] — a slice ENDING at
+# the second prompt block, so _KNOWLEDGE_SYSTEM was never read at all. It still
+# carried "Overlay text is the WORKHORSE (~7.5 per 25s) ... RARE (~0.5 per 25s)",
+# and I reported "system prompt rate-as-demand: NONE" with that block outside
+# the window I was looking through. The claim was true of what I measured and
+# false of what I said I measured.
+#
+# It also would have survived being caught: prose that DESCRIBES a rate reads as
+# harmless beside a schema field that DEMANDS one, and the ruling bans both —
+# a rate must not "reach the agent as a target, APPEAR IN THE PROMPT, or be
+# enforced as a floor". Appearing is the clause.
+#
+# Derived by suffix so a prompt block added tomorrow is covered by this check
+# without anyone remembering to add it.
+_PROMPT_CONSTS = {n: v for n, v in vars(A).items()
+                  if isinstance(v, str) and (n == "SYSTEM" or n.endswith("SYSTEM"))}
+check("every prompt constant is found by the derivation",
+      len(_PROMPT_CONSTS) >= 2,
+      f"found {sorted(_PROMPT_CONSTS)} — a hand-cut window is what let a rate "
+      f"through last time")
+SURFACES = dict(_PROMPT_CONSTS)
+SURFACES["tool schemas"] = json.dumps(list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS))
+# CATCHES THE PROSE FORM TOO. "~7.5 per 25s" is not a demand and was never
+# meant as one; it is still a rate appearing in the prompt, which is what the
+# ruling forbids. A pattern tuned only to demands is how it survived.
+RATE = r"/25\s?s|per[ _]25s|density is a FLOOR|rule to it|~?[0-9.]+\s*per\s*25"
 for _name, _text in SURFACES.items():
     _hits = re.findall(RATE, _text)
     check(f"no per-25s rate reaches the agent via the {_name}",

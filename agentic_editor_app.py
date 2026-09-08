@@ -907,6 +907,11 @@ CONTRACT_FAILURES = frozenset({
     # this port produced (600 caption frames, 300 reel frames) were invisible to
     # every check except asking the layer directly.
     "alpha_layer_empty",
+    # A FAILED MEASUREMENT IS A FAILURE. Both were reachable before only as
+    # None, which the guard skipped — the round went green on an unanswered
+    # question. Same class as the probe that reported a number it never took.
+    "alpha_layer_absent",
+    "alpha_layer_unmeasured",
 })
 
 
@@ -1571,8 +1576,8 @@ and `03_captions.md`. The rules file is the one that tells you WHICH family
 belongs on WHICH beat — an edit built without it is guessing at composition.
 
 TWO RULES FROM THAT KNOWLEDGE THAT OVERRIDE YOUR INSTINCTS:
-- Overlay text is the WORKHORSE (~7.5 per 25s). Emphasis and SFX are RARE
-  (~0.5 per 25s). If your edit has more zooms than text, it is inverted.
+- Overlay text is the WORKHORSE. Emphasis and SFX are RARE. If your edit has
+  more zooms than text, it is inverted.
 - Every component you place must be GROUNDED in something the speaker actually
   said. A card is a quoted line. If you cannot point at the words, do not place
   it.
@@ -3186,38 +3191,101 @@ def coerce_mg_props(props):
     return out, bad
 
 
-def alpha_layer_max(path, env=None):
-    """Peak alpha across an alpha-carrying .mov, or None if unreadable.
+ALPHA_MEASURED, ALPHA_ABSENT, ALPHA_FAILED = "measured", "absent", "failed"
 
-    THE DIRECT ARTIFACT CHECK, and the one that would have caught BOTH blank
-    layers this port produced — the 600-frame empty caption pass and the
-    300-frame empty reel. A composite psnr cannot see them: compositing an EMPTY
-    layer still re-encodes, still changes the file, still clears a relative
-    threshold against its control window. Asking the LAYER what it contains is
-    the only question with a different answer.
 
-    MEASURED: an empty alpha plane reports YMAX=256 on every frame; a layer
-    carrying a StatCard reaches 3760. There is no overlap.
+def alpha_layer_state(path, env=None):
+    """(state, ymax, detail) for an alpha-carrying .mov. Never a bare number.
+
+    THE INSTRUMENT DEFECT THIS REPLACES, found by Builder-1 on round 39 and
+    worse than either of us guessed. alpha_layer_max returned a float or None,
+    and the guard read
+
+        if _reel_alpha is not None and _reel_alpha <= _ALPHA_EMPTY_YMAX:
+
+    so None — the FAILED MEASUREMENT — sailed through the check built to catch
+    blank layers. A reel with no alpha channel at all passes: ffmpeg exits 234,
+    alphaextract emits zero values, `vals` is empty, None comes back, and the
+    round goes green on a question nobody answered. Probe collapse, in the
+    instrument I shipped to stop exactly this.
+
+    THE RANGE, stated because 256 was a magic number in a threshold and nobody
+    could tell what it meant. The reel is yuva444p12le — TWELVE-BIT — so the
+    alpha plane is 0..4095 and the measured constants are limited-range:
+
+        256   = 16 << 4    limited-range black — a transparent plane
+        3760  = 235 << 4   limited-range white — a StatCard at full opacity
+        0                  FULL-range transparent
+
+    0 and 256 are both empty; they differ in range flag, not in content. Round
+    39 read 0.0, which is a genuine transparent plane and not, as it first
+    looked, a missing channel — an absent channel returns ABSENT here and
+    returned None before.
+
+    THREE STATES, because a failed measurement must never wear a number's
+    clothes:
+      MEASURED  the plane was read; ymax is real
+      ABSENT    the stream carries no alpha component at all
+      FAILED    alpha exists but nothing could be read from it
     """
     import subprocess
+    if not path or not os.path.exists(path):
+        return (ALPHA_FAILED, None, "no such file: %s" % path)
     try:
-        if not path or not os.path.exists(path):
-            return None
+        _pf = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=pix_fmt", "-of", "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=120, env=env)
+        pix = (_pf.stdout or "").strip()
+    except Exception as e:                                    # noqa: BLE001
+        return (ALPHA_FAILED, None, "ffprobe raised: %s" % e)
+    if not pix:
+        return (ALPHA_FAILED, None, "ffprobe reported no pix_fmt")
+    # THE NAME IS THE EVIDENCE. yuva*/rgba/bgra/ya* carry alpha; yuv420p does
+    # not. Asked BEFORE alphaextract because alphaextract on a stream without
+    # alpha does not return an empty plane — it fails the filter graph, and a
+    # failed graph is indistinguishable from a black one once you are only
+    # reading the numbers it did not print.
+    if not (pix.startswith(("yuva", "rgba", "bgra", "argb", "abgr", "ya"))
+            or pix.endswith(("a", "a12le", "a10le", "a16le"))):
+        return (ALPHA_ABSENT, None,
+                "pix_fmt is %s — the stream carries NO alpha component, so the "
+                "layer cannot be composited as an overlay at all" % pix)
+    try:
         r = subprocess.run(
             ["ffmpeg", "-hide_banner", "-nostats", "-i", path,
              "-vf", "alphaextract,signalstats,"
                     "metadata=print:key=lavfi.signalstats.YMAX",
              "-f", "null", "-"],
             capture_output=True, text=True, timeout=600, env=env)
-        vals = [float(x) for x in re.findall(
-            r"lavfi\.signalstats\.YMAX=([0-9.]+)",
-            (r.stdout or "") + (r.stderr or ""))]
-        return max(vals) if vals else None
-    except Exception:
-        return None
+    except Exception as e:                                    # noqa: BLE001
+        return (ALPHA_FAILED, None, "ffmpeg raised: %s" % e)
+    vals = [float(x) for x in re.findall(
+        r"lavfi\.signalstats\.YMAX=([0-9.]+)",
+        (r.stdout or "") + (r.stderr or ""))]
+    if not vals:
+        return (ALPHA_FAILED, None,
+                "pix_fmt %s claims alpha but alphaextract printed no YMAX "
+                "(ffmpeg exit %s) — the plane was never read" % (pix, r.returncode))
+    return (ALPHA_MEASURED, max(vals),
+            "%d frames read from a %s plane" % (len(vals), pix))
 
 
-_ALPHA_EMPTY_YMAX = 260.0   # measured: empty planes sit at 256, content reaches 3760
+def alpha_layer_max(path, env=None):
+    """Peak alpha, or None when it could not be measured.
+
+    KEPT for callers that only want the number. Anything DECIDING on the answer
+    must use alpha_layer_state instead — None here means "absent or failed" and
+    those are different findings that a single sentinel cannot carry.
+    """
+    _st, _y, _ = alpha_layer_state(path, env=env)
+    return _y if _st == ALPHA_MEASURED else None
+
+
+# 12-BIT LIMITED RANGE (yuva444p12le, 0..4095): a transparent plane reads 256
+# (16 << 4) or 0 (full-range), a StatCard at full opacity reaches 3760 (235 << 4).
+# The bar sits above both empty readings and far below any content.
+_ALPHA_EMPTY_YMAX = 260.0
 
 
 def mg_back_timed_start_s(mg_type, anchor_s, attack_table, default_ms=150):
@@ -4988,13 +5056,33 @@ def edit(source_key: str, brief: str,
         # still re-encodes, still changes the file, still clears a relative
         # threshold against its control window. Round 35 painted 300 real frames
         # of nothing, composited them, and all four cards measured "moved".
-        _reel_alpha = alpha_layer_max("/work/reel.mov", env=_SUBPROCESS_ENV)
+        #
+        # THREE STATES, NOT A NUMBER-OR-None. The `is not None` here was the
+        # hole: an unreadable or alpha-less reel returned None and PASSED the
+        # check built to catch it.
+        _a_st, _reel_alpha, _a_why = alpha_layer_state("/work/reel.mov",
+                                                       env=_SUBPROCESS_ENV)
         led["reel_alpha_max"] = _reel_alpha
-        if _reel_alpha is not None and _reel_alpha <= _ALPHA_EMPTY_YMAX:
+        led["reel_alpha_state"] = _a_st
+        led["reel_alpha_detail"] = _a_why
+        if _a_st == ALPHA_ABSENT:
+            fail("alpha_layer_absent",
+                 f"the reel rendered {packed['reel_frames']} frames with NO "
+                 f"alpha channel — {_a_why}. This is not an empty layer; it is "
+                 f"a layer that cannot be composited, and it wants the render "
+                 f"call fixed, not the components.")
+        elif _a_st == ALPHA_FAILED:
+            fail("alpha_layer_unmeasured",
+                 f"the reel's alpha could not be read — {_a_why}. Reported as "
+                 f"a FAILURE, never as a pass: an unanswered question is not a "
+                 f"green one.")
+        elif _reel_alpha <= _ALPHA_EMPTY_YMAX:
             fail("alpha_layer_empty",
                  f"the reel rendered {packed['reel_frames']} frames and its "
-                 f"alpha never exceeds {_reel_alpha} (empty is "
-                 f"{_ALPHA_EMPTY_YMAX}) — the components painted NOTHING.")
+                 f"alpha never exceeds {_reel_alpha} of 4095 (12-bit; empty is "
+                 f"{_ALPHA_EMPTY_YMAX}, a component reaches 3760) — {_a_why}. "
+                 f"The alpha channel is present and TRANSPARENT: the components "
+                 f"painted NOTHING.")
         if not os.path.isfile("/work/reel.mov") or os.path.getsize("/work/reel.mov") == 0:
             fail("reel_mov_missing", "the batch reported ok and wrote no .mov")
             raise RuntimeError("reel render reported ok and produced no /work/reel.mov")
@@ -5469,15 +5557,26 @@ def edit(source_key: str, brief: str,
                 # SAME QUESTION OF THE CAPTION LAYER. This is the pass that
                 # rendered 600 frames of an empty default for two whole rounds
                 # while reporting path=remotion composited=True.
-                _cap_alpha = alpha_layer_max("/work/captions.mov",
-                                             env=_SUBPROCESS_ENV)
+                _c_st, _cap_alpha, _c_why = alpha_layer_state(
+                    "/work/captions.mov", env=_SUBPROCESS_ENV)
                 led["caption_alpha_max"] = _cap_alpha
-                if (_cap_alpha is not None and _cap_alpha <= _ALPHA_EMPTY_YMAX
-                        and _cap_pages):
+                led["caption_alpha_state"] = _c_st
+                led["caption_alpha_detail"] = _c_why
+                # GATED ON _cap_pages throughout: with no pages there is nothing
+                # to paint and an empty layer is the correct answer.
+                if _cap_pages and _c_st == ALPHA_ABSENT:
+                    fail("alpha_layer_absent",
+                         f"the caption pass rendered {_cap_frames} frames with "
+                         f"NO alpha channel — {_c_why}")
+                elif _cap_pages and _c_st == ALPHA_FAILED:
+                    fail("alpha_layer_unmeasured",
+                         f"the caption layer's alpha could not be read — "
+                         f"{_c_why}")
+                elif _cap_pages and _cap_alpha <= _ALPHA_EMPTY_YMAX:
                     fail("alpha_layer_empty",
                          f"the caption pass rendered {_cap_frames} frames from "
                          f"{len(_cap_pages)} pages and its alpha never exceeds "
-                         f"{_cap_alpha} — the styles painted NOTHING.")
+                         f"{_cap_alpha} of 4095 — the styles painted NOTHING.")
                 led["caption_mov"] = "/work/captions.mov"
                 led["caption_path"] = "remotion"
             else:
