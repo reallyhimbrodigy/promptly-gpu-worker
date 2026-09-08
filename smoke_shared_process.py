@@ -109,4 +109,13 @@ assert 'render_remotion_batch([{\n            "id": "reel"' in _src or \
 assert '"expect_frames": _reel_frames_want' in _src, \
     "the reel does not declare its frame count, so a short reel — which makes "\
     "every composite trim reference nothing — would not be caught"
-print("  shared process: reel + captions in one batch, frame counts declared")
+# THE STAGE IS NAMED FOR WHAT IT DOES. It carries captions, text overlays and
+# tight-cut overlays in ONE renderMedia call, so "build_captions" attributed two
+# other families' cost to captions — and it is the largest render item in the
+# job, so the misattribution is the biggest single number in the table.
+assert "build_alpha_layer" in _src, (
+    "the alpha pass is still marked as build_captions; it has not been "
+    "caption-only since text overlays moved off the ffmpeg burn")
+assert '"families_on_layer"' in _src, (
+    "what the layer carried is not recorded, so its cost cannot be attributed")
+print("  shared process: reel + alpha layer in one batch, frame counts declared")

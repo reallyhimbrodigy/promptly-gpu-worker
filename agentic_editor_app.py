@@ -5315,7 +5315,20 @@ def edit(source_key: str, brief: str,
                 # default.
                 "expect_frames": _cap_frames,
             }], env=_SUBPROCESS_ENV)
-            _mark(led, "build_captions", _cap_t0)
+            # ── THE STAGE NAME UNDERSTATES THE STAGE ────────────────────
+            # This pass has not been caption-only since text overlays moved off
+            # the ffmpeg burn and the tight-cut overlays joined it. One alpha
+            # layer now carries THREE families, which is why it is the largest
+            # render item — and calling its 76.32s "captions" attributes two
+            # other families' cost to the wrong place.
+            #
+            # Renamed rather than split into parallel marks: the three families
+            # are painted in ONE renderMedia call over ONE frame range, so there
+            # is no per-family duration to measure — inventing three marks would
+            # produce three numbers that are each the same number. What IS
+            # measurable is WHAT THE LAYER CARRIED, and that is recorded and
+            # printed below.
+            _mark(led, "build_alpha_layer", _cap_t0)
             _cj = (_cap_res or {}).get("captions") or {}
             led["_render_seq"] = led.get("_render_seq", 0) + 1
             led["caption_render"] = {
@@ -5324,6 +5337,14 @@ def edit(source_key: str, brief: str,
                 "pages": len(_cap_pages), "frames": _cap_frames,
                 "text_overlays": len(_text_overlays),
                 "tight_cut_overlays": len(_tc_overlays),
+                # THE DENOMINATOR FOR THE STAGE. 443 frames is the cost; what
+                # those frames were carrying is the only way to read whether
+                # the cost belongs to captions or to the families that joined
+                # them.
+                "families_on_layer": sorted(
+                    ([f"caption:{len(_cap_pages)}p"] if _cap_pages else [])
+                    + ([f"text:{len(_text_overlays)}"] if _text_overlays else [])
+                    + ([f"tight_cut:{len(_tc_overlays)}"] if _tc_overlays else [])),
                 "ok": bool(_cj.get("ok")),
                 "paint_ms": _cj.get("ms"),
                 "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
@@ -8507,6 +8528,7 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"paint {(_cr.get('paint_ms') or 0)/1000:.1f}s "
               f"({_cr.get('ms_per_frame')} ms/frame)  "
               f"bundle {(_cr.get('bundle_ms') or 0)/1000:.1f}s  "
+              f"carrying {_cr.get('families_on_layer') or ['nothing']}  "
               f"recent={(r.get('ledger') or {}).get('caption_recent_in') or '[]'}  "
               f"path={(r.get('ledger') or {}).get('caption_path')}  "
               f"composited={(r.get('ledger') or {}).get('caption_composited')}"
