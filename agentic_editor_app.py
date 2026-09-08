@@ -862,6 +862,12 @@ CONTRACT_FAILURES = frozenset({
     # placement_inert cannot see it: the composite genuinely changed those
     # frames, it just spliced in an un-zoomed copy of them.
     "zoom_not_applied",
+    # AN ALPHA LAYER THAT PAINTED NOTHING. Compositing it re-encodes, changes
+    # the file, and clears every relative threshold — so placement_inert and the
+    # effect legs all pass while the picture gains nothing. Both blank layers
+    # this port produced (600 caption frames, 300 reel frames) were invisible to
+    # every check except asking the layer directly.
+    "alpha_layer_empty",
 })
 
 
@@ -3030,6 +3036,91 @@ assert "LightLeak" not in VALID_TRANSITION_TYPES, (
     "cover graphic be asked to carry a picture change")
 
 
+# ── A COMPONENT WITH WRONG-TYPED PROPS RENDERS BLANK AND EXITS 0 ────────────
+# MEASURED on round 35's own four cards, rendered locally, alpha composited over
+# white and the non-white pixels counted:
+#     value "10,000"  (string)   ->        0 pixels
+#     value 10000     (number)   ->  204,953 pixels
+#     value "three"   (word)     ->        0 pixels
+# StatCard counts up digit-by-digit to a TARGET, so a string is not a smaller
+# number, it is not a number. Round 35 declared four StatCards, every effect
+# measurement passed them as "moved" (psnr 59-61 dB against their control), and
+# all four were INVISIBLE. Nothing errored, nothing was short, the reel painted
+# 300 real frames of nothing.
+#
+# This is the real-and-wrong class again, one layer further in: the composite
+# genuinely changed the file, it just composited an empty layer.
+_MG_NUMERIC_PROPS = {"value", "total", "fromValue"}
+
+
+def coerce_mg_props(props):
+    """Numbers where the component needs numbers. Returns (props, unusable).
+
+    `unusable` names the keys that could NOT be made numeric — "three" is a word
+    and there is no number in it. That is not a coercion failure to paper over:
+    it means the beat has no quoted figure, and production's own teach says a
+    StatCard without one is the wrong component. The caller refuses rather than
+    rendering an empty card.
+    """
+    out, bad = dict(props or {}), []
+    for k in _MG_NUMERIC_PROPS:
+        if k not in out:
+            continue
+        v = out[k]
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            continue
+        # Strip the presentation a human writes around a figure: separators,
+        # currency, percent, whitespace. "10,000" and "$1.2M" are numbers with
+        # clothes on; "three" is not.
+        _t = re.sub(r"[,\s$£€%+]", "", str(v or ""))
+        _mult = 1
+        if _t[-1:].upper() in ("K", "M", "B"):
+            _mult = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}[_t[-1].upper()]
+            _t = _t[:-1]
+        try:
+            _n = float(_t)
+        except (TypeError, ValueError):
+            bad.append(k)
+            continue
+        _n *= _mult
+        out[k] = int(_n) if _n == int(_n) else _n
+    return out, bad
+
+
+def alpha_layer_max(path, env=None):
+    """Peak alpha across an alpha-carrying .mov, or None if unreadable.
+
+    THE DIRECT ARTIFACT CHECK, and the one that would have caught BOTH blank
+    layers this port produced — the 600-frame empty caption pass and the
+    300-frame empty reel. A composite psnr cannot see them: compositing an EMPTY
+    layer still re-encodes, still changes the file, still clears a relative
+    threshold against its control window. Asking the LAYER what it contains is
+    the only question with a different answer.
+
+    MEASURED: an empty alpha plane reports YMAX=256 on every frame; a layer
+    carrying a StatCard reaches 3760. There is no overlap.
+    """
+    import subprocess
+    try:
+        if not path or not os.path.exists(path):
+            return None
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostats", "-i", path,
+             "-vf", "alphaextract,signalstats,"
+                    "metadata=print:key=lavfi.signalstats.YMAX",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=600, env=env)
+        vals = [float(x) for x in re.findall(
+            r"lavfi\.signalstats\.YMAX=([0-9.]+)",
+            (r.stdout or "") + (r.stderr or ""))]
+        return max(vals) if vals else None
+    except Exception:
+        return None
+
+
+_ALPHA_EMPTY_YMAX = 260.0   # measured: empty planes sit at 256, content reaches 3760
+
+
 def mg_back_timed_start_s(mg_type, anchor_s, attack_table, default_ms=150):
     """Where the MG's frame window starts so it is SETTLED on its anchor word.
 
@@ -4700,6 +4791,18 @@ def edit(source_key: str, brief: str,
         # NO PNG -> MOV ASSEMBLY STEP. The batch writes /work/reel.mov directly
         # as ProRes 4444; the ~300-file glob-and-encode that used to stand
         # between them is gone with the sequence render that required it.
+        # ── ASK THE LAYER WHAT IT CONTAINS ──────────────────────────────────
+        # A composite psnr cannot see an EMPTY alpha layer: compositing nothing
+        # still re-encodes, still changes the file, still clears a relative
+        # threshold against its control window. Round 35 painted 300 real frames
+        # of nothing, composited them, and all four cards measured "moved".
+        _reel_alpha = alpha_layer_max("/work/reel.mov", env=_SUBPROCESS_ENV)
+        led["reel_alpha_max"] = _reel_alpha
+        if _reel_alpha is not None and _reel_alpha <= _ALPHA_EMPTY_YMAX:
+            fail("alpha_layer_empty",
+                 f"the reel rendered {packed['reel_frames']} frames and its "
+                 f"alpha never exceeds {_reel_alpha} (empty is "
+                 f"{_ALPHA_EMPTY_YMAX}) — the components painted NOTHING.")
         if not os.path.isfile("/work/reel.mov") or os.path.getsize("/work/reel.mov") == 0:
             fail("reel_mov_missing", "the batch reported ok and wrote no .mov")
             raise RuntimeError("reel render reported ok and produced no /work/reel.mov")
@@ -5150,6 +5253,18 @@ def edit(source_key: str, brief: str,
                      f"did not receive the plan — check the props nesting before "
                      f"reading any ms/frame out of this run.")
             if _cj.get("ok") and os.path.exists("/work/captions.mov"):
+                # SAME QUESTION OF THE CAPTION LAYER. This is the pass that
+                # rendered 600 frames of an empty default for two whole rounds
+                # while reporting path=remotion composited=True.
+                _cap_alpha = alpha_layer_max("/work/captions.mov",
+                                             env=_SUBPROCESS_ENV)
+                led["caption_alpha_max"] = _cap_alpha
+                if (_cap_alpha is not None and _cap_alpha <= _ALPHA_EMPTY_YMAX
+                        and _cap_pages):
+                    fail("alpha_layer_empty",
+                         f"the caption pass rendered {_cap_frames} frames from "
+                         f"{len(_cap_pages)} pages and its alpha never exceeds "
+                         f"{_cap_alpha} — the styles painted NOTHING.")
                 led["caption_mov"] = "/work/captions.mov"
                 led["caption_path"] = "remotion"
             else:
@@ -5794,6 +5909,27 @@ def edit(source_key: str, brief: str,
             if not isinstance(_cprops, dict) or not _cprops:
                 _cprops = {"value": hero,
                            "label": str(v.get("card_label") or "")[:60]}
+            # NUMBERS WHERE THE COMPONENT NEEDS NUMBERS. card_hero arrives as
+            # the words the speaker said — "10,000", "$1.2M", "three" — and a
+            # StatCard counts up to a TARGET. Round 35 passed all four heroes
+            # through verbatim and rendered four invisible cards.
+            _cprops, _bad_props = coerce_mg_props(_cprops)
+            if _bad_props:
+                # NOT A COERCION FAILURE TO PAPER OVER. "three" is a word; the
+                # beat has no quoted figure, and production's own teach is that
+                # a StatCard without one is the WRONG COMPONENT. Refusing costs
+                # the placement; rendering it costs the placement AND reports
+                # success.
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": f"{_ctype} needs a number for "
+                                      f"{_bad_props} and got "
+                                      f"{[_cprops.get(k) for k in _bad_props]} "
+                                      f"— a non-numeric value renders a BLANK "
+                                      f"card with no error. If the beat has no "
+                                      f"quoted figure this is the wrong "
+                                      f"component: read 05_motion_graphics for "
+                                      f"one that carries a phrase."})
+                continue
             _cards.append({"t_start": round(_mg_at, 2), "type": _ctype,
                            "duration_s": min(2.5, b["t_end"] - b["t_start"]),
                            "hero": hero, "label": str(v.get("card_label") or "")[:60],
