@@ -70,6 +70,17 @@ check("the batch records what startup was amortised over",
 check("bundle time is captured so the saving can be measured, not assumed",
       '"bundle_ms"' in src)
 
+# ── THE MEASUREMENT SETTING MUST NOT LEAK INTO THE THING MEASURED ─────────
+# It shipped at concurrency 1, copied from the probe where 1 was deliberate to
+# keep the marginal ms/frame clean — after that same probe established 8 is
+# 2.63x faster. Round 32 painted 443 caption frames at 299.1 ms/frame.
+check("the batch does NOT hardcode concurrency 1",
+      "concurrency: 1," not in mjs,
+      "that is the measurement harness's setting, not production's")
+check("concurrency defaults to the measured flat top of the curve",
+      "PROMPTLY_REMOTION_CONCURRENCY || 8" in mjs,
+      "saturates at 4; 8 is the top of the plateau on an 8-CPU box")
+
 if fails:
     print(f"SHARED-PROCESS: {len(fails)} FAILED")
     for f in fails: print("  - " + f)

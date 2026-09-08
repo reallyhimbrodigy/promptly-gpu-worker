@@ -51,7 +51,24 @@ for (const j of jobs) {
       ...(j.alpha
         ? { codec: "prores", proResProfile: "4444", pixelFormat: "yuva444p10le" }
         : { codec: j.codec ?? "h264" }),
-      logLevel: "error", concurrency: 1,
+      logLevel: "error",
+      // CONCURRENCY 8, NOT 1.
+      //
+      // This shipped at 1 because it was copied from the measurement harness,
+      // where 1 was chosen deliberately to keep the marginal ms/frame clean.
+      // The setting leaked from the instrument into the thing being measured —
+      // after a whole probe had established that 8 is 2.63x faster.
+      //
+      // MEASURED in-container, one run, marginal over 180 frames:
+      //   conc 1  219.3 ms/frame      conc 6  88.8  (2.47x)
+      //   conc 4   90.7 ms/frame      conc 8  83.5  (2.63x)
+      // It saturates at 4 and the ceiling is NOT the encoder — a paint-only
+      // sweep with renderFrames flattens identically, so more painters past 4
+      // buy ~8%. 8 is chosen as the flat top of that curve on an 8-CPU box.
+      //
+      // COST OF THE BUG, round 32 talking_head: 443 caption frames painted at
+      // 299.1 ms/frame for 132.5s of wall.
+      concurrency: Number(process.env.PROMPTLY_REMOTION_CONCURRENCY || 8),
     });
     console.log(`JOB ${JSON.stringify({ id: j.id, ok: true, ms: Date.now() - started })}`);
   } catch (e) {
