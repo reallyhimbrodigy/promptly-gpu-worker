@@ -911,6 +911,22 @@ CONTRACT_FAILURES = frozenset({
     # None, which the guard skipped — the round went green on an unanswered
     # question. Same class as the probe that reported a number it never took.
     "card_props_mismatch",
+    # THE PLAN AND THE OUTPUT DISAGREE — never green, whatever the cause.
+    #
+    # Round 40 scored "all five green" while losing 3 of 3 cards, 1 of 1 zoom
+    # and 1 of 3 sfx. The refusals were CORRECT (refusing beats rendering a
+    # blank card), but a component the agent ruled did not reach the video, and
+    # that is a defect whether the fault is the pipeline's or the agent's.
+    #
+    # THIS IS NOT THE DENSITY RUBRIC RETURNING. Placing FEWER components is the
+    # agent's call and stays green — that ruling stands. This fires only when
+    # the agent DID rule something and the pipeline dropped it, which is plan
+    # and output disagreeing, not a rate being missed.
+    #
+    # Fail loudly to us, never to the user: the answer to a correct refusal is
+    # for the agent to rule a component that CAN be built, not for the round to
+    # call the loss green.
+    "ruled_not_built",
     "alpha_layer_absent",
     "alpha_layer_unmeasured",
 })
@@ -6667,8 +6683,25 @@ def edit(source_key: str, brief: str,
         led["execute_plan"] = {"steps": steps, "built": built, "ruled": ruled,
                                "ruled_but_not_built": gap, "skips": _skips,
                                "unbalanced": _unbalanced}
+        # THE SKIP REASON TRAVELS WITH THE VIOLATION.
+        #
+        # Round 40 lost a zoom to a 404 downloading its source (pipeline fault)
+        # and three cards to foreign props (agent fault) — the SAME NAME for two
+        # entirely different things, and the violation text carried neither. A
+        # reader gets one number and cannot tell which, which is the diagnosis
+        # gap that cost a bisect on card_props.
+        _why_by_fam = {}
+        for _sk in (_skips or []):
+            _f = _sk.get("family")
+            if _f and _f not in _why_by_fam and _sk.get("why"):
+                _why_by_fam[_f] = str(_sk["why"])[:160]
         for k, (rl, bl) in gap.items():
-            fail("ruled_not_built", f"{k}: ruled {rl}, built {bl}")
+            _why = _why_by_fam.get(k)
+            fail("ruled_not_built",
+                 f"{k}: ruled {rl}, built {bl}"
+                 + (f" — {_why}" if _why else
+                    " — NO SKIP REASON RECORDED, so why it was dropped is"
+                    " unknown; that absence is itself the thing to fix"))
         # A FAMILY THE SPEC ASKED FOR THAT BUILT ZERO IS A FAILURE, not a taste
         # call. "Clean and professional. Few cuts, SUBTLE OVERLAYS ONLY, no
         # sound effects" produced zero overlays — and "subtle" means fewer, not
