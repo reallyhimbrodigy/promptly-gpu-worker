@@ -38,7 +38,23 @@ for t in TARGETS:
     tree = ast.parse(src)
 
     # ── module-level file reads on tree-relative paths ─────────────────────
+    # MODULE LEVEL MEANS MODULE LEVEL.
+    #
+    # This walked tree.body and then ast.walk'd INTO each node — which descends
+    # through function bodies — so every open() anywhere inside a top-level
+    # function was reported as "module-level". Six of them in
+    # agentic_editor_app.py alone, all correctly written inside functions,
+    # exactly as this smoke's own message tells you to do ("read it inside the
+    # function"). It was failing files for taking its advice.
+    #
+    # The cost is not the noise: a check that is permanently red is one people
+    # learn to wave through, and these six were MASKING whatever real finding
+    # arrives next in the same file. Skipping the function bodies is what makes
+    # the remaining findings mean something.
+    _skip = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
     for node in tree.body:
+        if isinstance(node, _skip):
+            continue
         for n in ast.walk(node):
             if not (isinstance(n, ast.Call) and getattr(n.func, "id", "") == "open"):
                 continue
