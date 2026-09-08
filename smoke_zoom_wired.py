@@ -199,11 +199,43 @@ check("the absolute geometry bar is gone",
 check("the scale-fit bar is the measured one",
       A._ZOOM_SCALE_FIT_FAIL_DB == -8.0,
       f"is {A._ZOOM_SCALE_FIT_FAIL_DB}")
-check("it clears the worst REAL delta measured (-4.68, flat field)",
-      A._ZOOM_SCALE_FIT_FAIL_DB < -4.68 - 2.0,
-      "a real zoom on a flat field must not read as a passthrough")
-check("it sits above the best PASSTHROUGH delta measured (-10.45)",
-      A._ZOOM_SCALE_FIT_FAIL_DB > -10.45 + 2.0)
+# ── CALIBRATED ON THE POPULATION IT WILL ACTUALLY MEASURE ──────────────────
+# All seven types, both arms, on ZAC'S REAL TALKING-HEAD FOOTAGE — the first
+# real content this project has measured an instrument against:
+#     type            real     pass      gap
+#     SmoothPush      1.35   -17.36   -18.71
+#     SnapReframe     1.88   -16.68   -18.56
+#     FocusWindow    -3.89   -19.86   -15.97
+#     StepZoom        1.52   -18.76   -20.28
+#     LetterboxPush  -0.91   -16.58   -15.67
+#     DepthPull      -2.00   -17.91   -15.91
+#     StagedPush      1.33   -17.85   -19.18
+#     reals -3.89..+1.88   passes -19.86..-16.58   7/7 correct
+#
+# The margins WIDEN on real footage — 4.11 dB below the worst real and 8.58 dB
+# above the best passthrough, against 3.3 and 2.5 on synthetic fixtures. Real
+# content has structure at several scales, so a passthrough is unmistakably not
+# a zoom, while flat synthetic content compresses everything toward the middle.
+#
+# CONTRAST WITH THE ABSOLUTE BAR IT REPLACED, on the same real clips: a 1.10x
+# zoom against the unzoomed same second reads 19.13 dB on this talking head and
+# 22.33 on a real car clip — so a 20.0 dB absolute bar had 0.87 dB of margin on
+# one and NEGATIVE margin on the other. It would have called a perfectly applied
+# zoom on real footage a passthrough before it rendered.
+#
+# THESE CLIPS ARE CALIBRATION, NOT AN ARM. The durable-sources law governs A/B
+# arms and baselines — what you MEASURE. An instrument is calibrated against the
+# population it will be pointed at, and that population is real footage; that is
+# the whole finding here.
+check("it clears the worst REAL-FOOTAGE delta (-3.89, FocusWindow)",
+      A._ZOOM_SCALE_FIT_FAIL_DB < -3.89 - 2.0,
+      "a real zoom on real footage must never read as a passthrough")
+check("it sits above the best REAL-FOOTAGE passthrough (-16.58)",
+      A._ZOOM_SCALE_FIT_FAIL_DB > -16.58 + 2.0)
+check("it also holds on the synthetic extremes (flat real -4.68, "
+      "detailed passthrough -10.45)",
+      -10.45 + 2.0 < A._ZOOM_SCALE_FIT_FAIL_DB < -4.68 - 2.0,
+      "the synthetic corpus is the TIGHTER case and the bar must survive both")
 check("the test is ONE-SIDED — only strong evidence fails",
       "_gch = None if _gd is None else (_gd > _ZOOM_SCALE_FIT_FAIL_DB)" in src,
       "a false 'not applied' sends someone to edit a component that works, "
