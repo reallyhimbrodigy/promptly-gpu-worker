@@ -1926,6 +1926,9 @@ class PromptlyPrewarmWorker:
         By the time the real render request arrives, the source is on the
         Modal Volume and the download step is a no-op.
         """
+        _deny = _check_run_auth(body, "prewarm")
+        if _deny is not None:
+            return _deny
         result = self._prewarm({"input": body})
         try:
             self._prewarm_volume.commit()
@@ -1986,6 +1989,9 @@ class PromptlyValidator:
         full upload. When false, `user_message` is the text to show the
         user with a "Choose Different Video" button.
         """
+        _deny = _check_run_auth(body, "validate")
+        if _deny is not None:
+            return _deny
         return self._validate({"input": body})
 
 
@@ -2025,6 +2031,9 @@ class PromptlyDiagnoseUpload:
         of what stage the upload is at (or failed at). See handler's
         diagnose_upload_handler for the full schema.
         """
+        _deny = _check_run_auth(body, "diagnose")
+        if _deny is not None:
+            return _deny
         return self._diagnose({"input": body})
 
 
@@ -2130,9 +2139,43 @@ def _run_auth_verdict(body):
     return "ok" if _hmac.compare_digest(_given, _expected) else "mismatch"
 
 
-def _run_auth_enforcing():
+# THE ENDPOINTS `=1` ARMS — FROZEN, DELIBERATELY, AT THE MEASURED PAIR.
+#
+# PROMPTLY_RUN_AUTH_ENFORCE=1 is LIVE in production (observed 2026-09-07:
+# 40/40 `[runauth] ... enforcing=1`, every verdict ok). run_job and warmup
+# earned that arming the correct way — dark observer first, a real denominator,
+# then the flip.
+#
+# So arming is now PER ENDPOINT, and the legacy `=1` value is frozen to exactly
+# the two endpoints that were measured under it. Without this freeze, merely
+# ADDING the dark observer to prewarm/validate/diagnose would have armed all
+# three the instant the image deployed — enforcement is read from the
+# environment, the environment already says 1, and the observer and the
+# enforcer are the same call. That is the two-phase rollout defeating itself:
+# the phase-1 observer would BE phase 2, on endpoints whose callers have never
+# been proven to send the secret, and whose classes have never been proven to
+# mount promptly-run-auth at all.
+#
+# To arm a new endpoint, name it: PROMPTLY_RUN_AUTH_ENFORCE=run_job,warmup,validate
+# A name that is never added is never armed. Adding an endpoint to this tuple is
+# what the deploy gate refuses.
+_RUN_AUTH_LEGACY_ARMED = ("run_job", "warmup")
+
+
+def _run_auth_enforcing(endpoint):
+    """Is THIS endpoint armed? Per-endpoint, read from the environment.
+
+    "" / unset -> nothing armed.
+    "1"        -> the legacy pair only (never a newly-observed endpoint).
+    "a,b c"    -> exactly the endpoints named.
+    """
     import os as _os
-    return str(_os.environ.get("PROMPTLY_RUN_AUTH_ENFORCE", "") or "").strip() == "1"
+    _raw = str(_os.environ.get("PROMPTLY_RUN_AUTH_ENFORCE", "") or "").strip()
+    if not _raw:
+        return False
+    if _raw == "1":
+        return endpoint in _RUN_AUTH_LEGACY_ARMED
+    return endpoint in {p.strip() for p in _raw.replace(",", " ").split() if p.strip()}
 
 
 def _check_run_auth(body, endpoint):
@@ -2143,7 +2186,7 @@ def _check_run_auth(body, endpoint):
     carries it" into a count with a denominator.
     """
     _v = _run_auth_verdict(body)
-    _armed = _run_auth_enforcing()
+    _armed = _run_auth_enforcing(endpoint)
     print(f"[runauth] endpoint={endpoint} verdict={_v} enforcing={int(_armed)}",
           flush=True)
     if not _armed or _v == "ok":

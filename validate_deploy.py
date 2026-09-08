@@ -8379,14 +8379,41 @@ def _inbound_run_auth_wired():
     for _n in ("_run_auth_verdict", "_run_auth_enforcing", "_check_run_auth"):
         assert _n in _top, f"{_n} is missing from modal_app.py top level"
 
-    # (1) both endpoints check FIRST
+    # (1) EVERY public POST endpoint checks FIRST.
+    #
+    # This list is derived, not hand-kept: any method carrying a
+    # @modal.fastapi_endpoint(method="POST") decorator must call _check_run_auth
+    # as its first executable statement. A new public POST endpoint added
+    # without an auth check fails the deploy the day it is written — which is
+    # the regression that put validate/prewarm/diagnose on the open internet
+    # for months while run_job was being carefully hardened three screens away.
     _methods = {}
     for _c in _tree.body:
         if isinstance(_c, _ast.ClassDef):
             for _f in _c.body:
                 if isinstance(_f, _ast.FunctionDef):
                     _methods[_f.name] = _f
-    for _name in ("run_job", "warmup"):
+    def _is_post_endpoint(_f):
+        for _d in getattr(_f, "decorator_list", []):
+            if not isinstance(_d, _ast.Call):
+                continue
+            if getattr(_d.func, "attr", "") != "fastapi_endpoint":
+                continue
+            for _kw in _d.keywords:
+                if (_kw.arg == "method" and isinstance(_kw.value, _ast.Constant)
+                        and _kw.value.value == "POST"):
+                    return True
+        return False
+
+    _post_endpoints = sorted(n for n, f in _methods.items() if _is_post_endpoint(f))
+    # The pair that has been armed since 2026-09-06, plus the three that this
+    # gate's own commit put behind the dark observer. Named so that a DELETED
+    # endpoint check is a gate failure too, not a silently shorter loop.
+    for _must in ("run_job", "warmup", "prewarm", "validate", "diagnose"):
+        assert _must in _post_endpoints, (
+            f"{_must} is no longer a POST fastapi_endpoint method — the endpoint "
+            f"moved or was renamed; re-wire the auth check and update this gate")
+    for _name in _post_endpoints:
         _f = _methods.get(_name)
         assert _f is not None, f"{_name} not found — the endpoint moved; re-wire the auth check"
         _body = [st for st in _f.body
@@ -8464,6 +8491,61 @@ def _inbound_run_auth_wired():
         isinstance(r.value, _ast.Constant) and r.value.value is True for r in _rets), (
         "_run_auth_enforcing returns a hardcoded True — enforcement would be "
         "armed by code, with no way to disarm without shipping a new image")
+
+    # (5) ADDING THE OBSERVER MUST NEVER ARM THE ENDPOINT.
+    #
+    # PROMPTLY_RUN_AUTH_ENFORCE=1 is LIVE (measured 2026-09-07: 40/40 [runauth]
+    # lines read enforcing=1). Enforcement is read from the environment and the
+    # observer and the enforcer are the SAME call, so before this leg existed,
+    # wiring _check_run_auth into a new endpoint armed it the instant the image
+    # deployed — the phase-1 dark observer would have been phase 2, on callers
+    # never proven to send the secret and on classes never proven to mount
+    # promptly-run-auth. The two-phase rollout would have defeated itself.
+    #
+    # The executable property: `=1` arms EXACTLY the pair that was measured
+    # under it. Every other endpoint must be named explicitly to be armed.
+    _legacy = [n for n in _tree.body if isinstance(n, _ast.Assign)
+               and getattr(n.targets[0], "id", "") == "_RUN_AUTH_LEGACY_ARMED"]
+    assert _legacy, (
+        "_RUN_AUTH_LEGACY_ARMED is missing — arming is global again, so adding "
+        "the dark observer to any new endpoint arms it on deploy")
+    _legacy_val = _ast.literal_eval(_legacy[0].value)
+    assert tuple(_legacy_val) == ("run_job", "warmup"), (
+        f"_RUN_AUTH_LEGACY_ARMED is {_legacy_val!r}, not ('run_job', 'warmup'). "
+        f"PROMPTLY_RUN_AUTH_ENFORCE=1 is live in production: anything added to "
+        f"this tuple is armed by the ALREADY-SET value, with no measurement and "
+        f"no deploy of the flag. Arm a new endpoint by NAMING it in the secret "
+        f"(PROMPTLY_RUN_AUTH_ENFORCE=run_job,warmup,validate), never by widening "
+        f"this tuple.")
+
+    # DRIVE IT, do not read it. A tuple with the right contents proves nothing
+    # about the function that consumes it; this executes every branch.
+    _ns5 = {}
+    exec(compile(_ast.Module(_legacy + [_ef], []), "<gate>", "exec"), _ns5)
+    _enf = _ns5["_run_auth_enforcing"]
+    import os as _os5
+    _prev = _os5.environ.get("PROMPTLY_RUN_AUTH_ENFORCE")
+    try:
+        _os5.environ["PROMPTLY_RUN_AUTH_ENFORCE"] = "1"
+        for _armed_ep in ("run_job", "warmup"):
+            assert _enf(_armed_ep) is True, (
+                f"=1 no longer arms {_armed_ep} — this DISARMS live production auth")
+        for _dark_ep in ("prewarm", "validate", "diagnose"):
+            assert _enf(_dark_ep) is False, (
+                f"=1 arms {_dark_ep}: the live flag would enforce on it the "
+                f"moment this image deploys, with no dark measurement")
+        _os5.environ["PROMPTLY_RUN_AUTH_ENFORCE"] = "run_job,warmup,validate"
+        assert _enf("validate") is True and _enf("prewarm") is False, (
+            "explicit per-endpoint arming does not work — an endpoint cannot be "
+            "armed one at a time, so the only way to arm is all at once")
+        _os5.environ["PROMPTLY_RUN_AUTH_ENFORCE"] = ""
+        assert not any(_enf(e) for e in ("run_job", "warmup", "validate")), (
+            "an EMPTY flag arms something — disarming is no longer one flip")
+    finally:
+        if _prev is None:
+            _os5.environ.pop("PROMPTLY_RUN_AUTH_ENFORCE", None)
+        else:
+            _os5.environ["PROMPTLY_RUN_AUTH_ENFORCE"] = _prev
 
 
 @check("MODELS-NOT-SYMLINK LAW (Zac RULE-1, 2026-08-03, forged from the recurring 'Symlink loop from .../models' deploy death): `models/` is a GITIGNORED asset directory add_local_file-mounted into the image, but it was committed to HEAD as a self-referential symlink blob (the 4254ac7 clobber), so any `git checkout`/stash reverts the working tree to `models -> models` and `modal deploy` dies traversing the loop — while every source gate still passes. This gate closes the class: (1) `models` MUST be a real directory, never a symlink; (2) every `models/...` path modal_app.py mounts via add_local_file MUST exist as a real non-symlink file; (3) the RIFE weights (flownet.pkl) must be the real ~22MB blob, not a stub. Derived dynamically from modal_app.py so a new mounted asset is covered the day it is written.")

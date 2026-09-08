@@ -50,7 +50,15 @@ for _n in _tree.body:
     if isinstance(_n, ast.FunctionDef) and _n.name in _wanted:
         exec(compile(ast.Module([_n], []), "<smoke>", "exec"), _ns)
         _found.add(_n.name)
-    if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "") == "_RUN_AUTH_FIELD":
+    # EVERY module-level _RUN_AUTH_* constant, not a hand-kept list of one.
+    # The named-constant version broke the moment _RUN_AUTH_LEGACY_ARMED was
+    # added: the extracted function raised NameError deep inside the first
+    # assertion. It failed LOUDLY here, which is luck — the gate's own leg (3)
+    # carries a comment warning that a missing constant can make a leg "silently
+    # test nothing". A prefix match means a new constant arrives with its
+    # function instead of being remembered.
+    if (isinstance(_n, ast.Assign)
+            and getattr(_n.targets[0], "id", "").startswith("_RUN_AUTH")):
         exec(compile(ast.Module([_n], []), "<smoke>", "exec"), _ns)
 
 ok(_found == _wanted,
@@ -127,6 +135,43 @@ if _found == _wanted:
        "ARMED with an UNSET server secret ALLOWED the request (or refused it "
        "without a 403) — an unset secret must never mean 'let everyone in'")
 
+    # ── PER-ENDPOINT ARMING ────────────────────────────────────────────────
+    # PROMPTLY_RUN_AUTH_ENFORCE=1 is LIVE in production (measured 2026-09-07:
+    # 40/40 [runauth] lines read enforcing=1). The observer and the enforcer are
+    # the same call, so without per-endpoint arming, wiring _check_run_auth into
+    # prewarm/validate/diagnose would have enforced on them the instant the
+    # image deployed — no dark phase, no denominator, and 403s to callers never
+    # proven to send the secret. These assertions are the reason the observer
+    # can ship at all.
+    env(secret=SECRET, enforce="1")
+    for _ep in ("run_job", "warmup"):
+        ok(check({}, _ep) is not None,
+           f"=1 no longer arms {_ep} — this DISARMS auth that is live today")
+    for _ep in ("prewarm", "validate", "diagnose"):
+        ok(check({}, _ep) is None,
+           f"=1 armed {_ep}: the ALREADY-SET live flag would 403 it on deploy, "
+           f"turning the dark observer into a blind arm")
+    # A named endpoint arms, and ONLY it.
+    env(secret=SECRET, enforce="run_job,warmup,validate")
+    ok(check({}, "validate") is not None,
+       "an explicitly named endpoint is not armed — there is no way to arm one "
+       "endpoint at a time, so the only available move is to arm everything")
+    ok(check({}, "prewarm") is None,
+       "arming validate also armed prewarm — arming is not per-endpoint")
+    ok(check({FIELD: SECRET}, "validate") is None,
+       "an armed endpoint refused a CORRECT secret")
+    # Whitespace-separated form, and an unknown name arms nothing.
+    env(secret=SECRET, enforce="validate diagnose")
+    ok(check({}, "diagnose") is not None, "space-separated arming does not parse")
+    ok(check({}, "run_job") is None,
+       "an explicit list that omits run_job still armed it — the list is not "
+       "authoritative, so it cannot be used to disarm one endpoint")
+    env(secret=SECRET, enforce="not_an_endpoint")
+    for _ep in ("run_job", "warmup", "prewarm", "validate", "diagnose"):
+        ok(check({}, _ep) is None,
+           f"an unrecognised flag value armed {_ep} — a typo in the secret "
+           f"would 403 production")
+
     # ── timing safety, asserted on the AST ─────────────────────────────────
     # NOT a substring search. The first version of this check was
     # `"compare_digest" in <function source>`, and it PASSED against a mutant
@@ -187,4 +232,4 @@ if FAIL:
         print("  - " + f)
     sys.exit(1)
 print("ok smoke_run_auth — 9 verdicts, dark allows all, armed fails closed "
-      "(incl. unset server secret), compare_digest, both endpoints check FIRST")
+      "(incl. unset server secret), compare_digest, 5 endpoints check FIRST, per-endpoint arming")
