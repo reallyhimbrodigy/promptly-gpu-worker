@@ -611,6 +611,14 @@ CONTRACT_FAILURES = frozenset({
     # Asking the artifact what it holds is the only defence, and a mismatch has
     # to fail the round.
     "render_frames_mismatch",
+    # A ZOOM THAT IS THE SAME PICTURE AS ITS OWN SOURCE. ClipRenderer mounts a
+    # zoom only under `clip.zoomEffect && clip.src`; without the pre-extracted
+    # file it renders the footage un-zoomed and says nothing — right frame
+    # count, right duration, real footage. Seven types once produced seven
+    # BYTE-IDENTICAL files this way at a plausible ~1020 ms/frame.
+    # placement_inert cannot see it: the composite genuinely changed those
+    # frames, it just spliced in an un-zoomed copy of them.
+    "zoom_not_applied",
 })
 
 
@@ -1538,7 +1546,7 @@ KNOWLEDGE_TOOLS = [{
     "description": (
         "Rule on EVERY beat in ONE call. Pass the complete list — one entry per "
         "beat in your brief, each with treatment (a LIST from card|text|sfx|"
-        "zoom|none — more than one allowed), cut "
+        "zoom|none — more than one allowed), zoom_arc when you rule 'zoom', cut "
         "('keep'|'cut') and a why about that beat. This is one turn instead of "
         "one turn per beat, and the message history stops growing by a verdict "
         "every turn. If you miss any it tells you which; call again with only "
@@ -1605,6 +1613,28 @@ KNOWLEDGE_TOOLS = [{
                                                     "phrase the card is ABOUT"},
                                  "card_label": {"type": "string",
                                      "description": "the card's supporting line"},
+                                 # ARC POSITION IS JUDGEMENT; THE MOVE IS A
+                                 # LOOKUP. Which beat is the payoff cannot be
+                                 # derived from timing — but once you say so,
+                                 # WHICH of the seven zooms goes there is
+                                 # production's ZOOM_ARC_HOMES plus the vibe,
+                                 # and the harness does it. Naming the move
+                                 # yourself would let a snap land on a payoff,
+                                 # which is the one thing payoff purity forbids.
+                                 "zoom_arc": {"type": "string",
+                                     "enum": ["hook", "build", "mid_peak",
+                                              "payoff", "breather", "close"],
+                                     "description": "REQUIRED when treatment "
+                                                    "includes 'zoom': what this "
+                                                    "moment IS in the arc. hook "
+                                                    "= the opening grab; build "
+                                                    "= carrying toward "
+                                                    "something; mid_peak = a "
+                                                    "local high; payoff = THE "
+                                                    "reason-to-exist line, at "
+                                                    "most one per video; "
+                                                    "breather = a lull; close = "
+                                                    "the landing."},
                                  "why": {"type": "string"}},
                              "required": ["beat", "treatment", "cut", "why"]}}},
                      "required": ["verdicts"]},
@@ -2280,6 +2310,57 @@ _AUDIO_INERT_FLOOR_DB = -8.0
 # with no free span is a real case. A weaker measurement that says which one it
 # used is honest; one that silently degrades is the thing being fixed.
 _VIDEO_REL_MARGIN_DB = 3.0
+
+# ── A ZOOM MUST DIFFER FROM ITS OWN SOURCE ──────────────────────────────────
+# The silent-passthrough failure renders the extracted clip UN-ZOOMED, which is
+# a plain re-encode of that file. Measured on this repo's fixtures:
+#     re-encode, nothing drawn   45.10 dB
+#     real geometric transform   15.06 dB
+# 40 dB sits between them with 5 dB of margin below the re-encode floor and 25
+# above the transform. This is NOT the relative bar the other families use:
+# there is no un-zoomed control window inside a clip that is zoomed end to end,
+# so the comparison is against the SOURCE the render was made from — which is a
+# stronger reference than a control window, not a weaker one.
+# MEASURED, and my first guess was wrong by 20 dB. I set this at 40.0 from an
+# ffmpeg re-encode reading 45.1 dB — but the passthrough does not go through
+# ffmpeg, it goes through Chromium's decode/PNG/encode path, which loses far
+# more. Rendered locally, all seven types, real arm vs passthrough arm, psnr
+# against the clip's own source:
+#     real         15.94  16.01  16.02  16.40  15.99  16.68     (six types)
+#     passthrough  24.59  26.08  26.09  26.11  26.11  26.11
+# At 40.0 BOTH arms read as changed and the check would have passed a
+# passthrough — the exact failure it exists to catch. 20.0 sits between them
+# with 4.6 dB of margin below the passthrough floor and 3.3 dB above the real
+# ceiling.
+_ZOOM_GEOMETRY_MAX_DB = 20.0
+
+# ── STAGEDPUSH, WHICH NEEDS STAGES OR IT SILENTLY DOES NOTHING ──────────────
+# StagedPush.tsx: `const stages = ev.stages ?? []; if (stages.length < 2)
+# continue;`. An event without them renders a PASSTHROUGH — and that is exactly
+# what the geometry check caught on its first use: StagedPush's "real" arm was
+# byte-for-byte the behaviour of its passthrough arm (psnr@1.0 24.59 for both),
+# while the other six separated cleanly. Ported from production:
+_STAGED_PUSH_STEP_SCALE = 0.08   # EQUAL steps (Zac ruling): 1.08 / 1.16 / 1.24
+_STAGED_PUSH_MS = 280            # smooth-fast push into each stage
+_STAGED_PUSH_HOLD_MS = 260       # hold at full push after the final word
+_STAGED_PUSH_RELEASE_MS = 360    # ease-out when the phrase continues
+
+
+def staged_push_stages(words, t0, t1, clip_start_s):
+    """2-3 building stages from the words inside the beat, clip-local.
+
+    Each stage's atMs is a WORD ONSET and the scale climbs in equal +8% steps —
+    production's derivation, not a shape invented here. Returns [] when fewer
+    than two words fall in the window, because a staged push with one stage is
+    not a staged push and the component refuses it anyway.
+    """
+    _in = [w for w in (words or [])
+           if t0 <= float(w.get("s", -1)) <= t1][:3]
+    if len(_in) < 2:
+        return []
+    return [{"atMs": int(round((float(w["s"]) - clip_start_s) * 1000.0)),
+             "scale": round(1.0 + _STAGED_PUSH_STEP_SCALE * (i + 1), 4)}
+            for i, w in enumerate(_in)]
 
 
 def uncovered_families(placements, effects):
@@ -4460,7 +4541,30 @@ def edit(source_key: str, brief: str,
                 fail("caption_composite_failed", (_ccr.stderr or "")[-200:])
 
         _tz0 = time.time()
-        # 3. ZOOMS, one per zoom ruling, velocity capped by build_zoom itself.
+        # 3. ZOOMS — production's SEVEN components, not one generic zoompan.
+        #
+        # THREE THINGS THIS PATH GETS THAT THE FILTERGRAPH COULD NOT:
+        #   the TYPE comes from the arc position the agent ruled, scoped by the
+        #   vibe (ZOOM_ARC_HOMES + pick_zoom_type); the SPAN is the move's own
+        #   designed natural duration; and the clip is back-timed by
+        #   ZOOM_PEAK_REACH_MS so the PERCEPTUAL peak lands on the beat rather
+        #   than the ramp-out endpoint landing there with scale already back at
+        #   1.0 — which is what "the zoom feels late/missed" always was.
+        #
+        # PRE-EXTRACTION IS LOAD-BEARING AND ITS ABSENCE IS SILENT.
+        # ClipRenderer mounts a zoom component only under
+        # `if (clip.zoomEffect && clip.src)`. With no per-clip file it falls
+        # through to a plain <Video> and renders the footage UN-ZOOMED, with no
+        # error and no missing output. Measured while probing paint rates: seven
+        # different zoom types produced seven BYTE-IDENTICAL files at a
+        # perfectly plausible ~1020 ms/frame. Every per-file signal looked
+        # right. So the extract is not an optimisation, it is the thing that
+        # makes the zoom exist, and `_zoom_geometry_ok` below refuses to call
+        # this family built until the pixels prove it.
+        _zoom_jobs, _zoom_segs, _zpub = [], [], "/promptly-remotion/public"
+        os.makedirs(_zpub, exist_ok=True)
+        _zoom_cur_in = os.path.join("/work", cur)
+        _zcursor = 0                      # frames consumed in the micro timeline
         for v in vs:
             b = by_i.get(v.get("beat"))
             tr = [str(t).lower() for t in (v.get("treatment") or [])]
@@ -4476,22 +4580,258 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "zoom", "beat": v.get("beat"),
                                "why": f"no usable output window (a={a2}, b={z2})"})
                 continue
-            # UNIQUE OUTPUT PER ITERATION. This was a fixed "zoomed.mp4" while
-            # `cur` becomes that same name after the first success — so the
-            # SECOND zoom passed ffmpeg the same path as input and output and
-            # died with "Output ... same as Input #0 - exiting". Round 15
-            # measured it as zoom ruled 2, built 1: the family silently lost
-            # every placement after its first.
-            _zout = f"zoomed{built['zoom']}.mp4"
-            zr = build_zoom(a2, z2, 1.12, cur, _zout)
-            if zr.get("error"):
+            # A HALF-RULING IS REFUSED WHERE IT IS MADE. 'zoom' with no arc says
+            # this moment takes a camera move and never says what KIND of moment
+            # it is — and the kind is not derivable from timing. Defaulting
+            # would put some move on a payoff, and payoff purity exists exactly
+            # to stop that.
+            _arc = str(v.get("zoom_arc") or "").strip().lower()
+            if _arc not in ZOOM_ARC_HOMES:
                 _skips.append({"family": "zoom", "beat": v.get("beat"),
-                               "why": f"build_zoom failed: {zr['error']}"[:160]})
-            else:
-                cur = _zout
-                built["zoom"] += 1
-                steps.append({"step": "zoom", "t": [round(a2, 2), round(z2, 2)],
-                              "capped": zr.get("velocity_capped")})
+                               "why": f"ruled 'zoom' with zoom_arc={_arc!r}; the "
+                                      f"arc position is judgement and is not "
+                                      f"derivable — expected one of "
+                                      f"{sorted(ZOOM_ARC_HOMES)}"})
+                continue
+            _ztype = pick_zoom_type(_arc, brief)
+            # STAGEDPUSH NEEDS TWO WORDS OR IT IS NOT A STAGED PUSH. Its
+            # component refuses <2 stages by returning nothing — a passthrough
+            # with no error — so a beat that cannot supply them takes the next
+            # move the ARC allows rather than a silently inert one. Re-picking
+            # inside the arc keeps payoff purity intact by construction.
+            _stages = []
+            if _ztype == "StagedPush":
+                _stages = staged_push_stages(
+                    led.get("kept_words_out") or [], a2, z2,
+                    max(0.0, a2 - ZOOM_PEAK_REACH_MS["StagedPush"] / 1000.0))
+                if len(_stages) < 2:
+                    _alt = [t for t in ZOOM_ARC_HOMES[_arc] if t != "StagedPush"]
+                    _ztype = pick_zoom_type(
+                        _arc, brief) if not _alt else max(
+                        _alt, key=lambda t: (
+                            sum(1 for f in ZOOM_TYPE_FITS.get(t, ())
+                                if f in str(brief or "").lower())
+                            - sum(1 for f in ZOOM_TYPE_FIGHTS.get(t, ())
+                                  if f in str(brief or "").lower()),
+                            -ZOOM_ARC_HOMES[_arc].index(t)))
+                    led.setdefault("staged_push_downgrades", []).append(
+                        {"beat": v.get("beat"), "words_found": len(_stages),
+                         "fell_back_to": _ztype})
+                    _stages = []
+            _nat_s = zoom_natural_ms(_ztype) / 1000.0
+            _peak_s = ZOOM_PEAK_REACH_MS[_ztype] / 1000.0
+            # BACK-TIMED, then CLAMPED AT THE HEAD. Starting the clip
+            # peak-reach early puts the peak on the beat; at the very top of the
+            # video there is nothing to start early into, so it clamps and the
+            # peak lands late by whatever was unavailable. Recorded, not hidden.
+            _cs = a2 - _peak_s
+            _clamped = _cs < 0
+            _cs = max(0.0, _cs)
+            _ce = min(float(_out_dur or (z2 + _nat_s)), _cs + _nat_s)
+            if _ce - _cs < 0.2:
+                _skips.append({"family": "zoom", "beat": v.get("beat"),
+                               "why": f"{_ztype} needs {_nat_s:.2f}s and only "
+                                      f"{_ce - _cs:.2f}s of output remains"})
+                continue
+            _n_frames = max(2, int(round((_ce - _cs) * 30)))
+            _zsrc = f"zsrc{len(_zoom_jobs)}.mp4"
+            # THE EXTRACT. Frame 0 of this file is the clip's first frame, which
+            # is the contract the ABE components were built to: they take `src`
+            # and play it from 0, with no startFrom and no playbackRate.
+            # Re-encoded rather than stream-copied because a copy starts at the
+            # nearest keyframe and the whole point is a frame-exact origin.
+            _ex = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-ss", f"{_cs:.3f}",
+                 "-t", f"{_ce - _cs:.3f}", "-i", _zoom_cur_in,
+                 "-an", "-c:v", "libx264", "-crf", "16", "-preset", "veryfast",
+                 "-pix_fmt", "yuv420p", os.path.join(_zpub, _zsrc)],
+                capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
+            if _ex.returncode != 0:
+                _skips.append({"family": "zoom", "beat": v.get("beat"),
+                               "why": f"clip pre-extract failed: "
+                                      f"{(_ex.stderr or '')[-140:]}"})
+                continue
+            _zplan = f"/work/micro-zoom{len(_zoom_jobs)}.json"
+            with open(_zplan, "w") as fh:
+                json.dump({"input": {
+                    "sourceUrl": _zsrc, "fps": 30, "width": 1080, "height": 1920,
+                    "totalDurationInFrames": _n_frames,
+                    "segments": [{
+                        "type": "zoom_clip", "outputStartFrame": 0,
+                        "durationInFrames": _n_frames,
+                        "clip": {"id": f"z{len(_zoom_jobs)}", "src": _zsrc,
+                                 "startFromFrames": 0, "playbackRate": 1.0,
+                                 "durationInFrames": _n_frames,
+                                 "zoomEffect": {
+                                     "type": _ztype,
+                                     "events": [dict({
+                                         "startMs": 0,
+                                         "durationMs": int(round((_ce - _cs) * 1000)),
+                                         "scale": (_stages[-1]["scale"] if _stages
+                                                   else ZOOM_NATURAL_SCALE.get(_ztype, 1.22)),
+                                         "originX": 0.5, "originY": 0.4},
+                                         **({"stages": _stages,
+                                             "pushMs": _STAGED_PUSH_MS,
+                                             "holdMs": _STAGED_PUSH_HOLD_MS,
+                                             "releaseMs": _STAGED_PUSH_RELEASE_MS}
+                                            if _stages else {}))]}}}],
+                }}, fh)
+            _zid = f"zoom{len(_zoom_jobs)}"
+            _zoom_jobs.append({"id": _zid, "composition": "PromptlyMicroSegments",
+                               "propsFile": _zplan,
+                               "out": f"/work/{_zid}.mp4",
+                               "expect_frames": _n_frames})
+            _zoom_segs.append({"id": _zid, "beat": v.get("beat"), "arc": _arc,
+                               "type": _ztype, "src": os.path.join(_zpub, _zsrc),
+                               "out": f"/work/{_zid}.mp4",
+                               "t0": round(_cs, 3), "t1": round(_ce, 3),
+                               "frames": _n_frames,
+                               "stages": len(_stages),
+                               # The deepest push is the LAST stage, not the
+                               # first — ZOOM_PEAK_REACH_MS["StagedPush"] is the
+                               # push into stage one and would aim the check at
+                               # the shallowest part of the move.
+                               "stage_peak_s": (_stages[-1]["atMs"] / 1000.0
+                                                if _stages else None),
+                               "claimed_scale": (_stages[-1]["scale"] if _stages
+                                                 else ZOOM_NATURAL_SCALE.get(_ztype, 1.22)),
+                               "peak_lands_at_s": round(_cs + _peak_s, 3),
+                               "beat_at_s": round(a2, 3),
+                               "head_clamped": _clamped})
+            _zcursor += _n_frames
+
+        if _zoom_jobs:
+            # ONE PROCESS FOR EVERY ZOOM. bundle + browser is 12.24s per
+            # `npx remotion render`; N zooms spawning N processes pays it N
+            # times. This is the whole reason render_remotion_batch exists.
+            _zres = render_remotion_batch(_zoom_jobs, env=_SUBPROCESS_ENV,
+                                          timeout=2400)
+            led["zoom_render"] = {
+                "jobs": len(_zoom_jobs),
+                "bundle_ms": (_zres.get("_batch") or {}).get("bundle_ms"),
+                "segments": [dict(s2) for s2 in _zoom_segs],
+            }
+            _good = []
+            for _sg in _zoom_segs:
+                _jr = _zres.get(_sg["id"]) or {}
+                if not _jr.get("ok"):
+                    _skips.append({"family": "zoom", "beat": _sg["beat"],
+                                   "why": f"{_sg['type']} render failed: "
+                                          f"{str(_jr.get('error'))[:140]}"})
+                    continue
+                if _jr.get("frames_ok") is False:
+                    fail("render_frames_mismatch",
+                         f"zoom {_sg['type']}: asked for {_sg['frames']} frames, "
+                         f"the file holds {_jr.get('frames_actual')}")
+                    _skips.append({"family": "zoom", "beat": _sg["beat"],
+                                   "why": "rendered frame count did not match "
+                                          "the plan"})
+                    continue
+                # ── THE PIXELS, OR IT IS NOT A ZOOM ─────────────────────────
+                # A zoom is a crop-and-scale of its own source, so the render
+                # must differ GEOMETRICALLY from the file it was made from. A
+                # passthrough — the `clip.src` failure — is a plain re-encode of
+                # that same file and reads 44+ dB. Measured on this repo's own
+                # fixtures: a re-encode 45.10 dB, a real transform 15.06 dB.
+                # Nothing else in this pipeline can tell those apart, because
+                # the passthrough has the right frame count, the right duration
+                # and real footage in it.
+                # MEASURED WHERE THE MOVE IS LARGEST, not at the head. Every
+                # ramp type starts at scale 1.0, so the first frames of a REAL
+                # zoom are legitimately near-identical to their source — and
+                # StagedPush, whose first stage is only +8%, read 20.37 dB in a
+                # head window and would have been called inert while applying
+                # perfectly. The peak is where the geometry is, and this lane
+                # already has the table that says where the peak is.
+                _dur_s = _sg["t1"] - _sg["t0"]
+                _pk_s = (_sg["stage_peak_s"] if _sg.get("stage_peak_s")
+                         else ZOOM_PEAK_REACH_MS[_sg["type"]] / 1000.0)
+                _w0 = max(0.0, min(_pk_s, max(0.0, _dur_s - 0.3)))
+                _gch, _gdb = step_changed_output(
+                    _sg["src"], _sg["out"], _w0, min(_dur_s, _w0 + 0.3),
+                    env=_SUBPROCESS_ENV, identical_db=_ZOOM_GEOMETRY_MAX_DB)
+                _sg["geometry_window"] = [round(_w0, 3),
+                                          round(min(_dur_s, _w0 + 0.3), 3)]
+                _sg["geometry_psnr_db"] = _gdb
+                _sg["geometry_ok"] = _gch
+                if _gch is False:
+                    fail("zoom_not_applied",
+                         f"{_sg['type']} rendered {_sg['frames']} frames that "
+                         f"are the SAME PICTURE as its own source "
+                         f"(psnr {_gdb} dB >= {_ZOOM_GEOMETRY_MAX_DB}). "
+                         f"ClipRenderer mounts a zoom only under "
+                         f"`clip.zoomEffect && clip.src` — without the "
+                         f"pre-extracted file it renders un-zoomed and says "
+                         f"nothing.")
+                    _skips.append({"family": "zoom", "beat": _sg["beat"],
+                                   "why": f"{_sg['type']} rendered un-zoomed "
+                                          f"(psnr {_gdb} dB against its source)"})
+                    continue
+                _good.append(_sg)
+
+            if _good:
+                # SPLICE, not overlay-with-alpha: a zoom REPLACES the picture
+                # for its window. Same trim/setpts/overlay shape the reel uses,
+                # so there is one composite idiom in this file rather than two.
+                _zparts, _last = [], "0:v"
+                for _k, _sg in enumerate(_good):
+                    _dur = _sg["t1"] - _sg["t0"]
+                    _zparts.append(
+                        f"[{_k + 1}:v]trim=start=0:end={_dur:.3f},"
+                        f"setpts=PTS-STARTPTS+{_sg['t0']:.3f}/TB[zc{_k}]")
+                    _zparts.append(
+                        f"[{_last}][zc{_k}]overlay=0:0:enable='between(t,"
+                        f"{_sg['t0']:.3f},{_sg['t1']:.3f})'[zm{_k}]")
+                    _last = f"zm{_k}"
+                _zfilt = "/work/zoom-filter.txt"
+                with open(_zfilt, "w") as fh:
+                    fh.write(";".join(_zparts))
+                # SAME CLASS AS THE CHAINED BUILDERS, ASSERTED RATHER THAN
+                # ARGUED. The per-iteration ffmpeg write is gone — this
+                # composites once, outside the loop — so the fixed-output-name
+                # defect cannot recur by construction. But "cannot recur by
+                # construction" is what was said about the fixed "zoomed.mp4"
+                # before round 15 measured zoom 2->1, so the guard is explicit.
+                if cur == "zoomed.mp4":
+                    fail("chain_writes_its_own_input",
+                         "the zoom composite would read and write "
+                         "/work/zoomed.mp4 — ffmpeg exits 'Output ... same as "
+                         "Input #0' and the family loses every placement")
+                    raise RuntimeError("zoom composite input == output")
+                _zargs = ["ffmpeg", "-y", "-v", "error",
+                          "-i", os.path.join("/work", cur)]
+                for _sg in _good:
+                    _zargs += ["-i", _sg["out"]]
+                _zargs += ["-filter_complex", open(_zfilt).read().strip(),
+                           "-map", f"[{_last}]", "-map", "0:a?",
+                           "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                           "-c:a", "copy", "/work/zoomed.mp4"]
+                _zc = subprocess.run(_zargs, capture_output=True, text=True,
+                                     timeout=1800, env=_SUBPROCESS_ENV)
+                if _zc.returncode != 0 or not os.path.exists("/work/zoomed.mp4"):
+                    _why3 = f"zoom composite failed: {(_zc.stderr or '')[-140:]}"
+                    for _sg in _good:
+                        _skips.append({"family": "zoom", "beat": _sg["beat"],
+                                       "why": _why3})
+                else:
+                    _z_before = os.path.join("/work", cur)
+                    _zctrl = _free_ctrl([(s3["t0"], s3["t1"]) for s3 in _good],
+                                        _out_dur)
+                    for _sg in _good:
+                        _record_effect("zoom", _z_before, "/work/zoomed.mp4",
+                                       _sg["t0"], _sg["t1"],
+                                       note=f"{_sg['type']}@{_sg['arc']}",
+                                       ctrl_t0=_zctrl)
+                    cur = "zoomed.mp4"
+                    built["zoom"] = len(_good)
+                    for _sg in _good:
+                        steps.append({"step": "zoom",
+                                      "t": [_sg["t0"], _sg["t1"]],
+                                      "type": _sg["type"], "arc": _sg["arc"],
+                                      "peak_lands_at_s": _sg["peak_lands_at_s"],
+                                      "beat_at_s": _sg["beat_at_s"],
+                                      "head_clamped": _sg["head_clamped"],
+                                      "geometry_psnr_db": _sg.get("geometry_psnr_db")})
 
         _mark(led, "build_zoom", _tz0)
         _tcd0 = time.time()
