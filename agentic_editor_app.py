@@ -872,23 +872,6 @@ CONTRACT_FAILURES = frozenset({
     # An accounting gap means a number we steer by is wrong; that has to fail
     # the round, not annotate it.
     "accounting_unbalanced",
-    # THE SPEC'S DENSITY IS A FLOOR, NOT A HOPE. It was computed, reported once,
-    # and then the run PROCEEDED with a ledger note — so a brief resolving text
-    # to 10/25s came back with 7 and scored green. Round 16 measured exactly
-    # that: text 81% of reference on the same fixture and brief that produced
-    # 116% a round earlier, with nothing failing.
-    #
-    # Satisfied two ways, and one of them is always available: rule to the
-    # floor, or name the declined beats in shortfall_reasons. Because naming is
-    # always possible, this can never become the unsatisfiable refusal that
-    # burned two 24-turn budgets.
-    "spec_shortfall_unresolved",
-    # A SPEC THAT IMPLIES ZERO PLACEMENTS IN EVERY FAMILY IS NOT A SPEC.
-    # Round 24 screen_recording set three families at rates that, over a 20s
-    # source, implied zero each — so there was nothing to fall short OF, the
-    # shortfall check passed honestly, and a run that built nothing reported no
-    # violations. The bar has to be one the run can fail, or it is not a bar.
-    "spec_targets_all_zero",
     # A DECLARED PLACEMENT THAT CHANGES NOTHING IS NOT A PLACEMENT.
     # Every zoom in every round of this corpus was inert — 0.2% of frame where
     # it claimed 12% — and three of five fixtures in round 26 declared zoom as
@@ -949,37 +932,25 @@ def _contract_violations(ledger):
     # accounting_unbalanced is the exception and stays ledger-derived: it is a
     # fact about the RUN's bookkeeping, not a property of the artifact, and
     # there is no final state to re-measure it from.
-    # spec_shortfall_unresolved is a RUN fact like accounting_unbalanced — it is
-    # about what was ruled, not about the artifact — so it stays ledger-derived.
     _final_kinds = {"wrong_resolution", "no_audio_stream",
                     "output_has_no_speech", "speech_loss_severe", "no_output"}
     out = [f"{f['kind']}: {f['detail'][:80]}"
            for f in (ledger or {}).get("failures", [])
            if f.get("kind") in CONTRACT_FAILURES and f.get("kind") not in _final_kinds]
 
-    # AN OUTSTANDING SHORTFALL IS READ FROM THE LEDGER AT THE END, not from
-    # whether execute_plan happened to be called a second time.
+    # NO DENSITY VIOLATION IS EMITTED HERE. Two used to be, and they did NOT
+    # go through CONTRACT_FAILURES — they were appended straight from the
+    # ledger, so removing their names from that frozenset changed nothing and
+    # both kept failing rounds. The membership check I wrote passed while the
+    # behaviour stood; smoke_all_legs_and_zero_spec caught it.
     #
-    # MEASURED, round 22: music and pet_video finished with
-    # spec_shortfall outstanding (sfx; sfx+zoom) and NO contract violation. The
-    # escalation lived inside execute_plan — report once, fail on the NEXT call —
-    # so a shortfall recorded by a rule_all_beats that ran AFTER the last
-    # execute_plan was never escalated at all. The record was right; nothing
-    # read it.
+    #   spec_targets_all_zero        a spec whose rates imply zero placements
+    #   spec_shortfall_unresolved    a family below its implied count
     #
-    # Evaluated here it cannot be dodged by call ordering or call count: at the
-    # end of the run the question is simply whether the spec was met, and the
-    # persistent record answers it.
-    if (ledger or {}).get("spec_implies_nothing"):
-        out.append("spec_targets_all_zero: the spec's rates imply zero "
-                   "placements in EVERY family over this source — a bar the "
-                   "run cannot fail is not a bar")
-    _out_short = (ledger or {}).get("spec_shortfall") or {}
-    if _out_short:
-        _dirs = {f: (d or {}).get("direction", "under") for f, d in _out_short.items()}
-        out.append("spec_shortfall_unresolved: " + ", ".join(
-            f"{f} {v}" for f, v in sorted(_dirs.items()))[:80])
-
+    # Both are retired by the ruling (2026-09-07): the reference rates are a
+    # grading instrument, not a bar. Both quantities are still computed and
+    # still on the ledger — `spec_implies_nothing` and `spec_shortfall` — and
+    # both are reported. Neither refuses anything.
 
     # Re-derive the artifact promises from the FINAL state only.
     _f = (ledger or {}).get("final_inspect") or {}
@@ -1395,8 +1366,8 @@ Violating any of them produces a BROKEN video that still exits 0.
       is refused while any beat is unruled.
       THIS IS ONE QUESTION, NOT THREE. It replaced separate gates for numbers,
       components and the cut. Each of those forced a family and starved the
-      rest — adding the third took cards from 0.91 to 0.23 per 25s on a source
-      where the two runs before it had each rendered four. Decide the BEAT and
+      rest — adding the third cut cards to a quarter of what the two runs
+      before it had each rendered. Decide the BEAT and
       the families take care of themselves.
       Beats marked "(has a number)" are candidates for a card, not obligations:
       a number that is a joke, an ordinal, or an operand feeding a later total
@@ -1462,12 +1433,12 @@ This is the inventory the production pipeline ships, not a description of one.
                         [0:v][z]overlay=0:0:enable='between(t,T0,T1)'" \
                        -c:a copy out.mp4
 
-                   Corpus rate is 0.35/25s and it lands on hooks and evidence —
-                   about one punch per short. Use 1.05-1.10; more reads as a
+                   It lands on hooks and evidence — about one punch
+                   per short. Use 1.05-1.10; more reads as a
                    glitch.
 
-  S1. SOUND IS A FAMILY YOU HAVE NEVER USED. Corpus rate is 0.82 per 25s and
-      every run so far has placed ZERO. /assets/inventory.json carries
+  S1. SOUND IS A FAMILY YOU HAVE NEVER USED. Every run so far has
+      placed ZERO. /assets/inventory.json carries
       `sfx_catalogue`: 15 real files, each with a ROLE (the moment it belongs
       on), what it FITS, what it FIGHTS, its duration and its attack offset.
       Pick by ROLE from the TABLE BELOW — the table is already here, in the
@@ -1506,7 +1477,7 @@ twice.
       what you need, decide the spans, build_cut, render, build_overlays,
       composite, verify once. There is no budget for exploration.
       (E1 was "read only what the task needs" until 2026-09-03. It was dropped:
-      it cut placement density 6.9 -> 3.34 text/25s while reading stayed flat
+      it roughly halved placement density while reading stayed flat
       at 4 files, so it was suppressing the edit, not the survey.)
 
   E5. ONE CALL PER FAMILY, NOT ONE PER PLACEMENT. Each of these takes the
@@ -1556,7 +1527,7 @@ knowledge set at all — it answers "how to work", never "how to cut".
 
   NOT ADOPTED — "simplicity first / nothing beyond what was asked". It is good
   advice for writing code and it is WRONG FOR THIS JOB, measured: across five
-  runs this agent placed 0-1 cards against a reference rate of 2.57 per 25s.
+  runs this agent placed 0-1 cards where the beats plainly called for more.
   The failure mode here is UNDER-doing, not over-building. Placing the graphic a
   beat calls for is the task, not scope creep.
 
@@ -1858,26 +1829,13 @@ KNOWLEDGE_TOOLS = [{
         "those."),
     "input_schema": {"type": "object",
                      "properties": {
-                         "accept_shortfall": {
-                             "type": "array", "items": {"type": "string"},
-                             "description": (
-                                 "Families you are DELIBERATELY placing fewer of "
-                                 "than your own spec target — say which, and say "
-                                 "why in the verdicts. Only needed when the "
-                                 "harness reports a shortfall.")},
-                         "shortfall_reasons": {
-                             "type": "array",
-                             "description": (
-                                 "PER BEAT, why this family is NOT placed there. "
-                                 "Your spec's density is a FLOOR: rule to it, or "
-                                 "name the beats you are leaving empty and why. "
-                                 "One entry per beat you are declining."),
-                             "items": {"type": "object",
-                                       "properties": {
-                                           "beat": {"type": "integer"},
-                                           "family": {"type": "string"},
-                                           "why": {"type": "string"}},
-                                       "required": ["beat", "family", "why"]}},
+                         # accept_shortfall and shortfall_reasons lived here
+                         # ONLY to let the agent discharge a density FLOOR.
+                         # The rates grade the result afterwards; they are
+                         # not a target to satisfy, so there is nothing to
+                         # excuse and nothing to name beat by beat. A run
+                         # that places two zooms because two moments
+                         # deserved them is correct.
                          "verdicts": {"type": "array", "items": {"type": "object",
                              "properties": {
                                  "beat": {"type": "integer"},
@@ -3786,7 +3744,7 @@ def spec_implies_nothing(targets, n_beats, dur_s):
     return bool(saw_rate) and total <= 0
 
 
-def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
+def spec_shortfall(targets, ruled, n_beats, dur_s):
     """Which families fall below the spec's own floor, and by how much.
 
     PURE AND MODULE-LEVEL so it can be tested without a container — the same
@@ -3795,12 +3753,11 @@ def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
     the shipped code, and the test stayed green because it was never reading the
     shipped code at all. Two mutations passed that way before this refactor.
 
-    THE FLOOR IS SATISFIED TWO WAYS, and one of them is always available:
-      * rule to it, or
-      * name the declined beats in `reasons` (beat + family + a real why).
-    Because naming is always possible the refusal can never be unsatisfiable,
-    which is what turned an earlier density check into a livelock that burned
-    two 24-turn budgets.
+    A GRADING INSTRUMENT, NOT A FLOOR (ruling, 2026-09-07). This answers
+    "is the result in the plausible range?" AFTER the fact. It is ledgered and
+    reported; it refuses nothing, fails no round, and never reaches the agent.
+    The `reasons` parameter is gone with the demand — an excuse channel needs
+    something to be excused from.
 
     CAPPED AT THE BEAT COUNT. A rate is per-25s and a source has a fixed number
     of beats; one family lands at most once per beat. text=10/25s over 38.5s
@@ -3827,10 +3784,6 @@ def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
         # times against an implied 0 is still caught, and now the 0 is real.
         implied = min(int(n_beats), int(round(float(rate) * dur_25)))
         have = int((ruled or {}).get(fam, 0))
-        # A gap named without a reason is not named.
-        named = len({r.get("beat") for r in (reasons or [])
-                     if str(r.get("family", "")).lower() == str(fam).lower()
-                     and str(r.get("why") or "").strip()})
         # A MIX, NOT A FLOOR PER FAMILY. set_spec resolves a DISTRIBUTION, and a
         # run that places three zooms against an implied 1 while placing zero
         # text against an implied 3 has satisfied neither — it is over on one
@@ -3851,7 +3804,7 @@ def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
         # OVER needs a threshold because it has no natural zero: placing one
         # more than implied is rounding, not a miss. Two or more is the run
         # substituting the family it finds easy for the one the brief asked for.
-        gap = implied - have - named
+        gap = implied - have
         over = have - implied
         if gap >= 1:
             direction = 'absent' if have == 0 else 'under'
@@ -3862,7 +3815,6 @@ def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
         out[fam] = {"target_per_25s": float(rate),
                     "implied_over_%.1fs" % float(dur_s or 0): implied,
                     "implied": implied, "ruled": have,
-                    "gaps_named": named,
                     "direction": direction,
                     # kept for the existing consumers; negative means overshoot
                     "still_unexplained": gap}
@@ -5169,15 +5121,17 @@ def edit(source_key: str, brief: str,
         # A blocking check must be satisfiable or terminal. It now reports ONCE
         # and then proceeds, recording the gap — an unbuilt placement is worth
         # far less than a whole run spent asking for it.
-        if led.get("spec_shortfall") and not led.get("shortfall_reported"):
-            led["shortfall_reported"] = True
-            return {"error": "rulings fall short of your own spec",
-                    "shortfall": led["spec_shortfall"],
-                    "asked_once": True,
-                    "fix": ("Rule more beats for those families, or re-call "
-                            "rule_all_beats with accept_shortfall naming them. "
-                            "THIS IS ASKED ONCE — call execute_plan again and it "
-                            "will build with the gap recorded.")}
+        # ── THE RUBRIC GRADES; IT DOES NOT DEMAND ───────────────────────────
+        # This used to REFUSE the build while the rulings fell short of a
+        # per-25s rate, and the refusal reached the agent as a demand: "rule
+        # more beats for those families". That inverts what the rates are for.
+        # They are a grading instrument — afterwards, is the result in the
+        # plausible range — and a run that places two zooms because two moments
+        # deserved them is CORRECT. A rubric that calls that short is the
+        # rubric's problem.
+        #
+        # The shortfall is still COMPUTED and ledgered, because the grading
+        # question is worth answering. It is no longer asked OF the agent.
         # THE MANIFEST DESCRIBES THE VIDEO THAT EXISTS, NOT EVERY VIDEO BUILT.
         # execute_plan rebuilds the WHOLE pipeline from the verdicts, so a
         # second call replaces the first one's output entirely — but placements
@@ -5193,10 +5147,8 @@ def edit(source_key: str, brief: str,
         # makes it the sole producer of ONE manifest rather than a growing
         # union of every attempt.
         led["placements"] = []
-        if led.get("spec_shortfall"):
-            fail("spec_shortfall_unresolved",
-                 f"built with a shortfall the agent did not close or accept: "
-                 f"{led['spec_shortfall']}")
+        # NOT a failure. Density below a reference rate is an observation about
+        # the edit, not a defect in it.
         beats = led.get("beats") or []
         by_i = {b["i"]: b for b in beats}
         steps, built = [], {"cut": 0, "text": 0, "card": 0, "zoom": 0,
@@ -6462,19 +6414,21 @@ def edit(source_key: str, brief: str,
         # sound effects" produced zero overlays — and "subtle" means fewer, not
         # none. Zero of something the request named is a decision that has to be
         # stated, so if it was not stated it is a miss.
+        # A FAMILY THAT BUILT ZERO IS NOT A FAILURE. This fired whenever a rate
+        # was set above zero and nothing was built — a floor, expressed as a
+        # defect. Zero placements of a family is a real editorial answer, and
+        # the beat-level skips above already say WHY each individual one did not
+        # land, which is the diagnostic that was actually worth having.
+        #
+        # The unparseable-target check stays: a target that will not parse is a
+        # spec the agent believes it set and the GRADER cannot read, which is a
+        # broken instrument rather than a missed demand.
         _spec = led.get("spec") or {}
         for _fam, _rate in (_spec.get("targets") or {}).items():
             try:
-                _want = float(_rate)
+                float(_rate)
             except Exception:
-                # A target that will not parse is a spec the agent believes it
-                # set. Swallowing it means the family silently loses its floor.
                 fail("spec_target_unparseable", f"{_fam}={_rate!r} is not a number")
-                continue
-            if _want > 0 and built.get(_fam, 0) == 0:
-                fail("spec_family_built_zero",
-                     f"the spec set {_fam}={_want}/25s and NOTHING was built. A "
-                     f"soft modifier means fewer, not none.")
         for _sk in _skips:
             fail("execute_plan_skip", f"{_sk['family']} beat {_sk['beat']}: {_sk['why']}")
         return {"ok": True, "steps": steps, "built": built, "ruled": ruled,
@@ -7457,10 +7411,12 @@ def edit(source_key: str, brief: str,
                 # by the spec floor: the shortfall is reported, the agent
                 # re-rules to close it, and executes again.
                 #
-                # The floor is already satisfiable TWO ways and one of them is
-                # always available — rule to it, or NAME the declined beats in
-                # shortfall_reasons. Re-ruling is the expensive way; naming is
-                # free and is what the check actually asks for.
+                # THE LOOP'S CAUSE IS GONE, and the bound stays anyway. The
+                # re-ruling was induced by the density floor: the shortfall was
+                # reported, the agent re-ruled to close it, and executed again.
+                # That floor is retired (the rubric grades, it does not demand),
+                # so this bound now guards only the general case — a second full
+                # render to change a ruling.
                 #
                 # ENFORCED IN THE DISPATCH, NOT THE PROMPT. This lane's law:
                 # "a capability in the schema WILL be used" — telling a model
@@ -7475,11 +7431,16 @@ def edit(source_key: str, brief: str,
                         "why": ("The plan was already executed. A second pass "
                                 "re-renders everything to change a ruling that "
                                 "could have been named instead."),
-                        "close_the_shortfall_by_naming": (
-                            "If a family is short, call rule_all_beats ONCE more "
-                            "with shortfall_reasons naming the declined beats and "
-                            "a real reason for each — that satisfies the floor "
-                            "without another render."),
+                        # A REFUSAL MUST NAME WHAT IS AVAILABLE. The field
+                        # that used to sit here pointed at a density remedy and
+                        # a schema field that no longer exists — worse than
+                        # silence, because the agent cannot act on it. The
+                        # repair hatch is real and is the only path there is.
+                        "what_is_available": (
+                            "Nothing further is required. One more execute_plan "
+                            "is permitted only if this render violated the "
+                            "pipeline's contract, and you will be told so "
+                            "explicitly in repair_permitted."),
                         "executions_used": led["execute_plan_calls"] - 1,
                     }
                     led.setdefault("refused_second_execute", 0)
@@ -7491,10 +7452,10 @@ def edit(source_key: str, brief: str,
                     # broken first render unfixable, which is worse than the
                     # loop it replaces. Not "the agent wants another go" — a
                     # named contract failure: wrong resolution, no audio, no
-                    # output, speech lost, an inert placement. Quality misses
-                    # and shortfalls do NOT qualify; those are what naming is
-                    # for, and letting them re-execute would restore the loop
-                    # through the back door.
+                    # output, speech lost, an inert placement. A quality miss
+                    # does NOT qualify — letting one re-execute would restore
+                    # the loop through the back door. Density never qualified
+                    # and now cannot: the rubric grades, it does not refuse.
                     _cv_now = _contract_violations(led)
                     led["_exec_repair_ok"] = bool(_cv_now) and not led.get("_exec_repair_used")
                     if led.get("_exec_repair_ok"):
@@ -7598,32 +7559,11 @@ def edit(source_key: str, brief: str,
                 # The agent must either add rulings or name the family in
                 # accept_shortfall — a deliberate zero is a real decision and
                 # stays available, it just has to be stated.
-                _acc = {str(x).lower() for x in (tu.input.get("accept_shortfall") or [])}
-                # AN EXCUSE MUST BE AS VISIBLE AS A MISS. accept_shortfall
-                # removes a family from the floor entirely, and it was invisible:
-                # the log records tool NAMES and outputs, never inputs, so a run
-                # that excused itself from its own spec read identically to one
-                # that met it.
-                #
-                # Round 21 screen_recording placed nothing against text=0.2,
-                # card=0.1 and zoom=0.2, and spec_shortfall_unresolved never
-                # fired. Whether the agent accepted the shortfall or the floor
-                # failed to reach it could not be answered from the log at all —
-                # which is its own defect, independent of the answer.
-                if _acc:
-                    led.setdefault("shortfall_accepted", [])
-                    for _a in sorted(_acc):
-                        if _a not in led["shortfall_accepted"]:
-                            led["shortfall_accepted"].append(_a)
-                    fail("spec_shortfall_accepted",
-                         f"the agent excused itself from {sorted(_acc)} — a "
-                         f"deliberate zero is a decision, and it is now on the "
-                         f"record rather than silently satisfying the floor")
-                _reasons = [r for r in (tu.input.get("shortfall_reasons") or [])
-                            if isinstance(r, dict)]
-                if _reasons:
-                    led.setdefault("shortfall_reasons", []).extend(_reasons)
-                _reasons = led.get("shortfall_reasons") or []
+                # NO EXCUSE CHANNEL, because there is no demand to be
+                # excused from. accept_shortfall and shortfall_reasons existed
+                # only so the agent could discharge a density floor; with the
+                # floor retired, an excuse has nothing to point at and the
+                # spec_shortfall_accepted failure had nothing left to fire on.
                 # CLASSIFY THE WHOLE SPEC FIRST, then score only what is
                 # per-run scoreable at THIS duration. Recorded on the ledger so
                 # the round collector can sum the aggregate families across
@@ -7640,8 +7580,7 @@ def edit(source_key: str, brief: str,
                 # longest job is 180.0s, so no per-run verdict on it can mean
                 # anything. It is scored across the round instead.
                 _spec_t = {k: v for k, v in _full_t.items()
-                           if str(k).lower() not in _acc
-                           and str(k) in _per_run_fams}
+                           if str(k) in _per_run_fams}
                 # ONE CALL to the pure function. This arithmetic used to be
                 # inline here, which meant its smoke could only replay a copy of
                 # it — and a replay stays green no matter what the shipped code
@@ -7661,7 +7600,7 @@ def edit(source_key: str, brief: str,
                             1 for v in led["beat_verdicts"]
                             if _f6 in [str(t).lower()
                                        for t in (v.get("treatment") or [])])
-                _short = spec_shortfall(_spec_t, _ruled_by_fam, _reasons,
+                _short = spec_shortfall(_spec_t, _ruled_by_fam,
                                         len(_beats), _src_dur)
                 # A SPEC THAT ASKS FOR NOTHING CANNOT BE MISSED. Recorded here
                 # because this is where the targets, the beat count and the
@@ -7694,44 +7633,40 @@ def edit(source_key: str, brief: str,
                              if d["regime"] != REGIME_OUT_OF_SCOPE}
                 led["spec_implies_nothing"] = spec_implies_nothing(
                     _scoped_t, len(_beats), _src_dur)
-                # BOUNDED PER FAMILY. Even a satisfiable shortfall must not be
-                # reported forever: the bound in execute_plan never fired here
-                # because the agent never REACHED execute_plan — it looped
-                # inside rule_all_beats. A gate that only bounds the downstream
-                # refusal does not bound the loop.
-                _told = set(led.get("shortfall_told") or [])
-                _new_short = {k: v for k, v in _short.items() if k not in _told}
-                led["shortfall_told"] = sorted(_told | set(_short))
+                # THE ASK-ONCE BOUND GOES WITH THE ASK. It existed so a
+                # satisfiable shortfall was not reported to the agent forever;
+                # nothing is reported to the agent now, so there is nothing to
+                # bound. The shortfall is still computed and ledgered below —
+                # that is the grading half, and it was never the problem.
 
-                # ASKING IS BOUNDED. RECORDING IS NOT. These were the same
-                # thing, and the bound erased the record it was bounding: the
-                # agent was told once, shortfall_told filled, and the NEXT
-                # rule_all_beats took the else branch and popped
-                # led["spec_shortfall"] — so execute_plan saw no shortfall and
-                # spec_shortfall_unresolved, a CONTRACT failure, could never
-                # fire.
-                #
-                # MEASURED, round 19 screen_recording: the agent set text=0.4
-                # and zoom=0.2 per 25s, ruled all four beats `none`, and built
-                # NOTHING. spec_family_built_zero fired four times and the round
-                # still passed that leg, because the one check with the power to
-                # fail it had been cleared by the check that only warns.
-                #
-                # The shortfall is now cleared ONLY when it is genuinely gone —
-                # ruled up to the floor, or named per beat. Being told about it
-                # is not resolving it.
+                # THE GRADE REFLECTS THE LATEST RULING, so an empty
+                # shortfall clears a stale one. This pop used to be the bug
+                # rather than the bookkeeping: asking and recording were the
+                # same variable, so the bound erased the record it was bounding
+                # — the agent was told once, shortfall_told filled, the next
+                # rule_all_beats took this else branch, and the CONTRACT failure
+                # that read the record could never fire (round 19). Both the
+                # ask and that failure are retired; what is left is a grade
+                # being kept current.
                 if _short:
                     led["spec_shortfall"] = _short
                 else:
                     led.pop("spec_shortfall", None)
-                if _short and _new_short:
-                    out["SPEC_SHORTFALL"] = _new_short
-                    out["fix_shortfall"] = (
-                        "Your own spec set these rates and your rulings do not "
-                        "reach them. Either rule more beats for those families, "
-                        "or pass accept_shortfall with the family names and say "
-                        "why in the verdicts. A deliberate zero is a decision; "
-                        "an accidental one is a miss.")
+                # THE RATE IS NOT ASKED OF THE AGENT. This told it "your own
+                # spec set these rates and your rulings do not reach them —
+                # rule more beats for those families", which is the rubric
+                # acting as a demand. The rates grade the result afterwards;
+                # they are not a target the agent has to satisfy, and a run that
+                # places two zooms because two moments deserved them is correct.
+                #
+                # IT WAS ALSO DEAD, and that is worth recording rather than
+                # quietly deleting. `out` is REBOUND two lines below, so this
+                # payload never reached the agent in any run. It was writing
+                # into the PREVIOUS tool's result dict — and on a run where
+                # rule_all_beats is the first tool call, `out` is unbound and
+                # this line raises NameError. It never fired only because
+                # set_spec has always been called first.
+                # (An edit above a rebinding is not an edit — third instance.)
                 _missing = [b["i"] for b in _beats if b["i"] not in _seen]
                 out = {"recorded": _added, "ruled": len(_seen),
                        "of": len(_beats), "still_missing": _missing[:30]}

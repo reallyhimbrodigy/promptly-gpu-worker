@@ -81,8 +81,20 @@ check("sfx DOES become scoreable at round level",
 
 # ── 4. PER-RUN SCORING TOUCHES PER-RUN FAMILIES ONLY ───────────────────────
 src = pathlib.Path(A.__file__).read_text()
+# READ THE COMPREHENSION, NOT ITS PUNCTUATION. This greped
+# "and str(k) in _per_run_fams" and broke when an unrelated clause was removed
+# from the same comprehension — the restriction was intact, the word `and` was
+# not. A check that fails on incidental syntax is a check that will be deleted
+# by whoever it interrupts.
+_asn = next((n for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.Assign)
+             and any(getattr(t, "id", "") == "_spec_t" for t in n.targets)), None)
+check("_spec_t is built by a comprehension", isinstance(getattr(_asn, "value", None),
+                                                        ast.DictComp))
 check("_spec_t is restricted to per-run families",
-      "_per_run_fams" in src and "and str(k) in _per_run_fams" in src,
+      _asn is not None and "_per_run_fams" in {
+          n.id for g in _asn.value.generators for c in g.ifs
+          for n in ast.walk(c) if isinstance(n, ast.Name)},
       "a per-run verdict on a sub-unit family is quantisation, not behaviour")
 check("the regimes are recorded on the ledger for the round to sum",
       'led["rate_regimes"] = family_regimes(' in src)

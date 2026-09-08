@@ -232,6 +232,36 @@ check("it clears the worst REAL-FOOTAGE delta (-3.89, FocusWindow)",
       "a real zoom on real footage must never read as a passthrough")
 check("it sits above the best REAL-FOOTAGE passthrough (-16.58)",
       A._ZOOM_SCALE_FIT_FAIL_DB > -16.58 + 2.0)
+# ── THE v1 CORPUS ADJUDICATES FINE, WHICH RETIRES THE CORPUS EXPLANATION ───
+# Round 36's three zoom_not_applied verdicts were blamed partly on the corpus
+# being synthetic. Re-run under the SHIPPED test on the same sources — including
+# StepZoom on v1 pet_video, the exact pair that failed:
+#     source                  real     pass     separation
+#     v1 talking_head        -3.30   -30.48         27.18
+#     v1 pet_video           -4.12   -30.33         26.21
+#     StepZoom / pet_video   -4.19   -30.74         26.55   <- the actual pair
+#     DepthPull / pet_video  -1.07   -30.74         29.67
+#     SnapReframe/ pet_video -3.53   -30.96         27.43
+# Every real arm clears the bar. The v1 corpus was never structurally unable to
+# exercise zoom GEOMETRY; it was unable to exercise an ABSOLUTE psnr threshold,
+# which is a different claim. The bar was the whole cause.
+#
+# ── THE HARD CASE IS REAL, UPSCALED FOOTAGE — NOT SYNTHETIC ────────────────
+#     REAL car/drift (720x1272 -> 1080x1920)   real -0.57   pass -7.64
+# The passthrough reads -7.64, ABOVE the -8.0 bar, so a passthrough on that clip
+# is NOT caught. The mechanism is the upscale: the passthrough render already
+# contains a scale change, so it partially resembles a zoom. Every assumption
+# either lane made — synthetic is easy, real is hard — is backwards for this
+# instrument; the hardest source found so far is real 720p upscaled.
+#
+# NOT WIDENED TO CATCH IT. -6.0 would flag that passthrough and leave 1.3 dB
+# above the worst real arm (-4.68 flat, -4.19 StepZoom, -3.89 FocusWindow). The
+# test is one-sided precisely so the tolerable error is the missed passthrough
+# rather than the edited-working-component. This is a stated blind spot, not a
+# calibration to fix by moving a number.
+check("the bar clears every REAL arm measured, including v1 (-4.19) and "
+      "flat (-4.68)",
+      A._ZOOM_SCALE_FIT_FAIL_DB < -4.68 - 2.0)
 check("it also holds on the synthetic extremes (flat real -4.68, "
       "detailed passthrough -10.45)",
       -10.45 + 2.0 < A._ZOOM_SCALE_FIT_FAIL_DB < -4.68 - 2.0,
