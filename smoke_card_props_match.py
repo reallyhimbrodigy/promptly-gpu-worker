@@ -135,9 +135,42 @@ check("StatCard's requirements are the ones the component states",
 check("the table is not empty of requirements everywhere",
       sum(1 for v in A.MG_PROP_KEYS.values() if v["required"]) >= 10,
       "a table whose every entry requires nothing validates nothing")
-check("a card_props_mismatch is a real skip reason",
-      "card_props_mismatch" in A.CONTRACT_FAILURES
-      or "mg_props_mismatch" in src)
+# ── 4. THE NAME THAT CAN FAIL A ROUND IS ACTUALLY EMITTED ───────────────────
+# THIS LEG WAS A TAUTOLOGY AND COST A ROUND. It read
+#
+#     "card_props_mismatch" in A.CONTRACT_FAILURES or "mg_props_mismatch" in src
+#
+# and the second clause is ALWAYS true, because the function is named in the
+# file being searched. So it passed while card_props_mismatch had one consumer
+# and NO PRODUCER: round 40 dropped 3 of 3 cards to the refusal, emitted only
+# execute_plan_skip and ruled_not_built — neither of which fails a round — and
+# scored GREEN. Worse than round 39, where the cards rendered blank and
+# alpha_layer_empty caught them. Builder-1 found it by checking every fail()
+# literal in the module. Thirteenth substring trap this session, and the first
+# one that made a real round lie.
+#
+# READ THE CALL, NOT THE TEXT. A fail() whose first argument is the literal.
+_emitted = {n.args[0].value for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and n.func.id == "fail" and n.args
+            and isinstance(n.args[0], ast.Constant)
+            and isinstance(n.args[0].value, str)}
+check("this smoke can see the module's fail() calls", len(_emitted) > 15,
+      f"only {len(_emitted)} — the walk is not finding them and the leg below "
+      f"would pass vacuously")
+check("card_props_mismatch can fail a round",
+      "card_props_mismatch" in A.CONTRACT_FAILURES)
+check("card_props_mismatch is actually EMITTED",
+      "card_props_mismatch" in _emitted,
+      "it is in CONTRACT_FAILURES with no producer — a name that can fail a "
+      "round and never does is a green that means nothing")
+check("it is emitted from the mismatch refusal itself",
+      any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+          and n.func.id == "fail" and n.args
+          and isinstance(n.args[0], ast.Constant)
+          and n.args[0].value == "card_props_mismatch"
+          for n in ast.walk(_ep or tree)),
+      "emitted somewhere else entirely would not answer for this refusal")
 
 if fails:
     print(f"CARD-PROPS-MATCH: {len(fails)} FAILED")

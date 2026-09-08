@@ -80,6 +80,12 @@ r.append(mut('MG_PROPS_UNDERIVABLE = ["DeviceMockup", "EmojiCard", "EvidenceCard
              "the underivable set is exactly the four known ones",
              smoke="cert_mg_prop_keys.py"))
 
+# 7. THE FALSE GREEN ITSELF: the name can fail a round but nothing emits it.
+r.append(mut('                fail("card_props_mismatch",',
+             '                _unemitted = (',
+             "card_props_mismatch goes back to having no producer",
+             "card_props_mismatch is actually EMITTED"))
+
 for _s in ("smoke_card_props_match.py", "cert_mg_prop_keys.py"):
     rc, out = run(_s)
     print(f"RESTORED {_s} exit={rc}")
