@@ -1023,7 +1023,10 @@ CONTRACT_FAILURES = frozenset({
     # BYTE-IDENTICAL files this way at a plausible ~1020 ms/frame.
     # placement_inert cannot see it: the composite genuinely changed those
     # frames, it just spliced in an un-zoomed copy of them.
-    "zoom_not_applied",
+    # zoom_not_applied REMOVED with its producer (Zac's ruling, 2026-09-08:
+    # zoom geometry is unmeasured). A name that can fail a round and is emitted
+    # by nothing is the defect Builder-1 caught on card_props_mismatch; leaving
+    # this one behind would have recreated it in the same session.
     # AN ALPHA LAYER THAT PAINTED NOTHING. Compositing it re-encodes, changes
     # the file, and clears every relative threshold — so placement_inert and the
     # effect legs all pass while the picture gains nothing. Both blank layers
@@ -2807,7 +2810,32 @@ _VIDEO_REL_MARGIN_DB = 3.0
 # ONE-SIDED ON PURPOSE. It FAILS only on strong evidence of a passthrough;
 # anything else is recorded and not failed. A false "not applied" sends someone
 # to edit a component that works, which is more expensive than missing one.
-_ZOOM_SCALE_FIT_FAIL_DB = -8.0
+# ZOOM GEOMETRY IS UNMEASURED. Zac's ruling, 2026-09-08: ship neither bar.
+#
+# THREE INSTRUMENTS, THREE FAILURES, each fitted to the population in front of it:
+#   absolute geometry bar 20.0   fitted to SYNTHETIC; inverted on real footage
+#                                (0.87 dB margin on Zac's talking head, NEGATIVE
+#                                on his car clip)
+#   scale-fit ratio -8.0         fitted to REAL footage; FAILS on the v1 corpus
+#                                the rounds actually run on — FocusWindow reads
+#                                -12.57, a correctly applied zoom called NOT
+#                                APPLIED
+#   delta + intrinsic            refuted by the first population outside the
+#                                fitted range, across EVERY reproducible value
+#                                of its own input (7.07..10.21)
+#
+# The best remaining candidate is the raw delta at -14.15: 5/5 correct across
+# five populations, at 1.58 dB either side. That is under the 2.0 dB margin
+# registered BEFORE the data, and adopting a bar that fails its own
+# pre-registered standard is precisely what the three failures above are made of.
+#
+# THE ASYMMETRY DECIDES IT. A wrong zoom check costs a component edit on WORKING
+# code — round 36 nearly bought exactly that. Unmeasured is honest and cheap;
+# mismeasured is expensive and looks like knowledge.
+#
+# The delta is still COMPUTED and LEDGERED, because it is data and the next
+# instrument will be built from it. It decides nothing.
+_ZOOM_GEOMETRY_UNMEASURED = True
 
 
 def zoom_scale_fit_delta(src, render, scale, origin_x, origin_y, t0, dur=0.15,
@@ -6097,27 +6125,17 @@ def edit(source_key: str, brief: str,
                 _sg["geometry_window"] = [round(_w0, 3),
                                           round(min(_dur_s, _w0 + 0.15), 3)]
                 _sg["scale_fit_delta_db"] = _gd
-                # None is UNMEASURED. Only strong evidence of a passthrough
-                # fails; a false failure sends someone to edit a component that
-                # works.
-                _gch = None if _gd is None else (_gd > _ZOOM_SCALE_FIT_FAIL_DB)
+                # NO VERDICT. There is no validated bar, so geometry_ok is
+                # None — UNMEASURED — for every zoom, and nothing is refused on
+                # it. None here does NOT mean "passed": it means the question
+                # was not answered, and it is recorded and PRINTED as such so
+                # the absence cannot read as a green.
                 _gdb = _gd
                 _sg["geometry_psnr_db"] = _gdb
-                _sg["geometry_ok"] = _gch
-                if _gch is False:
-                    fail("zoom_not_applied",
-                         f"{_sg['type']} rendered {_sg['frames']} frames the "
-                         f"UNZOOMED source explains better than its own claimed "
-                         f"scale (scale-fit {_gdb} dB <= "
-                         f"{_ZOOM_SCALE_FIT_FAIL_DB}). "
-                         f"ClipRenderer mounts a zoom only under "
-                         f"`clip.zoomEffect && clip.src` — without the "
-                         f"pre-extracted file it renders un-zoomed and says "
-                         f"nothing.")
-                    _skips.append({"family": "zoom", "beat": _sg["beat"],
-                                   "why": f"{_sg['type']} rendered un-zoomed "
-                                          f"(psnr {_gdb} dB against its source)"})
-                    continue
+                _sg["geometry_ok"] = None
+                _sg["geometry_verdict"] = "UNMEASURED"
+                led.setdefault("zoom_geometry_unmeasured", 0)
+                led["zoom_geometry_unmeasured"] += 1
                 _good.append(_sg)
 
             if _good:
@@ -9050,6 +9068,10 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
             f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
             for c in _cps))
+    _zgu = (r.get("ledger") or {}).get("zoom_geometry_unmeasured")
+    if _zgu:
+        print(f"  ZOOM GEOMETRY   : {_zgu} placement(s) UNMEASURED — no validated "
+              f"bar exists; the scale-fit delta is recorded, not judged")
     _rf = (r.get("ledger") or {}).get("reel_frames")
     if _rf is not None:
         print(f"  REEL            : {_rf} frames "
