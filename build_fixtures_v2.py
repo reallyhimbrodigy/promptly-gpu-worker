@@ -51,7 +51,34 @@ FIXTURES = [
     ("pet_video",        "pet_video-382c5f1d",        18.0),
 ]
 
-_MAX_ZOOM_PSNR = 18.0   # v1 sat at 20.9-41.5; composed prototype reached 14.3
+# THE 18.0 dB ACCEPTANCE GATE IS RETIRED. It is recorded, not enforced.
+#
+# It rejected every source that is not my own construction. Measured
+# intrinsic 1.10x-zoom psnr, all six sources anyone has proposed:
+#
+#     v1 pet_video            29.79   REJECTED   the corpus rounds run on
+#     v1 talking_head         26.60   REJECTED   the corpus rounds run on
+#     Zac real car            22.33   REJECTED   real footage
+#     Zac real talking_head   19.13   REJECTED   real footage
+#     Zac real bathroom       17.82   admitted   real footage, barely
+#     v2-geometry (mine)  11.6-13.9   admitted   grey cellular static
+#
+# Five of six rejected, and the two it admitted comfortably are the ones I
+# built. A gate that rejects the corpus in use AND both of Zac's clips has
+# learned "resembles the sources I was fitted on" and called it "can exercise
+# geometry". Builder-2 named the consequence and it is the real cost: every
+# source it admits from then on is one our instruments can measure and the
+# product never sees.
+#
+# WHY NOT A HIGHER BAR. Because the number is not the property. Builder-2's
+# sweep found render FIDELITY is the dominant term — the same source at the
+# same content moves 22.3 dB across crf 18-40 — so an intrinsic psnr taken
+# without a render in it cannot answer "can a zoom be told from a passthrough
+# here". No threshold on this axis can, at any value.
+#
+# So it is MEASURED AND PRINTED, and a fixture is never rejected for it. The
+# question it was trying to answer belongs to a render-based two-arm test, which
+# lives in Builder-2's instrument and not in a corpus builder.
 _MIN_SCENES = 2
 
 # Per-fixture look, so the five are not five copies. Each keeps the texture that
@@ -134,8 +161,11 @@ def build(name, v1base, dur, outdir):
     audio = os.path.join(outdir, f"{name}.m4a")
     # v1's audio verbatim: the transcript must not move, or the speech route is
     # no longer comparable across the corpus change.
-    ar = sh(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src_url,
-             "-vn", "-c:a", "aac", "-b:a", "128k", "-t", str(dur), audio])
+    # The return is deliberately not bound: has_audio below asks the FILE
+    # whether the extraction produced anything, which is the question. Binding
+    # it and never reading it is a dead counter, and pyflakes says so.
+    sh(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", src_url,
+        "-vn", "-c:a", "aac", "-b:a", "128k", "-t", str(dur), audio])
     has_audio = os.path.exists(audio) and os.path.getsize(audio) > 1000
     out = os.path.join(outdir, f"{name}.mp4")
     # "+" NOT ",". Joined with a comma this builds if(a,b,c,B,A) — a five-
@@ -183,10 +213,7 @@ def main():
         size = os.path.getsize(path) / 1048576
         # THE GATE. A source that cannot show a zoom cannot test one.
         gate = []
-        if z is None:
-            gate.append("zoom psnr UNMEASURABLE")
-        elif z > _MAX_ZOOM_PSNR:
-            gate.append(f"zoom psnr {z:.2f} > {_MAX_ZOOM_PSNR} (cannot show a zoom)")
+        # zoom psnr is RECORDED, never gated on — see the note above.
         if sc < _MIN_SCENES:
             gate.append(f"{sc} scene change(s) < {_MIN_SCENES}")
         verdict = "OK" if not gate else "REJECTED: " + "; ".join(gate)
