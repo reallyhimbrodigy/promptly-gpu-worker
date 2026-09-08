@@ -465,6 +465,33 @@ def _bench_once(buf):
     return h
 
 
+def cgroup_cpu_quota():
+    """The container's ACTUAL cpu allowance, or None if unreadable.
+
+    os.cpu_count() reports the HOST's cores. Measured on the first real sweep:
+    arms requesting cpu=8/16/32 reported os.cpu_count() 24/28/48 — uncorrelated
+    with the request and useless as a quota. A benchmark printing that as
+    "cpu_count" invites exactly the comparison it exists to prevent.
+
+    cgroup v2 first (cpu.max: "<quota> <period>", or "max" for unlimited),
+    then v1. None means UNREADABLE, never a guessed number.
+    """
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as fh:
+            q, p = fh.read().split()
+            return None if q == "max" else round(int(q) / int(p), 2)
+    except Exception:
+        pass
+    try:
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as fh:
+            q = int(fh.read().strip())
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as fh:
+            p = int(fh.read().strip())
+        return None if q <= 0 else round(q / p, 2)
+    except Exception:
+        return None
+
+
 def container_benchmark():
     """Time a fixed workload single-threaded and across cores.
 
@@ -475,19 +502,25 @@ def container_benchmark():
     from concurrent.futures import ThreadPoolExecutor
     try:
         buf = _bench_buffer()
-        ncpu = _os.cpu_count() or 1
+        # QUOTA FIRST, host count only as a labelled fallback.
+        quota = cgroup_cpu_quota()
+        ncpu = int(quota) if quota else (_os.cpu_count() or 1)
         t = _t.time()
         digest = _bench_once(buf)
         single = _t.time() - t
         # PARALLEL ARM. hashlib releases the GIL, so N threads use N cores.
-        par_n = max(1, min(ncpu, 16))
+        # Workers follow the QUOTA, so the parallel arm actually loads the cores
+        # the container has rather than the host's. Capped at 32.
+        par_n = max(1, min(ncpu, 32))
         t = _t.time()
         with ThreadPoolExecutor(max_workers=par_n) as ex:
             list(ex.map(lambda _: _bench_once(buf), range(par_n)))
         par = _t.time() - t
         return {
             "ok": True,
-            "cpu_count": ncpu,
+            "cpu_quota": quota,
+            "host_cpu_count": _os.cpu_count(),
+            "cpu_basis": "cgroup_quota" if quota else "host_count_FALLBACK",
             "single_ms": round(single * 1000, 1),
             "par_ms": round(par * 1000, 1),
             "par_workers": par_n,
@@ -6226,7 +6259,8 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             print(f"  CONTAINER       : single {_cb['single_ms']:.0f}ms  "
                   f"par {_cb['par_ms']:.0f}ms over {_cb['par_workers']}w  "
                   f"effective_cores {_cb.get('effective_cores')}  "
-                  f"cpu_count {_cb.get('cpu_count')}{_warn}")
+                  f"cpu_quota {_cb.get('cpu_quota')} "
+                  f"({_cb.get('cpu_basis')}) host {_cb.get('host_cpu_count')}{_warn}")
             print(f"     divide any stage below by single_ms/1000 to compare "
                   f"across runs; a paint stage scales with effective_cores")
         else:

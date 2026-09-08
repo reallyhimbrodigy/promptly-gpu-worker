@@ -38,10 +38,33 @@ ok("the benchmark runs", b.get("ok") is True, str(b.get("error")))
 ok("it reports a NON-ZERO single-thread time", (b.get("single_ms") or 0) > 0,
    "a zero would normalise every stage to infinity")
 ok("it reports a non-zero parallel time", (b.get("par_ms") or 0) > 0)
-ok("it reports cpu_count", (b.get("cpu_count") or 0) >= 1)
+# THE BASIS MUST MATCH REALITY, not merely be one of two legal strings.
+# The membership-only version passed against a mutant that hardcoded
+# "cgroup_quota" — so a run that had actually fallen back to the HOST's core
+# count would have labelled itself as having read the container's quota, which
+# is the precise lie this field exists to prevent.
+_q = A.cgroup_cpu_quota()
+ok("cpu_basis matches what the quota reader actually returned",
+   b.get("cpu_basis") == ("cgroup_quota" if _q else "host_count_FALLBACK"),
+   f"quota reader returned {_q!r} but basis says {b.get('cpu_basis')!r}")
+ok("cpu_quota agrees with the reader", b.get("cpu_quota") == _q,
+   f"{b.get('cpu_quota')!r} != {_q!r}")
+ok("the basis is one of the two legal values",
+   b.get("cpu_basis") in ("cgroup_quota", "host_count_FALLBACK"),
+   "os.cpu_count() returned 24/28/48 for arms requesting cpu=8/16/32 — the "
+   "HOST's cores. Printing that as the container's cpu invites exactly the "
+   "false comparison this benchmark exists to prevent, so the basis is named.")
+ok("host cpu count is reported separately", (b.get("host_cpu_count") or 0) >= 1)
 ok("effective_cores is computed", b.get("effective_cores") is not None)
-ok("effective_cores is at least 1", (b.get("effective_cores") or 0) >= 1.0,
-   f"got {b.get('effective_cores')} — the parallel arm did no better than one core")
+# STRUCTURE, NOT SPEED. This asserts the instrument computes a number, never
+# that the number is large: effective_cores IS the measurement, and asserting a
+# floor on it makes the smoke fail whenever the machine it runs on is busy. It
+# did — at load average 382 it read 0.58 and the smoke called the instrument
+# broken. A check that fires on a loaded laptop is one people learn to wave
+# through, and then it is not a check.
+ok("effective_cores is a positive number",
+   isinstance(b.get("effective_cores"), (int, float)) and b["effective_cores"] > 0,
+   f"got {b.get('effective_cores')!r}")
 
 # ── THE PIN. This is the check that protects every historical comparison. ──
 ok("the workload matches its pinned digest", b.get("digest_ok") is True,
@@ -67,8 +90,18 @@ finally:
     A._bench_once = _real
 
 # ── it must be CHEAP enough to run on every job ───────────────────────────
-ok("the benchmark costs under 2s", (b["single_ms"] + b["par_ms"]) < 2000,
-   f"{b['single_ms']+b['par_ms']:.0f}ms — too expensive to run on every job")
+# The COST GUARD is on the WORK, which is fixed and machine-independent, not on
+# the wall time, which is the machine. 8 MiB x 12 iterations x (1 + workers)
+# hashes is what bounds this on every job; a busy host makes it slow without
+# making it expensive.
+_hashes = A._BENCH_ITERS * (1 + b["par_workers"])
+ok("the workload is bounded to a few hundred MiB of hashing",
+   _hashes * A._BENCH_MIB <= 4096,
+   f"{_hashes * A._BENCH_MIB} MiB — too much work to run on every job")
+ok("wall time is sane for an idle machine (informational)",
+   (b["single_ms"] + b["par_ms"]) < 60000,
+   f"{b['single_ms']+b['par_ms']:.0f}ms — if this fires the HOST is saturated, "
+   "not the instrument")
 
 if fails:
     print(f"CONTAINER-BENCH: {len(fails)} FAILED")
