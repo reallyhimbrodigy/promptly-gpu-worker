@@ -910,6 +910,7 @@ CONTRACT_FAILURES = frozenset({
     # A FAILED MEASUREMENT IS A FAILURE. Both were reachable before only as
     # None, which the guard skipped — the round went green on an unanswered
     # question. Same class as the probe that reported a number it never took.
+    "card_props_mismatch",
     "alpha_layer_absent",
     "alpha_layer_unmeasured",
 })
@@ -3889,6 +3890,129 @@ def spec_shortfall(targets, ruled, n_beats, dur_s):
     return out
 
 
+# ── WHAT EACH COMPONENT ACTUALLY READS ──────────────────────────────────────
+#
+# DERIVED FROM THE COMPONENTS' OWN types.ts, never hand-written. Regenerated
+# and compared by cert_mg_prop_keys.py, so a component that changes its props
+# fails the cert instead of rendering blank in production.
+#
+# WHY THIS EXISTS. card_props started reaching the builder at 6073850. Before
+# that it was dropped at the boundary, so `_cprops` ALWAYS fell back to the
+# StatCard shorthand {value: hero, label: card_label} — which always carried
+# `value`, and always rendered. After it, whatever the agent sent is used
+# verbatim, and nothing checked the keys against the component.
+#
+# MEASURED LOCALLY, one still per arm, PromptlyOverlay frame 20:
+#   StatCard {"value":10000,"label":"FOLLOWERS"}   184,920 bytes — renders
+#   StatCard {"stat":10000,"caption":"FOLLOWERS"}   48,138 bytes — BLANK
+# Both exit 0. Both report a successful render. One is a transparent frame.
+#
+# `required` are the non-optional props; `declared` is everything the
+# interface names. A props object sharing NO key with `declared` is certainly
+# addressing a different component, which is the case that renders nothing.
+MG_PROP_KEYS = {
+    "AnnotationArrow": {"required": ["end", "start"],
+                        "declared": ["arrowheadSize", "color", "customPath", "end", "pathType", "seed", "start", "strokeWidth"]},
+    "BarRace":         {"required": [],
+                        "declared": ["accentColor", "bars", "maxValue", "mode", "textShadow", "valuePrefix", "valueSuffix", "width"]},
+    "ChatThread":      {"required": ["messages"],
+                        "declared": ["backgroundColor", "borderRadius", "header", "incomingColor", "incomingTextColor", "messages", "minHeight", "outgoingColor", "outgoingTextColor", "showHomeIndicator", "showStatusBar", "statusBarTime", "width"]},
+    "DropBanner":      {"required": ["title"],
+                        "declared": ["accentColor", "cardColor", "cardHeightPct", "count", "mutedColor", "points", "spokenColor", "subtitle", "subtitleColor", "title", "titleColor"]},
+    "DropCard":        {"required": ["title"],
+                        "declared": ["accentColor", "cardColor", "cardHeightPct", "labelColor", "mutedColor", "points", "railColor", "spokenColor", "steps", "subtitle", "subtitleColor", "title", "titleColor", "titleLead"]},
+    "EditorialQuote":  {"required": ["text"],
+                        "declared": ["accentColor", "author", "authorColor", "fontKey", "fontSize", "italic", "lineStagger", "maxWordsPerLine", "role", "showQuoteMark", "text", "textColor"]},
+    "IMessageBubble":  {"required": ["messageType", "platform", "text"],
+                        "declared": ["messageType", "platform", "status", "text", "typewriter"]},
+    "InstagramComment": {"required": ["comment", "platform", "timestamp", "username"],
+                        "declared": ["avatarColor", "avatarSrc", "comment", "initials", "likes", "platform", "timestamp", "username"]},
+    "MouseDrag":       {"required": ["label"],
+                        "declared": ["cardColor", "cardTextColor", "label", "regionHeight", "regionWidth", "showCursor"]},
+    "Notification":    {"required": ["notifications"],
+                        "declared": ["notifications", "platform"]},
+    "PillCluster":     {"required": [],
+                        "declared": ["accentColor", "accentEvery", "fontSize", "glass", "tags", "textColor", "textShadow", "width"]},
+    "PillMarquee":     {"required": ["pills"],
+                        "declared": ["accentColor", "colorMode", "edgeFade", "firstDirection", "fontKey", "fontSize", "gap", "glass", "hashtag", "paddingX", "paddingY", "palette", "pillColor", "pills", "rowGap", "rows", "speed", "textColor", "uppercase"]},
+    "PullQuote":       {"required": ["text"],
+                        "declared": ["accentColor", "align", "barColor", "blurIn", "fontKey", "fontSize", "highlightStyle", "highlightTextColor", "keywordColor", "keywordScale", "keywords", "maxWordsPerLine", "quoteMarkColor", "showQuoteMark", "text", "textColor", "textShadow", "uppercase", "wordReveal", "wordStagger"]},
+    "RankedList":      {"required": [],
+                        "declared": ["accentColor", "highlightTop", "items", "labelColor", "order", "rankFontSize", "textShadow", "valueColor", "width"]},
+    "RecordingFrame":  {"required": [],
+                        "declared": ["accentColor", "annotationFontSize", "annotations", "frameBorderColor", "scanLineColor", "scanLineCycle", "showFrame", "showScanLine", "textColor"]},
+    "Reticle":         {"required": [],
+                        "declared": ["accentColor", "armLength", "bracketColor", "label", "regionHeight", "regionWidth", "showCrosshair", "showScanline", "textShadow", "thickness"]},
+    "SectionDivider":  {"required": ["title"],
+                        "declared": ["accentColor", "align", "eyebrowColor", "fontKey", "label", "number", "numberColor", "scrimColor", "showRule", "showScrim", "showVignette", "textShadow", "title", "titleColor", "titleFontSize", "variant", "vignetteStrength"]},
+    "Stamp":           {"required": ["text"],
+                        "declared": ["color", "distress", "doubleRing", "entryScale", "fontKey", "fontSize", "impactFlash", "mark", "markColor", "rotation", "shockRing", "size", "style", "subtextBottom", "subtextTop", "text", "textColor", "textShadow"]},
+    "StatCard":        {"required": ["label", "value"],
+                        "declared": ["accentColor", "decimals", "fromValue", "label", "labelColor", "numberColor", "prefix", "suffix", "textShadow", "value"]},
+    "StepDivider":     {"required": ["title"],
+                        "declared": ["accentColor", "fontKey", "kicker", "kickerColor", "showCount", "showProgress", "step", "title", "titleColor", "titleFontSize", "totalSteps", "uppercase"]},
+    "StickyNotes":     {"required": ["notes"],
+                        "declared": ["noteFontFamily", "noteFontSize", "noteSize", "notes", "showFog", "topOffset"]},
+    "TikTokComment":   {"required": ["comment", "likes", "platform", "username"],
+                        "declared": ["avatarColor", "avatarSrc", "comment", "initials", "likes", "platform", "username"]},
+    "Timeline":        {"required": [],
+                        "declared": ["accentColor", "indexColor", "labelColor", "nodeSize", "rowGap", "steps", "textShadow", "trackColor", "width"]},
+    "TimelineRoadmap": {"required": [],
+                        "declared": ["accentColor", "firstSide", "indexColor", "labelColor", "nodeSize", "rowHeight", "steps", "sublabelColor", "textShadow", "trackColor", "width"]},
+    "TweetBubble":     {"required": ["handle", "name", "platform", "stats", "text"],
+                        "declared": ["avatarColor", "avatarSrc", "darkMode", "handle", "initials", "name", "platform", "stats", "text", "timestamp", "verified"]},
+}
+
+# NOT DERIVABLE, and therefore NOT VALIDATED — never silently treated as
+# "requires nothing", which would let exactly the blank render above through
+# for these four. ProgressBar declares a UNION (ProgressBarValueProps |
+# ProgressBarPercentProps) rather than one interface; the other three have no
+# types.ts under motion-graphics at all. The cert pins this set, so a
+# component that DROPS OUT of validation fails rather than going quiet.
+MG_PROPS_UNDERIVABLE = ["DeviceMockup", "EmojiCard", "EvidenceCard", "ProgressBar"]
+
+def mg_props_mismatch(mg_type, props):
+    """Why `props` cannot drive `mg_type`, or "" if they can. Never raises.
+
+    THE CHECK THE SCHEMA ONLY DESCRIBED. card_props' description already told
+    the agent "A type whose props do not match renders empty" — and nothing
+    enforced it, so the sentence was a warning with no consequence. A component
+    handed keys it does not read paints a fully transparent frame, exits 0, and
+    reports a successful render.
+
+    TWO FAILURE SHAPES, both measured:
+      FOREIGN   the props share NO key with the component's interface. This is
+                the agent describing a different component, and it can never
+                render. StatCard {"stat": ..., "caption": ...} -> blank.
+      MISSING   a non-optional prop is absent. StatCard without `value` has
+                nothing to count up to and draws nothing.
+
+    UNDERIVABLE TYPES RETURN "" — not validated rather than assumed fine. Four
+    components have no derivable interface, and calling them "requires nothing"
+    would wave through the exact defect this function exists to catch. The alpha
+    check stays their backstop; MG_PROPS_UNDERIVABLE is pinned by the cert so
+    the set cannot grow quietly.
+    """
+    spec = MG_PROP_KEYS.get(str(mg_type))
+    if not spec:
+        return ""
+    keys = set((props or {}).keys())
+    if not keys:
+        return ""      # the shorthand fills an empty dict; not this check's job
+    declared = set(spec["declared"])
+    if not (keys & declared):
+        return ("none of the props %s is a prop %s reads. It reads %s. These "
+                "props describe a different component: as written this renders "
+                "a TRANSPARENT frame and reports success."
+                % (sorted(keys), mg_type, sorted(declared)))
+    missing = [k for k in spec["required"] if k not in keys]
+    if missing:
+        return ("%s requires %s and the props supply %s. Without %s it draws "
+                "nothing and still exits 0."
+                % (mg_type, sorted(spec["required"]), sorted(keys), missing))
+    return ""
+
+
 def _require_mg_type(item):
     """The component this item names, or a raise. Never a default."""
     _t = str((item or {}).get("type") or "").strip()
@@ -6245,6 +6369,19 @@ def edit(source_key: str, brief: str,
             # the words the speaker said — "10,000", "$1.2M", "three" — and a
             # StatCard counts up to a TARGET. Round 35 passed all four heroes
             # through verbatim and rendered four invisible cards.
+            # DOES THIS COMPONENT READ THESE KEYS AT ALL? Asked BEFORE the
+            # numeric coercion, because coercion only fixes keys that are
+            # PRESENT — coerce_mg_props({"stat": 10000}) reports nothing wrong,
+            # since a missing prop is never invented. So a props object aimed at
+            # the wrong component passed every gate and rendered a blank frame.
+            _mismatch = mg_props_mismatch(_ctype, _cprops)
+            if _mismatch:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": f"{_mismatch} Either send props in this "
+                                      f"component's own shape, or omit "
+                                      f"card_props and pass card_hero + "
+                                      f"card_label for the StatCard shorthand."})
+                continue
             _cprops, _bad_props = coerce_mg_props(_cprops)
             if _bad_props:
                 # NOT A COERCION FAILURE TO PAPER OVER. "three" is a word; the
@@ -6262,6 +6399,21 @@ def edit(source_key: str, brief: str,
                                       f"component: read 05_motion_graphics for "
                                       f"one that carries a phrase."})
                 continue
+            # WHAT THIS CARD WAS ACTUALLY HANDED, on the record.
+            #
+            # Round 39's log carries 224 lines and NOT ONE names card_props. So
+            # when four cards rendered as a transparent layer, the payload that
+            # produced them was unrecoverable — I could measure the blank frame
+            # and could not see what was sent to make it. A failure class that
+            # cannot be diagnosed from its own log will simply happen again.
+            #
+            # Keys, not values: the keys are what decide whether the component
+            # can read them, and values can carry the user's own words.
+            led.setdefault("card_props_seen", []).append(
+                {"beat": v.get("beat"), "type": _ctype,
+                 "keys": sorted(_cprops.keys()),
+                 "from": "card_props" if isinstance(v.get("card_props"), dict)
+                         and v.get("card_props") else "hero/label shorthand"})
             _cards.append({"t_start": round(_mg_at, 2), "type": _ctype,
                            "duration_s": min(2.5, b["t_end"] - b["t_start"]),
                            "hero": hero, "label": str(v.get("card_label") or "")[:60],
@@ -8830,6 +8982,15 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         print(f"  MG CATALOGUE    : {len(_mix)} distinct of "
               f"{len(MG_SELECTABLE_TYPES)} selectable  "
               + " ".join(f"{k}={v}" for k, v in sorted(_mix.items())))
+    # PRINTED IN THE SAME COMMIT THAT RECORDS IT. A counter that reaches the
+    # ledger and no output answers nothing — round 29 ran specifically to learn
+    # whether a gate had fired and could not find out.
+    _cps = (r.get("ledger") or {}).get("card_props_seen") or []
+    if _cps:
+        print("  CARD PROPS      : " + "  ".join(
+            f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
+            f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
+            for c in _cps))
     _rf = (r.get("ledger") or {}).get("reel_frames")
     if _rf is not None:
         print(f"  REEL            : {_rf} frames "
