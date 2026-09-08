@@ -92,7 +92,18 @@ def _plan(zoom_type, frames, fps=30):
         "segments": [{
             "type": "zoom_clip", "outputStartFrame": 0,
             "durationInFrames": frames,
-            "clip": {"id": f"z-{zoom_type}", "startFromFrames": 0,
+            # `src` IS LOAD-BEARING AND ITS ABSENCE IS SILENT.
+            # ClipRenderer mounts a zoom component only under
+            # `if (clip.zoomEffect && clip.src)` — with no `src` it falls
+            # through to a plain <Video> and renders the footage UN-ZOOMED,
+            # with no error. The first run of this probe did exactly that:
+            # seven different zoom types produced seven BYTE-IDENTICAL files of
+            # 135,864 bytes, at a perfectly plausible ~1020 ms/frame.
+            # Production pre-extracts a per-clip file whose frame 0 is the
+            # clip's first kept frame; the probe plays the whole source, which
+            # is the same shape for a paint measurement.
+            "clip": {"id": f"z-{zoom_type}", "src": "probe.mp4",
+                     "startFromFrames": 0,
                      "playbackRate": 1.0, "durationInFrames": frames,
                      "zoomEffect": {
                          "type": zoom_type,
@@ -129,7 +140,8 @@ def measure(src_url: str, short_frames: int = 10, long_frames: int = 34,
             with open(p, "w") as fh:
                 json.dump(_plan(zt, n, fps), fh)
             jobs.append({"id": f"{zt}:{tag}", "composition": "PromptlyMicroSegments",
-                         "propsFile": p, "out": f"/work/micro-{zt}-{tag}.mp4"})
+                         "propsFile": p, "out": f"/work/micro-{zt}-{tag}.mp4",
+                         "expect_frames": n})
 
     t0 = time.time()
     res = AE.render_remotion_batch(jobs, env=AE._SUBPROCESS_ENV, timeout=2200)
@@ -243,7 +255,17 @@ def main(src_url: str, short_frames: int = 10, long_frames: int = 34):
     for zt in ZOOM_TYPES:
         v = (r.get("verify") or {}).get(zt) or {}
         _y = v.get("y_mean")
-        _bad = (not v.get("exists")) or v.get("bytes", 0) < 2000 or _y is None or _y < 3.0
+        # Y=16 IS BLACK, NOT Y=0. Limited-range YUV puts black at 16, so the
+        # first version of this verdict called seven pure-black renders
+        # "carries footage" — a false green inside the verification written to
+        # find one. The real signals are: the luma never MOVES across the clip,
+        # and the frame count is not what was asked for.
+        # Y=16 IS BLACK, NOT Y=0 — limited-range YUV. The first verdict here
+        # used Y<3 and called seven pure-black renders "carries footage": a
+        # false green inside the verification written to find one.
+        _bad = ((not v.get("exists")) or v.get("bytes", 0) < 2000
+                or _y is None or _y <= 17.0
+                or v.get("y_frames", 0) < long_n - 1)
         if _bad:
             _blank.append(zt)
         # PRE-FORMATTED, not nested inside the f-string. A nested same-quote
@@ -256,6 +278,25 @@ def main(src_url: str, short_frames: int = 10, long_frames: int = 34):
         print("  %-16s%10s%9s%9s%8s   %s" % (
             zt, "{:,}".format(v.get("bytes", 0)), _ystr, _mstr,
             v.get("y_frames", 0), _verd))
+    # SEVEN DIFFERENT MOVES CANNOT PRODUCE ONE FILE SIZE. This is the check
+    # that actually caught the missing `src`: every per-file signal looked fine
+    # — 34 frames, real luma, a plausible 1020 ms/frame — and the outputs were
+    # byte-identical across a hard snap, a slow glide and a picture-in-picture.
+    _sizes = {}
+    for zt in ZOOM_TYPES:
+        _b2 = ((r.get("verify") or {}).get(zt) or {}).get("bytes")
+        if _b2:
+            _sizes.setdefault(_b2, []).append(zt)
+    _dupe = {k: v for k, v in _sizes.items() if len(v) > 1}
+    if _dupe:
+        print(f"\n  ❌ IDENTICAL OUTPUTS — the zoom is not being applied:")
+        for _b3, _ts in _dupe.items():
+            print(f"     {_b3:,} bytes shared by {len(_ts)}: {_ts}")
+        print("     ClipRenderer mounts a zoom only under `clip.zoomEffect && "
+              "clip.src`; without\n     `src` it falls through to a plain "
+              "<Video> and renders un-zoomed, silently.")
+        _blank = _blank or list(ZOOM_TYPES)
+
     if _blank:
         print(f"\n  ❌ INSTRUMENT FAILURE — {len(_blank)}/{len(ZOOM_TYPES)} outputs "
               f"carry no picture: {_blank}")

@@ -2370,6 +2370,200 @@ def step_changed_audio(before_path, after_path, t0, t1, env=None,
 # that table and fails if the two drift.
 ZOOM_RAMP_FRACTION = 0.35
 
+# THE REGISTRY, NOT A COPY OF IT. type_registries.py is the module production
+# imports and the container already mounts it, so "the homes tile the registry"
+# is an equality against production's own list rather than against a second
+# hand-maintained one that can fall behind silently.
+from type_registries import VALID_ZOOM_TYPES
+
+# ── THE SEVEN ZOOMS, AS PRODUCTION HOUSES THEM ──────────────────────────────
+#
+# Zac watched all seven side by side and approved them, so the catalogue is the
+# ruling and this lane's single generic 1.12x zoompan is the gap. What follows
+# is production's, VALUE FOR VALUE, and cert_production_table_parity.py reads
+# `git show zero-reject-routing:handler.py` and fails on any drift. That cert
+# had to be WRITTEN: two others were cited in this file's comments
+# ("cert_zoom_ramp_matches_production.py reads that table and fails if the two
+# drift") and neither existed, so the values everyone believed were pinned were
+# pinned by nothing.
+#
+# ARC POSITION IS THE AGENT'S, TYPE IS THE HARNESS'S. Which beat is the payoff
+# is editorial judgement and cannot be derived; WHICH MOVE a payoff takes is a
+# lookup plus the vibe register. That split is the same one the whole harness
+# runs on.
+ZOOM_ARC_HOMES = {
+    # SmoothPush is offered at hook AND mid_peak so the VIBE scopes the register
+    # the same way it scopes captions and SFX: a corporate beat picks the calm
+    # push, a viral beat picks the punchy snap. Both registers must be present
+    # at a position or the vibe has nothing to choose between.
+    "hook":     ("DepthPull", "SnapReframe", "StepZoom", "SmoothPush"),
+    # StagedPush lives at MID_PEAK ONLY — it is the climax of a short BUILDING
+    # phrase ("10 million dollars"), and a multi-stage phrase is a peak, not the
+    # one payoff.
+    "mid_peak": ("FocusWindow", "SnapReframe", "StepZoom", "StagedPush", "SmoothPush"),
+    # PAYOFF PURITY: the committed-push family only. The singular
+    # reason-to-exist word gets a move that commits, never a snap or a step.
+    "payoff":   ("LetterboxPush", "SmoothPush"),
+    "close":    ("SmoothPush", "SnapReframe", "StepZoom"),
+    "build":    ("SnapReframe", "StepZoom"),
+    "breather": ("SnapReframe", "StepZoom"),
+}
+ZOOM_MASK_POSITIONS = ("build", "breather")
+
+# Natural duration DECLARED IN FRAMES at 60fps, ms DERIVED with an exactness
+# check — production's B2 pattern. An off-grid zoom duration cannot be written.
+ZOOM_NATURAL_DURATION_FRAMES = {
+    "SmoothPush":    72,    # -> 1200ms
+    "SnapReframe":   42,    # ->  700ms
+    "FocusWindow":   90,    # -> 1500ms
+    "StepZoom":      48,    # ->  800ms
+    "LetterboxPush": 84,    # -> 1400ms
+    "DepthPull":    132,    # -> 2200ms
+}
+ZOOM_NATURAL_DURATION_MS = {}
+for _zt0, _zf0 in ZOOM_NATURAL_DURATION_FRAMES.items():
+    if (int(_zf0) * 1000) % 60 != 0:
+        raise ValueError(f"zoom {_zt0}: {_zf0} frames is not ms-exact at 60fps")
+    ZOOM_NATURAL_DURATION_MS[_zt0] = (int(_zf0) * 1000) // 60
+del _zt0, _zf0
+
+# STAGEDPUSH IS ABSENT FROM BOTH NATURAL TABLES IN PRODUCTION, and that is not
+# an oversight to paper over: its span is set by the 2-3 building words it
+# completes on, so there is no single designed duration or scale to copy.
+# Inventing one here would be a value production does not have, and the parity
+# cert would then be pinning a number to nothing.
+_STAGED_PUSH_FALLBACK_MS = 1800   # only when the words cannot be resolved
+
+ZOOM_NATURAL_SCALE = {
+    "SmoothPush":    1.22,
+    "SnapReframe":   1.3,
+    "FocusWindow":   1.8,   # bgScale; FocusWindow is dual-view, not a push
+    "StepZoom":      1.25,
+    "LetterboxPush": 1.25,
+    "DepthPull":     1.25,
+}
+
+# Per-type PERCEPTUAL PEAK reach, measured off each component's own ease curve.
+# The event's math endpoint is "ramp-out done" — scale back at 1.0 — so timing
+# the endpoint to the word puts the peak HUNDREDS OF MS EARLY and the zoom reads
+# as missed. startMs = word_start_ms - ZOOM_PEAK_REACH_MS[type].
+ZOOM_PEAK_REACH_MS = {
+    "SmoothPush":     420,   # 35% x 1200ms (ramp-in end)
+    "SnapReframe":    333,   # spring 99% settle (damping 28, mass 0.6, stiffness 260)
+    "FocusWindow":    417,   # spring 99% settle (damping 24, mass 0.7, stiffness 180)
+    "StepZoom":         0,   # instant — peak at startMs
+    "LetterboxPush":  490,   # 35% x 1400ms
+    "DepthPull":      770,   # 35% x 2200ms
+    "StagedPush":     280,   # the push into the FIRST stage; later stages peak
+                             # on their own words via each stage's atMs
+}
+
+# FITS / FIGHTS, lifted from production's own per-zoom teach — NOT paraphrased.
+# The vibe scores against these to pick the register within an arc position,
+# exactly as CAPTION_STYLE_FITS does for captions.
+ZOOM_TYPE_FITS = {
+    "SmoothPush":    ("calm", "weighty", "professional", "story", "corporate",
+                      "cinematic", "reflective", "deliberate", "premium"),
+    "SnapReframe":   ("viral", "punchy", "high-energy", "punchline", "reaction",
+                      "fast", "snappy"),
+    "FocusWindow":   ("detail", "context", "demo", "product", "comparison"),
+    "StepZoom":      ("hustle", "viral", "rhythm", "beat", "rhythm-locked",
+                      "quick", "snappy"),
+    "LetterboxPush": ("cinematic", "story", "dramatic", "climax", "reveal",
+                      "film", "moody"),
+    "DepthPull":     ("premium", "story", "cinematic", "intro", "atmospheric",
+                      "title", "luxury"),
+    "StagedPush":    ("building", "escalating", "stacked", "hustle", "money",
+                      "numbers"),
+}
+ZOOM_TYPE_FIGHTS = {
+    "SmoothPush":    ("frenetic",),
+    "SnapReframe":   ("calm", "cinematic", "story", "corporate", "composed",
+                      "slow"),
+    "FocusWindow":   (),      # a specialty, gated by need rather than by tone
+    "StepZoom":      ("calm", "deliberate", "cinematic", "corporate", "smooth"),
+    "LetterboxPush": ("casual", "viral", "educational"),
+    "DepthPull":     ("fast", "punchy", "casual"),
+    "StagedPush":    ("calm", "slow"),
+}
+
+# ── IMPORT-TIME EXACTNESS, the same three production asserts ─────────────────
+# These run in the CONTAINER on every launch, not in a test file that can be
+# skipped. Production carries them because a silently extinct zoom type is
+# invisible: everything parses and one move simply never appears again.
+assert {_t for _h in ZOOM_ARC_HOMES.values() for _t in _h} == set(VALID_ZOOM_TYPES), (
+    "ZOOM_ARC_HOMES must house exactly the zoom registry: "
+    f"{sorted({_t for _h in ZOOM_ARC_HOMES.values() for _t in _h})} vs "
+    f"{sorted(VALID_ZOOM_TYPES)}")
+assert set(ZOOM_ARC_HOMES) == {"hook", "build", "mid_peak", "payoff",
+                               "breather", "close"}, (
+    "every arc position carries a variant")
+assert all(_p in ZOOM_ARC_HOMES for _p in ZOOM_MASK_POSITIONS)
+# PAYOFF PURITY, asserted rather than remembered. The one reason-to-exist word
+# takes a committed push; a snap or a step there is the defect this pins.
+assert set(ZOOM_ARC_HOMES["payoff"]) == {"LetterboxPush", "SmoothPush"}, (
+    "payoff purity: the payoff takes the committed-push family only, not "
+    f"{sorted(ZOOM_ARC_HOMES['payoff'])}")
+# StagedPush at mid_peak ONLY — a multi-stage phrase is a peak, not a payoff.
+assert [_p for _p, _h in ZOOM_ARC_HOMES.items() if "StagedPush" in _h] == ["mid_peak"], (
+    "StagedPush lives at mid_peak only; it is the climax of a building phrase")
+assert set(ZOOM_TYPE_FITS) == set(VALID_ZOOM_TYPES), (
+    "every zoom type needs a fitness clause or the vibe cannot choose it")
+assert set(ZOOM_TYPE_FIGHTS) == set(VALID_ZOOM_TYPES)
+# Every type that can be OFFERED must be back-timeable, or its peak lands wrong
+# and nothing errors.
+assert set(ZOOM_PEAK_REACH_MS) == set(VALID_ZOOM_TYPES), (
+    "a type with no peak-reach cannot be landed on the word")
+
+
+def zoom_natural_ms(zoom_type):
+    """The designed span of one move, in ms.
+
+    StagedPush has no entry in production's table because its span comes from
+    the words it completes on; the fallback is used only when those cannot be
+    resolved, and it is named rather than hidden inside a `.get(..., 1800)`.
+    """
+    if zoom_type in ZOOM_NATURAL_DURATION_MS:
+        return ZOOM_NATURAL_DURATION_MS[zoom_type]
+    if zoom_type == "StagedPush":
+        return _STAGED_PUSH_FALLBACK_MS
+    raise KeyError(f"no natural duration for zoom type {zoom_type!r}")
+
+
+def pick_zoom_type(arc, vibe, fallback="SmoothPush"):
+    """Choose a zoom from the arc position's allowed set, scored by the vibe.
+
+    THE SAME SHAPE AS pick_caption_style, deliberately. The arc position says
+    what MAY go here (production's ZOOM_ARC_HOMES); the vibe says which register
+    within it. Neither half is guessed: an unknown arc raises rather than
+    quietly defaulting, because a zoom placed at a position nobody taught is a
+    move landing on the wrong kind of moment.
+
+    Ties break by the order inside the arc's tuple, so the choice is
+    DETERMINISTIC — a zoom type that changed between two runs of one brief would
+    make every A/B on this path unreadable, the same reason the caption picker
+    is deterministic.
+    """
+    if arc not in ZOOM_ARC_HOMES:
+        raise ValueError(f"unknown arc position {arc!r}; expected one of "
+                         f"{sorted(ZOOM_ARC_HOMES)}")
+    allowed = ZOOM_ARC_HOMES[arc]
+    v = " ".join(str(vibe or "").lower().replace("/", " ").split())
+    if not v:
+        return allowed[0]
+    scored = []
+    for i, t in enumerate(allowed):
+        hits = sum(1 for f in ZOOM_TYPE_FITS.get(t, ()) if f in v)
+        against = sum(1 for f in ZOOM_TYPE_FIGHTS.get(t, ()) if f in v)
+        scored.append((-(hits - against), i, t))
+    scored.sort()
+    # An all-negative field means the vibe FIGHTS everything this position
+    # offers. Falling back to a type the arc does not house would break payoff
+    # purity, so the least-bad allowed move wins and the arc still governs.
+    best = scored[0][2]
+    return best if best in allowed else (fallback if fallback in allowed
+                                         else allowed[0])
+
 
 # ── CAPTIONS: THE NINE STYLES, AND WHAT PICKS BETWEEN THEM ──────────────────
 #
