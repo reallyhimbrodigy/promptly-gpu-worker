@@ -1023,7 +1023,17 @@ CONTRACT_FAILURES = frozenset({
     # BYTE-IDENTICAL files this way at a plausible ~1020 ms/frame.
     # placement_inert cannot see it: the composite genuinely changed those
     # frames, it just spliced in an un-zoomed copy of them.
-    "zoom_not_applied",
+    # zoom_not_applied is GONE from this set, not merely unemitted.
+    #
+    # Zoom geometry is UNMEASURED: no validated bar exists (five-population
+    # window 3.16 dB wide, best margin 1.58 against a 2.0 standard). With the
+    # verdict removed, nothing emits this name — and a failing name with no
+    # producer is a check that cannot fire, which is what let round 40 score
+    # "all five green" while dropping 3 of 3 cards.
+    #
+    # smoke_failing_names_have_producers caught this within the hour of my own
+    # change. Leaving the name here would have been the same defect it was
+    # written to catch, one agent later.
     # AN ALPHA LAYER THAT PAINTED NOTHING. Compositing it re-encodes, changes
     # the file, and clears every relative threshold — so placement_inert and the
     # effect legs all pass while the picture gains nothing. Both blank layers
@@ -2823,33 +2833,41 @@ _VIDEO_REL_MARGIN_DB = 3.0
 # ONE-SIDED ON PURPOSE. It FAILS only on strong evidence of a passthrough;
 # anything else is recorded and not failed. A false "not applied" sends someone
 # to edit a component that works, which is more expensive than missing one.
-# -14.15, NOT -8.0, AND THE MARGIN IS 1.58 dB — UNDER THE 2.0 STANDARD.
+# ZOOM GEOMETRY IS REPORTED UNMEASURED. No validated bar exists.
 #
-# -8.0 was fitted to Zac's real footage and sits OUTSIDE the window that
-# separates real arms from passthroughs across all five populations measured
-# (-15.73, -12.57). It is wrong TODAY: on v1 talking_head a correctly applied
-# FocusWindow reads -12.57 and -8.0 calls it NOT APPLIED. That costs a component
-# edit on working code, which is what round 36 nearly bought.
+# THE FIVE-POPULATION EVIDENCE, recorded here so nobody re-derives it from
+# whichever fixture is nearest — which is how the last two bars were fitted:
 #
-# -14.15 is the midpoint of that five-population window and is 5/5 correct.
-# Its margin is 1.58 dB either side, BELOW the 2.0 dB that the pre-registered
-# falsifier requires, so it is NOT VALIDATED and is recorded as such here rather
-# than in a commit message nobody re-reads. A thin CORRECT bar beats a wide
-# WRONG one; neither is a validated bar.
+#   population              intrinsic   real arms         passthroughs
+#   ZAC REAL talking_head     18.62     -3.89 .. +1.88   -19.86 .. -16.58
+#   v1 talking_head           26.60    -12.57 .. -4.38   -30.48
+#   v1 pet_video              29.79     -6.26 .. -2.30   -31.42
+#   v2-geometry talking_head   7.23     -3.54 .. +0.59   -20.93
+#   held-out mandelbrot       19.76     -4.02 .. -2.81   -15.73
 #
-# THE NORMALISER (delta + intrinsic) WAS REFUTED, and not merely by failing.
-# Two competent measurements of "the source's own responsiveness" for the same
-# file differ by 6.8 dB — 7.19 measured through the real renderer, 13.98
-# measured as a pure ffmpeg geometry pair — and the verdict INVERTS between
-# them: 7.19 makes the populations overlap (window -0.38 dB, no bar exists),
-# 13.98 opens 6.28 dB. A correction term whose magnitude depends on an unstated
-# methodological choice is not a mechanism. The renderer-measured figure is the
-# right one, because it is what the arms actually experience — render fidelity
-# is the DOMINANT term, moving 22.3 dB across crf 18-40 — which is exactly why
-# a source property measured without a render in it cannot stand in for it.
-_ZOOM_SCALE_FIT_FAIL_DB = -14.15
-_ZOOM_SCALE_FIT_MARGIN_DB = 1.58      # measured; the falsifier wants >= 2.0
-_ZOOM_SCALE_FIT_VALIDATED = False     # 5/5 correct, margin under standard
+#   the ONLY window separating every real arm from every passthrough:
+#       (-15.73, -12.57)   3.16 dB wide, midpoint -14.15, margin 1.58 either side
+#
+# -14.15 is 5/5 correct. Its 1.58 dB is UNDER the 2.0 dB the pre-registered
+# falsifier requires, so it is not validated and is not shipped as a firing bar.
+# The previous -8.0 sat OUTSIDE that window entirely and was wrong today: on v1
+# talking_head a correctly applied FocusWindow reads -12.57 and -8.0 called it
+# NOT APPLIED. A wrong zoom check costs a component edit on working code, which
+# is what round 36 nearly bought — so zoom goes UNMEASURED rather than
+# mismeasured.
+#
+# THE NORMALISER (delta + intrinsic) IS REFUTED across every reproducible
+# measurement of its own input: 7.07-10.21 depending on sampling, unseparable
+# below ~10.8 and worse than the raw delta above it. And the mechanism is
+# legible — v2-geometry's real arms (-3.54..+0.59) sit almost exactly where
+# Zac's real footage sits (-3.89..+1.88), so the two populations BEHAVE
+# identically while their intrinsics differ by 11 dB. Adding intrinsic drives
+# apart two things that measured the same: it injects a difference rather than
+# cancelling one.
+_ZOOM_SCALE_FIT_WINDOW_DB = (-15.73, -12.57)   # measured, five populations
+_ZOOM_SCALE_FIT_BEST_BAR_DB = -14.15           # 5/5 correct, NOT shipped
+_ZOOM_SCALE_FIT_MARGIN_DB = 1.58               # falsifier requires >= 2.0
+_ZOOM_SCALE_FIT_VALIDATED = False              # therefore: report, never fail
 
 
 def zoom_scale_fit_delta(src, render, scale, origin_x, origin_y, t0, dur=0.15,
@@ -6142,24 +6160,27 @@ def edit(source_key: str, brief: str,
                 # None is UNMEASURED. Only strong evidence of a passthrough
                 # fails; a false failure sends someone to edit a component that
                 # works.
-                _gch = None if _gd is None else (_gd > _ZOOM_SCALE_FIT_FAIL_DB)
+                # UNMEASURED, not judged. There is no validated bar (see the
+                # five-population table above), so the delta is RECORDED and
+                # the verdict is None. A check with no validated threshold that
+                # fails anyway is worse than one that abstains: it sends someone
+                # to edit a working component.
+                _gch = None
                 _gdb = _gd
                 _sg["geometry_psnr_db"] = _gdb
                 _sg["geometry_ok"] = _gch
-                if _gch is False:
-                    fail("zoom_not_applied",
-                         f"{_sg['type']} rendered {_sg['frames']} frames the "
-                         f"UNZOOMED source explains better than its own claimed "
-                         f"scale (scale-fit {_gdb} dB <= "
-                         f"{_ZOOM_SCALE_FIT_FAIL_DB}). "
-                         f"ClipRenderer mounts a zoom only under "
-                         f"`clip.zoomEffect && clip.src` — without the "
-                         f"pre-extracted file it renders un-zoomed and says "
-                         f"nothing.")
-                    _skips.append({"family": "zoom", "beat": _sg["beat"],
-                                   "why": f"{_sg['type']} rendered un-zoomed "
-                                          f"(psnr {_gdb} dB against its source)"})
-                    continue
+                # NO FAILURE BRANCH. It was removed rather than left unreachable
+                # behind `if _gch is False`, because dead code that references a
+                # deleted constant is a crash waiting for whoever revives it —
+                # pyflakes flagged exactly that. The delta is still MEASURED and
+                # recorded in geometry_psnr_db; what is gone is the verdict.
+                #
+                # ClipRenderer mounts a zoom only under `clip.zoomEffect &&
+                # clip.src`, so without the pre-extracted file it renders
+                # un-zoomed and says nothing. That failure mode is real and is
+                # now UNGUARDED — recorded here so the gap is known rather than
+                # forgotten. Round 40's zoom loss was a 404 on that very file,
+                # and execute_plan_skip plus ruled_not_built do catch that one.
                 _good.append(_sg)
 
             if _good:
