@@ -604,6 +604,13 @@ CONTRACT_FAILURES = frozenset({
     # from sixteen honest placements. The coverage gap has to fail the round on
     # its own, or every component ported from here lands unverifiable.
     "placement_effect_uncovered",
+    # A RENDER THAT IGNORED ITS PLAN. remotion_batch.mjs stripped the props
+    # wrapper, so every composition fell back to defaultProps — 600 frames at
+    # 60fps with EMPTY caption pages — and reported ok:true. Two rounds of
+    # ms/frame were computed against a frame count Python had only requested.
+    # Asking the artifact what it holds is the only defence, and a mismatch has
+    # to fail the round.
+    "render_frames_mismatch",
 })
 
 
@@ -2500,6 +2507,27 @@ def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=()):
     }}
 
 
+def _probe_frame_count(path, env=None):
+    """Frames actually in the file, or None if it cannot be read.
+
+    nb_read_frames COUNTS them rather than trusting a container header, because
+    a header is another number written by the thing being checked.
+    """
+    import subprocess
+    try:
+        if not path or not os.path.exists(path):
+            return None
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
+             "-show_entries", "stream=nb_read_frames", "-of",
+             "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=300, env=env)
+        v = (r.stdout or "").strip().splitlines()
+        return int(v[0]) if v and v[0].isdigit() else None
+    except Exception:
+        return None
+
+
 def render_remotion_batch(jobs, env=None, timeout=1800):
     """Render N compositions in ONE Remotion process. Returns {id: {...}}.
 
@@ -2536,6 +2564,30 @@ def render_remotion_batch(jobs, env=None, timeout=1800):
                 res[d.get("id")] = d
             except Exception:
                 pass
+    # ── WHAT IT RENDERED, NOT WHAT IT WAS ASKED FOR ─────────────────────────
+    # THE CHECK THAT WOULD HAVE CAUGHT THE WRAPPER BUG ON ROUND 32.
+    #
+    # remotion_batch.mjs passed `JSON.parse(file).input` as inputProps while
+    # both compositions read `props.input` — so every render silently fell back
+    # to defaultProps. DEFAULT_RENDER_INPUT is 600 frames at 60fps with
+    # `caption.pages: []`, so the caption pass rendered SIX HUNDRED FRAMES OF
+    # NOTHING and reported ok:true. Two rounds of ms/frame were computed against
+    # a frame count Python had merely REQUESTED.
+    #
+    # Every number in that report was Python's own request read back to itself.
+    # The only defence is to ask the ARTIFACT what it contains, so a job may
+    # declare `expect_frames` and the answer is measured off the file.
+    for _j in jobs:
+        _ef = _j.get("expect_frames")
+        _d = res.get(_j.get("id"))
+        if not _ef or not isinstance(_d, dict) or not _d.get("ok"):
+            continue
+        _d["frames_expected"] = int(_ef)
+        _d["frames_actual"] = _probe_frame_count(_j.get("out"), env=env)
+        # None is UNMEASURED, never a pass — the same law the effect legs carry.
+        _d["frames_ok"] = (None if _d["frames_actual"] is None
+                           else abs(_d["frames_actual"] - int(_ef)) <= 1)
+
     _b = re.search(r"^BUNDLE (\d+)", out, re.M)
     _t = re.search(r"^TOTAL (\d+)", out, re.M)
     res["_batch"] = {
@@ -2992,7 +3044,21 @@ def edit(source_key: str, brief: str,
          model: str = MODEL, route_models: bool = False,
          cap_exec_effort: bool = True,
          cheap_model: str = "claude-haiku-4-5",
-         exec_model: str = MODEL) -> dict:
+         exec_model: str = MODEL,
+         recent_styles: str = "") -> dict:
+    """`recent_styles`: this user's last caption picks, most recent FIRST,
+    comma-separated.
+
+    PASSED IN, NOT FETCHED. Production reads it from the stored style profile
+    (`_read_recent_caption_styles`, handler.py:4129) over a Supabase client.
+    This container deliberately holds NO credentials — it receives two presigned
+    URLs and has no identity to steal — so it cannot make that read, and giving
+    it one to satisfy a caption rule would trade the whole security posture for
+    a style rotation. The caller owns the history; the container owns the pick.
+
+    Empty is the honest cold-start: `pick_caption_style` then chooses on fit
+    alone, which is exactly right for a user's first video.
+    """
     import subprocess
     from anthropic import Anthropic
 
@@ -4016,7 +4082,15 @@ def edit(source_key: str, brief: str,
         # frames. TypewriterReveal is 42% static (a per-character cursor) and
         # halving adds 17%, so it renders full-rate.
         if _want_caps and _cap_words:
-            _cap_style = pick_caption_style(brief)
+            # THE ROTATION RULE, FED. It was implemented, tested and called
+            # with `recent` defaulting to () — structurally present and
+            # unexercised, which the docstring said plainly and which is a
+            # wiring gap rather than a working feature. Threading the caller's
+            # history is what turns it on.
+            _recent = [x.strip() for x in str(recent_styles or "").split(",")
+                       if x.strip()]
+            _cap_style = pick_caption_style(brief, recent=_recent)
+            led["caption_recent_in"] = _recent
             _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
             _cap_pages = caption_pages(_cap_words, 3)
             _cap_end = max(float(w["e"]) for w in _cap_words)
@@ -4030,6 +4104,11 @@ def edit(source_key: str, brief: str,
                 "id": "captions", "composition": "PromptlyOverlay",
                 "propsFile": _cap_plan, "out": "/work/captions.mov",
                 "alpha": True,
+                # ASK THE FILE, DO NOT TRUST THE REQUEST. Two rounds reported
+                # "443 frames" that Python had computed and nothing had
+                # verified; the render was actually 600 frames of the empty
+                # default.
+                "expect_frames": _cap_frames,
             }], env=_SUBPROCESS_ENV)
             _mark(led, "build_captions", _cap_t0)
             _cj = (_cap_res or {}).get("captions") or {}
@@ -4041,8 +4120,19 @@ def edit(source_key: str, brief: str,
                 "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
                                  if _cj.get("ms") and _cap_frames else None),
                 "bundle_ms": (_cap_res.get("_batch") or {}).get("bundle_ms"),
+                "frames_actual": _cj.get("frames_actual"),
+                "frames_ok": _cj.get("frames_ok"),
                 "error": _cj.get("error"),
             }
+            # A RENDER THAT IGNORED THE PLAN IS NOT A RENDER. False here means
+            # the composition used something other than what was handed to it,
+            # which is how six hundred frames of nothing passed for nine styles.
+            if _cj.get("frames_ok") is False:
+                fail("render_frames_mismatch",
+                     f"captions: asked for {_cap_frames} frames at {_cap_fps}fps, "
+                     f"the file holds {_cj.get('frames_actual')}. The composition "
+                     f"did not receive the plan — check the props nesting before "
+                     f"reading any ms/frame out of this run.")
             if _cj.get("ok") and os.path.exists("/work/captions.mov"):
                 led["caption_mov"] = "/work/captions.mov"
                 led["caption_path"] = "remotion"
@@ -6237,7 +6327,8 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
          effort: str = DEFAULT_EFFORT,
          model: str = MODEL,
          route: bool = False,
-         src_url: str = "", out_url: str = "", out_key: str = ""):
+         src_url: str = "", out_url: str = "", out_key: str = "",
+         recent_styles: str = ""):
     # PRESIGN LOCALLY, where the credentials belong. The container receives two
     # URLs that each permit exactly one operation on exactly one key, and
     # expire. It gets no identity, so there is none to steal — and it cannot
@@ -6266,8 +6357,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         _out_url = _s3.generate_presigned_url(
             "put_object", Params={"Bucket": _bucket, "Key": _out_key,
                                   "ContentType": "video/mp4"}, ExpiresIn=3600)
+    # BY KEYWORD. The ten arguments above are positional and `recent_styles`
+    # sits after exec_model — appending it positionally would silently bind to
+    # cap_exec_effort and turn the rotation history into a boolean.
     r = edit.remote(source, brief, _src_url, _out_url, _out_key,
-                    iters, knowledge, effort, model, route)
+                    iters, knowledge, effort, model, route,
+                    recent_styles=recent_styles)
     print("\n" + "=" * 66)
     print(f"  AGENTIC EDITOR — knowledge={'ON' if knowledge else 'OFF'}  "
           f"effort={r.get('ledger').get('effort')}  model={r.get('ledger').get('model')}")
@@ -6499,9 +6594,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _cr:
         print(f"  CAPTIONS        : {_cr.get('style')} @ {_cr.get('fps')}fps  "
               f"{_cr.get('pages')} pages / {_cr.get('frames')} frames  "
+              f"frames_actual={_cr.get('frames_actual')} "
+              f"(ok={_cr.get('frames_ok')})  "
               f"paint {(_cr.get('paint_ms') or 0)/1000:.1f}s "
               f"({_cr.get('ms_per_frame')} ms/frame)  "
               f"bundle {(_cr.get('bundle_ms') or 0)/1000:.1f}s  "
+              f"recent={(r.get('ledger') or {}).get('caption_recent_in') or '[]'}  "
               f"path={(r.get('ledger') or {}).get('caption_path')}  "
               f"composited={(r.get('ledger') or {}).get('caption_composited')}"
               + (f"  ERROR={_cr.get('error')}" if _cr.get("error") else ""))

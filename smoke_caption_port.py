@@ -156,6 +156,96 @@ check("the caption COMPOSITE is not gated on the text-overlay list either",
       "items" not in _comp_guards and "ov" not in _comp_guards and "r2" not in _comp_guards,
       f"conditions wrapping the composite reference {sorted(_comp_guards)}")
 
+# ── THE ROTATION RULE IS FED, NOT MERELY IMPLEMENTED ──────────────────────
+# pick_caption_style has carried `recent` since the port, and the ONLY call site
+# passed `pick_caption_style(brief)` — so the rule was structurally present and
+# UNEXERCISED on every run ever made. Its own docstring said so, which is why it
+# was a wiring gap rather than a false green; wiring is what closes it.
+#
+# The history is PASSED IN, never fetched: production reads it from the stored
+# style profile over Supabase, and this container deliberately holds no
+# credentials.
+_pcs_calls = []
+for _n in _ast.walk(_tree):
+    if (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Name)
+            and _n.func.id == "pick_caption_style"):
+        _pcs_calls.append({k.arg for k in _n.keywords})
+check("pick_caption_style is called somewhere", bool(_pcs_calls))
+check("EVERY call site passes `recent` — a default of () is the inert case",
+      all("recent" in kw for kw in _pcs_calls),
+      f"{sum(1 for k in _pcs_calls if 'recent' not in k)} of {len(_pcs_calls)} "
+      f"call site(s) let it default to empty")
+check("edit() accepts the history from its caller",
+      "recent_styles" in [a.arg for _f in _ast.walk(_tree)
+                          if isinstance(_f, _ast.FunctionDef) and _f.name == "edit"
+                          for a in _f.args.args + _f.args.kwonlyargs],
+      "the container cannot read the user profile — it holds no credentials, so "
+      "the history has to arrive as an argument")
+check("the entrypoint forwards it BY KEYWORD",
+      "recent_styles=recent_styles" in src,
+      "it sits after exec_model; appended positionally it would bind to "
+      "cap_exec_effort and become a boolean")
+# BOTH HALVES, SEPARATELY. RED-proving caught this too: deleting the ledger
+# WRITE left the name in the PRINT statement, so a single substring check passed
+# while nothing was being recorded.
+check("what the rule received is RECORDED",
+      'led["caption_recent_in"] = _recent' in src)
+check("and it is PRINTED", "recent={(r.get('ledger') or {}).get('caption_recent_in')" in src,
+      "a rotation that rotated on nothing reads identically to one that rotated")
+
+# ── THE PROPS ACTUALLY REACH THE COMPOSITION ──────────────────────────────
+# THE MOST EXPENSIVE FALSE GREEN THIS PORT PRODUCED. remotion_batch.mjs passed
+# `JSON.parse(file).input` as inputProps while BOTH compositions read
+# `props.input` — so the unwrapped object merged in beside a defaultProps that
+# still carried `input`, and every render silently used DEFAULT_RENDER_INPUT:
+# 600 frames, 60fps, `caption.pages: []`. Six hundred frames of NOTHING,
+# reported as `path=remotion composited=True` because the file existed and
+# ffmpeg exited 0.
+#
+# MEASURED LOCALLY, both nestings, actual output:
+#   overlay unwrapped (shipped)  compDuration 600   21,028,986 bytes
+#   overlay wrapped              compDuration  20    1,663,820 bytes
+# After the fix, a 52-frame 15fps request produced exactly 52 frames at 15/1
+# with alpha varying frame to frame (YAVG 256 -> 308) — real animating captions.
+_batch_src = pathlib.Path(A.__file__).with_name("remotion_batch.mjs")
+check("remotion_batch.mjs is beside the app", _batch_src.exists())
+if _batch_src.exists():
+    _bs = _batch_src.read_text()
+    check("the batch passes the WHOLE props file, not `.input`",
+          'readFileSync(j.propsFile, "utf8")).input' not in _bs
+          and 'JSON.parse(fs.readFileSync(j.propsFile, "utf8"));' in _bs,
+          "stripping the wrapper makes every composition fall back to "
+          "defaultProps, which renders and reports success")
+
+# THE CATEGORICAL CHECK: ask the ARTIFACT, never the request.
+check("_probe_frame_count exists at runtime",
+      callable(getattr(A, "_probe_frame_count", None)))
+check("the caption job DECLARES how many frames it expects",
+      '"expect_frames": _cap_frames' in src,
+      "without a declared expectation there is nothing to compare the file to")
+check("the batch measures frames off the FILE",
+      '_d["frames_actual"] = _probe_frame_count(' in src)
+check("unmeasurable frames are None, never a pass",
+      '_d["frames_ok"] = (None if _d["frames_actual"] is None' in src,
+      "the same law the effect legs carry")
+check("a mismatch FAILS the round", "render_frames_mismatch" in A.CONTRACT_FAILURES)
+# GUARDED BY THE MEASUREMENT, not merely present in the file. RED-proving
+# caught this: neutering the condition to `if False:` left the fail() call in
+# the source, so a substring check passed while the raise was unreachable.
+_fm_guards = set()
+for _g in _enclosing_ifs(_tree, "render_frames_mismatch"):
+    for _t in _g:
+        for _n in _ast.walk(_t):
+            if isinstance(_n, _ast.Constant) and isinstance(_n.value, str):
+                _fm_guards.add(_n.value)
+check("the mismatch raise is guarded by the MEASURED result",
+      "frames_ok" in _fm_guards,
+      f"guarded by {sorted(_fm_guards)} — a fail() the condition can never "
+      f"reach is not a raise")
+check("the actual frame count is PRINTED",
+      "frames_actual={_cr.get('frames_actual')}" in src,
+      "two rounds reported a frame count Python had only requested")
+
 check("a failed render is LOUD", 'fail("caption_render_failed"' in src)
 check("a failed composite is LOUD", 'fail("caption_composite_failed"' in src,
       "render ok + composite failed = a video with NO captions")
