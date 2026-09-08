@@ -299,12 +299,41 @@ except ImportError as e:
     fails.append(f"type_registries could not be imported ({e}) — the registry "
                  f"legs did not run, and a leg that did not run is not a pass")
 
+# ── PORTED IS NOT WIRED ─────────────────────────────────────────────────────
+# Rule 2: built != committed != deployed != working. Nine features in this repo
+# have shipped gate-green and done nothing, and a table that is pinned, asserted
+# and never CALLED is exactly that shape — every check above passes while the
+# pipeline still runs the thing the port was meant to replace.
+#
+# Reported LOUDLY rather than failed: this is a true statement about work in
+# progress, and a cert that goes red for a known-incomplete step is one people
+# learn to run with their eyes closed. It is printed where nobody can miss it,
+# and BUILT_NOT_WIRED.md is where the repo keeps this class.
+_dark = []
+_app_src = open(A.__file__, encoding="utf-8").read()
+_app_tree = ast.parse(_app_src)
+_called = {n.func.id for n in ast.walk(_app_tree)
+           if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
+for _fn in ("pick_zoom_type", "zoom_natural_ms", "pick_caption_style"):
+    if hasattr(A, _fn) and _fn not in _called:
+        _dark.append(_fn)
+
 # ── REPORT ───────────────────────────────────────────────────────────────────
 print(f"PRODUCTION-TABLE-PARITY  (production: {HANDLER})")
 print(f"  pinned  : {_ported_now or '[]'}")
 if _not_yet:
     print(f"  NOT YET PORTED: {_not_yet}")
     print("            (listed, not failed — but nothing pins them until they land)")
+if _dark:
+    print()
+    print("  " + "!" * 68)
+    print(f"  PORTED BUT DARK: {_dark}")
+    print("  These are defined, pinned against production and asserted at import")
+    print("  — and NOTHING CALLS THEM. The pipeline still runs whatever they were")
+    print("  meant to replace. Every check above passes in this state, which is")
+    print("  precisely why it is printed here. (Rule 2 / BUILT_NOT_WIRED.md)")
+    print("  " + "!" * 68)
+
 if fails:
     print(f"\n  {len(fails)} FAILED")
     for f in fails:
