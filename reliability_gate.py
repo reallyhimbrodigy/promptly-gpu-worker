@@ -68,17 +68,23 @@ def required_for(corpus):
 # sources.
 ROUTE_FIXTURES = {
     "no_speech": ("music", "screen_recording", "product_shot", "pet_video",
-                  "car_short"),
+                  "car_short", "motion"),
     "speech":    ("talking_head",),
 }
 
-# `motion` IS ABSENT FROM BOTH ROUTES ON PURPOSE. Its staging probe returned
-# has_speech=null — undetermined, not false — and the manifest records it as
-# `no_speech_motion_UNRESOLVED`. route_of() therefore returns None for it, which
-# is honest; putting it in either set would apply that route's targets to a
-# fixture nobody has established the route of. Resolve the speech question, then
-# add it in a diff.
-ROUTE_UNASSIGNED = ("motion",)
+# `motion` WAS ABSENT FROM BOTH ROUTES until it was MEASURED, not guessed.
+#
+# Its staging `has_speech` was hand-declared null — the silence heuristic cannot
+# separate continuous speech from ambient, and said so, which is why it refused
+# to answer. The arbiter is the pipeline's own ASR, since the route branch is
+# simply `"transcript" if words else "visual"`. Round 42 ran it:
+#
+#     [route] no speech -> VISUAL beats
+#     SPEECH CHECK : NOT APPLICABLE - source carries no speech
+#
+# Zero words, so no_speech. Assigned off that observation, in a diff, as the
+# comment this replaces asked for.
+ROUTE_UNASSIGNED = ()
 
 
 def route_of(source):
