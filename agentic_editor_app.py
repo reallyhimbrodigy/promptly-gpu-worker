@@ -2381,9 +2381,16 @@ def render_remotion_batch(jobs, env=None, timeout=1800):
                 pass
     _b = re.search(r"^BUNDLE (\d+)", out, re.M)
     _t = re.search(r"^TOTAL (\d+)", out, re.M)
+    # BUNDLE_CACHED <0|1> <key> — whether this process reused a bundle another
+    # process in the same container already paid for. None means the line was
+    # ABSENT, which is a binary predating the cache, NOT a cache miss: a missing
+    # measurement must never render as a measured zero.
+    _bc = re.search(r"^BUNDLE_CACHED ([01]) (\S+)", out, re.M)
     res["_batch"] = {
         "returncode": r.returncode,
         "bundle_ms": int(_b.group(1)) if _b else None,
+        "bundle_cached": (bool(int(_bc.group(1))) if _bc else None),
+        "bundle_key": _bc.group(2) if _bc else None,
         "total_ms": int(_t.group(1)) if _t else None,
         "jobs": len(jobs),
         # THE WHOLE POINT, PRINTED: startup paid once across N jobs. A counter
@@ -3433,19 +3440,39 @@ def edit(source_key: str, brief: str,
         }
         with open("/work/reel-plan.json", "w") as fh:
             json.dump({"input": plan}, fh)
-        # ONE render. --sequence to a DIRECTORY with NO extension: any extension
-        # is refused ("sequence cannot have an extension"), and every VIDEO codec
-        # available here flattens the alpha (prores/vp8/vp9 all yuv, and
-        # --pixel-format=yuva* is rejected outright). PNG is the only path that
-        # keeps it.
+        # THROUGH THE SHARED PROCESS, and straight to the .mov.
+        #
+        # This used to be `npx remotion render --sequence` to a PNG directory,
+        # then an ffmpeg qtrle pass to assemble /work/reel.mov. Two costs, both
+        # removed: the CLI re-bundles every invocation (9.79s of the 12.24s
+        # per-process startup) and cannot be given a cached bundle, and the PNG
+        # round-trip wrote ~300 files to disk only to read them straight back.
+        #
+        # The sequence existed because the CLI refuses --pixel-format=yuva*. The
+        # Node API does not — prores 4444 / yuva444p10le carries the alpha
+        # directly, which is the same path the captions already render on.
+        #
+        # It also means the reel and the captions now share a BUNDLE CACHE:
+        # they are different agent tool calls and can never share one process,
+        # so the cache is the only thing that can collect the second 9.79s.
         shutil.rmtree("/work/reel", ignore_errors=True)
-        r = subprocess.run(
-            ["npx", "remotion", "render", "PromptlyOverlay", "/work/reel",
-             "--props=/work/reel-plan.json", "--sequence", "--image-format=png"],
-            cwd="/promptly-remotion", capture_output=True, text=True,
-            timeout=1800, env=_SUBPROCESS_ENV)
-        if r.returncode != 0:
-            fail("reel_render_failed", (r.stderr or "")[-300:])
+        _reel_t0 = time.time()
+        _reel_res = render_remotion_batch([{
+            "id": "reel", "composition": "PromptlyOverlay",
+            "propsFile": "/work/reel-plan.json", "out": "/work/reel.mov",
+            "alpha": True,
+        }], env=_SUBPROCESS_ENV)
+        _rj = (_reel_res or {}).get("reel") or {}
+        _rbatch = (_reel_res or {}).get("_batch") or {}
+        led["reel_render"] = {
+            "ok": bool(_rj.get("ok")), "paint_ms": _rj.get("ms"),
+            "frames_expected": packed["reel_frames"],
+            "bundle_ms": _rbatch.get("bundle_ms"),
+            "bundle_cached": _rbatch.get("bundle_cached"),
+            "error": _rj.get("error"),
+        }
+        if not _rj.get("ok"):
+            fail("reel_render_failed", str(_rj.get("error"))[:300])
             # FALLBACK, not an error handed back to the agent. Returning
             # {"error": ...} here made the render failure the AGENT's problem to
             # solve mid-run, and it has no better option than the one below —
@@ -3456,12 +3483,40 @@ def edit(source_key: str, brief: str,
             # Raising here keeps the failure diagnosable instead of laundering
             # it into a worse video the user did not ask for.
             raise RuntimeError(
-                f"reel render exited {r.returncode} — root-cause this, do not "
-                f"degrade: {(r.stderr or '')[-300:]}")
-        pngs = sorted(f for f in os.listdir("/work/reel") if f.endswith(".png")) \
-            if os.path.isdir("/work/reel") else []
-        if len(pngs) < packed["reel_frames"]:
-            fail("reel_short", f"{len(pngs)} frames rendered, expected "
+                f"reel render failed — root-cause this, do not degrade: "
+                f"{str(_rj.get('error'))[:300]}")
+        _mark(led, "build_reel_paint", _reel_t0)
+        # THE SHORT-REEL GUARD, KEPT — counted on the .mov instead of on PNGs.
+        #
+        # It has to survive the format change: the composite trims each window
+        # by reel TIME, so a reel that is short by even a few frames makes those
+        # trims reference nothing and components land on the WRONG content. That
+        # is silent — ffmpeg exits 0 and the video looks plausible.
+        #
+        # -count_frames DECODES, rather than trusting the container's nb_frames
+        # header, because a truncated write can leave the header claiming frames
+        # the file does not contain — which is precisely the failure this guards.
+        _probe = subprocess.run(
+            ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
+             "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0",
+             "/work/reel.mov"],
+            capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
+        try:
+            _reel_have = int((_probe.stdout or "").strip().rstrip(",") or 0)
+        except Exception:
+            _reel_have = -1
+        led["reel_render"]["frames_measured"] = _reel_have
+        if _reel_have < 0:
+            # MEASURED / ABSENT / FAILED — never a confident zero. An unreadable
+            # probe is a failed measurement, not a reel of zero frames.
+            fail("reel_frames_unmeasurable",
+                 f"ffprobe could not count frames in /work/reel.mov: "
+                 f"{(_probe.stderr or '')[-200:]}")
+            raise RuntimeError(
+                "could not verify the reel's frame count — refusing to composite "
+                "against an unverified reel")
+        if _reel_have < packed["reel_frames"]:
+            fail("reel_short", f"{_reel_have} frames rendered, expected "
                                f"{packed['reel_frames']}")
             # A SHORT REEL IS NOT A SURVIVABLE PARTIAL. The composite trims each
             # window by reel TIME; frames that were never rendered make those
@@ -3469,32 +3524,21 @@ def edit(source_key: str, brief: str,
             # the wrong content rather than a missing component. Previously this
             # recorded the failure and then built the composite anyway.
             raise RuntimeError(
-                f"reel rendered {len(pngs)} of {packed['reel_frames']} frames. "
+                f"reel rendered {_reel_have} of {packed['reel_frames']} frames. "
                 f"The composite trims by reel TIME, so missing frames make those "
                 f"trims reference nothing and components land on the WRONG "
                 f"content. Root-cause the short render.")
         led["reel_renders"] += 1
-        # Reel PNGs -> one alpha-carrying mov. qtrle is fine in FFMPEG (it is
-        # only the REMOTION --codec flag that rejects it).
-        # argv + cwd. The glob is expanded by FFMPEG (-pattern_type glob), not
-        # by a shell, so removing the shell changes nothing about the behaviour
-        # and removes every metacharacter from the equation.
-        _mov = subprocess.run(
-            ["ffmpeg", "-y", "-v", "error", "-framerate", "30",
-             "-pattern_type", "glob", "-i", "*.png",
-             "-c:v", "qtrle", "-pix_fmt", "argb", "/work/reel.mov"],
-            cwd="/work/reel", capture_output=True, text=True,
-            timeout=900, env=_SUBPROCESS_ENV)
-        # THIS RETURN CODE WAS NEVER CHECKED. A failure here left /work/reel.mov
-        # absent and handed the agent a `run_this` referencing a file that does
-        # not exist — the composite then failed far downstream, with an ffmpeg
-        # error about a missing input rather than the real cause.
-        if _mov.returncode != 0 or not os.path.isfile("/work/reel.mov") \
-                or os.path.getsize("/work/reel.mov") == 0:
-            fail("reel_mov_failed", (_mov.stderr or "")[-300:])
+        # THE PNG -> qtrle ASSEMBLY IS GONE. renderMedia writes the alpha .mov
+        # directly, so there is no sequence to assemble. The check that pass
+        # carried — "the .mov exists and is non-empty", whose return code was
+        # once never read at all — is kept, because "renderMedia said ok" and
+        # "there is a usable file at that path" are still two different claims.
+        if not os.path.isfile("/work/reel.mov") or os.path.getsize("/work/reel.mov") == 0:
+            fail("reel_mov_failed", "renderMedia reported ok but /work/reel.mov "
+                                    "is missing or empty")
             raise RuntimeError(
-                f"alpha .mov assembly failed (exit {_mov.returncode}): "
-                f"{(_mov.stderr or '')[-300:]}")
+                "renderMedia reported ok but /work/reel.mov is missing or empty")
 
         # THE COMPOSITE. Each reel window is trimmed and shifted to the OUTPUT
         # time the agent authored — two clocks, and pack_reel is the only thing
@@ -3502,7 +3546,16 @@ def edit(source_key: str, brief: str,
         parts, last = [], "0:v"
         for k, sg in enumerate(packed["segments"]):
             parts.append(
-                f"[1:v]trim=start={sg['reel_from_s']}:end={sg['reel_to_s']},"
+                # format=yuva444p BEFORE the trim, exactly as the caption
+                # composite already does it. The reel used to arrive as
+                # qtrle/argb, where overlay negotiated alpha on its own; it now
+                # arrives as prores 4444 yuva444p10le and that negotiation is
+                # not something to leave to chance — if alpha is dropped, every
+                # component composites as an OPAQUE BLACK BOX over the footage
+                # and ffmpeg still exits 0. Silent, and it looks like a
+                # component bug rather than a pixel-format one.
+                f"[1:v]format=yuva444p,"
+                f"trim=start={sg['reel_from_s']}:end={sg['reel_to_s']},"
                 f"setpts=PTS-STARTPTS+{sg['out_at_s']}/TB[c{k}]")
             parts.append(
                 f"[{last}][c{k}]overlay=0:0:enable='between(t,{sg['out_at_s']},"
@@ -3514,7 +3567,7 @@ def edit(source_key: str, brief: str,
             "ok": True, "components": len(items), "final_label": last,
             "reel_frames": packed["reel_frames"],
             "reel_seconds": round(packed["reel_frames"] / 30, 2),
-            "rendered_frames": len(pngs),
+            "rendered_frames": _reel_have,
             "segments": packed["segments"],
             "run_this": (f"cd /work && filt=$(cat reel-filter.txt) && ffmpeg -y -i "
                          f"cut.mp4 -i reel.mov -filter_complex \"$filt\" "
@@ -3768,6 +3821,7 @@ def edit(source_key: str, brief: str,
                     "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
                                      if _cj.get("ms") and _cap_frames else None),
                     "bundle_ms": (_cap_res.get("_batch") or {}).get("bundle_ms"),
+                    "bundle_cached": (_cap_res.get("_batch") or {}).get("bundle_cached"),
                     "error": _cj.get("error"),
                 }
                 if _cj.get("ok") and os.path.exists("/work/captions.mov"):
@@ -6114,6 +6168,28 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               + (f"  ERROR={_cr.get('error')}" if _cr.get("error") else ""))
     elif (r.get("ledger") or {}).get("caption_path") == "ffmpeg_fallback":
         print("  CAPTIONS        : ffmpeg burn (no Remotion pass ran)")
+
+    # ── REMOTION PROCESSES — printed in the commit that adds the counter ──
+    # The question this answers: what does the shared process actually save?
+    # bundle_ms reached the ledger and NO OUTPUT before this, so round 33 could
+    # not tell whether the 9.79s bundle was paid once or twice. A counter added
+    # to answer a question gets printed.
+    _procs = []
+    for _label, _key in (("reel", "reel_render"), ("captions", "caption_render")):
+        _d = (r.get("ledger") or {}).get(_key)
+        if _d and _d.get("bundle_ms") is not None:
+            _procs.append((_label, _d))
+    if _procs:
+        _paid = sum(d["bundle_ms"] for _, d in _procs if d.get("bundle_cached") is not True)
+        _saved = sum(d["bundle_ms"] for _, d in _procs if d.get("bundle_cached") is True)
+        print(f"  REMOTION PROCS  : {len(_procs)} process(es)  "
+              f"bundle paid {_paid/1000:.1f}s  reused {_saved/1000:.1f}s")
+        for _label, _d in _procs:
+            _cach = _d.get("bundle_cached")
+            _cs = ("CACHE HIT" if _cach is True else
+                   "bundled" if _cach is False else "UNKNOWN (no BUNDLE_CACHED line)")
+            print(f"     {_label:10} bundle {(_d.get('bundle_ms') or 0)/1000:5.1f}s "
+                  f"paint {(_d.get('paint_ms') or 0)/1000:6.1f}s  {_cs}")
 
     _eff = (r.get("ledger") or {}).get("placement_effects") or []
     if _eff:

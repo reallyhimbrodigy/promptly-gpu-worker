@@ -12,21 +12,116 @@
  * generalises across all three.
  *
  * Contract: argv[2] is a JSON file of
- *   [{ id, composition, propsFile, out, sequence?, imageFormat? }, ...]
+ *   [{ id, composition, propsFile, out, alpha?, codec? }, ...]
+ *
+ * THE CONTRACT USED TO LIST `sequence?` AND `imageFormat?`. Neither was ever
+ * read: imageFormat is hardcoded png and there is no sequence branch at all, so
+ * a caller asking for a PNG directory would have silently received a VIDEO FILE
+ * at that path. Documented-but-unimplemented is the same false-green class as an
+ * assertion in a docstring — the doc asserts a capability the code does not
+ * have, and the caller finds out downstream. Removed rather than implemented:
+ * the alpha ProRes path replaced every reason to want a sequence.
  * Emits one JSON line per job to stdout prefixed "JOB " so the caller can
  * attribute failures per entry rather than losing the batch to one bad job.
  */
-import { bundle } from "@remotion/bundler";
-import { renderMedia, selectComposition } from "@remotion/renderer";
+// REMOTION IS IMPORTED INSIDE main(), NOT AT MODULE LOAD.
+//
+// Not a style choice: with these at the top, this file cannot be imported
+// anywhere Remotion is not installed — which is everywhere except the image. So
+// the only possible test was to read the source as TEXT, and a substring check
+// is satisfied by the comment that explains it. Deferring the import is what
+// lets smoke_bundle_cache.mjs drive the SHIPPED bundleDecision instead of a
+// copy of it.
+//
+// The real path is unaffected: main() awaits these before it does anything
+// else, so a missing dependency in the image still fails immediately and
+// loudly, at the same moment it did before.
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 
 const R = "/promptly-remotion";
-const jobs = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const jobs = process.argv[2] ? JSON.parse(fs.readFileSync(process.argv[2], "utf8")) : [];
 const t0 = Date.now();
-const serveUrl = await bundle({ entryPoint: path.join(R, "src", "index.ts"), onProgress: () => {} });
+
+// ── BUNDLE CACHE, KEYED ON THE SOURCE TREE ──────────────────────────────────
+//
+// bundle() is 9.79s of the 12.24s per-process cost. Batching amortises it
+// across jobs in ONE call, but the reel and the captions are rendered by
+// DIFFERENT AGENT TOOL CALLS — render_components and execute_plan — so they can
+// never share a call, and batching alone never collects that 9.79s twice.
+// Caching the bundle on disk does: the second process in a container reuses the
+// first one's output.
+//
+// KEYED ON CONTENT, NOT TIME. The agent AUTHORS components mid-run (it writes
+// Comp.tsx), so a cache that assumed the tree was static would serve a stale
+// bundle and render the previous version of a component the agent had just
+// fixed — silently, and with a plausible-looking video out the far end. The key
+// is a hash of every source file's path + size + mtime, so authoring a
+// component invalidates it exactly the way it should.
+//
+// The cache lives in /work, which is per-container: a fresh container pays the
+// bundle once, as it must.
+function sourceKey(root) {
+  const parts = [];
+  const walk = (d) => {
+    let ents;
+    try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents.sort((a, b) => a.name < b.name ? -1 : 1)) {
+      if (e.name === "node_modules" || e.name.startsWith(".")) continue;
+      const f = path.join(d, e.name);
+      if (e.isDirectory()) { walk(f); continue; }
+      if (!/\.(tsx?|jsx?|json|css)$/.test(e.name)) continue;
+      try {
+        const st = fs.statSync(f);
+        parts.push(`${f}:${st.size}:${Math.floor(st.mtimeMs)}`);
+      } catch { /* a file that vanished mid-walk cannot be part of the key */ }
+    }
+  };
+  walk(path.join(root, "src"));
+  return crypto.createHash("sha1").update(parts.join("\n")).digest("hex").slice(0, 16);
+}
+
+const CACHE_ROOT = "/work/.rbundle";
+
+// THE DECISION, SEPARATED FROM THE BUNDLING, so a test can drive it without
+// running a 9.79s bundle. The marker is what makes a cache dir usable, and it
+// is written LAST — after bundle() returns. A directory left behind by a
+// process killed mid-bundle therefore never reads as complete. Absence must
+// never render as success, and here absence is the ONLY safe reading.
+export function bundleDecision(root, cacheRoot = CACHE_ROOT) {
+  const key = sourceKey(root);
+  const cacheDir = path.join(cacheRoot, key);
+  const marker = path.join(cacheDir, ".complete");
+  return { key, cacheDir, marker, cached: fs.existsSync(marker) };
+}
+
+async function main() {
+const { bundle } = await import("@remotion/bundler");
+const { renderMedia, selectComposition } = await import("@remotion/renderer");
+const d = bundleDecision(R);
+const { key, cacheDir, marker } = d;
+let serveUrl;
+let cached = d.cached;
+if (cached) {
+  serveUrl = cacheDir;
+} else {
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  fs.mkdirSync(cacheDir, { recursive: true });
+  serveUrl = await bundle({
+    entryPoint: path.join(R, "src", "index.ts"),
+    outDir: cacheDir,
+    onProgress: () => {},
+  });
+  fs.writeFileSync(marker, key);
+}
 const bundleMs = Date.now() - t0;
+// PRINTED, not just returned. The question this cache exists to answer is "what
+// does the shared process actually save", and a bundle_ms that reaches the
+// ledger and no output answers nothing.
 console.log(`BUNDLE ${bundleMs}`);
+console.log(`BUNDLE_CACHED ${cached ? 1 : 0} ${key}`);
 
 for (const j of jobs) {
   const started = Date.now();
@@ -77,3 +172,11 @@ for (const j of jobs) {
   }
 }
 console.log(`TOTAL ${Date.now() - t0}`);
+}
+
+// RUN-AS-MAIN, so importing this module for a test does not start a bundle.
+// Without it the smoke could only ever read the source as TEXT — which is how
+// this repo keeps shipping checks that a comment can satisfy.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}
