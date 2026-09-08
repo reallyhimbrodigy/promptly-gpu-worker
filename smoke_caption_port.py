@@ -120,10 +120,23 @@ for _g in _enclosing_ifs(_tree, "captions"):
         for _n in _ast.walk(_t):
             if isinstance(_n, _ast.Name):
                 _names_guarding.add(_n.id)
-check("the caption render is NOT gated on the text-overlay list",
-      "items" not in _names_guarding,
-      f"conditions wrapping the caption render reference {sorted(_names_guarding)} "
-      f"— a speech job that rules no text overlays would render no captions")
+# RUN, NOT WALKED. The structural form of this could not tell a CONJUNCTION
+# from a DISJUNCTION: `if items:` (the defect) and `speech OR text` (correct)
+# both put `items` in a wrapping condition. It fired on the correct one.
+check("alpha_pass_needed is importable at runtime", 
+      callable(getattr(A, "alpha_pass_needed", None)))
+check("a SPEECH job that rules ZERO text overlays still renders captions",
+      A.alpha_pass_needed(True, 40, 0) is True,
+      "this is the original defect: captions gated on the text family")
+check("a NO-SPEECH job with text overlays still gets the alpha pass",
+      A.alpha_pass_needed(False, 0, 3) is True,
+      "text on a silent source used to fall through to the ffmpeg burn")
+check("speech with no transcribed words does not open the pass",
+      A.alpha_pass_needed(True, 0, 0) is False)
+check("neither family means no pass", A.alpha_pass_needed(False, 0, 0) is False)
+check("the guard in execute_plan IS that predicate",
+      "alpha_pass_needed(_want_caps, len(_cap_words), len(items))" in src,
+      "a predicate nothing calls is not a guard")
 check("it IS gated on speech", "_want_caps" in _names_guarding or "words" in _names_guarding,
       f"guarded by {sorted(_names_guarding)}; captions on a visual beat source "
       f"ask libass to render an empty file")
@@ -245,6 +258,28 @@ check("the mismatch raise is guarded by the MEASURED result",
 check("the actual frame count is PRINTED",
       "frames_actual={_cr.get('frames_actual')}" in src,
       "two rounds reported a frame count Python had only requested")
+
+# ── TEXT MOVED ONTO THIS PASS, AND THE ffmpeg BURN NO LONGER DRAWS IT ─────
+# build_overlays re-encoded the whole video to draw text with drawtext — 32.20s
+# for ten items over a 23.17s output on round 33 — across a span this alpha
+# layer already covers frame for frame. Passing `items` to BOTH would
+# double-draw every overlay: once in the layer, once burned underneath it.
+check("the alpha pass carries the text overlays",
+      "text_overlays=_text_overlays" in src)
+check("how many it carried is RECORDED",
+      '"text_overlays": len(_text_overlays),' in src,
+      "a text family that silently carried zero reads exactly like one that "
+      "carried ten")
+check("the ffmpeg burn is handed NO text",
+      "build_overlays([], _want_caps, cur" in src,
+      "passing items here as well draws every overlay twice")
+check("the burn survives only as the caption fallback",
+      "_need_burn = _want_caps and not led.get(\"caption_mov\")" in src
+      and "if _need_burn:" in src)
+check("the text family's effect is measured where the text now LANDS",
+      '_record_effect("text", _cc_before, _cco,' in src,
+      "measuring it at a burn that no longer happens would report every "
+      "overlay inert")
 
 check("a failed render is LOUD", 'fail("caption_render_failed"' in src)
 check("a failed composite is LOUD", 'fail("caption_composite_failed"' in src,

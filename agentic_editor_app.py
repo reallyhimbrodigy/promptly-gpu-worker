@@ -2400,6 +2400,71 @@ def _audio_stats(args, env=None):
     return _last(r"RMS level dB:\s*(-?[0-9.]+|-?inf)"), _last(r"Peak level dB:\s*(-?[0-9.]+|-?inf)")
 
 
+def alpha_pass_needed(has_speech, n_caption_words, n_text_items):
+    """Does the transparent overlay pass have anything to draw?
+
+    MODULE LEVEL AND PURE so a test can call it with real values. The structural
+    version of this check could not tell a CONJUNCTION from a DISJUNCTION: the
+    guard was once `if items:` — captions gated on the text family, the defect —
+    and is now `speech OR text`, where `items` appears in the condition but
+    gates nothing. An AST walk sees the same name in both and cries wolf on the
+    correct one. A check that cries wolf gets loosened until it is not a check,
+    so the predicate moved somewhere it can simply be RUN.
+
+    Captions need speech. Text needs no speech at all — which is the case that
+    used to fall through to the ffmpeg burn on a silent source.
+    """
+    return bool((has_speech and int(n_caption_words or 0) > 0)
+                or int(n_text_items or 0) > 0)
+
+
+def sfx_start_s(attack_ms, at_s):
+    """Where the FILE starts so its perceptual peak lands on `at_s`.
+
+    MODULE LEVEL AND PURE so a test can call it. The whole reason the sound
+    library is not just fifteen mp3s is this subtraction: place it without one
+    and the hit is audibly in the wrong place while nothing errors.
+
+    Clamped at the clip head — a 935ms swell anchored 0.4s in has nowhere to
+    start early into, and the peak then lands late by whatever was unavailable.
+    That is correct by derivation and the clamp is reported, not hidden.
+    """
+    try:
+        _a = max(0.0, float(attack_ms or 0) / 1000.0)
+    except Exception:
+        _a = 0.0
+    _want = float(at_s) - _a
+    return max(0.0, _want), (_want < 0.0)
+
+
+# ── WHY THERE IS NO ACOUSTIC PEAK-LANDING GATE ──────────────────────────────
+# I built one and it could not adjudicate. Measured on real catalogue sounds,
+# mixed two ways — attack APPLIED vs SKIPPED — with the peak read as the argmax
+# of the difference signal's RMS envelope (astats, ~21ms frames):
+#
+#     sound           attack   applied err   skipped err
+#     popsfx            32ms       -0.016s       +0.027s   <-- 43ms apart
+#     punchsfx          67ms       -0.016s       +0.048s
+#     camera-flash     127ms       -0.016s       +0.112s
+#     boom             287ms       -0.016s       +0.581s
+#     money-ching      551ms       -0.357s       +0.176s   <-- APPLIED reads WORSE
+#     imposter         935ms       +0.027s       +0.965s
+#
+# Two failures, not one. Short attacks are separated by less than the
+# measurement's own resolution; and money-ching's CORRECTLY placed arm reads
+# 357ms off, because production's table is the argmax of a 5ms-window envelope
+# and a 21ms window picks the other lobe of a two-lobe sound.
+#
+# A gate on this fires on a correct placement. A check that cries wolf gets
+# loosened until it is not a check, so it is not shipped. What IS verifiable end
+# to end and IS shipped: the table matches production byte for value
+# (cert_production_table_parity), every catalogue sound carries an offset (same
+# cert), the subtraction is applied (sfx_start_s, tested), and the sound is
+# acoustically present in the output (step_changed_audio). The acoustic LANDING
+# is measured and reported, never gated.
+_SFX_PEAK_MEASURABLE_ATTACK_MS = 250   # below this the argmax cannot adjudicate
+
+
 def step_changed_audio(before_path, after_path, t0, t1, env=None,
                        floor_db=_AUDIO_INERT_FLOOR_DB):
     """Did this build step change the AUDIO over the window it claimed to touch?
@@ -2745,7 +2810,8 @@ def caption_pages(kept_words, words_per_page=3):
 
 
 
-def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=()):
+def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=(),
+                        text_overlays=()):
     """The PromptlyOverlay input for a CAPTIONS-ONLY alpha pass.
 
     PromptlyOverlay already renders "captions + motion graphics + text overlays
@@ -2771,7 +2837,15 @@ def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=()):
         "sourceUrl": "", "fps": int(fps), "width": 1080, "height": 1920,
         "totalDurationInFrames": n,
         "clips": [], "transitions": [], "broll": [],
-        "motionGraphics": [], "textOverlays": [], "outro": "none",
+        # TEXT OVERLAYS RIDE THIS PASS. They used to be burned by ffmpeg
+        # drawtext in build_overlays — a full re-encode of the video, 32.20s for
+        # ten items over a 23.17s output on round 33 — over a span this alpha
+        # layer already covers frame for frame. Moving them here costs ZERO
+        # extra frames and deletes that pass, and it is also the higher-fidelity
+        # path: production's own caption_match overlay rather than a DejaVu
+        # drawtext filter.
+        "motionGraphics": [], "textOverlays": list(text_overlays or []),
+        "outro": "none",
         "caption": {
             "style": str(style),
             "pages": list(pages or []),
@@ -4044,14 +4118,41 @@ def edit(source_key: str, brief: str,
         # available here flattens the alpha (prores/vp8/vp9 all yuv, and
         # --pixel-format=yuva* is rejected outright). PNG is the only path that
         # keeps it.
+        # ── THROUGH THE SHARED PROCESS, NOT ITS OWN ────────────────────────
+        # This shelled `npx remotion render`, which pays bundle 9.79s +
+        # selectComposition 2.05s + renderMedia 0.40s = 12.24s of startup that
+        # the caption pass had already paid moments earlier in the same job.
+        # Round 33: build_captions 28.59s AND build_reel 24.14s, two processes,
+        # two startups.
+        #
+        # ALPHA VIA PRORES 4444 rather than a PNG sequence. The CLI refuses
+        # --pixel-format=yuva* and every codec it offers flattens alpha, which
+        # is why this path used --sequence at all; the NODE api does not refuse
+        # it, so the reel comes back as ONE .mov instead of ~300 PNGs, and the
+        # assembly step below disappears with them.
         shutil.rmtree("/work/reel", ignore_errors=True)
-        r = subprocess.run(
-            ["npx", "remotion", "render", "PromptlyOverlay", "/work/reel",
-             "--props=/work/reel-plan.json", "--sequence", "--image-format=png"],
-            cwd="/promptly-remotion", capture_output=True, text=True,
-            timeout=1800, env=_SUBPROCESS_ENV)
-        if r.returncode != 0:
-            fail("reel_render_failed", (r.stderr or "")[-300:])
+        _reel_frames_want = max(1, packed["reel_frames"])
+        _rres = render_remotion_batch([{
+            "id": "reel", "composition": "PromptlyOverlay",
+            "propsFile": "/work/reel-plan.json", "out": "/work/reel.mov",
+            "alpha": True, "expect_frames": _reel_frames_want,
+        }], env=_SUBPROCESS_ENV, timeout=1800)
+        _rj = (_rres or {}).get("reel") or {}
+        led["reel_render"] = {
+            "frames_expected": _reel_frames_want,
+            "frames_actual": _rj.get("frames_actual"),
+            "frames_ok": _rj.get("frames_ok"),
+            "bundle_ms": (_rres.get("_batch") or {}).get("bundle_ms"),
+            "paint_ms": _rj.get("ms"),
+        }
+        if _rj.get("frames_ok") is False:
+            fail("render_frames_mismatch",
+                 f"reel: asked for {_reel_frames_want} frames, the file holds "
+                 f"{_rj.get('frames_actual')} — the composite trims by reel TIME, "
+                 f"so a short reel makes those trims reference nothing and "
+                 f"components land on the WRONG content")
+        if not _rj.get("ok"):
+            fail("reel_render_failed", str(_rj.get("error") or "")[-300:])
             # FALLBACK, not an error handed back to the agent. Returning
             # {"error": ...} here made the render failure the AGENT's problem to
             # solve mid-run, and it has no better option than the one below —
@@ -4062,10 +4163,12 @@ def edit(source_key: str, brief: str,
             # Raising here keeps the failure diagnosable instead of laundering
             # it into a worse video the user did not ask for.
             raise RuntimeError(
-                f"reel render exited {r.returncode} — root-cause this, do not "
-                f"degrade: {(r.stderr or '')[-300:]}")
-        pngs = sorted(f for f in os.listdir("/work/reel") if f.endswith(".png")) \
-            if os.path.isdir("/work/reel") else []
+                f"reel render failed in the shared process — root-cause this, "
+                f"do not degrade: {str(_rj.get('error') or '')[-300:]}")
+        # THE FRAME COUNT IS READ OFF THE FILE, not off a directory listing.
+        # `expect_frames` already counted them with -count_frames above; this
+        # keeps the original guard's meaning with the new artifact.
+        pngs = [None] * int(_rj.get("frames_actual") or 0)
         if len(pngs) < packed["reel_frames"]:
             fail("reel_short", f"{len(pngs)} frames rendered, expected "
                                f"{packed['reel_frames']}")
@@ -4080,27 +4183,12 @@ def edit(source_key: str, brief: str,
                 f"trims reference nothing and components land on the WRONG "
                 f"content. Root-cause the short render.")
         led["reel_renders"] += 1
-        # Reel PNGs -> one alpha-carrying mov. qtrle is fine in FFMPEG (it is
-        # only the REMOTION --codec flag that rejects it).
-        # argv + cwd. The glob is expanded by FFMPEG (-pattern_type glob), not
-        # by a shell, so removing the shell changes nothing about the behaviour
-        # and removes every metacharacter from the equation.
-        _mov = subprocess.run(
-            ["ffmpeg", "-y", "-v", "error", "-framerate", "30",
-             "-pattern_type", "glob", "-i", "*.png",
-             "-c:v", "qtrle", "-pix_fmt", "argb", "/work/reel.mov"],
-            cwd="/work/reel", capture_output=True, text=True,
-            timeout=900, env=_SUBPROCESS_ENV)
-        # THIS RETURN CODE WAS NEVER CHECKED. A failure here left /work/reel.mov
-        # absent and handed the agent a `run_this` referencing a file that does
-        # not exist — the composite then failed far downstream, with an ffmpeg
-        # error about a missing input rather than the real cause.
-        if _mov.returncode != 0 or not os.path.isfile("/work/reel.mov") \
-                or os.path.getsize("/work/reel.mov") == 0:
-            fail("reel_mov_failed", (_mov.stderr or "")[-300:])
-            raise RuntimeError(
-                f"alpha .mov assembly failed (exit {_mov.returncode}): "
-                f"{(_mov.stderr or '')[-300:]}")
+        # NO PNG -> MOV ASSEMBLY STEP. The batch writes /work/reel.mov directly
+        # as ProRes 4444; the ~300-file glob-and-encode that used to stand
+        # between them is gone with the sequence render that required it.
+        if not os.path.isfile("/work/reel.mov") or os.path.getsize("/work/reel.mov") == 0:
+            fail("reel_mov_missing", "the batch reported ok and wrote no .mov")
+            raise RuntimeError("reel render reported ok and produced no /work/reel.mov")
 
         # THE COMPOSITE. Each reel window is trimmed and shifted to the OUTPUT
         # time the agent authored — two clocks, and pack_reel is the only thing
@@ -4347,6 +4435,17 @@ def edit(source_key: str, brief: str,
         _want_caps = bool(words)
         _cap_words = led.get("kept_words_out") or []
         _cap_pages, _cap_style = [], None
+        # ── TEXT RIDES THE ALPHA PASS, NOT AN ffmpeg BURN ───────────────────
+        # build_overlays drew these with drawtext and re-encoded the whole video
+        # to do it: 32.20s for ten items over a 23.17s output on round 33, over
+        # a span the caption layer already covers frame for frame. Here they
+        # cost ZERO extra frames.
+        #
+        # It is also the higher-fidelity path, which matters more: production
+        # draws text through PromptlyOverlay's caption_match overlay, and the
+        # burn was a DejaVu drawtext filter standing in for it. Zac's ruling is
+        # full Remotion, no ffmpeg substitutes.
+        _text_overlays = []
         # ── REAL CAPTIONS, THROUGH PRODUCTION'S OWN COMPOSITION ─────────────
         # PromptlyOverlay renders "captions + motion graphics + text overlays on
         # a transparent background" — so the nine styles need no new component,
@@ -4356,7 +4455,7 @@ def edit(source_key: str, brief: str,
         # layer: 8 of 9 are already 80-97% static, so halving adds 0-5% held
         # frames. TypewriterReveal is 42% static (a per-character cursor) and
         # halving adds 17%, so it renders full-rate.
-        if _want_caps and _cap_words:
+        if alpha_pass_needed(_want_caps, len(_cap_words), len(items)):
             # THE ROTATION RULE, FED. It was implemented, tested and called
             # with `recent` defaulting to () — structurally present and
             # unexercised, which the docstring said plainly and which is a
@@ -4364,16 +4463,35 @@ def edit(source_key: str, brief: str,
             # history is what turns it on.
             _recent = [x.strip() for x in str(recent_styles or "").split(",")
                        if x.strip()]
-            _cap_style = pick_caption_style(brief, recent=_recent)
+            _cap_style = (pick_caption_style(brief, recent=_recent)
+                          if (_want_caps and _cap_words) else "CleanCut")
             led["caption_recent_in"] = _recent
             _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
-            _cap_pages = caption_pages(_cap_words, 3)
-            _cap_end = max(float(w["e"]) for w in _cap_words)
+            _cap_pages = (caption_pages(_cap_words, 3)
+                          if (_want_caps and _cap_words) else [])
+            _text_overlays = [
+                {"variant": "caption_match",
+                 "fromFrame": max(0, int(round(float(_i5["t_start"]) * _cap_fps))),
+                 "durationInFrames": max(1, int(round(
+                     (float(_i5["t_end"]) - float(_i5["t_start"])) * _cap_fps))),
+                 "text": str(_i5.get("text") or ""),
+                 "position": "top"}
+                for _i5 in items]
+            # THE LAYER MUST COVER THE LAST THING ON IT, whichever family that
+            # is. Sizing it to the speech alone clips a text overlay that
+            # outlasts the final word — and on a NO-SPEECH source there is no
+            # speech to size it by at all, which is exactly the case that used
+            # to fall through to the ffmpeg burn.
+            _ends = ([float(w["e"]) for w in _cap_words]
+                     if (_want_caps and _cap_words) else [])
+            _ends += [float(_i6["t_end"]) for _i6 in items]
+            _cap_end = max(_ends) if _ends else 0.0
             _cap_frames = max(1, int(round(_cap_end * _cap_fps)))
             _cap_plan = "/work/caption-plan.json"
             with open(_cap_plan, "w") as fh:
                 json.dump(caption_overlay_plan(_cap_pages, _cap_style,
-                                               _cap_frames, fps=_cap_fps), fh)
+                                               _cap_frames, fps=_cap_fps,
+                                               text_overlays=_text_overlays), fh)
             _cap_t0 = time.time()
             _cap_res = render_remotion_batch([{
                 "id": "captions", "composition": "PromptlyOverlay",
@@ -4390,6 +4508,7 @@ def edit(source_key: str, brief: str,
             led["caption_render"] = {
                 "style": _cap_style, "fps": _cap_fps,
                 "pages": len(_cap_pages), "frames": _cap_frames,
+                "text_overlays": len(_text_overlays),
                 "ok": bool(_cj.get("ok")),
                 "paint_ms": _cj.get("ms"),
                 "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
@@ -4425,14 +4544,14 @@ def edit(source_key: str, brief: str,
         # Entered when there is text to draw OR when captions still need the
         # burn because the Remotion pass produced no .mov. Either alone is a
         # reason to run build_overlays; requiring BOTH is the defect above.
+        # ONLY THE CAPTION FALLBACK REACHES ffmpeg NOW. Text draws in the alpha
+        # pass above; build_overlays survives solely for the case where the
+        # Remotion caption render failed, because shipping plain captions beats
+        # shipping none. Passing `items` here as well would DOUBLE-DRAW every
+        # overlay — once in the alpha layer, once burned underneath it.
         _need_burn = _want_caps and not led.get("caption_mov")
-        if items or _need_burn:
-            # CAPTURED BEFORE THE CALL, because `cur` is rebound to
-            # "overlaid.mp4" below and a path read after that rebinding measures
-            # the file against ITSELF — psnr=inf, and every text overlay reports
-            # INERT. An edit above a rebinding is not an edit (2026-09-07).
-            _ov_before = os.path.join("/work", cur)
-            ov = build_overlays(items, _want_caps, cur, "overlaid.mp4")
+        if _need_burn:
+            ov = build_overlays([], _want_caps, cur, "overlaid.mp4")
             if ov.get("error"):
                 # ONE SKIP PER LOST RULING. A batch failure loses len(items)
                 # rulings; recording a single skip made the balance report
@@ -4451,28 +4570,11 @@ def edit(source_key: str, brief: str,
                 else:
                     cur = "overlaid.mp4"
                     _mark(led, "build_overlays", _tov0)
-                    # DID THE TEXT REACH THE PICTURE? Ten of round 33's sixteen
-                    # declarations were text and not one carried evidence.
-                    # Measured BEFORE the caption composite, so a failed burn
-                    # cannot be masked by captions landing on top of it.
-                    _txt_ctrl = _free_ctrl(
-                        [(_i4["t_start"], _i4["t_end"]) for _i4 in items], _out_dur)
-                    for _it3 in items:
-                        _record_effect("text", _ov_before,
-                                       os.path.join("/work", "overlaid.mp4"),
-                                       _it3["t_start"], _it3["t_end"],
-                                       note=str(_it3.get("text") or "")[:40],
-                                       ctrl_t0=_txt_ctrl)
-                    # ONLY WHEN THERE WAS TEXT. This branch is now also reached
-                    # by a caption-burn-only run, and declaring len(items) == 0
-                    # text placements there would write a zero into the manifest
-                    # for a family nobody asked for.
-                    if items:
-                        built["text"] = len(items)
-                        steps.append({"step": "text", "n": len(items),
-                                      "items": [{"t": _i.get("t_start"),
-                                                 "content": str(_i.get("text") or "")[:80]}
-                                                for _i in items]})
+                    # NO TEXT MEASUREMENT HERE ANY MORE. This branch is now
+                    # reached ONLY by the caption fallback burn, and it draws no
+                    # text at all — `items` is deliberately not passed. The text
+                    # family's effect is measured at the alpha composite below,
+                    # which is where the text now actually lands.
 
         # ── COMPOSITE THE CAPTION ALPHA ─────────────────────────────────────
         # OUTSIDE the overlay branch, for the same reason the render is: whether
@@ -4517,6 +4619,24 @@ def edit(source_key: str, brief: str,
                 #
                 # The LONGEST page, so the probe lands on a span that genuinely
                 # holds text.
+                # TEXT IS MEASURED WHERE IT NOW LANDS. It rides this same
+                # alpha layer, so its evidence comes from this composite rather
+                # than from a burn that no longer happens. Same instrument, same
+                # control-window logic — only the pass it watches has moved.
+                if items:
+                    _txt_ctrl = _free_ctrl(
+                        [(_i4["t_start"], _i4["t_end"]) for _i4 in items],
+                        _out_dur)
+                    for _it3 in items:
+                        _record_effect("text", _cc_before, _cco,
+                                       _it3["t_start"], _it3["t_end"],
+                                       note=str(_it3.get("text") or "")[:40],
+                                       ctrl_t0=_txt_ctrl)
+                    built["text"] = len(items)
+                    steps.append({"step": "text", "n": len(items),
+                                  "items": [{"t": _i.get("t_start"),
+                                             "content": str(_i.get("text") or "")[:80]}
+                                            for _i in items]})
                 if _cap_pages:
                     _p0 = max(_cap_pages,
                               key=lambda _p: float(_p.get("durationMs") or 0))
@@ -5274,7 +5394,9 @@ def edit(source_key: str, brief: str,
         except Exception:
             return {"error": "t must be a number (OUTPUT seconds)"}
         attack_ms = float((inv.get("attack_ms") or {}).get(nm, 0) or 0)
-        start = max(0.0, at - attack_ms / 1000.0)
+        # THE ONE DERIVATION, hoisted so a test can run it. It was inline and
+        # therefore only reachable by reading it.
+        start, _head_clamped = sfx_start_s(attack_ms, at)
         inp = os.path.join("/work", os.path.basename(str(input_file)))
         outp = os.path.join("/work", os.path.basename(str(output_file)))
         sfx = os.path.join("/assets/sounds", nm + ".mp3")
@@ -5312,6 +5434,8 @@ def edit(source_key: str, brief: str,
         return {"ok": True, "output_file": os.path.basename(outp), "sfx": nm,
                 "lands_at_s": round(at, 3), "started_at_s": round(start, 3),
                 "attack_ms_applied": attack_ms, "sfx_duration_s": _sdur,
+                "head_clamped": _head_clamped,
+                "peak_adjudicable": attack_ms >= _SFX_PEAK_MEASURABLE_ATTACK_MS,
                 "note": "the file starts EARLY by its attack so the peak lands on t"}
 
     def author_component(tsx, frames=45, name="authored"):
