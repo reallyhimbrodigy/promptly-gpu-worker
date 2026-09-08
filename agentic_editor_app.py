@@ -2693,7 +2693,33 @@ _VIDEO_REL_MARGIN_DB = 3.0
 # ONE-SIDED ON PURPOSE. It FAILS only on strong evidence of a passthrough;
 # anything else is recorded and not failed. A false "not applied" sends someone
 # to edit a component that works, which is more expensive than missing one.
-_ZOOM_SCALE_FIT_FAIL_DB = -8.0
+# -14.15, NOT -8.0, AND THE MARGIN IS 1.58 dB — UNDER THE 2.0 STANDARD.
+#
+# -8.0 was fitted to Zac's real footage and sits OUTSIDE the window that
+# separates real arms from passthroughs across all five populations measured
+# (-15.73, -12.57). It is wrong TODAY: on v1 talking_head a correctly applied
+# FocusWindow reads -12.57 and -8.0 calls it NOT APPLIED. That costs a component
+# edit on working code, which is what round 36 nearly bought.
+#
+# -14.15 is the midpoint of that five-population window and is 5/5 correct.
+# Its margin is 1.58 dB either side, BELOW the 2.0 dB that the pre-registered
+# falsifier requires, so it is NOT VALIDATED and is recorded as such here rather
+# than in a commit message nobody re-reads. A thin CORRECT bar beats a wide
+# WRONG one; neither is a validated bar.
+#
+# THE NORMALISER (delta + intrinsic) WAS REFUTED, and not merely by failing.
+# Two competent measurements of "the source's own responsiveness" for the same
+# file differ by 6.8 dB — 7.19 measured through the real renderer, 13.98
+# measured as a pure ffmpeg geometry pair — and the verdict INVERTS between
+# them: 7.19 makes the populations overlap (window -0.38 dB, no bar exists),
+# 13.98 opens 6.28 dB. A correction term whose magnitude depends on an unstated
+# methodological choice is not a mechanism. The renderer-measured figure is the
+# right one, because it is what the arms actually experience — render fidelity
+# is the DOMINANT term, moving 22.3 dB across crf 18-40 — which is exactly why
+# a source property measured without a render in it cannot stand in for it.
+_ZOOM_SCALE_FIT_FAIL_DB = -14.15
+_ZOOM_SCALE_FIT_MARGIN_DB = 1.58      # measured; the falsifier wants >= 2.0
+_ZOOM_SCALE_FIT_VALIDATED = False     # 5/5 correct, margin under standard
 
 
 def zoom_scale_fit_delta(src, render, scale, origin_x, origin_y, t0, dur=0.15,
