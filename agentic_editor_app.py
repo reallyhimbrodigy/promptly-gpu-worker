@@ -6564,6 +6564,9 @@ def edit(source_key: str, brief: str,
     # at the bottom of the turn loop to stop the run. Initialised HERE, not at
     # the assignment, so the read is never a NameError on the ordinary path.
     _unsupported_stop = False
+    # Initialised before the loop for the same reason _unsupported_stop is: the
+    # ordinary path reads it every turn and would raise NameError without it.
+    _repeat_stop = False
     for it in range(max_iters):
         led["iters"] = it + 1
         # KNOWLEDGE EVICTION: TRIED AND REVERTED 2026-09-01. Modelled $0.51 ->
@@ -6832,7 +6835,51 @@ def edit(source_key: str, brief: str,
         # separating them is what makes "the model is slow" falsifiable.
         for tu in tool_uses:
             _tt0 = time.time()
-            if tu.name in _REPAIR_ONLY and not led.get("execute_plan"):
+            # ── A BYTE-IDENTICAL CALL PRODUCES NOTHING, WHICHEVER TOOL IT IS ──
+            # The one-execution gate below is execute_plan-specific, and the
+            # loop the agent falls into is not a property of any one tool: a
+            # measured run spent 21,728 tokens against 7,510 and 8,058 on
+            # IDENTICAL input — a 2.9x spread — with probe_source called six
+            # times as the top consumer at 26%. rule_all_beats was not the
+            # lever. The lever is whichever loop it lands in this month, so the
+            # bound is on the SHAPE, not on a name.
+            #
+            # THE ARGUMENT IS INTERPRETATION-FREE. A call repeated with the same
+            # payload cannot produce a different answer: the tools here are
+            # deterministic given their input and the ledger they read, so a
+            # second identical probe_source, a second identical rule_all_beats
+            # restating the same verdicts, a second identical inspect_output all
+            # return what the agent already has. Whether the agent is
+            # re-deciding or restating does not matter — the RESULT is
+            # byte-identical either way.
+            #
+            # ONE REPEAT IS ANSWERED, then it is terminal. Refusing the first
+            # repeat outright is how the execute_plan gate livelocked pet_video:
+            # a refusal with no exit produced 19 rule_all_beats calls and no
+            # video. Answering once and then STOPPING is terminal by
+            # construction — the loop cannot continue, so it cannot spin.
+            _rpt_key = f"{tu.name}:{json.dumps(tu.input, sort_keys=True, default=str)}"
+            _rpt_n = led.setdefault("_call_payloads", {})
+            _rpt_n[_rpt_key] = _rpt_n.get(_rpt_key, 0) + 1
+            _rpt_seen = _rpt_n[_rpt_key]
+            if _rpt_seen > 2:
+                led.setdefault("repeat_terminal", []).append(
+                    {"tool": tu.name, "seen": _rpt_seen,
+                     "turn": led.get("iters")})
+                _repeat_stop = True
+                out = {
+                    "terminal": "identical call repeated",
+                    "tool": tu.name,
+                    "times": _rpt_seen,
+                    "why": ("This exact call, with this exact payload, has "
+                            "already been answered twice. It cannot return "
+                            "anything different, so the run is stopping here "
+                            "rather than spending the remaining budget on it."),
+                    "what_was_outstanding": led.get("spec_shortfall")
+                                            or led.get("execute_plan", {}).get(
+                                                "ruled_but_not_built") or None,
+                }
+            elif tu.name in _REPAIR_ONLY and not led.get("execute_plan"):
                 # REFUSED, not absent. The tool stays in the schema so the cached
                 # prefix never changes; what changes is whether the call is
                 # honoured. The message names the next action rather than only
@@ -7377,6 +7424,16 @@ def edit(source_key: str, brief: str,
             # Knowledge reads get a wider cap than shell output. At 6000 the
             # 24k-char read above would arrive as a quarter of a file and the
             # agent would silently act on a fragment.
+            # THE FIRST REPEAT IS ANSWERED AND SAID SO. Serving it silently
+            # teaches nothing; the note is what makes the second one avoidable.
+            if _rpt_seen == 2 and isinstance(out, dict):
+                led.setdefault("repeat_answered", []).append(
+                    {"tool": tu.name, "turn": led.get("iters")})
+                out = dict(out)
+                out["repeat_note"] = (
+                    f"This is the SECOND identical `{tu.name}` call — same "
+                    f"payload, same answer. A third stops the run. If something "
+                    f"is missing, change the payload or say what is outstanding.")
             cap = 26000 if tu.name == "read_knowledge" else 6000
             results.append({"type": "tool_result", "tool_use_id": tu.id,
                             "content": json.dumps(out)[:cap]})
@@ -7385,6 +7442,14 @@ def edit(source_key: str, brief: str,
         # TERMINAL: the request asked for something this editor does not do. Stop
         # before spending another turn, a render, or the user's credit on an
         # edit that would ignore what they asked for.
+        # TERMINAL: the agent is repeating a call that cannot answer differently.
+        # The gap is recorded rather than the run being called clean.
+        if _repeat_stop:
+            fail("repeat_terminal",
+                 f"stopped: {led.get('repeat_terminal')} — an identical call "
+                 f"answered twice and asked a third time. Outstanding at stop: "
+                 f"{led.get('spec_shortfall') or 'nothing recorded'}")
+            break
         if _unsupported_stop:
             final_text = led.get("user_message") or ""
             break
@@ -8128,6 +8193,24 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # the log either. That is the SAME defect as placement_effects, shipped one
     # commit after the commit that fixed it and quoted the law. Ledgering a
     # signal is not observing it.
+    # ── REPEATED CALLS — printed in the commit that adds the counter ───────
+    # A bound that fires and says nothing is the same dead end as no bound: the
+    # run would simply be shorter, and nobody could tell a disciplined agent
+    # from a stopped one.
+    _rep_a = (r.get("ledger") or {}).get("repeat_answered") or []
+    _rep_t = (r.get("ledger") or {}).get("repeat_terminal") or []
+    _pay = (r.get("ledger") or {}).get("_call_payloads") or {}
+    _dupes = {k.split(":", 1)[0]: v for k, v in _pay.items() if v > 1}
+    if _rep_a or _rep_t or _dupes:
+        print(f"  REPEATED CALLS  : {len(_pay)} distinct payloads, "
+              f"{sum(1 for v in _pay.values() if v > 1)} repeated  "
+              + (" ".join(f"{k}x{v}" for k, v in sorted(_dupes.items())) or "")
+              + (f"   answered-once {len(_rep_a)}" if _rep_a else "")
+              + (f"   <-- TERMINAL {_rep_t}" if _rep_t else ""))
+    elif _pay:
+        print(f"  REPEATED CALLS  : none — {len(_pay)} distinct payloads, "
+              f"no call repeated")
+
     _ep = (r.get("ledger") or {}).get("execute_plan_calls") or 0
     _rf = (r.get("ledger") or {}).get("refused_second_execute") or 0
     _rp = bool((r.get("ledger") or {}).get("_exec_repair_used"))
