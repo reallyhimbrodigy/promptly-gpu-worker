@@ -139,7 +139,28 @@ console.log(`BUNDLE_CACHED ${cached ? 1 : 0} ${key}`);
 for (const j of jobs) {
   const started = Date.now();
   try {
-    const inputProps = JSON.parse(fs.readFileSync(j.propsFile, "utf8")).input;
+    // THE WHOLE FILE, NOT `.input`.
+    //
+    // This stripped the wrapper and passed the INNER object as inputProps.
+    // Both compositions read `props.input`, so the unwrapped object merged in
+    // beside a defaultProps that still carried `input` — and every render
+    // silently used DEFAULT_RENDER_INPUT instead of the caller's plan.
+    //
+    // MEASURED LOCALLY, both nestings, actual output:
+    //   overlay unwrapped (shipped)  compDuration 600   21,028,986 bytes
+    //   overlay wrapped              compDuration  20    1,663,820 bytes
+    //   micro   unwrapped            compDuration   1        5,102 bytes
+    //   micro   wrapped              compDuration  20      780,466 bytes
+    // DEFAULT_RENDER_INPUT is 600 frames at 60fps with `caption.pages: []`, so
+    // every caption pass since the port rendered SIX HUNDRED FRAMES OF NOTHING
+    // — a fully transparent .mov — and reported `path=remotion
+    // composited=True`, because the file existed and ffmpeg exited 0.
+    //
+    // The reel never had this bug: it goes through `npx remotion render
+    // --props=<file>`, and the CLI passes the WHOLE file. The batch introduced
+    // the strip. Callers already write {"input": {...}} for exactly that
+    // reason, so this restores the contract rather than changing it.
+    const inputProps = JSON.parse(fs.readFileSync(j.propsFile, "utf8"));
     const comp = await selectComposition({ serveUrl, id: j.composition, inputProps });
     await renderMedia({
       composition: comp, serveUrl, inputProps,

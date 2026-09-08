@@ -86,3 +86,27 @@ if fails:
     for f in fails: print("  - " + f)
     sys.exit(1)
 print("SHARED-PROCESS: PASS")
+
+# ── EVERY REMOTION RENDER GOES THROUGH THE SHARED PROCESS ──────────────────
+# The reel shelled `npx remotion render` while the caption pass went through
+# the batch: two processes, two startups, in one job. Round 33 measured
+# build_captions 28.59s AND build_reel 24.14s. bundle 9.79 + selectComposition
+# 2.05 + renderMedia 0.40 = 12.24s of that is startup, paid twice.
+import pathlib as _pl
+_src = _pl.Path(A.__file__).read_text()
+_shells = [ln for ln in _src.splitlines()
+           if '"npx", "remotion", "render"' in ln]
+# author_component keeps its own process on purpose: it renders AGENT-WRITTEN
+# tsx, and a bad component must not be able to take the pipeline's batch down
+# with it.
+_unexpected = [ln for ln in _shells if '"Comp", out_dir' not in ln]
+assert not _unexpected, (
+    f"{len(_unexpected)} Remotion render(s) still shell their own process "
+    f"instead of joining the batch: {_unexpected}")
+assert 'render_remotion_batch([{\n            "id": "reel"' in _src or \
+       '"id": "reel", "composition": "PromptlyOverlay"' in _src, \
+    "the reel no longer goes through the shared process"
+assert '"expect_frames": _reel_frames_want' in _src, \
+    "the reel does not declare its frame count, so a short reel — which makes "\
+    "every composite trim reference nothing — would not be caught"
+print("  shared process: reel + captions in one batch, frame counts declared")

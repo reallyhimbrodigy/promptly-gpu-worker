@@ -49,28 +49,60 @@ if _ep:
         if getattr(a_in, "id", "") != "cur":
             continue
         _checked += 1
-        # THE OUTPUT MUST NOT BE A CONSTANT. A constant is reused on the next
-        # iteration, by which time `cur` IS that constant.
-        ok(not isinstance(a_out, ast.Constant),
-           f"{name} at line {node.lineno} reads `cur` and writes the CONSTANT "
-           f"{getattr(a_out, 'value', '?')!r} — on the next iteration `cur` is "
-           f"that same file and ffmpeg exits with 'Output ... same as Input #0'")
-        # and it must vary with something that changes per iteration
-        if isinstance(a_out, ast.JoinedStr):
-            ok(any(isinstance(v, ast.FormattedValue) for v in a_out.values),
-               f"{name} at line {node.lineno} writes an f-string with no "
-               f"interpolated counter — it is a constant in disguise")
+        # RESOLVE THROUGH THE VARIABLE. This used to test only the expression AT
+        # the call site, so `_sout = "with_sfx.mp4"` one line above and
+        # `place_sfx(..., _sout)` at the call passed cleanly: the argument is a
+        # Name, not a Constant, and the constant was invisible. RED-proving
+        # found it — binding a literal to a variable first defeated the whole
+        # check. Scope is not text, and one hop of indirection is still scope.
+        _resolved = [a_out]
+        if isinstance(a_out, ast.Name) and _ep is not None:
+            _bindings = [n2.value for n2 in ast.walk(_ep)
+                         if isinstance(n2, ast.Assign)
+                         and any(isinstance(t, ast.Name) and t.id == a_out.id
+                                 for t in n2.targets)]
+            if _bindings:
+                _resolved = _bindings
+        for _rv in _resolved:
+            # THE OUTPUT MUST NOT BE A CONSTANT. A constant is reused on the
+            # next iteration, by which time `cur` IS that constant.
+            ok(not isinstance(_rv, ast.Constant),
+               f"{name} at line {node.lineno} reads `cur` and writes the "
+               f"CONSTANT {getattr(_rv, 'value', '?')!r} — on the next "
+               f"iteration `cur` is that same file and ffmpeg exits with "
+               f"'Output ... same as Input #0'")
+            # and it must vary with something that changes per iteration
+            if isinstance(_rv, ast.JoinedStr):
+                ok(any(isinstance(v, ast.FormattedValue) for v in _rv.values),
+                   f"{name} at line {node.lineno} writes an f-string with no "
+                   f"interpolated counter — it is a constant in disguise")
 
-ok(_checked >= 2,
-   f"only {_checked} chained builder call(s) inspected — expected at least the "
-   f"zoom and sfx sites; the walk is not reaching them and every assertion "
-   f"above is vacuous")
+# ZOOM LEFT THIS SHAPE, and that is a fix rather than a gap. It no longer calls
+# a chained builder per ruling: every zoom renders in ONE Remotion batch and the
+# whole family composites ONCE, outside the loop, so there is no per-iteration
+# ffmpeg write to collide. The guard does not disappear with the shape — it
+# moves into the composite as an explicit refusal, because "cannot recur by
+# construction" is exactly what was believed about the fixed "zoomed.mp4" before
+# round 15 measured zoom 2->1.
+ok("chain_writes_its_own_input" in SRC,
+   "the zoom composite no longer uses a chained builder, and nothing refuses "
+   "the case where it would read and write the same file")
+ok('if cur == "zoomed.mp4":' in SRC,
+   "the zoom composite's input==output guard is missing")
+
+ok(_checked >= 1,
+   f"only {_checked} chained builder call(s) inspected — sfx is still one, so "
+   f"the walk should reach it; at zero every assertion above is vacuous")
 
 # `cur` must be advanced to the SAME name that was written, not the old constant.
-for fam, var in (("zoom", "_zout"), ("sfx", "_sout")):
+for fam, var in (("sfx", "_sout"),):
     ok(f"cur = {var}" in SRC,
        f"after a successful {fam} build, `cur` is not advanced to {var} — the "
        f"chain would keep reading the pre-{fam} file and silently discard it")
+# The batch-rendered family advances to the name its composite wrote.
+ok('cur = "zoomed.mp4"' in SRC,
+   "after the zoom composite, `cur` is not advanced to zoomed.mp4 — the chain "
+   "would keep reading the pre-zoom file and silently discard every zoom")
 
 if FAIL:
     print("FAIL smoke_chain_paths:")

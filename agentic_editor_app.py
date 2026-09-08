@@ -42,6 +42,30 @@ import time
 
 import modal
 
+from type_registries import (VALID_ZOOM_TYPES, VALID_TRANSITION_TYPES,
+                             VALID_TIGHT_CUT_OVERLAYS, VALID_MG_TYPES)
+
+# ── THE MOTION-GRAPHIC CATALOGUE IS 29, NOT 31 ──────────────────────────────
+# VALID_MG_TYPES has 31 and I costed the port against that number. Two of them
+# are NOT model-selectable, and production says so in its own prompt:
+#
+#   "These render as the `NamePlate` and `EndCard` components. DO NOT put
+#    `NamePlate` or `EndCard` in `motion_graphics` yourself — the pipeline
+#    builds [them]"                                    (handler.py:2784)
+#
+# They are BRAND components, emitted from brand settings by
+# `_brand_mg_keys = (("name_plate", "NamePlate"), ("end_card", "EndCard"))`, and
+# neither appears in the catalogue prose at all — production cannot place them
+# from a ruling either. Offering them here would be MORE than parity, and Zac's
+# ruling is "no more and no less".
+MG_BRAND_ONLY = frozenset({"NamePlate", "EndCard"})
+MG_SELECTABLE_TYPES = tuple(sorted(set(VALID_MG_TYPES) - MG_BRAND_ONLY))
+assert len(MG_SELECTABLE_TYPES) == 29, (
+    f"the selectable catalogue is {len(MG_SELECTABLE_TYPES)}, not 29 — the "
+    f"registry or the brand set moved and the prompt no longer matches it")
+assert not (MG_BRAND_ONLY - set(VALID_MG_TYPES)), (
+    "a brand component left the registry")
+
 app = modal.App("agentic-editor")
 
 # python_version PINNED: debian_slim() defaults to 3.9 and the Deepgram SDK uses
@@ -817,6 +841,27 @@ CONTRACT_FAILURES = frozenset({
     # placements == 0 and these declared one or two. A count of declarations is
     # not a measure of work.
     "placement_inert",
+    # A FAMILY THAT DECLARES AND NEVER MEASURES IS NOT COVERED BY THE ABOVE.
+    # `placement_inert` can only fire where something looked; round 33 declared
+    # 16 placements, looked at 1, and fired zero — indistinguishable in the log
+    # from sixteen honest placements. The coverage gap has to fail the round on
+    # its own, or every component ported from here lands unverifiable.
+    "placement_effect_uncovered",
+    # A RENDER THAT IGNORED ITS PLAN. remotion_batch.mjs stripped the props
+    # wrapper, so every composition fell back to defaultProps — 600 frames at
+    # 60fps with EMPTY caption pages — and reported ok:true. Two rounds of
+    # ms/frame were computed against a frame count Python had only requested.
+    # Asking the artifact what it holds is the only defence, and a mismatch has
+    # to fail the round.
+    "render_frames_mismatch",
+    # A ZOOM THAT IS THE SAME PICTURE AS ITS OWN SOURCE. ClipRenderer mounts a
+    # zoom only under `clip.zoomEffect && clip.src`; without the pre-extracted
+    # file it renders the footage un-zoomed and says nothing — right frame
+    # count, right duration, real footage. Seven types once produced seven
+    # BYTE-IDENTICAL files this way at a plausible ~1020 ms/frame.
+    # placement_inert cannot see it: the composite genuinely changed those
+    # frames, it just spliced in an un-zoomed copy of them.
+    "zoom_not_applied",
 })
 
 
@@ -1744,7 +1789,7 @@ KNOWLEDGE_TOOLS = [{
     "description": (
         "Rule on EVERY beat in ONE call. Pass the complete list — one entry per "
         "beat in your brief, each with treatment (a LIST from card|text|sfx|"
-        "zoom|none — more than one allowed), cut "
+        "zoom|none — more than one allowed), zoom_arc when you rule 'zoom', cut "
         "('keep'|'cut') and a why about that beat. This is one turn instead of "
         "one turn per beat, and the message history stops growing by a verdict "
         "every turn. If you miss any it tells you which; call again with only "
@@ -1781,7 +1826,8 @@ KNOWLEDGE_TOOLS = [{
                                                     "is a real answer",
                                      "items": {"type": "string",
                                                "enum": ["card", "text", "sfx",
-                                                        "zoom", "none"]}},
+                                                        "zoom", "transition",
+                                                        "none"]}},
                                  "cut": {"type": "string", "enum": ["keep", "cut"]},
                                  "text_content": {
                                      "type": "string",
@@ -1811,6 +1857,53 @@ KNOWLEDGE_TOOLS = [{
                                                     "phrase the card is ABOUT"},
                                  "card_label": {"type": "string",
                                      "description": "the card's supporting line"},
+                                 # WHICH COMPONENT, and its props. This is the
+                                 # one family whose TYPE the harness cannot
+                                 # derive: a quoted headline number is a
+                                 # StatCard, an ordered set is a RankedList, a
+                                 # verbatim line is a PullQuote — the choice
+                                 # reads the DIALOGUE, not the timing. Read
+                                 # `05_motion_graphics` for the catalogue: every
+                                 # entry carries its claim, its FITS/FIGHTS and
+                                 # its props shape.
+                                 "card_type": {"type": "string",
+                                     "enum": list(MG_SELECTABLE_TYPES),
+                                     "description": "when treatment includes "
+                                                    "'card': WHICH motion "
+                                                    "graphic. Defaults to "
+                                                    "StatCard only if you do "
+                                                    "not say — and StatCard on "
+                                                    "a beat with no quoted "
+                                                    "number is the wrong "
+                                                    "component."},
+                                 "card_props": {"type": "object",
+                                     "description": "the component's own props, "
+                                                    "in the shape its catalogue "
+                                                    "entry shows. A type whose "
+                                                    "props do not match renders "
+                                                    "empty."},
+                                 # ARC POSITION IS JUDGEMENT; THE MOVE IS A
+                                 # LOOKUP. Which beat is the payoff cannot be
+                                 # derived from timing — but once you say so,
+                                 # WHICH of the seven zooms goes there is
+                                 # production's ZOOM_ARC_HOMES plus the vibe,
+                                 # and the harness does it. Naming the move
+                                 # yourself would let a snap land on a payoff,
+                                 # which is the one thing payoff purity forbids.
+                                 "zoom_arc": {"type": "string",
+                                     "enum": ["hook", "build", "mid_peak",
+                                              "payoff", "breather", "close"],
+                                     "description": "REQUIRED when treatment "
+                                                    "includes 'zoom': what this "
+                                                    "moment IS in the arc. hook "
+                                                    "= the opening grab; build "
+                                                    "= carrying toward "
+                                                    "something; mid_peak = a "
+                                                    "local high; payoff = THE "
+                                                    "reason-to-exist line, at "
+                                                    "most one per video; "
+                                                    "breather = a lull; close = "
+                                                    "the landing."},
                                  "why": {"type": "string"}},
                              "required": ["beat", "treatment", "cut", "why"]}}},
                      "required": ["verdicts"]},
@@ -1826,8 +1919,17 @@ KNOWLEDGE_TOOLS = [{
     "input_schema": {"type": "object",
                      "properties": {
                          "beat": {"type": "integer", "description": "the beat index"},
+                         # THE SAME FAMILIES AS rule_all_beats. This offered
+                         # only card|text|none while the main surface offered
+                         # six — and it is a LIVE repair path (_REPAIR_ONLY
+                         # gates it until execute_plan has run, it does not
+                         # remove it), so a repair could silently not reach
+                         # sfx, zoom or transition. Found by the surface
+                         # assert the moment it started comparing the two
+                         # lists instead of grepping one stale spelling.
                          "treatment": {"type": "string",
-                                       "enum": ["card", "text", "none"]},
+                                       "enum": ["card", "text", "sfx", "zoom",
+                                                "transition", "none"]},
                          "cut": {"type": "string", "enum": ["keep", "cut"]},
                          "why": {"type": "string",
                                  "description": "about THIS beat's content"}},
@@ -2418,12 +2520,657 @@ def step_changed_output(before_path, after_path, t0, t1, env=None,
         return None, None
 
 
+# ── DID THE AUDIO CHANGE? A VIDEO DIFF CANNOT ANSWER THIS ───────────────────
+# place_sfx writes a new file with `-c:v copy` — the VIDEO is byte-identical by
+# construction, so step_changed_output() reports psnr=inf and changed=False on a
+# PERFECT sfx placement. Standing in a video check for an audio family would not
+# merely be weak; it would report every correct sound as inert.
+#
+# MEASURED, not assumed. The obvious instrument — RMS of (after - before) in the
+# window — does NOT work, because place_sfx re-encodes to aac and generation
+# noise scales with the bed:
+#
+#     quiet bed, sfx -6dB    INERT diff -41.83 dB    REAL diff -34.18 dB
+#     LOUD bed,  sfx -20dB   INERT diff -31.24 dB    REAL diff -25.27 dB
+#
+# The loud bed's INERT diff (-31.24) is LOUDER than the quiet bed's REAL diff
+# (-34.18). Any absolute threshold calls one of them wrong. Comparing against the
+# sound's own predicted energy fails the same way: on the loud bed the codec
+# noise sat 14.9 dB ABOVE the prediction.
+#
+# So the metric is NORMALISED BY THE LOCAL SIGNAL — nsr = diff_RMS - before_RMS —
+# because codec noise is a roughly fixed number of dB below whatever it is
+# encoding. Measured across an 11 dB change in bed loudness AND a 14 dB change in
+# sfx gain:
+#
+#     arm             diffRMS   beforeRMS      nsr
+#     quiet-INERT      -41.83      -30.61   -11.22
+#     loud-INERT       -31.24      -19.49   -11.75     <-- floor moves 0.53 dB
+#     quiet-REAL       -34.18      -30.61    -3.57
+#     loud-REAL        -25.27      -19.49    -5.78     <-- sfx at -20dB, a hard case
+#
+# The INERT floor is STABLE at -11.2..-11.8 dB. -8.0 dB is the threshold: 3.2 dB
+# above the worst inert, 2.2 dB below the worst real. Production's default gain
+# is -6 dB, not the -20 dB used for the hard arm, so the real margin is wider.
+#
+# SCOPE, STATED HONESTLY — the same bound the video leg carries. This catches a
+# step that mixed NOTHING. It does NOT verify the sound is the RIGHT one, nor
+# that its peak landed on the word; _SFX_ATTACK_MS correctness is a separate
+# measurement and this must never be read as covering it.
+#
+# THE FLOOR IS ENCODER-DEPENDENT. It was measured against place_sfx's own
+# `-c:a aac` at default bitrate. Change that encoder and this threshold must be
+# re-measured — smoke_placement_effect_families.py re-derives it from fixtures on
+# every run rather than trusting the constant.
+_AUDIO_INERT_FLOOR_DB = -8.0
+
+# ── THE VIDEO LEG NEEDED THE SAME TREATMENT, AND RED-PROVING FOUND IT ────────
+# step_changed_output's absolute 50 dB bar was set against a measurement where a
+# re-encode read 68.25 dB. RED-proving the new families on a high-detail fixture
+# read a PURE RE-ENCODE — nothing drawn at all — at 45.1 dB, i.e. CHANGED. On a
+# detailed source a family that composites NOTHING would have reported "moved",
+# which is precisely the false green this whole commit exists to delete, hiding
+# inside the instrument brought in to find it.
+#
+# The confound is codec generation loss, the same one the audio leg has, and it
+# takes the same answer: measure the placement window AGAINST A CONTROL WINDOW
+# in the same file pair. Generation loss is in both; the placement is in one.
+#
+#     pair      placed[2.0-2.5]   ctrl[4.8-5.3]    delta
+#     reenc              45.10           44.39     -0.71     <-- nothing drawn
+#     drawn              15.06           44.43    +29.37     <-- real overlay
+#
+# 29 dB of separation against 0.7 dB of noise. 3.0 dB is the bar, and it is not
+# a close call in either direction.
+#
+# WHERE NO CONTROL EXISTS the measurement falls back to the absolute bar and
+# RECORDS `mode`, because captions can cover nearly the whole output and a run
+# with no free span is a real case. A weaker measurement that says which one it
+# used is honest; one that silently degrades is the thing being fixed.
+_VIDEO_REL_MARGIN_DB = 3.0
+
+# ── A ZOOM MUST DIFFER FROM ITS OWN SOURCE ──────────────────────────────────
+# The silent-passthrough failure renders the extracted clip UN-ZOOMED, which is
+# a plain re-encode of that file. Measured on this repo's fixtures:
+#     re-encode, nothing drawn   45.10 dB
+#     real geometric transform   15.06 dB
+# 40 dB sits between them with 5 dB of margin below the re-encode floor and 25
+# above the transform. This is NOT the relative bar the other families use:
+# there is no un-zoomed control window inside a clip that is zoomed end to end,
+# so the comparison is against the SOURCE the render was made from — which is a
+# stronger reference than a control window, not a weaker one.
+# MEASURED, and my first guess was wrong by 20 dB. I set this at 40.0 from an
+# ffmpeg re-encode reading 45.1 dB — but the passthrough does not go through
+# ffmpeg, it goes through Chromium's decode/PNG/encode path, which loses far
+# more. Rendered locally, all seven types, real arm vs passthrough arm, psnr
+# against the clip's own source:
+#     real         15.94  16.01  16.02  16.40  15.99  16.68     (six types)
+#     passthrough  24.59  26.08  26.09  26.11  26.11  26.11
+# At 40.0 BOTH arms read as changed and the check would have passed a
+# passthrough — the exact failure it exists to catch. 20.0 sits between them
+# with 4.6 dB of margin below the passthrough floor and 3.3 dB above the real
+# ceiling.
+_ZOOM_GEOMETRY_MAX_DB = 20.0
+
+# ── STAGEDPUSH, WHICH NEEDS STAGES OR IT SILENTLY DOES NOTHING ──────────────
+# StagedPush.tsx: `const stages = ev.stages ?? []; if (stages.length < 2)
+# continue;`. An event without them renders a PASSTHROUGH — and that is exactly
+# what the geometry check caught on its first use: StagedPush's "real" arm was
+# byte-for-byte the behaviour of its passthrough arm (psnr@1.0 24.59 for both),
+# while the other six separated cleanly. Ported from production:
+_STAGED_PUSH_STEP_SCALE = 0.08   # EQUAL steps (Zac ruling): 1.08 / 1.16 / 1.24
+_STAGED_PUSH_MS = 280            # smooth-fast push into each stage
+_STAGED_PUSH_HOLD_MS = 260       # hold at full push after the final word
+_STAGED_PUSH_RELEASE_MS = 360    # ease-out when the phrase continues
+
+
+def staged_push_stages(words, t0, t1, clip_start_s):
+    """2-3 building stages from the words inside the beat, clip-local.
+
+    Each stage's atMs is a WORD ONSET and the scale climbs in equal +8% steps —
+    production's derivation, not a shape invented here. Returns [] when fewer
+    than two words fall in the window, because a staged push with one stage is
+    not a staged push and the component refuses it anyway.
+    """
+    _in = [w for w in (words or [])
+           if t0 <= float(w.get("s", -1)) <= t1][:3]
+    if len(_in) < 2:
+        return []
+    return [{"atMs": int(round((float(w["s"]) - clip_start_s) * 1000.0)),
+             "scale": round(1.0 + _STAGED_PUSH_STEP_SCALE * (i + 1), 4)}
+            for i, w in enumerate(_in)]
+
+
+def uncovered_families(placements, effects):
+    """Families that DECLARED a placement and measured nothing.
+
+    MODULE LEVEL AND PURE so a test can call it with real inputs. It lived
+    inline in execute_plan, where the only thing a check could reach was the
+    error string — and RED-proving found exactly that hole: neutering the
+    identity to `set()` left every leg green, because the string it looks for
+    was still in the file. Source is where code might be; runtime is where it
+    is (standing rule, 2026-09-05).
+
+    A COVERAGE BAR, NOT A VERDICT BAR. An effect whose `changed` is None still
+    counts as covered: "we tried and could not measure" is a different fact from
+    "we never looked", and `placement_inert` owns the first.
+    """
+    _dec = {p.get("family") for p in (placements or [])
+            if isinstance(p, dict) and p.get("family")}
+    _meas = {e.get("family") for e in (effects or [])
+             if isinstance(e, dict) and e.get("family")}
+    return sorted(_dec - _meas)
+
+
+def _audio_stats(args, env=None):
+    """(rms_db, peak_db) from an ffmpeg astats run; (None, None) if unreadable."""
+    import subprocess
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=180, env=env)
+    except Exception:
+        return None, None
+    out = (r.stdout or "") + (r.stderr or "")
+    def _last(pat):
+        v = re.findall(pat, out)
+        if not v:
+            return None
+        return float("-inf") if "inf" in v[-1] else float(v[-1])
+    return _last(r"RMS level dB:\s*(-?[0-9.]+|-?inf)"), _last(r"Peak level dB:\s*(-?[0-9.]+|-?inf)")
+
+
+def alpha_pass_needed(has_speech, n_caption_words, n_text_items):
+    """Does the transparent overlay pass have anything to draw?
+
+    MODULE LEVEL AND PURE so a test can call it with real values. The structural
+    version of this check could not tell a CONJUNCTION from a DISJUNCTION: the
+    guard was once `if items:` — captions gated on the text family, the defect —
+    and is now `speech OR text`, where `items` appears in the condition but
+    gates nothing. An AST walk sees the same name in both and cries wolf on the
+    correct one. A check that cries wolf gets loosened until it is not a check,
+    so the predicate moved somewhere it can simply be RUN.
+
+    Captions need speech. Text needs no speech at all — which is the case that
+    used to fall through to the ffmpeg burn on a silent source.
+    """
+    return bool((has_speech and int(n_caption_words or 0) > 0)
+                or int(n_text_items or 0) > 0)
+
+
+def sfx_start_s(attack_ms, at_s):
+    """Where the FILE starts so its perceptual peak lands on `at_s`.
+
+    MODULE LEVEL AND PURE so a test can call it. The whole reason the sound
+    library is not just fifteen mp3s is this subtraction: place it without one
+    and the hit is audibly in the wrong place while nothing errors.
+
+    Clamped at the clip head — a 935ms swell anchored 0.4s in has nowhere to
+    start early into, and the peak then lands late by whatever was unavailable.
+    That is correct by derivation and the clamp is reported, not hidden.
+    """
+    try:
+        _a = max(0.0, float(attack_ms or 0) / 1000.0)
+    except Exception:
+        _a = 0.0
+    _want = float(at_s) - _a
+    return max(0.0, _want), (_want < 0.0)
+
+
+# ── WHY THERE IS NO ACOUSTIC PEAK-LANDING GATE ──────────────────────────────
+# I built one and it could not adjudicate. Measured on real catalogue sounds,
+# mixed two ways — attack APPLIED vs SKIPPED — with the peak read as the argmax
+# of the difference signal's RMS envelope (astats, ~21ms frames):
+#
+#     sound           attack   applied err   skipped err
+#     popsfx            32ms       -0.016s       +0.027s   <-- 43ms apart
+#     punchsfx          67ms       -0.016s       +0.048s
+#     camera-flash     127ms       -0.016s       +0.112s
+#     boom             287ms       -0.016s       +0.581s
+#     money-ching      551ms       -0.357s       +0.176s   <-- APPLIED reads WORSE
+#     imposter         935ms       +0.027s       +0.965s
+#
+# Two failures, not one. Short attacks are separated by less than the
+# measurement's own resolution; and money-ching's CORRECTLY placed arm reads
+# 357ms off, because production's table is the argmax of a 5ms-window envelope
+# and a 21ms window picks the other lobe of a two-lobe sound.
+#
+# A gate on this fires on a correct placement. A check that cries wolf gets
+# loosened until it is not a check, so it is not shipped. What IS verifiable end
+# to end and IS shipped: the table matches production byte for value
+# (cert_production_table_parity), every catalogue sound carries an offset (same
+# cert), the subtraction is applied (sfx_start_s, tested), and the sound is
+# acoustically present in the output (step_changed_audio). The acoustic LANDING
+# is measured and reported, never gated.
+_SFX_PEAK_MEASURABLE_ATTACK_MS = 250   # below this the argmax cannot adjudicate
+
+
+def step_changed_audio(before_path, after_path, t0, t1, env=None,
+                       floor_db=_AUDIO_INERT_FLOOR_DB):
+    """Did this build step change the AUDIO over the window it claimed to touch?
+
+    Returns (changed: bool|None, nsr_db: float|None). None means UNMEASURED —
+    never False, for the same reason the video leg says so: "could not measure"
+    and "did nothing" are different facts, and collapsing them is how absence
+    gets rendered as success.
+
+    See the measurement block above for why this is normalised rather than
+    absolute, and for the numbers the -8.0 dB floor comes from.
+    """
+    try:
+        if not (os.path.exists(before_path) and os.path.exists(after_path)):
+            return None, None
+        dur = max(0.05, float(t1) - float(t0))
+        ss, tt = f"{float(t0):.3f}", f"{dur:.3f}"
+        d_rms, _ = _audio_stats(
+            ["ffmpeg", "-hide_banner", "-nostats",
+             "-ss", ss, "-t", tt, "-i", before_path,
+             "-ss", ss, "-t", tt, "-i", after_path,
+             "-filter_complex",
+             "[0:a]aformat=sample_fmts=fltp,volume=-1[inv];"
+             "[inv][1:a]amix=inputs=2:normalize=0[d];"
+             "[d]astats=metadata=1:reset=0", "-f", "null", "-"], env=env)
+        b_rms, _ = _audio_stats(
+            ["ffmpeg", "-hide_banner", "-nostats", "-ss", ss, "-t", tt,
+             "-i", before_path, "-af", "astats=metadata=1:reset=0",
+             "-f", "null", "-"], env=env)
+        if d_rms is None or b_rms is None:
+            return None, None
+        # SILENCE IN THE WINDOW IS UNMEASURABLE, NOT INERT. A normalised metric
+        # divides by the local signal; with no local signal there is nothing to
+        # normalise against and the ratio is meaningless. Reporting False here
+        # would page on every sound placed over a silent beat — which is exactly
+        # where a sound effect most often goes.
+        if b_rms == float("-inf") or d_rms == float("-inf"):
+            return None, None
+        nsr = round(d_rms - b_rms, 2)
+        return (nsr >= floor_db), nsr
+    except Exception:
+        return None, None
+
+
 # THE RAMP FRACTION IS PRODUCTION'S, NOT A GUESS.
 # handler.py: ZOOM_PEAK_REACH_MS["SmoothPush"] = 420  # 35% x 1200ms (ramp-in end)
 # so the push reaches its peak 35% of the way through the event and HOLDS the
 # landed state for the remaining 65%. cert_zoom_ramp_matches_production.py reads
 # that table and fails if the two drift.
 ZOOM_RAMP_FRACTION = 0.35
+
+# THE REGISTRY, NOT A COPY OF IT. type_registries.py is the module production
+# imports and the container already mounts it, so "the homes tile the registry"
+# is an equality against production's own list rather than against a second
+# hand-maintained one that can fall behind silently.
+
+# ── THE SEVEN ZOOMS, AS PRODUCTION HOUSES THEM ──────────────────────────────
+#
+# Zac watched all seven side by side and approved them, so the catalogue is the
+# ruling and this lane's single generic 1.12x zoompan is the gap. What follows
+# is production's, VALUE FOR VALUE, and cert_production_table_parity.py reads
+# `git show zero-reject-routing:handler.py` and fails on any drift. That cert
+# had to be WRITTEN: two others were cited in this file's comments
+# ("cert_zoom_ramp_matches_production.py reads that table and fails if the two
+# drift") and neither existed, so the values everyone believed were pinned were
+# pinned by nothing.
+#
+# ARC POSITION IS THE AGENT'S, TYPE IS THE HARNESS'S. Which beat is the payoff
+# is editorial judgement and cannot be derived; WHICH MOVE a payoff takes is a
+# lookup plus the vibe register. That split is the same one the whole harness
+# runs on.
+ZOOM_ARC_HOMES = {
+    # SmoothPush is offered at hook AND mid_peak so the VIBE scopes the register
+    # the same way it scopes captions and SFX: a corporate beat picks the calm
+    # push, a viral beat picks the punchy snap. Both registers must be present
+    # at a position or the vibe has nothing to choose between.
+    "hook":     ("DepthPull", "SnapReframe", "StepZoom", "SmoothPush"),
+    # StagedPush lives at MID_PEAK ONLY — it is the climax of a short BUILDING
+    # phrase ("10 million dollars"), and a multi-stage phrase is a peak, not the
+    # one payoff.
+    "mid_peak": ("FocusWindow", "SnapReframe", "StepZoom", "StagedPush", "SmoothPush"),
+    # PAYOFF PURITY: the committed-push family only. The singular
+    # reason-to-exist word gets a move that commits, never a snap or a step.
+    "payoff":   ("LetterboxPush", "SmoothPush"),
+    "close":    ("SmoothPush", "SnapReframe", "StepZoom"),
+    "build":    ("SnapReframe", "StepZoom"),
+    "breather": ("SnapReframe", "StepZoom"),
+}
+ZOOM_MASK_POSITIONS = ("build", "breather")
+
+# Natural duration DECLARED IN FRAMES at 60fps, ms DERIVED with an exactness
+# check — production's B2 pattern. An off-grid zoom duration cannot be written.
+ZOOM_NATURAL_DURATION_FRAMES = {
+    "SmoothPush":    72,    # -> 1200ms
+    "SnapReframe":   42,    # ->  700ms
+    "FocusWindow":   90,    # -> 1500ms
+    "StepZoom":      48,    # ->  800ms
+    "LetterboxPush": 84,    # -> 1400ms
+    "DepthPull":    132,    # -> 2200ms
+}
+ZOOM_NATURAL_DURATION_MS = {}
+for _zt0, _zf0 in ZOOM_NATURAL_DURATION_FRAMES.items():
+    if (int(_zf0) * 1000) % 60 != 0:
+        raise ValueError(f"zoom {_zt0}: {_zf0} frames is not ms-exact at 60fps")
+    ZOOM_NATURAL_DURATION_MS[_zt0] = (int(_zf0) * 1000) // 60
+del _zt0, _zf0
+
+# STAGEDPUSH IS ABSENT FROM BOTH NATURAL TABLES IN PRODUCTION, and that is not
+# an oversight to paper over: its span is set by the 2-3 building words it
+# completes on, so there is no single designed duration or scale to copy.
+# Inventing one here would be a value production does not have, and the parity
+# cert would then be pinning a number to nothing.
+_STAGED_PUSH_FALLBACK_MS = 1800   # only when the words cannot be resolved
+
+ZOOM_NATURAL_SCALE = {
+    "SmoothPush":    1.22,
+    "SnapReframe":   1.3,
+    "FocusWindow":   1.8,   # bgScale; FocusWindow is dual-view, not a push
+    "StepZoom":      1.25,
+    "LetterboxPush": 1.25,
+    "DepthPull":     1.25,
+}
+
+# Per-type PERCEPTUAL PEAK reach, measured off each component's own ease curve.
+# The event's math endpoint is "ramp-out done" — scale back at 1.0 — so timing
+# the endpoint to the word puts the peak HUNDREDS OF MS EARLY and the zoom reads
+# as missed. startMs = word_start_ms - ZOOM_PEAK_REACH_MS[type].
+ZOOM_PEAK_REACH_MS = {
+    "SmoothPush":     420,   # 35% x 1200ms (ramp-in end)
+    "SnapReframe":    333,   # spring 99% settle (damping 28, mass 0.6, stiffness 260)
+    "FocusWindow":    417,   # spring 99% settle (damping 24, mass 0.7, stiffness 180)
+    "StepZoom":         0,   # instant — peak at startMs
+    "LetterboxPush":  490,   # 35% x 1400ms
+    "DepthPull":      770,   # 35% x 2200ms
+    "StagedPush":     280,   # the push into the FIRST stage; later stages peak
+                             # on their own words via each stage's atMs
+}
+
+# FITS / FIGHTS, lifted from production's own per-zoom teach — NOT paraphrased.
+# The vibe scores against these to pick the register within an arc position,
+# exactly as CAPTION_STYLE_FITS does for captions.
+ZOOM_TYPE_FITS = {
+    "SmoothPush":    ("calm", "weighty", "professional", "story", "corporate",
+                      "cinematic", "reflective", "deliberate", "premium"),
+    "SnapReframe":   ("viral", "punchy", "high-energy", "punchline", "reaction",
+                      "fast", "snappy"),
+    "FocusWindow":   ("detail", "context", "demo", "product", "comparison"),
+    "StepZoom":      ("hustle", "viral", "rhythm", "beat", "rhythm-locked",
+                      "quick", "snappy"),
+    "LetterboxPush": ("cinematic", "story", "dramatic", "climax", "reveal",
+                      "film", "moody"),
+    "DepthPull":     ("premium", "story", "cinematic", "intro", "atmospheric",
+                      "title", "luxury"),
+    "StagedPush":    ("building", "escalating", "stacked", "hustle", "money",
+                      "numbers"),
+}
+ZOOM_TYPE_FIGHTS = {
+    "SmoothPush":    ("frenetic",),
+    "SnapReframe":   ("calm", "cinematic", "story", "corporate", "composed",
+                      "slow"),
+    "FocusWindow":   (),      # a specialty, gated by need rather than by tone
+    "StepZoom":      ("calm", "deliberate", "cinematic", "corporate", "smooth"),
+    "LetterboxPush": ("casual", "viral", "educational"),
+    "DepthPull":     ("fast", "punchy", "casual"),
+    "StagedPush":    ("calm", "slow"),
+}
+
+# ── IMPORT-TIME EXACTNESS, the same three production asserts ─────────────────
+# These run in the CONTAINER on every launch, not in a test file that can be
+# skipped. Production carries them because a silently extinct zoom type is
+# invisible: everything parses and one move simply never appears again.
+assert {_t for _h in ZOOM_ARC_HOMES.values() for _t in _h} == set(VALID_ZOOM_TYPES), (
+    "ZOOM_ARC_HOMES must house exactly the zoom registry: "
+    f"{sorted({_t for _h in ZOOM_ARC_HOMES.values() for _t in _h})} vs "
+    f"{sorted(VALID_ZOOM_TYPES)}")
+assert set(ZOOM_ARC_HOMES) == {"hook", "build", "mid_peak", "payoff",
+                               "breather", "close"}, (
+    "every arc position carries a variant")
+assert all(_p in ZOOM_ARC_HOMES for _p in ZOOM_MASK_POSITIONS)
+# PAYOFF PURITY, asserted rather than remembered. The one reason-to-exist word
+# takes a committed push; a snap or a step there is the defect this pins.
+assert set(ZOOM_ARC_HOMES["payoff"]) == {"LetterboxPush", "SmoothPush"}, (
+    "payoff purity: the payoff takes the committed-push family only, not "
+    f"{sorted(ZOOM_ARC_HOMES['payoff'])}")
+# StagedPush at mid_peak ONLY — a multi-stage phrase is a peak, not a payoff.
+assert [_p for _p, _h in ZOOM_ARC_HOMES.items() if "StagedPush" in _h] == ["mid_peak"], (
+    "StagedPush lives at mid_peak only; it is the climax of a building phrase")
+assert set(ZOOM_TYPE_FITS) == set(VALID_ZOOM_TYPES), (
+    "every zoom type needs a fitness clause or the vibe cannot choose it")
+assert set(ZOOM_TYPE_FIGHTS) == set(VALID_ZOOM_TYPES)
+# Every type that can be OFFERED must be back-timeable, or its peak lands wrong
+# and nothing errors.
+assert set(ZOOM_PEAK_REACH_MS) == set(VALID_ZOOM_TYPES), (
+    "a type with no peak-reach cannot be landed on the word")
+
+
+# ── THE NINE TRANSITIONS AND THE TWO TIGHT-CUT OVERLAYS ─────────────────────
+#
+# Production's, value for value; cert_production_table_parity.py reads
+# `git show zero-reject-routing:handler.py` and fails on drift.
+#
+# THE CORPUS RATE ON THE SPEECH ROUTE IS 0.00/25s. That is not a gap to close by
+# placing more — it is what shipped output looks like, and the sizing pass said
+# so: at reference density this family costs nothing because reference density
+# is zero. It exists so that a seam which GENUINELY turns can be dressed, and
+# the vibe scopes the register rather than deciding whether to dress at all.
+TRANSITION_FPS = 60
+TRANSITION_DURATION_FRAMES = {
+    "DipToBlack":    21,   # ->  350ms
+    "ZoomThrough":   30,   # ->  500ms
+    "CardSwipe":     36,   # ->  600ms
+    "StepPush":      36,   # ->  600ms
+    "SlideOver":     42,   # ->  700ms
+    "ShutterFlash":  42,   # ->  700ms
+    "CrossfadeZoom": 48,   # ->  800ms
+    "LightLeak":     48,   # ->  800ms  (a TIGHT-CUT OVERLAY, not a transition)
+    "Stack":         60,   # -> 1000ms
+    "FilmStrip":     72,   # -> 1200ms
+}
+TRANSITION_NATURAL_DURATION_MS = {}
+for _tt0, _tf0 in TRANSITION_DURATION_FRAMES.items():
+    if (int(_tf0) * 1000) % TRANSITION_FPS != 0:
+        raise ValueError(f"transition {_tt0}: {_tf0} frames is not ms-exact at "
+                         f"{TRANSITION_FPS}fps")
+    TRANSITION_NATURAL_DURATION_MS[_tt0] = (int(_tf0) * 1000) // TRANSITION_FPS
+del _tt0, _tf0
+
+# TIGHT-CUT OVERLAYS ARE NOT TRANSITIONS. They are punctuation painted OVER a
+# hard cut — the cut plays straight, audio and time untouched — so they consume
+# NO footage and need no room. ShutterFlash is in both registries: the heavy
+# form is a transition that halts the video, the light form is an accent over a
+# cut that still plays. Reading the duration table as "ten transitions" is the
+# mistake this comment exists to prevent; LightLeak is in it and is not one.
+TIGHT_CUT_OVERLAY_MS = 180
+
+# ZERO-HANDLE CLASS. These render one clip at a time and swap under a cover
+# graphic, or squash both under a generated overlay at peak, so they work at a
+# 0ms gap where every other type needs handle frames on both sides.
+TRANSITION_ZERO_HANDLE = frozenset({"LightLeak", "FilmStrip", "ShutterFlash"})
+
+# FITS / FIGHTS, lifted from production's own per-transition teach.
+TRANSITION_FITS = {
+    "CardSwipe":     ("casual", "vlog", "viral", "pivot"),
+    "ZoomThrough":   ("viral", "high-energy", "punchy", "payoff", "fast"),
+    "SlideOver":     ("educational", "explainer", "corporate", "chaptered",
+                      "clean", "neutral", "professional"),
+    "Stack":         ("app", "phone", "ios", "demo", "product"),
+    "CrossfadeZoom": ("story", "cinematic", "documentary", "sentimental",
+                      "emotional", "reflective"),
+    "ShutterFlash":  ("viral", "high-energy", "punchy", "surprise", "stat"),
+    "StepPush":      ("corporate", "educational", "business", "training",
+                      "how-to"),
+    "FilmStrip":     ("showcase", "creative", "portfolio", "collection"),
+    "DipToBlack":    ("cinematic", "story", "professional", "documentary",
+                      "act", "chapter"),
+    "LightLeak":     ("story", "emotional", "nostalgic", "reflective",
+                      "realization", "callback"),
+}
+TRANSITION_FIGHTS = {
+    "CardSwipe":     ("corporate", "cinematic", "formal", "polished"),
+    "ZoomThrough":   ("calm", "corporate", "cinematic", "educational"),
+    "SlideOver":     (),        # too plain to fight anything
+    "Stack":         (),        # gated by SUBJECT, not by tone
+    "CrossfadeZoom": ("viral", "punchy", "high-energy"),
+    "ShutterFlash":  ("calm", "professional", "cinematic"),
+    "StepPush":      ("casual", "viral", "cinematic"),
+    "FilmStrip":     ("corporate", "formal"),
+    "DipToBlack":    ("casual", "viral", "fast"),
+    "LightLeak":     ("corporate", "hype", "tech"),
+}
+
+# ── IMPORT-TIME EXACTNESS ───────────────────────────────────────────────────
+assert set(VALID_TRANSITION_TYPES) <= set(TRANSITION_DURATION_FRAMES), (
+    "every transition in the registry needs a natural duration: "
+    f"{sorted(set(VALID_TRANSITION_TYPES) - set(TRANSITION_DURATION_FRAMES))} "
+    f"have none")
+assert set(VALID_TIGHT_CUT_OVERLAYS) <= set(TRANSITION_DURATION_FRAMES)
+assert set(TRANSITION_FITS) == set(TRANSITION_DURATION_FRAMES), (
+    "every type needs a fitness clause or the vibe cannot choose it")
+assert set(TRANSITION_FIGHTS) == set(TRANSITION_DURATION_FRAMES)
+# LightLeak must NOT be offerable as a transition — it is an overlay, and the
+# registry is the authority on which is which.
+assert "LightLeak" not in VALID_TRANSITION_TYPES, (
+    "LightLeak is a tight-cut overlay; offering it as a transition would let a "
+    "cover graphic be asked to carry a picture change")
+
+
+def mg_back_timed_start_s(mg_type, anchor_s, attack_table, default_ms=150):
+    """Where the MG's frame window starts so it is SETTLED on its anchor word.
+
+    The visual analogue of the SFX peak-on-word subtraction, and measured the
+    same way: the MGAttackProbe battery reports hit (peak entrance velocity) and
+    settle (90% of the entrance plateau) per component. A simple pop uses
+    SETTLE — the whole thing arrives as one; a sequenced/count-up type uses
+    container-arrival, min(hit, settle), so the frame lands on the beat while
+    its content keeps building.
+
+    The table has been in _asset_inventory.json since the inventory was built
+    and NOTHING READ IT: pack_reel placed every component at its raw anchor, so
+    every motion graphic in this lane has entered LATE by its own attack.
+    Clamped at the head, and the clamp is returned rather than hidden.
+    """
+    try:
+        _a = float((attack_table or {}).get(str(mg_type), default_ms) or 0) / 1000.0
+    except Exception:
+        _a = default_ms / 1000.0
+    _want = float(anchor_s) - _a
+    return max(0.0, _want), (_want < 0.0)
+
+
+def transition_room_ms(spans, k):
+    """Footage available at the seam AFTER span `k`, in ms.
+
+    A transition of duration D overlaps A's tail and B's head, so BOTH sides
+    must carry D. The room is therefore the SHORTER of the two, not the gap
+    between them and not their sum — offering a 1200ms FilmStrip across a 400ms
+    span would ask the renderer for frames that do not exist.
+    """
+    if not spans or k < 0 or k + 1 >= len(spans):
+        return 0.0
+    a0, a1 = float(spans[k][0]), float(spans[k][1])
+    b0, b1 = float(spans[k + 1][0]), float(spans[k + 1][1])
+    return max(0.0, min(a1 - a0, b1 - b0) * 1000.0)
+
+
+def transitions_fitting(room_ms, types=None):
+    """The types whose natural duration fits the measured room, shortest first.
+
+    PRODUCTION'S RULE: a seam is offered only what it can actually hold. The
+    alternative — offering the whole vocabulary and letting the renderer clamp —
+    is how a 1200ms strip becomes a 300ms smear that reads as a glitch.
+    """
+    _pool = set(types if types is not None else VALID_TRANSITION_TYPES)
+    return sorted(
+        (t for t in _pool
+         if TRANSITION_NATURAL_DURATION_MS.get(t, 10 ** 9) <= float(room_ms or 0)),
+        key=lambda t: (TRANSITION_NATURAL_DURATION_MS[t], t))
+
+
+def pick_transition(room_ms, vibe, types=None):
+    """The transition for this seam, or None when the seam cannot hold one.
+
+    None IS A REAL ANSWER and the caller must treat it as one. The corpus rate
+    on the speech route is 0.00/25s: most seams are meant to play straight, and
+    a family that always finds something to place has stopped reading the room.
+    """
+    fits = transitions_fitting(room_ms, types)
+    if not fits:
+        return None
+    v = " ".join(str(vibe or "").lower().replace("/", " ").split())
+    if not v:
+        return fits[0]
+    scored = []
+    for i, t in enumerate(fits):
+        hits = sum(1 for f in TRANSITION_FITS.get(t, ()) if f in v)
+        against = sum(1 for f in TRANSITION_FIGHTS.get(t, ()) if f in v)
+        scored.append((-(hits - against), i, t))
+    scored.sort()
+    return scored[0][2]
+
+
+def pick_tight_cut_overlay(vibe):
+    """The lighter weight: punctuation painted OVER a cut that plays straight.
+
+    Needs NO room — it consumes no footage — so it is what a seam too tight for
+    any transition can still take. Returns None when the vibe fights both, which
+    is a real answer: an unaccented hard cut is the default in this vocabulary,
+    not a failure to place something.
+    """
+    v = " ".join(str(vibe or "").lower().replace("/", " ").split())
+    if not v:
+        return None
+    best, best_score = None, 0
+    for t in sorted(VALID_TIGHT_CUT_OVERLAYS):
+        hits = sum(1 for f in TRANSITION_FITS.get(t, ()) if f in v)
+        against = sum(1 for f in TRANSITION_FIGHTS.get(t, ()) if f in v)
+        if hits - against > best_score:
+            best, best_score = t, hits - against
+    return best
+
+
+def zoom_natural_ms(zoom_type):
+    """The designed span of one move, in ms.
+
+    StagedPush has no entry in production's table because its span comes from
+    the words it completes on; the fallback is used only when those cannot be
+    resolved, and it is named rather than hidden inside a `.get(..., 1800)`.
+    """
+    if zoom_type in ZOOM_NATURAL_DURATION_MS:
+        return ZOOM_NATURAL_DURATION_MS[zoom_type]
+    if zoom_type == "StagedPush":
+        return _STAGED_PUSH_FALLBACK_MS
+    raise KeyError(f"no natural duration for zoom type {zoom_type!r}")
+
+
+def pick_zoom_type(arc, vibe, fallback="SmoothPush"):
+    """Choose a zoom from the arc position's allowed set, scored by the vibe.
+
+    THE SAME SHAPE AS pick_caption_style, deliberately. The arc position says
+    what MAY go here (production's ZOOM_ARC_HOMES); the vibe says which register
+    within it. Neither half is guessed: an unknown arc raises rather than
+    quietly defaulting, because a zoom placed at a position nobody taught is a
+    move landing on the wrong kind of moment.
+
+    Ties break by the order inside the arc's tuple, so the choice is
+    DETERMINISTIC — a zoom type that changed between two runs of one brief would
+    make every A/B on this path unreadable, the same reason the caption picker
+    is deterministic.
+    """
+    if arc not in ZOOM_ARC_HOMES:
+        raise ValueError(f"unknown arc position {arc!r}; expected one of "
+                         f"{sorted(ZOOM_ARC_HOMES)}")
+    allowed = ZOOM_ARC_HOMES[arc]
+    v = " ".join(str(vibe or "").lower().replace("/", " ").split())
+    if not v:
+        return allowed[0]
+    scored = []
+    for i, t in enumerate(allowed):
+        hits = sum(1 for f in ZOOM_TYPE_FITS.get(t, ()) if f in v)
+        against = sum(1 for f in ZOOM_TYPE_FIGHTS.get(t, ()) if f in v)
+        scored.append((-(hits - against), i, t))
+    scored.sort()
+    # An all-negative field means the vibe FIGHTS everything this position
+    # offers. Falling back to a type the arc does not house would break payoff
+    # purity, so the least-bad allowed move wins and the arc still governs.
+    best = scored[0][2]
+    return best if best in allowed else (fallback if fallback in allowed
+                                         else allowed[0])
 
 
 # ── CAPTIONS: THE NINE STYLES, AND WHAT PICKS BETWEEN THEM ──────────────────
@@ -2525,7 +3272,8 @@ def caption_pages(kept_words, words_per_page=3):
 
 
 
-def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=()):
+def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=(),
+                        text_overlays=(), tight_cut_overlays=()):
     """The PromptlyOverlay input for a CAPTIONS-ONLY alpha pass.
 
     PromptlyOverlay already renders "captions + motion graphics + text overlays
@@ -2551,7 +3299,21 @@ def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=()):
         "sourceUrl": "", "fps": int(fps), "width": 1080, "height": 1920,
         "totalDurationInFrames": n,
         "clips": [], "transitions": [], "broll": [],
-        "motionGraphics": [], "textOverlays": [], "outro": "none",
+        # TEXT OVERLAYS RIDE THIS PASS. They used to be burned by ffmpeg
+        # drawtext in build_overlays — a full re-encode of the video, 32.20s for
+        # ten items over a 23.17s output on round 33 — over a span this alpha
+        # layer already covers frame for frame. Moving them here costs ZERO
+        # extra frames and deletes that pass, and it is also the higher-fidelity
+        # path: production's own caption_match overlay rather than a DejaVu
+        # drawtext filter.
+        "motionGraphics": [], "textOverlays": list(text_overlays or []),
+        # TIGHT-CUT OVERLAYS RIDE THIS PASS TOO, and they are the clearest case
+        # for it: they are punctuation painted OVER a cut that plays straight —
+        # audio and time untouched — so they consume no footage, need no room,
+        # and cost ZERO extra frames on a layer that already spans the output.
+        # A seam too tight for any of the nine transitions can still be accented.
+        "tightCutOverlays": list(tight_cut_overlays or []),
+        "outro": "none",
         "caption": {
             "style": str(style),
             "pages": list(pages or []),
@@ -2560,6 +3322,27 @@ def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=()):
                                   "position": "bottom"}],
         },
     }}
+
+
+def _probe_frame_count(path, env=None):
+    """Frames actually in the file, or None if it cannot be read.
+
+    nb_read_frames COUNTS them rather than trusting a container header, because
+    a header is another number written by the thing being checked.
+    """
+    import subprocess
+    try:
+        if not path or not os.path.exists(path):
+            return None
+        r = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
+             "-show_entries", "stream=nb_read_frames", "-of",
+             "default=nw=1:nk=1", path],
+            capture_output=True, text=True, timeout=300, env=env)
+        v = (r.stdout or "").strip().splitlines()
+        return int(v[0]) if v and v[0].isdigit() else None
+    except Exception:
+        return None
 
 
 def render_remotion_batch(jobs, env=None, timeout=1800):
@@ -2598,6 +3381,30 @@ def render_remotion_batch(jobs, env=None, timeout=1800):
                 res[d.get("id")] = d
             except Exception:
                 pass
+    # ── WHAT IT RENDERED, NOT WHAT IT WAS ASKED FOR ─────────────────────────
+    # THE CHECK THAT WOULD HAVE CAUGHT THE WRAPPER BUG ON ROUND 32.
+    #
+    # remotion_batch.mjs passed `JSON.parse(file).input` as inputProps while
+    # both compositions read `props.input` — so every render silently fell back
+    # to defaultProps. DEFAULT_RENDER_INPUT is 600 frames at 60fps with
+    # `caption.pages: []`, so the caption pass rendered SIX HUNDRED FRAMES OF
+    # NOTHING and reported ok:true. Two rounds of ms/frame were computed against
+    # a frame count Python had merely REQUESTED.
+    #
+    # Every number in that report was Python's own request read back to itself.
+    # The only defence is to ask the ARTIFACT what it contains, so a job may
+    # declare `expect_frames` and the answer is measured off the file.
+    for _j in jobs:
+        _ef = _j.get("expect_frames")
+        _d = res.get(_j.get("id"))
+        if not _ef or not isinstance(_d, dict) or not _d.get("ok"):
+            continue
+        _d["frames_expected"] = int(_ef)
+        _d["frames_actual"] = _probe_frame_count(_j.get("out"), env=env)
+        # None is UNMEASURED, never a pass — the same law the effect legs carry.
+        _d["frames_ok"] = (None if _d["frames_actual"] is None
+                           else abs(_d["frames_actual"] - int(_ef)) <= 1)
+
     _b = re.search(r"^BUNDLE (\d+)", out, re.M)
     _t = re.search(r"^TOTAL (\d+)", out, re.M)
     # BUNDLE_CACHED <0|1> <key> — whether this process reused a bundle another
@@ -2923,7 +3730,7 @@ _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
 # with a different cost model. It is not a gap to be closed later in this lane —
 # when generated footage arrives it is a NEW family with its own tool, gated on
 # tier and priced per second.
-_TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "none"]
+_TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "transition", "none"]
 
 
 def _assert_treatment_surface_agrees(module_src: str) -> None:
@@ -2948,6 +3755,32 @@ def _assert_treatment_surface_agrees(module_src: str) -> None:
             f"{len(stale)} prose site(s) still offer only card|text|none while "
             f"the schema offers {_TREATMENT_FAMILIES}. The agent reads the "
             f"prose; a narrower list there silently removes families.")
+    # ── AND THE SCHEMA'S ENUM MUST EQUAL THE DECLARED FAMILY LIST ───────────
+    # The grep above only knows ONE stale spelling. Adding `transition` to the
+    # tool schema while _TREATMENT_FAMILIES still listed five passed it
+    # cleanly — the same defect this function exists for, in the direction it
+    # was not written to look. Compare the two surfaces instead of hunting a
+    # remembered string.
+    import ast as _ast
+    for _n in _ast.walk(_ast.parse(module_src)):
+        if not (isinstance(_n, _ast.Dict) and any(
+                isinstance(k, _ast.Constant) and k.value == "enum" for k in _n.keys)):
+            continue
+        for _k, _v in zip(_n.keys, _n.values):
+            if not (isinstance(_k, _ast.Constant) and _k.value == "enum"
+                    and isinstance(_v, _ast.List)):
+                continue
+            _vals = [e.value for e in _v.elts if isinstance(e, _ast.Constant)]
+            if "none" not in _vals or "card" not in _vals:
+                continue        # some other enum (zoom_arc, cut, sfx yes/no)
+            if set(_vals) != set(_TREATMENT_FAMILIES):
+                raise AssertionError(
+                    f"the treatment enum offers {sorted(set(_vals))} while "
+                    f"_TREATMENT_FAMILIES declares "
+                    f"{sorted(set(_TREATMENT_FAMILIES))}. Every consumer that "
+                    f"reads the declared list — the spec, the mix report, the "
+                    f"prose — silently disagrees with what the agent can "
+                    f"actually rule.")
 
 
 def _assert_constraints_intact(system_text: str) -> None:
@@ -3061,7 +3894,21 @@ def edit(source_key: str, brief: str,
          model: str = MODEL, route_models: bool = False,
          cap_exec_effort: bool = True,
          cheap_model: str = "claude-haiku-4-5",
-         exec_model: str = MODEL) -> dict:
+         exec_model: str = MODEL,
+         recent_styles: str = "") -> dict:
+    """`recent_styles`: this user's last caption picks, most recent FIRST,
+    comma-separated.
+
+    PASSED IN, NOT FETCHED. Production reads it from the stored style profile
+    (`_read_recent_caption_styles`, handler.py:4129) over a Supabase client.
+    This container deliberately holds NO credentials — it receives two presigned
+    URLs and has no identity to steal — so it cannot make that read, and giving
+    it one to satisfy a caption rule would trade the whole security posture for
+    a style rotation. The caller owns the history; the container owns the pick.
+
+    Empty is the honest cold-start: `pick_caption_style` then chooses on fit
+    alone, which is exactly right for a user's first video.
+    """
     import subprocess
     from anthropic import Anthropic
 
@@ -3077,6 +3924,114 @@ def edit(source_key: str, brief: str,
         led["failures"].append({"kind": kind, "detail": str(detail)[:400],
                                 "cmd": (cmd or "")[:300],
                                 "t": round(time.time() - t0, 1)})
+
+    # ── EVERY FAMILY MEASURES ITS OWN EFFECT ────────────────────────────────
+    # Until now step_changed_output() was generic and called from exactly ONE
+    # site — inside build_zoom. Round 33 read "PLACEMENT EFFECT: 1 measured" on a
+    # run that DECLARED SIXTEEN placements (text 10, card 4, sfx 1, zoom 1):
+    # fifteen declarations with no evidence they changed anything.
+    #
+    # That is the whole `placement_inert` lesson applied to one family and left
+    # there. A ported 31-type motion-graphics catalogue and a catalogue that
+    # composites nothing produce the identical report under that coverage, so
+    # this goes in BEFORE any component is ported, not after.
+    #
+    # `domain` picks the instrument, and picking it wrong is not a weak check but
+    # an inverted one: place_sfx writes `-c:v copy`, so a video diff reports
+    # psnr=inf / changed=False on a PERFECT sound placement.
+    # A SAMPLE, NOT A SWEEP. A text overlay holds for up to 3.0s and the question
+    # here is "did anything change in this span", which one short probe answers
+    # as well as decoding the whole thing twice. Ten items measured over their
+    # full spans would add 10-20s of ffmpeg to a wall this lane is trying to
+    # bring DOWN — a check that costs more than the family it measures gets
+    # switched off, which is how it stops being a check.
+    _PROBE_WINDOW_S = 0.5
+
+    def _free_ctrl(busy, out_dur, want=_PROBE_WINDOW_S, pad=0.25):
+        """A span of `want` seconds this family placed NOTHING in, or None.
+
+        The control window is what makes the video leg content-independent, so
+        picking one that actually overlaps a placement would quietly turn the
+        measurement back into the absolute bar while still calling itself
+        relative. Every candidate is checked against EVERY busy span, padded,
+        and None is returned rather than a bad guess.
+        """
+        try:
+            _d = float(out_dur or 0)
+        except Exception:
+            return None
+        if _d <= want:
+            return None
+        _b = []
+        for _s0, _s1 in (busy or []):
+            try:
+                _b.append((float(_s0) - pad, float(_s1) + pad))
+            except Exception:
+                continue
+        _t = 0.0
+        while _t + want <= _d:
+            if not any(_t < _e and _t + want > _s for _s, _e in _b):
+                return round(_t, 3)
+            _t += 0.25
+        return None
+
+    def _record_effect(family, before, after, t0_s, t1_s, note="", ctrl_t0=None):
+        # CLAMPED, AND THE CLAMPED WINDOW IS WHAT GETS RECORDED. Reporting the
+        # declared span while having measured 0.5s in the middle of it would be
+        # a number that does not describe what was done.
+        _a, _z = float(t0_s), float(t1_s)
+        if _z - _a > _PROBE_WINDOW_S:
+            _mid = (_a + _z) / 2.0
+            _a, _z = _mid - _PROBE_WINDOW_S / 2.0, _mid + _PROBE_WINDOW_S / 2.0
+        t0_s, t1_s = _a, _z
+        _rec = {"family": family,
+                "t": [round(float(t0_s), 2), round(float(t1_s), 2)],
+                "domain": "audio" if family == "sfx" else "video",
+                "note": note}
+        if _rec["domain"] == "audio":
+            _chg, _db = step_changed_audio(before, after, t0_s, t1_s,
+                                           env=_SUBPROCESS_ENV)
+            _rec["nsr_db"] = _db
+            _rec["mode"] = "normalised"
+        else:
+            _chg, _db = step_changed_output(before, after, t0_s, t1_s,
+                                            env=_SUBPROCESS_ENV)
+            _rec["psnr_db"] = _db
+            _cdb = None
+            if ctrl_t0 is not None:
+                _, _cdb = step_changed_output(before, after, float(ctrl_t0),
+                                              float(ctrl_t0) + (t1_s - t0_s),
+                                              env=_SUBPROCESS_ENV)
+            _rec["ctrl_psnr_db"] = _cdb
+            if _cdb is not None and _db is not None:
+                _rec["mode"] = "relative"
+                _inf = float("inf")
+                if _cdb == _inf and _db == _inf:
+                    # Nothing changed ANYWHERE in either window — the step was a
+                    # byte-identical copy. inf - inf is nan, and a nan compared
+                    # against a threshold is False by accident rather than by
+                    # measurement; say it outright instead.
+                    _chg = False
+                else:
+                    _chg = (_cdb - _db) >= _VIDEO_REL_MARGIN_DB
+            else:
+                # NAMED, not silent. The absolute bar is the weaker one and a
+                # reader has to be able to tell which measurement they are
+                # looking at.
+                _rec["mode"] = "absolute"
+        _rec["changed"] = _chg
+        led.setdefault("placement_effects", []).append(_rec)
+        if _chg is False:
+            fail("placement_inert",
+                 f"{family} declared a placement over "
+                 f"{float(t0_s):.2f}-{float(t1_s):.2f}s but the "
+                 f"{_rec['domain']} there is unchanged "
+                 f"({_rec['mode']}: {_db}"
+                 + (f" vs control {_rec.get('ctrl_psnr_db')}"
+                    if _rec.get("ctrl_psnr_db") is not None else "")
+                 + ") — a declared placement that changes nothing is not a "
+                   "placement")
+        return _chg, _db
 
     os.makedirs("/work", exist_ok=True)
     src = "/work/source.mp4"
@@ -3662,41 +4617,55 @@ def edit(source_key: str, brief: str,
         }
         with open("/work/reel-plan.json", "w") as fh:
             json.dump({"input": plan}, fh)
-        # THROUGH THE SHARED PROCESS, and straight to the .mov.
+        # ONE render. --sequence to a DIRECTORY with NO extension: any extension
+        # is refused ("sequence cannot have an extension"), and every VIDEO codec
+        # available here flattens the alpha (prores/vp8/vp9 all yuv, and
+        # --pixel-format=yuva* is rejected outright). PNG is the only path that
+        # keeps it.
+        # ── THROUGH THE SHARED PROCESS, NOT ITS OWN ────────────────────────
+        # This shelled `npx remotion render`, which pays bundle 9.79s +
+        # selectComposition 2.05s + renderMedia 0.40s = 12.24s of startup that
+        # the caption pass had already paid moments earlier in the same job.
+        # Round 33: build_captions 28.59s AND build_reel 24.14s, two processes,
+        # two startups.
         #
-        # This used to be `npx remotion render --sequence` to a PNG directory,
-        # then an ffmpeg qtrle pass to assemble /work/reel.mov. Two costs, both
-        # removed: the CLI re-bundles every invocation (9.79s of the 12.24s
-        # per-process startup) and cannot be given a cached bundle, and the PNG
-        # round-trip wrote ~300 files to disk only to read them straight back.
-        #
-        # The sequence existed because the CLI refuses --pixel-format=yuva*. The
-        # Node API does not — prores 4444 / yuva444p10le carries the alpha
-        # directly, which is the same path the captions already render on.
-        #
-        # It also means the reel and the captions now share a BUNDLE CACHE:
-        # they are different agent tool calls and can never share one process,
-        # so the cache is the only thing that can collect the second 9.79s.
+        # ALPHA VIA PRORES 4444 rather than a PNG sequence. The CLI refuses
+        # --pixel-format=yuva* and every codec it offers flattens alpha, which
+        # is why this path used --sequence at all; the NODE api does not refuse
+        # it, so the reel comes back as ONE .mov instead of ~300 PNGs, and the
+        # assembly step below disappears with them.
         shutil.rmtree("/work/reel", ignore_errors=True)
-        _reel_t0 = time.time()
-        _reel_res = render_remotion_batch([{
+        _reel_frames_want = max(1, packed["reel_frames"])
+        _rres = render_remotion_batch([{
             "id": "reel", "composition": "PromptlyOverlay",
             "propsFile": "/work/reel-plan.json", "out": "/work/reel.mov",
-            "alpha": True,
-        }], env=_SUBPROCESS_ENV)
-        _rj = (_reel_res or {}).get("reel") or {}
-        _rbatch = (_reel_res or {}).get("_batch") or {}
+            "alpha": True, "expect_frames": _reel_frames_want,
+        }], env=_SUBPROCESS_ENV, timeout=1800)
+        _rj = (_rres or {}).get("reel") or {}
+        # seq + bundle_cached, carried over from the other side of this merge.
+        # REMOTION PROCS prints in a fixed (reel, captions) order and that order
+        # was once READ AS CHRONOLOGICAL — "reel CACHE HIT, captions bundled"
+        # was diagnosed as the cache thrashing when captions simply render
+        # first. The seq makes the sequence a recorded fact rather than an
+        # inference from a table the reader ordered.
         led["_render_seq"] = led.get("_render_seq", 0) + 1
         led["reel_render"] = {
             "seq": led["_render_seq"],
-            "ok": bool(_rj.get("ok")), "paint_ms": _rj.get("ms"),
-            "frames_expected": packed["reel_frames"],
-            "bundle_ms": _rbatch.get("bundle_ms"),
-            "bundle_cached": _rbatch.get("bundle_cached"),
-            "error": _rj.get("error"),
+            "bundle_cached": (_rres.get("_batch") or {}).get("bundle_cached"),
+            "frames_expected": _reel_frames_want,
+            "frames_actual": _rj.get("frames_actual"),
+            "frames_ok": _rj.get("frames_ok"),
+            "bundle_ms": (_rres.get("_batch") or {}).get("bundle_ms"),
+            "paint_ms": _rj.get("ms"),
         }
+        if _rj.get("frames_ok") is False:
+            fail("render_frames_mismatch",
+                 f"reel: asked for {_reel_frames_want} frames, the file holds "
+                 f"{_rj.get('frames_actual')} — the composite trims by reel TIME, "
+                 f"so a short reel makes those trims reference nothing and "
+                 f"components land on the WRONG content")
         if not _rj.get("ok"):
-            fail("reel_render_failed", str(_rj.get("error"))[:300])
+            fail("reel_render_failed", str(_rj.get("error") or "")[-300:])
             # FALLBACK, not an error handed back to the agent. Returning
             # {"error": ...} here made the render failure the AGENT's problem to
             # solve mid-run, and it has no better option than the one below —
@@ -3707,61 +4676,14 @@ def edit(source_key: str, brief: str,
             # Raising here keeps the failure diagnosable instead of laundering
             # it into a worse video the user did not ask for.
             raise RuntimeError(
-                f"reel render failed — root-cause this, do not degrade: "
-                f"{str(_rj.get('error'))[:300]}")
-        _mark(led, "build_reel_paint", _reel_t0)
-        # THE SHORT-REEL GUARD, KEPT — counted on the .mov instead of on PNGs.
-        #
-        # It has to survive the format change: the composite trims each window
-        # by reel TIME, so a reel that is short by even a few frames makes those
-        # trims reference nothing and components land on the WRONG content. That
-        # is silent — ffmpeg exits 0 and the video looks plausible.
-        #
-        # HEADER FIRST, DECODE ONLY ON SUSPICION.
-        #
-        # The first version always passed -count_frames, which DECODES every
-        # frame. On 300 frames of ProRes 4444 at 1080x1920 that measured ~22s
-        # on the critical path (build_reel 79.6s vs build_reel_paint 57.4s) —
-        # a guard costing more than the render it guards.
-        #
-        # The header is free and right whenever it is present and matches. It
-        # can only lie by claiming frames a truncated file does not contain,
-        # so a header that AGREES with the expectation is trustworthy: a
-        # truncated file cannot agree by accident. Anything else — missing,
-        # unparseable, or short — falls through to the decode, which is the
-        # case actually worth 22s.
-        def _reel_frame_count(count_frames):
-            _args = ["ffprobe", "-v", "error", "-select_streams", "v:0",
-                     "-show_entries",
-                     "stream=nb_read_frames" if count_frames else "stream=nb_frames",
-                     "-of", "csv=p=0", "/work/reel.mov"]
-            if count_frames:
-                _args.insert(3, "-count_frames")
-            _p = subprocess.run(_args, capture_output=True, text=True,
-                                timeout=600, env=_SUBPROCESS_ENV)
-            try:
-                return int((_p.stdout or "").strip().rstrip(",") or 0), _p
-            except Exception:
-                return -1, _p
-        _reel_have, _probe = _reel_frame_count(False)
-        led["reel_render"]["frames_from_header"] = _reel_have
-        if _reel_have < packed["reel_frames"]:
-            # Includes the -1 (unparseable) and 0 (absent) cases. Never trust a
-            # header that disagrees; never treat its absence as a real zero.
-            _reel_have, _probe = _reel_frame_count(True)
-            led["reel_render"]["frames_decoded"] = _reel_have
-        led["reel_render"]["frames_measured"] = _reel_have
-        if _reel_have < 0:
-            # MEASURED / ABSENT / FAILED — never a confident zero. An unreadable
-            # probe is a failed measurement, not a reel of zero frames.
-            fail("reel_frames_unmeasurable",
-                 f"ffprobe could not count frames in /work/reel.mov: "
-                 f"{(_probe.stderr or '')[-200:]}")
-            raise RuntimeError(
-                "could not verify the reel's frame count — refusing to composite "
-                "against an unverified reel")
-        if _reel_have < packed["reel_frames"]:
-            fail("reel_short", f"{_reel_have} frames rendered, expected "
+                f"reel render failed in the shared process — root-cause this, "
+                f"do not degrade: {str(_rj.get('error') or '')[-300:]}")
+        # THE FRAME COUNT IS READ OFF THE FILE, not off a directory listing.
+        # `expect_frames` already counted them with -count_frames above; this
+        # keeps the original guard's meaning with the new artifact.
+        pngs = [None] * int(_rj.get("frames_actual") or 0)
+        if len(pngs) < packed["reel_frames"]:
+            fail("reel_short", f"{len(pngs)} frames rendered, expected "
                                f"{packed['reel_frames']}")
             # A SHORT REEL IS NOT A SURVIVABLE PARTIAL. The composite trims each
             # window by reel TIME; frames that were never rendered make those
@@ -3769,21 +4691,18 @@ def edit(source_key: str, brief: str,
             # the wrong content rather than a missing component. Previously this
             # recorded the failure and then built the composite anyway.
             raise RuntimeError(
-                f"reel rendered {_reel_have} of {packed['reel_frames']} frames. "
+                f"reel rendered {_rj.get('frames_actual')} of "
+                f"{packed['reel_frames']} frames. "
                 f"The composite trims by reel TIME, so missing frames make those "
                 f"trims reference nothing and components land on the WRONG "
                 f"content. Root-cause the short render.")
         led["reel_renders"] += 1
-        # THE PNG -> qtrle ASSEMBLY IS GONE. renderMedia writes the alpha .mov
-        # directly, so there is no sequence to assemble. The check that pass
-        # carried — "the .mov exists and is non-empty", whose return code was
-        # once never read at all — is kept, because "renderMedia said ok" and
-        # "there is a usable file at that path" are still two different claims.
+        # NO PNG -> MOV ASSEMBLY STEP. The batch writes /work/reel.mov directly
+        # as ProRes 4444; the ~300-file glob-and-encode that used to stand
+        # between them is gone with the sequence render that required it.
         if not os.path.isfile("/work/reel.mov") or os.path.getsize("/work/reel.mov") == 0:
-            fail("reel_mov_failed", "renderMedia reported ok but /work/reel.mov "
-                                    "is missing or empty")
-            raise RuntimeError(
-                "renderMedia reported ok but /work/reel.mov is missing or empty")
+            fail("reel_mov_missing", "the batch reported ok and wrote no .mov")
+            raise RuntimeError("reel render reported ok and produced no /work/reel.mov")
 
         # THE COMPOSITE. Each reel window is trimmed and shifted to the OUTPUT
         # time the agent authored — two clocks, and pack_reel is the only thing
@@ -3812,7 +4731,7 @@ def edit(source_key: str, brief: str,
             "ok": True, "components": len(items), "final_label": last,
             "reel_frames": packed["reel_frames"],
             "reel_seconds": round(packed["reel_frames"] / 30, 2),
-            "rendered_frames": _reel_have,
+            "rendered_frames": _rj.get("frames_actual"),
             "segments": packed["segments"],
             "run_this": (f"cd /work && filt=$(cat reel-filter.txt) && ffmpeg -y -i "
                          f"cut.mp4 -i reel.mov -filter_complex \"$filt\" "
@@ -3938,7 +4857,7 @@ def edit(source_key: str, brief: str,
         beats = led.get("beats") or []
         by_i = {b["i"]: b for b in beats}
         steps, built = [], {"cut": 0, "text": 0, "card": 0, "zoom": 0,
-                            "sfx": 0}
+                            "sfx": 0, "transition": 0}
         # EVERY SKIP RECORDS ITS REASON. The aggregate gap (ruled 3, built 1)
         # says something was dropped; it does not say WHY, and three of the
         # drops here were bare `continue`s. A count without a reason is the same
@@ -3973,6 +4892,8 @@ def edit(source_key: str, brief: str,
         _mark(led, "build_cut", _tc0)
         steps.append({"step": "cut", "spans": len(merged),
                       "output_duration_s": cutr.get("output_duration_s")})
+        # The clock every control window is picked against.
+        _out_dur = cutr.get("output_duration_s")
         built["cut"] = len(beats) - len(merged)
         cur = "cut.mp4"
         r = run_ffmpeg_from_recipe(cutr, cur)
@@ -4018,72 +4939,241 @@ def edit(source_key: str, brief: str,
                            "why": f"{ruled_text_n} text ruling(s) collected into "
                                   f"ZERO items — every one was filtered before "
                                   f"the build step"})
-        if items:
-            # Captions only where speech exists. Asking for them on a visual
-            # beat source is asking libass to render an empty file.
-            _want_caps = bool(words)
-            # ── REAL CAPTIONS, THROUGH PRODUCTION'S OWN COMPOSITION ────────
-            # PromptlyOverlay renders "captions + motion graphics + text
-            # overlays on a transparent background" — so the nine styles need
-            # no new component, just a caption spec and an empty
-            # motionGraphics list.
-            #
-            # ENQUEUED THROUGH THE BATCH so bundle+browser (12.24s measured) is
-            # paid once across this and the card reel rather than twice. Not
-            # merged INTO the reel: the reel is packed back-to-back in reel
-            # time and captions span the output at real time — two renders, one
-            # process, which is the distinction render_remotion_batch exists
-            # for.
-            #
-            # HALF RATE ON THE EIGHT FREE STYLES. Measured against the native
-            # 30fps layer: 8 of 9 are already 80-97% static, so halving adds
-            # 0-5% held frames. TypewriterReveal is 42% static (a per-character
-            # cursor) and halving adds 17%, so it renders full-rate.
-            _cap_words = led.get("kept_words_out") or []
-            if _want_caps and _cap_words:
-                _cap_style = pick_caption_style(brief)
-                _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
-                _cap_pages = caption_pages(_cap_words, 3)
-                _cap_end = max(float(w["e"]) for w in _cap_words)
-                _cap_frames = max(1, int(round(_cap_end * _cap_fps)))
-                _cap_plan = "/work/caption-plan.json"
-                with open(_cap_plan, "w") as fh:
-                    json.dump(caption_overlay_plan(_cap_pages, _cap_style,
-                                                   _cap_frames, fps=_cap_fps), fh)
-                _cap_t0 = time.time()
-                _cap_res = render_remotion_batch([{
-                    "id": "captions", "composition": "PromptlyOverlay",
-                    "propsFile": _cap_plan, "out": "/work/captions.mov",
-                    "alpha": True,
-                }], env=_SUBPROCESS_ENV)
-                _mark(led, "build_captions", _cap_t0)
-                _cj = (_cap_res or {}).get("captions") or {}
-                led["_render_seq"] = led.get("_render_seq", 0) + 1
-                led["caption_render"] = {
-                    "seq": led["_render_seq"],
-                    "style": _cap_style, "fps": _cap_fps,
-                    "pages": len(_cap_pages), "frames": _cap_frames,
-                    "ok": bool(_cj.get("ok")),
-                    "paint_ms": _cj.get("ms"),
-                    "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
-                                     if _cj.get("ms") and _cap_frames else None),
-                    "bundle_ms": (_cap_res.get("_batch") or {}).get("bundle_ms"),
-                    "bundle_cached": (_cap_res.get("_batch") or {}).get("bundle_cached"),
-                    "error": _cj.get("error"),
-                }
-                if _cj.get("ok") and os.path.exists("/work/captions.mov"):
-                    led["caption_mov"] = "/work/captions.mov"
-                    led["caption_path"] = "remotion"
-                else:
-                    # LOUD, not silent. A failed caption render falls back to
-                    # the ffmpeg burn below, and says so — shipping plain
-                    # captions while the ledger claims nine styles is the
-                    # failure this whole port exists to end.
-                    fail("caption_render_failed",
-                         f"style={_cap_style} fps={_cap_fps}: "
-                         f"{str(_cj.get('error'))[:200]} — falling back to the "
-                         f"ffmpeg burn")
-            ov = build_overlays(items, _want_caps, cur, "overlaid.mp4")
+        # ── CAPTIONS ARE GATED ON SPEECH, NOT ON THE TEXT FAMILY ────────────
+        # This whole block used to sit inside `if items:`, so a SPEECH job that
+        # ruled zero text overlays rendered ZERO CAPTIONS — silently, with no
+        # error and no ledger entry — while the comment on its first line said
+        # "captions only where speech exists". The gate and its own stated
+        # intent disagreed, and the gate won.
+        #
+        # LATENT IN ROUND 33, not fired: the only speech fixture in the corpus
+        # ruled 10 text items, so the two conditions were never distinguishable
+        # there. The other four print `SPEECH CHECK: NOT APPLICABLE` and are
+        # correctly capless either way. It would have presented as a video that
+        # simply has no captions — no error, nothing to grep for.
+        #
+        # Captions on a visual beat source would ask libass to render an empty
+        # file, which is what `words` — not `items` — has always been the right
+        # test for.
+        # 3c. SEAM DRESSING — the nine transitions and the two tight-cut overlays.
+        #
+        # THE SEAM IS WHERE THE EDIT JOINS TWO NON-ADJACENT SOURCE SPANS. A beat
+        # ruled 'transition' means "the cut ENTERING this beat is a genuine turn",
+        # which is judgement; the room at that seam and which type fits it are
+        # measured and derived here.
+        #
+        # DURATION-PRESERVING BY CONSTRUCTION. Production plans transitions
+        # BEFORE the render, so a type that consumes handle frames simply makes
+        # the timeline shorter and everything downstream is timed against the
+        # result. This lane has already cut, captioned, zoomed and timed the sfx
+        # against `cur`, so a family that shortened the video here would desync
+        # every one of them. The segment therefore occupies a window that
+        # already exists — [seam, seam+D] — and REPLACES the picture in it while
+        # audio and duration are untouched. Sizes and offsets are chosen so the
+        # window ENDS on the true content.
+        _seams = []
+        _cum = 0.0
+        for _si in range(len(merged) - 1):
+            _cum += merged[_si][1] - merged[_si][0]
+            _seams.append({"i": _si, "out_s": round(_cum, 3),
+                           "room_ms": transition_room_ms(merged, _si)})
+        # A seam belongs to the beat it leads INTO: the first kept beat whose
+        # output start is at that junction.
+        _seam_at = {}
+        for _sm in _seams:
+            _seam_at[round(_sm["out_s"], 2)] = _sm
+
+        # SELECTION ONLY HERE. The tight-cut overlays must be chosen BEFORE the
+        # alpha pass renders, because they RIDE it — they are painted over a cut
+        # that plays straight, so they cost no render of their own. Choosing them
+        # after that pass would mean a second alpha render to carry them, which
+        # is the doubled work this port keeps deleting.
+        _tr_choices = []
+        for v in vs:
+            b = by_i.get(v.get("beat"))
+            tr = [str(t).lower() for t in (v.get("treatment") or [])]
+            if b is None:
+                _skips.append({"family": "transition", "beat": v.get("beat"),
+                               "why": "verdict names a beat index that does not exist"})
+                continue
+            if "transition" not in tr:
+                continue          # not ruled for this family — filtering, not a drop
+            _bt = src_to_out(b["t_start"], merged)
+            if _bt is None:
+                _skips.append({"family": "transition", "beat": v.get("beat"),
+                               "why": "beat was cut, so it has no output time"})
+                continue
+            _sm = _seam_at.get(round(_bt, 2))
+            if _sm is None:
+                # A BEAT WITH NO SEAM IN FRONT OF IT. Nothing was cut here, so
+                # the picture does not change and there is nothing to dress —
+                # the costume production's teach warns about.
+                _skips.append({"family": "transition", "beat": v.get("beat"),
+                               "why": f"no cut enters this beat (output {_bt:.2f}s) "
+                                      f"— the picture does not change, so there "
+                                      f"is no seam to dress"})
+                continue
+            _ttype = pick_transition(_sm["room_ms"], brief)
+            if _ttype is not None:
+                _tr_choices.append({"kind": "transition", "beat": v.get("beat"),
+                                    "type": _ttype, "seam": _sm["i"],
+                                    "out_s": _sm["out_s"],
+                                    "room_ms": round(_sm["room_ms"])})
+                continue
+            # THE LIGHTER WEIGHT. An overlay consumes no footage and needs no
+            # room, so a seam too tight for any transition can still be accented.
+            _ov = pick_tight_cut_overlay(brief)
+            if _ov is None:
+                _skips.append({"family": "transition", "beat": v.get("beat"),
+                               "why": f"seam has {_sm['room_ms']:.0f}ms of room, the "
+                                      f"shortest transition needs "
+                                      f"{min(TRANSITION_NATURAL_DURATION_MS[t] for t in VALID_TRANSITION_TYPES)}ms, "
+                                      f"and the vibe fits neither overlay — the "
+                                      f"cut plays straight"})
+                continue
+            _tr_choices.append({"kind": "overlay", "beat": v.get("beat"),
+                                "type": _ov, "seam": _sm["i"],
+                                "out_s": _sm["out_s"],
+                                "room_ms": round(_sm["room_ms"])})
+        led["transition_plan"] = {
+            "seams_available": len(_seams),
+            "rooms_ms": [round(x["room_ms"]) for x in _seams],
+            "chosen": [dict(c) for c in _tr_choices],
+        }
+
+        _want_caps = bool(words)
+        _cap_words = led.get("kept_words_out") or []
+        _cap_pages, _cap_style = [], None
+        _tc_overlays = []
+        # ── TEXT RIDES THE ALPHA PASS, NOT AN ffmpeg BURN ───────────────────
+        # build_overlays drew these with drawtext and re-encoded the whole video
+        # to do it: 32.20s for ten items over a 23.17s output on round 33, over
+        # a span the caption layer already covers frame for frame. Here they
+        # cost ZERO extra frames.
+        #
+        # It is also the higher-fidelity path, which matters more: production
+        # draws text through PromptlyOverlay's caption_match overlay, and the
+        # burn was a DejaVu drawtext filter standing in for it. Zac's ruling is
+        # full Remotion, no ffmpeg substitutes.
+        _text_overlays = []
+        # ── REAL CAPTIONS, THROUGH PRODUCTION'S OWN COMPOSITION ─────────────
+        # PromptlyOverlay renders "captions + motion graphics + text overlays on
+        # a transparent background" — so the nine styles need no new component,
+        # just a caption spec and an empty motionGraphics list.
+        #
+        # HALF RATE ON THE EIGHT FREE STYLES. Measured against the native 30fps
+        # layer: 8 of 9 are already 80-97% static, so halving adds 0-5% held
+        # frames. TypewriterReveal is 42% static (a per-character cursor) and
+        # halving adds 17%, so it renders full-rate.
+        if alpha_pass_needed(_want_caps, len(_cap_words), len(items)):
+            # THE ROTATION RULE, FED. It was implemented, tested and called
+            # with `recent` defaulting to () — structurally present and
+            # unexercised, which the docstring said plainly and which is a
+            # wiring gap rather than a working feature. Threading the caller's
+            # history is what turns it on.
+            _recent = [x.strip() for x in str(recent_styles or "").split(",")
+                       if x.strip()]
+            _cap_style = (pick_caption_style(brief, recent=_recent)
+                          if (_want_caps and _cap_words) else "CleanCut")
+            led["caption_recent_in"] = _recent
+            _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
+            _cap_pages = (caption_pages(_cap_words, 3)
+                          if (_want_caps and _cap_words) else [])
+            # CENTRED ON THE SEAM, in the alpha layer's own frame clock.
+            _tc_overlays = [
+                {"type": _c2["type"],
+                 "fromFrame": max(0, int(round(
+                     (_c2["out_s"] - TIGHT_CUT_OVERLAY_MS / 2000.0) * _cap_fps))),
+                 "durationInFrames": max(1, int(round(
+                     TIGHT_CUT_OVERLAY_MS / 1000.0 * _cap_fps)))}
+                for _c2 in _tr_choices if _c2["kind"] == "overlay"]
+            _text_overlays = [
+                {"variant": "caption_match",
+                 "fromFrame": max(0, int(round(float(_i5["t_start"]) * _cap_fps))),
+                 "durationInFrames": max(1, int(round(
+                     (float(_i5["t_end"]) - float(_i5["t_start"])) * _cap_fps))),
+                 "text": str(_i5.get("text") or ""),
+                 "position": "top"}
+                for _i5 in items]
+            # THE LAYER MUST COVER THE LAST THING ON IT, whichever family that
+            # is. Sizing it to the speech alone clips a text overlay that
+            # outlasts the final word — and on a NO-SPEECH source there is no
+            # speech to size it by at all, which is exactly the case that used
+            # to fall through to the ffmpeg burn.
+            _ends = ([float(w["e"]) for w in _cap_words]
+                     if (_want_caps and _cap_words) else [])
+            _ends += [float(_i6["t_end"]) for _i6 in items]
+            _cap_end = max(_ends) if _ends else 0.0
+            _cap_frames = max(1, int(round(_cap_end * _cap_fps)))
+            _cap_plan = "/work/caption-plan.json"
+            with open(_cap_plan, "w") as fh:
+                json.dump(caption_overlay_plan(_cap_pages, _cap_style,
+                                               _cap_frames, fps=_cap_fps,
+                                               text_overlays=_text_overlays,
+                                               tight_cut_overlays=_tc_overlays), fh)
+            _cap_t0 = time.time()
+            _cap_res = render_remotion_batch([{
+                "id": "captions", "composition": "PromptlyOverlay",
+                "propsFile": _cap_plan, "out": "/work/captions.mov",
+                "alpha": True,
+                # ASK THE FILE, DO NOT TRUST THE REQUEST. Two rounds reported
+                # "443 frames" that Python had computed and nothing had
+                # verified; the render was actually 600 frames of the empty
+                # default.
+                "expect_frames": _cap_frames,
+            }], env=_SUBPROCESS_ENV)
+            _mark(led, "build_captions", _cap_t0)
+            _cj = (_cap_res or {}).get("captions") or {}
+            led["_render_seq"] = led.get("_render_seq", 0) + 1
+            led["caption_render"] = {
+                "seq": led["_render_seq"],
+                "style": _cap_style, "fps": _cap_fps,
+                "pages": len(_cap_pages), "frames": _cap_frames,
+                "text_overlays": len(_text_overlays),
+                "tight_cut_overlays": len(_tc_overlays),
+                "ok": bool(_cj.get("ok")),
+                "paint_ms": _cj.get("ms"),
+                "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
+                                 if _cj.get("ms") and _cap_frames else None),
+                "bundle_ms": (_cap_res.get("_batch") or {}).get("bundle_ms"),
+                "frames_actual": _cj.get("frames_actual"),
+                "frames_ok": _cj.get("frames_ok"),
+                "error": _cj.get("error"),
+            }
+            # A RENDER THAT IGNORED THE PLAN IS NOT A RENDER. False here means
+            # the composition used something other than what was handed to it,
+            # which is how six hundred frames of nothing passed for nine styles.
+            if _cj.get("frames_ok") is False:
+                fail("render_frames_mismatch",
+                     f"captions: asked for {_cap_frames} frames at {_cap_fps}fps, "
+                     f"the file holds {_cj.get('frames_actual')}. The composition "
+                     f"did not receive the plan — check the props nesting before "
+                     f"reading any ms/frame out of this run.")
+            if _cj.get("ok") and os.path.exists("/work/captions.mov"):
+                led["caption_mov"] = "/work/captions.mov"
+                led["caption_path"] = "remotion"
+            else:
+                # LOUD, not silent. A failed caption render falls back to the
+                # ffmpeg burn below, and says so — shipping plain captions while
+                # the ledger claims nine styles is the failure this port exists
+                # to end.
+                fail("caption_render_failed",
+                     f"style={_cap_style} fps={_cap_fps}: "
+                     f"{str(_cj.get('error'))[:200]} — falling back to the "
+                     f"ffmpeg burn")
+
+        # ── TEXT OVERLAYS, and the ffmpeg caption fallback ──────────────────
+        # Entered when there is text to draw OR when captions still need the
+        # burn because the Remotion pass produced no .mov. Either alone is a
+        # reason to run build_overlays; requiring BOTH is the defect above.
+        # ONLY THE CAPTION FALLBACK REACHES ffmpeg NOW. Text draws in the alpha
+        # pass above; build_overlays survives solely for the case where the
+        # Remotion caption render failed, because shipping plain captions beats
+        # shipping none. Passing `items` here as well would DOUBLE-DRAW every
+        # overlay — once in the alpha layer, once burned underneath it.
+        _need_burn = _want_caps and not led.get("caption_mov")
+        if _need_burn:
+            ov = build_overlays([], _want_caps, cur, "overlaid.mp4")
             if ov.get("error"):
                 # ONE SKIP PER LOST RULING. A batch failure loses len(items)
                 # rulings; recording a single skip made the balance report
@@ -4102,47 +5192,121 @@ def edit(source_key: str, brief: str,
                 else:
                     cur = "overlaid.mp4"
                     _mark(led, "build_overlays", _tov0)
-                    # COMPOSITE THE CAPTION ALPHA. One .mov, one ffmpeg input —
-                    # the CLI's refusal of yuva* had forced the old path into
-                    # PNG sequences, which for captions would be ~885 files.
-                    # scale2ref because the caption layer may be half-rate: the
-                    # overlay filter holds each caption frame across the video
-                    # frames between, which is exactly the 0-5% added holds the
-                    # eight free styles measured.
-                    if led.get("caption_mov"):
-                        _cc0 = time.time()
-                        _cco = "/work/captioned.mp4"
-                        _ccr = subprocess.run(
-                            ["ffmpeg", "-y", "-v", "error",
-                             "-i", os.path.join("/work", cur),
-                             "-i", led["caption_mov"],
-                             "-filter_complex",
-                             "[1:v]fps=30,format=yuva444p[cap];"
-                             "[0:v][cap]overlay=0:0:shortest=1[outv]",
-                             "-map", "[outv]", "-map", "0:a?",
-                             "-c:v", "libx264", "-crf", "18",
-                             "-preset", "veryfast", "-c:a", "copy", _cco],
-                            capture_output=True, text=True, timeout=900,
-                            env=_SUBPROCESS_ENV)
-                        _mark(led, "composite_captions", _cc0)
-                        if _ccr.returncode == 0 and os.path.exists(_cco):
-                            cur = "captioned.mp4"
-                            led["caption_composited"] = True
-                        else:
-                            # The render succeeded and the composite did not, so
-                            # the video has NO captions at all — worse than the
-                            # fallback, and it must not pass quietly.
-                            led["caption_composited"] = False
-                            fail("caption_composite_failed",
-                                 (_ccr.stderr or "")[-200:])
+                    # NO TEXT MEASUREMENT HERE ANY MORE. This branch is now
+                    # reached ONLY by the caption fallback burn, and it draws no
+                    # text at all — `items` is deliberately not passed. The text
+                    # family's effect is measured at the alpha composite below,
+                    # which is where the text now actually lands.
+
+        # ── COMPOSITE THE CAPTION ALPHA ─────────────────────────────────────
+        # OUTSIDE the overlay branch, for the same reason the render is: whether
+        # a caption layer exists has nothing to do with the text family. It used
+        # to composite only on the overlay SUCCESS path, so a job with captions
+        # and no text would have rendered a .mov and then never laid it on the
+        # picture — the same defect one layer down.
+        #
+        # One .mov, one ffmpeg input — the CLI's refusal of yuva* had forced the
+        # old path into PNG sequences, which for captions would be ~885 files.
+        # The overlay filter holds each caption frame across the video frames
+        # between, which is exactly the 0-5% added holds the eight free styles
+        # measured.
+        if led.get("caption_mov"):
+            _cc0 = time.time()
+            _cco = "/work/captioned.mp4"
+            _cc_before = os.path.join("/work", cur)
+            _ccr = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-i", _cc_before,
+                 "-i", led["caption_mov"],
+                 "-filter_complex",
+                 "[1:v]fps=30,format=yuva444p[cap];"
+                 "[0:v][cap]overlay=0:0:shortest=1[outv]",
+                 "-map", "[outv]", "-map", "0:a?",
+                 "-c:v", "libx264", "-crf", "18",
+                 "-preset", "veryfast", "-c:a", "copy", _cco],
+                capture_output=True, text=True, timeout=900,
+                env=_SUBPROCESS_ENV)
+            _mark(led, "composite_captions", _cc0)
+            if _ccr.returncode == 0 and os.path.exists(_cco):
+                # THE GREEN THIS REPLACES. `path=remotion composited=True` fired
+                # on a file existing and ffmpeg exiting 0 — which a FULLY
+                # TRANSPARENT .mov satisfies identically. Nine styles could
+                # render nothing and report exactly the same line.
+                #
+                # startMs + durationMs — caption_pages emits NO `endMs`. Reading
+                # one would have made the span zero-length, the guard below
+                # false, and the caption measurement would have SILENTLY NEVER
+                # RUN while every other family reported. A check that cannot
+                # fire is the exact green this commit exists to delete.
+                #
+                # The LONGEST page, so the probe lands on a span that genuinely
+                # holds text.
+                # TEXT IS MEASURED WHERE IT NOW LANDS. It rides this same
+                # alpha layer, so its evidence comes from this composite rather
+                # than from a burn that no longer happens. Same instrument, same
+                # control-window logic — only the pass it watches has moved.
+                if items:
+                    _txt_ctrl = _free_ctrl(
+                        [(_i4["t_start"], _i4["t_end"]) for _i4 in items],
+                        _out_dur)
+                    for _it3 in items:
+                        _record_effect("text", _cc_before, _cco,
+                                       _it3["t_start"], _it3["t_end"],
+                                       note=str(_it3.get("text") or "")[:40],
+                                       ctrl_t0=_txt_ctrl)
                     built["text"] = len(items)
                     steps.append({"step": "text", "n": len(items),
                                   "items": [{"t": _i.get("t_start"),
                                              "content": str(_i.get("text") or "")[:80]}
                                             for _i in items]})
+                if _cap_pages:
+                    _p0 = max(_cap_pages,
+                              key=lambda _p: float(_p.get("durationMs") or 0))
+                    _pa = float(_p0.get("startMs") or 0) / 1000.0
+                    _pz = _pa + float(_p0.get("durationMs") or 0) / 1000.0
+                    if _pz > _pa:
+                        _cap_ctrl = _free_ctrl(
+                            [(float(_p.get("startMs") or 0) / 1000.0,
+                              (float(_p.get("startMs") or 0)
+                               + float(_p.get("durationMs") or 0)) / 1000.0)
+                             for _p in _cap_pages], _out_dur)
+                        _record_effect("caption", _cc_before, _cco, _pa, _pz,
+                                       note=str(_cap_style or ""),
+                                       ctrl_t0=_cap_ctrl)
+                cur = "captioned.mp4"
+                led["caption_composited"] = True
+            else:
+                # The render succeeded and the composite did not, so the video
+                # has NO captions at all — worse than the fallback, and it must
+                # not pass quietly.
+                led["caption_composited"] = False
+                fail("caption_composite_failed", (_ccr.stderr or "")[-200:])
 
         _tz0 = time.time()
-        # 3. ZOOMS, one per zoom ruling, velocity capped by build_zoom itself.
+        # 3. ZOOMS — production's SEVEN components, not one generic zoompan.
+        #
+        # THREE THINGS THIS PATH GETS THAT THE FILTERGRAPH COULD NOT:
+        #   the TYPE comes from the arc position the agent ruled, scoped by the
+        #   vibe (ZOOM_ARC_HOMES + pick_zoom_type); the SPAN is the move's own
+        #   designed natural duration; and the clip is back-timed by
+        #   ZOOM_PEAK_REACH_MS so the PERCEPTUAL peak lands on the beat rather
+        #   than the ramp-out endpoint landing there with scale already back at
+        #   1.0 — which is what "the zoom feels late/missed" always was.
+        #
+        # PRE-EXTRACTION IS LOAD-BEARING AND ITS ABSENCE IS SILENT.
+        # ClipRenderer mounts a zoom component only under
+        # `if (clip.zoomEffect && clip.src)`. With no per-clip file it falls
+        # through to a plain <Video> and renders the footage UN-ZOOMED, with no
+        # error and no missing output. Measured while probing paint rates: seven
+        # different zoom types produced seven BYTE-IDENTICAL files at a
+        # perfectly plausible ~1020 ms/frame. Every per-file signal looked
+        # right. So the extract is not an optimisation, it is the thing that
+        # makes the zoom exist, and `_zoom_geometry_ok` below refuses to call
+        # this family built until the pixels prove it.
+        _zoom_jobs, _zoom_segs, _zpub = [], [], "/promptly-remotion/public"
+        os.makedirs(_zpub, exist_ok=True)
+        _zoom_cur_in = os.path.join("/work", cur)
+        _zcursor = 0                      # frames consumed in the micro timeline
         for v in vs:
             b = by_i.get(v.get("beat"))
             tr = [str(t).lower() for t in (v.get("treatment") or [])]
@@ -4158,24 +5322,408 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "zoom", "beat": v.get("beat"),
                                "why": f"no usable output window (a={a2}, b={z2})"})
                 continue
-            # UNIQUE OUTPUT PER ITERATION. This was a fixed "zoomed.mp4" while
-            # `cur` becomes that same name after the first success — so the
-            # SECOND zoom passed ffmpeg the same path as input and output and
-            # died with "Output ... same as Input #0 - exiting". Round 15
-            # measured it as zoom ruled 2, built 1: the family silently lost
-            # every placement after its first.
-            _zout = f"zoomed{built['zoom']}.mp4"
-            zr = build_zoom(a2, z2, 1.12, cur, _zout)
-            if zr.get("error"):
+            # A HALF-RULING IS REFUSED WHERE IT IS MADE. 'zoom' with no arc says
+            # this moment takes a camera move and never says what KIND of moment
+            # it is — and the kind is not derivable from timing. Defaulting
+            # would put some move on a payoff, and payoff purity exists exactly
+            # to stop that.
+            _arc = str(v.get("zoom_arc") or "").strip().lower()
+            if _arc not in ZOOM_ARC_HOMES:
                 _skips.append({"family": "zoom", "beat": v.get("beat"),
-                               "why": f"build_zoom failed: {zr['error']}"[:160]})
-            else:
-                cur = _zout
-                built["zoom"] += 1
-                steps.append({"step": "zoom", "t": [round(a2, 2), round(z2, 2)],
-                              "capped": zr.get("velocity_capped")})
+                               "why": f"ruled 'zoom' with zoom_arc={_arc!r}; the "
+                                      f"arc position is judgement and is not "
+                                      f"derivable — expected one of "
+                                      f"{sorted(ZOOM_ARC_HOMES)}"})
+                continue
+            _ztype = pick_zoom_type(_arc, brief)
+            # STAGEDPUSH NEEDS TWO WORDS OR IT IS NOT A STAGED PUSH. Its
+            # component refuses <2 stages by returning nothing — a passthrough
+            # with no error — so a beat that cannot supply them takes the next
+            # move the ARC allows rather than a silently inert one. Re-picking
+            # inside the arc keeps payoff purity intact by construction.
+            _stages = []
+            if _ztype == "StagedPush":
+                _stages = staged_push_stages(
+                    led.get("kept_words_out") or [], a2, z2,
+                    max(0.0, a2 - ZOOM_PEAK_REACH_MS["StagedPush"] / 1000.0))
+                if len(_stages) < 2:
+                    _alt = [t for t in ZOOM_ARC_HOMES[_arc] if t != "StagedPush"]
+                    _ztype = pick_zoom_type(
+                        _arc, brief) if not _alt else max(
+                        _alt, key=lambda t: (
+                            sum(1 for f in ZOOM_TYPE_FITS.get(t, ())
+                                if f in str(brief or "").lower())
+                            - sum(1 for f in ZOOM_TYPE_FIGHTS.get(t, ())
+                                  if f in str(brief or "").lower()),
+                            -ZOOM_ARC_HOMES[_arc].index(t)))
+                    led.setdefault("staged_push_downgrades", []).append(
+                        {"beat": v.get("beat"), "words_found": len(_stages),
+                         "fell_back_to": _ztype})
+                    _stages = []
+            _nat_s = zoom_natural_ms(_ztype) / 1000.0
+            _peak_s = ZOOM_PEAK_REACH_MS[_ztype] / 1000.0
+            # BACK-TIMED, then CLAMPED AT THE HEAD. Starting the clip
+            # peak-reach early puts the peak on the beat; at the very top of the
+            # video there is nothing to start early into, so it clamps and the
+            # peak lands late by whatever was unavailable. Recorded, not hidden.
+            _cs = a2 - _peak_s
+            _clamped = _cs < 0
+            _cs = max(0.0, _cs)
+            _ce = min(float(_out_dur or (z2 + _nat_s)), _cs + _nat_s)
+            if _ce - _cs < 0.2:
+                _skips.append({"family": "zoom", "beat": v.get("beat"),
+                               "why": f"{_ztype} needs {_nat_s:.2f}s and only "
+                                      f"{_ce - _cs:.2f}s of output remains"})
+                continue
+            _n_frames = max(2, int(round((_ce - _cs) * 30)))
+            _zsrc = f"zsrc{len(_zoom_jobs)}.mp4"
+            # THE EXTRACT. Frame 0 of this file is the clip's first frame, which
+            # is the contract the ABE components were built to: they take `src`
+            # and play it from 0, with no startFrom and no playbackRate.
+            # Re-encoded rather than stream-copied because a copy starts at the
+            # nearest keyframe and the whole point is a frame-exact origin.
+            _ex = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error", "-ss", f"{_cs:.3f}",
+                 "-t", f"{_ce - _cs:.3f}", "-i", _zoom_cur_in,
+                 "-an", "-c:v", "libx264", "-crf", "16", "-preset", "veryfast",
+                 "-pix_fmt", "yuv420p", os.path.join(_zpub, _zsrc)],
+                capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
+            if _ex.returncode != 0:
+                _skips.append({"family": "zoom", "beat": v.get("beat"),
+                               "why": f"clip pre-extract failed: "
+                                      f"{(_ex.stderr or '')[-140:]}"})
+                continue
+            _zplan = f"/work/micro-zoom{len(_zoom_jobs)}.json"
+            with open(_zplan, "w") as fh:
+                json.dump({"input": {
+                    "sourceUrl": _zsrc, "fps": 30, "width": 1080, "height": 1920,
+                    "totalDurationInFrames": _n_frames,
+                    "segments": [{
+                        "type": "zoom_clip", "outputStartFrame": 0,
+                        "durationInFrames": _n_frames,
+                        "clip": {"id": f"z{len(_zoom_jobs)}", "src": _zsrc,
+                                 "startFromFrames": 0, "playbackRate": 1.0,
+                                 "durationInFrames": _n_frames,
+                                 "zoomEffect": {
+                                     "type": _ztype,
+                                     "events": [dict({
+                                         "startMs": 0,
+                                         "durationMs": int(round((_ce - _cs) * 1000)),
+                                         "scale": (_stages[-1]["scale"] if _stages
+                                                   else ZOOM_NATURAL_SCALE.get(_ztype, 1.22)),
+                                         "originX": 0.5, "originY": 0.4},
+                                         **({"stages": _stages,
+                                             "pushMs": _STAGED_PUSH_MS,
+                                             "holdMs": _STAGED_PUSH_HOLD_MS,
+                                             "releaseMs": _STAGED_PUSH_RELEASE_MS}
+                                            if _stages else {}))]}}}],
+                }}, fh)
+            _zid = f"zoom{len(_zoom_jobs)}"
+            _zoom_jobs.append({"id": _zid, "composition": "PromptlyMicroSegments",
+                               "propsFile": _zplan,
+                               "out": f"/work/{_zid}.mp4",
+                               "expect_frames": _n_frames})
+            _zoom_segs.append({"id": _zid, "beat": v.get("beat"), "arc": _arc,
+                               "type": _ztype, "src": os.path.join(_zpub, _zsrc),
+                               "out": f"/work/{_zid}.mp4",
+                               "t0": round(_cs, 3), "t1": round(_ce, 3),
+                               "frames": _n_frames,
+                               "stages": len(_stages),
+                               # The deepest push is the LAST stage, not the
+                               # first — ZOOM_PEAK_REACH_MS["StagedPush"] is the
+                               # push into stage one and would aim the check at
+                               # the shallowest part of the move.
+                               "stage_peak_s": (_stages[-1]["atMs"] / 1000.0
+                                                if _stages else None),
+                               "claimed_scale": (_stages[-1]["scale"] if _stages
+                                                 else ZOOM_NATURAL_SCALE.get(_ztype, 1.22)),
+                               "peak_lands_at_s": round(_cs + _peak_s, 3),
+                               "beat_at_s": round(a2, 3),
+                               "head_clamped": _clamped})
+            _zcursor += _n_frames
+
+        if _zoom_jobs:
+            # ONE PROCESS FOR EVERY ZOOM. bundle + browser is 12.24s per
+            # `npx remotion render`; N zooms spawning N processes pays it N
+            # times. This is the whole reason render_remotion_batch exists.
+            _zres = render_remotion_batch(_zoom_jobs, env=_SUBPROCESS_ENV,
+                                          timeout=2400)
+            led["zoom_render"] = {
+                "jobs": len(_zoom_jobs),
+                "bundle_ms": (_zres.get("_batch") or {}).get("bundle_ms"),
+                "segments": [dict(s2) for s2 in _zoom_segs],
+            }
+            _good = []
+            for _sg in _zoom_segs:
+                _jr = _zres.get(_sg["id"]) or {}
+                if not _jr.get("ok"):
+                    _skips.append({"family": "zoom", "beat": _sg["beat"],
+                                   "why": f"{_sg['type']} render failed: "
+                                          f"{str(_jr.get('error'))[:140]}"})
+                    continue
+                if _jr.get("frames_ok") is False:
+                    fail("render_frames_mismatch",
+                         f"zoom {_sg['type']}: asked for {_sg['frames']} frames, "
+                         f"the file holds {_jr.get('frames_actual')}")
+                    _skips.append({"family": "zoom", "beat": _sg["beat"],
+                                   "why": "rendered frame count did not match "
+                                          "the plan"})
+                    continue
+                # ── THE PIXELS, OR IT IS NOT A ZOOM ─────────────────────────
+                # A zoom is a crop-and-scale of its own source, so the render
+                # must differ GEOMETRICALLY from the file it was made from. A
+                # passthrough — the `clip.src` failure — is a plain re-encode of
+                # that same file and reads 44+ dB. Measured on this repo's own
+                # fixtures: a re-encode 45.10 dB, a real transform 15.06 dB.
+                # Nothing else in this pipeline can tell those apart, because
+                # the passthrough has the right frame count, the right duration
+                # and real footage in it.
+                # MEASURED WHERE THE MOVE IS LARGEST, not at the head. Every
+                # ramp type starts at scale 1.0, so the first frames of a REAL
+                # zoom are legitimately near-identical to their source — and
+                # StagedPush, whose first stage is only +8%, read 20.37 dB in a
+                # head window and would have been called inert while applying
+                # perfectly. The peak is where the geometry is, and this lane
+                # already has the table that says where the peak is.
+                _dur_s = _sg["t1"] - _sg["t0"]
+                _pk_s = (_sg["stage_peak_s"] if _sg.get("stage_peak_s")
+                         else ZOOM_PEAK_REACH_MS[_sg["type"]] / 1000.0)
+                _w0 = max(0.0, min(_pk_s, max(0.0, _dur_s - 0.3)))
+                _gch, _gdb = step_changed_output(
+                    _sg["src"], _sg["out"], _w0, min(_dur_s, _w0 + 0.3),
+                    env=_SUBPROCESS_ENV, identical_db=_ZOOM_GEOMETRY_MAX_DB)
+                _sg["geometry_window"] = [round(_w0, 3),
+                                          round(min(_dur_s, _w0 + 0.3), 3)]
+                _sg["geometry_psnr_db"] = _gdb
+                _sg["geometry_ok"] = _gch
+                if _gch is False:
+                    fail("zoom_not_applied",
+                         f"{_sg['type']} rendered {_sg['frames']} frames that "
+                         f"are the SAME PICTURE as its own source "
+                         f"(psnr {_gdb} dB >= {_ZOOM_GEOMETRY_MAX_DB}). "
+                         f"ClipRenderer mounts a zoom only under "
+                         f"`clip.zoomEffect && clip.src` — without the "
+                         f"pre-extracted file it renders un-zoomed and says "
+                         f"nothing.")
+                    _skips.append({"family": "zoom", "beat": _sg["beat"],
+                                   "why": f"{_sg['type']} rendered un-zoomed "
+                                          f"(psnr {_gdb} dB against its source)"})
+                    continue
+                _good.append(_sg)
+
+            if _good:
+                # SPLICE, not overlay-with-alpha: a zoom REPLACES the picture
+                # for its window. Same trim/setpts/overlay shape the reel uses,
+                # so there is one composite idiom in this file rather than two.
+                _zparts, _last = [], "0:v"
+                for _k, _sg in enumerate(_good):
+                    _dur = _sg["t1"] - _sg["t0"]
+                    _zparts.append(
+                        f"[{_k + 1}:v]trim=start=0:end={_dur:.3f},"
+                        f"setpts=PTS-STARTPTS+{_sg['t0']:.3f}/TB[zc{_k}]")
+                    _zparts.append(
+                        f"[{_last}][zc{_k}]overlay=0:0:enable='between(t,"
+                        f"{_sg['t0']:.3f},{_sg['t1']:.3f})'[zm{_k}]")
+                    _last = f"zm{_k}"
+                _zfilt = "/work/zoom-filter.txt"
+                with open(_zfilt, "w") as fh:
+                    fh.write(";".join(_zparts))
+                # SAME CLASS AS THE CHAINED BUILDERS, ASSERTED RATHER THAN
+                # ARGUED. The per-iteration ffmpeg write is gone — this
+                # composites once, outside the loop — so the fixed-output-name
+                # defect cannot recur by construction. But "cannot recur by
+                # construction" is what was said about the fixed "zoomed.mp4"
+                # before round 15 measured zoom 2->1, so the guard is explicit.
+                if cur == "zoomed.mp4":
+                    fail("chain_writes_its_own_input",
+                         "the zoom composite would read and write "
+                         "/work/zoomed.mp4 — ffmpeg exits 'Output ... same as "
+                         "Input #0' and the family loses every placement")
+                    raise RuntimeError("zoom composite input == output")
+                _zargs = ["ffmpeg", "-y", "-v", "error",
+                          "-i", os.path.join("/work", cur)]
+                for _sg in _good:
+                    _zargs += ["-i", _sg["out"]]
+                _zargs += ["-filter_complex", open(_zfilt).read().strip(),
+                           "-map", f"[{_last}]", "-map", "0:a?",
+                           "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                           "-c:a", "copy", "/work/zoomed.mp4"]
+                _zc = subprocess.run(_zargs, capture_output=True, text=True,
+                                     timeout=1800, env=_SUBPROCESS_ENV)
+                if _zc.returncode != 0 or not os.path.exists("/work/zoomed.mp4"):
+                    _why3 = f"zoom composite failed: {(_zc.stderr or '')[-140:]}"
+                    for _sg in _good:
+                        _skips.append({"family": "zoom", "beat": _sg["beat"],
+                                       "why": _why3})
+                else:
+                    _z_before = os.path.join("/work", cur)
+                    _zctrl = _free_ctrl([(s3["t0"], s3["t1"]) for s3 in _good],
+                                        _out_dur)
+                    for _sg in _good:
+                        _record_effect("zoom", _z_before, "/work/zoomed.mp4",
+                                       _sg["t0"], _sg["t1"],
+                                       note=f"{_sg['type']}@{_sg['arc']}",
+                                       ctrl_t0=_zctrl)
+                    cur = "zoomed.mp4"
+                    built["zoom"] = len(_good)
+                    for _sg in _good:
+                        steps.append({"step": "zoom",
+                                      "t": [_sg["t0"], _sg["t1"]],
+                                      "type": _sg["type"], "arc": _sg["arc"],
+                                      "peak_lands_at_s": _sg["peak_lands_at_s"],
+                                      "beat_at_s": _sg["beat_at_s"],
+                                      "head_clamped": _sg["head_clamped"],
+                                      "geometry_psnr_db": _sg.get("geometry_psnr_db")})
 
         _mark(led, "build_zoom", _tz0)
+        # ── 3d. SEAM DRESSING, RENDERED ────────────────────────────────────
+        # Selection happened before the alpha pass (the overlays ride it). This
+        # is the half that costs frames: the nine transitions, rendered as micro
+        # segments over the picture as it now stands — after the zoom, so a
+        # dressed seam shows the finished frame rather than the raw cut.
+        _tt1 = time.time()
+        _tr_jobs, _tr_segs = [], []
+        for _c3 in [c for c in _tr_choices if c["kind"] == "transition"]:
+            _ttype = _c3["type"]
+            _d_ms = TRANSITION_NATURAL_DURATION_MS[_ttype]
+            _d_s = _d_ms / 1000.0
+            _w0 = _c3["out_s"]
+            _w1 = min(float(_out_dur or 0), _w0 + _d_s)
+            if _w1 - _w0 < _d_s * 0.9:
+                _skips.append({"family": "transition", "beat": _c3["beat"],
+                               "why": f"{_ttype} needs {_d_s:.2f}s and only "
+                                      f"{_w1 - _w0:.2f}s of output remains"})
+                continue
+            # PER-LAYER PRE-EXTRACTION. TransitionSpec's own note: a transition
+            # reads ONE file at TWO positions, which <Video> thrashes on
+            # (+26% measured); one small file per layer makes it -30%. Absent,
+            # the renderer falls back to the whole source — slower, but unlike
+            # the zoom case NOT a silent no-op.
+            _k = len(_tr_jobs)
+            _asrc, _bsrc = f"tA{_k}.mp4", f"tB{_k}.mp4"
+            _ok2 = True
+            for _nm2, _st in ((_asrc, max(0.0, _w0 - _d_s)), (_bsrc, _w0)):
+                _ex2 = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error", "-ss", f"{_st:.3f}",
+                     "-t", f"{_d_s:.3f}", "-i", os.path.join("/work", cur),
+                     "-an", "-c:v", "libx264", "-crf", "16", "-preset", "veryfast",
+                     "-pix_fmt", "yuv420p", os.path.join(_zpub, _nm2)],
+                    capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
+                if _ex2.returncode != 0:
+                    _skips.append({"family": "transition", "beat": _c3["beat"],
+                                   "why": f"seam pre-extract failed: "
+                                          f"{(_ex2.stderr or '')[-120:]}"})
+                    _ok2 = False
+                    break
+            if not _ok2:
+                continue
+            _nf = max(2, int(round((_w1 - _w0) * 30)))
+            _tplan = f"/work/micro-trans{_k}.json"
+            with open(_tplan, "w") as fh:
+                json.dump({"input": {
+                    "sourceUrl": _asrc, "fps": 30, "width": 1080, "height": 1920,
+                    "totalDurationInFrames": _nf,
+                    "segments": [{
+                        "type": "transition", "outputStartFrame": 0,
+                        "durationInFrames": _nf,
+                        "transition": {
+                            "afterClipIndex": _c3["seam"], "type": _ttype,
+                            "durationInFrames": _nf,
+                            "clipAStartFromFrames": 0, "clipBStartFromFrames": 0,
+                            "clipAPlaybackRate": 1.0, "clipBPlaybackRate": 1.0,
+                            "clipASrc": _asrc, "clipBSrc": _bsrc,
+                        }}],
+                }}, fh)
+            _tr_jobs.append({"id": f"trans{_k}", "composition": "PromptlyMicroSegments",
+                             "propsFile": _tplan, "out": f"/work/trans{_k}.mp4",
+                             "expect_frames": _nf})
+            _tr_segs.append({"id": f"trans{_k}", "beat": _c3["beat"],
+                             "type": _ttype, "out": f"/work/trans{_k}.mp4",
+                             "t0": round(_w0, 3), "t1": round(_w1, 3),
+                             "frames": _nf, "room_ms": _c3["room_ms"]})
+
+        if _tr_jobs:
+            _tres = render_remotion_batch(_tr_jobs, env=_SUBPROCESS_ENV, timeout=1800)
+            led["transition_render"] = {
+                "jobs": len(_tr_jobs),
+                "bundle_ms": (_tres.get("_batch") or {}).get("bundle_ms"),
+            }
+            _tgood = []
+            for _sg in _tr_segs:
+                _jr = _tres.get(_sg["id"]) or {}
+                if not _jr.get("ok"):
+                    _skips.append({"family": "transition", "beat": _sg["beat"],
+                                   "why": f"{_sg['type']} render failed: "
+                                          f"{str(_jr.get('error'))[:140]}"})
+                    continue
+                if _jr.get("frames_ok") is False:
+                    fail("render_frames_mismatch",
+                         f"transition {_sg['type']}: asked for {_sg['frames']} "
+                         f"frames, the file holds {_jr.get('frames_actual')}")
+                    _skips.append({"family": "transition", "beat": _sg["beat"],
+                                   "why": "rendered frame count did not match the plan"})
+                    continue
+                _tgood.append(_sg)
+            if _tgood:
+                if cur == "transitioned.mp4":
+                    fail("chain_writes_its_own_input",
+                         "the transition composite would read and write "
+                         "/work/transitioned.mp4")
+                    raise RuntimeError("transition composite input == output")
+                _tparts, _tlast = [], "0:v"
+                for _k2, _sg in enumerate(_tgood):
+                    _dur2 = _sg["t1"] - _sg["t0"]
+                    _tparts.append(
+                        f"[{_k2 + 1}:v]trim=start=0:end={_dur2:.3f},"
+                        f"setpts=PTS-STARTPTS+{_sg['t0']:.3f}/TB[tc{_k2}]")
+                    _tparts.append(
+                        f"[{_tlast}][tc{_k2}]overlay=0:0:enable='between(t,"
+                        f"{_sg['t0']:.3f},{_sg['t1']:.3f})'[tm{_k2}]")
+                    _tlast = f"tm{_k2}"
+                _targs = ["ffmpeg", "-y", "-v", "error",
+                          "-i", os.path.join("/work", cur)]
+                for _sg in _tgood:
+                    _targs += ["-i", _sg["out"]]
+                _targs += ["-filter_complex", ";".join(_tparts),
+                           "-map", f"[{_tlast}]", "-map", "0:a?",
+                           "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                           "-c:a", "copy", "/work/transitioned.mp4"]
+                _tc2 = subprocess.run(_targs, capture_output=True, text=True,
+                                      timeout=1800, env=_SUBPROCESS_ENV)
+                if _tc2.returncode != 0 or not os.path.exists("/work/transitioned.mp4"):
+                    _why4 = f"transition composite failed: {(_tc2.stderr or '')[-140:]}"
+                    for _sg in _tgood:
+                        _skips.append({"family": "transition", "beat": _sg["beat"],
+                                       "why": _why4})
+                else:
+                    _t_before = os.path.join("/work", cur)
+                    _tctrl = _free_ctrl([(s4["t0"], s4["t1"]) for s4 in _tgood],
+                                        _out_dur)
+                    for _sg in _tgood:
+                        _record_effect("transition", _t_before,
+                                       "/work/transitioned.mp4",
+                                       _sg["t0"], _sg["t1"],
+                                       note=f"{_sg['type']}@{_sg['room_ms']}ms",
+                                       ctrl_t0=_tctrl)
+                    cur = "transitioned.mp4"
+                    built["transition"] = built.get("transition", 0) + len(_tgood)
+                    for _sg in _tgood:
+                        steps.append({"step": "transition",
+                                      "t": [_sg["t0"], _sg["t1"]],
+                                      "type": _sg["type"],
+                                      "room_ms": _sg["room_ms"]})
+        # THE OVERLAYS COST NO RENDER OF THEIR OWN — they were painted into the
+        # alpha layer captions and text already pay for. Counted here because
+        # that pass has already carried them.
+        if _tc_overlays:
+            built["transition"] = built.get("transition", 0) + len(_tc_overlays)
+            for _o in [c for c in _tr_choices if c["kind"] == "overlay"]:
+                steps.append({"step": "transition",
+                              "t": [_o["out_s"], _o["out_s"]],
+                              "type": _o["type"], "room_ms": _o["room_ms"],
+                              "tight_cut_overlay": True})
+        _mark(led, "build_transitions", _tt1)
+
         _tcd0 = time.time()
         # 3b. CARDS — a family the agent could RULE and the harness could not
         # BUILD. execute_plan handled cut, text, zoom and sfx; card had no
@@ -4203,9 +5751,56 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "card", "beat": v.get("beat"),
                                "why": "beat was cut, so it has no output time"})
                 continue
-            _cards.append({"t_start": round(at, 2), "type": "StatCard",
+            # ── WHICH OF THE TWENTY-NINE ─────────────────────────────────
+            # This was hardcoded to StatCard, which is the whole "1 of 29" gap:
+            # the catalogue has been MOUNTED at knowledge/05_motion_graphics.md
+            # the entire time — 29 entries with claims, FITS/FIGHTS and props —
+            # and the agent could read it but not act on it, because the harness
+            # placed a StatCard whatever it said.
+            _ctype = str(v.get("card_type") or "").strip() or "StatCard"
+            if _ctype in MG_BRAND_ONLY:
+                # Production's own prompt: "DO NOT put NamePlate or EndCard in
+                # motion_graphics yourself — the pipeline builds [them]". They
+                # come from brand settings, not from a ruling.
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": f"{_ctype} is a BRAND component the "
+                                      f"pipeline builds from brand settings, "
+                                      f"not a catalogue choice"})
+                continue
+            if _ctype not in MG_SELECTABLE_TYPES:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": f"card_type {_ctype!r} is not in the "
+                                      f"catalogue — a type the renderer does "
+                                      f"not know renders nothing"})
+                continue
+            # BACK-TIMED so the component is SETTLED on its anchor word rather
+            # than STARTING there. _MG_ATTACK_MS has been in the inventory since
+            # it was built and nothing read it, so every motion graphic this
+            # lane has ever placed entered late by its own attack.
+            _mg_attack = ((_ASSET_INV or {}).get("motion_graphics") or {}).get("attack_ms") \
+                if _ASSET_INV else None
+            if not _mg_attack:
+                try:
+                    _mg_attack = (json.load(open("/assets/inventory.json"))
+                                  .get("motion_graphics") or {}).get("attack_ms") or {}
+                except Exception:
+                    _mg_attack = {}
+            _mg_at, _mg_clamped = mg_back_timed_start_s(_ctype, at, _mg_attack)
+            # PROPS ARE THE COMPONENT'S OWN SHAPE. hero/label are StatCard's
+            # vocabulary; every other type reads different keys, and a card
+            # carrying the wrong ones renders empty. Explicit props win; the
+            # hero/label pair remains the StatCard shorthand.
+            _cprops = v.get("card_props")
+            if not isinstance(_cprops, dict) or not _cprops:
+                _cprops = {"value": hero,
+                           "label": str(v.get("card_label") or "")[:60]}
+            _cards.append({"t_start": round(_mg_at, 2), "type": _ctype,
                            "duration_s": min(2.5, b["t_end"] - b["t_start"]),
-                           "hero": hero, "label": str(v.get("card_label") or "")[:60]})
+                           "hero": hero, "label": str(v.get("card_label") or "")[:60],
+                           "props": _cprops,
+                           "anchor_s": round(at, 2),
+                           "attack_ms": (_mg_attack or {}).get(_ctype, 150),
+                           "head_clamped": _mg_clamped})
         if _cards:
             # DO NOT RE-RENDER AN IDENTICAL REEL. execute_plan rebuilds the whole
             # pipeline, and the agent calls it more than once — round 15's
@@ -4251,6 +5846,17 @@ def edit(source_key: str, brief: str,
                     for _c2 in _cards:
                         _skips.append({"family": "card", "beat": None, "why": _whyc2})
                 else:
+                    # MEASURED BEFORE `cur` MOVES — same rebinding trap as text.
+                    _cd_ctrl = _free_ctrl(
+                        [(_c5["t_start"],
+                          _c5["t_start"] + float(_c5.get("duration_s") or 1.0))
+                         for _c5 in _cards], _out_dur)
+                    for _c4 in _cards:
+                        _record_effect("card", os.path.join("/work", cur),
+                                       "/work/carded.mp4", _c4["t_start"],
+                                       _c4["t_start"] + float(_c4.get("duration_s") or 1.0),
+                                       note=str(_c4.get("hero") or "")[:40],
+                                       ctrl_t0=_cd_ctrl)
                     cur = "carded.mp4"
                     _mark(led, "build_reel", _tcd0)
                     # THE FRAME COUNT, PRINTED. build_reel is 40% of
@@ -4263,6 +5869,9 @@ def edit(source_key: str, brief: str,
                     built["card"] = len(_cards)
                     steps.append({"step": "card", "n": len(_cards),
                                   "items": [{"t": _c3.get("t_start"),
+                                             "type": _c3.get("type"),
+                                             "anchor_s": _c3.get("anchor_s"),
+                                             "attack_ms": _c3.get("attack_ms"),
                                              "content": str(_c3.get("hero") or "")[:80]}
                                             for _c3 in _cards]})
 
@@ -4297,6 +5906,17 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "sfx", "beat": v.get("beat"),
                                "why": f"place_sfx failed: {sr['error']}"[:160]})
             else:
+                # AUDIO DOMAIN, NOT VIDEO. place_sfx writes `-c:v copy`, so the
+                # picture is byte-identical BY CONSTRUCTION — step_changed_output
+                # would report psnr=inf and changed=False on a PERFECT sound
+                # placement, marking every correct sfx inert. The window is the
+                # sound's own span from where it actually starts (attack-shifted),
+                # not from the beat.
+                _sd = sr.get("sfx_duration_s")
+                _s_a = float(sr.get("started_at_s") if sr.get("started_at_s") is not None else at)
+                _record_effect("sfx", os.path.join("/work", cur),
+                               os.path.join("/work", _sout),
+                               _s_a, _s_a + float(_sd if _sd else 0.5), note=nm)
                 cur = _sout
                 built["sfx"] += 1
                 steps.append({"step": "sfx", "name": nm, "t": round(at, 2)})
@@ -4309,9 +5929,10 @@ def edit(source_key: str, brief: str,
         ruled = {"text": sum(1 for v in vs if "text" in [str(t).lower() for t in (v.get("treatment") or [])]),
                  "zoom": sum(1 for v in vs if "zoom" in [str(t).lower() for t in (v.get("treatment") or [])]),
                  "card": sum(1 for v in vs if "card" in [str(t).lower() for t in (v.get("treatment") or [])]),
+                 "transition": sum(1 for v in vs if "transition" in [str(t).lower() for t in (v.get("treatment") or [])]),
                  "sfx": sum(1 for v in vs if str(v.get("sfx", "no")).lower() == "yes")}
         gap = {k: [ruled.get(k, 0), built.get(k, 0)]
-               for k in ("text", "zoom", "sfx", "card")
+               for k in ("text", "zoom", "sfx", "card", "transition")
                if ruled.get(k, 0) != built.get(k, 0)}
         # ── THE ACCOUNTING MUST BALANCE ──────────────────────────────────────
         # ruled = built + skipped, per family. Anything else means a ruling left
@@ -4327,7 +5948,7 @@ def edit(source_key: str, brief: str,
         for _s2 in _skips:
             _sk_by_fam[_s2["family"]] = _sk_by_fam.get(_s2["family"], 0) + 1
         _unbalanced = {}
-        for _f in ("text", "zoom", "sfx", "card"):
+        for _f in ("text", "zoom", "sfx", "card", "transition"):
             _r, _b, _s3 = ruled.get(_f, 0), built.get(_f, 0), _sk_by_fam.get(_f, 0)
             if _r != _b + _s3:
                 _unbalanced[_f] = {"ruled": _r, "built": _b, "skipped": _s3,
@@ -4359,7 +5980,7 @@ def edit(source_key: str, brief: str,
         #
         # zoom and sfx were already correct: those emit one step per ruling.
         _TYPE = {"text": "overlay_text", "zoom": "emphasis", "sfx": "sfx",
-                 "card": "card"}
+                 "card": "card", "transition": "transition"}
         for _s in steps:
             _k = _s.get("step")
             if _k not in _TYPE:
@@ -4393,6 +6014,27 @@ def edit(source_key: str, brief: str,
                      "method": "ffmpeg", "declared_by": "execute_plan",
                      "content": _s.get("name") or ""})
         _mark(led, "build_sfx", _ts0)
+        # ── EVERY DECLARED FAMILY MEASURES ITS EFFECT ───────────────────────
+        # AN ARITHMETIC IDENTITY, for the same reason the ruled/built/skipped
+        # balance is one: it catches the NEXT family without my having to
+        # predict where it is, including families added later by someone else.
+        # Round 33 declared 16 placements across four families and measured ONE
+        # — and nothing in the run said so, because the only thing that could
+        # have said so was a count of a list nobody compared to anything.
+        #
+        # THIS IS A COVERAGE BAR, NOT A VERDICT BAR. An entry whose `changed` is
+        # None still counts as covered: "we tried and could not measure" is a
+        # different fact from "we never looked", and this check is about the
+        # second one. `placement_inert` owns the first.
+        _uncovered = uncovered_families(led.get("placements"),
+                                        led.get("placement_effects"))
+        led["placement_effect_uncovered"] = _uncovered
+        if _uncovered:
+            fail("placement_effect_uncovered",
+                 f"{_uncovered} declared placement(s) and measured NOTHING. A "
+                 f"family that cannot show it changed the output is a manifest "
+                 f"entry, not a placement — and a ported catalogue and a "
+                 f"catalogue that composites nothing read identically here.")
         led["execute_plan"] = {"steps": steps, "built": built, "ruled": ruled,
                                "ruled_but_not_built": gap, "skips": _skips,
                                "unbalanced": _unbalanced}
@@ -4573,7 +6215,9 @@ def edit(source_key: str, brief: str,
         except Exception:
             return {"error": "t must be a number (OUTPUT seconds)"}
         attack_ms = float((inv.get("attack_ms") or {}).get(nm, 0) or 0)
-        start = max(0.0, at - attack_ms / 1000.0)
+        # THE ONE DERIVATION, hoisted so a test can run it. It was inline and
+        # therefore only reachable by reading it.
+        start, _head_clamped = sfx_start_s(attack_ms, at)
         inp = os.path.join("/work", os.path.basename(str(input_file)))
         outp = os.path.join("/work", os.path.basename(str(output_file)))
         sfx = os.path.join("/assets/sounds", nm + ".mp3")
@@ -4594,9 +6238,25 @@ def edit(source_key: str, brief: str,
         if r.returncode != 0:
             fail("place_sfx_failed", (r.stderr or "")[-300:])
             return {"error": "sfx mix failed", "stderr": (r.stderr or "")[-500:]}
+        # THE SOUND'S OWN DURATION, so the effect check can measure the window
+        # the sound actually occupies. A fixed guess would straddle silence on
+        # an impulsive hit (awkward-moment, 10ms attack) and fall short of a
+        # swell (imposter, 935ms attack) — and a window that mostly contains
+        # nothing is how a real placement measures as inert.
+        _sdur = None
+        try:
+            _pr = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "csv=p=0", sfx], capture_output=True, text=True,
+                timeout=30, env=_SUBPROCESS_ENV)
+            _sdur = round(float((_pr.stdout or "").strip()), 3)
+        except Exception:
+            _sdur = None
         return {"ok": True, "output_file": os.path.basename(outp), "sfx": nm,
                 "lands_at_s": round(at, 3), "started_at_s": round(start, 3),
-                "attack_ms_applied": attack_ms,
+                "attack_ms_applied": attack_ms, "sfx_duration_s": _sdur,
+                "head_clamped": _head_clamped,
+                "peak_adjudicable": attack_ms >= _SFX_PEAK_MEASURABLE_ATTACK_MS,
                 "note": "the file starts EARLY by its attack so the peak lands on t"}
 
     def author_component(tsx, frames=45, name="authored"):
@@ -6192,7 +7852,8 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
          effort: str = DEFAULT_EFFORT,
          model: str = MODEL,
          route: bool = False,
-         src_url: str = "", out_url: str = "", out_key: str = ""):
+         src_url: str = "", out_url: str = "", out_key: str = "",
+         recent_styles: str = ""):
     # PRESIGN LOCALLY, where the credentials belong. The container receives two
     # URLs that each permit exactly one operation on exactly one key, and
     # expire. It gets no identity, so there is none to steal — and it cannot
@@ -6221,8 +7882,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         _out_url = _s3.generate_presigned_url(
             "put_object", Params={"Bucket": _bucket, "Key": _out_key,
                                   "ContentType": "video/mp4"}, ExpiresIn=3600)
+    # BY KEYWORD. The ten arguments above are positional and `recent_styles`
+    # sits after exec_model — appending it positionally would silently bind to
+    # cap_exec_effort and turn the rotation history into a boolean.
     r = edit.remote(source, brief, _src_url, _out_url, _out_key,
-                    iters, knowledge, effort, model, route)
+                    iters, knowledge, effort, model, route,
+                    recent_styles=recent_styles)
     print("\n" + "=" * 66)
     print(f"  AGENTIC EDITOR — knowledge={'ON' if knowledge else 'OFF'}  "
           f"effort={r.get('ledger').get('effort')}  model={r.get('ledger').get('model')}")
@@ -6476,8 +8141,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _cr:
         print(f"  CAPTIONS        : {_cr.get('style')} @ {_cr.get('fps')}fps  "
               f"{_cr.get('pages')} pages / {_cr.get('frames')} frames  "
+              f"frames_actual={_cr.get('frames_actual')} "
+              f"(ok={_cr.get('frames_ok')})  "
               f"paint {(_cr.get('paint_ms') or 0)/1000:.1f}s "
               f"({_cr.get('ms_per_frame')} ms/frame)  "
+              f"bundle {(_cr.get('bundle_ms') or 0)/1000:.1f}s  "
+              f"recent={(r.get('ledger') or {}).get('caption_recent_in') or '[]'}  "
               f"path={(r.get('ledger') or {}).get('caption_path')}  "
               f"composited={(r.get('ledger') or {}).get('caption_composited')}"
               + (f"  ERROR={_cr.get('error')}" if _cr.get("error") else ""))
@@ -6527,13 +8196,46 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         for e in _eff:
             _v = ("moved" if e.get("changed") is True
                   else "INERT" if e.get("changed") is False else "UNMEASURED")
-            print(f"     {e.get('family','?'):8} t={e.get('t')}  {_v}  "
-                  f"psnr={e.get('psnr_db')} dB")
+            # THE UNIT IS PER-DOMAIN. sfx is measured in the AUDIO domain and
+            # printing its normalised-signal ratio under a `psnr=` label would
+            # be a number wearing another measurement's name — and psnr_db is
+            # simply absent on those rows, so it would print `psnr=None dB` on
+            # every correctly-placed sound.
+            _u = "nsr" if e.get("domain") == "audio" else "psnr"
+            _val = e.get("nsr_db") if e.get("domain") == "audio" else e.get("psnr_db")
+            print(f"     {e.get('family','?'):8} t={e.get('t')}  {_v:<10} "
+                  f"{_u}={_val} dB"
+                  + (f"  {str(e.get('note'))[:34]}" if e.get("note") else ""))
     else:
         # NOT SILENCE. Zero measurements is a fact about the run, and printing
         # nothing is what made round 27 unreadable.
         print("  PLACEMENT EFFECT: none measured "
               "(no step with a span ran, or the check did not execute)")
+    # COVERAGE, PRINTED — the counter added to answer "which families measured
+    # nothing" is useless in the ledger alone. Round 29 ran specifically to
+    # learn whether a gate fired and could not, because the counter reached the
+    # ledger and no output.
+    _unc = (r.get("ledger") or {}).get("placement_effect_uncovered")
+    _fam_dec = sorted({_p.get("family") for _p in _pl_all if _p.get("family")})
+    if _unc is not None:
+        print(f"  EFFECT COVERAGE : declared {_fam_dec or '[]'}  "
+              + ("ALL MEASURED" if not _unc
+                 else f"<-- UNCOVERED {_unc} — declared and never measured"))
+    # ── WHICH COMPONENTS, not how many ────────────────────────────────────
+    # "card=4" was true of a run that placed four StatCards and of a run that
+    # placed four different types, and the whole point of the catalogue port is
+    # the difference between those two.
+    _mg_steps = [x for x in ((r.get("ledger") or {}).get("execute_plan") or {}).get("steps", [])
+                 if x.get("step") == "card"]
+    _mg_items = [i for st in _mg_steps for i in (st.get("items") or [])]
+    if _mg_items:
+        _mix = {}
+        for _i8 in _mg_items:
+            _t8 = _i8.get("type") or "?"
+            _mix[_t8] = _mix.get(_t8, 0) + 1
+        print(f"  MG CATALOGUE    : {len(_mix)} distinct of "
+              f"{len(MG_SELECTABLE_TYPES)} selectable  "
+              + " ".join(f"{k}={v}" for k, v in sorted(_mix.items())))
     _rf = (r.get("ledger") or {}).get("reel_frames")
     if _rf is not None:
         print(f"  REEL            : {_rf} frames "

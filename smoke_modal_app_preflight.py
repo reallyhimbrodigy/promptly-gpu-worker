@@ -60,7 +60,21 @@ for t in TARGETS:
             if os.path.exists(os.path.join(HERE, m + ".py")):
                 # A sibling .py imported at module level must be MOUNTED, or the
                 # container's import of this module fails outright.
-                if f'"{m}.py"' not in src and f"/{m}.py" not in src:
+                # TWO MOUNT MECHANISMS, and the detector knew only one.
+                #
+                # add_local_python_source(m) is Modal's own way to put a local
+                # MODULE on the container's sys.path, and it is what actually
+                # works here — add_local_file put agentic_editor_app.py in the
+                # image and the import STILL failed with ModuleNotFoundError.
+                # The detector matched only a "<m>.py" path string, so it flagged
+                # two probes that mount correctly and RAN correctly in a
+                # container. A check that fires on the right answer is one people
+                # learn to wave through, and this one would have fired on every
+                # future correct use of the mechanism.
+                _mounted = (f'"{m}.py"' in src or f"/{m}.py" in src
+                            or f'add_local_python_source("{m}"' in src
+                            or f"add_local_python_source('{m}'" in src)
+                if not _mounted:
                     fails.append(
                         f"{t}:{node.lineno} imports sibling `{m}` at module level "
                         f"but never mounts {m}.py — ModuleNotFoundError in the "

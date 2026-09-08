@@ -196,6 +196,79 @@ inflated by retries into an apparent outage.
   never ran — and its absence from a log that never contained it was read as
   evidence it was unwired.
 
+## Standing rules earned 2026-09-07 (the component parity port)
+
+- **A CHANGE THAT IS REAL AND WRONG is a third failure class, and the inert
+  check cannot see it.** This lane has had "nothing happened" (`placement_inert`)
+  and "nobody looked" (`placement_effect_uncovered`). StagedPush was neither: the
+  composite genuinely changed those frames, it just spliced in an UN-ZOOMED copy
+  of them. Right frame count, right duration, real footage, real difference from
+  the previous file — and no zoom. Six other types separated cleanly from their
+  passthrough arms while StagedPush's "real" render was byte-for-byte its own
+  passthrough (psnr@1.0 24.59 for both), because `StagedPush.tsx` refuses
+  `stages.length < 2` by returning nothing.
+  **The only instrument that sees this class compares the output against the
+  input it was DERIVED FROM, not against the pipeline state before the step.**
+  A step-to-step diff says something happened; only source-to-output says the
+  right thing happened.
+
+- **A threshold borrowed from a different code path is a guess wearing a
+  measurement's clothes.** The zoom geometry bar was set at 40 dB from an ffmpeg
+  re-encode reading 45.1 — but the failure being detected renders through
+  CHROMIUM, which loses far more. Measured: real 15.94-16.84, passthrough
+  24.30-26.11. At 40.0 both arms read as "changed" and the check passed the
+  exact failure it existed to catch. Measure the threshold on the ARMS YOU WILL
+  ACTUALLY SEE, never on an analogous path.
+
+- **Measure where the signal is largest, not where the window is convenient.**
+  Second half of the same lesson: aimed at the clip HEAD, the geometry check read
+  StagedPush at 20.37 dB and called a perfectly applied zoom inert — every ramp
+  legitimately starts at scale 1.0, so the head is where a real move and a
+  passthrough look most alike. The tables that say where the peak is were already
+  ported; the check just was not using them.
+
+- **GREP PROVES A STRING IS PRESENT; ONLY THE AST PROVES THE CODE RUNS.** Six
+  checks in this port were too weak to fire on their first mutation, and every
+  one failed the same way: a substring that survived the change it existed to
+  catch. `if False:` leaves the `fail()` string in the file. Renaming a call to
+  `_NOT_record_effect(` still CONTAINS `_record_effect(`. Moving a literal from
+  `"type": "StatCard"` to `_ctype = "StatCard"` moves it out of the pattern and
+  changes nothing else. Deleting a ledger write leaves the name in the print
+  statement. Deleting the field a print reads leaves the print's header intact.
+  A guard rewritten from a conjunction to a disjunction puts the same name in
+  the same condition and means the opposite.
+  **This is the fifth consecutive session in which it has happened.** It is no
+  longer a mistake to notice; it is a default to design against. A check on
+  BEHAVIOUR reads the AST — every assignment to the name, the guard that wraps
+  the call, the call's own identifier — or better, IMPORTS THE MODULE AND RUNS
+  THE PREDICATE. Reserve substring tests for the one thing they are honest
+  about: a literal that must be present verbatim.
+
+- **A MEASURED TIMING TABLE THAT NOTHING READS IS THE MOST EXPENSIVE KIND OF
+  DEAD CODE, because the family it corrects ships VISIBLY WRONG and nothing
+  errors.** Twice in one port: `_SFX_ATTACK_MS` (16 argmax-of-RMS-envelope
+  measurements) and `_MG_ATTACK_MS` (24 entrance times from the MGAttackProbe
+  battery) were both built and both mounted in `_asset_inventory.json`, and the
+  MG one was read by NOTHING — so every motion graphic this lane ever placed
+  entered late by its own attack, PullQuote by 500ms and Reticle by 400ms. The
+  sound table nearly went the same way.
+  These tables are expensive to produce and silent when absent: the component
+  still renders, still lands in the manifest, still passes every count. **When a
+  measured table lands, the commit that adds it wires a CONSUMER and a check
+  that the consumer is called** — the same bar as a counter being printed in the
+  commit that adds it. `cert_production_table_parity.py` reports PORTED BUT DARK
+  for exactly this.
+
+- **"Is it called" is not "is it choosing".** A check that the derivation
+  function appears in the call graph stayed green when the primary assignment
+  became a hardcoded literal, because a fallback path further down still called
+  it. Walk every assignment to the name and refuse a constant.
+
+- **One hop of indirection is still scope.** `smoke_chain_paths` tested only the
+  expression AT the call site, so binding a constant to a variable one line above
+  defeated it entirely — the argument is a Name, not a Constant. Resolve through
+  the binding. (Third instance of *scope is not text* in this repo.)
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
