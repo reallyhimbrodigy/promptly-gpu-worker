@@ -138,3 +138,71 @@ Round 40's zero-cards finding and the prop-shape fix stand on their own: the
 agent invented a key name because it had never been told any component's props,
 and that was directly observed in round 40's skip line, not inferred from a
 distinct count.
+
+---
+
+# RESULT — round 41 (collected 2026-09-08)
+
+## Criterion 4. UNRESOLVED.
+
+    MG CATALOGUE : 1 distinct of 29 selectable   StatCard=4
+    per card beat, figure quoted:
+        t=3.48   10,000   FIGURE
+        t=8.76   $400     FIGURE
+        t=18.06  3        FIGURE
+        t=21.58  30,000   FIGURE      4 of 4
+
+Every card beat quoted a figure, so StatCard was the CORRECT answer on all four
+and not one of them could have discriminated. Denominator: 4 card beats on ONE
+fixture, of 5. The other four placed zero cards, so there was no second
+population. I said below 3 card beats nothing is more than suggestive; there are
+4, all on one fixture, so the fixture count is the real n and the real n is 1.
+
+**This lands exactly where Builder-1 predicted before the numbers existed**: on
+v1 the only card-generating fixture is stat-shaped, so criterion 4 was reachable
+by construction and the intervention could not be tested in either direction.
+
+And the frames make it worse than "stat-shaped": the v1 talking_head *source* is
+a purple gradient with a yellow square — a test pattern with a real speech track.
+Nothing about component FIT can be judged on it at all. Whether an editorial
+component suits a moment is not a question that fixture can be asked.
+
+## What DID resolve, and it is not nothing
+
+    CARD PROPS     : [StatCard label+value (shorthand)] x4
+    RULED vs BUILT : card 4->4
+    all four MOVED: 15.88, 17.06, 20.74, 15.57 dB
+
+Round 39 built four cards and 2 of 4 were INERT. Round 40 built zero. Round 41
+builds four and all four move. Cards work.
+
+## But which half of my change did that — and it is NOT the half I would have guessed
+
+The agent sent **card_hero + card_label**, the SHORTHAND. It did not send
+card_props at all.
+
+So the thing that fixed round 40 is the ONE SENTENCE offering the shorthand, not
+the 25-type prop table. **The table has never been exercised.** It applies only
+when card_props IS sent, and the shorthand exists only for StatCard — so the
+table can only ever pay off on a NON-StatCard component.
+
+Which makes its value contingent on exactly the question that is unresolved. It
+is 833 chars of cached prefix that is either a prerequisite for breaking
+incumbency or dead weight, and round 41 cannot say which. I am recording that
+rather than counting the table as validated by a round that never touched it.
+
+## Status of the prediction
+
+UNRESOLVED for the third round running, for a third distinct reason: no
+discriminating beat (39), zero cards (40), corpus cannot present one (41).
+
+## What would resolve it
+
+A fixture with a card-worthy beat that does NOT quote a figure — a quote, a
+claim, a named place, a list. v3 has three real sources whose card beats are not
+pre-committed to being stat-shaped. That is the corpus lane, and Builder-1 has
+reported the trade honestly: v3 cannot score zoom on any of its three fixtures,
+and cannot score sfx on one, so it swaps one blind spot for another.
+
+I am not proposing a fourth intervention on the same prediction before a corpus
+exists that can test it. Three rounds of untestable is enough to stop building.
