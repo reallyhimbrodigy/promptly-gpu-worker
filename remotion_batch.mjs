@@ -74,8 +74,16 @@ function sourceKey(root) {
       if (e.isDirectory()) { walk(f); continue; }
       if (!/\.(tsx?|jsx?|json|css)$/.test(e.name)) continue;
       try {
-        const st = fs.statSync(f);
-        parts.push(`${f}:${st.size}:${Math.floor(st.mtimeMs)}`);
+        // CONTENT, NOT MTIME.
+        //
+        // The mtime version THRASHED, and it was measured doing it: in the
+        // first container run the reel got a CACHE HIT (0.7s) and the captions
+        // then paid a full 9.3s bundle, which can only happen if the key moved
+        // between two calls that read an unchanged source tree. Mount
+        // materialisation gives files fresh mtimes; the bytes are identical.
+        // Hashing content is a few ms on this tree and cannot thrash.
+        parts.push(`${f}:${crypto.createHash("sha1")
+          .update(fs.readFileSync(f)).digest("hex")}`);
       } catch { /* a file that vanished mid-walk cannot be part of the key */ }
     }
   };
@@ -84,6 +92,10 @@ function sourceKey(root) {
 }
 
 const CACHE_ROOT = "/work/.rbundle";
+// KILL SWITCH. Every flag gets one: PROMPTLY_REMOTION_BUNDLE_CACHE=0 forces a
+// fresh bundle every process, which is exactly the pre-cache behaviour and the
+// control arm for measuring what the cache is worth.
+const CACHE_ENABLED = String(process.env.PROMPTLY_REMOTION_BUNDLE_CACHE ?? "1") !== "0";
 
 // THE DECISION, SEPARATED FROM THE BUNDLING, so a test can drive it without
 // running a 9.79s bundle. The marker is what makes a cache dir usable, and it
@@ -94,7 +106,8 @@ export function bundleDecision(root, cacheRoot = CACHE_ROOT) {
   const key = sourceKey(root);
   const cacheDir = path.join(cacheRoot, key);
   const marker = path.join(cacheDir, ".complete");
-  return { key, cacheDir, marker, cached: fs.existsSync(marker) };
+  return { key, cacheDir, marker,
+           cached: CACHE_ENABLED && fs.existsSync(marker) };
 }
 
 async function main() {

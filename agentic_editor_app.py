@@ -388,6 +388,35 @@ def _derive_card_hero(beat, number_beats):
     return None
 
 
+RATIONALE_KEYS = ("why", "reason", "rationale", "note", "notes", "because",
+                  "justification", "explanation")
+
+
+def rationale_bytes(o):
+    """JSON bytes sitting under rationale-ish keys, recursively.
+
+    MODULE LEVEL, not nested in the agent loop, so smoke_token_split.py can
+    DRIVE it. Nested, the only available check was reading the source as text —
+    and a substring is satisfied by the comment explaining it.
+
+    Recursive on purpose: rulings arrive as a LIST of dicts inside one tool
+    call, so a top-level-keys-only version would report 0 bytes of rationale on
+    exactly the tool that carries almost all of it, and print a confident
+    "0% rationale" — a clean zero that is a reader bug, not a measurement.
+    """
+    n = 0
+    if isinstance(o, dict):
+        for k, v in o.items():
+            if str(k).lower() in RATIONALE_KEYS:
+                n += len(json.dumps(v))
+            else:
+                n += rationale_bytes(v)
+    elif isinstance(o, list):
+        for v in o:
+            n += rationale_bytes(v)
+    return n
+
+
 def _mark(led, name, t_start):
     """Record seconds for one sub-stage. Cheap, unconditional, additive."""
     led.setdefault("wall_by_stage", {})
@@ -3493,18 +3522,39 @@ def edit(source_key: str, brief: str,
         # trims reference nothing and components land on the WRONG content. That
         # is silent — ffmpeg exits 0 and the video looks plausible.
         #
-        # -count_frames DECODES, rather than trusting the container's nb_frames
-        # header, because a truncated write can leave the header claiming frames
-        # the file does not contain — which is precisely the failure this guards.
-        _probe = subprocess.run(
-            ["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v:0",
-             "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0",
-             "/work/reel.mov"],
-            capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
-        try:
-            _reel_have = int((_probe.stdout or "").strip().rstrip(",") or 0)
-        except Exception:
-            _reel_have = -1
+        # HEADER FIRST, DECODE ONLY ON SUSPICION.
+        #
+        # The first version always passed -count_frames, which DECODES every
+        # frame. On 300 frames of ProRes 4444 at 1080x1920 that measured ~22s
+        # on the critical path (build_reel 79.6s vs build_reel_paint 57.4s) —
+        # a guard costing more than the render it guards.
+        #
+        # The header is free and right whenever it is present and matches. It
+        # can only lie by claiming frames a truncated file does not contain,
+        # so a header that AGREES with the expectation is trustworthy: a
+        # truncated file cannot agree by accident. Anything else — missing,
+        # unparseable, or short — falls through to the decode, which is the
+        # case actually worth 22s.
+        def _reel_frame_count(count_frames):
+            _args = ["ffprobe", "-v", "error", "-select_streams", "v:0",
+                     "-show_entries",
+                     "stream=nb_read_frames" if count_frames else "stream=nb_frames",
+                     "-of", "csv=p=0", "/work/reel.mov"]
+            if count_frames:
+                _args.insert(3, "-count_frames")
+            _p = subprocess.run(_args, capture_output=True, text=True,
+                                timeout=600, env=_SUBPROCESS_ENV)
+            try:
+                return int((_p.stdout or "").strip().rstrip(",") or 0), _p
+            except Exception:
+                return -1, _p
+        _reel_have, _probe = _reel_frame_count(False)
+        led["reel_render"]["frames_from_header"] = _reel_have
+        if _reel_have < packed["reel_frames"]:
+            # Includes the -1 (unparseable) and 0 (absent) cases. Never trust a
+            # header that disagrees; never treat its absence as a real zero.
+            _reel_have, _probe = _reel_frame_count(True)
+            led["reel_render"]["frames_decoded"] = _reel_have
         led["reel_render"]["frames_measured"] = _reel_have
         if _reel_have < 0:
             # MEASURED / ABSENT / FAILED — never a confident zero. An unreadable
@@ -4763,10 +4813,39 @@ def edit(source_key: str, brief: str,
         # the whole prefix, or is every turn writing a little?" was unanswerable
         # — two different problems with two different fixes, indistinguishable
         # from a sum. Captured here so the next question is a read, not a re-run.
+        # WHAT THE TOKENS ARE, not just how many.
+        #
+        # model_s = 8.36 + 0.01113 * out_tokens (R^2 0.9996 over round 33's five
+        # fixtures), so output tokens ARE the latency. That makes "which tokens"
+        # the only question that matters, and it was unanswerable: out_tokens
+        # was recorded per turn and printed nowhere, and the tool INPUTS — where
+        # essentially all of the output goes — were never measured at all.
+        #
+        # Bytes, not tokens, for the field split: the API returns one token
+        # count per turn, not per field. The byte SHARE is applied to the known
+        # token count downstream, and is labelled an estimate wherever it is
+        # printed. Measuring bytes exactly beats estimating tokens vaguely.
+        _tool_json = {}
+        _rat = 0
+        for c in tool_uses:
+            _inp = getattr(c, "input", None) or {}
+            try:
+                _tool_json[getattr(c, "name", "?")] = (
+                    _tool_json.get(getattr(c, "name", "?"), 0) + len(json.dumps(_inp)))
+                _rat += rationale_bytes(_inp)
+            except Exception:
+                # A tool input that will not serialise is a MEASUREMENT failure,
+                # not a zero. Recorded as None so the reader can say ABSENT
+                # rather than printing a confident 0% rationale share.
+                _tool_json[getattr(c, "name", "?")] = None
         led["turns"].append({
             "n": it + 1,
             "tools": [getattr(c, "name", "?") for c in tool_uses],
             "out_tokens": getattr(u, "output_tokens", 0) if u else 0,
+            "tool_json_bytes": _tool_json,
+            "rationale_bytes": _rat,
+            "text_chars": len(" ".join(getattr(c, "text", "") for c in r.content
+                                       if getattr(c, "type", "") == "text")),
             "cache_write": getattr(u, "cache_creation_input_tokens", 0) or 0 if u else 0,
             "cache_read": getattr(u, "cache_read_input_tokens", 0) or 0 if u else 0,
             "stop": getattr(r, "stop_reason", None),
@@ -6348,6 +6427,43 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"{sum(x['out_tokens'] for x in tns):,} output tokens")
         for _n, _c in _tc.most_common():
             print(f"    {_n:<20} {_c}")
+        # ── TOKEN SPLIT — printed in the commit that adds the counter ─────
+        # Round 33 could not answer "what are the 12,990 tokens" because
+        # out_tokens was ledgered per turn and printed nowhere. Third instance
+        # of that in one session.
+        _tot_out = sum(x["out_tokens"] for x in tns) or 0
+        if _tot_out:
+            _by_tool = {}
+            for x in tns:
+                _ts = x["tools"] or ["<none>"]
+                # A turn's tokens are split EVENLY across its tool calls. Stated
+                # because it is an approximation: the API bills one count per
+                # turn, not per tool. Single-tool turns (the overwhelming
+                # majority here) are exact.
+                for t in _ts:
+                    _by_tool[t] = _by_tool.get(t, 0) + x["out_tokens"] / len(_ts)
+            print("  TOKENS BY TOOL  : " + "  ".join(
+                f"{k} {v:,.0f} ({100*v/_tot_out:.0f}%)"
+                for k, v in sorted(_by_tool.items(), key=lambda kv: -kv[1])))
+            print("  OUT BY TURN     : " + " ".join(
+                f"{x['n']}:{x['out_tokens']:,}" for x in tns))
+            _rb = sum(x.get("rationale_bytes") or 0 for x in tns)
+            _jb_vals = [v for x in tns for v in (x.get("tool_json_bytes") or {}).values()]
+            if any(v is None for v in _jb_vals):
+                # A tool input that would not serialise means the denominator is
+                # incomplete. Say ABSENT rather than print a confident share.
+                print("  RATIONALE SHARE : UNMEASURABLE — a tool input did not serialise")
+            else:
+                _jb = sum(v for v in _jb_vals if v)
+                _tc = sum(x.get("text_chars") or 0 for x in tns)
+                if _jb:
+                    _share = _rb / _jb
+                    print(f"  RATIONALE SHARE : {_rb:,} of {_jb:,} tool-JSON bytes "
+                          f"({100*_share:.1f}%) sit under why/reason/rationale/note")
+                    print(f"     -> ~{_share*_tot_out:,.0f} of {_tot_out:,} output tokens "
+                          f"(~{_share*_tot_out*0.01113:.0f}s of model time), "
+                          f"ESTIMATED by byte share — the API bills per turn, not per field")
+                    print(f"     prose outside tool calls: {_tc:,} chars")
         _prod = sum(1 for x in tns if any(
             t in ("shell", "declare_placement") for t in (x["tools"] or [])))
         _read = sum(1 for x in tns if "read_knowledge" in (x["tools"] or []))

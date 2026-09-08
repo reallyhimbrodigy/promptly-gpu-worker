@@ -73,6 +73,26 @@ ok("editing a component changes the key", d3.key !== d1.key,
 ok("editing a component makes the cache MISS", d3.cached === false,
    "stale bundle served after an edit");
 
+// ── SAME CONTENT, NEW MTIME, SAME KEY — the thrash fix ─────────────────────
+// MEASURED THRASH: in the first container run the reel got a CACHE HIT (0.7s)
+// and the captions then paid a full 9.3s bundle on an unchanged source tree.
+// Mount materialisation hands files fresh mtimes; the bytes do not move. A key
+// that moves with mtime rebuilds the bundle for nothing, which is the whole
+// saving thrown away — and it looks like a working cache, because it does hit
+// sometimes.
+{
+  const k0 = bundleDecision(root, cacheRoot).key;
+  const f = path.join(root, "src", "index.ts");
+  const body = fs.readFileSync(f);
+  const future = Date.now() + 60_000;
+  fs.writeFileSync(f, body);                       // identical bytes
+  fs.utimesSync(f, future / 1000, future / 1000);  // moved mtime
+  ok("an unchanged FILE with a new mtime keeps the key",
+     bundleDecision(root, cacheRoot).key === k0,
+     "the key follows mtime, so a re-materialised mount rebuilds the bundle "
+     + "for nothing — measured as reel CACHE HIT then captions paying 9.3s");
+}
+
 // ── a NEW file changes the key ─────────────────────────────────────────────
 fs.writeFileSync(path.join(root, "src", "Added.tsx"), "export const X = 1;\n");
 ok("adding a file changes the key", bundleDecision(root, cacheRoot).key !== d3.key,
@@ -93,4 +113,4 @@ if (fails.length) {
   for (const f of fails) console.log("  - " + f);
   process.exit(1);
 }
-console.log("BUNDLE-CACHE: PASS (8 behaviours driven, not read)");
+console.log("BUNDLE-CACHE: PASS (9 behaviours driven, not read)");
