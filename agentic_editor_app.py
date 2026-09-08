@@ -417,6 +417,92 @@ def rationale_bytes(o):
     return n
 
 
+# ── CONTAINER SPEED BENCHMARK ────────────────────────────────────────────────
+#
+# WHY THIS EXISTS, and it is the most expensive lesson of the session.
+#
+# The SAME BYTES of agentic_editor_app.py (mount f40873429cfa84a6) painted 443
+# caption frames at 49.0 ms/frame in round 33 and 134.2 ms/frame six hours
+# later. A 2.7x spread with zero code difference. On the strength of the 49.0 a
+# concurrency fix was reported as a 6.1x win; it is worth ~2.3x. Then a
+# REGRESSION was reported against that same 49.0, and refuted by re-running the
+# old code.
+#
+# Both errors have one cause: nothing measured the machine. Every comparison was
+# an argument from whichever stage the author believed they had not touched —
+# and the first such yardstick, build_overlays, turned out to CONTAIN the render
+# being judged.
+#
+# So: a fixed synthetic workload, timed at the start of every run, printed
+# beside the stages. Normalisation becomes a measurement.
+#
+# THE WORKLOAD IS PINNED BY ITS OWN DIGEST. A benchmark whose work silently
+# changes makes every historical number incomparable while still looking like a
+# benchmark — so the digest is asserted against a constant. Change the workload
+# and BENCH_DIGEST must change with it, deliberately, which is the point.
+#
+# sha256 over a fixed buffer is a CPU-THROUGHPUT proxy, not a paint proxy. It is
+# not modelling Chrome; it is answering "is this container fast or slow today",
+# which is the only question the comparisons needed and never had. hashlib
+# releases the GIL, so the parallel arm measures real cores rather than threads.
+_BENCH_MIB = 8
+_BENCH_ITERS = 12
+BENCH_DIGEST = "56e346f0b67f2c173e04e1f24a6c4a3dc09a4439238032d1ec82f86598b6ff1d"
+
+
+def _bench_buffer():
+    # Deterministic, allocation-free per iteration, and never random: a buffer
+    # that varied would make the digest useless as a pin.
+    return (b"promptly-container-benchmark-v1" * ((_BENCH_MIB << 20) // 31 + 1)
+            )[:_BENCH_MIB << 20]
+
+
+def _bench_once(buf):
+    import hashlib
+    h = b""
+    for _ in range(_BENCH_ITERS):
+        h = hashlib.sha256(buf + h).digest()
+    return h
+
+
+def container_benchmark():
+    """Time a fixed workload single-threaded and across cores.
+
+    Returns MEASURED numbers or an explicit failure — never a silent default.
+    A benchmark that quietly returns 0 would normalise every stage to infinity.
+    """
+    import hashlib, os as _os, time as _t
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        buf = _bench_buffer()
+        ncpu = _os.cpu_count() or 1
+        t = _t.time()
+        digest = _bench_once(buf)
+        single = _t.time() - t
+        # PARALLEL ARM. hashlib releases the GIL, so N threads use N cores.
+        par_n = max(1, min(ncpu, 16))
+        t = _t.time()
+        with ThreadPoolExecutor(max_workers=par_n) as ex:
+            list(ex.map(lambda _: _bench_once(buf), range(par_n)))
+        par = _t.time() - t
+        return {
+            "ok": True,
+            "cpu_count": ncpu,
+            "single_ms": round(single * 1000, 1),
+            "par_ms": round(par * 1000, 1),
+            "par_workers": par_n,
+            # Effective cores: how many single-runs' worth of work the parallel
+            # arm actually completed per unit wall. On a container with the CPU
+            # it claims this approaches par_workers; under contention it does not.
+            "effective_cores": round(single * par_n / par, 2) if par > 0 else None,
+            "digest_ok": hashlib.sha256(digest).hexdigest() == BENCH_DIGEST,
+            "digest": hashlib.sha256(digest).hexdigest(),
+        }
+    except Exception as e:
+        # ABSENT, not zero. A failed benchmark must never normalise anything.
+        return {"ok": False, "error": str(e)[:200]}
+
+
 def _mark(led, name, t_start):
     """Record seconds for one sub-stage. Cheap, unconditional, additive."""
     led.setdefault("wall_by_stage", {})
@@ -2878,6 +2964,9 @@ def edit(source_key: str, brief: str,
     t0 = time.time()
     led = {"failures": [], "iters": 0, "tokens": {"in": 0, "out": 0,
                                                   "cache_read": 0, "cache_write": 0}}
+    # FIRST, before any stage. Every stage timing in this run is only
+    # comparable to another run's through this number.
+    led["container_bench"] = container_benchmark()
 
     def fail(kind, detail, cmd=None):
         """THE FAILURE LEDGER. Appended as it happens, never reconstructed."""
@@ -6124,6 +6213,27 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _wbs:
         _named = {k: v for k, v in _wbs.items() if not k.startswith("tool:")}
         _tools = {k[5:]: v for k, v in _wbs.items() if k.startswith("tool:")}
+        # THE MACHINE, PRINTED BESIDE THE STAGES.
+        #
+        # Identical bytes painted 49.0 and 134.2 ms/frame six hours apart. Any
+        # stage number below is comparable to another run's ONLY through this
+        # line. Printed immediately above the stages so the two cannot be read
+        # apart, and so a comparison that ignores it is a visible omission
+        # rather than an unnoticed one.
+        _cb = (r.get("ledger") or {}).get("container_bench") or {}
+        if _cb.get("ok"):
+            _warn = "" if _cb.get("digest_ok") else "   *** WORKLOAD DIGEST MISMATCH — NOT COMPARABLE ***"
+            print(f"  CONTAINER       : single {_cb['single_ms']:.0f}ms  "
+                  f"par {_cb['par_ms']:.0f}ms over {_cb['par_workers']}w  "
+                  f"effective_cores {_cb.get('effective_cores')}  "
+                  f"cpu_count {_cb.get('cpu_count')}{_warn}")
+            print(f"     divide any stage below by single_ms/1000 to compare "
+                  f"across runs; a paint stage scales with effective_cores")
+        else:
+            # ABSENT, not assumed fast. A run without this number cannot be
+            # compared to another run, and saying so beats normalising by 1.0.
+            print(f"  CONTAINER       : BENCHMARK FAILED ({_cb.get('error')}) — "
+                  f"stage timings below are NOT comparable across runs")
         print(f"  WALL BY STAGE   : {_tot:.1f}s total")
         for _k, _v in sorted(_named.items(), key=lambda kv: -kv[1]):
             print(f"     {_k:18} {_v:7.2f}s  {100*_v/_tot:5.1f}%")
