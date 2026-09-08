@@ -55,8 +55,26 @@ PY
 # The hash is captured BEFORE the first launch and re-checked before each one.
 # A round that cannot guarantee one codebase refuses to continue rather than
 # producing a number nobody can trust.
-MOUNT_SHA="$(shasum -a 256 agentic_editor_app.py | cut -c1-16)"
-echo "[mount] agentic_editor_app.py @ $MOUNT_SHA"
+# EVERY MOUNTED PATH, not just the app file.
+#
+# This hashed agentic_editor_app.py ALONE and called it "the mount". The image
+# also mounts src/remotion (368 files — the entire Remotion source, where the
+# caption port lives), remotion_batch.mjs, knowledge/, the skills tree, the
+# sound assets, the asset inventory, moodreel_editor.py and type_registries.py.
+# Eight paths uncovered. PROVEN blind: appending a line to remotion_batch.mjs
+# left the old sha byte-identical at 3ebafe2294660e18 while the fingerprint
+# moved 144fc21ccbbe2bab -> d33f8959e4a51076.
+#
+# Rounds 32 and 33 differ 6.1x on caption paint under shas that could not have
+# distinguished them. A cohort guard blind to the files being changed is worse
+# than no guard: it certifies two arms as identical code when they are not.
+MOUNT_SHA="$(python3 mount_fingerprint.py)"
+if [ -z "$MOUNT_SHA" ]; then
+  echo "[ABORT] mount_fingerprint.py produced nothing — refusing to run a round"
+  echo "        whose cohort integrity cannot be established."
+  exit 2
+fi
+echo "[mount] $(python3 mount_fingerprint.py --verbose | tail -1)"
 echo "$MOUNT_SHA" > "$OUT/mount_sha.txt"
 
 while IFS=$'\t' read -r name key brief model; do
@@ -65,9 +83,10 @@ while IFS=$'\t' read -r name key brief model; do
   if [ -z "${S:-}" ]; then
     echo "$name PRESIGN_FAILED" >> "$OUT/appmap.txt"; continue
   fi
-  now_sha="$(shasum -a 256 agentic_editor_app.py | cut -c1-16)"
+  now_sha="$(python3 mount_fingerprint.py)"
   if [ "$now_sha" != "$MOUNT_SHA" ]; then
-    echo "[ABORT] agentic_editor_app.py changed mid-round ($MOUNT_SHA -> $now_sha)."
+    echo "[ABORT] a MOUNTED PATH changed mid-round ($MOUNT_SHA -> $now_sha)."
+    echo "        Run: python3 mount_fingerprint.py --verbose   to see which."
     echo "        Arms would mount different code and the round is unscoreable."
     echo "        Re-run the whole round on a frozen tree."
     echo "$name MOUNT_DRIFT" >> "$OUT/appmap.txt"
