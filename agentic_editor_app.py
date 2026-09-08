@@ -417,7 +417,12 @@ RATIONALE_KEYS = ("why", "reason", "rationale", "note", "notes", "because",
 
 
 RULING_DECISION_FIELDS = ("treatment", "cut", "text_content", "sfx",
-                          "sfx_name", "card_hero", "card_label")
+                          "sfx_name", "card_hero", "card_label",
+                          # These decide WHICH component and WHERE in the arc.
+                          # Absent from the fingerprint, two rulings that chose
+                          # different zooms and different motion graphics
+                          # hashed as identical decisions.
+                          "zoom_arc", "card_type", "card_props")
 
 
 def ruling_fingerprint(tool_input):
@@ -862,6 +867,12 @@ CONTRACT_FAILURES = frozenset({
     # placement_inert cannot see it: the composite genuinely changed those
     # frames, it just spliced in an un-zoomed copy of them.
     "zoom_not_applied",
+    # AN ALPHA LAYER THAT PAINTED NOTHING. Compositing it re-encodes, changes
+    # the file, and clears every relative threshold — so placement_inert and the
+    # effect legs all pass while the picture gains nothing. Both blank layers
+    # this port produced (600 caption frames, 300 reel frames) were invisible to
+    # every check except asking the layer directly.
+    "alpha_layer_empty",
 })
 
 
@@ -3030,6 +3041,91 @@ assert "LightLeak" not in VALID_TRANSITION_TYPES, (
     "cover graphic be asked to carry a picture change")
 
 
+# ── A COMPONENT WITH WRONG-TYPED PROPS RENDERS BLANK AND EXITS 0 ────────────
+# MEASURED on round 35's own four cards, rendered locally, alpha composited over
+# white and the non-white pixels counted:
+#     value "10,000"  (string)   ->        0 pixels
+#     value 10000     (number)   ->  204,953 pixels
+#     value "three"   (word)     ->        0 pixels
+# StatCard counts up digit-by-digit to a TARGET, so a string is not a smaller
+# number, it is not a number. Round 35 declared four StatCards, every effect
+# measurement passed them as "moved" (psnr 59-61 dB against their control), and
+# all four were INVISIBLE. Nothing errored, nothing was short, the reel painted
+# 300 real frames of nothing.
+#
+# This is the real-and-wrong class again, one layer further in: the composite
+# genuinely changed the file, it just composited an empty layer.
+_MG_NUMERIC_PROPS = {"value", "total", "fromValue"}
+
+
+def coerce_mg_props(props):
+    """Numbers where the component needs numbers. Returns (props, unusable).
+
+    `unusable` names the keys that could NOT be made numeric — "three" is a word
+    and there is no number in it. That is not a coercion failure to paper over:
+    it means the beat has no quoted figure, and production's own teach says a
+    StatCard without one is the wrong component. The caller refuses rather than
+    rendering an empty card.
+    """
+    out, bad = dict(props or {}), []
+    for k in _MG_NUMERIC_PROPS:
+        if k not in out:
+            continue
+        v = out[k]
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            continue
+        # Strip the presentation a human writes around a figure: separators,
+        # currency, percent, whitespace. "10,000" and "$1.2M" are numbers with
+        # clothes on; "three" is not.
+        _t = re.sub(r"[,\s$£€%+]", "", str(v or ""))
+        _mult = 1
+        if _t[-1:].upper() in ("K", "M", "B"):
+            _mult = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}[_t[-1].upper()]
+            _t = _t[:-1]
+        try:
+            _n = float(_t)
+        except (TypeError, ValueError):
+            bad.append(k)
+            continue
+        _n *= _mult
+        out[k] = int(_n) if _n == int(_n) else _n
+    return out, bad
+
+
+def alpha_layer_max(path, env=None):
+    """Peak alpha across an alpha-carrying .mov, or None if unreadable.
+
+    THE DIRECT ARTIFACT CHECK, and the one that would have caught BOTH blank
+    layers this port produced — the 600-frame empty caption pass and the
+    300-frame empty reel. A composite psnr cannot see them: compositing an EMPTY
+    layer still re-encodes, still changes the file, still clears a relative
+    threshold against its control window. Asking the LAYER what it contains is
+    the only question with a different answer.
+
+    MEASURED: an empty alpha plane reports YMAX=256 on every frame; a layer
+    carrying a StatCard reaches 3760. There is no overlap.
+    """
+    import subprocess
+    try:
+        if not path or not os.path.exists(path):
+            return None
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostats", "-i", path,
+             "-vf", "alphaextract,signalstats,"
+                    "metadata=print:key=lavfi.signalstats.YMAX",
+             "-f", "null", "-"],
+            capture_output=True, text=True, timeout=600, env=env)
+        vals = [float(x) for x in re.findall(
+            r"lavfi\.signalstats\.YMAX=([0-9.]+)",
+            (r.stdout or "") + (r.stderr or ""))]
+        return max(vals) if vals else None
+    except Exception:
+        return None
+
+
+_ALPHA_EMPTY_YMAX = 260.0   # measured: empty planes sit at 256, content reaches 3760
+
+
 def mg_back_timed_start_s(mg_type, anchor_s, attack_table, default_ms=150):
     """Where the MG's frame window starts so it is SETTLED on its anchor word.
 
@@ -3733,6 +3829,87 @@ _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
 _TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "transition", "none"]
 
 
+# ── THE BOUNDARY MUST KEEP EVERY FIELD THE SCHEMA OFFERS ────────────────────
+# It kept SIX of twelve. `card_hero` and `sfx_name` survived only because
+# derivers refill them afterwards; `zoom_arc`, `card_type`, `card_props` and
+# `card_label` have no deriver and were therefore ALWAYS EMPTY.
+#
+# Three separate findings collapse into this one defect. "zoom ruled 3, built 0
+# — zoom_arc=''" was not the agent failing to supply an arc; it was the harness
+# discarding it. "MG CATALOGUE: 1 distinct of 29" was not the agent choosing
+# only StatCard; card_type never arrived. And the invisible cards followed from
+# card_props never arriving, so every card fell back to the hero string.
+#
+# DERIVED FROM THE SCHEMA, never restated. A hand-written copy list is a second
+# vocabulary that drifts from the first in silence — which is exactly what this
+# was.
+def _verdict_fields():
+    for _t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
+        if _t.get("name") != "rule_all_beats":
+            continue
+        return tuple(sorted(
+            (((_t.get("input_schema") or {}).get("properties") or {})
+             .get("verdicts") or {}).get("items", {}).get("properties", {})))
+    return ()
+
+
+VERDICT_FIELDS = _verdict_fields()
+assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
+    "the verdict schema could not be read, so the boundary would store nothing")
+
+
+def _assert_build_reads_only_stored_fields(module_src: str) -> None:
+    """Every verdict field the BUILD reads must be one the BOUNDARY stores.
+
+    THE CHECK THAT WOULD HAVE CAUGHT IT IMMEDIATELY. execute_plan read
+    `v.get("zoom_arc")` and the boundary never stored it, so the build asked a
+    question the data could not answer and recorded a skip that blamed the
+    agent. Nothing errored: `.get()` on a missing key is None, and None looks
+    exactly like "the agent did not say".
+    """
+    import ast as _ast
+    _tree = _ast.parse(module_src)
+    _ep = next((n for n in _ast.walk(_tree)
+                if isinstance(n, _ast.FunctionDef) and n.name == "execute_plan"),
+               None)
+    if _ep is None:
+        raise AssertionError("execute_plan not found; the check cannot run")
+    _read = set()
+    for _n in _ast.walk(_ep):
+        if (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Attribute)
+                and _n.func.attr == "get" and _n.args
+                and isinstance(_n.args[0], _ast.Constant)
+                and isinstance(_n.args[0].value, str)):
+            _read.add(_n.args[0].value)
+    # The store step must copy from ONE schema-derived list, not a hand list.
+    if not re.search(r"_rec = \{k: _v\.get\(k\) for k in VERDICT_FIELDS\}",
+                     module_src):
+        raise AssertionError(
+            "the boundary no longer copies the verdict fields from a single "
+            "schema-derived list — a hand-written copy list is a second "
+            "vocabulary and it drifted silently once already")
+    # AND THE LIST ITSELF MUST COVER WHAT THE BUILD READS. Comparing
+    # VERDICT_FIELDS against VERDICT_FIELDS is a tautology — the first version
+    # of this did exactly that and passed while the list was truncated to three
+    # fields. The independent reference is the SCHEMA: whatever the agent can be
+    # asked for is what the build may read and the boundary must keep.
+    _offered = set()
+    for _t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
+        if _t.get("name") == "rule_all_beats":
+            _offered = set(
+                (((_t.get("input_schema") or {}).get("properties") or {})
+                 .get("verdicts") or {}).get("items", {}).get("properties", {}))
+    if not _offered:
+        raise AssertionError("the verdict schema could not be read")
+    _gap = sorted((_read & _offered) - set(VERDICT_FIELDS))
+    if _gap:
+        raise AssertionError(
+            f"execute_plan reads verdict field(s) {_gap} that the boundary does "
+            f"not store. `.get()` returns None and None is indistinguishable "
+            f"from 'the agent did not say', so the build blames the ruling for "
+            f"a field the harness threw away.")
+
+
 def _assert_treatment_surface_agrees(module_src: str) -> None:
     """The PROSE must not offer a narrower family set than the SCHEMA.
 
@@ -3867,6 +4044,10 @@ _assert_prompt_blocks_present()
 _assert_constraints_intact(SYSTEM)
 _assert_treatment_surface_agrees(open(__file__).read()
                                  if os.path.exists(__file__) else "")
+# Runs in the container on every launch. It would have caught the dropped-field
+# defect the moment execute_plan first read `v.get("zoom_arc")`.
+_assert_build_reads_only_stored_fields(open(__file__).read()
+                                       if os.path.exists(__file__) else "")
 # Runs at IMPORT, in the container, on every run — not in a test file that can
 # be skipped. The two beat sources must stay interchangeable or the verdict
 # machinery silently rules on a field one of them does not supply.
@@ -4700,6 +4881,18 @@ def edit(source_key: str, brief: str,
         # NO PNG -> MOV ASSEMBLY STEP. The batch writes /work/reel.mov directly
         # as ProRes 4444; the ~300-file glob-and-encode that used to stand
         # between them is gone with the sequence render that required it.
+        # ── ASK THE LAYER WHAT IT CONTAINS ──────────────────────────────────
+        # A composite psnr cannot see an EMPTY alpha layer: compositing nothing
+        # still re-encodes, still changes the file, still clears a relative
+        # threshold against its control window. Round 35 painted 300 real frames
+        # of nothing, composited them, and all four cards measured "moved".
+        _reel_alpha = alpha_layer_max("/work/reel.mov", env=_SUBPROCESS_ENV)
+        led["reel_alpha_max"] = _reel_alpha
+        if _reel_alpha is not None and _reel_alpha <= _ALPHA_EMPTY_YMAX:
+            fail("alpha_layer_empty",
+                 f"the reel rendered {packed['reel_frames']} frames and its "
+                 f"alpha never exceeds {_reel_alpha} (empty is "
+                 f"{_ALPHA_EMPTY_YMAX}) — the components painted NOTHING.")
         if not os.path.isfile("/work/reel.mov") or os.path.getsize("/work/reel.mov") == 0:
             fail("reel_mov_missing", "the batch reported ok and wrote no .mov")
             raise RuntimeError("reel render reported ok and produced no /work/reel.mov")
@@ -5122,7 +5315,20 @@ def edit(source_key: str, brief: str,
                 # default.
                 "expect_frames": _cap_frames,
             }], env=_SUBPROCESS_ENV)
-            _mark(led, "build_captions", _cap_t0)
+            # ── THE STAGE NAME UNDERSTATES THE STAGE ────────────────────
+            # This pass has not been caption-only since text overlays moved off
+            # the ffmpeg burn and the tight-cut overlays joined it. One alpha
+            # layer now carries THREE families, which is why it is the largest
+            # render item — and calling its 76.32s "captions" attributes two
+            # other families' cost to the wrong place.
+            #
+            # Renamed rather than split into parallel marks: the three families
+            # are painted in ONE renderMedia call over ONE frame range, so there
+            # is no per-family duration to measure — inventing three marks would
+            # produce three numbers that are each the same number. What IS
+            # measurable is WHAT THE LAYER CARRIED, and that is recorded and
+            # printed below.
+            _mark(led, "build_alpha_layer", _cap_t0)
             _cj = (_cap_res or {}).get("captions") or {}
             led["_render_seq"] = led.get("_render_seq", 0) + 1
             led["caption_render"] = {
@@ -5131,6 +5337,14 @@ def edit(source_key: str, brief: str,
                 "pages": len(_cap_pages), "frames": _cap_frames,
                 "text_overlays": len(_text_overlays),
                 "tight_cut_overlays": len(_tc_overlays),
+                # THE DENOMINATOR FOR THE STAGE. 443 frames is the cost; what
+                # those frames were carrying is the only way to read whether
+                # the cost belongs to captions or to the families that joined
+                # them.
+                "families_on_layer": sorted(
+                    ([f"caption:{len(_cap_pages)}p"] if _cap_pages else [])
+                    + ([f"text:{len(_text_overlays)}"] if _text_overlays else [])
+                    + ([f"tight_cut:{len(_tc_overlays)}"] if _tc_overlays else [])),
                 "ok": bool(_cj.get("ok")),
                 "paint_ms": _cj.get("ms"),
                 "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
@@ -5150,6 +5364,18 @@ def edit(source_key: str, brief: str,
                      f"did not receive the plan — check the props nesting before "
                      f"reading any ms/frame out of this run.")
             if _cj.get("ok") and os.path.exists("/work/captions.mov"):
+                # SAME QUESTION OF THE CAPTION LAYER. This is the pass that
+                # rendered 600 frames of an empty default for two whole rounds
+                # while reporting path=remotion composited=True.
+                _cap_alpha = alpha_layer_max("/work/captions.mov",
+                                             env=_SUBPROCESS_ENV)
+                led["caption_alpha_max"] = _cap_alpha
+                if (_cap_alpha is not None and _cap_alpha <= _ALPHA_EMPTY_YMAX
+                        and _cap_pages):
+                    fail("alpha_layer_empty",
+                         f"the caption pass rendered {_cap_frames} frames from "
+                         f"{len(_cap_pages)} pages and its alpha never exceeds "
+                         f"{_cap_alpha} — the styles painted NOTHING.")
                 led["caption_mov"] = "/work/captions.mov"
                 led["caption_path"] = "remotion"
             else:
@@ -5794,6 +6020,27 @@ def edit(source_key: str, brief: str,
             if not isinstance(_cprops, dict) or not _cprops:
                 _cprops = {"value": hero,
                            "label": str(v.get("card_label") or "")[:60]}
+            # NUMBERS WHERE THE COMPONENT NEEDS NUMBERS. card_hero arrives as
+            # the words the speaker said — "10,000", "$1.2M", "three" — and a
+            # StatCard counts up to a TARGET. Round 35 passed all four heroes
+            # through verbatim and rendered four invisible cards.
+            _cprops, _bad_props = coerce_mg_props(_cprops)
+            if _bad_props:
+                # NOT A COERCION FAILURE TO PAPER OVER. "three" is a word; the
+                # beat has no quoted figure, and production's own teach is that
+                # a StatCard without one is the WRONG COMPONENT. Refusing costs
+                # the placement; rendering it costs the placement AND reports
+                # success.
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": f"{_ctype} needs a number for "
+                                      f"{_bad_props} and got "
+                                      f"{[_cprops.get(k) for k in _bad_props]} "
+                                      f"— a non-numeric value renders a BLANK "
+                                      f"card with no error. If the beat has no "
+                                      f"quoted figure this is the wrong "
+                                      f"component: read 05_motion_graphics for "
+                                      f"one that carries a phrase."})
+                continue
             _cards.append({"t_start": round(_mg_at, 2), "type": _ctype,
                            "duration_s": min(2.5, b["t_end"] - b["t_start"]),
                            "hero": hero, "label": str(v.get("card_label") or "")[:60],
@@ -7104,17 +7351,60 @@ def edit(source_key: str, brief: str,
                 _incoming = tu.input.get("verdicts") or []
                 _seen = {v.get("beat") for v in led["beat_verdicts"]}
                 _added = 0
+                _rejected = []
                 for _v in _incoming:
                     if not isinstance(_v, dict) or _v.get("beat") is None:
                         continue
                     if _v.get("beat") in _seen:
                         continue        # first ruling wins; a re-call tops up
-                    led["beat_verdicts"].append({
-                        "beat": _v.get("beat"), "treatment": _v.get("treatment"),
-                        "cut": _v.get("cut"), "sfx": _v.get("sfx"),
-                        "text_content": _v.get("text_content"),
-                        "why": str(_v.get("why") or "")})
+                    _tr6 = [str(t).lower() for t in (_v.get("treatment") or [])]
+                    # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
+                    # Both of these used to be discovered at BUILD time, where
+                    # the only outcome is a skip: the placement is lost, the run
+                    # is paid for, and the log blames the ruling. Here it costs
+                    # one line to fix and the agent is still holding the beat.
+                    _why6 = None
+                    if "zoom" in _tr6:
+                        _arc6 = str(_v.get("zoom_arc") or "").strip().lower()
+                        if _arc6 not in ZOOM_ARC_HOMES:
+                            _why6 = (
+                                f"beat {_v.get('beat')}: ruled 'zoom' with "
+                                f"zoom_arc={_v.get('zoom_arc')!r}. WHICH MOMENT "
+                                f"this is cannot be derived from timing, and it "
+                                f"decides the move: payoff takes a committed "
+                                f"push, a hook takes a snap or a pull. Give one "
+                                f"of {sorted(ZOOM_ARC_HOMES)}.")
+                    if _why6 is None and "card" in _tr6:
+                        # A card whose figure is not a figure renders BLANK and
+                        # exits 0 — four of them shipped invisible in round 35.
+                        _ct6 = str(_v.get("card_type") or "StatCard").strip()
+                        _pr6 = _v.get("card_props")
+                        if not isinstance(_pr6, dict) or not _pr6:
+                            _pr6 = {"value": str(_v.get("card_hero") or "").strip()}
+                        _, _bad6 = coerce_mg_props(_pr6)
+                        if _bad6 and _ct6 not in MG_BRAND_ONLY:
+                            _why6 = (
+                                f"beat {_v.get('beat')}: {_ct6} needs a NUMBER "
+                                f"for {_bad6} and got "
+                                f"{[_pr6.get(k) for k in _bad6]!r}. It counts up "
+                                f"to a target, so a word renders a blank card "
+                                f"with no error. If this beat has no quoted "
+                                f"figure it is the wrong component — read "
+                                f"05_motion_graphics and pick one that carries "
+                                f"a phrase.")
+                    if _why6:
+                        _rejected.append(_why6)
+                        continue
+                    # EVERY FIELD THE SCHEMA OFFERS. Six of twelve used to
+                    # survive; zoom_arc, card_type, card_props and card_label
+                    # had no deriver and were therefore always empty, so the
+                    # build read None and blamed the agent for not saying.
+                    _rec = {k: _v.get(k) for k in VERDICT_FIELDS}
+                    _rec["why"] = str(_v.get("why") or "")
+                    led["beat_verdicts"].append(_rec)
                     _seen.add(_v.get("beat")); _added += 1
+                if _rejected:
+                    led.setdefault("verdicts_rejected", []).extend(_rejected)
                 _nocopy = [v.get("beat") for v in led["beat_verdicts"]
                            if "text" in (v.get("treatment") or [])
                            and not v.get("text_content")]
@@ -8228,6 +8518,15 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # A bound that fires and says nothing is the same dead end as no bound: the
     # run would simply be shorter, and nobody could tell a disciplined agent
     # from a stopped one.
+    # ── RULINGS REFUSED AT THE BOUNDARY ────────────────────────────────────
+    # These used to be build-time skips, where the placement was already lost.
+    # Refused here they cost one line — but only if the run says so.
+    _rej = (r.get("ledger") or {}).get("verdicts_rejected") or []
+    if _rej:
+        print(f"  VERDICTS REFUSED: {len(_rej)} at the boundary "
+              f"(one line to fix, vs a lost placement at build time)")
+        for _r9 in _rej[:6]:
+            print(f"     {str(_r9)[:150]}")
     _rep_a = (r.get("ledger") or {}).get("repeat_answered") or []
     _rep_t = (r.get("ledger") or {}).get("repeat_terminal") or []
     _pay = (r.get("ledger") or {}).get("_call_payloads") or {}
@@ -8260,6 +8559,7 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"paint {(_cr.get('paint_ms') or 0)/1000:.1f}s "
               f"({_cr.get('ms_per_frame')} ms/frame)  "
               f"bundle {(_cr.get('bundle_ms') or 0)/1000:.1f}s  "
+              f"carrying {_cr.get('families_on_layer') or ['nothing']}  "
               f"recent={(r.get('ledger') or {}).get('caption_recent_in') or '[]'}  "
               f"path={(r.get('ledger') or {}).get('caption_path')}  "
               f"composited={(r.get('ledger') or {}).get('caption_composited')}"
