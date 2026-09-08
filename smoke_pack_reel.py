@@ -29,17 +29,35 @@ ok = lambda c, m: None if c else FAIL.append(m)
 SRC = open("agentic_editor_app.py", encoding="utf-8").read()
 TREE = ast.parse(SRC)
 _ns = {}
-_fn = next((n for n in TREE.body
-            if isinstance(n, ast.FunctionDef) and n.name == "pack_reel"), None)
-ok(_fn is not None, "pack_reel is not defined at module level")
-if _fn:
-    exec(compile(ast.Module([_fn], []), "<s>", "exec"), _ns)
+# EXEC WHAT IT DEPENDS ON, not just the function. Isolating pack_reel alone hid
+# a real dependency: it calls _require_mg_type, and running it in an empty
+# namespace raised NameError — a harness failure that reads exactly like a
+# defect in the function under test.
+_deps = ("_require_mg_type", "pack_reel")
+_fns = [n for n in TREE.body
+        if isinstance(n, ast.FunctionDef) and n.name in _deps]
+ok({f.name for f in _fns} == set(_deps),
+   f"missing at module level: {sorted(set(_deps) - {f.name for f in _fns})}")
+_fn = next((f for f in _fns if f.name == "pack_reel"), None)
+if len(_fns) == len(_deps):
+    exec(compile(ast.Module(_fns, []), "<s>", "exec"), _ns)
     pack = _ns["pack_reel"]
 
+    # ── NO SILENT DEFAULT ─────────────────────────────────────────────────
+    # An untyped item used to become a StatCard here, so a caller bug arrived
+    # as a rendered StatCard nobody chose and reported as chosen.
+    try:
+        pack([{"t_start": 1.0, "duration_s": 2.0}])
+        FAIL.append("an item with no `type` still defaults to StatCard — a "
+                    "component nobody chose reaches the video and reports as "
+                    "chosen")
+    except ValueError:
+        pass
+
     # ── CONTIGUOUS, and that is the whole point ───────────────────────────
-    r = pack([{"t_start": 3.0, "duration_s": 2.0},
-              {"t_start": 20.0, "duration_s": 2.0},
-              {"t_start": 40.0, "duration_s": 2.0}], 30)
+    r = pack([{"t_start": 3.0, "duration_s": 2.0, "type": "StatCard"},
+              {"t_start": 20.0, "duration_s": 2.0, "type": "StatCard"},
+              {"t_start": 40.0, "duration_s": 2.0, "type": "StatCard"}], 30)
     ok(r["reel_frames"] == 180,
        f"three 2s components packed to {r['reel_frames']} frames, expected 180 "
        f"— the reel is painting timeline, not components")
@@ -53,9 +71,9 @@ if _fn:
     # ── VARIABLE DURATIONS: the case a fixed stride gets wrong ────────────
     # i * dur_f silently overlaps or gaps everything after the first component
     # whose length differs, and the render still exits 0.
-    r = pack([{"t_start": 1.0, "duration_s": 1.0},
-              {"t_start": 5.0, "duration_s": 3.0},
-              {"t_start": 9.0, "duration_s": 0.5}], 30)
+    r = pack([{"t_start": 1.0, "duration_s": 1.0, "type": "StatCard"},
+              {"t_start": 5.0, "duration_s": 3.0, "type": "StatCard"},
+              {"t_start": 9.0, "duration_s": 0.5, "type": "StatCard"}], 30)
     ok([s["reel_from_s"] for s in r["segments"]] == [0.0, 1.0, 4.0],
        f"variable-duration packing gave {[s['reel_from_s'] for s in r['segments']]}, "
        f"expected [0.0, 1.0, 4.0] — a fixed stride instead of a cumulative cursor")
@@ -75,21 +93,21 @@ if _fn:
            f"reads {(s['reel_to_s'] - s['reel_from_s']) * 30}")
 
     # ── no component may be zero-length: a 0-frame render is a black hole ─
-    r = pack([{"t_start": 2.0, "duration_s": 0.0}], 30)
+    r = pack([{"t_start": 2.0, "duration_s": 0.0, "type": "StatCard"}], 30)
     ok(r["reel_frames"] >= 1,
        "a 0s component packed to 0 frames — remotion renders nothing and the "
        "composite reads an empty slice")
 
     # ── author order is preserved; the composite indexes by position ──────
-    r = pack([{"t_start": 30.0, "duration_s": 1.0},
-              {"t_start": 2.0, "duration_s": 1.0}], 30)
+    r = pack([{"t_start": 30.0, "duration_s": 1.0, "type": "StatCard"},
+              {"t_start": 2.0, "duration_s": 1.0, "type": "StatCard"}], 30)
     ok([s["out_at_s"] for s in r["segments"]] == [30.0, 2.0],
        "pack_reel reordered the items — the composite maps segment i to item i, "
        "so reordering silently swaps two components' positions in the edit")
     ok([s["i"] for s in r["segments"]] == [0, 1], "segment indices are not author order")
 
     # ── fps is honoured, not assumed ─────────────────────────────────────
-    r60 = pack([{"t_start": 0.0, "duration_s": 2.0}], 60)
+    r60 = pack([{"t_start": 0.0, "duration_s": 2.0, "type": "StatCard"}], 60)
     ok(r60["reel_frames"] == 120,
        f"at 60fps a 2s component packed to {r60['reel_frames']} frames, not 120 "
        f"— a hardcoded 30 would halve every duration on a 60fps render")

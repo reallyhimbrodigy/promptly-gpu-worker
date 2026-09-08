@@ -100,6 +100,48 @@ check("its enum IS the selectable catalogue",
       set(_vp.get("card_type", {}).get("enum") or []) == set(A.MG_SELECTABLE_TYPES),
       "an enum that drifts from the catalogue either hides types or offers "
       "ones nothing teaches")
+# ── A BARE ENUM IS A LIST OF WORDS ─────────────────────────────────────────
+# THE MECHANISM behind "1 distinct of 29 selectable, StatCard=4" on two rounds.
+# The agent saw 29 NAMES and had semantic information about exactly one:
+# StatCard is named in the system prompt, ProgressBar once, the other 27 nowhere
+# in the cached prefix. Learning what a PullQuote is for costs a read_knowledge
+# turn the agent does not spend, so it picks the only component it was told
+# anything about. Not taste — a vocabulary the harness never defined.
+_desc = _vp.get("card_type", {}).get("description") or ""
+check("every offered type carries its CLAIM where the agent chooses",
+      all(f"{t} —" in _desc for t in A.MG_SELECTABLE_TYPES),
+      f"{sum(1 for t in A.MG_SELECTABLE_TYPES if f'{t} —' not in _desc)} of "
+      f"{len(A.MG_SELECTABLE_TYPES)} are offered as a bare name")
+check("the claims come from the catalogue, not a paraphrase",
+      all(A.MG_CLAIM_INDEX[t] in _desc for t in A.MG_SELECTABLE_TYPES),
+      "a second copy of the teach drifts from the first in silence")
+# RUN, NOT GREPED. `_missing = []` leaves the raise in the file and a substring
+# test passes on an unreachable branch — the same trap this port has now hit
+# eight times. Patch the type list and call it: a type with no Claim: line in
+# the catalogue must raise, not come back missing from the index.
+_orig_types = A.MG_SELECTABLE_TYPES
+try:
+    A.MG_SELECTABLE_TYPES = tuple(list(_orig_types) + ["NoSuchComponent"])
+    try:
+        A._mg_claim_index()
+        check("the index REFUSES to build partially", False,
+              "a type with no Claim: line came back missing from the index "
+              "instead of raising — it would be offered as a bare name and "
+              "nobody would see which one")
+    except RuntimeError:
+        check("the index REFUSES to build partially", True)
+finally:
+    A.MG_SELECTABLE_TYPES = _orig_types
+check("the description no longer teaches a default",
+      "Defaults to StatCard" not in _desc,
+      "naming one type as the fallback is the incumbency, written down")
+check("and the BUILD has no silent default either",
+      'or "StatCard"' not in src,
+      "a schema that says 'no default' over a build that defaults is a schema "
+      "describing a pipeline that does not exist")
+check("a card ruled with no type is refused, not defaulted",
+      "ruled 'card' with no card_type" in src)
+
 check("card_props is offered", "card_props" in _vp,
       "every type reads different keys; hero/label is StatCard's vocabulary "
       "and a component carrying the wrong props renders empty")

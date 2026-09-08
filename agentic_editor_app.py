@@ -74,6 +74,57 @@ app = modal.App("agentic-editor")
 # than an agent one — worth separating in the ledger.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
+
+# ── A BARE ENUM IS A LIST OF WORDS ──────────────────────────────────────────
+# THE MECHANISM BEHIND "1 distinct of 29 selectable, StatCard=4" on two rounds
+# running. The agent saw 29 NAMES in the enum and had semantic information about
+# exactly one of them: StatCard is named in the system prompt, ProgressBar is
+# named once, and the other 27 appear nowhere in the cached prefix. Learning
+# what a PullQuote or a RankedList is for costs a read_knowledge turn, and the
+# agent does not spend it — so it picks the only component it has been told
+# anything about. That is not taste, and it is not incumbency in the agent; it
+# is the harness offering a vocabulary it never defined.
+#
+# The claims are the catalogue's OWN one-line "Claim:" per entry, extracted from
+# the mounted file rather than paraphrased, so the index cannot drift from the
+# teach. ~364 tokens for all 29 — about $0.0009 a run at twelve turns — against
+# ~6,600 for the full prose. The prose stays where it is; this is the part that
+# has to be in front of the agent at the moment it chooses.
+def _mg_claim_index():
+    """{type: one-line claim} read from the mounted catalogue.
+
+    RAISES rather than returning a partial index. A missing claim means a type
+    the agent can name and cannot understand, which is the exact condition this
+    exists to end — degrading quietly would restore it for that type alone and
+    nobody would see which.
+    """
+    _p = os.path.join("/knowledge", "05_motion_graphics.md")
+    if not os.path.isfile(_p):
+        _p = os.path.join(_KNOWLEDGE_DIR, "05_motion_graphics.md")
+    try:
+        _txt = open(_p, encoding="utf-8").read()
+    except Exception as _e:
+        raise RuntimeError(
+            f"the motion-graphic catalogue is unreadable ({_e}); the schema "
+            f"would offer 29 bare names again") from _e
+    _out = {}
+    for _t in MG_SELECTABLE_TYPES:
+        _m = re.search(r"\*\*" + re.escape(_t) + r"\*\*.*?Claim:\s*[\"\u201c]"
+                       r"([^\"\u201d]+)[\"\u201d]", _txt, re.S)
+        if _m:
+            _out[_t] = " ".join(_m.group(1).split())
+    _missing = [t for t in MG_SELECTABLE_TYPES if t not in _out]
+    if _missing:
+        raise RuntimeError(
+            f"no Claim: line in the catalogue for {_missing} — those types "
+            f"would be offered as bare names, which is how StatCard won two "
+            f"rounds running")
+    return _out
+
+
+MG_CLAIM_INDEX = _mg_claim_index()
+MG_CLAIM_LINES = "\n".join(f"  {k} — {v}" for k, v in sorted(MG_CLAIM_INDEX.items()))
+
 _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion"))
 _REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 _MOODREEL_SRC = os.path.join(_REPO_ROOT, "moodreel_editor.py")
@@ -1879,14 +1930,26 @@ KNOWLEDGE_TOOLS = [{
                                  # its props shape.
                                  "card_type": {"type": "string",
                                      "enum": list(MG_SELECTABLE_TYPES),
-                                     "description": "when treatment includes "
-                                                    "'card': WHICH motion "
-                                                    "graphic. Defaults to "
-                                                    "StatCard only if you do "
-                                                    "not say — and StatCard on "
-                                                    "a beat with no quoted "
-                                                    "number is the wrong "
-                                                    "component."},
+                                     # THE CLAIM, NOT JUST THE NAME. This
+                                     # description used to say "defaults to
+                                     # StatCard", which taught the incumbency
+                                     # rather than the choice — and the other 28
+                                     # types appeared nowhere in the cached
+                                     # prefix, so the agent had no way to know
+                                     # what they were for without spending a
+                                     # read_knowledge turn it never spent.
+                                     "description": (
+                                         "REQUIRED when treatment includes "
+                                         "'card'. Match the component to what "
+                                         "the beat SAYS — each line below is "
+                                         "the claim that component makes, and "
+                                         "the beat must actually be making it. "
+                                         "There is no default: StatCard is for "
+                                         "a QUOTED NUMBER and nothing else.\n"
+                                         + MG_CLAIM_LINES +
+                                         "\nread_knowledge('05_motion_graphics')"
+                                         " for the full teach and each one's "
+                                         "props shape.")},
                                  "card_props": {"type": "object",
                                      "description": "the component's own props, "
                                                     "in the shape its catalogue "
@@ -2621,7 +2684,80 @@ _VIDEO_REL_MARGIN_DB = 3.0
 # passthrough — the exact failure it exists to catch. 20.0 sits between them
 # with 4.6 dB of margin below the passthrough floor and 3.3 dB above the real
 # ceiling.
-_ZOOM_GEOMETRY_MAX_DB = 20.0
+# ── THE ABSOLUTE BAR WAS CALIBRATED ON ONE CONTENT CLASS AND INVERTS ────────
+# I set 20.0 from a single high-detail fixture: real zooms read 15.94-16.84 and
+# passthroughs 24.30-26.11. On FLAT content the whole scale moves and the arms
+# swap sides. Measured on a flat field (the shape of three corpus fixtures):
+#
+#     content    arm    abs psnr   bar 20.0 says   scale-fit delta
+#     detailed   real      15.99   APPLIED               +6.06
+#     detailed   pass      26.11   NOT APPLIED          -10.91
+#     FLAT       real      26.91   NOT APPLIED  <-- WRONG   -4.68
+#     FLAT       pass      53.25   NOT APPLIED          -31.71
+#
+# A real zoom on a flat field reads 26.91 and the absolute bar calls it a
+# passthrough. That is three false failures in round 36 (DepthPull, SnapReframe,
+# StepZoom) and it would have had someone editing three working components.
+# Never infer a universal shape from one sampled instance — a standing rule I
+# broke while writing the check that enforces the others.
+#
+# THE CONTENT-INDEPENDENT FORM asks which SCALE better explains the render:
+# psnr(source cropped to the claimed scale, render) minus psnr(source, render).
+# Both terms read the same content, so content cancels. Across a 27 dB swing in
+# absolute level:
+#     reals    +6.06, -4.25, -4.68, -0.10, +1.67, +2.48, +4.82
+#     passes  -10.45, -10.91, -11.20, -11.23, -14.60, -31.71
+# -8.0 sits between them with 3.3 dB below the worst real and 2.5 dB above the
+# best passthrough.
+#
+# ONE-SIDED ON PURPOSE. It FAILS only on strong evidence of a passthrough;
+# anything else is recorded and not failed. A false "not applied" sends someone
+# to edit a component that works, which is more expensive than missing one.
+_ZOOM_SCALE_FIT_FAIL_DB = -8.0
+
+
+def zoom_scale_fit_delta(src, render, scale, origin_x, origin_y, t0, dur=0.15,
+                         env=None, width=1080, height=1920):
+    """How much better the CLAIMED scale explains the render than no zoom does.
+
+    Positive: the render looks like the source seen through that zoom.
+    Strongly negative: it looks like the source with no zoom at all.
+    None: unreadable, which is never a pass and never a failure.
+    """
+    import subprocess
+
+    def _psnr(s):
+        if s and abs(float(s) - 1.0) > 1e-6:
+            cw, ch = width / float(s), height / float(s)
+            x = max(0.0, min(width - cw, float(origin_x) * width - cw / 2))
+            y = max(0.0, min(height - ch, float(origin_y) * height - ch / 2))
+            f = (f"[0:v]crop=w={cw:.0f}:h={ch:.0f}:x={x:.0f}:y={y:.0f},"
+                 f"scale={width}:{height},setsar=1[a];"
+                 f"[1:v]setsar=1[b];[a][b]psnr=stats_file=-")
+        else:
+            f = "[0:v]setsar=1[a];[1:v]setsar=1[b];[a][b]psnr=stats_file=-"
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-nostats",
+                 "-ss", f"{float(t0):.3f}", "-t", f"{float(dur):.3f}", "-i", src,
+                 "-ss", f"{float(t0):.3f}", "-t", f"{float(dur):.3f}", "-i", render,
+                 "-lavfi", f, "-f", "null", "-"],
+                capture_output=True, text=True, timeout=300, env=env)
+        except Exception:
+            return None
+        v = [float(x) for x in re.findall(
+            r"psnr_avg:([0-9.]+)", (r.stdout or "") + (r.stderr or ""))]
+        return sum(v) / len(v) if v else None
+
+    try:
+        if not (os.path.exists(src) and os.path.exists(render)):
+            return None
+        a, b = _psnr(1.0), _psnr(scale)
+        if a is None or b is None:
+            return None
+        return round(b - a, 2)
+    except Exception:
+        return None
 
 # ── STAGEDPUSH, WHICH NEEDS STAGES OR IT SILENTLY DOES NOTHING ──────────────
 # StagedPush.tsx: `const stages = ev.stages ?? []; if (stages.length < 2)
@@ -3733,6 +3869,16 @@ def spec_shortfall(targets, ruled, reasons, n_beats, dur_s):
     return out
 
 
+def _require_mg_type(item):
+    """The component this item names, or a raise. Never a default."""
+    _t = str((item or {}).get("type") or "").strip()
+    if not _t:
+        raise ValueError(
+            "a reel item carries no `type` — defaulting it to StatCard is how "
+            "a component nobody chose reaches the video and reports as chosen")
+    return _t
+
+
 def pack_reel(items, fps=30):
     """Pack authored placements into a CONTIGUOUS reel + the composite offsets.
 
@@ -3758,7 +3904,11 @@ def pack_reel(items, fps=30):
         dur_f = max(1, int(round(dur_s * fps)))
         at_s = float(it.get("t_start") or 0.0)
         out_reel.append({
-            "type": it.get("type") or "StatCard",
+            # NO DEFAULT HERE EITHER. This silently made an untyped item a
+            # StatCard, so a caller bug arrived as a rendered StatCard nobody
+            # chose. Both surfaces above refuse an untyped card now; this is
+            # the last place the old default could have survived.
+            "type": _require_mg_type(it),
             # CUMULATIVE, never i * dur_f. With variable durations a fixed
             # stride silently overlaps or gaps every component after the first
             # one whose length differs — and the render still exits 0.
@@ -5715,18 +5865,26 @@ def edit(source_key: str, brief: str,
                 _pk_s = (_sg["stage_peak_s"] if _sg.get("stage_peak_s")
                          else ZOOM_PEAK_REACH_MS[_sg["type"]] / 1000.0)
                 _w0 = max(0.0, min(_pk_s, max(0.0, _dur_s - 0.3)))
-                _gch, _gdb = step_changed_output(
-                    _sg["src"], _sg["out"], _w0, min(_dur_s, _w0 + 0.3),
-                    env=_SUBPROCESS_ENV, identical_db=_ZOOM_GEOMETRY_MAX_DB)
+                _gd = zoom_scale_fit_delta(
+                    _sg["src"], _sg["out"], _sg.get("claimed_scale") or 1.22,
+                    0.5, 0.4, _w0, min(0.15, max(0.05, _dur_s - _w0)),
+                    env=_SUBPROCESS_ENV)
                 _sg["geometry_window"] = [round(_w0, 3),
-                                          round(min(_dur_s, _w0 + 0.3), 3)]
+                                          round(min(_dur_s, _w0 + 0.15), 3)]
+                _sg["scale_fit_delta_db"] = _gd
+                # None is UNMEASURED. Only strong evidence of a passthrough
+                # fails; a false failure sends someone to edit a component that
+                # works.
+                _gch = None if _gd is None else (_gd > _ZOOM_SCALE_FIT_FAIL_DB)
+                _gdb = _gd
                 _sg["geometry_psnr_db"] = _gdb
                 _sg["geometry_ok"] = _gch
                 if _gch is False:
                     fail("zoom_not_applied",
-                         f"{_sg['type']} rendered {_sg['frames']} frames that "
-                         f"are the SAME PICTURE as its own source "
-                         f"(psnr {_gdb} dB >= {_ZOOM_GEOMETRY_MAX_DB}). "
+                         f"{_sg['type']} rendered {_sg['frames']} frames the "
+                         f"UNZOOMED source explains better than its own claimed "
+                         f"scale (scale-fit {_gdb} dB <= "
+                         f"{_ZOOM_SCALE_FIT_FAIL_DB}). "
                          f"ClipRenderer mounts a zoom only under "
                          f"`clip.zoomEffect && clip.src` — without the "
                          f"pre-extracted file it renders un-zoomed and says "
@@ -5983,7 +6141,19 @@ def edit(source_key: str, brief: str,
             # the entire time — 29 entries with claims, FITS/FIGHTS and props —
             # and the agent could read it but not act on it, because the harness
             # placed a StatCard whatever it said.
-            _ctype = str(v.get("card_type") or "").strip() or "StatCard"
+            # NO SILENT DEFAULT. It fell back to StatCard, which meant a
+            # ruling that named nothing became a StatCard and the run reported
+            # a StatCard the agent never chose — indistinguishable from one it
+            # did. The schema now says there is no default; the build has to
+            # agree or the schema is describing a pipeline that does not exist.
+            _ctype = str(v.get("card_type") or "").strip()
+            if not _ctype:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": "ruled 'card' with no card_type — WHICH "
+                                      "component reads the dialogue and cannot "
+                                      "be derived. The enum carries each one's "
+                                      "claim; pick the one the beat is making."})
+                continue
             if _ctype in MG_BRAND_ONLY:
                 # Production's own prompt: "DO NOT put NamePlate or EndCard in
                 # motion_graphics yourself — the pipeline builds [them]". They
@@ -7377,7 +7547,14 @@ def edit(source_key: str, brief: str,
                     if _why6 is None and "card" in _tr6:
                         # A card whose figure is not a figure renders BLANK and
                         # exits 0 — four of them shipped invisible in round 35.
-                        _ct6 = str(_v.get("card_type") or "StatCard").strip()
+                        _ct6 = str(_v.get("card_type") or "").strip()
+                        if not _ct6:
+                            _why6 = (
+                                f"beat {_v.get('beat')}: ruled 'card' with no "
+                                f"card_type. WHICH component reads what the "
+                                f"beat SAYS and cannot be derived — the enum "
+                                f"carries each one's claim. There is no "
+                                f"default; StatCard is for a quoted number.")
                         _pr6 = _v.get("card_props")
                         if not isinstance(_pr6, dict) or not _pr6:
                             _pr6 = {"value": str(_v.get("card_hero") or "").strip()}
