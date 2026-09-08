@@ -61,9 +61,36 @@ ok("def place_cutaway" not in SRC, "place_cutaway is implemented again")
 # read TOOLS alone, so "place_cutaway not in names" was TRUE about a list that
 # never contained it, and a mutation re-adding the tool passed clean. Checking
 # the wrong collection is indistinguishable from checking nothing.
-tools = list(_top.get("TOOLS") or []) + list(_top.get("KNOWLEDGE_TOOLS") or [])
-ok(_top.get("TOOLS") is not None, "TOOLS could not be read")
-ok(_top.get("KNOWLEDGE_TOOLS") is not None, "KNOWLEDGE_TOOLS could not be read")
+# IMPORTED, NOT literal_eval'd. The schemas stopped being pure literals the
+# moment an enum was built from a constant (`"enum": list(MG_SELECTABLE_TYPES)`)
+# — literal_eval returned nothing for the whole TOOLS assignment and this walk
+# found ZERO enums. The non-vacuity leg below caught it, which is the only
+# reason it was not a silent hole.
+#
+# The categorical fix is this repo's own law: IMPORT THE MODULE AND ASSERT THE
+# SYMBOL. Source is where code might be; runtime is where it is.
+import types as _types
+_m5 = _types.ModuleType("modal")
+
+
+class _S5:
+    def __init__(s, *a, **k): pass
+    def __getattr__(s, n): return _S5()
+    def __call__(s, *a, **k): return _S5()
+    def function(s, *a, **k): return lambda f: f
+    def local_entrypoint(s, *a, **k): return lambda f: f
+
+
+for _n5 in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
+    setattr(_m5, _n5, _S5())
+_m5.is_local = lambda: True
+_m5.enable_output = _S5()
+sys.modules.setdefault("modal", _m5)
+import agentic_editor_app as _A5                                  # noqa: E402
+tools = list(_A5.TOOLS) + list(_A5.KNOWLEDGE_TOOLS)
+ok(getattr(_A5, "TOOLS", None) is not None, "TOOLS could not be read")
+ok(getattr(_A5, "KNOWLEDGE_TOOLS", None) is not None,
+   "KNOWLEDGE_TOOLS could not be read")
 names = [t.get("name") for t in tools]
 # Non-vacuity: the surface must contain the tools we know are there.
 for _must in ("set_spec", "rule_all_beats", "execute_plan"):

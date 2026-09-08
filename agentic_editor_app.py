@@ -42,6 +42,30 @@ import time
 
 import modal
 
+from type_registries import (VALID_ZOOM_TYPES, VALID_TRANSITION_TYPES,
+                             VALID_TIGHT_CUT_OVERLAYS, VALID_MG_TYPES)
+
+# ── THE MOTION-GRAPHIC CATALOGUE IS 29, NOT 31 ──────────────────────────────
+# VALID_MG_TYPES has 31 and I costed the port against that number. Two of them
+# are NOT model-selectable, and production says so in its own prompt:
+#
+#   "These render as the `NamePlate` and `EndCard` components. DO NOT put
+#    `NamePlate` or `EndCard` in `motion_graphics` yourself — the pipeline
+#    builds [them]"                                    (handler.py:2784)
+#
+# They are BRAND components, emitted from brand settings by
+# `_brand_mg_keys = (("name_plate", "NamePlate"), ("end_card", "EndCard"))`, and
+# neither appears in the catalogue prose at all — production cannot place them
+# from a ruling either. Offering them here would be MORE than parity, and Zac's
+# ruling is "no more and no less".
+MG_BRAND_ONLY = frozenset({"NamePlate", "EndCard"})
+MG_SELECTABLE_TYPES = tuple(sorted(set(VALID_MG_TYPES) - MG_BRAND_ONLY))
+assert len(MG_SELECTABLE_TYPES) == 29, (
+    f"the selectable catalogue is {len(MG_SELECTABLE_TYPES)}, not 29 — the "
+    f"registry or the brand set moved and the prompt no longer matches it")
+assert not (MG_BRAND_ONLY - set(VALID_MG_TYPES)), (
+    "a brand component left the registry")
+
 app = modal.App("agentic-editor")
 
 # python_version PINNED: debian_slim() defaults to 3.9 and the Deepgram SDK uses
@@ -1614,6 +1638,31 @@ KNOWLEDGE_TOOLS = [{
                                                     "phrase the card is ABOUT"},
                                  "card_label": {"type": "string",
                                      "description": "the card's supporting line"},
+                                 # WHICH COMPONENT, and its props. This is the
+                                 # one family whose TYPE the harness cannot
+                                 # derive: a quoted headline number is a
+                                 # StatCard, an ordered set is a RankedList, a
+                                 # verbatim line is a PullQuote — the choice
+                                 # reads the DIALOGUE, not the timing. Read
+                                 # `05_motion_graphics` for the catalogue: every
+                                 # entry carries its claim, its FITS/FIGHTS and
+                                 # its props shape.
+                                 "card_type": {"type": "string",
+                                     "enum": list(MG_SELECTABLE_TYPES),
+                                     "description": "when treatment includes "
+                                                    "'card': WHICH motion "
+                                                    "graphic. Defaults to "
+                                                    "StatCard only if you do "
+                                                    "not say — and StatCard on "
+                                                    "a beat with no quoted "
+                                                    "number is the wrong "
+                                                    "component."},
+                                 "card_props": {"type": "object",
+                                     "description": "the component's own props, "
+                                                    "in the shape its catalogue "
+                                                    "entry shows. A type whose "
+                                                    "props do not match renders "
+                                                    "empty."},
                                  # ARC POSITION IS JUDGEMENT; THE MOVE IS A
                                  # LOOKUP. Which beat is the payoff cannot be
                                  # derived from timing — but once you say so,
@@ -2530,8 +2579,6 @@ ZOOM_RAMP_FRACTION = 0.35
 # imports and the container already mounts it, so "the homes tile the registry"
 # is an equality against production's own list rather than against a second
 # hand-maintained one that can fall behind silently.
-from type_registries import (VALID_ZOOM_TYPES, VALID_TRANSITION_TYPES,
-                             VALID_TIGHT_CUT_OVERLAYS)
 
 # ── THE SEVEN ZOOMS, AS PRODUCTION HOUSES THEM ──────────────────────────────
 #
@@ -2762,6 +2809,29 @@ assert set(TRANSITION_FIGHTS) == set(TRANSITION_DURATION_FRAMES)
 assert "LightLeak" not in VALID_TRANSITION_TYPES, (
     "LightLeak is a tight-cut overlay; offering it as a transition would let a "
     "cover graphic be asked to carry a picture change")
+
+
+def mg_back_timed_start_s(mg_type, anchor_s, attack_table, default_ms=150):
+    """Where the MG's frame window starts so it is SETTLED on its anchor word.
+
+    The visual analogue of the SFX peak-on-word subtraction, and measured the
+    same way: the MGAttackProbe battery reports hit (peak entrance velocity) and
+    settle (90% of the entrance plateau) per component. A simple pop uses
+    SETTLE — the whole thing arrives as one; a sequenced/count-up type uses
+    container-arrival, min(hit, settle), so the frame lands on the beat while
+    its content keeps building.
+
+    The table has been in _asset_inventory.json since the inventory was built
+    and NOTHING READ IT: pack_reel placed every component at its raw anchor, so
+    every motion graphic in this lane has entered LATE by its own attack.
+    Clamped at the head, and the clamp is returned rather than hidden.
+    """
+    try:
+        _a = float((attack_table or {}).get(str(mg_type), default_ms) or 0) / 1000.0
+    except Exception:
+        _a = default_ms / 1000.0
+    _want = float(anchor_s) - _a
+    return max(0.0, _want), (_want < 0.0)
 
 
 def transition_room_ms(spans, k):
@@ -5431,9 +5501,56 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "card", "beat": v.get("beat"),
                                "why": "beat was cut, so it has no output time"})
                 continue
-            _cards.append({"t_start": round(at, 2), "type": "StatCard",
+            # ── WHICH OF THE TWENTY-NINE ─────────────────────────────────
+            # This was hardcoded to StatCard, which is the whole "1 of 29" gap:
+            # the catalogue has been MOUNTED at knowledge/05_motion_graphics.md
+            # the entire time — 29 entries with claims, FITS/FIGHTS and props —
+            # and the agent could read it but not act on it, because the harness
+            # placed a StatCard whatever it said.
+            _ctype = str(v.get("card_type") or "").strip() or "StatCard"
+            if _ctype in MG_BRAND_ONLY:
+                # Production's own prompt: "DO NOT put NamePlate or EndCard in
+                # motion_graphics yourself — the pipeline builds [them]". They
+                # come from brand settings, not from a ruling.
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": f"{_ctype} is a BRAND component the "
+                                      f"pipeline builds from brand settings, "
+                                      f"not a catalogue choice"})
+                continue
+            if _ctype not in MG_SELECTABLE_TYPES:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": f"card_type {_ctype!r} is not in the "
+                                      f"catalogue — a type the renderer does "
+                                      f"not know renders nothing"})
+                continue
+            # BACK-TIMED so the component is SETTLED on its anchor word rather
+            # than STARTING there. _MG_ATTACK_MS has been in the inventory since
+            # it was built and nothing read it, so every motion graphic this
+            # lane has ever placed entered late by its own attack.
+            _mg_attack = ((_ASSET_INV or {}).get("motion_graphics") or {}).get("attack_ms") \
+                if _ASSET_INV else None
+            if not _mg_attack:
+                try:
+                    _mg_attack = (json.load(open("/assets/inventory.json"))
+                                  .get("motion_graphics") or {}).get("attack_ms") or {}
+                except Exception:
+                    _mg_attack = {}
+            _mg_at, _mg_clamped = mg_back_timed_start_s(_ctype, at, _mg_attack)
+            # PROPS ARE THE COMPONENT'S OWN SHAPE. hero/label are StatCard's
+            # vocabulary; every other type reads different keys, and a card
+            # carrying the wrong ones renders empty. Explicit props win; the
+            # hero/label pair remains the StatCard shorthand.
+            _cprops = v.get("card_props")
+            if not isinstance(_cprops, dict) or not _cprops:
+                _cprops = {"value": hero,
+                           "label": str(v.get("card_label") or "")[:60]}
+            _cards.append({"t_start": round(_mg_at, 2), "type": _ctype,
                            "duration_s": min(2.5, b["t_end"] - b["t_start"]),
-                           "hero": hero, "label": str(v.get("card_label") or "")[:60]})
+                           "hero": hero, "label": str(v.get("card_label") or "")[:60],
+                           "props": _cprops,
+                           "anchor_s": round(at, 2),
+                           "attack_ms": (_mg_attack or {}).get(_ctype, 150),
+                           "head_clamped": _mg_clamped})
         if _cards:
             # DO NOT RE-RENDER AN IDENTICAL REEL. execute_plan rebuilds the whole
             # pipeline, and the agent calls it more than once — round 15's
@@ -5502,6 +5619,9 @@ def edit(source_key: str, brief: str,
                     built["card"] = len(_cards)
                     steps.append({"step": "card", "n": len(_cards),
                                   "items": [{"t": _c3.get("t_start"),
+                                             "type": _c3.get("type"),
+                                             "anchor_s": _c3.get("anchor_s"),
+                                             "attack_ms": _c3.get("attack_ms"),
                                              "content": str(_c3.get("hero") or "")[:80]}
                                             for _c3 in _cards]})
 
@@ -7750,6 +7870,21 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         print(f"  EFFECT COVERAGE : declared {_fam_dec or '[]'}  "
               + ("ALL MEASURED" if not _unc
                  else f"<-- UNCOVERED {_unc} — declared and never measured"))
+    # ── WHICH COMPONENTS, not how many ────────────────────────────────────
+    # "card=4" was true of a run that placed four StatCards and of a run that
+    # placed four different types, and the whole point of the catalogue port is
+    # the difference between those two.
+    _mg_steps = [x for x in ((r.get("ledger") or {}).get("execute_plan") or {}).get("steps", [])
+                 if x.get("step") == "card"]
+    _mg_items = [i for st in _mg_steps for i in (st.get("items") or [])]
+    if _mg_items:
+        _mix = {}
+        for _i8 in _mg_items:
+            _t8 = _i8.get("type") or "?"
+            _mix[_t8] = _mix.get(_t8, 0) + 1
+        print(f"  MG CATALOGUE    : {len(_mix)} distinct of "
+              f"{len(MG_SELECTABLE_TYPES)} selectable  "
+              + " ".join(f"{k}={v}" for k, v in sorted(_mix.items())))
     _rf = (r.get("ledger") or {}).get("reel_frames")
     if _rf is not None:
         print(f"  REEL            : {_rf} frames "
