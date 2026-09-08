@@ -1826,8 +1826,33 @@ KNOWLEDGE_TOOLS = [{
     "input_schema": {"type": "object",
                      "properties": {
                          "beat": {"type": "integer", "description": "the beat index"},
+                         # THE SAME FAMILIES AS rule_all_beats, and it is a
+                         # LIVE defect that they were not.
+                         #
+                         # This offered card|text|none while the main ruling
+                         # surface offered five — and beat_verdict is REACHABLE:
+                         # _REPAIR_ONLY GATES it until execute_plan has run, it
+                         # does not remove it. So the repair path, the one
+                         # reached precisely when something came out wrong,
+                         # could not say "sfx" or "zoom".
+                         #
+                         # A contract failure on either family would be
+                         # "repaired" by re-ruling the beat as text (changing
+                         # the intent) or none (deleting the placement). Neither
+                         # errors. The accounting balances, because the beat now
+                         # genuinely has no sound. And NOTHING in the ledger
+                         # distinguishes "the agent decided against a sound"
+                         # from "the agent could not say the word".
+                         # A LITERAL, PINNED BY AN IMPORT-TIME ASSERT rather
+                         # than an expression. `list(_TREATMENT_FAMILIES)` would
+                         # read better and would make TOOLS non-literal-
+                         # evaluable, which several checks depend on for static
+                         # analysis. The single source of truth is enforced by
+                         # _assert_treatment_surface_agrees below — divergence
+                         # raises at import, in the container, on every launch.
                          "treatment": {"type": "string",
-                                       "enum": ["card", "text", "none"]},
+                                       "enum": ["card", "text", "sfx", "zoom",
+                                                "none"]},
                          "cut": {"type": "string", "enum": ["keep", "cut"]},
                          "why": {"type": "string",
                                  "description": "about THIS beat's content"}},
@@ -2948,6 +2973,35 @@ def _assert_treatment_surface_agrees(module_src: str) -> None:
             f"{len(stale)} prose site(s) still offer only card|text|none while "
             f"the schema offers {_TREATMENT_FAMILIES}. The agent reads the "
             f"prose; a narrower list there silently removes families.")
+    # ── COMPARE THE SURFACES; DO NOT HUNT A REMEMBERED SPELLING ────────────
+    # The grep above knows the narrow set written as PROSE, in three
+    # punctuations. beat_verdict wrote the SAME narrow set as a JSON-schema
+    # enum, and this function — which exists for exactly that class — walked
+    # straight past it for as long as both have existed.
+    #
+    # A check looking for a string it has seen before is not comparing anything.
+    # Every treatment enum must EQUAL the declared family list, so a fourth
+    # surface added later is covered without anyone remembering this comment.
+    import ast as _ast
+    for _n in _ast.walk(_ast.parse(module_src)):
+        if not isinstance(_n, _ast.Dict):
+            continue
+        for _k, _v in zip(_n.keys, _n.values):
+            if not (isinstance(_k, _ast.Constant) and _k.value == "enum"
+                    and isinstance(_v, _ast.List)):
+                continue
+            _vals = [e.value for e in _v.elts if isinstance(e, _ast.Constant)]
+            # A treatment enum is the one naming families; every other enum in
+            # this file (cut keep/cut, sfx yes/no, spec modes) names something
+            # else and must not be dragged in.
+            if "none" not in _vals or "card" not in _vals:
+                continue
+            if set(_vals) != set(_TREATMENT_FAMILIES):
+                raise AssertionError(
+                    f"a treatment enum offers {sorted(set(_vals))} while "
+                    f"_TREATMENT_FAMILIES declares "
+                    f"{sorted(set(_TREATMENT_FAMILIES))}. A family the agent "
+                    f"cannot NAME is indistinguishable from one it declined.")
 
 
 def _assert_constraints_intact(system_text: str) -> None:
