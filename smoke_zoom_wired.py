@@ -179,10 +179,11 @@ check("the extract is re-encoded, not stream-copied",
 check("the extract lands where staticFile can serve it",
       '_zpub = "/promptly-remotion/public"' in src or
       '"/promptly-remotion/public"' in src)
-check("a zoom the unzoomed source explains better FAILS",
-      'fail("zoom_not_applied"' in src)
-check("zoom_not_applied is a CONTRACT failure",
-      "zoom_not_applied" in A.CONTRACT_FAILURES)
+# THESE TWO LEGS ARE INVERTED BY THE RULING, and are kept inverted rather than
+# deleted so the file records that the check once existed and why it does not.
+# They asserted that a zoom the unzoomed source explains better FAILS the round.
+# It no longer does, because no bar separating those two cases survived
+# validation — see the block below.
 # THE BAR IS CONTENT-INDEPENDENT, and the absolute one was not.
 # Calibrated on ONE high-detail fixture, 20.0 dB INVERTED on flat content:
 #     content    arm    abs psnr   bar 20.0 says   scale-fit delta
@@ -196,80 +197,78 @@ check("the absolute geometry bar is gone",
       not hasattr(A, "_ZOOM_GEOMETRY_MAX_DB"),
       "an absolute psnr against the source is a function of the CONTENT, and "
       "the corpus is not one content class")
-check("the scale-fit bar is the measured one",
-      A._ZOOM_SCALE_FIT_FAIL_DB == -8.0,
-      f"is {A._ZOOM_SCALE_FIT_FAIL_DB}")
-# ── CALIBRATED ON THE POPULATION IT WILL ACTUALLY MEASURE ──────────────────
-# All seven types, both arms, on ZAC'S REAL TALKING-HEAD FOOTAGE — the first
-# real content this project has measured an instrument against:
-#     type            real     pass      gap
-#     SmoothPush      1.35   -17.36   -18.71
-#     SnapReframe     1.88   -16.68   -18.56
-#     FocusWindow    -3.89   -19.86   -15.97
-#     StepZoom        1.52   -18.76   -20.28
-#     LetterboxPush  -0.91   -16.58   -15.67
-#     DepthPull      -2.00   -17.91   -15.91
-#     StagedPush      1.33   -17.85   -19.18
-#     reals -3.89..+1.88   passes -19.86..-16.58   7/7 correct
+# ══════════════════════════════════════════════════════════════════════════
+# ZOOM GEOMETRY IS UNMEASURED. Zac's ruling, 2026-09-08: ship neither bar.
 #
-# The margins WIDEN on real footage — 4.11 dB below the worst real and 8.58 dB
-# above the best passthrough, against 3.3 and 2.5 on synthetic fixtures. Real
-# content has structure at several scales, so a passthrough is unmistakably not
-# a zoom, while flat synthetic content compresses everything toward the middle.
+# THREE INSTRUMENTS, THREE FAILURES, each fitted to whatever population was in
+# front of it:
 #
-# CONTRAST WITH THE ABSOLUTE BAR IT REPLACED, on the same real clips: a 1.10x
-# zoom against the unzoomed same second reads 19.13 dB on this talking head and
-# 22.33 on a real car clip — so a 20.0 dB absolute bar had 0.87 dB of margin on
-# one and NEGATIVE margin on the other. It would have called a perfectly applied
-# zoom on real footage a passthrough before it rendered.
+#   absolute bar 20.0     fitted to SYNTHETIC. On Zac's real footage a 1.10x
+#                         zoom reads 19.13 dB (talking head) and 22.33 (car) —
+#                         0.87 dB of margin on one, NEGATIVE on the other.
+#   scale-fit -8.0        fitted to REAL footage. On the v1 corpus the rounds
+#                         actually run on, FocusWindow reads -12.57 — a
+#                         correctly applied zoom called NOT APPLIED. And it
+#                         already had a documented blind spot: real 720p
+#                         upscaled to 1080 gives a PASSTHROUGH of -7.64, above
+#                         the bar, uncaught.
+#   delta + intrinsic     refuted by the first population outside the fitted
+#                         range, across EVERY reproducible value of its own
+#                         input (7.07..10.21). v2-geometry's raw reals sit where
+#                         Zac's real footage sits — identical behaviour — while
+#                         their intrinsics differ by 12 dB, so the correction
+#                         drove them apart. A term that separates two things
+#                         which measured the same is injecting, not cancelling.
 #
-# THESE CLIPS ARE CALIBRATION, NOT AN ARM. The durable-sources law governs A/B
-# arms and baselines — what you MEASURE. An instrument is calibrated against the
-# population it will be pointed at, and that population is real footage; that is
-# the whole finding here.
-check("it clears the worst REAL-FOOTAGE delta (-3.89, FocusWindow)",
-      A._ZOOM_SCALE_FIT_FAIL_DB < -3.89 - 2.0,
-      "a real zoom on real footage must never read as a passthrough")
-check("it sits above the best REAL-FOOTAGE passthrough (-16.58)",
-      A._ZOOM_SCALE_FIT_FAIL_DB > -16.58 + 2.0)
-# ── THE v1 CORPUS ADJUDICATES FINE, WHICH RETIRES THE CORPUS EXPLANATION ───
-# Round 36's three zoom_not_applied verdicts were blamed partly on the corpus
-# being synthetic. Re-run under the SHIPPED test on the same sources — including
-# StepZoom on v1 pet_video, the exact pair that failed:
-#     source                  real     pass     separation
-#     v1 talking_head        -3.30   -30.48         27.18
-#     v1 pet_video           -4.12   -30.33         26.21
-#     StepZoom / pet_video   -4.19   -30.74         26.55   <- the actual pair
-#     DepthPull / pet_video  -1.07   -30.74         29.67
-#     SnapReframe/ pet_video -3.53   -30.96         27.43
-# Every real arm clears the bar. The v1 corpus was never structurally unable to
-# exercise zoom GEOMETRY; it was unable to exercise an ABSOLUTE psnr threshold,
-# which is a different claim. The bar was the whole cause.
+# THE BEST REMAINING CANDIDATE was the raw delta at -14.15: 5/5 across five
+# populations, 1.58 dB either side. That is UNDER the 2.0 dB margin registered
+# before the data — and adopting a bar that fails its own pre-registered
+# standard is what the three failures above are made of.
 #
-# ── THE HARD CASE IS REAL, UPSCALED FOOTAGE — NOT SYNTHETIC ────────────────
-#     REAL car/drift (720x1272 -> 1080x1920)   real -0.57   pass -7.64
-# The passthrough reads -7.64, ABOVE the -8.0 bar, so a passthrough on that clip
-# is NOT caught. The mechanism is the upscale: the passthrough render already
-# contains a scale change, so it partially resembles a zoom. Every assumption
-# either lane made — synthetic is easy, real is hard — is backwards for this
-# instrument; the hardest source found so far is real 720p upscaled.
+# THE ASYMMETRY DECIDES IT. A wrong zoom check costs a component edit on WORKING
+# code, which round 36 nearly bought. Unmeasured is honest and cheap;
+# mismeasured is expensive and LOOKS LIKE KNOWLEDGE.
 #
-# NOT WIDENED TO CATCH IT. -6.0 would flag that passthrough and leave 1.3 dB
-# above the worst real arm (-4.68 flat, -4.19 StepZoom, -3.89 FocusWindow). The
-# test is one-sided precisely so the tolerable error is the missed passthrough
-# rather than the edited-working-component. This is a stated blind spot, not a
-# calibration to fix by moving a number.
-check("the bar clears every REAL arm measured, including v1 (-4.19) and "
-      "flat (-4.68)",
-      A._ZOOM_SCALE_FIT_FAIL_DB < -4.68 - 2.0)
-check("it also holds on the synthetic extremes (flat real -4.68, "
-      "detailed passthrough -10.45)",
-      -10.45 + 2.0 < A._ZOOM_SCALE_FIT_FAIL_DB < -4.68 - 2.0,
-      "the synthetic corpus is the TIGHTER case and the bar must survive both")
-check("the test is ONE-SIDED — only strong evidence fails",
-      "_gch = None if _gd is None else (_gd > _ZOOM_SCALE_FIT_FAIL_DB)" in src,
-      "a false 'not applied' sends someone to edit a component that works, "
-      "which costs more than missing one")
+# The five-population data lives in zoom_bar_populations.py so the next
+# instrument starts from measurement rather than from a fresh guess.
+# ══════════════════════════════════════════════════════════════════════════
+check("no scale-fit BAR exists any more",
+      not hasattr(A, "_ZOOM_SCALE_FIT_FAIL_DB"),
+      "a constant nobody validated is a verdict nobody can defend")
+check("zoom geometry is declared UNMEASURED",
+      getattr(A, "_ZOOM_GEOMETRY_UNMEASURED", False) is True)
+
+# NOTHING REFUSES ON GEOMETRY — and this is the leg that matters, because
+# "removed the gate" and "the gate now always passes" look identical from the
+# outside and are opposite mistakes. geometry_ok must be None (UNMEASURED),
+# never True.
+_tree = ast.parse(src)
+_geom_fails = [n for n in ast.walk(_tree)
+               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+               and n.func.id == "fail" and n.args
+               and isinstance(n.args[0], ast.Constant)
+               and n.args[0].value in ("zoom_not_applied", "zoom_geometry_failed")]
+check("nothing fails a round on zoom geometry", not _geom_fails,
+      f"{len(_geom_fails)} producer(s) remain")
+check("zoom_not_applied is gone from CONTRACT_FAILURES too",
+      "zoom_not_applied" not in A.CONTRACT_FAILURES,
+      "a name that can fail a round with no producer is the card_props_mismatch "
+      "defect — removing the producer and leaving the name recreates it")
+check("geometry_ok is set to None, not True",
+      '_sg["geometry_ok"] = None' in src and '_sg["geometry_ok"] = _gch' not in src,
+      "None is UNMEASURED; True would be an unearned pass, which is the whole "
+      "thing this ruling avoids")
+check("and the segment carries the word",
+      '_sg["geometry_verdict"] = "UNMEASURED"' in src)
+
+# UNMEASURED MUST BE VISIBLE. An absence nobody prints reads as a green — the
+# lesson from four ledgered-and-unprinted counters this session.
+check("the unmeasured count is ledgered",
+      'led["zoom_geometry_unmeasured"] += 1' in src)
+check("and PRINTED in the same commit that records it",
+      "ZOOM GEOMETRY   :" in src,
+      "a counter that reaches the ledger and no output answers nothing")
+
 check("the delta is RECORDED on every segment",
       '_sg["scale_fit_delta_db"] = _gd' in src,
       "a threshold nobody can read the inputs of cannot be re-calibrated when "

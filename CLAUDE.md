@@ -306,6 +306,44 @@ inflated by retries into an apparent outage.
   defeated it entirely — the argument is a Name, not a Constant. Resolve through
   the binding. (Third instance of *scope is not text* in this repo.)
 
+## Standing rules earned 2026-09-08
+
+- **A measurement with a free parameter is not a mechanism.** A normaliser was
+  proposed to cancel content out of the zoom scale-fit bar, justified as
+  mechanism rather than curve-fitting: the delta's other term IS the source's
+  intrinsic responsiveness, so subtracting it should remove the variable that
+  broke the two previous bars. It was refuted by the first population outside
+  the fitted range — and the refutation nearly failed, because the two lanes
+  disagreed about the intrinsic value by 6.6 dB while the margin at stake was 5.
+  **Whichever number is right, a term whose value moves that far with a sampling
+  choice cannot be the thing that cancels anything.** Before a normaliser is a
+  mechanism, its INPUT must be well-defined; that source read 7.18-7.20 across
+  the window the arms render and carried a 19.36 outlier from a later scene, so
+  "its intrinsic" was never one number.
+
+- **Settle a disagreement by reproducing the other number, not by defending
+  yours.** Seven plausible sampling methods spanned 7.07-10.21 and NONE produced
+  13.80. That mattered more than the argument for 7.19: across the whole
+  reproducible range the normaliser was either unseparable or worse than the raw
+  measurement, so the conclusion held without anyone having to win. **Test the
+  verdict across the range of the disputed quantity — if it survives everywhere,
+  the dispute was never load-bearing.**
+
+- **A term that separates identically-behaving populations is injecting, not
+  cancelling.** v2-geometry's raw reals (-3.54..+0.59) sit almost exactly where
+  Zac's real footage sits (-3.89..+1.88) — the same behaviour — while their
+  intrinsics differ by 12 dB. Adding intrinsic drove them apart. When a
+  correction moves two things that measured the same, it is adding a difference
+  the raw measurement did not have.
+
+- **Educate rather than validate applies to SHAPES, not just rules.** Three
+  rounds built zero cards because the agent invented prop names. It had never
+  been told any component's props: `card_props` said "in the shape its catalogue
+  entry shows", and reading the catalogue costs a turn no agent spends. A
+  refusal that is correct still is not the fix. The prop table is now GENERATED
+  into the schema from the same constant the builder enforces and the cert
+  derives from the components — one chain, no hand-written third copy.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a

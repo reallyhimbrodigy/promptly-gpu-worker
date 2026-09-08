@@ -1023,17 +1023,10 @@ CONTRACT_FAILURES = frozenset({
     # BYTE-IDENTICAL files this way at a plausible ~1020 ms/frame.
     # placement_inert cannot see it: the composite genuinely changed those
     # frames, it just spliced in an un-zoomed copy of them.
-    # zoom_not_applied is GONE from this set, not merely unemitted.
-    #
-    # Zoom geometry is UNMEASURED: no validated bar exists (five-population
-    # window 3.16 dB wide, best margin 1.58 against a 2.0 standard). With the
-    # verdict removed, nothing emits this name — and a failing name with no
-    # producer is a check that cannot fire, which is what let round 40 score
-    # "all five green" while dropping 3 of 3 cards.
-    #
-    # smoke_failing_names_have_producers caught this within the hour of my own
-    # change. Leaving the name here would have been the same defect it was
-    # written to catch, one agent later.
+    # zoom_not_applied REMOVED with its producer (Zac's ruling, 2026-09-08:
+    # zoom geometry is unmeasured). A name that can fail a round and is emitted
+    # by nothing is the defect Builder-1 caught on card_props_mismatch; leaving
+    # this one behind would have recreated it in the same session.
     # AN ALPHA LAYER THAT PAINTED NOTHING. Compositing it re-encodes, changes
     # the file, and clears every relative threshold — so placement_inert and the
     # effect legs all pass while the picture gains nothing. Both blank layers
@@ -2833,41 +2826,32 @@ _VIDEO_REL_MARGIN_DB = 3.0
 # ONE-SIDED ON PURPOSE. It FAILS only on strong evidence of a passthrough;
 # anything else is recorded and not failed. A false "not applied" sends someone
 # to edit a component that works, which is more expensive than missing one.
-# ZOOM GEOMETRY IS REPORTED UNMEASURED. No validated bar exists.
+# ZOOM GEOMETRY IS UNMEASURED. Zac's ruling, 2026-09-08: ship neither bar.
 #
-# THE FIVE-POPULATION EVIDENCE, recorded here so nobody re-derives it from
-# whichever fixture is nearest — which is how the last two bars were fitted:
+# THREE INSTRUMENTS, THREE FAILURES, each fitted to the population in front of it:
+#   absolute geometry bar 20.0   fitted to SYNTHETIC; inverted on real footage
+#                                (0.87 dB margin on Zac's talking head, NEGATIVE
+#                                on his car clip)
+#   scale-fit ratio -8.0         fitted to REAL footage; FAILS on the v1 corpus
+#                                the rounds actually run on — FocusWindow reads
+#                                -12.57, a correctly applied zoom called NOT
+#                                APPLIED
+#   delta + intrinsic            refuted by the first population outside the
+#                                fitted range, across EVERY reproducible value
+#                                of its own input (7.07..10.21)
 #
-#   population              intrinsic   real arms         passthroughs
-#   ZAC REAL talking_head     18.62     -3.89 .. +1.88   -19.86 .. -16.58
-#   v1 talking_head           26.60    -12.57 .. -4.38   -30.48
-#   v1 pet_video              29.79     -6.26 .. -2.30   -31.42
-#   v2-geometry talking_head   7.23     -3.54 .. +0.59   -20.93
-#   held-out mandelbrot       19.76     -4.02 .. -2.81   -15.73
+# The best remaining candidate is the raw delta at -14.15: 5/5 correct across
+# five populations, at 1.58 dB either side. That is under the 2.0 dB margin
+# registered BEFORE the data, and adopting a bar that fails its own
+# pre-registered standard is precisely what the three failures above are made of.
 #
-#   the ONLY window separating every real arm from every passthrough:
-#       (-15.73, -12.57)   3.16 dB wide, midpoint -14.15, margin 1.58 either side
+# THE ASYMMETRY DECIDES IT. A wrong zoom check costs a component edit on WORKING
+# code — round 36 nearly bought exactly that. Unmeasured is honest and cheap;
+# mismeasured is expensive and looks like knowledge.
 #
-# -14.15 is 5/5 correct. Its 1.58 dB is UNDER the 2.0 dB the pre-registered
-# falsifier requires, so it is not validated and is not shipped as a firing bar.
-# The previous -8.0 sat OUTSIDE that window entirely and was wrong today: on v1
-# talking_head a correctly applied FocusWindow reads -12.57 and -8.0 called it
-# NOT APPLIED. A wrong zoom check costs a component edit on working code, which
-# is what round 36 nearly bought — so zoom goes UNMEASURED rather than
-# mismeasured.
-#
-# THE NORMALISER (delta + intrinsic) IS REFUTED across every reproducible
-# measurement of its own input: 7.07-10.21 depending on sampling, unseparable
-# below ~10.8 and worse than the raw delta above it. And the mechanism is
-# legible — v2-geometry's real arms (-3.54..+0.59) sit almost exactly where
-# Zac's real footage sits (-3.89..+1.88), so the two populations BEHAVE
-# identically while their intrinsics differ by 11 dB. Adding intrinsic drives
-# apart two things that measured the same: it injects a difference rather than
-# cancelling one.
-_ZOOM_SCALE_FIT_WINDOW_DB = (-15.73, -12.57)   # measured, five populations
-_ZOOM_SCALE_FIT_BEST_BAR_DB = -14.15           # 5/5 correct, NOT shipped
-_ZOOM_SCALE_FIT_MARGIN_DB = 1.58               # falsifier requires >= 2.0
-_ZOOM_SCALE_FIT_VALIDATED = False              # therefore: report, never fail
+# The delta is still COMPUTED and LEDGERED, because it is data and the next
+# instrument will be built from it. It decides nothing.
+_ZOOM_GEOMETRY_UNMEASURED = True
 
 
 def zoom_scale_fit_delta(src, render, scale, origin_x, origin_y, t0, dur=0.15,
@@ -3157,6 +3141,39 @@ del _zt0, _zf0
 # Inventing one here would be a value production does not have, and the parity
 # cert would then be pinning a number to nothing.
 _STAGED_PUSH_FALLBACK_MS = 1800   # only when the words cannot be resolved
+
+# ── WHY THERE IS NO ZOOM GEOMETRY BAR, WITH THE NUMBERS ────────────────────
+# Recorded at module scope because this is where the next person will be tempted
+# to add one back, and both previous bars were fitted to whichever fixture was
+# nearest. Full arms in zoom_bar_populations.py.
+#
+#   population              intrinsic   real arms         passthroughs
+#   ZAC REAL talking_head     18.62     -3.89 .. +1.88   -19.86 .. -16.58
+#   v1 talking_head           26.60    -12.57 .. -4.38   -30.48
+#   v1 pet_video              29.79     -6.26 .. -2.30   -31.42
+#   v2-geometry talking_head   7.23     -3.54 .. +0.59   -20.93
+#   held-out mandelbrot       19.76     -4.02 .. -2.81   -15.73
+#
+# The ONLY window separating every real arm from every passthrough across all
+# five is (-15.73, -12.57) — 3.16 dB wide, midpoint -14.15, margin 1.58 either
+# side. The falsifier registered BEFORE the data required 2.0, so -14.15 is
+# 5/5 correct and NOT VALIDATED, and is not shipped.
+#
+# THE BAR THAT WAS SHIPPED WAS WRONG IN BOTH DIRECTIONS. -8.0 false-failed a
+# correctly applied FocusWindow on v1 talking_head at -12.57, AND missed a
+# passthrough on real 720p-upscaled footage at -7.64. Two opposite errors on
+# different sources from one constant.
+#
+# THE NORMALISER (delta + intrinsic) IS REFUTED across every reproducible
+# measurement of its own input (7.07-10.21 by sampling method): unseparable
+# below ~10.8, worse than the raw delta above it. Mechanism — v2-geometry's real
+# arms sit almost exactly where Zac's real footage sits, so the populations
+# BEHAVE identically while their intrinsics differ by 11 dB; adding intrinsic
+# drives apart two things that measured the same.
+_ZOOM_GEOMETRY_WINDOW_DB = (-15.73, -12.57)   # measured, five populations
+_ZOOM_GEOMETRY_BEST_BAR_DB = -14.15           # 5/5 correct, NOT shipped
+_ZOOM_GEOMETRY_MARGIN_DB = 1.58               # falsifier required >= 2.0
+_ZOOM_GEOMETRY_VALIDATED = False              # therefore UNMEASURED, never failed
 
 ZOOM_NATURAL_SCALE = {
     "SmoothPush":    1.22,
@@ -6157,30 +6174,17 @@ def edit(source_key: str, brief: str,
                 _sg["geometry_window"] = [round(_w0, 3),
                                           round(min(_dur_s, _w0 + 0.15), 3)]
                 _sg["scale_fit_delta_db"] = _gd
-                # None is UNMEASURED. Only strong evidence of a passthrough
-                # fails; a false failure sends someone to edit a component that
-                # works.
-                # UNMEASURED, not judged. There is no validated bar (see the
-                # five-population table above), so the delta is RECORDED and
-                # the verdict is None. A check with no validated threshold that
-                # fails anyway is worse than one that abstains: it sends someone
-                # to edit a working component.
-                _gch = None
+                # NO VERDICT. There is no validated bar, so geometry_ok is
+                # None — UNMEASURED — for every zoom, and nothing is refused on
+                # it. None here does NOT mean "passed": it means the question
+                # was not answered, and it is recorded and PRINTED as such so
+                # the absence cannot read as a green.
                 _gdb = _gd
                 _sg["geometry_psnr_db"] = _gdb
-                _sg["geometry_ok"] = _gch
-                # NO FAILURE BRANCH. It was removed rather than left unreachable
-                # behind `if _gch is False`, because dead code that references a
-                # deleted constant is a crash waiting for whoever revives it —
-                # pyflakes flagged exactly that. The delta is still MEASURED and
-                # recorded in geometry_psnr_db; what is gone is the verdict.
-                #
-                # ClipRenderer mounts a zoom only under `clip.zoomEffect &&
-                # clip.src`, so without the pre-extracted file it renders
-                # un-zoomed and says nothing. That failure mode is real and is
-                # now UNGUARDED — recorded here so the gap is known rather than
-                # forgotten. Round 40's zoom loss was a 404 on that very file,
-                # and execute_plan_skip plus ruled_not_built do catch that one.
+                _sg["geometry_ok"] = None
+                _sg["geometry_verdict"] = "UNMEASURED"
+                led.setdefault("zoom_geometry_unmeasured", 0)
+                led["zoom_geometry_unmeasured"] += 1
                 _good.append(_sg)
 
             if _good:
@@ -9161,6 +9165,10 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
             f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
             for c in _cps))
+    _zgu = (r.get("ledger") or {}).get("zoom_geometry_unmeasured")
+    if _zgu:
+        print(f"  ZOOM GEOMETRY   : {_zgu} placement(s) UNMEASURED — no validated "
+              f"bar exists; the scale-fit delta is recorded, not judged")
     _rf = (r.get("ledger") or {}).get("reel_frames")
     if _rf is not None:
         print(f"  REEL            : {_rf} frames "
