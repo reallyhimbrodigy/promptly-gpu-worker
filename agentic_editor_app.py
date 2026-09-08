@@ -1583,7 +1583,8 @@ KNOWLEDGE_TOOLS = [{
                                                     "is a real answer",
                                      "items": {"type": "string",
                                                "enum": ["card", "text", "sfx",
-                                                        "zoom", "none"]}},
+                                                        "zoom", "transition",
+                                                        "none"]}},
                                  "cut": {"type": "string", "enum": ["keep", "cut"]},
                                  "text_content": {
                                      "type": "string",
@@ -1650,8 +1651,17 @@ KNOWLEDGE_TOOLS = [{
     "input_schema": {"type": "object",
                      "properties": {
                          "beat": {"type": "integer", "description": "the beat index"},
+                         # THE SAME FAMILIES AS rule_all_beats. This offered
+                         # only card|text|none while the main surface offered
+                         # six — and it is a LIVE repair path (_REPAIR_ONLY
+                         # gates it until execute_plan has run, it does not
+                         # remove it), so a repair could silently not reach
+                         # sfx, zoom or transition. Found by the surface
+                         # assert the moment it started comparing the two
+                         # lists instead of grepping one stale spelling.
                          "treatment": {"type": "string",
-                                       "enum": ["card", "text", "none"]},
+                                       "enum": ["card", "text", "sfx", "zoom",
+                                                "transition", "none"]},
                          "cut": {"type": "string", "enum": ["keep", "cut"]},
                          "why": {"type": "string",
                                  "description": "about THIS beat's content"}},
@@ -2520,7 +2530,8 @@ ZOOM_RAMP_FRACTION = 0.35
 # imports and the container already mounts it, so "the homes tile the registry"
 # is an equality against production's own list rather than against a second
 # hand-maintained one that can fall behind silently.
-from type_registries import VALID_ZOOM_TYPES
+from type_registries import (VALID_ZOOM_TYPES, VALID_TRANSITION_TYPES,
+                             VALID_TIGHT_CUT_OVERLAYS)
 
 # ── THE SEVEN ZOOMS, AS PRODUCTION HOUSES THEM ──────────────────────────────
 #
@@ -2660,6 +2671,168 @@ assert set(ZOOM_TYPE_FIGHTS) == set(VALID_ZOOM_TYPES)
 # and nothing errors.
 assert set(ZOOM_PEAK_REACH_MS) == set(VALID_ZOOM_TYPES), (
     "a type with no peak-reach cannot be landed on the word")
+
+
+# ── THE NINE TRANSITIONS AND THE TWO TIGHT-CUT OVERLAYS ─────────────────────
+#
+# Production's, value for value; cert_production_table_parity.py reads
+# `git show zero-reject-routing:handler.py` and fails on drift.
+#
+# THE CORPUS RATE ON THE SPEECH ROUTE IS 0.00/25s. That is not a gap to close by
+# placing more — it is what shipped output looks like, and the sizing pass said
+# so: at reference density this family costs nothing because reference density
+# is zero. It exists so that a seam which GENUINELY turns can be dressed, and
+# the vibe scopes the register rather than deciding whether to dress at all.
+TRANSITION_FPS = 60
+TRANSITION_DURATION_FRAMES = {
+    "DipToBlack":    21,   # ->  350ms
+    "ZoomThrough":   30,   # ->  500ms
+    "CardSwipe":     36,   # ->  600ms
+    "StepPush":      36,   # ->  600ms
+    "SlideOver":     42,   # ->  700ms
+    "ShutterFlash":  42,   # ->  700ms
+    "CrossfadeZoom": 48,   # ->  800ms
+    "LightLeak":     48,   # ->  800ms  (a TIGHT-CUT OVERLAY, not a transition)
+    "Stack":         60,   # -> 1000ms
+    "FilmStrip":     72,   # -> 1200ms
+}
+TRANSITION_NATURAL_DURATION_MS = {}
+for _tt0, _tf0 in TRANSITION_DURATION_FRAMES.items():
+    if (int(_tf0) * 1000) % TRANSITION_FPS != 0:
+        raise ValueError(f"transition {_tt0}: {_tf0} frames is not ms-exact at "
+                         f"{TRANSITION_FPS}fps")
+    TRANSITION_NATURAL_DURATION_MS[_tt0] = (int(_tf0) * 1000) // TRANSITION_FPS
+del _tt0, _tf0
+
+# TIGHT-CUT OVERLAYS ARE NOT TRANSITIONS. They are punctuation painted OVER a
+# hard cut — the cut plays straight, audio and time untouched — so they consume
+# NO footage and need no room. ShutterFlash is in both registries: the heavy
+# form is a transition that halts the video, the light form is an accent over a
+# cut that still plays. Reading the duration table as "ten transitions" is the
+# mistake this comment exists to prevent; LightLeak is in it and is not one.
+TIGHT_CUT_OVERLAY_MS = 180
+
+# ZERO-HANDLE CLASS. These render one clip at a time and swap under a cover
+# graphic, or squash both under a generated overlay at peak, so they work at a
+# 0ms gap where every other type needs handle frames on both sides.
+TRANSITION_ZERO_HANDLE = frozenset({"LightLeak", "FilmStrip", "ShutterFlash"})
+
+# FITS / FIGHTS, lifted from production's own per-transition teach.
+TRANSITION_FITS = {
+    "CardSwipe":     ("casual", "vlog", "viral", "pivot"),
+    "ZoomThrough":   ("viral", "high-energy", "punchy", "payoff", "fast"),
+    "SlideOver":     ("educational", "explainer", "corporate", "chaptered",
+                      "clean", "neutral", "professional"),
+    "Stack":         ("app", "phone", "ios", "demo", "product"),
+    "CrossfadeZoom": ("story", "cinematic", "documentary", "sentimental",
+                      "emotional", "reflective"),
+    "ShutterFlash":  ("viral", "high-energy", "punchy", "surprise", "stat"),
+    "StepPush":      ("corporate", "educational", "business", "training",
+                      "how-to"),
+    "FilmStrip":     ("showcase", "creative", "portfolio", "collection"),
+    "DipToBlack":    ("cinematic", "story", "professional", "documentary",
+                      "act", "chapter"),
+    "LightLeak":     ("story", "emotional", "nostalgic", "reflective",
+                      "realization", "callback"),
+}
+TRANSITION_FIGHTS = {
+    "CardSwipe":     ("corporate", "cinematic", "formal", "polished"),
+    "ZoomThrough":   ("calm", "corporate", "cinematic", "educational"),
+    "SlideOver":     (),        # too plain to fight anything
+    "Stack":         (),        # gated by SUBJECT, not by tone
+    "CrossfadeZoom": ("viral", "punchy", "high-energy"),
+    "ShutterFlash":  ("calm", "professional", "cinematic"),
+    "StepPush":      ("casual", "viral", "cinematic"),
+    "FilmStrip":     ("corporate", "formal"),
+    "DipToBlack":    ("casual", "viral", "fast"),
+    "LightLeak":     ("corporate", "hype", "tech"),
+}
+
+# ── IMPORT-TIME EXACTNESS ───────────────────────────────────────────────────
+assert set(VALID_TRANSITION_TYPES) <= set(TRANSITION_DURATION_FRAMES), (
+    "every transition in the registry needs a natural duration: "
+    f"{sorted(set(VALID_TRANSITION_TYPES) - set(TRANSITION_DURATION_FRAMES))} "
+    f"have none")
+assert set(VALID_TIGHT_CUT_OVERLAYS) <= set(TRANSITION_DURATION_FRAMES)
+assert set(TRANSITION_FITS) == set(TRANSITION_DURATION_FRAMES), (
+    "every type needs a fitness clause or the vibe cannot choose it")
+assert set(TRANSITION_FIGHTS) == set(TRANSITION_DURATION_FRAMES)
+# LightLeak must NOT be offerable as a transition — it is an overlay, and the
+# registry is the authority on which is which.
+assert "LightLeak" not in VALID_TRANSITION_TYPES, (
+    "LightLeak is a tight-cut overlay; offering it as a transition would let a "
+    "cover graphic be asked to carry a picture change")
+
+
+def transition_room_ms(spans, k):
+    """Footage available at the seam AFTER span `k`, in ms.
+
+    A transition of duration D overlaps A's tail and B's head, so BOTH sides
+    must carry D. The room is therefore the SHORTER of the two, not the gap
+    between them and not their sum — offering a 1200ms FilmStrip across a 400ms
+    span would ask the renderer for frames that do not exist.
+    """
+    if not spans or k < 0 or k + 1 >= len(spans):
+        return 0.0
+    a0, a1 = float(spans[k][0]), float(spans[k][1])
+    b0, b1 = float(spans[k + 1][0]), float(spans[k + 1][1])
+    return max(0.0, min(a1 - a0, b1 - b0) * 1000.0)
+
+
+def transitions_fitting(room_ms, types=None):
+    """The types whose natural duration fits the measured room, shortest first.
+
+    PRODUCTION'S RULE: a seam is offered only what it can actually hold. The
+    alternative — offering the whole vocabulary and letting the renderer clamp —
+    is how a 1200ms strip becomes a 300ms smear that reads as a glitch.
+    """
+    _pool = set(types if types is not None else VALID_TRANSITION_TYPES)
+    return sorted(
+        (t for t in _pool
+         if TRANSITION_NATURAL_DURATION_MS.get(t, 10 ** 9) <= float(room_ms or 0)),
+        key=lambda t: (TRANSITION_NATURAL_DURATION_MS[t], t))
+
+
+def pick_transition(room_ms, vibe, types=None):
+    """The transition for this seam, or None when the seam cannot hold one.
+
+    None IS A REAL ANSWER and the caller must treat it as one. The corpus rate
+    on the speech route is 0.00/25s: most seams are meant to play straight, and
+    a family that always finds something to place has stopped reading the room.
+    """
+    fits = transitions_fitting(room_ms, types)
+    if not fits:
+        return None
+    v = " ".join(str(vibe or "").lower().replace("/", " ").split())
+    if not v:
+        return fits[0]
+    scored = []
+    for i, t in enumerate(fits):
+        hits = sum(1 for f in TRANSITION_FITS.get(t, ()) if f in v)
+        against = sum(1 for f in TRANSITION_FIGHTS.get(t, ()) if f in v)
+        scored.append((-(hits - against), i, t))
+    scored.sort()
+    return scored[0][2]
+
+
+def pick_tight_cut_overlay(vibe):
+    """The lighter weight: punctuation painted OVER a cut that plays straight.
+
+    Needs NO room — it consumes no footage — so it is what a seam too tight for
+    any transition can still take. Returns None when the vibe fights both, which
+    is a real answer: an unaccented hard cut is the default in this vocabulary,
+    not a failure to place something.
+    """
+    v = " ".join(str(vibe or "").lower().replace("/", " ").split())
+    if not v:
+        return None
+    best, best_score = None, 0
+    for t in sorted(VALID_TIGHT_CUT_OVERLAYS):
+        hits = sum(1 for f in TRANSITION_FITS.get(t, ()) if f in v)
+        against = sum(1 for f in TRANSITION_FIGHTS.get(t, ()) if f in v)
+        if hits - against > best_score:
+            best, best_score = t, hits - against
+    return best
 
 
 def zoom_natural_ms(zoom_type):
@@ -2811,7 +2984,7 @@ def caption_pages(kept_words, words_per_page=3):
 
 
 def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=(),
-                        text_overlays=()):
+                        text_overlays=(), tight_cut_overlays=()):
     """The PromptlyOverlay input for a CAPTIONS-ONLY alpha pass.
 
     PromptlyOverlay already renders "captions + motion graphics + text overlays
@@ -2845,6 +3018,12 @@ def caption_overlay_plan(pages, style, out_frames, fps=30, keywords=(),
         # path: production's own caption_match overlay rather than a DejaVu
         # drawtext filter.
         "motionGraphics": [], "textOverlays": list(text_overlays or []),
+        # TIGHT-CUT OVERLAYS RIDE THIS PASS TOO, and they are the clearest case
+        # for it: they are punctuation painted OVER a cut that plays straight —
+        # audio and time untouched — so they consume no footage, need no room,
+        # and cost ZERO extra frames on a layer that already spans the output.
+        # A seam too tight for any of the nine transitions can still be accented.
+        "tightCutOverlays": list(tight_cut_overlays or []),
         "outro": "none",
         "caption": {
             "style": str(style),
@@ -3255,7 +3434,7 @@ _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
 # with a different cost model. It is not a gap to be closed later in this lane —
 # when generated footage arrives it is a NEW family with its own tool, gated on
 # tier and priced per second.
-_TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "none"]
+_TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "transition", "none"]
 
 
 def _assert_treatment_surface_agrees(module_src: str) -> None:
@@ -3280,6 +3459,32 @@ def _assert_treatment_surface_agrees(module_src: str) -> None:
             f"{len(stale)} prose site(s) still offer only card|text|none while "
             f"the schema offers {_TREATMENT_FAMILIES}. The agent reads the "
             f"prose; a narrower list there silently removes families.")
+    # ── AND THE SCHEMA'S ENUM MUST EQUAL THE DECLARED FAMILY LIST ───────────
+    # The grep above only knows ONE stale spelling. Adding `transition` to the
+    # tool schema while _TREATMENT_FAMILIES still listed five passed it
+    # cleanly — the same defect this function exists for, in the direction it
+    # was not written to look. Compare the two surfaces instead of hunting a
+    # remembered string.
+    import ast as _ast
+    for _n in _ast.walk(_ast.parse(module_src)):
+        if not (isinstance(_n, _ast.Dict) and any(
+                isinstance(k, _ast.Constant) and k.value == "enum" for k in _n.keys)):
+            continue
+        for _k, _v in zip(_n.keys, _n.values):
+            if not (isinstance(_k, _ast.Constant) and _k.value == "enum"
+                    and isinstance(_v, _ast.List)):
+                continue
+            _vals = [e.value for e in _v.elts if isinstance(e, _ast.Constant)]
+            if "none" not in _vals or "card" not in _vals:
+                continue        # some other enum (zoom_arc, cut, sfx yes/no)
+            if set(_vals) != set(_TREATMENT_FAMILIES):
+                raise AssertionError(
+                    f"the treatment enum offers {sorted(set(_vals))} while "
+                    f"_TREATMENT_FAMILIES declares "
+                    f"{sorted(set(_TREATMENT_FAMILIES))}. Every consumer that "
+                    f"reads the declared list — the spec, the mix report, the "
+                    f"prose — silently disagrees with what the agent can "
+                    f"actually rule.")
 
 
 def _assert_constraints_intact(system_text: str) -> None:
@@ -4334,7 +4539,7 @@ def edit(source_key: str, brief: str,
         beats = led.get("beats") or []
         by_i = {b["i"]: b for b in beats}
         steps, built = [], {"cut": 0, "text": 0, "card": 0, "zoom": 0,
-                            "sfx": 0}
+                            "sfx": 0, "transition": 0}
         # EVERY SKIP RECORDS ITS REASON. The aggregate gap (ruled 3, built 1)
         # says something was dropped; it does not say WHY, and three of the
         # drops here were bare `continue`s. A count without a reason is the same
@@ -4432,9 +4637,96 @@ def edit(source_key: str, brief: str,
         # Captions on a visual beat source would ask libass to render an empty
         # file, which is what `words` — not `items` — has always been the right
         # test for.
+        # 3c. SEAM DRESSING — the nine transitions and the two tight-cut overlays.
+        #
+        # THE SEAM IS WHERE THE EDIT JOINS TWO NON-ADJACENT SOURCE SPANS. A beat
+        # ruled 'transition' means "the cut ENTERING this beat is a genuine turn",
+        # which is judgement; the room at that seam and which type fits it are
+        # measured and derived here.
+        #
+        # DURATION-PRESERVING BY CONSTRUCTION. Production plans transitions
+        # BEFORE the render, so a type that consumes handle frames simply makes
+        # the timeline shorter and everything downstream is timed against the
+        # result. This lane has already cut, captioned, zoomed and timed the sfx
+        # against `cur`, so a family that shortened the video here would desync
+        # every one of them. The segment therefore occupies a window that
+        # already exists — [seam, seam+D] — and REPLACES the picture in it while
+        # audio and duration are untouched. Sizes and offsets are chosen so the
+        # window ENDS on the true content.
+        _seams = []
+        _cum = 0.0
+        for _si in range(len(merged) - 1):
+            _cum += merged[_si][1] - merged[_si][0]
+            _seams.append({"i": _si, "out_s": round(_cum, 3),
+                           "room_ms": transition_room_ms(merged, _si)})
+        # A seam belongs to the beat it leads INTO: the first kept beat whose
+        # output start is at that junction.
+        _seam_at = {}
+        for _sm in _seams:
+            _seam_at[round(_sm["out_s"], 2)] = _sm
+
+        # SELECTION ONLY HERE. The tight-cut overlays must be chosen BEFORE the
+        # alpha pass renders, because they RIDE it — they are painted over a cut
+        # that plays straight, so they cost no render of their own. Choosing them
+        # after that pass would mean a second alpha render to carry them, which
+        # is the doubled work this port keeps deleting.
+        _tr_choices = []
+        for v in vs:
+            b = by_i.get(v.get("beat"))
+            tr = [str(t).lower() for t in (v.get("treatment") or [])]
+            if b is None:
+                _skips.append({"family": "transition", "beat": v.get("beat"),
+                               "why": "verdict names a beat index that does not exist"})
+                continue
+            if "transition" not in tr:
+                continue          # not ruled for this family — filtering, not a drop
+            _bt = src_to_out(b["t_start"], merged)
+            if _bt is None:
+                _skips.append({"family": "transition", "beat": v.get("beat"),
+                               "why": "beat was cut, so it has no output time"})
+                continue
+            _sm = _seam_at.get(round(_bt, 2))
+            if _sm is None:
+                # A BEAT WITH NO SEAM IN FRONT OF IT. Nothing was cut here, so
+                # the picture does not change and there is nothing to dress —
+                # the costume production's teach warns about.
+                _skips.append({"family": "transition", "beat": v.get("beat"),
+                               "why": f"no cut enters this beat (output {_bt:.2f}s) "
+                                      f"— the picture does not change, so there "
+                                      f"is no seam to dress"})
+                continue
+            _ttype = pick_transition(_sm["room_ms"], brief)
+            if _ttype is not None:
+                _tr_choices.append({"kind": "transition", "beat": v.get("beat"),
+                                    "type": _ttype, "seam": _sm["i"],
+                                    "out_s": _sm["out_s"],
+                                    "room_ms": round(_sm["room_ms"])})
+                continue
+            # THE LIGHTER WEIGHT. An overlay consumes no footage and needs no
+            # room, so a seam too tight for any transition can still be accented.
+            _ov = pick_tight_cut_overlay(brief)
+            if _ov is None:
+                _skips.append({"family": "transition", "beat": v.get("beat"),
+                               "why": f"seam has {_sm['room_ms']:.0f}ms of room, the "
+                                      f"shortest transition needs "
+                                      f"{min(TRANSITION_NATURAL_DURATION_MS[t] for t in VALID_TRANSITION_TYPES)}ms, "
+                                      f"and the vibe fits neither overlay — the "
+                                      f"cut plays straight"})
+                continue
+            _tr_choices.append({"kind": "overlay", "beat": v.get("beat"),
+                                "type": _ov, "seam": _sm["i"],
+                                "out_s": _sm["out_s"],
+                                "room_ms": round(_sm["room_ms"])})
+        led["transition_plan"] = {
+            "seams_available": len(_seams),
+            "rooms_ms": [round(x["room_ms"]) for x in _seams],
+            "chosen": [dict(c) for c in _tr_choices],
+        }
+
         _want_caps = bool(words)
         _cap_words = led.get("kept_words_out") or []
         _cap_pages, _cap_style = [], None
+        _tc_overlays = []
         # ── TEXT RIDES THE ALPHA PASS, NOT AN ffmpeg BURN ───────────────────
         # build_overlays drew these with drawtext and re-encoded the whole video
         # to do it: 32.20s for ten items over a 23.17s output on round 33, over
@@ -4469,6 +4761,14 @@ def edit(source_key: str, brief: str,
             _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
             _cap_pages = (caption_pages(_cap_words, 3)
                           if (_want_caps and _cap_words) else [])
+            # CENTRED ON THE SEAM, in the alpha layer's own frame clock.
+            _tc_overlays = [
+                {"type": _c2["type"],
+                 "fromFrame": max(0, int(round(
+                     (_c2["out_s"] - TIGHT_CUT_OVERLAY_MS / 2000.0) * _cap_fps))),
+                 "durationInFrames": max(1, int(round(
+                     TIGHT_CUT_OVERLAY_MS / 1000.0 * _cap_fps)))}
+                for _c2 in _tr_choices if _c2["kind"] == "overlay"]
             _text_overlays = [
                 {"variant": "caption_match",
                  "fromFrame": max(0, int(round(float(_i5["t_start"]) * _cap_fps))),
@@ -4491,7 +4791,8 @@ def edit(source_key: str, brief: str,
             with open(_cap_plan, "w") as fh:
                 json.dump(caption_overlay_plan(_cap_pages, _cap_style,
                                                _cap_frames, fps=_cap_fps,
-                                               text_overlays=_text_overlays), fh)
+                                               text_overlays=_text_overlays,
+                                               tight_cut_overlays=_tc_overlays), fh)
             _cap_t0 = time.time()
             _cap_res = render_remotion_batch([{
                 "id": "captions", "composition": "PromptlyOverlay",
@@ -4509,6 +4810,7 @@ def edit(source_key: str, brief: str,
                 "style": _cap_style, "fps": _cap_fps,
                 "pages": len(_cap_pages), "frames": _cap_frames,
                 "text_overlays": len(_text_overlays),
+                "tight_cut_overlays": len(_tc_overlays),
                 "ok": bool(_cj.get("ok")),
                 "paint_ms": _cj.get("ms"),
                 "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
@@ -4954,6 +5256,154 @@ def edit(source_key: str, brief: str,
                                       "geometry_psnr_db": _sg.get("geometry_psnr_db")})
 
         _mark(led, "build_zoom", _tz0)
+        # ── 3d. SEAM DRESSING, RENDERED ────────────────────────────────────
+        # Selection happened before the alpha pass (the overlays ride it). This
+        # is the half that costs frames: the nine transitions, rendered as micro
+        # segments over the picture as it now stands — after the zoom, so a
+        # dressed seam shows the finished frame rather than the raw cut.
+        _tt1 = time.time()
+        _tr_jobs, _tr_segs = [], []
+        for _c3 in [c for c in _tr_choices if c["kind"] == "transition"]:
+            _ttype = _c3["type"]
+            _d_ms = TRANSITION_NATURAL_DURATION_MS[_ttype]
+            _d_s = _d_ms / 1000.0
+            _w0 = _c3["out_s"]
+            _w1 = min(float(_out_dur or 0), _w0 + _d_s)
+            if _w1 - _w0 < _d_s * 0.9:
+                _skips.append({"family": "transition", "beat": _c3["beat"],
+                               "why": f"{_ttype} needs {_d_s:.2f}s and only "
+                                      f"{_w1 - _w0:.2f}s of output remains"})
+                continue
+            # PER-LAYER PRE-EXTRACTION. TransitionSpec's own note: a transition
+            # reads ONE file at TWO positions, which <Video> thrashes on
+            # (+26% measured); one small file per layer makes it -30%. Absent,
+            # the renderer falls back to the whole source — slower, but unlike
+            # the zoom case NOT a silent no-op.
+            _k = len(_tr_jobs)
+            _asrc, _bsrc = f"tA{_k}.mp4", f"tB{_k}.mp4"
+            _ok2 = True
+            for _nm2, _st in ((_asrc, max(0.0, _w0 - _d_s)), (_bsrc, _w0)):
+                _ex2 = subprocess.run(
+                    ["ffmpeg", "-y", "-v", "error", "-ss", f"{_st:.3f}",
+                     "-t", f"{_d_s:.3f}", "-i", os.path.join("/work", cur),
+                     "-an", "-c:v", "libx264", "-crf", "16", "-preset", "veryfast",
+                     "-pix_fmt", "yuv420p", os.path.join(_zpub, _nm2)],
+                    capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
+                if _ex2.returncode != 0:
+                    _skips.append({"family": "transition", "beat": _c3["beat"],
+                                   "why": f"seam pre-extract failed: "
+                                          f"{(_ex2.stderr or '')[-120:]}"})
+                    _ok2 = False
+                    break
+            if not _ok2:
+                continue
+            _nf = max(2, int(round((_w1 - _w0) * 30)))
+            _tplan = f"/work/micro-trans{_k}.json"
+            with open(_tplan, "w") as fh:
+                json.dump({"input": {
+                    "sourceUrl": _asrc, "fps": 30, "width": 1080, "height": 1920,
+                    "totalDurationInFrames": _nf,
+                    "segments": [{
+                        "type": "transition", "outputStartFrame": 0,
+                        "durationInFrames": _nf,
+                        "transition": {
+                            "afterClipIndex": _c3["seam"], "type": _ttype,
+                            "durationInFrames": _nf,
+                            "clipAStartFromFrames": 0, "clipBStartFromFrames": 0,
+                            "clipAPlaybackRate": 1.0, "clipBPlaybackRate": 1.0,
+                            "clipASrc": _asrc, "clipBSrc": _bsrc,
+                        }}],
+                }}, fh)
+            _tr_jobs.append({"id": f"trans{_k}", "composition": "PromptlyMicroSegments",
+                             "propsFile": _tplan, "out": f"/work/trans{_k}.mp4",
+                             "expect_frames": _nf})
+            _tr_segs.append({"id": f"trans{_k}", "beat": _c3["beat"],
+                             "type": _ttype, "out": f"/work/trans{_k}.mp4",
+                             "t0": round(_w0, 3), "t1": round(_w1, 3),
+                             "frames": _nf, "room_ms": _c3["room_ms"]})
+
+        if _tr_jobs:
+            _tres = render_remotion_batch(_tr_jobs, env=_SUBPROCESS_ENV, timeout=1800)
+            led["transition_render"] = {
+                "jobs": len(_tr_jobs),
+                "bundle_ms": (_tres.get("_batch") or {}).get("bundle_ms"),
+            }
+            _tgood = []
+            for _sg in _tr_segs:
+                _jr = _tres.get(_sg["id"]) or {}
+                if not _jr.get("ok"):
+                    _skips.append({"family": "transition", "beat": _sg["beat"],
+                                   "why": f"{_sg['type']} render failed: "
+                                          f"{str(_jr.get('error'))[:140]}"})
+                    continue
+                if _jr.get("frames_ok") is False:
+                    fail("render_frames_mismatch",
+                         f"transition {_sg['type']}: asked for {_sg['frames']} "
+                         f"frames, the file holds {_jr.get('frames_actual')}")
+                    _skips.append({"family": "transition", "beat": _sg["beat"],
+                                   "why": "rendered frame count did not match the plan"})
+                    continue
+                _tgood.append(_sg)
+            if _tgood:
+                if cur == "transitioned.mp4":
+                    fail("chain_writes_its_own_input",
+                         "the transition composite would read and write "
+                         "/work/transitioned.mp4")
+                    raise RuntimeError("transition composite input == output")
+                _tparts, _tlast = [], "0:v"
+                for _k2, _sg in enumerate(_tgood):
+                    _dur2 = _sg["t1"] - _sg["t0"]
+                    _tparts.append(
+                        f"[{_k2 + 1}:v]trim=start=0:end={_dur2:.3f},"
+                        f"setpts=PTS-STARTPTS+{_sg['t0']:.3f}/TB[tc{_k2}]")
+                    _tparts.append(
+                        f"[{_tlast}][tc{_k2}]overlay=0:0:enable='between(t,"
+                        f"{_sg['t0']:.3f},{_sg['t1']:.3f})'[tm{_k2}]")
+                    _tlast = f"tm{_k2}"
+                _targs = ["ffmpeg", "-y", "-v", "error",
+                          "-i", os.path.join("/work", cur)]
+                for _sg in _tgood:
+                    _targs += ["-i", _sg["out"]]
+                _targs += ["-filter_complex", ";".join(_tparts),
+                           "-map", f"[{_tlast}]", "-map", "0:a?",
+                           "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                           "-c:a", "copy", "/work/transitioned.mp4"]
+                _tc2 = subprocess.run(_targs, capture_output=True, text=True,
+                                      timeout=1800, env=_SUBPROCESS_ENV)
+                if _tc2.returncode != 0 or not os.path.exists("/work/transitioned.mp4"):
+                    _why4 = f"transition composite failed: {(_tc2.stderr or '')[-140:]}"
+                    for _sg in _tgood:
+                        _skips.append({"family": "transition", "beat": _sg["beat"],
+                                       "why": _why4})
+                else:
+                    _t_before = os.path.join("/work", cur)
+                    _tctrl = _free_ctrl([(s4["t0"], s4["t1"]) for s4 in _tgood],
+                                        _out_dur)
+                    for _sg in _tgood:
+                        _record_effect("transition", _t_before,
+                                       "/work/transitioned.mp4",
+                                       _sg["t0"], _sg["t1"],
+                                       note=f"{_sg['type']}@{_sg['room_ms']}ms",
+                                       ctrl_t0=_tctrl)
+                    cur = "transitioned.mp4"
+                    built["transition"] = built.get("transition", 0) + len(_tgood)
+                    for _sg in _tgood:
+                        steps.append({"step": "transition",
+                                      "t": [_sg["t0"], _sg["t1"]],
+                                      "type": _sg["type"],
+                                      "room_ms": _sg["room_ms"]})
+        # THE OVERLAYS COST NO RENDER OF THEIR OWN — they were painted into the
+        # alpha layer captions and text already pay for. Counted here because
+        # that pass has already carried them.
+        if _tc_overlays:
+            built["transition"] = built.get("transition", 0) + len(_tc_overlays)
+            for _o in [c for c in _tr_choices if c["kind"] == "overlay"]:
+                steps.append({"step": "transition",
+                              "t": [_o["out_s"], _o["out_s"]],
+                              "type": _o["type"], "room_ms": _o["room_ms"],
+                              "tight_cut_overlay": True})
+        _mark(led, "build_transitions", _tt1)
+
         _tcd0 = time.time()
         # 3b. CARDS — a family the agent could RULE and the harness could not
         # BUILD. execute_plan handled cut, text, zoom and sfx; card had no
@@ -5109,9 +5559,10 @@ def edit(source_key: str, brief: str,
         ruled = {"text": sum(1 for v in vs if "text" in [str(t).lower() for t in (v.get("treatment") or [])]),
                  "zoom": sum(1 for v in vs if "zoom" in [str(t).lower() for t in (v.get("treatment") or [])]),
                  "card": sum(1 for v in vs if "card" in [str(t).lower() for t in (v.get("treatment") or [])]),
+                 "transition": sum(1 for v in vs if "transition" in [str(t).lower() for t in (v.get("treatment") or [])]),
                  "sfx": sum(1 for v in vs if str(v.get("sfx", "no")).lower() == "yes")}
         gap = {k: [ruled.get(k, 0), built.get(k, 0)]
-               for k in ("text", "zoom", "sfx", "card")
+               for k in ("text", "zoom", "sfx", "card", "transition")
                if ruled.get(k, 0) != built.get(k, 0)}
         # ── THE ACCOUNTING MUST BALANCE ──────────────────────────────────────
         # ruled = built + skipped, per family. Anything else means a ruling left
@@ -5127,7 +5578,7 @@ def edit(source_key: str, brief: str,
         for _s2 in _skips:
             _sk_by_fam[_s2["family"]] = _sk_by_fam.get(_s2["family"], 0) + 1
         _unbalanced = {}
-        for _f in ("text", "zoom", "sfx", "card"):
+        for _f in ("text", "zoom", "sfx", "card", "transition"):
             _r, _b, _s3 = ruled.get(_f, 0), built.get(_f, 0), _sk_by_fam.get(_f, 0)
             if _r != _b + _s3:
                 _unbalanced[_f] = {"ruled": _r, "built": _b, "skipped": _s3,
@@ -5159,7 +5610,7 @@ def edit(source_key: str, brief: str,
         #
         # zoom and sfx were already correct: those emit one step per ruling.
         _TYPE = {"text": "overlay_text", "zoom": "emphasis", "sfx": "sfx",
-                 "card": "card"}
+                 "card": "card", "transition": "transition"}
         for _s in steps:
             _k = _s.get("step")
             if _k not in _TYPE:

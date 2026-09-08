@@ -156,6 +156,9 @@ _expected_ports = {
     "ZOOM_NATURAL_DURATION_MS": "the duration each move was designed for",
     "ZOOM_NATURAL_SCALE": "the perceptible-baseline scale per type",
     "ZOOM_ARC_HOMES": "arc position -> the types that may be offered there",
+    "TRANSITION_DURATION_FRAMES": "how much room each seam treatment needs",
+    "TRANSITION_NATURAL_DURATION_MS": "the derived ms view of the same",
+    "TRANSITION_FPS": "the grid those frame counts are declared on",
 }
 # _SFX_ATTACK_MS is deliberately NOT expected on the module: this lane reads it
 # from _asset_inventory.json, and adding a copy here would make three.
@@ -168,6 +171,12 @@ for _t2 in _expected_ports:
 # literal_eval sees an empty dict — and comparing against it reported the whole
 # ported table as drift. Derive it exactly as production does, from the source
 # of truth production derives it from.
+# Same loop-built shape as the zoom durations: handler.py declares
+# `TRANSITION_NATURAL_DURATION_MS = {}` and a for-loop fills it, so literal_eval
+# sees an empty dict. Derive it the way production does.
+_prod["TRANSITION_NATURAL_DURATION_MS"] = {
+    k: (int(v) * 1000) // (_prod.get("TRANSITION_FPS") or 60)
+    for k, v in (_prod.get("TRANSITION_DURATION_FRAMES") or {}).items()}
 _prod["ZOOM_NATURAL_DURATION_MS"] = {
     k: (int(v) * 1000) // 60
     for k, v in (_prod.get("ZOOM_NATURAL_DURATION_FRAMES") or {}).items()}
@@ -279,6 +288,21 @@ try:
               _housed == set(TR.VALID_ZOOM_TYPES),
               f"housed {sorted(_housed)} vs registry "
               f"{sorted(TR.VALID_ZOOM_TYPES)}")
+    if hasattr(A, "TRANSITION_FITS"):
+        # LIGHTLEAK IS IN THE DURATION TABLE AND IS NOT A TRANSITION. It is a
+        # tight-cut overlay, and ShutterFlash is BOTH. Reading the ten-row table
+        # as "ten transitions" is the mistake this leg exists to catch.
+        check("every registry transition has a natural duration",
+              set(TR.VALID_TRANSITION_TYPES) <= set(A.TRANSITION_DURATION_FRAMES),
+              f"{sorted(set(TR.VALID_TRANSITION_TYPES) - set(A.TRANSITION_DURATION_FRAMES))} "
+              f"have none")
+        check("every tight-cut overlay has one too",
+              set(TR.VALID_TIGHT_CUT_OVERLAYS) <= set(A.TRANSITION_DURATION_FRAMES))
+        check("LightLeak is NOT offerable as a transition",
+              "LightLeak" not in TR.VALID_TRANSITION_TYPES,
+              "it is a cover graphic, not a picture change")
+        check("every type in the table carries a fitness clause",
+              set(A.TRANSITION_FITS) == set(A.TRANSITION_DURATION_FRAMES))
     if hasattr(A, "CAPTION_STYLE_FITS"):
         # "none" IS IN THE REGISTRY AND MUST NOT BE IN THE FITNESS TABLE. It is
         # a valid caption_style meaning NO CAPTIONS — the absence of a style,
@@ -314,7 +338,9 @@ _app_src = open(A.__file__, encoding="utf-8").read()
 _app_tree = ast.parse(_app_src)
 _called = {n.func.id for n in ast.walk(_app_tree)
            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
-for _fn in ("pick_zoom_type", "zoom_natural_ms", "pick_caption_style"):
+for _fn in ("pick_zoom_type", "zoom_natural_ms", "pick_caption_style",
+            "pick_transition", "pick_tight_cut_overlay",
+            "transition_room_ms", "alpha_pass_needed", "sfx_start_s"):
     if hasattr(A, _fn) and _fn not in _called:
         _dark.append(_fn)
 

@@ -30,9 +30,15 @@ for _n in TREE.body:
 # ── 1. the family vocabulary ────────────────────────────────────────────────
 fams = _top.get("_TREATMENT_FAMILIES")
 ok(fams is not None, "_TREATMENT_FAMILIES is gone")
+# SIX now: `transition` joined when the seam-dressing family was wired. The
+# count is asserted so a family cannot quietly leave, and the MEMBERS are
+# asserted so it cannot quietly change identity either.
+ok(set(fams or []) == {"card", "text", "sfx", "zoom", "transition", "none"},
+   f"the treatment families are {sorted(fams or [])}, not the six expected — "
+   f"a family that leaves this list stops being rulable while every other "
+   f"surface still mentions it")
 ok("cutaway" not in (fams or []), "cutaway is back in _TREATMENT_FAMILIES")
-ok(set(fams or []) == {"card", "text", "sfx", "zoom", "none"},
-   f"the family set changed: {fams}")
+
 
 ref = _top.get("REFERENCE_PER_25S") or {}
 ok("cutaway" not in ref,
@@ -265,6 +271,6 @@ if FAIL:
     for f in FAIL:
         print("  - " + f)
     sys.exit(1)
-print("ok smoke_five_families — 5 families, cutaway absent from tools/enums/"
+print("ok smoke_five_families — 6 families, cutaway absent from tools/enums/"
       "rates/rubric, unsupported class validated, terminal path breaks the loop "
       "and charges nothing")
