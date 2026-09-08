@@ -123,6 +123,129 @@ def _mg_claim_index():
 
 
 MG_CLAIM_INDEX = _mg_claim_index()
+
+# ── WHAT EACH COMPONENT ACTUALLY READS ──────────────────────────────────────
+#
+# DERIVED FROM THE COMPONENTS' OWN types.ts, never hand-written. Regenerated
+# and compared by cert_mg_prop_keys.py, so a component that changes its props
+# fails the cert instead of rendering blank in production.
+#
+# WHY THIS EXISTS. card_props started reaching the builder at 6073850. Before
+# that it was dropped at the boundary, so `_cprops` ALWAYS fell back to the
+# StatCard shorthand {value: hero, label: card_label} — which always carried
+# `value`, and always rendered. After it, whatever the agent sent is used
+# verbatim, and nothing checked the keys against the component.
+#
+# MEASURED LOCALLY, one still per arm, PromptlyOverlay frame 20:
+#   StatCard {"value":10000,"label":"FOLLOWERS"}   184,920 bytes — renders
+#   StatCard {"stat":10000,"caption":"FOLLOWERS"}   48,138 bytes — BLANK
+# Both exit 0. Both report a successful render. One is a transparent frame.
+#
+# `required` are the non-optional props; `declared` is everything the
+# interface names. A props object sharing NO key with `declared` is certainly
+# addressing a different component, which is the case that renders nothing.
+MG_PROP_KEYS = {
+    "AnnotationArrow": {"required": ["end", "start"],
+                        "declared": ["arrowheadSize", "color", "customPath", "end", "pathType", "seed", "start", "strokeWidth"]},
+    "BarRace":         {"required": [],
+                        "declared": ["accentColor", "bars", "maxValue", "mode", "textShadow", "valuePrefix", "valueSuffix", "width"]},
+    "ChatThread":      {"required": ["messages"],
+                        "declared": ["backgroundColor", "borderRadius", "header", "incomingColor", "incomingTextColor", "messages", "minHeight", "outgoingColor", "outgoingTextColor", "showHomeIndicator", "showStatusBar", "statusBarTime", "width"]},
+    "DropBanner":      {"required": ["title"],
+                        "declared": ["accentColor", "cardColor", "cardHeightPct", "count", "mutedColor", "points", "spokenColor", "subtitle", "subtitleColor", "title", "titleColor"]},
+    "DropCard":        {"required": ["title"],
+                        "declared": ["accentColor", "cardColor", "cardHeightPct", "labelColor", "mutedColor", "points", "railColor", "spokenColor", "steps", "subtitle", "subtitleColor", "title", "titleColor", "titleLead"]},
+    "EditorialQuote":  {"required": ["text"],
+                        "declared": ["accentColor", "author", "authorColor", "fontKey", "fontSize", "italic", "lineStagger", "maxWordsPerLine", "role", "showQuoteMark", "text", "textColor"]},
+    "IMessageBubble":  {"required": ["messageType", "platform", "text"],
+                        "declared": ["messageType", "platform", "status", "text", "typewriter"]},
+    "InstagramComment": {"required": ["comment", "platform", "timestamp", "username"],
+                        "declared": ["avatarColor", "avatarSrc", "comment", "initials", "likes", "platform", "timestamp", "username"]},
+    "MouseDrag":       {"required": ["label"],
+                        "declared": ["cardColor", "cardTextColor", "label", "regionHeight", "regionWidth", "showCursor"]},
+    "Notification":    {"required": ["notifications"],
+                        "declared": ["notifications", "platform"]},
+    "PillCluster":     {"required": [],
+                        "declared": ["accentColor", "accentEvery", "fontSize", "glass", "tags", "textColor", "textShadow", "width"]},
+    "PillMarquee":     {"required": ["pills"],
+                        "declared": ["accentColor", "colorMode", "edgeFade", "firstDirection", "fontKey", "fontSize", "gap", "glass", "hashtag", "paddingX", "paddingY", "palette", "pillColor", "pills", "rowGap", "rows", "speed", "textColor", "uppercase"]},
+    "PullQuote":       {"required": ["text"],
+                        "declared": ["accentColor", "align", "barColor", "blurIn", "fontKey", "fontSize", "highlightStyle", "highlightTextColor", "keywordColor", "keywordScale", "keywords", "maxWordsPerLine", "quoteMarkColor", "showQuoteMark", "text", "textColor", "textShadow", "uppercase", "wordReveal", "wordStagger"]},
+    "RankedList":      {"required": [],
+                        "declared": ["accentColor", "highlightTop", "items", "labelColor", "order", "rankFontSize", "textShadow", "valueColor", "width"]},
+    "RecordingFrame":  {"required": [],
+                        "declared": ["accentColor", "annotationFontSize", "annotations", "frameBorderColor", "scanLineColor", "scanLineCycle", "showFrame", "showScanLine", "textColor"]},
+    "Reticle":         {"required": [],
+                        "declared": ["accentColor", "armLength", "bracketColor", "label", "regionHeight", "regionWidth", "showCrosshair", "showScanline", "textShadow", "thickness"]},
+    "SectionDivider":  {"required": ["title"],
+                        "declared": ["accentColor", "align", "eyebrowColor", "fontKey", "label", "number", "numberColor", "scrimColor", "showRule", "showScrim", "showVignette", "textShadow", "title", "titleColor", "titleFontSize", "variant", "vignetteStrength"]},
+    "Stamp":           {"required": ["text"],
+                        "declared": ["color", "distress", "doubleRing", "entryScale", "fontKey", "fontSize", "impactFlash", "mark", "markColor", "rotation", "shockRing", "size", "style", "subtextBottom", "subtextTop", "text", "textColor", "textShadow"]},
+    "StatCard":        {"required": ["label", "value"],
+                        "declared": ["accentColor", "decimals", "fromValue", "label", "labelColor", "numberColor", "prefix", "suffix", "textShadow", "value"]},
+    "StepDivider":     {"required": ["title"],
+                        "declared": ["accentColor", "fontKey", "kicker", "kickerColor", "showCount", "showProgress", "step", "title", "titleColor", "titleFontSize", "totalSteps", "uppercase"]},
+    "StickyNotes":     {"required": ["notes"],
+                        "declared": ["noteFontFamily", "noteFontSize", "noteSize", "notes", "showFog", "topOffset"]},
+    "TikTokComment":   {"required": ["comment", "likes", "platform", "username"],
+                        "declared": ["avatarColor", "avatarSrc", "comment", "initials", "likes", "platform", "username"]},
+    "Timeline":        {"required": [],
+                        "declared": ["accentColor", "indexColor", "labelColor", "nodeSize", "rowGap", "steps", "textShadow", "trackColor", "width"]},
+    "TimelineRoadmap": {"required": [],
+                        "declared": ["accentColor", "firstSide", "indexColor", "labelColor", "nodeSize", "rowHeight", "steps", "sublabelColor", "textShadow", "trackColor", "width"]},
+    "TweetBubble":     {"required": ["handle", "name", "platform", "stats", "text"],
+                        "declared": ["avatarColor", "avatarSrc", "darkMode", "handle", "initials", "name", "platform", "stats", "text", "timestamp", "verified"]},
+}
+
+# NOT DERIVABLE, and therefore NOT VALIDATED — never silently treated as
+# "requires nothing", which would let exactly the blank render above through
+# for these four. ProgressBar declares a UNION (ProgressBarValueProps |
+# ProgressBarPercentProps) rather than one interface; the other three have no
+# types.ts under motion-graphics at all. The cert pins this set, so a
+# component that DROPS OUT of validation fails rather than going quiet.
+MG_PROPS_UNDERIVABLE = ["DeviceMockup", "EmojiCard", "EvidenceCard", "ProgressBar"]
+
+
+# ── THE SAME TABLE, WRITTEN FOR THE AGENT ───────────────────────────────────
+#
+# GENERATED FROM MG_PROP_KEYS, never typed by hand, so the shape the agent is
+# told matches the shape the builder enforces and the shape the component
+# declares — one chain, certed at both joints (cert_mg_prop_keys against
+# types.ts, smoke_card_props_taught against this string).
+#
+# WHY IT EXISTS. Round 40 built ZERO cards: the agent sent a camel-cased hero
+# key where StatCard reads `value`, my refusal correctly skipped all three, and
+# MG CATALOGUE had nothing to measure for the third round running. The refusal
+# was right and it is not the fix — "educate rather than validate" is the
+# standing law, and until now the agent was never TOLD any component's props.
+# card_props' description said only "in the shape its catalogue entry shows",
+# which costs a read_knowledge turn the agent does not spend.
+#
+# STYLING PROPS ARE EXCLUDED for the types that require nothing. Listing them
+# alphabetically put `accentColor` first for BarRace, which reads `bars` — that
+# would teach the agent to send a styled EMPTY component, a new way to render
+# nothing rather than a fix for the old one.
+_MG_STYLE_PROP = re.compile(
+    r"(color|shadow|fontsize|size|width|height|ratio|opacity|radius|spacing|"
+    r"gap|padding|margin|font|weight|align|mode|side|every|prefix|suffix|"
+    r"decimals|dark|verified|avatar|initials)", re.I)
+
+
+def _mg_props_teach():
+    out = []
+    for _t in sorted(MG_PROP_KEYS):
+        _v = MG_PROP_KEYS[_t]
+        if _v["required"]:
+            out.append("%s: %s" % (_t, "+".join(_v["required"])))
+        else:
+            _c = [p for p in _v["declared"] if not _MG_STYLE_PROP.search(p)][:4]
+            if _c:
+                out.append("%s: %s (all optional)" % (_t, "+".join(_c)))
+    return "; ".join(out)
+
+
+MG_PROPS_TEACH = _mg_props_teach()
+
 MG_CLAIM_LINES = "\n".join(f"  {k} — {v}" for k, v in sorted(MG_CLAIM_INDEX.items()))
 
 _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion"))
@@ -1931,11 +2054,18 @@ KNOWLEDGE_TOOLS = [{
                                          " for the full teach and each one's "
                                          "props shape.")},
                                  "card_props": {"type": "object",
-                                     "description": "the component's own props, "
-                                                    "in the shape its catalogue "
-                                                    "entry shows. A type whose "
-                                                    "props do not match renders "
-                                                    "empty."},
+                                     "description":
+                                         "the component's own props. A type "
+                                         "whose props do not match renders "
+                                         "EMPTY and is refused before the "
+                                         "render, so use these exact key "
+                                         "names — "
+                                         + MG_PROPS_TEACH
+                                         + ". For StatCard you may instead "
+                                           "omit card_props entirely and pass "
+                                           "card_hero + card_label; the hero "
+                                           "becomes `value` and must be a "
+                                           "figure the speaker actually said."},
                                  # ARC POSITION IS JUDGEMENT; THE MOVE IS A
                                  # LOOKUP. Which beat is the payoff cannot be
                                  # derived from timing — but once you say so,
@@ -3932,86 +4062,6 @@ def spec_shortfall(targets, ruled, n_beats, dur_s):
     return out
 
 
-# ── WHAT EACH COMPONENT ACTUALLY READS ──────────────────────────────────────
-#
-# DERIVED FROM THE COMPONENTS' OWN types.ts, never hand-written. Regenerated
-# and compared by cert_mg_prop_keys.py, so a component that changes its props
-# fails the cert instead of rendering blank in production.
-#
-# WHY THIS EXISTS. card_props started reaching the builder at 6073850. Before
-# that it was dropped at the boundary, so `_cprops` ALWAYS fell back to the
-# StatCard shorthand {value: hero, label: card_label} — which always carried
-# `value`, and always rendered. After it, whatever the agent sent is used
-# verbatim, and nothing checked the keys against the component.
-#
-# MEASURED LOCALLY, one still per arm, PromptlyOverlay frame 20:
-#   StatCard {"value":10000,"label":"FOLLOWERS"}   184,920 bytes — renders
-#   StatCard {"stat":10000,"caption":"FOLLOWERS"}   48,138 bytes — BLANK
-# Both exit 0. Both report a successful render. One is a transparent frame.
-#
-# `required` are the non-optional props; `declared` is everything the
-# interface names. A props object sharing NO key with `declared` is certainly
-# addressing a different component, which is the case that renders nothing.
-MG_PROP_KEYS = {
-    "AnnotationArrow": {"required": ["end", "start"],
-                        "declared": ["arrowheadSize", "color", "customPath", "end", "pathType", "seed", "start", "strokeWidth"]},
-    "BarRace":         {"required": [],
-                        "declared": ["accentColor", "bars", "maxValue", "mode", "textShadow", "valuePrefix", "valueSuffix", "width"]},
-    "ChatThread":      {"required": ["messages"],
-                        "declared": ["backgroundColor", "borderRadius", "header", "incomingColor", "incomingTextColor", "messages", "minHeight", "outgoingColor", "outgoingTextColor", "showHomeIndicator", "showStatusBar", "statusBarTime", "width"]},
-    "DropBanner":      {"required": ["title"],
-                        "declared": ["accentColor", "cardColor", "cardHeightPct", "count", "mutedColor", "points", "spokenColor", "subtitle", "subtitleColor", "title", "titleColor"]},
-    "DropCard":        {"required": ["title"],
-                        "declared": ["accentColor", "cardColor", "cardHeightPct", "labelColor", "mutedColor", "points", "railColor", "spokenColor", "steps", "subtitle", "subtitleColor", "title", "titleColor", "titleLead"]},
-    "EditorialQuote":  {"required": ["text"],
-                        "declared": ["accentColor", "author", "authorColor", "fontKey", "fontSize", "italic", "lineStagger", "maxWordsPerLine", "role", "showQuoteMark", "text", "textColor"]},
-    "IMessageBubble":  {"required": ["messageType", "platform", "text"],
-                        "declared": ["messageType", "platform", "status", "text", "typewriter"]},
-    "InstagramComment": {"required": ["comment", "platform", "timestamp", "username"],
-                        "declared": ["avatarColor", "avatarSrc", "comment", "initials", "likes", "platform", "timestamp", "username"]},
-    "MouseDrag":       {"required": ["label"],
-                        "declared": ["cardColor", "cardTextColor", "label", "regionHeight", "regionWidth", "showCursor"]},
-    "Notification":    {"required": ["notifications"],
-                        "declared": ["notifications", "platform"]},
-    "PillCluster":     {"required": [],
-                        "declared": ["accentColor", "accentEvery", "fontSize", "glass", "tags", "textColor", "textShadow", "width"]},
-    "PillMarquee":     {"required": ["pills"],
-                        "declared": ["accentColor", "colorMode", "edgeFade", "firstDirection", "fontKey", "fontSize", "gap", "glass", "hashtag", "paddingX", "paddingY", "palette", "pillColor", "pills", "rowGap", "rows", "speed", "textColor", "uppercase"]},
-    "PullQuote":       {"required": ["text"],
-                        "declared": ["accentColor", "align", "barColor", "blurIn", "fontKey", "fontSize", "highlightStyle", "highlightTextColor", "keywordColor", "keywordScale", "keywords", "maxWordsPerLine", "quoteMarkColor", "showQuoteMark", "text", "textColor", "textShadow", "uppercase", "wordReveal", "wordStagger"]},
-    "RankedList":      {"required": [],
-                        "declared": ["accentColor", "highlightTop", "items", "labelColor", "order", "rankFontSize", "textShadow", "valueColor", "width"]},
-    "RecordingFrame":  {"required": [],
-                        "declared": ["accentColor", "annotationFontSize", "annotations", "frameBorderColor", "scanLineColor", "scanLineCycle", "showFrame", "showScanLine", "textColor"]},
-    "Reticle":         {"required": [],
-                        "declared": ["accentColor", "armLength", "bracketColor", "label", "regionHeight", "regionWidth", "showCrosshair", "showScanline", "textShadow", "thickness"]},
-    "SectionDivider":  {"required": ["title"],
-                        "declared": ["accentColor", "align", "eyebrowColor", "fontKey", "label", "number", "numberColor", "scrimColor", "showRule", "showScrim", "showVignette", "textShadow", "title", "titleColor", "titleFontSize", "variant", "vignetteStrength"]},
-    "Stamp":           {"required": ["text"],
-                        "declared": ["color", "distress", "doubleRing", "entryScale", "fontKey", "fontSize", "impactFlash", "mark", "markColor", "rotation", "shockRing", "size", "style", "subtextBottom", "subtextTop", "text", "textColor", "textShadow"]},
-    "StatCard":        {"required": ["label", "value"],
-                        "declared": ["accentColor", "decimals", "fromValue", "label", "labelColor", "numberColor", "prefix", "suffix", "textShadow", "value"]},
-    "StepDivider":     {"required": ["title"],
-                        "declared": ["accentColor", "fontKey", "kicker", "kickerColor", "showCount", "showProgress", "step", "title", "titleColor", "titleFontSize", "totalSteps", "uppercase"]},
-    "StickyNotes":     {"required": ["notes"],
-                        "declared": ["noteFontFamily", "noteFontSize", "noteSize", "notes", "showFog", "topOffset"]},
-    "TikTokComment":   {"required": ["comment", "likes", "platform", "username"],
-                        "declared": ["avatarColor", "avatarSrc", "comment", "initials", "likes", "platform", "username"]},
-    "Timeline":        {"required": [],
-                        "declared": ["accentColor", "indexColor", "labelColor", "nodeSize", "rowGap", "steps", "textShadow", "trackColor", "width"]},
-    "TimelineRoadmap": {"required": [],
-                        "declared": ["accentColor", "firstSide", "indexColor", "labelColor", "nodeSize", "rowHeight", "steps", "sublabelColor", "textShadow", "trackColor", "width"]},
-    "TweetBubble":     {"required": ["handle", "name", "platform", "stats", "text"],
-                        "declared": ["avatarColor", "avatarSrc", "darkMode", "handle", "initials", "name", "platform", "stats", "text", "timestamp", "verified"]},
-}
-
-# NOT DERIVABLE, and therefore NOT VALIDATED — never silently treated as
-# "requires nothing", which would let exactly the blank render above through
-# for these four. ProgressBar declares a UNION (ProgressBarValueProps |
-# ProgressBarPercentProps) rather than one interface; the other three have no
-# types.ts under motion-graphics at all. The cert pins this set, so a
-# component that DROPS OUT of validation fails rather than going quiet.
-MG_PROPS_UNDERIVABLE = ["DeviceMockup", "EmojiCard", "EvidenceCard", "ProgressBar"]
 
 def mg_props_mismatch(mg_type, props):
     """Why `props` cannot drive `mg_type`, or "" if they can. Never raises.
