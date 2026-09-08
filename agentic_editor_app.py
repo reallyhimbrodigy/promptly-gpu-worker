@@ -3000,6 +3000,33 @@ def sfx_start_s(attack_ms, at_s):
     return max(0.0, _want), (_want < 0.0)
 
 
+def sfx_catalogue_name(name):
+    """The catalogue stem for whatever shape the agent sent.
+
+    MODULE LEVEL AND PURE so a test can call it — the same reason sfx_start_s
+    is out here, and the reason this bug shipped unseen while it was inline.
+
+    THE SHAPE WE PUBLISH MUST BE THE SHAPE WE ACCEPT. `_asset_inventory.json`
+    advertises sfx.files WITH extensions ('boom.mp3', 'money-ching.mp3') and the
+    membership test compares against splitext-stripped stems. The old inline
+    normalisation was
+
+        re.sub(r"[^A-Za-z0-9_-]", "", name)
+
+    which strips the DOT, so the name the agent was shown became 'boommp3' —
+    unmatchable by construction. Round 41 lost two of four ruled sfx that way,
+    with a correct-looking refusal and nothing to see in any component:
+
+        place_sfx failed: 'money-chingmp3' is not in the catalogue
+
+    The extension comes off FIRST, then the sanitiser. basename() precedes both
+    so a path cannot survive normalisation into a bare stem.
+    """
+    base = os.path.basename(str(name or ""))
+    stem = os.path.splitext(base)[0]
+    return re.sub(r"[^A-Za-z0-9_-]", "", stem)
+
+
 # ── WHY THERE IS NO ACOUSTIC PEAK-LANDING GATE ──────────────────────────────
 # I built one and it could not adjudicate. Measured on real catalogue sounds,
 # mixed two ways — attack APPLIED vs SKIPPED — with the peak read as the argmax
@@ -6966,7 +6993,7 @@ def edit(source_key: str, brief: str,
         sound without it puts the hit in the wrong place, audibly, and nothing
         errors. Making the agent do the subtraction is how it gets skipped.
         """
-        nm = re.sub(r"[^A-Za-z0-9_-]", "", str(name or ""))
+        nm = sfx_catalogue_name(name)
         try:
             inv = (json.load(open("/assets/inventory.json")) or {}).get("sfx") or {}
         except Exception as _e:

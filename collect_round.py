@@ -10,7 +10,7 @@ greps instead of the real scorer.
 """
 import os, sys, json, re
 import re as _re
-import reliability_gate as rg
+import importlib.util
 
 if len(sys.argv) < 2:
     print(__doc__)
@@ -26,12 +26,34 @@ if not os.path.isdir(out):
     print(f"no such round: {out}")
     sys.exit(2)
 
-import json, re, sys, os, importlib.util
 # (out is resolved above from a round number or a path — do not rebind it)
 spec = importlib.util.spec_from_file_location("rg", "reliability_gate.py")
 rg = importlib.util.module_from_spec(spec); spec.loader.exec_module(rg)
+# WHICH FIXTURES THIS ROUND OWED, DERIVED FROM THE ROUND'S OWN PLAN.
+#
+# This read a hardcoded five-name tuple, so it could only ever score the v1
+# corpus. A v3 round would have found none of its logs and reported an EMPTY
+# round — and an empty round reads as "no failures", which is the exact shape
+# every silent defect in this product has taken. The plan.tsv sitting in the
+# round directory says what was actually launched; ask it.
+_plan = os.path.join(out, "plan.tsv")
+if os.path.exists(_plan):
+    _keys = [l.split("\t")[1] for l in open(_plan, encoding="utf-8")
+             if len(l.split("\t")) > 1]
+    _corpora = sorted({"/".join(k.split("/")[:-1]) for k in _keys})
+    if len(_corpora) != 1:
+        print(f"round {out} plan spans {_corpora} — refusing to score a mixed cohort")
+        sys.exit(2)
+    _required = rg.required_for(_corpora[0])
+    print(f"  scoring against {_corpora[0]}  {list(_required)}")
+else:
+    # NOT a fallback to the default set: a round with no plan cannot be scored
+    # against a guess about what it ran.
+    print(f"round {out} has no plan.tsv — cannot know which fixtures it owed")
+    sys.exit(2)
+
 res = {}
-for name in rg.REQUIRED_SOURCES:
+for name in _required:
     p = os.path.join(out, f"{name}.log")
     if not os.path.exists(p):
         continue
@@ -72,7 +94,6 @@ print(f"  {why}")
 # the wrong reason — it did less, and every gate passes because everything it
 # DID do was correct. Printed per fixture so the variance question accumulates
 # evidence across rounds instead of being re-litigated from one log at a time.
-import re as _re
 print()
 print(f"  {'fixture':18} {'turns':>6} {'cost':>9} {'placed':>7}  families")
 for _n in sorted(res):

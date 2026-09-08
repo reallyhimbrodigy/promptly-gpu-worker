@@ -18,7 +18,12 @@ could regress — a re-introduced enum, and absence rendered as success.
 """
 import re, subprocess, sys, tempfile, os, pathlib
 
-RUNNER = pathlib.Path(__file__).with_name("run_round.sh").read_text()
+# THE COLLECTOR NOW LIVES IN ONE PLACE. This read run_round.sh, which
+# carried a 113-line inline COPY of collect_round.py; the copy is gone, so
+# reading the runner tested a scorer that no longer exists there. Pinning a
+# check to the duplicate rather than the real thing is how both copies came
+# to resolve fixtures from a hardcoded v1 tuple with every smoke green.
+RUNNER = pathlib.Path(__file__).with_name("collect_round.py").read_text()
 
 fails = []
 def check(label, cond, detail=""):

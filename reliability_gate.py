@@ -16,11 +16,44 @@ green only if every declared source is present AND ok. A gate that counts
 and that is precisely the class this gate exists to catch.
 """
 
-# The five sources are a CONTRACT, not a config. Adding or removing one changes
-# what "green" means, so it is a code change with a diff, not a flag.
-REQUIRED_SOURCES = ("talking_head", "music", "screen_recording",
-                    "product_shot", "pet_video")
+# The source set is a CONTRACT, not a config. Adding or removing one changes what
+# "green" means, so it is a code change with a diff, not a flag.
+#
+# IT IS PER CORPUS, because the corpora do not share a fixture set and mapping
+# one onto the other by name is actively dangerous: v3 carries a stray
+# music-fb4aa93b.mp4 that is byte-identical to car_short, so a name-matched v3
+# round would have scored a 10s silent car clip under a "cuts on the beat" brief.
+#
+# v1 is the flat/noise corpus every round from 35 to 41 unknowingly ran.
+# v3 is Zac's real footage and is INCOMPLETE: three sources, not the five asked
+# for. `motion` has has_speech=null at staging — its route is DELIBERATELY
+# unassigned below rather than guessed, because assigning a fixture to the wrong
+# route is how a speech target gets applied to a silent clip.
+CORPUS_SOURCES = {
+    "ab-sources/reliability-fixtures-v1": ("talking_head", "music",
+                                           "screen_recording", "product_shot",
+                                           "pet_video"),
+    "ab-sources/reliability-fixtures-v3": ("talking_head", "motion", "car_short"),
+}
+DEFAULT_CORPUS = "ab-sources/reliability-fixtures-v1"
+REQUIRED_SOURCES = CORPUS_SOURCES[DEFAULT_CORPUS]
 REQUIRED_GREEN_ROUNDS = 10
+
+
+def required_for(corpus):
+    """The contract for one corpus. An unknown corpus RAISES.
+
+    Never falls back to the default set: a round scored against another
+    corpus's fixture names is the failure this whole change exists to stop,
+    and a silent fallback is how it would come back.
+    """
+    try:
+        return CORPUS_SOURCES[str(corpus).rstrip("/")]
+    except KeyError:
+        raise ValueError(
+            f"no source contract for corpus {corpus!r}; known: "
+            f"{sorted(CORPUS_SOURCES)}. Add it to CORPUS_SOURCES — changing "
+            f"what 'green' means is a diff, not a fallback.")
 
 # ── PER-ROUTE GATE SETS ──────────────────────────────────────────────────────
 # A route arms on ITS OWN fixtures. The no-speech route is the cutover target —
@@ -34,9 +67,18 @@ REQUIRED_GREEN_ROUNDS = 10
 # blocks a no-speech route that has been green for ten rounds on its own
 # sources.
 ROUTE_FIXTURES = {
-    "no_speech": ("music", "screen_recording", "product_shot", "pet_video"),
+    "no_speech": ("music", "screen_recording", "product_shot", "pet_video",
+                  "car_short"),
     "speech":    ("talking_head",),
 }
+
+# `motion` IS ABSENT FROM BOTH ROUTES ON PURPOSE. Its staging probe returned
+# has_speech=null — undetermined, not false — and the manifest records it as
+# `no_speech_motion_UNRESOLVED`. route_of() therefore returns None for it, which
+# is honest; putting it in either set would apply that route's targets to a
+# fixture nobody has established the route of. Resolve the speech question, then
+# add it in a diff.
+ROUTE_UNASSIGNED = ("motion",)
 
 
 def route_of(source):

@@ -110,6 +110,49 @@ export function bundleDecision(root, cacheRoot = CACHE_ROOT) {
            cached: CACHE_ENABLED && fs.existsSync(marker) };
 }
 
+// A CACHED BUNDLE'S public/ IS A SNAPSHOT; RUNTIME ASSETS ARE NOT IN IT.
+//
+// build_zoom writes zsrc<N>.mp4 into <root>/public at RUN time and hands the
+// component `src: "zsrc0.mp4"`. Remotion serves public/ out of the SERVE root,
+// which on a cache hit is a bundle directory built by an earlier run — so the
+// file the component needs is not there and the render dies with
+//
+//     Received a status code of 404 while downloading
+//     http://localhost:3000/public/zsrc0.mp4
+//
+// ADDS, NEVER WIPES: the bundle's own public/ entries stay, because they are
+// part of the built bundle and only the runtime extras are missing. Idempotent,
+// because a container may render more than one batch. A no-op when the serve
+// root IS the source root (the cache-miss path), where bundle() already copied
+// public/ as it built.
+export function syncPublicAssets(root, serveUrl) {
+  if (!root || !serveUrl) return 0;
+  const from = path.join(root, "public");
+  const to = path.join(serveUrl, "public");
+  if (path.resolve(from) === path.resolve(to)) return 0;
+  if (!fs.existsSync(from)) return 0;
+  fs.mkdirSync(to, { recursive: true });
+  let n = 0;
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    const src = path.join(from, entry.name);
+    const dst = path.join(to, entry.name);
+    if (entry.isDirectory()) {
+      fs.cpSync(src, dst, { recursive: true, force: true });
+      n += 1;
+      continue;
+    }
+    // Skip only when the destination is already byte-for-byte this file, so a
+    // re-sync is cheap without ever leaving a stale copy in place.
+    try {
+      const a = fs.statSync(src), b = fs.statSync(dst);
+      if (a.size === b.size && b.mtimeMs >= a.mtimeMs) continue;
+    } catch { /* not there yet — copy it */ }
+    fs.copyFileSync(src, dst);
+    n += 1;
+  }
+  return n;
+}
+
 async function main() {
 const { bundle } = await import("@remotion/bundler");
 const { renderMedia, selectComposition } = await import("@remotion/renderer");
@@ -119,6 +162,12 @@ let serveUrl;
 let cached = d.cached;
 if (cached) {
   serveUrl = cacheDir;
+  // THE CACHE HIT IS THE BROKEN CASE. Without this, every asset written to
+  // public/ after the bundle was built is a 404 — six rounds of zoom "ruled and
+  // never built" with no component involved. PRINTED, because a reconciliation
+  // that runs silently cannot be told apart from one that never ran.
+  const synced = syncPublicAssets(R, serveUrl);
+  console.log(`PUBLIC_SYNCED ${synced}`);
 } else {
   fs.rmSync(cacheDir, { recursive: true, force: true });
   fs.mkdirSync(cacheDir, { recursive: true });
