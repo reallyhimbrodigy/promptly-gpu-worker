@@ -109,15 +109,97 @@ check("an unreadable layer is None, never a pass",
       A.alpha_layer_max("/nonexistent-layer.mov") is None,
       "the same law every other instrument here carries")
 check("the REEL layer is checked before it is composited",
-      "_reel_alpha = alpha_layer_max(" in src
-      and src.index("_reel_alpha = alpha_layer_max(") < src.index("reel-filter.txt"),
+      "alpha_layer_state(\"/work/reel.mov\"" in src
+      and src.index("alpha_layer_state(\"/work/reel.mov\"") < src.index("reel-filter.txt"),
       "checking after the composite tells you what you already shipped")
 check("the CAPTION layer is checked too",
-      "_cap_alpha = alpha_layer_max(" in src,
+      "alpha_layer_state(\n" in src or 'alpha_layer_state(\n                    "/work/captions.mov"' in src
+      or "captions.mov\", env=" in src or "_c_st, _cap_alpha, _c_why" in src,
       "this is the pass that rendered 600 frames of an empty default for two "
       "whole rounds while reporting composited=True")
 check("an empty layer FAILS the round",
       "alpha_layer_empty" in A.CONTRACT_FAILURES)
+
+# ── 3b. AND A FAILED MEASUREMENT IS NOT A PASS ──────────────────────────────
+# THE HOLE, found by Builder-1 on round 39 and worse than either of us guessed.
+# The guard read `if _reel_alpha is not None and _reel_alpha <= 260`, so None —
+# an unreadable or alpha-LESS reel — skipped the check built to catch it. An
+# alpha-less .mov makes ffmpeg fail the filter graph (exit 234, zero YMAX
+# lines), which parses to None, which passed. Probe collapse inside the
+# instrument I shipped to prevent it.
+#
+# MEASURED HERE, on files this smoke builds, so the three states are read off
+# real ffmpeg output rather than asserted about the source text:
+#   yuva444p12le, alpha 1.0   ->  measured 3760.0
+#   yuva444p12le, alpha 0.0   ->  measured  256.0
+#   yuv420p (no alpha)        ->  absent
+#   no such file              ->  failed
+# 3760 = 235 << 4 and 256 = 16 << 4: the plane is TWELVE-BIT limited range,
+# which is what made 260 look like a magic number for as long as it did.
+import subprocess as _sp                                       # noqa: E402
+import tempfile as _tf                                         # noqa: E402
+_d = _tf.mkdtemp(prefix="alphastate_")
+
+
+def _mk(name, lavfi, extra):
+    _p = f"{_d}/{name}"
+    _r = _sp.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                  "-f", "lavfi", "-i", lavfi] + extra + [_p],
+                 capture_output=True, text=True)
+    return _p if _r.returncode == 0 else None
+
+
+_PRORES = ["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le"]
+_opaque = _mk("opaque.mov", "color=c=white@1.0:s=128x128:d=1:r=10,format=yuva444p12le", _PRORES)
+_clear = _mk("clear.mov", "color=c=black@0.0:s=128x128:d=1:r=10,format=yuva444p12le", _PRORES)
+_noa = _mk("noalpha.mp4", "color=c=red:s=64x64:d=1:r=10", ["-pix_fmt", "yuv420p"])
+check("the fixtures this smoke measures on were built",
+      all((_opaque, _clear, _noa)),
+      "ffmpeg could not build them — the legs below would be vacuous")
+
+if all((_opaque, _clear, _noa)):
+    _st, _y, _ = A.alpha_layer_state(_opaque)
+    check("a painted layer reads MEASURED and well above the bar",
+          _st == A.ALPHA_MEASURED and _y > A._ALPHA_EMPTY_YMAX,
+          f"({_st}, {_y}) — if this does not clear the bar the check cannot "
+          f"tell content from nothing and every layer reads empty")
+    _st, _y, _ = A.alpha_layer_state(_clear)
+    check("a transparent layer reads MEASURED and at or below the bar",
+          _st == A.ALPHA_MEASURED and _y <= A._ALPHA_EMPTY_YMAX, f"({_st}, {_y})")
+    _st, _y, _why = A.alpha_layer_state(_noa)
+    check("a stream with NO alpha reads ABSENT, not a number",
+          _st == A.ALPHA_ABSENT and _y is None,
+          f"({_st}, {_y}) — this returned None before and PASSED the guard")
+    check("and ABSENT says what to fix",
+          "pix_fmt" in _why and "composited" in _why, _why)
+_st, _y, _ = A.alpha_layer_state(f"{_d}/nope.mov")
+check("an unreadable file reads FAILED", _st == A.ALPHA_FAILED and _y is None,
+      f"({_st}, {_y})")
+
+for _k in ("alpha_layer_absent", "alpha_layer_unmeasured"):
+    check(f"{_k} FAILS the round", _k in A.CONTRACT_FAILURES,
+          "an unanswered question must not be a green one")
+# THE GUARD MUST READ THE STATE, not the number-or-None. This is the shape the
+# hole had, so it is the shape the check names.
+check("the reel guard branches on the alpha STATE",
+      "_a_st = " in src or "_a_st," in src,
+      "the guard is back to reading a bare number, where None means pass")
+# READ THE COMPARISONS, NOT THE FILE TEXT. The first version greped for
+# "_reel_alpha is not None" and failed on alpha_layer_state's own DOCSTRING,
+# which quotes the buggy predicate to explain it. Twelfth instance of a check
+# reading around the thing it checks, and the third one I have written this
+# session — the trap does not get less convincing with practice.
+_ISNOT = [n for n in ast.walk(tree) if isinstance(n, ast.Compare)
+          and isinstance(n.left, ast.Name)
+          and n.left.id in ("_reel_alpha", "_cap_alpha")
+          and any(isinstance(o, ast.IsNot) for o in n.ops)
+          and any(isinstance(c, ast.Constant) and c.value is None
+                  for c in n.comparators)]
+check("no guard tests alpha with `is not None` again", not _ISNOT,
+      f"{len(_ISNOT)} live comparison(s) — that predicate IS the hole: it makes "
+      f"an unmeasured layer indistinguishable from a measured-good one")
+check("both states are recorded, not only tested",
+      'led["reel_alpha_state"]' in src and 'led["caption_alpha_state"]' in src)
 
 
 def _guarded_by(marker):
