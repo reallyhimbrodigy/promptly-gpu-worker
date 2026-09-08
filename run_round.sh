@@ -68,6 +68,23 @@ PY
 # Rounds 32 and 33 differ 6.1x on caption paint under shas that could not have
 # distinguished them. A cohort guard blind to the files being changed is worse
 # than no guard: it certifies two arms as identical code when they are not.
+# PRE-FLIGHT BEFORE THE FIRST ARM IS PAID FOR.
+#
+# The fingerprint below catches drift DURING a round, which is right and has
+# fired twice on real drift. But it catches it AFTER arms have been spent:
+# rounds 37 and 38 both died three arms in, once when scratch appeared under a
+# mounted path and once when the same scratch was tidied away.
+#
+# This asks whether the tree is round-ready BEFORE launching. It checks the
+# RESOLVED mounted paths, not the checkout it runs in — src/remotion resolves to
+# the MAIN checkout via _HERE/../../src/remotion even when the round launches
+# from a worktree, so a checker that inspected the local tree would report a
+# confident CLEAN about a directory the image never sees.
+if ! python3 mount_preflight.py; then
+  echo "[ABORT] the tree is not round-ready — see above. Nothing has been spent."
+  exit 2
+fi
+
 MOUNT_SHA="$(python3 mount_fingerprint.py)"
 if [ -z "$MOUNT_SHA" ]; then
   echo "[ABORT] mount_fingerprint.py produced nothing — refusing to run a round"
