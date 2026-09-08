@@ -244,6 +244,43 @@ inflated by retries into an apparent outage.
   THE PREDICATE. Reserve substring tests for the one thing they are honest
   about: a literal that must be present verbatim.
 
+- **A THRESHOLD FROM ONE DRAW IS NOT A THRESHOLD — it measures the fixture, not
+  the thing.** The zoom geometry bar was set at 20.0 dB from a single
+  high-detail fixture, where real zooms read 15.94-16.84 and passthroughs
+  24.30-26.11. On a FLAT field the whole scale moves and the arms SWAP SIDES:
+
+      content    arm    abs psnr   bar 20.0 says
+      detailed   real      15.99   APPLIED
+      detailed   pass      26.11   NOT APPLIED
+      FLAT       real      26.91   NOT APPLIED   <-- a real zoom, called a no-op
+      FLAT       pass      53.25   NOT APPLIED
+
+  It produced three false failures in round 36 and would have sent someone to
+  edit three working components. The check was never measuring the component; it
+  was measuring how much DETAIL the source had.
+  This is the same failure as the invented fixture, one level up: **both are a
+  threshold from one draw.** Calibrate on every content class the corpus
+  actually contains — and prefer a form where the content CANCELS (a ratio
+  within one measurement) over any absolute bar. The replacement asks which
+  SCALE better explains the render, so both terms read the same pixels.
+  **And make the test one-sided where the errors are asymmetric**: a false "it
+  did not work" sends someone to edit working code; a missed one costs less.
+
+- **A BARE ENUM IS A LIST OF WORDS.** Two rounds read "1 distinct of 29
+  selectable, StatCard=4" and it was read as taste, then as incumbency. It was
+  neither: the cached prefix named StatCard and ProgressBar and NOTHING ELSE,
+  while the enum offered 29 bare names. Learning what any of the other 27 was
+  for cost a knowledge-read turn the agent never spent, so it picked the only
+  component it had ever been told about — and the field description wrote the
+  incumbency down: "Defaults to StatCard only if you do not say."
+  **A capability the agent cannot NAME is indistinguishable from one it
+  declined, and a capability it cannot UNDERSTAND is indistinguishable from one
+  it rejected.** An enum entry ships with the one line that says what it claims,
+  in the surface where the choice is made — 469 tokens bought 29 usable options.
+  Corollary: every silent default is a vote for the incumbent. Three of them sat
+  behind that enum, including one where an untyped item became a rendered
+  StatCard nobody chose and was REPORTED as chosen.
+
 - **A MEASURED TIMING TABLE THAT NOTHING READS IS THE MOST EXPENSIVE KIND OF
   DEAD CODE, because the family it corrects ships VISIBLY WRONG and nothing
   errors.** Twice in one port: `_SFX_ATTACK_MS` (16 argmax-of-RMS-envelope
