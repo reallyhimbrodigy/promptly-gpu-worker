@@ -417,7 +417,12 @@ RATIONALE_KEYS = ("why", "reason", "rationale", "note", "notes", "because",
 
 
 RULING_DECISION_FIELDS = ("treatment", "cut", "text_content", "sfx",
-                          "sfx_name", "card_hero", "card_label")
+                          "sfx_name", "card_hero", "card_label",
+                          # These decide WHICH component and WHERE in the arc.
+                          # Absent from the fingerprint, two rulings that chose
+                          # different zooms and different motion graphics
+                          # hashed as identical decisions.
+                          "zoom_arc", "card_type", "card_props")
 
 
 def ruling_fingerprint(tool_input):
@@ -3824,6 +3829,87 @@ _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
 _TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "transition", "none"]
 
 
+# ── THE BOUNDARY MUST KEEP EVERY FIELD THE SCHEMA OFFERS ────────────────────
+# It kept SIX of twelve. `card_hero` and `sfx_name` survived only because
+# derivers refill them afterwards; `zoom_arc`, `card_type`, `card_props` and
+# `card_label` have no deriver and were therefore ALWAYS EMPTY.
+#
+# Three separate findings collapse into this one defect. "zoom ruled 3, built 0
+# — zoom_arc=''" was not the agent failing to supply an arc; it was the harness
+# discarding it. "MG CATALOGUE: 1 distinct of 29" was not the agent choosing
+# only StatCard; card_type never arrived. And the invisible cards followed from
+# card_props never arriving, so every card fell back to the hero string.
+#
+# DERIVED FROM THE SCHEMA, never restated. A hand-written copy list is a second
+# vocabulary that drifts from the first in silence — which is exactly what this
+# was.
+def _verdict_fields():
+    for _t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
+        if _t.get("name") != "rule_all_beats":
+            continue
+        return tuple(sorted(
+            (((_t.get("input_schema") or {}).get("properties") or {})
+             .get("verdicts") or {}).get("items", {}).get("properties", {})))
+    return ()
+
+
+VERDICT_FIELDS = _verdict_fields()
+assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
+    "the verdict schema could not be read, so the boundary would store nothing")
+
+
+def _assert_build_reads_only_stored_fields(module_src: str) -> None:
+    """Every verdict field the BUILD reads must be one the BOUNDARY stores.
+
+    THE CHECK THAT WOULD HAVE CAUGHT IT IMMEDIATELY. execute_plan read
+    `v.get("zoom_arc")` and the boundary never stored it, so the build asked a
+    question the data could not answer and recorded a skip that blamed the
+    agent. Nothing errored: `.get()` on a missing key is None, and None looks
+    exactly like "the agent did not say".
+    """
+    import ast as _ast
+    _tree = _ast.parse(module_src)
+    _ep = next((n for n in _ast.walk(_tree)
+                if isinstance(n, _ast.FunctionDef) and n.name == "execute_plan"),
+               None)
+    if _ep is None:
+        raise AssertionError("execute_plan not found; the check cannot run")
+    _read = set()
+    for _n in _ast.walk(_ep):
+        if (isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Attribute)
+                and _n.func.attr == "get" and _n.args
+                and isinstance(_n.args[0], _ast.Constant)
+                and isinstance(_n.args[0].value, str)):
+            _read.add(_n.args[0].value)
+    # The store step must copy from ONE schema-derived list, not a hand list.
+    if not re.search(r"_rec = \{k: _v\.get\(k\) for k in VERDICT_FIELDS\}",
+                     module_src):
+        raise AssertionError(
+            "the boundary no longer copies the verdict fields from a single "
+            "schema-derived list — a hand-written copy list is a second "
+            "vocabulary and it drifted silently once already")
+    # AND THE LIST ITSELF MUST COVER WHAT THE BUILD READS. Comparing
+    # VERDICT_FIELDS against VERDICT_FIELDS is a tautology — the first version
+    # of this did exactly that and passed while the list was truncated to three
+    # fields. The independent reference is the SCHEMA: whatever the agent can be
+    # asked for is what the build may read and the boundary must keep.
+    _offered = set()
+    for _t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
+        if _t.get("name") == "rule_all_beats":
+            _offered = set(
+                (((_t.get("input_schema") or {}).get("properties") or {})
+                 .get("verdicts") or {}).get("items", {}).get("properties", {}))
+    if not _offered:
+        raise AssertionError("the verdict schema could not be read")
+    _gap = sorted((_read & _offered) - set(VERDICT_FIELDS))
+    if _gap:
+        raise AssertionError(
+            f"execute_plan reads verdict field(s) {_gap} that the boundary does "
+            f"not store. `.get()` returns None and None is indistinguishable "
+            f"from 'the agent did not say', so the build blames the ruling for "
+            f"a field the harness threw away.")
+
+
 def _assert_treatment_surface_agrees(module_src: str) -> None:
     """The PROSE must not offer a narrower family set than the SCHEMA.
 
@@ -3958,6 +4044,10 @@ _assert_prompt_blocks_present()
 _assert_constraints_intact(SYSTEM)
 _assert_treatment_surface_agrees(open(__file__).read()
                                  if os.path.exists(__file__) else "")
+# Runs in the container on every launch. It would have caught the dropped-field
+# defect the moment execute_plan first read `v.get("zoom_arc")`.
+_assert_build_reads_only_stored_fields(open(__file__).read()
+                                       if os.path.exists(__file__) else "")
 # Runs at IMPORT, in the container, on every run — not in a test file that can
 # be skipped. The two beat sources must stay interchangeable or the verdict
 # machinery silently rules on a field one of them does not supply.
@@ -7240,17 +7330,60 @@ def edit(source_key: str, brief: str,
                 _incoming = tu.input.get("verdicts") or []
                 _seen = {v.get("beat") for v in led["beat_verdicts"]}
                 _added = 0
+                _rejected = []
                 for _v in _incoming:
                     if not isinstance(_v, dict) or _v.get("beat") is None:
                         continue
                     if _v.get("beat") in _seen:
                         continue        # first ruling wins; a re-call tops up
-                    led["beat_verdicts"].append({
-                        "beat": _v.get("beat"), "treatment": _v.get("treatment"),
-                        "cut": _v.get("cut"), "sfx": _v.get("sfx"),
-                        "text_content": _v.get("text_content"),
-                        "why": str(_v.get("why") or "")})
+                    _tr6 = [str(t).lower() for t in (_v.get("treatment") or [])]
+                    # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
+                    # Both of these used to be discovered at BUILD time, where
+                    # the only outcome is a skip: the placement is lost, the run
+                    # is paid for, and the log blames the ruling. Here it costs
+                    # one line to fix and the agent is still holding the beat.
+                    _why6 = None
+                    if "zoom" in _tr6:
+                        _arc6 = str(_v.get("zoom_arc") or "").strip().lower()
+                        if _arc6 not in ZOOM_ARC_HOMES:
+                            _why6 = (
+                                f"beat {_v.get('beat')}: ruled 'zoom' with "
+                                f"zoom_arc={_v.get('zoom_arc')!r}. WHICH MOMENT "
+                                f"this is cannot be derived from timing, and it "
+                                f"decides the move: payoff takes a committed "
+                                f"push, a hook takes a snap or a pull. Give one "
+                                f"of {sorted(ZOOM_ARC_HOMES)}.")
+                    if _why6 is None and "card" in _tr6:
+                        # A card whose figure is not a figure renders BLANK and
+                        # exits 0 — four of them shipped invisible in round 35.
+                        _ct6 = str(_v.get("card_type") or "StatCard").strip()
+                        _pr6 = _v.get("card_props")
+                        if not isinstance(_pr6, dict) or not _pr6:
+                            _pr6 = {"value": str(_v.get("card_hero") or "").strip()}
+                        _, _bad6 = coerce_mg_props(_pr6)
+                        if _bad6 and _ct6 not in MG_BRAND_ONLY:
+                            _why6 = (
+                                f"beat {_v.get('beat')}: {_ct6} needs a NUMBER "
+                                f"for {_bad6} and got "
+                                f"{[_pr6.get(k) for k in _bad6]!r}. It counts up "
+                                f"to a target, so a word renders a blank card "
+                                f"with no error. If this beat has no quoted "
+                                f"figure it is the wrong component — read "
+                                f"05_motion_graphics and pick one that carries "
+                                f"a phrase.")
+                    if _why6:
+                        _rejected.append(_why6)
+                        continue
+                    # EVERY FIELD THE SCHEMA OFFERS. Six of twelve used to
+                    # survive; zoom_arc, card_type, card_props and card_label
+                    # had no deriver and were therefore always empty, so the
+                    # build read None and blamed the agent for not saying.
+                    _rec = {k: _v.get(k) for k in VERDICT_FIELDS}
+                    _rec["why"] = str(_v.get("why") or "")
+                    led["beat_verdicts"].append(_rec)
                     _seen.add(_v.get("beat")); _added += 1
+                if _rejected:
+                    led.setdefault("verdicts_rejected", []).extend(_rejected)
                 _nocopy = [v.get("beat") for v in led["beat_verdicts"]
                            if "text" in (v.get("treatment") or [])
                            and not v.get("text_content")]
@@ -8333,6 +8466,15 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # A bound that fires and says nothing is the same dead end as no bound: the
     # run would simply be shorter, and nobody could tell a disciplined agent
     # from a stopped one.
+    # ── RULINGS REFUSED AT THE BOUNDARY ────────────────────────────────────
+    # These used to be build-time skips, where the placement was already lost.
+    # Refused here they cost one line — but only if the run says so.
+    _rej = (r.get("ledger") or {}).get("verdicts_rejected") or []
+    if _rej:
+        print(f"  VERDICTS REFUSED: {len(_rej)} at the boundary "
+              f"(one line to fix, vs a lost placement at build time)")
+        for _r9 in _rej[:6]:
+            print(f"     {str(_r9)[:150]}")
     _rep_a = (r.get("ledger") or {}).get("repeat_answered") or []
     _rep_t = (r.get("ledger") or {}).get("repeat_terminal") or []
     _pay = (r.get("ledger") or {}).get("_call_payloads") or {}
