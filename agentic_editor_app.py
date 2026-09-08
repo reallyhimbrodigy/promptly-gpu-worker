@@ -598,6 +598,12 @@ CONTRACT_FAILURES = frozenset({
     # placements == 0 and these declared one or two. A count of declarations is
     # not a measure of work.
     "placement_inert",
+    # A FAMILY THAT DECLARES AND NEVER MEASURES IS NOT COVERED BY THE ABOVE.
+    # `placement_inert` can only fire where something looked; round 33 declared
+    # 16 placements, looked at 1, and fired zero — indistinguishable in the log
+    # from sixteen honest placements. The coverage gap has to fail the round on
+    # its own, or every component ported from here lands unverifiable.
+    "placement_effect_uncovered",
 })
 
 
@@ -2199,6 +2205,157 @@ def step_changed_output(before_path, after_path, t0, t1, env=None,
         return None, None
 
 
+# ── DID THE AUDIO CHANGE? A VIDEO DIFF CANNOT ANSWER THIS ───────────────────
+# place_sfx writes a new file with `-c:v copy` — the VIDEO is byte-identical by
+# construction, so step_changed_output() reports psnr=inf and changed=False on a
+# PERFECT sfx placement. Standing in a video check for an audio family would not
+# merely be weak; it would report every correct sound as inert.
+#
+# MEASURED, not assumed. The obvious instrument — RMS of (after - before) in the
+# window — does NOT work, because place_sfx re-encodes to aac and generation
+# noise scales with the bed:
+#
+#     quiet bed, sfx -6dB    INERT diff -41.83 dB    REAL diff -34.18 dB
+#     LOUD bed,  sfx -20dB   INERT diff -31.24 dB    REAL diff -25.27 dB
+#
+# The loud bed's INERT diff (-31.24) is LOUDER than the quiet bed's REAL diff
+# (-34.18). Any absolute threshold calls one of them wrong. Comparing against the
+# sound's own predicted energy fails the same way: on the loud bed the codec
+# noise sat 14.9 dB ABOVE the prediction.
+#
+# So the metric is NORMALISED BY THE LOCAL SIGNAL — nsr = diff_RMS - before_RMS —
+# because codec noise is a roughly fixed number of dB below whatever it is
+# encoding. Measured across an 11 dB change in bed loudness AND a 14 dB change in
+# sfx gain:
+#
+#     arm             diffRMS   beforeRMS      nsr
+#     quiet-INERT      -41.83      -30.61   -11.22
+#     loud-INERT       -31.24      -19.49   -11.75     <-- floor moves 0.53 dB
+#     quiet-REAL       -34.18      -30.61    -3.57
+#     loud-REAL        -25.27      -19.49    -5.78     <-- sfx at -20dB, a hard case
+#
+# The INERT floor is STABLE at -11.2..-11.8 dB. -8.0 dB is the threshold: 3.2 dB
+# above the worst inert, 2.2 dB below the worst real. Production's default gain
+# is -6 dB, not the -20 dB used for the hard arm, so the real margin is wider.
+#
+# SCOPE, STATED HONESTLY — the same bound the video leg carries. This catches a
+# step that mixed NOTHING. It does NOT verify the sound is the RIGHT one, nor
+# that its peak landed on the word; _SFX_ATTACK_MS correctness is a separate
+# measurement and this must never be read as covering it.
+#
+# THE FLOOR IS ENCODER-DEPENDENT. It was measured against place_sfx's own
+# `-c:a aac` at default bitrate. Change that encoder and this threshold must be
+# re-measured — smoke_placement_effect_families.py re-derives it from fixtures on
+# every run rather than trusting the constant.
+_AUDIO_INERT_FLOOR_DB = -8.0
+
+# ── THE VIDEO LEG NEEDED THE SAME TREATMENT, AND RED-PROVING FOUND IT ────────
+# step_changed_output's absolute 50 dB bar was set against a measurement where a
+# re-encode read 68.25 dB. RED-proving the new families on a high-detail fixture
+# read a PURE RE-ENCODE — nothing drawn at all — at 45.1 dB, i.e. CHANGED. On a
+# detailed source a family that composites NOTHING would have reported "moved",
+# which is precisely the false green this whole commit exists to delete, hiding
+# inside the instrument brought in to find it.
+#
+# The confound is codec generation loss, the same one the audio leg has, and it
+# takes the same answer: measure the placement window AGAINST A CONTROL WINDOW
+# in the same file pair. Generation loss is in both; the placement is in one.
+#
+#     pair      placed[2.0-2.5]   ctrl[4.8-5.3]    delta
+#     reenc              45.10           44.39     -0.71     <-- nothing drawn
+#     drawn              15.06           44.43    +29.37     <-- real overlay
+#
+# 29 dB of separation against 0.7 dB of noise. 3.0 dB is the bar, and it is not
+# a close call in either direction.
+#
+# WHERE NO CONTROL EXISTS the measurement falls back to the absolute bar and
+# RECORDS `mode`, because captions can cover nearly the whole output and a run
+# with no free span is a real case. A weaker measurement that says which one it
+# used is honest; one that silently degrades is the thing being fixed.
+_VIDEO_REL_MARGIN_DB = 3.0
+
+
+def uncovered_families(placements, effects):
+    """Families that DECLARED a placement and measured nothing.
+
+    MODULE LEVEL AND PURE so a test can call it with real inputs. It lived
+    inline in execute_plan, where the only thing a check could reach was the
+    error string — and RED-proving found exactly that hole: neutering the
+    identity to `set()` left every leg green, because the string it looks for
+    was still in the file. Source is where code might be; runtime is where it
+    is (standing rule, 2026-09-05).
+
+    A COVERAGE BAR, NOT A VERDICT BAR. An effect whose `changed` is None still
+    counts as covered: "we tried and could not measure" is a different fact from
+    "we never looked", and `placement_inert` owns the first.
+    """
+    _dec = {p.get("family") for p in (placements or [])
+            if isinstance(p, dict) and p.get("family")}
+    _meas = {e.get("family") for e in (effects or [])
+             if isinstance(e, dict) and e.get("family")}
+    return sorted(_dec - _meas)
+
+
+def _audio_stats(args, env=None):
+    """(rms_db, peak_db) from an ffmpeg astats run; (None, None) if unreadable."""
+    import subprocess
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=180, env=env)
+    except Exception:
+        return None, None
+    out = (r.stdout or "") + (r.stderr or "")
+    def _last(pat):
+        v = re.findall(pat, out)
+        if not v:
+            return None
+        return float("-inf") if "inf" in v[-1] else float(v[-1])
+    return _last(r"RMS level dB:\s*(-?[0-9.]+|-?inf)"), _last(r"Peak level dB:\s*(-?[0-9.]+|-?inf)")
+
+
+def step_changed_audio(before_path, after_path, t0, t1, env=None,
+                       floor_db=_AUDIO_INERT_FLOOR_DB):
+    """Did this build step change the AUDIO over the window it claimed to touch?
+
+    Returns (changed: bool|None, nsr_db: float|None). None means UNMEASURED —
+    never False, for the same reason the video leg says so: "could not measure"
+    and "did nothing" are different facts, and collapsing them is how absence
+    gets rendered as success.
+
+    See the measurement block above for why this is normalised rather than
+    absolute, and for the numbers the -8.0 dB floor comes from.
+    """
+    try:
+        if not (os.path.exists(before_path) and os.path.exists(after_path)):
+            return None, None
+        dur = max(0.05, float(t1) - float(t0))
+        ss, tt = f"{float(t0):.3f}", f"{dur:.3f}"
+        d_rms, _ = _audio_stats(
+            ["ffmpeg", "-hide_banner", "-nostats",
+             "-ss", ss, "-t", tt, "-i", before_path,
+             "-ss", ss, "-t", tt, "-i", after_path,
+             "-filter_complex",
+             "[0:a]aformat=sample_fmts=fltp,volume=-1[inv];"
+             "[inv][1:a]amix=inputs=2:normalize=0[d];"
+             "[d]astats=metadata=1:reset=0", "-f", "null", "-"], env=env)
+        b_rms, _ = _audio_stats(
+            ["ffmpeg", "-hide_banner", "-nostats", "-ss", ss, "-t", tt,
+             "-i", before_path, "-af", "astats=metadata=1:reset=0",
+             "-f", "null", "-"], env=env)
+        if d_rms is None or b_rms is None:
+            return None, None
+        # SILENCE IN THE WINDOW IS UNMEASURABLE, NOT INERT. A normalised metric
+        # divides by the local signal; with no local signal there is nothing to
+        # normalise against and the ratio is meaningless. Reporting False here
+        # would page on every sound placed over a silent beat — which is exactly
+        # where a sound effect most often goes.
+        if b_rms == float("-inf") or d_rms == float("-inf"):
+            return None, None
+        nsr = round(d_rms - b_rms, 2)
+        return (nsr >= floor_db), nsr
+    except Exception:
+        return None, None
+
+
 # THE RAMP FRACTION IS PRODUCTION'S, NOT A GUESS.
 # handler.py: ZOOM_PEAK_REACH_MS["SmoothPush"] = 420  # 35% x 1200ms (ramp-in end)
 # so the push reaches its peak 35% of the way through the event and HOLDS the
@@ -2848,6 +3005,114 @@ def edit(source_key: str, brief: str,
         led["failures"].append({"kind": kind, "detail": str(detail)[:400],
                                 "cmd": (cmd or "")[:300],
                                 "t": round(time.time() - t0, 1)})
+
+    # ── EVERY FAMILY MEASURES ITS OWN EFFECT ────────────────────────────────
+    # Until now step_changed_output() was generic and called from exactly ONE
+    # site — inside build_zoom. Round 33 read "PLACEMENT EFFECT: 1 measured" on a
+    # run that DECLARED SIXTEEN placements (text 10, card 4, sfx 1, zoom 1):
+    # fifteen declarations with no evidence they changed anything.
+    #
+    # That is the whole `placement_inert` lesson applied to one family and left
+    # there. A ported 31-type motion-graphics catalogue and a catalogue that
+    # composites nothing produce the identical report under that coverage, so
+    # this goes in BEFORE any component is ported, not after.
+    #
+    # `domain` picks the instrument, and picking it wrong is not a weak check but
+    # an inverted one: place_sfx writes `-c:v copy`, so a video diff reports
+    # psnr=inf / changed=False on a PERFECT sound placement.
+    # A SAMPLE, NOT A SWEEP. A text overlay holds for up to 3.0s and the question
+    # here is "did anything change in this span", which one short probe answers
+    # as well as decoding the whole thing twice. Ten items measured over their
+    # full spans would add 10-20s of ffmpeg to a wall this lane is trying to
+    # bring DOWN — a check that costs more than the family it measures gets
+    # switched off, which is how it stops being a check.
+    _PROBE_WINDOW_S = 0.5
+
+    def _free_ctrl(busy, out_dur, want=_PROBE_WINDOW_S, pad=0.25):
+        """A span of `want` seconds this family placed NOTHING in, or None.
+
+        The control window is what makes the video leg content-independent, so
+        picking one that actually overlaps a placement would quietly turn the
+        measurement back into the absolute bar while still calling itself
+        relative. Every candidate is checked against EVERY busy span, padded,
+        and None is returned rather than a bad guess.
+        """
+        try:
+            _d = float(out_dur or 0)
+        except Exception:
+            return None
+        if _d <= want:
+            return None
+        _b = []
+        for _s0, _s1 in (busy or []):
+            try:
+                _b.append((float(_s0) - pad, float(_s1) + pad))
+            except Exception:
+                continue
+        _t = 0.0
+        while _t + want <= _d:
+            if not any(_t < _e and _t + want > _s for _s, _e in _b):
+                return round(_t, 3)
+            _t += 0.25
+        return None
+
+    def _record_effect(family, before, after, t0_s, t1_s, note="", ctrl_t0=None):
+        # CLAMPED, AND THE CLAMPED WINDOW IS WHAT GETS RECORDED. Reporting the
+        # declared span while having measured 0.5s in the middle of it would be
+        # a number that does not describe what was done.
+        _a, _z = float(t0_s), float(t1_s)
+        if _z - _a > _PROBE_WINDOW_S:
+            _mid = (_a + _z) / 2.0
+            _a, _z = _mid - _PROBE_WINDOW_S / 2.0, _mid + _PROBE_WINDOW_S / 2.0
+        t0_s, t1_s = _a, _z
+        _rec = {"family": family,
+                "t": [round(float(t0_s), 2), round(float(t1_s), 2)],
+                "domain": "audio" if family == "sfx" else "video",
+                "note": note}
+        if _rec["domain"] == "audio":
+            _chg, _db = step_changed_audio(before, after, t0_s, t1_s,
+                                           env=_SUBPROCESS_ENV)
+            _rec["nsr_db"] = _db
+            _rec["mode"] = "normalised"
+        else:
+            _chg, _db = step_changed_output(before, after, t0_s, t1_s,
+                                            env=_SUBPROCESS_ENV)
+            _rec["psnr_db"] = _db
+            _cdb = None
+            if ctrl_t0 is not None:
+                _, _cdb = step_changed_output(before, after, float(ctrl_t0),
+                                              float(ctrl_t0) + (t1_s - t0_s),
+                                              env=_SUBPROCESS_ENV)
+            _rec["ctrl_psnr_db"] = _cdb
+            if _cdb is not None and _db is not None:
+                _rec["mode"] = "relative"
+                _inf = float("inf")
+                if _cdb == _inf and _db == _inf:
+                    # Nothing changed ANYWHERE in either window — the step was a
+                    # byte-identical copy. inf - inf is nan, and a nan compared
+                    # against a threshold is False by accident rather than by
+                    # measurement; say it outright instead.
+                    _chg = False
+                else:
+                    _chg = (_cdb - _db) >= _VIDEO_REL_MARGIN_DB
+            else:
+                # NAMED, not silent. The absolute bar is the weaker one and a
+                # reader has to be able to tell which measurement they are
+                # looking at.
+                _rec["mode"] = "absolute"
+        _rec["changed"] = _chg
+        led.setdefault("placement_effects", []).append(_rec)
+        if _chg is False:
+            fail("placement_inert",
+                 f"{family} declared a placement over "
+                 f"{float(t0_s):.2f}-{float(t1_s):.2f}s but the "
+                 f"{_rec['domain']} there is unchanged "
+                 f"({_rec['mode']}: {_db}"
+                 + (f" vs control {_rec.get('ctrl_psnr_db')}"
+                    if _rec.get("ctrl_psnr_db") is not None else "")
+                 + ") — a declared placement that changes nothing is not a "
+                   "placement")
+        return _chg, _db
 
     os.makedirs("/work", exist_ok=True)
     src = "/work/source.mp4"
@@ -3675,6 +3940,8 @@ def edit(source_key: str, brief: str,
         _mark(led, "build_cut", _tc0)
         steps.append({"step": "cut", "spans": len(merged),
                       "output_duration_s": cutr.get("output_duration_s")})
+        # The clock every control window is picked against.
+        _out_dur = cutr.get("output_duration_s")
         built["cut"] = len(beats) - len(merged)
         cur = "cut.mp4"
         r = run_ffmpeg_from_recipe(cutr, cur)
@@ -3720,68 +3987,86 @@ def edit(source_key: str, brief: str,
                            "why": f"{ruled_text_n} text ruling(s) collected into "
                                   f"ZERO items — every one was filtered before "
                                   f"the build step"})
-        if items:
-            # Captions only where speech exists. Asking for them on a visual
-            # beat source is asking libass to render an empty file.
-            _want_caps = bool(words)
-            # ── REAL CAPTIONS, THROUGH PRODUCTION'S OWN COMPOSITION ────────
-            # PromptlyOverlay renders "captions + motion graphics + text
-            # overlays on a transparent background" — so the nine styles need
-            # no new component, just a caption spec and an empty
-            # motionGraphics list.
-            #
-            # ENQUEUED THROUGH THE BATCH so bundle+browser (12.24s measured) is
-            # paid once across this and the card reel rather than twice. Not
-            # merged INTO the reel: the reel is packed back-to-back in reel
-            # time and captions span the output at real time — two renders, one
-            # process, which is the distinction render_remotion_batch exists
-            # for.
-            #
-            # HALF RATE ON THE EIGHT FREE STYLES. Measured against the native
-            # 30fps layer: 8 of 9 are already 80-97% static, so halving adds
-            # 0-5% held frames. TypewriterReveal is 42% static (a per-character
-            # cursor) and halving adds 17%, so it renders full-rate.
-            _cap_words = led.get("kept_words_out") or []
-            if _want_caps and _cap_words:
-                _cap_style = pick_caption_style(brief)
-                _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
-                _cap_pages = caption_pages(_cap_words, 3)
-                _cap_end = max(float(w["e"]) for w in _cap_words)
-                _cap_frames = max(1, int(round(_cap_end * _cap_fps)))
-                _cap_plan = "/work/caption-plan.json"
-                with open(_cap_plan, "w") as fh:
-                    json.dump(caption_overlay_plan(_cap_pages, _cap_style,
-                                                   _cap_frames, fps=_cap_fps), fh)
-                _cap_t0 = time.time()
-                _cap_res = render_remotion_batch([{
-                    "id": "captions", "composition": "PromptlyOverlay",
-                    "propsFile": _cap_plan, "out": "/work/captions.mov",
-                    "alpha": True,
-                }], env=_SUBPROCESS_ENV)
-                _mark(led, "build_captions", _cap_t0)
-                _cj = (_cap_res or {}).get("captions") or {}
-                led["caption_render"] = {
-                    "style": _cap_style, "fps": _cap_fps,
-                    "pages": len(_cap_pages), "frames": _cap_frames,
-                    "ok": bool(_cj.get("ok")),
-                    "paint_ms": _cj.get("ms"),
-                    "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
-                                     if _cj.get("ms") and _cap_frames else None),
-                    "bundle_ms": (_cap_res.get("_batch") or {}).get("bundle_ms"),
-                    "error": _cj.get("error"),
-                }
-                if _cj.get("ok") and os.path.exists("/work/captions.mov"):
-                    led["caption_mov"] = "/work/captions.mov"
-                    led["caption_path"] = "remotion"
-                else:
-                    # LOUD, not silent. A failed caption render falls back to
-                    # the ffmpeg burn below, and says so — shipping plain
-                    # captions while the ledger claims nine styles is the
-                    # failure this whole port exists to end.
-                    fail("caption_render_failed",
-                         f"style={_cap_style} fps={_cap_fps}: "
-                         f"{str(_cj.get('error'))[:200]} — falling back to the "
-                         f"ffmpeg burn")
+        # ── CAPTIONS ARE GATED ON SPEECH, NOT ON THE TEXT FAMILY ────────────
+        # This whole block used to sit inside `if items:`, so a SPEECH job that
+        # ruled zero text overlays rendered ZERO CAPTIONS — silently, with no
+        # error and no ledger entry — while the comment on its first line said
+        # "captions only where speech exists". The gate and its own stated
+        # intent disagreed, and the gate won.
+        #
+        # LATENT IN ROUND 33, not fired: the only speech fixture in the corpus
+        # ruled 10 text items, so the two conditions were never distinguishable
+        # there. The other four print `SPEECH CHECK: NOT APPLICABLE` and are
+        # correctly capless either way. It would have presented as a video that
+        # simply has no captions — no error, nothing to grep for.
+        #
+        # Captions on a visual beat source would ask libass to render an empty
+        # file, which is what `words` — not `items` — has always been the right
+        # test for.
+        _want_caps = bool(words)
+        _cap_words = led.get("kept_words_out") or []
+        _cap_pages, _cap_style = [], None
+        # ── REAL CAPTIONS, THROUGH PRODUCTION'S OWN COMPOSITION ─────────────
+        # PromptlyOverlay renders "captions + motion graphics + text overlays on
+        # a transparent background" — so the nine styles need no new component,
+        # just a caption spec and an empty motionGraphics list.
+        #
+        # HALF RATE ON THE EIGHT FREE STYLES. Measured against the native 30fps
+        # layer: 8 of 9 are already 80-97% static, so halving adds 0-5% held
+        # frames. TypewriterReveal is 42% static (a per-character cursor) and
+        # halving adds 17%, so it renders full-rate.
+        if _want_caps and _cap_words:
+            _cap_style = pick_caption_style(brief)
+            _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
+            _cap_pages = caption_pages(_cap_words, 3)
+            _cap_end = max(float(w["e"]) for w in _cap_words)
+            _cap_frames = max(1, int(round(_cap_end * _cap_fps)))
+            _cap_plan = "/work/caption-plan.json"
+            with open(_cap_plan, "w") as fh:
+                json.dump(caption_overlay_plan(_cap_pages, _cap_style,
+                                               _cap_frames, fps=_cap_fps), fh)
+            _cap_t0 = time.time()
+            _cap_res = render_remotion_batch([{
+                "id": "captions", "composition": "PromptlyOverlay",
+                "propsFile": _cap_plan, "out": "/work/captions.mov",
+                "alpha": True,
+            }], env=_SUBPROCESS_ENV)
+            _mark(led, "build_captions", _cap_t0)
+            _cj = (_cap_res or {}).get("captions") or {}
+            led["caption_render"] = {
+                "style": _cap_style, "fps": _cap_fps,
+                "pages": len(_cap_pages), "frames": _cap_frames,
+                "ok": bool(_cj.get("ok")),
+                "paint_ms": _cj.get("ms"),
+                "ms_per_frame": (round(_cj["ms"] / _cap_frames, 1)
+                                 if _cj.get("ms") and _cap_frames else None),
+                "bundle_ms": (_cap_res.get("_batch") or {}).get("bundle_ms"),
+                "error": _cj.get("error"),
+            }
+            if _cj.get("ok") and os.path.exists("/work/captions.mov"):
+                led["caption_mov"] = "/work/captions.mov"
+                led["caption_path"] = "remotion"
+            else:
+                # LOUD, not silent. A failed caption render falls back to the
+                # ffmpeg burn below, and says so — shipping plain captions while
+                # the ledger claims nine styles is the failure this port exists
+                # to end.
+                fail("caption_render_failed",
+                     f"style={_cap_style} fps={_cap_fps}: "
+                     f"{str(_cj.get('error'))[:200]} — falling back to the "
+                     f"ffmpeg burn")
+
+        # ── TEXT OVERLAYS, and the ffmpeg caption fallback ──────────────────
+        # Entered when there is text to draw OR when captions still need the
+        # burn because the Remotion pass produced no .mov. Either alone is a
+        # reason to run build_overlays; requiring BOTH is the defect above.
+        _need_burn = _want_caps and not led.get("caption_mov")
+        if items or _need_burn:
+            # CAPTURED BEFORE THE CALL, because `cur` is rebound to
+            # "overlaid.mp4" below and a path read after that rebinding measures
+            # the file against ITSELF — psnr=inf, and every text overlay reports
+            # INERT. An edit above a rebinding is not an edit (2026-09-07).
+            _ov_before = os.path.join("/work", cur)
             ov = build_overlays(items, _want_caps, cur, "overlaid.mp4")
             if ov.get("error"):
                 # ONE SKIP PER LOST RULING. A batch failure loses len(items)
@@ -3801,44 +4086,94 @@ def edit(source_key: str, brief: str,
                 else:
                     cur = "overlaid.mp4"
                     _mark(led, "build_overlays", _tov0)
-                    # COMPOSITE THE CAPTION ALPHA. One .mov, one ffmpeg input —
-                    # the CLI's refusal of yuva* had forced the old path into
-                    # PNG sequences, which for captions would be ~885 files.
-                    # scale2ref because the caption layer may be half-rate: the
-                    # overlay filter holds each caption frame across the video
-                    # frames between, which is exactly the 0-5% added holds the
-                    # eight free styles measured.
-                    if led.get("caption_mov"):
-                        _cc0 = time.time()
-                        _cco = "/work/captioned.mp4"
-                        _ccr = subprocess.run(
-                            ["ffmpeg", "-y", "-v", "error",
-                             "-i", os.path.join("/work", cur),
-                             "-i", led["caption_mov"],
-                             "-filter_complex",
-                             "[1:v]fps=30,format=yuva444p[cap];"
-                             "[0:v][cap]overlay=0:0:shortest=1[outv]",
-                             "-map", "[outv]", "-map", "0:a?",
-                             "-c:v", "libx264", "-crf", "18",
-                             "-preset", "veryfast", "-c:a", "copy", _cco],
-                            capture_output=True, text=True, timeout=900,
-                            env=_SUBPROCESS_ENV)
-                        _mark(led, "composite_captions", _cc0)
-                        if _ccr.returncode == 0 and os.path.exists(_cco):
-                            cur = "captioned.mp4"
-                            led["caption_composited"] = True
-                        else:
-                            # The render succeeded and the composite did not, so
-                            # the video has NO captions at all — worse than the
-                            # fallback, and it must not pass quietly.
-                            led["caption_composited"] = False
-                            fail("caption_composite_failed",
-                                 (_ccr.stderr or "")[-200:])
-                    built["text"] = len(items)
-                    steps.append({"step": "text", "n": len(items),
-                                  "items": [{"t": _i.get("t_start"),
-                                             "content": str(_i.get("text") or "")[:80]}
-                                            for _i in items]})
+                    # DID THE TEXT REACH THE PICTURE? Ten of round 33's sixteen
+                    # declarations were text and not one carried evidence.
+                    # Measured BEFORE the caption composite, so a failed burn
+                    # cannot be masked by captions landing on top of it.
+                    _txt_ctrl = _free_ctrl(
+                        [(_i4["t_start"], _i4["t_end"]) for _i4 in items], _out_dur)
+                    for _it3 in items:
+                        _record_effect("text", _ov_before,
+                                       os.path.join("/work", "overlaid.mp4"),
+                                       _it3["t_start"], _it3["t_end"],
+                                       note=str(_it3.get("text") or "")[:40],
+                                       ctrl_t0=_txt_ctrl)
+                    # ONLY WHEN THERE WAS TEXT. This branch is now also reached
+                    # by a caption-burn-only run, and declaring len(items) == 0
+                    # text placements there would write a zero into the manifest
+                    # for a family nobody asked for.
+                    if items:
+                        built["text"] = len(items)
+                        steps.append({"step": "text", "n": len(items),
+                                      "items": [{"t": _i.get("t_start"),
+                                                 "content": str(_i.get("text") or "")[:80]}
+                                                for _i in items]})
+
+        # ── COMPOSITE THE CAPTION ALPHA ─────────────────────────────────────
+        # OUTSIDE the overlay branch, for the same reason the render is: whether
+        # a caption layer exists has nothing to do with the text family. It used
+        # to composite only on the overlay SUCCESS path, so a job with captions
+        # and no text would have rendered a .mov and then never laid it on the
+        # picture — the same defect one layer down.
+        #
+        # One .mov, one ffmpeg input — the CLI's refusal of yuva* had forced the
+        # old path into PNG sequences, which for captions would be ~885 files.
+        # The overlay filter holds each caption frame across the video frames
+        # between, which is exactly the 0-5% added holds the eight free styles
+        # measured.
+        if led.get("caption_mov"):
+            _cc0 = time.time()
+            _cco = "/work/captioned.mp4"
+            _cc_before = os.path.join("/work", cur)
+            _ccr = subprocess.run(
+                ["ffmpeg", "-y", "-v", "error",
+                 "-i", _cc_before,
+                 "-i", led["caption_mov"],
+                 "-filter_complex",
+                 "[1:v]fps=30,format=yuva444p[cap];"
+                 "[0:v][cap]overlay=0:0:shortest=1[outv]",
+                 "-map", "[outv]", "-map", "0:a?",
+                 "-c:v", "libx264", "-crf", "18",
+                 "-preset", "veryfast", "-c:a", "copy", _cco],
+                capture_output=True, text=True, timeout=900,
+                env=_SUBPROCESS_ENV)
+            _mark(led, "composite_captions", _cc0)
+            if _ccr.returncode == 0 and os.path.exists(_cco):
+                # THE GREEN THIS REPLACES. `path=remotion composited=True` fired
+                # on a file existing and ffmpeg exiting 0 — which a FULLY
+                # TRANSPARENT .mov satisfies identically. Nine styles could
+                # render nothing and report exactly the same line.
+                #
+                # startMs + durationMs — caption_pages emits NO `endMs`. Reading
+                # one would have made the span zero-length, the guard below
+                # false, and the caption measurement would have SILENTLY NEVER
+                # RUN while every other family reported. A check that cannot
+                # fire is the exact green this commit exists to delete.
+                #
+                # The LONGEST page, so the probe lands on a span that genuinely
+                # holds text.
+                if _cap_pages:
+                    _p0 = max(_cap_pages,
+                              key=lambda _p: float(_p.get("durationMs") or 0))
+                    _pa = float(_p0.get("startMs") or 0) / 1000.0
+                    _pz = _pa + float(_p0.get("durationMs") or 0) / 1000.0
+                    if _pz > _pa:
+                        _cap_ctrl = _free_ctrl(
+                            [(float(_p.get("startMs") or 0) / 1000.0,
+                              (float(_p.get("startMs") or 0)
+                               + float(_p.get("durationMs") or 0)) / 1000.0)
+                             for _p in _cap_pages], _out_dur)
+                        _record_effect("caption", _cc_before, _cco, _pa, _pz,
+                                       note=str(_cap_style or ""),
+                                       ctrl_t0=_cap_ctrl)
+                cur = "captioned.mp4"
+                led["caption_composited"] = True
+            else:
+                # The render succeeded and the composite did not, so the video
+                # has NO captions at all — worse than the fallback, and it must
+                # not pass quietly.
+                led["caption_composited"] = False
+                fail("caption_composite_failed", (_ccr.stderr or "")[-200:])
 
         _tz0 = time.time()
         # 3. ZOOMS, one per zoom ruling, velocity capped by build_zoom itself.
@@ -3950,6 +4285,17 @@ def edit(source_key: str, brief: str,
                     for _c2 in _cards:
                         _skips.append({"family": "card", "beat": None, "why": _whyc2})
                 else:
+                    # MEASURED BEFORE `cur` MOVES — same rebinding trap as text.
+                    _cd_ctrl = _free_ctrl(
+                        [(_c5["t_start"],
+                          _c5["t_start"] + float(_c5.get("duration_s") or 1.0))
+                         for _c5 in _cards], _out_dur)
+                    for _c4 in _cards:
+                        _record_effect("card", os.path.join("/work", cur),
+                                       "/work/carded.mp4", _c4["t_start"],
+                                       _c4["t_start"] + float(_c4.get("duration_s") or 1.0),
+                                       note=str(_c4.get("hero") or "")[:40],
+                                       ctrl_t0=_cd_ctrl)
                     cur = "carded.mp4"
                     _mark(led, "build_reel", _tcd0)
                     # THE FRAME COUNT, PRINTED. build_reel is 40% of
@@ -3996,6 +4342,17 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "sfx", "beat": v.get("beat"),
                                "why": f"place_sfx failed: {sr['error']}"[:160]})
             else:
+                # AUDIO DOMAIN, NOT VIDEO. place_sfx writes `-c:v copy`, so the
+                # picture is byte-identical BY CONSTRUCTION — step_changed_output
+                # would report psnr=inf and changed=False on a PERFECT sound
+                # placement, marking every correct sfx inert. The window is the
+                # sound's own span from where it actually starts (attack-shifted),
+                # not from the beat.
+                _sd = sr.get("sfx_duration_s")
+                _s_a = float(sr.get("started_at_s") if sr.get("started_at_s") is not None else at)
+                _record_effect("sfx", os.path.join("/work", cur),
+                               os.path.join("/work", _sout),
+                               _s_a, _s_a + float(_sd if _sd else 0.5), note=nm)
                 cur = _sout
                 built["sfx"] += 1
                 steps.append({"step": "sfx", "name": nm, "t": round(at, 2)})
@@ -4092,6 +4449,27 @@ def edit(source_key: str, brief: str,
                      "method": "ffmpeg", "declared_by": "execute_plan",
                      "content": _s.get("name") or ""})
         _mark(led, "build_sfx", _ts0)
+        # ── EVERY DECLARED FAMILY MEASURES ITS EFFECT ───────────────────────
+        # AN ARITHMETIC IDENTITY, for the same reason the ruled/built/skipped
+        # balance is one: it catches the NEXT family without my having to
+        # predict where it is, including families added later by someone else.
+        # Round 33 declared 16 placements across four families and measured ONE
+        # — and nothing in the run said so, because the only thing that could
+        # have said so was a count of a list nobody compared to anything.
+        #
+        # THIS IS A COVERAGE BAR, NOT A VERDICT BAR. An entry whose `changed` is
+        # None still counts as covered: "we tried and could not measure" is a
+        # different fact from "we never looked", and this check is about the
+        # second one. `placement_inert` owns the first.
+        _uncovered = uncovered_families(led.get("placements"),
+                                        led.get("placement_effects"))
+        led["placement_effect_uncovered"] = _uncovered
+        if _uncovered:
+            fail("placement_effect_uncovered",
+                 f"{_uncovered} declared placement(s) and measured NOTHING. A "
+                 f"family that cannot show it changed the output is a manifest "
+                 f"entry, not a placement — and a ported catalogue and a "
+                 f"catalogue that composites nothing read identically here.")
         led["execute_plan"] = {"steps": steps, "built": built, "ruled": ruled,
                                "ruled_but_not_built": gap, "skips": _skips,
                                "unbalanced": _unbalanced}
@@ -4293,9 +4671,23 @@ def edit(source_key: str, brief: str,
         if r.returncode != 0:
             fail("place_sfx_failed", (r.stderr or "")[-300:])
             return {"error": "sfx mix failed", "stderr": (r.stderr or "")[-500:]}
+        # THE SOUND'S OWN DURATION, so the effect check can measure the window
+        # the sound actually occupies. A fixed guess would straddle silence on
+        # an impulsive hit (awkward-moment, 10ms attack) and fall short of a
+        # swell (imposter, 935ms attack) — and a window that mostly contains
+        # nothing is how a real placement measures as inert.
+        _sdur = None
+        try:
+            _pr = subprocess.run(
+                ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                 "-of", "csv=p=0", sfx], capture_output=True, text=True,
+                timeout=30, env=_SUBPROCESS_ENV)
+            _sdur = round(float((_pr.stdout or "").strip()), 3)
+        except Exception:
+            _sdur = None
         return {"ok": True, "output_file": os.path.basename(outp), "sfx": nm,
                 "lands_at_s": round(at, 3), "started_at_s": round(start, 3),
-                "attack_ms_applied": attack_ms,
+                "attack_ms_applied": attack_ms, "sfx_duration_s": _sdur,
                 "note": "the file starts EARLY by its attack so the peak lands on t"}
 
     def author_component(tsx, frames=45, name="authored"):
@@ -6109,6 +6501,7 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"{_cr.get('pages')} pages / {_cr.get('frames')} frames  "
               f"paint {(_cr.get('paint_ms') or 0)/1000:.1f}s "
               f"({_cr.get('ms_per_frame')} ms/frame)  "
+              f"bundle {(_cr.get('bundle_ms') or 0)/1000:.1f}s  "
               f"path={(r.get('ledger') or {}).get('caption_path')}  "
               f"composited={(r.get('ledger') or {}).get('caption_composited')}"
               + (f"  ERROR={_cr.get('error')}" if _cr.get("error") else ""))
@@ -6125,13 +6518,31 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         for e in _eff:
             _v = ("moved" if e.get("changed") is True
                   else "INERT" if e.get("changed") is False else "UNMEASURED")
-            print(f"     {e.get('family','?'):8} t={e.get('t')}  {_v}  "
-                  f"psnr={e.get('psnr_db')} dB")
+            # THE UNIT IS PER-DOMAIN. sfx is measured in the AUDIO domain and
+            # printing its normalised-signal ratio under a `psnr=` label would
+            # be a number wearing another measurement's name — and psnr_db is
+            # simply absent on those rows, so it would print `psnr=None dB` on
+            # every correctly-placed sound.
+            _u = "nsr" if e.get("domain") == "audio" else "psnr"
+            _val = e.get("nsr_db") if e.get("domain") == "audio" else e.get("psnr_db")
+            print(f"     {e.get('family','?'):8} t={e.get('t')}  {_v:<10} "
+                  f"{_u}={_val} dB"
+                  + (f"  {str(e.get('note'))[:34]}" if e.get("note") else ""))
     else:
         # NOT SILENCE. Zero measurements is a fact about the run, and printing
         # nothing is what made round 27 unreadable.
         print("  PLACEMENT EFFECT: none measured "
               "(no step with a span ran, or the check did not execute)")
+    # COVERAGE, PRINTED — the counter added to answer "which families measured
+    # nothing" is useless in the ledger alone. Round 29 ran specifically to
+    # learn whether a gate fired and could not, because the counter reached the
+    # ledger and no output.
+    _unc = (r.get("ledger") or {}).get("placement_effect_uncovered")
+    _fam_dec = sorted({_p.get("family") for _p in _pl_all if _p.get("family")})
+    if _unc is not None:
+        print(f"  EFFECT COVERAGE : declared {_fam_dec or '[]'}  "
+              + ("ALL MEASURED" if not _unc
+                 else f"<-- UNCOVERED {_unc} — declared and never measured"))
     _rf = (r.get("ledger") or {}).get("reel_frames")
     if _rf is not None:
         print(f"  REEL            : {_rf} frames "

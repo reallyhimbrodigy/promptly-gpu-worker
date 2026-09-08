@@ -81,6 +81,81 @@ check("alpha is requested", '"alpha": True' in src)
 check("the ffmpeg burn survives ONLY as a fallback",
       'not led.get("caption_mov")' in src,
       "no captions at all is worse than plain ones")
+# ── GATED ON SPEECH, NOT ON THE TEXT FAMILY ───────────────────────────────
+# The caption render sat inside `if items:` — the TEXT overlay list — so a
+# SPEECH job that ruled zero text overlays rendered ZERO CAPTIONS, silently,
+# while the comment on the block's first line said "captions only where speech
+# exists". The gate and its own stated intent disagreed and the gate won.
+#
+# LATENT, never fired: round 33's only speech fixture ruled 10 text items, so
+# the two conditions were indistinguishable there, and the other four fixtures
+# carry no speech and are correctly capless either way. It would have shipped as
+# a video that simply has no captions — no error, nothing to grep for.
+#
+# WALKED FROM THE AST, and over the ENCLOSING conditions rather than the call
+# line: the defect was never visible at the call site, only in what wrapped it.
+import ast as _ast
+_tree = _ast.parse(src)
+
+
+def _enclosing_ifs(root, want):
+    """Every `if` test that wraps a node whose source contains `want`."""
+    out, stack = [], [(root, [])]
+    while stack:
+        node, guards = stack.pop()
+        for child in _ast.iter_child_nodes(node):
+            g = guards
+            if isinstance(node, _ast.If) and child in node.body:
+                g = guards + [node.test]
+            if (isinstance(child, _ast.Constant) and isinstance(child.value, str)
+                    and child.value == want):
+                out.append(g)
+            stack.append((child, g))
+    return out
+
+
+_names_guarding = set()
+for _g in _enclosing_ifs(_tree, "captions"):
+    for _t in _g:
+        for _n in _ast.walk(_t):
+            if isinstance(_n, _ast.Name):
+                _names_guarding.add(_n.id)
+check("the caption render is NOT gated on the text-overlay list",
+      "items" not in _names_guarding,
+      f"conditions wrapping the caption render reference {sorted(_names_guarding)} "
+      f"— a speech job that rules no text overlays would render no captions")
+check("it IS gated on speech", "_want_caps" in _names_guarding or "words" in _names_guarding,
+      f"guarded by {sorted(_names_guarding)}; captions on a visual beat source "
+      f"ask libass to render an empty file")
+# AND THE GATE IS DERIVED FROM SPEECH, not merely named after it. RED-proving
+# caught this: replacing `_want_caps = bool(words)` with `_want_caps = True`
+# left the name in the guard, so the check above passed while the gate was gone.
+# A check that survives the mutation it exists to catch is not yet a check.
+_wc_from = set()
+for _n in _ast.walk(_tree):
+    if isinstance(_n, _ast.Assign) and any(
+            isinstance(_t2, _ast.Name) and _t2.id == "_want_caps" for _t2 in _n.targets):
+        for _v in _ast.walk(_n.value):
+            if isinstance(_v, _ast.Name):
+                _wc_from.add(_v.id)
+check("the speech gate is DERIVED from the transcript words",
+      "words" in _wc_from,
+      f"_want_caps is assigned from {sorted(_wc_from) or 'a constant'} — a gate "
+      f"named after speech but not computed from it is not a gate")
+
+# The COMPOSITE has the same shape one layer down: it used to run only on the
+# overlay SUCCESS path, so a job with captions and no text would have rendered a
+# .mov and never laid it on the picture.
+_comp_guards = set()
+for _g in _enclosing_ifs(_tree, "/work/captioned.mp4"):
+    for _t in _g:
+        for _n in _ast.walk(_t):
+            if isinstance(_n, _ast.Name):
+                _comp_guards.add(_n.id)
+check("the caption COMPOSITE is not gated on the text-overlay list either",
+      "items" not in _comp_guards and "ov" not in _comp_guards and "r2" not in _comp_guards,
+      f"conditions wrapping the composite reference {sorted(_comp_guards)}")
+
 check("a failed render is LOUD", 'fail("caption_render_failed"' in src)
 check("a failed composite is LOUD", 'fail("caption_composite_failed"' in src,
       "render ok + composite failed = a video with NO captions")
