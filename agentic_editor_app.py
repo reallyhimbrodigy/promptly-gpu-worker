@@ -8501,7 +8501,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             # commit that adds the counter.
             _fps = [(x["n"], x.get("ruling_fp")) for x in tns if x.get("ruling_fp")]
             if len(_fps) >= 2:
-                _st, _rows, _churn = {}, [], 0
+                # DROPPED, not printed: _churn was a counter assigned and
+                # never read. The restatement share below is the number it
+                # would have carried, and it IS printed — so the counter was
+                # redundant rather than unobserved. A dead counter reads like
+                # a measurement that exists.
+                _st, _rows = {}, []
                 for _n, _fp in _fps:
                     _c, _st = diff_rulings(_st, {int(k): tuple(v)
                                                  for k, v in _fp.items()})
