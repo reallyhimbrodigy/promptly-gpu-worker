@@ -3493,7 +3493,9 @@ def edit(source_key: str, brief: str,
         }], env=_SUBPROCESS_ENV)
         _rj = (_reel_res or {}).get("reel") or {}
         _rbatch = (_reel_res or {}).get("_batch") or {}
+        led["_render_seq"] = led.get("_render_seq", 0) + 1
         led["reel_render"] = {
+            "seq": led["_render_seq"],
             "ok": bool(_rj.get("ok")), "paint_ms": _rj.get("ms"),
             "frames_expected": packed["reel_frames"],
             "bundle_ms": _rbatch.get("bundle_ms"),
@@ -3863,7 +3865,9 @@ def edit(source_key: str, brief: str,
                 }], env=_SUBPROCESS_ENV)
                 _mark(led, "build_captions", _cap_t0)
                 _cj = (_cap_res or {}).get("captions") or {}
+                led["_render_seq"] = led.get("_render_seq", 0) + 1
                 led["caption_render"] = {
+                    "seq": led["_render_seq"],
                     "style": _cap_style, "fps": _cap_fps,
                     "pages": len(_cap_pages), "frames": _cap_frames,
                     "ok": bool(_cj.get("ok")),
@@ -6253,11 +6257,21 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # bundle_ms reached the ledger and NO OUTPUT before this, so round 33 could
     # not tell whether the 9.79s bundle was paid once or twice. A counter added
     # to answer a question gets printed.
+    # EXECUTION ORDER, NOT THE ORDER THIS LOOP HAPPENS TO NAME THEM.
+    #
+    # This printed a FIXED (reel, captions) order, and it was misread as
+    # chronological: "reel CACHE HIT, captions bundled" was diagnosed as the
+    # cache thrashing, when captions simply render FIRST (execute_plan does
+    # cut -> text -> zoom -> card, and the reel is the card step). The cache was
+    # working correctly the entire time. A table whose order the reader chose
+    # cannot be used to infer sequence, so the sequence is now recorded at the
+    # call site and printed.
     _procs = []
     for _label, _key in (("reel", "reel_render"), ("captions", "caption_render")):
         _d = (r.get("ledger") or {}).get(_key)
         if _d and _d.get("bundle_ms") is not None:
             _procs.append((_label, _d))
+    _procs.sort(key=lambda kv: kv[1].get("seq") or 0)
     if _procs:
         _paid = sum(d["bundle_ms"] for _, d in _procs if d.get("bundle_cached") is not True)
         _saved = sum(d["bundle_ms"] for _, d in _procs if d.get("bundle_cached") is True)
@@ -6267,7 +6281,8 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             _cach = _d.get("bundle_cached")
             _cs = ("CACHE HIT" if _cach is True else
                    "bundled" if _cach is False else "UNKNOWN (no BUNDLE_CACHED line)")
-            print(f"     {_label:10} bundle {(_d.get('bundle_ms') or 0)/1000:5.1f}s "
+            print(f"     #{_d.get('seq') or '?'} {_label:10} "
+                  f"bundle {(_d.get('bundle_ms') or 0)/1000:5.1f}s "
                   f"paint {(_d.get('paint_ms') or 0)/1000:6.1f}s  {_cs}")
 
     _eff = (r.get("ledger") or {}).get("placement_effects") or []
