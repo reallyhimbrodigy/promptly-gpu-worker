@@ -79,3 +79,62 @@ Re-run this prediction a fourth time on a new intervention and call the earlier
 failures untested. Rounds 39, 40 and 41 are three attempts; 39 refuted the
 original mechanism, 40 could not test anything (zero cards built), and 41 tests a
 different claim. That is the record.
+
+---
+
+# AMENDMENT (2026-09-08, still before any round-41 number)
+
+Builder-1 applied my own criterion 4 to round 39 and it holds. I am withdrawing
+the refutation and marking round 39 **UNRESOLVED**.
+
+Round 39's four card beats quoted 10,000, $400, 3 and 30,000. Every one warranted
+a StatCard. So the agent was never on a beat where naming a different component
+was the right answer, and visibility-as-description was never put in a position
+to fail. `1 distinct of 29` there means what it means on any all-stat set:
+nothing.
+
+**A confound that makes a positive result unreadable makes a negative result
+unreadable too.** I wrote the rule for round 41 and did not apply it backwards.
+
+## This correction favours me, which is why it needs stating plainly
+
+It converts a failed prediction of mine into an untested one. That is the shape
+of an argument I should distrust, so the test is whether the logic stands
+independent of who benefits — and it does, because it is symmetric and it is
+mine. A beat that genuinely warrants StatCard cannot discriminate between "chose
+it because it is the only one it knows" and "chose it because it is right."
+
+**The corrected record is WORSE for the project, not better.** Not "one
+refutation and two nulls" but THREE ROUNDS THAT TESTED NOTHING:
+
+    round 39   all four card beats stat-shaped — no discriminating beat
+    round 40   zero cards built — nothing to measure
+    round 41   running on v1, where the only card-generating fixture is
+               stat-shaped, so it lands here again by construction
+
+The mechanism has never been tested. That is not a rescue; it is a more expensive
+finding than a clean refutation, because three rounds bought no information.
+
+## One asymmetry that keeps round 39 above zero evidence
+
+The agent chooses WHICH BEATS get cards as well as which component. With claim
+lines for all 29 types in the prefix, an agent that understood PullQuote or
+EditorialQuote had the option of carding a quote beat instead of, or as well as,
+a stat beat. It carded four stat beats. That is weak evidence against the
+mechanism — weak because beat selection has its own drivers and I have not
+isolated them, and because n=1 fixture.
+
+So: **UNRESOLVED, leaning slightly against.** Not refuted, not alive.
+
+## What I will not now do
+
+Treat "visibility is dead" as settled, and treat it as vindicated. It is neither.
+The next test needs a fixture whose card beats are NOT stat-shaped — which is in
+v3, and which round 41 cannot reach.
+
+## What this does not change
+
+Round 40's zero-cards finding and the prop-shape fix stand on their own: the
+agent invented a key name because it had never been told any component's props,
+and that was directly observed in round 40's skip line, not inferred from a
+distinct count.
