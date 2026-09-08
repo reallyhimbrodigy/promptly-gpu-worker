@@ -84,7 +84,7 @@ for name in _required:
                  "kept_ratio": float(kept.group(1)) if kept else None,
                  "placements": int(pm.group(1)) if pm else 0,
                  "contract_violations": cv_list}
-green, why = rg.round_is_green(res)
+green, why = rg.round_is_green(res, required=_required)
 json.dump({"result": res, "green": green, "why": why},
           open(os.path.join(out, "score.json"), "w"), indent=1)
 print(f"\nROUND {os.environ.get('PROMPTLY_ROUND') or os.path.basename(out).replace('round','')} GREEN={green}")

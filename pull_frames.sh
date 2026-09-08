@@ -16,7 +16,15 @@ mkdir -p "$OUT"
 command -v ffmpeg >/dev/null || { echo "ffmpeg not found"; exit 2; }
 
 found=0
-for f in talking_head music screen_recording product_shot pet_video; do
+# THE FIXTURES THIS ROUND ACTUALLY RAN, from its own plan.tsv — the FOURTH
+# reader of the v1 five-name list found in one session (the collector's loop,
+# round_is_green, archive_round and this). On round 42 it printed "no log" four
+# times for fixtures that were never in the round and skipped nothing real, but
+# a reader that names fixtures a round does not have will silently skip ones it
+# does, which is how a sheet nobody can pull becomes a sheet nobody looks at.
+FIXTURES="$(cut -f1 "$DIR/plan.tsv" 2>/dev/null | tr '\n' ' ')"
+[ -n "${FIXTURES// /}" ] || { echo "no plan.tsv in $DIR — cannot know which fixtures ran"; exit 2; }
+for f in $FIXTURES; do
   log="$DIR/$f.log"
   [ -f "$log" ] || { echo "  $f: no log"; continue; }
   key=$(grep -oE 's3 key +: [^ ]+' "$log" | tail -1 | awk '{print $NF}')

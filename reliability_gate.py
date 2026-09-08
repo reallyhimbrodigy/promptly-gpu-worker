@@ -126,8 +126,18 @@ def evaluate_route(rounds, route):
             "arms": streak >= REQUIRED_GREEN_ROUNDS, "streak_broken_by": broke}
 
 
-def round_is_green(round_result):
+def round_is_green(round_result, required=None):
     """One round: every required source present, and every one of them ok.
+
+    `required` IS THE CORPUS'S CONTRACT AND MUST BE PASSED for any corpus but
+    the default. This read the module-level REQUIRED_SOURCES unconditionally,
+    so round 42 — three real fixtures, correctly derived and printed by the
+    collector — was scored against v1's five names: four "NO RESULT (absent)"
+    legs for fixtures that were never in the round, and `car_short`/`motion`
+    reported as "unknown source(s)". The collector's loop had been made
+    corpus-aware and THIS function was left holding the hardcode, which is the
+    same shape as the two copies of the collector both carrying it: fixing one
+    reader of a constant does not fix the others.
 
     `round_result` maps source -> {"ok": bool, ...}. A source that is missing,
     None, or not a dict is NOT green — it is unproven, and unproven is the same
@@ -143,8 +153,9 @@ def round_is_green(round_result):
     cannot show, nobody sees.
     """
     r = round_result or {}
+    req = tuple(required) if required else REQUIRED_SOURCES
     fails = []
-    for src in REQUIRED_SOURCES:
+    for src in req:
         v = r.get(src)
         if not isinstance(v, dict):
             fails.append(f"{src}: NO RESULT (absent — never treated as a pass)")
@@ -194,7 +205,7 @@ def round_is_green(round_result):
             if v.get(marker):
                 fails.append(f"{src}: ok but {marker}={v[marker]!r} — green "
                              f"means the FULL video, not a lesser one")
-    extra = sorted(set(r) - set(REQUIRED_SOURCES))
+    extra = sorted(set(r) - set(req))
     if extra:
         fails.append(f"unknown source(s) {extra} in the round — the test set "
                      f"is a contract; a renamed source must not silently "
