@@ -2621,7 +2621,80 @@ _VIDEO_REL_MARGIN_DB = 3.0
 # passthrough — the exact failure it exists to catch. 20.0 sits between them
 # with 4.6 dB of margin below the passthrough floor and 3.3 dB above the real
 # ceiling.
-_ZOOM_GEOMETRY_MAX_DB = 20.0
+# ── THE ABSOLUTE BAR WAS CALIBRATED ON ONE CONTENT CLASS AND INVERTS ────────
+# I set 20.0 from a single high-detail fixture: real zooms read 15.94-16.84 and
+# passthroughs 24.30-26.11. On FLAT content the whole scale moves and the arms
+# swap sides. Measured on a flat field (the shape of three corpus fixtures):
+#
+#     content    arm    abs psnr   bar 20.0 says   scale-fit delta
+#     detailed   real      15.99   APPLIED               +6.06
+#     detailed   pass      26.11   NOT APPLIED          -10.91
+#     FLAT       real      26.91   NOT APPLIED  <-- WRONG   -4.68
+#     FLAT       pass      53.25   NOT APPLIED          -31.71
+#
+# A real zoom on a flat field reads 26.91 and the absolute bar calls it a
+# passthrough. That is three false failures in round 36 (DepthPull, SnapReframe,
+# StepZoom) and it would have had someone editing three working components.
+# Never infer a universal shape from one sampled instance — a standing rule I
+# broke while writing the check that enforces the others.
+#
+# THE CONTENT-INDEPENDENT FORM asks which SCALE better explains the render:
+# psnr(source cropped to the claimed scale, render) minus psnr(source, render).
+# Both terms read the same content, so content cancels. Across a 27 dB swing in
+# absolute level:
+#     reals    +6.06, -4.25, -4.68, -0.10, +1.67, +2.48, +4.82
+#     passes  -10.45, -10.91, -11.20, -11.23, -14.60, -31.71
+# -8.0 sits between them with 3.3 dB below the worst real and 2.5 dB above the
+# best passthrough.
+#
+# ONE-SIDED ON PURPOSE. It FAILS only on strong evidence of a passthrough;
+# anything else is recorded and not failed. A false "not applied" sends someone
+# to edit a component that works, which is more expensive than missing one.
+_ZOOM_SCALE_FIT_FAIL_DB = -8.0
+
+
+def zoom_scale_fit_delta(src, render, scale, origin_x, origin_y, t0, dur=0.15,
+                         env=None, width=1080, height=1920):
+    """How much better the CLAIMED scale explains the render than no zoom does.
+
+    Positive: the render looks like the source seen through that zoom.
+    Strongly negative: it looks like the source with no zoom at all.
+    None: unreadable, which is never a pass and never a failure.
+    """
+    import subprocess
+
+    def _psnr(s):
+        if s and abs(float(s) - 1.0) > 1e-6:
+            cw, ch = width / float(s), height / float(s)
+            x = max(0.0, min(width - cw, float(origin_x) * width - cw / 2))
+            y = max(0.0, min(height - ch, float(origin_y) * height - ch / 2))
+            f = (f"[0:v]crop=w={cw:.0f}:h={ch:.0f}:x={x:.0f}:y={y:.0f},"
+                 f"scale={width}:{height},setsar=1[a];"
+                 f"[1:v]setsar=1[b];[a][b]psnr=stats_file=-")
+        else:
+            f = "[0:v]setsar=1[a];[1:v]setsar=1[b];[a][b]psnr=stats_file=-"
+        try:
+            r = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-nostats",
+                 "-ss", f"{float(t0):.3f}", "-t", f"{float(dur):.3f}", "-i", src,
+                 "-ss", f"{float(t0):.3f}", "-t", f"{float(dur):.3f}", "-i", render,
+                 "-lavfi", f, "-f", "null", "-"],
+                capture_output=True, text=True, timeout=300, env=env)
+        except Exception:
+            return None
+        v = [float(x) for x in re.findall(
+            r"psnr_avg:([0-9.]+)", (r.stdout or "") + (r.stderr or ""))]
+        return sum(v) / len(v) if v else None
+
+    try:
+        if not (os.path.exists(src) and os.path.exists(render)):
+            return None
+        a, b = _psnr(1.0), _psnr(scale)
+        if a is None or b is None:
+            return None
+        return round(b - a, 2)
+    except Exception:
+        return None
 
 # ── STAGEDPUSH, WHICH NEEDS STAGES OR IT SILENTLY DOES NOTHING ──────────────
 # StagedPush.tsx: `const stages = ev.stages ?? []; if (stages.length < 2)
@@ -5715,18 +5788,26 @@ def edit(source_key: str, brief: str,
                 _pk_s = (_sg["stage_peak_s"] if _sg.get("stage_peak_s")
                          else ZOOM_PEAK_REACH_MS[_sg["type"]] / 1000.0)
                 _w0 = max(0.0, min(_pk_s, max(0.0, _dur_s - 0.3)))
-                _gch, _gdb = step_changed_output(
-                    _sg["src"], _sg["out"], _w0, min(_dur_s, _w0 + 0.3),
-                    env=_SUBPROCESS_ENV, identical_db=_ZOOM_GEOMETRY_MAX_DB)
+                _gd = zoom_scale_fit_delta(
+                    _sg["src"], _sg["out"], _sg.get("claimed_scale") or 1.22,
+                    0.5, 0.4, _w0, min(0.15, max(0.05, _dur_s - _w0)),
+                    env=_SUBPROCESS_ENV)
                 _sg["geometry_window"] = [round(_w0, 3),
-                                          round(min(_dur_s, _w0 + 0.3), 3)]
+                                          round(min(_dur_s, _w0 + 0.15), 3)]
+                _sg["scale_fit_delta_db"] = _gd
+                # None is UNMEASURED. Only strong evidence of a passthrough
+                # fails; a false failure sends someone to edit a component that
+                # works.
+                _gch = None if _gd is None else (_gd > _ZOOM_SCALE_FIT_FAIL_DB)
+                _gdb = _gd
                 _sg["geometry_psnr_db"] = _gdb
                 _sg["geometry_ok"] = _gch
                 if _gch is False:
                     fail("zoom_not_applied",
-                         f"{_sg['type']} rendered {_sg['frames']} frames that "
-                         f"are the SAME PICTURE as its own source "
-                         f"(psnr {_gdb} dB >= {_ZOOM_GEOMETRY_MAX_DB}). "
+                         f"{_sg['type']} rendered {_sg['frames']} frames the "
+                         f"UNZOOMED source explains better than its own claimed "
+                         f"scale (scale-fit {_gdb} dB <= "
+                         f"{_ZOOM_SCALE_FIT_FAIL_DB}). "
                          f"ClipRenderer mounts a zoom only under "
                          f"`clip.zoomEffect && clip.src` — without the "
                          f"pre-extracted file it renders un-zoomed and says "

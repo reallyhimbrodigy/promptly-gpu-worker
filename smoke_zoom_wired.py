@@ -179,18 +179,39 @@ check("the extract is re-encoded, not stream-copied",
 check("the extract lands where staticFile can serve it",
       '_zpub = "/promptly-remotion/public"' in src or
       '"/promptly-remotion/public"' in src)
-check("a zoom that does not differ from its source FAILS",
+check("a zoom the unzoomed source explains better FAILS",
       'fail("zoom_not_applied"' in src)
 check("zoom_not_applied is a CONTRACT failure",
       "zoom_not_applied" in A.CONTRACT_FAILURES)
-check("the geometry bar is the MEASURED one, not the assumed 40.0",
-      A._ZOOM_GEOMETRY_MAX_DB == 20.0,
-      f"is {A._ZOOM_GEOMETRY_MAX_DB}; at 40.0 a passthrough (24.30..26.11 dB) "
-      f"reads as a real zoom")
-check("the bar clears the measured real ceiling of 16.84 dB",
-      A._ZOOM_GEOMETRY_MAX_DB > 16.84 + 2.0)
-check("the bar sits under the measured passthrough floor of 24.30 dB",
-      A._ZOOM_GEOMETRY_MAX_DB < 24.30 - 2.0)
+# THE BAR IS CONTENT-INDEPENDENT, and the absolute one was not.
+# Calibrated on ONE high-detail fixture, 20.0 dB INVERTED on flat content:
+#     content    arm    abs psnr   bar 20.0 says   scale-fit delta
+#     detailed   real      15.99   APPLIED               +6.06
+#     detailed   pass      26.11   NOT APPLIED          -10.91
+#     FLAT       real      26.91   NOT APPLIED  <-- WRONG   -4.68
+#     FLAT       pass      53.25   NOT APPLIED          -31.71
+# Three of round 36's fixtures are flat fields, and the absolute bar produced
+# three false failures that would have sent someone to edit working components.
+check("the absolute geometry bar is gone",
+      not hasattr(A, "_ZOOM_GEOMETRY_MAX_DB"),
+      "an absolute psnr against the source is a function of the CONTENT, and "
+      "the corpus is not one content class")
+check("the scale-fit bar is the measured one",
+      A._ZOOM_SCALE_FIT_FAIL_DB == -8.0,
+      f"is {A._ZOOM_SCALE_FIT_FAIL_DB}")
+check("it clears the worst REAL delta measured (-4.68, flat field)",
+      A._ZOOM_SCALE_FIT_FAIL_DB < -4.68 - 2.0,
+      "a real zoom on a flat field must not read as a passthrough")
+check("it sits above the best PASSTHROUGH delta measured (-10.45)",
+      A._ZOOM_SCALE_FIT_FAIL_DB > -10.45 + 2.0)
+check("the test is ONE-SIDED — only strong evidence fails",
+      "_gch = None if _gd is None else (_gd > _ZOOM_SCALE_FIT_FAIL_DB)" in src,
+      "a false 'not applied' sends someone to edit a component that works, "
+      "which costs more than missing one")
+check("the delta is RECORDED on every segment",
+      '_sg["scale_fit_delta_db"] = _gd' in src,
+      "a threshold nobody can read the inputs of cannot be re-calibrated when "
+      "the corpus changes")
 check("the check is aimed at the PEAK, not the head",
       "_pk_s = (_sg[\"stage_peak_s\"] if _sg.get(\"stage_peak_s\")" in src,
       "a ramp starts at scale 1.0, so a real zoom's head is legitimately "
