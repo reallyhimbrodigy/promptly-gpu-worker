@@ -6376,6 +6376,15 @@ def edit(source_key: str, brief: str,
             # the wrong component passed every gate and rendered a blank frame.
             _mismatch = mg_props_mismatch(_ctype, _cprops)
             if _mismatch:
+                # LOUD, NOT MERELY SKIPPED. I put card_props_mismatch in
+                # CONTRACT_FAILURES and emitted it from NOWHERE — one consumer,
+                # no producer. So round 40 dropped 3 of 3 cards and scored
+                # GREEN, which is strictly WORSE than round 39: there the cards
+                # at least rendered blank and alpha_layer_empty caught them.
+                # A refusal that replaces a visible failure with a quiet one is
+                # a regression, however correct the refusal itself is.
+                fail("card_props_mismatch",
+                     f"card beat {v.get('beat')}: {_mismatch}")
                 _skips.append({"family": "card", "beat": v.get("beat"),
                                "why": f"{_mismatch} Either send props in this "
                                       f"component's own shape, or omit "
