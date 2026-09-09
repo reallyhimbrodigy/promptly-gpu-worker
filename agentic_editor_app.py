@@ -1507,6 +1507,13 @@ Violating any of them produces a BROKEN video that still exits 0.
                     ["card"] ["text"] ["sfx"] ["zoom"] ["none"]
                     or combinations — a corpus hook routinely carries BOTH
                     text and a sound hit. F1 above maps each to its mechanism.
+                    CARD AND TEXT ARE NOT ALTERNATIVES. A beat that quotes a
+                    figure, or a claim worth stamping, takes a card AND a
+                    caption:
+                      the caption carries the words,
+                      the card carries the number.
+                    Choosing between them is the wrong question — the reference
+                    hooks do both on the same beat.
         text_content — REQUIRED when treatment includes "text": the words to
                     burn for that beat. The overlay is DERIVED from this — you
                     do not hand build_overlays a list, it reads your rulings and
@@ -1995,7 +2002,13 @@ KNOWLEDGE_TOOLS = [{
                                      "type": "array",
                                      "description": "one or more families for "
                                                     "this beat; [] or ['none'] "
-                                                    "is a real answer",
+                                                    "is a real answer. card and "
+                                                    "text are NOT alternatives "
+                                                    "— a beat that quotes a "
+                                                    "figure or a claim worth "
+                                                    "stamping takes BOTH: the "
+                                                    "caption carries the words, "
+                                                    "the card carries the number",
                                      "items": {"type": "string",
                                                "enum": ["card", "text", "sfx",
                                                         "zoom", "transition",
@@ -2202,6 +2215,147 @@ def segment_beats(words, gap_s=0.35, max_beat_s=6.0):
     if out:
         out[0]["role"] = "hook"
         out[-1]["role"] = "close"
+    return out
+
+
+_BEAT_TARGET_S = 3.0        # above this a beat is a candidate for splitting
+_SPLIT_MIN_GAP_S = 0.12     # a word gap below this is not a seam, it is diction
+_SPLIT_W_SHOT = 3.0         # a hard cut is the strongest seam there is
+_SPLIT_W_TROUGH = 2.0       # motion resolving — the moodreel doctrine's cut point
+_SPLIT_W_PAUSE = 1.0        # a micro-pause between words, scaled by its length
+
+
+def beat_split_candidates(t0, t1, words=None, shot_changes=None,
+                          motion_curve=None, window_s=1.0, min_beat_s=1.2):
+    """Real seams strictly inside (t0, t1), as [(t, weight, kind)]. PURE.
+
+    THE POINT IS THAT THIS CAN RETURN NOTHING. A beat with no internal seam is
+    not split — cutting every 3 seconds on a metronome is worse than not
+    cutting, so there is deliberately NO midpoint fallback anywhere below. If
+    the footage offers no seam, the beat stays whole.
+
+    Three signals, weighted by how much of a cut point they actually are:
+      shot change   a hard visual cut; nothing argues with it
+      motion trough motion RESOLVING, which is the moodreel doctrine's cut
+                    point — never on the rise
+      word pause    a micro-pause between words, scaled by its length, so a
+                    0.4s breath outranks a 0.13s consonant gap
+    """
+    out = []
+    try:
+        a, z = float(t0), float(t1)
+    except (TypeError, ValueError):
+        return out
+    lo, hi = a + min_beat_s, z - min_beat_s
+    if hi <= lo:
+        return out                      # no room for a split of legal length
+
+    for _t in (shot_changes or []):
+        try:
+            t = float(_t)
+        except (TypeError, ValueError):
+            continue
+        if lo <= t <= hi:
+            out.append((round(t, 3), _SPLIT_W_SHOT, "shot"))
+
+    _w = [w for w in (words or []) if isinstance(w, dict)]
+    for p, q in zip(_w, _w[1:]):
+        try:
+            gap = float(q["s"]) - float(p["e"])
+            mid = (float(q["s"]) + float(p["e"])) / 2.0
+        except (TypeError, ValueError, KeyError):
+            continue
+        if gap >= _SPLIT_MIN_GAP_S and lo <= mid <= hi:
+            out.append((round(mid, 3), _SPLIT_W_PAUSE + gap, f"pause{gap:.2f}s"))
+
+    curve = list(motion_curve or [])
+    for i in range(1, len(curve) - 1):
+        if curve[i] <= curve[i - 1] and curve[i] <= curve[i + 1]:
+            t = (i + 0.5) * float(window_s or 1.0)
+            if lo <= t <= hi:
+                out.append((round(t, 3), _SPLIT_W_TROUGH, "trough"))
+    return out
+
+
+def subdivide_beats(beats, words=None, shot_changes=None, motion_curve=None,
+                    target_s=_BEAT_TARGET_S, min_beat_s=1.2, window_s=1.0,
+                    max_splits=64):
+    """Split over-long beats at REAL seams so beats become PACING units. PURE.
+
+    WHY. A beat is a speech gap >= 0.35s or a 6s cap, so beats average ~5s — and
+    cuts can only land on beat BOUNDARIES. Measured against Zac's ten reference
+    videos (median 0.253 cuts/s, range 0.140-0.689), the beat structure caps the
+    achievable rate BELOW the reference median on most sources:
+
+        fixture         out_s  beats  max_cuts  ceiling   reference median 0.253
+        talking_head     20.3      4         3    0.148   <-- cannot reach it
+        car_short        10.0      3         2    0.199   <-- cannot reach it
+        car_mid          13.2      4         3    0.227   <-- cannot reach it
+        motion           22.7      8         7    0.308
+
+    So round 45's 5.7x under-cut had TWO causes and the prompt was the smaller
+    one: the agent under-used the boundaries it had (0 of 3 on talking_head), and
+    the surface itself could not express the reference rate. Prompting alone
+    tops out at 0.148 on talking_head.
+
+    THE SPLIT IS NOT PERIODIC. Every split lands on a seam the footage or the
+    speech actually offers, and a beat with no seam is returned WHOLE. There is
+    no midpoint fallback: a metronome cut every 3s is worse than no cut, and a
+    fallback is exactly how one would creep in.
+
+    The contract is unchanged — the agent still rules per beat, every family
+    still indexes per beat, and the shape stays {i, t_start, t_end, text}. There
+    are simply more beats, at the grain the reference actually cuts at.
+
+    EXPECT DENSITY TO MOVE ON EVERY FAMILY, not just cut: more beats is more
+    ruling opportunities for text, card, sfx and zoom at once. That is the thing
+    to watch in the next round rather than a side effect to suppress — the
+    reference videos are dense everywhere.
+    """
+    out = [dict(b) for b in (beats or [])]
+    if not out:
+        return out
+    try:
+        tgt = float(target_s)
+    except (TypeError, ValueError):
+        tgt = _BEAT_TARGET_S
+    splits = 0
+    changed = True
+    while changed and splits < max_splits:
+        changed = False
+        for idx, b in enumerate(out):
+            try:
+                a, z = float(b["t_start"]), float(b["t_end"])
+            except (TypeError, ValueError, KeyError):
+                continue
+            if z - a <= tgt:
+                continue
+            cands = beat_split_candidates(a, z, words, shot_changes,
+                                          motion_curve, window_s, min_beat_s)
+            if not cands:
+                continue                # NO SEAM, NO SPLIT. Deliberate.
+            # Strongest seam; among equals the one nearest the middle, so a
+            # split does not shave a sliver off one end.
+            mid = (a + z) / 2.0
+            t, w, kind = max(cands, key=lambda c: (c[1], -abs(c[0] - mid)))
+            left = dict(b); right = dict(b)
+            left["t_end"] = round(t, 3)
+            right["t_start"] = round(t, 3)
+            _base = str(b.get("text") or "")
+            left["text"] = _base
+            right["text"] = _base
+            right["split_from"] = b.get("i")
+            right["split_at"] = f"{kind}@{t:.2f}"
+            out[idx:idx + 1] = [left, right]
+            splits += 1
+            changed = True
+            break
+    for _b in out:
+        _b.pop("role", None)
+    for _i, _b in enumerate(out):
+        _b["i"] = _i
+    out[0]["role"] = "hook"
+    out[-1]["role"] = "close"
     return out
 
 
@@ -8224,6 +8378,14 @@ def edit(source_key: str, brief: str,
     # wrong. Fourth instance of *scope is not text* in this repo, and the first
     # one I authored.
     _vdur = float(meta.get("format", {}).get("duration") or 0)
+    # SHOT CHANGES FOR BOTH ROUTES, hoisted for the same reason _vdur was.
+    #
+    # It was detected only on the visual route, so the TRANSCRIPT route had no
+    # visual seam to subdivide on — and talking_head is transcript-route. A hard
+    # cut is the strongest seam there is and the speech path could not see one.
+    # Costs one ffmpeg scene pass on a path that did not pay it before.
+    _shots = detect_shot_changes(src, env=_SUBPROCESS_ENV)
+    led["shot_changes"] = _shots
     if _beat_source == "visual":
         # shot changes are best-effort and an empty list simply means motion is
         # the only boundary source.
@@ -8249,9 +8411,10 @@ def edit(source_key: str, brief: str,
         # the union was resolves alone on every no-speech run. probe_source can
         # find them but it is a TOOL — it runs only if the agent calls it, and
         # by then the beats are already cut.
-        _shots = detect_shot_changes(src, env=_SUBPROCESS_ENV)
-        led["shot_changes"] = _shots
         _beats = segment_beats_visual(src, _vdur, shot_changes=_shots)
+        _pre_sub = len(_beats)
+        _beats = subdivide_beats(_beats, shot_changes=_shots,
+                                 motion_curve=_vcurve)
         # THE CUT SIGNAL. Without this the agent has boundaries but nothing to
         # cut ON, and every no-speech run kept 100% of its source.
         #
@@ -8280,12 +8443,26 @@ def edit(source_key: str, brief: str,
         # because two incidental words were the only thing beats covered.
         _pre_n = len(_beats)
         _beats = cover_unnarrated_edges(_beats, _vdur)
+        _pre_sub = len(_beats)
+        _beats = subdivide_beats(_beats, words=words, shot_changes=_shots)
         if len(_beats) != _pre_n:
             _cov = sum(float(_b["t_end"]) - float(_b["t_start"]) for _b in _beats)
             print(f"[beats] {_pre_n} transcript beat(s); added "
                   f"{len(_beats) - _pre_n} un-narrated edge beat(s) — coverage now "
                   f"{_cov:.2f}s of {_vdur:.2f}s", flush=True)
             led["unnarrated_edges_added"] = len(_beats) - _pre_n
+    # PRINTED, and with the CEILING it buys — the number this exists to move.
+    # Zac's ten reference videos run 0.140-0.689 cuts/s, median 0.253; round 45
+    # came in 5.7x under and three of four fixtures could not have reached the
+    # median even cutting EVERY boundary they had.
+    led["beats_before_subdivision"] = _pre_sub
+    led["beats_after_subdivision"] = len(_beats)
+    _ceil = (len(_beats) - 1) / _vdur if _vdur else 0.0
+    print(f"[beats] {_pre_sub} -> {len(_beats)} after subdivision "
+          f"(+{len(_beats) - _pre_sub}); cut-rate ceiling now {_ceil:.3f}/s "
+          f"(reference median 0.253)"
+          + ("" if _ceil >= 0.253 else "  <-- STILL under the reference median"),
+          flush=True)
     _mark(led, "beats", _tb0)
     _numeric_ts = {b["t"] for b in _number_beats}
     for _b in _beats:

@@ -64,6 +64,17 @@ r.append(mut("            _ctype, _dwhy = derive_card_type(hero, str(b.get(\"tex
              "            _ctype, _dwhy = (\"StatCard\", \"x\"); _unused = (hero, str(b.get(\"text\") or \"\"),",
              "the build stops deriving the type",
              "the build DERIVES the type"))
+# 9-10. The sentence goes, on either surface.
+r.append(mut("                    CARD AND TEXT ARE NOT ALTERNATIVES. A beat that quotes a",
+             "                    Card and text are separate choices. A beat that quotes a",
+             "the system prompt stops saying card and text are not alternatives",
+             "the system prompt says card and text are not alternatives"))
+# Simple unique anchor — the escaped multi-line one never matched (anchor 0x)
+# and the harness said so rather than counting it RED.
+r.append(mut('"text are NOT alternatives "',
+             '"text are ALTERNATIVES "',
+             "the schema stops saying it",
+             "the tool schemas says card and text are not alternatives"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc==0 else 1)

@@ -158,6 +158,44 @@ check("and the derivation is recorded",
       'led.setdefault("card_type_derived"' in src,
       "the reason a component was chosen has to be readable afterwards")
 
+# ── 6. CARD AND TEXT ARE NOT ALTERNATIVES ───────────────────────────────────
+# Zac, 2026-09-09. The derivation removed the 29-way pick; it did NOT address
+# the miss, because the card path is gated on the AGENT's treatment and round 45
+# ruled those beats ['text','zoom'] with no card at all. The agent was treating
+# card and text as competing answers to one beat. The reference does both — a
+# counter AND a caption — and round 42 did too, ruling
+# ['text','card','zoom','sfx'] on the very beats round 45 captioned.
+#
+# ONE SENTENCE, on both surfaces the agent reads, and it removes no judgement:
+# the beat still has to be worth stamping, and that call stays the agent's.
+_SURF = {"system prompt": src[src.index("SYSTEM = "):src.index("_KNOWLEDGE_SYSTEM")],
+         "tool schemas": __import__("json").dumps(
+             list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS))}
+for _name, _text in _SURF.items():
+    check(f"the {_name} says card and text are not alternatives",
+          "not alternatives" in _text.lower() or "NOT alternatives" in _text,
+          "the agent chose between them run to run — 'the headline stat' carded "
+          "in r42, 'the headline win' captioned in r45, same beat, same figure")
+    check(f"the {_name} says which carries what",
+          "carries the words" in _text and "carries the number" in _text,
+          "without the division it reads as a licence to double up rather than "
+          "a split of duties")
+# IT MUST NOT BECOME A FLOOR. "takes BOTH" is CONDITIONAL on the beat being
+# worth stamping; an unconditional form would be the density ruling undone.
+for _text in _SURF.values():
+    check("the sentence carries no rate", "/25" not in _text and "per 25" not in _text)
+# The condition must be IN the sentence. My first version asked whether the
+# surface contained "every beat" anywhere and "card" anywhere — and the prompt
+# says "Rule on EVERY beat" for unrelated reasons, so it flagged prose that has
+# nothing to do with cards. Read the sentence, not the surface.
+for _name, _text in _SURF.items():
+    _i = _text.lower().find("not alternatives")
+    _sentence = _text[max(0, _i - 200):_i + 400] if _i >= 0 else ""
+    check(f"the {_name}'s sentence is CONDITIONAL, not a floor",
+          "worth stamping" in _sentence or "quotes a" in _sentence,
+          "an unconditional 'card every beat' is a density demand, which is the "
+          "thing Zac's rubric ruling removed")
+
 if fails:
     print(f"CARD-DERIVED: {len(fails)} FAILED")
     for f in fails:
