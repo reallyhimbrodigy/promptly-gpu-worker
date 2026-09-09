@@ -401,6 +401,57 @@ inflated by retries into an apparent outage.
   `smoke_sfx_name_shapes.py` does exactly this — 15 sounds x 2 shapes, both the
   advertised form and its stem, with traversal still refused.
 
+- **WHEN YOU RESOLVE A CONFLICT IN CODE UNDER MUTATION TEST, RE-VERIFY THE
+  MUTATIONS STILL APPLY.** (Ruled by Zac 2026-09-08.) A merge is where a
+  mutation silently stops applying, and the silence is total.
+
+  Two overlay mutations in `red_proof_edit_quality.py` targeted the literal
+  `"[0:v][cap]overlay=0:0:eof_action=pass[outv]"`. Resolving a conflict moved
+  that string INTO `alpha_composite_filter()`. The mutations were checked and
+  still applied — but had they not, a 7/7 red proof would really have been 5/7
+  with two mutations that changed nothing, and **a passing baseline and a
+  passing restore look identical either way**, so no output would have differed.
+  The proof would have gone on reporting 7/7 forever.
+
+  This is *a mutation that does not mutate proves nothing* with a specific
+  trigger: not a typo in the mutation, but a legitimate refactor moving the
+  target out from under it. Hoisting an inline string into a function, renaming
+  a constant, reindenting a block, taking `ours` in a conflict — every one of
+  them can orphan a mutation while every test still passes. A red proof whose
+  mutations do not apply is the purest false green available — a check that has
+  stopped being a check while still saying the words.
+
+  **THE CHECK, NAMED: `mut()`'s anchor guard in `red_proof_edit_quality.py`** —
+  `if src.count(old) != 1: HARNESS FAILURE` — which refuses the mutation instead
+  of reporting a pass. RED-PROVEN by orphaning a mutation the way a refactor
+  does: the harness printed `HARNESS FAILURE [...] anchor 0x`, the tally fell to
+  `6/7 RED-proven`, and it exited non-zero. Every red-proof harness carries that
+  guard, and an ad-hoc mutation run that merely prints `[SKIP]` and continues
+  does NOT satisfy this rule — printing a skip and passing anyway is the failure
+  wearing the notice.
+
+- **A CHECKOUT IS A CLAIM ABOUT THE PAST, NOT THE PRESENT.** (Ruled by Zac
+  2026-09-08.) *Commit truth is not truth*, one level down.
+
+  Builder-2 reported that `alpha_composite_filter` "does not exist in
+  agentic_editor_app.py". It exists at line 3235 and is called at 6538. It did
+  not exist in ITS WORKING COPY, which was 35 commits behind — so a property of
+  the FILE was asserted from the state of a CHECKOUT.
+
+  What it cost: the same defect was fixed twice on two branches, and the second
+  fix was written up as a SECOND INDEPENDENT PRODUCER of the truncation. That
+  reached the reliability pillar, where it changed what a round could close — a
+  green round would have looked like half a fix standing. `git merge-base
+  --is-ancestor` settled it in one command: one producer, one line, two
+  branches.
+
+  Before asserting that a symbol, a path or a behaviour is absent, ask what your
+  checkout is behind. The absence of a thing is exactly the claim a stale tree
+  makes most convincingly, because a missing symbol looks identical whether it
+  was never written or merely not yet fetched. Same shape as `.last_deployed
+  _commit` and *never trust origin/main for what is running*: ask the system that
+  holds the truth, not the copy that once agreed with it.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
