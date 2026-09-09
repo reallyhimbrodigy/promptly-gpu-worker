@@ -75,6 +75,11 @@ r.append(mut('"text are NOT alternatives "',
              '"text are ALTERNATIVES "',
              "the schema stops saying it",
              "the tool schemas says card and text are not alternatives"))
+# 11. card_hero stops saying REQUIRED — it carries the whole card contract now.
+r.append(mut('"description": "REQUIRED when treatment "\n                                                    "includes \'card\': the "',
+             '"description": "when treatment "\n                                                    "includes \'card\': the "',
+             "card_hero stops saying REQUIRED",
+             "card_hero says REQUIRED, like zoom_arc"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc==0 else 1)

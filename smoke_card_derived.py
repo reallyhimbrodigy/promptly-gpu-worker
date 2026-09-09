@@ -143,6 +143,31 @@ check("card_type is gone from the agent's schema", '"card_type"' not in _schema,
 check("card_props is gone too", '"card_props"' not in _schema,
       "the agent cannot supply a component's props when it does not choose the "
       "component")
+# card_hero IS THE WHOLE CARD CONTRACT NOW, and must say REQUIRED like the
+# field it is modelled on. Removing card_type and card_props left it carrying
+# everything while still described as one optional field among several — a gap
+# my own change created.
+_ch = __import__("json").loads(_schema)
+_hero_desc = ""
+def _find(o):
+    global _hero_desc
+    if isinstance(o, dict):
+        for _k, _v in o.items():
+            if _k == "card_hero" and isinstance(_v, dict):
+                _hero_desc = _v.get("description", "")
+            _find(_v)
+    elif isinstance(o, list):
+        for _v in o:
+            _find(_v)
+_find(_ch)
+check("card_hero says REQUIRED, like zoom_arc", "REQUIRED" in _hero_desc,
+      f"{_hero_desc[:80]!r} — it is now the ONLY thing the agent says about a "
+      f"card, and the field it is modelled on has said REQUIRED since it shipped")
+check("and says the component is derived from it",
+      "derived" in _hero_desc and "zoom_arc" in _hero_desc,
+      "the agent has to know the phrase decides the component, or it will treat "
+      "card_hero as decoration")
+
 check("card_hero survives — the judgement is still the agent's",
       '"card_hero"' in _schema,
       "WHICH phrase is worth stamping cannot be derived; that is the zoom_arc "

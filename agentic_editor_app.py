@@ -2037,9 +2037,26 @@ KNOWLEDGE_TOOLS = [{
                                                     "sfx is 'yes'. Pick by ROLE "
                                                     "from the table."},
                                  "card_hero": {"type": "string",
-                                     "description": "when treatment includes "
-                                                    "'card': the number or short "
-                                                    "phrase the card is ABOUT"},
+                                     # REQUIRED, and it says so now. Removing
+                                     # card_type and card_props made this the
+                                     # WHOLE card contract — the harness derives
+                                     # the component and its props from this one
+                                     # phrase — while its description still read
+                                     # as one optional field among several. The
+                                     # field it is modelled on, zoom_arc, has
+                                     # said REQUIRED since it shipped.
+                                     "description": "REQUIRED when treatment "
+                                                    "includes 'card': the "
+                                                    "number or short phrase the "
+                                                    "card is ABOUT. This is the "
+                                                    "ONLY thing you say about a "
+                                                    "card — the component and "
+                                                    "its props are derived from "
+                                                    "it, the way zoom_arc "
+                                                    "derives the zoom. A figure "
+                                                    "becomes a counting card; a "
+                                                    "short claim becomes a "
+                                                    "quote card"},
                                  "card_label": {"type": "string",
                                      "description": "the card's supporting line"},
                                  # WHICH COMPONENT, and its props. This is the
