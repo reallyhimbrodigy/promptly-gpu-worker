@@ -3068,6 +3068,35 @@ def sfx_start_s(attack_ms, at_s):
     return max(0.0, _want), (_want < 0.0)
 
 
+def alpha_composite_filter(fps=30):
+    """The overlay filtergraph, as a PURE STRING, so a test can run the shipped one.
+
+    THE DEFECT THIS FIXES was one flag: `shortest=1`.
+
+        [1:v]fps=30,format=yuva444p[cap];[0:v][cap]overlay=0:0:shortest=1[outv]
+
+    `shortest=1` terminates the output when the SHORTEST input ends. The overlay
+    .mov is only as long as the material it carries, so any job whose overlay is
+    shorter than its video ended the VIDEO at the overlay's last frame — while
+    `-map 0:a?` carried the full-length audio through untouched. Round 43
+    delivered screen_recording as 9.267s of video against 30.960s of audio.
+
+    NOT SIMPLY DROPPING IT. overlay's default eof_action is `repeat`, which HOLDS
+    THE LAST OVERLAY FRAME for the rest of the video — a caption frozen on screen
+    for twenty seconds. That is a different defect with the same cause, and it
+    would have looked like a fix. `eof_action=pass` passes the main input through
+    once the overlay ends, which is the actual intent: overlay while it exists,
+    untouched picture afterwards.
+
+    The three options are worth naming because two of them are wrong here:
+        repeat  (default) hold the last overlay frame — freezes a caption
+        endall            end both streams — the truncation, by another name
+        pass              main input continues unchanged — correct
+    """
+    return (f"[1:v]fps={int(fps)},format=yuva444p[cap];"
+            f"[0:v][cap]overlay=0:0:eof_action=pass[outv]")
+
+
 _STREAM_LEN_TOL_FRAMES = 1.5      # 1.5 frames = 50ms at 30fps
 
 
@@ -6342,8 +6371,7 @@ def edit(source_key: str, brief: str,
                  "-i", _cc_before,
                  "-i", led["caption_mov"],
                  "-filter_complex",
-                 "[1:v]fps=30,format=yuva444p[cap];"
-                 "[0:v][cap]overlay=0:0:shortest=1[outv]",
+                 alpha_composite_filter(30),
                  "-map", "[outv]", "-map", "0:a?",
                  "-c:v", "libx264", "-crf", "18",
                  "-preset", "veryfast", "-c:a", "copy", _cco],
