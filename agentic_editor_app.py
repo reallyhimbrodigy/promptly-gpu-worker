@@ -4091,6 +4091,142 @@ def mg_props_mismatch(mg_type, props):
     return ""
 
 
+# ── THE LOCALISED EFFECT MEASURE ────────────────────────────────────────────
+#
+# WHY THE GLOBAL ONE HAD TO GO. _record_effect compared whole-frame PSNR at the
+# placement against whole-frame PSNR at a control, bar 3.0 dB. MEASURED here:
+# a text overlay paints 0.9% OF THE FRAME. A card paints 23.1%. Averaged over
+# 1080x1920 a text overlay is indistinguishable from encode noise, and round 42
+# produced THREE FALSE placement_inert failures on text that rendered correctly
+# and legibly on Zac's real footage.
+#
+# REPRODUCED, on constructed arms under production-like accumulated loss (every
+# pipeline step re-encodes the whole video, so the CONTROL window degrades too):
+#     v3 text   GLOBAL delta 3.14 dB against a 3.0 bar   margin 0.14 dB
+#     v3 text   REGION delta 19.98 dB                    margin 13.98 dB
+# The verdict turned on a seventh of a decibel. That is not a constant to nudge.
+#
+# THE BOUNDS COME FROM THE ALPHA LAYER the components paint into. Painted pixels
+# ARE the placement's bounds — nothing needs to know a component's geometry, and
+# the EMPTY case falls out rather than needing a rule: no painted pixels is a
+# different answer from "a region that did not change".
+ALPHA_BOX_MEASURED, ALPHA_BOX_EMPTY, ALPHA_BOX_UNMEASURED = (
+    "measured", "empty", "unmeasured")
+_ALPHA_PAINT_THRESHOLD = 40     # 8-bit; empty planes read 16, content reaches 235
+_ALPHA_BOX_DOWNSCALE = 4        # 270x480 scan — a 4px box edge is below caring
+
+
+def alpha_paint_box(layer, t, env=None, width=1080, height=1920):
+    """(state, box, detail) — the bounding box of what the layer PAINTED at t.
+
+    box is (x, y, w, h) in source pixels, or None. Never raises, never guesses.
+    An unreadable layer is UNMEASURED, which is not a pass and not a failure —
+    the same law every other instrument in this file carries.
+    """
+    import subprocess
+    if not layer or not os.path.exists(layer):
+        return (ALPHA_BOX_UNMEASURED, None, "no such layer: %s" % layer)
+    _w, _h = width // _ALPHA_BOX_DOWNSCALE, height // _ALPHA_BOX_DOWNSCALE
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", "%.3f" % float(t),
+             "-i", layer, "-vf", "alphaextract,format=gray,scale=%d:%d" % (_w, _h),
+             "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "-"],
+            capture_output=True, timeout=300, env=env)
+    except Exception as e:                                    # noqa: BLE001
+        return (ALPHA_BOX_UNMEASURED, None, "ffmpeg raised: %s" % e)
+    buf = r.stdout or b""
+    if len(buf) < _w * _h:
+        return (ALPHA_BOX_UNMEASURED, None,
+                "read %d bytes of %d — the alpha plane was not produced"
+                % (len(buf), _w * _h))
+    x0, y0, x1, y1 = _w, _h, -1, -1
+    for _y in range(_h):
+        _row = buf[_y * _w:(_y + 1) * _w]
+        for _x in range(_w):
+            if _row[_x] > _ALPHA_PAINT_THRESHOLD:
+                if _x < x0:
+                    x0 = _x
+                if _x > x1:
+                    x1 = _x
+                if _y < y0:
+                    y0 = _y
+                if _y > y1:
+                    y1 = _y
+    if x1 < 0:
+        return (ALPHA_BOX_EMPTY, None, "no pixel above the paint threshold")
+    _d = _ALPHA_BOX_DOWNSCALE
+    _box = (x0 * _d, y0 * _d, (x1 - x0 + 1) * _d, (y1 - y0 + 1) * _d)
+    return (ALPHA_BOX_MEASURED, _box,
+            "%dx%d at %d,%d — %.1f%% of frame"
+            % (_box[2], _box[3], _box[0], _box[1],
+               100.0 * _box[2] * _box[3] / float(width * height)))
+
+
+def region_psnr(before, after, t0, t1, box=None, env=None):
+    """PSNR between two videos over a window, optionally cropped to `box`.
+
+    inf when the region is IDENTICAL — captured deliberately. The regex that
+    matched only [0-9.] dropped `inf` silently, so the cleanest possible result
+    (a control window that did not move at all) came back as unmeasurable.
+    """
+    import subprocess
+    if box:
+        _x, _y, _w, _h = box
+        # crop is w:h:x:y. NOT the box order. Passing (x,y,w,h) straight through
+        # measures a region with nothing to do with the placement — it read
+        # 44.85 dB on a card whose real region PSNR was 9.45.
+        _c = "crop=%d:%d:%d:%d" % (_w, _h, _x, _y)
+        _f = ("[0:v]%s,setsar=1[a];[1:v]%s,setsar=1[b];[a][b]psnr=stats_file=-"
+              % (_c, _c))
+    else:
+        _f = "[0:v]setsar=1[a];[1:v]setsar=1[b];[a][b]psnr=stats_file=-"
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-nostats",
+             "-ss", "%.3f" % float(t0), "-t", "%.3f" % (float(t1) - float(t0)), "-i", before,
+             "-ss", "%.3f" % float(t0), "-t", "%.3f" % (float(t1) - float(t0)), "-i", after,
+             "-lavfi", _f, "-f", "null", "-"],
+            capture_output=True, text=True, timeout=300, env=env)
+    except Exception:                                         # noqa: BLE001
+        return None
+    _v = [float("inf") if _x == "inf" else float(_x)
+          for _x in re.findall(r"psnr_avg:(inf|[0-9.]+)",
+                               (r.stdout or "") + (r.stderr or ""))]
+    if not _v:
+        return None
+    if all(_x == float("inf") for _x in _v):
+        return float("inf")
+    _fin = [_x for _x in _v if _x != float("inf")]
+    return sum(_fin) / len(_fin)
+
+
+# MEASURED across both corpora, four arms each, plus the production-like lossy
+# condition. A bar anywhere in (0.24, 19.98) satisfies every arm:
+#     worst CHANGED   19.98   v3 text under accumulated loss
+#     best INERT       0.24   v3 null region
+# 6.0 rather than the 10.1 midpoint, DELIBERATELY BIASED LOW. The two errors are
+# not symmetric: a false INERT sends someone to edit a component that works
+# (round 42, three times), a false CHANGED misses one inert placement. The
+# tolerable error is the missed defect. 13.98 dB below the worst real, 5.76
+# above the best null — both far over the 2.0 registered in advance.
+_REGION_EFFECT_BAR_DB = 6.0
+
+
+def region_effect_delta(place_psnr, ctrl_psnr):
+    """How much MORE the region moved at the placement than at the control."""
+    _inf = float("inf")
+    if place_psnr is None or ctrl_psnr is None:
+        return None
+    if ctrl_psnr == _inf and place_psnr == _inf:
+        return 0.0        # nothing moved anywhere — a byte-identical step
+    if ctrl_psnr == _inf:
+        return _inf       # control pristine, the placement moved: unambiguous
+    if place_psnr == _inf:
+        return -_inf      # the placement region is untouched: inert
+    return ctrl_psnr - place_psnr
+
+
 def _require_mg_type(item):
     """The component this item names, or a raise. Never a default."""
     _t = str((item or {}).get("type") or "").strip()
@@ -4528,7 +4664,8 @@ def edit(source_key: str, brief: str,
             _t += 0.25
         return None
 
-    def _record_effect(family, before, after, t0_s, t1_s, note="", ctrl_t0=None):
+    def _record_effect(family, before, after, t0_s, t1_s, note="", ctrl_t0=None,
+                       layer=None):
         # CLAMPED, AND THE CLAMPED WINDOW IS WHAT GETS RECORDED. Reporting the
         # declared span while having measured 0.5s in the middle of it would be
         # a number that does not describe what was done.
@@ -4546,6 +4683,48 @@ def edit(source_key: str, brief: str,
                                            env=_SUBPROCESS_ENV)
             _rec["nsr_db"] = _db
             _rec["mode"] = "normalised"
+        elif layer is not None:
+            # LOCALISED. Whole-frame PSNR cannot see a 0.9%-of-frame text
+            # overlay; round 42 called three legible ones INERT on a 0.14 dB
+            # margin. The bounds come from what the layer actually PAINTED.
+            _bx_st, _bx, _bx_why = alpha_paint_box(
+                layer, (float(t0_s) + float(t1_s)) / 2.0, env=_SUBPROCESS_ENV)
+            _rec["mode"] = "region"
+            _rec["box"] = list(_bx) if _bx else None
+            _rec["box_state"] = _bx_st
+            _rec["box_detail"] = _bx_why
+            if _bx_st != ALPHA_BOX_MEASURED:
+                # EMPTY and UNMEASURED are NOT verdicts on the placement. An
+                # empty layer is alpha_layer_empty's finding, not this one's,
+                # and an unread box is an unanswered question. Neither may
+                # report as changed OR as inert.
+                _rec["psnr_db"] = None
+                _rec["changed"] = None
+                _rec["region_verdict"] = _bx_st.upper()
+                led.setdefault("placement_effects", []).append(_rec)
+                led.setdefault("region_effect_" + _bx_st, 0)
+                led["region_effect_" + _bx_st] += 1
+                return None, None
+            _db = region_psnr(before, after, t0_s, t1_s, box=_bx,
+                              env=_SUBPROCESS_ENV)
+            _cdb = None
+            if ctrl_t0 is not None:
+                _cdb = region_psnr(before, after, float(ctrl_t0),
+                                   float(ctrl_t0) + (t1_s - t0_s), box=_bx,
+                                   env=_SUBPROCESS_ENV)
+            _delta = region_effect_delta(_db, _cdb)
+            _rec["psnr_db"] = None if _db in (float("inf"), None) else round(_db, 2)
+            _rec["ctrl_psnr_db"] = (None if _cdb in (float("inf"), None)
+                                    else round(_cdb, 2))
+            _rec["region_delta_db"] = (None if _delta in (float("inf"), float("-inf"), None)
+                                       else round(_delta, 2))
+            if _delta is None:
+                _rec["region_verdict"] = "UNMEASURED"
+                _rec["changed"] = None
+                led.setdefault("placement_effects", []).append(_rec)
+                return None, None
+            _chg = _delta >= _REGION_EFFECT_BAR_DB
+            _rec["region_verdict"] = "CHANGED" if _chg else "INERT"
         else:
             _chg, _db = step_changed_output(before, after, t0_s, t1_s,
                                             env=_SUBPROCESS_ENV)
@@ -5882,7 +6061,8 @@ def edit(source_key: str, brief: str,
                         _record_effect("text", _cc_before, _cco,
                                        _it3["t_start"], _it3["t_end"],
                                        note=str(_it3.get("text") or "")[:40],
-                                       ctrl_t0=_txt_ctrl)
+                                       ctrl_t0=_txt_ctrl,
+                                       layer=led.get("caption_mov"))
                     built["text"] = len(items)
                     steps.append({"step": "text", "n": len(items),
                                   "items": [{"t": _i.get("t_start"),
@@ -5900,6 +6080,7 @@ def edit(source_key: str, brief: str,
                                + float(_p.get("durationMs") or 0)) / 1000.0)
                              for _p in _cap_pages], _out_dur)
                         _record_effect("caption", _cc_before, _cco, _pa, _pz,
+                                       layer=led.get("caption_mov"),
                                        note=str(_cap_style or ""),
                                        ctrl_t0=_cap_ctrl)
                 cur = "captioned.mp4"
@@ -6553,7 +6734,8 @@ def edit(source_key: str, brief: str,
                                        "/work/carded.mp4", _c4["t_start"],
                                        _c4["t_start"] + float(_c4.get("duration_s") or 1.0),
                                        note=str(_c4.get("hero") or "")[:40],
-                                       ctrl_t0=_cd_ctrl)
+                                       ctrl_t0=_cd_ctrl,
+                                       layer="/work/reel.mov")
                     cur = "carded.mp4"
                     _mark(led, "build_reel", _tcd0)
                     # THE FRAME COUNT, PRINTED. build_reel is 40% of
