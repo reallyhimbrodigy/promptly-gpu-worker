@@ -3264,6 +3264,54 @@ def alpha_composite_filter(fps=30):
 _STREAM_LEN_TOL_FRAMES = 1.5      # 1.5 frames = 50ms at 30fps
 
 
+def fps_verdict(r_frame_rate, nb_frames, duration_s, vfr_tol=0.03):
+    """(declared, actual, state) — a source's frame rate has TWO values.
+
+    MODULE LEVEL AND PURE so a test can drive it.
+
+    WHY BOTH. `r_frame_rate` is what the container CLAIMS; nb_frames/duration is
+    what it CONTAINS. On constant-rate footage they agree. On VFR they do not,
+    and `motion` — Zac's real phone footage, in the corpus since round 42 —
+    declares 60000/1001 (59.94) while actually running 35.94 fps. A 40% gap.
+
+    THIS EXISTS BECAUSE A CONSUMER ASKED FOR led["source_fps"] AND THERE WAS NO
+    SUCH KEY. Builder-2's quantisation floor for cut-word intrusions is computed
+    from a frame duration; with the key absent the floor would have silently
+    defaulted to 30fps on every fixture — wrong by 2x on motion, in exactly the
+    direction that HIDES intrusions. A missing key that defaults is worse than a
+    missing key that raises, and the only reason it was caught is that the
+    consumer asked where its number came from before trusting it.
+
+    Returns a STATE, so VFR is visible rather than collapsed into one number:
+        CFR         the two agree within tolerance
+        VFR         they do not — neither number describes the file alone
+        UNMEASURED  nb_frames or duration unavailable; declared is NOT a
+                    substitute, it is the half that lies on VFR
+    """
+    declared = None
+    try:
+        if r_frame_rate and "/" in str(r_frame_rate):
+            _n, _d = str(r_frame_rate).split("/")
+            declared = round(float(_n) / float(_d), 3) if float(_d) else None
+        elif r_frame_rate:
+            declared = round(float(r_frame_rate), 3)
+    except (TypeError, ValueError, ZeroDivisionError):
+        declared = None
+    actual = None
+    try:
+        nb, du = int(nb_frames or 0), float(duration_s or 0)
+        actual = round(nb / du, 3) if nb and du > 0 else None
+    except (TypeError, ValueError):
+        actual = None
+    if actual is None:
+        return declared, None, "UNMEASURED"
+    if declared is None:
+        return None, actual, "UNMEASURED"
+    return (declared, actual,
+            "CFR" if abs(declared - actual) <= vfr_tol * max(declared, actual)
+            else "VFR")
+
+
 def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0):
     """(state, detail) — does the VIDEO stream run as long as it should?
 
@@ -5523,6 +5571,19 @@ def edit(source_key: str, brief: str,
         res["video_s"] = v.get("duration")
         res["audio_s"] = a.get("duration") if a else None
         res["stream_length"] = {"state": _sl_state, "detail": _sl_detail}
+        # THE OUTPUT'S RATE IS THE ONE THAT MATTERS TO A CUT. Cuts are expressed
+        # in OUTPUT time, so the frame boundary a cut can land on is the
+        # output's, not the source's — and output rate currently FOLLOWS THE
+        # SOURCE, so it varies between fixtures in one round (motion at 59.94
+        # while the rest come out at 30). A quantisation floor must read this.
+        _odec, _oact, _ostate = fps_verdict(v.get("r_frame_rate"),
+                                            v.get("nb_frames"), v.get("duration"))
+        led["output_fps_declared"] = _odec
+        led["output_fps_actual"] = _oact
+        led["output_fps_state"] = _ostate
+        res["output_fps"] = _oact
+        print(f"  OUTPUT FPS      : {_ostate}  declared={_odec}  actual={_oact}",
+              flush=True)
         # PRINTED in the same commit that records it.
         print(f"  STREAM LENGTH   : {_sl_state}  {_sl_detail}", flush=True)
         if _sl_state != "OK":
@@ -8004,6 +8065,17 @@ def edit(source_key: str, brief: str,
     # duration of 0 returns 0 silently — the same shape as the cost_usd key that
     # would have printed $0.0000 forever.
     led["source_duration_s"] = _src_dur
+    # BOTH RATES AND THE STATE. A consumer asked for led["source_fps"] and there
+    # was no such key, so its floor would have defaulted to 30 in silence.
+    # Declared alone is not enough: motion declares 59.94 and runs 35.94.
+    _fdec, _fact, _fstate = fps_verdict(vs.get("r_frame_rate"),
+                                        vs.get("nb_frames"), vs.get("duration"))
+    led["source_fps_declared"] = _fdec
+    led["source_fps_actual"] = _fact
+    led["source_fps_state"] = _fstate
+    print(f"  SOURCE FPS      : {_fstate}  declared={_fdec}  actual={_fact}"
+          + ("   <-- the two disagree; neither describes the file alone"
+             if _fstate == "VFR" else ""), flush=True)
     user = (f"{_REQ_OPEN}\n{_neutralise_brief(brief)}\n{_REQ_CLOSE}\n\n"
             f"SOURCE: /work/source.mp4 — {vs.get('width')}x{vs.get('height')}, "
             f"{_src_dur:.1f}s\n\n"
