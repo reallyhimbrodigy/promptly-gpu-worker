@@ -3312,7 +3312,7 @@ def fps_verdict(r_frame_rate, nb_frames, duration_s, vfr_tol=0.03):
             else "VFR")
 
 
-def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0):
+def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0, spans=None):
     """(state, detail) — does the VIDEO stream run as long as it should?
 
     MODULE LEVEL AND PURE so a test can call it with the real numbers.
@@ -3346,9 +3346,26 @@ def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0):
     ABSENT must never render as OK: a container that does not report a stream
     duration is exactly where this hid in the first place.
 
-    Tolerance is 1.5 frames. Round 43's healthy fixtures differ by 0.004s and
-    0.020s; the broken ones by 1.393s, 2.975s and 21.693s. Nothing sits near
-    the line, which is what a tolerance should look like.
+    THE TOLERANCE IS SPAN-AWARE, AND DERIVED RATHER THAN FITTED. I set it at a
+    flat 1.5 frames and round 44 flagged screen_recording at 1.80 frames on a
+    4-span output — a legitimate result 0.3 frames over an invented bar. Rather
+    than widen the constant to fit the observation, the bound comes from the
+    mechanism: a video ends on a FRAME BOUNDARY and its audio does not, and each
+    concat join can round by up to one frame, so an n-span output can differ by
+    about n+1 frames. Measured, both rounds, in FRAMES:
+
+        FIXED   (round 44)  -0.87  -0.75  -0.12  +1.80      max   1.80
+        BROKEN  (round 43)  +41.8  +89.3  +650.8            min  41.80
+
+    A 40-frame gap. Any bar in between separates them, so the choice is not
+    load-bearing — which is exactly the property the three fitted bars in this
+    lane lacked. (spans+1) puts screen_recording's 4-span output at 5 frames,
+    2.8x above its real 1.80 and 8x below the smallest real defect.
+
+    AND THE DEFICIT IS REPORTED IN FRAMES, not only seconds, because a reader
+    must be able to tell 2 frames from 650 at a glance. Biased TIGHT on purpose:
+    a false TRUNCATED sends someone to investigate a working pipeline, which is
+    cheap and happened here; a missed truncation ships a video that stops.
     """
     def _f(x):
         try:
@@ -3359,9 +3376,14 @@ def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0):
 
     v, a, e = _f(video_s), _f(audio_s), _f(expected_s)
     try:
-        tol = _STREAM_LEN_TOL_FRAMES / float(fps or 30.0)
+        _fps = float(fps or 30.0) or 30.0
+        # spans UNKNOWN keeps the TIGHT bar rather than a generous guess: a flag
+        # is recoverable, a miss ships.
+        _n = int(spans) if spans else 0
+        _tol_frames = (_n + 1.0) if _n else _STREAM_LEN_TOL_FRAMES
+        tol = _tol_frames / _fps
     except Exception:
-        tol = 0.05
+        _fps, _tol_frames, tol = 30.0, _STREAM_LEN_TOL_FRAMES, 0.05
     if v is None:
         return "ABSENT", ("video stream duration unreadable — the container "
                           "duration is NOT a substitute, it is what hid this")
@@ -3378,7 +3400,10 @@ def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0):
         d = e - v
         parts.append(f"kept {e:.3f}s vs video {v:.3f}s (deficit {d:.3f}s)")
         worst = max(worst, d)
-    detail = "; ".join(parts) + f"; tolerance {tol:.3f}s"
+    detail = ("; ".join(parts)
+              + f"; worst {worst * _fps:+.2f} frames vs tolerance "
+                f"{_tol_frames:.1f} frames ({tol:.3f}s at {_fps:.2f}fps"
+                + (f", {_n} span(s))" if _n else ", span count UNKNOWN)"))
     return ("TRUNCATED" if worst > tol else "OK"), detail
 
 
@@ -5566,8 +5591,12 @@ def edit(source_key: str, brief: str,
         # stream_length_verdict: four of five round-43 fixtures shipped a video
         # stream shorter than their audio and every printed number said 30.96s.
         _kept = ((led.get("cut_coverage") or {}).get("kept_s"))
+        _spans = ((led.get("cut_coverage") or {}).get("spans"))
+        _ofps = fps_verdict(v.get("r_frame_rate"), v.get("nb_frames"),
+                            v.get("duration"))[1] or 30.0
         _sl_state, _sl_detail = stream_length_verdict(
-            v.get("duration"), a.get("duration") if a else None, _kept)
+            v.get("duration"), a.get("duration") if a else None, _kept,
+            fps=_ofps, spans=_spans)
         res["video_s"] = v.get("duration")
         res["audio_s"] = a.get("duration") if a else None
         res["stream_length"] = {"state": _sl_state, "detail": _sl_detail}

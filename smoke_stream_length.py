@@ -35,16 +35,42 @@ v = app.stream_length_verdict
 
 # THE REAL ROUND-43 NUMBERS, from ffprobe on the delivered files. Driven by
 # measurement, not by invented cases — these are the draws that must separate.
-REAL = [("talking_head", 20.266667, 20.270998, 20.25, "OK"),
-        ("motion", 22.689333, 22.709002, 22.69, "OK"),
-        ("car_short", 7.033333, 10.008005, 10.0, "TRUNCATED"),
-        ("screen_recording", 9.266667, 30.960000, 30.96, "TRUNCATED"),
-        ("car_mid", 11.833333, 13.226000, 13.72, "TRUNCATED")]
+# (video_s, audio_s, kept_s, fps, spans, want). Round 43 BROKEN and round 44
+# FIXED, on the same instrument — the pair is what proves the bar separates
+# rather than merely rejects.
+REAL = [("r43 talking_head", 20.266667, 20.270998, 20.25, 30.0, 1, "OK"),
+        ("r43 motion", 22.689333, 22.709002, 22.69, 59.94, 2, "OK"),
+        ("r43 car_short", 7.033333, 10.008005, 10.0, 30.0, 1, "TRUNCATED"),
+        ("r43 screen_recording", 9.266667, 30.960000, 30.96, 30.0, 3, "TRUNCATED"),
+        ("r43 car_mid", 11.833333, 13.226000, 13.72, 30.0, 1, "TRUNCATED"),
+        # ROUND 44, AFTER THE CURE — the same fixtures must now pass, including
+        # screen_recording at +1.80 frames on a 4-span output, which a flat
+        # 1.5-frame bar wrongly flagged.
+        ("r44 talking_head", 20.300, 20.271, 20.250, 30.11, 1, "OK"),
+        ("r44 motion", 27.961, 27.957, 27.940, 35.95, 2, "OK"),
+        ("r44 car_short", 10.033, 10.008, 10.000, 30.0, 1, "OK"),
+        ("r44 screen_recording", 40.900, 40.960, 40.960, 30.0, 4, "OK")]
 
-print("the five real round-43 outputs:")
-for name, vid, aud, kept, want in REAL:
-    st, _ = v(vid, aud, kept)
-    check(f"{name:17} -> {st}", st == want, f"expected {want}")
+print("both rounds on one instrument — broken must fail, fixed must pass:")
+for name, vid, aud, kept, fps, spans, want in REAL:
+    st, _ = v(vid, aud, kept, fps=fps, spans=spans)
+    check(f"{name:22} -> {st}", st == want, f"expected {want}")
+
+# THE SEPARATION, stated as a number rather than trusted. The bar's exact value
+# is not load-bearing precisely because this gap is 40 frames wide.
+_fixed = [abs(a - vd) * f for n, vd, a, k, f, sp, w in REAL if w == "OK"]
+_broken = [abs(a - vd) * f for n, vd, a, k, f, sp, w in REAL if w == "TRUNCATED"]
+check("worst FIXED case is far below the best BROKEN case",
+      max(_fixed) * 10 < min(_broken),
+      f"fixed max {max(_fixed):.2f} frames vs broken min {min(_broken):.2f} frames")
+
+# A FLAT 1.5-FRAME BAR — the one I invented — must be shown to fail the real
+# fixed case, so the reason for the change is in the check and not only in a
+# commit message.
+_st_flat, _ = v(40.900, 40.960, 40.960, fps=30.0, spans=None)
+check("the ORIGINAL flat bar wrongly flags r44 screen_recording",
+      _st_flat == "TRUNCATED",
+      "this is why the bound is span-aware, not a widened constant")
 
 # ABSENCE MUST NEVER PASS. An unreadable stream duration is the condition the
 # defect lived in.
