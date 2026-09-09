@@ -308,6 +308,29 @@ inflated by retries into an apparent outage.
 
 ## Standing rules earned 2026-09-08
 
+- **Correct parts, wrong wiring — test the COMPOSITION, not only the pieces.**
+  A distinct shape from every false green in this file. Those were checks that
+  could not fire; this was three checks firing CORRECTLY on a system that was
+  wrong. `alpha_paint_box` returned the right box, `region_psnr` computed a
+  correct PSNR of the rectangle it was given, `region_effect_delta` subtracted
+  correctly — and the verdict read 44.85 dB on a region whose real PSNR was
+  9.45, because `crop` takes `w:h:x:y` and the box is `(x,y,w,h)`. Every unit
+  behaved exactly as specified. **Unit-correct is not system-correct, and a
+  smoke that only ever calls the parts separately will never see the seam.** Run
+  the shipped functions composed, against real inputs, and pin the composed
+  result — that run is what found it.
+
+- **A temp copy of a mounted module belongs in the scratchpad, never beside the
+  original.** I aborted rounds 37 and 38 for writes under `src/remotion` and
+  then blocked round 43 with my own `_rb_tmp.mjs` — a path-rewritten copy of
+  `remotion_batch.mjs`, put next to the original because that is where module
+  resolution works. Both reasons were true and neither is a justification. The
+  shipped module already defers its heavy imports and carries a run-as-main
+  guard precisely so a smoke can import it without a copy. Builder-1's launch
+  pre-flight caught it before any spend, which is where this guard has to live:
+  `mount_scratch_check` only helps if someone remembers to run it, the
+  pre-flight runs at the moment that matters.
+
 - **A measurement with a free parameter is not a mechanism.** A normaliser was
   proposed to cancel content out of the zoom scale-fit bar, justified as
   mechanism rather than curve-fitting: the delta's other term IS the source's
