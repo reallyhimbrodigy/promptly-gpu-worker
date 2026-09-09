@@ -989,6 +989,9 @@ CONTRACT_FAILURES = frozenset({
     # The two healthy ones had no overlay pass, or an overlay that happened to
     # span the whole video — which is why every earlier corpus hid this.
     "video_truncated",
+    # A ruling carrying a family the schema does not offer. Round 46 reported
+    # a/c/d/r each 3->0 because the bare string "card" was iterated.
+    "verdict_family_unknown",
     "no_audio_stream",         # output has no audio
     "output_has_no_speech",    # a speech source rendered mute
     "no_output",               # nothing was produced
@@ -5349,6 +5352,85 @@ def _verdict_fields():
     return ()
 
 
+# THE CLOSED FAMILY SET, read from the schema the agent is actually given so it
+# cannot drift from it. Anything outside this is a contract failure, never a
+# reported family.
+TREATMENT_FAMILIES = ("card", "text", "sfx", "zoom", "transition", "none")
+
+
+def normalise_verdict(v):
+    """(ok, record, reason) — the TYPE BOUNDARY for one beat ruling. PURE.
+
+    WHY THIS EXISTS. Round 46, talking_head, printed this:
+
+        RULED vs BUILT : a 3->0 GAP  c 3->0 GAP  card 0->0  d 3->0 GAP  r 3->0 GAP
+        [1] ['c', 'a', 'r', 'd']/keep  10 times a day workload. StatCard hero '10'.
+
+    The agent supplied `treatment` as the BARE STRING "card" against a schema
+    that correctly declares an array. Nothing rejected it, so:
+
+      * seven consumers doing `for t in (v.get("treatment") or [])` iterated the
+        STRING and got 'c','a','r','d';
+      * led["ruled_vs_built"] keys off set(_fam_ruled), so those four letters
+        became four reported FAMILIES, each 3->0 with a GAP marker, while the
+        real `card 0->0` read clean;
+      * three cards were ruled and ZERO built, and the accounting blamed
+        families that do not exist.
+
+    AND THE SAME PAYLOAD BROKE THE DEDUP. The ingest guard is
+    `if _v.get("beat") in _seen: continue` — first ruling wins — but `_seen`
+    holds whatever type arrived. Proven directly:
+
+        beat 1 (int) then beat 1 (int)   -> 1 stored, dedup works
+        beat 1 (int) then beat "1" (str) -> 2 STORED, dedup BYPASSED
+
+    So beat 1 carried BOTH ['none'] and the corrupt ruling, and every per-beat
+    count in that round counted one beat twice. One missing check, two symptoms:
+    the character-families and the duplicate verdict.
+
+    REJECTS RATHER THAN COERCES, because Zac ruled it loud. A coerced
+    `"card" -> ["card"]` would paper over an agent that is emitting the wrong
+    shape, and we would never learn it was. The rejection is recorded in
+    led["verdicts_rejected"] with the reason and printed, so a run that loses
+    rulings says which and why instead of reporting phantom families.
+    """
+    if not isinstance(v, dict):
+        return False, None, f"verdict is {type(v).__name__}, not an object"
+    if v.get("beat") is None:
+        return False, None, "no beat index"
+    # BEAT: one canonical type, so the dedup set cannot be bypassed by "1" vs 1.
+    _b = v.get("beat")
+    if isinstance(_b, bool) or not isinstance(_b, (int, float, str)):
+        return False, None, f"beat is {type(_b).__name__}"
+    try:
+        beat = int(str(_b).strip())
+    except (TypeError, ValueError):
+        return False, None, f"beat {_b!r} is not an integer index"
+    # TREATMENT: a LIST. A bare string is the defect, named explicitly.
+    _t = v.get("treatment")
+    if isinstance(_t, str):
+        return False, None, (f"treatment is the STRING {_t!r}, not a list — a "
+                             f"string is iterated character by character and "
+                             f"becomes {sorted(set(_t))} families")
+    if _t is None:
+        _t = []
+    if not isinstance(_t, (list, tuple)):
+        return False, None, f"treatment is {type(_t).__name__}, not a list"
+    fams, bad = [], []
+    for _x in _t:
+        if not isinstance(_x, str):
+            bad.append(repr(_x)); continue
+        _n = _x.strip().lower()
+        (fams if _n in TREATMENT_FAMILIES else bad).append(_n)
+    if bad:
+        return False, None, (f"treatment carries {bad} — outside the closed set "
+                             f"{list(TREATMENT_FAMILIES)}")
+    rec = dict(v)
+    rec["beat"] = beat
+    rec["treatment"] = fams
+    return True, rec, ""
+
+
 VERDICT_FIELDS = _verdict_fields()
 assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
     "the verdict schema could not be read, so the boundary would store nothing")
@@ -9169,9 +9251,19 @@ def edit(source_key: str, brief: str,
                 _added = 0
                 _rejected = []
                 for _v in _incoming:
-                    if not isinstance(_v, dict) or _v.get("beat") is None:
+                    # THE TYPE BOUNDARY. Round 46 stored a ruling whose
+                    # treatment was the bare string "card" and whose beat was a
+                    # string, so seven consumers iterated it into 'c','a','r','d'
+                    # families AND the dedup set was bypassed ("1" != 1). Both
+                    # symptoms, one missing check.
+                    _ok, _norm, _why2 = normalise_verdict(_v)
+                    if not _ok:
+                        _rejected.append({"beat": (_v.get("beat")
+                                                   if isinstance(_v, dict) else None),
+                                          "reason": _why2})
                         continue
-                    if _v.get("beat") in _seen:
+                    _v = _norm
+                    if _v["beat"] in _seen:
                         continue        # first ruling wins; a re-call tops up
                     _tr6 = [str(t).lower() for t in (_v.get("treatment") or [])]
                     # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
@@ -9228,6 +9320,11 @@ def edit(source_key: str, brief: str,
                     _seen.add(_v.get("beat")); _added += 1
                 if _rejected:
                     led.setdefault("verdicts_rejected", []).extend(_rejected)
+                    # PRINTED in the commit that records it. A rejected ruling
+                    # is a LOST placement and the round must say which.
+                    for _rj in _rejected:
+                        print(f"  [verdict REJECTED] beat {_rj.get('beat')!r}: "
+                              f"{_rj.get('reason')}", flush=True)
                 _nocopy = [v.get("beat") for v in led["beat_verdicts"]
                            if "text" in (v.get("treatment") or [])
                            and not v.get("text_content")]
@@ -9757,10 +9854,29 @@ def edit(source_key: str, brief: str,
     # green — the two halves of the run were never compared. Same class as
     # placement_declared_without_render, one layer out.
     _fam_ruled = {}
+    _fam_unknown = {}
     for _v in (led.get("beat_verdicts") or []):
-        for _t in (_v.get("treatment") or []):
-            if _t != "none":
+        _tv = _v.get("treatment")
+        # A STRING HERE IS A BUG, NOT A FAMILY LIST. The boundary rejects these
+        # now; this stays as the backstop, because the reporting layer is where
+        # the character-families surfaced and it must never invent one again.
+        if isinstance(_tv, str):
+            _fam_unknown[f"<string {_tv!r}>"] = _fam_unknown.get(
+                f"<string {_tv!r}>", 0) + 1
+            continue
+        for _t in (_tv or []):
+            if _t == "none":
+                continue
+            if _t in TREATMENT_FAMILIES:
                 _fam_ruled[_t] = _fam_ruled.get(_t, 0) + 1
+            else:
+                _fam_unknown[str(_t)] = _fam_unknown.get(str(_t), 0) + 1
+    if _fam_unknown:
+        led["families_unknown"] = _fam_unknown
+        fail("verdict_family_unknown",
+             f"rulings carry families outside the closed set: {_fam_unknown} — "
+             f"a name the schema does not offer became a reported family, which "
+             f"is how 'card' as a bare string appeared as a/c/d/r each 3->0")
     # DECLARED, not built. The manifest is what the agent SAYS it placed; the
     # harness's own count of what it BUILT lives in led["execute_plan"]["built"].
     # Naming them apart is the whole point: they were conflated, so the gap
@@ -9810,7 +9926,12 @@ def edit(source_key: str, brief: str,
                  f"family rate whether or not the video is right")
     led["ruled_vs_built"] = {f: {"ruled": _fam_ruled.get(f, 0),
                                  "built": _fam_declared.get(f, 0)}
-                             for f in set(_fam_ruled) | {"card", "text", "sfx"}}
+                             # CLOSED. This was `set(_fam_ruled) | {...}`, so
+                             # any garbage in a treatment value became a
+                             # reported family with a GAP marker.
+                             for f in (set(TREATMENT_FAMILIES) - {"none"})
+                             if _fam_ruled.get(f, 0) or _fam_declared.get(f, 0)
+                             or f in ("card", "text", "sfx")}
     # PROPORTION, not zero. Run Y ruled 18 beats `text` and built ONE, and both
     # this audit and the build_overlays guard passed it — each tested for zero
     # and one is not zero. A family ruled N and built far fewer is the same
