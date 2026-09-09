@@ -161,3 +161,42 @@ the denominator.
 Nothing here loosens a bar. The registered outcomes are unchanged: no threshold
 from a smooth distribution, UNEXERCISED rather than passing, motion excluded by
 its own UNMEASURED floor.
+
+---
+
+# ROUND 47 IS A ONE-VARIABLE EXPERIMENT — a constraint on my own work
+
+Round 46 = Builder-1's beat subdivision + my card derivation (b13730c). The
+card-and-text sentence (f7b5808) landed after that freeze, so round 47 adds
+exactly one thing.
+
+**That only holds if I add nothing else card-affecting before round 47
+collects.** The constraint is on me, and it is easy to break by accident: any
+prompt edit, any schema wording, any change to derive_card_type or
+derive_card_props lands in the same round and the sentence stops being
+separable. I have already registered once for three causes when there were two;
+the way to not do that again is to stop adding causes.
+
+## Frozen until round 47 collects
+
+    the treatment description        no edits
+    card_hero / card_label wording   no edits
+    derive_card_type                 no edits
+    derive_card_props                no edits
+    the card branch in execute_plan  no edits
+
+ff9311f (card_hero says REQUIRED) is already in and is the last one. If something
+in that list turns out to be broken before round 47, the honest move is to fix it
+AND say the round is no longer one-variable — not to fix it quietly and read the
+result as if it were.
+
+## What is NOT frozen
+
+The three edit-quality measures, because they are per-placement and observational
+— they change no ruling and no render. Anything outside the card family.
+
+## What round 47 answers, and only this
+
+Whether telling the agent that card and text are not alternatives changes the
+card-vs-text behaviour. Not whether cards are good, not whether the derivation
+picked well — one sentence, one behaviour, one round.
