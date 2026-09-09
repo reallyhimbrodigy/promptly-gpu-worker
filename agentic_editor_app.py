@@ -7302,10 +7302,25 @@ def edit(source_key: str, brief: str,
                      for w in words if _NUMWORD.match(str(w["w"]).strip(".,!?"))]
     led["number_beats"] = _number_beats
     _tb0 = time.time()
+    # SOURCE DURATION, HOISTED ABOVE THE BRANCH — ONE definition for both paths.
+    #
+    # It used to be assigned INSIDE the visual branch, and cover_unnarrated_edges
+    # was then added to the TRANSCRIPT branch using it. pyflakes cannot see that:
+    # the name IS bound somewhere in the function, so it is a legal local, and
+    # every AST check I wrote confirmed the call existed and its result was
+    # bound — none of them could ask whether the ARGUMENTS were in scope on the
+    # branch doing the calling. Round 43's talking_head died on
+    # `UnboundLocalError: cannot access local variable '_vdur'` after the round
+    # had launched.
+    #
+    # Hoisting is the structural fix rather than a second assignment: with one
+    # definition dominating both branches there is no scope question left to get
+    # wrong. Fourth instance of *scope is not text* in this repo, and the first
+    # one I authored.
+    _vdur = float(meta.get("format", {}).get("duration") or 0)
     if _beat_source == "visual":
-        # Duration from the probe we already have; shot changes are best-effort
-        # and an empty list simply means motion is the only boundary source.
-        _vdur = float(meta.get("format", {}).get("duration") or 0)
+        # shot changes are best-effort and an empty list simply means motion is
+        # the only boundary source.
         _vcurve = []
         try:
             import moodreel_editor as _mre_c
