@@ -344,6 +344,40 @@ inflated by retries into an apparent outage.
   into the schema from the same constant the builder enforces and the cert
   derives from the components — one chain, no hand-written third copy.
 
+- **WHEN WE ADVERTISE A SHAPE, THE ACCEPTOR MUST TAKE THE SHAPE WE ADVERTISED.**
+  (Ruled by Zac 2026-09-08 on Builder-2's proposal, after the third instance.)
+  The rule has a DIRECTION: the acceptor moves, not the caller. This is the
+  shape half of *educate rather than validate* — if a surface publishes a form,
+  that form must parse.
+
+  Three instances, two lanes, one week, and all three were read as the model
+  being careless:
+    * `card_props` described its payload as "in the shape its catalogue entry
+      shows" — a shape reachable only by spending a `read_knowledge` turn no
+      agent spends. The agent invented `heroNumber`, the builder correctly
+      refused, and THREE ROUNDS BUILT ZERO CARDS.
+    * `_asset_inventory.json` advertises `sfx.files` WITH extensions
+      (`boom.mp3`, `money-ching.mp3`) while `place_sfx` sanitised with
+      `re.sub(r"[^A-Za-z0-9_-]", "", name)`, which strips the dot. The agent
+      sent the name it was SHOWN and got `'boommp3' is not in the catalogue`:
+      unmatchable by construction, 2 of 4 ruled sfx lost in one run.
+    * What actually built cards was NOT the 25-type prop table but the one
+      sentence offering the `card_hero`/`card_label` shorthand — the shape the
+      agent already reaches for. The table has still never been exercised
+      (round 42: `CARD PROPS: [StatCard label+value (shorthand)] x3`) and is
+      either a prerequisite for a non-StatCard component or dead weight. It is
+      recorded UNVALIDATED rather than credited for what the shorthand did.
+
+  **A REFUSAL THAT IS TECHNICALLY CORRECT STILL LOSES THE PLACEMENT**, and it
+  fails silently: the family simply arrives short, every gate passes, and the
+  log reads like a judgement call the model made.
+
+  The check is cheap and it is mandatory with any published catalogue: assert
+  every shape the surface PUBLISHES resolves through the acceptor, driven by the
+  shipped catalogue so a new entry is covered the day it lands.
+  `smoke_sfx_name_shapes.py` does exactly this — 15 sounds x 2 shapes, both the
+  advertised form and its stem, with traversal still refused.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
