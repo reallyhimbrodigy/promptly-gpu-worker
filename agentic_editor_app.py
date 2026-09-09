@@ -5310,6 +5310,12 @@ def edit(source_key: str, brief: str,
                 led.setdefault("region_effect_" + _bx_st, 0)
                 led["region_effect_" + _bx_st] += 1
                 return None, None
+            # KEEP THE BOX. It is the PAINTED rectangle, which is the only
+            # geometry that cannot lie — a component overflowing its anchor
+            # still reports the anchor.
+            led.setdefault("_painted_boxes", []).append(
+                {"family": family, "t0": float(t0_s), "t1": float(t1_s),
+                 "box": list(_bx)})
             _db = region_psnr(before, after, t0_s, t1_s, box=_bx,
                               env=_SUBPROCESS_ENV)
             _cdb = None
@@ -5775,6 +5781,16 @@ def edit(source_key: str, brief: str,
         # because it CHOSE to keep everything? Coverage answers it directly —
         # one span covering the source is a decision, not an omission.
         led["keep_spans"] = [[round(a, 3), round(b, 3)] for a, b in spans]
+        # WHERE THE CUTS LANDED, relative to the words. Measured, not judged:
+        # intrusion_ms to the NEARER edge of the word a boundary severed. The
+        # only floor stated is the one that is not invented — a cut lands on a
+        # frame boundary, so it can sit half a frame from any word edge for
+        # reasons that are quantisation rather than editing, and that floor is
+        # a function of THIS fixture's frame rate, not a constant.
+        _fps_here = float(led.get("source_fps") or 30.0) or 30.0
+        led["cut_word_intrusions"] = cut_word_intrusions(spans, words)
+        led["cut_quantisation_floor_ms"] = round(1000.0 / _fps_here / 2.0, 1)
+        led["cut_boundaries_total"] = 2 * len(spans)
         led["cut_coverage"] = {
             "spans": len(spans),
             "kept_s": round(out_dur, 2),
@@ -7318,6 +7334,13 @@ def edit(source_key: str, brief: str,
             #
             # Keys, not values: the keys are what decide whether the component
             # can read them, and values can carry the user's own words.
+            # DID THIS CARD LAND ON THE BEAT IT NAMES, and does it say what
+            # that beat says? Two questions, recorded separately because they
+            # fail for different reasons. grounded is None when the hero has no
+            # digits — not applicable, never False.
+            led.setdefault("card_beat_alignment", []).append(dict(
+                card_beat_alignment({"anchor_s": _mg_at, "hero": hero}, b),
+                beat=v.get("beat"), type=_ctype))
             led.setdefault("card_props_seen", []).append(
                 {"beat": v.get("beat"), "type": _ctype,
                  "keys": sorted(_cprops.keys()),
@@ -9064,6 +9087,12 @@ def edit(source_key: str, brief: str,
     # THE ONE MEASUREMENT THE CONTRACT IS JUDGED ON. Recorded separately from the
     # agent's intermediate inspect_output calls, because those measure half-built
     # files and were being read as the run's verdict.
+    # OVERLAYS COLLIDING — computed once, over every PAINTED box this run
+    # measured. Two placements collide when they overlap in TIME and in PIXELS;
+    # declared anchors are excluded on purpose, because a component that
+    # overflows its anchor still reports the anchor.
+    led["placement_collisions"] = placement_collisions(led.get("_painted_boxes") or [])
+    led["painted_boxes_measured"] = len(led.get("_painted_boxes") or [])
     led["final_inspect"] = final
     key = None
     if final.get("exists"):
@@ -9982,6 +10011,33 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
             f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
             for c in _cps))
+    _cwi = (r.get("ledger") or {}).get("cut_word_intrusions")
+    if _cwi is not None:
+        _fl = (r.get("ledger") or {}).get("cut_quantisation_floor_ms")
+        _tot = (r.get("ledger") or {}).get("cut_boundaries_total") or 0
+        _above = [x for x in _cwi if x.get("intrusion_ms", 0) > (_fl or 0)]
+        _ms = sorted(x["intrusion_ms"] for x in _cwi)
+        print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land inside a "
+              f"word, {len(_above)} above the {_fl}ms frame floor"
+              + (f"  ms={_ms[:12]}" if _ms else "")
+              + "   MEASURED, no threshold")
+    _cba = (r.get("ledger") or {}).get("card_beat_alignment") or []
+    if _cba:
+        _off = [c for c in _cba if c.get("on_beat") is False]
+        _ung = [c for c in _cba if c.get("grounded") is False]
+        _na = [c for c in _cba if c.get("grounded") is None]
+        print(f"  CARD ALIGNMENT  : {len(_cba)} cards  off-beat={len(_off)}  "
+              f"ungrounded={len(_ung)}  not-applicable={len(_na)}"
+              + ("   UNEXERCISED — no card could have failed either leg"
+                 if not _off and not _ung and len(_na) == 0 else ""))
+    _pc = (r.get("ledger") or {}).get("placement_collisions")
+    if _pc is not None:
+        _nb = (r.get("ledger") or {}).get("painted_boxes_measured") or 0
+        print(f"  COLLISIONS      : {len(_pc)} over {_nb} painted box(es)"
+              + ("  " + "  ".join(f"[{'+'.join(c['families'])} "
+                                  f"{c['overlap_frac_of_smaller']:.2f} of smaller]"
+                                  for c in _pc[:4]) if _pc else "")
+              + "   MEASURED, no threshold")
     _zgu = (r.get("ledger") or {}).get("zoom_geometry_unmeasured")
     if _zgu:
         print(f"  ZOOM GEOMETRY   : {_zgu} placement(s) UNMEASURED — no validated "
