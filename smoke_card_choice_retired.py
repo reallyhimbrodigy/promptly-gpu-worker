@@ -69,9 +69,19 @@ check("the derivation exists", callable(getattr(A, "derive_card_type", None))
 # and a check that let those rot would be the wrong lesson from this.
 check("the selectable catalogue still exists",
       len(A.MG_SELECTABLE_TYPES) == 29, str(len(A.MG_SELECTABLE_TYPES)))
-check("the claim index still covers it",
-      set(A.MG_CLAIM_INDEX) >= set(A.MG_SELECTABLE_TYPES),
-      "the claims are what a future derivation reads; they are not dead")
+# THE CLAIM INDEX IS RETIRED, not merely unused. It parsed the catalogue at
+# IMPORT to feed the card_type enum description; b13730c retired that enum and
+# the table kept running with zero readers. Asserting it still exists would have
+# been this smoke keeping a dead thing alive — the check as the only consumer,
+# which is circular and was exactly the situation the wiring audit found.
+check("the claim index is GONE, not kept alive by its own check",
+      not hasattr(A, "MG_CLAIM_INDEX") and not hasattr(A, "MG_CLAIM_LINES"),
+      "a table whose only reader is the check asserting it exists is not wired")
+check("and the invariant it carried moved to the cert",
+      "Claim line in the catalogue" in
+      __import__("pathlib").Path("cert_mg_prop_keys.py").read_text(),
+      "the catalogue must still document every selectable type — that is real "
+      "and belongs in a cert, off the import path")
 check("the prop table still covers what it can derive",
       set(A.MG_PROP_KEYS) | set(A.MG_PROPS_UNDERIVABLE) == set(A.MG_SELECTABLE_TYPES))
 

@@ -75,54 +75,19 @@ app = modal.App("agentic-editor")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
 
-# ── A BARE ENUM IS A LIST OF WORDS ──────────────────────────────────────────
-# THE MECHANISM BEHIND "1 distinct of 29 selectable, StatCard=4" on two rounds
-# running. The agent saw 29 NAMES in the enum and had semantic information about
-# exactly one of them: StatCard is named in the system prompt, ProgressBar is
-# named once, and the other 27 appear nowhere in the cached prefix. Learning
-# what a PullQuote or a RankedList is for costs a read_knowledge turn, and the
-# agent does not spend it — so it picks the only component it has been told
-# anything about. That is not taste, and it is not incumbency in the agent; it
-# is the harness offering a vocabulary it never defined.
+# THE CLAIM INDEX IS RETIRED (2026-09-09). It parsed a `Claim:` line for each
+# of the 29 components out of knowledge/05_motion_graphics.md at import, and fed
+# exactly one consumer: the `card_type` enum description. b13730c retired that
+# enum — the agent no longer names a component — and the table lost its only
+# reader without anyone noticing. It kept being computed on every import.
 #
-# The claims are the catalogue's OWN one-line "Claim:" per entry, extracted from
-# the mounted file rather than paraphrased, so the index cannot drift from the
-# teach. ~364 tokens for all 29 — about $0.0009 a run at twelve turns — against
-# ~6,600 for the full prose. The prose stays where it is; this is the part that
-# has to be in front of the agent at the moment it chooses.
-def _mg_claim_index():
-    """{type: one-line claim} read from the mounted catalogue.
-
-    RAISES rather than returning a partial index. A missing claim means a type
-    the agent can name and cannot understand, which is the exact condition this
-    exists to end — degrading quietly would restore it for that type alone and
-    nobody would see which.
-    """
-    _p = os.path.join("/knowledge", "05_motion_graphics.md")
-    if not os.path.isfile(_p):
-        _p = os.path.join(_KNOWLEDGE_DIR, "05_motion_graphics.md")
-    try:
-        _txt = open(_p, encoding="utf-8").read()
-    except Exception as _e:
-        raise RuntimeError(
-            f"the motion-graphic catalogue is unreadable ({_e}); the schema "
-            f"would offer 29 bare names again") from _e
-    _out = {}
-    for _t in MG_SELECTABLE_TYPES:
-        _m = re.search(r"\*\*" + re.escape(_t) + r"\*\*.*?Claim:\s*[\"\u201c]"
-                       r"([^\"\u201d]+)[\"\u201d]", _txt, re.S)
-        if _m:
-            _out[_t] = " ".join(_m.group(1).split())
-    _missing = [t for t in MG_SELECTABLE_TYPES if t not in _out]
-    if _missing:
-        raise RuntimeError(
-            f"no Claim: line in the catalogue for {_missing} — those types "
-            f"would be offered as bare names, which is how StatCard won two "
-            f"rounds running")
-    return _out
-
-
-MG_CLAIM_INDEX = _mg_claim_index()
+# Second instance of a table mounted and unread in this codebase, and the first
+# one I made myself. Found by the wiring audit, not by a check.
+#
+# THE INVARIANT IT CARRIED IS REAL AND SURVIVES, in cert_mg_prop_keys.py: the
+# components' own catalogue must document every selectable type. That belongs in
+# a cert, not on the import path — it is a fact about the repo, not something
+# the worker needs at run time.
 
 # ── WHAT EACH COMPONENT ACTUALLY READS ──────────────────────────────────────
 #
@@ -246,7 +211,6 @@ def _mg_props_teach():
 
 MG_PROPS_TEACH = _mg_props_teach()
 
-MG_CLAIM_LINES = "\n".join(f"  {k} — {v}" for k, v in sorted(MG_CLAIM_INDEX.items()))
 
 _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion"))
 _REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
