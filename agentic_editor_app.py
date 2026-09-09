@@ -3068,6 +3068,170 @@ def sfx_start_s(attack_ms, at_s):
     return max(0.0, _want), (_want < 0.0)
 
 
+# ── VISION FOR THE VISUAL ROUTE ─────────────────────────────────────────────
+#
+# WHY. Round 43's screen_recording — 90.5s, every family in scope — ruled `none`
+# on 24 of 25 beats and placed ONE graphic. Its own rationales say why:
+# "Opening stillness (motion 0.00)", "Motion rises to 0.31", "Energetic at shot
+# change (0.61)". On the visual route `beats_from_visual` renders MOTION
+# FEATURES into the beat's `text`, so the agent is told how much movement there
+# is and never told what is ON SCREEN. The prompt tells it overlays "derive from
+# THE REQUEST and THE VISIBLE CONTENT" — and on this route the visible content
+# was never supplied. For a ChatGPT walkthrough, the most describable source in
+# the corpus, it had nothing to describe.
+#
+# PRICED BEFORE BUILDING (Rule 6), against measured spend at Haiku's confirmed
+# $1/$5 per MTok with cache_write 1.25x and cache_read 0.1x:
+#   frames inline in the editorial loop   +$0.0097 on a $0.0460 run  (+21%)
+#   ONE batched caption call, text in     +$0.0091                   (+20%)
+# A wash on cost. B wins on contract fit — its output is TEXT going into the
+# beat's existing `text` field, so nothing downstream learns a new field and the
+# message shape never changes (the shape change that once cost 43,222
+# cache_write tokens, 74% of a run) — and on failure containment: one call, one
+# state, one printed line.
+#
+# THE RISK B CARRIES is silent blandness. "a web page" instead of "the pricing
+# page, three tiers" is not a crash; it is a beat the agent still cannot place a
+# card on, and it looks like success. So the PROMPT is the whole quality lever,
+# and it asks for what an editor needs to point at rather than for a description.
+_VISION_FRAME_W = 512          # 512x290 measured at ~198 image tokens/frame
+_VISION_MAX_FRAMES = 40        # a 40-beat source is already past the length cap
+
+
+def beat_keyframe_times(beats, duration_s=None):
+    """The midpoint of each beat — PURE, so a test needs no video.
+
+    The midpoint rather than the start: a beat boundary sits ON a shot change,
+    where the frame is mid-transition and describes neither shot.
+    """
+    out = []
+    for b in (beats or []):
+        try:
+            a, z = float(b.get("t_start")), float(b.get("t_end"))
+        except (TypeError, ValueError):
+            continue
+        if z <= a:
+            continue
+        t = (a + z) / 2.0
+        if duration_s:
+            try:
+                t = min(t, max(0.0, float(duration_s) - 0.05))
+            except (TypeError, ValueError):
+                pass
+        out.append(round(t, 3))
+    return out
+
+
+def extract_beat_frames(video_path, times, out_dir, width=_VISION_FRAME_W, env=None):
+    """(state, paths, detail) — one frame per time, in ONE decode pass.
+
+    MEASURED: 25 frames from a 90.46s 3826x2160 source in 3.22s wall, 11 KB and
+    ~198 image tokens each at 512 wide. Per-frame seeking on a 4K file costs far
+    more than decoding once, so this builds a single select expression.
+
+    A STATE, NEVER A PATH LIST ALONE. ffmpeg exiting 0 having written nothing is
+    the shape this lane keeps paying for, so the count is compared against what
+    was asked and a shortfall is reported rather than silently returned short.
+    """
+    # Function-local, matching every other module-level ffmpeg helper here.
+    import glob
+    import subprocess
+    if not times:
+        return "ABSENT", [], "no beat times to sample"
+    times = list(times)[:_VISION_MAX_FRAMES]
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except Exception as exc:
+        return "FAILED", [], f"cannot create {out_dir}: {exc}"
+    # One decode pass: select the frame nearest each timestamp.
+    expr = "+".join(f"between(t,{t - 0.03:.3f},{t + 0.03:.3f})" for t in times)
+    pat = os.path.join(out_dir, "beat%03d.jpg")
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-i", video_path,
+         "-vf", f"select='{expr}',scale={int(width)}:-2", "-vsync", "0",
+         "-q:v", "6", pat],
+        capture_output=True, text=True, timeout=900, env=env)
+    got = sorted(glob.glob(os.path.join(out_dir, "beat*.jpg")))
+    if r.returncode != 0 and not got:
+        return "FAILED", [], f"ffmpeg exit {r.returncode}: {(r.stderr or '')[-140:]}"
+    if not got:
+        return "FAILED", [], ("ffmpeg exited 0 and wrote NO frames — exit 0 is "
+                              "not evidence a frame exists")
+    if len(got) < len(times):
+        # NAMED, not silently short. Fewer frames than beats means the mapping
+        # from frame to beat is no longer positional, and a description attached
+        # to the wrong beat is worse than no description.
+        return "FAILED", got, (f"asked for {len(times)} frames, got {len(got)} — "
+                               f"frame-to-beat mapping is no longer positional")
+    return "MEASURED", got[:len(times)], f"{len(got)} frame(s) at {width}px wide"
+
+
+# THE PROMPT IS THE QUALITY LEVER, and it is written for what an EDITOR needs.
+#
+# "Describe this frame" produces "a web page" — true, useless, and it looks like
+# success. The three things asked for here are the three an editor actually uses:
+# the specific nameable thing, what changed since the previous beat (which is
+# what makes a moment a moment), and whether there is READABLE TEXT — the last
+# because the landscape framing choice (fit / crop / blur-fill) cannot be made
+# without it. Readable text means fit or blur-fill; a subject with room around it
+# means crop.
+_VISION_SYSTEM = (
+    "You label frames from a video an editor is cutting into a vertical short. "
+    "For each frame, in ONE line under 22 words:\n"
+    "  - NAME the specific thing on screen a caption or card could point at — "
+    "'the pricing page, three tiers', 'a hand picking up the blue mug', "
+    "'the settings panel with dark mode on'. NEVER a category like 'a web "
+    "page', 'a person', 'an app' — a category is unusable and worse than "
+    "nothing because it reads as an answer.\n"
+    "  - say WHAT CHANGED from the previous frame, if anything did.\n"
+    "  - end with TEXT:yes or TEXT:no — is there text a viewer could READ at "
+    "this size.\n"
+    "Output one line per frame, numbered to match, and nothing else."
+)
+
+
+def parse_vision_lines(raw, n_expected):
+    """(state, descriptions, detail) — split a numbered reply into n lines. PURE.
+
+    A reply with the wrong number of lines is FAILED, not truncated to fit:
+    positional mapping is the whole contract, and a description on the wrong
+    beat is worse than none.
+    """
+    if not raw or not str(raw).strip():
+        return "ABSENT", [], "the model returned nothing"
+    lines = [l.strip() for l in str(raw).splitlines() if l.strip()]
+    keep = []
+    for l in lines:
+        m = re.match(r"^\s*(\d+)[.):\-]\s*(.+)$", l)
+        keep.append(m.group(2).strip() if m else l)
+    if len(keep) != int(n_expected):
+        return "FAILED", keep, (f"expected {n_expected} line(s), parsed "
+                                f"{len(keep)} — positional beat mapping broken")
+    return "MEASURED", keep, f"{len(keep)} description(s)"
+
+
+def merge_beat_descriptions(beats, state, descriptions):
+    """Put the descriptions into each beat's `text`. PURE.
+
+    ABSENT AND FAILED SAY SO IN THE TEXT THE AGENT READS. Falling back to the
+    motion numbers alone would be byte-identical to the behaviour this replaces,
+    so a broken vision pass would be indistinguishable from a working one and
+    the regression would be invisible. The agent is told the sight is missing.
+    """
+    out = [dict(b) for b in (beats or [])]
+    if state == "MEASURED" and len(descriptions or []) == len(out):
+        for b, d in zip(out, descriptions):
+            b["vision"] = str(d)[:200]
+            b["text"] = f"{b.get('text', '')} · {str(d)[:200]}".strip(" ·")
+        return out
+    for b in out:
+        b["vision"] = None
+        b["text"] = (f"{b.get('text', '')} · [NO VISION: frame description "
+                     f"{state.lower()} — rule from motion and the request only]"
+                     ).strip(" ·")
+    return out
+
+
 def alpha_composite_filter(fps=30):
     """The overlay filtergraph, as a PURE STRING, so a test can run the shipped one.
 
