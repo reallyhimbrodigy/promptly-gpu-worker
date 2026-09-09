@@ -32,6 +32,23 @@ FALSIFIER_localised_effect.md:
     worst CHANGED 19.98 | best INERT 0.24 | window 19.74 dB
 One bar serves both corpora, which is the criterion all three previous bars
 failed.
+
+AND THE SHIPPED FUNCTIONS, COMPOSED — not a replay of their arithmetic. The legs
+below test alpha_paint_box, region_psnr and region_effect_delta separately, and
+three correct parts can still compose into a wrong verdict. Run against the arms:
+
+    arm            v1 delta   v3 delta   state        wanted
+    card              49.41      33.38   measured     CHANGED
+    text              72.62      28.86   measured     CHANGED
+    text (lossy)      50.68      19.98   measured     CHANGED
+    null              -0.18      -0.48   measured     INERT
+    empty alpha         n/a        n/a   empty        EMPTY
+    10/10 arms land in their pre-registered state
+    worst CHANGED 19.98 | best INERT -0.18 | bar 6.0
+
+The arms live in the scratchpad, so this smoke cannot re-render them offline; it
+pins the numbers they produced and the bar that separates them. The composition
+check is the reason the crop-order bug was found — the parts were each fine.
 """
 import ast
 import pathlib
