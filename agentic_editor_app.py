@@ -2038,49 +2038,13 @@ KNOWLEDGE_TOOLS = [{
                                  # `05_motion_graphics` for the catalogue: every
                                  # entry carries its claim, its FITS/FIGHTS and
                                  # its props shape.
-                                 "card_type": {"type": "string",
-                                     "enum": list(MG_SELECTABLE_TYPES),
-                                     # THE CLAIM, NOT JUST THE NAME. This
-                                     # description used to say "defaults to
-                                     # StatCard", which taught the incumbency
-                                     # rather than the choice — and the other 28
-                                     # types appeared nowhere in the cached
-                                     # prefix, so the agent had no way to know
-                                     # what they were for without spending a
-                                     # read_knowledge turn it never spent.
-                                     "description": (
-                                         "REQUIRED when treatment includes "
-                                         "'card'. Match the component to what "
-                                         "the beat SAYS — each line below is "
-                                         "the claim that component makes, and "
-                                         "the beat must actually be making it. "
-                                         "There is no default: StatCard is for "
-                                         "a QUOTED NUMBER and nothing else.\n"
-                                         + MG_CLAIM_LINES +
-                                         "\nread_knowledge('05_motion_graphics')"
-                                         " for the full teach and each one's "
-                                         "props shape.")},
-                                 "card_props": {"type": "object",
-                                     "description":
-                                         "the component's own props. A type "
-                                         "whose props do not match renders "
-                                         "EMPTY and is refused before the "
-                                         "render, so use these exact key "
-                                         "names — "
-                                         + MG_PROPS_TEACH
-                                         + ". For StatCard you may instead "
-                                           "omit card_props entirely and pass "
-                                           "card_hero + card_label; the hero "
-                                           "becomes `value` and must be a "
-                                           "figure the speaker actually said."},
-                                 # ARC POSITION IS JUDGEMENT; THE MOVE IS A
-                                 # LOOKUP. Which beat is the payoff cannot be
-                                 # derived from timing — but once you say so,
-                                 # WHICH of the seven zooms goes there is
-                                 # production's ZOOM_ARC_HOMES plus the vibe,
-                                 # and the harness does it. Naming the move
-                                 # yourself would let a snap land on a payoff,
-                                 # which is the one thing payoff purity forbids.
+                                 # card_type AND card_props are GONE.
+                                 # The agent no longer names the component, so
+                                 # it cannot supply that component's props
+                                 # either — the harness derives both from
+                                 # card_hero. This is the zoom contract: the
+                                 # agent rules the MOMENT, the harness looks up
+                                 # the MOVE.
                                  "zoom_arc": {"type": "string",
                                      "enum": ["hook", "build", "mid_peak",
                                               "payoff", "breather", "close"],
@@ -4816,6 +4780,126 @@ def _rate_to_float(rate):
         return None
 
 
+# ── CARDS DERIVE, THEY ARE NOT PICKED ───────────────────────────────────────
+#
+# ZAC'S RULING, 2026-09-09, from watching the videos against his references:
+# three moments wanted a card and got text — "10 TIMES A DAY", "HOURS TO EDIT",
+# "5 MINUTES" — on the one fixture that had them, against reference hooks built
+# on escalating counters and dollar-figure cards. The agent identified each as a
+# stat IN ITS OWN RATIONALE and chose text anyway.
+#
+# THE MECHANISM, from round 42's own control group. Same round, same prefix,
+# same model: zoom produced THREE distinct types and cards produced ONE of 29.
+# The difference is who chooses. The agent NEVER NAMES A ZOOM TYPE — it rules
+# `zoom_arc`, what the beat IS in the arc, and ZOOM_ARC_HOMES plus the vibe
+# looks up the move. The schema says it outright: ARC POSITION IS JUDGEMENT;
+# THE MOVE IS A LOOKUP. Cards asked the model to do the one thing the zoom
+# design deliberately refuses to ask.
+#
+# SO CARDS NOW WORK LIKE ZOOM. The agent supplies the JUDGEMENT — this beat
+# carries a claim worth stamping, and here is the phrase worth stamping
+# (card_hero). The harness derives WHICH component from what that phrase and
+# beat CONTAIN. The 29-name enum is gone, which is the incumbency mechanism
+# itself: 29 bare names of which exactly one was ever named in prose.
+#
+# THE SHAPES ARE DERIVED FROM WHAT THE COMPONENTS READ, not from taste. A
+# component that requires `value: number` can only carry a figure; one that
+# requires `text` can carry a phrase. The ORDER is the taste call and it is
+# Zac's to change — it is small, it is here, and it is one table rather than a
+# sentence in a prompt.
+_CARD_FIGURE = re.compile(r"[0-9]")
+# A figure the speaker actually said, in the forms speech carries them.
+_CARD_FIGURE_RICH = re.compile(
+    r"(\$\s?[0-9]|[0-9][0-9,.]*\s?(%|k\b|m\b|x\b|st\b|nd\b|rd\b|th\b)|[0-9])",
+    re.I)
+
+
+def derive_card_props(mg_type, hero, label=""):
+    """The props THIS component reads, filled from the phrase. Never a guess.
+
+    THE DEFECT THIS PREVENTS, and I introduced it two commits ago. The
+    hero/label shorthand builds {value, label} — StatCard's shape. The moment
+    the harness started DERIVING the type, a PullQuote would have been handed
+    `value` and `label`, read neither, and painted a transparent frame: the
+    exact blank-card class this thread began with, reintroduced by the fix for
+    a different half of it.
+
+    Derived from MG_PROP_KEYS, which is derived from the components' own
+    types.ts and certed against them — so a component that changes its props
+    changes this, rather than silently receiving the wrong ones.
+    """
+    _req = (MG_PROP_KEYS.get(str(mg_type)) or {}).get("required") or []
+    _h = str(hero or "").strip()
+    _l = str(label or "").strip()[:60]
+    if not _req:
+        return ({}, "%s declares no required props" % mg_type)
+
+    # THE SPLIT HAPPENS FIRST, before any prop is filled. Filling in the
+    # interface's own (alphabetical) order put `label` before `value`, so the
+    # label took the WHOLE phrase and the remainder was computed too late —
+    # "10 TIMES A DAY" became 10 / "10 TIMES A DAY" instead of 10 / "TIMES A DAY".
+    _fig, _rest = None, ""
+    if "value" in _req:
+        # A MULTIPLIER SUFFIX MUST BE ATTACHED TO THE DIGITS, not merely near
+        # them. `[0-9][0-9,.]*\s?[kKmMxX]?` matched "5 M" in "5 MINUTES" and
+        # coerce_mg_props read it as FIVE MILLION. A suffix only counts when it
+        # is not the start of a word.
+        _m = re.search(r"[$£€]?\s?[0-9][0-9,.]*(?:[%kKmMxX](?![A-Za-z]))?", _h)
+        if not _m:
+            return ({}, "%s needs a figure and %r has none" % (mg_type, _h))
+        _fig = _m.group(0).strip()
+        _rest = (_h[:_m.start()] + " " + _h[_m.end():]).strip(" -–—:,")
+
+    _p = {}
+    for _k in _req:
+        if _k == "value":
+            _p["value"] = _fig
+        elif _k == "text":
+            _p["text"] = _h
+        elif _k in ("label", "title", "name"):
+            # The words AROUND the figure are the label when none was given —
+            # "10 TIMES A DAY" is 10 / TIMES A DAY, which is the shape the
+            # reference counter hooks use.
+            _p[_k] = _l or _rest or _h
+        else:
+            # NOT INVENTED. A component needing something a phrase cannot
+            # supply is the wrong component for this beat, and saying so beats
+            # filling the key with the hero and rendering nonsense.
+            return ({}, "%s requires %r, which a phrase cannot supply"
+                    % (mg_type, _k))
+    return (_p, "filled %s from the phrase" % sorted(_p))
+
+
+def derive_card_type(hero, beat_text="", vibe=""):
+    """(type, why) — WHICH component this claim wants. Never a default.
+
+    Returns (None, why) when the claim does not want a card at all, which is a
+    real answer: refusing beats rendering the wrong component, and a card
+    nobody can read is the failure this whole thread began with.
+    """
+    _h = str(hero or "").strip()
+    if not _h:
+        return (None, "no phrase to stamp — the agent ruled a card and named "
+                      "nothing to put on it")
+    # A QUOTED FIGURE WANTS THE COUNTER. StatCard requires value:number and
+    # counts up to it; that is what an escalating-counter hook IS, and it is the
+    # component the three missed moments wanted.
+    if _CARD_FIGURE.search(_h):
+        return ("StatCard", "the phrase carries a figure, and StatCard is the "
+                            "only component that counts up to one")
+    # A PHRASE WITH NO FIGURE IS STILL A CLAIM. "HOURS TO EDIT" is the third
+    # missed moment and has no numeral in it — a digits-only rule catches two of
+    # the three and would have left that one as text, which is the defect.
+    # PullQuote requires `text` and nothing else, so a phrase is exactly what it
+    # can carry.
+    _words = [w for w in re.split(r"\s+", _h) if w]
+    if len(_words) <= 5:
+        return ("PullQuote", "a short claim with no figure — PullQuote reads "
+                             "`text` and carries a phrase whole")
+    return (None, "the phrase is too long to stamp (%d words); a card is a "
+                  "few words at reading size, not a sentence" % len(_words))
+
+
 def cut_intrusion_floor_ms(r_frame_rate, avg_frame_rate):
     """(floor_ms, state, detail). floor_ms is None whenever it is not knowable.
 
@@ -7417,14 +7501,28 @@ def edit(source_key: str, brief: str,
             # a StatCard the agent never chose — indistinguishable from one it
             # did. The schema now says there is no default; the build has to
             # agree or the schema is describing a pipeline that does not exist.
-            _ctype = str(v.get("card_type") or "").strip()
+            # DERIVED, NOT PICKED (Zac's ruling, 2026-09-09). The agent
+            # supplies the JUDGEMENT — this beat carries a claim worth stamping,
+            # and card_hero is the phrase worth stamping. WHICH component is a
+            # lookup on what that phrase contains, exactly as zoom_arc names the
+            # moment and ZOOM_ARC_HOMES names the move.
+            #
+            # Round 42's control group is why: same round, same prefix, same
+            # model — zoom picked THREE distinct types, cards picked ONE of 29.
+            # The 29-name enum is retired with this line, and it was the
+            # incumbency mechanism itself.
+            _ctype, _dwhy = derive_card_type(hero, str(b.get("text") or ""),
+                                             led.get("vibe") or "")
             if not _ctype:
+                # REFUSING IS A REAL ANSWER. A card nobody can read is the
+                # failure this whole thread began with, and it is worse than no
+                # card at all.
                 _skips.append({"family": "card", "beat": v.get("beat"),
-                               "why": "ruled 'card' with no card_type — WHICH "
-                                      "component reads the dialogue and cannot "
-                                      "be derived. The enum carries each one's "
-                                      "claim; pick the one the beat is making."})
+                               "why": _dwhy})
                 continue
+            led.setdefault("card_type_derived", []).append(
+                {"beat": v.get("beat"), "type": _ctype,
+                 "hero": hero[:32], "why": _dwhy[:90]})
             if _ctype in MG_BRAND_ONLY:
                 # Production's own prompt: "DO NOT put NamePlate or EndCard in
                 # motion_graphics yourself — the pipeline builds [them]". They
@@ -7457,10 +7555,15 @@ def edit(source_key: str, brief: str,
             # vocabulary; every other type reads different keys, and a card
             # carrying the wrong ones renders empty. Explicit props win; the
             # hero/label pair remains the StatCard shorthand.
-            _cprops = v.get("card_props")
-            if not isinstance(_cprops, dict) or not _cprops:
-                _cprops = {"value": hero,
-                           "label": str(v.get("card_label") or "")[:60]}
+            # PROPS DERIVE FROM THE DERIVED TYPE. The old shorthand built
+            # {value, label} — StatCard's shape — which a PullQuote reads
+            # neither of.
+            _cprops, _pwhy = derive_card_props(
+                _ctype, hero, str(v.get("card_label") or ""))
+            if not _cprops:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": _pwhy})
+                continue
             # NUMBERS WHERE THE COMPONENT NEEDS NUMBERS. card_hero arrives as
             # the words the speaker said — "10,000", "$1.2M", "three" — and a
             # StatCard counts up to a TARGET. Round 35 passed all four heroes
