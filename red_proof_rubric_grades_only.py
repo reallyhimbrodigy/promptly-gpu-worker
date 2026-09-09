@@ -16,7 +16,7 @@ rc,out=run(); print(f"BASELINE exit={rc}"); assert rc==0, out
 r=[]
 r.append(mut('    "render_frames_mismatch",','    "spec_shortfall_unresolved",\n    "render_frames_mismatch",',
  "a density floor returns as a contract failure","no longer fails the round"))
-r.append(mut('"REQUIRED when treatment includes ','"Corpus rate is 2.35 per 25s. REQUIRED when treatment includes ',
+r.append(mut('''includes 'text': the words ''','''includes 'text' (corpus rate 7.28 per 25s): the words ''',
  "a rate reappears in a tool description","reaches the agent via the tool schemas"))
 r.append(mut('        # NOT a failure. Density below a reference rate is an observation about\n        # the edit, not a defect in it.',
  '        if led.get("spec_shortfall"):\n            fail("x", "rulings fall short of your own spec")',
