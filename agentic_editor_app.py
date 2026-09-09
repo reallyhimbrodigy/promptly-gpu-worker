@@ -985,6 +985,10 @@ def derive_rubric(declared, mode="full_edit", beat_source="transcript"):
 # those rounds green.
 CONTRACT_FAILURES = frozenset({
     "wrong_resolution",        # not 1080x1920
+    # The video stream ending before the AUDIO. Three of five round-43 fixtures.
+    # The two healthy ones had no overlay pass, or an overlay that happened to
+    # span the whole video — which is why every earlier corpus hid this.
+    "video_truncated",
     "no_audio_stream",         # output has no audio
     "output_has_no_speech",    # a speech source rendered mute
     "no_output",               # nothing was produced
@@ -3064,6 +3068,79 @@ def sfx_start_s(attack_ms, at_s):
     return max(0.0, _want), (_want < 0.0)
 
 
+_STREAM_LEN_TOL_FRAMES = 1.5      # 1.5 frames = 50ms at 30fps
+
+
+def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0):
+    """(state, detail) — does the VIDEO stream run as long as it should?
+
+    MODULE LEVEL AND PURE so a test can call it with the real numbers.
+
+    THE DEFECT, round 43. inspect() read `format.duration` and nothing else.
+    That is the CONTAINER duration, which the longest stream sets — the audio.
+    So a file whose video stream ended two thirds of the way through reported
+    its full length and passed every check:
+
+        screen_recording   video 9.267s / 278 frames   audio 30.960s
+                           output: 30.96s 1080x1920 audio=True   <- reported
+                           frames_actual=139 (ok=True)            <- passed
+
+    THREE of five fixtures were truncated (car_short 2.975s, car_mid 1.887s,
+    screen_recording 21.693s). I first reported four, which was wrong twice
+    over: motion is healthy because it ran NO overlay pass, and talking_head is
+    healthy because its overlay happened to span the full 20.27s exactly.
+
+    That correction sharpens the mechanism rather than softening it: the
+    composite sizes the output to the OVERLAY, so the defect appears precisely
+    when the overlay is SHORTER than the base — and is invisible whenever
+    captions happen to cover the whole video, which is every corpus before this
+    one. A user gets a video that stops while the audio keeps going, and every
+    number this pipeline printed said it was fine.
+
+    A STATE, NEVER A BOOL. Three ways this can go and only one of them is a
+    pass:
+        OK          video matches audio (and the kept duration, when known)
+        TRUNCATED   video is short — the defect
+        ABSENT      a duration could not be read, so nothing is known
+    ABSENT must never render as OK: a container that does not report a stream
+    duration is exactly where this hid in the first place.
+
+    Tolerance is 1.5 frames. Round 43's healthy fixtures differ by 0.004s and
+    0.020s; the broken ones by 1.393s, 2.975s and 21.693s. Nothing sits near
+    the line, which is what a tolerance should look like.
+    """
+    def _f(x):
+        try:
+            v = float(x)
+            return v if v > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    v, a, e = _f(video_s), _f(audio_s), _f(expected_s)
+    try:
+        tol = _STREAM_LEN_TOL_FRAMES / float(fps or 30.0)
+    except Exception:
+        tol = 0.05
+    if v is None:
+        return "ABSENT", ("video stream duration unreadable — the container "
+                          "duration is NOT a substitute, it is what hid this")
+    if a is None and e is None:
+        return "ABSENT", ("no audio duration and no expected duration — "
+                          "nothing to compare the video against")
+    parts = []
+    worst = 0.0
+    if a is not None:
+        d = a - v
+        parts.append(f"audio {a:.3f}s vs video {v:.3f}s (deficit {d:.3f}s)")
+        worst = max(worst, d)
+    if e is not None:
+        d = e - v
+        parts.append(f"kept {e:.3f}s vs video {v:.3f}s (deficit {d:.3f}s)")
+        worst = max(worst, d)
+    detail = "; ".join(parts) + f"; tolerance {tol:.3f}s"
+    return ("TRUNCATED" if worst > tol else "OK"), detail
+
+
 def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920):
     """(filter, mode, crop_loss) to bring a source to the delivery geometry.
 
@@ -5110,6 +5187,21 @@ def edit(source_key: str, brief: str,
             fail("no_audio_stream", "output has no audio stream")
         if (v.get("width"), v.get("height")) != (1080, 1920):
             fail("wrong_resolution", f"{v.get('width')}x{v.get('height')}")
+        # PER-STREAM DURATIONS, because the container's is the audio's. See
+        # stream_length_verdict: four of five round-43 fixtures shipped a video
+        # stream shorter than their audio and every printed number said 30.96s.
+        _kept = ((led.get("cut_coverage") or {}).get("kept_s"))
+        _sl_state, _sl_detail = stream_length_verdict(
+            v.get("duration"), a.get("duration") if a else None, _kept)
+        res["video_s"] = v.get("duration")
+        res["audio_s"] = a.get("duration") if a else None
+        res["stream_length"] = {"state": _sl_state, "detail": _sl_detail}
+        # PRINTED in the same commit that records it.
+        print(f"  STREAM LENGTH   : {_sl_state}  {_sl_detail}", flush=True)
+        if _sl_state != "OK":
+            # ABSENT FAILS TOO. An unreadable stream duration is the condition
+            # this defect lived in, so it is a failure to measure, not a pass.
+            fail("video_truncated", f"{_sl_state}: {_sl_detail}")
         # ── THE SPEECH CHECK ───────────────────────────────────────────────
         got = transcribe_words(out)
         if not words:
