@@ -71,6 +71,25 @@ r.append(mut('    _p = [x for x in (placed or []) if x.get("box")]',
              "an unmeasured box becomes a rectangle at the origin",
              "skipped, not guessed"))
 
+# 8-10. THE WIRING ITSELF — the defect that made all three produce nothing.
+r.append(mut('        led["cut_word_intrusions"] = cut_word_intrusions(spans, words)',
+             '        led["cut_word_intrusions"] = []',
+             "cut_word_intrusions stops being called by the pipeline",
+             "cut_word_intrusions is CALLED by the pipeline"))
+r.append(mut('                card_beat_alignment({"anchor_s": _mg_at, "hero": hero}, b),',
+             '                {},',
+             "card_beat_alignment stops being called by the pipeline",
+             "card_beat_alignment is CALLED by the pipeline"))
+r.append(mut('    led["placement_collisions"] = placement_collisions(led.get("_painted_boxes") or [])',
+             '    led["placement_collisions"] = []',
+             "placement_collisions stops being called by the pipeline",
+             "placement_collisions is CALLED by the pipeline"))
+# 11. Measured and ledgered but never PRINTED — round 29's defect exactly.
+r.append(mut('        print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land inside a "',
+             '        _unprinted = (f"  CUT INTRUSIONS : {len(_cwi)} of {_tot} boundaries "',
+             "the cut distribution is ledgered but never printed",
+             "CUT INTRUSIONS is PRINTED"))
+
 rc, out = run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc == 0 else 1)

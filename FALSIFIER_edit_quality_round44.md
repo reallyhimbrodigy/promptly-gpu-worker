@@ -1,0 +1,110 @@
+# Falsifier — calibrating the three edit-quality proxies on round 44
+
+**Registered before round 44 exists.** No distribution has been read, no
+threshold proposed. Same discipline as the localised effect measure and
+Builder-1's fourth zoom population.
+
+## The three, and they are NOT the same kind of measurement
+
+This is the part I want on the record before the numbers, because it is the
+thing I would otherwise blur afterwards:
+
+    cut_word_intrusions    a CONTINUOUS distribution with NO ground truth
+    placement_collisions   a CONTINUOUS distribution WITH constructible truth
+    card_beat_alignment    two BOOLEANS — nothing to calibrate, a population to find
+
+Treating all three as "pick a bar from the distribution" is exactly how the
+absolute geometry bar, the scale-fit bar and the 3.0 effect bar were set.
+
+---
+
+## 1. cut_word_intrusions — I may not be able to threshold this at all
+
+**What I will report:** every intrusion's `intrusion_ms`, the full distribution,
+and the count against total cuts. Per fixture and pooled.
+
+**The one number that is not invented:** a cut lands on a frame boundary, so at
+30fps it can sit up to 16.7ms from a word edge for reasons that are quantisation,
+not editing. Anything at or below that is arithmetic, not a defect.
+
+**Why a bar may be unreachable.** Above the quantisation floor there is no
+measurable ground truth in a round. Whether a 90ms intrusion is audible is a
+question about hearing, and I have no instrument for it — the honest answer is
+Zac's ear on the finished audio, not a percentile of my own distribution.
+
+**PRE-REGISTERED: if the distribution is continuous with no gap above the
+quantisation floor, I will NOT propose a threshold.** I will report the
+distribution and say the proxy is measured-only pending a listening judgement. A
+bar chosen from a smooth distribution is a bar chosen from nothing, and I would
+rather hand over a histogram than a number I cannot defend.
+
+Only a clear bimodal separation — a cluster at quantisation and a distinct
+cluster well above it — justifies a bar, and I state that before seeing it.
+
+---
+
+## 2. placement_collisions — the one I can construct truth for
+
+**What I will report:** every collision's `overlap_px` and
+`overlap_frac_of_smaller`, and the non-colliding pairs as the negative
+population.
+
+**Constructible ground truth, the way the effect measure had arms.** I can render
+two placements that genuinely overlap and two that merely abut, and measure both
+— so this proxy CAN have a validated separation rather than a percentile.
+
+**Ship criteria, all required:**
+1. A constructed swallowed-overlay and a constructed abutting pair separate on
+   `overlap_frac_of_smaller`.
+2. The window between them is wide enough that a bar carries **>= 2x** the
+   fraction on either side — the proportional form of the 2.0 dB standard I
+   registered for the zoom bar and honoured for the effect measure.
+3. **One bar across BOTH corpora**, which is the criterion three previous bars
+   failed.
+4. Round 44's real collisions fall on the side the frames say they do. If I have
+   to look at a frame and disagree with the number, the number loses.
+
+---
+
+## 3. card_beat_alignment — nothing to calibrate, everything to populate
+
+`on_beat` and `grounded` are booleans. There is no threshold.
+
+**The real risk is a check that cannot fail.** Round 39's four cards were all
+grounded and all on-beat; if round 44 is the same, the check has never been shown
+to fire on anything and is a green with no evidence behind it.
+
+**PRE-REGISTERED: if round 44 produces 100% on_beat and 100% grounded, I will
+report the check as UNEXERCISED, not as passing.** The remedy is a RED proof
+against a constructed misaligned card — not a claim that the pipeline is correct
+because a check that has never fired did not fire.
+
+`grounded` is None for a hero with no digits. **None is not a pass.** If the
+None rate is high, the check is mostly not applicable and I will say what
+fraction it actually covered.
+
+---
+
+## Confounds that would make round 44 unreadable, named now
+
+- **Truncated output.** Three of five in round 43. Collisions and cuts measured
+  on a video that ends early are measured on a different video.
+- **Wrong resolution.** 540x960 and 720x1272 in round 43. A collision fraction
+  calibrated on a half-size frame is calibrated against a frame size that is
+  itself a defect.
+- **motion is VFR** — 59.94 declared, 35.94 actual, and the output rate follows
+  the source. A cut-intrusion floor is a function of frame duration, so 30fps and
+  59.94fps fixtures have DIFFERENT quantisation floors: 16.7ms and 8.3ms. I will
+  compute the floor per fixture from its actual rate, not apply one constant.
+
+**If any of the three is still present in round 44, that fixture is excluded from
+calibration and named as excluded** — not silently pooled. Rule 5: state the
+window and why it is clean, before reporting a rate.
+
+## What I will not do
+
+Propose a threshold in the same report that first shows its distribution. The
+distributions go to Zac first. A bar comes after, in a separate pass, with the
+separation shown — or does not come at all, which for cut_word_intrusions is a
+live possibility I am naming in advance rather than discovering when it is
+convenient.

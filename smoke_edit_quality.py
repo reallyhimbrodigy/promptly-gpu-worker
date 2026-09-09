@@ -185,6 +185,53 @@ check("a placement with no measured box is skipped, not guessed",
                               {"family": "b", "t0": 0, "t1": 9, "box": (0, 0, 9, 9)}]) == [],
       "an unmeasured box must not be treated as a rectangle at the origin")
 
+# ── 3. AND SOMETHING ACTUALLY CALLS THEM ────────────────────────────────────
+# THE DEFECT THIS EXISTS FOR. All three measures were written, smoke-tested
+# directly, and CALLED NOWHERE. The smoke passed because it invoked them itself;
+# a round would have produced no distribution at all, and I would have found out
+# when round 44 collected and there was nothing to report. Tenth instance of
+# this repo's "shipped gate-green and did nothing" — and the first I caught
+# before the round rather than after.
+#
+# A pure function plus a smoke that calls it is not wiring. Ask the MODULE who
+# calls it, not the test.
+_defs = {n.name: n.lineno for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+_calls = {}
+for _n in ast.walk(tree):
+    if isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name):
+        _calls.setdefault(_n.func.id, []).append(_n.lineno)
+for _fn in ("cut_word_intrusions", "card_beat_alignment", "placement_collisions"):
+    _sites = [l for l in _calls.get(_fn, []) if abs(l - _defs.get(_fn, -999)) > 3]
+    check(f"{_fn} is CALLED by the pipeline, not only by this smoke",
+          bool(_sites),
+          "defined and invoked nowhere — a round produces no distribution and "
+          "the smoke still passes, because the smoke calls it itself")
+
+# AND ITS RESULT REACHES THE LEDGER AND THE OUTPUT. Ledgering is not observing:
+# a counter that reaches the ledger and no output answered nothing in round 29.
+for _key, _label in (("cut_word_intrusions", "CUT INTRUSIONS"),
+                     ("card_beat_alignment", "CARD ALIGNMENT"),
+                     ("placement_collisions", "COLLISIONS")):
+    check(f"{_key} reaches the ledger", f'led["{_key}"]' in src
+          or f'led.setdefault("{_key}"' in src)
+    # INSIDE A print() CALL, not merely present in the file. The first version
+    # asked whether the label string existed, and a mutant that changed
+    # `print(f"  CUT INTRUSIONS ...")` to `_unprinted = (f"  CUT INTRUSIONS ...")`
+    # kept the string and stayed green. Seventeenth instance of the class: the
+    # label is evidence of intent, the print CALL is evidence of output.
+    _printed = False
+    for _n in ast.walk(tree):
+        if not (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name)
+                and _n.func.id == "print"):
+            continue
+        for _sub in ast.walk(_n):
+            if isinstance(_sub, ast.Constant) and isinstance(_sub.value, str) \
+                    and _label in _sub.value:
+                _printed = True
+    check(f"{_label} is PRINTED", _printed,
+          "the label exists somewhere but no print() call carries it — a "
+          "measure nobody prints is a measure nobody reads")
+
 if fails:
     print(f"EDIT-QUALITY: {len(fails)} FAILED")
     for f in fails:
