@@ -4227,6 +4227,140 @@ def region_effect_delta(place_psnr, ctrl_psnr):
     return ctrl_psnr - place_psnr
 
 
+# ── IS THE EDIT GOOD — the mechanical half ──────────────────────────────────
+#
+# Zac, 2026-09-09: nobody has judged an edit AS AN EDIT. The honest version is
+# his eye on finished videos; the cheap proxy is the handful of things "bad edit"
+# usually means mechanically. These three are that proxy.
+#
+# THEY LAND MEASURED AND PRINTED, NOT AS VERDICTS. Every one is a threshold on a
+# distribution nobody has measured, and this lane has set four thresholds from
+# the wrong measurement in a week (absolute geometry, scale-fit, the density
+# floor, the 3.0 global effect bar). They report a number and a distribution
+# first; they become a verdict only after a validated separation, falsifier
+# before arms — the way the localised effect measure was done.
+
+
+def cut_word_intrusions(spans, words):
+    """Cuts that land INSIDE a spoken word, with how far in they land.
+
+    A cut boundary is an edge of a kept span. It intrudes when a word straddles
+    it: the word is audible on one side and severed. Returns one entry per
+    intrusion with `intrusion_ms` — the distance from the cut to the NEARER edge
+    of the word, i.e. how much of the word is left dangling.
+
+    NO THRESHOLD HERE, deliberately. A cut clipping 5 ms of a word is inaudible
+    and a cut 200 ms into it halves the word; which is 'mid-word' is a question
+    for the distribution, not for a constant invented now. The floor that IS
+    real and is not invented: a cut can only land on a frame boundary, so at
+    30fps a boundary can sit up to 16.7 ms from any word edge for reasons that
+    are quantisation rather than editing.
+    """
+    out = []
+    for _sp in (spans or []):
+        try:
+            _a, _b = float(_sp[0]), float(_sp[1])
+        except Exception:                                     # noqa: BLE001
+            continue
+        for _t, _edge in ((_a, "in"), (_b, "out")):
+            for _w in (words or []):
+                try:
+                    _ws, _we = float(_w.get("s")), float(_w.get("e"))
+                except Exception:                             # noqa: BLE001
+                    continue
+                if _ws < _t < _we:
+                    out.append({
+                        "t": round(_t, 3), "edge": _edge,
+                        "word": str(_w.get("w") or "")[:24],
+                        "word_span": [round(_ws, 3), round(_we, 3)],
+                        "intrusion_ms": int(round(
+                            min(_t - _ws, _we - _t) * 1000.0)),
+                    })
+                    break
+    return out
+
+
+def card_beat_alignment(card, beat):
+    """Does this card land on the beat it was ruled for, and name what it says?
+
+    Two independent questions, reported separately because they fail for
+    different reasons:
+      on_beat   the card's anchor falls inside the beat's own window. A card
+                that lands two beats away is a timing defect.
+      grounded  the card's hero appears in the words of that beat. A StatCard
+                reading 10,000 over a beat that never says 10,000 is the
+                'GROUNDED in something the speaker actually said' rule, checked
+                rather than asked for.
+    `grounded` is None when the hero carries no digits — the comparison is not
+    applicable rather than failed, and None must never read as False.
+    """
+    try:
+        _at = float(card.get("anchor_s", card.get("t_start")))
+        _b0, _b1 = float(beat.get("t_start")), float(beat.get("t_end"))
+    except Exception:                                         # noqa: BLE001
+        return {"on_beat": None, "grounded": None, "why": "unreadable"}
+    _on = (_b0 - 1e-6) <= _at <= (_b1 + 1e-6)
+    _hero = str(card.get("hero") or "")
+    _digits = re.sub(r"[^0-9]", "", _hero)
+    if not _digits:
+        _grounded = None
+    else:
+        _said = re.sub(r"[^0-9]", "", str(beat.get("text") or ""))
+        _grounded = _digits in _said
+    return {"on_beat": _on, "grounded": _grounded,
+            "anchor_s": round(_at, 2), "beat": [round(_b0, 2), round(_b1, 2)],
+            "hero": _hero[:24]}
+
+
+def boxes_overlap(a, b):
+    """Do two (x, y, w, h) rectangles intersect, and by how much?
+
+    Returns overlapping AREA in pixels — 0 when they do not touch. Area rather
+    than a boolean because a 4-pixel clip of two anti-aliased edges is not a
+    collision and a 200,000-pixel overlap is, and only the number can tell them
+    apart.
+    """
+    if not a or not b:
+        return 0
+    _ax, _ay, _aw, _ah = a
+    _bx, _by, _bw, _bh = b
+    _x = max(0, min(_ax + _aw, _bx + _bw) - max(_ax, _bx))
+    _y = max(0, min(_ay + _ah, _by + _bh) - max(_ay, _by))
+    return _x * _y
+
+
+def placement_collisions(placed):
+    """Placements that overlap in TIME and in PAINTED PIXELS.
+
+    `placed` entries carry t0, t1, box and family. The box is what the component
+    ACTUALLY PAINTED (alpha_paint_box), never its declared anchor — a component
+    that overflows its anchor still reports the anchor, so declared geometry is
+    exactly the thing that would lie here.
+    """
+    out = []
+    _p = [x for x in (placed or []) if x.get("box")]
+    for _i in range(len(_p)):
+        for _j in range(_i + 1, len(_p)):
+            _a, _b = _p[_i], _p[_j]
+            if float(_a["t1"]) <= float(_b["t0"]) or float(_b["t1"]) <= float(_a["t0"]):
+                continue
+            _area = boxes_overlap(_a.get("box"), _b.get("box"))
+            if _area <= 0:
+                continue
+            _sa = _a["box"][2] * _a["box"][3]
+            _sb = _b["box"][2] * _b["box"][3]
+            out.append({
+                "families": sorted([_a.get("family", "?"), _b.get("family", "?")]),
+                "overlap_px": _area,
+                # OF THE SMALLER BOX. A caption line swallowed by a card is a
+                # collision; a card clipping a corner of a full-frame wash is not.
+                "overlap_frac_of_smaller": round(_area / float(max(1, min(_sa, _sb))), 3),
+                "t": [round(max(float(_a["t0"]), float(_b["t0"])), 2),
+                      round(min(float(_a["t1"]), float(_b["t1"])), 2)],
+            })
+    return out
+
+
 def _require_mg_type(item):
     """The component this item names, or a raise. Never a default."""
     _t = str((item or {}).get("type") or "").strip()
@@ -6027,8 +6161,23 @@ def edit(source_key: str, brief: str,
                  "-i", _cc_before,
                  "-i", led["caption_mov"],
                  "-filter_complex",
+                 # eof_action=pass, NOT shortest, and NOT the default.
+                 #
+                 # shortest=1 ends the OUTPUT when the shortest input ends, and
+                 # the caption layer is shorter than the video whenever speech
+                 # does not run to the last frame. Round 43: screen_recording
+                 # delivered 9.267s of video against 30.960s of audio, and three
+                 # of five fixtures truncated. Every corpus before that one hid
+                 # it, because the defect appears precisely when the overlay is
+                 # SHORTER than the base.
+                 #
+                 # Dropping `shortest` alone is NOT the fix (Builder-1's finding
+                 # on the same defect in the production compositor): overlay's
+                 # default eof_action is REPEAT, which freezes the last caption
+                 # frame over the rest of the video. Same cause, different
+                 # defect, and a length check passes it happily.
                  "[1:v]fps=30,format=yuva444p[cap];"
-                 "[0:v][cap]overlay=0:0:shortest=1[outv]",
+                 "[0:v][cap]overlay=0:0:eof_action=pass[outv]",
                  "-map", "[outv]", "-map", "0:a?",
                  "-c:v", "libx264", "-crf", "18",
                  "-preset", "veryfast", "-c:a", "copy", _cco],
