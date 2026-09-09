@@ -210,6 +210,52 @@ if _col:
           0 < _col[0]["overlap_frac_of_smaller"] <= 1.0,
           "a caption swallowed by a card is a collision; a card clipping the "
           "corner of a full-frame wash is not")
+# ── 2c-ii. THE SCALE IS VALIDATED; THE THRESHOLD IS NOT AVAILABLE ───────────
+# I registered collisions as "the one I can construct ground truth for". The
+# construction shows why that was half right, and the correction is recorded
+# BEFORE round 45 rather than after.
+#
+# MEASURED by sliding the REAL text paint (208x88) through the REAL card paint
+# (852x416) — both measured component rectangles, only the offset constructed:
+#     clear            0.000
+#     straddling       0.091  0.182  0.545  0.636
+#     fully inside     1.000
+# The metric is CONTINUOUS BY CONSTRUCTION. There is no gap between a touch and
+# a swallow, so picking two constructed points and calling them separated proves
+# nothing — it is the smooth-distribution trap with arms instead of a round.
+#
+# WHAT CONSTRUCTION DOES ESTABLISH, and it is what these legs pin: the SCALE is
+# correct, ordered and interpretable. 0 means clear, 1 means one component is
+# entirely inside the other, and the middle is the fraction of the smaller box
+# covered. Whether 0.3 is a defect is a QUALITY judgement — Zac's eye — exactly
+# as whether a 90ms intrusion is audible is a question about hearing.
+_CARD, _TEXT = (120, 652, 852, 416), (436, 920, 208, 88)
+
+
+def _frac(dy):
+    _t = (_TEXT[0], _TEXT[1] + dy, _TEXT[2], _TEXT[3])
+    _c = A.placement_collisions([{"family": "card", "t0": 0, "t1": 2, "box": _CARD},
+                                 {"family": "text", "t0": 1, "t1": 3, "box": _t}])
+    return _c[0]["overlap_frac_of_smaller"] if _c else 0.0
+
+
+check("a fully-contained overlay reads exactly 1.0", _frac(0) == 1.0,
+      f"{_frac(0)} — the text box sits entirely inside the card box")
+check("a clear overlay reads exactly 0.0", _frac(-500) == 0.0 and _frac(500) == 0.0)
+# The card spans y 652..1068 and the text is 88 tall, so it straddles the top
+# edge for dy in (-356, -268) and the bottom edge for dy in (60, 148). Offsets
+# picked from the measured sweep rather than guessed — my first attempt used
+# dy=340, which puts the text clear of the card entirely and reads 0.0.
+check("the scale is MONOTONIC through the straddle",
+      _frac(-348) < _frac(-308) < _frac(-268),
+      f"{_frac(-348)}, {_frac(-308)}, {_frac(-268)} — a measure that is not "
+      f"ordered in the thing it measures cannot be read at any bar")
+check("the straddle is CONTINUOUS — no gap to put a bar in",
+      0.0 < _frac(-348) < 1.0 and 0.0 < _frac(132) < 1.0,
+      "recorded so nobody later reads the constructed arms as a validated "
+      "separation; the bar has to come from the real population being bimodal, "
+      "which round 45 answers and construction cannot")
+
 check("a placement with no measured box is skipped, not guessed",
       A.placement_collisions([{"family": "a", "t0": 0, "t1": 9, "box": None},
                               {"family": "b", "t0": 0, "t1": 9, "box": (0, 0, 9, 9)}]) == [],
