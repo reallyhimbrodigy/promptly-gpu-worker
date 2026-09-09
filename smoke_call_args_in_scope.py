@@ -47,7 +47,9 @@ APP = os.path.join(HERE, "agentic_editor_app.py")
 # The calls whose arguments must be reachable. Anything added to a BRANCHED code
 # path belongs here — that is the only shape this failure takes.
 WATCHED = ("cover_unnarrated_edges", "geometry_normalise_filter",
-           "sfx_catalogue_name", "region_effect_delta", "alpha_paint_box")
+           "sfx_catalogue_name", "region_effect_delta", "alpha_paint_box",
+           "subdivide_beats", "beat_split_candidates", "fps_verdict",
+           "stream_length_verdict")
 
 
 def _walk_same_scope(stmt):
