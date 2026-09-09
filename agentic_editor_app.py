@@ -830,6 +830,46 @@ def _mark(led, name, t_start):
         led["wall_by_stage"].get(name, 0.0) + (time.time() - t_start), 2)
 
 
+# ── HOW MUCH OF A STAGE IS THE PRODUCT, AND HOW MUCH IS THE INSTRUMENT ───────
+#
+# THE QUESTION THIS ANSWERS, and it is Zac's speed pillar. Round 46: motion ran
+# 628.7s against a 120s law, and build_zoom was 578.92s of it — 92.1% — for
+# EIGHT zooms on a 540x960 source. 72s per zoom to crop-and-scale half a second
+# of tiny video is not a plausible render cost, and the stage timer cannot say
+# what it was, because every verification pass this lane added runs INSIDE the
+# timed stage:
+#
+#   zoom_scale_fit_delta   an ffmpeg PSNR pass per zoom (the geometry check)
+#   region_psnr            two more per placement (placement + control window)
+#   _probe_frame_count     ffprobe -count_frames, which DECODES THE WHOLE FILE
+#
+# So "the pipeline is 5x over the latency law" and "the gate measuring the
+# pipeline is 5x over the latency law" are the same number today, and nobody can
+# tell them apart. That is the instrument's own failure class: a stage total
+# nobody decomposed, quoted as a product metric.
+#
+# COUNTED, NOT ESTIMATED. Every measurement helper is wrapped once, here, so a
+# new call site cannot forget to account for itself — the alternative is editing
+# each of the ~12 call sites and being wrong about one of them.
+_INSTRUMENT_S = {}
+
+
+def _instrumented(fn, label=None):
+    """Wrap a MEASUREMENT helper so its wall time is attributed to the gate."""
+    _lbl = label or getattr(fn, "__name__", "measure")
+
+    def _w(*a, **k):
+        _t0 = time.time()
+        try:
+            return fn(*a, **k)
+        finally:
+            _INSTRUMENT_S[_lbl] = round(
+                _INSTRUMENT_S.get(_lbl, 0.0) + (time.time() - _t0), 2)
+    _w.__name__ = _lbl
+    _w.__wrapped__ = fn
+    return _w
+
+
 PIPELINE_STAGES = (
     ("download",   {"kind": "external", "retry_to_success": True}),
     ("transcribe", {"kind": "external", "retry_to_success": True}),
@@ -4968,6 +5008,23 @@ def region_effect_delta(place_psnr, ctrl_psnr):
     return ctrl_psnr - place_psnr
 
 
+# THE WRAP, AFTER EVERY DEFINITION AND BEFORE EVERY CALL. Deliberate rebinding
+# of the module globals, placed here because all five are defined above and
+# every caller is inside a function that runs later. `detect_shot_changes` is
+# NOT in this list — it feeds beat subdivision, so it is product cost, not gate
+# cost, and attributing it to the instrument would flatter the product number.
+#
+# THE DIRECTION OF THE ERROR MATTERS. Anything mis-labelled here moves cost OFF
+# the product and onto the gate, which is the flattering direction, so the list
+# is deliberately short: only helpers whose sole purpose is to VERIFY something
+# already built.
+zoom_scale_fit_delta = _instrumented(zoom_scale_fit_delta)
+region_psnr = _instrumented(region_psnr)
+step_changed_audio = _instrumented(step_changed_audio)
+_probe_frame_count = _instrumented(_probe_frame_count)
+alpha_paint_box = _instrumented(alpha_paint_box)
+
+
 # ── IS THE EDIT GOOD — the mechanical half ──────────────────────────────────
 #
 # Zac, 2026-09-09: nobody has judged an edit AS AN EDIT. The honest version is
@@ -5917,6 +5974,12 @@ def edit(source_key: str, brief: str,
     # FIRST, before any stage. Every stage timing in this run is only
     # comparable to another run's through this number.
     led["container_bench"] = container_benchmark()
+    # RESET PER RUN. _INSTRUMENT_S is a module global and a Modal container is
+    # REUSED — without this, run two of a warm container reports run one's gate
+    # cost plus its own, and the product/gate split silently drifts in the
+    # flattering direction. Same class as the memory-snapshot env freeze: module
+    # state outlives the call that created it.
+    _INSTRUMENT_S.clear()
 
     def fail(kind, detail, cmd=None):
         """THE FAILURE LEDGER. Appended as it happens, never reconstructed."""
@@ -10536,6 +10599,10 @@ def edit(source_key: str, brief: str,
         fail("knowledge_never_read",
              "use_knowledge=True but the agent called read_knowledge zero times "
              "— this arm is not a knowledge arm and must not be compared as one")
+    # THE GATE'S OWN COST, INTO THE LEDGER IT IS PRINTED FROM. Written here,
+    # after every stage, so it counts the whole run rather than whatever had
+    # accumulated at some earlier point.
+    led["instrument_s"] = dict(_INSTRUMENT_S)
     return _result(ok=bool(final.get("exists")), wall_s=round(time.time() - t0, 1),
                    download_s=dl_s, transcript_s=transcript_s,
                    source_words=len(words), final=final, ledger=led,
@@ -10739,6 +10806,27 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             print("     -- per tool --")
             for _k, _v in sorted(_tools.items(), key=lambda kv: -kv[1]):
                 print(f"     {_k:18} {_v:7.2f}s  {100*_v/_tot:5.1f}%")
+        # ── THE GATE'S OWN COST, SPLIT OUT OF THE STAGE IT HIDES IN ─────────
+        # Every one of these runs INSIDE a build_* stage, so until now the
+        # product's latency and the verification of that latency were one
+        # number. motion's build_zoom was 578.92s for 8 zooms on a 540x960
+        # source and nothing could say how much of it was rendering.
+        _ins = (r.get("ledger") or {}).get("instrument_s") or {}
+        _isum = sum(_ins.values())
+        if _ins:
+            print(f"     -- of which INSTRUMENT (verification, not product) — "
+                  f"{_isum:.2f}s = {100*_isum/_tot:.1f}% of wall --")
+            for _k, _v in sorted(_ins.items(), key=lambda kv: -kv[1]):
+                print(f"     {_k:18} {_v:7.2f}s  {100*_v/_tot:5.1f}%")
+            print(f"     PRODUCT WALL       {_tot - _isum:7.2f}s   "
+                  f"(vs the 120s law: "
+                  f"{'MET' if _tot - _isum <= 120 else 'OVER by %.0fs' % (_tot - _isum - 120)})")
+        else:
+            # ABSENT IS NOT ZERO. No instrument time recorded means the
+            # accumulator never ran, not that verification was free — and a
+            # missing split must not silently flatter the product number.
+            print("     -- INSTRUMENT: UNMEASURED (accumulator empty; the "
+                  "product/gate split below is NOT available) --")
         # NESTED INTERVALS ARE NOT ADDITIVE. build_* run INSIDE the execute_plan
         # tool call, so summing both buckets double-counts and the remainder
         # printed -8.67s — a negative remainder is arithmetic saying the model
