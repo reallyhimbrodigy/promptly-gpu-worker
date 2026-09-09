@@ -252,6 +252,7 @@ _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion
 _REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 _MOODREEL_SRC = os.path.join(_REPO_ROOT, "moodreel_editor.py")
 _TYPEREG_SRC = os.path.join(_REPO_ROOT, "type_registries.py")
+_REFERENCE_INDEX_SRC = os.path.join(_HERE, "reference_index.json")
 _BATCH_MJS = os.path.join(_HERE, "remotion_batch.mjs")
 # INPUT 4 — the Remotion skills. 276 markdown files, ~11MB, and until now they
 # lived ONLY in ~/.claude/skills on the laptop: the agent runs in a Modal
@@ -401,7 +402,12 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
        # + browser launch + renderMedia overhead = 12.24s measured, EVERY call.
        # This script bundles once and renders a queue, so captions, cards and
        # zooms pay it between them instead of each.
-       .add_local_file(_BATCH_MJS, "/promptly-remotion/remotion_batch.mjs", copy=True))
+       .add_local_file(_BATCH_MJS, "/promptly-remotion/remotion_batch.mjs", copy=True)
+       # THE REFERENCE INDEX. A file the code reads MUST be mounted — this repo's
+       # own law, and without it load_reference_index returns UNREADABLE and the
+       # brief honestly reports that the agent is ruling without the examples.
+       # Honest and useless is still useless.
+       .add_local_file(_REFERENCE_INDEX_SRC, "/root/reference_index.json", copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
 # The source cache must OUTLIVE the container or it is inert — /cache on a fresh
@@ -5071,6 +5077,169 @@ def derive_card_type(hero, beat_text="", vibe=""):
                   "few words at reading size, not a sentence" % len(_words))
 
 
+# ── REFERENCE RETRIEVAL — the examples, at the moment of ruling ─────────────
+#
+# ZAC, 2026-09-09: prompting does not produce intent. "About one punch per short"
+# was in the prompt and six of seven fixtures ignored it, because a schema that
+# offers a free slot gets filled. The corpus was mined into numbers; the numbers
+# grade; nothing showed the agent the craft it is graded against.
+#
+# AND A STYLE GUIDE WOULD HAVE BEEN THE SAME MISTAKE WITH MORE WORDS — prose
+# describing craft is what already failed. So this shows the EXAMPLES: for each
+# beat, the k reference beats most like it, with what the editor placed and why.
+#
+# IT IS NOT A TOOL THE AGENT CALLS. read_knowledge has been called ZERO times in
+# every round; a surface the agent never opens cannot carry the craft. This is
+# injected into the beats brief, which is already in the cached prefix — one
+# cache write, pennies per turn after, no extra model turn, no agent decision.
+#
+# THE THREE ABSENCES ARE SPOKEN, NOT HIDDEN. Every one is the same rule: say
+# what is missing rather than return something that reads as a judgement.
+#   cutaway    47.1% of the corpus (72 of 153) places a cutaway and this
+#              pipeline cannot do one. Those beats are FILTERED, with the reason
+#              stated, so the agent is never shown craft it cannot imitate.
+#   punch_in   6 beats, 3.9%. Labelled as six examples rather than presented as
+#              a corpus, because repetition from a bottleneck is not a style.
+#   transition ZERO reference beats. Returns an explicit "no reference beat uses
+#              this" rather than an empty list, which reads as nothing to say.
+_REFERENCE_INDEX_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "reference_index.json")
+# The corpus's own vocabulary, against which the agent already answers arc
+# position for zoom. Four values coincide with zoom_arc's enum, which is why the
+# join key needs no new annotation on either side.
+REFERENCE_PURPOSES = ("hook", "claim", "turn", "evidence", "payoff", "close", "breath")
+# Our family -> the corpus's name for it. Named explicitly because they differ,
+# and a silent mismatch would retrieve nothing while looking like it worked.
+REFERENCE_FAMILY_NAME = {"text": "overlay_text", "card": "card", "sfx": "sfx",
+                         "zoom": "punch_in", "cut": "cut", "transition": None}
+_REFERENCE_UNBUILDABLE = "cutaway"
+
+
+def load_reference_index(path=None):
+    """(beats, meta). Never raises — an unreadable index is an absence, said."""
+    _p = path or _REFERENCE_INDEX_PATH
+    try:
+        with open(_p, encoding="utf-8") as fh:
+            _d = json.load(fh)
+    except Exception as e:                                    # noqa: BLE001
+        return ([], {"state": "UNREADABLE", "why": str(e)[:120],
+                     "beats_in_corpus": None, "beats_in_index": 0})
+    _b = _d.get("beats") or []
+    _n = _d.get("beats_in_corpus")
+    # AN INDEX CANNOT CARRY MORE BEATS THAN THE CORPUS HOLDS. That is the one
+    # form of a self-inconsistent index a reader CAN catch — a file that merely
+    # understates the corpus is indistinguishable from a complete one, and the
+    # defence there is the generator, which computes both from the same query.
+    if _n and len(_b) > _n:
+        return (_b, {"state": "INCONSISTENT", "beats_in_corpus": _n,
+                     "beats_in_index": len(_b),
+                     "family_counts_in_corpus": _d.get("family_counts_in_corpus") or {},
+                     "why": "the index carries %d beats and claims the corpus "
+                            "has %d — regenerate it" % (len(_b), _n)})
+    _meta = {"state": "PARTIAL" if (_n and len(_b) < _n) else "COMPLETE",
+             "beats_in_corpus": _n, "beats_in_index": len(_b),
+             "family_counts_in_corpus": _d.get("family_counts_in_corpus") or {},
+             "why": ""}
+    if _meta["state"] == "PARTIAL":
+        _meta["why"] = ("the index carries %d of the corpus's %d beats — "
+                        "regenerate with build_reference_index.py"
+                        % (len(_b), _n))
+    return (_b, _meta)
+
+
+def reference_examples_for(purpose, duration_s, k=3, beats=None,
+                           allow_unbuildable=False):
+    """The k reference beats most like this moment. Cutaway beats excluded.
+
+    Nearest on PURPOSE first (the join key), then on duration — a 0.82s breath
+    and a 3.98s close are different moments and want different treatment.
+    """
+    _b = beats if beats is not None else load_reference_index()[0]
+    _p = str(purpose or "").lower()
+    _pool = [x for x in _b
+             if allow_unbuildable
+             or _REFERENCE_UNBUILDABLE not in (x.get("treat") or [])]
+    _same = [x for x in _pool if str(x.get("purpose") or "").lower() == _p]
+    _rest = [x for x in _pool if str(x.get("purpose") or "").lower() != _p]
+    try:
+        _d = float(duration_s or 0)
+    except Exception:                                         # noqa: BLE001
+        _d = 0.0
+    _same.sort(key=lambda x: abs(float(x.get("dur") or 0) - _d))
+    _rest.sort(key=lambda x: abs(float(x.get("dur") or 0) - _d))
+    return (_same + _rest)[:max(0, int(k))]
+
+
+def reference_family_note(family, beats=None, meta=None):
+    """What the corpus can and cannot say about this family. Absence SPOKEN.
+
+    COUNTS COME FROM THE CORPUS, NOT FROM THE INDEX. A seeded index reporting
+    "only 4 examples of sfx in the whole corpus" when the corpus holds 14 is the
+    absence-misreported-as-a-finding this whole feature exists to prevent — and
+    it was the first thing this function did.
+    """
+    if beats is None or meta is None:
+        _b, _m = load_reference_index()
+        beats = beats if beats is not None else _b
+        meta = meta if meta is not None else _m
+    _b = beats
+    _name = REFERENCE_FAMILY_NAME.get(str(family))
+    if _name is None:
+        return ("NO REFERENCE: no reference beat uses %s. The corpus has nothing "
+                "to show you for this family — that is an absence in the "
+                "examples, not permission and not a prohibition." % family)
+    _corpus_counts = (meta or {}).get("family_counts_in_corpus") or {}
+    _n = _corpus_counts.get(_name)
+    if _n is None:
+        _n = sum(1 for x in _b if _name in (x.get("treat") or []))
+    if _n == 0:
+        return ("NO REFERENCE: no reference beat uses %s." % family)
+    if _n <= 8:
+        return ("ONLY %d EXAMPLES of %s in the whole corpus — treat these as %d "
+                "examples, not as a pattern. Repetition from a bottleneck is "
+                "not a style." % (_n, family, _n))
+    return ""
+
+
+def _reference_block(our_beats, k=3):
+    """The reference examples for this run's beats, as prompt text.
+
+    ABSENCE IS SPOKEN, three times over — a partial index says so, a family with
+    too few examples says so, and a family with none says so. None of the three
+    returns something that reads as a judgement.
+    """
+    _b, _meta = load_reference_index()
+    if not _b:
+        return ("REFERENCE EXAMPLES: NONE AVAILABLE — the reference index could "
+                "not be read (%s). You are ruling without the examples this "
+                "product is graded against." % (_meta.get("why") or "no index"))
+    _lines = ["HOW REAL EDITS TREAT MOMENTS LIKE THESE — from %d annotated beats "
+              "of the reference corpus. These are what editors DID, not rules." %
+              (_meta.get("beats_in_corpus") or len(_b))]
+    if _meta.get("state") == "PARTIAL":
+        _lines.append("  (index is PARTIAL: %s)" % _meta.get("why"))
+    _seen = set()
+    for _ob in (our_beats or []):
+        _dur = float(_ob.get("t_end", 0)) - float(_ob.get("t_start", 0))
+        # The agent has not named this beat's purpose yet — that is what it is
+        # about to do. Match on DURATION alone and show the nearest moments,
+        # which is honest about what is knowable before the ruling exists.
+        for _e in reference_examples_for(None, _dur, k=k, beats=_b):
+            _key = (_e.get("read") or "")[:40]
+            if _key in _seen:
+                continue
+            _seen.add(_key)
+            _lines.append(
+                "  %-8s %4.2fs  %-28s %s"
+                % (_e.get("purpose") or "?", _e.get("dur") or 0,
+                   "+".join(_e.get("treat") or []), (_e.get("read") or "")[:150]))
+    for _fam in ("text", "card", "sfx", "zoom", "transition"):
+        _note = reference_family_note(_fam, _b, _meta)
+        if _note:
+            _lines.append("  %s" % _note)
+    return "\n".join(_lines)
+
+
 def cut_intrusion_floor_ms(r_frame_rate, avg_frame_rate):
     """(floor_ms, state, detail). floor_ms is None whenever it is not knowable.
 
@@ -8558,6 +8727,12 @@ def edit(source_key: str, brief: str,
             + "\n".join(f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
                         + ("  (has a number)" if b["has_number"] else "")
                         + f"  {b['text'][:90]}" for b in _beats) + "\n\n"
+            # ── THE EXAMPLES, AT THE MOMENT OF RULING ──────────────────────
+            # Not a description of the craft — the craft. For each beat, the
+            # reference beats most like it: what an editor placed at a moment
+            # of that shape, and WHY. Injected into the brief, which is inside
+            # the CACHED prefix, so it costs one write and pennies per turn.
+            + _reference_block(_beats) + "\n\n"
             f"Decide the spans to KEEP, then call `build_cut` with them. It "
             f"returns the ffmpeg command and an output-time .srt — do not build "
             f"either by hand.\n\n"
