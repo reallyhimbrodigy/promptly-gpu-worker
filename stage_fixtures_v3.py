@@ -116,18 +116,48 @@ def scenes(path):
     return ((r.stdout or "") + (r.stderr or "")).count("pts_time")
 
 
-# fixture name -> (source filename, the content class it covers, speech?)
-# ROUTE IS RECORDED AS MEASURED, NOT AS ASSUMED. The third clip's audio has ZERO
-# silence segments at both -30dB/0.4s and -25dB/0.25s — the identical signature
-# to the car clip's pure ambient — so a silence heuristic cannot tell continuous
-# overlapping speech from crowd noise. Its route is UNRESOLVED until the
-# pipeline's own transcriber sees it, and the manifest says so rather than
-# guessing. The car clip is kept: at 10.0s it cannot score sfx or zoom, but its
-# 720p upscale is the only source that finds the geometry test's blind spot.
+# fixture name -> (source filename, the content class it covers, speech state)
+#
+# SPEECH IS A MEASURED STATE, NEVER A HAND-DECLARED BOOLEAN — and this table is
+# where that was learned the expensive way. `car_short` was declared False. The
+# pipeline's ASR found TWO Russian words in it, took the TRANSCRIPT route,
+# derived a single beat spanning 5.68-6.64s, and delivered 0.975s of a 10.0s
+# source. A hand-declared boolean that disagrees with the ASR does not just
+# mislabel a fixture; it hides which route the fixture actually exercises.
+#
+# The only arbiter is the pipeline's own transcriber, because the route branch is
+# literally `"transcript" if words else "visual"`. So each entry carries one of:
+#
+#   ("MEASURED", n_words)  observed in a named round — the route is a fact
+#   ("UNMEASURED", None)   not yet run — NOT false, and never rendered as false
+#
+# A silence heuristic cannot supply this. Both the car and the third clip show
+# ZERO silence segments at -30dB/0.4s AND -25dB/0.25s — pure ambient and
+# continuous overlapping speech have the identical signature.
+UNMEASURED = ("UNMEASURED", None)
 ASSIGN = {
-    "talking_head": ("3e002565603e47ca832ed38f8609e58f.mov", "talking_head", True),
-    "motion":       ("DF3EFE06-AB65-4862-82BD-5220AE3935F3.mov", "no_speech_motion_UNRESOLVED", None),
-    "car_short":    ("F65074CC-AC1B-43BF-8E00-C9B9DB6D77AB.mov", "geometry_edge_case_10s", False),
+    # talking_head: 2 words? no — full narration, confirmed round 42 transcript route.
+    "talking_head": ("3e002565603e47ca832ed38f8609e58f.mov", "talking_head",
+                     ("MEASURED", "narration")),
+    # motion: round 42 printed `[route] no speech -> VISUAL beats`, zero words.
+    "motion":       ("DF3EFE06-AB65-4862-82BD-5220AE3935F3.mov",
+                     "no_speech_visual_beats", ("MEASURED", 0)),
+    # car_short: declared False, ACTUALLY 2 words. Kept because at 10.0s it
+    # cannot score sfx or zoom, and its 720p upscale is the only source that
+    # finds the geometry test's blind spot — and now because it is the only
+    # source that exercises incidental speech collapsing a clip to its utterance.
+    "car_short":    ("F65074CC-AC1B-43BF-8E00-C9B9DB6D77AB.mov",
+                     "incidental_speech_2_words_10s", ("MEASURED", 2)),
+    # screen_recording: 3826x2160 LANDSCAPE, 90.46s, audio mean -91 dB (silent).
+    # The FIRST non-vertical source: 3826x2160 -> 1080x1920 is a REFRAME, not a
+    # scale, and that is a different path from every source before it. At 90.5s
+    # it is also the first source long enough to score zoom (aggregate).
+    "screen_recording": ("Double14Steps-Chatgpt.mov",
+                         "landscape_screen_recording_90s", UNMEASURED),
+    # car_mid: 2160x3840, 13.80s. Below the 15.2s sfx floor, so sfx is
+    # out_of_scope and must be REPORTED as unscoreable rather than read as a
+    # family the agent declined.
+    "car_mid":      ("IMG_5428.MOV", "sfx_below_D_zero_13.8s", UNMEASURED),
 }
 
 
@@ -155,7 +185,7 @@ def main():
             "sha256_16": sha, "s3_key": key, "provenance":
                 "Zac reference footage, ~/Desktop/Promptly Reports/references/",
             **meta, "zoom_psnr": z, "scene_cuts": sc, "audio": aud,
-            "has_speech": speech,
+            "has_speech": {"state": speech[0], "words": speech[1]},
             "regimes": {f: g for f, (g, _) in regs.items()},
             "exact": {f: e for f, (_, e) in regs.items()},
             "cannot_score": blocked,

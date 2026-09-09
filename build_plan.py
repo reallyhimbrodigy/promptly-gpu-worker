@@ -41,10 +41,27 @@ BRIEFS = {
         # must not assume captions are possible; it asks for them only if there
         # is speech, so a no-speech route is not scored against a caption target.
         "motion": "Energetic and modern. Let the movement lead. Captions only if there is speech worth showing; otherwise carry it with motion and sound.",
-        # 10.0s, no speech, zero scene cuts, sfx OUT OF SCOPE at this duration
-        # (D_zero 15.2s). A brief asking for a sound effect here would be asking
-        # for something the regime rule says cannot be scored.
+        # 10.0s, sfx OUT OF SCOPE at this duration (D_zero 15.2s). A brief asking
+        # for a sound effect here would ask for something the regime rule says
+        # cannot be scored. NOT "no speech": the ASR found two Russian words and
+        # routed it as speech, which is the defect this fixture now carries.
         "car_short": "Bold and kinetic. One strong moment, tight and punchy. No captions — let the shot and the motion do it.",
+        # 3826x2160 LANDSCAPE, 90.46s, audio mean -91 dB. Scores every family.
+        # The brief does not ask for captions because the source is silent; it
+        # asks for overlays, which a silent source can carry.
+        "screen_recording": "Clean and professional. Few cuts, subtle overlays only, no sound effects. Calm and legible.",
+        # 2160x3840, 13.80s. text and card ARE in scope here (per_run 4.02,
+        # aggregate 1.30); sfx and zoom are not. So the brief permits overlays
+        # rather than forbidding them the way car_short's does — forbidding a
+        # family the regime CAN score would make the instrument measure the
+        # brief instead of the pipeline.
+        #
+        # DELIBERATELY NOT ENGINEERED TOWARD A NON-FIGURE CARD BEAT. Builder-2's
+        # open prediction needs a card-worthy moment that quotes no number, and
+        # this source is the likeliest place one exists — which is exactly why
+        # the brief must not ask for one. A brief written to produce the awaited
+        # result measures the brief.
+        "car_mid": "Bold and kinetic. Let the shot lead. Call out what matters in a few words on screen.",
     },
 }
 

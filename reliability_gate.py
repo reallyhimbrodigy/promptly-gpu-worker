@@ -33,7 +33,8 @@ CORPUS_SOURCES = {
     "ab-sources/reliability-fixtures-v1": ("talking_head", "music",
                                            "screen_recording", "product_shot",
                                            "pet_video"),
-    "ab-sources/reliability-fixtures-v3": ("talking_head", "motion", "car_short"),
+    "ab-sources/reliability-fixtures-v3": ("talking_head", "motion", "car_short",
+                                           "screen_recording", "car_mid"),
 }
 DEFAULT_CORPUS = "ab-sources/reliability-fixtures-v1"
 REQUIRED_SOURCES = CORPUS_SOURCES[DEFAULT_CORPUS]
@@ -84,7 +85,11 @@ ROUTE_FIXTURES = {
 #
 # Zero words, so no_speech. Assigned off that observation, in a diff, as the
 # comment this replaces asked for.
-ROUTE_UNASSIGNED = ()
+# car_mid is UNASSIGNED: staged 2026-09-08, its speech state is UNMEASURED, and
+# car_short is the standing proof that hand-declaring it is how a fixture ends up
+# exercising a route nobody thinks it exercises. Round 43 measures it; it gets
+# added in a diff off the observation, like motion did.
+ROUTE_UNASSIGNED = ("car_mid",)
 
 
 def route_of(source):
