@@ -1,15 +1,26 @@
-"""SMOKE — five families, and an unsupported request is ANSWERED not edited.
+"""SMOKE — the family surface, and an unsupported request is ANSWERED not edited.
 
-CUTAWAY WAS REMOVED (2026-09-06), not left unbuilt. It had been the largest
-corpus family (72 placements, 4.22/25s) building ZERO on every run, which read
-as the pipeline's biggest gap. It is a scope decision: this editor works with
-the footage the user uploaded.
+CUTAWAY, TWICE. It was REMOVED 2026-09-06 and RULED BACK IN 2026-09-09, and the
+guard had to be rewritten rather than reversed, because the two decisions are
+about different things that share a name.
+
+  removed   a TOOL that FETCHED footage — stock b-roll from a library. Priced
+            per second, a different product. `place_cutaway` stays deleted.
+  ruled in  a RULING on a beat: another moment in the material THE USER ALREADY
+            UPLOADED, under the same narration. 72 of the 153 reference beats.
+
+THE OLD GUARD CHECKED THE NAME. `"cutaway" not in fams` blocked both the fetch
+and the thing that was never a fetch, so obeying it would have meant refusing a
+ruling on grounds that never applied — and quietly deleting it would have thrown
+away the protection that DID apply. So the name checks are gone and MECHANISM
+checks replace them: no http, no library, no generator anywhere in the cutaway
+path, and a cutaway must name the source moment it comes from.
 
 WHY A SMOKE AND NOT A NOTE. This lane's own law is that A CAPABILITY IN THE
 SCHEMA WILL BE USED — the prompt said "do not orchestrate" and the agent
-orchestrated anyway. Removal therefore has to be checked as an ABSENCE from the
-tool surface, the enums and the rubric, or the next person to widen an enum
-quietly restores a family with no implementation behind it.
+orchestrated anyway. So the fetch has to be checked as an ABSENCE from the tool
+surface and the code, or the next person to add a convenience helper quietly
+restores a family with a per-second bill behind it.
 """
 import ast
 import sys
@@ -33,27 +44,87 @@ ok(fams is not None, "_TREATMENT_FAMILIES is gone")
 # SIX now: `transition` joined when the seam-dressing family was wired. The
 # count is asserted so a family cannot quietly leave, and the MEMBERS are
 # asserted so it cannot quietly change identity either.
-ok(set(fams or []) == {"card", "text", "sfx", "zoom", "transition", "none"},
-   f"the treatment families are {sorted(fams or [])}, not the six expected — "
+ok(set(fams or []) == {"card", "text", "sfx", "zoom", "cutaway",
+                       "transition", "none"},
+   f"the treatment families are {sorted(fams or [])}, not the seven expected — "
    f"a family that leaves this list stops being rulable while every other "
    f"surface still mentions it")
-ok("cutaway" not in (fams or []), "cutaway is back in _TREATMENT_FAMILIES")
 
 
+# GRADED, because the family builds. The 09-06 removal took the rate out on the
+# correct grounds that grading a run against a capability the pipeline lacks is
+# a standing false alarm; the reverse is worse now — the largest visual
+# treatment in the reference shipping with nothing able to see whether it fires
+# is precisely the "gate-green and did nothing" class.
 ref = _top.get("REFERENCE_PER_25S") or {}
-ok("cutaway" not in ref,
-   "the corpus cutaway rate is back in REFERENCE_PER_25S — every run would "
-   "again report 0% against a capability this pipeline deliberately lacks, "
-   "which reads as a gap rather than a scope decision")
-fit = _top.get("REFERENCE_BEAT_FIT") or {}
-ok("cutaway" not in fit, "cutaway is back in REFERENCE_BEAT_FIT")
+ok("cutaway" in ref,
+   "cutaway has no rate in REFERENCE_PER_25S — the family builds and NOTHING "
+   "grades it, so a run that places zero and a run that places four report the "
+   "same")
+nos = _top.get("REFERENCE_PER_25S_NOSPEECH") or {}
+ok(set(ref) == set(nos),
+   f"the two reference dicts have different families — speech {sorted(ref)} vs "
+   f"no-speech {sorted(nos)}. derive_rubric picks one by beat_source, so a "
+   f"family in only one of them is graded on one route and invisible on the "
+   f"other, with nothing saying which happened")
+# PLACEMENT_FAMILY is the declare_placement vocabulary, and cutaway is NOT a
+# declared placement — the harness composites it from the beat ruling. Its
+# absence here is correct and is asserted so nobody "completes" the table.
 ok("cutaway" not in (_top.get("PLACEMENT_FAMILY") or {}),
-   "cutaway is back in PLACEMENT_FAMILY")
+   "cutaway is in PLACEMENT_FAMILY — it is not a declare_placement type, and "
+   "adding it makes the scope check expect a manifest entry that never comes")
 
 # ── 2. THE TOOL IS GONE FROM THE SURFACE ────────────────────────────────────
 # Withholding the capability is the property; forbidding it in prose is only a
 # preference.
+# THE RETIRED SHAPE STAYS RETIRED. `place_cutaway` was a TOOL the agent called
+# to fetch footage; the family Zac ruled in is a RULING on a beat that the
+# harness builds from the upload. No tool, no fetch.
 ok("def place_cutaway" not in SRC, "place_cutaway is implemented again")
+# NOTHING IS FETCHED. This is the property the 2026-09-06 removal protected and
+# the reason the name check existed. A cutaway may only come from material the
+# user already gave us.
+# ON THE AST, AND WITH THE DOCSTRING DROPPED. The first version of this scanned
+# the function's SOURCE TEXT and failed on the word "stock" inside the docstring
+# sentence "No stock, no generated footage" — the prose PROMISING the property
+# tripped the check FOR the property. That is this repo's standing law arriving
+# from the other direction: grep proves a string is present, and here it was
+# present in a comment. Identifiers and real string constants only.
+_cut_fn = next((n for n in ast.walk(TREE)
+                if isinstance(n, ast.FunctionDef) and n.name == "cutaway_plan"),
+               None)
+ok(_cut_fn is not None, "cutaway_plan does not exist — the family has no "
+                        "planner and every check below is vacuous")
+_cut_tokens = set()
+if _cut_fn is not None:
+    _body = list(_cut_fn.body)
+    if (_body and isinstance(_body[0], ast.Expr)
+            and isinstance(_body[0].value, ast.Constant)
+            and isinstance(_body[0].value.value, str)):
+        _body = _body[1:]                       # the docstring is prose, not code
+    for _st in _body:
+        for _x in ast.walk(_st):
+            if isinstance(_x, ast.Name):
+                _cut_tokens.add(_x.id.lower())
+            elif isinstance(_x, ast.Attribute):
+                _cut_tokens.add(_x.attr.lower())
+            elif isinstance(_x, ast.Constant) and isinstance(_x.value, str):
+                _cut_tokens.add(_x.value.lower())
+_cut_blob = " ".join(sorted(_cut_tokens))
+for _bad in ("http://", "https://", "requests", "urlopen", "urllib", "boto3",
+             "pexels", "getty", "unsplash", "stock_footage", "generate_video",
+             "veo", "sora"):
+    ok(_bad not in _cut_blob,
+       f"the cutaway path references {_bad!r} in CODE — cutaway is the user's "
+       f"own material only, and an external fetch is the retired family "
+       f"returning under a name that is now allowed")
+# NON-VACUITY: a token scan that found nothing forbids nothing.
+ok(len(_cut_tokens) >= 20,
+   f"only {len(_cut_tokens)} tokens read out of cutaway_plan — the AST walk is "
+   f"not reaching its body, so every mechanism check above passes vacuously")
+ok("cutaway_from_s" in SRC,
+   "cutaway has no source-moment field — it would name nothing, which is the "
+   "ungrounded shape the intent requirement exists to prevent")
 # BOTH LISTS. The agent's surface is `TOOLS + KNOWLEDGE_TOOLS` (see the
 # dispatch), and TOOLS holds only 5 entries — execute_plan, probe_source,
 # build_zoom, place_sfx, inspect_output. set_spec, rule_all_beats and
@@ -117,16 +188,37 @@ def _enums(node, path="input_schema"):
         for i, v in enumerate(node):
             yield from _enums(v, f"{path}[{i}]")
 
-_seen_enums = 0
+# THE POSITIVE FORM, and it is the one that matters now. The removal-era check
+# asserted cutaway was ABSENT from every enum; the family is back, so the same
+# walk is turned around to prove it is actually OFFERED. A family in
+# _TREATMENT_FAMILIES that no tool schema exposes is unrulable — the agent
+# cannot name what it is not shown, and the run reports 0/4.22 forever with
+# nothing anywhere saying why.
+_seen_enums, _treat_enums, _cut_enums = 0, 0, 0
 for t in (tools or []):
     for path, vals in _enums(t.get("input_schema") or {}):
         _seen_enums += 1
-        ok("cutaway" not in vals,
-           f"tool {t.get('name')!r} still offers 'cutaway' at {path}")
+        if path.endswith("treatment.items") or path.endswith("treatment"):
+            _treat_enums += 1
+            if "cutaway" in vals:
+                _cut_enums += 1
+            else:
+                FAIL.append(f"tool {t.get('name')!r} does NOT offer 'cutaway' "
+                            f"at {path} — the family is rulable in "
+                            f"_TREATMENT_FAMILIES and invisible to the agent")
 # A walk that finds nothing asserts nothing.
 ok(_seen_enums >= 5,
    f"only {_seen_enums} enums found in the tool schemas — the walk is not "
    f"reaching them, so this check passes vacuously")
+ok(_treat_enums >= 2,
+   f"only {_treat_enums} treatment enum(s) found — both rule_all_beats and "
+   f"beat_verdict declare one, so a lower count means the walk is missing the "
+   f"depth at which treatment lives and the check above is vacuous")
+ok(_cut_enums == _treat_enums,
+   f"cutaway is in {_cut_enums} of {_treat_enums} treatment enums — the two "
+   f"declaration sites have DRIFTED, which is exactly the bug that made the "
+   f"repair path declare treatment as a string while rule_all_beats declared "
+   f"an array")
 
 # ── 3. THE UNSUPPORTED CLASS ────────────────────────────────────────────────
 modes = _top.get("SPEC_MODES") or ()
@@ -160,8 +252,10 @@ try:
     FAIL.append("an arbitrary unsupported_class is accepted")
 except ValueError:
     pass
-ok("cutaway" not in _ns["SPEC_FAMILIES"],
-   "cutaway is back in SPEC_FAMILIES — a targeted_change could scope to it")
+ok("cutaway" in _ns["SPEC_FAMILIES"],
+   "cutaway is not in SPEC_FAMILIES — 'redo the cutaway on beat 4' could not "
+   "be scoped, and a re-edit that cannot name the family it is changing "
+   "re-runs the whole edit")
 
 # ── 4. THE TERMINAL PATH IS REAL ────────────────────────────────────────────
 # A flag that nothing reads is the producer-with-no-consumer defect this repo
@@ -223,9 +317,13 @@ for _n in TREE.body:
     if isinstance(_n, ast.FunctionDef) and _n.name == "derive_rubric":
         exec(compile(ast.Module([_n], []), "<s>", "exec"), _rm)
 _r = _rm["derive_rubric"](None, "full_edit")
-ok("cutaway" not in str(_r),
-   f"derive_rubric still emits a cutaway target: {_r}")
-ok(set(_r["targets"]) == {"text", "cut", "card", "sfx", "zoom", "transition"},
+ok(_r["targets"].get("cutaway") == 4.22,
+   f"derive_rubric does not carry the corpus cutaway rate: {_r}")
+ok(_r["source"].get("cutaway") == "corpus",
+   "the cutaway target is not marked 'corpus' — a rate that is not attributed "
+   "cannot be told from a vibe-directed one at ruling time")
+ok(set(_r["targets"]) == {"text", "cut", "card", "sfx", "zoom", "cutaway",
+                          "transition"},
    f"the rubric target set changed: {sorted(_r['targets'])}")
 
 # ── 6. ONE MANIFEST PER RUN, NOT A UNION OF EVERY ATTEMPT ──────────────────
@@ -298,6 +396,6 @@ if FAIL:
     for f in FAIL:
         print("  - " + f)
     sys.exit(1)
-print("ok smoke_five_families — 6 families, cutaway absent from tools/enums/"
+print("ok smoke_five_families — 7 families, no fetch path, cutaway offered in "
       "rates/rubric, unsupported class validated, terminal path breaks the loop "
       "and charges nothing")

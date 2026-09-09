@@ -80,11 +80,19 @@ print("\nWIRING legs — the reporting layer must not invent a family:")
 tree = ast.parse(open(os.path.join(HERE, "agentic_editor_app.py"),
                       encoding="utf-8").read())
 src = open(os.path.join(HERE, "agentic_editor_app.py"), encoding="utf-8").read()
-check("TREATMENT_FAMILIES is a closed tuple read from the schema enum",
+# DERIVED, NOT RESTATED. This leg used to carry its own literal copy of the
+# family set, so adding `cutaway` broke it in a way that said nothing about the
+# property — it went red because a SECOND list had gone stale, which is the
+# duplication the alias exists to prevent. What this leg actually cares about is
+# that TREATMENT_FAMILIES is a closed tuple over the ONE source of truth;
+# smoke_five_families is where the membership itself is asserted, once.
+check("TREATMENT_FAMILIES is a closed tuple aliasing _TREATMENT_FAMILIES",
       isinstance(getattr(app, "TREATMENT_FAMILIES", None), tuple)
-      and set(app.TREATMENT_FAMILIES) == {"card", "text", "sfx", "zoom",
-                                          "transition", "none"},
+      and set(app.TREATMENT_FAMILIES) == set(app._TREATMENT_FAMILIES)
+      and len(app.TREATMENT_FAMILIES) == len(app._TREATMENT_FAMILIES),
       str(getattr(app, "TREATMENT_FAMILIES", None)))
+check("the family set is non-trivial (an empty alias would pass the leg above)",
+      len(app.TREATMENT_FAMILIES) >= 5, str(len(app.TREATMENT_FAMILIES)))
 check("verdict_family_unknown is a CONTRACT_FAILURES member",
       "verdict_family_unknown" in app.CONTRACT_FAILURES)
 # ruled_vs_built must key off the CLOSED set, never off whatever arrived —

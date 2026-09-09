@@ -438,6 +438,13 @@ REFERENCE_PER_25S = {
     "card":       2.35,   # 40
     "sfx":        0.82,   # 14
     "zoom":       0.35,   # punch_in, 6
+    # BACK, 2026-09-09, because the family now builds. It was pulled on 09-06
+    # when the pipeline could not do it — grading a run against a capability it
+    # lacks is a standing false alarm, and that was right. The reverse is worse:
+    # the largest visual treatment in the reference shipping with nothing able
+    # to see whether it fires. 72 of 153 beats, the same full-corpus query as
+    # every other rate here.
+    "cutaway":    4.22,   # 72
     "transition": 0.00,   # ZERO in the corpus — not a gap, an absence
 }
 # ── THE NO-SPEECH REFERENCE, MEASURED FROM SHIPPED OUTPUT ───────────────────
@@ -475,6 +482,12 @@ REFERENCE_PER_25S_NOSPEECH = {
     "card":       0.23,
     "sfx":        0.00,
     "zoom":       0.00,
+    # 0.00 IS A MEASUREMENT, NOT A JUDGEMENT — the same shape as text above.
+    # The no-speech plan shape has keys clips / motion_graphics / transitions /
+    # notes / outro and no cutaway field at all, so production cannot place one
+    # on these sources. It is a FLOOR like every rate in this dict: a brief
+    # asking for cutaways on a silent clip is vibe-directed and overrides it.
+    "cutaway":    0.00,
     "transition": 0.27,
 }
 
@@ -2001,7 +2014,8 @@ KNOWLEDGE_TOOLS = [{
                                                     "is a real answer",
                                      "items": {"type": "string",
                                                "enum": ["card", "text", "sfx",
-                                                        "zoom", "transition",
+                                                        "zoom", "cutaway",
+                                                        "transition",
                                                         "none"]}},
                                  "cut": {"type": "string", "enum": ["keep", "cut"]},
                                  "text_content": {
@@ -2048,6 +2062,27 @@ KNOWLEDGE_TOOLS = [{
                                  # card_hero. This is the zoom contract: the
                                  # agent rules the MOMENT, the harness looks up
                                  # the MOVE.
+                                 # CUTAWAY NAMES A MOMENT, NOT A LABEL. This is
+                                 # the grounded shape: the agent cannot fill it
+                                 # without having FOUND another moment in the
+                                 # footage that shows what this beat is about —
+                                 # the property that makes card_hero and
+                                 # text_content self-limiting and zoom_arc not.
+                                 # 72 of 153 reference beats carry one.
+                                 "cutaway_from_s": {
+                                     "type": "number",
+                                     "description":
+                                         "REQUIRED when treatment includes "
+                                         "'cutaway': the timestamp IN THE "
+                                         "SOURCE of the other moment to show "
+                                         "here, in seconds. The picture cuts to "
+                                         "that moment and back while THIS "
+                                         "beat's audio keeps playing, so it must "
+                                         "show what this beat is talking about. "
+                                         "It cannot be inside this beat's own "
+                                         "footage — that is the same picture. "
+                                         "Only the uploaded material; there is "
+                                         "no stock and no generated shot."},
                                  "zoom_arc": {"type": "string",
                                      "enum": ["hook", "build", "mid_peak",
                                               "payoff", "breather", "close"],
@@ -2085,9 +2120,12 @@ KNOWLEDGE_TOOLS = [{
                          # sfx, zoom or transition. Found by the surface
                          # assert the moment it started comparing the two
                          # lists instead of grepping one stale spelling.
-                         "treatment": {"type": "string",
-                                       "enum": ["card", "text", "sfx", "zoom",
-                                                "transition", "none"]},
+                         "treatment": {"type": "array",
+                                       "items": {
+                                           "type": "string",
+                                           "enum": ["card", "text", "sfx",
+                                                    "zoom", "cutaway",
+                                                    "transition", "none"]}},
                          "cut": {"type": "string", "enum": ["keep", "cut"]},
                          "why": {"type": "string",
                                  "description": "about THIS beat's content"}},
@@ -3204,6 +3242,7 @@ def sfx_start_s(attack_ms, at_s):
 # and it asks for what an editor needs to point at rather than for a description.
 _VISION_FRAME_W = 512          # 512x290 measured at ~198 image tokens/frame
 _VISION_MAX_FRAMES = 40        # a 40-beat source is already past the length cap
+_VISION_MODEL = "claude-haiku-4-5"   # the captioner, not the editor
 
 
 def beat_keyframe_times(beats, duration_s=None):
@@ -3296,6 +3335,56 @@ _VISION_SYSTEM = (
     "this size.\n"
     "Output one line per frame, numbered to match, and nothing else."
 )
+
+
+def describe_beats_vision(frame_paths, client, model=_VISION_MODEL, brief=""):
+    """(state, raw_text, detail) — ONE batched call describing every beat frame.
+
+    ONE CALL, NOT N. The frames are paid for once as image tokens and the
+    resulting TEXT is what enters the editorial conversation, where it is re-read
+    every turn at a tenth the price. Measured against the alternative of putting
+    frames in the editorial loop directly: +$0.0091 vs +$0.0097 on a $0.0460 run
+    — a wash on cost, but this shape keeps the editorial message structure
+    unchanged, and changing that structure once cost 43,222 cache_write tokens.
+
+    A STATE, NEVER A BARE STRING. FAILED and ABSENT both have to be
+    distinguishable from a working pass, because the fallback — beat text with
+    motion numbers and no description — is byte-identical to the behaviour this
+    replaces. A broken vision pass that degraded silently would be invisible.
+    """
+    import base64
+    if not frame_paths:
+        return "ABSENT", "", "no frames to describe"
+    if client is None:
+        return "FAILED", "", "no anthropic client"
+    content = []
+    if brief:
+        content.append({"type": "text",
+                        "text": f"The editor's brief, for context only — "
+                                f"describe what you SEE, not what the brief "
+                                f"wants: {str(brief)[:300]}"})
+    for _i, _p in enumerate(frame_paths, 1):
+        try:
+            with open(_p, "rb") as _fh:
+                b64 = base64.b64encode(_fh.read()).decode("ascii")
+        except OSError as exc:
+            return "FAILED", "", f"cannot read {os.path.basename(_p)}: {exc}"
+        content.append({"type": "text", "text": f"Frame {_i}:"})
+        content.append({"type": "image",
+                        "source": {"type": "base64", "media_type": "image/jpeg",
+                                   "data": b64}})
+    try:
+        r = client.messages.create(
+            model=model, max_tokens=64 * len(frame_paths) + 256,
+            system=_VISION_SYSTEM,
+            messages=[{"role": "user", "content": content}])
+    except Exception as exc:                     # any API failure is FAILED
+        return "FAILED", "", f"{type(exc).__name__}: {str(exc)[:160]}"
+    raw = "".join(getattr(b, "text", "") for b in (r.content or []))
+    _u = getattr(r, "usage", None)
+    detail = (f"{len(frame_paths)} frame(s); in {getattr(_u, 'input_tokens', '?')} "
+              f"out {getattr(_u, 'output_tokens', '?')}")
+    return ("MEASURED" if raw.strip() else "ABSENT"), raw, detail
 
 
 def parse_vision_lines(raw, n_expected):
@@ -5276,6 +5365,129 @@ def pack_reel(items, fps=30):
     return {"fps": fps, "reel_frames": cursor, "reel": out_reel, "segments": out_seg}
 
 
+def source_to_output(spans, t_src):
+    """SOURCE time -> OUTPUT time under a set of keep spans, or None. PURE.
+
+    The generalisation of remap_words' arithmetic to an arbitrary instant. A
+    source instant inside a CUT region has no output time at all and returns
+    None — which is a real answer, not a failure: it means the moment the agent
+    named is not in the finished video.
+
+    Same rule remap_words uses: offset within the containing span, plus the
+    total duration of every earlier span. Never the source time, which is the
+    bug both hand-written versions had.
+    """
+    try:
+        t = float(t_src)
+    except (TypeError, ValueError):
+        return None
+    acc = 0.0
+    for _s in sorted([[float(a), float(b)] for a, b in (spans or [])]):
+        a, b = _s
+        if b <= a:
+            continue
+        if a <= t <= b:
+            return round(acc + (t - a), 4)
+        acc += (b - a)
+    return None
+
+
+_CUTAWAY_MIN_S = 0.6        # below this a cutaway reads as a glitch, not a shot
+_CUTAWAY_MAX_S = 4.0        # the corpus's longest evidence beat is 11.5s, but a
+                            # single held cutaway past ~4s stops being a cutaway
+                            # and becomes the shot; that is a different ruling
+
+
+def cutaway_plan(rulings, keep_spans, source_duration_s, beats=None,
+                 min_s=_CUTAWAY_MIN_S, max_s=_CUTAWAY_MAX_S):
+    """(plans, rejects) — resolve cutaway rulings to extract+overlay geometry. PURE.
+
+    WHY CUTAWAY EXISTS AT ALL. It is 72 of the 153 annotated reference beats —
+    the second-largest treatment after `cut`, ahead of `card` (40) — and 85% of
+    the largest purpose class (`evidence`, 52 beats) carries one. This lane
+    removed it from the rubric because the pipeline could not do it, which was
+    right as a rubric decision and left the most-used visual treatment in the
+    reference absent from the product.
+
+    FROM THE USER'S OWN MATERIAL ONLY. Another moment in the same upload, or a
+    second uploaded clip. No stock, no generated footage. The reference does
+    exactly this — its cutaways are the speaker's own screen recordings and
+    b-roll, not a library.
+
+    IT REPLACES PICTURE AND KEEPS AUDIO, which is why it costs no time. The
+    narration continues underneath while the picture shows the thing being
+    talked about — "the metaphorical b-roll illustrates the abstract claim",
+    "one long unbroken screen-capture walks through the actual product UI as
+    literal proof". So a cutaway does NOT occupy time the primary footage would
+    have filled: it occupies the same time with different pixels, and the beat
+    structure and output duration are untouched.
+
+    EVERY REJECTION IS NAMED. A cutaway that cannot be built must say why rather
+    than vanish — the `ruled_not_built` class is this lane's most repeated
+    defect.
+    """
+    plans, rejects = [], []
+    try:
+        src_dur = float(source_duration_s or 0)
+    except (TypeError, ValueError):
+        src_dur = 0.0
+    _by_i = {b.get("i"): b for b in (beats or []) if isinstance(b, dict)}
+    for r in (rulings or []):
+        if not isinstance(r, dict):
+            continue
+        bi = r.get("beat")
+        frm = r.get("cutaway_from_s")
+        if frm is None:
+            rejects.append({"beat": bi, "why": "no cutaway_from_s — the ruling "
+                                               "named no source moment"})
+            continue
+        try:
+            f0 = float(frm)
+        except (TypeError, ValueError):
+            rejects.append({"beat": bi, "why": f"cutaway_from_s {frm!r} is not "
+                                               f"a number of seconds"})
+            continue
+        b = _by_i.get(bi)
+        if b is None:
+            rejects.append({"beat": bi, "why": "no such beat"})
+            continue
+        # The beat's OUTPUT span — cuts remap time, so the overlay window is in
+        # output seconds while the extract is in source seconds.
+        o0 = source_to_output(keep_spans, b.get("t_start"))
+        o1 = source_to_output(keep_spans, b.get("t_end"))
+        if o0 is None or o1 is None or o1 <= o0:
+            rejects.append({"beat": bi, "why": "the beat itself was cut, so it "
+                                               "has no output span to cover"})
+            continue
+        want = min(max(o1 - o0, min_s), max_s)
+        if o1 - o0 < min_s:
+            rejects.append({"beat": bi,
+                            "why": f"beat is {o1 - o0:.2f}s in the output, under "
+                                   f"the {min_s}s floor — a shorter cutaway reads "
+                                   f"as a glitch"})
+            continue
+        if f0 < 0 or f0 >= src_dur:
+            rejects.append({"beat": bi, "why": f"cutaway_from_s {f0:.2f} is "
+                                               f"outside the source (0-{src_dur:.2f}s)"})
+            continue
+        if f0 + want > src_dur:
+            f0 = max(0.0, src_dur - want)      # slide back rather than refuse
+        # A cutaway to the beat's OWN footage shows the same picture and is a
+        # no-op. Named, not silently accepted.
+        _bs, _be = float(b.get("t_start") or 0), float(b.get("t_end") or 0)
+        if f0 < _be and (f0 + want) > _bs:
+            rejects.append({"beat": bi,
+                            "why": f"cutaway_from_s {f0:.2f} overlaps the beat's "
+                                   f"own footage ({_bs:.2f}-{_be:.2f}s) — that "
+                                   f"shows the same picture"})
+            continue
+        plans.append({"beat": bi, "src_t0": round(f0, 3),
+                      "src_t1": round(f0 + want, 3),
+                      "out_t0": o0, "out_t1": round(o0 + want, 4),
+                      "duration_s": round(want, 3)})
+    return plans, rejects
+
+
 def remap_words(spans, words):
     """Words inside `spans`, re-timed to the CONCATENATED output's clock.
 
@@ -5320,12 +5532,27 @@ _REQUIRED_CONSTRAINTS = [
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
 
 
-# FIVE FAMILIES. Cutaway was removed 2026-09-06: this editor works with the
-# footage the user uploaded, and fetching stock b-roll is a different product
-# with a different cost model. It is not a gap to be closed later in this lane —
-# when generated footage arrives it is a NEW family with its own tool, gated on
-# tier and priced per second.
-_TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "transition", "none"]
+# SIX FAMILIES. Cutaway was removed 2026-09-06 and RULED BACK IN 2026-09-09,
+# and the two decisions do not contradict each other because they are about
+# different things wearing the same name.
+#
+#   what was removed  a TOOL that FETCHED footage — stock b-roll from a library.
+#                     A different product with a different cost model, priced
+#                     per second. That stays removed, and `place_cutaway` stays
+#                     deleted; the guard in smoke_five_families now checks the
+#                     MECHANISM (no http, no library, no generator) rather than
+#                     the name, because the name was never the property.
+#
+#   what came back    a RULING on a beat: show another moment the user already
+#                     uploaded, under the same narration. No fetch, no third
+#                     party, nothing generated. It is 72 of the 153 reference
+#                     beats — the largest visual treatment there is — and 85% of
+#                     the `evidence` purpose class carries one.
+#
+# When generated footage arrives it is still a NEW family with its own tool,
+# gated on tier and priced per second. This is not that.
+_TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "cutaway",
+                       "transition", "none"]
 
 
 # ── THE BOUNDARY MUST KEEP EVERY FIELD THE SCHEMA OFFERS ────────────────────
@@ -5355,7 +5582,13 @@ def _verdict_fields():
 # THE CLOSED FAMILY SET, read from the schema the agent is actually given so it
 # cannot drift from it. Anything outside this is a contract failure, never a
 # reported family.
-TREATMENT_FAMILIES = ("card", "text", "sfx", "zoom", "transition", "none")
+# ONE COPY. This was a second hardcoded tuple beside the pre-existing
+# _TREATMENT_FAMILIES, which is already pinned to the schema enum by
+# _assert_treatment_surface_agrees at import. That assert caught the duplicate
+# the moment they diverged — a closed set defined twice is two things to get
+# wrong, and the alias means the boundary and the reporting layer can never
+# disagree about what a family is.
+TREATMENT_FAMILIES = tuple(_TREATMENT_FAMILIES)
 
 
 def normalise_verdict(v):
@@ -5425,6 +5658,13 @@ def normalise_verdict(v):
     if bad:
         return False, None, (f"treatment carries {bad} — outside the closed set "
                              f"{list(TREATMENT_FAMILIES)}")
+    # A FAMILY THAT NAMES NOTHING IS NOT A RULING. cutaway is the first family
+    # built with the grounding requirement in place, so it is enforced HERE
+    # rather than discovered at build time as another ruled_not_built.
+    if "cutaway" in fams and v.get("cutaway_from_s") is None:
+        return False, None, ("treatment includes 'cutaway' but no "
+                             "cutaway_from_s — a cutaway must name the source "
+                             "moment it cuts to")
     rec = dict(v)
     rec["beat"] = beat
     rec["treatment"] = fams
@@ -6808,6 +7048,135 @@ def edit(source_key: str, brief: str,
         r = run_ffmpeg_from_recipe(cutr, cur)
         if r.get("error"):
             return {"error": f"cut render failed: {r['error']}"}
+
+        # ── 1b. CUTAWAY — the picture changes, the clock does not ───────────
+        # FIRST PASS AFTER THE CUT, and the order is the ruling. A cutaway
+        # replaces the picture; text, cards, captions and zoom all sit ON it.
+        # Compositing it after them would bury every overlay it covers, and the
+        # failure would be silent — the overlay renders, the ledger counts it
+        # built, and nobody ever sees it.
+        #
+        # IT ALSO MAKES THE CONTROL WINDOW HONEST. `placement_inert` has been
+        # contaminated for every other family because the caption track paints
+        # across the whole output, so a "control" window is never actually
+        # untouched. Between cut.mp4 and cutaway.mp4 the ONLY thing that changed
+        # is the cutaways, so a free window here is clean by construction — the
+        # first family in this file whose control means what it says.
+        _cw_rulings = [v for v in vs
+                       if "cutaway" in [str(t).lower()
+                                        for t in (v.get("treatment") or [])]]
+        _cw_plans, _cw_rejects = cutaway_plan(
+            _cw_rulings, merged,
+            float((meta.get("format") or {}).get("duration") or 0), beats=beats)
+        led["cutaway_ruled"] = len(_cw_rulings)
+        led["cutaway_planned"] = len(_cw_plans)
+        led["cutaway_rejects"] = _cw_rejects
+        # PRINTED IN THE COMMIT THAT ADDS IT. A counter that reaches the ledger
+        # and no output answers nothing — round 29 ran specifically to learn
+        # whether a gate fired and could not.
+        print(f"[cutaway] ruled={len(_cw_rulings)} planned={len(_cw_plans)} "
+              f"rejected={len(_cw_rejects)}", flush=True)
+        for _rj in _cw_rejects:
+            _skips.append({"family": "cutaway", "beat": _rj.get("beat"),
+                           "why": _rj.get("why")})
+            print(f"[cutaway]   beat {_rj.get('beat')}: {_rj.get('why')}",
+                  flush=True)
+        if _cw_plans:
+            # Input 0 is the cut; input 1 is the ORIGINAL source, which is where
+            # the other moment lives. There is no third input and there is no
+            # fetch: everything a cutaway can show, the user already uploaded.
+            _cvs = next((_x for _x in (meta.get("streams") or [])
+                         if _x.get("codec_type") == "video"), {})
+            _cgeo, _cgmode, _ = geometry_normalise_filter(_cvs.get("width"),
+                                                          _cvs.get("height"))
+            _n_cw = len(_cw_plans)
+            # split=N even when N is 1 — one idiom, so the single-cutaway case
+            # is not a second code path that only the rare run exercises.
+            _cparts = ["[1:v]split=%d%s" % (
+                _n_cw, "".join(f"[cs{_k}]" for _k in range(_n_cw)))]
+            _clast = "0:v"
+            for _k, _p in enumerate(_cw_plans):
+                _ch = (f"[cs{_k}]trim={_p['src_t0']:.3f}:{_p['src_t1']:.3f},"
+                       f"setpts=PTS-STARTPTS+{_p['out_t0']:.3f}/TB")
+                if _cgeo:
+                    # THE SAME NORMALISER THE CUT USED. Without it a landscape
+                    # source's cutaway arrives 3826x2160 and overlay pins it at
+                    # 0:0 — the delivered frame shows the top-left corner of the
+                    # extract, at the wrong scale, and every duration and frame
+                    # count still checks out.
+                    _ch += f",{_cgeo}"
+                _cparts.append(_ch + f"[cw{_k}]")
+                _cparts.append(f"[{_clast}][cw{_k}]overlay=0:0:enable="
+                               f"'between(t,{_p['out_t0']:.3f},"
+                               f"{_p['out_t1']:.3f})'[cm{_k}]")
+                _clast = f"cm{_k}"
+            if cur == "cutaway.mp4":
+                fail("chain_writes_its_own_input",
+                     "the cutaway composite would read and write "
+                     "/work/cutaway.mp4 — ffmpeg exits 'Output ... same as "
+                     "Input #0' and the family loses every placement")
+                raise RuntimeError("cutaway composite input == output")
+            _cw_before = os.path.join("/work", cur)
+            _cargs = ["ffmpeg", "-y", "-v", "error",
+                      "-i", _cw_before, "-i", "/work/source.mp4",
+                      "-filter_complex", ";".join(_cparts),
+                      "-map", f"[{_clast}]", "-map", "0:a?",
+                      "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                      "-c:a", "copy", "/work/cutaway.mp4"]
+            _cc = subprocess.run(_cargs, capture_output=True, text=True,
+                                 timeout=1800, env=_SUBPROCESS_ENV)
+            if _cc.returncode != 0 or not os.path.exists("/work/cutaway.mp4"):
+                _cwhy = f"cutaway composite failed: {(_cc.stderr or '')[-140:]}"
+                for _p in _cw_plans:
+                    _skips.append({"family": "cutaway", "beat": _p["beat"],
+                                   "why": _cwhy})
+                print(f"[cutaway] {_cwhy}", flush=True)
+            else:
+                # THE CLOCK IS THE CONTRACT. A cutaway occupies the same time
+                # with different pixels, so an output whose duration moved is a
+                # defect and not a taste question. Checked against the cut it
+                # was made from, in frames, not asserted in a comment.
+                # FRAMES, COUNTED — not the container's duration header, which
+                # is another number written by the thing being checked, and not
+                # a tolerance fitted to whatever the first run happened to
+                # produce. An overlay pass over a CFR input preserves the frame
+                # count EXACTLY, so the check is equality and there is nothing
+                # to tune.
+                _cw_f0 = _probe_frame_count(_cw_before, env=_SUBPROCESS_ENV)
+                _cw_f1 = _probe_frame_count("/work/cutaway.mp4",
+                                            env=_SUBPROCESS_ENV)
+                led["cutaway_frames"] = {"before": _cw_f0, "after": _cw_f1}
+                print(f"[cutaway] frames {_cw_f0} -> {_cw_f1}", flush=True)
+                if _cw_f0 is None or _cw_f1 is None:
+                    # ABSENT IS NOT A PASS. A guard that only reads the value
+                    # lets the failed measurement through — four instances of
+                    # exactly that in one session, each inside an instrument
+                    # built to prevent the class it then exhibited.
+                    fail("cutaway_frames_unmeasured",
+                         f"could not count frames across the cutaway pass "
+                         f"(before={_cw_f0}, after={_cw_f1}) — the clock "
+                         f"contract is UNCHECKED, not satisfied")
+                elif _cw_f1 != _cw_f0:
+                    fail("cutaway_changed_duration",
+                         f"the cutaway pass moved the output clock "
+                         f"{_cw_f0} -> {_cw_f1} frames. A cutaway replaces "
+                         f"picture and keeps time; a frame-count change means "
+                         f"it is inserting, and every downstream overlay time "
+                         f"is now wrong")
+                _cwctrl = _free_ctrl([(p["out_t0"], p["out_t1"])
+                                      for p in _cw_plans], _out_dur)
+                for _p in _cw_plans:
+                    _record_effect("cutaway", _cw_before, "/work/cutaway.mp4",
+                                   _p["out_t0"], _p["out_t1"],
+                                   note=f"src@{_p['src_t0']:.2f}s",
+                                   ctrl_t0=_cwctrl)
+                cur = "cutaway.mp4"
+                built["cutaway"] = len(_cw_plans)
+                for _p in _cw_plans:
+                    steps.append({"step": "cutaway", "beat": _p["beat"],
+                                  "t": [_p["out_t0"], _p["out_t1"]],
+                                  "src_t": [_p["src_t0"], _p["src_t1"]],
+                                  "duration_s": _p["duration_s"]})
 
         _tov0 = time.time()
         # 2. TEXT, derived from the text rulings + their copy.
@@ -8532,6 +8901,43 @@ def edit(source_key: str, brief: str,
           f"(reference median 0.253)"
           + ("" if _ceil >= 0.253 else "  <-- STILL under the reference median"),
           flush=True)
+    # ── VISION: WHAT IS ON SCREEN, PER BEAT ─────────────────────────────────
+    #
+    # ONE SITE FOR BOTH ROUTES, after subdivision so the frames land on the
+    # FINAL beat midpoints rather than on boundaries that no longer exist.
+    #
+    # WHY IT IS NOT VISUAL-ROUTE-ONLY. The transcript route knows the WORDS and
+    # still cannot see the frame, and zoom_subject asks what the push moves
+    # TOWARD — "the number on screen", "the gesture at 4.2s". Two of those three
+    # need sight even when the speech is known. Round 46's screen_recording
+    # ruled `none` on all 36 beats while being the most describable source in
+    # the corpus, because it was told motion 0.31 and never what was there.
+    _vis_state, _vis_detail, _vis_desc = "ABSENT", "not attempted", []
+    try:
+        _vt = beat_keyframe_times(_beats, _vdur)
+        _fstate, _fpaths, _fdetail = extract_beat_frames(
+            src, _vt, "/work/beatframes", env=_SUBPROCESS_ENV)
+        if _fstate != "MEASURED":
+            _vis_state, _vis_detail = _fstate, f"frames: {_fdetail}"
+        else:
+            _vstate, _vraw, _vdetail2 = describe_beats_vision(
+                _fpaths, client, brief=brief)
+            if _vstate != "MEASURED":
+                _vis_state, _vis_detail = _vstate, f"call: {_vdetail2}"
+            else:
+                _pstate, _vis_desc, _pdetail = parse_vision_lines(_vraw, len(_fpaths))
+                _vis_state = _pstate
+                _vis_detail = f"{_vdetail2}; {_pdetail}"
+    except Exception as _vexc:
+        _vis_state, _vis_detail = "FAILED", f"{type(_vexc).__name__}: {_vexc}"
+    _beats = merge_beat_descriptions(_beats, _vis_state, _vis_desc)
+    led["vision"] = {"state": _vis_state, "detail": _vis_detail,
+                     "described": len(_vis_desc)}
+    # PRINTED. A vision pass that failed leaves beat text that is byte-identical
+    # to the old behaviour, so absence must be stated or the regression is
+    # invisible.
+    print(f"  VISION          : {_vis_state}  {_vis_detail}"
+          + (f"  e.g. {_vis_desc[0][:70]!r}" if _vis_desc else ""), flush=True)
     _mark(led, "beats", _tb0)
     _numeric_ts = {b["t"] for b in _number_beats}
     for _b in _beats:
@@ -9965,12 +10371,19 @@ def edit(source_key: str, brief: str,
     _TERMS = {
         "sfx": ("sfx", "sound effect", "sound-effect", "audio hit", "whoosh",
                 "boom", "ding", "sting"),
-        # Kept AFTER the family was removed, and renamed to say what it now
-        # measures: how often the agent reaches for footage that does not
-        # exist. Zero here means the scope decision is landing; a rising number
-        # is the demand signal for the generated-footage family, not a defect.
-        "wants_footage_we_lack": ("cutaway", "cut-away", "b-roll", "broll",
-                                  "stock footage", "pexels"),
+        # SPLIT 2026-09-09, when cutaway came back as a real family. Leaving
+        # "cutaway" inside `wants_footage_we_lack` would make the demand meter
+        # read HIGHEST exactly when the family is working — a signal that
+        # inverts the moment the thing it measures ships.
+        #   cutaway  — the agent reaching for another moment in the user's own
+        #              upload. We build that now, so it is ordinary family talk.
+        #   wants_generated_footage — footage that does not exist and that this
+        #              lane deliberately does not fetch. Still the demand signal
+        #              for a future priced family, and now it counts only that.
+        "cutaway": ("cutaway", "cut-away", "cut away"),
+        "wants_generated_footage": ("b-roll", "broll", "stock footage",
+                                    "stock clip", "pexels", "generate footage",
+                                    "generated footage"),
         "zoom": ("zoom", "punch-in", "punch in", "push in"),
     }
     led["family_mentions"] = {
@@ -10242,6 +10655,16 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         print("  RULED vs BUILT  : " + "  ".join(
             f"{f} {v['ruled']}->{v['built']}" + ("  <-- GAP" if v["ruled"] and not v["built"] else "")
             for f, v in sorted(_rvb.items())))
+    _cwr = r["ledger"].get("cutaway_ruled")
+    if _cwr is not None:
+        _cwf = r["ledger"].get("cutaway_frames") or {}
+        print(f"  CUTAWAY         : ruled {_cwr}  planned "
+              f"{r['ledger'].get('cutaway_planned')}  built "
+              f"{((r['ledger'].get('execute_plan') or {}).get('built') or {}).get('cutaway', 0)}"
+              + (f"   frames {_cwf.get('before')}->{_cwf.get('after')}"
+                 if _cwf else "   frames UNMEASURED"))
+        for _rj in (r["ledger"].get("cutaway_rejects") or [])[:6]:
+            print(f"    rejected b{_rj.get('beat')}: {_rj.get('why')}")
     _fm2 = r["ledger"].get("family_mentions") or {}
     if _fm2:
         print(f"  FAMILY MENTIONS : {_fm2}  over {r.get('ledger').get('trace_chars',0):,} "
@@ -10716,6 +11139,13 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               "card": mx["cards"],
               "sfx": mx["sfx"], "zoom": mx.get("emphasis", 0),
               "transition": mx.get("transitions", 0)}
+        # CUTAWAY COMES FROM THE HARNESS'S OWN BUILD COUNT, not the placement
+        # manifest — it is not a declare_placement type, it is a picture
+        # replacement the harness composites. Reading it from `mx` would print
+        # `cutaway 0.0 /25s ref 4.22 0%` on a run that built four of them, which
+        # is the false-zero class this lane has now produced five times.
+        _n["cutaway"] = int(((r.get("ledger") or {}).get("execute_plan")
+                             or {}).get("built", {}).get("cutaway", 0) or 0)
         for _f, _ref in REFERENCE_PER_25S.items():
             _rate = round(_n.get(_f, 0) / _dur * 25.0, 2)
             _pct = f"{100*_rate/_ref:3.0f}%" if _ref else "  — "

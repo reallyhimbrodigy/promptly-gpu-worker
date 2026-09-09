@@ -49,7 +49,7 @@ APP = os.path.join(HERE, "agentic_editor_app.py")
 WATCHED = ("cover_unnarrated_edges", "geometry_normalise_filter",
            "sfx_catalogue_name", "region_effect_delta", "alpha_paint_box",
            "subdivide_beats", "beat_split_candidates", "fps_verdict",
-           "stream_length_verdict")
+           "stream_length_verdict", "cutaway_plan", "source_to_output")
 
 
 def _walk_same_scope(stmt):
@@ -158,9 +158,48 @@ def main():
         MODULE_NAMES |= _bound_by(stmt)
     problems, checked = [], 0
 
+    # ENCLOSING FUNCTION SCOPES — closures, which Python resolves at CALL time.
+    #
+    # Without this the check reports every closure variable as unreachable:
+    # `execute_plan` is defined at line 6912 and reads `meta`, which `edit`
+    # binds at 8745, and that is CORRECT Python — a nested function sees the
+    # whole enclosing scope, not the lines above its own def. The first
+    # cutaway_plan call tripped exactly this and the honest fix is to model the
+    # rule rather than exempt the name; an exemption is where this check has
+    # been blind twice already.
+    #
+    # IT DOES NOT WEAKEN THE ORIGINAL CATCH. The round-43 `_vdur` defect was a
+    # name bound in a SIBLING BRANCH OF THE SAME FUNCTION, and same-function
+    # ordering is still evaluated line by line below. RED-proven after this
+    # change, not assumed.
+    _parents = {}
+    def _index(node, chain):
+        for ch in ast.iter_child_nodes(node):
+            if isinstance(ch, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                _parents[id(ch)] = list(chain)
+                _index(ch, chain + [ch])
+            elif isinstance(ch, ast.ClassDef):
+                _index(ch, chain)          # a class body is not a closure scope
+            else:
+                _index(ch, chain)
+    _index(tree, [])
+
+    def _scope_names(fn):
+        out = set()
+        for p in (list(fn.args.posonlyargs) + list(fn.args.args)
+                  + list(fn.args.kwonlyargs)
+                  + ([fn.args.vararg] if fn.args.vararg else [])
+                  + ([fn.args.kwarg] if fn.args.kwarg else [])):
+            out.add(p.arg)
+        for st in fn.body:
+            out |= _bound_by(st)
+        return out
+
     for fn in [n for n in ast.walk(tree)
                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
         params = set()
+        for _anc in _parents.get(id(fn), []):
+            params |= _scope_names(_anc)
         a = fn.args
         for p in (list(a.posonlyargs) + list(a.args) + list(a.kwonlyargs)
                   + ([a.vararg] if a.vararg else []) + ([a.kwarg] if a.kwarg else [])):

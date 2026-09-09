@@ -58,12 +58,29 @@ for t in TARGETS:
         for n in ast.walk(node):
             if not (isinstance(n, ast.Call) and getattr(n.func, "id", "") == "open"):
                 continue
-            seg = ast.dump(n)
-            if "__file__" in seg or "dirname" in seg or "src" in seg:
-                fails.append(
-                    f"{t}:{n.lineno} module-level open() on a tree-relative path — "
-                    f"the container executes this module and that path is not there. "
-                    f"Mount the file and read it inside the function.")
+            # THE CONDITION WAS INVERTED, and that is why this check sat
+            # permanently red — the exact fate the comment above warns about,
+            # in the check carrying the warning.
+            #
+            # It flagged any open() whose dump MENTIONED `__file__`, `dirname`
+            # or `src`. Those are the SAFE forms: `open(__file__)` resolves to
+            # wherever the module actually is, container or not. Meanwhile the
+            # form that really breaks — `open("prompt_blocks.txt")`, a bare
+            # relative literal that resolves against the container's CWD — has
+            # no such token in it and sailed straight through. The check was
+            # reporting the six safe sites in this repo and blind to the one
+            # class it exists for.
+            _arg = n.args[0] if n.args else None
+            if _arg is None:
+                continue
+            if isinstance(_arg, ast.Constant) and isinstance(_arg.value, str):
+                if not _arg.value.startswith("/"):
+                    fails.append(
+                        f"{t}:{n.lineno} module-level open({_arg.value!r}) — a "
+                        f"RELATIVE literal, resolved against the container's "
+                        f"working directory, which is not this tree. Mount the "
+                        f"file and read it inside the function, or anchor the "
+                        f"path to os.path.dirname(__file__).")
 
     # ── module-level imports of sibling repo modules ──────────────────────
     for node in tree.body:
