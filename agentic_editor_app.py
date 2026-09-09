@@ -10230,15 +10230,32 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                   f"word, {len(_above)} above the {_fl}ms frame floor"
                   + (f"  ms={_ms[:12]}" if _ms else "")
                   + "   MEASURED, no threshold")
+    # THREE STATES, AND ALL THREE PRINT. Round 45 placed no cards at all, so
+    # `if _cba:` skipped the line entirely and CARD ALIGNMENT appeared ZERO
+    # times in four logs — an absence rendered as silence, which is the shape
+    # this repo keeps paying for.
+    #
+    # AND "NO CARDS EXISTED" IS NOT "NO CARD COULD HAVE FAILED". I registered
+    # UNEXERCISED for the second and round 45 produced the first; the same label
+    # over two different facts is how a register stops being honest. They print
+    # differently now.
     _cba = (r.get("ledger") or {}).get("card_beat_alignment") or []
-    if _cba:
+    _cards_ruled = sum(1 for _p6 in ((r.get("ledger") or {}).get("placements") or [])
+                       if _p6.get("family") == "card")
+    if not _cba:
+        print(f"  CARD ALIGNMENT  : NO CARDS PLACED"
+              + (f" ({_cards_ruled} ruled — they did not reach the builder)"
+                 if _cards_ruled else "")
+              + "   nothing to align, and nothing measured")
+    else:
         _off = [c for c in _cba if c.get("on_beat") is False]
         _ung = [c for c in _cba if c.get("grounded") is False]
         _na = [c for c in _cba if c.get("grounded") is None]
+        _could_fail = len(_cba) - len(_na)
         print(f"  CARD ALIGNMENT  : {len(_cba)} cards  off-beat={len(_off)}  "
               f"ungrounded={len(_ung)}  not-applicable={len(_na)}"
               + ("   UNEXERCISED — no card could have failed either leg"
-                 if not _off and not _ung and len(_na) == 0 else ""))
+                 if not _off and not _ung and _could_fail == 0 else ""))
     _pc = (r.get("ledger") or {}).get("placement_collisions")
     if _pc is not None:
         _nb = (r.get("ledger") or {}).get("painted_boxes_measured") or 0

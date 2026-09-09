@@ -302,6 +302,45 @@ check("a placement with no measured box is skipped, not guessed",
                               {"family": "b", "t0": 0, "t1": 9, "box": (0, 0, 9, 9)}]) == [],
       "an unmeasured box must not be treated as a rectangle at the origin")
 
+# ── 2b-ii. NO CARDS IS NOT "NO CARD COULD HAVE FAILED" ──────────────────────
+# Round 45 placed no cards, so `if _cba:` skipped the line and CARD ALIGNMENT
+# appeared ZERO times in four logs. An absence rendered as silence — and worse,
+# I had registered UNEXERCISED for "every card passed both legs", which is a
+# DIFFERENT fact wearing the same label.
+# READ THE print() CALLS, not the file text. My first version asked whether the
+# phrase EXISTED, so `_unprinted = (f"... NO CARDS PLACED"` kept it and stayed
+# green. Eighteenth instance, and the third time in this one file.
+def _in_print(phrase):
+    for _n in ast.walk(tree):
+        if isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name) \
+                and _n.func.id == "print":
+            for _sub in ast.walk(_n):
+                if isinstance(_sub, ast.Constant) and isinstance(_sub.value, str) \
+                        and phrase in _sub.value:
+                    return True
+    return False
+
+
+check("the no-cards case is PRINTED, not skipped", _in_print("NO CARDS PLACED"),
+      "with no cards the line vanished entirely, which reads as 'not measured' "
+      "and 'nothing wrong' at the same time")
+check("the two states print differently",
+      _in_print("NO CARDS PLACED") and _in_print("UNEXERCISED"),
+      "'no cards existed' and 'no card could have failed' are different facts")
+# UNEXERCISED must key on cards that COULD have failed, not on the absence of
+# failures — a set of all-not-applicable cards has not exercised the check
+# either, and reporting it as passing is the same error one step in. Asserted
+# on the CONDITION that yields the word, not on the name appearing somewhere.
+_unex_tests = [n.test for n in ast.walk(tree) if isinstance(n, ast.IfExp)
+               and any(isinstance(c, ast.Constant) and isinstance(c.value, str)
+                       and "UNEXERCISED" in c.value for c in ast.walk(n))]
+check("the UNEXERCISED condition exists", len(_unex_tests) == 1, str(len(_unex_tests)))
+check("UNEXERCISED keys on cards that could have failed",
+      _unex_tests and "_could_fail" in {n.id for t in _unex_tests
+                                        for n in ast.walk(t) if isinstance(n, ast.Name)},
+      "all-not-applicable cards exercise nothing; counting them as passing is "
+      "the same mistake as counting zero cards as passing")
+
 # ── 3. AND SOMETHING ACTUALLY CALLS THEM ────────────────────────────────────
 # THE DEFECT THIS EXISTS FOR. All three measures were written, smoke-tested
 # directly, and CALLED NOWHERE. The smoke passed because it invoked them itself;

@@ -132,6 +132,21 @@ r.append(mut('    led["painted_boxes_duplicate"] = len(_pb) - len(_uniq)',
              "the duplicate count stops being recorded",
              "duplicates are counted, not silently collapsed"))
 
+# 17. The no-cards case goes silent again — round 45's actual behaviour.
+# Neutralise the print CALL, since the check reads calls. `if False:` leaves the
+# print in the source and the static check cannot see unreachability — a limit
+# already stated for CUT INTRUSIONS and the same here.
+r.append(mut('        print(f"  CARD ALIGNMENT  : NO CARDS PLACED"',
+             '        _unprinted = (f"  CARD ALIGNMENT : NO-CARDS-PLACED"',
+             "the no-cards case prints nothing again",
+             "the no-cards case is PRINTED, not skipped"))
+# 18. UNEXERCISED keys on "no failures" rather than "nothing could fail", so a
+#     set of all-not-applicable cards reports as passing.
+r.append(mut("                 if not _off and not _ung and _could_fail == 0 else \"\"))",
+             "                 if not _off and not _ung and False else \"\"))",
+             "UNEXERCISED stops keying on cards that could have failed",
+             "UNEXERCISED keys on cards that could have failed"))
+
 rc, out = run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc == 0 else 1)
