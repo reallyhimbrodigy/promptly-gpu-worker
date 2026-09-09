@@ -2237,6 +2237,70 @@ def segment_beats(words, gap_s=0.35, max_beat_s=6.0):
     return out
 
 
+def cover_unnarrated_edges(beats, duration_s, min_beat_s=1.2):
+    """Give the UN-NARRATED head and tail of a source their own beats.
+
+    MODULE LEVEL AND PURE so a test can call it with real spans.
+
+    THE DEFECT. `segment_beats` derives beats from WORDS, so the timeline
+    outside the transcript is not a beat, and a stretch that is not a beat can
+    never be kept — the agent is never offered it. Round 42's `car_short`: a
+    10.0s car clip carrying TWO incidental Russian words at 5.68-6.64s. Deepgram
+    found them, the source took the transcript route, beats covered 0.96s, and
+    the delivered file was 0.975 SECONDS. The agent did nothing wrong; it kept
+    every beat it was shown (`cuts ACTUAL {'keep': 1, 'cut': 0}`). 9.04s of
+    footage was invisible to the decision.
+
+    That is a REJECTION wearing a delivery's clothes, and the zero-reject law
+    permits exactly two rejections: under 2.0s and over 300s.
+
+    WHY EDGES AND NOT EVERY GAP. Interior gaps between words are dead air, and
+    cutting them is the product working as intended — "cut the filler and dead
+    air hard" is in the brief. But the stretch BEFORE the first word and AFTER
+    the last is not dead air between phrases; it is footage nobody narrated, and
+    on a mostly-silent clip it IS the content. Only the edges are covered, so
+    dead-air cutting is untouched.
+
+    NO NEW TUNED CONSTANT. The floor is `beats_from_visual`'s own min_beat_s —
+    a span too short to hold a treatment is not a beat there either, and
+    inventing a second threshold for the same physical fact is how two
+    thresholds drift apart. On a talking head that starts at 0.3s this adds
+    nothing; on car_short it adds two.
+
+    AND IT DOES NOT DECIDE ANYTHING. The new beats are offered, not kept — the
+    agent rules keep/cut on them exactly as on every other beat, which is where
+    this design puts every other such decision.
+    """
+    dur = float(duration_s or 0)
+    if dur <= 0 or not beats:
+        return list(beats or [])
+    try:
+        floor = float(min_beat_s)
+    except Exception:
+        floor = 1.2
+    out = list(beats)
+    head = float(out[0].get("t_start") or 0.0)
+    tail_start = float(out[-1].get("t_end") or 0.0)
+    if head >= floor:
+        out.insert(0, {"i": -1, "t_start": 0.0, "t_end": round(head, 2),
+                       "text": f"[no narration] {head:.1f}s of footage before "
+                               f"the first word — visible content, not dead air"})
+    if dur - tail_start >= floor:
+        out.append({"i": -1, "t_start": round(tail_start, 2), "t_end": round(dur, 2),
+                    "text": f"[no narration] {dur - tail_start:.1f}s of footage "
+                            f"after the last word — visible content, not dead air"})
+    # RE-INDEX AND RE-ROLE. `i` is the agent's handle on a beat and hook/close
+    # are marked mechanically as first and last; leaving them on the old first
+    # beat would put the hook in the middle of the timeline.
+    for _b in out:
+        _b.pop("role", None)
+    for _i, _b in enumerate(out):
+        _b["i"] = _i
+    out[0]["role"] = "hook"
+    out[-1]["role"] = "close"
+    return out
+
+
 # ── BEATS WITHOUT SPEECH ─────────────────────────────────────────────────────
 # MEASURED 2026-09-05, 14d completed jobs: 46.5% (706/1518) never reach the
 # verdict machinery at all. They route to moodreel (453), minimal_speech_uncut
@@ -2998,6 +3062,60 @@ def sfx_start_s(attack_ms, at_s):
         _a = 0.0
     _want = float(at_s) - _a
     return max(0.0, _want), (_want < 0.0)
+
+
+def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920):
+    """(filter, mode, crop_loss) to bring a source to the delivery geometry.
+
+    MODULE LEVEL AND PURE so a test can call it with real dimensions.
+
+    THE DEFECT THIS FIXES. build_cut trimmed and concatenated and NEVER
+    normalised geometry, so the delivered file was whatever the source happened
+    to be. Round 42, the first round on real footage, delivered `motion` at
+    540x960 and `car_short` at 720x1272 against a 1080x1920 contract. Seven
+    prior rounds could not see it because every synthetic fixture was ALREADY
+    1080x1920 — the check `(w, h) != (1080, 1920)` had simply never had a source
+    that could fail it. A user uploading sub-HD got sub-HD back.
+
+    THREE MODES, and the third is a REFRAME rather than a resize:
+
+      none          already the delivery geometry; emit no filter at all, so a
+                    conforming source is not re-encoded through a no-op scale.
+      scale         aspect within tolerance of the target — pure resize, and
+                    the crop is sub-pixel. 540x960 is EXACTLY 9:16; 720x1272 is
+                    0.5660 against 0.5625, which crops 6 pixels of 1272.
+      reframe_crop  the aspect genuinely differs, e.g. 3826x2160 landscape into
+                    1080x1920. Scale-to-COVER then centre-crop. This LOSES
+                    CONTENT off the sides and `crop_loss` says how much, so the
+                    loss is a reported number rather than an invisible choice.
+
+    Cover-and-crop, never pad: bars are a visible product decision and this
+    function is not the place to make one. But a landscape source losing 68% of
+    its width IS a taste call about what belongs in frame, which is why the
+    fraction is returned and ledgered instead of being swallowed.
+    """
+    try:
+        w, h = int(src_w), int(src_h)
+    except Exception:
+        return "", "unknown", None
+    if w <= 0 or h <= 0:
+        return "", "unknown", None
+    if (w, h) == (int(out_w), int(out_h)):
+        return "", "none", 0.0
+    src_ar, out_ar = w / h, float(out_w) / float(out_h)
+    # Scale-to-cover: whichever axis is proportionally short decides the scale,
+    # and the excess on the other axis is cropped centred.
+    if src_ar > out_ar:
+        kept_w = h * out_ar               # source pixels kept horizontally
+        loss = 1.0 - (kept_w / w)
+    else:
+        kept_h = w / out_ar
+        loss = 1.0 - (kept_h / h)
+    loss = max(0.0, round(loss, 4))
+    mode = "scale" if loss <= 0.02 else "reframe_crop"
+    filt = (f"scale={int(out_w)}:{int(out_h)}:force_original_aspect_ratio=increase,"
+            f"crop={int(out_w)}:{int(out_h)},setsar=1")
+    return filt, mode, loss
 
 
 def sfx_catalogue_name(name):
@@ -5007,7 +5125,29 @@ def edit(source_key: str, brief: str,
             parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS[v{i}]")
             parts.append(f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS[a{i}]")
         cat = "".join(f"[v{i}][a{i}]" for i in range(n))
-        parts.append(f"{cat}concat=n={n}:v=1:a=1[outv][outa]")
+        # NORMALISE TO THE DELIVERY GEOMETRY. Without this the concat output is
+        # the SOURCE's resolution and that is what gets delivered — round 42
+        # shipped 540x960 and 720x1272 against a 1080x1920 contract. [outv] stays
+        # the downstream name so nothing else has to know this happened.
+        _vs = (meta.get("streams") or [{}])
+        _v0 = next((_x for _x in _vs if _x.get("codec_type") == "video"), {})
+        _gfilt, _gmode, _gloss = geometry_normalise_filter(_v0.get("width"),
+                                                           _v0.get("height"))
+        if _gfilt:
+            parts.append(f"{cat}concat=n={n}:v=1:a=1[cv][outa]")
+            parts.append(f"[cv]{_gfilt}[outv]")
+        else:
+            parts.append(f"{cat}concat=n={n}:v=1:a=1[outv][outa]")
+        # PRINTED, not just ledgered. A reframe that drops 68% of a landscape
+        # source's width is a product decision and it must be visible in the log
+        # of the run that made it.
+        led["geometry_normalise"] = {
+            "src": [_v0.get("width"), _v0.get("height")],
+            "out": [1080, 1920], "mode": _gmode, "crop_loss": _gloss,
+        }
+        print(f"[geometry] {_v0.get('width')}x{_v0.get('height')} -> 1080x1920  "
+              f"mode={_gmode}"
+              + (f"  crop_loss={_gloss:.1%}" if _gloss else ""), flush=True)
         filt = ";".join(parts)
         with open("/work/filter.txt", "w") as fh:
             fh.write(filt)
@@ -7214,6 +7354,17 @@ def edit(source_key: str, brief: str,
                 f"{_vdur:.1f}s source — the extractor is broken, not the video.")
     else:
         _beats = segment_beats(words)
+        # THE UN-NARRATED EDGES ARE CONTENT, and a stretch that is not a beat
+        # can never be kept. Without this, car_short's 10.0s delivered 0.975s
+        # because two incidental words were the only thing beats covered.
+        _pre_n = len(_beats)
+        _beats = cover_unnarrated_edges(_beats, _vdur)
+        if len(_beats) != _pre_n:
+            _cov = sum(float(_b["t_end"]) - float(_b["t_start"]) for _b in _beats)
+            print(f"[beats] {_pre_n} transcript beat(s); added "
+                  f"{len(_beats) - _pre_n} un-narrated edge beat(s) — coverage now "
+                  f"{_cov:.2f}s of {_vdur:.2f}s", flush=True)
+            led["unnarrated_edges_added"] = len(_beats) - _pre_n
     _mark(led, "beats", _tb0)
     _numeric_ts = {b["t"] for b in _number_beats}
     for _b in _beats:
