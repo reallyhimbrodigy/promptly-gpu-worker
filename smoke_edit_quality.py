@@ -144,6 +144,36 @@ check("no threshold is applied", not any(
     "it reports intrusion_ms and the distribution decides — a constant invented "
     "now is the fourth threshold from an unmeasured distribution")
 
+# ── 2a-ii. THE FLOOR IS UNMEASURED OR REAL, NEVER A DEFAULT ─────────────────
+# The first version read float(led.get("source_fps") or 30.0). Nothing ever set
+# source_fps, so EVERY fixture silently took 30 — and on a 59.94 source that is
+# wrong by 2x in the direction that HIDES intrusions: a floor twice too large
+# excuses cuts that really did sever a word. A default that fails toward
+# "nothing to see" is the worst direction a default can fail.
+check("a missing frame rate is UNMEASURED, not 30",
+      A.cut_intrusion_floor_ms(None, None)[0] is None
+      and A.cut_intrusion_floor_ms(None, None)[1] == "UNMEASURED")
+check("a CFR source gets half a frame",
+      A.cut_intrusion_floor_ms("30/1", "30/1")[0] == 16.67,
+      str(A.cut_intrusion_floor_ms("30/1", "30/1")))
+check("29.97 is not rounded to 30",
+      A.cut_intrusion_floor_ms("30000/1001", "30000/1001")[0] == 16.68)
+# A VFR SOURCE HAS NO FLOOR AT ALL — the floor is half a frame duration, so it
+# exists only if frames have ONE duration. This is what excludes motion from
+# pooled numbers, DERIVED from the source rather than hand-listed, so the next
+# VFR fixture excludes itself without anyone remembering.
+_vfr = A.cut_intrusion_floor_ms("60000/1001", "35.94")
+check("a VFR source has NO floor", _vfr[0] is None and _vfr[1] == "UNMEASURED",
+      str(_vfr))
+check("and says which two rates disagree",
+      "59.94" in _vfr[2] and "35.94" in _vfr[2], _vfr[2])
+check("the VFR tolerance is an equality check, not a fitted threshold",
+      A._CUT_FLOOR_VFR_TOLERANCE == 0.02,
+      "a CFR source agrees to rounding; this is slack on 'these should be "
+      "equal', not a bar chosen from a distribution")
+check("the floor STATE reaches the ledger",
+      'led["cut_floor_state"]' in src and 'led["cut_floor_detail"]' in src)
+
 # ── 2b. CARDS ON THE BEAT THEY NAME ─────────────────────────────────────────
 _beat = {"t_start": 1.0, "t_end": 3.0, "text": "we hit 10,000 followers"}
 _r = A.card_beat_alignment({"anchor_s": 2.0, "hero": "10,000"}, _beat)
@@ -180,10 +210,136 @@ if _col:
           0 < _col[0]["overlap_frac_of_smaller"] <= 1.0,
           "a caption swallowed by a card is a collision; a card clipping the "
           "corner of a full-frame wash is not")
+# ── 2c-ii. THE SCALE IS VALIDATED; THE THRESHOLD IS NOT AVAILABLE ───────────
+# I registered collisions as "the one I can construct ground truth for". The
+# construction shows why that was half right, and the correction is recorded
+# BEFORE round 45 rather than after.
+#
+# MEASURED by sliding the REAL text paint (208x88) through the REAL card paint
+# (852x416) — both measured component rectangles, only the offset constructed:
+#     clear            0.000
+#     straddling       0.091  0.182  0.545  0.636
+#     fully inside     1.000
+# The metric is CONTINUOUS BY CONSTRUCTION. There is no gap between a touch and
+# a swallow, so picking two constructed points and calling them separated proves
+# nothing — it is the smooth-distribution trap with arms instead of a round.
+#
+# WHAT CONSTRUCTION DOES ESTABLISH, and it is what these legs pin: the SCALE is
+# correct, ordered and interpretable. 0 means clear, 1 means one component is
+# entirely inside the other, and the middle is the fraction of the smaller box
+# covered. Whether 0.3 is a defect is a QUALITY judgement — Zac's eye — exactly
+# as whether a 90ms intrusion is audible is a question about hearing.
+_CARD, _TEXT = (120, 652, 852, 416), (436, 920, 208, 88)
+
+
+def _frac(dy):
+    _t = (_TEXT[0], _TEXT[1] + dy, _TEXT[2], _TEXT[3])
+    _c = A.placement_collisions([{"family": "card", "t0": 0, "t1": 2, "box": _CARD},
+                                 {"family": "text", "t0": 1, "t1": 3, "box": _t}])
+    return _c[0]["overlap_frac_of_smaller"] if _c else 0.0
+
+
+check("a fully-contained overlay reads exactly 1.0", _frac(0) == 1.0,
+      f"{_frac(0)} — the text box sits entirely inside the card box")
+check("a clear overlay reads exactly 0.0", _frac(-500) == 0.0 and _frac(500) == 0.0)
+# The card spans y 652..1068 and the text is 88 tall, so it straddles the top
+# edge for dy in (-356, -268) and the bottom edge for dy in (60, 148). Offsets
+# picked from the measured sweep rather than guessed — my first attempt used
+# dy=340, which puts the text clear of the card entirely and reads 0.0.
+check("the scale is MONOTONIC through the straddle",
+      _frac(-348) < _frac(-308) < _frac(-268),
+      f"{_frac(-348)}, {_frac(-308)}, {_frac(-268)} — a measure that is not "
+      f"ordered in the thing it measures cannot be read at any bar")
+check("the straddle is CONTINUOUS — no gap to put a bar in",
+      0.0 < _frac(-348) < 1.0 and 0.0 < _frac(132) < 1.0,
+      "recorded so nobody later reads the constructed arms as a validated "
+      "separation; the bar has to come from the real population being bimodal, "
+      "which round 45 answers and construction cannot")
+
+# ── 2c-iii. ONE PLACEMENT SEEN TWICE IS NOT A COLLISION ─────────────────────
+# Round 45 reported four text+text collisions at exactly 1.00 on four text
+# placements at DISJOINT times (1.25-1.75, 7.09-7.59, 12.85-13.35, 18.64-19.14).
+# Every placement was recorded twice — the harness answers a second identical
+# execute_plan and only refuses the third — so each row met itself.
+#
+# AND IT LANDED EXACTLY WHERE A THRESHOLD WOULD HAVE COME FROM. I registered
+# that a bar could come from the real population being bimodal; {0.000 x N,
+# 1.000 x 4} IS bimodal, and read at face value it is the strongest possible
+# argument for a bar at 0.5 — manufactured entirely by a duplicate record.
+_B = (436, 920, 208, 88)
+_dbl = [{"family": "text", "t0": 1.25, "t1": 1.75, "box": _B},
+        {"family": "text", "t0": 1.25, "t1": 1.75, "box": _B}]
+check("the same placement recorded twice is NOT a collision",
+      A.placement_collisions(_dbl) == [],
+      "identical family, window and painted box is one placement seen twice")
+# EXACT, not a threshold: a different window or a different box is a real pair.
+check("a duplicate at a DIFFERENT time is still compared",
+      len(A.placement_collisions(
+          [{"family": "text", "t0": 1.0, "t1": 3.0, "box": _B},
+           {"family": "text", "t0": 2.0, "t1": 4.0, "box": _B}])) == 1,
+      "same box, overlapping but different windows — two placements, not one")
+check("a duplicate window with a DIFFERENT box is still compared",
+      len(A.placement_collisions(
+          [{"family": "text", "t0": 1.0, "t1": 3.0, "box": _B},
+           {"family": "text", "t0": 1.0, "t1": 3.0, "box": (400, 900, 300, 150)}])) == 1)
+# AND 1.00 IS NOT THE SIGNATURE. A small overlay fully inside a large one reads
+# exactly 1.00 legitimately — the diagnostic for round 45 was the DISJOINT
+# TIMES, not the value. Anyone using "1.00 means duplicate" as a heuristic would
+# discard real collisions.
+check("a genuine containment still reads 1.00 and still collides",
+      A.placement_collisions(
+          [{"family": "card", "t0": 1.0, "t1": 3.0, "box": (120, 652, 852, 416)},
+           {"family": "text", "t0": 2.0, "t1": 4.0, "box": _B}]
+      )[0]["overlap_frac_of_smaller"] == 1.0,
+      "1.00 is what full containment MEANS; it is not evidence of duplication")
+check("duplicates are counted, not silently collapsed",
+      'led["painted_boxes_duplicate"]' in src,
+      "a number that quietly disappears is how this inflated every "
+      "per-placement count since round 41 without anyone noticing")
+
 check("a placement with no measured box is skipped, not guessed",
       A.placement_collisions([{"family": "a", "t0": 0, "t1": 9, "box": None},
                               {"family": "b", "t0": 0, "t1": 9, "box": (0, 0, 9, 9)}]) == [],
       "an unmeasured box must not be treated as a rectangle at the origin")
+
+# ── 2b-ii. NO CARDS IS NOT "NO CARD COULD HAVE FAILED" ──────────────────────
+# Round 45 placed no cards, so `if _cba:` skipped the line and CARD ALIGNMENT
+# appeared ZERO times in four logs. An absence rendered as silence — and worse,
+# I had registered UNEXERCISED for "every card passed both legs", which is a
+# DIFFERENT fact wearing the same label.
+# READ THE print() CALLS, not the file text. My first version asked whether the
+# phrase EXISTED, so `_unprinted = (f"... NO CARDS PLACED"` kept it and stayed
+# green. Eighteenth instance, and the third time in this one file.
+def _in_print(phrase):
+    for _n in ast.walk(tree):
+        if isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name) \
+                and _n.func.id == "print":
+            for _sub in ast.walk(_n):
+                if isinstance(_sub, ast.Constant) and isinstance(_sub.value, str) \
+                        and phrase in _sub.value:
+                    return True
+    return False
+
+
+check("the no-cards case is PRINTED, not skipped", _in_print("NO CARDS PLACED"),
+      "with no cards the line vanished entirely, which reads as 'not measured' "
+      "and 'nothing wrong' at the same time")
+check("the two states print differently",
+      _in_print("NO CARDS PLACED") and _in_print("UNEXERCISED"),
+      "'no cards existed' and 'no card could have failed' are different facts")
+# UNEXERCISED must key on cards that COULD have failed, not on the absence of
+# failures — a set of all-not-applicable cards has not exercised the check
+# either, and reporting it as passing is the same error one step in. Asserted
+# on the CONDITION that yields the word, not on the name appearing somewhere.
+_unex_tests = [n.test for n in ast.walk(tree) if isinstance(n, ast.IfExp)
+               and any(isinstance(c, ast.Constant) and isinstance(c.value, str)
+                       and "UNEXERCISED" in c.value for c in ast.walk(n))]
+check("the UNEXERCISED condition exists", len(_unex_tests) == 1, str(len(_unex_tests)))
+check("UNEXERCISED keys on cards that could have failed",
+      _unex_tests and "_could_fail" in {n.id for t in _unex_tests
+                                        for n in ast.walk(t) if isinstance(n, ast.Name)},
+      "all-not-applicable cards exercise nothing; counting them as passing is "
+      "the same mistake as counting zero cards as passing")
 
 # ── 3. AND SOMETHING ACTUALLY CALLS THEM ────────────────────────────────────
 # THE DEFECT THIS EXISTS FOR. All three measures were written, smoke-tested

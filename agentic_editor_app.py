@@ -2038,49 +2038,13 @@ KNOWLEDGE_TOOLS = [{
                                  # `05_motion_graphics` for the catalogue: every
                                  # entry carries its claim, its FITS/FIGHTS and
                                  # its props shape.
-                                 "card_type": {"type": "string",
-                                     "enum": list(MG_SELECTABLE_TYPES),
-                                     # THE CLAIM, NOT JUST THE NAME. This
-                                     # description used to say "defaults to
-                                     # StatCard", which taught the incumbency
-                                     # rather than the choice — and the other 28
-                                     # types appeared nowhere in the cached
-                                     # prefix, so the agent had no way to know
-                                     # what they were for without spending a
-                                     # read_knowledge turn it never spent.
-                                     "description": (
-                                         "REQUIRED when treatment includes "
-                                         "'card'. Match the component to what "
-                                         "the beat SAYS — each line below is "
-                                         "the claim that component makes, and "
-                                         "the beat must actually be making it. "
-                                         "There is no default: StatCard is for "
-                                         "a QUOTED NUMBER and nothing else.\n"
-                                         + MG_CLAIM_LINES +
-                                         "\nread_knowledge('05_motion_graphics')"
-                                         " for the full teach and each one's "
-                                         "props shape.")},
-                                 "card_props": {"type": "object",
-                                     "description":
-                                         "the component's own props. A type "
-                                         "whose props do not match renders "
-                                         "EMPTY and is refused before the "
-                                         "render, so use these exact key "
-                                         "names — "
-                                         + MG_PROPS_TEACH
-                                         + ". For StatCard you may instead "
-                                           "omit card_props entirely and pass "
-                                           "card_hero + card_label; the hero "
-                                           "becomes `value` and must be a "
-                                           "figure the speaker actually said."},
-                                 # ARC POSITION IS JUDGEMENT; THE MOVE IS A
-                                 # LOOKUP. Which beat is the payoff cannot be
-                                 # derived from timing — but once you say so,
-                                 # WHICH of the seven zooms goes there is
-                                 # production's ZOOM_ARC_HOMES plus the vibe,
-                                 # and the harness does it. Naming the move
-                                 # yourself would let a snap land on a payoff,
-                                 # which is the one thing payoff purity forbids.
+                                 # card_type AND card_props are GONE.
+                                 # The agent no longer names the component, so
+                                 # it cannot supply that component's props
+                                 # either — the harness derives both from
+                                 # card_hero. This is the zoom contract: the
+                                 # agent rules the MOMENT, the harness looks up
+                                 # the MOVE.
                                  "zoom_arc": {"type": "string",
                                      "enum": ["hook", "build", "mid_peak",
                                               "payoff", "breather", "close"],
@@ -4926,6 +4890,179 @@ def region_effect_delta(place_psnr, ctrl_psnr):
 # before arms — the way the localised effect measure was done.
 
 
+# A MISSING FRAME RATE MEANS UNMEASURED, NEVER 30.
+#
+# The first version read `float(led.get("source_fps") or 30.0)`. source_fps was
+# never set by anything, so every fixture silently took 30 — and on motion
+# (59.94 declared) that is wrong by 2x IN THE DIRECTION THAT HIDES INTRUSIONS: a
+# floor twice too large excuses cuts that really did sever a word. A default
+# that fails toward "nothing to see" is the worst direction a default can fail.
+#
+# AND A VFR SOURCE HAS NO FLOOR AT ALL. The floor is half a frame duration, so
+# it only exists if frames have ONE duration. motion declares 59.94 and actually
+# runs 35.94 — for that source the question "how far can a cut sit from a word
+# edge for reasons of quantisation" has no single answer, and the honest reply
+# is UNMEASURED rather than either of the two available wrong numbers. This is
+# also what excludes motion from pooled numbers: DERIVED from the source rather
+# than hand-listed, so the next VFR fixture excludes itself.
+_CUT_FLOOR_VFR_TOLERANCE = 0.02   # declared vs average; a CFR source agrees to
+                                  # rounding, so this is an equality check with
+                                  # slack, not a threshold fitted to anything
+
+
+def _rate_to_float(rate):
+    try:
+        _t = str(rate or "").strip()
+        if "/" in _t:
+            _n, _d = _t.split("/")
+            return float(_n) / float(_d) if float(_d) else None
+        return float(_t) or None
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+# ── CARDS DERIVE, THEY ARE NOT PICKED ───────────────────────────────────────
+#
+# ZAC'S RULING, 2026-09-09, from watching the videos against his references:
+# three moments wanted a card and got text — "10 TIMES A DAY", "HOURS TO EDIT",
+# "5 MINUTES" — on the one fixture that had them, against reference hooks built
+# on escalating counters and dollar-figure cards. The agent identified each as a
+# stat IN ITS OWN RATIONALE and chose text anyway.
+#
+# THE MECHANISM, from round 42's own control group. Same round, same prefix,
+# same model: zoom produced THREE distinct types and cards produced ONE of 29.
+# The difference is who chooses. The agent NEVER NAMES A ZOOM TYPE — it rules
+# `zoom_arc`, what the beat IS in the arc, and ZOOM_ARC_HOMES plus the vibe
+# looks up the move. The schema says it outright: ARC POSITION IS JUDGEMENT;
+# THE MOVE IS A LOOKUP. Cards asked the model to do the one thing the zoom
+# design deliberately refuses to ask.
+#
+# SO CARDS NOW WORK LIKE ZOOM. The agent supplies the JUDGEMENT — this beat
+# carries a claim worth stamping, and here is the phrase worth stamping
+# (card_hero). The harness derives WHICH component from what that phrase and
+# beat CONTAIN. The 29-name enum is gone, which is the incumbency mechanism
+# itself: 29 bare names of which exactly one was ever named in prose.
+#
+# THE SHAPES ARE DERIVED FROM WHAT THE COMPONENTS READ, not from taste. A
+# component that requires `value: number` can only carry a figure; one that
+# requires `text` can carry a phrase. The ORDER is the taste call and it is
+# Zac's to change — it is small, it is here, and it is one table rather than a
+# sentence in a prompt.
+_CARD_FIGURE = re.compile(r"[0-9]")
+# A figure the speaker actually said, in the forms speech carries them.
+_CARD_FIGURE_RICH = re.compile(
+    r"(\$\s?[0-9]|[0-9][0-9,.]*\s?(%|k\b|m\b|x\b|st\b|nd\b|rd\b|th\b)|[0-9])",
+    re.I)
+
+
+def derive_card_props(mg_type, hero, label=""):
+    """The props THIS component reads, filled from the phrase. Never a guess.
+
+    THE DEFECT THIS PREVENTS, and I introduced it two commits ago. The
+    hero/label shorthand builds {value, label} — StatCard's shape. The moment
+    the harness started DERIVING the type, a PullQuote would have been handed
+    `value` and `label`, read neither, and painted a transparent frame: the
+    exact blank-card class this thread began with, reintroduced by the fix for
+    a different half of it.
+
+    Derived from MG_PROP_KEYS, which is derived from the components' own
+    types.ts and certed against them — so a component that changes its props
+    changes this, rather than silently receiving the wrong ones.
+    """
+    _req = (MG_PROP_KEYS.get(str(mg_type)) or {}).get("required") or []
+    _h = str(hero or "").strip()
+    _l = str(label or "").strip()[:60]
+    if not _req:
+        return ({}, "%s declares no required props" % mg_type)
+
+    # THE SPLIT HAPPENS FIRST, before any prop is filled. Filling in the
+    # interface's own (alphabetical) order put `label` before `value`, so the
+    # label took the WHOLE phrase and the remainder was computed too late —
+    # "10 TIMES A DAY" became 10 / "10 TIMES A DAY" instead of 10 / "TIMES A DAY".
+    _fig, _rest = None, ""
+    if "value" in _req:
+        # A MULTIPLIER SUFFIX MUST BE ATTACHED TO THE DIGITS, not merely near
+        # them. `[0-9][0-9,.]*\s?[kKmMxX]?` matched "5 M" in "5 MINUTES" and
+        # coerce_mg_props read it as FIVE MILLION. A suffix only counts when it
+        # is not the start of a word.
+        _m = re.search(r"[$£€]?\s?[0-9][0-9,.]*(?:[%kKmMxX](?![A-Za-z]))?", _h)
+        if not _m:
+            return ({}, "%s needs a figure and %r has none" % (mg_type, _h))
+        _fig = _m.group(0).strip()
+        _rest = (_h[:_m.start()] + " " + _h[_m.end():]).strip(" -–—:,")
+
+    _p = {}
+    for _k in _req:
+        if _k == "value":
+            _p["value"] = _fig
+        elif _k == "text":
+            _p["text"] = _h
+        elif _k in ("label", "title", "name"):
+            # The words AROUND the figure are the label when none was given —
+            # "10 TIMES A DAY" is 10 / TIMES A DAY, which is the shape the
+            # reference counter hooks use.
+            _p[_k] = _l or _rest or _h
+        else:
+            # NOT INVENTED. A component needing something a phrase cannot
+            # supply is the wrong component for this beat, and saying so beats
+            # filling the key with the hero and rendering nonsense.
+            return ({}, "%s requires %r, which a phrase cannot supply"
+                    % (mg_type, _k))
+    return (_p, "filled %s from the phrase" % sorted(_p))
+
+
+def derive_card_type(hero, beat_text="", vibe=""):
+    """(type, why) — WHICH component this claim wants. Never a default.
+
+    Returns (None, why) when the claim does not want a card at all, which is a
+    real answer: refusing beats rendering the wrong component, and a card
+    nobody can read is the failure this whole thread began with.
+    """
+    _h = str(hero or "").strip()
+    if not _h:
+        return (None, "no phrase to stamp — the agent ruled a card and named "
+                      "nothing to put on it")
+    # A QUOTED FIGURE WANTS THE COUNTER. StatCard requires value:number and
+    # counts up to it; that is what an escalating-counter hook IS, and it is the
+    # component the three missed moments wanted.
+    if _CARD_FIGURE.search(_h):
+        return ("StatCard", "the phrase carries a figure, and StatCard is the "
+                            "only component that counts up to one")
+    # A PHRASE WITH NO FIGURE IS STILL A CLAIM. "HOURS TO EDIT" is the third
+    # missed moment and has no numeral in it — a digits-only rule catches two of
+    # the three and would have left that one as text, which is the defect.
+    # PullQuote requires `text` and nothing else, so a phrase is exactly what it
+    # can carry.
+    _words = [w for w in re.split(r"\s+", _h) if w]
+    if len(_words) <= 5:
+        return ("PullQuote", "a short claim with no figure — PullQuote reads "
+                             "`text` and carries a phrase whole")
+    return (None, "the phrase is too long to stamp (%d words); a card is a "
+                  "few words at reading size, not a sentence" % len(_words))
+
+
+def cut_intrusion_floor_ms(r_frame_rate, avg_frame_rate):
+    """(floor_ms, state, detail). floor_ms is None whenever it is not knowable.
+
+    UNMEASURED is a real answer here and must never be substituted with a
+    default — the whole point of the floor is to say which intrusions are
+    arithmetic, and a guessed floor decides that question wrongly and silently.
+    """
+    _r, _a = _rate_to_float(r_frame_rate), _rate_to_float(avg_frame_rate)
+    if not _r and not _a:
+        return (None, "UNMEASURED", "no frame rate on the source stream")
+    if _r and _a:
+        _spread = abs(_r - _a) / max(_r, _a)
+        if _spread > _CUT_FLOOR_VFR_TOLERANCE:
+            return (None, "UNMEASURED",
+                    "variable frame rate: declared %.2f, average %.2f (%.0f%% "
+                    "apart) — frames have no single duration, so there is no "
+                    "quantisation floor" % (_r, _a, 100.0 * _spread))
+    _fps = _a or _r
+    return (round(1000.0 / _fps / 2.0, 2), "MEASURED",
+            "half a frame at %.2f fps" % _fps)
+
+
 def cut_word_intrusions(spans, words):
     """Cuts that land INSIDE a spoken word, with how far in they land.
 
@@ -5023,7 +5160,39 @@ def placement_collisions(placed):
     exactly the thing that would lie here.
     """
     out = []
-    _p = [x for x in (placed or []) if x.get("box")]
+    # ONE PLACEMENT SEEN TWICE IS NOT A COLLISION WITH ITSELF.
+    #
+    # Round 45 reported four text+text collisions at EXACTLY 1.00 of the smaller
+    # box, on four text placements at DISJOINT times — 1.25-1.75, 7.09-7.59,
+    # 12.85-13.35, 18.64-19.14. No genuine overlap between any pair is possible.
+    # Every placement was recorded TWICE (18 rows, 9 unique) because the harness
+    # answers a second identical execute_plan and only refuses the third, so each
+    # row met itself: identical window, identical box, perfect containment.
+    #
+    # AND THE ARTEFACT LANDED EXACTLY WHERE A THRESHOLD WOULD COME FROM. I had
+    # registered that construction cannot supply a bar because the metric is a
+    # continuum, and that a bar could still come from the REAL population being
+    # bimodal. {0.000 x N, 1.000 x 4} IS bimodal, and reading it at face value is
+    # the strongest possible argument for a bar at 0.5 — derived entirely from a
+    # duplicate record. The shape that would justify the threshold was
+    # manufactured by the instrument's input.
+    #
+    # The predicate is EXACT, not a threshold: same family, same window, same
+    # painted box is the same placement. A genuine exact-duplicate placement —
+    # the same component rendered twice into the same pixels at the same time —
+    # is therefore invisible here, and that is the right trade: it is
+    # indistinguishable from a doubled record by construction, and calling it a
+    # collision would report the harness as an edit defect.
+    _seen, _p = set(), []
+    for _x in (placed or []):
+        if not _x.get("box"):
+            continue
+        _k = (_x.get("family"), round(float(_x.get("t0", 0)), 3),
+              round(float(_x.get("t1", 0)), 3), tuple(_x["box"]))
+        if _k in _seen:
+            continue
+        _seen.add(_k)
+        _p.append(_x)
     for _i in range(len(_p)):
         for _j in range(_i + 1, len(_p)):
             _a, _b = _p[_i], _p[_j]
@@ -6018,9 +6187,14 @@ def edit(source_key: str, brief: str,
         # frame boundary, so it can sit half a frame from any word edge for
         # reasons that are quantisation rather than editing, and that floor is
         # a function of THIS fixture's frame rate, not a constant.
-        _fps_here = float(led.get("source_fps") or 30.0) or 30.0
+        _vs = next((_x for _x in (meta.get("streams") or [])
+                    if _x.get("codec_type") == "video"), {})
+        _floor, _fstate, _fwhy = cut_intrusion_floor_ms(
+            _vs.get("r_frame_rate"), _vs.get("avg_frame_rate"))
         led["cut_word_intrusions"] = cut_word_intrusions(spans, words)
-        led["cut_quantisation_floor_ms"] = round(1000.0 / _fps_here / 2.0, 1)
+        led["cut_quantisation_floor_ms"] = _floor
+        led["cut_floor_state"] = _fstate
+        led["cut_floor_detail"] = _fwhy
         led["cut_boundaries_total"] = 2 * len(spans)
         led["cut_coverage"] = {
             "spans": len(spans),
@@ -7468,14 +7642,28 @@ def edit(source_key: str, brief: str,
             # a StatCard the agent never chose — indistinguishable from one it
             # did. The schema now says there is no default; the build has to
             # agree or the schema is describing a pipeline that does not exist.
-            _ctype = str(v.get("card_type") or "").strip()
+            # DERIVED, NOT PICKED (Zac's ruling, 2026-09-09). The agent
+            # supplies the JUDGEMENT — this beat carries a claim worth stamping,
+            # and card_hero is the phrase worth stamping. WHICH component is a
+            # lookup on what that phrase contains, exactly as zoom_arc names the
+            # moment and ZOOM_ARC_HOMES names the move.
+            #
+            # Round 42's control group is why: same round, same prefix, same
+            # model — zoom picked THREE distinct types, cards picked ONE of 29.
+            # The 29-name enum is retired with this line, and it was the
+            # incumbency mechanism itself.
+            _ctype, _dwhy = derive_card_type(hero, str(b.get("text") or ""),
+                                             led.get("vibe") or "")
             if not _ctype:
+                # REFUSING IS A REAL ANSWER. A card nobody can read is the
+                # failure this whole thread began with, and it is worse than no
+                # card at all.
                 _skips.append({"family": "card", "beat": v.get("beat"),
-                               "why": "ruled 'card' with no card_type — WHICH "
-                                      "component reads the dialogue and cannot "
-                                      "be derived. The enum carries each one's "
-                                      "claim; pick the one the beat is making."})
+                               "why": _dwhy})
                 continue
+            led.setdefault("card_type_derived", []).append(
+                {"beat": v.get("beat"), "type": _ctype,
+                 "hero": hero[:32], "why": _dwhy[:90]})
             if _ctype in MG_BRAND_ONLY:
                 # Production's own prompt: "DO NOT put NamePlate or EndCard in
                 # motion_graphics yourself — the pipeline builds [them]". They
@@ -7508,10 +7696,15 @@ def edit(source_key: str, brief: str,
             # vocabulary; every other type reads different keys, and a card
             # carrying the wrong ones renders empty. Explicit props win; the
             # hero/label pair remains the StatCard shorthand.
-            _cprops = v.get("card_props")
-            if not isinstance(_cprops, dict) or not _cprops:
-                _cprops = {"value": hero,
-                           "label": str(v.get("card_label") or "")[:60]}
+            # PROPS DERIVE FROM THE DERIVED TYPE. The old shorthand built
+            # {value, label} — StatCard's shape — which a PullQuote reads
+            # neither of.
+            _cprops, _pwhy = derive_card_props(
+                _ctype, hero, str(v.get("card_label") or ""))
+            if not _cprops:
+                _skips.append({"family": "card", "beat": v.get("beat"),
+                               "why": _pwhy})
+                continue
             # NUMBERS WHERE THE COMPONENT NEEDS NUMBERS. card_hero arrives as
             # the words the speaker said — "10,000", "$1.2M", "three" — and a
             # StatCard counts up to a TARGET. Round 35 passed all four heroes
@@ -9357,7 +9550,16 @@ def edit(source_key: str, brief: str,
     # declared anchors are excluded on purpose, because a component that
     # overflows its anchor still reports the anchor.
     led["placement_collisions"] = placement_collisions(led.get("_painted_boxes") or [])
-    led["painted_boxes_measured"] = len(led.get("_painted_boxes") or [])
+    _pb = led.get("_painted_boxes") or []
+    _uniq = {(x.get("family"), round(float(x.get("t0", 0)), 3),
+              round(float(x.get("t1", 0)), 3), tuple(x.get("box") or ()))
+             for x in _pb if x.get("box")}
+    led["painted_boxes_measured"] = len(_pb)
+    # DUPLICATES ARE REPORTED, not silently collapsed. They are evidence about
+    # the RUN — the harness answered a repeated execute_plan — and a number that
+    # quietly disappears is how this one inflated every per-placement count since
+    # round 41 without anyone connecting it to anything.
+    led["painted_boxes_duplicate"] = len(_pb) - len(_uniq)
     led["final_inspect"] = final
     key = None
     if final.get("exists"):
@@ -10280,25 +10482,54 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _cwi is not None:
         _fl = (r.get("ledger") or {}).get("cut_quantisation_floor_ms")
         _tot = (r.get("ledger") or {}).get("cut_boundaries_total") or 0
-        _above = [x for x in _cwi if x.get("intrusion_ms", 0) > (_fl or 0)]
         _ms = sorted(x["intrusion_ms"] for x in _cwi)
-        print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land inside a "
-              f"word, {len(_above)} above the {_fl}ms frame floor"
-              + (f"  ms={_ms[:12]}" if _ms else "")
-              + "   MEASURED, no threshold")
+        _fst = (r.get("ledger") or {}).get("cut_floor_state")
+        if _fl is None:
+            # NO FLOOR, SO NO 'ABOVE THE FLOOR'. Printing a count against a
+            # guessed floor is the defect this replaced.
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land "
+                  f"inside a word  ms={_ms[:12]}   FLOOR {_fst}: "
+                  f"{(r.get('ledger') or {}).get('cut_floor_detail')}"
+                  f"   EXCLUDED from any pooled distribution")
+        else:
+            _above = [x for x in _cwi if x.get("intrusion_ms", 0) > _fl]
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land inside a "
+                  f"word, {len(_above)} above the {_fl}ms frame floor"
+                  + (f"  ms={_ms[:12]}" if _ms else "")
+                  + "   MEASURED, no threshold")
+    # THREE STATES, AND ALL THREE PRINT. Round 45 placed no cards at all, so
+    # `if _cba:` skipped the line entirely and CARD ALIGNMENT appeared ZERO
+    # times in four logs — an absence rendered as silence, which is the shape
+    # this repo keeps paying for.
+    #
+    # AND "NO CARDS EXISTED" IS NOT "NO CARD COULD HAVE FAILED". I registered
+    # UNEXERCISED for the second and round 45 produced the first; the same label
+    # over two different facts is how a register stops being honest. They print
+    # differently now.
     _cba = (r.get("ledger") or {}).get("card_beat_alignment") or []
-    if _cba:
+    _cards_ruled = sum(1 for _p6 in ((r.get("ledger") or {}).get("placements") or [])
+                       if _p6.get("family") == "card")
+    if not _cba:
+        print(f"  CARD ALIGNMENT  : NO CARDS PLACED"
+              + (f" ({_cards_ruled} ruled — they did not reach the builder)"
+                 if _cards_ruled else "")
+              + "   nothing to align, and nothing measured")
+    else:
         _off = [c for c in _cba if c.get("on_beat") is False]
         _ung = [c for c in _cba if c.get("grounded") is False]
         _na = [c for c in _cba if c.get("grounded") is None]
+        _could_fail = len(_cba) - len(_na)
         print(f"  CARD ALIGNMENT  : {len(_cba)} cards  off-beat={len(_off)}  "
               f"ungrounded={len(_ung)}  not-applicable={len(_na)}"
               + ("   UNEXERCISED — no card could have failed either leg"
-                 if not _off and not _ung and len(_na) == 0 else ""))
+                 if not _off and not _ung and _could_fail == 0 else ""))
     _pc = (r.get("ledger") or {}).get("placement_collisions")
     if _pc is not None:
         _nb = (r.get("ledger") or {}).get("painted_boxes_measured") or 0
+        _dup = (r.get("ledger") or {}).get("painted_boxes_duplicate") or 0
         print(f"  COLLISIONS      : {len(_pc)} over {_nb} painted box(es)"
+              + (f"  ({_dup} DUPLICATE record(s) collapsed — the run answered a "
+                 f"repeated execute_plan)" if _dup else "")
               + ("  " + "  ".join(f"[{'+'.join(c['families'])} "
                                   f"{c['overlap_frac_of_smaller']:.2f} of smaller]"
                                   for c in _pc[:4]) if _pc else "")
