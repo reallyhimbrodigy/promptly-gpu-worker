@@ -144,6 +144,36 @@ check("no threshold is applied", not any(
     "it reports intrusion_ms and the distribution decides — a constant invented "
     "now is the fourth threshold from an unmeasured distribution")
 
+# ── 2a-ii. THE FLOOR IS UNMEASURED OR REAL, NEVER A DEFAULT ─────────────────
+# The first version read float(led.get("source_fps") or 30.0). Nothing ever set
+# source_fps, so EVERY fixture silently took 30 — and on a 59.94 source that is
+# wrong by 2x in the direction that HIDES intrusions: a floor twice too large
+# excuses cuts that really did sever a word. A default that fails toward
+# "nothing to see" is the worst direction a default can fail.
+check("a missing frame rate is UNMEASURED, not 30",
+      A.cut_intrusion_floor_ms(None, None)[0] is None
+      and A.cut_intrusion_floor_ms(None, None)[1] == "UNMEASURED")
+check("a CFR source gets half a frame",
+      A.cut_intrusion_floor_ms("30/1", "30/1")[0] == 16.67,
+      str(A.cut_intrusion_floor_ms("30/1", "30/1")))
+check("29.97 is not rounded to 30",
+      A.cut_intrusion_floor_ms("30000/1001", "30000/1001")[0] == 16.68)
+# A VFR SOURCE HAS NO FLOOR AT ALL — the floor is half a frame duration, so it
+# exists only if frames have ONE duration. This is what excludes motion from
+# pooled numbers, DERIVED from the source rather than hand-listed, so the next
+# VFR fixture excludes itself without anyone remembering.
+_vfr = A.cut_intrusion_floor_ms("60000/1001", "35.94")
+check("a VFR source has NO floor", _vfr[0] is None and _vfr[1] == "UNMEASURED",
+      str(_vfr))
+check("and says which two rates disagree",
+      "59.94" in _vfr[2] and "35.94" in _vfr[2], _vfr[2])
+check("the VFR tolerance is an equality check, not a fitted threshold",
+      A._CUT_FLOOR_VFR_TOLERANCE == 0.02,
+      "a CFR source agrees to rounding; this is slack on 'these should be "
+      "equal', not a bar chosen from a distribution")
+check("the floor STATE reaches the ledger",
+      'led["cut_floor_state"]' in src and 'led["cut_floor_detail"]' in src)
+
 # ── 2b. CARDS ON THE BEAT THEY NAME ─────────────────────────────────────────
 _beat = {"t_start": 1.0, "t_end": 3.0, "text": "we hit 10,000 followers"}
 _r = A.card_beat_alignment({"anchor_s": 2.0, "hero": "10,000"}, _beat)

@@ -85,10 +85,30 @@ r.append(mut('    led["placement_collisions"] = placement_collisions(led.get("_p
              "placement_collisions stops being called by the pipeline",
              "placement_collisions is CALLED by the pipeline"))
 # 11. Measured and ledgered but never PRINTED — round 29's defect exactly.
-r.append(mut('        print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land inside a "',
-             '        _unprinted = (f"  CUT INTRUSIONS : {len(_cwi)} of {_tot} boundaries "',
-             "the cut distribution is ledgered but never printed",
+# BOTH PRINTS, not one. The block has a MEASURED and an UNMEASURED branch and
+# killing either leaves the other, so the single-print mutation could not fire.
+# And `_cwi = None` cannot fire it either: the check is STATIC — it proves a
+# print() carrying the label EXISTS, not that it executes. That limit is real
+# and stated rather than papered over; what the check guards is "nobody wrote
+# the print", which is the defect that actually happened.
+_OLD_BLOCK = open("/tmp/block_old.txt").read()
+_NEW_BLOCK = open("/tmp/block_new.txt").read()
+r.append(mut(_OLD_BLOCK, _NEW_BLOCK,
+             "neither branch prints the cut distribution",
              "CUT INTRUSIONS is PRINTED"))
+
+# 12. THE DEFAULT RETURNS — a guessed floor, silently deciding which
+#     intrusions are arithmetic.
+r.append(mut('    if not _r and not _a:\n        return (None, "UNMEASURED", "no frame rate on the source stream")',
+             '    if not _r and not _a:\n        return (16.67, "MEASURED", "assumed 30fps")',
+             "a missing frame rate defaults to 30 again",
+             "a missing frame rate is UNMEASURED, not 30"))
+# 13. VFR stops being detected, so motion silently rejoins the pooled numbers
+#     with one of two wrong floors.
+r.append(mut("        if _spread > _CUT_FLOOR_VFR_TOLERANCE:",
+             "        if False:",
+             "a VFR source is given a floor anyway",
+             "a VFR source has NO floor"))
 
 rc, out = run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")

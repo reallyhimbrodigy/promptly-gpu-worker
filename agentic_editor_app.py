@@ -4712,6 +4712,59 @@ def region_effect_delta(place_psnr, ctrl_psnr):
 # before arms — the way the localised effect measure was done.
 
 
+# A MISSING FRAME RATE MEANS UNMEASURED, NEVER 30.
+#
+# The first version read `float(led.get("source_fps") or 30.0)`. source_fps was
+# never set by anything, so every fixture silently took 30 — and on motion
+# (59.94 declared) that is wrong by 2x IN THE DIRECTION THAT HIDES INTRUSIONS: a
+# floor twice too large excuses cuts that really did sever a word. A default
+# that fails toward "nothing to see" is the worst direction a default can fail.
+#
+# AND A VFR SOURCE HAS NO FLOOR AT ALL. The floor is half a frame duration, so
+# it only exists if frames have ONE duration. motion declares 59.94 and actually
+# runs 35.94 — for that source the question "how far can a cut sit from a word
+# edge for reasons of quantisation" has no single answer, and the honest reply
+# is UNMEASURED rather than either of the two available wrong numbers. This is
+# also what excludes motion from pooled numbers: DERIVED from the source rather
+# than hand-listed, so the next VFR fixture excludes itself.
+_CUT_FLOOR_VFR_TOLERANCE = 0.02   # declared vs average; a CFR source agrees to
+                                  # rounding, so this is an equality check with
+                                  # slack, not a threshold fitted to anything
+
+
+def _rate_to_float(rate):
+    try:
+        _t = str(rate or "").strip()
+        if "/" in _t:
+            _n, _d = _t.split("/")
+            return float(_n) / float(_d) if float(_d) else None
+        return float(_t) or None
+    except Exception:                                         # noqa: BLE001
+        return None
+
+
+def cut_intrusion_floor_ms(r_frame_rate, avg_frame_rate):
+    """(floor_ms, state, detail). floor_ms is None whenever it is not knowable.
+
+    UNMEASURED is a real answer here and must never be substituted with a
+    default — the whole point of the floor is to say which intrusions are
+    arithmetic, and a guessed floor decides that question wrongly and silently.
+    """
+    _r, _a = _rate_to_float(r_frame_rate), _rate_to_float(avg_frame_rate)
+    if not _r and not _a:
+        return (None, "UNMEASURED", "no frame rate on the source stream")
+    if _r and _a:
+        _spread = abs(_r - _a) / max(_r, _a)
+        if _spread > _CUT_FLOOR_VFR_TOLERANCE:
+            return (None, "UNMEASURED",
+                    "variable frame rate: declared %.2f, average %.2f (%.0f%% "
+                    "apart) — frames have no single duration, so there is no "
+                    "quantisation floor" % (_r, _a, 100.0 * _spread))
+    _fps = _a or _r
+    return (round(1000.0 / _fps / 2.0, 2), "MEASURED",
+            "half a frame at %.2f fps" % _fps)
+
+
 def cut_word_intrusions(spans, words):
     """Cuts that land INSIDE a spoken word, with how far in they land.
 
@@ -5787,9 +5840,14 @@ def edit(source_key: str, brief: str,
         # frame boundary, so it can sit half a frame from any word edge for
         # reasons that are quantisation rather than editing, and that floor is
         # a function of THIS fixture's frame rate, not a constant.
-        _fps_here = float(led.get("source_fps") or 30.0) or 30.0
+        _vs = next((_x for _x in (meta.get("streams") or [])
+                    if _x.get("codec_type") == "video"), {})
+        _floor, _fstate, _fwhy = cut_intrusion_floor_ms(
+            _vs.get("r_frame_rate"), _vs.get("avg_frame_rate"))
         led["cut_word_intrusions"] = cut_word_intrusions(spans, words)
-        led["cut_quantisation_floor_ms"] = round(1000.0 / _fps_here / 2.0, 1)
+        led["cut_quantisation_floor_ms"] = _floor
+        led["cut_floor_state"] = _fstate
+        led["cut_floor_detail"] = _fwhy
         led["cut_boundaries_total"] = 2 * len(spans)
         led["cut_coverage"] = {
             "spans": len(spans),
@@ -10015,12 +10073,21 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _cwi is not None:
         _fl = (r.get("ledger") or {}).get("cut_quantisation_floor_ms")
         _tot = (r.get("ledger") or {}).get("cut_boundaries_total") or 0
-        _above = [x for x in _cwi if x.get("intrusion_ms", 0) > (_fl or 0)]
         _ms = sorted(x["intrusion_ms"] for x in _cwi)
-        print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land inside a "
-              f"word, {len(_above)} above the {_fl}ms frame floor"
-              + (f"  ms={_ms[:12]}" if _ms else "")
-              + "   MEASURED, no threshold")
+        _fst = (r.get("ledger") or {}).get("cut_floor_state")
+        if _fl is None:
+            # NO FLOOR, SO NO 'ABOVE THE FLOOR'. Printing a count against a
+            # guessed floor is the defect this replaced.
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land "
+                  f"inside a word  ms={_ms[:12]}   FLOOR {_fst}: "
+                  f"{(r.get('ledger') or {}).get('cut_floor_detail')}"
+                  f"   EXCLUDED from any pooled distribution")
+        else:
+            _above = [x for x in _cwi if x.get("intrusion_ms", 0) > _fl]
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land inside a "
+                  f"word, {len(_above)} above the {_fl}ms frame floor"
+                  + (f"  ms={_ms[:12]}" if _ms else "")
+                  + "   MEASURED, no threshold")
     _cba = (r.get("ledger") or {}).get("card_beat_alignment") or []
     if _cba:
         _off = [c for c in _cba if c.get("on_beat") is False]
