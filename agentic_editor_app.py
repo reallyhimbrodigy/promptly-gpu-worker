@@ -4862,7 +4862,39 @@ def placement_collisions(placed):
     exactly the thing that would lie here.
     """
     out = []
-    _p = [x for x in (placed or []) if x.get("box")]
+    # ONE PLACEMENT SEEN TWICE IS NOT A COLLISION WITH ITSELF.
+    #
+    # Round 45 reported four text+text collisions at EXACTLY 1.00 of the smaller
+    # box, on four text placements at DISJOINT times — 1.25-1.75, 7.09-7.59,
+    # 12.85-13.35, 18.64-19.14. No genuine overlap between any pair is possible.
+    # Every placement was recorded TWICE (18 rows, 9 unique) because the harness
+    # answers a second identical execute_plan and only refuses the third, so each
+    # row met itself: identical window, identical box, perfect containment.
+    #
+    # AND THE ARTEFACT LANDED EXACTLY WHERE A THRESHOLD WOULD COME FROM. I had
+    # registered that construction cannot supply a bar because the metric is a
+    # continuum, and that a bar could still come from the REAL population being
+    # bimodal. {0.000 x N, 1.000 x 4} IS bimodal, and reading it at face value is
+    # the strongest possible argument for a bar at 0.5 — derived entirely from a
+    # duplicate record. The shape that would justify the threshold was
+    # manufactured by the instrument's input.
+    #
+    # The predicate is EXACT, not a threshold: same family, same window, same
+    # painted box is the same placement. A genuine exact-duplicate placement —
+    # the same component rendered twice into the same pixels at the same time —
+    # is therefore invisible here, and that is the right trade: it is
+    # indistinguishable from a doubled record by construction, and calling it a
+    # collision would report the harness as an edit defect.
+    _seen, _p = set(), []
+    for _x in (placed or []):
+        if not _x.get("box"):
+            continue
+        _k = (_x.get("family"), round(float(_x.get("t0", 0)), 3),
+              round(float(_x.get("t1", 0)), 3), tuple(_x["box"]))
+        if _k in _seen:
+            continue
+        _seen.add(_k)
+        _p.append(_x)
     for _i in range(len(_p)):
         for _j in range(_i + 1, len(_p)):
             _a, _b = _p[_i], _p[_j]
@@ -9150,7 +9182,16 @@ def edit(source_key: str, brief: str,
     # declared anchors are excluded on purpose, because a component that
     # overflows its anchor still reports the anchor.
     led["placement_collisions"] = placement_collisions(led.get("_painted_boxes") or [])
-    led["painted_boxes_measured"] = len(led.get("_painted_boxes") or [])
+    _pb = led.get("_painted_boxes") or []
+    _uniq = {(x.get("family"), round(float(x.get("t0", 0)), 3),
+              round(float(x.get("t1", 0)), 3), tuple(x.get("box") or ()))
+             for x in _pb if x.get("box")}
+    led["painted_boxes_measured"] = len(_pb)
+    # DUPLICATES ARE REPORTED, not silently collapsed. They are evidence about
+    # the RUN — the harness answered a repeated execute_plan — and a number that
+    # quietly disappears is how this one inflated every per-placement count since
+    # round 41 without anyone connecting it to anything.
+    led["painted_boxes_duplicate"] = len(_pb) - len(_uniq)
     led["final_inspect"] = final
     key = None
     if final.get("exists"):
@@ -10100,7 +10141,10 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     _pc = (r.get("ledger") or {}).get("placement_collisions")
     if _pc is not None:
         _nb = (r.get("ledger") or {}).get("painted_boxes_measured") or 0
+        _dup = (r.get("ledger") or {}).get("painted_boxes_duplicate") or 0
         print(f"  COLLISIONS      : {len(_pc)} over {_nb} painted box(es)"
+              + (f"  ({_dup} DUPLICATE record(s) collapsed — the run answered a "
+                 f"repeated execute_plan)" if _dup else "")
               + ("  " + "  ".join(f"[{'+'.join(c['families'])} "
                                   f"{c['overlap_frac_of_smaller']:.2f} of smaller]"
                                   for c in _pc[:4]) if _pc else "")

@@ -66,8 +66,12 @@ r.append(mut('            if float(_a["t1"]) <= float(_b["t0"]) or float(_b["t1"
              "placements overlapping in time AND pixels collide"))
 
 # 7. An unmeasured box is treated as a rectangle rather than skipped.
-r.append(mut('    _p = [x for x in (placed or []) if x.get("box")]',
-             '    _p = [dict(x, box=x.get("box") or (0, 0, 1, 1)) for x in (placed or [])]',
+# RETARGETED after the dedup rewrite removed the old anchor. The harness
+# reported "anchor 0x" rather than counting it RED, which is the whole reason
+# mut() checks the count — a mutation that no longer applies proves nothing, and
+# a refactor is exactly where that happens.
+r.append(mut('        if not _x.get("box"):\n            continue',
+             '        _x = dict(_x, box=_x.get("box") or (0, 0, 1, 1))\n        if False:\n            continue',
              "an unmeasured box becomes a rectangle at the origin",
              "skipped, not guessed"))
 
@@ -109,6 +113,24 @@ r.append(mut("        if _spread > _CUT_FLOOR_VFR_TOLERANCE:",
              "        if False:",
              "a VFR source is given a floor anyway",
              "a VFR source has NO floor"))
+
+# 14. The dedup goes away and a placement collides with its own duplicate —
+#     the round-45 artefact, which is bimodal and would justify a bar at 0.5.
+r.append(mut('        if _k in _seen:\n            continue',
+             '        if False:\n            continue',
+             "a placement collides with its own duplicate record again",
+             "the same placement recorded twice is NOT a collision"))
+# 15. The dedup gets TOO BROAD and swallows real pairs that merely share a box.
+r.append(mut('        _k = (_x.get("family"), round(float(_x.get("t0", 0)), 3),\n'
+             '              round(float(_x.get("t1", 0)), 3), tuple(_x["box"]))',
+             '        _k = (_x.get("family"), tuple(_x["box"]))',
+             "the dedup key drops the time window and swallows real pairs",
+             "a duplicate at a DIFFERENT time is still compared"))
+# 16. The duplicate count stops being reported — the harness signal disappears.
+r.append(mut('    led["painted_boxes_duplicate"] = len(_pb) - len(_uniq)',
+             '    led["_painted_boxes_duplicate_unreported"] = len(_pb) - len(_uniq)',
+             "the duplicate count stops being recorded",
+             "duplicates are counted, not silently collapsed"))
 
 rc, out = run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")

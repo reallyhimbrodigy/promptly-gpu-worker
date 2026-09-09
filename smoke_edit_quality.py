@@ -256,6 +256,47 @@ check("the straddle is CONTINUOUS — no gap to put a bar in",
       "separation; the bar has to come from the real population being bimodal, "
       "which round 45 answers and construction cannot")
 
+# ── 2c-iii. ONE PLACEMENT SEEN TWICE IS NOT A COLLISION ─────────────────────
+# Round 45 reported four text+text collisions at exactly 1.00 on four text
+# placements at DISJOINT times (1.25-1.75, 7.09-7.59, 12.85-13.35, 18.64-19.14).
+# Every placement was recorded twice — the harness answers a second identical
+# execute_plan and only refuses the third — so each row met itself.
+#
+# AND IT LANDED EXACTLY WHERE A THRESHOLD WOULD HAVE COME FROM. I registered
+# that a bar could come from the real population being bimodal; {0.000 x N,
+# 1.000 x 4} IS bimodal, and read at face value it is the strongest possible
+# argument for a bar at 0.5 — manufactured entirely by a duplicate record.
+_B = (436, 920, 208, 88)
+_dbl = [{"family": "text", "t0": 1.25, "t1": 1.75, "box": _B},
+        {"family": "text", "t0": 1.25, "t1": 1.75, "box": _B}]
+check("the same placement recorded twice is NOT a collision",
+      A.placement_collisions(_dbl) == [],
+      "identical family, window and painted box is one placement seen twice")
+# EXACT, not a threshold: a different window or a different box is a real pair.
+check("a duplicate at a DIFFERENT time is still compared",
+      len(A.placement_collisions(
+          [{"family": "text", "t0": 1.0, "t1": 3.0, "box": _B},
+           {"family": "text", "t0": 2.0, "t1": 4.0, "box": _B}])) == 1,
+      "same box, overlapping but different windows — two placements, not one")
+check("a duplicate window with a DIFFERENT box is still compared",
+      len(A.placement_collisions(
+          [{"family": "text", "t0": 1.0, "t1": 3.0, "box": _B},
+           {"family": "text", "t0": 1.0, "t1": 3.0, "box": (400, 900, 300, 150)}])) == 1)
+# AND 1.00 IS NOT THE SIGNATURE. A small overlay fully inside a large one reads
+# exactly 1.00 legitimately — the diagnostic for round 45 was the DISJOINT
+# TIMES, not the value. Anyone using "1.00 means duplicate" as a heuristic would
+# discard real collisions.
+check("a genuine containment still reads 1.00 and still collides",
+      A.placement_collisions(
+          [{"family": "card", "t0": 1.0, "t1": 3.0, "box": (120, 652, 852, 416)},
+           {"family": "text", "t0": 2.0, "t1": 4.0, "box": _B}]
+      )[0]["overlap_frac_of_smaller"] == 1.0,
+      "1.00 is what full containment MEANS; it is not evidence of duplication")
+check("duplicates are counted, not silently collapsed",
+      'led["painted_boxes_duplicate"]' in src,
+      "a number that quietly disappears is how this inflated every "
+      "per-placement count since round 41 without anyone noticing")
+
 check("a placement with no measured box is skipped, not guessed",
       A.placement_collisions([{"family": "a", "t0": 0, "t1": 9, "box": None},
                               {"family": "b", "t0": 0, "t1": 9, "box": (0, 0, 9, 9)}]) == [],
