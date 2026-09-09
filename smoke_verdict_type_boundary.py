@@ -95,6 +95,40 @@ check("the family set is non-trivial (an empty alias would pass the leg above)",
       len(app.TREATMENT_FAMILIES) >= 5, str(len(app.TREATMENT_FAMILIES)))
 check("verdict_family_unknown is a CONTRACT_FAILURES member",
       "verdict_family_unknown" in app.CONTRACT_FAILURES)
+
+# ── EVERY REJECTION RECORD IS ONE SHAPE ────────────────────────────────────
+# Round 47's talking_head died here: `_rejected` had TWO producers, one
+# appending {"beat","reason"} and one appending a bare string, and the printer
+# reads `.get('beat')`. It survived every previous round because NOTHING HAD
+# EVER BEEN REJECTED — an empty list agrees with every consumer, so the two
+# shapes could not disagree until the first real rejection arrived. Cutaway
+# produced it (a ruling that names no source moment), and the run crashed after
+# vision had already succeeded.
+#
+# Asked of the AST: every append into _rejected must be a dict literal carrying
+# both keys. A defensive isinstance in the printer is the second half of the
+# contract, not a substitute for this.
+_rej_appends = []
+for _fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
+    for _n in ast.walk(_fn):
+        if (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Attribute)
+                and _n.func.attr == "append"
+                and getattr(_n.func.value, "id", "") == "_rejected"):
+            _rej_appends.append(_n)
+check("_rejected has appends at all (an empty check forbids nothing)",
+      len(_rej_appends) >= 2, f"{len(_rej_appends)} found")
+for _n in _rej_appends:
+    _arg = _n.args[0] if _n.args else None
+    _isdict = isinstance(_arg, ast.Dict)
+    _keys = {k.value for k in (_arg.keys if _isdict else [])
+             if isinstance(k, ast.Constant)}
+    check(f"_rejected.append at line {_n.lineno} is a dict with beat+reason",
+          _isdict and {"beat", "reason"} <= _keys,
+          "a bare value here reaches a printer that calls .get() on it and "
+          "kills the run on the first rejection the pipeline ever produces")
+check("the printer refuses to crash on a malformed rejection record",
+      "MALFORMED rejection" in src,
+      "a formatting bug in a diagnostic must not lose the whole run")
 # ruled_vs_built must key off the CLOSED set, never off whatever arrived —
 # asked of the AST, because the comment ABOVE the fixed line quotes the old
 # expression and a substring search flags it. (That is what the first version of

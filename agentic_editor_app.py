@@ -9777,7 +9777,21 @@ def edit(source_key: str, brief: str,
                                 f"05_motion_graphics and pick one that carries "
                                 f"a phrase.")
                     if _why6:
-                        _rejected.append(_why6)
+                        # THE SAME SHAPE AS EVERY OTHER REJECTION. This appended
+                        # a bare STRING while the sibling append twelve lines up
+                        # appended {"beat", "reason"} — and the printer reads
+                        # `.get('beat')`. It crashed round 47's talking_head on
+                        # the FIRST rejection this pipeline has ever produced:
+                        # nothing had been rejected before, so two shapes lived
+                        # in one list for as long as the list stayed empty.
+                        #
+                        # "Advertise a shape, accept that shape" — and an empty
+                        # container is where a shape disagreement hides, because
+                        # every consumer of nothing agrees.
+                        _rejected.append({"beat": (_v.get("beat")
+                                                   if isinstance(_v, dict)
+                                                   else None),
+                                          "reason": _why6})
                         continue
                     # EVERY FIELD THE SCHEMA OFFERS. Six of twelve used to
                     # survive; zoom_arc, card_type, card_props and card_label
@@ -9792,6 +9806,14 @@ def edit(source_key: str, brief: str,
                     # PRINTED in the commit that records it. A rejected ruling
                     # is a LOST placement and the round must say which.
                     for _rj in _rejected:
+                        # LOUD ABOUT A WRONG SHAPE, never crashing on one. A
+                        # malformed rejection is still a LOST PLACEMENT and the
+                        # round must say which — dying here loses the whole run
+                        # to a formatting bug in the diagnostic.
+                        if not isinstance(_rj, dict):
+                            print(f"  [verdict REJECTED] (MALFORMED rejection "
+                                  f"record, not a dict): {_rj!r}", flush=True)
+                            continue
                         print(f"  [verdict REJECTED] beat {_rj.get('beat')!r}: "
                               f"{_rj.get('reason')}", flush=True)
                 _nocopy = [v.get("beat") for v in led["beat_verdicts"]
