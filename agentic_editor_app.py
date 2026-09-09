@@ -5204,6 +5204,85 @@ def _reference_block(our_beats, k=3):
     return "\n".join(_lines)
 
 
+# ── THE RULING-TIME KNOWLEDGE, IN THE PREFIX ────────────────────────────────
+#
+# Zac, 2026-09-09: the material that answers "when does a placement earn its
+# moment", not "how do I write a Remotion component".
+#
+# MEASURED before building. All 14 knowledge documents are 48,033 tokens — too
+# large whole. But the distribution is the finding: THE DOCUMENTS THAT ARE PURELY
+# RULING-TIME JUDGEMENT ARE THE SMALLEST FOUR.
+#
+#     02_intent_standard              362 tok
+#     09_seam_treatments              213
+#     13_placement_findings           923
+#     14_card_text_placement_rules  1,288
+#     ─────────────────────────────────────
+#                                   2,786 tokens
+#
+# The large ones are catalogues and recipes — 05_motion_graphics (9,168) is the
+# component catalogue, 15_ffmpeg is command recipes, 11_thumbnail is a different
+# product surface. A derivation reads a catalogue; an agent mid-ruling does not.
+# They stay on disk behind read_knowledge, which is the right mechanism for
+# lookup.
+#
+# WHY THE PREFIX AND NOT THE TOOL. read_knowledge is OFFERED to Sonnet and
+# called ZERO times in every round. A surface the agent never opens cannot carry
+# the standard, and this lane's own law says a preference is not a property.
+#
+# THE HONEST CAVEAT, recorded rather than omitted: rounds 12-13 measured Haiku
+# spending NINE turns on read_knowledge/search_skills and reaching a
+# BYTE-IDENTICAL cut and speech check to Sonnet, which read nothing. That is
+# evidence reading changed nothing — on a measurement of the CUT. It did not
+# look at placement, which is what these four documents are about. This is not
+# proof they will help; it is the material being present at the moment it is
+# relevant instead of behind a call nobody makes.
+_RULING_TIME_DOCS = ("02_intent_standard.md",
+                     "09_seam_treatments_transitions_tight_.md",
+                     "13_placement_findings.md",
+                     "14_card_text_placement_rules.md")
+
+
+def ruling_time_knowledge(dirs=None, docs=None):
+    """The four judgement documents as prompt text. Absence is SPOKEN.
+
+    A missing document says so rather than silently shrinking the block — the
+    same rule the reference retrieval follows, and the reason is the same: an
+    absence that reads as nothing-to-say is a judgement nobody made.
+    """
+    # dirs/docs are parameters so this can be tested by BEHAVIOUR. The first
+    # version could only be checked by asking whether a string appeared in the
+    # source, and a mutant that moved the string into a dead branch kept it —
+    # twentieth instance of that trap in this lane.
+    _dirs = list(dirs) if dirs else ["/knowledge", _KNOWLEDGE_DIR]
+    _parts, _missing = [], []
+    for _name in (docs if docs is not None else _RULING_TIME_DOCS):
+        _txt = None
+        for _d in _dirs:
+            _p = os.path.join(_d, _name)
+            if os.path.isfile(_p):
+                try:
+                    _txt = open(_p, encoding="utf-8").read().strip()
+                except Exception:                             # noqa: BLE001
+                    _txt = None
+                break
+        if _txt:
+            _parts.append(_txt)
+        else:
+            _missing.append(_name)
+    if not _parts:
+        return ("EDITORIAL STANDARD: UNAVAILABLE — none of %s could be read. You "
+                "are ruling without the standard this product is graded against."
+                % (", ".join(_RULING_TIME_DOCS)))
+    _head = ("THE EDITORIAL STANDARD AND WHERE THE FAMILIES ACTUALLY LAND — "
+             "read this before you rule, it is not reference you look up.")
+    if _missing:
+        _head += ("\n  (MISSING and not read: %s — the standard below is "
+                  "incomplete and that is a gap, not a smaller standard.)"
+                  % ", ".join(_missing))
+    return _head + "\n\n" + "\n\n".join(_parts)
+
+
 def cut_intrusion_floor_ms(r_frame_rate, avg_frame_rate):
     """(floor_ms, state, detail). floor_ms is None whenever it is not knowable.
 
@@ -8732,7 +8811,11 @@ def edit(source_key: str, brief: str,
     led["sfx_table_chars"] = len(_sfx_table)
 
     sys_text = (SYSTEM + _sfx_table
-                + (_KNOWLEDGE_SYSTEM if use_knowledge else ""))
+                + (_KNOWLEDGE_SYSTEM if use_knowledge else "")
+                # The judgement documents ride the SYSTEM block, which is
+                # the one thing marked cache_control — written once,
+                # read on every turn after.
+                + "\n\n" + ruling_time_knowledge())
     sys_blocks = [{"type": "text", "text": sys_text,
                    "cache_control": {"type": "ephemeral"}}]
     # THE SCHEMA IS CONSTANT FOR THE WHOLE RUN, and the gate moved into the
