@@ -60,8 +60,30 @@ tree = ast.parse(src)
 # ── 1. NO COMPOSITE MAY TRUNCATE ────────────────────────────────────────────
 # READ THE FILTER STRINGS, not the file text — a comment explaining the defect
 # names `shortest=1` and would satisfy a substring search. Fifteenth instance.
+# DOCSTRINGS EXCLUDED, and this is the SIXTEENTH instance of the same class.
+#
+# The comment above says "read the filter strings, not the file text" — and a
+# DOCSTRING is a string constant, so it was read as one. alpha_composite_filter's
+# docstring documents the defect it cures by quoting it:
+#
+#     [1:v]fps=30,...[cap];[0:v][cap]overlay=0:0:shortest=1[outv]
+#
+# so this check failed on the FIXED tree and named prose as the defect. Moving
+# from file text to string constants was the right direction and one step short:
+# a docstring is prose that happens to be a string, which is exactly the thing
+# "a check that reads SOURCE cannot tell code from string content" warns about.
+_DOCSTRINGS = set()
+for _n in ast.walk(tree):
+    if isinstance(_n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
+                       ast.ClassDef)):
+        _b = getattr(_n, "body", None) or []
+        if (_b and isinstance(_b[0], ast.Expr)
+                and isinstance(_b[0].value, ast.Constant)
+                and isinstance(_b[0].value.value, str)):
+            _DOCSTRINGS.add(id(_b[0].value))
 _STRINGS = [n.value for n in ast.walk(tree)
-            if isinstance(n, ast.Constant) and isinstance(n.value, str)]
+            if isinstance(n, ast.Constant) and isinstance(n.value, str)
+            and id(n) not in _DOCSTRINGS]
 check("this smoke can see the module's strings", len(_STRINGS) > 500,
       f"only {len(_STRINGS)}")
 # AN ACTUAL FILTER GRAPH, not any string containing the word. The first version

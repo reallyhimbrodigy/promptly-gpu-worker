@@ -16,11 +16,45 @@ green only if every declared source is present AND ok. A gate that counts
 and that is precisely the class this gate exists to catch.
 """
 
-# The five sources are a CONTRACT, not a config. Adding or removing one changes
-# what "green" means, so it is a code change with a diff, not a flag.
-REQUIRED_SOURCES = ("talking_head", "music", "screen_recording",
-                    "product_shot", "pet_video")
+# The source set is a CONTRACT, not a config. Adding or removing one changes what
+# "green" means, so it is a code change with a diff, not a flag.
+#
+# IT IS PER CORPUS, because the corpora do not share a fixture set and mapping
+# one onto the other by name is actively dangerous: v3 carries a stray
+# music-fb4aa93b.mp4 that is byte-identical to car_short, so a name-matched v3
+# round would have scored a 10s silent car clip under a "cuts on the beat" brief.
+#
+# v1 is the flat/noise corpus every round from 35 to 41 unknowingly ran.
+# v3 is Zac's real footage and is INCOMPLETE: three sources, not the five asked
+# for. `motion` has has_speech=null at staging — its route is DELIBERATELY
+# unassigned below rather than guessed, because assigning a fixture to the wrong
+# route is how a speech target gets applied to a silent clip.
+CORPUS_SOURCES = {
+    "ab-sources/reliability-fixtures-v1": ("talking_head", "music",
+                                           "screen_recording", "product_shot",
+                                           "pet_video"),
+    "ab-sources/reliability-fixtures-v3": ("talking_head", "motion", "car_short",
+                                           "screen_recording", "car_mid"),
+}
+DEFAULT_CORPUS = "ab-sources/reliability-fixtures-v1"
+REQUIRED_SOURCES = CORPUS_SOURCES[DEFAULT_CORPUS]
 REQUIRED_GREEN_ROUNDS = 10
+
+
+def required_for(corpus):
+    """The contract for one corpus. An unknown corpus RAISES.
+
+    Never falls back to the default set: a round scored against another
+    corpus's fixture names is the failure this whole change exists to stop,
+    and a silent fallback is how it would come back.
+    """
+    try:
+        return CORPUS_SOURCES[str(corpus).rstrip("/")]
+    except KeyError:
+        raise ValueError(
+            f"no source contract for corpus {corpus!r}; known: "
+            f"{sorted(CORPUS_SOURCES)}. Add it to CORPUS_SOURCES — changing "
+            f"what 'green' means is a diff, not a fallback.")
 
 # ── PER-ROUTE GATE SETS ──────────────────────────────────────────────────────
 # A route arms on ITS OWN fixtures. The no-speech route is the cutover target —
@@ -34,9 +68,28 @@ REQUIRED_GREEN_ROUNDS = 10
 # blocks a no-speech route that has been green for ten rounds on its own
 # sources.
 ROUTE_FIXTURES = {
-    "no_speech": ("music", "screen_recording", "product_shot", "pet_video"),
+    "no_speech": ("music", "screen_recording", "product_shot", "pet_video",
+                  "car_short", "motion"),
     "speech":    ("talking_head",),
 }
+
+# `motion` WAS ABSENT FROM BOTH ROUTES until it was MEASURED, not guessed.
+#
+# Its staging `has_speech` was hand-declared null — the silence heuristic cannot
+# separate continuous speech from ambient, and said so, which is why it refused
+# to answer. The arbiter is the pipeline's own ASR, since the route branch is
+# simply `"transcript" if words else "visual"`. Round 42 ran it:
+#
+#     [route] no speech -> VISUAL beats
+#     SPEECH CHECK : NOT APPLICABLE - source carries no speech
+#
+# Zero words, so no_speech. Assigned off that observation, in a diff, as the
+# comment this replaces asked for.
+# car_mid is UNASSIGNED: staged 2026-09-08, its speech state is UNMEASURED, and
+# car_short is the standing proof that hand-declaring it is how a fixture ends up
+# exercising a route nobody thinks it exercises. Round 43 measures it; it gets
+# added in a diff off the observation, like motion did.
+ROUTE_UNASSIGNED = ("car_mid",)
 
 
 def route_of(source):
@@ -78,8 +131,18 @@ def evaluate_route(rounds, route):
             "arms": streak >= REQUIRED_GREEN_ROUNDS, "streak_broken_by": broke}
 
 
-def round_is_green(round_result):
+def round_is_green(round_result, required=None):
     """One round: every required source present, and every one of them ok.
+
+    `required` IS THE CORPUS'S CONTRACT AND MUST BE PASSED for any corpus but
+    the default. This read the module-level REQUIRED_SOURCES unconditionally,
+    so round 42 — three real fixtures, correctly derived and printed by the
+    collector — was scored against v1's five names: four "NO RESULT (absent)"
+    legs for fixtures that were never in the round, and `car_short`/`motion`
+    reported as "unknown source(s)". The collector's loop had been made
+    corpus-aware and THIS function was left holding the hardcode, which is the
+    same shape as the two copies of the collector both carrying it: fixing one
+    reader of a constant does not fix the others.
 
     `round_result` maps source -> {"ok": bool, ...}. A source that is missing,
     None, or not a dict is NOT green — it is unproven, and unproven is the same
@@ -95,8 +158,9 @@ def round_is_green(round_result):
     cannot show, nobody sees.
     """
     r = round_result or {}
+    req = tuple(required) if required else REQUIRED_SOURCES
     fails = []
-    for src in REQUIRED_SOURCES:
+    for src in req:
         v = r.get(src)
         if not isinstance(v, dict):
             fails.append(f"{src}: NO RESULT (absent — never treated as a pass)")
@@ -146,7 +210,7 @@ def round_is_green(round_result):
             if v.get(marker):
                 fails.append(f"{src}: ok but {marker}={v[marker]!r} — green "
                              f"means the FULL video, not a lesser one")
-    extra = sorted(set(r) - set(REQUIRED_SOURCES))
+    extra = sorted(set(r) - set(req))
     if extra:
         fails.append(f"unknown source(s) {extra} in the round — the test set "
                      f"is a contract; a renamed source must not silently "

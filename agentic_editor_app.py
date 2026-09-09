@@ -985,6 +985,10 @@ def derive_rubric(declared, mode="full_edit", beat_source="transcript"):
 # those rounds green.
 CONTRACT_FAILURES = frozenset({
     "wrong_resolution",        # not 1080x1920
+    # The video stream ending before the AUDIO. Three of five round-43 fixtures.
+    # The two healthy ones had no overlay pass, or an overlay that happened to
+    # span the whole video — which is why every earlier corpus hid this.
+    "video_truncated",
     "no_audio_stream",         # output has no audio
     "output_has_no_speech",    # a speech source rendered mute
     "no_output",               # nothing was produced
@@ -1037,6 +1041,22 @@ CONTRACT_FAILURES = frozenset({
     # None, which the guard skipped — the round went green on an unanswered
     # question. Same class as the probe that reported a number it never took.
     "card_props_mismatch",
+    # THE PLAN AND THE OUTPUT DISAGREE — never green, whatever the cause.
+    #
+    # Round 40 scored "all five green" while losing 3 of 3 cards, 1 of 1 zoom
+    # and 1 of 3 sfx. The refusals were CORRECT (refusing beats rendering a
+    # blank card), but a component the agent ruled did not reach the video, and
+    # that is a defect whether the fault is the pipeline's or the agent's.
+    #
+    # THIS IS NOT THE DENSITY RUBRIC RETURNING. Placing FEWER components is the
+    # agent's call and stays green — that ruling stands. This fires only when
+    # the agent DID rule something and the pipeline dropped it, which is plan
+    # and output disagreeing, not a rate being missed.
+    #
+    # Fail loudly to us, never to the user: the answer to a correct refusal is
+    # for the agent to rule a component that CAN be built, not for the round to
+    # call the loss green.
+    "ruled_not_built",
     "alpha_layer_absent",
     "alpha_layer_unmeasured",
 })
@@ -2221,6 +2241,70 @@ def segment_beats(words, gap_s=0.35, max_beat_s=6.0):
     return out
 
 
+def cover_unnarrated_edges(beats, duration_s, min_beat_s=1.2):
+    """Give the UN-NARRATED head and tail of a source their own beats.
+
+    MODULE LEVEL AND PURE so a test can call it with real spans.
+
+    THE DEFECT. `segment_beats` derives beats from WORDS, so the timeline
+    outside the transcript is not a beat, and a stretch that is not a beat can
+    never be kept — the agent is never offered it. Round 42's `car_short`: a
+    10.0s car clip carrying TWO incidental Russian words at 5.68-6.64s. Deepgram
+    found them, the source took the transcript route, beats covered 0.96s, and
+    the delivered file was 0.975 SECONDS. The agent did nothing wrong; it kept
+    every beat it was shown (`cuts ACTUAL {'keep': 1, 'cut': 0}`). 9.04s of
+    footage was invisible to the decision.
+
+    That is a REJECTION wearing a delivery's clothes, and the zero-reject law
+    permits exactly two rejections: under 2.0s and over 300s.
+
+    WHY EDGES AND NOT EVERY GAP. Interior gaps between words are dead air, and
+    cutting them is the product working as intended — "cut the filler and dead
+    air hard" is in the brief. But the stretch BEFORE the first word and AFTER
+    the last is not dead air between phrases; it is footage nobody narrated, and
+    on a mostly-silent clip it IS the content. Only the edges are covered, so
+    dead-air cutting is untouched.
+
+    NO NEW TUNED CONSTANT. The floor is `beats_from_visual`'s own min_beat_s —
+    a span too short to hold a treatment is not a beat there either, and
+    inventing a second threshold for the same physical fact is how two
+    thresholds drift apart. On a talking head that starts at 0.3s this adds
+    nothing; on car_short it adds two.
+
+    AND IT DOES NOT DECIDE ANYTHING. The new beats are offered, not kept — the
+    agent rules keep/cut on them exactly as on every other beat, which is where
+    this design puts every other such decision.
+    """
+    dur = float(duration_s or 0)
+    if dur <= 0 or not beats:
+        return list(beats or [])
+    try:
+        floor = float(min_beat_s)
+    except Exception:
+        floor = 1.2
+    out = list(beats)
+    head = float(out[0].get("t_start") or 0.0)
+    tail_start = float(out[-1].get("t_end") or 0.0)
+    if head >= floor:
+        out.insert(0, {"i": -1, "t_start": 0.0, "t_end": round(head, 2),
+                       "text": f"[no narration] {head:.1f}s of footage before "
+                               f"the first word — visible content, not dead air"})
+    if dur - tail_start >= floor:
+        out.append({"i": -1, "t_start": round(tail_start, 2), "t_end": round(dur, 2),
+                    "text": f"[no narration] {dur - tail_start:.1f}s of footage "
+                            f"after the last word — visible content, not dead air"})
+    # RE-INDEX AND RE-ROLE. `i` is the agent's handle on a beat and hook/close
+    # are marked mechanically as first and last; leaving them on the old first
+    # beat would put the hook in the middle of the timeline.
+    for _b in out:
+        _b.pop("role", None)
+    for _i, _b in enumerate(out):
+        _b["i"] = _i
+    out[0]["role"] = "hook"
+    out[-1]["role"] = "close"
+    return out
+
+
 # ── BEATS WITHOUT SPEECH ─────────────────────────────────────────────────────
 # MEASURED 2026-09-05, 14d completed jobs: 46.5% (706/1518) never reach the
 # verdict machinery at all. They route to moodreel (453), minimal_speech_uncut
@@ -2984,6 +3068,353 @@ def sfx_start_s(attack_ms, at_s):
     return max(0.0, _want), (_want < 0.0)
 
 
+# ── VISION FOR THE VISUAL ROUTE ─────────────────────────────────────────────
+#
+# WHY. Round 43's screen_recording — 90.5s, every family in scope — ruled `none`
+# on 24 of 25 beats and placed ONE graphic. Its own rationales say why:
+# "Opening stillness (motion 0.00)", "Motion rises to 0.31", "Energetic at shot
+# change (0.61)". On the visual route `beats_from_visual` renders MOTION
+# FEATURES into the beat's `text`, so the agent is told how much movement there
+# is and never told what is ON SCREEN. The prompt tells it overlays "derive from
+# THE REQUEST and THE VISIBLE CONTENT" — and on this route the visible content
+# was never supplied. For a ChatGPT walkthrough, the most describable source in
+# the corpus, it had nothing to describe.
+#
+# PRICED BEFORE BUILDING (Rule 6), against measured spend at Haiku's confirmed
+# $1/$5 per MTok with cache_write 1.25x and cache_read 0.1x:
+#   frames inline in the editorial loop   +$0.0097 on a $0.0460 run  (+21%)
+#   ONE batched caption call, text in     +$0.0091                   (+20%)
+# A wash on cost. B wins on contract fit — its output is TEXT going into the
+# beat's existing `text` field, so nothing downstream learns a new field and the
+# message shape never changes (the shape change that once cost 43,222
+# cache_write tokens, 74% of a run) — and on failure containment: one call, one
+# state, one printed line.
+#
+# THE RISK B CARRIES is silent blandness. "a web page" instead of "the pricing
+# page, three tiers" is not a crash; it is a beat the agent still cannot place a
+# card on, and it looks like success. So the PROMPT is the whole quality lever,
+# and it asks for what an editor needs to point at rather than for a description.
+_VISION_FRAME_W = 512          # 512x290 measured at ~198 image tokens/frame
+_VISION_MAX_FRAMES = 40        # a 40-beat source is already past the length cap
+
+
+def beat_keyframe_times(beats, duration_s=None):
+    """The midpoint of each beat — PURE, so a test needs no video.
+
+    The midpoint rather than the start: a beat boundary sits ON a shot change,
+    where the frame is mid-transition and describes neither shot.
+    """
+    out = []
+    for b in (beats or []):
+        try:
+            a, z = float(b.get("t_start")), float(b.get("t_end"))
+        except (TypeError, ValueError):
+            continue
+        if z <= a:
+            continue
+        t = (a + z) / 2.0
+        if duration_s:
+            try:
+                t = min(t, max(0.0, float(duration_s) - 0.05))
+            except (TypeError, ValueError):
+                pass
+        out.append(round(t, 3))
+    return out
+
+
+def extract_beat_frames(video_path, times, out_dir, width=_VISION_FRAME_W, env=None):
+    """(state, paths, detail) — one frame per time, in ONE decode pass.
+
+    MEASURED: 25 frames from a 90.46s 3826x2160 source in 3.22s wall, 11 KB and
+    ~198 image tokens each at 512 wide. Per-frame seeking on a 4K file costs far
+    more than decoding once, so this builds a single select expression.
+
+    A STATE, NEVER A PATH LIST ALONE. ffmpeg exiting 0 having written nothing is
+    the shape this lane keeps paying for, so the count is compared against what
+    was asked and a shortfall is reported rather than silently returned short.
+    """
+    # Function-local, matching every other module-level ffmpeg helper here.
+    import glob
+    import subprocess
+    if not times:
+        return "ABSENT", [], "no beat times to sample"
+    times = list(times)[:_VISION_MAX_FRAMES]
+    try:
+        os.makedirs(out_dir, exist_ok=True)
+    except Exception as exc:
+        return "FAILED", [], f"cannot create {out_dir}: {exc}"
+    # One decode pass: select the frame nearest each timestamp.
+    expr = "+".join(f"between(t,{t - 0.03:.3f},{t + 0.03:.3f})" for t in times)
+    pat = os.path.join(out_dir, "beat%03d.jpg")
+    r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-i", video_path,
+         "-vf", f"select='{expr}',scale={int(width)}:-2", "-vsync", "0",
+         "-q:v", "6", pat],
+        capture_output=True, text=True, timeout=900, env=env)
+    got = sorted(glob.glob(os.path.join(out_dir, "beat*.jpg")))
+    if r.returncode != 0 and not got:
+        return "FAILED", [], f"ffmpeg exit {r.returncode}: {(r.stderr or '')[-140:]}"
+    if not got:
+        return "FAILED", [], ("ffmpeg exited 0 and wrote NO frames — exit 0 is "
+                              "not evidence a frame exists")
+    if len(got) < len(times):
+        # NAMED, not silently short. Fewer frames than beats means the mapping
+        # from frame to beat is no longer positional, and a description attached
+        # to the wrong beat is worse than no description.
+        return "FAILED", got, (f"asked for {len(times)} frames, got {len(got)} — "
+                               f"frame-to-beat mapping is no longer positional")
+    return "MEASURED", got[:len(times)], f"{len(got)} frame(s) at {width}px wide"
+
+
+# THE PROMPT IS THE QUALITY LEVER, and it is written for what an EDITOR needs.
+#
+# "Describe this frame" produces "a web page" — true, useless, and it looks like
+# success. The three things asked for here are the three an editor actually uses:
+# the specific nameable thing, what changed since the previous beat (which is
+# what makes a moment a moment), and whether there is READABLE TEXT — the last
+# because the landscape framing choice (fit / crop / blur-fill) cannot be made
+# without it. Readable text means fit or blur-fill; a subject with room around it
+# means crop.
+_VISION_SYSTEM = (
+    "You label frames from a video an editor is cutting into a vertical short. "
+    "For each frame, in ONE line under 22 words:\n"
+    "  - NAME the specific thing on screen a caption or card could point at — "
+    "'the pricing page, three tiers', 'a hand picking up the blue mug', "
+    "'the settings panel with dark mode on'. NEVER a category like 'a web "
+    "page', 'a person', 'an app' — a category is unusable and worse than "
+    "nothing because it reads as an answer.\n"
+    "  - say WHAT CHANGED from the previous frame, if anything did.\n"
+    "  - end with TEXT:yes or TEXT:no — is there text a viewer could READ at "
+    "this size.\n"
+    "Output one line per frame, numbered to match, and nothing else."
+)
+
+
+def parse_vision_lines(raw, n_expected):
+    """(state, descriptions, detail) — split a numbered reply into n lines. PURE.
+
+    A reply with the wrong number of lines is FAILED, not truncated to fit:
+    positional mapping is the whole contract, and a description on the wrong
+    beat is worse than none.
+    """
+    if not raw or not str(raw).strip():
+        return "ABSENT", [], "the model returned nothing"
+    lines = [l.strip() for l in str(raw).splitlines() if l.strip()]
+    keep = []
+    for l in lines:
+        m = re.match(r"^\s*(\d+)[.):\-]\s*(.+)$", l)
+        keep.append(m.group(2).strip() if m else l)
+    if len(keep) != int(n_expected):
+        return "FAILED", keep, (f"expected {n_expected} line(s), parsed "
+                                f"{len(keep)} — positional beat mapping broken")
+    return "MEASURED", keep, f"{len(keep)} description(s)"
+
+
+def merge_beat_descriptions(beats, state, descriptions):
+    """Put the descriptions into each beat's `text`. PURE.
+
+    ABSENT AND FAILED SAY SO IN THE TEXT THE AGENT READS. Falling back to the
+    motion numbers alone would be byte-identical to the behaviour this replaces,
+    so a broken vision pass would be indistinguishable from a working one and
+    the regression would be invisible. The agent is told the sight is missing.
+    """
+    out = [dict(b) for b in (beats or [])]
+    if state == "MEASURED" and len(descriptions or []) == len(out):
+        for b, d in zip(out, descriptions):
+            b["vision"] = str(d)[:200]
+            b["text"] = f"{b.get('text', '')} · {str(d)[:200]}".strip(" ·")
+        return out
+    for b in out:
+        b["vision"] = None
+        b["text"] = (f"{b.get('text', '')} · [NO VISION: frame description "
+                     f"{state.lower()} — rule from motion and the request only]"
+                     ).strip(" ·")
+    return out
+
+
+def alpha_composite_filter(fps=30):
+    """The overlay filtergraph, as a PURE STRING, so a test can run the shipped one.
+
+    THE DEFECT THIS FIXES was one flag: `shortest=1`.
+
+        [1:v]fps=30,format=yuva444p[cap];[0:v][cap]overlay=0:0:shortest=1[outv]
+
+    `shortest=1` terminates the output when the SHORTEST input ends. The overlay
+    .mov is only as long as the material it carries, so any job whose overlay is
+    shorter than its video ended the VIDEO at the overlay's last frame — while
+    `-map 0:a?` carried the full-length audio through untouched. Round 43
+    delivered screen_recording as 9.267s of video against 30.960s of audio.
+
+    NOT SIMPLY DROPPING IT. overlay's default eof_action is `repeat`, which HOLDS
+    THE LAST OVERLAY FRAME for the rest of the video — a caption frozen on screen
+    for twenty seconds. That is a different defect with the same cause, and it
+    would have looked like a fix. `eof_action=pass` passes the main input through
+    once the overlay ends, which is the actual intent: overlay while it exists,
+    untouched picture afterwards.
+
+    The three options are worth naming because two of them are wrong here:
+        repeat  (default) hold the last overlay frame — freezes a caption
+        endall            end both streams — the truncation, by another name
+        pass              main input continues unchanged — correct
+    """
+    return (f"[1:v]fps={int(fps)},format=yuva444p[cap];"
+            f"[0:v][cap]overlay=0:0:eof_action=pass[outv]")
+
+
+_STREAM_LEN_TOL_FRAMES = 1.5      # 1.5 frames = 50ms at 30fps
+
+
+def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0):
+    """(state, detail) — does the VIDEO stream run as long as it should?
+
+    MODULE LEVEL AND PURE so a test can call it with the real numbers.
+
+    THE DEFECT, round 43. inspect() read `format.duration` and nothing else.
+    That is the CONTAINER duration, which the longest stream sets — the audio.
+    So a file whose video stream ended two thirds of the way through reported
+    its full length and passed every check:
+
+        screen_recording   video 9.267s / 278 frames   audio 30.960s
+                           output: 30.96s 1080x1920 audio=True   <- reported
+                           frames_actual=139 (ok=True)            <- passed
+
+    THREE of five fixtures were truncated (car_short 2.975s, car_mid 1.887s,
+    screen_recording 21.693s). I first reported four, which was wrong twice
+    over: motion is healthy because it ran NO overlay pass, and talking_head is
+    healthy because its overlay happened to span the full 20.27s exactly.
+
+    That correction sharpens the mechanism rather than softening it: the
+    composite sizes the output to the OVERLAY, so the defect appears precisely
+    when the overlay is SHORTER than the base — and is invisible whenever
+    captions happen to cover the whole video, which is every corpus before this
+    one. A user gets a video that stops while the audio keeps going, and every
+    number this pipeline printed said it was fine.
+
+    A STATE, NEVER A BOOL. Three ways this can go and only one of them is a
+    pass:
+        OK          video matches audio (and the kept duration, when known)
+        TRUNCATED   video is short — the defect
+        ABSENT      a duration could not be read, so nothing is known
+    ABSENT must never render as OK: a container that does not report a stream
+    duration is exactly where this hid in the first place.
+
+    Tolerance is 1.5 frames. Round 43's healthy fixtures differ by 0.004s and
+    0.020s; the broken ones by 1.393s, 2.975s and 21.693s. Nothing sits near
+    the line, which is what a tolerance should look like.
+    """
+    def _f(x):
+        try:
+            v = float(x)
+            return v if v > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    v, a, e = _f(video_s), _f(audio_s), _f(expected_s)
+    try:
+        tol = _STREAM_LEN_TOL_FRAMES / float(fps or 30.0)
+    except Exception:
+        tol = 0.05
+    if v is None:
+        return "ABSENT", ("video stream duration unreadable — the container "
+                          "duration is NOT a substitute, it is what hid this")
+    if a is None and e is None:
+        return "ABSENT", ("no audio duration and no expected duration — "
+                          "nothing to compare the video against")
+    parts = []
+    worst = 0.0
+    if a is not None:
+        d = a - v
+        parts.append(f"audio {a:.3f}s vs video {v:.3f}s (deficit {d:.3f}s)")
+        worst = max(worst, d)
+    if e is not None:
+        d = e - v
+        parts.append(f"kept {e:.3f}s vs video {v:.3f}s (deficit {d:.3f}s)")
+        worst = max(worst, d)
+    detail = "; ".join(parts) + f"; tolerance {tol:.3f}s"
+    return ("TRUNCATED" if worst > tol else "OK"), detail
+
+
+def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920):
+    """(filter, mode, crop_loss) to bring a source to the delivery geometry.
+
+    MODULE LEVEL AND PURE so a test can call it with real dimensions.
+
+    THE DEFECT THIS FIXES. build_cut trimmed and concatenated and NEVER
+    normalised geometry, so the delivered file was whatever the source happened
+    to be. Round 42, the first round on real footage, delivered `motion` at
+    540x960 and `car_short` at 720x1272 against a 1080x1920 contract. Seven
+    prior rounds could not see it because every synthetic fixture was ALREADY
+    1080x1920 — the check `(w, h) != (1080, 1920)` had simply never had a source
+    that could fail it. A user uploading sub-HD got sub-HD back.
+
+    THREE MODES, and the third is a REFRAME rather than a resize:
+
+      none          already the delivery geometry; emit no filter at all, so a
+                    conforming source is not re-encoded through a no-op scale.
+      scale         aspect within tolerance of the target — pure resize, and
+                    the crop is sub-pixel. 540x960 is EXACTLY 9:16; 720x1272 is
+                    0.5660 against 0.5625, which crops 6 pixels of 1272.
+      reframe_crop  the aspect genuinely differs, e.g. 3826x2160 landscape into
+                    1080x1920. Scale-to-COVER then centre-crop. This LOSES
+                    CONTENT off the sides and `crop_loss` says how much, so the
+                    loss is a reported number rather than an invisible choice.
+
+    Cover-and-crop, never pad: bars are a visible product decision and this
+    function is not the place to make one. But a landscape source losing 68% of
+    its width IS a taste call about what belongs in frame, which is why the
+    fraction is returned and ledgered instead of being swallowed.
+    """
+    try:
+        w, h = int(src_w), int(src_h)
+    except Exception:
+        return "", "unknown", None
+    if w <= 0 or h <= 0:
+        return "", "unknown", None
+    if (w, h) == (int(out_w), int(out_h)):
+        return "", "none", 0.0
+    src_ar, out_ar = w / h, float(out_w) / float(out_h)
+    # Scale-to-cover: whichever axis is proportionally short decides the scale,
+    # and the excess on the other axis is cropped centred.
+    if src_ar > out_ar:
+        kept_w = h * out_ar               # source pixels kept horizontally
+        loss = 1.0 - (kept_w / w)
+    else:
+        kept_h = w / out_ar
+        loss = 1.0 - (kept_h / h)
+    loss = max(0.0, round(loss, 4))
+    mode = "scale" if loss <= 0.02 else "reframe_crop"
+    filt = (f"scale={int(out_w)}:{int(out_h)}:force_original_aspect_ratio=increase,"
+            f"crop={int(out_w)}:{int(out_h)},setsar=1")
+    return filt, mode, loss
+
+
+def sfx_catalogue_name(name):
+    """The catalogue stem for whatever shape the agent sent.
+
+    MODULE LEVEL AND PURE so a test can call it — the same reason sfx_start_s
+    is out here, and the reason this bug shipped unseen while it was inline.
+
+    THE SHAPE WE PUBLISH MUST BE THE SHAPE WE ACCEPT. `_asset_inventory.json`
+    advertises sfx.files WITH extensions ('boom.mp3', 'money-ching.mp3') and the
+    membership test compares against splitext-stripped stems. The old inline
+    normalisation was
+
+        re.sub(r"[^A-Za-z0-9_-]", "", name)
+
+    which strips the DOT, so the name the agent was shown became 'boommp3' —
+    unmatchable by construction. Round 41 lost two of four ruled sfx that way,
+    with a correct-looking refusal and nothing to see in any component:
+
+        place_sfx failed: 'money-chingmp3' is not in the catalogue
+
+    The extension comes off FIRST, then the sanitiser. basename() precedes both
+    so a path cannot survive normalisation into a bare stem.
+    """
+    base = os.path.basename(str(name or ""))
+    stem = os.path.splitext(base)[0]
+    return re.sub(r"[^A-Za-z0-9_-]", "", stem)
+
+
 # ── WHY THERE IS NO ACOUSTIC PEAK-LANDING GATE ──────────────────────────────
 # I built one and it could not adjudicate. Measured on real catalogue sounds,
 # mixed two ways — attack APPLIED vs SKIPPED — with the peak read as the argmax
@@ -3125,6 +3556,39 @@ del _zt0, _zf0
 # Inventing one here would be a value production does not have, and the parity
 # cert would then be pinning a number to nothing.
 _STAGED_PUSH_FALLBACK_MS = 1800   # only when the words cannot be resolved
+
+# ── WHY THERE IS NO ZOOM GEOMETRY BAR, WITH THE NUMBERS ────────────────────
+# Recorded at module scope because this is where the next person will be tempted
+# to add one back, and both previous bars were fitted to whichever fixture was
+# nearest. Full arms in zoom_bar_populations.py.
+#
+#   population              intrinsic   real arms         passthroughs
+#   ZAC REAL talking_head     18.62     -3.89 .. +1.88   -19.86 .. -16.58
+#   v1 talking_head           26.60    -12.57 .. -4.38   -30.48
+#   v1 pet_video              29.79     -6.26 .. -2.30   -31.42
+#   v2-geometry talking_head   7.23     -3.54 .. +0.59   -20.93
+#   held-out mandelbrot       19.76     -4.02 .. -2.81   -15.73
+#
+# The ONLY window separating every real arm from every passthrough across all
+# five is (-15.73, -12.57) — 3.16 dB wide, midpoint -14.15, margin 1.58 either
+# side. The falsifier registered BEFORE the data required 2.0, so -14.15 is
+# 5/5 correct and NOT VALIDATED, and is not shipped.
+#
+# THE BAR THAT WAS SHIPPED WAS WRONG IN BOTH DIRECTIONS. -8.0 false-failed a
+# correctly applied FocusWindow on v1 talking_head at -12.57, AND missed a
+# passthrough on real 720p-upscaled footage at -7.64. Two opposite errors on
+# different sources from one constant.
+#
+# THE NORMALISER (delta + intrinsic) IS REFUTED across every reproducible
+# measurement of its own input (7.07-10.21 by sampling method): unseparable
+# below ~10.8, worse than the raw delta above it. Mechanism — v2-geometry's real
+# arms sit almost exactly where Zac's real footage sits, so the populations
+# BEHAVE identically while their intrinsics differ by 11 dB; adding intrinsic
+# drives apart two things that measured the same.
+_ZOOM_GEOMETRY_WINDOW_DB = (-15.73, -12.57)   # measured, five populations
+_ZOOM_GEOMETRY_BEST_BAR_DB = -14.15           # 5/5 correct, NOT shipped
+_ZOOM_GEOMETRY_MARGIN_DB = 1.58               # falsifier required >= 2.0
+_ZOOM_GEOMETRY_VALIDATED = False              # therefore UNMEASURED, never failed
 
 ZOOM_NATURAL_SCALE = {
     "SmoothPush":    1.22,
@@ -3829,11 +4293,18 @@ def render_remotion_batch(jobs, env=None, timeout=1800):
     # ABSENT, which is a binary predating the cache, NOT a cache miss: a missing
     # measurement must never render as a measured zero.
     _bc = re.search(r"^BUNDLE_CACHED ([01]) (\S+)", out, re.M)
+    # PUBLIC_SYNCED <n> — runtime-written public assets reconciled into a cached
+    # bundle's serve root. None means ABSENT (no cache hit, or a binary predating
+    # the sync), which is NOT the same as zero synced; a missing measurement must
+    # never render as a measured zero. This is the line that would have settled
+    # the zoom 404 in one round instead of six.
+    _ps = re.search(r"^PUBLIC_SYNCED (\d+)", out, re.M)
     res["_batch"] = {
         "returncode": r.returncode,
         "bundle_ms": int(_b.group(1)) if _b else None,
         "bundle_cached": (bool(int(_bc.group(1))) if _bc else None),
         "bundle_key": _bc.group(2) if _bc else None,
+        "public_synced": (int(_ps.group(1)) if _ps else None),
         "total_ms": int(_t.group(1)) if _t else None,
         "jobs": len(jobs),
         # THE WHOLE POINT, PRINTED: startup paid once across N jobs. A counter
@@ -5043,6 +5514,21 @@ def edit(source_key: str, brief: str,
             fail("no_audio_stream", "output has no audio stream")
         if (v.get("width"), v.get("height")) != (1080, 1920):
             fail("wrong_resolution", f"{v.get('width')}x{v.get('height')}")
+        # PER-STREAM DURATIONS, because the container's is the audio's. See
+        # stream_length_verdict: four of five round-43 fixtures shipped a video
+        # stream shorter than their audio and every printed number said 30.96s.
+        _kept = ((led.get("cut_coverage") or {}).get("kept_s"))
+        _sl_state, _sl_detail = stream_length_verdict(
+            v.get("duration"), a.get("duration") if a else None, _kept)
+        res["video_s"] = v.get("duration")
+        res["audio_s"] = a.get("duration") if a else None
+        res["stream_length"] = {"state": _sl_state, "detail": _sl_detail}
+        # PRINTED in the same commit that records it.
+        print(f"  STREAM LENGTH   : {_sl_state}  {_sl_detail}", flush=True)
+        if _sl_state != "OK":
+            # ABSENT FAILS TOO. An unreadable stream duration is the condition
+            # this defect lived in, so it is a failure to measure, not a pass.
+            fail("video_truncated", f"{_sl_state}: {_sl_detail}")
         # ── THE SPEECH CHECK ───────────────────────────────────────────────
         got = transcribe_words(out)
         if not words:
@@ -5237,7 +5723,29 @@ def edit(source_key: str, brief: str,
             parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS[v{i}]")
             parts.append(f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS[a{i}]")
         cat = "".join(f"[v{i}][a{i}]" for i in range(n))
-        parts.append(f"{cat}concat=n={n}:v=1:a=1[outv][outa]")
+        # NORMALISE TO THE DELIVERY GEOMETRY. Without this the concat output is
+        # the SOURCE's resolution and that is what gets delivered — round 42
+        # shipped 540x960 and 720x1272 against a 1080x1920 contract. [outv] stays
+        # the downstream name so nothing else has to know this happened.
+        _vs = (meta.get("streams") or [{}])
+        _v0 = next((_x for _x in _vs if _x.get("codec_type") == "video"), {})
+        _gfilt, _gmode, _gloss = geometry_normalise_filter(_v0.get("width"),
+                                                           _v0.get("height"))
+        if _gfilt:
+            parts.append(f"{cat}concat=n={n}:v=1:a=1[cv][outa]")
+            parts.append(f"[cv]{_gfilt}[outv]")
+        else:
+            parts.append(f"{cat}concat=n={n}:v=1:a=1[outv][outa]")
+        # PRINTED, not just ledgered. A reframe that drops 68% of a landscape
+        # source's width is a product decision and it must be visible in the log
+        # of the run that made it.
+        led["geometry_normalise"] = {
+            "src": [_v0.get("width"), _v0.get("height")],
+            "out": [1080, 1920], "mode": _gmode, "crop_loss": _gloss,
+        }
+        print(f"[geometry] {_v0.get('width')}x{_v0.get('height')} -> 1080x1920  "
+              f"mode={_gmode}"
+              + (f"  crop_loss={_gloss:.1%}" if _gloss else ""), flush=True)
         filt = ";".join(parts)
         with open("/work/filter.txt", "w") as fh:
             fh.write(filt)
@@ -6161,23 +6669,7 @@ def edit(source_key: str, brief: str,
                  "-i", _cc_before,
                  "-i", led["caption_mov"],
                  "-filter_complex",
-                 # eof_action=pass, NOT shortest, and NOT the default.
-                 #
-                 # shortest=1 ends the OUTPUT when the shortest input ends, and
-                 # the caption layer is shorter than the video whenever speech
-                 # does not run to the last frame. Round 43: screen_recording
-                 # delivered 9.267s of video against 30.960s of audio, and three
-                 # of five fixtures truncated. Every corpus before that one hid
-                 # it, because the defect appears precisely when the overlay is
-                 # SHORTER than the base.
-                 #
-                 # Dropping `shortest` alone is NOT the fix (Builder-1's finding
-                 # on the same defect in the production compositor): overlay's
-                 # default eof_action is REPEAT, which freezes the last caption
-                 # frame over the rest of the video. Same cause, different
-                 # defect, and a length check passes it happily.
-                 "[1:v]fps=30,format=yuva444p[cap];"
-                 "[0:v][cap]overlay=0:0:eof_action=pass[outv]",
+                 alpha_composite_filter(30),
                  "-map", "[outv]", "-map", "0:a?",
                  "-c:v", "libx264", "-crf", "18",
                  "-preset", "veryfast", "-c:a", "copy", _cco],
@@ -6407,8 +6899,18 @@ def edit(source_key: str, brief: str,
             # times. This is the whole reason render_remotion_batch exists.
             _zres = render_remotion_batch(_zoom_jobs, env=_SUBPROCESS_ENV,
                                           timeout=2400)
+            # seq + bundle_cached + public_synced, THE SAME FIELDS THE REEL
+            # RECORDS. This record had neither, and zoom_render was not in the
+            # REMOTION PROCS table at all, so when every zoom type 404'd on
+            # public/zsrc0.mp4 for six rounds there was no way to ask whether
+            # the render had reused a cached bundle. The instrument was blind
+            # exactly where the failure was.
+            led["_render_seq"] = led.get("_render_seq", 0) + 1
             led["zoom_render"] = {
+                "seq": led["_render_seq"],
                 "jobs": len(_zoom_jobs),
+                "bundle_cached": (_zres.get("_batch") or {}).get("bundle_cached"),
+                "public_synced": (_zres.get("_batch") or {}).get("public_synced"),
                 "bundle_ms": (_zres.get("_batch") or {}).get("bundle_ms"),
                 "segments": [dict(s2) for s2 in _zoom_segs],
             }
@@ -7066,8 +7568,25 @@ def edit(source_key: str, brief: str,
         led["execute_plan"] = {"steps": steps, "built": built, "ruled": ruled,
                                "ruled_but_not_built": gap, "skips": _skips,
                                "unbalanced": _unbalanced}
+        # THE SKIP REASON TRAVELS WITH THE VIOLATION.
+        #
+        # Round 40 lost a zoom to a 404 downloading its source (pipeline fault)
+        # and three cards to foreign props (agent fault) — the SAME NAME for two
+        # entirely different things, and the violation text carried neither. A
+        # reader gets one number and cannot tell which, which is the diagnosis
+        # gap that cost a bisect on card_props.
+        _why_by_fam = {}
+        for _sk in (_skips or []):
+            _f = _sk.get("family")
+            if _f and _f not in _why_by_fam and _sk.get("why"):
+                _why_by_fam[_f] = str(_sk["why"])[:160]
         for k, (rl, bl) in gap.items():
-            fail("ruled_not_built", f"{k}: ruled {rl}, built {bl}")
+            _why = _why_by_fam.get(k)
+            fail("ruled_not_built",
+                 f"{k}: ruled {rl}, built {bl}"
+                 + (f" — {_why}" if _why else
+                    " — NO SKIP REASON RECORDED, so why it was dropped is"
+                    " unknown; that absence is itself the thing to fix"))
         # A FAMILY THE SPEC ASKED FOR THAT BUILT ZERO IS A FAILURE, not a taste
         # call. "Clean and professional. Few cuts, SUBTLE OVERLAYS ONLY, no
         # sound effects" produced zero overlays — and "subtle" means fewer, not
@@ -7231,7 +7750,7 @@ def edit(source_key: str, brief: str,
         sound without it puts the hit in the wrong place, audibly, and nothing
         errors. Making the agent do the subtraction is how it gets skipped.
         """
-        nm = re.sub(r"[^A-Za-z0-9_-]", "", str(name or ""))
+        nm = sfx_catalogue_name(name)
         try:
             inv = (json.load(open("/assets/inventory.json")) or {}).get("sfx") or {}
         except Exception as _e:
@@ -7383,10 +7902,25 @@ def edit(source_key: str, brief: str,
                      for w in words if _NUMWORD.match(str(w["w"]).strip(".,!?"))]
     led["number_beats"] = _number_beats
     _tb0 = time.time()
+    # SOURCE DURATION, HOISTED ABOVE THE BRANCH — ONE definition for both paths.
+    #
+    # It used to be assigned INSIDE the visual branch, and cover_unnarrated_edges
+    # was then added to the TRANSCRIPT branch using it. pyflakes cannot see that:
+    # the name IS bound somewhere in the function, so it is a legal local, and
+    # every AST check I wrote confirmed the call existed and its result was
+    # bound — none of them could ask whether the ARGUMENTS were in scope on the
+    # branch doing the calling. Round 43's talking_head died on
+    # `UnboundLocalError: cannot access local variable '_vdur'` after the round
+    # had launched.
+    #
+    # Hoisting is the structural fix rather than a second assignment: with one
+    # definition dominating both branches there is no scope question left to get
+    # wrong. Fourth instance of *scope is not text* in this repo, and the first
+    # one I authored.
+    _vdur = float(meta.get("format", {}).get("duration") or 0)
     if _beat_source == "visual":
-        # Duration from the probe we already have; shot changes are best-effort
-        # and an empty list simply means motion is the only boundary source.
-        _vdur = float(meta.get("format", {}).get("duration") or 0)
+        # shot changes are best-effort and an empty list simply means motion is
+        # the only boundary source.
         _vcurve = []
         try:
             import moodreel_editor as _mre_c
@@ -7435,6 +7969,17 @@ def edit(source_key: str, brief: str,
                 f"{_vdur:.1f}s source — the extractor is broken, not the video.")
     else:
         _beats = segment_beats(words)
+        # THE UN-NARRATED EDGES ARE CONTENT, and a stretch that is not a beat
+        # can never be kept. Without this, car_short's 10.0s delivered 0.975s
+        # because two incidental words were the only thing beats covered.
+        _pre_n = len(_beats)
+        _beats = cover_unnarrated_edges(_beats, _vdur)
+        if len(_beats) != _pre_n:
+            _cov = sum(float(_b["t_end"]) - float(_b["t_start"]) for _b in _beats)
+            print(f"[beats] {_pre_n} transcript beat(s); added "
+                  f"{len(_beats) - _pre_n} un-narrated edge beat(s) — coverage now "
+                  f"{_cov:.2f}s of {_vdur:.2f}s", flush=True)
+            led["unnarrated_edges_added"] = len(_beats) - _pre_n
     _mark(led, "beats", _tb0)
     _numeric_ts = {b["t"] for b in _number_beats}
     for _b in _beats:
@@ -9159,11 +9704,42 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         # printed -8.67s — a negative remainder is arithmetic saying the model
         # is wrong, not that time went missing. Only top-level intervals are
         # subtracted; build_* stay in the table as the breakdown of that time.
-        _NESTED = ("build_cut", "build_overlays", "build_zoom", "build_reel",
-                   "build_sfx", "audio_extract")
-        _top_level = sum(v for k, v in _named.items() if k not in _NESTED)
+        # NESTED STAGES ARE DERIVED BY PREFIX, NOT LISTED BY HAND.
+        #
+        # The hand-kept tuple rotted the moment the port added stages. It named
+        # six; the port introduced build_captions, composite_captions,
+        # build_transitions and build_reel_paint, none of them in it. All four
+        # were then counted BOTH as top-level and inside execute_plan, and the
+        # remainder printed -79.82s — which is almost exactly
+        # build_captions (76.32) + composite_captions (6.06).
+        #
+        # The comment above this once recorded fixing a -8.67s remainder with
+        # that same list. It came back bigger, because a list of what nests is a
+        # list somebody has to remember to update, and the whole point of the
+        # table is to show work nobody remembered.
+        _NESTED_PREFIXES = ("build_", "composite_")
+        # Nested stages whose names do not carry a prefix. This set may still go
+        # stale — which is exactly what the guard below is for.
+        _NESTED_EXTRA = ("audio_extract",)
+        _top_level = sum(v for k, v in _named.items()
+                         if not k.startswith(_NESTED_PREFIXES)
+                         and k not in _NESTED_EXTRA)
         _un = _tot - _top_level - sum(_tools.values())
-        print(f"     {'(unattributed)':18} {_un:7.2f}s  {100*_un/_tot:5.1f}%")
+        if _un < 0:
+            # LOUD, NOT PRINTED AS A NUMBER. A negative remainder is arithmetic
+            # saying the model of what nests is WRONG — time cannot go missing
+            # in the negative direction. Printing it as a value invites reading
+            # a share off a table that does not add up, which is how -79.82s sat
+            # in a decomposition that was quoted as 66.4% render.
+            _sus = sorted((k for k in _named
+                           if k.startswith(_NESTED_PREFIXES) or k in _NESTED_EXTRA),
+                          key=lambda k: -_named[k])[:4]
+            print(f"     {'(unattributed)':18} UNACCOUNTABLE — the nesting model is "
+                  f"wrong by {abs(_un):.2f}s")
+            print(f"        every share above is SUSPECT. Double-counting "
+                  f"candidates: {_sus}")
+        else:
+            print(f"     {'(unattributed)':18} {_un:7.2f}s  {100*_un/_tot:5.1f}%")
     else:
         # LOUD. An empty table means the marks did not run, not that the run had
         # no stages — and a silently absent instrument is how this block was
@@ -9322,7 +9898,11 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # cannot be used to infer sequence, so the sequence is now recorded at the
     # call site and printed.
     _procs = []
-    for _label, _key in (("reel", "reel_render"), ("captions", "caption_render")):
+    # EVERY REMOTION PROCESS, not the two that happened to be wired. zoom and
+    # transition were absent, which is why a six-round zoom outage in the
+    # bundler could not be read off the table built to show bundler behaviour.
+    for _label, _key in (("reel", "reel_render"), ("captions", "caption_render"),
+                         ("zoom", "zoom_render"), ("transition", "transition_render")):
         _d = (r.get("ledger") or {}).get(_key)
         if _d and _d.get("bundle_ms") is not None:
             _procs.append((_label, _d))
@@ -9336,9 +9916,12 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             _cach = _d.get("bundle_cached")
             _cs = ("CACHE HIT" if _cach is True else
                    "bundled" if _cach is False else "UNKNOWN (no BUNDLE_CACHED line)")
+            _psn = _d.get("public_synced")
             print(f"     #{_d.get('seq') or '?'} {_label:10} "
                   f"bundle {(_d.get('bundle_ms') or 0)/1000:5.1f}s "
-                  f"paint {(_d.get('paint_ms') or 0)/1000:6.1f}s  {_cs}")
+                  f"paint {(_d.get('paint_ms') or 0)/1000:6.1f}s  {_cs}"
+                  + (f"  public_synced={_psn}" if _psn is not None
+                     else "  public_synced=ABSENT"))
 
     _eff = (r.get("ledger") or {}).get("placement_effects") or []
     if _eff:

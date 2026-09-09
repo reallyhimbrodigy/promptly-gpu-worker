@@ -118,7 +118,12 @@ check("out_of_scope families are excluded from the scoped set",
 
 # ── 6. THE LINE, AND A READER THAT OWNS NO VOCABULARY ──────────────────────
 check("the RATE REGIMES line is emitted", "RATE REGIMES    : " in src)
-runner = pathlib.Path(__file__).with_name("run_round.sh").read_text()
+# THE COLLECTOR NOW LIVES IN ONE PLACE. This read run_round.sh, which
+# carried a 113-line inline COPY of collect_round.py; the copy is gone, so
+# reading the runner tested a scorer that no longer exists there. Pinning a
+# check to the duplicate rather than the real thing is how both copies came
+# to resolve fixtures from a hardcoded v1 tuple with every smoke green.
+runner = pathlib.Path(__file__).with_name("collect_round.py").read_text()
 check("the collector parses that line", "RATE REGIMES" in runner)
 code = "\n".join(l for l in runner.split("\n") if not l.strip().startswith("#"))
 for fam in ("zoom", "sfx", "card"):
