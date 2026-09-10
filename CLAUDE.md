@@ -378,7 +378,13 @@ The shape has four recurring costumes:
    `0/0, exit 1`. The static matcher and the executed proof disagreed about what
    the rule was, and the proof was correct.
 
-3. **A MEASUREMENT OF THE WRONG THING.** An observable computed on the wrong
+3. **A MEASUREMENT OF THE WRONG THING.** **FOUR TIMES TODAY THE MEASUREMENT WAS A
+   PIPE'S EXIT CODE.** `cmd | head` and `cmd | tail` report the STATUS OF head
+   AND tail, not of the command. Two RED-proofs printed `exit=0` while the check
+   had failed; a suite run through a nonexistent `timeout` reported 163/163 FAIL
+   that meant nothing; and the fourth was an agent reading `| tail -14`'s status
+   WHILE AUDITING ANOTHER AGENT'S RIGOUR. Pipe for the human-readable output,
+   then re-run bare for the status. An observable computed on the wrong
    side of a process boundary. Two numbers with the same name counting different
    things (visual cuts vs beats-ruled-cut). A judgement wearing a measurement's
    clothes (model-annotated rates printed as fact). A truncated list printed as
