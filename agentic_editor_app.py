@@ -33,6 +33,7 @@ NEVER GET BUILT:
 
   ./run_modal.sh agentic_editor_app.py --source <s3-key> --brief "..."
 """
+import hashlib
 import json
 import os
 import re
@@ -5853,6 +5854,110 @@ def _verdict_fields():
     return ()
 
 
+# ── THE DURABLE PLAN ────────────────────────────────────────────────────────
+#
+# `execute_plan` takes NO ARGUMENTS: it runs from the verdicts in harness state.
+# So the plan already exists and is already the right size — it needs a durable
+# address and somewhere to be written, not inventing.
+#
+# WHY BEAT INDEX CANNOT BE THE ADDRESS. Verdicts are keyed by beat index, and
+# indices are derived per run — round 48 moved a fixture 8 -> 9 when subdivision
+# changed. An index is a position in a list that is rebuilt every time. SOURCE
+# TIME IS NOT: re-segmentation moves indices without moving the moment an editor
+# ruled on, and a changed cut moves OUTPUT time without moving source time. A
+# re-edit MAY change the cut (ruled 2026-09-09), so anchoring to output seconds
+# is not merely worse, it is wrong.
+#
+# THE ID IS DERIVED FROM THE ANCHOR, not bolted on beside it. An independently
+# assigned id is a second thing to keep in sync, and this repo has paid for
+# every one of those.
+
+
+def plan_anchor_id(src_t0, src_t1, family, content=""):
+    """Stable address for one ruling: source span + family + content. PURE."""
+    _key = "%.3f|%.3f|%s|%s" % (float(src_t0), float(src_t1),
+                                str(family), str(content or ""))
+    return hashlib.sha1(_key.encode("utf-8")).hexdigest()[:12]
+
+
+PLAN_ORPHAN, PLAN_UNPLACEABLE = "ORPHAN_VERDICT", "UNPLACEABLE"
+
+
+def durable_plan(beats, verdicts):
+    """(plan, problems) — verdicts re-keyed from beat INDEX to SOURCE SPAN.
+
+    A verdict whose beat index is not in `beats` is an ORPHAN and is REPORTED,
+    never dropped. Dropping it would silently shrink a user's edit on reload,
+    which is the failure this whole feature exists to prevent.
+    """
+    _by_i = {b.get("i"): b for b in (beats or []) if isinstance(b, dict)}
+    plan, problems = [], []
+    for v in (verdicts or []):
+        if not isinstance(v, dict):
+            continue
+        _b = _by_i.get(v.get("beat"))
+        if _b is None:
+            problems.append({"state": PLAN_ORPHAN, "beat": v.get("beat"),
+                             "why": "verdict names a beat index the beat list "
+                                    "does not contain"})
+            continue
+        _t0, _t1 = _b.get("t_start"), _b.get("t_end")
+        if _t0 is None or _t1 is None:
+            problems.append({"state": PLAN_ORPHAN, "beat": v.get("beat"),
+                             "why": "beat carries no source span to anchor to"})
+            continue
+        _fam = ",".join(sorted(v.get("treatment") or [])) or "none"
+        _content = str(v.get("text_content") or v.get("card_hero") or "")
+        _e = {k: v.get(k) for k in VERDICT_FIELDS if k != "beat"}
+        _e.update({"src_t0": round(float(_t0), 3),
+                   "src_t1": round(float(_t1), 3),
+                   "id": plan_anchor_id(_t0, _t1, _fam, _content)})
+        plan.append(_e)
+    return plan, problems
+
+
+def plan_onto_beats(plan, beats, min_overlap=0.5):
+    """(verdicts, problems) — re-map a persisted plan onto a FRESH beat list.
+
+    The load half. Each entry is placed on the beat it overlaps MOST, and only
+    when that overlap covers at least `min_overlap` of the entry's own span.
+
+    AN ENTRY THAT PLACES NOWHERE IS UNPLACEABLE AND IS REPORTED — not dropped,
+    and NOT forced onto the nearest beat. A ruling silently moved to a different
+    moment is worse than one the user is told could not be carried.
+    """
+    verdicts, problems = [], []
+    _bs = [b for b in (beats or []) if isinstance(b, dict)
+           and b.get("t_start") is not None and b.get("t_end") is not None]
+    for e in (plan or []):
+        if not isinstance(e, dict):
+            continue
+        _t0, _t1 = e.get("src_t0"), e.get("src_t1")
+        if _t0 is None or _t1 is None:
+            problems.append({"state": PLAN_UNPLACEABLE, "id": e.get("id"),
+                             "why": "plan entry carries no source span"})
+            continue
+        _span = max(1e-9, float(_t1) - float(_t0))
+        _best, _cov = None, 0.0
+        for b in _bs:
+            _ov = (min(float(_t1), float(b["t_end"]))
+                   - max(float(_t0), float(b["t_start"])))
+            if _ov > _cov:
+                _best, _cov = b, _ov
+        if _best is None or (_cov / _span) < float(min_overlap):
+            problems.append({"state": PLAN_UNPLACEABLE, "id": e.get("id"),
+                             "src_t0": _t0, "src_t1": _t1,
+                             "why": "no beat overlaps this span by at least "
+                                    "%.0f%% (best %.0f%%)"
+                                    % (100.0 * float(min_overlap),
+                                       100.0 * (_cov / _span))})
+            continue
+        _v = {k: e.get(k) for k in VERDICT_FIELDS if k != "beat"}
+        _v["beat"] = _best.get("i")
+        verdicts.append(_v)
+    return verdicts, problems
+
+
 VERDICT_FIELDS = _verdict_fields()
 assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
     "the verdict schema could not be read, so the boundary would store nothing")
@@ -10588,7 +10693,27 @@ def edit(source_key: str, brief: str,
         fail("knowledge_never_read",
              "use_knowledge=True but the agent called read_knowledge zero times "
              "— this arm is not a knowledge arm and must not be compared as one")
+    # ── EMIT THE DURABLE PLAN ───────────────────────────────────────────────
+    # Written from the verdicts AS THEY FINALLY STAND. This is the ONLY artefact
+    # besides out.mp4 that has to outlive the container, and it is emitted
+    # unconditionally so an early finish still carries whatever was ruled.
+    # PROBLEMS ARE LEDGERED AND PRINTED: an orphan verdict is a ruling a re-edit
+    # would silently lose.
+    _plan, _plan_problems = durable_plan(led.get("beats") or [],
+                                         led.get("beat_verdicts") or [])
+    led["plan"] = _plan
+    led["plan_problems"] = _plan_problems
+    print(f"  PLAN            : {len(_plan)} entr(ies) keyed by source span"
+          + (f"   <-- {len(_plan_problems)} UNADDRESSABLE: "
+             f"{_plan_problems[0].get('why')}" if _plan_problems else
+             "   every ruling addressable"), flush=True)
+    if _plan_problems:
+        fail("plan_unaddressable",
+             f"{len(_plan_problems)} of {len(_plan) + len(_plan_problems)} "
+             f"ruling(s) could not be keyed to a source span — a re-edit would "
+             f"lose them silently")
     return _result(ok=bool(final.get("exists")), wall_s=round(time.time() - t0, 1),
+                   plan=_plan, plan_problems=_plan_problems,
                    download_s=dl_s, transcript_s=transcript_s,
                    source_words=len(words), final=final, ledger=led,
                    output_key=key, s3_key=key,
