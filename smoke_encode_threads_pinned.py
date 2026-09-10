@@ -130,6 +130,17 @@ check("every libx264 encode pins its thread count", not _unpinned,
         "same plan encodes differently on different hosts. Byte-identity is the "
         "cert bar and re-edit's whole proof rests on it.")
 
+# NEVER 0. handler.py's comment is explicit — "NEVER 0 (validate_deploy asserts
+# it)" — because threads=0 IS x264-auto, the exact defect the pin exists to
+# close. Without this leg the check passes on a tree pinned to auto: every site
+# carries `-x264-params threads=0`, the matcher is satisfied, and the output is
+# machine-dependent again. A pin whose value re-enables the defect is not a pin.
+_m = re.search(r"_X264_ENCODE_THREADS\s*=\s*(-?\d+)", src)
+check("the pinned thread count is a POSITIVE integer, never 0 (= auto)",
+      bool(_m) and int(_m.group(1)) > 0,
+      f"_X264_ENCODE_THREADS = {_m.group(1) if _m else 'NOT FOUND'} — 0 is "
+      f"x264-auto, which is the defect, and a negative value is not a count")
+
 check("the pin uses x264-params, not ffmpeg's -threads",
       "-threads" not in src or "x264-params" in src,
       "handler.py's comment is explicit that the deploy gate requires "

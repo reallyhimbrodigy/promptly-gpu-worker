@@ -26,10 +26,19 @@ _INJECTS = None
 # that no longer exists: an anchor that stops matching is the first way a
 # mutation stops mutating, and a fix is exactly where it happens.
 MUTATIONS = [
+    # The argv pin sequence appears FIVE times — identical by construction —
+    # so the anchor guard refused it, correctly. Anchored instead on the one
+    # site that is unique: build_overlays' run_this TEMPLATE.
     ("a real pin is removed from an encode (APP)",
-     '"-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", ',
-     '"-c:v", "libx264", "-crf", "18", ',
+     'f"-crf 18 -x264-params threads={_X264_ENCODE_THREADS} "',
+     'f"-crf 18 "',
      "every libx264 encode pins its thread count", _INJECTS),
+    # THE PIN SET TO AUTO. threads=0 IS x264-auto, so a tree "pinned" to 0 has
+    # the defect with the flag present — the matcher alone cannot tell.
+    ("the pinned value is set to 0, which is auto (APP)",
+     '_X264_ENCODE_THREADS = 48',
+     '_X264_ENCODE_THREADS = 0',
+     "POSITIVE integer, never 0", _INJECTS),
     ("the scan stops finding encode sites (CHECK)",
      '"libx264" in _n.value',
      '"libx264_NOPE" in _n.value',
