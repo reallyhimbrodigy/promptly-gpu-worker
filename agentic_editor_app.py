@@ -6015,6 +6015,71 @@ def plan_batch(n_sources, balance, per_job=CREDITS_PER_JOB,
             % (_bal, _afford, _n, _per, (_n - _afford) * _per))
 
 
+CUTAWAY_REF_OK, CUTAWAY_REF_BAD = "OK", "BAD_REF"
+
+
+def cutaway_source_ref(ref, sources, durations):
+    """(state, source_index, t, why) — resolve a cutaway's address.
+
+    WHY THE ADDRESS CHANGES SHAPE. With ONE source a cutaway is a timestamp:
+    `cutaway_from_s: 12.4` means 12.4s into the only footage there is. With TEN
+    it is ambiguous, and an ambiguous address resolved by a default is the
+    silent-wrong-moment class — the picture cuts to the right second of the
+    wrong clip and nothing reports it.
+
+    So a multi-source cutaway names BOTH: `{"source": 3, "t": 12.4}`. A bare
+    number stays legal and means source 0, which keeps every single-source
+    ruling working unchanged — but ONLY when there is one source. With several,
+    a bare number is REFUSED rather than defaulted, because defaulting is
+    exactly the guess this exists to prevent.
+
+    BOUNDS ARE PER SOURCE. Clip 3 being 40s long says nothing about clip 7, and
+    a timestamp valid in one is routinely past the end of another. The duration
+    checked is the duration OF THE NAMED SOURCE.
+
+    PURE, so a check drives the shipped rule rather than a copy.
+    """
+    _n = len(sources or [])
+    if _n <= 0:
+        return (CUTAWAY_REF_BAD, None, None, "no sources")
+    if isinstance(ref, (int, float)) and not isinstance(ref, bool):
+        if _n > 1:
+            return (CUTAWAY_REF_BAD, None, None,
+                    "a bare timestamp is ambiguous across %d sources — name "
+                    "which one, as {\"source\": i, \"t\": seconds}" % _n)
+        _idx, _t = 0, float(ref)
+    elif isinstance(ref, dict):
+        _idx, _t = ref.get("source"), ref.get("t")
+        if _idx is None or _t is None:
+            return (CUTAWAY_REF_BAD, None, None,
+                    "a cutaway ref needs BOTH source and t; got %r" % (ref,))
+        try:
+            _idx, _t = int(_idx), float(_t)
+        except (TypeError, ValueError):
+            return (CUTAWAY_REF_BAD, None, None,
+                    "source must be an index and t a number of seconds")
+    else:
+        return (CUTAWAY_REF_BAD, None, None,
+                "a cutaway ref is a number or {source, t}; got %s"
+                % type(ref).__name__)
+    if not (0 <= _idx < _n):
+        return (CUTAWAY_REF_BAD, None, None,
+                "source %d does not exist (%d uploaded)" % (_idx, _n))
+    _dur = (durations or {}).get(_idx) if isinstance(durations, dict) \
+        else (durations[_idx] if durations and _idx < len(durations) else None)
+    if _dur is None:
+        # UNKNOWN LENGTH IS NOT ZERO LENGTH. Refusing here is the same rule as
+        # source_duration_state: a bound we could not read must not become a
+        # bound of 0, which would reject every timestamp in the clip.
+        return (CUTAWAY_REF_BAD, None, None,
+                "source %d has no measured duration, so t=%.2f cannot be "
+                "bounded" % (_idx, _t))
+    if _t < 0 or _t >= float(_dur):
+        return (CUTAWAY_REF_BAD, None, None,
+                "t=%.2f is outside source %d (0-%.2fs)" % (_t, _idx, float(_dur)))
+    return (CUTAWAY_REF_OK, _idx, _t, "source %d at %.2fs" % (_idx, _t))
+
+
 def batch_dispatch_plan(sources, balance, per_job=CREDITS_PER_JOB,
                         max_sources=MULTI_UPLOAD_MAX):
     """(verdict, jobs, held, why) — ten sources become TEN INDEPENDENT JOBS.
