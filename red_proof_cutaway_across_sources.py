@@ -22,11 +22,15 @@ MUTATIONS = [
      '''    _dur = (durations or {}).get(0) if isinstance(durations, dict) \\
         else (durations[0] if durations else None)''',
      "SAME 12.4s is OUTSIDE source 1", _INJECTS),
+    # VACUOUS ON THE FIRST WRITING: `if False: _dur = 0.0` before the real
+    # branch is a no-op, so the mutant changed bytes and could not change
+    # behaviour. The mutation has to REPLACE the refusal with the zero bound,
+    # which is what the defect would actually look like.
     ("an unknown duration becomes a bound of ZERO",
-     '''    if _dur is None:''',
-     '''    if False:
-        _dur = 0.0
-    if _dur is None:''',
+     '''        return (CUTAWAY_REF_BAD, None, None,
+                "source %d has no measured duration, so t=%.2f cannot be "
+                "bounded" % (_idx, _t))''',
+     '''        _dur = 0.0''',
      "REFUSES rather than bounding at 0", _INJECTS),
     ("True is accepted as a timestamp",
      "    if isinstance(ref, (int, float)) and not isinstance(ref, bool):",
