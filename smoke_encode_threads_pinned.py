@@ -71,7 +71,15 @@ check(f"the scan finds libx264 encode sites ({len(_enc)}) — non-vacuity",
 # An encode is PINNED when the same command carries an explicit x264 thread
 # count. Accepted forms: `-x264-params threads=N` in one string, or the flag and
 # its value as adjacent argv constants.
-_PIN = re.compile(r"x264-params[^\"']*threads=\d+")
+# BOTH SPELLINGS, and a value that may be a constant. The first version was
+# `x264-params[^"\']*threads=\d+`, which cannot cross a quote — so it recognised
+# only the shell-string form and reported 10 of 12 real pins as missing. An
+# argv-list encode spells it `"-x264-params", f"threads={_X264_ENCODE_THREADS}"`:
+# quotes in between, and the value is a NAME rather than digits. A matcher tight
+# enough to reject a correct implementation is not a check, which is the twin
+# rule from yesterday, arriving in the check I wrote to enforce this one.
+_PIN = re.compile(r"x264-params.{0,60}?threads=(?:\d+|\{?_X264_ENCODE_THREADS\}?)",
+                  re.S)
 _unpinned = []
 for _ln, _val in _enc:
     # The command may be split across adjacent constants, so look at a window of
@@ -99,23 +107,21 @@ for _ln, _val in _enc:
 #     DELIVERED or feeding it   -> pin required
 #     analysed and discarded    -> exempt, with the reason written down
 #
-# OWNER: Builder-2. DATE OPENED: 2026-09-09. Blocked on: round 49 running, and
-# agentic_editor_app.py is a mounted path.
-_BASELINE_UNPINNED = 13
+# QUARANTINE CLOSED 2026-09-10, the moment round 49 collected. Opened
+# 2026-09-09, owner Builder-2, blocked on the round being live. The debt is PAID
+# — all 13 pinned — so the baseline drops to ZERO and this check now enforces
+# the property outright rather than holding a line. A quarantine that outlives
+# its fix becomes the chronic red it was meant to prevent.
+_BASELINE_UNPINNED = 0
 
-check(f"the unpinned set has not grown beyond the {_BASELINE_UNPINNED} known "
-      f"sites (quarantined 2026-09-09, owner Builder-2)",
+check(f"no libx264 encode is unpinned (quarantine opened 2026-09-09, "
+      f"CLOSED 2026-09-10)",
       len(_unpinned) <= _BASELINE_UNPINNED,
       f"{len(_unpinned)} unpinned, baseline {_BASELINE_UNPINNED} — a NEW "
       f"unpinned encode landed. Every added libx264 site pins threads unless "
       f"its bytes are analysed and discarded, and that exemption is written "
       f"down at the site.")
-check("the known-unpinned set is reported, not hidden", True,
-      f"{len(_unpinned)} of {len(_enc)} libx264 sites unpinned — OPEN DEFECT, "
-      f"see the header. Not a pass; a stated debt.")
-
-check("NOT YET TRUE, tracked: every libx264 encode pins its thread count",
-      not _unpinned,
+check("every libx264 encode pins its thread count", not _unpinned,
       f"{len(_unpinned)} of {len(_enc)} unpinned:\n         "
       + "\n         ".join(_unpinned[:14])
       + (f"\n         ... showing {min(14, len(_unpinned))} of "
@@ -130,20 +136,15 @@ check("the pin uses x264-params, not ffmpeg's -threads",
       "`-x264-params threads=N`, not ffmpeg's -threads, which does something "
       "else")
 
-# The quarantined leg is reported but does not fail the run, and it is named
-# in the summary either way so it cannot be forgotten. Everything else fails.
-_open_debt = [f for f in fails if f.startswith("NOT YET TRUE")]
-fails = [f for f in fails if not f.startswith("NOT YET TRUE")]
-
 print()
-for _d in _open_debt:
-    print("  OPEN DEBT: " + _d.split("  :: ")[0])
 if fails:
     print("ENCODE-THREADS-PINNED: FAIL")
     for _f in fails:
         print("  - " + _f)
     sys.exit(1)
-print(f"ENCODE-THREADS-PINNED: PASS — {len(_enc)} libx264 site(s), "
-      f"{len(_unpinned)} unpinned and QUARANTINED at baseline "
-      f"{_BASELINE_UNPINNED} (owner Builder-2, opened 2026-09-09). "
-      f"A fourteenth fails this check.")
+# READ THE VALUE FROM THE APP rather than printing a literal: a summary that
+# states a number it did not read is the class this repo files under "a
+# measurement of the wrong thing".
+_m = re.search(r"_X264_ENCODE_THREADS\s*=\s*(\d+)", src)
+print(f"ENCODE-THREADS-PINNED: PASS — {len(_enc)} libx264 site(s), all pinned at "
+      f"threads={_m.group(1) if _m else 'UNREAD'}. Quarantine closed 2026-09-10.")

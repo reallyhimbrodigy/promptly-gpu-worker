@@ -19,12 +19,18 @@ import tempfile
 SMOKE = pathlib.Path("smoke_encode_threads_pinned.py").resolve()
 _INJECTS = None
 
+# THE MUTATIONS MOVED WHEN THE QUARANTINE CLOSED. They used to shift
+# _BASELINE_UNPINNED, which tested a line being held. The check now enforces the
+# PROPERTY — zero unpinned — so the mutation that matters is REMOVING A REAL PIN
+# from the app. Re-anchoring rather than leaving mutations aimed at a constant
+# that no longer exists: an anchor that stops matching is the first way a
+# mutation stops mutating, and a fix is exactly where it happens.
 MUTATIONS = [
-    ("a FOURTEENTH unpinned libx264 encode lands",
-     '_BASELINE_UNPINNED = 13',
-     '_BASELINE_UNPINNED = 12',
-     "unpinned set has not grown", _INJECTS),
-    ("the scan stops finding encode sites",
+    ("a real pin is removed from an encode (APP)",
+     '"-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", ',
+     '"-c:v", "libx264", "-crf", "18", ',
+     "every libx264 encode pins its thread count", _INJECTS),
+    ("the scan stops finding encode sites (CHECK)",
      '"libx264" in _n.value',
      '"libx264_NOPE" in _n.value',
      "non-vacuity", _INJECTS),
@@ -62,7 +68,9 @@ try:
 
     red, harness = 0, []
     for label, old, new, expect, precond in MUTATIONS:
-        txt = TARGET.read_text()
+        _tgt = (pathlib.Path(_wt) / "agentic_editor_app.py") if "(APP)" in label \
+            else TARGET
+        txt = _tgt.read_text()
         n = txt.count(old)
         if n != 1:
             harness.append(f"{label}: anchor {n}x")
@@ -76,9 +84,10 @@ try:
             print(f"  HARNESS FAILURE  {label}  :: mutant does not parse "
                   f"({_se.msg}) — it never ran")
             continue
-        TARGET.write_text(_mutant)
+        _restore = _tgt.read_text()
+        _tgt.write_text(_mutant)
         mrc, mout = run(_wt)
-        TARGET.write_text(ORIG)
+        _tgt.write_text(_restore)
         if mrc == 0:
             print(f"  NOT RED          {label}  :: the mutant PASSED")
             harness.append(f"{label}: mutant passed")

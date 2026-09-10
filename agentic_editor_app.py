@@ -3417,6 +3417,33 @@ def fps_verdict(r_frame_rate, nb_frames, duration_s, vfr_tol=0.03):
             else "VFR")
 
 
+# ── ENCODE DETERMINISM ──────────────────────────────────────────────────────
+# PIN THE X264 THREAD COUNT. x264 auto (threads=0) picks ~min(cores*1.5, 128),
+# so the OUTPUT BYTES depend on the MACHINE's core count rather than the config.
+# handler.py pinned this on 2026-08-01 after render_burst at cpu=48 diverged
+# byte-for-byte from cpu=16 production, and cert_encode_threads_bench measured
+# 48 as FASTER than auto on both boxes AND byte-deterministic AND byte-identical
+# across cpu.
+#
+# THE FIX NEVER REACHED THIS PATH until 2026-09-10: thirteen libx264
+# invocations here, none pinned, in containers where os.cpu_count() reports the
+# HOST's cores (24/28/48 for arms requesting 8/16/32). Two runs of an IDENTICAL
+# PLAN could encode differently and nothing would report it — the video looks
+# right, every gate passes, and only a byte comparison sees it. No agentic
+# output was reproducible.
+#
+# The form is `-x264-params threads=N`, NOT ffmpeg's `-threads`, because the
+# deploy gate's byte-identity check recognises this spelling. NEVER 0.
+#
+# ALL 13 SITES TAKE IT, confirmed by tracing rather than on the provisional
+# ruling: the execute_plan chain is cut.mp4 -> overlaid -> captioned -> zoomed
+# -> transitioned -> carded -> _sout, each stage reading `cur` and writing the
+# next, and the two `-an` extracts feed Remotion compositions whose pixels land
+# in the reel. There is no analysed-and-discarded proxy in this path, so nothing
+# here takes handler.py's Gemini-proxy exemption.
+_X264_ENCODE_THREADS = 48
+
+
 SRC_DUR_MEASURED, SRC_DUR_ABSENT, SRC_DUR_FAILED = "MEASURED", "ABSENT", "FAILED"
 
 
@@ -6704,12 +6731,12 @@ def edit(source_key: str, brief: str,
             "captions_srt": "/work/captions.srt",
             "run_this": ("cd /work && filt=$(cat filter.txt) && ffmpeg -y -i source.mp4 "
                          "-filter_complex \"$filt\" -map '[outv]' -map '[outa]' "
-                         "-c:v libx264 -crf 18 -preset veryfast -c:a aac cut.mp4"),
+                         "-c:v libx264 -crf 18 -x264-params threads=48 -preset veryfast -c:a aac cut.mp4"),
             "then_captions": ("cd /work && ffmpeg -y -i cut.mp4 -vf "
                               "\"subtitles=captions.srt:force_style='Fontname=DejaVu Sans,"
                               "Bold=1,FontSize=18,PrimaryColour=&H00FFFFFF,"
                               "OutlineColour=&H00000000,Outline=2,Alignment=2,MarginV=120'\" "
-                              "-c:v libx264 -crf 18 -preset veryfast -c:a copy capped.mp4"),
+                              "-c:v libx264 -crf 18 -x264-params threads=48 -preset veryfast -c:a copy capped.mp4"),
 
             "note": "Captions are already remapped to OUTPUT time. Do not shift them.",
         }
@@ -6871,7 +6898,8 @@ def edit(source_key: str, brief: str,
             "filter_file": "/work/overlays.txt",
             "run_this": (f"cd /work && filt=$(cat overlays.txt) && ffmpeg -y "
                          f"-i {input_file}{extra} -vf \"$filt\" -c:v libx264 "
-                         f"-crf 18 -preset veryfast -c:a copy {output_file}"),
+                         f"-crf 18 -x264-params threads={_X264_ENCODE_THREADS} "
+                         f"-preset veryfast -c:a copy {output_file}"),
             "note": "Apostrophes and colons are already escaped. Do not sed this "
                     "file — hand-patching escaping is what cost a turn last run.",
         }
@@ -7055,7 +7083,7 @@ def edit(source_key: str, brief: str,
             "segments": packed["segments"],
             "run_this": (f"cd /work && filt=$(cat reel-filter.txt) && ffmpeg -y -i "
                          f"cut.mp4 -i reel.mov -filter_complex \"$filt\" "
-                         f"-map '[{last}]' -map 0:a -c:v libx264 -crf 18 "
+                         f"-map '[{last}]' -map 0:a -c:v libx264 -crf 18 -x264-params threads=48 "
                          f"-preset veryfast -c:a copy out.mp4"),
             "note": "ONE render for all components. Offsets are already computed "
                     "— do not shift anything by hand.",
@@ -7090,13 +7118,13 @@ def edit(source_key: str, brief: str,
         if complex_:
             cmd = ["ffmpeg", "-y", "-v", "error", "-i", "/work/source.mp4",
                    "-filter_complex", filt, "-map", "[outv]", "-map", "[outa]",
-                   "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                   "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                    "-c:a", "aac", outp]
         else:
             inp = os.path.join("/work", os.path.basename(
                 recipe.get("input_file") or "cut.mp4"))
             cmd = ["ffmpeg", "-y", "-v", "error", "-i", inp, "-vf", filt,
-                   "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                   "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                    "-c:a", "copy", outp]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=1200,
                            env=_SUBPROCESS_ENV)
@@ -7586,7 +7614,7 @@ def edit(source_key: str, brief: str,
                  alpha_composite_filter(30),
                  "-map", "[outv]", "-map", "0:a?",
                  "-c:v", "libx264", "-crf", "18",
-                 "-preset", "veryfast", "-c:a", "copy", _cco],
+                 "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast", "-c:a", "copy", _cco],
                 capture_output=True, text=True, timeout=900,
                 env=_SUBPROCESS_ENV)
             _mark(led, "composite_captions", _cc0)
@@ -7750,7 +7778,7 @@ def edit(source_key: str, brief: str,
             _ex = subprocess.run(
                 ["ffmpeg", "-y", "-v", "error", "-ss", f"{_cs:.3f}",
                  "-t", f"{_ce - _cs:.3f}", "-i", _zoom_cur_in,
-                 "-an", "-c:v", "libx264", "-crf", "16", "-preset", "veryfast",
+                 "-an", "-c:v", "libx264", "-crf", "16", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                  "-pix_fmt", "yuv420p", os.path.join(_zpub, _zsrc)],
                 capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
             if _ex.returncode != 0:
@@ -7919,7 +7947,7 @@ def edit(source_key: str, brief: str,
                     _zargs += ["-i", _sg["out"]]
                 _zargs += ["-filter_complex", open(_zfilt).read().strip(),
                            "-map", f"[{_last}]", "-map", "0:a?",
-                           "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                           "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                            "-c:a", "copy", "/work/zoomed.mp4"]
                 _zc = subprocess.run(_zargs, capture_output=True, text=True,
                                      timeout=1800, env=_SUBPROCESS_ENV)
@@ -7979,7 +8007,7 @@ def edit(source_key: str, brief: str,
                 _ex2 = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-ss", f"{_st:.3f}",
                      "-t", f"{_d_s:.3f}", "-i", os.path.join("/work", cur),
-                     "-an", "-c:v", "libx264", "-crf", "16", "-preset", "veryfast",
+                     "-an", "-c:v", "libx264", "-crf", "16", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                      "-pix_fmt", "yuv420p", os.path.join(_zpub, _nm2)],
                     capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
                 if _ex2.returncode != 0:
@@ -8059,7 +8087,7 @@ def edit(source_key: str, brief: str,
                     _targs += ["-i", _sg["out"]]
                 _targs += ["-filter_complex", ";".join(_tparts),
                            "-map", f"[{_tlast}]", "-map", "0:a?",
-                           "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                           "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                            "-c:a", "copy", "/work/transitioned.mp4"]
                 _tc2 = subprocess.run(_targs, capture_output=True, text=True,
                                       timeout=1800, env=_SUBPROCESS_ENV)
@@ -8304,7 +8332,7 @@ def edit(source_key: str, brief: str,
                          "-i", os.path.join("/work", cur), "-i", "/work/reel.mov",
                          "-filter_complex", open(_filt).read().strip(),
                          "-map", f"[{rc.get('final_label') or '0:v'}]", "-map", "0:a?",
-                         "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                         "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                          "-c:a", "copy", "/work/carded.mp4"],
                         capture_output=True, text=True, timeout=1200,
                         env=_SUBPROCESS_ENV)
@@ -8654,7 +8682,7 @@ def edit(source_key: str, brief: str,
         r = subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", inp, "-filter_complex", f,
              "-map", "[outv]", "-map", "0:a?", "-c:v", "libx264", "-crf", "18",
-             "-preset", "veryfast", "-c:a", "copy", outp],
+             "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast", "-c:a", "copy", outp],
             capture_output=True, text=True, timeout=900, env=_SUBPROCESS_ENV)
         if r.returncode != 0:
             fail("build_zoom_failed", (r.stderr or "")[-300:])
