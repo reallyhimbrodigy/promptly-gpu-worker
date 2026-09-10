@@ -1933,7 +1933,11 @@ KNOWLEDGE_TOOLS = [{
     "name": "author_component",
     "description": (
         "WRITE a Remotion component when the catalogue has none, then render it. "
-        "Zoom is the case: there is no PunchIn component, so author one. Pass the "
+        "THE CASE IS A CARD THE CATALOGUE CANNOT SERVE. When you rule `card` and "
+        "the harness reports back `no_catalogue_component` for that beat, the "
+        "hero is neither a figure nor a short claim — no StatCard, no PullQuote, "
+        "nothing in the 25 fits — and the beat comes back UNSERVED unless you "
+        "write something for it. That report names the beat and the hero. Pass the "
         "full TSX exporting `Comp` — that is the name the project registers — at "
         "1080x1920, 30fps, TRANSPARENT background so it composites over the "
         "footage. It renders to an alpha PNG sequence and returns a .mov plus the "
@@ -8470,8 +8474,27 @@ def edit(source_key: str, brief: str,
                 # REFUSING IS A REAL ANSWER. A card nobody can read is the
                 # failure this whole thread began with, and it is worse than no
                 # card at all.
+                # THE ONE MOMENT THE CATALOGUE PROVABLY CANNOT SERVE A BEAT,
+                # and until now it was absorbed into a skip. `author_component`
+                # exists for exactly this and the agent was never told the
+                # moment had arrived — the tool's own worked example was ZOOM,
+                # which the harness took over, so its only illustration pointed
+                # at a case it must not do.
+                #
+                # This does not invite authoring anywhere else. The signal is
+                # DERIVED — the agent ruled a card, the harness tried every
+                # catalogue type and none fit — so it is offered where the need
+                # is proven rather than as a standing option.
                 _skips.append({"family": "card", "beat": v.get("beat"),
-                               "why": _dwhy})
+                               "why": _dwhy,
+                               "code": "no_catalogue_component",
+                               "hero": str(hero)[:60],
+                               "remedy": "no catalogue component fits this "
+                                         "hero; author_component is how this "
+                                         "beat gets served"})
+                led.setdefault("authorable_beats", []).append(
+                    {"beat": v.get("beat"), "hero": str(hero)[:60],
+                     "why": _dwhy[:120]})
                 continue
             led.setdefault("card_type_derived", []).append(
                 {"beat": v.get("beat"), "type": _ctype,
