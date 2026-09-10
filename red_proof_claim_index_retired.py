@@ -45,4 +45,9 @@ for s in (CERT,"smoke_card_choice_retired.py"):
     rc,out=run(s); print(f"RESTORED {s} exit={rc}")
     if rc!=0: print(out); sys.exit(1)
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-sys.exit(0 if all(r) else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if r and all(r) else 1)

@@ -173,4 +173,9 @@ frc, _ = run()
 print(f"\nRESTORED exit={frc}")
 print(f"{red}/{len(MUTATIONS)} RED-proven"
       + (f"   HARNESS FAILURES: {harness}" if harness else ""))
-sys.exit(0 if red == len(MUTATIONS) and not harness and frc == 0 else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if red and red == len(MUTATIONS) and not harness and frc == 0 else 1)

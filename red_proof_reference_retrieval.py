@@ -3,15 +3,16 @@
 import ast
 import os, shutil, subprocess, sys
 APP="agentic_editor_app.py"; IDX="reference_index.json"
-BAK="/tmp/_rr_app.py"; BAKI="/tmp/_rr_idx.json"
-shutil.copy(APP,BAK); shutil.copy(IDX,BAKI)
+# IN MEMORY, NEVER FILES — a fixed /tmp backup is shared across branches
+# and worktrees, and a stale restore rewrites the file under test.
+_ORIG = {APP: open(APP, encoding="utf-8").read(),
+         IDX: open(IDX, encoding="utf-8").read()}
 env=dict(os.environ,PYTHONPATH=".")
 def run():
     r=subprocess.run([sys.executable,"smoke_reference_retrieval.py"],
                      capture_output=True,text=True,env=env)
     return r.returncode, r.stdout+r.stderr
 def mut(path,old,new,label,expect):
-    bak = BAK if path==APP else BAKI
     src=open(path,encoding="utf-8").read()
     if src.count(old)!=1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
@@ -28,7 +29,7 @@ def mut(path,old,new,label,expect):
             print(f"  HARNESS FAILURE [{label}] mutant does not parse: "
                   f"{_se.msg} — it never ran, so it proved nothing"); return False
     open(path,"w",encoding="utf-8").write(_mutant)
-    rc,out=run(); shutil.copy(bak,path)
+    rc,out=run(); open(path,"w",encoding="utf-8").write(_ORIG[path])
     ok=rc!=0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok: print(f"      expected {expect!r}")
@@ -108,4 +109,9 @@ r.append(mut(APP, '    _ours = {v for k, v in REFERENCE_FAMILY_NAME.items()\n   
     "a family joining the enum leaves the unbuildable set"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-sys.exit(0 if all(r) and rc==0 else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if r and all(r) and rc == 0 else 1)

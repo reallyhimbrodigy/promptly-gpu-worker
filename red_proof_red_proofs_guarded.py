@@ -14,8 +14,10 @@ import sys
 
 SMOKE = pathlib.Path("smoke_red_proofs_guarded.py")
 TARGET = pathlib.Path("red_proof_alpha_state.py")
-BAK = "/tmp/_rpg_bak.py"
-shutil.copy(TARGET, BAK)
+# IN MEMORY, NEVER A FILE. A fixed /tmp backup is shared across every
+# branch and worktree on the machine, and restoring from a stale one
+# silently replaces the file under test with another branch's copy.
+_ORIG_TARGET = TARGET.read_text()
 ORIG = TARGET.read_text()
 
 
@@ -41,6 +43,17 @@ MUTATIONS = [
               f"(line {_se.lineno}) — it never ran, so it proved nothing")
         return False
 ''', "    ast.parse(_mutant)\n", "refuses a mutant that will not parse"),
+    # THE FLOOR. Removing it lets a harness with zero legs exit 0, which is
+    # what every one of these did until today.
+    ("the zero-legs floor is removed from a harness",
+     "sys.exit(0 if r and all(r) and rc == 0 else 1)",
+     "sys.exit(0 if all(r) and rc == 0 else 1)",
+     "exit 0 with zero legs executed"),
+    # THE EXTERNAL BACKUP. Reintroducing a /tmp backup path must fire.
+    ("a source backup outside the tree comes back",
+     "_ORIG_SRC = {}   # IN MEMORY, never a file",
+     '_ORIG_SRC = {}\nBAK_PATH = "/tmp/_alpha_bak.py"',
+     "backup outside the tree"),
 ]
 
 rc, out = run()
@@ -66,7 +79,7 @@ for label, old, new, expect in MUTATIONS:
         continue
     TARGET.write_text(_mutant)
     mrc, mout = run()
-    shutil.copy(BAK, TARGET)
+    TARGET.write_text(_ORIG_TARGET)
     if mrc == 0:
         print(f"  NOT RED          {label}  :: the mutant PASSED")
         harness.append(f"{label}: mutant passed")
@@ -77,9 +90,14 @@ for label, old, new, expect in MUTATIONS:
         red += 1
         print(f"  RED              {label}\n                   caught by: {expect}")
 
-shutil.copy(BAK, TARGET)
+TARGET.write_text(_ORIG_TARGET)
 frc, _ = run()
 print(f"\nRESTORED exit={frc}  target unchanged={TARGET.read_text() == ORIG}")
 print(f"{red}/{len(MUTATIONS)} RED-proven"
       + (f"   HARNESS FAILURES: {harness}" if harness else ""))
-sys.exit(0 if red == len(MUTATIONS) and not harness and frc == 0 else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if red and red == len(MUTATIONS) and not harness and frc == 0 else 1)

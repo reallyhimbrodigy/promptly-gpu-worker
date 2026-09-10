@@ -11,8 +11,8 @@ import subprocess
 import sys
 
 APP = "agentic_editor_app.py"
-BAK = "/tmp/_zoomunm_bak.py"
-shutil.copy(APP, BAK)
+_ORIG_SRC = {}   # IN MEMORY, never a file
+_ORIG_SRC.setdefault(APP, open(APP, encoding="utf-8").read())
 env = dict(os.environ, PYTHONPATH=".")
 
 
@@ -39,7 +39,7 @@ def mut(old, new, label, expect):
         return False
     open(APP, "w", encoding="utf-8").write(_mutant)
     rc, out = run()
-    shutil.copy(BAK, APP)
+    open(APP, "w", encoding="utf-8").write(_ORIG_SRC[APP])
     ok = rc != 0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok:
@@ -87,4 +87,9 @@ r.append(mut('        print(f"  ZOOM GEOMETRY   : {_zgu} placement(s) UNMEASURED
 rc, out = run()
 print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-sys.exit(0 if all(r) and rc == 0 else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if r and all(r) and rc == 0 else 1)

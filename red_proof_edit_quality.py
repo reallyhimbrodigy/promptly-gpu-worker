@@ -2,8 +2,8 @@
 """RED proof: the truncation cure, and the three edit-quality measures."""
 import ast
 import os, shutil, subprocess, sys
-APP = "agentic_editor_app.py"; BAK = "/tmp/_eq_bak.py"
-shutil.copy(APP, BAK)
+APP = "agentic_editor_app.py"; _ORIG_SRC = {}   # IN MEMORY, never a file
+_ORIG_SRC.setdefault(APP, open(APP, encoding="utf-8").read())
 env = dict(os.environ, PYTHONPATH=".")
 
 
@@ -28,7 +28,7 @@ def mut(old, new, label, expect):
               f"(line {_se.lineno}) — it never ran, so it proved nothing")
         return False
     open(APP, "w", encoding="utf-8").write(_mutant)
-    rc, out = run(); shutil.copy(BAK, APP)
+    rc, out = run(); open(APP, "w", encoding="utf-8").write(_ORIG_SRC[APP])
     ok = rc != 0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok:
@@ -193,4 +193,9 @@ r.append(mut('        _tot = (r.get("ledger") or {}).get("cut_boundaries_total")
              "no measure I report uses"))
 rc, out = run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-sys.exit(0 if all(r) and rc == 0 else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if r and all(r) and rc == 0 else 1)

@@ -95,6 +95,51 @@ check(f"the scan found source-mutating harnesses ({len(_mutators)}) — non-vacu
       len(_mutators) >= 10,
       f"only {len(_mutators)} detected as mutators; the detector is probably "
       f"wrong, and a check over an empty set passes quietly")
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. Found 2026-09-09 by asking Builder-1's
+# question of my own suite: does a PASS mean "ran and passed" or "did not run"?
+# `all([])` is True and `red == len(MUTATIONS)` is `0 == 0`, so EVERY red proof
+# here reported success on an empty leg list. Sixteen instruments built to catch
+# absence-rendered-as-success, each rendering its own absence as success.
+_no_floor = []
+for _p in _harnesses:
+    _s = _p.read_text()
+    _ex = [ln for ln in _s.split("\n") if ln.strip().startswith("sys.exit(")]
+    if not _ex:
+        _no_floor.append(f"{_p.name}  (no sys.exit at all)"); continue
+    _tail = _ex[-1]
+    # The floor: the leg collection must be truthy before its contents are
+    # judged. `r and all(r)` or `red and red == len(...)`.
+    if not ("r and all(r)" in _tail or "red and red ==" in _tail):
+        _no_floor.append(f"{_p.name}  ->  {_tail.strip()[:70]}")
+check("no red proof can exit 0 with zero legs executed", not _no_floor,
+      "\n         ".join(_no_floor) + "\n         all([]) is True; a harness "
+      "whose mutations were all deleted would report success.")
+
+# NO BACKUP OUTSIDE THE TREE. Observed 2026-09-09: red_proof_edit_quality kept
+# its backup at the fixed path /tmp/_eq_bak.py, which is SHARED ACROSS EVERY
+# BRANCH AND WORKTREE ON THE MACHINE. A run on one branch wrote it; a later run
+# on another restored from it and silently replaced agentic_editor_app.py with
+# the other branch's content — a 914-line diff — while printing 19/19
+# RED-PROVEN. The harness reported success about a file it had just corrupted.
+#
+# THE FIX IS TO DELETE THE SHARED STATE, NOT TO MAKE THE PATH UNIQUE. A
+# per-branch filename still outlives the process and can be restored from after
+# the tree has moved under it. A backup is not a fixture: a fixture belongs IN
+# the tree so it drifts with the tree or fails loudly at merge, and a backup
+# belongs in MEMORY so it cannot survive the run that made it.
+_ext_backup = []
+for _p in _harnesses:
+    _s = _p.read_text()
+    for _n in ast.walk(ast.parse(_s)):
+        if isinstance(_n, ast.Constant) and isinstance(_n.value, str) \
+                and _n.value.startswith(("/tmp/", "/var/tmp/")) \
+                and _n.value.endswith((".py", ".json", ".md", ".txt", ".mjs")):
+            _ext_backup.append(f"{_p.name}:{_n.lineno}  {_n.value}")
+check("no red proof keeps a source backup outside the tree", not _ext_backup,
+      "\n         ".join(_ext_backup) + "\n         A fixed /tmp path is shared "
+      "across branches and worktrees; a stale restore rewrites the file under "
+      "test and the harness still reports RED-proven.")
+
 check("every source-mutating red proof refuses a mutant that will not parse",
       not _unguarded,
       "\n         ".join(_unguarded) + "\n         A mutant that does not "
