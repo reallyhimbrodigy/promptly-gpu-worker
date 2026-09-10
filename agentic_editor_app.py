@@ -5905,6 +5905,88 @@ _CUTAWAY_MAX_S = 4.0        # the corpus's longest evidence beat is 11.5s, but a
                             # and becomes the shot; that is a different ruling
 
 
+# ── CUTAWAY CANDIDATES: THE AGENT CHOOSES A MOMENT, IT DOES NOT INVENT ONE ──
+#
+# WHY THIS EXISTS. Cutaway ruled ZERO across twenty runs. Rounds 47-48 it was
+# never mentioned in the prompt — the obvious cause — so round 50 put thirteen
+# mentions and a full block in SYSTEM, and it STILL ruled zero on every fixture
+# that completed, screen_recording included: 36 beats of ChatGPT UI with vision
+# MEASURED on every frame, which placed 13 text overlays and no cutaway.
+#
+# THE BLOCK WAS NECESSARY AND NOT SUFFICIENT. The remaining gap is the one zoom
+# does not have. `zoom_arc` offers a CLOSED SET — breather, build, close, hook,
+# mid_peak, payoff — and the agent picks one. A cutaway asks it to INVENT a
+# source-clock timestamp and defend it, which is a different and much harder act
+# and is not what this surface asks anywhere else.
+#
+# EVERY CANDIDATE NAMES A REAL BEAT. Nothing is synthesised, no timestamp is
+# guessed, and if nothing differs enough the list comes back EMPTY WITH A REASON
+# rather than padded — a filler candidate is worse than none, because the agent
+# would rule on it and the builder would refuse it.
+_CUTAWAY_MIN_DIFF = 0.55      # 1 - Jaccard over description tokens. NOT fitted:
+                              # 0.55 means "barely half the words in common", a
+                              # deliberately loose bar, because the cost of a
+                              # weak candidate (the agent declines) is far below
+                              # the cost of offering none.
+
+
+def _desc_tokens(b):
+    """The words a beat's description carries, lowercased, stopwords dropped."""
+    _t = (b.get("vision") or b.get("text") or "")
+    _w = [w.strip(".,!?'\"()").lower() for w in str(_t).split()]
+    _stop = {"a", "an", "the", "in", "on", "at", "of", "and", "with", "is",
+             "to", "for", "from", "his", "her", "its", "this", "that", "no"}
+    return {w for w in _w if len(w) > 2 and w not in _stop}
+
+
+def cutaway_candidates(beats, min_diff=_CUTAWAY_MIN_DIFF, k=3, min_gap_s=1.0):
+    """({beat: [candidate,...]}, state, why) — PURE. Every candidate is a beat.
+
+    A candidate for beat i is a beat j elsewhere in the SOURCE whose description
+    shares little vocabulary with i's. Returns a STATE because "no candidates
+    because the beats are all alike" and "no candidates because the descriptions
+    never arrived" are different answers and must not look the same.
+    """
+    _bs = [b for b in (beats or []) if isinstance(b, dict)]
+    if len(_bs) < 2:
+        return {}, "ABSENT", f"only {len(_bs)} beat(s) — nothing to cut away to"
+    _toks = {b.get("i"): _desc_tokens(b) for b in _bs}
+    _described = sum(1 for v in _toks.values() if v)
+    if _described < 2:
+        return ({}, "ABSENT",
+                f"only {_described} of {len(_bs)} beats carry a description — "
+                f"vision is the input this needs and it did not arrive")
+    out = {}
+    for b in _bs:
+        i, ti = b.get("i"), _toks.get(b.get("i")) or set()
+        if not ti:
+            continue
+        _cands = []
+        for o in _bs:
+            j, tj = o.get("i"), _toks.get(o.get("i")) or set()
+            if j == i or not tj:
+                continue
+            try:
+                if abs(float(o.get("t_start", 0))
+                       - float(b.get("t_start", 0))) < min_gap_s:
+                    continue          # a neighbouring beat is the same shot
+            except (TypeError, ValueError):
+                continue
+            _diff = 1.0 - (len(ti & tj) / (len(ti | tj) or 1))
+            if _diff >= min_diff:
+                _cands.append({"beat": j,
+                               "t": round(float(o.get("t_start", 0)), 2),
+                               "diff": round(_diff, 3),
+                               "shows": (o.get("vision")
+                                         or o.get("text") or "")[:90]})
+        _cands.sort(key=lambda c: -c["diff"])
+        if _cands:
+            out[i] = _cands[:k]
+    return (out, ("MEASURED" if out else "EMPTY"),
+            f"{len(out)} of {len(_bs)} beats have a candidate at "
+            f"diff>={min_diff}")
+
+
 def cutaway_plan(rulings, keep_spans, source_duration_s, beats=None,
                  min_s=_CUTAWAY_MIN_S, max_s=_CUTAWAY_MAX_S):
     """(plans, rejects) — resolve cutaway rulings to extract+overlay geometry. PURE.
@@ -9683,6 +9765,45 @@ def edit(source_key: str, brief: str,
     print(f"  SOURCE FPS      : {_fstate}  declared={_fdec}  actual={_fact}"
           + ("   <-- the two disagree; neither describes the file alone"
              if _fstate == "VFR" else ""), flush=True)
+    # ── CUTAWAY CANDIDATES, DERIVED AND OFFERED ─────────────────────────────
+    #
+    # ROUND 50 TESTED THE PREMISE AND THE BLOCK WAS NOT ENOUGH. With thirteen
+    # mentions of cutaway in SYSTEM and a full block written against the
+    # builder, FOUR of four completing fixtures still ruled ZERO — including
+    # screen_recording, 36 beats of ChatGPT UI with vision MEASURED on every
+    # frame, which placed 13 text overlays and no cutaway.
+    #
+    # So it is not that the agent does not know the family exists. It is the one
+    # place this surface asks for INVENTION: `zoom_arc` offers six named options
+    # and gets used; `cutaway_from_s` offers a blank and asks the agent to
+    # defend a source-clock number it has to make up. Every candidate below
+    # names a REAL BEAT — nothing synthesised, no timestamp guessed.
+    _cw_cands, _cw_state, _cw_why = cutaway_candidates(_beats)
+    if _cw_state == "MEASURED":
+        _cutaway_block = (
+            "CUTAWAY CANDIDATES — moments elsewhere in THIS source that look "
+            "different from each beat. To place one, put \"cutaway\" in "
+            "`treatment` and set `cutaway_from_s` to one of these timestamps. "
+            "You are CHOOSING, not inventing.\n"
+            + "\n".join(
+                f"  beat [{_bi}] could cut to: "
+                + "; ".join(f"{_c['t']:.2f}s (differs {_c['diff']:.2f}) "
+                            f"{_c['shows'][:60]}" for _c in _cs)
+                for _bi, _cs in sorted(_cw_cands.items())[:12])
+            + "\n  (a cutaway keeps THIS beat's audio and replaces only the "
+              "picture, so it costs no time)")
+    else:
+        # ABSENT AND EMPTY SAY WHICH. "No candidates because the beats are all
+        # alike" is a different answer from "no candidates because vision did
+        # not arrive", and the agent must not read one as the other.
+        _cutaway_block = (
+            f"CUTAWAY CANDIDATES — {_cw_state}: {_cw_why}. Rule cutaway only if "
+            f"you can name a source timestamp yourself; otherwise this source "
+            f"has nothing to cut away to, and that is a real answer.")
+    led["cutaway_candidates"] = {"state": _cw_state, "why": _cw_why,
+                                 "beats_with_candidates": len(_cw_cands)}
+    print(f"  CUTAWAY CANDS   : {_cw_state}  {_cw_why}", flush=True)
+
     user = (f"{_REQ_OPEN}\n{_neutralise_brief(brief)}\n{_REQ_CLOSE}\n\n"
             f"SOURCE: /work/source.mp4 — {vs.get('width')}x{vs.get('height')}, "
             f"{_src_dur:.1f}s\n\n"
@@ -9731,6 +9852,7 @@ def edit(source_key: str, brief: str,
             # reference beats most like it: what an editor placed at a moment
             # of that shape, and WHY. Injected into the brief, which is inside
             # the CACHED prefix, so it costs one write and pennies per turn.
+            + _cutaway_block + "\n\n"
             + _reference_block(_beats) + "\n\n"
             f"Decide the spans to KEEP, then call `build_cut` with them. It "
             f"returns the ffmpeg command and an output-time .srt — do not build "
