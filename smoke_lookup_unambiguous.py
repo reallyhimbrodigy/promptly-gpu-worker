@@ -72,20 +72,39 @@ for nm in sorted(looked):
             f"about whichever copy the walk reached first, possibly the one "
             f"that never runs")
 
-# DEFINED ZERO is only a defect for names that ARE app functions — a check may
-# legitimately look up a name in its own file or another module.
+# DEFINED ZERO. A check may legitimately look up a name in its OWN file (a
+# helper it defines) or in another module — so the test is: absent from the app
+# AND absent from the file doing the looking.
+#
+# MY FIRST VERSION HAD A HOLE ITS OWN RED PROOF FOUND. It only flagged a missing
+# name when the SAME FILE also looked up a name that resolved ("siblings"), as a
+# proxy for "this file inspects the app". A check file that looks up EXACTLY ONE
+# function had no siblings and therefore no coverage — which is most of them.
+# Deleting count_cuts, a real looked-up function, did not fire it.
+#
+# A heuristic clever enough to need a proxy is a heuristic with a hole in it.
+_self_defined = {}
+for f in sorted(glob.glob(os.path.join(HERE, "smoke_*.py"))
+                + glob.glob(os.path.join(HERE, "red_proof_*.py"))):
+    try:
+        _t = ast.parse(open(f, encoding="utf-8").read())
+    except Exception:                                             # noqa: BLE001
+        continue
+    _self_defined[os.path.basename(f)] = {
+        n.name for n in ast.walk(_t)
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
 for nm in sorted(looked):
-    if nm not in defs and any(s.startswith(("smoke_", "red_")) for s in looked[nm]):
-        # only flag if some OTHER looked-up name from the same file resolves,
-        # i.e. the file is looking into the app at all
-        siblings = {o for o in looked if o in defs
-                    and looked[o] & looked[nm]}
-        if siblings:
-            FAIL.append(
-                f"{nm!r} is looked up by {', '.join(sorted(looked[nm]))} and is "
-                f"DEFINED ZERO TIMES in the app — next(..., None) returns None "
-                f"and those legs assert nothing about a function that no longer "
-                f"exists")
+    if nm in defs:
+        continue
+    # which of the looking files could NOT be talking about their own helper?
+    _outside = sorted(f for f in looked[nm] if nm not in _self_defined.get(f, set()))
+    if _outside:
+        FAIL.append(
+            f"{nm!r} is looked up by {', '.join(_outside)} and is DEFINED ZERO "
+            f"TIMES in the app and in those files — next(..., None) returns "
+            f"None and those legs assert nothing about a function that does not "
+            f"exist. Absence rendered as success, inside the lookup itself")
 
 print(f"LOOKUP-UNAMBIGUOUS  {len(looked)} name(s) looked up by checks, "
       f"{len(app_names)} of them app functions")

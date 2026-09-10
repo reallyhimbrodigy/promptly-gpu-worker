@@ -1716,6 +1716,46 @@ knowledge set at all — it answers "how to work", never "how to cut".
   The failure mode here is UNDER-doing, not over-building. Placing the graphic a
   beat calls for is the task, not scope creep.
 
+CUTAWAY — SHOW THE THING, KEEP THE VOICE
+A cutaway replaces the PICTURE for part of a beat while THIS BEAT'S AUDIO KEEPS
+PLAYING. The narration continues underneath and the picture shows the thing being
+talked about. It costs no time: the beat structure and the output duration are
+exactly what they would have been without it.
+
+It comes from the USER'S OWN MATERIAL — another moment in this upload, or a
+second uploaded clip. There is no stock and no generated footage, so a cutaway
+is only available when the footage already contains a shot of what the beat is
+about. That is the whole judgement: HAVE YOU SEEN, ELSEWHERE IN THIS SOURCE, A
+MOMENT THAT SHOWS WHAT THIS BEAT IS SAYING? If you have, name it. If you have
+not, this beat does not take one, and saying so is a correct answer.
+
+Rule it by putting "cutaway" in `treatment` AND setting `cutaway_from_s` to the
+timestamp IN THE SOURCE of the moment to show. A cutaway without a timestamp is
+not a ruling and is refused — the family names a moment, not a label.
+
+WHAT THE BUILDER WILL ACCEPT, so nothing you rule is lost at build time:
+- `cutaway_from_s` is in SOURCE seconds — the original clip's clock, the same
+  clock the transcript timestamps use. Not output seconds. The builder remaps it.
+- It must fall inside the source, and it must NOT fall inside this beat's own
+  footage: cutting from a beat to itself shows the same picture.
+- The beat must survive the cut. A beat you also ruled `cut` has no output span
+  to cover, so it cannot carry one.
+- The beat needs at least 0.6s in the OUTPUT. Shorter than that a cutaway reads
+  as a glitch rather than a shot.
+- The cutaway is held for the beat's length, capped at 4.0s. Past about four
+  seconds a held cutaway stops being a cutaway and becomes the shot, which is a
+  different edit and not this one.
+- If the moment you name is close enough to the end that the hold would run off
+  the source, the builder slides it back rather than refusing you.
+
+WHERE IT EARNS ITS PLACE. A cutaway is the strongest move available when the
+beat makes a CLAIM the footage can prove — the product being described, the
+screen being walked through, the object being held up, the place being named.
+Reach for it when the words point at something and the picture is still a
+talking head. Do not reach for it to break up a long take; that is what a cut
+is for, and a cutaway used as pacing shows the viewer something irrelevant while
+the voice says something specific.
+
 HARD RULES
 - The output must be 1080x1920, H.264, with audio.
 - NEVER report success on an output whose speech is missing. An edit that plays
@@ -11282,14 +11322,19 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"{((r['ledger'].get('execute_plan') or {}).get('built') or {}).get('cutaway', 0)}"
               + (f"   frames {_cwf.get('before')}->{_cwf.get('after')}"
                  if _cwf else "   frames UNMEASURED"))
-        # THE ONE THAT WOULD HAVE COST THIS ROUND. A run rejecting 30
-        # cutaways printed 6 and read as rejecting 6 — in the family whose
-        # entire diagnosis is "ruled zero".
+        # THE REJECTION COUNT, which was the one quantity this line did not
+        # carry. `ruled / planned / built` are three OTHER numbers: a run that
+        # ruled 30 cutaways and could build none printed six rejections and read
+        # as a run with six problems. That is the diagnosis surface for the
+        # family whose whole question this round is "why zero", so a truncated
+        # listing here is the most expensive place in the report to have one.
+        # (Builder-1 found it; I had checked the four sites around it and missed
+        # this one.)
         _cwrj = r["ledger"].get("cutaway_rejects") or []
-        if len(_cwrj) > 6:
-            print(f"    showing 6 of {len(_cwrj)} cutaway rejections")
         for _rj in _cwrj[:6]:
             print(f"    rejected b{_rj.get('beat')}: {_rj.get('why')}")
+        if _cwrj:
+            print(f"    ^ {min(6, len(_cwrj))} shown of {len(_cwrj)} rejection(s)")
     _fm2 = r["ledger"].get("family_mentions") or {}
     if _fm2:
         print(f"  FAMILY MENTIONS : {_fm2}  over {r.get('ledger').get('trace_chars',0):,} "
