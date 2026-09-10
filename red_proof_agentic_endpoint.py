@@ -21,12 +21,17 @@ MUTATIONS = [
     ("the instruction is dropped on the floor",
      '        instruction=_b.get("instruction") or "",', "",
      "instruction is forwarded", _INJECTS),
+    # RE-ANCHORED: adding source_key and result_url_given to the response
+    # orphaned the old anchor and the guard reported `anchor 0x` rather than
+    # counting it RED. Anchored on the mode expression alone now, which is the
+    # thing under test and survives fields being added around it.
+    #
+    # MODE IS LOAD-BEARING FOR MONEY: shouldDebit({mode,isReEdit}) returns FALSE
+    # for every re-edit, so a wrong mode here is a FREE RENDER rather than a
+    # mis-counted one.
     ("every run reports as an edit",
-     '''    return {"spawned": True, "call_id": _fc.object_id,
-            "job_id": _b.get("job_id"),
-            "mode": "reedit" if _plan else "edit"}''',
-     '''    return {"spawned": True, "call_id": _fc.object_id,
-            "job_id": _b.get("job_id")}''',
+     '''            "mode": "reedit" if _plan else "edit"}''',
+     '''            "mode": "edit"}''',
      "whether this was an edit or a reedit", _INJECTS),
 ]
 

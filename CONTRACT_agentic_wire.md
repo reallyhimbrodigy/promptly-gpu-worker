@@ -8,8 +8,14 @@ App: `agentic-editor` (Modal). Two endpoints, both POST, both JSON.
 ## 1. DISPATCH — `run_agentic`
 
     POST { job_id, source_key, brief, src_url, out_url, out_key,
-           prior_plan?, instruction? }
-    -> { spawned: true, call_id, job_id, mode: "edit" | "reedit" }
+           result_url?, prior_plan?, instruction? }
+    -> { spawned: true, call_id, job_id, source_key, result_url_given,
+         mode: "edit" | "reedit" }
+
+ONE SOURCE PER CALL. Call it N times for a multi-upload — see PRICING below.
+`source_key` is ECHOED BACK because the client picked ASSETS, not job ids: if
+that mapping dies here, the UI can say "four failed" and not WHICH four, and a
+refund nobody can attribute to a clip reads as a random credit change.
 
 Returns in milliseconds. It SPAWNS; it does not hold the request open across a
 multi-minute edit.
@@ -33,6 +39,86 @@ A poll rather than a callback ON PURPOSE: handler's path posts back to
 /api/modal-complete, which means the worker calls the server and needs its URL
 and reachability. This container is deliberately credential-free. The server
 already knows where Modal is and already holds the call id it was handed.
+
+## THE PLAN ENTRY SCHEMA (fc's A)
+
+A plan is a LIST. Every element is an object with exactly these keys:
+
+    src_t0          number   source seconds, start of the beat this rules
+    src_t1          number   source seconds, end
+    id              string   12 hex chars, DERIVED from (src_t0, src_t1,
+                             family, content) — not assigned, so it reproduces
+    purpose         string|null   hook|claim|evidence|turn|payoff|close|breath
+    treatment       array|null    of card|text|sfx|zoom|transition|none
+    cut             string|null   "keep"|"cut"
+    text_content    string|null
+    card_hero       string|null
+    card_label      string|null
+    sfx             any|null
+    sfx_name        string|null
+    zoom_arc        string|null   hook|build|mid_peak|payoff|breather|close
+    why             string|null
+
+Validate `src_t0`, `src_t1` and `id` on EVERY element — those three are what
+make it a plan rather than a list of dicts. The rest may be null.
+
+## COLLECTION SURVIVES A DEPLOY (fc's B) — the dependency is removed, not characterised
+
+**I do not know whether a Modal call id stays resolvable across an app
+redeploy, and I am not willing to establish it on real traffic.** You named the
+precedent yourself: a completion tail behind an in-process await that no deploy
+survived.
+
+So pass `result_url` — a presigned PUT. The worker writes the full result JSON
+there BEFORE returning, and a failure to write is loud. Collection then becomes
+a read of YOUR OWN storage and a deploy mid-edit strands nothing.
+`result_agentic` stays the fast path, not the only one.
+
+## FAILED CARRIES A CODE (fc's C)
+
+`AGENTIC_CODES`: BAD_REQUEST, UNSUPPORTED, SOURCE_UNREADABLE, AGENT_FAILED,
+RENDER_FAILED, UPLOAD_FAILED, INTERNAL. **UNSUPPORTED is a designed refusal, not
+an error** — the request needed something this pipeline does not do. If a code
+you need is missing, say which and it gets added rather than mapped on your side.
+
+## plan_entries (fc's E)
+
+`len(result["plan"])` — the number of rulings that got a durable address. It is
+there so an EMPTY plan is visible without parsing the result: a re-edit against
+a plan of zero entries would silently behave as a fresh edit.
+
+## PRICING: NOT MINE, AND I REMOVED WHAT I BUILT (fc's D, ee's 1)
+
+I built batch pricing. **It is deleted.** You established that credits are
+RevenueCat virtual currencies and that `debit()` deliberately has NO PRE-READ —
+RC checks and deducts atomically, so reading first only opens a race. A
+price-then-dispatch design IS that race one process further away, and it would
+have put a money decision inside a container holding no RC credentials by
+design.
+
+**Debit per source, in order, stop at the first INSUFFICIENT.** "Six answered,
+four held by name" becomes an OUTCOME of the debits rather than a prediction.
+The held list must come from the real attempts, not an estimate.
+
+## WHAT THIS CONTRACT ASSUMES ABOUT MONEY, said out loud
+
+- The debit path has **ZERO executions in production** — deliberately, because
+  `CREDITS_DEBIT_ENABLED` is OFF while `CREDITS=1` lights the display. Fail-
+  closed on purpose. Nothing here has been exercised against a real spend.
+- **A re-edit NEVER debits.** `shouldDebit({mode, isReEdit})` is false for every
+  re-edit variant. That makes the `mode` this endpoint returns LOAD-BEARING FOR
+  MONEY: if it comes back wrong it is a free render, not a mis-count. Three
+  checks guard it — derived from one thing, settable in one place, never read
+  from the request body.
+- COST_PER_RENDER=10; allowances free 30 / pro 200 / max 1000.
+
+## THE SHIPPING RE-EDIT ENDPOINT ALREADY USES THE TRAP (ee's finding)
+
+`POST /api/video-jobs/re-edit` documents itself as routing through Modal "in
+either tweak or reinterpret mode". So trap 3 is not hypothetical — it is the
+mapping the live endpoint already uses, and whoever wires `run_agentic` into
+that endpoint meets it on the first try. **The agentic path must not reuse it
+as-is.**
 
 ## THE THREE THINGS THAT MUST NOT BE GUESSED
 
