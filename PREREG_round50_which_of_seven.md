@@ -83,7 +83,9 @@ below.
 
 n=1 per cell and **no estimate of run-to-run variance exists**. Round 48's
 `both_on` and round 49's `both_on` ran on DIFFERENT trees (fingerprints
-8c74fffe2bb17f2a -> 15ccf9dbe7cc6290 -> 91f4d58c3c1c0e51), so their difference
+8c74fffe2bb17f2a for 48 and 3ca73fad8c8f279c for 49 — Builder-1 corrected
+91f4d58c3c1c0e51, which was the killed first launch, a stale value from a run
+that no longer existed), so their difference
 conflates tree change with noise and does not bound it. I will make no
 significance claim.
 
@@ -95,6 +97,47 @@ threshold I picked now would be fitted to nothing.
 **A member is exonerated only if removing it leaves all three within the noise
 we cannot measure** — which means exoneration is WEAK by construction and I will
 say so rather than reporting "member X does not matter".
+
+### AMENDMENT (Builder-1, accepted before the table): THE FIXTURES ARE NOT EQUAL
+### EVIDENCE, and the all-three rule treats them as if they are
+
+Each fixture has a MEASUREMENT RESOLUTION set by its beat count — the smallest
+change it is capable of expressing is one placement:
+
+    car_short           3 beats    resolution 0.333 per-beat
+    car_mid             5 beats    resolution 0.200 per-beat
+    screen_recording   36 beats    resolution 0.028 per-beat
+
+So one placement appearing or not on car_short moves that fixture's rate TWELVE
+TIMES more than the same placement on screen_recording. Under a bare all-three
+rule, car_short can VETO an effect screen_recording shows strongly, on evidence
+one ruling wide.
+
+**This is quantisation, not only noise, and the distinction matters.** A 3-beat
+fixture CANNOT REPRESENT an effect smaller than 0.333 per-beat. If the effect
+size seen on screen_recording is below a small fixture's resolution floor, that
+fixture's dissent is not evidence of absence — it is a fixture that could not
+have seen the effect at all. Same shape as `cut_intrusion_floor_ms`: below the
+floor, the instrument is not measuring the thing, and a value read there is
+arithmetic rather than a finding.
+
+**THE CRITERION IS UNCHANGED: implication requires 3/3.** The asymmetry justifies
+keeping it — a false attribution drives the next build in the wrong direction,
+a missed member costs one more round, so missing is the tolerable error and 3/3
+is the conservative side. What changes is that the failure mode must be VISIBLE
+rather than silent:
+
+- **Every arm reports per-fixture DIRECTION and BEAT COUNT, always**, so a 2-of-3
+  with the dissent on a 3-beat fixture is legible as exactly that.
+- A 2/3 whose dissent falls on car_short or car_mid is reported as
+  **INCONCLUSIVE — SMALL-FIXTURE DISSENT**, never as a null, and it is the first
+  candidate for a re-run at higher n rather than a conclusion.
+- Where the dissenting fixture's resolution floor EXCEEDS the effect size
+  observed on screen_recording, that is stated on the line, because it converts
+  the dissent from a disagreement into a known blind spot.
+
+Neither of us can then quietly upgrade a 2/3 afterwards, and neither of us loses
+a real finding to a 3-beat coin flip without seeing it happen.
 
 ## What "no member carries it" would mean, registered as an acceptable answer
 
@@ -115,6 +158,9 @@ contribution — a different and more expensive question, to be scoped separatel
   apparatus-only and 50 has nothing to build on.
 - If any of 3 or 4 turns out to be entangled with 1 the way 7 is, its arm is
   measuring degraded examples and must be withdrawn rather than reported.
+- If a removal arm's effect on screen_recording is below 0.333 per-beat, the
+  all-three rule is UNTESTABLE on car_short by construction and the round
+  reports 2-fixture directional agreement with that stated, rather than a null.
 - If the clean cohort stops being clean — any of the three fixtures showing
   rejections in the control — that fixture leaves the cohort and the round
   reports on what remains, with the denominator stated.
