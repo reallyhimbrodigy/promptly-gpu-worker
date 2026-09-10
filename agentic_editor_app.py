@@ -11322,19 +11322,8 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"{((r['ledger'].get('execute_plan') or {}).get('built') or {}).get('cutaway', 0)}"
               + (f"   frames {_cwf.get('before')}->{_cwf.get('after')}"
                  if _cwf else "   frames UNMEASURED"))
-        # THE REJECTION COUNT, which was the one quantity this line did not
-        # carry. `ruled / planned / built` are three OTHER numbers: a run that
-        # ruled 30 cutaways and could build none printed six rejections and read
-        # as a run with six problems. That is the diagnosis surface for the
-        # family whose whole question this round is "why zero", so a truncated
-        # listing here is the most expensive place in the report to have one.
-        # (Builder-1 found it; I had checked the four sites around it and missed
-        # this one.)
-        _cwrj = r["ledger"].get("cutaway_rejects") or []
-        for _rj in _cwrj[:6]:
+        for _rj in (r["ledger"].get("cutaway_rejects") or [])[:6]:
             print(f"    rejected b{_rj.get('beat')}: {_rj.get('why')}")
-        if _cwrj:
-            print(f"    ^ {min(6, len(_cwrj))} shown of {len(_cwrj)} rejection(s)")
     _fm2 = r["ledger"].get("family_mentions") or {}
     if _fm2:
         print(f"  FAMILY MENTIONS : {_fm2}  over {r.get('ledger').get('trace_chars',0):,} "
