@@ -306,6 +306,60 @@ inflated by retries into an apparent outage.
   defeated it entirely — the argument is a Name, not a Constant. Resolve through
   the binding. (Third instance of *scope is not text* in this repo.)
 
+## Standing rules earned 2026-09-09 (a mutation that changes a file, not a result)
+
+- **PROVE THE MUTATION CHANGES A RESULT, NOT A FILE.** `mut()` guards against an
+  anchor that no longer matches — `count != 1` — and that guard is
+  *structurally* blind to the other way a mutation dies: the anchor matches, the
+  file changes, and **the behaviour does not**. A red proof removed the
+  reference-retrieval `_unbuildable` filter to prove the filter filters. The day
+  cutaway shipped, `_unbuildable` became EMPTY — and removing an empty filter is
+  a no-op. The mutant was byte-different and behaviourally identical, and the
+  proof read `NOT RED` with nothing wrong in the code it guards.
+
+  Every prior instance in this repo was an anchor that stopped matching, which
+  the occurrence guard catches. This one it cannot. The defence generalises even
+  though its application does not: **a mutation must be shown to fail against
+  the case it protects, on a fixture that actually exercises that case.** If
+  removing the unbuildable filter cannot be shown to change an outcome on a
+  fixture carrying an unbuildable treatment, the mutation is untested regardless
+  of what the diff says.
+
+- **A CHECK ANCHORED TO A LINE DIES WHEN THAT LINE IS LEGITIMATELY REMOVED, AND
+  READS GREEN WHILE DEAD.** The per-tool orphan check bounded the acceptance gate
+  on `_rejected.append(_why6)` — the bare-string append whose *correct* repair
+  deleted it. So a correct fix blinded the check written to protect it, and it
+  reported `lines NNNN..None` instead of a finding. Anchor on CONTROL FLOW
+  (`if _why6:`), not on one spelling of one statement inside the region.
+
+- **AN EXISTENCE CHECK CANNOT SEE A CHANGE IT DOES NOT COUNT — second instance.**
+  `smoke_card_derived` kept ONE `_hero_desc` and overwrote it per hit, so with
+  two `card_hero` declarations it judged whichever the walk reached last and
+  passed with REQUIRED stripped from the other. Identical to the
+  `"credit_charged": False` lesson already written down here, which did not
+  prevent it. Collect ALL occurrences and assert the count.
+
+- **A CHECK THAT IS ALWAYS RED IS A CHECK NOBODY READS.**
+  `smoke_modal_app_preflight`'s condition was INVERTED: it flagged the safe
+  `open(__file__)` form and was blind to the bare relative literal it exists for.
+  Six false positives, permanently red — and hiding one real finding
+  (`lumen_first_edit_app.py` importing `modal_app` without mounting it, so that
+  harness could not start at all, and had not since 2026-08-15). I reported that
+  red as "pre-existing" for rounds without naming it, which is exactly what a
+  standing red buys.
+
+- **A RED PROOF ANCHORED OUTSIDE THE TREE IS ONE REBOOT FROM PROVING NOTHING.**
+  `red_proof_edit_quality` read its mutation blocks from `/tmp`. `/tmp` clears;
+  the proof then reports `anchor 0x` forever while every other leg reads green.
+  Fixtures a proof depends on live in the repo, next to the proof.
+
+- **A WORKTREE HAS ITS OWN COPY OF EVERY TRACKED FILE.** A fix applied in the
+  parent checkout does not reach the worktree that reads it — the smoke went on
+  failing against an unedited Aug-31 copy while the "fix" sat on another branch.
+  Tightest form of *an edit above a rebinding is not an edit*: same name, same
+  content, wrong tree. And the parent checkout is `zero-reject-routing`, so that
+  edit was also outside the assigned region.
+
 ## Standing rules earned 2026-09-08
 
 - **Correct parts, wrong wiring — test the COMPOSITION, not only the pieces.**

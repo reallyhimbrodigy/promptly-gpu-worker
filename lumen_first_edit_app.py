@@ -52,7 +52,24 @@ MAX_SPEND_USD = 1.20          # stated in advance; the run reports against it
 # impossible instead of something to keep chasing.
 import modal_app as _prod
 
-image = _prod.image
+# AND MOUNT IT, which is the half this file was missing. Importing modal_app to
+# borrow the production image is right and deliberate — it is what makes version
+# drift structurally impossible. But the module-level import RUNS AGAIN IN THE
+# CONTAINER, and modal_app.py is not in its own image's file list (automounting
+# is off by design — see modal_app.py's header). So `modal run` on this file
+# dies with ModuleNotFoundError before any work starts, which means this harness
+# has not run since the import landed on 2026-08-15.
+#
+# BOTH SIBLING HARNESSES ALREADY DO THIS — ab_matrix_app.py:69 and
+# lumen_first_light_app.py:40 — so the correct form sat twice in this directory
+# while this one shipped without it.
+#
+# IT WAS THE SINGLE RED FOR ROUNDS, AND NOBODY NAMED IT. smoke_modal_app_preflight
+# had its condition INVERTED: it flagged the safe `open(__file__)` form and was
+# blind to the class it exists for, so this real finding hid behind six false
+# positives for as long as the check was permanently red. A check that is always
+# red is a check nobody reads.
+image = _prod.image.add_local_file("modal_app.py", "/modal_app.py")
 
 
 @app.function(image=image, cpu=8, memory=16384, timeout=1800,
