@@ -452,6 +452,57 @@ inflated by retries into an apparent outage.
   _commit` and *never trust origin/main for what is running*: ask the system that
   holds the truth, not the copy that once agreed with it.
 
+## Standing rules earned 2026-09-09
+
+- **`or 0` ON A VALUE THAT MIGHT NOT EXIST IS A PROHIBITION WHEREVER A NUMBER
+  REACHES A REPORT.** (Ruled by Zac 2026-09-09, after the second instance.)
+  This is *probe collapse* — a failed measurement published as a confident
+  number — reduced to its smallest possible form: seven characters, on the line
+  that prints.
+
+  Two instances, both in the same week and both on numbers headed for a round
+  report. `paint_ms or 0` reported `paint 0.0s` against 458.6s of wall for six
+  rounds — a paint that was never measured, reading as *instant* and
+  indistinguishable from a real zero.
+  My own two edit-quality lines carried the same idiom on the distributions I
+  was about to publish. Neither was a typo; both were the ordinary defensive
+  reflex, applied to the one category of value where the default is a lie.
+
+  **THE RULE IS NOT "BAN `or 0`" — IT IS A DISTINCTION, AND THE DISTINCTION IS
+  THE WHOLE RULE.** `execute_plan_calls or 0` is a COUNTER: absent genuinely
+  means zero, nothing happened, the default is TRUE. `paint_ms or 0` is a
+  MEASUREMENT: absent means *unknown*, and zero is a claim the instrument never
+  made. A check that bans the idiom outright gets suppressed within a week
+  because most of its hits are counters, sums and divisor guards. Ten instances
+  are pinned by owner and reason for exactly this reason — a pin is an argument
+  on the record, not an exemption.
+
+  **THE CHECK, NAMED: `smoke_no_absent_as_zero.py`** (RED-proven by
+  `red_proof_no_absent_as_zero.py`), and its scope took three attempts, each
+  wrong in a way worth keeping:
+    * inside `print()` only — too narrow, and it missed MY OWN instance, which
+      was an assignment one line above the print;
+    * any function containing a print — too wide: 17 innocents inside the
+      3,000-line `edit`, which is how a check earns its own deletion;
+    * **def-use into a print** — the value's path, not its neighbourhood.
+
+  And the mutation lesson underneath it: **both RED mutations were defeated by a
+  `str(...)` wrapper.** `str(paint_ms or 0)` is the identical defect and the
+  naive matcher saw a call, not a fallback. Walk the WHOLE assigned expression;
+  a disguise one node deep is not a different bug.
+
+  Where a value can be absent, say which: MEASURED / ABSENT / FAILED, the same
+  three states `alpha_layer_state` returns. A report that cannot say *absent*
+  will say *zero*, and a tidy zero is the most expensive result to trust.
+
+- **A DEFAULT ON A FIELD THAT NEVER EXISTED IS THE SAME DEFECT WITH NO IDIOM TO
+  GREP FOR.** `source_fps` was read off every fixture and was never a key any
+  producer wrote — so every fixture silently took the 30fps floor, and a VFR
+  source, which has no floor at all, took it too. Nothing was wrong at the read
+  site; the field simply did not exist. Assert the KEY is present before
+  defaulting its value, or the default becomes the measurement for 100% of the
+  population and reads perfectly plausible while doing it.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
