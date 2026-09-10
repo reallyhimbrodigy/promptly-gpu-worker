@@ -6015,6 +6015,36 @@ def plan_batch(n_sources, balance, per_job=CREDITS_PER_JOB,
             % (_bal, _afford, _n, _per, (_n - _afford) * _per))
 
 
+def batch_dispatch_plan(sources, balance, per_job=CREDITS_PER_JOB,
+                        max_sources=MULTI_UPLOAD_MAX):
+    """(verdict, jobs, held, why) — ten sources become TEN INDEPENDENT JOBS.
+
+    ONE ACTION, N JOBS, N DEBITS. Each job carries its own credit debit so each
+    REFUNDS INDEPENDENTLY. A batch that debited once for ten and then lost job
+    seven would owe a partial refund nobody can compute, and this lane has
+    already paid for a lifecycle where the money and the work were tracked in
+    different places.
+
+    THE BATCH NEVER STARTS A RUN IT CANNOT FINISH. plan_batch prices the
+    selection first and this returns ONLY the jobs the balance covers. The
+    remainder comes back as `held` — named, counted, not dispatched — rather
+    than sent and allowed to fail. A held source is a sentence the caller can
+    show; a failed one is a mystery the user has to interpret.
+
+    PURE, so a check drives the shipped rule rather than a copy of it.
+    """
+    _v, _afford, _debit, _why = plan_batch(len(sources or []), balance,
+                                           per_job=per_job,
+                                           max_sources=max_sources)
+    if _v in ("REFUSED", "NONE"):
+        return (_v, [], list(sources or []), _why)
+    _src = list(sources or [])
+    jobs = [{"source": _s, "index": _i, "credits": int(per_job),
+             "debit_at": "dispatch", "refunds": "independently"}
+            for _i, _s in enumerate(_src[:_afford])]
+    return (_v, jobs, _src[_afford:], _why)
+
+
 def reedit_merge(prior, targets, incoming):
     """(verdicts, refused) — apply a re-edit's incoming rulings to the prior set.
 

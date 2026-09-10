@@ -92,6 +92,43 @@ check("exactly one boundary: 9 credits is NONE, 10 is OK",
       f(1, 9)[0] == "NONE" and f(1, 10)[0] == "OK",
       f"{f(1, 9)[0]} / {f(1, 10)[0]}")
 
+# ── THE DISPATCH PATH ───────────────────────────────────────────────────────
+# Pricing alone is a number on a screen. What matters is that the batch never
+# STARTS a run it cannot finish, and that each job carries its own debit so each
+# refunds independently.
+for _n2 in tree.body:
+    if isinstance(_n2, ast.FunctionDef) and _n2.name == "batch_dispatch_plan":
+        exec(compile(ast.Module([_n2], []), "<c>", "exec"), _ns)
+check("batch_dispatch_plan is module-level and pure",
+      "batch_dispatch_plan" in _ns)
+_bd = _ns.get("batch_dispatch_plan")
+if _bd:
+    _S = ["s%d.mp4" % i for i in range(10)]
+    _v, _j, _h, _w = _bd(_S, 100)
+    check("a covered batch dispatches every source", _v == "OK"
+          and len(_j) == 10 and not _h, f"{_v} {len(_j)} {len(_h)}")
+    check("EACH JOB CARRIES ITS OWN DEBIT so each refunds independently",
+          all(x["credits"] == 10 for x in _j)
+          and sum(x["credits"] for x in _j) == 100,
+          "one debit for ten jobs cannot be partially refunded when job seven "
+          "is lost")
+    _v6, _j6, _h6, _w6 = _bd(_S, 60)
+    check("60 credits DISPATCHES SIX AND HOLDS FOUR",
+          (_v6, len(_j6), len(_h6)) == ("PARTIAL", 6, 4),
+          f"{_v6} dispatch={len(_j6)} held={len(_h6)}")
+    check("the held four are NAMED, not silently dropped",
+          _h6 == _S[6:], f"{_h6}")
+    check("the batch never debits more than the balance",
+          sum(x["credits"] for x in _j6) == 60)
+    check("a batch that covers nothing dispatches NOTHING",
+          _bd(_S, 5)[0] == "NONE" and not _bd(_S, 5)[1]
+          and len(_bd(_S, 5)[2]) == 10,
+          "a run started that cannot finish is the failure this prevents")
+    check("an over-cap selection dispatches nothing and holds everything",
+          _bd(["x"] * 11, 500)[0] == "REFUSED" and not _bd(["x"] * 11, 500)[1])
+    check("job indices are stable and contiguous",
+          [x["index"] for x in _j6] == list(range(6)))
+
 print()
 if fails:
     print("BATCH-BALANCE: FAIL")
