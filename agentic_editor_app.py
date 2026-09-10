@@ -1993,12 +1993,25 @@ KNOWLEDGE_TOOLS = [{
                                               "turn", "payoff", "close",
                                               "breath"],
                                      "description":
-                                         "WHAT THIS MOMENT IS. The reference "
-                                         "exemplars are indexed by it, so this "
-                                         "is the key that decides which "
-                                         "editor's read applies. Name what the "
-                                         "beat IS — not what you want to place "
-                                         "on it, and not a quota to fill."},
+                                         "WHAT THIS BEAT DOES — its rhetorical "
+                                         "function. hook opens; claim asserts; "
+                                         "evidence backs a claim up; turn "
+                                         "pivots; payoff is the reason-to-exist "
+                                         "line; close lands it; breath is a "
+                                         "pause that carries nothing new.\n\n"
+                                         "NOT THE SAME AXIS AS `zoom_arc`. That "
+                                         "one is ENERGY POSITION in the arc "
+                                         "(build, mid_peak, breather); this is "
+                                         "FUNCTION. A claim can sit at build or "
+                                         "at mid_peak. Where the two share a "
+                                         "word — hook, payoff, close — they "
+                                         "must agree: a beat is not a hook by "
+                                         "function and a close by energy.\n\n"
+                                         "The reference exemplars are indexed "
+                                         "by this, so it decides which editor's "
+                                         "read applies. Name what the beat IS, "
+                                         "not what you want to place on it, and "
+                                         "not a quota to fill."},
                                  "treatment": {
                                      "type": "array",
                                      "description": "one or more families for "
@@ -2089,7 +2102,12 @@ KNOWLEDGE_TOOLS = [{
                                                     "reason-to-exist line, at "
                                                     "most one per video; "
                                                     "breather = a lull; close = "
-                                                    "the landing."},
+                                                    "the landing.\n\n"
+                                                    "ENERGY POSITION, not "
+                                                    "function — `purpose` is "
+                                                    "the function axis. Where "
+                                                    "they share a word they "
+                                                    "must agree."},
                                  "why": {"type": "string"}},
                              "required": ["beat", "purpose", "treatment",
                                           "cut", "why"]}}},
@@ -11137,6 +11155,34 @@ def edit(source_key: str, brief: str,
             fail("purpose_unnamed",
                  "%d of %d verdict(s) carry no purpose — the reference join has "
                  "no key for them" % (_pc["UNNAMED"], len(_purposes)))
+
+    # ── THE TWO AXES MUST NOT CONTRADICT ────────────────────────────────────
+    # `purpose` (function) and `zoom_arc` (energy position) are different axes
+    # and both ask "what is this moment". They SHARE three words — hook, payoff,
+    # close — and where a beat carries both, they must agree. A beat ruled
+    # purpose=hook and zoom_arc=close is incoherent, and it would send the
+    # reference join and the zoom lookup to opposite ends of the video.
+    #
+    # I introduced this collision by adding `purpose` beside a `zoom_arc` that
+    # already asked "what this moment IS in the arc". Two names for overlapping
+    # things is the class this lane has paid for repeatedly; the fix is to say
+    # which axis is which AND to check the overlap rather than trust the prose.
+    _SHARED_AXIS = {"hook", "payoff", "close"}
+    _incoherent = [
+        {"beat": _v.get("beat"), "purpose": _v.get("purpose"),
+         "zoom_arc": _v.get("zoom_arc")}
+        for _v in (led.get("beat_verdicts") or [])
+        if _v.get("purpose") in _SHARED_AXIS
+        and _v.get("zoom_arc") in _SHARED_AXIS
+        and _v.get("purpose") != _v.get("zoom_arc")]
+    led["axis_incoherent"] = _incoherent
+    if _incoherent:
+        print("  AXIS CONFLICT   : %d beat(s) name one moment two ways: %s"
+              % (len(_incoherent), _incoherent[:3]), flush=True)
+        fail("axis_incoherent",
+             "%d beat(s) carry a purpose and a zoom_arc that share the "
+             "vocabulary and disagree — the reference join and the zoom lookup "
+             "would point at different moments" % len(_incoherent))
 
     _plan, _plan_problems = durable_plan(led.get("beats") or [],
                                          led.get("beat_verdicts") or [])
