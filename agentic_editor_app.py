@@ -75,54 +75,19 @@ app = modal.App("agentic-editor")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
 
-# ── A BARE ENUM IS A LIST OF WORDS ──────────────────────────────────────────
-# THE MECHANISM BEHIND "1 distinct of 29 selectable, StatCard=4" on two rounds
-# running. The agent saw 29 NAMES in the enum and had semantic information about
-# exactly one of them: StatCard is named in the system prompt, ProgressBar is
-# named once, and the other 27 appear nowhere in the cached prefix. Learning
-# what a PullQuote or a RankedList is for costs a read_knowledge turn, and the
-# agent does not spend it — so it picks the only component it has been told
-# anything about. That is not taste, and it is not incumbency in the agent; it
-# is the harness offering a vocabulary it never defined.
+# THE CLAIM INDEX IS RETIRED (2026-09-09). It parsed a `Claim:` line for each
+# of the 29 components out of knowledge/05_motion_graphics.md at import, and fed
+# exactly one consumer: the `card_type` enum description. b13730c retired that
+# enum — the agent no longer names a component — and the table lost its only
+# reader without anyone noticing. It kept being computed on every import.
 #
-# The claims are the catalogue's OWN one-line "Claim:" per entry, extracted from
-# the mounted file rather than paraphrased, so the index cannot drift from the
-# teach. ~364 tokens for all 29 — about $0.0009 a run at twelve turns — against
-# ~6,600 for the full prose. The prose stays where it is; this is the part that
-# has to be in front of the agent at the moment it chooses.
-def _mg_claim_index():
-    """{type: one-line claim} read from the mounted catalogue.
-
-    RAISES rather than returning a partial index. A missing claim means a type
-    the agent can name and cannot understand, which is the exact condition this
-    exists to end — degrading quietly would restore it for that type alone and
-    nobody would see which.
-    """
-    _p = os.path.join("/knowledge", "05_motion_graphics.md")
-    if not os.path.isfile(_p):
-        _p = os.path.join(_KNOWLEDGE_DIR, "05_motion_graphics.md")
-    try:
-        _txt = open(_p, encoding="utf-8").read()
-    except Exception as _e:
-        raise RuntimeError(
-            f"the motion-graphic catalogue is unreadable ({_e}); the schema "
-            f"would offer 29 bare names again") from _e
-    _out = {}
-    for _t in MG_SELECTABLE_TYPES:
-        _m = re.search(r"\*\*" + re.escape(_t) + r"\*\*.*?Claim:\s*[\"\u201c]"
-                       r"([^\"\u201d]+)[\"\u201d]", _txt, re.S)
-        if _m:
-            _out[_t] = " ".join(_m.group(1).split())
-    _missing = [t for t in MG_SELECTABLE_TYPES if t not in _out]
-    if _missing:
-        raise RuntimeError(
-            f"no Claim: line in the catalogue for {_missing} — those types "
-            f"would be offered as bare names, which is how StatCard won two "
-            f"rounds running")
-    return _out
-
-
-MG_CLAIM_INDEX = _mg_claim_index()
+# Second instance of a table mounted and unread in this codebase, and the first
+# one I made myself. Found by the wiring audit, not by a check.
+#
+# THE INVARIANT IT CARRIED IS REAL AND SURVIVES, in cert_mg_prop_keys.py: the
+# components' own catalogue must document every selectable type. That belongs in
+# a cert, not on the import path — it is a fact about the repo, not something
+# the worker needs at run time.
 
 # ── WHAT EACH COMPONENT ACTUALLY READS ──────────────────────────────────────
 #
@@ -246,12 +211,12 @@ def _mg_props_teach():
 
 MG_PROPS_TEACH = _mg_props_teach()
 
-MG_CLAIM_LINES = "\n".join(f"  {k} — {v}" for k, v in sorted(MG_CLAIM_INDEX.items()))
 
 _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion"))
 _REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 _MOODREEL_SRC = os.path.join(_REPO_ROOT, "moodreel_editor.py")
 _TYPEREG_SRC = os.path.join(_REPO_ROOT, "type_registries.py")
+_REFERENCE_INDEX_SRC = os.path.join(_HERE, "reference_index.json")
 _BATCH_MJS = os.path.join(_HERE, "remotion_batch.mjs")
 # INPUT 4 — the Remotion skills. 276 markdown files, ~11MB, and until now they
 # lived ONLY in ~/.claude/skills on the laptop: the agent runs in a Modal
@@ -401,7 +366,12 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
        # + browser launch + renderMedia overhead = 12.24s measured, EVERY call.
        # This script bundles once and renders a queue, so captions, cards and
        # zooms pay it between them instead of each.
-       .add_local_file(_BATCH_MJS, "/promptly-remotion/remotion_batch.mjs", copy=True))
+       .add_local_file(_BATCH_MJS, "/promptly-remotion/remotion_batch.mjs", copy=True)
+       # THE REFERENCE INDEX. A file the code reads MUST be mounted — this repo's
+       # own law, and without it load_reference_index returns UNREADABLE and the
+       # brief honestly reports that the agent is ruling without the examples.
+       # Honest and useless is still useless.
+       .add_local_file(_REFERENCE_INDEX_SRC, "/root/reference_index.json", copy=True))
 
 SECRETS = [modal.Secret.from_name("promptly-secrets")]
 # The source cache must OUTLIVE the container or it is inert — /cache on a fresh
@@ -1563,6 +1533,13 @@ Violating any of them produces a BROKEN video that still exits 0.
                     ["card"] ["text"] ["sfx"] ["zoom"] ["none"]
                     or combinations — a corpus hook routinely carries BOTH
                     text and a sound hit. F1 above maps each to its mechanism.
+                    CARD AND TEXT ARE NOT ALTERNATIVES. A beat that quotes a
+                    figure, or a claim worth stamping, takes a card AND a
+                    caption:
+                      the caption carries the words,
+                      the card carries the number.
+                    Choosing between them is the wrong question — the reference
+                    hooks do both on the same beat.
         text_content — REQUIRED when treatment includes "text": the words to
                     burn for that beat. The overlay is DERIVED from this — you
                     do not hand build_overlays a list, it reads your rulings and
@@ -2051,7 +2028,13 @@ KNOWLEDGE_TOOLS = [{
                                      "type": "array",
                                      "description": "one or more families for "
                                                     "this beat; [] or ['none'] "
-                                                    "is a real answer",
+                                                    "is a real answer. card and "
+                                                    "text are NOT alternatives "
+                                                    "— a beat that quotes a "
+                                                    "figure or a claim worth "
+                                                    "stamping takes BOTH: the "
+                                                    "caption carries the words, "
+                                                    "the card carries the number",
                                      "items": {"type": "string",
                                                "enum": ["card", "text", "sfx",
                                                         "zoom", "cutaway",
@@ -2081,9 +2064,26 @@ KNOWLEDGE_TOOLS = [{
                                                     "sfx is 'yes'. Pick by ROLE "
                                                     "from the table."},
                                  "card_hero": {"type": "string",
-                                     "description": "when treatment includes "
-                                                    "'card': the number or short "
-                                                    "phrase the card is ABOUT"},
+                                     # REQUIRED, and it says so now. Removing
+                                     # card_type and card_props made this the
+                                     # WHOLE card contract — the harness derives
+                                     # the component and its props from this one
+                                     # phrase — while its description still read
+                                     # as one optional field among several. The
+                                     # field it is modelled on, zoom_arc, has
+                                     # said REQUIRED since it shipped.
+                                     "description": "REQUIRED when treatment "
+                                                    "includes 'card': the "
+                                                    "number or short phrase the "
+                                                    "card is ABOUT. This is the "
+                                                    "ONLY thing you say about a "
+                                                    "card — the component and "
+                                                    "its props are derived from "
+                                                    "it, the way zoom_arc "
+                                                    "derives the zoom. A figure "
+                                                    "becomes a counting card; a "
+                                                    "short claim becomes a "
+                                                    "quote card"},
                                  "card_label": {"type": "string",
                                      "description": "the card's supporting line"},
                                  # WHICH COMPONENT, and its props. This is the
@@ -5233,6 +5233,284 @@ def derive_card_type(hero, beat_text="", vibe=""):
                              "`text` and carries a phrase whole")
     return (None, "the phrase is too long to stamp (%d words); a card is a "
                   "few words at reading size, not a sentence" % len(_words))
+
+
+# ── REFERENCE RETRIEVAL — the examples, at the moment of ruling ─────────────
+#
+# ZAC, 2026-09-09: prompting does not produce intent. "About one punch per short"
+# was in the prompt and six of seven fixtures ignored it, because a schema that
+# offers a free slot gets filled. The corpus was mined into numbers; the numbers
+# grade; nothing showed the agent the craft it is graded against.
+#
+# AND A STYLE GUIDE WOULD HAVE BEEN THE SAME MISTAKE WITH MORE WORDS — prose
+# describing craft is what already failed. So this shows the EXAMPLES: for each
+# beat, the k reference beats most like it, with what the editor placed and why.
+#
+# IT IS NOT A TOOL THE AGENT CALLS. read_knowledge has been called ZERO times in
+# every round; a surface the agent never opens cannot carry the craft. This is
+# injected into the beats brief, which is already in the cached prefix — one
+# cache write, pennies per turn after, no extra model turn, no agent decision.
+#
+# THE THREE ABSENCES ARE SPOKEN, NOT HIDDEN. Every one is the same rule: say
+# what is missing rather than return something that reads as a judgement.
+#   cutaway    47.1% of the corpus (72 of 153) places a cutaway and this
+#              pipeline cannot do one. Those beats are FILTERED, with the reason
+#              stated, so the agent is never shown craft it cannot imitate.
+#   punch_in   6 beats, 3.9%. Labelled as six examples rather than presented as
+#              a corpus, because repetition from a bottleneck is not a style.
+#   transition ZERO reference beats. Returns an explicit "no reference beat uses
+#              this" rather than an empty list, which reads as nothing to say.
+_REFERENCE_INDEX_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "reference_index.json")
+# The corpus's own vocabulary, against which the agent already answers arc
+# position for zoom. Four values coincide with zoom_arc's enum, which is why the
+# join key needs no new annotation on either side.
+REFERENCE_PURPOSES = ("hook", "claim", "turn", "evidence", "payoff", "close", "breath")
+# Our family -> the corpus's name for it. Named explicitly because they differ,
+# and a silent mismatch would retrieve nothing while looking like it worked.
+REFERENCE_FAMILY_NAME = {"text": "overlay_text", "card": "card", "sfx": "sfx",
+                         "zoom": "punch_in", "cut": "cut", "transition": None}
+_REFERENCE_UNBUILDABLE = "cutaway"
+
+
+def load_reference_index(path=None):
+    """(beats, meta). Never raises — an unreadable index is an absence, said."""
+    _p = path or _REFERENCE_INDEX_PATH
+    try:
+        with open(_p, encoding="utf-8") as fh:
+            _d = json.load(fh)
+    except Exception as e:                                    # noqa: BLE001
+        return ([], {"state": "UNREADABLE", "why": str(e)[:120],
+                     "beats_in_corpus": None, "beats_in_index": 0})
+    _b = _d.get("beats") or []
+    _n = _d.get("beats_in_corpus")
+    # AN INDEX CANNOT CARRY MORE BEATS THAN THE CORPUS HOLDS. That is the one
+    # form of a self-inconsistent index a reader CAN catch — a file that merely
+    # understates the corpus is indistinguishable from a complete one, and the
+    # defence there is the generator, which computes both from the same query.
+    if _n and len(_b) > _n:
+        return (_b, {"state": "INCONSISTENT", "beats_in_corpus": _n,
+                     "beats_in_index": len(_b),
+                     "family_counts_in_corpus": _d.get("family_counts_in_corpus") or {},
+                     "why": "the index carries %d beats and claims the corpus "
+                            "has %d — regenerate it" % (len(_b), _n)})
+    _meta = {"state": "PARTIAL" if (_n and len(_b) < _n) else "COMPLETE",
+             "beats_in_corpus": _n, "beats_in_index": len(_b),
+             "family_counts_in_corpus": _d.get("family_counts_in_corpus") or {},
+             "why": ""}
+    if _meta["state"] == "PARTIAL":
+        _meta["why"] = ("the index carries %d of the corpus's %d beats — "
+                        "regenerate with build_reference_index.py"
+                        % (len(_b), _n))
+    return (_b, _meta)
+
+
+def reference_examples_for(purpose, duration_s, k=3, beats=None,
+                           allow_unbuildable=False):
+    """The k reference beats most like this moment. Cutaway beats excluded.
+
+    Nearest on PURPOSE first (the join key), then on duration — a 0.82s breath
+    and a 3.98s close are different moments and want different treatment.
+    """
+    _b = beats if beats is not None else load_reference_index()[0]
+    _p = str(purpose or "").lower()
+    _pool = [x for x in _b
+             if allow_unbuildable
+             or _REFERENCE_UNBUILDABLE not in (x.get("treat") or [])]
+    _same = [x for x in _pool if str(x.get("purpose") or "").lower() == _p]
+    _rest = [x for x in _pool if str(x.get("purpose") or "").lower() != _p]
+    try:
+        _d = float(duration_s or 0)
+    except Exception:                                         # noqa: BLE001
+        _d = 0.0
+    _same.sort(key=lambda x: abs(float(x.get("dur") or 0) - _d))
+    _rest.sort(key=lambda x: abs(float(x.get("dur") or 0) - _d))
+    return (_same + _rest)[:max(0, int(k))]
+
+
+def reference_family_note(family, beats=None, meta=None):
+    """What the corpus can and cannot say about this family. Absence SPOKEN.
+
+    COUNTS COME FROM THE CORPUS, NOT FROM THE INDEX. A seeded index reporting
+    "only 4 examples of sfx in the whole corpus" when the corpus holds 14 is the
+    absence-misreported-as-a-finding this whole feature exists to prevent — and
+    it was the first thing this function did.
+    """
+    if beats is None or meta is None:
+        _b, _m = load_reference_index()
+        beats = beats if beats is not None else _b
+        meta = meta if meta is not None else _m
+    _b = beats
+    _name = REFERENCE_FAMILY_NAME.get(str(family))
+    if _name is None:
+        return ("NO REFERENCE: no reference beat uses %s. The corpus has nothing "
+                "to show you for this family — that is an absence in the "
+                "examples, not permission and not a prohibition." % family)
+    _corpus_counts = (meta or {}).get("family_counts_in_corpus") or {}
+    _n = _corpus_counts.get(_name)
+    if _n is None:
+        _n = sum(1 for x in _b if _name in (x.get("treat") or []))
+    if _n == 0:
+        return ("NO REFERENCE: no reference beat uses %s." % family)
+    if _n <= 8:
+        return ("ONLY %d EXAMPLES of %s in the whole corpus — treat these as %d "
+                "examples, not as a pattern. Repetition from a bottleneck is "
+                "not a style." % (_n, family, _n))
+    return ""
+
+
+def _reference_block(our_beats, k=3):
+    """The reference examples for this run's beats, as prompt text.
+
+    ABSENCE IS SPOKEN, three times over — a partial index says so, a family with
+    too few examples says so, and a family with none says so. None of the three
+    returns something that reads as a judgement.
+    """
+    if not prefix_material_enabled("reference_examples"):
+        return ("REFERENCE EXAMPLES: REMOVED for this run "
+                "(PROMPTLY_DISABLE_REFERENCE_EXAMPLES=1) — a deliberate removal, "
+                "not an absence in the corpus.")
+    _b, _meta = load_reference_index()
+    if not _b:
+        return ("REFERENCE EXAMPLES: NONE AVAILABLE — the reference index could "
+                "not be read (%s). You are ruling without the examples this "
+                "product is graded against." % (_meta.get("why") or "no index"))
+    _lines = ["HOW REAL EDITS TREAT MOMENTS LIKE THESE — from %d annotated beats "
+              "of the reference corpus. These are what editors DID, not rules." %
+              (_meta.get("beats_in_corpus") or len(_b))]
+    if _meta.get("state") == "PARTIAL":
+        _lines.append("  (index is PARTIAL: %s)" % _meta.get("why"))
+    _seen = set()
+    for _ob in (our_beats or []):
+        _dur = float(_ob.get("t_end", 0)) - float(_ob.get("t_start", 0))
+        # The agent has not named this beat's purpose yet — that is what it is
+        # about to do. Match on DURATION alone and show the nearest moments,
+        # which is honest about what is knowable before the ruling exists.
+        for _e in reference_examples_for(None, _dur, k=k, beats=_b):
+            _key = (_e.get("read") or "")[:40]
+            if _key in _seen:
+                continue
+            _seen.add(_key)
+            _lines.append(
+                "  %-8s %4.2fs  %-28s %s"
+                % (_e.get("purpose") or "?", _e.get("dur") or 0,
+                   "+".join(_e.get("treat") or []), (_e.get("read") or "")[:150]))
+    for _fam in ("text", "card", "sfx", "zoom", "transition"):
+        _note = reference_family_note(_fam, _b, _meta)
+        if _note:
+            _lines.append("  %s" % _note)
+    return "\n".join(_lines)
+
+
+# ── THE RULING-TIME KNOWLEDGE, IN THE PREFIX ────────────────────────────────
+#
+# Zac, 2026-09-09: the material that answers "when does a placement earn its
+# moment", not "how do I write a Remotion component".
+#
+# MEASURED before building. All 14 knowledge documents are 48,033 tokens — too
+# large whole. But the distribution is the finding: THE DOCUMENTS THAT ARE PURELY
+# RULING-TIME JUDGEMENT ARE THE SMALLEST FOUR.
+#
+#     02_intent_standard              362 tok
+#     09_seam_treatments              213
+#     13_placement_findings           923
+#     14_card_text_placement_rules  1,288
+#     ─────────────────────────────────────
+#                                   2,786 tokens
+#
+# The large ones are catalogues and recipes — 05_motion_graphics (9,168) is the
+# component catalogue, 15_ffmpeg is command recipes, 11_thumbnail is a different
+# product surface. A derivation reads a catalogue; an agent mid-ruling does not.
+# They stay on disk behind read_knowledge, which is the right mechanism for
+# lookup.
+#
+# WHY THE PREFIX AND NOT THE TOOL. read_knowledge is OFFERED to Sonnet and
+# called ZERO times in every round. A surface the agent never opens cannot carry
+# the standard, and this lane's own law says a preference is not a property.
+#
+# THE HONEST CAVEAT, recorded rather than omitted: rounds 12-13 measured Haiku
+# spending NINE turns on read_knowledge/search_skills and reaching a
+# BYTE-IDENTICAL cut and speech check to Sonnet, which read nothing. That is
+# evidence reading changed nothing — on a measurement of the CUT. It did not
+# look at placement, which is what these four documents are about. This is not
+# proof they will help; it is the material being present at the moment it is
+# relevant instead of behind a call nobody makes.
+_RULING_TIME_DOCS = ("02_intent_standard.md",
+                     "09_seam_treatments_transitions_tight_.md",
+                     "13_placement_findings.md",
+                     "14_card_text_placement_rules.md")
+
+
+def ruling_time_knowledge(dirs=None, docs=None):
+    """The four judgement documents as prompt text. Absence is SPOKEN.
+
+    A missing document says so rather than silently shrinking the block — the
+    same rule the reference retrieval follows, and the reason is the same: an
+    absence that reads as nothing-to-say is a judgement nobody made.
+    """
+    # dirs/docs are parameters so this can be tested by BEHAVIOUR. The first
+    # version could only be checked by asking whether a string appeared in the
+    # source, and a mutant that moved the string into a dead branch kept it —
+    # twentieth instance of that trap in this lane.
+    if dirs is None and not prefix_material_enabled("ruling_time_knowledge"):
+        return ("EDITORIAL STANDARD: REMOVED for this run "
+                "(PROMPTLY_DISABLE_RULING_TIME_KNOWLEDGE=1) — a deliberate "
+                "removal, not a missing document.")
+    _dirs = list(dirs) if dirs else ["/knowledge", _KNOWLEDGE_DIR]
+    _parts, _missing = [], []
+    for _name in (docs if docs is not None else _RULING_TIME_DOCS):
+        _txt = None
+        for _d in _dirs:
+            _p = os.path.join(_d, _name)
+            if os.path.isfile(_p):
+                try:
+                    _txt = open(_p, encoding="utf-8").read().strip()
+                except Exception:                             # noqa: BLE001
+                    _txt = None
+                break
+        if _txt:
+            _parts.append(_txt)
+        else:
+            _missing.append(_name)
+    if not _parts:
+        return ("EDITORIAL STANDARD: UNAVAILABLE — none of %s could be read. You "
+                "are ruling without the standard this product is graded against."
+                % (", ".join(_RULING_TIME_DOCS)))
+    _head = ("THE EDITORIAL STANDARD AND WHERE THE FAMILIES ACTUALLY LAND — "
+             "read this before you rule, it is not reference you look up.")
+    if _missing:
+        _head += ("\n  (MISSING and not read: %s — the standard below is "
+                  "incomplete and that is a gap, not a smaller standard.)"
+                  % ", ".join(_missing))
+    return _head + "\n\n" + "\n\n".join(_parts)
+
+
+# ── REMOVAL SWITCHES FOR THE PREFIX MATERIAL ────────────────────────────────
+#
+# The registered follow-up (83d85a4): if placement moves, the BUNDLE worked and
+# which of the four changes did it is unknown — and the honest way to find out is
+# ONE REMOVAL AT A TIME, not a story about which one it probably was.
+#
+# Without a switch each removal is a code change, a merge and a freeze cycle.
+# With one it is an env var, and the experiment is three rounds instead of nine.
+#
+# DEFAULT ON, REMOVAL ONLY. Absent or unset means the material IS included, so
+# an unset variable can never silently ship a darker prefix. This repo has nine
+# features that shipped dark on an unset flag; a switch that only SUBTRACTS from
+# the shipped default cannot join them.
+#
+# AND THE STATE IS PRINTED, always — a removal nobody can see in the log is a
+# round whose prefix nobody can reconstruct afterwards.
+def prefix_material_enabled(name):
+    """False only when explicitly disabled. Unset means ON."""
+    return str(os.environ.get("PROMPTLY_DISABLE_" + name.upper(), "")).strip() != "1"
+
+
+def prefix_material_state():
+    """What is IN this run's prefix, for the log. Never inferred from a flag
+    name — the same predicate the injection uses."""
+    return {_n: ("ON" if prefix_material_enabled(_n) else "REMOVED")
+            for _n in ("reference_examples", "ruling_time_knowledge")}
 
 
 def cut_intrusion_floor_ms(r_frame_rate, avg_frame_rate):
@@ -9148,6 +9426,12 @@ def edit(source_key: str, brief: str,
             + "\n".join(f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
                         + ("  (has a number)" if b["has_number"] else "")
                         + f"  {b['text'][:90]}" for b in _beats) + "\n\n"
+            # ── THE EXAMPLES, AT THE MOMENT OF RULING ──────────────────────
+            # Not a description of the craft — the craft. For each beat, the
+            # reference beats most like it: what an editor placed at a moment
+            # of that shape, and WHY. Injected into the brief, which is inside
+            # the CACHED prefix, so it costs one write and pennies per turn.
+            + _reference_block(_beats) + "\n\n"
             f"Decide the spans to KEEP, then call `build_cut` with them. It "
             f"returns the ffmpeg command and an output-time .srt — do not build "
             f"either by hand.\n\n"
@@ -9183,7 +9467,11 @@ def edit(source_key: str, brief: str,
     led["sfx_table_chars"] = len(_sfx_table)
 
     sys_text = (SYSTEM + _sfx_table
-                + (_KNOWLEDGE_SYSTEM if use_knowledge else ""))
+                + (_KNOWLEDGE_SYSTEM if use_knowledge else "")
+                # The judgement documents ride the SYSTEM block, which is
+                # the one thing marked cache_control — written once,
+                # read on every turn after.
+                + "\n\n" + ruling_time_knowledge())
     sys_blocks = [{"type": "text", "text": sys_text,
                    "cache_control": {"type": "ephemeral"}}]
     # THE SCHEMA IS CONSTANT FOR THE WHOLE RUN, and the gate moved into the
@@ -9821,30 +10109,49 @@ def edit(source_key: str, brief: str,
                                 f"push, a hook takes a snap or a pull. Give one "
                                 f"of {sorted(ZOOM_ARC_HOMES)}.")
                     if _why6 is None and "card" in _tr6:
-                        # A card whose figure is not a figure renders BLANK and
-                        # exits 0 — four of them shipped invisible in round 35.
-                        _ct6 = str(_v.get("card_type") or "").strip()
-                        if not _ct6:
+                        # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
+                        # OFFERS. It demanded `card_type` — a field b13730c
+                        # REMOVED from the schema when cards became derived. The
+                        # agent could not supply it, was rejected, and re-ruled
+                        # the same beat identically about five times: round 47's
+                        # control shows exactly that loop, three beats each.
+                        #
+                        # I removed the field and left the gate demanding it.
+                        # That is the mirror of the card_props_mismatch orphan —
+                        # there a NAME with no producer, here a DEMAND with no
+                        # supply — and both are invisible until something tries
+                        # to satisfy them.
+                        _hero6 = str(_v.get("card_hero") or "").strip()
+                        if not _hero6:
                             _why6 = (
                                 f"beat {_v.get('beat')}: ruled 'card' with no "
-                                f"card_type. WHICH component reads what the "
-                                f"beat SAYS and cannot be derived — the enum "
-                                f"carries each one's claim. There is no "
-                                f"default; StatCard is for a quoted number.")
-                        _pr6 = _v.get("card_props")
-                        if not isinstance(_pr6, dict) or not _pr6:
-                            _pr6 = {"value": str(_v.get("card_hero") or "").strip()}
-                        _, _bad6 = coerce_mg_props(_pr6)
-                        if _bad6 and _ct6 not in MG_BRAND_ONLY:
-                            _why6 = (
-                                f"beat {_v.get('beat')}: {_ct6} needs a NUMBER "
-                                f"for {_bad6} and got "
-                                f"{[_pr6.get(k) for k in _bad6]!r}. It counts up "
-                                f"to a target, so a word renders a blank card "
-                                f"with no error. If this beat has no quoted "
-                                f"figure it is the wrong component — read "
-                                f"05_motion_graphics and pick one that carries "
-                                f"a phrase.")
+                                f"card_hero. That is the ONE thing you say about "
+                                f"a card — the component and its props are "
+                                f"derived from it, the way zoom_arc derives the "
+                                f"zoom. Give the figure or the short phrase the "
+                                f"card is about.")
+                        else:
+                            # SAME DERIVATION THE BUILDER USES. A gate that
+                            # accepts what the builder then refuses is a second
+                            # opinion nobody asked for, and this file has paid
+                            # for divergent copies of one rule before.
+                            _ct6, _dw6 = derive_card_type(
+                                _hero6, str(_v.get("text_content") or ""))
+                            if not _ct6:
+                                _why6 = f"beat {_v.get('beat')}: {_dw6}"
+                            else:
+                                _pp6, _pw6 = derive_card_props(_ct6, _hero6,
+                                                               str(_v.get("card_label") or ""))
+                                _, _bad6 = coerce_mg_props(dict(_pp6))
+                                if _bad6:
+                                    _why6 = (
+                                        f"beat {_v.get('beat')}: {_ct6} needs a "
+                                        f"NUMBER for {_bad6} and {_hero6!r} does "
+                                        f"not give one. It counts up to a target, "
+                                        f"so a word renders a blank card with no "
+                                        f"error. If this beat has no quoted "
+                                        f"figure, a short claim still takes a "
+                                        f"card — the phrase becomes a quote card.")
                     if _why6:
                         # THE SAME SHAPE AS EVERY OTHER REJECTION. This appended
                         # a bare STRING while the sibling append twelve lines up
@@ -11209,6 +11516,14 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
             f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
             for c in _cps))
+    # ALWAYS PRINTED, both states. A removal nobody can see in the log is a
+    # round whose prefix nobody can reconstruct afterwards — and the whole point
+    # of the switch is a removal EXPERIMENT, which is worthless if the removal
+    # is not on the record beside the result.
+    _pm = prefix_material_state()
+    print("  PREFIX MATERIAL : " + "  ".join(f"{_k}={_v}" for _k, _v in sorted(_pm.items()))
+          + ("   <-- REMOVED material, this run is not comparable to a default one"
+             if any(_v == "REMOVED" for _v in _pm.values()) else ""))
     _cwi = (r.get("ledger") or {}).get("cut_word_intrusions")
     if _cwi is not None:
         _fl = (r.get("ledger") or {}).get("cut_quantisation_floor_ms")

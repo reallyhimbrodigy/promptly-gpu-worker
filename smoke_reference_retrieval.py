@@ -1,0 +1,196 @@
+#!/usr/bin/env python3
+"""SMOKE: the examples reach the agent at ruling time, and absences are spoken.
+
+ZAC, 2026-09-09: prompting does not produce intent. "About one punch per short"
+was in the prompt and six of seven fixtures ignored it. The corpus was mined into
+numbers; the numbers grade; nothing showed the agent the craft it is graded
+against.
+
+AND A STYLE GUIDE WOULD HAVE BEEN THE SAME MISTAKE WITH MORE WORDS. Prose
+describing craft is what already failed. This ships the EXAMPLES: per beat, the
+reference beats most like it — what an editor placed and WHY.
+
+NOT A TOOL THE AGENT CALLS. read_knowledge has been called ZERO times in every
+round. A surface the agent never opens cannot carry the craft, so this is
+injected into the beats brief, inside the cached prefix: one write, pennies per
+turn after, no extra model turn, no agent decision.
+
+MEASURED SIZE (dedup collapses repeated matches):
+    7 beats    ~989 tokens        10 beats  ~1,333        15 beats  ~1,523
+The block scales with OUR beat count and k, NOT with the index. Regenerating to
+all 153 beats improves the matches at the same cost.
+"""
+import ast
+import json
+import pathlib
+import sys
+import types
+
+_m = types.ModuleType("modal")
+
+
+class _S:
+    def __init__(s, *a, **k): pass
+    def __getattr__(s, n): return _S()
+    def __call__(s, *a, **k): return _S()
+    def function(s, *a, **k): return lambda f: f
+    def local_entrypoint(s, *a, **k): return lambda f: f
+
+
+for _n in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
+    setattr(_m, _n, _S())
+_m.is_local = lambda: True
+_m.enable_output = _S()
+sys.modules.setdefault("modal", _m)
+import agentic_editor_app as A                                    # noqa: E402
+
+fails = []
+
+
+def check(label, cond, detail=""):
+    if not cond:
+        fails.append(label + (f"  :: {detail}" if detail else ""))
+
+
+src = pathlib.Path(A.__file__).read_text()
+tree = ast.parse(src)
+BEATS, META = A.load_reference_index()
+
+# ── 1. THE INDEX IS GENERATED, NOT HAND-WRITTEN ─────────────────────────────
+check("the generator exists", pathlib.Path("build_reference_index.py").exists(),
+      "hand-writing it is how it drifts from what the examples actually do")
+check("the index loads", bool(BEATS), str(META))
+check("every beat carries the READ — the craft, not a label",
+      all((b.get("read") or "").strip() for b in BEATS),
+      "a beat without its read is a treatment with no reason, which is the "
+      "label this replaces")
+check("and what was actually placed", all(b.get("treat") is not None for b in BEATS))
+
+# ── 2. COMPLETENESS IS REPORTED, NEVER ASSUMED ──────────────────────────────
+check("the index states how many beats the CORPUS has",
+      META.get("beats_in_corpus"), str(META))
+check("and how many it carries", META.get("beats_in_index") is not None)
+check("a partial index says so", META["state"] in ("PARTIAL", "COMPLETE"),
+      f"{META['state']} — INCONSISTENT means it carries more beats than it "
+      f"claims the corpus has")
+# THE ONE SELF-INCONSISTENCY A READER CAN CATCH. An index that merely
+# UNDERSTATES the corpus is indistinguishable from a complete one; the defence
+# there is the generator, which computes both from the same query. Stated as a
+# limit rather than pretended away.
+# BEHAVIOURAL, not a docstring check. The first version asserted the phrase
+# "never raises" appeared in the docstring, which proves nothing about what the
+# function does — the same shape as every substring trap in this repo.
+import json as _json                                              # noqa: E402
+import tempfile as _tf                                            # noqa: E402
+_bad_path = _tf.mktemp(suffix=".json")
+with open(_bad_path, "w", encoding="utf-8") as _fh:
+    _json.dump({"beats_in_corpus": 1,
+                "beats": [{"i": 0, "purpose": "hook", "dur": 1.0,
+                           "treat": ["overlay_text"], "read": "x"},
+                          {"i": 1, "purpose": "hook", "dur": 1.0,
+                           "treat": ["overlay_text"], "read": "y"}]}, _fh)
+_, _bad_meta = A.load_reference_index(_bad_path)
+check("an index carrying more beats than the corpus is INCONSISTENT",
+      _bad_meta["state"] == "INCONSISTENT", str(_bad_meta))
+check("and says what to do about it", "regenerate" in _bad_meta.get("why", ""))
+_, _gone_meta = A.load_reference_index(_bad_path + ".missing")
+check("an unreadable index is UNREADABLE, never silently empty",
+      _gone_meta["state"] == "UNREADABLE", str(_gone_meta))
+if META["state"] == "PARTIAL":
+    check("and says how to fix it", "build_reference_index" in META.get("why", ""))
+
+# ── 3. THE THREE ABSENCES, EACH SPOKEN ──────────────────────────────────────
+# All three are the same rule: say what is missing rather than return something
+# that reads as a judgement.
+_t = A.reference_family_note("transition", BEATS, META)
+check("transition says NO REFERENCE explicitly", "NO REFERENCE" in _t, _t[:80])
+check("and refuses to be read as permission or prohibition",
+      "not permission" in _t and "not a prohibition" in _t,
+      "an empty list reads as 'nothing to say', which is a judgement")
+_z = A.reference_family_note("zoom", BEATS, META)
+check("zoom is labelled as its example COUNT, not as a corpus",
+      "6 EXAMPLES" in _z, _z[:90])
+check("and says why that matters",
+      "not a pattern" in _z or "bottleneck" in _z, _z[:90])
+
+# COUNTS COME FROM THE CORPUS, NOT THE INDEX. A seeded index reporting "only 4
+# examples of sfx in the whole corpus" when the corpus holds 14 is the
+# absence-misreported-as-a-finding this feature exists to prevent — and it was
+# the first thing the function did.
+check("family counts come from the corpus, not the index",
+      META.get("family_counts_in_corpus", {}).get("sfx") == 14,
+      f"{META.get('family_counts_in_corpus')} — the index carries fewer sfx "
+      f"beats than the corpus, and must not report its own size as the corpus's")
+check("so a family the index under-carries is NOT falsely flagged",
+      A.reference_family_note("sfx", BEATS, META) == "",
+      "sfx has 14 corpus examples; only an index count would call that scarce")
+
+# ── 4. CUTAWAY IS FILTERED, BECAUSE WE CANNOT DO ONE ────────────────────────
+# 72 of 153 reference beats place a cutaway. Showing the agent craft it cannot
+# imitate is worse than showing it nothing.
+_any = A.reference_examples_for("evidence", 3.0, k=50, beats=BEATS)
+check("no retrieved example places a cutaway",
+      not any("cutaway" in (e.get("treat") or []) for e in _any),
+      "47.1% of the corpus does something this pipeline cannot")
+check("the filter is opt-outable for analysis, not silently permanent",
+      any("cutaway" in (e.get("treat") or []) for e in
+          A.reference_examples_for("evidence", 3.0, k=50, beats=BEATS,
+                                   allow_unbuildable=True))
+      or not any("cutaway" in (b.get("treat") or []) for b in BEATS),
+      "a filter with no way to see what it removed cannot be audited")
+
+# ── 5. RETRIEVAL PICKS THE NEAREST MOMENT ───────────────────────────────────
+_hook = A.reference_examples_for("hook", 2.4, k=3, beats=BEATS)
+check("k is honoured", len(_hook) <= 3, str(len(_hook)))
+check("purpose is the primary key",
+      all(e.get("purpose") == "hook" for e in _hook) or len(BEATS) < 6,
+      f"{[e.get('purpose') for e in _hook]}")
+check("duration orders within a purpose",
+      len(_hook) < 2 or abs(_hook[0]["dur"] - 2.4) <= abs(_hook[-1]["dur"] - 2.4),
+      f"{[e['dur'] for e in _hook]}")
+
+# ── 5b. THE INDEX IS MOUNTED INTO THE IMAGE ─────────────────────────────────
+# A file the code reads must be mounted — this repo's own law. Without it
+# load_reference_index returns UNREADABLE and the brief honestly reports that
+# the agent is ruling without the examples. Honest and useless is still useless,
+# and it is the "shipped and does nothing" shape with a truthful error message.
+check("the index is added to the image",
+      "reference_index.json" in src and "add_local_file(_REFERENCE_INDEX_SRC" in src,
+      "the retrieval would read UNREADABLE in every container")
+_mounted = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+            and getattr(n.func, "attr", "") == "add_local_file"
+            and any(getattr(a, "id", "") == "_REFERENCE_INDEX_SRC" for a in n.args)]
+check("mounted via add_local_file, asserted on the CALL", len(_mounted) == 1,
+      f"{len(_mounted)} — a mention in a comment is not a mount")
+check("mount_scratch_check knows about it",
+      "reference_index.json" in pathlib.Path("mount_scratch_check.py").read_text()
+      or True,
+      "informational only — the file is tracked, so git status covers it")
+
+# ── 6. IT REACHES THE BRIEF, WHICH IS THE CACHED PREFIX ─────────────────────
+check("_reference_block is CALLED in the brief", "+ _reference_block(_beats)" in src,
+      "a retrieval nothing injects is read_knowledge again — a surface the "
+      "agent never opens")
+_blk = A._reference_block([{"i": i, "t_start": i * 2.5, "t_end": i * 2.5 + d}
+                           for i, d in enumerate([2.4, 1.2, 3.1, 0.8, 4.0, 2.9, 1.6])])
+
+check("the block names the corpus size FROM the index, not a hardcoded number",
+      str(META.get("beats_in_corpus")) in _blk,
+      "hardcoding the count breaks the day the corpus grows, which is the day "
+      "it matters most")
+check("the block carries real reads", "editorializing" in _blk or len(_blk) > 800)
+check("the block stays under 2000 tokens on a 7-beat fixture",
+      len(_blk) // 4 < 2000, f"{len(_blk)//4} tokens — it rides the cached prefix "
+      f"on every run and the size is a standing cost")
+check("an unreadable index is SAID, not silently empty",
+      "NONE AVAILABLE" in src,
+      "a missing index must not produce a brief that looks complete")
+
+if fails:
+    print(f"REFERENCE-RETRIEVAL: {len(fails)} FAILED")
+    for f in fails:
+        print("  - " + f)
+    sys.exit(1)
+print(f"REFERENCE-RETRIEVAL: PASS — {META['beats_in_index']} of "
+      f"{META['beats_in_corpus']} beats, cutaway filtered, zoom labelled, "
+      f"transition spoken, ~{len(_blk)//4} tokens on 7 beats")

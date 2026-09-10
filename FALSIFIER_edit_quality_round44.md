@@ -108,3 +108,95 @@ distributions go to Zac first. A bar comes after, in a separate pass, with the
 separation shown — or does not come at all, which for cut_word_intrusions is a
 live possibility I am naming in advance rather than discovering when it is
 convenient.
+
+---
+
+# RE-READ before round 46 — the denominator moves, the criteria hold
+
+Builder-1's `subdivide_beats` splits any beat over ~3s at the strongest REAL
+seam, taking talking_head from 4 beats to 8-10. Every family gets more ruling
+opportunities at once, so my three distributions land on a **different beat
+population** than the one this file registered against. Re-read as instructed.
+
+## What does NOT change
+
+Nothing in the criteria. All three measures are per-PLACEMENT, not per-beat:
+
+    cut_word_intrusions    per cut boundary, against the words
+    card_beat_alignment    per card, against its own beat
+    placement_collisions   per pair of painted boxes
+
+More beats changes how MANY placements exist; it does not change what any of
+them is measured against. A cut still lands inside a word or it does not.
+
+## What DOES change, and it is the reading rather than the rule
+
+1. **The cut denominator grows, which is the point.** Round 45 gave 0 of 8
+   boundaries across three fixtures — four cuts. That is not evidence of
+   anything, and I said so. A doubled beat count is the first chance this
+   measure has to be exercised at all.
+
+2. **Card counts are no longer comparable across rounds.** 7 card beats across 4
+   rounds, all on talking_head, all quoting a figure. If round 46 shows more
+   cards, the causes are now THREE and this file must not let me pick one:
+   subdivide_beats (more beats), the derivation (b13730c), and the
+   card-and-text sentence (f7b5808). All three landed together.
+   **PRE-REGISTERED: I will not attribute a change in card count to any one of
+   them.** The only clean read available is per-beat RATE — cards per card-worthy
+   beat — and even that confounds the sentence with the split.
+
+3. **Collisions get more likely by construction.** More placements in the same
+   frame means more chances for two painted boxes to coexist. A rise in
+   collisions is therefore NOT evidence of worse layout until it is normalised
+   by the number of coexisting placements, and I will report the pair count
+   alongside.
+
+## The one criterion that needed changing, and why it is not a widening
+
+Criterion 2 for collisions — "a bar carrying >= 2x the fraction either side" —
+was already retired in fbef19c: the metric is continuous by construction, so a
+constructed separation is meaningless. That correction stands and is unrelated to
+the denominator.
+
+Nothing here loosens a bar. The registered outcomes are unchanged: no threshold
+from a smooth distribution, UNEXERCISED rather than passing, motion excluded by
+its own UNMEASURED floor.
+
+---
+
+# ROUND 47 IS A ONE-VARIABLE EXPERIMENT — a constraint on my own work
+
+Round 46 = Builder-1's beat subdivision + my card derivation (b13730c). The
+card-and-text sentence (f7b5808) landed after that freeze, so round 47 adds
+exactly one thing.
+
+**That only holds if I add nothing else card-affecting before round 47
+collects.** The constraint is on me, and it is easy to break by accident: any
+prompt edit, any schema wording, any change to derive_card_type or
+derive_card_props lands in the same round and the sentence stops being
+separable. I have already registered once for three causes when there were two;
+the way to not do that again is to stop adding causes.
+
+## Frozen until round 47 collects
+
+    the treatment description        no edits
+    card_hero / card_label wording   no edits
+    derive_card_type                 no edits
+    derive_card_props                no edits
+    the card branch in execute_plan  no edits
+
+ff9311f (card_hero says REQUIRED) is already in and is the last one. If something
+in that list turns out to be broken before round 47, the honest move is to fix it
+AND say the round is no longer one-variable — not to fix it quietly and read the
+result as if it were.
+
+## What is NOT frozen
+
+The three edit-quality measures, because they are per-placement and observational
+— they change no ruling and no render. Anything outside the card family.
+
+## What round 47 answers, and only this
+
+Whether telling the agent that card and text are not alternatives changes the
+card-vs-text behaviour. Not whether cards are good, not whether the derivation
+picked well — one sentence, one behaviour, one round.

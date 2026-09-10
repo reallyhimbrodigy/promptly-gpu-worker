@@ -35115,7 +35115,11 @@ _ERROR_SUBCODES = {
         # browser_launch. A WRONG sub-code is worse than `unclassified`: it sends
         # the fix to the wrong subsystem with false confidence. Only phrases that
         # can appear exclusively in a launch FAILURE belong here.
+<<<<<<< Updated upstream
         ("browser_launch", ("Failed to launch", "Could not find Chrome",
+=======
+        ("browser_launch", ("chrome", "Chromium", "Failed to launch", "Could not find Chrome",
+>>>>>>> Stashed changes
                             "browser has disconnected", "Target closed",
                             "Protocol error", "Navigation timeout")),
     ),
@@ -38463,6 +38467,7 @@ def _start_render_frame_watcher(job_id, work_dir, app_url, messages=None, interv
     # (bundle/openBrowser/selectComposition emit no frames — a legit ~10-30s gap
     # the watchdog threshold must exceed).
     try:
+<<<<<<< Updated upstream
         # ASYNC, NOT SYNCHRONOUS [2026-08-15]. This watcher ticks every 4s and
         # write_job_status runs UNDER _JOB_STATUS_LOCK — the top suspect for the
         # hang class. A new 4-second contender for that lock, added inside the
@@ -38473,6 +38478,10 @@ def _start_render_frame_watcher(job_id, work_dir, app_url, messages=None, interv
         # behind progress telemetry.
         _async_job_status(job_id, phase="render", progress=65, render_frames=0,
                           progress_at=datetime.utcnow().isoformat())
+=======
+        write_job_status(job_id, phase="render", progress=65, render_frames=0,
+                         progress_at=datetime.utcnow().isoformat())
+>>>>>>> Stashed changes
     except Exception:
         pass
 
@@ -38503,11 +38512,16 @@ def _start_render_frame_watcher(job_id, work_dir, app_url, messages=None, interv
                         _msg = messages[_state["i"] % len(messages)]
                         _state["i"] += 1
                     try:
+<<<<<<< Updated upstream
                         # ASYNC for the same reason as the baseline write above:
                         # this fires every 4s on frame advance and must never
                         # queue the terminal write behind progress telemetry.
                         _async_job_status(job_id, phase="render", progress=_pct,
                                           render_frames=_tot,
+=======
+                        write_job_status(job_id, phase="render", progress=_pct,
+                                         render_frames=_tot,
+>>>>>>> Stashed changes
                                          progress_at=datetime.utcnow().isoformat())
                         if _msg and app_url:
                             send_progress(job_id, "render", _pct, _msg, app_url)

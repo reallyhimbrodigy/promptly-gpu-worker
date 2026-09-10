@@ -245,6 +245,7 @@ let lastPctLogged = -10;
 
 let _lastProgressTime = Date.now();
 let _lastRenderedFrames = 0;
+let _lastProgressFileWrite = 0;   // watchdog: throttle the {output}.progress.json writes
 let _lastEncodedFrames = 0;
 const _intervalSamples = [];
 
@@ -367,6 +368,24 @@ const _progressJsonPath = `${outputPath}.progress.json`;
     if (!_CLK._framesDoneAt && _CLK._expectedFrames
         && (renderedFrames || 0) >= _CLK._expectedFrames) {
       _CLK._framesDoneAt = now;
+    }
+    // WATCHDOG SIGNAL (Zac 2026-08-04): persist the REAL rendered-frame count to
+    // {output}.progress.json so the worker can drive an HONEST progress bar and a
+    // progress-delta watchdog (kill on zero frame movement) — the render subprocess
+    // is otherwise opaque until it exits. Throttled to ~1s (best-effort; a write
+    // failure must never affect the render). This is the frame count the fake
+    // 4-second timer bar was inventing instead of reading.
+    if (now - _lastProgressFileWrite >= 1000) {
+      _lastProgressFileWrite = now;
+      try {
+        writeFileSync(`${outputPath}.progress.json`, JSON.stringify({
+          renderedFrames: renderedFrames || 0,
+          encodedFrames: encodedFrames || 0,
+          expectedFrames: _CLK._expectedFrames || 0,
+          pct: Math.round((progress || 0) * 100),
+          ts: now,
+        }));
+      } catch (_e) { /* best-effort: never let telemetry break a render */ }
     }
     const pct = Math.round((progress || 0) * 100);
     if (pct >= lastPctLogged + 10) {

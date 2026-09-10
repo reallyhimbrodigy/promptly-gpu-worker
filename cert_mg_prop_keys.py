@@ -135,6 +135,42 @@ check("every selectable type is accounted for",
       set(A.MG_PROP_KEYS) | set(A.MG_PROPS_UNDERIVABLE) == set(A.MG_SELECTABLE_TYPES),
       f"unaccounted={sorted(set(A.MG_SELECTABLE_TYPES) - set(A.MG_PROP_KEYS) - set(A.MG_PROPS_UNDERIVABLE))}")
 
+# ── THE CATALOGUE DOCUMENTS EVERY SELECTABLE TYPE ───────────────────────────
+# Inherited from the retired MG_CLAIM_INDEX, which parsed this at IMPORT to feed
+# the card_type enum description. b13730c retired that enum and the parse lost
+# its only reader while still running on every import — a table mounted and
+# unread, and one I made.
+#
+# The invariant is real and belongs here: a type the pipeline can BUILD but the
+# catalogue does not DESCRIBE is a component nobody can learn, and the catalogue
+# is what read_knowledge serves and what any future derivation would read. It is
+# a fact about the repo, checked once, rather than work the worker repeats every
+# cold start.
+_CAT = os.path.join(os.path.dirname(ROOT.rstrip("/")) or ".", "..", "..")
+_cat_path = None
+for _cand in ("knowledge/05_motion_graphics.md",
+              os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "knowledge", "05_motion_graphics.md")):
+    if os.path.isfile(_cand):
+        _cat_path = _cand
+        break
+if _cat_path is None:
+    print("CERT-MG-PROP-KEYS: catalogue not found — skipping the coverage leg")
+else:
+    _txt = open(_cat_path, encoding="utf-8").read()
+    _undocumented = []
+    for _t in sorted(A.MG_SELECTABLE_TYPES):
+        if not re.search(r"\*\*" + re.escape(_t) + r"\*\*.*?Claim:\s*[\"\u201c]",
+                         _txt, re.S):
+            _undocumented.append(_t)
+    check("every selectable type has a Claim line in the catalogue",
+          not _undocumented,
+          f"{_undocumented} — a type the pipeline can BUILD that the catalogue "
+          f"does not DESCRIBE is a component nobody can learn")
+    check("this leg is not vacuous", "Claim:" in _txt,
+          "the catalogue has no Claim lines at all and the check passes by "
+          "finding none to fail")
+
 if fails:
     print(f"CERT-MG-PROP-KEYS: {len(fails)} FAILED")
     for f in fails:

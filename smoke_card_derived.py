@@ -143,6 +143,31 @@ check("card_type is gone from the agent's schema", '"card_type"' not in _schema,
 check("card_props is gone too", '"card_props"' not in _schema,
       "the agent cannot supply a component's props when it does not choose the "
       "component")
+# card_hero IS THE WHOLE CARD CONTRACT NOW, and must say REQUIRED like the
+# field it is modelled on. Removing card_type and card_props left it carrying
+# everything while still described as one optional field among several — a gap
+# my own change created.
+_ch = __import__("json").loads(_schema)
+_hero_desc = ""
+def _find(o):
+    global _hero_desc
+    if isinstance(o, dict):
+        for _k, _v in o.items():
+            if _k == "card_hero" and isinstance(_v, dict):
+                _hero_desc = _v.get("description", "")
+            _find(_v)
+    elif isinstance(o, list):
+        for _v in o:
+            _find(_v)
+_find(_ch)
+check("card_hero says REQUIRED, like zoom_arc", "REQUIRED" in _hero_desc,
+      f"{_hero_desc[:80]!r} — it is now the ONLY thing the agent says about a "
+      f"card, and the field it is modelled on has said REQUIRED since it shipped")
+check("and says the component is derived from it",
+      "derived" in _hero_desc and "zoom_arc" in _hero_desc,
+      "the agent has to know the phrase decides the component, or it will treat "
+      "card_hero as decoration")
+
 check("card_hero survives — the judgement is still the agent's",
       '"card_hero"' in _schema,
       "WHICH phrase is worth stamping cannot be derived; that is the zoom_arc "
@@ -157,6 +182,91 @@ check("the build DERIVES the props", "derive_card_props" in _calls)
 check("and the derivation is recorded",
       'led.setdefault("card_type_derived"' in src,
       "the reason a component was chosen has to be readable afterwards")
+
+# ── 6. CARD AND TEXT ARE NOT ALTERNATIVES ───────────────────────────────────
+# Zac, 2026-09-09. The derivation removed the 29-way pick; it did NOT address
+# the miss, because the card path is gated on the AGENT's treatment and round 45
+# ruled those beats ['text','zoom'] with no card at all. The agent was treating
+# card and text as competing answers to one beat. The reference does both — a
+# counter AND a caption — and round 42 did too, ruling
+# ['text','card','zoom','sfx'] on the very beats round 45 captioned.
+#
+# ONE SENTENCE, on both surfaces the agent reads, and it removes no judgement:
+# the beat still has to be worth stamping, and that call stays the agent's.
+_SURF = {"system prompt": src[src.index("SYSTEM = "):src.index("_KNOWLEDGE_SYSTEM")],
+         "tool schemas": __import__("json").dumps(
+             list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS))}
+for _name, _text in _SURF.items():
+    check(f"the {_name} says card and text are not alternatives",
+          "not alternatives" in _text.lower() or "NOT alternatives" in _text,
+          "the agent chose between them run to run — 'the headline stat' carded "
+          "in r42, 'the headline win' captioned in r45, same beat, same figure")
+    check(f"the {_name} says which carries what",
+          "carries the words" in _text and "carries the number" in _text,
+          "without the division it reads as a licence to double up rather than "
+          "a split of duties")
+# IT MUST NOT BECOME A FLOOR. "takes BOTH" is CONDITIONAL on the beat being
+# worth stamping; an unconditional form would be the density ruling undone.
+for _text in _SURF.values():
+    check("the sentence carries no rate", "/25" not in _text and "per 25" not in _text)
+# The condition must be IN the sentence. My first version asked whether the
+# surface contained "every beat" anywhere and "card" anywhere — and the prompt
+# says "Rule on EVERY beat" for unrelated reasons, so it flagged prose that has
+# nothing to do with cards. Read the sentence, not the surface.
+for _name, _text in _SURF.items():
+    _i = _text.lower().find("not alternatives")
+    _sentence = _text[max(0, _i - 200):_i + 400] if _i >= 0 else ""
+    check(f"the {_name}'s sentence is CONDITIONAL, not a floor",
+          "worth stamping" in _sentence or "quotes a" in _sentence,
+          "an unconditional 'card every beat' is a density demand, which is the "
+          "thing Zac's rubric ruling removed")
+
+# ── 7. NO GATE DEMANDS A FIELD THE SCHEMA NO LONGER OFFERS ──────────────────
+# THE DEFECT THIS EXISTS FOR. b13730c removed card_type from the schema and the
+# beat_verdict ACCEPTANCE GATE kept demanding it. The agent could not supply it,
+# was rejected, and re-ruled the same beat identically about five times — round
+# 47's control shows that loop on three beats.
+#
+# I removed the field and left the gate asking for it. Mirror of the
+# card_props_mismatch orphan: there a NAME with no producer, here a DEMAND with
+# no supply. Both are invisible until something tries to satisfy them.
+_schema_fields = set()
+
+
+def _collect_fields(o):
+    if isinstance(o, dict):
+        for _k, _v in o.items():
+            if _k == "properties" and isinstance(_v, dict):
+                _schema_fields.update(_v.keys())
+            _collect_fields(_v)
+    elif isinstance(o, list):
+        for _v in o:
+            _collect_fields(_v)
+
+
+_collect_fields(list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS))
+check("the field scan found the schema", len(_schema_fields) > 20,
+      f"{len(_schema_fields)} — the check below would be vacuous")
+# Every `_v.get("<field>")` in the verdict-acceptance path must name something
+# the agent can actually send.
+_retired = {"card_type", "card_props"}
+_demanded = set()
+for _n in ast.walk(tree):
+    if (isinstance(_n, ast.Call) and getattr(_n.func, "attr", "") == "get"
+            and getattr(getattr(_n.func, "value", None), "id", "") == "_v"
+            and _n.args and isinstance(_n.args[0], ast.Constant)):
+        _demanded.add(_n.args[0].value)
+_orphaned = sorted(_demanded & _retired)
+check("no acceptance gate reads a retired field", not _orphaned,
+      f"{_orphaned} — the schema does not offer these, so the agent cannot "
+      f"satisfy the gate and will re-rule the same beat until it gives up")
+check("the gate asks for card_hero, which the schema DOES offer",
+      "card_hero" in _demanded and "card_hero" in _schema_fields)
+check("and it uses the SAME derivation as the builder",
+      "derive_card_type(\n                                _hero6" in src
+      or "_ct6, _dw6 = derive_card_type(" in src,
+      "a gate that accepts what the builder refuses is a second opinion nobody "
+      "asked for")
 
 if fails:
     print(f"CARD-DERIVED: {len(fails)} FAILED")
