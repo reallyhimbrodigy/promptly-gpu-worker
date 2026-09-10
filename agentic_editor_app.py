@@ -823,6 +823,17 @@ def _mark(led, name, t_start):
 # each of the ~12 call sites and being wrong about one of them.
 _INSTRUMENT_S = {}
 
+# ── SUB-STAGE TIMERS INSIDE build_zoom ──────────────────────────────────────
+# car_mid, round 48: build_zoom 216.16s, of which paint 22.6s, bundle 0.6s and
+# zoom_scale_fit_delta 3.34s. ~178s belongs to NOTHING THAT REPORTS ITSELF, for
+# ONE zoom on a 13.8s source. A stage total is not a diagnosis, and an
+# unattributed remainder is where the next optimisation lives.
+_ZOOM_S = {}
+
+
+def _zt(label, t0):
+    _ZOOM_S[label] = round(_ZOOM_S.get(label, 0.0) + (time.time() - t0), 2)
+
 
 def _instrumented(fn, label=None):
     """Wrap a MEASUREMENT helper so its wall time is attributed to the gate."""
@@ -3306,6 +3317,13 @@ def uncovered_families(placements, effects):
     _meas = {e.get("family") for e in (effects or [])
              if isinstance(e, dict) and e.get("family")}
     return sorted(_dec - _meas)
+
+
+# A FILE WHOSE LOUDEST SAMPLE IS BELOW THIS CONTAINS NOTHING AUDIBLE. Not a
+# speech threshold — a SILENCE threshold, which is the question that can be
+# answered without fitting to a fixture set. -60 dBFS is ~1/1000 of full scale;
+# screen_recording measures -91 dB and normal speech peaks above -30.
+_SILENT_PEAK_DBFS = -60.0
 
 
 def _audio_stats(args, env=None):
@@ -6464,6 +6482,7 @@ def edit(source_key: str, brief: str,
     # flattering direction. Same class as the memory-snapshot env freeze: module
     # state outlives the call that created it.
     _INSTRUMENT_S.clear()
+    _ZOOM_S.clear()
 
     def fail(kind, detail, cmd=None):
         """THE FAILURE LEDGER. Appended as it happens, never reconstructed."""
@@ -6653,6 +6672,61 @@ def edit(source_key: str, brief: str,
     dl_s = round(time.time() - t0, 1)
     _mark(led, "download", t0)
 
+    # ── VFR NORMALISATION, ON INGEST ────────────────────────────────────────
+    #
+    # MEASURED, round 48: `motion` renders zoom frames at 5.92s/frame against
+    # 1.17-1.51 on every CFR fixture — a 5x tax — and it is the corpus's only
+    # variable-rate source: declared 59.94, actual 35.941. A container that
+    # claims one rate and contains another makes every downstream frame
+    # calculation an estimate, and the encoder pays on every frame it emits.
+    #
+    # A PRODUCTION COST, NOT A FIXTURE ARTIFACT. Phone cameras record VFR by
+    # default. It is 1.9% of real uploads (34 of 1,776 jobs carrying a
+    # source_fps over 30 days) — a small population paying a large multiple,
+    # which is a reliability finding as much as a speed one.
+    #
+    # A CFR SOURCE IS LEFT ALONE. Re-encoding an already-constant file spends a
+    # generation of quality for nothing, and quality wins over speed in every
+    # trade.
+    _vf_t0 = time.time()
+    _vfp = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-count_frames",
+         "-show_entries", "stream=r_frame_rate,nb_read_frames,duration",
+         "-of", "default=nw=1", src],
+        capture_output=True, text=True, timeout=300, env=_SUBPROCESS_ENV)
+    _vfd = dict(l.split("=", 1) for l in (_vfp.stdout or "").splitlines() if "=" in l)
+    _declared, _actual, _fps_state = fps_verdict(
+        _vfd.get("r_frame_rate"), _vfd.get("nb_read_frames"), _vfd.get("duration"))
+    led["source_fps"] = {"declared": _declared, "actual": _actual,
+                         "state": _fps_state}
+    _vfr_fixed = False
+    if _fps_state == "VFR" and _actual:
+        # Resample to the ACTUAL rate. The declared value is the lie; the
+        # measured average is what the file contains.
+        _tgt = max(1.0, min(60.0, float(_actual)))
+        _norm = src.rsplit(".", 1)[0] + ".cfr.mp4"
+        _vn = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-i", src,
+             "-fps_mode", "cfr", "-r", f"{_tgt:.3f}",
+             "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+             "-pix_fmt", "yuv420p", "-c:a", "copy", _norm],
+            capture_output=True, text=True, timeout=900, env=_SUBPROCESS_ENV)
+        if _vn.returncode == 0 and os.path.exists(_norm) and os.path.getsize(_norm) > 0:
+            os.replace(_norm, src)
+            _vfr_fixed = True
+        else:
+            # LOUD AND NOT FATAL. A source that could not be normalised still
+            # edits — it just pays the 5x. Proceeding as though it HAD been
+            # normalised is the absence-as-success shape this file is about.
+            fail("vfr_normalise_failed", (_vn.stderr or "")[-300:])
+    led["vfr_normalised"] = _vfr_fixed
+    _mark(led, "vfr_normalise", _vf_t0)
+    print(f"  SOURCE FPS      : {_fps_state}  declared={_declared} "
+          f"actual={_actual}"
+          + ("   -> NORMALISED to CFR" if _vfr_fixed
+             else ("   (left alone — already constant)" if _fps_state == "CFR"
+                   else f"   (NOT normalised: {_fps_state})")), flush=True)
+
     # ── TRANSCRIPT (Deepgram — reused, not reinvented) ─────────────────────
     tw0 = time.time()
     from deepgram import DeepgramClient, PrerecordedOptions
@@ -6675,26 +6749,74 @@ def edit(source_key: str, brief: str,
             return path          # fall back to the video; worse, not fatal
         return a
 
-    try:
-        with open(_audio_of(src), "rb") as fh:
+    # ── DOES THIS SOURCE HAVE AUDIBLE CONTENT AT ALL? ──────────────────────
+    #
+    # MEASURED, round 48: FIVE of five fixtures paid an audio extract AND a
+    # Deepgram call. TWO are silent — screen_recording at -91 dB, and motion —
+    # and returned nothing usable. The call sits BEFORE the route split, so it
+    # is unconditional by construction rather than by decision, and 40% of runs
+    # buy an API call to be told there is no speech.
+    #
+    # THE GATE ASKS "IS THIS FILE SILENT", NOT "IS THIS SPEECH". A speech
+    # threshold fitted to five fixtures would silently drop real transcripts
+    # from quiet talkers — the unrecoverable error, because the job then
+    # proceeds looking normal. PEAK not RMS: RMS falls with sparse speech and
+    # peak does not.
+    #
+    # NO AUDIO STREAM is decided from ffprobe: no decode, no call.
+    _ap = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "a:0",
+         "-show_entries", "stream=codec_type", "-of", "default=nw=1:nk=1", src],
+        capture_output=True, text=True, timeout=60, env=_SUBPROCESS_ENV)
+    _a_stream = "audio" if (_ap.stdout or "").strip() == "audio" else None
+    _skip_asr, _asr_why, _peak_db, _aud = False, "", None, None
+    if _a_stream is None:
+        _skip_asr, _asr_why = True, "the source carries NO AUDIO STREAM"
+    else:
+        _aud = _audio_of(src)
+        _rms_db, _peak_db = _audio_stats(
+            ["ffmpeg", "-v", "info", "-i", _aud, "-af", "astats", "-f", "null", "-"],
+            env=_SUBPROCESS_ENV)
+        if _peak_db is None:
+            # UNMEASURED IS NOT SILENT. A failed probe TRANSCRIBES — the
+            # tolerable error is paying for a call we did not need, never
+            # losing a real transcript.
+            _asr_why = "peak level UNMEASURED — transcribing rather than guessing"
+        elif _peak_db <= _SILENT_PEAK_DBFS:
+            _skip_asr = True
+            _asr_why = (f"peak {_peak_db:.1f} dBFS <= {_SILENT_PEAK_DBFS} — "
+                        f"nothing a transcriber could hear")
+    led["asr_gate"] = {"skipped": _skip_asr, "peak_dbfs": _peak_db,
+                       "why": _asr_why or "audible"}
+    print(f"  ASR GATE        : {'SKIPPED' if _skip_asr else 'transcribed'}"
+          f"  peak={'?' if _peak_db is None else f'{_peak_db:.1f}'} dBFS"
+          f"  {_asr_why or 'audible'}", flush=True)
+
+    if _skip_asr:
+        words = []
+        transcript_s = 0.0
+        _mark(led, "transcribe", tw0)
+    else:
+      try:
+        with open(_aud or _audio_of(src), "rb") as fh:
             dgr = dg.listen.prerecorded.v("1").transcribe_file(
-                {"buffer": fh.read()},
-                PrerecordedOptions(model="nova-3", language="multi",
-                                   smart_format=True, punctuate=True,
-                                   utterances=True, filler_words=True))
+                  {"buffer": fh.read()},
+                  PrerecordedOptions(model="nova-3", language="multi",
+                                     smart_format=True, punctuate=True,
+                                     utterances=True, filler_words=True))
         d = dgr.to_dict() if hasattr(dgr, "to_dict") else json.loads(dgr.to_json())
         alt = d["results"]["channels"][0]["alternatives"][0]
         words = [{"w": w["word"], "s": round(w["start"], 3), "e": round(w["end"], 3)}
                  for w in (alt.get("words") or [])]
-    except Exception as e:
+      except Exception as e:
         # Guarded because run 5 proved it can throw. An unguarded network call
         # here crashes the container and the failure taxonomy learns nothing —
         # the exact opposite of why the ledger exists.
         fail("source_transcribe_failed", e)
         return _result(ok=False, why=f"source transcribe failed: {e}",
                        ledger=led, wall_s=round(time.time() - t0, 1))
-    transcript_s = round(time.time() - tw0, 1)
-    _mark(led, "transcribe", tw0)
+      transcript_s = round(time.time() - tw0, 1)
+      _mark(led, "transcribe", tw0)
     # NO SPEECH IS A ROUTE, NOT A REJECTION (2026-09-05). This used to
     # `return {"ok": False}` — a hard refusal — and it is the single biggest
     # population in the product: 46.5% of completed jobs (706/1518 over 14d)
@@ -8252,12 +8374,14 @@ def edit(source_key: str, brief: str,
             # and play it from 0, with no startFrom and no playbackRate.
             # Re-encoded rather than stream-copied because a copy starts at the
             # nearest keyframe and the whole point is a frame-exact origin.
+            _t_ex = time.time()
             _ex = subprocess.run(
                 ["ffmpeg", "-y", "-v", "error", "-ss", f"{_cs:.3f}",
                  "-t", f"{_ce - _cs:.3f}", "-i", _zoom_cur_in,
                  "-an", "-c:v", "libx264", "-crf", "16", "-preset", "veryfast",
                  "-pix_fmt", "yuv420p", os.path.join(_zpub, _zsrc)],
                 capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
+            _zt("pre_extract", _t_ex)
             if _ex.returncode != 0:
                 _skips.append({"family": "zoom", "beat": v.get("beat"),
                                "why": f"clip pre-extract failed: "
@@ -8316,8 +8440,10 @@ def edit(source_key: str, brief: str,
             # ONE PROCESS FOR EVERY ZOOM. bundle + browser is 12.24s per
             # `npx remotion render`; N zooms spawning N processes pays it N
             # times. This is the whole reason render_remotion_batch exists.
+            _t_batch = time.time()
             _zres = render_remotion_batch(_zoom_jobs, env=_SUBPROCESS_ENV,
                                           timeout=2400)
+            _zt("remotion_batch", _t_batch)
             # seq + bundle_cached + public_synced, THE SAME FIELDS THE REEL
             # RECORDS. This record had neither, and zoom_render was not in the
             # REMOTION PROCS table at all, so when every zoom type 404'd on
@@ -8450,8 +8576,10 @@ def edit(source_key: str, brief: str,
                            "-map", f"[{_last}]", "-map", "0:a?",
                            "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
                            "-c:a", "copy", "/work/zoomed.mp4"]
+                _t_comp = time.time()
                 _zc = subprocess.run(_zargs, capture_output=True, text=True,
                                      timeout=1800, env=_SUBPROCESS_ENV)
+                _zt("composite_ffmpeg", _t_comp)
                 if _zc.returncode != 0 or not os.path.exists("/work/zoomed.mp4"):
                     _why3 = f"zoom composite failed: {(_zc.stderr or '')[-140:]}"
                     for _sg in _good:
@@ -8477,6 +8605,17 @@ def edit(source_key: str, brief: str,
                                       "head_clamped": _sg["head_clamped"],
                                       "geometry_psnr_db": _sg.get("geometry_psnr_db")})
 
+        # LEDGERED AND PRINTED IN THE SAME COMMIT THAT ADDS THEM. A counter
+        # that reaches the ledger and no output answers nothing. The remainder
+        # is NAMED, not left to subtraction — subtraction is what hid it.
+        led["zoom_substages"] = dict(_ZOOM_S)
+        _zz = round(time.time() - _tz0, 2)
+        _named_z = sum(_ZOOM_S.values())
+        print(f"[zoom-stage] {_zz:.2f}s = "
+              + "  ".join(f"{_k} {_v:.2f}s"
+                          for _k, _v in sorted(_ZOOM_S.items(),
+                                               key=lambda kv: -kv[1]))
+              + f"   UNATTRIBUTED {_zz - _named_z:.2f}s", flush=True)
         _mark(led, "build_zoom", _tz0)
         # ── 3d. SEAM DRESSING, RENDERED ────────────────────────────────────
         # Selection happened before the alpha pass (the overlays ride it). This
