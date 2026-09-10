@@ -417,6 +417,29 @@ The shape has four recurring costumes:
   mutating harness and a running round cannot share a worktree at all; there is
   no safe moment.**
 
+5. **A CHECK THAT PASSES FOR A REASON OTHER THAN THE ONE IT CLAIMS.** The first
+   four costumes are failures that render as successes. This one is a SUCCESS
+   that renders as the wrong success — the verdict is right and the path does
+   not generalise, so nothing is red and the next case breaks it.
+
+   Builder-2's floor leg bound `all` and `len` as bare Names, so evaluating
+   `len(MUTATIONS)` raised TypeError — and it still gave the correct verdict for
+   every one of their harnesses, BY SHORT-CIRCUIT LUCK: their floor sits first,
+   so a falsy `red` meant the call was never evaluated. Move the floor later in
+   the predicate and it raises, and the `except` clause reports "no floor" for a
+   floored harness.
+
+   Same shape as my own audit passing clean: zero `walk(...)[-1]` sites, but by
+   CONSTRUCTION rather than by design — I asked positional questions of
+   `fn.body` because that was the question I had, not because I knew the trap.
+   A clean result whose cleanliness is incidental is not evidence the class is
+   absent.
+
+   **Ask why a check passed, not only whether it did.** An expression that
+   CANNOT BE EVALUATED is UNDECIDABLE, not false — folding that third state into
+   either of the other two is the three-state rule failing inside the check that
+   enforces it.
+
 **Why it keeps happening:** every one of these is invisible from the inside. You
 wrote the `[:20]` and you remember it is 20. You wrote the predicate and you know
 which process it runs in. The reader has neither. And the two people who found
