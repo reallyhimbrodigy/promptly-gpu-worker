@@ -111,6 +111,81 @@ manifests is exactly the elements the instruction named. A re-edit that produces
 a correct-looking output while silently re-deriving six untouched placements is
 the failure this catches, and it is invisible in the video.
 
+## THE PLAN ALREADY EXISTS — DESIGN, after Zac's rulings
+
+Rulings taken: a re-edit MAY change the cut, so source-clock anchoring is
+mandatory; the plan lives server-side keyed by job id, with `edit_recipe` on
+`video_jobs` as the precedent; an ambiguous instruction ASKS, and is counted
+either way.
+
+**OBSERVED: `execute_plan` takes NO ARGUMENTS** — `"input_schema": {"properties":
+{}, "required": []}` (1735). It runs "from your verdicts", which live in harness
+state as `led["beat_verdicts"]` (8984), over `led["beats"]` (8983). Its docstring
+is already explicit about the split: *the agent rules; the pipeline executes*,
+and what stays with the agent is treatment per beat, cut/keep per beat, and
+text_content — *"the words do not exist until written"*.
+
+**So the plan is the beat verdicts, and it is already the right size.** Nothing
+new has to be invented to have a plan; it has to be given a durable address and
+written down.
+
+### The one change that makes it durable
+
+`beat_verdicts` are keyed by beat INDEX, and beat indices are derived per run —
+round 48 moved a fixture 8 -> 9. **Persist each verdict keyed by its beat's
+SOURCE TIME SPAN**, resolved at write time from `led["beats"]`:
+
+    {"src_t0": 4.12, "src_t1": 7.80, "treatment": [...], "cut": "keep",
+     "text_content": "...", "card_hero": "...", "zoom_arc": "...",
+     "cutaway_from_s": 12.4, "id": <hash of (src_t0, src_t1, family, content)>}
+
+Source spans survive everything a re-edit can do. Re-segmentation moves indices
+and does not move the moment an editor ruled on; a changed cut moves OUTPUT time
+and does not move source time. A persisted verdict re-maps onto a fresh beat
+list by TIME OVERLAP, which is well-defined even when subdivision changes.
+
+That single re-keying satisfies both of Zac's ordered items: it is the
+persistence shape AND the addressable id, because the id is derived from the
+anchor rather than bolted on beside it.
+
+### What re-edit then does
+
+    load     the persisted verdicts for the job id
+    resolve  the instruction against them — the plan goes in the prompt, which
+             is affordable and belongs in the cached prefix
+    modify   only the verdicts the instruction names
+    execute  execute_plan on the merged set, unchanged
+
+The agent loop is not re-entered for untouched beats. That is what makes it a
+modification rather than a re-plan, and it is why the byte-identity check is the
+right proof: identical verdicts in, identical bytes out.
+
+### The precondition, stated once more because it gates the proof
+
+Byte-identity cannot be claimed until the x264 pin lands — 13 of 13 encodes in
+this path are unpinned, so today two runs of an identical plan need not agree.
+Ordered by Zac: pin first, then persistence, then ids, then the proof on real
+traffic.
+
+### Per-site ruling for the pin, prepared so landing it is mechanical
+
+The test is whether the encoded bytes ever reach the delivered file.
+
+    6705, 6708  build_cut               source -> cut.mp4 -> capped.mp4
+    6873        build_overlays          overlay intermediate
+    7058        render_components       -> out.mp4                DELIVERED
+    7093, 7099  run_ffmpeg_from_recipe  source -> cut.mp4
+    7588, 7753, 7922, 7982, 8062, 8307  execute_plan stage chain
+                                        (zoomed / transitioned / carded / reel)
+    8656        build_zoom              zoom intermediate
+
+`cut.mp4`, `reel.mov` and `out.mp4` are confirmed by direct `-i` reference; the
+`execute_plan` stages hand their output to the next stage through a variable, so
+they are read as a chain rather than by literal filename. PROVISIONAL RULING:
+**all 13 feed the delivered file and none is an analysed-and-discarded proxy**,
+so all 13 take the pin. The chain sites get confirmed at the moment the pin
+lands rather than asserted now.
+
 ## WHAT I WOULD MEASURE, before believing any of it
 
 - Re-edit wall time and cost against a full edit on the same fixture, BY ROUTE.
