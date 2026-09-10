@@ -106,7 +106,57 @@ if __name__ == "__main__":
         print("  BUDGET: $0.05, and the actual gets reported against it")
         sys.exit(0)
     if len(sys.argv) < 3:
-        print(__doc__.strip().split("USAGE")[1].strip()); sys.exit(2)
+        # NO ARGUMENTS = SELF-TEST, NOT USAGE-AND-EXIT-2.
+        #
+        # The suite runs every cert_/smoke_ with no arguments, so a harness that
+        # exits 2 without files is PERMANENTLY RED in the suite — the chronic-red
+        # class, which I had just written a rule about and then shipped an
+        # instance of. A check that is always red stops being read, including
+        # the part that is true.
+        #
+        # So with no files it proves the COMPARISON ITSELF: all three states on
+        # real bytes. That is the half that can be checked without spending, and
+        # it is exactly what must be trustworthy before a $0.05 run means
+        # anything — a comparator that cannot tell DIFFERENT from ABSENT would
+        # make the render prove nothing.
+        import tempfile
+        _d = tempfile.mkdtemp(prefix="byteid_")
+        _a = os.path.join(_d, "a.bin")
+        _b = os.path.join(_d, "b.bin")
+        _c = os.path.join(_d, "c.bin")
+        with open(_a, "wb") as _f:
+            _f.write(b"same bytes")
+        with open(_b, "wb") as _f:
+            _f.write(b"same bytes")
+        with open(_c, "wb") as _f:
+            _f.write(b"other bytes")
+        _cases = [("identical files", (_a, _b), STATE_IDENTICAL),
+                  ("differing files", (_a, _c), STATE_DIFFERENT),
+                  ("a missing file", (_a, os.path.join(_d, "nope.bin")),
+                   STATE_ABSENT),
+                  ("both missing", (os.path.join(_d, "x"), os.path.join(_d, "y")),
+                   STATE_ABSENT)]
+        _bad = []
+        for _label, _args, _want in _cases:
+            _got = compare_outputs(*_args)[0]
+            if _got != _want:
+                _bad.append(f"{_label}: got {_got}, expected {_want}")
+            print(f"  [{'ok' if _got == _want else 'FAIL'}] {_label} -> {_got}")
+        # NON-VACUITY: the three states must be DISTINCT, or the comparator is
+        # collapsing findings it is supposed to keep apart.
+        _states = {compare_outputs(*_a2)[0] for _l, _a2, _w in _cases}
+        if len(_states) != 3:
+            _bad.append(f"the comparator produced {sorted(_states)} — three "
+                        f"distinct states are the whole point")
+        print()
+        if _bad:
+            print("REEDIT BYTE-IDENTITY (self-test): FAIL")
+            for _m in _bad:
+                print("  - " + _m)
+            sys.exit(1)
+        print("REEDIT BYTE-IDENTITY (self-test): PASS — three distinct states on "
+              "real bytes. Give it two files to compare a render.")
+        sys.exit(0)
     _state, _detail = compare_outputs(sys.argv[1], sys.argv[2])
     print("REEDIT BYTE-IDENTITY: %s\n  %s" % (_state, _detail))
     if _state == STATE_DIFFERENT:
