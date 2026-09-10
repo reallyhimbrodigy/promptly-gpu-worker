@@ -342,6 +342,46 @@ inflated by retries into an apparent outage.
   You wrote the `[:20]` and you remember it is 20. The reader does not. This is
   why it is a rule and not two fixes.
 
+- **AN OBSERVABLE MUST BE COMPUTED ON THE SIDE OF THE BOUNDARY IT DESCRIBES**
+  (Builder-2). `prefix_material_enabled()` gated the prefix material inside
+  `edit()` — `@app.function`, the CONTAINER. `prefix_material_state()` produced
+  the report inside `main()` — `@app.local_entrypoint`, THE DEVELOPER'S MACHINE.
+  Same function, same predicate, same file, two processes, and `os.environ` is
+  per-process. The report described the wrong machine, and failed in whichever
+  direction the environments disagreed: export locally and the log says REMOVED
+  while the container runs ON (confirming a fabricated null); pass a parameter
+  with a clean shell and the log says ON while the container removes (making a
+  real arm unverifiable). Neither is visible in the log, because the log is what
+  is wrong. Record the state where it is USED and print THAT.
+
+- **A FLAG'S TEST SURFACE IS THE PAIR, NOT THE READER** (Builder-2). The removal
+  switches had a reader, a smoke driving the reader, and a red proof mutating
+  the reader — and NOTHING ANYWHERE SET THEM in the container. A consumer with
+  no producer, in the mechanism a whole round's attribution depended on. It
+  would have produced a FABRICATED NULL: the arm reports no effect because the
+  arm never happened, and under a null-is-attributable registration that reads
+  as a finding rather than as a broken arm. A flag reads as configuration; it is
+  a wire. Hardening the reader does nothing for a missing writer.
+
+- **A CHECK THAT COMPARES AGAINST AN EMPTY SET PASSES, AND PASSES QUIETLY.** An
+  ordering leg compared an `os.environ` write against `prefix_material_enabled`
+  call sites *inside* `edit()` — there are none, the predicate is read at module
+  scope — so it compared against an empty list, asserted nothing, and passed
+  with the write relocated to the end of the function. The precondition guard
+  catches an empty operand in a MUTATION; nothing catches an empty population in
+  a CHECK LEG except asking, every time, what it iterates and whether that can
+  be empty here. Same instruction as the denominator rule one level up: a leg
+  over an empty set and a printed list with no total both look complete and both
+  assert nothing.
+
+- **A FOURTH WAY A MUTATION STOPS MUTATING: IT DOES NOT PARSE.** `mut()` must
+  `ast.parse` the mutant before writing it; a SyntaxError is a HARNESS FAILURE,
+  never a silent non-result. The full set now:
+      anchor 0x               a refactor moved it        count guard
+      operand is empty        the edit is a no-op        precondition
+      match lands in prose    a comment owns the anchor  _match_is_prose
+      mutant will not parse   it never ran at all        ast.parse
+
 - **A HARNESS MUST FAIL LOUDLY AND DIFFERENTLY FROM THE THINGS IT RUNS** (Builder-2).
   A suite run through macOS `timeout` — which does not exist there — reported
   **163/163 FAIL**. That tally is indistinguishable from a real catastrophe, and
