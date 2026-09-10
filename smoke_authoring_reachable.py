@@ -101,6 +101,31 @@ check("the routing sits on the None branch of that call",
       src.index('"code": "no_catalogue_component"') > src.index("if not _ctype:"),
       "the remedy must attach to the proven failure, not to every card")
 
+# ── REASON 3, now closed: SYSTEM routes to it ───────────────────────────────
+_sys = src[src.index("SYSTEM = "):src.index("_KNOWLEDGE_SYSTEM")]
+check("SYSTEM names author_component at all", "author_component" in _sys,
+      "it appeared ZERO times — the manual existed for a task nobody was told "
+      "to begin")
+check("SYSTEM names the condition that triggers it",
+      "no_catalogue_component" in _sys,
+      "routing to a tool without naming when is how cutaway ruled zero")
+check("it is framed as a RESPONSE, not a standing invitation",
+      "NOT a standing invitation" in _sys,
+      "authoring on any beat is a render round-trip each, against E1-E4")
+check("and it says when NOT to author",
+      "Do not author when a catalogue component would do" in _sys,
+      "an offer with no boundary becomes the default")
+
+# REASON 1 STANDS AND IS STATED, not quietly closed. The enum still cannot
+# express 'the catalogue has none' — the trigger is a harness determination
+# reported back, not a ruling the agent makes. That is deliberate: a treatment
+# value meaning 'author' invites it on any beat.
+check("the trigger remains DERIVED rather than a ruling the agent can make",
+      all(not any(v in ("author", "custom", "new_component") for v in vals)
+          for _ln, vals in _enums),
+      "if this ever fails, someone added an author treatment and the cost model "
+      "changed with it")
+
 print()
 if fails:
     print("AUTHORING-REACHABLE: FAIL")

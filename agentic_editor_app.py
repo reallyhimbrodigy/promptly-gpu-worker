@@ -1661,6 +1661,20 @@ knowledge set at all — it answers "how to work", never "how to cut".
   The failure mode here is UNDER-doing, not over-building. Placing the graphic a
   beat calls for is the task, not scope creep.
 
+WHEN THE CATALOGUE CANNOT SERVE A BEAT
+You rule `card` and the harness answers `no_catalogue_component` for that beat:
+the hero is neither a figure nor a short claim, so no StatCard, no PullQuote,
+nothing in the twenty-five fits. That beat comes back UNSERVED unless you write
+something for it. `author_component` is what that is for — a full TSX exporting
+`Comp`, 1080x1920, 30fps, transparent background — and `search_skills` is the
+Remotion API reference while you write it.
+
+This is NOT a standing invitation. It is the response to a condition the harness
+REPORTS, with the hero named, after it has tried every catalogue type and none
+fit. Do not author when a catalogue component would do: the twenty-five exist
+because they are known to render, and a component written for one beat is a
+render round-trip you are paying for.
+
 HARD RULES
 - The output must be 1080x1920, H.264, with audio.
 - NEVER report success on an output whose speech is missing. An edit that plays
