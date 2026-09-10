@@ -365,6 +365,27 @@ The shape has four recurring costumes:
    parsed. A pattern loose enough to match the defect it forbids. **Count the
    population and assert the count.**
 
+2c. **A HEURISTIC CLEVER ENOUGH TO NEED A PROXY IS A HEURISTIC WITH A HOLE IN
+   IT.** `smoke_lookup_unambiguous` flagged a missing name only when the SAME
+   FILE also looked up a name that resolved — "siblings" as a proxy for "this
+   file inspects the app". Most check files look up exactly ONE function, so the
+   proxy excluded the majority of the population it was meant to cover, and
+   deleting a real looked-up function did not fire it. Test the property; if you
+   cannot, say so — do not test a correlate of it.
+
+2d. **A FIFTH WAY A MUTATION FAILS TO MUTATE: WRONG POPULATION.** The target is
+   outside the set the check examines, so the mutant changes real bytes and
+   CANNOT change the verdict — and is CORRECT to pass. Confirmed live: deleting
+   `source_to_output`, which no check looks up by name, while every existing
+   guard stayed silent. The full set:
+       anchor 0x             a refactor moved it            count guard
+       operand is empty      the edit is a no-op            precondition
+       match lands in prose  a comment owns the anchor      _match_is_prose
+       mutant will not parse it never ran at all            ast.parse
+       WRONG POPULATION      the target is outside the set  NO GENERIC GUARD
+   There is no generic guard for the fifth. State which population a mutation is
+   aimed at, and check the target is in it — a per-mutation obligation.
+
 2b. **AND ITS TWIN: A PATTERN TIGHT ENOUGH TO EXCLUDE A CORRECT IMPLEMENTATION
    IS NOT A CHECK EITHER.** The floors checker went both ways on one axis: v1
    matched a shape loose enough to admit the defect (`all(r) and rc == 0`
