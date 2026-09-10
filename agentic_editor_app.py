@@ -5057,6 +5057,42 @@ _CARD_FIGURE_RICH = re.compile(
     re.I)
 
 
+# ── THE FIGURE EXTRACTOR, ONE DEFINITION ────────────────────────────────────
+#
+# A MULTIPLIER SUFFIX MUST BE ATTACHED TO THE DIGITS, not merely near them.
+# `[0-9][0-9,.]*\s?[kKmMxX]?` matched "5 M" in "5 MINUTES" and coerce_mg_props
+# read it as FIVE MILLION. A suffix only counts when it is not the start of a
+# word.
+_FIGURE_RE = re.compile(r"[$£€]?\s?[0-9][0-9,.]*(?:[%kKmMxX](?![A-Za-z]))?")
+
+
+def extract_figure(phrase):
+    """(figure, remainder) or (None, "") — the number in a phrase, and the words
+    around it.
+
+    HOISTED SO THERE IS ONE EXTRACTOR. The beat brief used to tell the agent
+    only `(has a number)` — a BOOLEAN — while this regex, which the harness
+    already owns, had found the figure itself. The pipeline located "10 TIMES A
+    DAY" and told the agent "there is one", so the agent re-derived by eye what
+    the harness had already computed. That is cutaway in miniature: a capability
+    offered as a blank rather than as material.
+
+    Two callers now, and they MUST agree — if the brief showed a figure that
+    derive_card_props then failed to find, the agent would be shown material the
+    builder refuses, which is the advertise-a-shape-the-acceptor-rejects class
+    this repo has paid for three times.
+    """
+    if not phrase:
+        return (None, "")
+    _m = _FIGURE_RE.search(str(phrase))
+    if not _m:
+        return (None, "")
+    _fig = _m.group(0).strip()
+    _rest = (str(phrase)[:_m.start()] + " "
+             + str(phrase)[_m.end():]).strip(" -–—:,")
+    return (_fig, _rest)
+
+
 def derive_card_props(mg_type, hero, label=""):
     """The props THIS component reads, filled from the phrase. Never a guess.
 
@@ -5087,11 +5123,9 @@ def derive_card_props(mg_type, hero, label=""):
         # them. `[0-9][0-9,.]*\s?[kKmMxX]?` matched "5 M" in "5 MINUTES" and
         # coerce_mg_props read it as FIVE MILLION. A suffix only counts when it
         # is not the start of a word.
-        _m = re.search(r"[$£€]?\s?[0-9][0-9,.]*(?:[%kKmMxX](?![A-Za-z]))?", _h)
-        if not _m:
+        _fig, _rest = extract_figure(_h)
+        if _fig is None:
             return ({}, "%s needs a figure and %r has none" % (mg_type, _h))
-        _fig = _m.group(0).strip()
-        _rest = (_h[:_m.start()] + " " + _h[_m.end():]).strip(" -–—:,")
 
     _p = {}
     for _k in _req:
@@ -9322,6 +9356,12 @@ def edit(source_key: str, brief: str,
     _numeric_ts = {b["t"] for b in _number_beats}
     for _b in _beats:
         _b["has_number"] = any(_b["t_start"] <= t <= _b["t_end"] for t in _numeric_ts)
+        # THE FIGURE, NOT THE FACT OF ONE. The harness already located it; the
+        # brief used to report a boolean and leave the agent to re-find by eye
+        # what had already been computed. Offered as MATERIAL, never as an
+        # instruction — a beat carrying a figure is not a beat that must take a
+        # card, and the rates grade, they never instruct.
+        _b["figure"] = extract_figure(_b.get("text") or "")[0] if _b["has_number"] else None
     led["beats"] = _beats
 
     # ── RE-EDIT: LOAD THE PRIOR PLAN ────────────────────────────────────────
@@ -9449,7 +9489,8 @@ def edit(source_key: str, brief: str,
             f"need to compute these:\n{_gap_txt}\n\n"
             f"BEATS ({len(_beats)}) — rule on EVERY one with `beat_verdict`:\n"
             + "\n".join(f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
-                        + ("  (has a number)" if b["has_number"] else "")
+                        + (("  (figure: %s)" % b["figure"]) if b.get("figure")
+                           else ("  (has a number)" if b["has_number"] else ""))
                         + f"  {b['text'][:90]}" for b in _beats) + "\n\n"
             # ── THE EXAMPLES, AT THE MOMENT OF RULING ──────────────────────
             # Not a description of the craft — the craft. For each beat, the
@@ -9800,7 +9841,8 @@ def edit(source_key: str, brief: str,
                      f"finished with {len(_unruled)} of {len(_beats)} beats unruled")
                 _lst = "\n".join(
                     f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
-                    + ("  (has a number)" if b["has_number"] else "")
+                    + (("  (figure: %s)" % b["figure"]) if b.get("figure")
+                       else ("  (has a number)" if b["has_number"] else ""))
                     + f"  {b['text'][:80]}" for b in _unruled[:20])
                 msgs.append({"role": "user", "content": [{"type": "text", "text":
                     f"NOT DONE. {len(_unruled)} of {len(_beats)} beats have no "
