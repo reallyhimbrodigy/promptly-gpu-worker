@@ -1817,6 +1817,16 @@ KNOWLEDGE_TOOLS = [{
         "SPECIFICATION of this job. Everything you place derives from it — "
         "there is nothing else to satisfy.\n\n"
         "Read the request and say what it specifies:\n"
+        "THE BRIEF SETS THE SCOPE ON EVERY RUN, not only on "
+        "re-edits. A brief that asks for LITTLE MUST PRODUCE LITTLE. Placing "
+        "more than was asked is a FAILURE, not generosity — it is the edit the "
+        "user did not request, delivered over the one they did. 'Just add "
+        "captions' is a targeted_change naming text, and an output carrying "
+        "four zooms has failed it however good the zooms are.\n\n"
+        "Choosing full_edit for a narrow request is how that happens: "
+        "full_edit has no family scope, so nothing downstream can object. Pick "
+        "it because the request describes a VIBE, never because you are "
+        "unsure.\n\n"
         "  full_edit       — the request describes a VIBE ('punchy and direct', "
         "'clean and professional', 'like a movie trailer'). The vibe is the "
         "spec: derive the whole edit from it, and derive your own density "
@@ -6241,6 +6251,66 @@ def batch_dispatch_plan(sources, balance, per_job=CREDITS_PER_JOB,
              "debit_at": "dispatch", "refunds": "independently"}
             for _i, _s in enumerate(_src[:_afford])]
     return (_v, jobs, _src[_afford:], _why)
+
+
+FIDELITY_OK, FIDELITY_SHORT, FIDELITY_OVER, FIDELITY_UNSCOPED = (
+    "FAITHFUL", "SHORT", "OVERREACHED", "UNSCOPED")
+
+
+def spec_fidelity(spec, placements, cut_made=False):
+    """(state, missing, unasked, detail) — did the output contain what was asked
+    and NOTHING THAT WAS NOT?
+
+    THE REQUIREMENT. The user's prompt is the source of truth. "Just add
+    captions" gets captions and nothing else. "Make it viral" gets the full
+    treatment. A brief that asks for little must produce little, and PLACING
+    MORE THAN WAS ASKED IS A FAILURE, NOT GENEROSITY — it is the edit the user
+    did not request, delivered over the one they did.
+
+    TWO DIRECTIONS, and only one of them was ever measured. `not_asked_for`
+    recorded families built outside a targeted scope at build time. Nothing
+    recorded the other direction: a family ASKED FOR and never delivered. An
+    edit that quietly drops the one thing requested reads as a successful run.
+
+        SHORT        asked for and not delivered
+        OVERREACHED  delivered and not asked for
+        FAITHFUL     neither
+        UNSCOPED     the run declared full_edit, so there is no scope to judge
+                     against. NOT a pass — it is the absence of the question,
+                     and it is reported as such so a minimal brief declared
+                     full_edit is visible rather than excused.
+
+    PURE, so the check drives the shipped rule rather than a copy.
+    """
+    _sc = spec or {}
+    _mode = _sc.get("mode")
+    _built = {str(p.get("family") or p.get("type") or "").lower()
+              for p in (placements or [])}
+    _built.discard("")
+    if cut_made:
+        _built.add("cut")
+    if _mode != "targeted_change":
+        return (FIDELITY_UNSCOPED, [], sorted(_built),
+                "mode=%s — no declared family scope, so fidelity cannot be "
+                "judged. A minimal brief declared full_edit gets a full edit "
+                "and nothing here objects." % _mode)
+    _asked = {str(f).lower() for f in (_sc.get("families") or [])}
+    _missing = sorted(_asked - _built)
+    _unasked = sorted(_built - _asked)
+    if _missing and _unasked:
+        return (FIDELITY_OVER, _missing, _unasked,
+                "asked for %s and did not deliver %s; delivered %s that was "
+                "not asked for" % (sorted(_asked), _missing, _unasked))
+    if _unasked:
+        return (FIDELITY_OVER, [], _unasked,
+                "delivered %s that the request did not ask for — more than was "
+                "asked is not generosity" % _unasked)
+    if _missing:
+        return (FIDELITY_SHORT, _missing, [],
+                "asked for %s and did not deliver %s" % (sorted(_asked),
+                                                         _missing))
+    return (FIDELITY_OK, [], [],
+            "asked for %s and delivered exactly that" % sorted(_asked))
 
 
 def reedit_merge(prior, targets, incoming):
@@ -11126,6 +11196,30 @@ def edit(source_key: str, brief: str,
     # unconditionally so an early finish still carries whatever was ruled.
     # PROBLEMS ARE LEDGERED AND PRINTED: an orphan verdict is a ruling a re-edit
     # would silently lose.
+    # ── PROMPT FIDELITY, ON EVERY RUN ───────────────────────────────────────
+    # THE USER'S PROMPT IS THE SOURCE OF TRUTH. A brief that asks for little
+    # must produce little; placing more than was asked is a failure, not
+    # generosity. Only one direction was ever measured — `not_asked_for` caught
+    # families built outside a targeted scope AT BUILD TIME — and nothing
+    # caught the other: a family ASKED FOR and never delivered reads as a
+    # successful run.
+    _fid_state, _fid_missing, _fid_unasked, _fid_why = spec_fidelity(
+        led.get("spec"), led.get("placements") or [],
+        cut_made=bool(led.get("keep_spans")))
+    led["fidelity"] = {"state": _fid_state, "missing": _fid_missing,
+                       "unasked": _fid_unasked, "why": _fid_why}
+    print("  FIDELITY        : %s — %s" % (_fid_state, _fid_why), flush=True)
+    if _fid_state == FIDELITY_SHORT:
+        fail("fidelity_short",
+             "the request asked for %s and the output does not contain it — "
+             "the one thing asked for is the one thing missing"
+             % _fid_missing)
+    elif _fid_state == FIDELITY_OVER:
+        fail("fidelity_overreached",
+             "the output contains %s that the request did not ask for. More "
+             "than was asked is not generosity: it is the edit the user did "
+             "not request, delivered over the one they did." % _fid_unasked)
+
     # ── THE PURPOSE DISTRIBUTION, PRINTED ───────────────────────────────────
     # THE FIRST FAILURE MODE TO READ, registered before this shipped: if the
     # seven values do not discriminate, the agent picks one anyway and the join
