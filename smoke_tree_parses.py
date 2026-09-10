@@ -69,13 +69,23 @@ ok = True
 if marked:
     ok = False
     print(f"\n  CONFLICT MARKERS in {len(marked)} place(s):")
+    # SHOWING N OF M, because a truncated list reads as a total. Builder-1 found
+    # this exact defect in their own per-beat printer on 2026-09-09 and then
+    # found it HERE, in the check I had shipped them two hours earlier: 47
+    # markers would have printed 20 and read as 20. The verdict was never wrong;
+    # the COUNT was, and the count is what tells you whether this was one stash
+    # pop or a systemic mess.
     for m in marked[:20]:
         print("    " + m)
+    if len(marked) > 20:
+        print(f"    ... showing 20 of {len(marked)}")
 if broken:
     ok = False
     print(f"\n  DOES NOT PARSE — {len(broken)} file(s):")
     for b in broken[:20]:
         print("    " + b)
+    if len(broken) > 20:
+        print(f"    ... showing 20 of {len(broken)}")
 if not ok:
     print("\n  A tracked file in this state is a landmine for whoever merges "
           "the lane.\n  It breaks nothing until it breaks everything.")

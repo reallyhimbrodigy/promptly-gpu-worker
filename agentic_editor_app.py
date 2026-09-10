@@ -10648,8 +10648,19 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         print(f"     cuts ACTUAL (from build_cut spans) {_ca}   self-reported {_cr}"
               + ("   <- SELF-REPORT DISAGREES" if _ca and _cr
                  and _ca.get('cut') != _cr.get('cut') else ""))
-        for _v in (_vq.get("sample") or []):
+        # NAMED AS A SAMPLE, because it is one. Builder-1 read this listing as
+        # the complete per-beat record and counted 4 ruled placements against a
+        # run signature of 6 built — "built exceeds ruled", which is impossible,
+        # and was the listing being a subset that did not say so. A subset
+        # renders identically to a total.
+        _vs = _vq.get("sample") or []
+        _vn = _vq.get("n_beats")
+        for _v in _vs:
             print(f"     [{_v.get('b')}] {_v.get('t')}/{_v.get('c')}  {_v['why']}")
+        print(f"     ^ SAMPLE: {len(_vs)} beat(s) shown"
+              + (f" of {_vn}" if _vn is not None else
+                 " — TOTAL NOT RECORDED, so this is a subset of an unknown "
+                 "number; do not count from it"))
     # THE TWO QUESTIONS RUN F RAISED, answered in the report rather than inferred:
     # was nothing cut because turns ran out (harness) or because the agent chose
     # to keep everything (prompt)? And did the components crowd out the text?
@@ -11220,8 +11231,11 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                 + "   <- decided and never reached the video")
         else:
             print("     every ruling reached the video")
-        for _sk in (_ep.get("skips") or [])[:8]:
+        _sks = _ep.get("skips") or []
+        for _sk in _sks[:8]:
             print(f"       skip: {_sk['family']} beat {_sk['beat']} — {_sk['why']}")
+        if len(_sks) > 8:
+            print(f"       ... showing 8 of {len(_sks)} skip(s)")
         _steps = _ep.get("steps") or []
         print(f"     steps: {' -> '.join(str(x.get('step')) for x in _steps) or '(none)'}")
     _rbp = (r.get("ledger") or {}).get("repair_before_plan")
