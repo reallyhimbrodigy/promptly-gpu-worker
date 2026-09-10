@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """RED proof: the standard must stay in the prefix, and absence must stay spoken."""
+import ast
 import os, shutil, subprocess, sys
 APP="agentic_editor_app.py"; BAK="/tmp/_rtk.py"
 shutil.copy(APP,BAK); env=dict(os.environ,PYTHONPATH=".")
@@ -63,7 +64,13 @@ def mut(old,new,label,expect):
         print(f"  HARNESS FAILURE [{label}] anchor matches ONLY inside a string "
               f"or comment — the mutation would edit prose and prove nothing")
         return False
-    open(APP,"w",encoding="utf-8").write(src.replace(old,new,1))
+    _mutant=src.replace(old,new,1)
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN — it fails the check for a reason
+    # unrelated to the property, which is a pass it did not earn.
+    try: ast.parse(_mutant)
+    except SyntaxError as _se:
+        print(f"  HARNESS FAILURE [{label}] mutant does not parse: {_se.msg}"); return False
+    open(APP,"w",encoding="utf-8").write(_mutant)
     rc,out=run(); shutil.copy(BAK,APP)
     ok=rc!=0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")

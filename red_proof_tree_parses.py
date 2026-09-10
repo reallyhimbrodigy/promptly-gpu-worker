@@ -6,6 +6,7 @@ ff9311f committed into handler.py — rather than a synthetic broken file, so th
 proof shows the check catching the thing that happened, in the state it
 happened in.
 """
+import ast
 import pathlib
 import subprocess
 import sys
@@ -54,6 +55,24 @@ for label, block, expects in MUTATIONS:
     if mutated == ORIG:
         harness.append(f"{label}: mutation was a no-op")
         print(f"  HARNESS FAILURE  {label}  :: nothing changed")
+        continue
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN. Leg 1 here deliberately mutates
+    # handler.py into something that does NOT parse — that IS the defect under
+    # test — so this harness asserts the mutant is unparseable exactly when the
+    # leg says it should be, rather than refusing every mutant that fails to
+    # compile. The guard is the same question, asked with the expected answer
+    # stated: "does this mutant compile, and did I mean it to?"
+    _parses = True
+    try:
+        ast.parse(mutated)
+    except SyntaxError:
+        _parses = False
+    if _parses is not ("DOES NOT PARSE" not in " ".join(expects)):
+        harness.append(f"{label}: mutant parse state {_parses} contradicts the "
+                       f"leg's own expectation")
+        print(f"  HARNESS FAILURE  {label}  :: the mutant "
+              f"{'parses' if _parses else 'does not parse'}, which contradicts "
+              f"what this leg claims to be testing")
         continue
     TARGET.write_text(mutated)
     mrc, mout = run()

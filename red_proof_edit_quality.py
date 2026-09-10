@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """RED proof: the truncation cure, and the three edit-quality measures."""
+import ast
 import os, shutil, subprocess, sys
 APP = "agentic_editor_app.py"; BAK = "/tmp/_eq_bak.py"
 shutil.copy(APP, BAK)
@@ -16,7 +17,17 @@ def mut(old, new, label, expect):
     src = open(APP, encoding="utf-8").read()
     if src.count(old) != 1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
-    open(APP, "w", encoding="utf-8").write(src.replace(old, new, 1))
+    _mutant = src.replace(old, new, 1)
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN. The check then fails for a reason
+    # unrelated to the property under test, which is a pass it did not earn.
+    # None of the other guards see it: the anchor matched, the match was code.
+    try:
+        ast.parse(_mutant)
+    except SyntaxError as _se:
+        print(f"  HARNESS FAILURE [{label}] mutant does not parse: {_se.msg} "
+              f"(line {_se.lineno}) — it never ran, so it proved nothing")
+        return False
+    open(APP, "w", encoding="utf-8").write(_mutant)
     rc, out = run(); shutil.copy(BAK, APP)
     ok = rc != 0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
@@ -95,8 +106,33 @@ r.append(mut('    led["placement_collisions"] = placement_collisions(led.get("_p
 # print() carrying the label EXISTS, not that it executes. That limit is real
 # and stated rather than papered over; what the check guards is "nobody wrote
 # the print", which is the defect that actually happened.
-_OLD_BLOCK = open("/tmp/block_old.txt").read()
-_NEW_BLOCK = open("/tmp/block_new.txt").read()
+# DERIVED FROM THE SOURCE, NOT FROM /tmp. These were two scratch files I wrote
+# while authoring this mutation. They are long gone, so `open()` raised at
+# IMPORT time and THE WHOLE HARNESS DIED — legs 1 through 13 never ran either,
+# and this proof has been reporting nothing for as long as the files have been
+# missing. A red proof that cannot run is a check that has stopped being a
+# check while still sitting in the suite with a name that says otherwise.
+#
+# The block is now located by anchor and the mutant built by deleting its
+# print() calls, so the mutation travels with the code it mutates.
+_APPSRC = open(APP, encoding="utf-8").read()
+_B0 = _APPSRC.index("        if _fl is None:\n")
+_B1 = _APPSRC.index("   MEASURED, no threshold\")\n", _B0) + len("   MEASURED, no threshold\")\n")
+_OLD_BLOCK = _APPSRC[_B0:_B1]
+# Kill BOTH prints — the block has a MEASURED and an UNMEASURED branch and
+# removing one leaves the other, which is why a single-print mutation could not
+# fire. Replaced with a pass in each branch so the mutant still parses; the
+# ast.parse guard would refuse it otherwise, which is the guard working.
+_NEW_BLOCK = """        if _fl is None:
+            pass
+        else:
+            _above = [x for x in _cwi if x.get("intrusion_ms", 0) > _fl]
+            pass
+"""
+assert _OLD_BLOCK.count("print(") == 2, (
+    "expected exactly two prints in the CUT INTRUSIONS block, found "
+    f"{_OLD_BLOCK.count('print(')} — the block moved and this mutation would "
+    "no longer be testing what it claims")
 r.append(mut(_OLD_BLOCK, _NEW_BLOCK,
              "neither branch prints the cut distribution",
              "CUT INTRUSIONS is PRINTED"))

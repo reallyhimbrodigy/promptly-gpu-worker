@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """RED proof for the localised effect measure."""
+import ast
 import os
 import shutil
 import subprocess
@@ -22,7 +23,17 @@ def mut(old, new, label, expect):
     if src.count(old) != 1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x")
         return False
-    open(APP, "w", encoding="utf-8").write(src.replace(old, new, 1))
+    _mutant = src.replace(old, new, 1)
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN. The check then fails for a reason
+    # unrelated to the property under test, which is a pass it did not earn.
+    # None of the other guards see it: the anchor matched, the match was code.
+    try:
+        ast.parse(_mutant)
+    except SyntaxError as _se:
+        print(f"  HARNESS FAILURE [{label}] mutant does not parse: {_se.msg} "
+              f"(line {_se.lineno}) — it never ran, so it proved nothing")
+        return False
+    open(APP, "w", encoding="utf-8").write(_mutant)
     rc, out = run()
     shutil.copy(BAK, APP)
     ok = rc != 0 and expect in out
