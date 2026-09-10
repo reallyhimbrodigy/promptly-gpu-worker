@@ -221,6 +221,53 @@ for _name, _text in _SURF.items():
           "an unconditional 'card every beat' is a density demand, which is the "
           "thing Zac's rubric ruling removed")
 
+# ── 7. NO GATE DEMANDS A FIELD THE SCHEMA NO LONGER OFFERS ──────────────────
+# THE DEFECT THIS EXISTS FOR. b13730c removed card_type from the schema and the
+# beat_verdict ACCEPTANCE GATE kept demanding it. The agent could not supply it,
+# was rejected, and re-ruled the same beat identically about five times — round
+# 47's control shows that loop on three beats.
+#
+# I removed the field and left the gate asking for it. Mirror of the
+# card_props_mismatch orphan: there a NAME with no producer, here a DEMAND with
+# no supply. Both are invisible until something tries to satisfy them.
+_schema_fields = set()
+
+
+def _collect_fields(o):
+    if isinstance(o, dict):
+        for _k, _v in o.items():
+            if _k == "properties" and isinstance(_v, dict):
+                _schema_fields.update(_v.keys())
+            _collect_fields(_v)
+    elif isinstance(o, list):
+        for _v in o:
+            _collect_fields(_v)
+
+
+_collect_fields(list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS))
+check("the field scan found the schema", len(_schema_fields) > 20,
+      f"{len(_schema_fields)} — the check below would be vacuous")
+# Every `_v.get("<field>")` in the verdict-acceptance path must name something
+# the agent can actually send.
+_retired = {"card_type", "card_props"}
+_demanded = set()
+for _n in ast.walk(tree):
+    if (isinstance(_n, ast.Call) and getattr(_n.func, "attr", "") == "get"
+            and getattr(getattr(_n.func, "value", None), "id", "") == "_v"
+            and _n.args and isinstance(_n.args[0], ast.Constant)):
+        _demanded.add(_n.args[0].value)
+_orphaned = sorted(_demanded & _retired)
+check("no acceptance gate reads a retired field", not _orphaned,
+      f"{_orphaned} — the schema does not offer these, so the agent cannot "
+      f"satisfy the gate and will re-rule the same beat until it gives up")
+check("the gate asks for card_hero, which the schema DOES offer",
+      "card_hero" in _demanded and "card_hero" in _schema_fields)
+check("and it uses the SAME derivation as the builder",
+      "derive_card_type(\n                                _hero6" in src
+      or "_ct6, _dw6 = derive_card_type(" in src,
+      "a gate that accepts what the builder refuses is a second opinion nobody "
+      "asked for")
+
 if fails:
     print(f"CARD-DERIVED: {len(fails)} FAILED")
     for f in fails:

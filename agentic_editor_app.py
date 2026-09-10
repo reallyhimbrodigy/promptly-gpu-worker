@@ -9479,30 +9479,49 @@ def edit(source_key: str, brief: str,
                                 f"push, a hook takes a snap or a pull. Give one "
                                 f"of {sorted(ZOOM_ARC_HOMES)}.")
                     if _why6 is None and "card" in _tr6:
-                        # A card whose figure is not a figure renders BLANK and
-                        # exits 0 — four of them shipped invisible in round 35.
-                        _ct6 = str(_v.get("card_type") or "").strip()
-                        if not _ct6:
+                        # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
+                        # OFFERS. It demanded `card_type` — a field b13730c
+                        # REMOVED from the schema when cards became derived. The
+                        # agent could not supply it, was rejected, and re-ruled
+                        # the same beat identically about five times: round 47's
+                        # control shows exactly that loop, three beats each.
+                        #
+                        # I removed the field and left the gate demanding it.
+                        # That is the mirror of the card_props_mismatch orphan —
+                        # there a NAME with no producer, here a DEMAND with no
+                        # supply — and both are invisible until something tries
+                        # to satisfy them.
+                        _hero6 = str(_v.get("card_hero") or "").strip()
+                        if not _hero6:
                             _why6 = (
                                 f"beat {_v.get('beat')}: ruled 'card' with no "
-                                f"card_type. WHICH component reads what the "
-                                f"beat SAYS and cannot be derived — the enum "
-                                f"carries each one's claim. There is no "
-                                f"default; StatCard is for a quoted number.")
-                        _pr6 = _v.get("card_props")
-                        if not isinstance(_pr6, dict) or not _pr6:
-                            _pr6 = {"value": str(_v.get("card_hero") or "").strip()}
-                        _, _bad6 = coerce_mg_props(_pr6)
-                        if _bad6 and _ct6 not in MG_BRAND_ONLY:
-                            _why6 = (
-                                f"beat {_v.get('beat')}: {_ct6} needs a NUMBER "
-                                f"for {_bad6} and got "
-                                f"{[_pr6.get(k) for k in _bad6]!r}. It counts up "
-                                f"to a target, so a word renders a blank card "
-                                f"with no error. If this beat has no quoted "
-                                f"figure it is the wrong component — read "
-                                f"05_motion_graphics and pick one that carries "
-                                f"a phrase.")
+                                f"card_hero. That is the ONE thing you say about "
+                                f"a card — the component and its props are "
+                                f"derived from it, the way zoom_arc derives the "
+                                f"zoom. Give the figure or the short phrase the "
+                                f"card is about.")
+                        else:
+                            # SAME DERIVATION THE BUILDER USES. A gate that
+                            # accepts what the builder then refuses is a second
+                            # opinion nobody asked for, and this file has paid
+                            # for divergent copies of one rule before.
+                            _ct6, _dw6 = derive_card_type(
+                                _hero6, str(_v.get("text_content") or ""))
+                            if not _ct6:
+                                _why6 = f"beat {_v.get('beat')}: {_dw6}"
+                            else:
+                                _pp6, _pw6 = derive_card_props(_ct6, _hero6,
+                                                               str(_v.get("card_label") or ""))
+                                _, _bad6 = coerce_mg_props(dict(_pp6))
+                                if _bad6:
+                                    _why6 = (
+                                        f"beat {_v.get('beat')}: {_ct6} needs a "
+                                        f"NUMBER for {_bad6} and {_hero6!r} does "
+                                        f"not give one. It counts up to a target, "
+                                        f"so a word renders a blank card with no "
+                                        f"error. If this beat has no quoted "
+                                        f"figure, a short claim still takes a "
+                                        f"card — the phrase becomes a quote card.")
                     if _why6:
                         _rejected.append(_why6)
                         continue

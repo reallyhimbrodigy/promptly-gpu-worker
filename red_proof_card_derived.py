@@ -80,6 +80,11 @@ r.append(mut('"description": "REQUIRED when treatment "\n                       
              '"description": "when treatment "\n                                                    "includes \'card\': the "',
              "card_hero stops saying REQUIRED",
              "card_hero says REQUIRED, like zoom_arc"))
+# 12. THE GATE DEMANDS THE RETIRED FIELD AGAIN — round 47's control loop.
+r.append(mut('                        _hero6 = str(_v.get("card_hero") or "").strip()',
+             '                        _hero6 = str(_v.get("card_type") or "").strip()',
+             "the acceptance gate reads a retired field again",
+             "no acceptance gate reads a retired field"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc==0 else 1)
