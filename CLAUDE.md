@@ -113,6 +113,24 @@ inflated by retries into an apparent outage.
 
 ## Working agreement
 
+- **INSTRUMENTS ARE REVIEWED ACROSS LANES, DELIBERATELY.** A check written by the
+  person who wrote the code is STRUCTURALLY WEAKER than one written by someone
+  reading it cold — not because the author is careless, but because every
+  failure in the family below is invisible from the inside. You wrote the
+  `[:20]` and you remember it is 20. You wrote the predicate and you know which
+  process it runs in. The reader has only the output.
+
+  The evidence is the record: on 2026-09-09 nearly every instrument defect was
+  found by the OTHER lane, in files their author had read many times — the
+  boundary-side observable, the `/tmp` cross-branch backup, the missing flag
+  writer, the empty-leg floors, the truncated `sample`, the loose-pattern
+  floor-checker. Including a mis-citation made *while arguing for precision
+  about naming*. That was happening incidentally all day and caught more than
+  either lane's own discipline; **it should happen on purpose.**
+
+  So: when a lane ships a check, the other lane reads it before it is trusted —
+  and reads it for the four costumes specifically, not for style.
+
 - Every agent works in **its own git worktree**. Never edit outside your
   assigned region.
 - **The `speed` agent owns merge and deploy.** Nobody else deploys. Ever. All
