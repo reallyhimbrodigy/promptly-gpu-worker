@@ -10963,6 +10963,15 @@ def edit(source_key: str, brief: str,
             "cuts_reported": {c: sum(1 for v in _vs if v.get("cut") == c)
                               for c in ("keep", "cut")},
             "cuts_actual": led.get("cuts_actual"),
+            # BOTH, AND THE SUBSET IS NAMED AT ITS SOURCE. `sample` was the
+            # only thing emitted, so the printer had no full record to show and
+            # no way to know it was showing a subset. A subset must be named
+            # where it is CREATED, not inferred where it is printed — that is
+            # the half the AST check cannot see.
+            "all": [{"b": v.get("beat"), "t": v.get("treatment"),
+                     "c": v.get("cut"), "why": str(v.get("why"))[:150]}
+                    for v in _vs],
+            "sample_of": len(_vs),
             "sample": [{"b": v.get("beat"), "t": v.get("treatment"),
                         "c": v.get("cut"), "why": str(v.get("why"))[:150]}
                        for v in _vs[:8]],
@@ -11158,8 +11167,30 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
         print(f"     cuts ACTUAL (from build_cut spans) {_ca}   self-reported {_cr}"
               + ("   <- SELF-REPORT DISAGREES" if _ca and _cr
                  and _ca.get('cut') != _cr.get('cut') else ""))
-        for _v in (_vq.get("sample") or []):
-            print(f"     [{_v.get('b')}] {_v.get('t')}/{_v.get('c')}  {_v['why']}")
+        # THE FULL PER-BEAT RECORD, not a sample. This printed
+        # `_vq["sample"]` — a list that was ALREADY a subset when it arrived,
+        # with nothing marking it as one — so r47 motion showed 8 of 9 beats and
+        # was read as the complete record. That is the defect the truncated-list
+        # rule exists for, arriving from the side the AST check cannot see:
+        # there is no slice here to spot, the truncation happened upstream.
+        #
+        # REMOVED RATHER THAN ANNOTATED. It is nine lines on these fixtures and
+        # there was never a size reason to cut it; and the full record is what
+        # makes per-beat attribution computable from the log instead of from the
+        # ledger. `sample` is kept as a fallback only if the full list is absent,
+        # and says so.
+        _full = _vq.get("all")
+        if _full:
+            print(f"     per-beat record, all {len(_full)}:")
+            for _v in _full:
+                print(f"     [{_v.get('b')}] {_v.get('t')}/{_v.get('c')}  {_v['why']}")
+        else:
+            _smp = _vq.get("sample") or []
+            print(f"     SAMPLE — {len(_smp)} shown of "
+                  f"{_vq.get('sample_of', _vq['n'])} verdicts; the full record "
+                  f"was not emitted by this run")
+            for _v in _smp:
+                print(f"     [{_v.get('b')}] {_v.get('t')}/{_v.get('c')}  {_v['why']}")
     # THE TWO QUESTIONS RUN F RAISED, answered in the report rather than inferred:
     # was nothing cut because turns ran out (harness) or because the agent chose
     # to keep everything (prompt)? And did the components crowd out the text?
@@ -11197,7 +11228,13 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"{((r['ledger'].get('execute_plan') or {}).get('built') or {}).get('cutaway', 0)}"
               + (f"   frames {_cwf.get('before')}->{_cwf.get('after')}"
                  if _cwf else "   frames UNMEASURED"))
-        for _rj in (r["ledger"].get("cutaway_rejects") or [])[:6]:
+        # THE ONE THAT WOULD HAVE COST THIS ROUND. A run rejecting 30
+        # cutaways printed 6 and read as rejecting 6 — in the family whose
+        # entire diagnosis is "ruled zero".
+        _cwrj = r["ledger"].get("cutaway_rejects") or []
+        if len(_cwrj) > 6:
+            print(f"    showing 6 of {len(_cwrj)} cutaway rejections")
+        for _rj in _cwrj[:6]:
             print(f"    rejected b{_rj.get('beat')}: {_rj.get('why')}")
     _fm2 = r["ledger"].get("family_mentions") or {}
     if _fm2:
@@ -11761,7 +11798,10 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                 + "   <- decided and never reached the video")
         else:
             print("     every ruling reached the video")
-        for _sk in (_ep.get("skips") or [])[:8]:
+        _skl = _ep.get("skips") or []
+        if len(_skl) > 8:
+            print(f"       showing 8 of {len(_skl)} skips")
+        for _sk in _skl[:8]:
             print(f"       skip: {_sk['family']} beat {_sk['beat']} — {_sk['why']}")
         _steps = _ep.get("steps") or []
         print(f"     steps: {' -> '.join(str(x.get('step')) for x in _steps) or '(none)'}")
