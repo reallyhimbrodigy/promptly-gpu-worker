@@ -147,6 +147,14 @@ r.append(mut("                 if not _off and not _ung and _could_fail == 0 els
              "UNEXERCISED stops keying on cards that could have failed",
              "UNEXERCISED keys on cards that could have failed"))
 
+# 19. THE `or 0` IDIOM RETURNS on a denominator — Builder-1's paint_ms defect,
+#     in my lines, on the numbers Zac asked me to report.
+r.append(mut('        _tot = (r.get("ledger") or {}).get("cut_boundaries_total")\n'
+             '        _tot_s = "?" if _tot is None else str(_tot)',
+             '        _tot = (r.get("ledger") or {}).get("cut_boundaries_total") or 0\n'
+             '        _tot_s = str(_tot)',
+             "a never-written denominator prints as a measured zero again",
+             "no measure I report uses"))
 rc, out = run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc == 0 else 1)

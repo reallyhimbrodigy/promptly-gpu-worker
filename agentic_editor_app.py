@@ -10843,19 +10843,24 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     _cwi = (r.get("ledger") or {}).get("cut_word_intrusions")
     if _cwi is not None:
         _fl = (r.get("ledger") or {}).get("cut_quantisation_floor_ms")
-        _tot = (r.get("ledger") or {}).get("cut_boundaries_total") or 0
+        # NOT `or 0`. A key that was never written prints as a measured zero,
+        # and "0 of 0 boundaries land inside a word" reads as a clean edit
+        # rather than as an unrecorded denominator. That idiom is exactly how
+        # paint_ms reported 0.0s for six rounds against 458s of real wall.
+        _tot = (r.get("ledger") or {}).get("cut_boundaries_total")
+        _tot_s = "?" if _tot is None else str(_tot)
         _ms = sorted(x["intrusion_ms"] for x in _cwi)
         _fst = (r.get("ledger") or {}).get("cut_floor_state")
         if _fl is None:
             # NO FLOOR, SO NO 'ABOVE THE FLOOR'. Printing a count against a
             # guessed floor is the defect this replaced.
-            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land "
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot_s} boundaries land "
                   f"inside a word  ms={_ms[:12]}   FLOOR {_fst}: "
                   f"{(r.get('ledger') or {}).get('cut_floor_detail')}"
                   f"   EXCLUDED from any pooled distribution")
         else:
             _above = [x for x in _cwi if x.get("intrusion_ms", 0) > _fl]
-            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land inside a "
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot_s} boundaries land inside a "
                   f"word, {len(_above)} above the {_fl}ms frame floor"
                   + (f"  ms={_ms[:12]}" if _ms else "")
                   + "   MEASURED, no threshold")
@@ -10887,9 +10892,13 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                  if not _off and not _ung and _could_fail == 0 else ""))
     _pc = (r.get("ledger") or {}).get("placement_collisions")
     if _pc is not None:
-        _nb = (r.get("ledger") or {}).get("painted_boxes_measured") or 0
-        _dup = (r.get("ledger") or {}).get("painted_boxes_duplicate") or 0
-        print(f"  COLLISIONS      : {len(_pc)} over {_nb} painted box(es)"
+        # Same idiom, same fix. A collision count over an UNRECORDED box count
+        # is not "0 over 0" — it is a number with no denominator, and printing
+        # a zero denominator is how an absence becomes a finding.
+        _nb = (r.get("ledger") or {}).get("painted_boxes_measured")
+        _nb_s = "? (NOT RECORDED)" if _nb is None else str(_nb)
+        _dup = (r.get("ledger") or {}).get("painted_boxes_duplicate")
+        print(f"  COLLISIONS      : {len(_pc)} over {_nb_s} painted box(es)"
               + (f"  ({_dup} DUPLICATE record(s) collapsed — the run answered a "
                  f"repeated execute_plan)" if _dup else "")
               + ("  " + "  ".join(f"[{'+'.join(c['families'])} "

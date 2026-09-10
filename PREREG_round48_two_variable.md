@@ -5,9 +5,10 @@ Amends 83d85a4 and the ce710e0 freeze. No result seen.
 ## What 48 carries
 
     round 47 (control)
-      + my six commits + cffc983     the prefix material, the card derivation,
-                                     the card/text sentence, card_hero REQUIRED,
-                                     the acceptance-gate fix
+      + my SEVEN commits             the prefix material, the card derivation,
+        (cffc983 + 444c4b8)          the card/text sentence, card_hero REQUIRED,
+                                     the acceptance-gate fix, and the DERIVED
+                                     cutaway filter
       + ONE change of Builder-1's    beat_verdict gains cutaway_from_s,
                                      zoom_arc and text_content
 
@@ -49,6 +50,24 @@ disabled) make three env vars rather than nine code changes.
 **Cards still not building is UNMEASURABLE, not null.** Unchanged from 83d85a4
 and it now has two live causes on record — the bare-string treatment of round 46
 and the orphaned gate of round 47, both fixed, neither yet observed fixed.
+
+## Why seven and not six — added before the round, not after
+
+Merging cffc983 alone would have shipped my HARDCODED cutaway filter into a tree
+where cutaway exists, hiding 72 of 153 reference beats. The filter drops a BEAT,
+not a treatment, so it takes the card and text craft on those beats with it:
+
+    card examples    40 -> 17 surviving   42.5%
+    text examples   124 -> 69 surviving   55.6%
+
+Round 48 would have tested whether reference examples move placement using 43% of
+the card examples. That is not a confound — it is measuring a knowingly degraded
+version of the thing under test, and it would make the NULL uninterpretable,
+which is the outcome this registration says is the valuable one.
+
+444c4b8 is not a new variable: it makes my own feature behave as designed in a
+tree where cutaway ships. The hardcode was a claim about Builder-1's pipeline
+that their work made false.
 
 ## What I am taking on trust, and what would invalidate it
 
