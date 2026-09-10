@@ -688,6 +688,58 @@ inflated by retries into an apparent outage.
   perfect predicate on the wrong side of a boundary still reads the wrong
   environment.
 
+- **A FIXTURE BELONGS IN THE TREE. A BACKUP BELONGS IN MEMORY.** (2026-09-09.)
+  Two OPPOSITE answers to what looked like one problem, and the wrong
+  convergence came from trying to agree rather than from disagreeing.
+
+  A **fixture** — a mutation block, a golden, an expected output — belongs IN
+  the tree, so it drifts with the tree or fails loudly at merge. Builder-1's
+  `/tmp` copy of a mutation block had rewrapped four lines of comment away from
+  the source and reported `anchor 0x`; moving it into `red_proof_blocks/` fixed
+  it. Deriving it from the source by anchor, which is what I did, is WORSE — an
+  anchor couples the mutation to the source's exact line shape, and line shape
+  is precisely what drifted.
+
+  A **backup** is not a fixture. It belongs IN MEMORY so it cannot survive the
+  run that made it. `red_proof_edit_quality` kept its backup at the fixed path
+  `/tmp/_eq_bak.py`, shared across every branch and worktree on the machine: a
+  run on one branch wrote it, a later run on another restored from it, and
+  `agentic_editor_app.py` was silently replaced with the other branch's content
+  — a 914-line diff — **while the harness printed 19/19 RED-PROVEN.** Eleven of
+  sixteen harnesses did this.
+
+  **AND I WAS ONE STEP FROM MOVING THE BACKUPS INTO THE REPO TO CONVERGE**,
+  which would have made them DURABLE — the exact property that caused the
+  corruption. Two lanes agreeing is not the same as two lanes being right; ask
+  what the artifact IS before copying where someone else put theirs.
+
+  **THE COMPLETE SYMPTOM SET for a fixture outside the tree**, with the caveat
+  that makes it usable:
+
+      MISSING              open() raises at import; the harness dies and reports
+                           nothing. Reads as an environment problem — a category
+                           people skip rather than investigate.
+      DRIFTED              the copy disagrees with the source; anchor 0x.
+      STALE FROM A BRANCH  a restore rewrites the file under test with another
+                           branch's content, under a GREEN tally. The worst,
+                           because it reports success.
+      INTERRUPTED          a killed run leaves the mutant on disk. **ORTHOGONAL
+                           TO BACKUP LOCATION** — in-memory restore does not
+                           survive a SIGKILL either, and no relocation reaches
+                           it. Only a POST-RUN TREE CHECK catches it.
+
+  That caveat is the point of recording the set: **do not relocate a backup to
+  fix a symptom relocation cannot reach.** A sweep that mutates source must
+  `git status --porcelain` the mutated file after EVERY harness and restore if
+  dirty, so an interrupted run announces itself instead of being found by
+  committing. Mine left `led["cut_word_intrusions"] = []` on disk — one line in
+  12,000, in the measurement whose entire job is counting cut-word intrusions,
+  and every gate passes on an empty list.
+
+  **THE CHECK, NAMED: `smoke_red_proofs_guarded.py`** — no red proof may keep a
+  source backup outside the tree, and none may exit 0 with zero legs executed
+  (all sixteen could: `all([])` is True and `0 == 0` is True). RED-proven 4/4.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
