@@ -70,22 +70,8 @@ ok("def place_cutaway" not in SRC, "place_cutaway is implemented again")
 # The categorical fix is this repo's own law: IMPORT THE MODULE AND ASSERT THE
 # SYMBOL. Source is where code might be; runtime is where it is.
 import types as _types
-_m5 = _types.ModuleType("modal")
-
-
-class _S5:
-    def __init__(s, *a, **k): pass
-    def __getattr__(s, n): return _S5()
-    def __call__(s, *a, **k): return _S5()
-    def function(s, *a, **k): return lambda f: f
-    def local_entrypoint(s, *a, **k): return lambda f: f
-
-
-for _n5 in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
-    setattr(_m5, _n5, _S5())
-_m5.is_local = lambda: True
-_m5.enable_output = _S5()
-sys.modules.setdefault("modal", _m5)
+import modal_stub                                         # noqa: E402
+modal_stub.install()
 import agentic_editor_app as _A5                                  # noqa: E402
 tools = list(_A5.TOOLS) + list(_A5.KNOWLEDGE_TOOLS)
 ok(getattr(_A5, "TOOLS", None) is not None, "TOOLS could not be read")

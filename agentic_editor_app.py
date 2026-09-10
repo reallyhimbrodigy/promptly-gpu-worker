@@ -11206,6 +11206,79 @@ def edit(source_key: str, brief: str,
                    agent_last_message=final_text[:1200])
 
 
+# ── THE SERVER'S WAY IN ─────────────────────────────────────────────────────
+#
+# THE GAP THIS CLOSES. The server dispatches every job to MODAL_ENDPOINT_URL,
+# which is `run_job` on modal_app.py — handler.py's path. Nothing anywhere
+# routed to THIS app: `grep -ic agentic server.js lib/` returned zero. So
+# re-edit and multi-upload were built in the worker and unreachable from the
+# product, which is the difference between "re-edit works" and "a user can
+# re-edit".
+#
+# A SEPARATE URL IS THE ROUTE DECISION, and that is deliberate. The scope said a
+# per-job record of which pipeline produced a job must be stored at creation and
+# never inferred from which plan column is populated. Giving this app its own
+# endpoint makes the choice explicit at dispatch: the server picks a URL, and
+# the URL IS the pipeline. Nothing has to be guessed from an artefact later.
+#
+# THE PLAN COMES BACK IN THE RESPONSE. This container holds no Supabase
+# credentials — deliberately, which is why it is handed a presigned URL rather
+# than a bucket name — so it CANNOT persist its own plan. It returns it and the
+# server writes it. That is not a limitation to work around; it is the boundary
+# that keeps the credential surface small.
+#
+# AUTH POSTURE, stated rather than assumed: `run_job` on modal_app.py is
+# unauthenticated today and MODAL_RUN_SECRET is half-built (shipping it would
+# 403 all dispatch). This endpoint matches the existing posture rather than
+# inventing a new one — it is not worse, and it is not a place to fix inbound
+# auth quietly. When that gate lands it lands on both.
+@app.function(image=IMG, secrets=SECRETS, timeout=60)
+@modal.fastapi_endpoint(method="POST")
+def run_agentic(body: dict):
+    """Dispatch an agentic edit. Returns immediately with a call id.
+
+    SPAWN, NOT CALL. An edit runs for minutes and an HTTP request must not hold
+    it open — `.remote()` dies with the client, which this repo has already paid
+    for. `.spawn()` returns a call id the server polls or receives a callback
+    for, exactly as run_job does under PROMPTLY_SPAWN_MODE.
+
+    THE RE-EDIT PAYLOAD IS THE SAME SHAPE AS AN EDIT plus two fields, so the
+    server has one call to make and not two:
+
+        prior_plan   the `plan` from the previous run's result. Present = this
+                     is a MODIFICATION; absent = a plain edit. There is no
+                     'reinterpret' here: the agentic no-plan case IS a plain
+                     edit, and mapping handler's mode onto it would send an
+                     instruction with no plan — a fresh edit wearing a re-edit's
+                     name, counted as one in every metric.
+        instruction  the user's change_request, verbatim.
+    """
+    _b = body or {}
+    _plan = _b.get("prior_plan")
+    if _plan is not None and not isinstance(_plan, list):
+        # A PLAN OF THE WRONG SHAPE IS REFUSED, not coerced. handler's
+        # `edit_recipe` is a dict and this is a list of source-span entries; if
+        # the server ever hands one to the other, that must fail here rather
+        # than produce a confident edit from a plan this path cannot read.
+        return {"error": "prior_plan must be a list of plan entries; got %s. "
+                         "This is the agentic plan shape, not handler's "
+                         "edit_recipe." % type(_plan).__name__}
+    _fc = edit.spawn(
+        source_key=_b.get("source_key") or "",
+        brief=_b.get("brief") or "",
+        prior_plan=_plan,
+        instruction=_b.get("instruction") or "",
+        src_url=_b.get("src_url") or "",
+        out_url=_b.get("out_url") or "",
+        out_key=_b.get("out_key") or "",
+    )
+    print("[run_agentic] spawned call=%s job=%s reedit=%s"
+          % (_fc.object_id, _b.get("job_id"), bool(_plan)), flush=True)
+    return {"spawned": True, "call_id": _fc.object_id,
+            "job_id": _b.get("job_id"),
+            "mode": "reedit" if _plan else "edit"}
+
+
 @app.local_entrypoint()
 def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
          brief: str = "Cut this into a punchy vertical short. Remove silence and "
