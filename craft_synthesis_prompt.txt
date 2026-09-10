@@ -1,0 +1,92 @@
+You are reading a set of independent analyses. Each one is an editor's account
+of a single short-form video: what the editor of that video did, moment by
+moment, and why it lands.
+
+Your job is to write ONE report: the combined editorial understanding these
+videos contain, in their own terms, simplified down to what an editor needs to
+know AT THE MOMENT OF A DECISION.
+
+WHAT "AT THE MOMENT OF A DECISION" MEANS
+An editor is sitting at a specific second of a specific take. They have to
+decide: cut or hold. Cut away or stay on the face. Put a word on screen or
+leave it. Land a sound or leave the moment dry. Trim this pause or keep it.
+Your report is what they should have in their head at that second. So write
+things that can be ACTED ON at a moment:
+
+  "When a claim has just landed and the proof is visual, cut on the breath
+   after the claim, not on the last word — the silence is what makes the
+   viewer look."
+
+That is usable. This is not:
+
+  "Videos average 7.5 cuts per 25 seconds."
+
+A RATE IS NOT AN INSTRUCTION. Do not write frequencies, counts, averages,
+per-minute figures or densities, ever, even where the analyses contain them.
+An editor at a moment cannot act on a rate; they can only act on a reason. If
+you find yourself writing "often" or "usually", ask what the CONDITION is that
+made it often, and write the condition instead.
+
+THIS INCLUDES RHETORICAL NUMBERS. "99% of pauses are fat and the 1% that
+remains is load-bearing" is a rate wearing a figure of speech, and it is worse
+than a measured one because nobody measured it. An editor cannot look at a
+pause and know whether it is in the 99 or the 1. Write the TEST instead: what
+about a pause tells you it is carrying weight? No percentages, no fractions,
+no "X out of Y", no "every N seconds", not even for emphasis. A draft
+containing one is REFUSED by an automatic check before it reaches the editor,
+and you will have written it for nothing.
+
+NO PREAMBLE. Do not open with "Excellent", "Here is", "Based on the provided
+analyses", or any sentence about the task. Begin with the first header. The
+reader is mid-edit.
+
+TWO SOURCES, NEVER BLENDED
+The analyses are marked by weight.
+
+  * zac_reference — ten videos chosen by the person you are writing for as
+    examples of the editing he wants. These are the STANDARD. Where they and
+    the wider field disagree, they win, and you say so explicitly.
+  * apify_field — other people's videos, gathered in bulk from what is
+    working publicly. These are BREADTH, not taste. They tell you what the
+    form does widely. Cite them as "the wider field", never merged into a
+    single average with the references.
+
+Never average the two into one number or one claim. If the references do
+something the field does not, that difference is the single most valuable
+thing in your report — name it and give it its own section.
+
+YOU ARE READING ANALYSES OF VARIABLE QUALITY
+These were written by a model watching each video alone. Some are sharp, some
+are thin, some are flattering — an analysis that says a video is a "masterclass"
+is telling you about the analyst's manners, not the edit. Read past the praise
+to the mechanism. If an analysis makes a claim with no moment attached to it,
+it is worth nothing to you; drop it. If several analyses independently describe
+the same mechanism in different words, that is your strongest signal, and it is
+strong EVEN IF they describe it at different moments or count it differently —
+two readings that both explain a moment agree on what matters even when they
+disagree on how many there were.
+
+STRUCTURE
+Write prose with headers, not a list of rules. Suggested shape, adapt freely:
+
+  1. What these videos are doing (the shared intent, in one paragraph)
+  2. The opening — what earns the next three seconds, and what the analyses
+     say happens if it doesn't
+  3. Cutting — the conditions under which a cut lands, and the conditions
+     under which holding is stronger
+  4. Cutaway and coverage — when to leave the face, what to leave it FOR,
+     and what makes a cutaway feel like evidence rather than decoration
+  5. Words on screen — what earns text, what text is doing that the voice
+     is not, and where it goes
+  6. Sound — what a sound is marking, and what it is marking it AGAINST
+  7. Silence, pauses and dead air — which pauses are load-bearing and which
+     are dead, and how the analyses tell them apart
+  8. Energy and turn — where these videos change gear and what triggers it
+  9. Where Zac's references differ from the wider field
+ 10. The half-dozen things that matter most, each one a condition and an
+     action
+
+LENGTH. Long enough to be complete, short enough that every sentence earns its
+place. This report is read on every single render, so a sentence that does not
+change a decision is a sentence that costs money forever. Cut anything you
+would not defend to an editor mid-cut.

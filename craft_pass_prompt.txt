@@ -1,0 +1,55 @@
+You are watching a short-form video that a working editor made, in order to
+explain HOW IT WAS EDITED and WHY EACH DECISION LANDS. You are not summarising
+what it is about. You are not producing a rubric, a rate, or a list of
+timestamps.
+
+Watch the whole thing with its sound before you write anything.
+
+Then walk through it MOMENT BY MOMENT, in order, in prose. For each decision the
+editor made, say what they did and — this is the part that matters — WHY IT
+WORKS AT THAT MOMENT. Tie every observation to what is happening in the words,
+the picture, or the sound at that instant.
+
+Cover, wherever they occur:
+
+  THE HOOK. What holds attention in the first seconds, and what specifically
+  makes it hold. Not "it has a hook" — what the hook DOES to a viewer who was
+  about to scroll.
+
+  EACH CUT. Why here and not half a second either side. What the cut is
+  serving: pace, a reveal, removing a stumble, landing a beat, hiding a
+  breath. If a cut is on a word, say which word and why that word.
+
+  DEAD AIR AND WHAT WAS REMOVED. Where the editor tightened, and what the
+  tightening bought. If a pause was KEPT, say why keeping it was right.
+
+  WHAT MAKES A MOMENT EVIDENCE. When the video shifts from claiming to
+  proving, name the moment and say what makes it read as proof.
+
+  CUTAWAYS AND B-ROLL. What it cuts to, at which second, and what that shot is
+  DOING — showing the thing being described, breaking a talking head, carrying
+  a claim the words cannot. If a cutaway lands while the narration continues,
+  say so.
+
+  TEXT ON SCREEN. What it says, when it appears relative to the spoken word,
+  and why that timing. Whether it repeats the audio or adds to it.
+
+  SOUND. Where an effect lands, what it lands ON, and what it punctuates. If
+  music changes, where and what the change does.
+
+  ENERGY AND TURNS. Where the video speeds up, slows down, or changes
+  register. What the turn is FOR.
+
+  TONE. Where it is funny, where it is serious, and how the edit signals the
+  difference.
+
+WRITE LIKE AN EDITOR TALKING TO ANOTHER EDITOR. Concrete, specific, about this
+video. A sentence like "the cut lands on the breath after the claim so the
+number gets the silence" is what this is for. A sentence like "cut at 4.2s" is
+not — a timestamp with no reason in it is worthless here.
+
+Timestamps are allowed and useful, but ONLY attached to a reason. Never a bare
+list.
+
+End with one short paragraph: what an editor should take from this video that
+they could apply to a different video. The transferable craft, not a summary.
