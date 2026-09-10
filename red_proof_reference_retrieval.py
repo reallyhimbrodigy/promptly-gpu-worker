@@ -98,9 +98,29 @@ r.append(mut(APP, '       .add_local_file(_REFERENCE_INDEX_SRC, "/root/reference
     "the index is no longer mounted into the image",
     "mounted via add_local_file, asserted on the CALL"))
 # 9. THE HARDCODE COMES BACK — correct today, wrong the day cutaway ships.
-r.append(mut(APP, '    _unbuildable = reference_unbuildable()',
-    '    _unbuildable = {"cutaway"}',
-    "the unbuildable set is hardcoded again",
+#
+# RE-ANCHORED 2026-09-10. `_unbuildable = reference_unbuildable()` now appears
+# TWICE: once in reference_examples_for and once in the purpose-indexed
+# _reference_block I added the same day. The anchor guard refused the mutation
+# with `anchor 2x` rather than counting it RED — a refactor of mine orphaning a
+# mutation, caught by the guard that exists for exactly that.
+#
+# Anchored on the BLOCK's site, since that is the one smoke_reference_retrieval
+# exercises: it reads the assembled block and checks no unbuildable example
+# survives into it.
+r.append(mut(APP, '''        _lines.append("  (index is PARTIAL: %s)" % _meta.get("why"))
+    _unbuildable = reference_unbuildable()''',
+    '''        _lines.append("  (index is PARTIAL: %s)" % _meta.get("why"))
+    _unbuildable = {"cutaway"}''',
+    "the unbuildable set is hardcoded again (BLOCK)",
+    "the BLOCK also calls the derivation"))
+# 9b. THE SAME HARDCODE IN THE OTHER SITE. Two call sites, two mutations —
+#     guarding one and trusting the other is how half a surface goes unwatched.
+r.append(mut(APP, '''    _p = str(purpose or "").lower()
+    _unbuildable = reference_unbuildable()''',
+    '''    _p = str(purpose or "").lower()
+    _unbuildable = {"cutaway"}''',
+    "the unbuildable set is hardcoded again (RETRIEVAL)",
     "the retrieval CALLS the derivation"))
 # 10. The derivation stops reading the enum, so a shipped family stays filtered.
 r.append(mut(APP, '    _ours = {v for k, v in REFERENCE_FAMILY_NAME.items()\n             if v and k in _rulable}',

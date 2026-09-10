@@ -151,6 +151,21 @@ check("the retrieval CALLS the derivation", "reference_unbuildable" in _uses,
       "a hardcoded family list is a claim about the pipeline that rots the day "
       "the pipeline changes")
 check("and the old constant is gone", not hasattr(A, "_REFERENCE_UNBUILDABLE"))
+
+# BOTH SITES, because there are now two. The purpose-indexed _reference_block
+# derives the unbuildable set itself rather than going through the retrieval,
+# so guarding only reference_examples_for left half the surface unwatched — a
+# gap my own refactor opened and the red proof's anchor guard exposed by
+# reporting `anchor 2x` instead of counting a mutation RED.
+_blkfn = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+               and n.name == "_reference_block"), None)
+check("_reference_block exists", _blkfn is not None)
+_bu = {n.func.id for n in ast.walk(_blkfn) if isinstance(n, ast.Call)
+       and isinstance(n.func, ast.Name)} if _blkfn else set()
+check("the BLOCK also calls the derivation, not a hardcoded set",
+      "reference_unbuildable" in _bu,
+      "two call sites, two chances to hardcode; a family list frozen in either "
+      "is a claim about the pipeline that rots the day the pipeline changes")
 _rulable = A._rulable_treatments()
 check("the derivation reads the treatment ENUM the agent rules from",
       {"card", "text", "sfx", "zoom"} <= _rulable, sorted(_rulable)[:8])
