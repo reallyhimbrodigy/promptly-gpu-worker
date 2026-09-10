@@ -306,6 +306,51 @@ inflated by retries into an apparent outage.
   defeated it entirely — the argument is a Name, not a Constant. Resolve through
   the binding. (Third instance of *scope is not text* in this repo.)
 
+## THE FAMILY: A FAILURE THAT RENDERS IDENTICALLY TO A SUCCESS
+
+**Read this header, not the twenty-four instances.** Nearly every rule below is
+one shape wearing different clothes: *the failed thing and the working thing
+produce the same output, so nothing in the log distinguishes them.* A reader who
+internalises the shape catches the twenty-fifth instance without having seen it.
+
+The shape has four recurring costumes:
+
+1. **ABSENCE RENDERED AS A VALUE.** `or 0` turns a key nobody wrote into a
+   measured zero. `alpha_layer_max` returns `None` and the guard reads
+   `x <= 260`. `paint_ms` is never recorded and prints `0.0s` beside a 458s
+   stage. `float(duration or 0)` converts ABSENT into a well-typed 0.0 that no
+   consumer-side check can see. **Return a STATE — MEASURED / ABSENT / FAILED —
+   and make ABSENT and FAILED fail.**
+
+2. **A CHECK THAT ASSERTS NOTHING.** `all([])` is True, so 26 of 27 red proofs
+   passed on an empty mutation list. A leg iterating a population that is empty
+   *here*. A walk that finds zero enums. A mutation whose anchor no longer
+   matches, whose operand went empty, whose match landed in prose, or that never
+   parsed. A pattern loose enough to match the defect it forbids. **Count the
+   population and assert the count.**
+
+3. **A MEASUREMENT OF THE WRONG THING.** An observable computed on the wrong
+   side of a process boundary. Two numbers with the same name counting different
+   things (visual cuts vs beats-ruled-cut). A judgement wearing a measurement's
+   clothes (model-annotated rates printed as fact). A truncated list printed as
+   a total. A stale identifier from a run that no longer exists. **State what a
+   number COUNTS and WHERE it was computed, beside the number.**
+
+4. **A PRODUCER OR CONSUMER THAT ISN'T THERE.** A gate demanding a field the
+   schema does not offer. A flag with a reader and no writer. A tool in the
+   enum that the prompt never explains. A capability mounted and never read.
+   **A flag's test surface is the PAIR, not the reader.**
+
+**Why it keeps happening:** every one of these is invisible from the inside. You
+wrote the `[:20]` and you remember it is 20. You wrote the predicate and you know
+which process it runs in. The reader has neither. And the two people who found
+most of these found them in each other's files, not their own.
+
+**The corollary that decides priority:** a failure mode with a *plausible
+innocent explanation* is worse than one that fires constantly. `anchor 0x`
+demands investigation; `FileNotFoundError` on a `/tmp` path reads as someone
+else's laptop. Same rot, one gets looked at.
+
 ## Standing rules earned 2026-09-09 (a mutation that changes a file, not a result)
 
 - **A TRUNCATED LIST MUST CARRY ITS DENOMINATOR** (Builder-2's framing). It is
