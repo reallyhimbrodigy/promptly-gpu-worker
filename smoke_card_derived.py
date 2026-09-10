@@ -230,38 +230,106 @@ for _name, _text in _SURF.items():
 # I removed the field and left the gate asking for it. Mirror of the
 # card_props_mismatch orphan: there a NAME with no producer, here a DEMAND with
 # no supply. Both are invisible until something tries to satisfy them.
-_schema_fields = set()
+# PER TOOL, NOT ACROSS THE UNION. My first version collected `properties` from
+# every tool into ONE flat set and compared the gate's demands against that. A
+# field offered by rule_all_beats and MISSING from beat_verdict passes such a
+# check — the union contains it — while every ruling made through the repair
+# path is rejected forever for a field it cannot send.
+#
+# Builder-1 found exactly that in their tree: beat_verdict offers the full
+# treatment enum and NONE of text_content, zoom_arc or cutaway_from_s. Three
+# fields wide, on the path whose whole job is to fix a rejected ruling, and 22
+# rejections logged on one fixture in round 47.
+#
+# Checking the union is the "wrong collection is indistinguishable from checking
+# nothing" failure this repo already has on record — smoke_five_families read
+# TOOLS and never saw that place_cutaway lived in KNOWLEDGE_TOOLS.
+def _props_of(tool):
+    _out = set()
+
+    def _w(o):
+        if isinstance(o, dict):
+            for _k, _v2 in o.items():
+                if _k == "properties" and isinstance(_v2, dict):
+                    _out.update(_v2.keys())
+                _w(_v2)
+        elif isinstance(o, list):
+            for _v2 in o:
+                _w(_v2)
+
+    _w(tool.get("input_schema") or {})
+    return _out
 
 
-def _collect_fields(o):
-    if isinstance(o, dict):
-        for _k, _v in o.items():
-            if _k == "properties" and isinstance(_v, dict):
-                _schema_fields.update(_v.keys())
-            _collect_fields(_v)
-    elif isinstance(o, list):
-        for _v in o:
-            _collect_fields(_v)
+def _rules_verdicts(tool):
+    """Does this tool let the agent rule a TREATMENT? Then the gate applies."""
+    _hit = [False]
+
+    def _w(o):
+        if isinstance(o, dict):
+            if o.get("type") == "array" and isinstance(o.get("items"), dict):
+                if "card" in (o["items"].get("enum") or []):
+                    _hit[0] = True
+            for _v2 in o.values():
+                _w(_v2)
+        elif isinstance(o, list):
+            for _v2 in o:
+                _w(_v2)
+
+    _w(tool.get("input_schema") or {})
+    return _hit[0]
 
 
-_collect_fields(list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS))
-check("the field scan found the schema", len(_schema_fields) > 20,
-      f"{len(_schema_fields)} — the check below would be vacuous")
-# Every `_v.get("<field>")` in the verdict-acceptance path must name something
-# the agent can actually send.
-_retired = {"card_type", "card_props"}
+_verdict_tools = [t for t in list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS)
+                  if _rules_verdicts(t)]
+check("at least one tool rules verdicts", _verdict_tools,
+      "the per-tool check below would be vacuous")
+
+# SCOPED TO THE ACCEPTANCE PATH, not the whole module. Walking every
+# `_v.get(...)` in the file collected `_v.get('b')`, `_v.get('t')` and
+# `_v.get('c')` from an unrelated reporting line 800 lines away that happens to
+# bind the same name — and reported them as fields the schema fails to offer.
+# Scope is not text, in my own check this time.
+# Bounded by the gate's own lines: from the verdict-acceptance branch to the
+# rejection it appends. Scoping by ENCLOSING FUNCTION was not enough — the gate
+# lives inside `edit`, which is 3,000 lines and contains the stranger.
+_lines = src.split("\n")
+_g0 = next((i for i, l in enumerate(_lines, 1)
+            if 'if _why6 is None and "card" in _tr6:' in l), None)
+_g1 = next((i for i, l in enumerate(_lines, 1)
+            if i > (_g0 or 0) and "_rejected.append(_why6)" in l), None)
+check("the acceptance gate was located", _g0 and _g1 and _g1 > _g0,
+      f"lines {_g0}..{_g1} — without bounds this walks the whole module and "
+      f"reports strangers as schema fields")
 _demanded = set()
 for _n in ast.walk(tree):
+    if not (_g0 and _g1 and _g0 <= getattr(_n, "lineno", -1) <= _g1):
+        continue
     if (isinstance(_n, ast.Call) and getattr(_n.func, "attr", "") == "get"
             and getattr(getattr(_n.func, "value", None), "id", "") == "_v"
-            and _n.args and isinstance(_n.args[0], ast.Constant)):
+            and _n.args and isinstance(_n.args[0], ast.Constant)
+            and isinstance(_n.args[0].value, str)):
         _demanded.add(_n.args[0].value)
-_orphaned = sorted(_demanded & _retired)
-check("no acceptance gate reads a retired field", not _orphaned,
-      f"{_orphaned} — the schema does not offer these, so the agent cannot "
-      f"satisfy the gate and will re-rule the same beat until it gives up")
-check("the gate asks for card_hero, which the schema DOES offer",
-      "card_hero" in _demanded and "card_hero" in _schema_fields)
+check("the gate's demands were found", len(_demanded) >= 2, sorted(_demanded))
+check("and they are real field names, not strangers from another scope",
+      all(len(_f) > 2 for _f in _demanded), sorted(_demanded))
+
+for _t in _verdict_tools:
+    _offered = _props_of(_t)
+    _orphaned = sorted(_demanded - _offered - {"beat"})
+    check(f"{_t['name']} offers every field the gate demands",
+          not _orphaned,
+          f"{_orphaned} — this tool can rule a treatment and cannot supply "
+          f"what the gate then requires, so every such ruling is rejected and "
+          f"re-ruled identically until the turn budget absorbs it")
+
+_retired = {"card_type", "card_props"}
+check("no acceptance gate reads a retired field",
+      not sorted(_demanded & _retired),
+      f"{sorted(_demanded & _retired)} — the schema does not offer these")
+check("the gate asks for card_hero, which every verdict tool offers",
+      "card_hero" in _demanded
+      and all("card_hero" in _props_of(_t) for _t in _verdict_tools))
 check("and it uses the SAME derivation as the builder",
       "derive_card_type(\n                                _hero6" in src
       or "_ct6, _dw6 = derive_card_type(" in src,

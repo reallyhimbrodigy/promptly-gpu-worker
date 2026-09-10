@@ -85,6 +85,12 @@ r.append(mut('                        _hero6 = str(_v.get("card_hero") or "").st
              '                        _hero6 = str(_v.get("card_type") or "").strip()',
              "the acceptance gate reads a retired field again",
              "no acceptance gate reads a retired field"))
+# 13. A VERDICT TOOL LOSES A COMPANION FIELD — Builder-1's beat_verdict orphan,
+#     which a UNION check passes and a per-tool check catches.
+r.append(mut('                                 "card_hero": {"type": "string",',
+             '                                 "card_hero_RENAMED": {"type": "string",',
+             "a verdict tool stops offering a field the gate demands",
+             "offers every field the gate demands"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc==0 else 1)
