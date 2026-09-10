@@ -308,6 +308,50 @@ inflated by retries into an apparent outage.
 
 ## Standing rules earned 2026-09-09 (a mutation that changes a file, not a result)
 
+- **A HARNESS MUST FAIL LOUDLY AND DIFFERENTLY FROM THE THINGS IT RUNS** (Builder-2).
+  A suite run through macOS `timeout` — which does not exist there — reported
+  **163/163 FAIL**. That tally is indistinguishable from a real catastrophe, and
+  from `0/163 FAIL`, because the RUNNER's failure was reported through the same
+  channel as the checks' results. A missing runner must **exit 2 with HARNESS**
+  and contribute NO per-check rows. "Read the first line" is not the lesson —
+  next time the first line will be plausible.
+
+  Same family as *read exit codes without a pipe*: the question is always
+  whether the thing reporting is the thing being measured.
+
+- **TWENTY RED CHECKS CAN BE ONE FACT.** ~20 handler.py certs went red at once
+  and read as "the handler certs are red again". One stash pop, one file, one
+  cause. A tally is not a count of problems, and treating it as twenty sends
+  someone into twenty investigations.
+
+- **A JUDGEMENT WEARING A MEASUREMENT'S CLOTHES.** `reference_index.json`'s 153
+  beats are `claude-sonnet-5`'s READING of ten videos, not mechanical counts,
+  and nothing in the artifact says so — it carries `source`, `note` and
+  `beats_in_corpus`. So "reference median 0.253 cuts/s" printed in the agent's
+  own report as a fact all week. Every rate ships its PROVENANCE beside it:
+  annotator, model, date, and MODEL-ANNOTATED vs COUNTED per family. The rule
+  that rates GRADE and never instruct only holds if the grade is honest about
+  what it is.
+
+- **AND CROSS-CORPUS RATES CARRY AN ANNOTATOR SEAM.** `reference_videos` is
+  claude-sonnet-5 (2026-08-25); `trend_analyses` is gemini-2.5-pro (2026-03-16).
+  Different model families, six months apart. Before any cross-corpus number is
+  quoted, the seam must be bounded — and a same-family agreement number bounds
+  only its own seam, never the cross-family one.
+
+- **TWO NUMBERS WITH THE SAME NAME MEASURING DIFFERENT THINGS.** The reference
+  corpus stores `cuts` (141 VISUAL cuts = 8.27/25s) and beats-ruled-cut (81 =
+  4.75/25s). The trend corpus's `cuts.total_count` is VISUAL cuts. Comparing it
+  against 4.75 produced "trends cut 46% more" when the truth is the reference
+  cuts ~19% MORE (8.27 vs 6.92) — the direction inverted, reported as a finding.
+  Before comparing two numbers, state what each one COUNTS.
+
+- **A 404 THAT MEANS "WRONG PATH SHAPE" READS EXACTLY LIKE ONE THAT MEANS "THE
+  DATA IS GONE."** Every `trend_videos.video_file_url` uses `/object/public/`
+  against a PRIVATE bucket, and Supabase answers `Bucket not found`. Trusting
+  that reading would have written off 743 MB of intact corpus — all 103 objects
+  were present. Check the container before believing the contents are missing.
+
 - **PROVE THE MUTATION CHANGES A RESULT, NOT A FILE.** `mut()` guards against an
   anchor that no longer matches — `count != 1` — and that guard is
   *structurally* blind to the other way a mutation dies: the anchor matches, the
