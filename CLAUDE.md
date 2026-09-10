@@ -341,6 +341,27 @@ The shape has four recurring costumes:
    enum that the prompt never explains. A capability mounted and never read.
    **A flag's test surface is the PAIR, not the reader.**
 
+**Two corollaries about verifying a writer:**
+
+- **A STALE IDENTIFIER AND A REAL ONE ARE INDISTINGUISHABLE ONCE WRITTEN DOWN.**
+  A killed run and a live run produce identically well-formed fingerprints;
+  `91f4d58c3c1c0e51` sat in a PRE-REGISTRATION for an hour looking exactly like
+  a fact — the one class of document nobody re-checks, because re-checking it
+  after the result is what a pre-registration exists to prevent. A hash carries
+  no evidence of its own currency. Re-read the identifier from the artifact that
+  owns it (`mount_sha.txt`, `modal app history`), never from a message.
+
+- **VERIFY A WRITER IN A WORKTREE YOU CREATE FOR THE PURPOSE.**
+  `git worktree add --detach <tmp> HEAD` costs a second and makes the whole
+  class impossible. Twice today the verification and the thing verified were the
+  same writer: a background red-proof sweep drifted a frozen fingerprint and
+  aborted a nine-launch round mid-arm, and Builder-2's first residue-checker
+  mutated the checkout it ran from — it restored correctly every time it
+  completed, and a kill would have left exactly the residue it exists to detect,
+  shipping the hazard into the repo under the name of the check for it. **A
+  mutating harness and a running round cannot share a worktree at all; there is
+  no safe moment.**
+
 **Why it keeps happening:** every one of these is invisible from the inside. You
 wrote the `[:20]` and you remember it is 20. You wrote the predicate and you know
 which process it runs in. The reader has neither. And the two people who found
