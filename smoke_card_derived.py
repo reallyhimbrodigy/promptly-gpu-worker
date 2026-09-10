@@ -147,22 +147,42 @@ check("card_props is gone too", '"card_props"' not in _schema,
 # field it is modelled on. Removing card_type and card_props left it carrying
 # everything while still described as one optional field among several — a gap
 # my own change created.
+# EVERY card_hero, NOT THE LAST ONE FOUND.
+#
+# This collected a single _hero_desc and overwrote it on each hit, so with TWO
+# declarations (rule_all_beats and, since Builder-1's repair-path fix,
+# beat_verdict) it only ever judged whichever the walk reached last. The red
+# proof caught it immediately: strip REQUIRED from one site and this check still
+# passed, because the other site was the one it read.
+#
+# It is the recorded lesson in this repo word for word — a substring test for
+# '"credit_charged": False' passed while one of the two sites was flipped,
+# because the other still matched. AN EXISTENCE CHECK CANNOT SEE A CHANGE IT
+# DOES NOT COUNT. Both sites, and the count asserted.
 _ch = __import__("json").loads(_schema)
-_hero_desc = ""
+_hero_descs = []
 def _find(o):
-    global _hero_desc
     if isinstance(o, dict):
         for _k, _v in o.items():
             if _k == "card_hero" and isinstance(_v, dict):
-                _hero_desc = _v.get("description", "")
+                _hero_descs.append(_v.get("description", ""))
             _find(_v)
     elif isinstance(o, list):
         for _v in o:
             _find(_v)
 _find(_ch)
-check("card_hero says REQUIRED, like zoom_arc", "REQUIRED" in _hero_desc,
-      f"{_hero_desc[:80]!r} — it is now the ONLY thing the agent says about a "
-      f"card, and the field it is modelled on has said REQUIRED since it shipped")
+check("every tool that offers card_hero declares one", len(_hero_descs) >= 2,
+      f"{len(_hero_descs)} found — rule_all_beats and beat_verdict both offer "
+      f"it, so a lower count means this walk is missing one and the REQUIRED "
+      f"check below judges only the site it happened to reach")
+_bad_hero = [d for d in _hero_descs if "REQUIRED" not in d]
+check("card_hero says REQUIRED in EVERY declaration, like zoom_arc",
+      _hero_descs and not _bad_hero,
+      f"{len(_bad_hero)} of {len(_hero_descs)} declaration(s) omit it "
+      f"{[d[:60] for d in _bad_hero]} — it is the ONLY thing the agent says "
+      f"about a card, and a tool whose description drops REQUIRED is a tool "
+      f"whose card rulings get rejected and re-ruled until the turns run out")
+_hero_desc = _hero_descs[0] if _hero_descs else ""
 check("and says the component is derived from it",
       "derived" in _hero_desc and "zoom_arc" in _hero_desc,
       "the agent has to know the phrase decides the component, or it will treat "
@@ -296,8 +316,20 @@ check("at least one tool rules verdicts", _verdict_tools,
 _lines = src.split("\n")
 _g0 = next((i for i, l in enumerate(_lines, 1)
             if 'if _why6 is None and "card" in _tr6:' in l), None)
+# END ANCHOR: `if _why6:` — the line that decides whether the gate rejected.
+#
+# This anchored on `_rejected.append(_why6)` and BUILDER-1'S FIX DELETED THAT
+# LINE. It was a bare-string append into a list whose printer calls .get(), and
+# it crashed round 47 on the first rejection this pipeline ever produced; the
+# repair made it a dict, so the anchor text no longer exists and this check
+# reported `lines 10158..None` — a correct fix silently blinding the check
+# written to protect it.
+#
+# `if _why6:` is the gate's own control flow rather than one spelling of one
+# statement inside it, so a change to HOW a rejection is recorded cannot move
+# it again. The non-vacuity leg below is what makes that safe to rely on.
 _g1 = next((i for i, l in enumerate(_lines, 1)
-            if i > (_g0 or 0) and "_rejected.append(_why6)" in l), None)
+            if i > (_g0 or 0) and l.strip() == "if _why6:"), None)
 check("the acceptance gate was located", _g0 and _g1 and _g1 > _g0,
       f"lines {_g0}..{_g1} — without bounds this walks the whole module and "
       f"reports strangers as schema fields")

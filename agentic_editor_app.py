@@ -2212,6 +2212,28 @@ KNOWLEDGE_TOOLS = [{
                                             "must show what this beat is "
                                             "talking about. It cannot be inside "
                                             "this beat's own footage."},
+                         # card_hero and card_label, MIRRORED FROM
+                         # rule_all_beats. I added the other three and stopped,
+                         # and Builder-2's per-tool orphan check caught these
+                         # two immediately — the check working on the very fix
+                         # it was merged alongside. Cards are the family that
+                         # burned three beats and five turns in round 47, so
+                         # leaving them off the repair path would have kept the
+                         # exact loop the round was meant to close.
+                         "card_hero": {
+                             "type": "string",
+                             "description": "REQUIRED when treatment includes "
+                                            "'card': the number or short phrase "
+                                            "the card is ABOUT. This is the "
+                                            "ONLY thing you say about a card — "
+                                            "the component and its props are "
+                                            "derived from it, the way zoom_arc "
+                                            "derives the zoom. A figure becomes "
+                                            "a counting card; a short claim "
+                                            "becomes a quote card"},
+                         "card_label": {
+                             "type": "string",
+                             "description": "the card's supporting line"},
                          "why": {"type": "string",
                                  "description": "about THIS beat's content"}},
                      "required": ["beat", "treatment", "cut", "why"]},
@@ -11574,19 +11596,24 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     _cwi = (r.get("ledger") or {}).get("cut_word_intrusions")
     if _cwi is not None:
         _fl = (r.get("ledger") or {}).get("cut_quantisation_floor_ms")
-        _tot = (r.get("ledger") or {}).get("cut_boundaries_total") or 0
+        # NOT `or 0`. A key that was never written prints as a measured zero,
+        # and "0 of 0 boundaries land inside a word" reads as a clean edit
+        # rather than as an unrecorded denominator. That idiom is exactly how
+        # paint_ms reported 0.0s for six rounds against 458s of real wall.
+        _tot = (r.get("ledger") or {}).get("cut_boundaries_total")
+        _tot_s = "?" if _tot is None else str(_tot)
         _ms = sorted(x["intrusion_ms"] for x in _cwi)
         _fst = (r.get("ledger") or {}).get("cut_floor_state")
         if _fl is None:
             # NO FLOOR, SO NO 'ABOVE THE FLOOR'. Printing a count against a
             # guessed floor is the defect this replaced.
-            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land "
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot_s} boundaries land "
                   f"inside a word  ms={_ms[:12]}   FLOOR {_fst}: "
                   f"{(r.get('ledger') or {}).get('cut_floor_detail')}"
                   f"   EXCLUDED from any pooled distribution")
         else:
             _above = [x for x in _cwi if x.get("intrusion_ms", 0) > _fl]
-            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot} boundaries land inside a "
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot_s} boundaries land inside a "
                   f"word, {len(_above)} above the {_fl}ms frame floor"
                   + (f"  ms={_ms[:12]}" if _ms else "")
                   + "   MEASURED, no threshold")

@@ -1,0 +1,33 @@
+    _cwi = (r.get("ledger") or {}).get("cut_word_intrusions")
+    if _cwi is not None:
+        _fl = (r.get("ledger") or {}).get("cut_quantisation_floor_ms")
+        # NOT `or 0`. A key that was never written prints as a measured zero,
+        # and "0 of 0 boundaries land inside a word" reads as a clean edit
+        # rather than as an unrecorded denominator. That idiom is exactly how
+        # paint_ms reported 0.0s for six rounds against 458s of real wall.
+        _tot = (r.get("ledger") or {}).get("cut_boundaries_total")
+        _tot_s = "?" if _tot is None else str(_tot)
+        _ms = sorted(x["intrusion_ms"] for x in _cwi)
+        _fst = (r.get("ledger") or {}).get("cut_floor_state")
+        if _fl is None:
+            # NO FLOOR, SO NO 'ABOVE THE FLOOR'. Printing a count against a
+            # guessed floor is the defect this replaced.
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot_s} boundaries land "
+                  f"inside a word  ms={_ms[:12]}   FLOOR {_fst}: "
+                  f"{(r.get('ledger') or {}).get('cut_floor_detail')}"
+                  f"   EXCLUDED from any pooled distribution")
+        else:
+            _above = [x for x in _cwi if x.get("intrusion_ms", 0) > _fl]
+            print(f"  CUT INTRUSIONS  : {len(_cwi)} of {_tot_s} boundaries land inside a "
+                  f"word, {len(_above)} above the {_fl}ms frame floor"
+                  + (f"  ms={_ms[:12]}" if _ms else "")
+                  + "   MEASURED, no threshold")
+    # THREE STATES, AND ALL THREE PRINT. Round 45 placed no cards at all, so
+    # `if _cba:` skipped the line entirely and CARD ALIGNMENT appeared ZERO
+    # times in four logs — an absence rendered as silence, which is the shape
+    # this repo keeps paying for.
+    #
+    # AND "NO CARDS EXISTED" IS NOT "NO CARD COULD HAVE FAILED". I registered
+    # UNEXERCISED for the second and round 45 produced the first; the same label
+    # over two different facts is how a register stops being honest. They print
+    # differently now.

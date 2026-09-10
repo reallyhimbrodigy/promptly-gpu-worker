@@ -79,7 +79,10 @@ r.append(mut('"text are NOT alternatives "',
 r.append(mut('"description": "REQUIRED when treatment "\n                                                    "includes \'card\': the "',
              '"description": "when treatment "\n                                                    "includes \'card\': the "',
              "card_hero stops saying REQUIRED",
-             "card_hero says REQUIRED, like zoom_arc"))
+             # The leg is per-declaration now: it asserts EVERY card_hero says
+             # REQUIRED, because with two declaration sites a check that read
+             # only the last one passed while this very mutation was applied.
+             "card_hero says REQUIRED in EVERY declaration"))
 # 12. THE GATE DEMANDS THE RETIRED FIELD AGAIN — round 47's control loop.
 r.append(mut('                        _hero6 = str(_v.get("card_hero") or "").strip()',
              '                        _hero6 = str(_v.get("card_type") or "").strip()',

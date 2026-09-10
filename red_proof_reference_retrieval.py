@@ -28,11 +28,25 @@ r=[]
 #    derivation, so the old anchor no longer existed and the harness said
 #    "anchor 0x" rather than counting it RED. A refactor is exactly where a
 #    mutation stops applying.
+# THIS MUTATION WENT VACUOUS THE DAY CUTAWAY SHIPPED, and that is worth stating
+# rather than quietly reversing. It removed the unbuildable filter to prove the
+# filter filters — but in a tree where cutaway IS rulable, `_unbuildable` is
+# EMPTY and removing an empty filter changes nothing. The mutant was
+# byte-different and behaviourally identical, so the proof read NOT RED with
+# nothing wrong.
+#
+# A mutation that does not mutate proves nothing — and this is the subtler form
+# of it: the anchor still matched, the edit still applied, and the SEMANTICS had
+# gone no-op underneath. Counting occurrences cannot catch that.
+#
+# So it is inverted to the defect that is live in THIS tree: the filter drops
+# examples the agent CAN rule. The smoke now asserts cutaway examples appear
+# exactly when cutaway is rulable, so suppressing them must fire it.
 r.append(mut(APP,
     '             or not (_unbuildable & set(x.get("treat") or []))]',
-    '             or True]',
-    "cutaway beats are retrieved again",
-    "no retrieved example places a cutaway"))
+    '             or not set(x.get("treat") or []) & {"cutaway"}]',
+    "the filter suppresses a family the agent CAN rule",
+    "cutaway examples appear exactly when cutaway is rulable"))
 
 # 2. transition returns an empty list instead of saying nothing exists.
 r.append(mut(APP,
@@ -92,7 +106,11 @@ r.append(mut(APP, '    _unbuildable = reference_unbuildable()',
 r.append(mut(APP, '    _ours = {v for k, v in REFERENCE_FAMILY_NAME.items()\n             if v and k in _rulable}',
     '    _ours = {v for k, v in REFERENCE_FAMILY_NAME.items()\n             if v and k in _rulable and k != "cutaway"}',
     "a shipped family never leaves the unbuildable set",
-    "a family joining the enum leaves the unbuildable set"))
+    # The leg patches whichever direction THIS tree allows: cutaway ships here,
+    # so the live assertion is that removing it from the enum makes it
+    # unbuildable again. The add-direction wording only existed in a tree
+    # where cutaway was absent.
+    "a family LEAVING the enum joins the unbuildable set"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc==0 else 1)

@@ -95,8 +95,24 @@ r.append(mut('    led["placement_collisions"] = placement_collisions(led.get("_p
 # print() carrying the label EXISTS, not that it executes. That limit is real
 # and stated rather than papered over; what the check guards is "nobody wrote
 # the print", which is the defect that actually happened.
-_OLD_BLOCK = open("/tmp/block_old.txt").read()
-_NEW_BLOCK = open("/tmp/block_new.txt").read()
+# THE BLOCKS LIVE IN THE REPO, NOT /tmp.
+#
+# These were read from /tmp/block_old.txt and /tmp/block_new.txt — scratch files
+# outside version control. /tmp is cleared on reboot, so this proof was one
+# restart away from reporting HARNESS FAILURE forever, and the failure mode is
+# the quiet one: mut() finds 0 occurrences, says "anchor 0x", and the leg stops
+# proving anything while every other leg still reads green.
+#
+# It already half-happened today: the source drifted from the scratch copy by
+# four lines of comment rewrap and the proof went red with nothing wrong in the
+# code it guards. An anchor that lives outside the tree cannot be kept in step
+# with the tree by anything but memory.
+_BLOCKS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "red_proof_blocks")
+_OLD_BLOCK = open(os.path.join(_BLOCKS,
+                               "edit_quality_cut_distribution_old.txt")).read()
+_NEW_BLOCK = open(os.path.join(_BLOCKS,
+                               "edit_quality_cut_distribution_new.txt")).read()
 r.append(mut(_OLD_BLOCK, _NEW_BLOCK,
              "neither branch prints the cut distribution",
              "CUT INTRUSIONS is PRINTED"))
