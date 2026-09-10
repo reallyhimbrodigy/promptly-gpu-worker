@@ -139,6 +139,54 @@ if _res is not None:
     check("and the plan size is reported so an empty one is visible",
           "plan_entries" in _rbody)
 
+# ── MODE IS LOAD-BEARING FOR MONEY, NOT JUST FOR COUNTING ───────────────────
+# Frontend: `shouldDebit({mode, isReEdit})` returns FALSE for every re-edit
+# variant, so a re-edit costs nothing — and the server keys that off the `mode`
+# this endpoint returns. IF MODE COMES BACK WRONG IT IS A FREE RENDER, not a
+# mis-counted one. So the derivation gets a guard proportionate to that.
+_mode_expr = [ast.unparse(n) for n in ast.walk(_fn)
+              if isinstance(n, ast.IfExp) and "reedit" in ast.unparse(n)]
+check("mode is derived from ONE thing: whether a prior plan was supplied",
+      len(_mode_expr) == 1 and "_plan" in _mode_expr[0], f"{_mode_expr}")
+check("nothing else in the endpoint can set mode",
+      sum(1 for c in ast.walk(_fn) if isinstance(c, ast.Constant)
+          and c.value == "reedit") == 1,
+      "two places writing mode is two places to disagree, and disagreement here "
+      "is a free render")
+check("mode is not read from the request body",
+      '"mode"' not in _body.replace('"mode": ', '@@').replace("'mode': ", "@@"),
+      "a caller-supplied mode would let the client decide whether it pays")
+
+# ── THE BATCH SURFACE IS GONE, and stays gone ───────────────────────────────
+# Frontend established that credits are RevenueCat virtual currencies and that
+# debit() deliberately has NO PRE-READ — RC checks and deducts atomically, so
+# reading first only opens a race. Price-then-dispatch IS that race one process
+# further away, and it would have put a money decision in a container holding
+# no RC credentials by design. Dispatch is PER-SOURCE; the server debits each
+# and stops at the first INSUFFICIENT.
+# AST, NOT SUBSTRING. The removal is EXPLAINED in a comment that names both
+# functions — so a substring check fails on the very prose recording why they
+# went. A defined function is the thing to test, and a comment about one is not
+# one. (This repo's substring trap, hit again in the check written to confirm a
+# deletion.)
+_defs = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+check("no batch pricing endpoint is DEFINED", "price_batch" not in _defs,
+      "a feature that exists and cannot be reached is the class this repo has "
+      "shipped nine times")
+check("no batch dispatch rule is DEFINED",
+      not ({"batch_dispatch_plan", "plan_batch"} & _defs),
+      f"{sorted({'batch_dispatch_plan', 'plan_batch'} & _defs)}")
+# WHITESPACE-NORMALISED, because the sentence wraps across comment lines with a
+# leading "#" on each. Matching raw source for prose asserts something about
+# line breaks, which is the fourth time today.
+_flat_src = " ".join(src.replace("#", " ").split())
+check("and the removal is explained rather than silent",
+      "PRE-READ" in _flat_src and "RC checks the balance and deducts" in _flat_src,
+      "deleting a design without recording why invites its return")
+check("run_agentic takes ONE source, not a list",
+      "sources" not in _body,
+      "the server calls it N times, only for sources whose debit succeeded")
+
 print()
 if fails:
     print("AGENTIC-ENDPOINT: FAIL")

@@ -6101,61 +6101,41 @@ def plan_onto_beats(plan, beats, min_overlap=0.5):
     return verdicts, problems
 
 
-MULTI_UPLOAD_MAX = 10
-CREDITS_PER_JOB = 10
-
-
-def plan_batch(n_sources, balance, per_job=CREDITS_PER_JOB,
-               max_sources=MULTI_UPLOAD_MAX):
-    """(verdict, affordable, debit, why) — decide a batch BEFORE any dispatch.
-
-    THE FAILURE THIS EXISTS TO PREVENT: a user with 60 credits selects ten
-    sources, six render, four fail. Four failures that are not failures — they
-    are arithmetic nobody did — and the user paid attention to ten and got six
-    with no explanation. TELL THEM FIRST.
-
-    So this is a PURE decision returned to the caller, not a dispatch-time
-    check: `affordable` is how many jobs the balance covers, `debit` is what
-    those cost, and a shortfall is REPORTED with both numbers rather than
-    discovered one failure at a time.
-
-    Verdicts:
-        OK          every selected source is affordable
-        PARTIAL     some are; `affordable` says how many, and the caller asks
-                    the user before dispatching any of them
-        NONE        the balance covers zero jobs
-        REFUSED     the selection itself is invalid (empty, or over the cap)
-    """
-    try:
-        _n = int(n_sources)
-        _bal = int(balance)
-        _per = int(per_job)
-    except (TypeError, ValueError):
-        return ("REFUSED", 0, 0,
-                "n_sources, balance and per_job must be whole numbers")
-    if _per <= 0:
-        return ("REFUSED", 0, 0, "per-job cost must be positive")
-    if _n <= 0:
-        return ("REFUSED", 0, 0, "no sources selected")
-    if _n > int(max_sources):
-        return ("REFUSED", 0, 0,
-                "%d sources selected; the cap is %d in one action"
-                % (_n, int(max_sources)))
-    if _bal < 0:
-        return ("REFUSED", 0, 0, "balance is negative")
-    _afford = min(_n, _bal // _per)
-    if _afford == _n:
-        return ("OK", _afford, _afford * _per,
-                "%d job(s) at %d credits = %d of %d"
-                % (_n, _per, _n * _per, _bal))
-    if _afford == 0:
-        return ("NONE", 0, 0,
-                "%d credits will not cover one job at %d — %d needed"
-                % (_bal, _per, _per))
-    return ("PARTIAL", _afford, _afford * _per,
-            "%d credits covers %d of %d selected job(s) at %d each; %d more "
-            "credits would cover the rest"
-            % (_bal, _afford, _n, _per, (_n - _afford) * _per))
+# ── BATCH PRICING: BUILT, THEN REMOVED, AND THE REASON IS THE USEFUL PART ───
+#
+# I built plan_batch and batch_dispatch_plan here — price ten sources against a
+# balance, dispatch the affordable ones, hold the rest by name. The arithmetic
+# was right (60 credits, 10 per job, SIX answered and four held) and the
+# MECHANISM was wrong, which Frontend established by reading the real credit
+# path rather than taking my example at face value:
+#
+#   Credits are RevenueCat VIRTUAL CURRENCIES, not a Supabase table, moved
+#   through lib/credits.js against the RC API. `debit()` deliberately has NO
+#   PRE-READ, and its comment says why: RC checks the balance and deducts in
+#   ONE operation, so reading first only opens a race between the read and the
+#   spend.
+#
+# A price-then-dispatch design IS that race, moved one process further away.
+# Between pricing ten and dispatching six the balance can move — a concurrent
+# render, a refund, a renewal. And pricing here would have put a money decision
+# inside a container that holds no RC and no Supabase credentials BY DESIGN,
+# making the server's number look authoritative in the one place it cannot be
+# checked.
+#
+# THE REPLACEMENT IS BETTER AND IS THE SERVER'S: debit per source, in order,
+# stop at the first INSUFFICIENT. "Six answered, four held by name" becomes an
+# OUTCOME of the debits instead of a prediction of them. RC's atomic
+# check-and-deduct IS the pricing. Same user-visible behaviour, one fewer thing
+# to be wrong, and no balance read anywhere.
+#
+# So run_agentic stays PER-SOURCE. The server calls it N times and only for
+# sources whose debit already succeeded. Nothing here fans out a batch.
+#
+# Deleted rather than left in place: a feature that exists and cannot be reached
+# is the class this repo has shipped nine times, and Frontend asked to be told
+# now rather than find it looking live later.
+CREDITS_PER_JOB = 10          # the RC cost per render, for reference only —
+                              # the DEBIT happens server-side, never here
 
 
 CUTAWAY_REF_OK, CUTAWAY_REF_BAD = "OK", "BAD_REF"
@@ -6221,36 +6201,6 @@ def cutaway_source_ref(ref, sources, durations):
         return (CUTAWAY_REF_BAD, None, None,
                 "t=%.2f is outside source %d (0-%.2fs)" % (_t, _idx, float(_dur)))
     return (CUTAWAY_REF_OK, _idx, _t, "source %d at %.2fs" % (_idx, _t))
-
-
-def batch_dispatch_plan(sources, balance, per_job=CREDITS_PER_JOB,
-                        max_sources=MULTI_UPLOAD_MAX):
-    """(verdict, jobs, held, why) — ten sources become TEN INDEPENDENT JOBS.
-
-    ONE ACTION, N JOBS, N DEBITS. Each job carries its own credit debit so each
-    REFUNDS INDEPENDENTLY. A batch that debited once for ten and then lost job
-    seven would owe a partial refund nobody can compute, and this lane has
-    already paid for a lifecycle where the money and the work were tracked in
-    different places.
-
-    THE BATCH NEVER STARTS A RUN IT CANNOT FINISH. plan_batch prices the
-    selection first and this returns ONLY the jobs the balance covers. The
-    remainder comes back as `held` — named, counted, not dispatched — rather
-    than sent and allowed to fail. A held source is a sentence the caller can
-    show; a failed one is a mystery the user has to interpret.
-
-    PURE, so a check drives the shipped rule rather than a copy of it.
-    """
-    _v, _afford, _debit, _why = plan_batch(len(sources or []), balance,
-                                           per_job=per_job,
-                                           max_sources=max_sources)
-    if _v in ("REFUSED", "NONE"):
-        return (_v, [], list(sources or []), _why)
-    _src = list(sources or [])
-    jobs = [{"source": _s, "index": _i, "credits": int(per_job),
-             "debit_at": "dispatch", "refunds": "independently"}
-            for _i, _s in enumerate(_src[:_afford])]
-    return (_v, jobs, _src[_afford:], _why)
 
 
 FIDELITY_OK, FIDELITY_SHORT, FIDELITY_OVER, FIDELITY_UNSCOPED = (
@@ -6563,6 +6513,7 @@ DEFAULT_EFFORT = "high"
 @app.function(image=IMG, secrets=SECRETS, timeout=3600, cpu=8, memory=16384)
 def edit(source_key: str, brief: str,
          prior_plan: list = None, instruction: str = "",
+         result_url: str = "",
          src_url: str = "", out_url: str = "", out_key: str = "",
          max_iters: int = MAX_ITERS,
          use_knowledge: bool = True, effort: str = DEFAULT_EFFORT,
@@ -11291,6 +11242,49 @@ def edit(source_key: str, brief: str,
              f"{len(_plan_problems)} of {len(_plan) + len(_plan_problems)} "
              f"ruling(s) could not be keyed to a source span — a re-edit would "
              f"lose them silently")
+    # ── THE RESULT, WRITTEN SOMEWHERE THAT OUTLIVES THE CALL ────────────────
+    # WHY THIS EXISTS. A poll-only collection depends on the call id staying
+    # resolvable, and the server auto-deploys on push — this repo already has a
+    # documented failure of exactly that shape: a completion tail behind an
+    # in-process await that no deploy survived, which is why completion-reconcile
+    # and the durable poller exist.
+    #
+    # I DO NOT KNOW whether a Modal call id survives an app redeploy, and I am
+    # not willing to find out on real traffic. So the dependency is REMOVED
+    # rather than characterised: the server hands a presigned PUT, the worker
+    # writes the result there, and collection becomes a read of the server's own
+    # storage. A deploy mid-edit then strands nothing, and result_agentic stays
+    # as the fast path rather than the only one.
+    #
+    # It writes BEFORE returning, and a failure to write is LOUD — a result that
+    # exists only in a return value the caller may never collect is the
+    # in-process-await class again.
+    _res_obj = _result(ok=bool(final.get("exists")),
+                       wall_s=round(time.time() - t0, 1),
+                       plan=_plan, plan_problems=_plan_problems,
+                       download_s=dl_s, transcript_s=transcript_s,
+                       source_words=len(words), final=final, ledger=led,
+                       output_key=key, s3_key=key,
+                       contract_violations=_contract_violations(led))
+    if result_url:
+        try:
+            import urllib.request as _url3
+            _payload = json.dumps(_res_obj, default=str).encode("utf-8")
+            _rq = _url3.Request(result_url, data=_payload, method="PUT",
+                                headers={"Content-Type": "application/json",
+                                         "Content-Length": str(len(_payload))})
+            with _url3.urlopen(_rq, timeout=120) as _rp:
+                if _rp.status not in (200, 204):
+                    fail("result_put_failed", "HTTP %s writing the result" % _rp.status)
+                else:
+                    print("  RESULT          : written to the presigned URL "
+                          "(%d bytes) — collection does not depend on the call "
+                          "id" % len(_payload), flush=True)
+        except Exception as _e3:                              # noqa: BLE001
+            fail("result_put_failed",
+                 "%s: %s — the caller can still collect by call_id, but a "
+                 "deploy mid-edit would strand this job"
+                 % (type(_e3).__name__, str(_e3)[:200]))
     return _result(ok=bool(final.get("exists")), wall_s=round(time.time() - t0, 1),
                    plan=_plan, plan_problems=_plan_problems,
                    download_s=dl_s, transcript_s=transcript_s,
@@ -11358,6 +11352,7 @@ def run_agentic(body: dict):
                          "This is the agentic plan shape, not handler's "
                          "edit_recipe." % type(_plan).__name__}
     _fc = edit.spawn(
+        result_url=_b.get("result_url") or "",
         source_key=_b.get("source_key") or "",
         brief=_b.get("brief") or "",
         prior_plan=_plan,
@@ -11370,6 +11365,11 @@ def run_agentic(body: dict):
           % (_fc.object_id, _b.get("job_id"), bool(_plan)), flush=True)
     return {"spawned": True, "call_id": _fc.object_id,
             "job_id": _b.get("job_id"),
+            # THE SOURCE IDENTITY THE CALLER SUPPLIED, echoed back. The client
+            # picked ASSETS, not job ids; if the mapping dies here the UI can
+            # say "four failed" and not WHICH four.
+            "source_key": _b.get("source_key") or "",
+            "result_url_given": bool(_b.get("result_url")),
             "mode": "reedit" if _plan else "edit"}
 
 
