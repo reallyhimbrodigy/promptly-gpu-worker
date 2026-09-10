@@ -32,4 +32,9 @@ for s in (CERT,"smoke_card_choice_retired.py"):
     rc,out=run(s); print(f"RESTORED {s} exit={rc}")
     if rc!=0: print(out); sys.exit(1)
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-sys.exit(0 if all(r) else 1)
+# A FLOOR, BECAUSE all([]) IS TRUE. A red proof whose mutation list is
+# emptied — by a bad merge, a botched refactor, a commented-out block —
+# reports SUCCESS. An instrument built to prove a check CAN FAIL,
+# rendering its own absence as success. Found in 10 of 11 here and 16 of
+# 16 on Builder-2's tree: 26 of 27 across both.
+sys.exit(0 if r and all(r) else 1)

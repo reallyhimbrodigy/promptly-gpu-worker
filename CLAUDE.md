@@ -342,6 +342,40 @@ inflated by retries into an apparent outage.
   You wrote the `[:20]` and you remember it is 20. The reader does not. This is
   why it is a rule and not two fixes.
 
+- **26 OF 27 RED PROOFS PASSED ON AN EMPTY MUTATION LIST.** `all([])` is True and
+  `0 == len([])` is True, so a harness whose mutations are deleted — bad merge,
+  botched refactor, commented-out block — reports SUCCESS. 10 of 11 here, 16 of
+  16 on Builder-2's tree. **The verification layer failing in exactly the way it
+  exists to catch**, and every "RED-proven" claim in either lane rested on it.
+  The floor is one token: `r and all(r)`, `MUTATIONS and red == len(MUTATIONS)`.
+  And the floor-CHECKER needs a floor too — a check over an empty population
+  asserts nothing, including the check that checks for that.
+
+- **A PATTERN LOOSE ENOUGH TO MATCH THE DEFECT IS NOT A CHECK.** The first
+  floor-checker matched the SHAPE `BoolOp and And and all(...)` and therefore
+  passed `all(r) and rc == 0`, which has no floor at all — it would have
+  green-lit the exact defect it was written for, and only its own RED proof
+  exposed it. Assert the PROPERTY: the container the exit reasons about must
+  also appear as a bare truthy operand. Same family as keying a concept map to
+  incidental wording that survives the mutation deleting the sentence.
+
+- **A FAILURE MODE WITH A PLAUSIBLE INNOCENT EXPLANATION IS WORSE THAN ONE THAT
+  FIRES CONSTANTLY.** The same fixture-outside-the-tree rot surfaced two ways:
+  `anchor 0x`, which names itself and demands investigation, and
+  `FileNotFoundError` on a `/tmp` path, which reads as someone else's laptop and
+  gets skipped. A chronic red is ignored; an *innocent-looking* red is never
+  examined at all. Builder-2's harness reported nothing for weeks that way —
+  nineteen legs believed, zero running.
+
+- **A CORRECT RULE THAT ARRIVES AS A WAVE OF RED GETS REVERTED, NOT
+  INVESTIGATED.** An unconditional `ast.parse` guard on mutants would have
+  turned FOUR working harnesses red here (they mutate `.md`/`.json`, or
+  deliberately mutate into unparseable code) and two on Builder-2's tree. "Four
+  red proofs broke when the guard landed" reads as the guard being wrong, and it
+  would have been discarded on its first day for being right about nothing.
+  Crying wolf at BIRTH rather than developing. Scope it before landing it, or
+  land it with the scoping already in.
+
 - **AN OBSERVABLE MUST BE COMPUTED ON THE SIDE OF THE BOUNDARY IT DESCRIBES**
   (Builder-2). `prefix_material_enabled()` gated the prefix material inside
   `edit()` — `@app.function`, the CONTAINER. `prefix_material_state()` produced

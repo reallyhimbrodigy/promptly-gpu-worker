@@ -87,4 +87,9 @@ r.append(mut('            _bx_st, _bx, _bx_why = alpha_paint_box(',
 rc, out = run()
 print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-sys.exit(0 if all(r) and rc == 0 else 1)
+# A FLOOR, BECAUSE all([]) IS TRUE. A red proof whose mutation list is
+# emptied — by a bad merge, a botched refactor, a commented-out block —
+# reports SUCCESS. An instrument built to prove a check CAN FAIL,
+# rendering its own absence as success. Found in 10 of 11 here and 16 of
+# 16 on Builder-2's tree: 26 of 27 across both.
+sys.exit(0 if r and all(r) and rc == 0 else 1)
