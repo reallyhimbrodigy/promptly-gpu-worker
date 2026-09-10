@@ -141,6 +141,52 @@ if _state is not None:
        "its own copy of the predicate, so the REPORTED state can drift from "
        "the ACTUAL one and the log would confirm an arm that never ran")
 
+# ── LEG 3b: THE OBSERVABLE IS COMPUTED ON THE SIDE IT DESCRIBES ──────────────
+#
+# AN OBSERVABLE MUST BE COMPUTED ON THE SIDE OF THE BOUNDARY IT DESCRIBES.
+#
+# prefix_material_state() was called in main() — an @app.local_entrypoint, which
+# runs on the DEVELOPER'S MACHINE — while the material it reports is gated
+# inside edit(), which runs in the CONTAINER. Same function, same predicate,
+# same source file, different process; os.environ is per-process.
+#
+# It fails in whichever direction the two environments disagree:
+#   var exported locally, nothing passed  -> log says REMOVED, container runs ON
+#   parameter passed, clean local shell   -> log says ON, container removes
+# The first CONFIRMS a fabricated null. The second makes a real arm
+# unverifiable. Neither is visible from the log, because the log is the thing
+# that is wrong — "a check that would have caught the failure" was itself on
+# the wrong machine.
+_main = _fns.get("main")
+_edit_fn = _fns.get("edit")
+ok(_main is not None and _edit_fn is not None, "main/edit missing")
+if _main is not None:
+    _local_calls = [n.lineno for n in ast.walk(_main)
+                    if isinstance(n, ast.Call)
+                    and getattr(n.func, "id", "") == "prefix_material_state"]
+    ok(not _local_calls,
+       f"prefix_material_state() is called inside main() at {_local_calls} — "
+       f"main is the LOCAL entrypoint, so that line reports THIS machine's "
+       f"environment while the material is gated in the container. The report "
+       f"must come from the ledger the container filled")
+if _edit_fn is not None:
+    _cont_calls = [n.lineno for n in ast.walk(_edit_fn)
+                   if isinstance(n, ast.Call)
+                   and getattr(n.func, "id", "") == "prefix_material_state"]
+    ok(_cont_calls,
+       "prefix_material_state() is never called inside edit() — nothing "
+       "measures the arm on the side that actually runs it, so the printed "
+       "state is a restatement of what was requested rather than a measurement "
+       "of what happened")
+ok('led["prefix_material_state"]' in SRC,
+   "the container never records its state in the ledger — main() has nothing "
+   "truthful to print")
+# ABSENT MUST NOT PRINT AS A DEFAULT ARM.
+ok("PREFIX MATERIAL : UNKNOWN" in SRC,
+   "a run whose ledger carries no prefix state prints as though it were a "
+   "default run — an unknown arm rendering as a known one is the fabricated "
+   "null with a report's clothes on")
+
 # ── LEG 4: ROUND-TRIP, on the real functions ─────────────────────────────────
 _saved = {k: os.environ.get(k) for k in
           ("PROMPTLY_DISABLE_REFERENCE_EXAMPLES",

@@ -60,13 +60,29 @@ run_arm() {
         --src-url "$S" --out-url "$O" --out-key "$K" \
         --prefix-removals "$removals" > "$OUT/$name.log" 2>&1
     fi
-    # THE ARM MUST BE WHAT IT CLAIMS. Read the state back out of the run's own
-    # log, from the predicate the injection uses — an arm that says ON while
-    # claiming OFF is the fabricated null this whole round is exposed to.
+    # THE ARM MUST BE WHAT IT CLAIMS, AND THE CLAIM MUST COME FROM THE CONTAINER.
+    #
+    # An earlier version of this grepped the PREFIX MATERIAL line and called it
+    # verification. That line USED TO BE COMPUTED IN main() — the local
+    # entrypoint — so it reported the shell that launched the run, not the
+    # process that built the prompt. Nine rows of it would have agreed with what
+    # each arm was ASKED to run, by construction, whether or not the container
+    # obeyed. The void condition ("a row says ON in an OFF arm") could never
+    # fire, so the table would have looked like verification and been a
+    # restatement of the request.
+    #
+    # The state is now recorded by edit() into the ledger and printed with the
+    # marker `(measured in-container)`. REQUIRING THAT MARKER is what makes each
+    # row a measurement: a run whose container did not report prints UNKNOWN and
+    # is void for the other good reason — we do not know what it ran.
     local got
     got=$(grep -oE "PREFIX MATERIAL : .*" "$OUT/$name.log" | head -1)
-    echo "   ${got:-PREFIX MATERIAL LINE ABSENT — arm state UNVERIFIED}"
-    echo "$arm/$name ${got:-ABSENT}" >> "$BASE/armmap.txt"
+    case "$got" in
+      *"measured in-container"*) ;;
+      *) got="VOID — ${got:-no PREFIX MATERIAL line}; not measured in-container" ;;
+    esac
+    echo "   $got"
+    echo "$arm/$name	$got" >> "$BASE/armmap.txt"
   done < "$BASE/plan.tsv"
 }
 
@@ -75,5 +91,12 @@ run_arm no_examples      "reference_examples"
 run_arm no_knowledge     "ruling_time_knowledge"
 
 echo
-echo "=== ARM VERIFICATION (each line must match its arm) ==="
+echo "=== ARM VERIFICATION — every row must be measured IN-CONTAINER ==="
 cat "$BASE/armmap.txt"
+_void=$(grep -c "VOID" "$BASE/armmap.txt" 2>/dev/null || echo 0)
+if [ "$_void" != "0" ]; then
+  echo
+  echo "[UNUSABLE] $_void of 9 run(s) did not report their own state from the"
+  echo "           container. Those arms say what they were ASKED to run and"
+  echo "           nothing about what they ran, so they are not evidence."
+fi

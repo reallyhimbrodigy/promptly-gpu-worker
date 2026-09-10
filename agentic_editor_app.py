@@ -6393,6 +6393,28 @@ def edit(source_key: str, brief: str,
     t0 = time.time()
     led = {"failures": [], "iters": 0, "tokens": {"in": 0, "out": 0,
                                                   "cache_read": 0, "cache_write": 0}}
+    # ── THE ARM REPORTS ITSELF, FROM THE SIDE THAT LIVES IT ─────────────────
+    #
+    # AN OBSERVABLE MUST BE COMPUTED ON THE SIDE OF THE BOUNDARY IT DESCRIBES.
+    # This line used to be produced in main() — an @app.local_entrypoint, which
+    # runs on the DEVELOPER'S MACHINE — while the material it describes is
+    # gated inside edit(), which runs in the CONTAINER. Same function, same
+    # predicate, same file, different process, and os.environ is per-process.
+    #
+    # So the report was about the wrong machine, and it failed in whichever
+    # direction the environments disagreed:
+    #   export the var locally and pass nothing  -> log says REMOVED, container
+    #                                               runs the material IN
+    #   pass --prefix-removals and a clean shell -> log says ON, container
+    #                                               correctly removes
+    # The first CONFIRMS a fabricated null; the second makes a real arm
+    # unverifiable. Neither is visible from the log, because the log is the
+    # thing that is wrong.
+    #
+    # Recorded here, immediately after the removals are applied and before any
+    # prompt is assembled, so what is printed is a MEASUREMENT of the arm that
+    # actually ran rather than a restatement of what was requested.
+    led["prefix_material_state"] = prefix_material_state()
     # FIRST, before any stage. Every stage timing in this run is only
     # comparable to another run's through this number.
     led["container_bench"] = container_benchmark()
@@ -11658,10 +11680,23 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # round whose prefix nobody can reconstruct afterwards — and the whole point
     # of the switch is a removal EXPERIMENT, which is worthless if the removal
     # is not on the record beside the result.
-    _pm = prefix_material_state()
-    print("  PREFIX MATERIAL : " + "  ".join(f"{_k}={_v}" for _k, _v in sorted(_pm.items()))
-          + ("   <-- REMOVED material, this run is not comparable to a default one"
-             if any(_v == "REMOVED" for _v in _pm.values()) else ""))
+    # FROM THE LEDGER, NOT FROM A LOCAL CALL. Calling prefix_material_state()
+    # here would read THIS machine's environment and describe the wrong process.
+    _pm = (r.get("ledger") or {}).get("prefix_material_state")
+    if not _pm:
+        # ABSENT, NEVER ASSUMED ON. A run whose ledger carries no state is a run
+        # whose arm is unknown, and an unknown arm must not print as a default
+        # one — that is the fabricated null wearing a report's clothes.
+        print("  PREFIX MATERIAL : UNKNOWN — the container did not record its "
+              "own state, so which material this run carried CANNOT be read "
+              "from this log and the run is not usable as an ablation arm")
+    else:
+        print("  PREFIX MATERIAL : "
+              + "  ".join(f"{_k}={_v}" for _k, _v in sorted(_pm.items()))
+              + "   (measured in-container)"
+              + ("   <-- REMOVED material, this run is not comparable to a "
+                 "default one" if any(_v == "REMOVED" for _v in _pm.values())
+                 else ""))
     _cwi = (r.get("ledger") or {}).get("cut_word_intrusions")
     if _cwi is not None:
         _fl = (r.get("ledger") or {}).get("cut_quantisation_floor_ms")
