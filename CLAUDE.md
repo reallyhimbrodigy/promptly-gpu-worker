@@ -740,6 +740,36 @@ inflated by retries into an apparent outage.
   source backup outside the tree, and none may exit 0 with zero legs executed
   (all sixteen could: `all([])` is True and `0 == 0` is True). RED-proven 4/4.
 
+- **A RULE THAT LIVES INSIDE A DISPATCH CANNOT BE DRIVEN BY A CHECK — HOIST IT,
+  OR THE CHECK TESTS A COPY.** (Twice in this file now, 2026-09-10.) When the
+  logic sits inline in a tool-dispatch branch, the only way to exercise it from
+  a smoke is to reimplement it — and then the smoke proves the reimplementation
+  while the shipped path goes untested.
+
+  `spec_shortfall` was hoisted out of the dispatch for exactly this reason: *"a
+  local copy of this logic let two mutations pass green"*. The re-edit merge
+  repeated it in the same file: two mutations to the real dispatch — the
+  allow-list no longer refusing, and an empty scope becoming a free hand —
+  passed green, because `smoke_reedit_surgical` drove its own `_merge`.
+
+  **The wiring legs did not save it, and that is the second half of the rule.**
+  They were substring checks, and the mutations walked past them: `elif
+  _reedit:` -> `elif False:` leaves `led.setdefault("reedit_refused"` intact in
+  the source. A presence check cannot see control flow.
+
+  So: any rule a check must exercise is a MODULE-LEVEL PURE FUNCTION that the
+  dispatch calls. `reedit_merge` and `plan_batch` are both that shape. The test
+  for whether you have done it: can the smoke import the rule, or does it have
+  to restate it?
+
+- **A NO-OP EDIT IN THE BRANCH WHERE THE VALUES ARE ALREADY EQUAL.** A mutation
+  changed `_afford * _per` to `_n * _per` to prove an overcharge is caught — in
+  the `OK` branch, where `_afford == _n` holds by construction. Same value, no
+  behaviour change, and it had declared `_INJECTS` so the vacuity precondition
+  never ran. **An injection can still be vacuous if it lands where the two
+  expressions are provably equal**; the overcharge only exists in the PARTIAL
+  branch, which is where the mutation belonged.
+
 - **A STALE IDENTIFIER AND A REAL ONE ARE INDISTINGUISHABLE ONCE WRITTEN DOWN.**
   (Named by Zac 2026-09-09.) I recorded round 49's mount fingerprint as
   `91f4d58c3c1c0e51` in a PRE-REGISTRATION — a document whose entire value is
