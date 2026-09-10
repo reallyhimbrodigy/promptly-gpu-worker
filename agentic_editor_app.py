@@ -6174,6 +6174,7 @@ DEFAULT_EFFORT = "high"
 
 @app.function(image=IMG, secrets=SECRETS, timeout=3600, cpu=8, memory=16384)
 def edit(source_key: str, brief: str,
+         prior_plan: list = None, instruction: str = "",
          src_url: str = "", out_url: str = "", out_key: str = "",
          max_iters: int = MAX_ITERS,
          use_knowledge: bool = True, effort: str = DEFAULT_EFFORT,
@@ -9114,6 +9115,35 @@ def edit(source_key: str, brief: str,
     for _b in _beats:
         _b["has_number"] = any(_b["t_start"] <= t <= _b["t_end"] for t in _numeric_ts)
     led["beats"] = _beats
+
+    # ── RE-EDIT: LOAD THE PRIOR PLAN ────────────────────────────────────────
+    # A prior plan turns this from an edit into a MODIFICATION. The verdicts are
+    # re-mapped onto THIS run's beats by source-span overlap, so the plan
+    # survives resegmentation and a changed cut.
+    #
+    # THE FLOOR IS ENFORCED HERE, NOT ONLY IN THE CHECK. An entry that only
+    # grazes a beat is REFUSED rather than placed: on a re-edit that is the
+    # USER'S PREVIOUS WORK MOVING UNDER THEM, to a moment they never chose,
+    # which is exactly what the re-edit law forbids. Below the floor it fails.
+    _reedit = bool(prior_plan)
+    _reedit_targets = set()
+    if _reedit:
+        _prior, _prior_probs = plan_onto_beats(prior_plan, _beats)
+        led["beat_verdicts"] = list(_prior)
+        led["reedit_loaded"] = len(_prior)
+        led["reedit_unplaceable"] = _prior_probs
+        print(f"  RE-EDIT         : loaded {len(_prior)} of "
+              f"{len(prior_plan)} prior ruling(s) onto {len(_beats)} beat(s)"
+              + (f"   <-- {len(_prior_probs)} UNPLACEABLE"
+                 if _prior_probs else "   all placed"), flush=True)
+        if _prior_probs:
+            # LOUD, AND IT STOPS THE RUN'S CLAIM TO BE SURGICAL. A re-edit that
+            # silently loses part of the previous edit is the failure this
+            # feature exists to prevent, so it is named rather than absorbed.
+            fail("reedit_prior_lost",
+                 f"{len(_prior_probs)} prior ruling(s) could not be placed on "
+                 f"this run's beats — the previous edit would come back short: "
+                 f"{_prior_probs[0].get('why')}")
     led["beat_verdicts"] = []
     led["component_verdicts"] = []   # legacy field, retained so old runs still parse
 
@@ -9147,7 +9177,30 @@ def edit(source_key: str, brief: str,
     print(f"  SOURCE FPS      : {_fstate}  declared={_fdec}  actual={_fact}"
           + ("   <-- the two disagree; neither describes the file alone"
              if _fstate == "VFR" else ""), flush=True)
-    user = (f"{_REQ_OPEN}\n{_neutralise_brief(brief)}\n{_REQ_CLOSE}\n\n"
+    # BUILT AS A PLAIN STRING, not inline in the prompt expression. The first
+    # version nested `','.join(...)` inside an f-string using the same quote —
+    # legal only on 3.12+ — and sat between two implicitly-concatenated
+    # fragments without a `+`, which is a SyntaxError at import: the container
+    # would have failed before any work ran.
+    _reedit_block = ""
+    if _reedit:
+        _rows = []
+        for _v in (led.get("beat_verdicts") or []):
+            _tr = ",".join(_v.get("treatment") or []) or "none"
+            _tx = str(_v.get("text_content") or "")[:48]
+            _rows.append("  beat %s  %s  cut=%s  %s"
+                         % (_v.get("beat"), _tr, _v.get("cut"), _tx))
+        _reedit_block = (
+            "YOU ARE MODIFYING AN EXISTING EDIT, NOT MAKING A NEW ONE.\n"
+            "THE INSTRUCTION: " + _neutralise_brief(instruction) + "\n\n"
+            "The rulings below are what the user already has. Change ONLY what "
+            "the instruction names. Declare the beats you are allowed to touch "
+            "with `set_spec` — anything you rule outside that set is REFUSED, "
+            "and anything you do not re-rule comes back exactly as it is.\n"
+            + "\n".join(_rows) + "\n\n")
+
+    user = (_reedit_block
+            + f"{_REQ_OPEN}\n{_neutralise_brief(brief)}\n{_REQ_CLOSE}\n\n"
             f"SOURCE: /work/source.mp4 — {vs.get('width')}x{vs.get('height')}, "
             f"{_src_dur:.1f}s\n\n"
             + (f"TRANSCRIPT ({len(words)} words):\n{tl}\n\n" if words else
@@ -9658,6 +9711,13 @@ def edit(source_key: str, brief: str,
                           or ("NO_OUTPUT" if out.get("exists") is False else "OK"))
                     _iv.append("OK" if str(_v).startswith("OK") else str(_v)[:40])
             elif tu.name == "set_spec":
+                # ON A RE-EDIT the declared beats ARE the allow-list. Declaring
+                # none leaves the set empty, which makes the run a no-op rather
+                # than a free hand — the safe direction when a scope is unclear.
+                if _reedit:
+                    _reedit_targets = set(
+                        (tu.input.get("scope") or {}).get("beats") or [])
+                    led["reedit_targets"] = sorted(_reedit_targets)
                 try:
                     _sc = normalize_spec(dict(tu.input or {}))
                     _sc["why"] = str((tu.input or {}).get("why") or "")[:200]
@@ -9844,7 +9904,32 @@ def edit(source_key: str, brief: str,
                     if not isinstance(_v, dict) or _v.get("beat") is None:
                         continue
                     if _v.get("beat") in _seen:
-                        continue        # first ruling wins; a re-call tops up
+                        # ── THE SURGICAL GUARANTEE, MECHANICAL ─────────────
+                        # On a fresh edit "first ruling wins" and a re-call tops
+                        # up. On a RE-EDIT the prior plan is already loaded, so
+                        # every beat is `_seen` — and the agent must be able to
+                        # change the ones the instruction names, and MUST NOT be
+                        # able to change the ones it does not.
+                        #
+                        # Trusting the prompt for this would make "surgical" a
+                        # claim rather than a property. The scope the agent
+                        # declared through set_spec is the allow-list, and a
+                        # ruling outside it is REFUSED AND COUNTED, not
+                        # silently applied and not silently dropped.
+                        if _reedit and _v.get("beat") in _reedit_targets:
+                            led["beat_verdicts"] = [
+                                _old for _old in led["beat_verdicts"]
+                                if _old.get("beat") != _v.get("beat")]
+                            _seen.discard(_v.get("beat"))
+                        elif _reedit:
+                            led.setdefault("reedit_refused", []).append(
+                                {"beat": _v.get("beat"),
+                                 "why": "not named by the instruction — a "
+                                        "re-edit may not change a beat the "
+                                        "user did not ask about"})
+                            continue
+                        else:
+                            continue    # first ruling wins; a re-call tops up
                     _tr6 = [str(t).lower() for t in (_v.get("treatment") or [])]
                     # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
                     # Both of these used to be discovered at BUILD time, where
