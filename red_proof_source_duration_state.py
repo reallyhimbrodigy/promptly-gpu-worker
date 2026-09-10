@@ -21,6 +21,7 @@ TWO GUARDS, because there are two ways a mutation stops being a mutation:
                  narrowest thing that would have caught their instance and
                  mine.
 """
+import ast
 import pathlib
 import subprocess
 import sys
@@ -125,7 +126,28 @@ for label, path, old, new, expect, precond in MUTATIONS:
         harness.append(f"{label}: anchor {n}x (expected 1) — a refactor moved it")
         print(f"  HARNESS FAILURE  {label}  :: anchor {n}x")
         continue
-    path.write_text(txt.replace(old, new))
+    _mutant = txt.replace(old, new)
+    # FOURTH WAY A MUTATION FAILS TO MUTATE: SYNTACTICALLY DEAD. (Builder-1,
+    # 2026-09-09 — their mutant inserted a 4-space block before an 8-space
+    # line.) A mutant that does not compile makes the check fail for a reason
+    # unrelated to the property under test, and a check failing for the wrong
+    # reason is a check reporting a pass it did not earn. The other guards are
+    # all silent: the anchor matched, the operand was non-empty, the match was
+    # in code.
+    #
+    #     anchor 0x             a refactor moved it     count guard
+    #     operand is empty      the edit is a no-op     precondition
+    #     match lands in prose  a comment now owns it   _match_is_prose
+    #     mutant will not parse it never ran at all     THIS
+    try:
+        ast.parse(_mutant)
+    except SyntaxError as _se:
+        harness.append(f"{label}: mutant does not parse ({_se.msg})")
+        print(f"  HARNESS FAILURE  {label}  :: the mutant does not parse "
+              f"({_se.msg} at line {_se.lineno}) — it never ran, so it proved "
+              f"nothing")
+        continue
+    path.write_text(_mutant)
     mrc, mout = run()
     restore()
     if mrc == 0:

@@ -10,6 +10,7 @@ inside a string or comment proves nothing), and a per-mutation precondition for
 anything that WEAKENS rather than injects.
 """
 import io
+import ast
 import pathlib
 import subprocess
 import sys
@@ -91,7 +92,28 @@ for label, old, new, expect, precond in MUTATIONS:
         harness.append(f"{label}: VACUOUS")
         print(f"  VACUOUS          {label}")
         continue
-    APP.write_text(txt.replace(old, new))
+    _mutant = txt.replace(old, new)
+    # FOURTH WAY A MUTATION FAILS TO MUTATE: SYNTACTICALLY DEAD. (Builder-1,
+    # 2026-09-09 — their mutant inserted a 4-space block before an 8-space
+    # line.) A mutant that does not compile makes the check fail for a reason
+    # unrelated to the property under test, and a check failing for the wrong
+    # reason is a check reporting a pass it did not earn. The other guards are
+    # all silent: the anchor matched, the operand was non-empty, the match was
+    # in code.
+    #
+    #     anchor 0x             a refactor moved it     count guard
+    #     operand is empty      the edit is a no-op     precondition
+    #     match lands in prose  a comment now owns it   _match_is_prose
+    #     mutant will not parse it never ran at all     THIS
+    try:
+        ast.parse(_mutant)
+    except SyntaxError as _se:
+        harness.append(f"{label}: mutant does not parse ({_se.msg})")
+        print(f"  HARNESS FAILURE  {label}  :: the mutant does not parse "
+              f"({_se.msg} at line {_se.lineno}) — it never ran, so it proved "
+              f"nothing")
+        continue
+    APP.write_text(_mutant)
     mrc, mout = run()
     APP.write_text(ORIG)
     if mrc == 0:

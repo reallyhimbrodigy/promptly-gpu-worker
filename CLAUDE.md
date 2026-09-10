@@ -645,6 +645,49 @@ inflated by retries into an apparent outage.
   loop, O(n^2) on 45,000 lines, and did not finish in 120s: *a guard nobody can
   afford to run is not a guard.*
 
+- **AN OBSERVABLE MUST BE COMPUTED ON THE SIDE OF THE BOUNDARY IT DESCRIBES.**
+  (2026-09-09.) The container-boundary member of the absent-as-zero family, and
+  the most convincing one yet, because the value is produced by THE SAME
+  FUNCTION reading THE SAME VARIABLE — in the wrong process.
+
+  `prefix_material_enabled` gates the prefix material inside `_reference_block`,
+  called at line 9543 inside `edit`, which is `@app.function` and RUNS IN THE
+  CONTAINER. `prefix_material_state()` — the PREFIX MATERIAL report line — is
+  called at line 11632 inside `main`, which is `@app.local_entrypoint()` and
+  RUNS ON THE LOCAL MACHINE. `os.environ` is per-process, so
+  `PROMPTLY_DISABLE_...=1 ./run_round.sh` exports into the local shell, the
+  report prints REMOVED, and the container never saw the variable and builds the
+  prompt with the material fully IN.
+
+  **THE LOG DOES NOT CATCH THE FABRICATED NULL; IT CERTIFIES IT.** Both lanes
+  credited that line as the thing making an ablation arm checkable rather than
+  trusted. It was the opposite.
+
+  It survives the obvious fix in the opposite direction: pass the removal as a
+  parameter applied to `os.environ` inside `edit()`, and now the container
+  honours it while the locally-computed report prints ON. An arm that really was
+  OFF, reported as ON, is equally unattributable.
+
+  **Report the state FROM WHERE IT IS READ** — put it in the ledger inside the
+  remote function and print THAT. Then the line measures the arm that ran, and a
+  disagreement between requested and actual becomes visible instead of
+  impossible to see.
+
+- **A FLAG'S TEST SURFACE IS THE PAIR, NOT THE READER.** The same switch had a
+  smoke driving every spelling, a red proof mutating the predicate, and a
+  hardened reader that raises on anything unreadable — and **nothing anywhere
+  set the variable in the container**. A consumer with no producer, in the
+  mechanism a whole round's attribution depended on. Every leg asked whether the
+  predicate READS correctly; none asked whether anything WRITES.
+
+  This repo already has the producer/consumer law (`card_props_mismatch` sat in
+  `CONTRACT_FAILURES` with no producer and a round dropped 3/3 cards scoring
+  green). It was not applied here because a flag reads as *configuration* rather
+  than as a *wire*. It is a wire. Grep for what sets it before trusting anything
+  that reads it — and note that hardening the reader does nothing for this: a
+  perfect predicate on the wrong side of a boundary still reads the wrong
+  environment.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
