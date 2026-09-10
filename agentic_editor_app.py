@@ -1987,6 +1987,18 @@ KNOWLEDGE_TOOLS = [{
                          "verdicts": {"type": "array", "items": {"type": "object",
                              "properties": {
                                  "beat": {"type": "integer"},
+                                 "purpose": {
+                                     "type": "string",
+                                     "enum": ["hook", "claim", "evidence",
+                                              "turn", "payoff", "close",
+                                              "breath"],
+                                     "description":
+                                         "WHAT THIS MOMENT IS. The reference "
+                                         "exemplars are indexed by it, so this "
+                                         "is the key that decides which "
+                                         "editor's read applies. Name what the "
+                                         "beat IS — not what you want to place "
+                                         "on it, and not a quota to fill."},
                                  "treatment": {
                                      "type": "array",
                                      "description": "one or more families for "
@@ -2079,7 +2091,8 @@ KNOWLEDGE_TOOLS = [{
                                                     "breather = a lull; close = "
                                                     "the landing."},
                                  "why": {"type": "string"}},
-                             "required": ["beat", "treatment", "cut", "why"]}}},
+                             "required": ["beat", "purpose", "treatment",
+                                          "cut", "why"]}}},
                      "required": ["verdicts"]},
 }, {
     "name": "beat_verdict",
@@ -2101,13 +2114,21 @@ KNOWLEDGE_TOOLS = [{
                          # sfx, zoom or transition. Found by the surface
                          # assert the moment it started comparing the two
                          # lists instead of grepping one stale spelling.
+                         "purpose": {"type": "string",
+                                     "enum": ["hook", "claim", "evidence",
+                                              "turn", "payoff", "close",
+                                              "breath"],
+                                     "description":
+                                         "what this moment IS — the key the "
+                                         "reference exemplars are indexed by"},
                          "treatment": {"type": "string",
                                        "enum": ["card", "text", "sfx", "zoom",
                                                 "transition", "none"]},
                          "cut": {"type": "string", "enum": ["keep", "cut"]},
                          "why": {"type": "string",
                                  "description": "about THIS beat's content"}},
-                     "required": ["beat", "treatment", "cut", "why"]},
+                     "required": ["beat", "purpose", "treatment", "cut",
+                                  "why"]},
 }, {
     "name": "search_skills",
     "description": (
@@ -5397,12 +5418,36 @@ def reference_family_note(family, beats=None, meta=None):
     return ""
 
 
-def _reference_block(our_beats, k=3):
-    """The reference examples for this run's beats, as prompt text.
+BEAT_PURPOSES = ("hook", "claim", "evidence", "turn", "payoff", "close",
+                 "breath")
 
-    ABSENCE IS SPOKEN, three times over — a partial index says so, a family with
-    too few examples says so, and a family with none says so. None of the three
-    returns something that reads as a judgement.
+
+def _reference_block(our_beats, k=2):
+    """The reference exemplars, INDEXED BY PURPOSE. Two per purpose.
+
+    WHY NOT PER BEAT, and this is a correction to what the previous version
+    claimed to do. It looped over our beats taking the k nearest BY DURATION and
+    deduping on `read[:40]` — and with 39 beats in the index the same handful
+    always won. Measured: a 7-beat fixture and a 36-beat fixture produced a
+    BYTE-IDENTICAL block (sha e0237dcb69). It varied with the fixture's duration
+    profile and with nothing else. It was never per-beat retrieval; it was a
+    fixed block chosen by the weakest available key.
+
+    So this is not a trade of personalisation for a fixed block. It is the same
+    fixed block, organised by the key that decides what belongs on a moment.
+    DURATION IS NOT A CRAFT SIGNAL. A beat is a hook or a claim or a payoff, and
+    that is what an editor answers.
+
+    AND IT DISSOLVES THE ORDERING PROBLEM. Retrieval runs when the brief is
+    built, before the agent has ruled, so OUR purpose does not exist yet — which
+    is why the old version matched on duration and said so. Indexing by purpose
+    needs no purpose of ours: it shows what each of the seven looks like, and the
+    agent names its beat's purpose while ruling with the exemplars in front of
+    it. No extra turn, no cache invalidation.
+
+    ABSENCE IS SPOKEN, still three times over: a removed block says it was
+    removed, an unreadable index says so, and a purpose the corpus has too few
+    of says how few rather than quietly showing fewer.
     """
     if not prefix_material_enabled("reference_examples"):
         return ("REFERENCE EXAMPLES: REMOVED for this run "
@@ -5413,26 +5458,44 @@ def _reference_block(our_beats, k=3):
         return ("REFERENCE EXAMPLES: NONE AVAILABLE — the reference index could "
                 "not be read (%s). You are ruling without the examples this "
                 "product is graded against." % (_meta.get("why") or "no index"))
-    _lines = ["HOW REAL EDITS TREAT MOMENTS LIKE THESE — from %d annotated beats "
-              "of the reference corpus. These are what editors DID, not rules." %
+    _lines = ["WHAT EDITORS DO AT EACH KIND OF MOMENT — from %d annotated beats "
+              "of the reference corpus. These are what editors DID, not rules, "
+              "and not a quota." %
               (_meta.get("beats_in_corpus") or len(_b))]
     if _meta.get("state") == "PARTIAL":
         _lines.append("  (index is PARTIAL: %s)" % _meta.get("why"))
-    _seen = set()
-    for _ob in (our_beats or []):
-        _dur = float(_ob.get("t_end", 0)) - float(_ob.get("t_start", 0))
-        # The agent has not named this beat's purpose yet — that is what it is
-        # about to do. Match on DURATION alone and show the nearest moments,
-        # which is honest about what is knowable before the ruling exists.
-        for _e in reference_examples_for(None, _dur, k=k, beats=_b):
-            _key = (_e.get("read") or "")[:40]
-            if _key in _seen:
-                continue
-            _seen.add(_key)
-            _lines.append(
-                "  %-8s %4.2fs  %-28s %s"
-                % (_e.get("purpose") or "?", _e.get("dur") or 0,
-                   "+".join(_e.get("treat") or []), (_e.get("read") or "")[:150]))
+    _unbuildable = reference_unbuildable()
+    for _p in BEAT_PURPOSES:
+        _pool = [x for x in _b
+                 if str(x.get("purpose") or "").lower() == _p
+                 and not (_unbuildable & set(x.get("treat") or []))]
+        _lines.append("")
+        if not _pool:
+            # A PURPOSE WITH NOTHING BUILDABLE SAYS SO. Showing the header and
+            # then nothing reads as "editors place nothing here", which is a
+            # judgement the corpus never made.
+            _lines.append("%s — no buildable example in the corpus (%d beat(s) "
+                          "carry this purpose, all using treatments this "
+                          "pipeline cannot place)"
+                          % (_p.upper(),
+                             sum(1 for x in _b
+                                 if str(x.get("purpose") or "").lower() == _p)))
+            continue
+        _lines.append("%s (%d in corpus)" % (_p.upper(), len(_pool)))
+        if len(_pool) < k:
+            _lines.append("  (only %d buildable example%s — thin, not absent)"
+                          % (len(_pool), "" if len(_pool) == 1 else "s"))
+        # Longest READ first: the exemplar that explains the most is the one
+        # worth the tokens, and the read is the whole value of the corpus.
+        for _e in sorted(_pool, key=lambda x: -len(str(x.get("read") or "")))[:k]:
+            _lines.append("  %4.2fs  %-26s %s"
+                          % (float(_e.get("dur") or 0),
+                             "+".join(_e.get("treat") or []),
+                             str(_e.get("read") or "")[:150]))
+            if _e.get("card_text"):
+                _lines.append("          words: %s"
+                              % str(_e.get("card_text"))[:80])
+    _lines.append("")
     for _fam in ("text", "card", "sfx", "zoom", "transition"):
         _note = reference_family_note(_fam, _b, _meta)
         if _note:
@@ -11045,6 +11108,36 @@ def edit(source_key: str, brief: str,
     # unconditionally so an early finish still carries whatever was ruled.
     # PROBLEMS ARE LEDGERED AND PRINTED: an orphan verdict is a ruling a re-edit
     # would silently lose.
+    # ── THE PURPOSE DISTRIBUTION, PRINTED ───────────────────────────────────
+    # THE FIRST FAILURE MODE TO READ, registered before this shipped: if the
+    # seven values do not discriminate, the agent picks one anyway and the join
+    # is confident and meaningless. A round ruling 90% of beats one purpose has
+    # a vocabulary that is decoration, not a key.
+    #
+    # Printed in the same commit that adds it — a counter that reaches only the
+    # ledger answers nothing.
+    _purposes = [str(_v.get("purpose") or "UNNAMED")
+                 for _v in (led.get("beat_verdicts") or [])]
+    if _purposes:
+        _pc = {}
+        for _p9 in _purposes:
+            _pc[_p9] = _pc.get(_p9, 0) + 1
+        _top, _topn = max(_pc.items(), key=lambda kv: kv[1])
+        _share = _topn / float(len(_purposes))
+        led["purpose_distribution"] = _pc
+        led["purpose_top_share"] = round(_share, 3)
+        print("  PURPOSE MIX     : "
+              + "  ".join("%s=%d" % (_k, _v9) for _k, _v9 in sorted(_pc.items()))
+              + "   (%d beat(s), top %s %.0f%%)" % (len(_purposes), _top,
+                                                    100.0 * _share)
+              + ("   <-- ONE PURPOSE DOMINATES; the vocabulary may not be "
+                 "discriminating and the join would be decoration"
+                 if _share >= 0.9 else ""), flush=True)
+        if "UNNAMED" in _pc:
+            fail("purpose_unnamed",
+                 "%d of %d verdict(s) carry no purpose — the reference join has "
+                 "no key for them" % (_pc["UNNAMED"], len(_purposes)))
+
     _plan, _plan_problems = durable_plan(led.get("beats") or [],
                                          led.get("beat_verdicts") or [])
     led["plan"] = _plan
