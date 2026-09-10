@@ -132,6 +132,62 @@ _any = A.reference_examples_for("evidence", 3.0, k=50, beats=BEATS)
 check("no retrieved example places a cutaway",
       not any("cutaway" in (e.get("treat") or []) for e in _any),
       "47.1% of the corpus does something this pipeline cannot")
+# THE FILTER IS DERIVED FROM THE SCHEMA, NOT HARDCODED — and this is the leg
+# that matters, because the hardcode was CORRECT when written and becomes WRONG
+# the day cutaway ships. Merged unchanged into a tree where cutaway exists, it
+# would hide 47.1% of the corpus — the largest visual treatment — from the family
+# that ruled ZERO because nothing explained it. The examples that teach it are
+# exactly the ones the filter removed.
+# ASSERTED ON THE CALL, not on the function existing. The first version asked
+# whether reference_unbuildable was callable and the constant gone — both true
+# of a tree where the CALL SITE had been replaced with a hardcoded set. Twenty-
+# first instance: existence is not use.
+_fn = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+            and n.name == "reference_examples_for"), None)
+check("reference_examples_for exists", _fn is not None)
+_uses = {n.func.id for n in ast.walk(_fn) if isinstance(n, ast.Call)
+         and isinstance(n.func, ast.Name)} if _fn else set()
+check("the retrieval CALLS the derivation", "reference_unbuildable" in _uses,
+      "a hardcoded family list is a claim about the pipeline that rots the day "
+      "the pipeline changes")
+check("and the old constant is gone", not hasattr(A, "_REFERENCE_UNBUILDABLE"))
+_rulable = A._rulable_treatments()
+check("the derivation reads the treatment ENUM the agent rules from",
+      {"card", "text", "sfx", "zoom"} <= _rulable, sorted(_rulable)[:8])
+# SELF-CORRECTION, exercised rather than asserted: patch the enum and the filter
+# must open. Without this the leg only proves today's answer.
+_before = set(A.reference_unbuildable())
+
+
+def _enums(o, out):
+    if isinstance(o, dict):
+        if o.get("type") == "array" and isinstance(o.get("items"), dict) \
+                and o["items"].get("enum"):
+            out.append(o["items"]["enum"])
+        for _v in o.values():
+            _enums(_v, out)
+    elif isinstance(o, list):
+        for _v in o:
+            _enums(_v, out)
+
+
+_es = []
+_enums(list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS), _es)
+_patched = [e for e in _es if "card" in e and "text" in e]
+check("there is a treatment enum to patch", bool(_patched))
+if _patched:
+    _e = _patched[0]
+    _added = "cutaway" not in _e
+    if _added:
+        _e.append("cutaway")
+    _after = set(A.reference_unbuildable())
+    if _added:
+        _e.remove("cutaway")
+    check("a family joining the enum leaves the unbuildable set",
+          "cutaway" in _before and "cutaway" not in _after,
+          f"before={sorted(_before)} after={sorted(_after)} — the filter must "
+          f"open the day the family ships, without anyone editing it")
+
 check("the filter is opt-outable for analysis, not silently permanent",
       any("cutaway" in (e.get("treat") or []) for e in
           A.reference_examples_for("evidence", 3.0, k=50, beats=BEATS,

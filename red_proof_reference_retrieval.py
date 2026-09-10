@@ -24,9 +24,13 @@ rc,out=run(); print(f"BASELINE exit={rc}"); assert rc==0,out
 r=[]
 
 # 1. THE CUTAWAY FILTER COMES OFF — the agent is shown craft it cannot imitate.
+#    Retargeted: the pool comprehension was rewritten when the hardcode became a
+#    derivation, so the old anchor no longer existed and the harness said
+#    "anchor 0x" rather than counting it RED. A refactor is exactly where a
+#    mutation stops applying.
 r.append(mut(APP,
-    '    _pool = [x for x in _b\n             if allow_unbuildable\n             or _REFERENCE_UNBUILDABLE not in (x.get("treat") or [])]',
-    '    _pool = list(_b)',
+    '             or not (_unbuildable & set(x.get("treat") or []))]',
+    '             or True]',
     "cutaway beats are retrieved again",
     "no retrieved example places a cutaway"))
 
@@ -79,6 +83,16 @@ r.append(mut(APP, '       .add_local_file(_REFERENCE_INDEX_SRC, "/root/reference
     '       )',
     "the index is no longer mounted into the image",
     "mounted via add_local_file, asserted on the CALL"))
+# 9. THE HARDCODE COMES BACK — correct today, wrong the day cutaway ships.
+r.append(mut(APP, '    _unbuildable = reference_unbuildable()',
+    '    _unbuildable = {"cutaway"}',
+    "the unbuildable set is hardcoded again",
+    "the retrieval CALLS the derivation"))
+# 10. The derivation stops reading the enum, so a shipped family stays filtered.
+r.append(mut(APP, '    _ours = {v for k, v in REFERENCE_FAMILY_NAME.items()\n             if v and k in _rulable}',
+    '    _ours = {v for k, v in REFERENCE_FAMILY_NAME.items()\n             if v and k in _rulable and k != "cutaway"}',
+    "a shipped family never leaves the unbuildable set",
+    "a family joining the enum leaves the unbuildable set"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc==0 else 1)
