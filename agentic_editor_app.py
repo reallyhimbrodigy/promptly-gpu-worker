@@ -11487,6 +11487,36 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                     iters, knowledge, effort, model, route,
                     recent_styles=recent_styles,
                     prefix_removals=prefix_removals)
+
+    # ── THE RESULT, PERSISTED — not only its printed summary ────────────────
+    #
+    # keep_spans is written to the ledger and the ledger IS returned here, and
+    # it was still LOST: run_round.sh captures stdout, main() printed a derived
+    # summary, and the spans themselves reached no file. The report says
+    # `cuts ACTUAL {'keep': 6, 'cut': 1}` — a COUNT, not WHICH SECONDS SURVIVED.
+    #
+    # Judging whether a placement landed on the right moment needs the spans,
+    # not their cardinality. So the whole result goes to disk beside the log,
+    # and the path is PRINTED so a reader knows it exists.
+    #
+    # A value correctly produced, correctly carried across the container
+    # boundary, and then dropped by the harness that asked for it — the
+    # producer/consumer shape one layer further out than usual.
+    try:
+        _rp = os.environ.get("PROMPTLY_RESULT_JSON")
+        if not _rp:
+            _base = os.path.basename(str(out_key or source)).rsplit(".", 1)[0]
+            _rp = f"/tmp/result_{_base or 'run'}.json"
+        with open(_rp, "w") as _rf:
+            json.dump(r, _rf, default=str)
+        print(f"  RESULT JSON     : {_rp}  "
+              f"(keep_spans={len((r.get('ledger') or {}).get('keep_spans') or [])} "
+              f"spans)", flush=True)
+    except Exception as _rje:
+        # LOUD, never silent. A missing result file means the next reader is
+        # judging placements from a summary, and would not know it.
+        print(f"  RESULT JSON     : NOT WRITTEN ({_rje}) — the spans are lost "
+              f"for this run and placement judging cannot use it", flush=True)
     print("\n" + "=" * 66)
     print(f"  AGENTIC EDITOR — knowledge={'ON' if knowledge else 'OFF'}  "
           f"effort={r.get('ledger').get('effort')}  model={r.get('ledger').get('model')}")

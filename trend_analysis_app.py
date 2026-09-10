@@ -1,3 +1,21 @@
+# A MINIMAL IMAGE, AND THE REASONING THAT DIFFERS FROM THE EDITORIAL PATH.
+#
+# The first version borrowed `_prod.image` to make version drift structurally
+# impossible — the same argument lumen_first_edit_app.py makes, and a good one
+# THERE. It does not apply here, and the deploy proved it: the production image
+# carries add_local_file entries for models/rife-v4.18/ which do not exist in a
+# lane worktree, so the build failed before any work could run.
+#
+# The reasoning differs because the JOBS differ. The editorial path's output
+# depends on the exact model and library versions, so drift changes the product.
+# This job downloads one file and asks Gemini a question — it renders nothing,
+# touches no component, and its only version-sensitive dependency is the MODEL
+# NAME, which is pinned explicitly below to match the stored gemini_model field.
+#
+# So: a small pinned image with the three things it actually needs. Fewer
+# moving parts than the production image, and no dependency on files that only
+# exist in one checkout.
+
 #!/usr/bin/env python3
 """RE-ANNOTATE THE TREND CORPUS WITH A CURRENT MODEL, ON THE ORIGINAL PROMPT.
 
@@ -48,10 +66,23 @@ app = modal.App("promptly-trend-analysis")
 # is not in its own image's file list. Omitting the mount is why
 # lumen_first_edit_app.py could not start for three weeks. Both sibling harnesses
 # already do this; this one does it from the first commit.
-import modal_app as _prod                                          # noqa: E402
 
-image = (_prod.image
-         .add_local_file("modal_app.py", "/modal_app.py")
+# A MINIMAL IMAGE, AND WHY THE REASONING DIFFERS FROM THE EDITORIAL PATH.
+#
+# The first version borrowed `_prod.image` to make version drift structurally
+# impossible — the argument lumen_first_edit_app.py makes, and a good one THERE.
+# It does not apply here, and the deploy proved it: the production image carries
+# add_local_file entries for models/rife-v4.18/ which do not exist in a lane
+# worktree, so the build failed before any work could run.
+#
+# The reasoning differs because the JOBS differ. The editorial path's output
+# depends on exact model and library versions, so drift changes the product.
+# This job downloads one file and asks Gemini a question — it renders nothing,
+# touches no component, and its only version-sensitive dependency is the MODEL
+# NAME, pinned below to match the stored gemini_model field exactly.
+image = (modal.Image.debian_slim(python_version="3.11")
+         .apt_install("curl")
+         .pip_install("google-genai", "google-auth")
          .add_local_file("trend_extraction_prompt.txt",
                          "/trend_extraction_prompt.txt"))
 

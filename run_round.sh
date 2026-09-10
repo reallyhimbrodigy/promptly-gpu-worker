@@ -100,6 +100,11 @@ while IFS=$'\t' read -r name key brief model; do
     exit 2
   fi
   echo "[launch] $name  model=${model:-claude-sonnet-5}"
+  # THE RESULT JSON LANDS BESIDE THE LOG. keep_spans crossed the container
+  # boundary correctly and was then dropped here, because this captured stdout
+  # and nothing else. Judging whether a placement hit the right moment needs the
+  # SPANS, and the log only ever carried their count.
+  PROMPTLY_RESULT_JSON="$OUT/$name.result.json" \
   modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
     --model "${model:-claude-sonnet-5}" \
     --src-url "$S" --out-url "$O" --out-key "$K" > "$OUT/$name.log" 2>&1
