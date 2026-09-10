@@ -603,6 +603,48 @@ inflated by retries into an apparent outage.
   file outside my region a revert of an accident rather than a choice between
   two versions — and it is the check to run before touching anyone else's file.
 
+- **A CHECK THAT IS ALWAYS RED STOPS BEING READ, INCLUDING THE PART THAT IS
+  TRUE.** (Named by Zac 2026-09-09, on two instances in one day in two lanes.)
+  `smoke_modal_app_preflight` has been failing on a clean tree for days
+  (`lumen_first_edit_app.py:53`, a different app, awaiting a ruling), and
+  handler.py's ~20 red certs were read as *the handler certs are red again*
+  rather than as one broken file. Both are the same mechanism: a permanent red
+  becomes furniture, and the next real failure arrives inside it wearing the
+  same colour.
+
+  This is the twin of *a check that has never failed is not yet a check*. One
+  fails to fire; the other fires constantly and stops being heard. A red that
+  will not be fixed today must be either **fixed, quarantined with an owner and
+  a date, or deleted** — never left to accumulate a second meaning.
+
+- **A MUTATION CAN BE RE-TARGETED BY PROSE, AND THE COUNT GUARD CANNOT SEE IT.**
+  (Found 2026-09-09.) The third way a mutation stops mutating, and the one with
+  the nastiest cause: **documenting a defect silently re-targets the mutation
+  that hunts it.**
+
+  `red_proof_ruling_time_knowledge` leg 7 anchored on `.strip() != "1"`.
+  Rewriting `prefix_material_enabled` removed that predicate AND REPLACED IT
+  WITH A DOCSTRING SENTENCE QUOTING IT — the sentence recording the defect for
+  the next reader. The anchor still matched EXACTLY ONCE, `count != 1` passed,
+  the mutation edited a comment, and the proof printed NOT RED with nothing
+  wrong in the code.
+
+      anchor 0x                 a refactor moved it        count guard
+      anchor lands in prose     a comment now owns it      _match_is_prose
+      operand is empty          the edit is a no-op        precondition
+
+  **THE CHECK, NAMED: `_match_is_prose`** — tokenize the file, collect STRING
+  and COMMENT character spans, refuse a mutation whose single match sits wholly
+  inside one. RED-proven by aiming a mutation at the prose-only anchor: refused,
+  8/9, exit 1; restored 8/8, exit 0.
+
+  Two traps in building it, both mine. The first version blanked string
+  CONTENTS, which refused 7 of 8 legs — almost every anchor legitimately
+  contains a literal, and the question is not whether the anchor has quotes but
+  **where the match lands**. The second computed line offsets inside the token
+  loop, O(n^2) on 45,000 lines, and did not finish in 120s: *a guard nobody can
+  afford to run is not a guard.*
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
