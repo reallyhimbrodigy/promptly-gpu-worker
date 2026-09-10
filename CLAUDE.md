@@ -740,6 +740,41 @@ inflated by retries into an apparent outage.
   source backup outside the tree, and none may exit 0 with zero legs executed
   (all sixteen could: `all([])` is True and `0 == 0` is True). RED-proven 4/4.
 
+- **A STALE IDENTIFIER AND A REAL ONE ARE INDISTINGUISHABLE ONCE WRITTEN DOWN.**
+  (Named by Zac 2026-09-09.) I recorded round 49's mount fingerprint as
+  `91f4d58c3c1c0e51` in a PRE-REGISTRATION — a document whose entire value is
+  that it fixes facts before the numbers exist. It was the fingerprint of a
+  launch Builder-1 had KILLED. The real one was `3ca73fad8c8f279c`. The wrong
+  value sat there for an hour looking exactly like a fact, in the one class of
+  document nobody re-checks, because re-checking it after the result is what a
+  pre-registration exists to prevent.
+
+  A hash carries no evidence of its own currency. `.last_deployed_commit`, a
+  branch name, a container id, a run id, a fingerprint: each is a claim about a
+  moment, and the moment is not in the string. **Re-read an identifier from the
+  system that owns it at the moment you write it down, and say which system
+  that was** — the same instruction as *ask Modal what is deployed*, applied to
+  every identifier rather than only to deploys.
+
+  The tell is that a killed run and a live one produce identically well-formed
+  ids. This is the identifier member of the family: a failed measurement and a
+  clean result look the same once you are only reading the value.
+
+- **A VERIFICATION THAT CAN REACH THE THING IT VERIFIES IS NOT A VERIFICATION.**
+  I ran a mutating sweep to prove a tree was clean, and the sweep was the writer
+  that made it dirty. The check-of-the-check must run where it cannot touch what
+  it is checking.
+
+  **THE CHECK, NAMED: `smoke_sweep_detects_residue.py`** — it BUILDS ITS OWN
+  throwaway `git worktree`, kills a mutation inside it, and asserts the residue
+  check fires, restores, stays silent on a clean tree, is sensitive at ONE LINE
+  (the size the real incident was), and removes the worktree afterwards. An
+  earlier draft mutated the checkout it ran from; it restored correctly, and if
+  killed halfway it would have left exactly the residue it exists to detect, in
+  whatever branch happened to be checked out. **Shipping that would have put the
+  hazard into the repo under the name of the check for it.** RED-proven by
+  blinding the check: 5 legs fail, exit 1.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a

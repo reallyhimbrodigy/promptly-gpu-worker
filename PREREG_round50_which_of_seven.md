@@ -139,6 +139,59 @@ rather than silent:
 Neither of us can then quietly upgrade a 2/3 afterwards, and neither of us loses
 a real finding to a 3-beat coin flip without seeing it happen.
 
+## WHAT A NULL MEANS FOR EACH OF THE TWO, registered before the numbers
+
+A null is only interpretable if what it would mean is written down first.
+Otherwise the member that fails to move becomes whatever the round needs it to be.
+
+### Endpoints, pre-specified so there is no fishing
+
+**PRIMARY, and the only basis for implication: total per-beat placement rate,
+3/3 directional, subject to the small-fixture amendment above.** One endpoint,
+named now.
+
+**SECONDARY, one per member, named now and reported always:**
+
+    member 3  card derivation      the CARD-family per-beat rate
+    member 4  card/text sentence   beats carrying BOTH a card and text
+
+Both members target specific families, so total rate could mask a real
+family-level effect — but choosing the endpoint after seeing which one moved is
+exactly how a null becomes a finding. **A secondary that moves while the primary
+does not is INCONCLUSIVE and a candidate for a targeted re-run. It is never an
+implication on its own.**
+
+### Member 3 — the card derivation. What its null would mean
+
+`derive_card_type` / `derive_card_props` replaced picking from a 29-name enum.
+A null says the derivation is NOT the mechanism that made cards build.
+
+That would be CONSISTENT WITH WHAT IS ALREADY ON RECORD, which is why it is
+worth stating in advance rather than treating as a surprise: the standing
+finding from round 42 is that what actually built cards was the one sentence
+offering the `card_hero`/`card_label` shorthand, and that the 25-type prop table
+has never been exercised (`CARD PROPS: [StatCard label+value (shorthand)] x3`)
+and is recorded UNVALIDATED. A null here strengthens that, and points at members
+4 and 5 rather than at nothing.
+
+### Member 4 — the card/text sentence. What its null would mean
+
+One sentence: cards and text are not alternatives. A null says the sentence is
+not the mechanism, and that card-and-text co-occurrence is driven by something
+that SHOWS the combination rather than something that states it — most plausibly
+the reference examples, which carry beats where an editor placed both.
+
+That reading is testable and I am registering it as the follow-up rather than
+the conclusion: it predicts that `no_examples` reduces both-carrying beats and
+`no_card_text_sentence` does not.
+
+### The joint null
+
+If neither 3 nor 4 moves the primary on all three, AND round 49 attributed
+nothing to 1 or 2, then no single member carries it — see below. That is the
+outcome this design most needs to be able to report cleanly, because it is the
+one a motivated reader would otherwise resolve by picking a winner.
+
 ## What "no member carries it" would mean, registered as an acceptable answer
 
 Individual removal effects need not sum to the bundle effect. If no single
