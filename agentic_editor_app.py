@@ -6343,9 +6343,34 @@ def edit(source_key: str, brief: str,
          cap_exec_effort: bool = True,
          cheap_model: str = "claude-haiku-4-5",
          exec_model: str = MODEL,
-         recent_styles: str = "") -> dict:
+         recent_styles: str = "",
+         prefix_removals: str = "") -> dict:
     """`recent_styles`: this user's last caption picks, most recent FIRST,
     comma-separated.
+
+    `prefix_removals`: comma-separated prefix-material names to REMOVE for this
+    run, e.g. "reference_examples". Applied to os.environ INSIDE THE CONTAINER
+    before any prompt is built.
+
+    WHY THIS PARAMETER EXISTS AT ALL. The removal switches read
+    `PROMPTLY_DISABLE_<NAME>` with os.environ.get — evaluated in the CONTAINER —
+    and NOTHING ANYWHERE SET IT THERE. `@app.local_entrypoint()` runs on the
+    developer's machine and Modal does not forward local environment to the
+    container, so an ablation arm launched with the variable exported would have
+    run with the material fully ON and printed `reference_examples=ON` while
+    claiming to be the OFF arm.
+
+    A consumer with no producer, in the mechanism an entire round's attribution
+    was about to depend on. It would have produced a FABRICATED NULL — the arm
+    reports no effect because the arm never happened — which is the most
+    expensive result this lane can generate, because a null is what the
+    registration says is attributable.
+
+    THE PREFIX MATERIAL LINE WOULD HAVE CAUGHT IT, and that is the only reason
+    this is a near-miss rather than a wasted round: it prints the state from the
+    SAME predicate the injection uses, so an arm claiming OFF while running ON
+    is visible in its own log. An observable that nobody has to remember to
+    check is what makes a silent failure loud.
 
     PASSED IN, NOT FETCHED. Production reads it from the stored style profile
     (`_read_recent_caption_styles`, handler.py:4129) over a Supabase client.
@@ -6360,6 +6385,11 @@ def edit(source_key: str, brief: str,
     import subprocess
     from anthropic import Anthropic
 
+    # FIRST, BEFORE ANY PROMPT IS BUILT. prefix_material_enabled() is read while
+    # assembling the system prompt, so this must land before that happens or the
+    # arm silently runs with the material in.
+    for _rm in [x.strip().lower() for x in (prefix_removals or "").split(",") if x.strip()]:
+        os.environ["PROMPTLY_DISABLE_" + _rm.upper()] = "1"
     t0 = time.time()
     led = {"failures": [], "iters": 0, "tokens": {"in": 0, "out": 0,
                                                   "cache_read": 0, "cache_write": 0}}
@@ -11097,7 +11127,8 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
          model: str = MODEL,
          route: bool = False,
          src_url: str = "", out_url: str = "", out_key: str = "",
-         recent_styles: str = ""):
+         recent_styles: str = "",
+         prefix_removals: str = ""):
     # PRESIGN LOCALLY, where the credentials belong. The container receives two
     # URLs that each permit exactly one operation on exactly one key, and
     # expire. It gets no identity, so there is none to steal — and it cannot
@@ -11131,7 +11162,8 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # cap_exec_effort and turn the rotation history into a boolean.
     r = edit.remote(source, brief, _src_url, _out_url, _out_key,
                     iters, knowledge, effort, model, route,
-                    recent_styles=recent_styles)
+                    recent_styles=recent_styles,
+                    prefix_removals=prefix_removals)
     print("\n" + "=" * 66)
     print(f"  AGENTIC EDITOR — knowledge={'ON' if knowledge else 'OFF'}  "
           f"effort={r.get('ledger').get('effort')}  model={r.get('ledger').get('model')}")
