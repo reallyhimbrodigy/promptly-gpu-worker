@@ -5562,10 +5562,17 @@ def _reference_block(our_beats, k=3):
 # look at placement, which is what these four documents are about. This is not
 # proof they will help; it is the material being present at the moment it is
 # relevant instead of behind a call nobody makes.
+# THE STANDARD FIRST, THE FIELD SECOND, AND NEVER MERGED. The two craft
+# reports are separate documents on purpose: the agent has to be able to tell
+# which one a line came from, and a contradiction is resolved by the standard
+# winning — which is impossible to do to half of one merged document. Order is
+# load-bearing; each file also states its own precedence in its first lines.
 _RULING_TIME_DOCS = ("02_intent_standard.md",
                      "09_seam_treatments_transitions_tight_.md",
                      "13_placement_findings.md",
-                     "14_card_text_placement_rules.md")
+                     "14_card_text_placement_rules.md",
+                     "16_craft_the_standard.md",
+                     "17_craft_the_wider_field.md")
 
 
 def ruling_time_knowledge(dirs=None, docs=None):

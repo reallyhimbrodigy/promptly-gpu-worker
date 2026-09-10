@@ -34,7 +34,8 @@ image = (modal.Image.debian_slim(python_version="3.11")
          .pip_install("google-genai", "google-auth")
          .add_local_file("craft_pass_prompt.txt", "/craft_pass_prompt.txt")
          .add_local_file("craft_synthesis_prompt.txt",
-                         "/craft_synthesis_prompt.txt"))
+                         "/craft_synthesis_prompt.txt")
+         .add_local_file("craft_field_prompt.txt", "/craft_field_prompt.txt"))
 
 _MODEL = os.environ.get("PROMPTLY_CRAFT_MODEL", "gemini-2.5-pro")
 
@@ -159,7 +160,6 @@ _RATE_PATTERNS = [
     r"\bon average\b",
     r"\baverages?\s+(?:about\s+|around\s+|~)?\d",
     r"\b\d+(?:\.\d+)?\s*%",
-    r"\bdensit(?:y|ies)\b",
     r"\bper-(?:minute|second)\b",
     r"\bevery\s+\d+(?:\.\d+)?\s*(?:-|\s)?\s*(?:to\s+\d+(?:\.\d+)?\s*)?seconds?\b",
 ]
@@ -184,23 +184,68 @@ def strip_preamble(text: str):
     return text, ""
 
 
+# "DENSITY" IS TWO DIFFERENT WORDS AND THE FIRST VERSION KNEW ONLY ONE.
+# A bare \bdensit\b rejected a correct report over "jump cuts that sacrifice
+# visual smoothness for INFORMATION DENSITY" — an editorial idea with no
+# number in it and nothing to act on wrongly. That is the guard that learned a
+# population instead of the property, one layer in. So density counts as a
+# rate when it is the density OF A COUNTABLE EDIT ELEMENT, or when a number is
+# standing next to it; "information density" and "emotional density" are
+# prose and pass.
+_DENSITY_ELEMENT = (r"\b(?:text|cut|edit|caption|overlay|zoom|sfx|sound|"
+                    r"graphic|element|shot)s?\s+densit(?:y|ies)\b")
+_DENSITY_ANY = r"\bdensit(?:y|ies)\b"
+
+
 def rate_language(text: str) -> list:
     """Every place the report tried to instruct with a NUMBER instead of a
     CONDITION. Returns the offending snippets, with enough either side to
     judge them by."""
     import re as _re
     hits = []
+
+    def _snip(a, b):
+        return ("..." + text[max(0, a - 60):min(len(text), b + 60)]
+                .replace("\n", " ") + "...")
+
     for pat in _RATE_PATTERNS:
         for m in _re.finditer(pat, text, _re.I):
-            a, b = max(0, m.start() - 60), min(len(text), m.end() + 60)
-            hits.append("..." + text[a:b].replace("\n", " ") + "...")
+            hits.append(_snip(m.start(), m.end()))
+    for m in _re.finditer(_DENSITY_ANY, text, _re.I):
+        near = text[max(0, m.start() - 40):m.end() + 40]
+        is_element = _re.search(_DENSITY_ELEMENT, near, _re.I)
+        has_number = _re.search(r"\d", near)
+        if is_element or has_number:
+            hits.append(_snip(m.start(), m.end()))
     return hits
+
+
+def guard_fp() -> str:
+    """A fingerprint of the RATE GUARD ITSELF, computed the same way here and
+    in the container.
+
+    EARNED THE HARD WAY, ten minutes ago. `modal deploy` followed immediately
+    by `fn.remote` ran the PREVIOUS version: the container refused a report
+    over "information density" using a rule I had already narrowed and
+    redeployed, and the same text passed the guard locally with zero hits. I
+    was one step from reporting a real refusal that the shipped code would not
+    have made. Commit truth is not truth and neither is deploy truth — the
+    check is whether the running image contains the code.
+
+    So every result carries this, and the client REFUSES a result whose
+    fingerprint is not the one it just deployed."""
+    import hashlib
+    import inspect
+    src = (inspect.getsource(rate_language) + repr(_RATE_PATTERNS)
+           + _DENSITY_ELEMENT + _DENSITY_ANY)
+    return hashlib.sha256(src.encode()).hexdigest()[:12]
 
 
 @app.function(image=image, cpu=2, memory=8192, timeout=3600,
               secrets=[modal.Secret.from_name("promptly-secrets"),
                        modal.Secret.from_name("gemini-vertex")])
-def synthesise(analyses: list, model: str = _MODEL) -> dict:
+def synthesise(analyses: list, model: str = _MODEL,
+               mode: str = "standard") -> dict:
     """ONE report from all the per-video analyses.
 
     `analyses` is a list of {label, weight, prose}. The weights are kept
@@ -213,12 +258,21 @@ def synthesise(analyses: list, model: str = _MODEL) -> dict:
 
     def out(state, prose=None, detail="", **kw):
         d = {"state": state, "prose": prose, "detail": detail, "model": model,
+             "guard_fp": guard_fp(),
              "wall_s": round(time.time() - t0, 1)}
         d.update(kw)
         return d
 
+    # TWO REPORTS, NEVER ONE. The standard and the field are synthesised
+    # SEPARATELY and read side by side, so the agent can tell which document a
+    # line came from and the standard can win a contradiction. A single merged
+    # report cannot be overruled in half.
+    if mode not in ("standard", "field"):
+        return out("FAILED", detail=f"unknown mode {mode!r}")
+    path = ("/craft_synthesis_prompt.txt" if mode == "standard"
+            else "/craft_field_prompt.txt")
     try:
-        prompt = open("/craft_synthesis_prompt.txt", encoding="utf-8").read()
+        prompt = open(path, encoding="utf-8").read()
     except Exception as e:                                        # noqa: BLE001
         return out("FAILED", detail=f"synthesis prompt unreadable: {e}")
     if len(prompt) < 3000:
@@ -227,10 +281,17 @@ def synthesise(analyses: list, model: str = _MODEL) -> dict:
 
     ref = [a for a in analyses if a.get("weight") == "zac_reference"]
     field = [a for a in analyses if a.get("weight") != "zac_reference"]
-    if not ref:
+    if mode == "standard" and not ref:
         return out("ABSENT", detail="no zac_reference analyses — the standard "
                                     "is missing and the field alone is not a "
                                     "taste he chose")
+    if mode == "field":
+        if ref:
+            return out("FAILED", detail=f"{len(ref)} reference analyses were "
+                                        f"handed to the FIELD report — that "
+                                        f"is the blend, one call earlier")
+        if not field:
+            return out("ABSENT", detail="no field analyses")
 
     def block(items, header):
         parts = [header]
@@ -262,9 +323,28 @@ def synthesise(analyses: list, model: str = _MODEL) -> dict:
             location=os.environ.get("GOOGLE_CLOUD_LOCATION") or "global",
             credentials=creds,
             http_options=_gt.HttpOptions(timeout=1800_000))
-        resp = client.models.generate_content(
-            model=model, contents=[prompt + "\n\n" + body])
-        text = (resp.text or "").strip()
+        # THE SAME QUOTA BACKOFF AS analyse(). It was written there and not
+        # here, and this function then died on a 429 in 2.5s — a fix applied
+        # to one of two call sites is the oldest bug in this repo.
+        contents = [prompt + "\n\n" + body]
+        text, waited = "", 0.0
+        for attempt in range(4):
+            try:
+                resp = client.models.generate_content(model=model,
+                                                      contents=contents)
+                text = (resp.text or "").strip()
+                break
+            except Exception as e:                                # noqa: BLE001
+                msg = str(e)
+                if "RESOURCE_EXHAUSTED" not in msg and "429" not in msg:
+                    raise
+                if attempt == 3:
+                    return out("FAILED", detail=f"quota after 4 attempts "
+                                                f"({waited:.0f}s waited): "
+                                                f"{msg[:160]}")
+                nap = (attempt + 1) * 25.0
+                waited += nap
+                time.sleep(nap)
     except Exception as e:                                        # noqa: BLE001
         return out("FAILED", detail=f"{type(e).__name__}: {str(e)[:240]}")
 
@@ -281,7 +361,7 @@ def synthesise(analyses: list, model: str = _MODEL) -> dict:
                    detail=f"{len(rates)} rate(s) in a report bound for the "
                           f"cached prefix — REFUSED")
     # A field corpus that vanished into an average is the other failure.
-    if field and "wider field" not in text.lower():
+    if mode == "standard" and field and "wider field" not in text.lower():
         return out("BLENDED", prose=text, **counts,
                    detail="the field corpus was read but never named — it was "
                           "blended into the standard")
@@ -289,7 +369,11 @@ def synthesise(analyses: list, model: str = _MODEL) -> dict:
         return out("FAILED", prose=text, **counts,
                    detail=f"{words} words is not a combined understanding of "
                           f"{len(ref) + len(field)} videos")
-    return out("MEASURED", prose=text, rate_hits=[], **counts,
+    if mode == "field":
+        return out("MEASURED", prose=text, rate_hits=[], mode=mode, **counts,
+                   detail=f"{words} words from {len(field)} field videos, "
+                          f"0 rates, 0 references (unblended)")
+    return out("MEASURED", prose=text, rate_hits=[], mode=mode, **counts,
                detail=f"{words} words from {len(ref)} references"
                       + (f" + {len(field)} field videos" if field else "")
                       + ", 0 rates")

@@ -16,7 +16,8 @@ import sys
 src = open("craft_pass_app.py").read()
 mod = ast.parse(src)
 ns = {}
-WANT = ("_RATE_PATTERNS", "rate_language")
+WANT = ("_RATE_PATTERNS", "_DENSITY_ELEMENT", "_DENSITY_ANY",
+        "rate_language")
 picked = []
 for node in mod.body:
     name = None
@@ -41,6 +42,7 @@ RED = [
     "On average the hook resolves before the third beat.",
     "Sound lands on 60% of the emphasis moments.",
     "Text density is higher in the field videos than in the references.",
+    "Cut density sits around 12 across these edits.",
     "These edits average about 16 cuts per video.",
     "Cuts arrive every 1.5 to 3 seconds through the middle section.",
 ]
@@ -54,6 +56,10 @@ GREEN = [
     "the voice is already loud.",
     "The 3-second mark is where a viewer decides, so the first idea has to be "
     "complete before it.",
+    # THE FALSE POSITIVE THAT REJECTED A CORRECT REPORT. An idea, not a rate.
+    "These are jump cuts that sacrifice visual smoothness for information "
+    "density, which is the correct trade for this form.",
+    "The emotional density of the opening is what earns the next line.",
 ]
 
 fail = 0
