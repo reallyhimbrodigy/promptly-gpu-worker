@@ -187,6 +187,57 @@ ok("PREFIX MATERIAL : UNKNOWN" in SRC,
    "default run — an unknown arm rendering as a known one is the fabricated "
    "null with a report's clothes on")
 
+# ── LEG 3c: THE GATE IS AN EARLY RETURN, SO REMOVED CANNOT REACH THE MATERIAL
+#
+# A REMOVED state row proves `prefix_material_enabled` returned False at the
+# moment the state was recorded. It does NOT, by itself, prove the assembled
+# prompt lacks the material — those are the same predicate reporting on itself,
+# and self-report is exactly what failed at the process boundary today.
+#
+# Builder-2 proposed ledgering len(block) as an independent witness, and the
+# reasoning is right, but the arithmetic does not apply here: a disabled block
+# returns a REMOVAL NOTICE, not "" — deliberately, because a removal that looks
+# like an absence corrupts the next reader's diagnosis. So chars==0 never holds.
+#
+# The structural version is stronger and needs no run: the gate is an EARLY
+# RETURN. If the predicate is False the function returns the notice and CANNOT
+# reach the assembly below it, on every path, for every run — not just the ones
+# anyone looked at. Asked of the AST, because "it returns early" is a claim
+# about control flow and a comment is not one.
+for _fname, _mat in (("_reference_block", "reference_examples"),
+                     ("ruling_time_knowledge", "ruling_time_knowledge")):
+    _f = _fns.get(_fname)
+    ok(_f is not None, f"{_fname} is gone — the gate has nothing to guard")
+    if _f is None:
+        continue
+    _guard = None
+    for _i, _st in enumerate(_f.body):
+        if not isinstance(_st, ast.If):
+            continue
+        _uses = any(isinstance(c, ast.Call)
+                    and getattr(c.func, "id", "") == "prefix_material_enabled"
+                    and c.args and isinstance(c.args[0], ast.Constant)
+                    and c.args[0].value == _mat
+                    for c in ast.walk(_st.test))
+        if _uses:
+            _guard = (_i, _st)
+            break
+    ok(_guard is not None,
+       f"{_fname} has no top-level `if ... prefix_material_enabled({_mat!r})` "
+       f"guard — the switch cannot stop the material from being assembled, so "
+       f"a REMOVED row would report a removal that did not happen")
+    if _guard is not None:
+        _i, _st = _guard
+        _returns = [n for n in _st.body if isinstance(n, ast.Return)]
+        ok(_returns,
+           f"{_fname}'s removal guard does not RETURN — execution falls through "
+           f"into the material assembly, so the block is built anyway and the "
+           f"state row says REMOVED about a prompt that still carries it")
+        ok(_i <= 3,
+           f"{_fname}'s removal guard is statement {_i}, not near the top — "
+           f"anything above it that assembles material runs regardless of the "
+           f"switch")
+
 # ── LEG 4: ROUND-TRIP, on the real functions ─────────────────────────────────
 _saved = {k: os.environ.get(k) for k in
           ("PROMPTLY_DISABLE_REFERENCE_EXAMPLES",
