@@ -3417,6 +3417,76 @@ def fps_verdict(r_frame_rate, nb_frames, duration_s, vfr_tol=0.03):
             else "VFR")
 
 
+SRC_DUR_MEASURED, SRC_DUR_ABSENT, SRC_DUR_FAILED = "MEASURED", "ABSENT", "FAILED"
+
+
+def source_duration_state(meta):
+    """(state, seconds, why) — how long the source is, or WHY we do not know.
+
+    MODULE LEVEL AND PURE so a test can drive every branch.
+
+    THIS REPLACES `float(meta["format"].get("duration") or 0)`, which is the
+    LAUNDERING shape: it converts *absent* into a present, well-typed 0.0 and
+    writes it to the ledger, after which no consumer-side check can tell a
+    fabricated duration from a measured one — the key is there, the type is
+    right, and there is nothing left to test. `probe()` returns `{}` when ffprobe
+    fails or its JSON will not parse, so the absent path is reachable, not
+    theoretical.
+
+    WHAT A ZERO COSTS, and it is not confined to one route:
+        visual     `segment_beats_visual(src, 0.0)` divides a 0-second video.
+                   The AssertionError below it fires on the empty beat list, so
+                   this half at least ends loudly — but it names the extractor
+                   as the culprit while quoting "0.0s source", which points the
+                   next reader at the wrong component.
+        transcript `cover_unnarrated_edges(beats, 0.0)` covers nothing. That is
+                   exactly the car_short regression (10.0s delivered 0.975s)
+                   coming back SILENTLY, with beats still present from the word
+                   list so nothing looks empty.
+        both       `_ceil = (len - 1) / _vdur if _vdur else 0.0` — a guarded
+                   divisor that prints a FABRICATED cut-rate ceiling of 0.000
+                   against a reference median of 0.253, i.e. the instrument
+                   reports the worst possible score for the one number it exists
+                   to move.
+
+    THE FALLBACK STOPS WHERE THE MEASUREMENTS DO. format.duration, then the
+    video stream's own duration — two measurements of the same thing. It does
+    NOT derive a duration from `r_frame_rate`, because `fps_verdict` above
+    exists precisely because that number lies on VFR (motion declares 59.94 and
+    runs 35.94). Deriving one unknown from the field we already proved
+    untrustworthy would rebuild the defect one layer up.
+
+    States, so ABSENT and FAILED cannot both collapse into a number:
+        MEASURED  a duration was read and is > 0
+        ABSENT    no duration field anywhere — ffprobe failed, or gave us none
+        FAILED    a field is present and does not parse, or is <= 0
+    """
+    if not isinstance(meta, dict):
+        return (SRC_DUR_FAILED, None, "meta is %s, not a dict" % type(meta).__name__)
+    _fmt = meta.get("format") or {}
+    _vs = next((x for x in (meta.get("streams") or [])
+                if isinstance(x, dict) and x.get("codec_type") == "video"), {})
+    _seen = []
+    for _src, _raw in (("format.duration", _fmt.get("duration")),
+                       ("stream.duration", _vs.get("duration"))):
+        if _raw is None or _raw == "":
+            continue
+        _seen.append(_src)
+        try:
+            _v = float(_raw)
+        except (TypeError, ValueError):
+            return (SRC_DUR_FAILED, None,
+                    "%s=%r does not parse as a number" % (_src, _raw))
+        if _v > 0:
+            return (SRC_DUR_MEASURED, _v, _src)
+        return (SRC_DUR_FAILED, None, "%s=%s is not a positive duration"
+                % (_src, _v))
+    return (SRC_DUR_ABSENT, None,
+            "no duration field in format or video stream"
+            + (" (fields seen: %s)" % ", ".join(_seen) if _seen else
+               " — probe returned %d stream(s)" % len(meta.get("streams") or [])))
+
+
 def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0, spans=None):
     """(state, detail) — does the VIDEO stream run as long as it should?
 
@@ -5125,6 +5195,41 @@ def reference_unbuildable():
                         "punch_in") if t not in _ours}
 
 
+def reference_provenance(path=None):
+    """One line naming WHO produced the reference rates and HOW — never a blank.
+
+    THE RATES LOOK LIKE MEASUREMENTS AND ARE MODEL JUDGEMENTS. The 153 beats are
+    claude-sonnet-5's READING of ten videos: one annotator, one pass, no second
+    rater, so the corpus has no measured inter-rater reliability at all. Nothing
+    in the artifact said so, and "reference median 0.253" has been printing in
+    the agent's own report all week as though it were counted.
+
+    Same shape as Builder-1's two-quantities-one-name finding on 2026-09-09
+    (visual cuts 8.27/25s compared against beats-ruled-cut 4.75/25s, which
+    inverted the direction of the result), one level up — and worse in one way:
+    that was two real measurements confused, this is a judgement wearing a
+    measurement's clothes.
+
+    AN ABSENT PROVENANCE PRINTS AS "PROVENANCE UNKNOWN", never as nothing. A
+    rate whose origin is invisible will be read as a count.
+    """
+    try:
+        with open(path or _REFERENCE_INDEX_PATH, encoding="utf-8") as fh:
+            _p = (json.load(fh) or {}).get("provenance") or {}
+    except Exception:                                         # noqa: BLE001
+        return "PROVENANCE UNKNOWN (index unreadable)"
+    if not _p:
+        return "PROVENANCE UNKNOWN (no provenance block in the index)"
+    return "%s by %s, n=%s videos, %s" % (
+        _p.get("kind") or "KIND UNSTATED",
+        _p.get("annotator") or "ANNOTATOR UNSTATED",
+        _p.get("n_videos") if _p.get("n_videos") is not None else "?",
+        _p.get("annotated") or "date unstated")
+
+
+_REFERENCE_PROVENANCE = reference_provenance()
+
+
 def load_reference_index(path=None):
     """(beats, meta). Never raises — an unreadable index is an absence, said."""
     _p = path or _REFERENCE_INDEX_PATH
@@ -5354,9 +5459,56 @@ def ruling_time_knowledge(dirs=None, docs=None):
 #
 # AND THE STATE IS PRINTED, always — a removal nobody can see in the log is a
 # round whose prefix nobody can reconstruct afterwards.
+_FLAG_TRUE = ("1", "true", "yes", "on")
+_FLAG_FALSE = ("0", "false", "no", "off")
+
+
 def prefix_material_enabled(name):
-    """False only when explicitly disabled. Unset means ON."""
-    return str(os.environ.get("PROMPTLY_DISABLE_" + name.upper(), "")).strip() != "1"
+    """Is this prefix material IN this run? Unset means ON. A value we cannot
+    read RAISES — it never picks a side.
+
+    THE DEFECT THIS CLOSES (Builder-1, 2026-09-09). The old body was
+    `... .strip() != "1"`, so ONLY a literal "1" disabled the material: an
+    ablation arm set to "true", "yes" or "on" ran with the material IN and
+    reported a null. A FABRICATED NULL, in the one experiment whose entire value
+    is its null case.
+
+    MY FIRST FIX WAS TO INVERT THE POLARITY AND IT WAS WRONG — it moves the
+    fabricated arm rather than removing it. With OFF as the explicit state, a
+    typo'd ON value silently runs OFF and the CONTROL becomes the fabricated
+    arm. Either way a mis-set string quietly picks a side and the experiment
+    cannot tell.
+
+    The property is that the switch NEVER GUESSES:
+        unset                          -> ON, so an ordinary round is unaffected
+                                          and a forgotten variable cannot
+                                          silently darken the material (that is
+                                          the KNOWN_OUTAGE_UNTIL / unset-global
+                                          class in Rule 2, nine features shipped
+                                          gate-green doing nothing)
+        a recognised spelling          -> that state, case-insensitive
+        ANYTHING ELSE                  -> RAISE, naming variable and value
+
+    This is MEASURED / ABSENT / FAILED one level up. Folding an unreadable value
+    into ON is a value standing in for "I could not read this", which is the
+    substitution this lane has spent a week on: alpha_layer_max returning None
+    and reading as a pass, paint_ms absent printing 0.0s, `or 0` turning absent
+    into a measured zero. A flag is not different because it is a string.
+    """
+    _var = "PROMPTLY_DISABLE_" + name.upper()
+    _raw = os.environ.get(_var)
+    if _raw is None or str(_raw).strip() == "":
+        return True
+    _v = str(_raw).strip().lower()
+    if _v in _FLAG_TRUE:
+        return False        # DISABLE_X is true -> the material is removed
+    if _v in _FLAG_FALSE:
+        return True
+    raise ValueError(
+        "%s=%r is not a value I can read. Accepted: %s (on) / %s (off), "
+        "case-insensitive, or unset for ON. Refusing to guess — a flag that "
+        "picks a side quietly turns an ablation arm into a fabricated null."
+        % (_var, _raw, "/".join(_FLAG_TRUE), "/".join(_FLAG_FALSE)))
 
 
 def prefix_material_state():
@@ -6219,8 +6371,16 @@ def edit(source_key: str, brief: str,
         info = probe(out)
         v = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), {})
         a = next((s for s in info.get("streams", []) if s.get("codec_type") == "audio"), {})
-        dur = float(info.get("format", {}).get("duration") or 0)
-        res = {"exists": True, "duration_s": round(dur, 2),
+        # THE OUTPUT'S OWN LENGTH, three-state for the same reason the source's
+        # is. A rendered file reported as 0.0s is the probe-collapse class on the
+        # thing we just built — and this is the QA tool, so it must be able to
+        # say it could not read it rather than report a zero-length render.
+        _ods, _odv, _odw = source_duration_state(info)
+        if _ods != SRC_DUR_MEASURED:
+            fail("output_duration_unmeasured", _odw)
+        res = {"exists": True,
+               "duration_s": round(_odv, 2) if _ods == SRC_DUR_MEASURED else None,
+               "duration_state": _ods,
                "width": v.get("width"), "height": v.get("height"),
                "vcodec": v.get("codec_name"), "has_audio": bool(a),
                "size_mb": round(os.path.getsize(out) / 1e6, 1)}
@@ -6440,7 +6600,15 @@ def edit(source_key: str, brief: str,
             return {"error": f"keep_spans must be [[start,end],...]: {e}"}
         if not spans:
             return {"error": "keep_spans is empty"}
-        dur = float(meta.get("format", {}).get("duration") or 0)
+        # THE BOUND EVERY SPAN IS CHECKED AGAINST. `or 0` here was the worst of
+        # the five: a fabricated 0.0 makes `s[1] > dur + 0.05` true for EVERY
+        # span, so the tool refuses the agent's entire cut with "spans outside
+        # 0..0.00s" — a total refusal that reads as the agent proposing nonsense.
+        # Says which of the three states it is in instead.
+        _ds, dur, _dw = source_duration_state(meta)
+        if _ds != SRC_DUR_MEASURED:
+            return {"error": f"source duration {_ds}: {_dw} — keep_spans cannot "
+                             f"be bounded against a source of unknown length"}
         bad = [s for s in spans if s[1] <= s[0] or s[0] < 0 or s[1] > dur + 0.05]
         if bad:
             return {"error": f"spans outside 0..{dur:.2f}s or non-increasing: {bad[:3]}"}
@@ -8414,8 +8582,15 @@ def edit(source_key: str, brief: str,
         if v.get("r_frame_rate") and "/" in str(v["r_frame_rate"]):
             _n, _d = str(v["r_frame_rate"]).split("/")
             fps = round(float(_n) / float(_d), 3) if float(_d) else None
+        _psd = source_duration_state(meta)
         out = {"width": v.get("width"), "height": v.get("height"), "fps": fps,
-               "duration_s": round(float(meta.get("format", {}).get("duration") or 0), 2),
+               # WHAT THE AGENT IS TOLD. A source it is told runs 0.0s is a
+               # source it will rule on as if empty; educate rather than
+               # validate applies to the absence too, so it gets the state.
+               "duration_s": (round(_psd[1], 2)
+                              if _psd[0] == SRC_DUR_MEASURED else None),
+               "duration_state": _psd[0],
+               "duration_why": None if _psd[0] == SRC_DUR_MEASURED else _psd[2],
                "has_audio": a is not None}
         if shot_changes:
             r = subprocess.run(
@@ -8689,7 +8864,33 @@ def edit(source_key: str, brief: str,
     # definition dominating both branches there is no scope question left to get
     # wrong. Fourth instance of *scope is not text* in this repo, and the first
     # one I authored.
-    _vdur = float(meta.get("format", {}).get("duration") or 0)
+    # THE ONE DURATION READ. Was `float(meta["format"].get("duration") or 0)`,
+    # which laundered absence into a present 0.0 — see source_duration_state for
+    # what a zero costs on each route. There is no downstream path where a
+    # fabricated duration produces a correct edit: it is the beat span on the
+    # visual route, the edge-coverage span on the transcript route, and the
+    # cut-rate ceiling's denominator on both. So this raises HERE, once, while
+    # the absence is still visible, rather than degrading three things quietly.
+    _vdur_state, _vdur, _vdur_why = source_duration_state(meta)
+    led["source_duration_state"] = _vdur_state
+    led["source_duration_why"] = _vdur_why
+    # THE GUARD DOMINATES EVERY USE, INCLUDING THE PRINT. My first version put
+    # the print above the raise with the value in a conditional branch — safe by
+    # evaluation order, and still wrong: the rule is that nothing touches _vdur
+    # before the state is checked, and a version that needs a reader to reason
+    # about f-string branch evaluation to see it is safe has already lost the
+    # property. The raise carries _vdur_why, so no diagnosis is lost by moving
+    # the print below it. (Caught by smoke_source_duration_state's own
+    # dominance leg, on the commit that introduced it.)
+    if _vdur_state != SRC_DUR_MEASURED:
+        raise AssertionError(
+            f"source duration {_vdur_state}: {_vdur_why}. Refusing to segment a "
+            f"source of unknown length — a 0.0s span silently returns no beats "
+            f"on the visual route and no edge coverage on the transcript route.")
+    # PRINTED IN THE SAME COMMIT THAT ADDS IT — a counter that reaches only the
+    # ledger answers nothing.
+    print(f"  SOURCE DURATION : {_vdur_state}  {_vdur:.2f}s  ({_vdur_why})",
+          flush=True)
     # SHOT CHANGES FOR BOTH ROUTES, hoisted for the same reason _vdur was.
     #
     # It was detected only on the visual route, so the TRANSCRIPT route had no
@@ -8772,7 +8973,7 @@ def edit(source_key: str, brief: str,
     _ceil = (len(_beats) - 1) / _vdur if _vdur else 0.0
     print(f"[beats] {_pre_sub} -> {len(_beats)} after subdivision "
           f"(+{len(_beats) - _pre_sub}); cut-rate ceiling now {_ceil:.3f}/s "
-          f"(reference median 0.253)"
+          f"(reference median 0.253 — {_REFERENCE_PROVENANCE})"
           + ("" if _ceil >= 0.253 else "  <-- STILL under the reference median"),
           flush=True)
     _mark(led, "beats", _tb0)
@@ -8794,7 +8995,10 @@ def edit(source_key: str, brief: str,
     # there is no bucket string left to shadow. The lesson it encoded — a loop
     # variable rebinding a name used 300s later — is now carried by the
     # `_w0/_w1` naming in the dead-air loop itself.
-    _src_dur = float(meta.get('format', {}).get('duration') or 0)
+    # SAME `meta`, SAME READ — so take the value already measured above rather
+    # than laundering the field a second time 100 lines apart. The guard at the
+    # single read dominates this line, so _vdur here is always MEASURED.
+    _src_dur = _vdur
     # LEDGERED because count_cuts needs it at report time, and a counter given a
     # duration of 0 returns 0 silently — the same shape as the cost_usd key that
     # would have printed $0.0000 forever.
@@ -10916,8 +11120,19 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"the paint half of build_reel")
 
     _regs = (r.get("ledger") or {}).get("rate_regimes") or {}
+    # THE DENOMINATOR THE RATES ARE COMPUTED AGAINST, so it says what it is.
+    # `or 0` printed a fabricated 0.00 here — every rate in this line is per
+    # 25s of THIS number, and a zero denominator quietly makes the whole line
+    # meaningless while still rendering as a result. The producer now raises on
+    # a duration it cannot read, so an absent key means a run that died BEFORE
+    # the ledger write; that is a different fact and it prints as one.
+    _dled = (r.get("ledger") or {})
+    _dst = _dled.get("source_duration_state")
     print("  RATE REGIMES    : " + json.dumps({
-        "dur_s": round(float((r.get("ledger") or {}).get("source_duration_s") or 0), 2),
+        "dur_s": (round(float(_dled.get("source_duration_s")), 2)
+                  if _dst == "MEASURED" and _dled.get("source_duration_s") is not None
+                  else (_dst or "ABSENT (no ledger duration — run died before "
+                                "the source was probed)")),
         "families": {_f: {"regime": _d["regime"],
                           "rate": _d["rate"],
                           "expected": _d["expected"],

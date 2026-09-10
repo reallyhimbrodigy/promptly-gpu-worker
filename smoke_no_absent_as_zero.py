@@ -144,7 +144,11 @@ KNOWN = {
     # removing the `or 0` here changes nothing for the common case — the key is
     # there, it is a float, and it is fabricated. Absence is reachable only for
     # a run that died before 8801. Fix the PRODUCER; this line is the symptom.
-    "source_duration_s": "MINE: symptom of the 8797 producer default, not the cause",
+    # FIXED on lane/duration-producer (round 49). The producer now raises on a
+    # duration it cannot read, and this print says ABSENT with the reason rather
+    # than 0.00. Entry KEPT after the fix: the set is allowed to shrink without
+    # editing this file, and the note is the record of what the chain was.
+    "source_duration_s": "FIXED r49: producer raises; the print names the state",
     # THE LEGITIMATE CASE, pinned so the distinction is documented rather than
     # re-argued. Both are COUNTERS incremented only when the thing happens, so
     # no key genuinely means it never happened. `or 0` is CORRECT here, and a
@@ -165,7 +169,7 @@ KNOWN = {
     # duration segments a 0-second video and the visual route returns no beats.
     # MINE, to fix at the producer. Pinned with the real reason so nobody
     # re-derives "guarded downstream" from a note I wrote without checking.
-    "duration": "MINE, to fix: `_vdur` 8692 — printed AND the beat span, not a divisor",
+    "duration": "FIXED r49: source_duration_state, guarded above every use",
     # `float(wall_s or 0) or 1.0` — the second `or` makes it a DIVISOR guard,
     # never a reported value. Absent wall gives 1.0, so percentages read as
     # nonsense rather than as zeros, which is loud.

@@ -543,6 +543,66 @@ inflated by retries into an apparent outage.
   that the class recurs; a silent overwrite leaves the next reader with a tidy
   note and no reason to distrust the next tidy note.
 
+- **SEMANTIC VACUITY: A MUTATION CAN STOP MUTATING WITHOUT ITS ANCHOR MOVING.**
+  (Found by Builder-1 2026-09-09, in Builder-2's retrieval proof.) The second
+  kind of *a mutation that does not mutate*, and `mut()`'s occurrence guard is
+  blind to it — every previous instance in this file was an anchor that stopped
+  matching, which counting catches.
+
+  The mutation removed an unbuildable-family filter to prove the filter filters.
+  Once cutaway shipped, `_unbuildable` was EMPTY — so removing an empty filter
+  changed nothing. The anchor matched, the edit applied, the mutant was
+  byte-different and behaviourally identical, and the proof read NOT RED with
+  nothing wrong in the code. **A vacuous mutation and a blind check are
+  indistinguishable in a tally**, which is the same shape as *a failed
+  measurement and a clean result are indistinguishable once you are only reading
+  numbers*.
+
+  **THE SECOND GUARD, NAMED: a PRECONDITION per mutation.** The anchor guard
+  asks *does the target exist*; the precondition asks *does the target DO
+  anything*. Every mutation that WEAKENS OR REMOVES something declares a
+  callable over the unmutated source, evaluated BEFORE the edit — the filter's
+  operand is non-empty, the guard is present and reachable, the branch is taken
+  by something. A mutation that INJECTS a defect declares `None` and says so:
+  new material cannot be vacuous in this way, and a precondition that is always
+  true is noise that teaches the next reader to skip the field.
+
+  When a mutant passes, the precondition is what separates the two diagnoses.
+  Implemented in `red_proof_source_duration_state.py`: it prints VACUOUS,
+  refuses to count the mutation, and exits non-zero. RED-proven by falsifying a
+  precondition — 7/7 fell to 6/7 with VACUOUS named and exit 1.
+
+  It is a per-mutation obligation rather than a free rule, and that is its
+  honest cost. The alternative is a proof that goes on reporting a number.
+
+- **A BROKEN FILE THAT NOTHING MOUNTS BREAKS NOTHING UNTIL IT BREAKS
+  EVERYTHING.** `ff9311f` committed three `git stash pop` conflict blocks into
+  handler.py — the main pipeline worker — and it went unnoticed for a day
+  because every consequence landed where nobody was looking: handler.py is not
+  one of the ten mounted paths, so no round could fail on it; ~20 certs went red
+  at once, which reads as *the handler certs are red again* rather than as one
+  file; and the deploy branch never carried it, so nothing live broke. A
+  landmine for whoever merged a lane, not an outage.
+
+  Two things generalise. **A commit's diff is not confined to the file it is
+  about** — that commit was card-contract work and had no business in
+  handler.py, which is precisely why nobody looked. And **when many checks go
+  red together, find the one cause before reading any of them as findings**;
+  a class of failures is a single fact wearing a crowd.
+
+  **THE CHECK, NAMED: `smoke_tree_parses.py`** — every tracked file, no conflict
+  markers at line start, every tracked `.py` compiles. Repo-wide deliberately:
+  scoped to *the files this lane touches* it would be a population fitted to
+  today's lane, and this landed in a file its own commit was not editing.
+  RED-proven 2/2 with the real block shape, including one leg whose markers sit
+  inside a string literal so the file still parses — proving the marker scan and
+  the parse scan are independent and neither is carrying the other.
+
+  A note on the repair: taking the `Updated upstream` side of all three blocks
+  reproduced `ff9311f~1:handler.py` BYTE-IDENTICALLY. That is what made fixing a
+  file outside my region a revert of an accident rather than a choice between
+  two versions — and it is the check to run before touching anyone else's file.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
