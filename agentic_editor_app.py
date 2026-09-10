@@ -5172,6 +5172,10 @@ def _reference_block(our_beats, k=3):
     too few examples says so, and a family with none says so. None of the three
     returns something that reads as a judgement.
     """
+    if not prefix_material_enabled("reference_examples"):
+        return ("REFERENCE EXAMPLES: REMOVED for this run "
+                "(PROMPTLY_DISABLE_REFERENCE_EXAMPLES=1) — a deliberate removal, "
+                "not an absence in the corpus.")
     _b, _meta = load_reference_index()
     if not _b:
         return ("REFERENCE EXAMPLES: NONE AVAILABLE — the reference index could "
@@ -5254,6 +5258,10 @@ def ruling_time_knowledge(dirs=None, docs=None):
     # version could only be checked by asking whether a string appeared in the
     # source, and a mutant that moved the string into a dead branch kept it —
     # twentieth instance of that trap in this lane.
+    if dirs is None and not prefix_material_enabled("ruling_time_knowledge"):
+        return ("EDITORIAL STANDARD: REMOVED for this run "
+                "(PROMPTLY_DISABLE_RULING_TIME_KNOWLEDGE=1) — a deliberate "
+                "removal, not a missing document.")
     _dirs = list(dirs) if dirs else ["/knowledge", _KNOWLEDGE_DIR]
     _parts, _missing = [], []
     for _name in (docs if docs is not None else _RULING_TIME_DOCS):
@@ -5281,6 +5289,34 @@ def ruling_time_knowledge(dirs=None, docs=None):
                   "incomplete and that is a gap, not a smaller standard.)"
                   % ", ".join(_missing))
     return _head + "\n\n" + "\n\n".join(_parts)
+
+
+# ── REMOVAL SWITCHES FOR THE PREFIX MATERIAL ────────────────────────────────
+#
+# The registered follow-up (83d85a4): if placement moves, the BUNDLE worked and
+# which of the four changes did it is unknown — and the honest way to find out is
+# ONE REMOVAL AT A TIME, not a story about which one it probably was.
+#
+# Without a switch each removal is a code change, a merge and a freeze cycle.
+# With one it is an env var, and the experiment is three rounds instead of nine.
+#
+# DEFAULT ON, REMOVAL ONLY. Absent or unset means the material IS included, so
+# an unset variable can never silently ship a darker prefix. This repo has nine
+# features that shipped dark on an unset flag; a switch that only SUBTRACTS from
+# the shipped default cannot join them.
+#
+# AND THE STATE IS PRINTED, always — a removal nobody can see in the log is a
+# round whose prefix nobody can reconstruct afterwards.
+def prefix_material_enabled(name):
+    """False only when explicitly disabled. Unset means ON."""
+    return str(os.environ.get("PROMPTLY_DISABLE_" + name.upper(), "")).strip() != "1"
+
+
+def prefix_material_state():
+    """What is IN this run's prefix, for the log. Never inferred from a flag
+    name — the same predicate the injection uses."""
+    return {_n: ("ON" if prefix_material_enabled(_n) else "REMOVED")
+            for _n in ("reference_examples", "ruling_time_knowledge")}
 
 
 def cut_intrusion_floor_ms(r_frame_rate, avg_frame_rate):
@@ -10730,6 +10766,14 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
             f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
             for c in _cps))
+    # ALWAYS PRINTED, both states. A removal nobody can see in the log is a
+    # round whose prefix nobody can reconstruct afterwards — and the whole point
+    # of the switch is a removal EXPERIMENT, which is worthless if the removal
+    # is not on the record beside the result.
+    _pm = prefix_material_state()
+    print("  PREFIX MATERIAL : " + "  ".join(f"{_k}={_v}" for _k, _v in sorted(_pm.items()))
+          + ("   <-- REMOVED material, this run is not comparable to a default one"
+             if any(_v == "REMOVED" for _v in _pm.values()) else ""))
     _cwi = (r.get("ledger") or {}).get("cut_word_intrusions")
     if _cwi is not None:
         _fl = (r.get("ledger") or {}).get("cut_quantisation_floor_ms")

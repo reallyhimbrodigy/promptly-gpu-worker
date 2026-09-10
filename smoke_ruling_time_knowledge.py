@@ -130,6 +130,35 @@ check("and is not trivially small either", len(BLOCK) // 4 > 800,
       f"{len(BLOCK)//4} — if the documents stopped loading this would be the "
       f"only sign")
 
+# ── 6. THE REMOVAL SWITCH — DEFAULT ON, REMOVAL ONLY ────────────────────────
+# The registered follow-up is one removal at a time. Without a switch each
+# removal is a code change and a freeze cycle; with one it is an env var.
+#
+# DEFAULT ON is the whole safety property: this repo has NINE features that
+# shipped dark on an unset flag, and a switch that only SUBTRACTS from the
+# shipped default cannot join them.
+_saved = _os.environ.pop("PROMPTLY_DISABLE_RULING_TIME_KNOWLEDGE", None)
+check("unset means ON — an unset flag can never ship a darker prefix",
+      A.prefix_material_enabled("ruling_time_knowledge") is True)
+_os.environ["PROMPTLY_DISABLE_RULING_TIME_KNOWLEDGE"] = "0"
+check("only the literal '1' disables it",
+      A.prefix_material_enabled("ruling_time_knowledge") is True,
+      "'0', 'false' and 'no' must not read as a removal")
+_os.environ["PROMPTLY_DISABLE_RULING_TIME_KNOWLEDGE"] = "1"
+check("an explicit 1 removes it", not A.prefix_material_enabled("ruling_time_knowledge"))
+_removed = A.ruling_time_knowledge()
+check("and a removal SAYS it is deliberate, not a missing document",
+      "REMOVED for this run" in _removed and "not a missing document" in _removed,
+      "a removal that looks like an absence corrupts the next reader's "
+      "diagnosis — the two are different findings")
+if _saved is None:
+    _os.environ.pop("PROMPTLY_DISABLE_RULING_TIME_KNOWLEDGE", None)
+else:
+    _os.environ["PROMPTLY_DISABLE_RULING_TIME_KNOWLEDGE"] = _saved
+check("the state is PRINTED both ways", '"  PREFIX MATERIAL : "' in src,
+      "a removal nobody can see in the log is a round whose prefix nobody can "
+      "reconstruct")
+
 if fails:
     print(f"RULING-TIME-KNOWLEDGE: {len(fails)} FAILED")
     for f in fails:

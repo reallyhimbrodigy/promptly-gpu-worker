@@ -50,6 +50,22 @@ r.append(mut('_RULING_TIME_DOCS = ("02_intent_standard.md",\n',
              "the intent standard is dropped from the set",
              "02_intent_standard.md is included"))
 
+# 6. THE SWITCH DEFAULTS TO OFF — an unset flag ships a darker prefix, which is
+#    the nine-dark-features class this repo has paid for repeatedly.
+r.append(mut('    return str(os.environ.get("PROMPTLY_DISABLE_" + name.upper(), "")).strip() != "1"',
+             '    return str(os.environ.get("PROMPTLY_ENABLE_" + name.upper(), "")).strip() == "1"',
+             "the switch defaults to OFF instead of ON",
+             "unset means ON"))
+# 7. A truthy-looking value removes it, so '0' or 'false' silently strips the
+#    prefix — the classic flag-parsing defect.
+r.append(mut('.strip() != "1"', '.strip() == ""',
+             "any non-empty value removes the material",
+             "only the literal '1' disables it"))
+# 8. A removal stops declaring itself and reads as a missing document.
+r.append(mut('        return ("EDITORIAL STANDARD: REMOVED for this run "',
+             '        return ("EDITORIAL STANDARD: UNAVAILABLE — none of it could be read. "\n                "" if False else "x" if False else "EDITORIAL STANDARD: REMOVED_ for this run "',
+             "a deliberate removal reads as a missing document",
+             "a removal SAYS it is deliberate"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
 sys.exit(0 if all(r) and rc==0 else 1)
