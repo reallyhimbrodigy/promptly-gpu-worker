@@ -2167,6 +2167,51 @@ KNOWLEDGE_TOOLS = [{
                                                     "zoom", "cutaway",
                                                     "transition", "none"]}},
                          "cut": {"type": "string", "enum": ["keep", "cut"]},
+                         # THE COMPANION FIELDS THE GATE DEMANDS. This tool
+                         # offered the FULL treatment enum and NONE of the
+                         # fields normalise_verdict requires, so every text,
+                         # zoom and cutaway ruling made through the repair path
+                         # was structurally impossible to satisfy: the agent
+                         # cannot send a field the schema does not offer, so it
+                         # re-ruled the same beat identically until the turns
+                         # ran out.
+                         #
+                         # It is Builder-2's card_type orphan in the same
+                         # direction — a gate demanding what no schema supplies
+                         # — and it was on the ONE path whose entire job is to
+                         # fix a rejected ruling. Round 47 called beat_verdict
+                         # 3 times and logged 22 rejections.
+                         #
+                         # THE INVARIANT, stated because the fix is only half of
+                         # it: a description that says REQUIRED must have a gate
+                         # that enforces it, AND the gate may only demand what
+                         # the schema offers. Both directions, on EVERY tool
+                         # that names families — checking one tool passes while
+                         # the other is broken, which is how this survived.
+                         "text_content": {
+                             "type": "string",
+                             "description": "REQUIRED when treatment includes "
+                                            "'text': the words to burn on "
+                                            "screen for this beat."},
+                         "zoom_arc": {
+                             "type": "string",
+                             "enum": ["breather", "build", "close", "hook",
+                                      "mid_peak", "payoff"],
+                             "description": "REQUIRED when treatment includes "
+                                            "'zoom': WHICH MOMENT this is. It "
+                                            "decides the move and cannot be "
+                                            "derived from timing."},
+                         "cutaway_from_s": {
+                             "type": "number",
+                             "description": "REQUIRED when treatment includes "
+                                            "'cutaway': the timestamp IN THE "
+                                            "SOURCE of the other moment to "
+                                            "show here, in seconds. The picture "
+                                            "cuts to it and back while THIS "
+                                            "beat's audio keeps playing, so it "
+                                            "must show what this beat is "
+                                            "talking about. It cannot be inside "
+                                            "this beat's own footage."},
                          "why": {"type": "string",
                                  "description": "about THIS beat's content"}},
                      "required": ["beat", "treatment", "cut", "why"]},
@@ -7841,12 +7886,36 @@ def edit(source_key: str, brief: str,
             # the render had reused a cached bundle. The instrument was blind
             # exactly where the failure was.
             led["_render_seq"] = led.get("_render_seq", 0) + 1
+            # paint_ms AND total_ms, WHICH WERE ALREADY IN HAND AND DROPPED.
+            #
+            # build_zoom read 458.57s on motion — 87.5% of wall — with the
+            # REMOTION PROCS table printing "paint 0.0s" beside it. That zero
+            # was never a measurement: reel records paint_ms from _rj["ms"] and
+            # captions from _cj["ms"], and THIS record simply never wrote one,
+            # so the printer's `or 0` turned a missing key into a measured
+            # zero. render_remotion_batch had returned the per-job ms all along.
+            #
+            # 449 seconds looked unattributed for six rounds because the number
+            # was collected and thrown away between the batch and the ledger —
+            # the same shape as the rejection reasons that died on the way out.
+            _zpaint = sum((_zres.get(_s3["id"]) or {}).get("ms") or 0
+                          for _s3 in _zoom_segs)
+            _zpaint_state = ("MEASURED"
+                             if any((_zres.get(_s3["id"]) or {}).get("ms")
+                                    is not None for _s3 in _zoom_segs)
+                             else "ABSENT")
             led["zoom_render"] = {
                 "seq": led["_render_seq"],
                 "jobs": len(_zoom_jobs),
                 "bundle_cached": (_zres.get("_batch") or {}).get("bundle_cached"),
                 "public_synced": (_zres.get("_batch") or {}).get("public_synced"),
                 "bundle_ms": (_zres.get("_batch") or {}).get("bundle_ms"),
+                "total_ms": (_zres.get("_batch") or {}).get("total_ms"),
+                # None, never 0, when no job reported one — ABSENT is a state.
+                "paint_ms": (_zpaint if _zpaint_state == "MEASURED" else None),
+                "paint_state": _zpaint_state,
+                "per_job_ms": {_s3["id"]: (_zres.get(_s3["id"]) or {}).get("ms")
+                               for _s3 in _zoom_segs},
                 "segments": [dict(s2) for s2 in _zoom_segs],
             }
             _good = []
@@ -11067,9 +11136,17 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
             _cs = ("CACHE HIT" if _cach is True else
                    "bundled" if _cach is False else "UNKNOWN (no BUNDLE_CACHED line)")
             _psn = _d.get("public_synced")
+            # ABSENT, NOT 0.0s. `(_d.get('paint_ms') or 0)/1000` printed a
+            # never-recorded value as a measured zero, and that is exactly how
+            # 449 seconds of real Remotion render read as "paint 0.0s" beside a
+            # 458s stage for six rounds. The idiom is the defect, not the zoom
+            # record: `or 0` cannot tell "nothing happened" from "nobody wrote
+            # it down", and one of those is a finding.
+            def _ms(_v):
+                return "ABSENT" if _v is None else f"{_v/1000:.1f}s"
             print(f"     #{_d.get('seq') or '?'} {_label:10} "
-                  f"bundle {(_d.get('bundle_ms') or 0)/1000:5.1f}s "
-                  f"paint {(_d.get('paint_ms') or 0)/1000:6.1f}s  {_cs}"
+                  f"bundle {_ms(_d.get('bundle_ms')):>8} "
+                  f"paint {_ms(_d.get('paint_ms')):>9}  {_cs}"
                   + (f"  public_synced={_psn}" if _psn is not None
                      else "  public_synced=ABSENT"))
 
