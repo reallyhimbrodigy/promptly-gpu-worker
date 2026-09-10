@@ -5958,6 +5958,39 @@ def plan_onto_beats(plan, beats, min_overlap=0.5):
     return verdicts, problems
 
 
+def reedit_merge(prior, targets, incoming):
+    """(verdicts, refused) — apply a re-edit's incoming rulings to the prior set.
+
+    HOISTED OUT OF THE DISPATCH ON PURPOSE. A local copy of this logic inside
+    the agent loop let two mutations pass green — the smoke drove its own
+    reimplementation while the shipped path went untested, which is the same
+    defect `spec_shortfall` was hoisted for. A check that exercises a copy
+    proves the copy.
+
+    THE RULE. A ruling on a beat inside `targets` REPLACES the prior one. A
+    ruling outside is REFUSED and returned, never silently applied and never
+    silently dropped. An empty target set therefore changes NOTHING, which is
+    the safe direction when the instruction's scope is unclear: a re-edit that
+    quietly rewrites beats the user did not ask about is the user's previous
+    work moving under them.
+    """
+    out = [dict(v) for v in (prior or [])]
+    refused = []
+    _t = set(targets or ())
+    for v in (incoming or []):
+        if not isinstance(v, dict) or v.get("beat") is None:
+            continue
+        _b = v.get("beat")
+        if _b in _t:
+            out = [o for o in out if o.get("beat") != _b] + [dict(v)]
+        else:
+            refused.append({"beat": _b,
+                            "why": "not named by the instruction — a re-edit "
+                                   "may not change a beat the user did not ask "
+                                   "about"})
+    return out, refused
+
+
 VERDICT_FIELDS = _verdict_fields()
 assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
     "the verdict schema could not be read, so the boundary would store nothing")
@@ -9916,20 +9949,17 @@ def edit(source_key: str, brief: str,
                         # declared through set_spec is the allow-list, and a
                         # ruling outside it is REFUSED AND COUNTED, not
                         # silently applied and not silently dropped.
-                        if _reedit and _v.get("beat") in _reedit_targets:
-                            led["beat_verdicts"] = [
-                                _old for _old in led["beat_verdicts"]
-                                if _old.get("beat") != _v.get("beat")]
-                            _seen.discard(_v.get("beat"))
-                        elif _reedit:
-                            led.setdefault("reedit_refused", []).append(
-                                {"beat": _v.get("beat"),
-                                 "why": "not named by the instruction — a "
-                                        "re-edit may not change a beat the "
-                                        "user did not ask about"})
-                            continue
-                        else:
+                        if not _reedit:
                             continue    # first ruling wins; a re-call tops up
+                        # THE SHIPPED RULE, called not copied.
+                        _kept, _ref7 = reedit_merge(
+                            led["beat_verdicts"], _reedit_targets, [_v])
+                        if _ref7:
+                            led.setdefault("reedit_refused", []).extend(_ref7)
+                            continue
+                        led["beat_verdicts"] = [
+                            _o for _o in _kept if _o.get("beat") != _v.get("beat")]
+                        _seen.discard(_v.get("beat"))
                     _tr6 = [str(t).lower() for t in (_v.get("treatment") or [])]
                     # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
                     # Both of these used to be discovered at BUILD time, where
