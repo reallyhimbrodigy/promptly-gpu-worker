@@ -100,17 +100,100 @@ check(f"the scan found source-mutating harnesses ({len(_mutators)}) — non-vacu
 # `all([])` is True and `red == len(MUTATIONS)` is `0 == 0`, so EVERY red proof
 # here reported success on an empty leg list. Sixteen instruments built to catch
 # absence-rendered-as-success, each rendering its own absence as success.
-_no_floor = []
+# ASSERT THE PROPERTY BY EVALUATION, NOT BY PATTERN. (Builder-1's rule, earned
+# on this exact leg twice over.) My first version was a SUBSTRING match on the
+# exit line — `"r and all(r)" in _tail` — which accepts a COMMENTED-OUT floor
+# and rejects every other correct spelling. Builder-1's was an AST shape match,
+# which was loose enough to admit the defect in v1 and then tight enough to
+# reject five of my working harnesses in v2. Same axis, three errors, one cause:
+# a matcher approximating a property.
+#
+# THE PROPERTY: with the legs EMPTY, the exit predicate must be false NO MATTER
+# WHAT ELSE HAPPENED. So bind the leg names empty, enumerate every other free
+# name over falsy AND truthy, and require False in all of them. Exact, cheap,
+# and indifferent to spelling.
+def _leg_names(test):
+    """Names that hold the legs: arguments of all/len/any/sum, plus any bare
+    Name compared against one of those (a COUNT of that container)."""
+    legs, counted = set(), set()
+    for n in ast.walk(test):
+        if isinstance(n, ast.Call) and getattr(n.func, "id", "") in (
+                "all", "len", "any", "sum"):
+            for _a in n.args:
+                if isinstance(_a, ast.Name):
+                    legs.add(_a.id)
+    for n in ast.walk(test):
+        if isinstance(n, ast.Compare):
+            _sides = [n.left] + list(n.comparators)
+            _has_len = any(isinstance(x, ast.Call)
+                           and getattr(x.func, "id", "") in ("len", "sum")
+                           for x in _sides)
+            if _has_len:
+                for x in _sides:
+                    if isinstance(x, ast.Name):
+                        counted.add(x.id)
+    return legs, counted
+
+
+_no_floor, _undecidable = [], []
 for _p in _harnesses:
-    _s = _p.read_text()
-    _ex = [ln for ln in _s.split("\n") if ln.strip().startswith("sys.exit(")]
-    if not _ex:
+    _t = ast.parse(_p.read_text())
+    # SORTED BY LINE. ast.walk does NOT yield source order, so `_exits[-1]` was
+    # the last node the WALK reached, not the last sys.exit in the file — it
+    # picked the early `sys.exit(2)` baseline guard and reported "reasons about
+    # no collection at all" for seven harnesses that are correctly floored.
+    # A traversal order mistaken for a positional one; the check was wrong, the
+    # harnesses were fine.
+    _exits = sorted(
+        (n for n in ast.walk(_t)
+         if isinstance(n, ast.Call)
+         and getattr(getattr(n, "func", None), "attr", "") == "exit"),
+        key=lambda n: n.lineno)
+    if not _exits:
         _no_floor.append(f"{_p.name}  (no sys.exit at all)"); continue
-    _tail = _ex[-1]
-    # The floor: the leg collection must be truthy before its contents are
-    # judged. `r and all(r)` or `red and red == len(...)`.
-    if not ("r and all(r)" in _tail or "red and red ==" in _tail):
-        _no_floor.append(f"{_p.name}  ->  {_tail.strip()[:70]}")
+    _arg = _exits[-1].args[0] if _exits[-1].args else None
+    _test = _arg.test if isinstance(_arg, ast.IfExp) else _arg
+    if _test is None:
+        _no_floor.append(f"{_p.name}  (exit takes no argument)"); continue
+    _legs, _counts = _leg_names(_test)
+    if not _legs:
+        _no_floor.append(f"{_p.name}  (exit reasons about no collection at all)")
+        continue
+    # BUILTINS ARE NAMES TOO. `all`, `len`, `any`, `sum` parse as ast.Name, so
+    # the first version bound them to 0 and `len(MUTATIONS)` raised TypeError.
+    # It reached the right verdict for my harnesses only by SHORT-CIRCUIT LUCK —
+    # the floor sits first, so `red` was falsy and the call was never evaluated.
+    # For a predicate whose floor is not first it would have raised, and the
+    # except below would have called that "no floor". Leave them resolving to
+    # the real builtins.
+    _BUILTIN = {"all", "any", "len", "sum", "bool", "int", "min", "max", "abs"}
+    _free = sorted({n.id for n in ast.walk(_test) if isinstance(n, ast.Name)}
+                   - _legs - _counts - _BUILTIN)
+    _expr = compile(ast.Expression(_test), "<exit>", "eval")
+    _held = True
+    import itertools
+    for _combo in itertools.product([0, 1], repeat=min(len(_free), 12)):
+        _ns = {k: [] for k in _legs}
+        _ns.update({k: 0 for k in _counts})          # empty legs -> zero count
+        _ns.update(dict(zip(_free, _combo)))
+        _ns.setdefault("__builtins__", __builtins__)
+        try:
+            if eval(_expr, _ns):                      # noqa: S307
+                _held = False; break
+        except Exception as _e:
+            # THREE STATES, NOT TWO. An expression I cannot evaluate is not the
+            # same finding as one that exits 0 on empty legs, and reporting them
+            # with the same words is the failure this whole file is about.
+            _undecidable.append(f"{_p.name}  ->  {type(_e).__name__}: "
+                                f"{str(_e)[:60]}  (free={_free})")
+            _held = None; break
+    if _held is False:
+        _no_floor.append(f"{_p.name}  ->  exits 0 with EMPTY legs under some "
+                         f"combination of {_free}")
+check("every exit predicate could be EVALUATED (not just pattern-matched)",
+      not _undecidable, "\n         ".join(_undecidable) + "\n         An "
+      "expression the check cannot evaluate is UNDECIDABLE, not unfloored — "
+      "reporting them with the same words is the defect this file is about.")
 check("no red proof can exit 0 with zero legs executed", not _no_floor,
       "\n         ".join(_no_floor) + "\n         all([]) is True; a harness "
       "whose mutations were all deleted would report success.")
