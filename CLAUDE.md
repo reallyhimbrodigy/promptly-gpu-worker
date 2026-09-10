@@ -503,6 +503,46 @@ inflated by retries into an apparent outage.
   defaulting its value, or the default becomes the measurement for 100% of the
   population and reads perfectly plausible while doing it.
 
+- **LAUNDERING: A DEFAULT AT THE PRODUCER MAKES EVERY CONSUMER-SIDE CHECK
+  STRUCTURALLY BLIND.** (Named by Zac 2026-09-09, found by the rule above one
+  commit after it was written, in its own pin table.) The third shape in this
+  family and the one no downstream guard can catch.
+
+  `float(meta['format'].get('duration') or 0)` converts *absent* into a
+  **present, well-typed 0.0** and writes it to the ledger. Downstream, the key
+  is there, the type is right, the value is fabricated, and nothing — no `is
+  None` test, no three-state read, no wider def-use scope — can tell it from a
+  measurement, because by then there is nothing left to tell. My own pinned
+  `source_duration_s` was the print at the END of that chain: removing its
+  `or 0` would have changed nothing and closed the item.
+
+  The consequences run past reports and into behaviour. The same idiom binds
+  `_vdur`, which is printed twice as a source duration AND passed as the SPAN to
+  `segment_beats_visual` and `cover_unnarrated_edges` — so an unreadable
+  duration segments a **0-second video** and the visual route returns no beats:
+  a silent total failure on 46.5% of traffic, from a missing key. It degrades a
+  plan rather than raising, which is the failure mode the boundary contract
+  already forbids for out-parameters, arriving here through a different door.
+
+  **THE FIX IS ALWAYS AT THE PRODUCER, AND A DOCSTRING STATING THE GAP BEATS
+  WIDENING THE SCOPE.** Def-use resolves within a function; laundering crosses
+  functions by design. A check that grew until it claimed to cover this would be
+  claiming something it cannot do — say the gap, and put the guard where the
+  absence is still visible.
+
+- **A STALE COMMENT IS READ AS FACT BY THE NEXT PERSON, INCLUDING THE PERSON WHO
+  WROTE IT.** (Ruled by Zac 2026-09-09.) A pin, a justification, a note beside a
+  constant — each is an ARGUMENT ON THE RECORD, and a plausible wrong one is
+  worse than none, because it is what gets re-derived next time instead of
+  checked. `"duration": "ffprobe duration into arithmetic, guarded downstream"`
+  was mine, was wrong, and described a divisor guard that was actually the beat
+  span for the whole visual route.
+
+  So when a note turns out to be wrong, **keep it in place as the correction**
+  rather than replacing it with a clean one. The wrong sentence is the evidence
+  that the class recurs; a silent overwrite leaves the next reader with a tidy
+  note and no reason to distrust the next tidy note.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a
