@@ -365,6 +365,19 @@ The shape has four recurring costumes:
    parsed. A pattern loose enough to match the defect it forbids. **Count the
    population and assert the count.**
 
+2b. **AND ITS TWIN: A PATTERN TIGHT ENOUGH TO EXCLUDE A CORRECT IMPLEMENTATION
+   IS NOT A CHECK EITHER.** The floors checker went both ways on one axis: v1
+   matched a shape loose enough to admit the defect (`all(r) and rc == 0`
+   passed); v2 matched a shape tight enough to reject a *working* floor
+   (`red and red == len(MUTATIONS)` — which floors on the COUNT rather than the
+   container, and is equally valid). It failed 5 of 16 correct harnesses in the
+   other lane. A style rule wearing a correctness rule's clothes, and the next
+   person to hit it "fixes" their working code to match the checker's spelling.
+   **Assert the property by EXECUTION where you can** — the red proof for this
+   was right all along, because it emptied a real harness and observed
+   `0/0, exit 1`. The static matcher and the executed proof disagreed about what
+   the rule was, and the proof was correct.
+
 3. **A MEASUREMENT OF THE WRONG THING.** An observable computed on the wrong
    side of a process boundary. Two numbers with the same name counting different
    things (visual cuts vs beats-ruled-cut). A judgement wearing a measurement's

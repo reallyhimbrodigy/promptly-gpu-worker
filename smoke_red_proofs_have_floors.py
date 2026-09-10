@@ -36,17 +36,26 @@ for path in sorted(glob.glob(os.path.join(HERE, "red_proof_*.py"))):
         FAIL.append(f"{name} never calls sys.exit — its result reaches nobody")
         continue
     _checked += 1
-    # THE FLOOR MUST BE THE CONTAINER ITSELF, AS A BARE TRUTHY OPERAND.
+    # THE FLOOR MUST MAKE AN EMPTY LIST FALSY. Two spellings do that, and a
+    # check that admits only one is a STYLE rule wearing a correctness rule's
+    # clothes.
     #
-    # MY FIRST VERSION MATCHED "BoolOp and And and (all|Compare)" and therefore
-    # PASSED `all(r) and rc == 0` — which has no floor whatsoever. Its own RED
-    # proof caught it: I stripped a real floor and the check stayed green. A
-    # pattern loose enough to match the defect is not a check, and this is the
-    # second time today a leg of mine matched a shape instead of a property.
+    #   r and all(r)                        floors on the CONTAINER
+    #   red and red == len(MUTATIONS)       floors on the COUNT of red legs —
+    #                                       if the list is empty nothing can be
+    #                                       counted, so red is 0 and falsy
     #
-    # The property: whatever container the exit reasons about (`r` inside
-    # all(r), or MUTATIONS inside len(MUTATIONS)) must ALSO appear as a bare
-    # Name operand of the same `and` — that is what makes [] falsy and fails.
+    # v1 matched a shape LOOSE enough to admit the defect (`all(r) and rc == 0`
+    # passed). v2 matched a shape TIGHT enough to exclude a correct
+    # implementation — it failed 5 of Builder-2's 16 working harnesses. Same
+    # axis, opposite error, and the twin of the rule this file exists under:
+    # A PATTERN TIGHT ENOUGH TO EXCLUDE A CORRECT IMPLEMENTATION IS NOT A CHECK
+    # EITHER. Whoever hit it next would have "fixed" their working floor by
+    # rewriting it to my spelling.
+    #
+    # THE FIX IS TO TIE NAMES THE WAY THE CODE TIES THEM: a bare Name COMPARED
+    # to len(X) is bound to X, so it reasons about X. Not `bare and reasoned`,
+    # which would admit `unrelated_flag and all(r)` — a real hole.
     guarded = False
     for e in exits:
         for node in ast.walk(e):
@@ -58,11 +67,22 @@ for path in sorted(glob.glob(os.path.join(HERE, "red_proof_*.py"))):
             reasoned = set()
             for v in node.values:
                 for sub in ast.walk(v):
-                    if isinstance(sub, ast.Call) and getattr(sub.func, "id", "") in ("all", "len", "sum", "any"):
+                    # all(X) / len(X) / sum(X) / any(X) -> reasons about X
+                    if (isinstance(sub, ast.Call)
+                            and getattr(sub.func, "id", "") in ("all", "len", "sum", "any")):
                         for a in sub.args:
                             nm = getattr(a, "id", None)
                             if nm:
                                 reasoned.add(nm)
+                    # n == len(X)  ->  n is a count OF X, so n reasons about X
+                    if isinstance(sub, ast.Compare):
+                        sides = [sub.left] + list(sub.comparators)
+                        names = {x.id for x in sides if isinstance(x, ast.Name)}
+                        lens = any(isinstance(x, ast.Call)
+                                   and getattr(x.func, "id", "") in ("len", "sum")
+                                   for x in sides)
+                        if names and lens:
+                            reasoned |= names
             if bare & reasoned:
                 guarded = True
     if not guarded:
