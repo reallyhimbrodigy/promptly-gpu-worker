@@ -5958,6 +5958,63 @@ def plan_onto_beats(plan, beats, min_overlap=0.5):
     return verdicts, problems
 
 
+MULTI_UPLOAD_MAX = 10
+CREDITS_PER_JOB = 10
+
+
+def plan_batch(n_sources, balance, per_job=CREDITS_PER_JOB,
+               max_sources=MULTI_UPLOAD_MAX):
+    """(verdict, affordable, debit, why) — decide a batch BEFORE any dispatch.
+
+    THE FAILURE THIS EXISTS TO PREVENT: a user with 60 credits selects ten
+    sources, six render, four fail. Four failures that are not failures — they
+    are arithmetic nobody did — and the user paid attention to ten and got six
+    with no explanation. TELL THEM FIRST.
+
+    So this is a PURE decision returned to the caller, not a dispatch-time
+    check: `affordable` is how many jobs the balance covers, `debit` is what
+    those cost, and a shortfall is REPORTED with both numbers rather than
+    discovered one failure at a time.
+
+    Verdicts:
+        OK          every selected source is affordable
+        PARTIAL     some are; `affordable` says how many, and the caller asks
+                    the user before dispatching any of them
+        NONE        the balance covers zero jobs
+        REFUSED     the selection itself is invalid (empty, or over the cap)
+    """
+    try:
+        _n = int(n_sources)
+        _bal = int(balance)
+        _per = int(per_job)
+    except (TypeError, ValueError):
+        return ("REFUSED", 0, 0,
+                "n_sources, balance and per_job must be whole numbers")
+    if _per <= 0:
+        return ("REFUSED", 0, 0, "per-job cost must be positive")
+    if _n <= 0:
+        return ("REFUSED", 0, 0, "no sources selected")
+    if _n > int(max_sources):
+        return ("REFUSED", 0, 0,
+                "%d sources selected; the cap is %d in one action"
+                % (_n, int(max_sources)))
+    if _bal < 0:
+        return ("REFUSED", 0, 0, "balance is negative")
+    _afford = min(_n, _bal // _per)
+    if _afford == _n:
+        return ("OK", _afford, _afford * _per,
+                "%d job(s) at %d credits = %d of %d"
+                % (_n, _per, _n * _per, _bal))
+    if _afford == 0:
+        return ("NONE", 0, 0,
+                "%d credits will not cover one job at %d — %d needed"
+                % (_bal, _per, _per))
+    return ("PARTIAL", _afford, _afford * _per,
+            "%d credits covers %d of %d selected job(s) at %d each; %d more "
+            "credits would cover the rest"
+            % (_bal, _afford, _n, _per, (_n - _afford) * _per))
+
+
 def reedit_merge(prior, targets, incoming):
     """(verdicts, refused) — apply a re-edit's incoming rulings to the prior set.
 
