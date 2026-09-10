@@ -131,6 +131,24 @@ inflated by retries into an apparent outage.
   So: when a lane ships a check, the other lane reads it before it is trusted —
   and reads it for the four costumes specifically, not for style.
 
+  **The proof, 2026-09-09 — four found in each direction, NONE found by the
+  author.** This is not a soft observation that review is good practice; it is
+  evidence that self-review is structurally blind to these four costumes.
+
+  | found by BUILDER-2, in BUILDER-1's files | found by BUILDER-1, in BUILDER-2's files |
+  |---|---|
+  | the observable computed on the wrong side of a process boundary | the truncated `sample` printed as a complete record |
+  | the `/tmp` backup shared across every branch and worktree | the orphan check scoped one schema too narrow |
+  | the missing writer behind the removal flag | the filter mutation that went semantically dead |
+  | the empty-leg floors (26 of 27 across both lanes) | the stale-anchor `edit_quality`, from the other end |
+
+  And the sharper cautionary case is the one that WOULD HAVE SURVIVED REVIEW: a
+  residue-checker that mutated its own checkout and restored correctly every
+  time it COMPLETED. It looks right in the diff and passes every run; only a
+  kill exposes it, leaving exactly the residue it exists to detect, under the
+  name of the check for it. The cruder failure — running a mutating sweep during
+  a live round — was louder, and therefore cheaper.
+
 - Every agent works in **its own git worktree**. Never edit outside your
   assigned region.
 - **The `speed` agent owns merge and deploy.** Nobody else deploys. Ever. All
