@@ -308,6 +308,40 @@ inflated by retries into an apparent outage.
 
 ## Standing rules earned 2026-09-09 (a mutation that changes a file, not a result)
 
+- **A TRUNCATED LIST MUST CARRY ITS DENOMINATOR** (Builder-2's framing). It is
+  Rule 2 applied to OUTPUT rather than measurement: *report zero only with what
+  it is zero out of* and *print a list only with what it is a subset of* are the
+  same instruction, and they fail the same way — the incomplete thing renders
+  identically to the complete thing.
+
+  MEASURE THE CLASS BEFORE CHECKING IT. A first scan found **187** `[:N]` slices
+  in print-bearing scopes and the number was useless: it is dominated by
+  `str[:200]` truncating error messages, which is legitimate. Truncating a
+  MESSAGE loses characters; truncating a COLLECTION loses countable items, and
+  only the second makes a subset read as a total. Narrowed to `for x in
+  NAME[:N]` that prints: **4** in agentic_editor_app.py, **2** in
+  smoke_tree_parses.py, 0 elsewhere. Four real instances beat a check that fires
+  on 187.
+
+  One of the four was `_rej[:6]` on the CUTAWAY REJECTIONS — a run rejecting 30
+  would print 6 and read as 6, in the family whose entire diagnosis that round
+  was "ruled zero".
+
+- **AND THE MECHANICAL CHECK CANNOT CATCH THE CASE THAT MOTIVATED IT.**
+  `for _v in (_vq.get("sample") or [])` has no slice: the list was ALREADY a
+  subset when it reached the printer. `for x in NAME[:N]` catches truncation AT
+  the print and is blind to truncation BEFORE it. The other half is a
+  CONVENTION, not a proof, and is recorded as one: a subset must be named where
+  it is CREATED — `sample`, `head`, `first`, `subset` — and printed with a count
+  beside it. Prefer removing the truncation to annotating it: the per-beat
+  record is nine lines and never needed sampling at all.
+
+- **A TRUNCATED PRINT LOOKS CORRECT FROM THE INSIDE.** Neither agent caught this
+  in their own file while catching it in the other's — one found it in a check
+  shipped two hours earlier, the other in a printer read every round for weeks.
+  You wrote the `[:20]` and you remember it is 20. The reader does not. This is
+  why it is a rule and not two fixes.
+
 - **A HARNESS MUST FAIL LOUDLY AND DIFFERENTLY FROM THE THINGS IT RUNS** (Builder-2).
   A suite run through macOS `timeout` — which does not exist there — reported
   **163/163 FAIL**. That tally is indistinguishable from a real catastrophe, and
