@@ -5269,8 +5269,54 @@ REFERENCE_PURPOSES = ("hook", "claim", "turn", "evidence", "payoff", "close", "b
 # Our family -> the corpus's name for it. Named explicitly because they differ,
 # and a silent mismatch would retrieve nothing while looking like it worked.
 REFERENCE_FAMILY_NAME = {"text": "overlay_text", "card": "card", "sfx": "sfx",
-                         "zoom": "punch_in", "cut": "cut", "transition": None}
-_REFERENCE_UNBUILDABLE = "cutaway"
+                         "zoom": "punch_in", "cut": "cut", "cutaway": "cutaway",
+                         "transition": None}
+
+
+def _rulable_treatments():
+    """The treatments the agent can actually rule, from the SCHEMA's own enum.
+
+    THE HARDCODE THIS REPLACES. `_REFERENCE_UNBUILDABLE = "cutaway"` was correct
+    when written — 72 of 153 reference beats place a cutaway and the pipeline
+    could not make one, so showing the agent that craft was worse than showing
+    it nothing.
+
+    IT BECOMES WRONG THE DAY CUTAWAY SHIPS, and it ships in Builder-1's tree.
+    Merged unchanged, the filter would hide 47.1% of the corpus — the LARGEST
+    visual treatment — from the family that has just ruled ZERO because nothing
+    explains it. The examples that would teach it are precisely the ones the
+    filter removes.
+    
+    So it is derived from the treatment enum, which is the authoritative
+    statement of what the agent can rule, and it self-corrects in either tree
+    without anyone remembering this comment exists.
+    """
+    _enum = set()
+
+    def _walk(o):
+        if isinstance(o, dict):
+            if o.get("type") == "array" and isinstance(o.get("items"), dict):
+                _enum.update(o["items"].get("enum") or [])
+            for _v in o.values():
+                _walk(_v)
+        elif isinstance(o, list):
+            for _v in o:
+                _walk(_v)
+
+    _walk(list(TOOLS) + list(KNOWLEDGE_TOOLS))
+    return _enum
+
+
+def reference_unbuildable():
+    """Corpus treatments this pipeline cannot make, derived from the schema."""
+    _rulable = _rulable_treatments()
+    _ours = {v for k, v in REFERENCE_FAMILY_NAME.items()
+             if v and k in _rulable}
+    # `cut` is always buildable and is not a treatment the agent picks from the
+    # same enum, so it never counts as unbuildable.
+    _ours.add("cut")
+    return {t for t in ("overlay_text", "cut", "cutaway", "card", "sfx",
+                        "punch_in") if t not in _ours}
 
 
 def load_reference_index(path=None):
@@ -5314,9 +5360,10 @@ def reference_examples_for(purpose, duration_s, k=3, beats=None,
     """
     _b = beats if beats is not None else load_reference_index()[0]
     _p = str(purpose or "").lower()
+    _unbuildable = reference_unbuildable()
     _pool = [x for x in _b
              if allow_unbuildable
-             or _REFERENCE_UNBUILDABLE not in (x.get("treat") or [])]
+             or not (_unbuildable & set(x.get("treat") or []))]
     _same = [x for x in _pool if str(x.get("purpose") or "").lower() == _p]
     _rest = [x for x in _pool if str(x.get("purpose") or "").lower() != _p]
     try:
