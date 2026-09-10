@@ -11373,6 +11373,59 @@ def run_agentic(body: dict):
             "mode": "reedit" if _plan else "edit"}
 
 
+@app.function(image=IMG, secrets=SECRETS, timeout=60)
+@modal.fastapi_endpoint(method="POST")
+def result_agentic(body: dict):
+    """Collect a spawned agentic edit. POST {"call_id": "..."}.
+
+    WHY A POLL AND NOT A CALLBACK. handler's path posts back to
+    /api/modal-complete, which means the WORKER calls the SERVER — it needs the
+    server's URL and reachability, and this container is deliberately credential-
+    free and outbound-minimal. A poll inverts that: the server already knows
+    where Modal is, already holds the call id it was handed, and nothing new has
+    to be trusted in the container.
+
+    NON-BLOCKING BY DEFAULT. `timeout=0` returns immediately with RUNNING rather
+    than holding the HTTP request open across a multi-minute edit — the mistake
+    the spawn exists to avoid, reintroduced at the collection end.
+
+    THREE STATES, because a collection that cannot answer is not a failure of
+    the edit:
+        DONE     the edit finished; `result` carries the plan and the ledger
+        RUNNING  not finished yet — poll again. NOT an error.
+        FAILED   the edit raised; `error` says what. A failed edit and an
+                 unfinished one are different facts and this repo has paid for
+                 collapsing them.
+
+    THE PLAN COMES BACK HERE. That is the whole point of the round trip: the
+    container holds no Supabase credentials, so it cannot persist its own plan.
+    `result["plan"]` is what the server stores against the job id, and what it
+    hands back as `prior_plan` on a re-edit.
+    """
+    _cid = (body or {}).get("call_id")
+    if not _cid:
+        return {"state": "FAILED", "error": "call_id is required"}
+    try:
+        _fc = modal.FunctionCall.from_id(_cid)
+    except Exception as _e:                                   # noqa: BLE001
+        return {"state": "FAILED", "call_id": _cid,
+                "error": "no such call: %s" % str(_e)[:160]}
+    try:
+        _r = _fc.get(timeout=0)
+    except TimeoutError:
+        return {"state": "RUNNING", "call_id": _cid}
+    except Exception as _e:                                   # noqa: BLE001
+        # THE EDIT RAISED. Distinct from RUNNING, and named — an edit that died
+        # reported as "not finished" would be polled forever.
+        return {"state": "FAILED", "call_id": _cid,
+                "error": "%s: %s" % (type(_e).__name__, str(_e)[:300])}
+    _plan = (_r or {}).get("plan") if isinstance(_r, dict) else None
+    print("[result_agentic] DONE call=%s plan_entries=%s"
+          % (_cid, len(_plan) if isinstance(_plan, list) else "none"), flush=True)
+    return {"state": "DONE", "call_id": _cid, "result": _r,
+            "plan_entries": len(_plan) if isinstance(_plan, list) else 0}
+
+
 @app.local_entrypoint()
 def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
          brief: str = "Cut this into a punchy vertical short. Remove silence and "

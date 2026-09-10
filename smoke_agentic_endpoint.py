@@ -97,6 +97,48 @@ check("the response says whether this was an edit or a reedit",
       "a re-edit that reports as an edit is uncountable, and the count is how "
       "we know the feature is used")
 
+# ── THE COLLECTION HALF ─────────────────────────────────────────────────────
+# A spawned call the server cannot collect is a wire that only goes one way.
+_res = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+             and n.name == "result_agentic"), None)
+check("the app exposes result_agentic", _res is not None)
+if _res is not None:
+    _rdecs = [ast.unparse(d) for d in _res.decorator_list]
+    check("collection is a POST endpoint too",
+          any("fastapi_endpoint" in d and "POST" in d for d in _rdecs))
+    _rbody = ast.unparse(_res)
+    check("it does NOT block across the edit",
+          "timeout=0" in _rbody,
+          "holding an HTTP request open across a multi-minute edit is the "
+          "mistake the spawn exists to avoid, reintroduced at the collection end")
+    _rstates = {c.value for c in ast.walk(_res) if isinstance(c, ast.Constant)
+                and c.value in ("DONE", "RUNNING", "FAILED")}
+    check("three states: DONE, RUNNING and FAILED are all distinct",
+          _rstates == {"DONE", "RUNNING", "FAILED"}, f"{sorted(_rstates)}")
+    # ASSERT THE HANDLER'S OWN BODY, not text order. My first version compared
+    # the position of "except TimeoutError" against the position of "RUNNING" —
+    # and the DOCSTRING says RUNNING several lines earlier, so it read as
+    # out-of-order on correct code. A positional test over source that includes
+    # prose is not a test of control flow.
+    _to = [h for h in ast.walk(_res) if isinstance(h, ast.ExceptHandler)
+           and "TimeoutError" in ast.unparse(h.type or ast.Constant(""))]
+    check("there is a TimeoutError handler (non-vacuity)", len(_to) == 1,
+          f"{len(_to)} handlers")
+    check("a still-running call is NOT reported as an error",
+          bool(_to) and any(
+              isinstance(c, ast.Constant) and c.value == "RUNNING"
+              for c in ast.walk(_to[0])),
+          "an unfinished edit and a failed one are different facts")
+    check("a raised edit is FAILED, not RUNNING",
+          "type(_e).__name__" in _rbody,
+          "an edit that died reported as not-finished would be polled forever")
+    check("the PLAN comes back in the result",
+          '"plan"' in _rbody or "'plan'" in _rbody,
+          "the container holds no credentials and cannot persist its own plan; "
+          "the round trip exists so the server can")
+    check("and the plan size is reported so an empty one is visible",
+          "plan_entries" in _rbody)
+
 print()
 if fails:
     print("AGENTIC-ENDPOINT: FAIL")
