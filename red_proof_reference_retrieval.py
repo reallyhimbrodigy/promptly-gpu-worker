@@ -2,20 +2,24 @@
 """RED proof: every absence must stay spoken, and the filter must stay on."""
 import os, shutil, subprocess, sys
 APP="agentic_editor_app.py"; IDX="reference_index.json"
-BAK="/tmp/_rr_app.py"; BAKI="/tmp/_rr_idx.json"
-shutil.copy(APP,BAK); shutil.copy(IDX,BAKI)
+# BACKUP IN MEMORY, NEVER A SHARED FILE — see red_proof_alpha_state.py for
+# the full note. A "/tmp/..." backup path is shared across every branch and
+# worktree on this machine; Builder-2 watched one silently restore another
+# branch's app over their working copy and then print 19/19 RED-proven.
+_ORIG = {}   # path -> content, in memory, per run
+_ORIG.setdefault(APP, open(APP, encoding="utf-8").read()); _ORIG.setdefault(IDX, open(IDX, encoding="utf-8").read())
 env=dict(os.environ,PYTHONPATH=".")
 def run():
     r=subprocess.run([sys.executable,"smoke_reference_retrieval.py"],
                      capture_output=True,text=True,env=env)
     return r.returncode, r.stdout+r.stderr
 def mut(path,old,new,label,expect):
-    bak = BAK if path==APP else BAKI
     src=open(path,encoding="utf-8").read()
+    _ORIG.setdefault(path, src)          # in memory, first touch, per run
     if src.count(old)!=1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
     open(path,"w",encoding="utf-8").write(src.replace(old,new,1))
-    rc,out=run(); shutil.copy(bak,path)
+    rc,out=run(); open(path,"w",encoding="utf-8").write(_ORIG[path])
     ok=rc!=0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok: print(f"      expected {expect!r}")

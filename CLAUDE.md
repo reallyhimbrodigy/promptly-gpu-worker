@@ -342,6 +342,38 @@ inflated by retries into an apparent outage.
   You wrote the `[:20]` and you remember it is 20. The reader does not. This is
   why it is a rule and not two fixes.
 
+- **A MUTATING HARNESS AND A RUNNING ROUND CANNOT SHARE A WORKTREE.** Red proofs
+  are WRITERS — they mutate the file under test and restore it — and
+  `agentic_editor_app.py` is MOUNTED. Launching a background verification of the
+  red proofs during a nine-launch ablation drifted the frozen fingerprint and
+  the round ABORTED mid-arm. Done twice in twenty minutes, the second time
+  immediately after diagnosing it, by the person who had just written the rule
+  down. The suite is named "run the checks"; nothing in that phrase says it
+  rewrites 12,000 lines and puts them back.
+
+- **A FIXTURE BELONGS IN THE TREE; A BACKUP BELONGS IN MEMORY.** They are
+  opposite requirements and converging them is a mistake. A fixture (mutation
+  blocks) must drift WITH the tree or fail loudly at merge — so it lives in
+  `red_proof_blocks/`. A backup must not survive the run that made it — so it
+  lives in memory, never at a `/tmp` path shared across every branch and
+  worktree on the machine. Builder-2 watched one such backup silently restore
+  ANOTHER BRANCH'S app over their working copy — a 914-line rewrite — and the
+  harness then printed `19/19 RED-proven` about a file it had just replaced with
+  a stranger.
+
+- **FOUR SYMPTOMS OF THE FIXTURE-OUTSIDE-THE-TREE DEFECT**, and the fourth is
+  orthogonal to where the backup lives:
+      MISSING              died at import, reported nothing
+      DRIFTED              rewrapped four lines, reported `anchor 0x`
+      STALE FROM A BRANCH  silent 914-line rewrite, green tally
+      INTERRUPTED          SIGKILL between mutate and restore leaves the MUTANT
+                           on disk — in-memory backup does not survive a kill
+  Only a post-run `git status --porcelain <mounted file>` catches the fourth,
+  and it must name WHICH harness left the residue. Builder-2 found
+  `led["cut_word_intrusions"] = []` sitting on disk after a killed sweep: one
+  line in 12,000, in the measurement whose whole job is that count, and every
+  gate passes on an empty list.
+
 - **26 OF 27 RED PROOFS PASSED ON AN EMPTY MUTATION LIST.** `all([])` is True and
   `0 == len([])` is True, so a harness whose mutations are deleted — bad merge,
   botched refactor, commented-out block — reports SUCCESS. 10 of 11 here, 16 of

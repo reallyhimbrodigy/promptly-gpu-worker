@@ -12,8 +12,23 @@ import sys
 
 APP = "agentic_editor_app.py"
 SMOKE = "smoke_alpha_not_empty.py"
-BAK = "/tmp/_alpha_bak.py"
-shutil.copy(APP, BAK)
+# BACKUP IN MEMORY, NEVER A FILE. This was `_ORIG_SRC = "/tmp/..."` — a FIXED
+# PATH SHARED ACROSS EVERY BRANCH AND WORKTREE ON THIS MACHINE. Builder-2
+# observed it silently restore ANOTHER BRANCH'S agentic_editor_app.py over
+# their working copy: a 914-line diff, `git status` the only witness, and
+# the harness printed 19/19 RED-proven about a file it had just replaced
+# with a stranger.
+#
+# A per-branch filename does NOT fix it: the file still outlives the
+# process and can be restored from after the tree moves under it. The
+# backup must not survive the run that made it.
+#
+# THIRD SYMPTOM OF ONE DEFECT — a fixture outside the tree can be MISSING
+# (dies at import, reports nothing), DRIFTED (anchor 0x), or STALE FROM
+# ANOTHER BRANCH (this one, which reports SUCCESS while corrupting the
+# file under test). The third is worst because it is silent AND green.
+_ORIG_SRC = open(APP, encoding="utf-8").read()
+None
 env = dict(os.environ, PYTHONPATH=".")
 
 
@@ -29,7 +44,7 @@ def mut(old, new, label, expect):
         return False
     open(APP, "w", encoding="utf-8").write(src.replace(old, new, 1))
     rc, out = run()
-    shutil.copy(BAK, APP)
+    open(APP, "w", encoding="utf-8").write(_ORIG_SRC)
     ok = rc != 0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok:

@@ -1,7 +1,11 @@
 import os, shutil, subprocess, sys
 APP="agentic_editor_app.py"; CERT="cert_mg_prop_keys.py"; CAT="knowledge/05_motion_graphics.md"
-BAKS={p:"/tmp/_cl_"+os.path.basename(p) for p in (APP,CERT,CAT)}
-for p,b in BAKS.items(): shutil.copy(p,b)
+# BACKUP IN MEMORY, NEVER A SHARED FILE — see red_proof_alpha_state.py for
+# the full note. A "/tmp/..." backup path is shared across every branch and
+# worktree on this machine; Builder-2 watched one silently restore another
+# branch's app over their working copy and then print 19/19 RED-proven.
+_ORIG={p: open(p, encoding="utf-8").read() for p in (APP,CERT,CAT)}
+for p,b in _ORIG.items(): shutil.copy(p,b)
 env=dict(os.environ,PYTHONPATH=".")
 def run(s):
     r=subprocess.run([sys.executable,s],capture_output=True,text=True,env=env)
@@ -11,7 +15,7 @@ def mut(path,old,new,label,expect,smoke):
     if src.count(old)!=1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
     open(path,"w",encoding="utf-8").write(src.replace(old,new,1))
-    rc,out=run(smoke); shutil.copy(BAKS[path],path)
+    rc,out=run(smoke); open(path, "w", encoding="utf-8").write(_ORIG[path])
     ok=rc!=0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok: print(f"      expected {expect!r}")

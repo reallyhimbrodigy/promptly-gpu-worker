@@ -39,6 +39,29 @@ run_arm() {
   echo "=== ARM $arm  removals='${removals:-none}' ==="
   while IFS=$'\t' read -r name key brief model; do
     case " $CLEAN " in *" $name "*) ;; *) continue ;; esac
+    # RESIDUE CHECK BEFORE THE FINGERPRINT CHECK, because they answer different
+    # questions and the residue one is more specific.
+    #
+    # A mutating harness restores from memory, which removes the CROSS-BRANCH
+    # surface and does NOTHING about an INTERRUPTED run: a SIGKILL between
+    # mutate and restore leaves the mutant on disk. Builder-2 found exactly that
+    # after a killed sweep —
+    #     -  led["cut_word_intrusions"] = cut_word_intrusions(spans, words)
+    #     +  led["cut_word_intrusions"] = []
+    # one line in 12,000, in the measurement whose whole job is that count, and
+    # every gate passes on an empty list.
+    #
+    # The fingerprint check below would catch it too, but it says only "the tree
+    # moved". This says WHAT moved and hands over a diff.
+    _residue=$(git status --porcelain agentic_editor_app.py)
+    if [ -n "$_residue" ]; then
+      echo "[ABORT] RESIDUE in a mounted file before launching $arm/$name:"
+      echo "        $_residue"
+      echo "        A harness was interrupted mid-mutation, or something else"
+      echo "        wrote here. The frozen fingerprint is now around a MUTANT."
+      git --no-pager diff --stat agentic_editor_app.py | sed 's/^/        /'
+      exit 2
+    fi
     now=$(python3 mount_fingerprint.py | tail -1)
     if [ "$now" != "$MOUNT_SHA" ]; then
       echo "[ABORT] mounted path changed mid-ablation ($MOUNT_SHA -> $now)."

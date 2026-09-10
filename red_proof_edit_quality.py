@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """RED proof: the truncation cure, and the three edit-quality measures."""
 import os, shutil, subprocess, sys
-APP = "agentic_editor_app.py"; BAK = "/tmp/_eq_bak.py"
-shutil.copy(APP, BAK)
+APP = "agentic_editor_app.py"
+# BACKUP IN MEMORY, NEVER A SHARED FILE — see red_proof_alpha_state.py for
+# the full note. A "/tmp/..." backup path is shared across every branch and
+# worktree on this machine; Builder-2 watched one silently restore another
+# branch's app over their working copy and then print 19/19 RED-proven.
+_ORIG_SRC = open(APP, encoding="utf-8").read()
+None
 env = dict(os.environ, PYTHONPATH=".")
 
 
@@ -17,7 +22,7 @@ def mut(old, new, label, expect):
     if src.count(old) != 1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
     open(APP, "w", encoding="utf-8").write(src.replace(old, new, 1))
-    rc, out = run(); shutil.copy(BAK, APP)
+    rc, out = run(); open(APP, "w", encoding="utf-8").write(_ORIG_SRC)
     ok = rc != 0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok:
