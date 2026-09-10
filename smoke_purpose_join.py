@@ -167,6 +167,25 @@ check("a dominant purpose is flagged as possible decoration",
       "discriminate makes the join confident and meaningless")
 check("an unnamed purpose fails loudly", 'fail("purpose_unnamed"' in src)
 
+# ── THE GATE MUST NOT REJECT ON PURPOSE, and this is a regression guard for a
+# failure that cost THREE ROUNDS OF ZERO CARDS. The acceptance gate once
+# demanded `card_type` after the schema stopped offering it: the agent could not
+# satisfy it, was rejected, re-ruled, and burned five turns placing nothing.
+#
+# `purpose` is REQUIRED IN THE SCHEMA — so the model supplies it — and must NOT
+# be a rejection condition in the harness. A miss is reported loudly at the end
+# instead. Marking a field required and ALSO rejecting on it is how a loop
+# starts, and the two look identical in a diff.
+_gate = src[src.index("_why6 = None"):src.index("_rejected.append(_why6)")]
+check("the acceptance gate does NOT reject a verdict for a missing purpose",
+      "purpose" not in _gate,
+      "requiring a field in the schema AND rejecting on it in the harness is "
+      "the orphaned-gate loop: three rounds built zero cards that way")
+check("the gate still rejects on zoom_arc, so this leg is not vacuous",
+      "zoom_arc" in _gate,
+      "if the gate stopped rejecting anything, the leg above would pass for "
+      "the wrong reason")
+
 print()
 if fails:
     print("PURPOSE-JOIN: FAIL")
