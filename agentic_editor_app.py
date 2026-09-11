@@ -13061,8 +13061,17 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # BY KEYWORD. The ten arguments above are positional and `recent_styles`
     # sits after exec_model — appending it positionally would silently bind to
     # cap_exec_effort and turn the rotation history into a boolean.
-    r = edit.remote(source, brief, _src_url, _out_url, _out_key,
-                    iters, knowledge, effort, model, route,
+    # BY NAME, NOT BY POSITION. Round 56, all five arms, died here: the merge
+    # inserted prior_plan/instruction/result_url as parameters 3-5 of edit()
+    # and this call still passed ten positionals, so _src_url landed on
+    # prior_plan and `iters` landed on src_url — "ValueError: unknown url type:
+    # '24'". pyflakes, the in-container import and 80 smokes all passed,
+    # because nothing had CALLED it. A keyword call cannot drift when a
+    # signature grows; smoke_entrypoint_binds_by_name keeps it that way.
+    r = edit.remote(source_key=source, brief=brief,
+                    src_url=_src_url, out_url=_out_url, out_key=_out_key,
+                    max_iters=iters, use_knowledge=knowledge, effort=effort,
+                    model=model, route_models=route,
                     recent_styles=recent_styles,
                     prefix_removals=prefix_removals)
 
