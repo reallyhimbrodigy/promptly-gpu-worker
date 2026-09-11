@@ -209,6 +209,57 @@ def resolve_beat(beats, src_t):
     return None
 
 
+RESOLVED_INTERIOR = "INTERIOR"
+RESOLVED_BOUNDARY = "BOUNDARY TIE-BREAK"
+RESOLVED_FALLBACK = "MOMENT FALLBACK"
+RESOLVED_SPAN_EDGE = "SPAN EDGE"
+RESOLVED_UNMAPPED = "UNMAPPED"
+
+
+def resolution_basis(p, beats, keep_spans):
+    """(basis, detail) — HOW this placement reached the beat it is judged on.
+
+    THE INSTRUMENT THIS FILE OWED AND DID NOT HAVE. Four conventions in this
+    sheet each silently assigned placements to the wrong beat, and the counts
+    they produced — BUILT BUT NOT RULED 14 and 19 — were reported onward as
+    facts about the pipeline. They were facts about the tie-breaks.
+
+    What would have caught it in one line: 44 of 47 of those rows sat EXACTLY
+    on a convention's edge. A finding concentrated on the edge of a tie-break
+    is a finding about the tie-break. So every count this sheet prints now
+    carries how much of it rests on a convention rather than on an instant that
+    falls unambiguously inside one beat.
+
+    INTERIOR is the only basis that needs no convention to be right.
+    """
+    _t, _tsrc = placement_moment(p, {})
+    _mstate, _src_t = output_to_source(keep_spans, _t)
+    if _mstate != MAPPED:
+        return (RESOLVED_UNMAPPED, "no source instant")
+    if _tsrc != "moment":
+        return (RESOLVED_FALLBACK,
+                "no t_moment: judged on the RENDER start, which leads the "
+                "moment by the family's attack or pre-roll")
+    _acc = 0.0
+    for _sp in (keep_spans or []):
+        try:
+            _acc += max(0.0, float(_sp[1]) - float(_sp[0]))
+        except (TypeError, ValueError, IndexError):
+            break
+        if abs(_f(_t) - _acc) < 1e-6:
+            return (RESOLVED_SPAN_EDGE,
+                    "the output instant is exactly a kept-span boundary; which "
+                    "span owns it is a convention")
+    _st = round(float(_src_t), 3)
+    for _b in (beats or []):
+        if abs(_st - round(_f(_b.get("t_start")), 3)) < 1e-6 \
+                or abs(_st - round(_f(_b.get("t_end")), 3)) < 1e-6:
+            return (RESOLVED_BOUNDARY,
+                    "the source instant is exactly a beat boundary; which beat "
+                    "owns it is a convention")
+    return (RESOLVED_INTERIOR, "strictly inside one beat")
+
+
 def reason_grounding(why, beat_text):
     """(state, detail) — WHERE the stated reason could be checked.
 
@@ -289,6 +340,20 @@ def sheet(result, ref_beats, provenance):
                    "sheet's question.")
         return out
     out.append("  %d placement(s) over %d beat(s)" % (len(placements), len(beats)))
+    _bases = [resolution_basis(p, beats, _keep) for p in placements]
+    _conv = [b for b, _d in _bases if b != RESOLVED_INTERIOR]
+    out.append("  resolution: %d of %d placement(s) rest on a CONVENTION, not "
+               "on an instant strictly inside one beat  [%s]"
+               % (len(_conv), len(placements),
+                  "  ".join("%s %d" % (_k, _conv.count(_k))
+                            for _k in (RESOLVED_BOUNDARY, RESOLVED_FALLBACK,
+                                       RESOLVED_SPAN_EDGE, RESOLVED_UNMAPPED)
+                            if _conv.count(_k))
+                  or "none"))
+    if placements and len(_conv) > len(placements) / 2:
+        out.append("  !! MORE THAN HALF OF THIS SHEET RESTS ON TIE-BREAKS. Any "
+                   "count below is a claim about the conventions before it is a "
+                   "claim about the pipeline. Do not pass one on as the other.")
     out.append("")
 
     for _n, p in enumerate(placements, 1):
@@ -323,6 +388,7 @@ def sheet(result, ref_beats, provenance):
                 _pos = "  [INFERRED: last beat — a close position]"
 
         out.append("─" * 74)
+        _basis, _bwhy = resolution_basis(p, beats, _keep)
         out.append("%2d. %-9s at %ss out (%s)%s   beat %s (%.2fs)%s"
                    % (_n, p.get("family") or p.get("type") or "?", _t, _tsrc,
                       (" = %.2fs src" % _src_t) if _mstate == MAPPED else "",
@@ -339,6 +405,11 @@ def sheet(result, ref_beats, provenance):
             out.append("    !! BUILT BUT NOT RULED: no verdict on this beat "
                        "names '%s'. The why below belongs to another ruling."
                        % _fam)
+            out.append("       resolved %s — %s%s"
+                       % (_basis, _bwhy,
+                          "" if _basis == RESOLVED_INTERIOR else
+                          "  <-- THIS ROW IS A CONVENTION'S OUTPUT, not yet a "
+                          "finding about the pipeline"))
         if _v:
             out.append("    agent's why: %s" % str(_v.get("why") or "")[:88])
             out.append("    agent ruled: %s%s"
@@ -487,6 +558,51 @@ if __name__ == "__main__":
                  "an output instant on a span boundary is the START of the next span"),
                 (output_to_source([[0.0, 1.0], [3.0, 4.0]], 2.0), (MAPPED, 4.0),
                  "the last span's end stays closed")]
+        # THE RESOLUTION BASIS. INTERIOR is the only one that needs no
+        # convention; every other basis is a tie-break this sheet chose.
+        _rb2 = [{"i": 0, "t_start": 0.0, "t_end": 2.0},
+                {"i": 1, "t_start": 2.0, "t_end": 4.0}]
+        _ks2 = [[0.0, 2.0], [3.0, 5.0]]
+        for _p, _want, _lbl in (
+                ({"family": "text", "t_start": 1.0, "t_moment": 1.0},
+                 RESOLVED_INTERIOR, "strictly inside one beat needs no convention"),
+                ({"family": "text", "t_start": 0.5, "t_moment": 0.5},
+                 RESOLVED_INTERIOR, "another interior instant"),
+                ({"family": "card", "t_start": 1.9},
+                 RESOLVED_FALLBACK, "no t_moment is a fallback, not an interior hit"),
+                ({"family": "text", "t_start": 2.0, "t_moment": 2.0},
+                 RESOLVED_SPAN_EDGE, "an output instant on a kept-span boundary"),
+                ({"family": "text", "t_start": 1.0, "t_moment": 1.0,
+                  "_ks": [[0.0, 9.0]]},
+                 RESOLVED_INTERIOR, "unchanged when the span does not bite"),
+                ({"family": "text", "t_start": 9.0, "t_moment": 9.0},
+                 RESOLVED_UNMAPPED, "past the kept material")):
+            _got = resolution_basis(_p, _rb2, _p.get("_ks") or _ks2)[0]
+            if _got != _want:
+                _bad.append("resolution_basis: %s -> %s, expected %s"
+                            % (_lbl, _got, _want))
+        # a BEAT boundary, with the span out of the way
+        if resolution_basis({"family": "text", "t_start": 2.0, "t_moment": 2.0},
+                            _rb2, [[0.0, 9.0]])[0] != RESOLVED_BOUNDARY:
+            _bad.append("resolution_basis: an instant exactly on a shared beat "
+                        "boundary must report BOUNDARY TIE-BREAK")
+        # the disclosure reaches the sheet, and the loud line fires
+        _demo5 = {"ledger": {
+            "keep_spans": [[0.0, 9.0]],
+            "beats": _rb2,
+            "placements": [{"family": "text", "t_start": 2.0, "t_moment": 2.0},
+                           {"family": "card", "t_start": 1.9}],
+            "beat_verdicts": [{"beat": 1, "treatment": ["text"], "why": "x"}]}}
+        _l5 = sheet(_demo5, _refs, _prov)
+        if not any("rest on a CONVENTION" in x for x in _l5):
+            _bad.append("the sheet does not disclose how many placements rest "
+                        "on a convention")
+        if not any("MORE THAN HALF OF THIS SHEET RESTS ON TIE-BREAKS" in x
+                   for x in _l5):
+            _bad.append("a sheet that is mostly tie-breaks does not say so "
+                        "loudly — which is how its counts get passed on as "
+                        "facts about the pipeline")
+
         # THE MOMENT FROM THE STEP, for ledgers that predate t_moment.
         _led_old = {"execute_plan": {"steps": [
             {"step": "card", "items": [{"t": 1.92, "anchor_s": 2.0, "content": "10"}]},
@@ -554,7 +670,8 @@ if __name__ == "__main__":
         print("JUDGE-PLACEMENTS (self-test): PASS — %d reference beat(s), a "
               "matched pair, two blank verdict axes, four distinct grounding "
               "states, boundary resolution (5 legs), BUILT BUT NOT RULED "
-              "fires once, output->source through a cut" % len(_refs))
+              "fires once, output->source through a cut, and every count "
+              "discloses how much of it rests on a tie-break" % len(_refs))
         sys.exit(0)
     with open(sys.argv[1], encoding="utf-8") as fh:
         _r = json.load(fh)
