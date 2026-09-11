@@ -2254,6 +2254,21 @@ KNOWLEDGE_TOOLS = [{
                                          "footage — that is the same picture. "
                                          "Only the uploaded material; there is "
                                          "no stock and no generated shot."},
+                                 "framing": {"type": "string",
+                                     "enum": ["blur", "fit", "crop"],
+                                     "description":
+                                         "ONLY for a source whose shape is not "
+                                         "9:16 (landscape, square). What to do "
+                                         "with the frame on THIS beat: `blur` "
+                                         "keeps the whole frame over a blurred "
+                                         "fill (nothing lost), `fit` keeps it "
+                                         "on black bars, `crop` fills the "
+                                         "screen and LOSES the sides. Crop when "
+                                         "the subject is centred and the edges "
+                                         "are empty; blur or fit when there is "
+                                         "text, a face, or anything readable "
+                                         "near an edge. Omit it and the frame "
+                                         "is kept whole (blur)."},
                                  "zoom_arc": {"type": "string",
                                      "enum": ["hook", "build", "mid_peak",
                                               "payoff", "breather", "close"],
@@ -2337,6 +2352,21 @@ KNOWLEDGE_TOOLS = [{
                              "description": "REQUIRED when treatment includes "
                                             "'text': the words to burn on "
                                             "screen for this beat."},
+                         "framing": {"type": "string",
+                             "enum": ["blur", "fit", "crop"],
+                             "description":
+                         "ONLY for a source whose shape is not "
+                         "9:16 (landscape, square). What to do "
+                         "with the frame on THIS beat: `blur` "
+                         "keeps the whole frame over a blurred "
+                         "fill (nothing lost), `fit` keeps it "
+                         "on black bars, `crop` fills the "
+                         "screen and LOSES the sides. Crop when "
+                         "the subject is centred and the edges "
+                         "are empty; blur or fit when there is "
+                         "text, a face, or anything readable "
+                         "near an edge. Omit it and the frame "
+                         "is kept whole (blur)."},
                          "zoom_arc": {
                              "type": "string",
                              "enum": ["hook", "build", "mid_peak",
@@ -4081,7 +4111,8 @@ def delivery_fps(actual, tol=0.1):
     near = min(_STANDARD_FPS, key=lambda std: abs(a - std))
     return near if abs(a - near) <= tol else 30.0
 
-def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920):
+def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920,
+                              framing="blur"):
     """(filter, mode, crop_loss) to bring a source to the delivery geometry.
 
     MODULE LEVEL AND PURE so a test can call it with real dimensions.
@@ -4129,11 +4160,79 @@ def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920):
         kept_h = w / out_ar
         loss = 1.0 - (kept_h / h)
     loss = max(0.0, round(loss, 4))
-    mode = "scale" if loss <= 0.02 else "reframe_crop"
-    filt = (f"scale={int(out_w)}:{int(out_h)}:force_original_aspect_ratio=increase,"
-            f"crop={int(out_w)}:{int(out_h)},setsar=1")
-    return filt, mode, loss
+    W, H = int(out_w), int(out_h)
+    # WITHIN TOLERANCE THERE IS NOTHING TO DECIDE. A 9:16 source is resized and
+    # the sub-pixel crop is not a framing choice, so `framing` is ignored here
+    # and every conforming source renders exactly as it did before.
+    # RETURNED AS A LABELLED GRAPH FRAGMENT, not a bare chain. blur-fill is a
+    # split/overlay — it cannot be appended to a trim with a comma the way a
+    # scale can — and per-beat framing means N of these in one graph. So every
+    # mode returns the same shape: a fragment with {IN}, {OUT} and {i}
+    # placeholders the caller fills, and one caller handles all three.
+    if loss <= 0.02:
+        return (f"[{{IN}}]scale={W}:{H}:force_original_aspect_ratio=increase,"
+                f"crop={W}:{H},setsar=1[{{OUT}}]"), "scale", loss
+    # THE ASPECT GENUINELY DIFFERS, so SOMETHING is lost or added and that is a
+    # taste call, not arithmetic. Zac ruled it on 2026-09-08: fit, crop or
+    # blur-fill, chosen per beat, blur-fill when it cannot be told.
+    #
+    # WHY THE DEFAULT IS BLUR AND NOT CROP. crop was the only mode for seven
+    # rounds and it delivered screen_recording at 68% crop_loss, cutting every
+    # heading mid-word — "Point me in", "Where I can f". A landscape upload is
+    # a normal upload and must never be refused, but neither is losing two
+    # thirds of the frame the safe default. Blur keeps the whole frame.
+    _f = str(framing or "blur").strip().lower()
+    if _f not in ("blur", "fit", "crop"):
+        _f = "blur"
+    if _f == "crop":
+        return (f"[{{IN}}]scale={W}:{H}:force_original_aspect_ratio=increase,"
+                f"crop={W}:{H},setsar=1[{{OUT}}]"), "reframe_crop", loss
+    if _f == "fit":
+        return (f"[{{IN}}]scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[{{OUT}}]"), "fit", 0.0
+    # blur-fill: the whole frame, centred, over a blurred cover of itself.
+    return (f"[{{IN}}]split[_bg{{i}}][_fg{{i}}];"
+            f"[_bg{{i}}]scale={W}:{H}:force_original_aspect_ratio=increase,"
+            f"crop={W}:{H},gblur=sigma=24[_bgb{{i}}];"
+            f"[_fg{{i}}]scale={W}:{H}:force_original_aspect_ratio=decrease[_fgs{{i}}];"
+            f"[_bgb{{i}}][_fgs{{i}}]overlay=(W-w)/2:(H-h)/2,setsar=1[{{OUT}}]"), "blur_fill", 0.0
 
+
+
+def split_spans_by_framing(spans, framing_spans=None):
+    """Kept spans cut at framing boundaries: [(t0, t1, framing), ...]. PURE.
+
+    A kept span can cover several beats and those beats can be framed
+    differently, so the VIDEO is cut finer than the cut is. Audio is not: it
+    stays one segment per kept span, because framing does not touch it.
+
+    A stretch no framing ruling covers gets None — the default, which
+    geometry_normalise_filter reads as blur-fill. An uncovered stretch is a
+    beat nobody ruled, not an error: the edit still has to render it.
+    """
+    out = []
+    for a, b in spans:
+        try:
+            a, b = float(a), float(b)
+        except (TypeError, ValueError):
+            continue
+        cuts = {a, b}
+        for fa, fb, _fr in (framing_spans or ()):
+            for t in (float(fa), float(fb)):
+                if a < t < b:
+                    cuts.add(t)
+        pts = sorted(cuts)
+        for lo, hi in zip(pts, pts[1:]):
+            if hi - lo <= 1e-6:
+                continue
+            mid = (lo + hi) / 2.0
+            fr = None
+            for fa, fb, _fr in (framing_spans or ()):
+                if float(fa) <= mid < float(fb):
+                    fr = _fr
+                    break
+            out.append((lo, hi, fr))
+    return out
 
 def sfx_catalogue_name(name):
     """The catalogue stem for whatever shape the agent sent.
@@ -8094,7 +8193,7 @@ def edit(source_key: str, brief: str,
         h = int(t // 3600); m = int(t % 3600 // 60); s = t % 60
         return f"{h:02d}:{m:02d}:{s:06.3f}".replace(".", ",")
 
-    def build_cut(keep_spans, words_per_cue=4):
+    def build_cut(keep_spans, words_per_cue=4, framing_spans=None):
         """keep_spans -> concat filter + output-time SRT. Returns the command."""
         try:
             spans = sorted([[float(a), float(b)] for a, b in keep_spans])
@@ -8118,35 +8217,63 @@ def edit(source_key: str, brief: str,
             if b[0] < a[1] - 1e-6:
                 return {"error": f"overlapping spans: {a} and {b}"}
 
-        # concat filter — the shape the agent hand-wrote every run
-        parts, n = [], len(spans)
+        # concat filter — the shape the agent hand-wrote every run.
+        #
+        # VIDEO IS CUT FINER THAN AUDIO. Framing is a per-BEAT decision (Zac,
+        # 2026-09-08) and a kept span can cover several beats, so the video is
+        # split at framing boundaries and each piece gets its own geometry;
+        # audio stays one segment per kept span because framing does not touch
+        # it. Video and audio therefore concat SEPARATELY — the interleaved
+        # single concat only worked while the two grains were the same.
+        parts = []
+        _vsegs = split_spans_by_framing(spans, framing_spans)
         for i, (a, b) in enumerate(spans):
-            parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS[v{i}]")
             parts.append(f"[0:a]atrim={a:.3f}:{b:.3f},asetpts=PTS-STARTPTS[a{i}]")
-        cat = "".join(f"[v{i}][a{i}]" for i in range(n))
+        for i, (a, b, _fr) in enumerate(_vsegs):
+            parts.append(f"[0:v]trim={a:.3f}:{b:.3f},setpts=PTS-STARTPTS[v{i}]")
+        n = len(spans)
         # NORMALISE TO THE DELIVERY GEOMETRY. Without this the concat output is
         # the SOURCE's resolution and that is what gets delivered — round 42
         # shipped 540x960 and 720x1272 against a 1080x1920 contract. [outv] stays
         # the downstream name so nothing else has to know this happened.
         _vs = (meta.get("streams") or [{}])
         _v0 = next((_x for _x in _vs if _x.get("codec_type") == "video"), {})
-        _gfilt, _gmode, _gloss = geometry_normalise_filter(_v0.get("width"),
-                                                           _v0.get("height"))
-        if _gfilt:
-            parts.append(f"{cat}concat=n={n}:v=1:a=1[cv][outa]")
-            parts.append(f"[cv]{_gfilt}[outv]")
-        else:
-            parts.append(f"{cat}concat=n={n}:v=1:a=1[outv][outa]")
+        _modes, _losses = [], []
+        for i, (_a, _b, _fr) in enumerate(_vsegs):
+            _gfilt, _gmode, _gloss = geometry_normalise_filter(
+                _v0.get("width"), _v0.get("height"), framing=_fr)
+            _modes.append(_gmode)
+            if _gloss is not None:
+                _losses.append(_gloss)
+            if _gfilt:
+                parts.append(_gfilt.format(IN=f"v{i}", OUT=f"g{i}", i=i))
+            else:
+                # already the delivery geometry: no filter, and the trim's own
+                # label is what concat reads.
+                parts.append(f"[v{i}]null[g{i}]")
+        parts.append("".join(f"[g{i}]" for i in range(len(_vsegs)))
+                     + f"concat=n={len(_vsegs)}:v=1:a=0[outv]")
+        parts.append("".join(f"[a{i}]" for i in range(n))
+                     + f"concat=n={n}:v=0:a=1[outa]")
+        _gmode = _modes[0] if len(set(_modes)) == 1 else "mixed"
+        _gloss = max(_losses) if _losses else None
         # PRINTED, not just ledgered. A reframe that drops 68% of a landscape
         # source's width is a product decision and it must be visible in the log
         # of the run that made it.
         led["geometry_normalise"] = {
             "src": [_v0.get("width"), _v0.get("height")],
             "out": [1080, 1920], "mode": _gmode, "crop_loss": _gloss,
+            "segments": [{"t0": round(_a, 2), "t1": round(_b, 2),
+                          "framing": _fr, "mode": _m}
+                         for (_a, _b, _fr), _m in zip(_vsegs, _modes)],
         }
         print(f"[geometry] {_v0.get('width')}x{_v0.get('height')} -> 1080x1920  "
-              f"mode={_gmode}"
-              + (f"  crop_loss={_gloss:.1%}" if _gloss else ""), flush=True)
+              f"mode={_gmode}  {len(_vsegs)} video seg(s) / {n} audio"
+              + (f"  worst crop_loss={_gloss:.1%}" if _gloss else "")
+              + ("  framing=" + ",".join(str(_fr or "default")
+                                         for _a, _b, _fr in _vsegs[:6])
+                 if len(set(_fr for _a, _b, _fr in _vsegs)) > 1 else ""),
+              flush=True)
         filt = ";".join(parts)
         with open("/work/filter.txt", "w") as fh:
             fh.write(filt)
@@ -8709,7 +8836,22 @@ def edit(source_key: str, brief: str,
                 merged.append([a, z])
         if not merged:
             return {"error": "every beat was ruled 'cut' — that is not an edit"}
-        cutr = build_cut(merged)
+        # THE FRAMING RULINGS, BEAT SPANS IN SOURCE TIME. A beat with no
+        # `framing` contributes nothing and the splitter leaves that stretch
+        # None — the default, which is blur-fill. Only a source whose aspect
+        # differs is affected at all; a 9:16 upload renders exactly as before.
+        _fr_spans = []
+        for _v in vs:
+            _fb = by_i.get(_v.get("beat"))
+            _frv = str(_v.get("framing") or "").strip().lower()
+            if _fb and _frv in ("blur", "fit", "crop"):
+                _fr_spans.append((float(_fb["t_start"]), float(_fb["t_end"]), _frv))
+        _fr_spans.sort()
+        led["framing_ruled"] = [{"beat": _v.get("beat"),
+                                 "framing": str(_v.get("framing")).lower()}
+                                for _v in vs if str(_v.get("framing") or "").lower()
+                                in ("blur", "fit", "crop")]
+        cutr = build_cut(merged, framing_spans=_fr_spans)
         if cutr.get("error"):
             return {"error": f"cut failed: {cutr['error']}"}
         _mark(led, "build_cut", _tc0)
@@ -12340,11 +12482,16 @@ def edit(source_key: str, brief: str,
     # five for five. A check that fires on everything is one you learn to
     # ignore, which is how wrong_resolution went unread for four rounds.
     # Restricted to the families the manifest can actually represent.
-    _DECLARABLE = ("text", "card", "sfx", "zoom")
+    # cutaway JOINED the manifest 2026-09-10 (it was built and then dropped by
+    # a lookup table that never learned the word), so it is declarable now and
+    # the gap check must see it.
+    _DECLARABLE = ("text", "card", "sfx", "zoom", "cutaway")
     _declare_gap = {}
     for _f in _DECLARABLE:
-        _b = int(_fam_built.get(_f, 0) or 0)
-        _d = int(_fam_declared.get(_f, 0) or 0)
+        # `.get(_f, 0)` already defaults; the old `or 0` on top of it was the
+        # shape that turns an ABSENT key into a measured zero elsewhere.
+        _b = int(_fam_built.get(_f, 0))
+        _d = int(_fam_declared.get(_f, 0))
         if _b != _d:
             _declare_gap[_f] = {"built": _b, "declared": _d, "unexplained": _b - _d}
     if _declare_gap:

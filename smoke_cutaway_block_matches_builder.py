@@ -116,7 +116,11 @@ check("the floor the block states IS the floor the builder uses",
       _ns.get("_CUTAWAY_MIN_S") == 0.6, f"{_ns.get('_CUTAWAY_MIN_S')}")
 
 # THE BLOCK SAYS: held for the beat's length, capped at 4.0s.
-_p, _r = _one({"beat": 2, "cutaway_from_s": 15.0})
+# 0.0s: the only window that is BEFORE this 8s beat once the 4s cap is
+# applied, so the cap is what is under test and not the
+# next-footage rule (added 2026-09-10 — a cutaway to 15.0 for a beat ending at
+# 12.0 is the footage about to play, which is now refused by name).
+_p, _r = _one({"beat": 2, "cutaway_from_s": 0.0})
 check("a beat longer than the cap is HELD AT THE CAP, not refused",
       len(_p) == 1 and abs(_p[0]["duration_s"] - 4.0) < 1e-6, f"{_p} {_r}")
 check("the cap the block states IS the cap the builder uses",

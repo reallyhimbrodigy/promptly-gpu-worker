@@ -35,7 +35,9 @@ CASES = [
     ("talking_head",     1080, 1920, "none"),
     ("motion",            540,  960, "scale"),
     ("car_short",         720, 1272, "scale"),
-    ("screen_recording", 3826, 2160, "reframe_crop"),
+    # DEFAULT FRAMING IS BLUR-FILL since 2026-09-10 — a landscape
+    # source keeps its whole frame unless a beat rules `crop`.
+    ("screen_recording", 3826, 2160, "blur_fill"),
     ("car_mid",          2160, 3840, "scale"),
 ]
 
@@ -72,7 +74,9 @@ def main():
 
     # The output must be EXACTLY the contract, and cover-not-pad means the crop
     # is what makes it exact. Assert the emitted filter states both.
-    filt, _, _ = g(3826, 2160)
+    # THE DEFAULT IS NO LONGER CROP (Zac 2026-09-08, framing per beat), so the
+    # cover-crop SHAPE is asserted against the mode that still does it.
+    filt, _, _ = g(3826, 2160, framing="crop")
     check("the filter scales to cover AND crops to exactly 1080:1920",
           "force_original_aspect_ratio=increase" in filt
           and "crop=1080:1920" in filt and "setsar=1" in filt, filt)
@@ -87,7 +91,7 @@ def main():
         return 1
     calls = [n for n in ast.walk(bc) if isinstance(n, ast.Call)
              and getattr(n.func, "id", "") == "geometry_normalise_filter"]
-    check("build_cut CALLS geometry_normalise_filter", len(calls) == 1,
+    check("build_cut CALLS geometry_normalise_filter", len(calls) >= 1,
           f"{len(calls)} call(s)")
     # Its result must be BOUND, not dropped — a call whose value goes nowhere
     # changes nothing, which is the "is it called vs is it choosing" trap.
@@ -95,7 +99,7 @@ def main():
              and any(isinstance(v, ast.Call)
                      and getattr(v.func, "id", "") == "geometry_normalise_filter"
                      for v in ast.walk(n))]
-    check("its result is BOUND, not discarded", len(bound) == 1)
+    check("its result is BOUND, not discarded", len(bound) >= 1)
     # And the normalised stage must produce [outv]: the concat output is renamed
     # to an intermediate whenever a filter exists, so downstream is unchanged.
     strs = [n.value for n in ast.walk(bc)
@@ -103,7 +107,11 @@ def main():
     joined = " ".join(strs) + " " + " ".join(
         v.value for n in ast.walk(bc) if isinstance(n, ast.JoinedStr)
         for v in n.values if isinstance(v, ast.Constant) and isinstance(v.value, str))
-    check("a normalised stage produces [outv]", "[outv]" in joined and "[cv]" in joined)
+    # PER-SEGMENT FRAMING: the video segments carry their own geometry and
+    # concat straight to [outv]; the single [cv] intermediate is gone because
+    # there is no longer one filter for the whole timeline.
+    check("a normalised stage produces [outv]",
+          "[outv]" in joined and "concat=n=" in joined)
 
     print()
     if fails:
