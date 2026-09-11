@@ -937,3 +937,47 @@ inflated by retries into an apparent outage.
   **Two derivations agreeing is the strongest evidence available that a rule is
   real and neither was invented**, and the smoke now asserts they keep
   agreeing, because a drift would mean one is wrong with nothing saying which.
+
+## Standing rules earned 2026-09-11 (two reporting forms)
+
+- **A FUNNEL REPORTED AS ONE NUMBER HIDES WHICH STAGE DID THE WORK.** (Third
+  instance in one file, so it is the standing form now.) I wrote that a
+  241-sentence corpus sweep "became 159 by dropping the old pipeline's schema"
+  and never measured which filter produced the drop. Measured:
+
+      names NO lane enum value at all     66   <- the actual exclusion
+      names a foreign schema field          6   <- what I attributed 82 to
+      already reachable                    10
+
+  So "this corpus is craft written against a dead schema" was wrong by an order
+  of magnitude, and the real finding was better than the one it replaced: 66
+  rules name families this lane does not rule on, which is a product question
+  rather than a translation problem. **State each stage's count, or the
+  conclusion attaches to the wrong cause** — and the cause is what someone acts
+  on.
+
+  Same shape as the three earlier corrections in that file: a
+  document-to-field MAPPING reported as an audit (27 instructable became 7), a
+  heading extractor's blind spot reported as an absence in the corpus ("no
+  guidance anywhere" for two arc values that had it mid-paragraph), and a
+  field-mapping table reported as a translation plan ("five have targets"
+  became one clearly new after reading the six sentences). **The generalisation:
+  reading the population is not the same as classifying it from a distance, and
+  every one of these was a distance claim.**
+
+- **A FLOOR ON A SUM HIDES WHICH CONTRIBUTOR VANISHED.** A leg asserted five
+  wired-claim markers across two documents. Once eight existed, dropping the
+  zoom marker left six across two and the leg passed **while `zoom_arc` lost its
+  craft**. The field that loses its guidance is the one nobody sees go.
+
+  This is the stale-target class one level up: there the mutation and the leg
+  drifted apart, here the leg and the PROPERTY drifted apart because the
+  property is per-contributor and the check was per-total. Floors are now
+  per-document, and the same sweep over this repo's other smokes found the shape
+  in two more places — `figure_note`'s two call sites (the brief and the
+  unruled-beat list are different surfaces, and `>= 2` lets either cover for the
+  other) and `smoke_red_proofs_guarded`'s `len(_harnesses) >= 10`, where one red
+  proof disappearing is exactly what should be noticed and ten others keep it
+  green.
+
+  **When a check counts things that are individually load-bearing, name them.**

@@ -223,6 +223,27 @@ MG_PROPS_TEACH = _mg_props_teach()
 # grading exactly this field against the frame while the agent was never told
 # what it is for — and rule_all_beats' copy had NO DESCRIPTION AT ALL, on the
 # surface called every run, while beat_verdict's repair path had one.
+# A TRANSLATION, MARKED AS ONE. Everything else wired from the catalogue is
+# EXTRACTED — pulled by anchor, unchanged. This is not: the source rule is
+#
+#     "Protected words (hook / payoff / close / key_moments) are never cut."
+#
+# and `key_moments` does not exist here. Translating it took a decision — that
+# this lane's equivalent of the peak ledger is "the beats you rule `zoom` on" —
+# so it carries a `translated` marker rather than `wired`, and a reader can
+# tell which claims a human reinterpreted from which were lifted.
+#
+# AND `cut` HAD NO DESCRIPTION ON EITHER SURFACE. It is answered on every beat
+# of every run and carried nothing but its enum. Third field found bare this
+# way after `why` and the primary surface's copy of it.
+CUT_FIELD_TEACH = (
+    "keep or cut THIS beat. PROTECTED POSITIONS ARE NEVER CUT: the hook, the "
+    "payoff and the close, and any beat you rule `zoom` on — a zoom with its "
+    "beat removed is a move with nothing to land on. "
+    "[01_cut_pass, translated 2026-09-11: the source says 'hook / payoff / "
+    "close / key_moments are never cut'; key_moments is the old pipeline's peak "
+    "ledger and its equivalent here is the beats you rule zoom on]")
+
 WHY_FIELD_TEACH = (
     "about THIS beat's content. NAME THE SPECIFIC MOMENT that asked for this "
     "treatment, in twelve words or fewer - 'the 55 degree spec is the payoff "
@@ -545,7 +566,16 @@ def arc_jobs_teach(enum_values):
     # the text says so rather than shipping a prompt missing a rule silently.
     if _ARC_RULE_STATE == "MEASURED" and ARC_RULES:
         _txt += (" [01_cut_pass, wired 2026-09-11] [06_emphasis_zoom, wired "
-                 "2026-09-11] " + " ".join(ARC_RULES))
+                 "2026-09-11] " + " ".join(ARC_RULES)
+                 # TRANSLATED, not extracted: the source states this inside a
+                 # `zoom_effect` schema block that does not exist here, so the
+                 # claim was lifted out of a foreign shape by hand.
+                 + " The arc position is YOUR CLAIM and nothing else about the "
+                   "move is: the harness picks the type from the position and "
+                   "the vibe, back-times the peak onto the word, and floors it "
+                   "at the clip head. Nothing for you to compute or clamp. "
+                   "[06_emphasis_zoom, translated 2026-09-11 from a zoom_effect "
+                   "schema block this lane does not have]")
     elif ARC_RULES:
         _txt += (" PARTIAL: %s. %s" % (_ARC_RULE_WHY, " ".join(ARC_RULES)))
     return _txt
@@ -2753,7 +2783,8 @@ KNOWLEDGE_TOOLS = [{
                                                "enum": ["card", "text", "sfx",
                                                         "zoom", "transition",
                                                         "none"]}},
-                                 "cut": {"type": "string", "enum": ["keep", "cut"]},
+                                 "cut": {"type": "string", "enum": ["keep", "cut"],
+                                         "description": CUT_FIELD_TEACH},
                                  "text_content": {
                                      "type": "string",
                                      "description": "REQUIRED when treatment "
@@ -2991,7 +3022,8 @@ KNOWLEDGE_TOOLS = [{
                          "treatment": {"type": "string",
                                        "enum": ["card", "text", "sfx", "zoom",
                                                 "transition", "none"]},
-                         "cut": {"type": "string", "enum": ["keep", "cut"]},
+                         "cut": {"type": "string", "enum": ["keep", "cut"],
+                                         "description": CUT_FIELD_TEACH},
                          "why": {"type": "string",
                                  "description": WHY_FIELD_TEACH}},
                      "required": ["beat", "purpose", "treatment", "cut",
