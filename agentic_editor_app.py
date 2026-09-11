@@ -10012,7 +10012,10 @@ def edit(source_key: str, brief: str,
                                                  else ZOOM_NATURAL_SCALE.get(_ztype, 1.22)),
                                "peak_lands_at_s": round(_cs + _peak_s, 3),
                                "beat_at_s": round(a2, 3),
-                               "beat": v.get("beat"),
+                               # `beat` is already the second key of this dict.
+                               # The merge added it again at the end with the
+                               # same expression — harmless today, and a silent
+                               # overwrite the day the two differ. One key.
                                "head_clamped": _clamped})
             _zcursor += _n_frames
 

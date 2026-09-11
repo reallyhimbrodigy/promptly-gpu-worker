@@ -113,6 +113,27 @@ def fingerprint(verbose=False):
             + "\nA fingerprint over a subset would certify arms as identical "
               "while a mounted tree differed between them.")
     fp = top.hexdigest()[:16]
+    # THE COMMIT, BESIDE THE FINGERPRINT. The fingerprint is a content hash of
+    # the mounted paths and is NOT a git object, so it cannot answer "which
+    # tree did this round run". Builder-2 hit that on round 57: settling
+    # whether a fix was in the tree took my word plus an ancestry check
+    # instead of a read. HEAD is printed alongside, with -dirty when the
+    # worktree differs from it, because a clean sha over a dirty tree is the
+    # more expensive half of the same ambiguity.
+    try:
+        import subprocess as _sp
+        _sha = _sp.run(["git", "rev-parse", "--short", "HEAD"],
+                       capture_output=True, text=True,
+                       cwd=os.path.dirname(os.path.abspath(__file__))
+                       ).stdout.strip() or "UNKNOWN"
+        _dirty = _sp.run(["git", "status", "--porcelain", "--untracked-files=no"],
+                         capture_output=True, text=True,
+                         cwd=os.path.dirname(os.path.abspath(__file__))
+                         ).stdout.strip()
+        _head = _sha + ("-dirty" if _dirty else "")
+    except Exception:                                             # noqa: BLE001
+        _head = "UNKNOWN"
+    fp = f"{fp} @{_head}"
     if verbose:
         print(f"{'path':70} {'sha':14}{'files':>7}{'bytes':>12}")
         for p, sha, n, tot in rows:

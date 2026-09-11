@@ -64,30 +64,45 @@ def apply_one(src, anchor, replacement):
 
 if __name__ == "__main__":
     import sys
-    _bad = []
+    _bad, _ran = [], []
+    _LEGS_EXPECTED = 7
     _s = 'def f():\n    if x <= y:\n        return (A, b)\n    t = ("one "\n         "two")\n'
+    _ran.append(1)
     if find_one(_s, "return (A, b)")[0] != EXACT:
         _bad.append("an exact single occurrence must report EXACT")
+    _ran.append(1)
     if find_one(_s, '("one " "two")')[0] != LOOSE:
         _bad.append("a re-wrapped literal must resolve LOOSE, not 0x — this is "
                     "the case that orphaned a real mutation")
+    _ran.append(1)
     if find_one(_s, "return")[0] != EXACT or find_one(_s + _s, "return (A, b)")[0] != MANY:
         _bad.append("two occurrences must report MANY, never pick one")
+    _ran.append(1)
     if find_one(_s, "return (A, c)")[0] != NONE:
         _bad.append("an anchor whose TOKENS changed must be 0x — a resolver "
                     "that lands somewhere plausible is worse than one that fails")
+    _ran.append(1)
     if find_one(_s, "if x < y:")[0] != NONE:
         _bad.append("a changed operator must be 0x; whitespace tolerance must "
                     "not become semantic tolerance")
+    _ran.append(1)
     _m, _out = apply_one(_s, '("one " "two")', '("three")')
     if _m != LOOSE or "three" not in (_out or ""):
         _bad.append("apply_one must mutate through a LOOSE match")
+    _ran.append(1)
     if apply_one(_s, "nope", "x") != (NONE, None):
         _bad.append("apply_one must refuse an unresolved anchor")
+    # A FLOOR, IN THE SHAPE THE CHECKER READS. This proof has no mutation list
+    # to be empty — it has a fixed sequence of assertions, and deleting all of
+    # them leaves `_bad` empty and prints PASS. So the legs that RAN are
+    # collected, and the exit tests that collection as a BARE OPERAND: an
+    # emptied proof reports failure, not success.
     if _bad:
         print("RED-PROOF-ANCHOR: FAIL")
         for _b in _bad:
             print("  - " + _b)
-        sys.exit(1)
-    print("RED-PROOF-ANCHOR: PASS — exact, whitespace-loose, 0x on a token "
-          "change, Nx on ambiguity, and never a plausible landing")
+    else:
+        print("RED-PROOF-ANCHOR: PASS — exact, whitespace-loose, 0x on a token "
+              "change, Nx on ambiguity, and never a plausible landing "
+              "(%d leg(s))" % len(_ran))
+    sys.exit(0 if _ran and len(_ran) == _LEGS_EXPECTED and not _bad else 1)
