@@ -5910,6 +5910,49 @@ def derive_card_props(mg_type, hero, label=""):
     return (_p, "filled %s from the phrase" % sorted(_p))
 
 
+def mg_conditions(path=None):
+    """{condition: [components]} — EXTRACTED FROM THE CATALOGUE, never typed.
+
+    THE CATALOGUE ALREADY ANSWERS THE SELECTION QUESTION and the agent has never
+    seen it. `knowledge/05_motion_graphics.md` is organised under eight
+    condition headings — WHEN A NUMBER LANDS, WHEN A CLAIM GETS A VERDICT OR
+    STAMP, WHEN TIME OR SEQUENCE IS THE STORY — and every documented component
+    sits under the question it answers. That is the discriminator
+    `derive_card_type` does not have, written down for months, in a document
+    `read_knowledge` has been called ZERO times on.
+
+    Third instance of the same class: the overlay rule that stopped talking_head
+    subtitling itself, the card_props shape that cost three rounds of zero
+    cards, and this. A rule in a document the agent does not open is
+    indistinguishable from a rule nobody wrote.
+
+    DERIVED, so a catalogue edit cannot leave this behind — the repo's standing
+    rule after the hand-copied asset tables.
+    """
+    import re as _re
+    _p = path or os.path.join(_KNOWLEDGE_DIR, "05_motion_graphics.md")
+    try:
+        _txt = open(_p, encoding="utf-8").read()
+    except OSError as _e:
+        return ("FAILED", {}, "cannot read the catalogue: %s" % _e)
+    _heads = [(m.start(), m.group(1).strip())
+              for m in _re.finditer(r"──\s*(WHEN [^─]+?)\s*──", _txt)]
+    if not _heads:
+        return ("ABSENT", {},
+                "the catalogue carries no WHEN headings — the selection "
+                "structure this reads is gone, and a silent {} would read as "
+                "'no conditions' rather than 'the source changed shape'")
+    _out = {_h: [] for _p2, _h in _heads}
+    for _m in _re.finditer(r"\*\*([A-Z][A-Za-z]+)\*\*\s*\(", _txt):
+        _prev = [_h for _p2, _h in _heads if _p2 < _m.start()]
+        if not _prev:
+            continue                    # documented before the first heading
+        _c = _m.group(1)
+        if _c not in _out[_prev[-1]]:
+            _out[_prev[-1]].append(_c)
+    return ("MEASURED", {_k: sorted(_v) for _k, _v in _out.items() if _v}, "")
+
+
 def derive_card_type(hero, beat_text="", vibe=""):
     """(type, why) — WHICH component this claim wants. Never a default.
 

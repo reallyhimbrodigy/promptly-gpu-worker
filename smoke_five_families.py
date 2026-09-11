@@ -191,6 +191,36 @@ ok(bool(_tl),
    "nothing derives _too_long from the HERO_TOO_LONG marker, so the skip "
    "cannot distinguish a copy fault from a catalogue gap and offers authoring "
    "for both")
+# ── THE CATALOGUE'S OWN CONDITIONS, DERIVED NOT TYPED ───────────────────────
+_mgc = next((n for n in TREE.body
+             if isinstance(n, ast.FunctionDef) and n.name == "mg_conditions"), None)
+ok(_mgc is not None, "mg_conditions does not exist")
+if _mgc is not None:
+    import subprocess as _sp
+    _r = _sp.run([sys.executable, "-c",
+                  "import modal_stub;modal_stub.install();"
+                  "import agentic_editor_app as A;"
+                  "st,d,w=A.mg_conditions();"
+                  "print(st);print(len(d));"
+                  "print(sum(len(v) for v in d.values()));"
+                  "print(sorted(A.VALID_MG_TYPES-{c for v in d.values() for c in v}))"],
+                 capture_output=True, text=True)
+    _out = (_r.stdout or "").splitlines()
+    ok(len(_out) >= 4 and _out[0] == "MEASURED",
+       "mg_conditions does not read the catalogue: %r" % (_r.stdout + _r.stderr)[:200])
+    if len(_out) >= 4:
+        ok(int(_out[1]) == 8,
+           "the catalogue's condition headings changed count (%s, expected 8) — "
+           "CARD_CATALOGUE_REACH.md's group-A argument is measured against them"
+           % _out[1])
+        ok(int(_out[2]) >= 26,
+           "fewer components are documented under a condition than the 26 the "
+           "reach census was taken over (%s)" % _out[2])
+        ok("DeviceMockup" in _out[3] and "EmojiCard" in _out[3],
+           "the undocumented components changed — the reach census names "
+           "exactly which have no catalogue entry: %s" % _out[3])
+ok(pathlib.Path("CARD_CATALOGUE_REACH.md").exists(),
+   "the catalogue reach census is not on the record")
 ok(pathlib.Path("AUTHORING_VERDICT.md").exists(),
    "the authoring verdict is not on the record — Zac asked twice and the "
    "answer has to survive this session")
