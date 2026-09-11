@@ -79,7 +79,7 @@ check("the report carries the HERO, so the agent has the material",
 check("and a remedy naming author_component",
       "author_component is how this" in src)
 check("the beats are ledgered so the round can count them",
-      'led.setdefault("authorable_beats"' in src,
+      'led.setdefault("catalogue_gap_beats"' in src,
       "a signal that reaches the agent and not the ledger cannot be measured "
       "afterwards; one that reaches the ledger and not the agent cannot be "
       "acted on. This needs both.")

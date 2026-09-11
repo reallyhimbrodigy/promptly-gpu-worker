@@ -169,7 +169,16 @@ def sheet(result, ref_beats, provenance):
     led = (result or {}).get("ledger") or {}
     beats = led.get("beats") or []
     placements = led.get("placements") or []
-    verdicts = {v.get("beat"): v for v in (led.get("beat_verdicts") or [])}
+    # ALL RULINGS PER BEAT, NOT THE LAST. Beats get ruled more than once — a
+    # second pass re-rules some — and a dict keyed by beat index SILENTLY KEEPS
+    # THE LAST. car_short has 6 verdicts for 3 beats and its beat 1 went
+    # `zoom+cutaway+sfx` then `zoom+sfx`: the re-rule DROPPED cutaway. Keying by
+    # beat would have shown the second and hidden that the first existed, and
+    # every "agent's why" in this sheet would have been the wrong ruling with
+    # nothing to indicate it. (Flagged by Builder-1 before I ran it.)
+    verdicts = {}
+    for _v in (led.get("beat_verdicts") or []):
+        verdicts.setdefault(_v.get("beat"), []).append(_v)
     _keep = led.get("keep_spans") or []
     out = []
 
@@ -202,7 +211,16 @@ def sheet(result, ref_beats, provenance):
                     _b = b
                     break
         _dur = (_f(_b.get("t_end")) - _f(_b.get("t_start"))) if _b else 0.0
-        _v = verdicts.get(_b.get("i")) if _b else None
+        _all_v = verdicts.get(_b.get("i")) if _b else None
+        # The ruling that PRODUCED this placement is the one whose treatment
+        # names its family — not simply the newest.
+        _fam = str(p.get("family") or p.get("type") or "").lower()
+        _v = None
+        if _all_v:
+            _match = [x for x in _all_v
+                      if _fam in [str(t).lower() for t in (x.get("treatment") or [])]]
+            _v = _match[-1] if _match else _all_v[-1]
+            _unruled = not _match
         _pos = ""
         if _b and beats:
             if _b.get("i") == beats[0].get("i"):
@@ -218,6 +236,15 @@ def sheet(result, ref_beats, provenance):
         out.append("    placed: %s" % (str(p.get("content") or "")[:88] or "(no content recorded)"))
         if _b:
             out.append("    beat text: %s" % str(_b.get("text") or "")[:88])
+        if _v and locals().get("_unruled"):
+            # BUILT BUT NOT RULED — the inverse of ruled_but_not_built, and it
+            # has never had a name. A placement exists whose beat carries NO
+            # ruling naming its family, so the `why` shown below is the agent's
+            # reasoning about a DIFFERENT decision. Judging the placement
+            # against it would be judging the wrong sentence.
+            out.append("    !! BUILT BUT NOT RULED: no verdict on this beat "
+                       "names '%s'. The why below belongs to another ruling."
+                       % _fam)
         if _v:
             out.append("    agent's why: %s" % str(_v.get("why") or "")[:88])
             out.append("    agent ruled: %s%s"
@@ -227,6 +254,16 @@ def sheet(result, ref_beats, provenance):
             _gs, _gd = reason_grounding(_v.get("why"),
                                         (_b or {}).get("text"))
             out.append("    reason is %s — %s" % (_gs, _gd))
+            if _all_v and len(_all_v) > 1:
+                _trs = ["+".join(x.get("treatment") or []) or "none"
+                        for x in _all_v]
+                out.append("    !! this beat was ruled %d times: %s"
+                           % (len(_all_v), " THEN ".join(_trs)))
+                if len(set(_trs)) > 1:
+                    out.append("       the re-rule CHANGED the treatment — the "
+                               "verdict below is about the ruling that names "
+                               "this family, and the other ruling is a "
+                               "different decision the agent also made")
         else:
             out.append("    NO VERDICT FOUND for this beat — the placement "
                        "exists and the ruling behind it does not, which is a "

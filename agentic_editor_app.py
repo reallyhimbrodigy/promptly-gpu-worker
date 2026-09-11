@@ -8642,7 +8642,13 @@ def edit(source_key: str, brief: str,
                                "remedy": "no catalogue component fits this "
                                          "hero; author_component is how this "
                                          "beat gets served"})
-                led.setdefault("authorable_beats", []).append(
+                # RENAMED FROM authorable_beats 2026-09-10. Builder-1's harness
+                # uses that name for a DENOMINATOR — beats eligible to carry a
+                # placement at all — and this is a DEFECT COUNT: beats where a
+                # card was ruled and no catalogue component fits. Same word, one
+                # a rate's denominator and the other a failure tally, and we
+                # nearly shipped both.
+                led.setdefault("catalogue_gap_beats", []).append(
                     {"beat": v.get("beat"), "hero": str(hero)[:60],
                      "why": _dwhy[:120]})
                 continue
