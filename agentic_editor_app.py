@@ -2461,11 +2461,14 @@ def cover_unnarrated_edges(beats, duration_s, min_beat_s=1.2):
     if head >= floor:
         out.insert(0, {"i": -1, "t_start": 0.0, "t_end": round(head, 2),
                        "text": f"[no narration] {head:.1f}s of footage before "
-                               f"the first word — visible content, not dead air"})
+                               f"the first word — footage doing a job before "
+                               f"speech starts; a hook or an establish, not "
+                               f"dead air"})
     if dur - tail_start >= floor:
         out.append({"i": -1, "t_start": round(tail_start, 2), "t_end": round(dur, 2),
                     "text": f"[no narration] {dur - tail_start:.1f}s of footage "
-                            f"after the last word — visible content, not dead air"})
+                            f"after the last word — footage after speech ends; a "
+                            f"close or a breath, not leftover"})
     # RE-INDEX AND RE-ROLE. `i` is the agent's handle on a beat and hook/close
     # are marked mechanically as first and last; leaving them on the old first
     # beat would put the hook in the middle of the timeline.
@@ -5448,6 +5451,68 @@ def reference_family_note(family, beats=None, meta=None):
 
 BEAT_PURPOSES = ("hook", "claim", "evidence", "turn", "payoff", "close",
                  "breath")
+
+# ── THE VISUAL ROUTE'S OWN LANGUAGE ─────────────────────────────────────────
+#
+# THE DEFECT, with the evidence. 46.5% of real traffic has no narration, and
+# until now the silent route was told to "rule on them exactly as you would rule
+# on spoken beats" and that stillness is "the visual equivalent of dead air".
+# It borrowed the speech route's language because it had none of its own.
+# Round 52, car_short beat 0: the beat's OWN TEXT said "visible content, not
+# dead air", and the agent's why said "5.7s of pre-speech setup is dead air"
+# and cut it. Wet street footage building tension, deleted as silence.
+#
+# NOT A SECOND VOCABULARY. The seven purposes stay the join key — the reference
+# exemplars are indexed by them and adding a visual axis would recreate the
+# purpose/zoom_arc collision fixed this morning. What changes is the DEFINITION
+# each purpose is given on the silent route: the same seven words, described in
+# what footage DOES rather than what a sentence says. A hook is still a hook; on
+# a silent clip it is the first look at the subject, not the first line.
+#
+# GROUNDED IN WHAT THE ROUTE CAN MEASURE — motion energy, shot changes, held
+# stretches, and the frame description when vision ran — and in the reference
+# reads, which already think this way even on speech videos: "static wide shot
+# lets it breathe", "new framing marks the pivot", "held shot", "cuts away".
+VISUAL_PURPOSE_READS = {
+    "hook":     "the first look at the subject, place or motion — what the eye "
+                "is given before anything else. Establishing footage is a hook "
+                "doing its job, not waiting.",
+    "claim":    "the footage asserts something on its own: the subject in full "
+                "view, the action clearly stated, the thing the clip is ABOUT "
+                "shown plainly.",
+    "evidence": "the picture backs the claim up — the detail, the close-up, the "
+                "second angle, the thing that proves the first shot.",
+    "turn":     "a change of framing, subject or energy. A shot change is a turn "
+                "when it changes what the clip is about, not merely where the "
+                "camera is.",
+    "payoff":   "the moment the footage was building to — the impact, the "
+                "reveal, the peak of motion, the thing arriving. At most one per "
+                "clip.",
+    "close":    "energy falls and the picture settles. The last look. Footage "
+                "after the peak is a close, not leftover.",
+    "breath":   "a held shot or a still stretch that carries no new "
+                "information — and is often THE POINT. Stillness after motion "
+                "is where the eye rests. It is a beat to rule on, not dead air "
+                "to delete.",
+}
+assert set(VISUAL_PURPOSE_READS) == set(BEAT_PURPOSES), (
+    "the visual reads must cover exactly the seven purposes — a purpose with a "
+    "speech definition and no visual one is the defect this closes")
+
+
+def visual_purpose_block():
+    """The seven purposes in footage terms, for the silent route's brief."""
+    return ("WHAT EACH KIND OF MOMENT IS, IN FOOTAGE TERMS. This source has no "
+            "narration, so the beats are what the PICTURE does. Rule on them by "
+            "what is happening in the frame — motion, framing, subject, "
+            "stillness — never by what would have been said.\n"
+            + "\n".join("  %-9s %s" % (_p.upper(), VISUAL_PURPOSE_READS[_p])
+                         for _p in BEAT_PURPOSES)
+            + "\n\nSTILLNESS IS NOT DEAD AIR. Dead air is a speech concept: "
+              "silence between words. A held shot has no words to be between. "
+              "A still stretch is a BREATH if it lets the eye rest, and a HOOK or "
+              "a CLOSE if it is the first or last look — it is footage, and it "
+              "is ruled on, not cleared.\n")
 
 
 def _reference_block(our_beats, k=2):
@@ -9577,14 +9642,18 @@ def edit(source_key: str, brief: str,
                "NO SPEECH. This source carries no transcript, so the beats below "
                "were derived from the VIDEO ITSELF — motion energy and shot "
                "changes. Each beat's text shows its mean motion (0-1) and "
-               "whether a shot change falls inside it. Rule on them exactly as "
-               "you would rule on spoken beats: a high-motion beat is a moment "
-               "landing, a shot change is a boundary the edit should respect. "
-               "Do NOT place captions — there is nothing to caption.\n\n")
-            + (("STILLNESS ALREADY DETECTED — these are the visual equivalent of "
-                "dead air: stretches where this clip is much quieter than it "
-                "typically is. They are CANDIDATES to remove, not instructions; "
-                "a held shot is sometimes the point, so rule on each.\n"
+               "whether a shot change falls inside it. Rule on them by what "
+               "the PICTURE does: a high-motion beat is a moment landing, a "
+               "shot change is a boundary the edit should respect, a held "
+               "shot is a beat in its own right. "
+               "Do NOT place captions — there is nothing to caption.\n\n"
+               + visual_purpose_block() + "\n")
+            + (("STILLNESS ALREADY DETECTED — stretches where this clip moves "
+                "much less than it typically does. These are NOT dead air; that "
+                "is a speech concept and there is no speech here. They are "
+                "CANDIDATES to consider, not instructions: a held shot is often "
+                "the point — a breath after motion, the first look, the last — "
+                "so rule on each as footage.\n"
                 + "\n".join(f"  [{_v['t_start']:.2f}-{_v['t_end']:.2f}] "
                              f"{_v['duration_s']:.1f}s, motion {_v['mean_motion']}"
                              for _v in (led.get("visual_cut_candidates") or []))
