@@ -326,17 +326,27 @@ check("fewer than two values is ABSENT — two points cannot show a gap",
       and A.bar_separates([], bar=6.0)[0] == "ABSENT")
 check("an infinite delta is not counted as a value",
       A.bar_separates([float("inf"), 5.0], bar=6.0)[0] == "ABSENT")
+# PER FAMILY, read from the AST rather than from a name that appears four
+# times. `"region_bar_separation" in src` would survive deleting the per-family
+# loop entirely, because the key is also read where the verdicts are resolved.
+_bsl = [n for n in ast.walk(tree) if isinstance(n, ast.For)
+        and any(isinstance(x, ast.Call)
+                and getattr(x.func, "id", "") == "bar_separates"
+                for x in ast.walk(n))]
 check("the separation is checked PER FAMILY — only the text family's "
       "distribution moved",
-      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "bar_separates"
-          for n in ast.walk(tree))
-      and "region_bar_separation" in src)
+      bool(_bsl) and any("_fx" in ast.unparse(n.iter) or "items()" in ast.unparse(n.iter)
+                         for n in _bsl),
+      "bar_separates must be called inside a loop over the families, not once "
+      "over everything")
 check("and an unsupportable bar fails LOUDLY, naming its verdicts unvalidated",
       any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "fail"
           and any(isinstance(x, ast.Constant)
                   and x.value == "inert_bar_inside_population"
                   for x in ast.walk(n)) for n in ast.walk(tree))
-      and "UNVALIDATED" in src)
+      and any(isinstance(n, ast.Constant) and isinstance(n.value, str)
+              and "UNVALIDATED" in n.value and "do not read them as defects" in n.value
+              for n in ast.walk(tree)))
 
 # ── 7. THE BAR IS PER CONTROL SCHEME, AND REFUSES WHERE NONE IS SUPPORTABLE ──
 # One bar was being applied to two populations whose nulls differ by 8 dB. It
@@ -355,10 +365,19 @@ check("a missing scheme is treated as unknown, not as the old default",
 check("and the basis is carried with the bar, never just the number",
       all(isinstance(A.region_bar_for(k)[1], str) and A.region_bar_for(k)[1]
           for k in ("same_window_layer_withheld", "window_elsewhere", "x")))
+# THE ASSIGNMENT, not the word. "UNVALIDATED" appears three times in the app.
+_unv = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                and t.slice.value == "region_verdict" for t in n.targets)
+        and isinstance(n.value, ast.Constant) and n.value.value == "UNVALIDATED"]
 check("a region measurement with no supportable bar records UNVALIDATED and "
       "changed=None, never CHANGED or INERT",
-      '_rec["region_verdict"] = "UNVALIDATED"' in src
-      and "return None, _db" in src)
+      bool(_unv) and any(
+          isinstance(n, ast.Assign)
+          and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                  and t.slice.value == "changed" for t in n.targets)
+          and isinstance(n.value, ast.Constant) and n.value.value is None
+          for n in ast.walk(tree)))
 # THE BRANCH, NOT THE NAME. `'_deferred_inert' in src` survived gutting the
 # deferral entirely, because the name still appears in the block that resolves
 # the list at the end of the run. Read the If that does the deferring: it must
