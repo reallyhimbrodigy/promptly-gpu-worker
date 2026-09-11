@@ -347,7 +347,13 @@ IMG = (modal.Image.debian_slim(python_version="3.11")
        .run_commands(
            "cd /promptly-remotion && npm install --no-audit --no-fund",
            "cd /promptly-remotion && npx remotion browser ensure")
-       .pip_install(["anthropic", "deepgram-sdk==3.*"])
+       # fastapi: @modal.fastapi_endpoint needs it IN THE IMAGE. Round 55, all
+       # five arms, at launch: "Functions using @modal.fastapi_endpoint require
+       # FastAPI to be installed in their Image" — the decorator arrived with a
+       # merge from a branch that never ran on Modal, 80 smokes were green on
+       # the laptop where modal is a stub, and every container refused to
+       # start. smoke_endpoint_deps_in_image pins decorator -> package.
+       .pip_install(["anthropic", "deepgram-sdk==3.*", "fastapi[standard]"])
        .add_local_dir(_SKILLS_SRC, "/skills", copy=True, ignore=_SKILLS_IGNORE)
        .add_local_dir(_ASSETS_SOUNDS, "/assets/sounds", copy=True)
        .add_local_file(_INVENTORY_JSON, "/assets/inventory.json", copy=True)
