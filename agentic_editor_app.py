@@ -1664,6 +1664,15 @@ knowledge set at all — it answers "how to work", never "how to cut".
       "if something is unclear, stop, name what is confusing, ask" — Zac's
       ruling for ambiguous re-edit instructions, 2026-09-10.)
 
+  K6. MEASURE BEFORE YOU REBUILD. If a build did not come out right, find out
+      WHY before running execute_plan again. `inspect_output` is how; the
+      ledger's own defect lines (placement_inert, RULED vs BUILT gaps) name
+      what went wrong. Measured across rounds 51-54: 9 of 15 runs called
+      execute_plan more often than inspect_output, and two called it THREE
+      times against ONE measurement — rebuilding on a guess, which is the same
+      render billed twice. A second identical failure is not bad luck; it is
+      the first diagnosis never made.
+
   NOT ADOPTED — "simplicity first / nothing beyond what was asked". It is good
   advice for writing code and it is WRONG FOR THIS JOB, measured: across five
   runs this agent placed 0-1 cards where the beats plainly called for more.
@@ -6108,7 +6117,7 @@ _REQUIRED_CONSTRAINTS = [
     # asset library that reported mounted_unread on every run; E4 was a
     # tombstone for a retired rule. ~4,200 chars describing paths the agent no
     # longer takes, billed on every turn of every render.
-    "C8.", "C9.", "F1.", "S1.", "E1.", "E2.", "E3.", "E5.", "K1.", "K2.", "K3.", "K4.", "K5."]
+    "C8.", "C9.", "F1.", "S1.", "E1.", "E2.", "E3.", "E5.", "K1.", "K2.", "K3.", "K4.", "K5.", "K6."]
 # Every one of these was tried against this image and FAILED. If a future edit
 # reintroduces them the agent inherits 31 failed attempts again.
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
@@ -10981,6 +10990,27 @@ def edit(source_key: str, brief: str,
     # measured. Two placements collide when they overlap in TIME and in PIXELS;
     # declared anchors are excluded on purpose, because a component that
     # overflows its anchor still reports the anchor.
+    # K6, MEASURED. A rebuild with no measurement since the last one is a
+    # render billed for a guess. Counted from the turn record — the tools the
+    # agent actually called, in order — not from a self-report.
+    _seen_inspect, _blind = True, 0
+    for _t6 in (led.get("turns") or []):
+        for _tool in (_t6.get("tools") or []):
+            if _tool == "inspect_output":
+                _seen_inspect = True
+            elif _tool == "execute_plan":
+                if not _seen_inspect:
+                    _blind += 1
+                _seen_inspect = False
+    led["rebuilds_without_measurement"] = _blind
+    led["execute_plan_calls_total"] = sum(
+        1 for _t6 in (led.get("turns") or []) for _x in (_t6.get("tools") or [])
+        if _x == "execute_plan")
+    print("  K6 REBUILDS     : %d of %d execute_plan call(s) ran with NO "
+          "inspect_output since the previous build%s"
+          % (_blind, led["execute_plan_calls_total"],
+             "" if led["execute_plan_calls_total"] else
+             "  (ABSENT: no turn record)"), flush=True)
     led["placement_collisions"] = placement_collisions(led.get("_painted_boxes") or [])
     _pb = led.get("_painted_boxes") or []
     _uniq = {(x.get("family"), round(float(x.get("t0", 0)), 3),
@@ -11074,8 +11104,8 @@ def edit(source_key: str, brief: str,
         # Verified against sys_text, NOT the module constant, so an arm that
         # ships a stripped prompt cannot pass on the constant's behalf.
         "karpathy_behaviour": {
-            "mounted": all(k in sys_text for k in ("K1.", "K2.", "K3.", "K4.", "K5.")),
-            "used": [k for k in ("K1.", "K2.", "K3.", "K4.", "K5.") if k in sys_text],
+            "mounted": all(k in sys_text for k in ("K1.", "K2.", "K3.", "K4.", "K5.", "K6.")),
+            "used": [k for k in ("K1.", "K2.", "K3.", "K4.", "K5.", "K6.") if k in sys_text],
             "want": ["K1.", "K2.", "K3.", "K4."],
             "resident": True,
         },

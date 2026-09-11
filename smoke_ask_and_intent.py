@@ -168,6 +168,31 @@ check("and it is distinct from DONE — no plan comes back with a question",
 check("the wire contract documents it for the server half",
       "NEEDS_INPUT" in pathlib.Path("CONTRACT_agentic_wire.md").read_text())
 
+# ── 4. K6: MEASURE BEFORE YOU REBUILD ───────────────────────────────────────
+# Distilled from obra/superpowers the way Karpathy's four were: its iron law
+# "NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST" is the one rule in that
+# repo not already covered by K1-K5, and it has evidence HERE — rounds 51-54,
+# 9 of 15 runs called execute_plan more often than inspect_output.
+check("K6 is in the working-discipline block", "K6." in src)
+check("K6 is in the prompt-section fingerprint", src.count('"K6."') >= 2)
+_blind = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+          and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                  and t.slice.value == "rebuilds_without_measurement" for t in n.targets)]
+check("the rebuild-without-measurement counter is ledgered", bool(_blind))
+check("it is computed from the TURN RECORD, not a self-report",
+      any(isinstance(n, ast.For) and "turns" in ast.unparse(n.iter)
+          for n in ast.walk(tree)
+          if isinstance(n, ast.For) and "_t6" in ast.unparse(n.target)))
+check("and PRINTED in the same commit that adds it, with its denominator",
+      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "print"
+          and any(isinstance(x, ast.Constant) and isinstance(x.value, str)
+                  and "K6 REBUILDS" in x.value for x in ast.walk(n))
+          and any(isinstance(x, ast.Name) and x.id == "_blind" for x in ast.walk(n))
+          for n in ast.walk(tree)),
+      "a count with no denominator is the reporting defect this repo bans")
+check("an absent turn record says ABSENT rather than reading 0 of 0 as clean",
+      "ABSENT: no turn record" in src)
+
 print()
 if fails:
     print("ASK-AND-INTENT: FAIL")
@@ -175,4 +200,5 @@ if fails:
         print("  - " + _f)
     sys.exit(1)
 print("ASK-AND-INTENT: PASS — no overlay without a ruling, the executed rulings "
-      "are frozen, and an ambiguous request stops and asks for free")
+      "are frozen, an ambiguous request stops and asks for free, and a blind "
+      "rebuild is counted against its denominator")
