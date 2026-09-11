@@ -1764,6 +1764,9 @@ WHAT THE BUILDER WILL ACCEPT, so nothing you rule is lost at build time:
   clock the transcript timestamps use. Not output seconds. The builder remaps it.
 - It must fall inside the source, and it must NOT fall inside this beat's own
   footage: cutting from a beat to itself shows the same picture.
+- It must NOT be the footage that plays right after this beat (the next few
+  seconds). The viewer is about to see that anyway; showing it early is a
+  stutter, not a reveal. Cut to something from elsewhere in the clip.
 - The beat must survive the cut. A beat you also ruled `cut` has no output span
   to cover, so it cannot carry one.
 - The beat needs at least 0.6s in the OUTPUT. Shorter than that a cutaway reads
