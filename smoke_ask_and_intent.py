@@ -215,6 +215,66 @@ check("and PRINTED with BOTH numbers and the state",
               for _nm in ("_k6_state", "_k6_blind", "_k6_total")) for n in _k6p),
       "a count with no denominator is the reporting defect this repo bans")
 
+# ── 5. THE OVERLAY TRACK IS NOT A SECOND SUBTITLE TRACK ─────────────────────
+# talking_head shipped an upper overlay accumulating the transcript verbatim in
+# caps while the caption track below showed the same words. The rule against it
+# has always existed, perfectly stated, in knowledge/04_text_overlays.md — a
+# document reachable only by spending a read_knowledge turn the agent does not
+# spend. Same shape as card_props, which cost three rounds of zero cards.
+_B = [{"i": 0, "t_start": 0.0, "t_end": 2.0, "text": "being a content creator is not easy"},
+      {"i": 1, "t_start": 2.0, "t_end": 4.0, "text": "posting ten times a day takes hours"},
+      {"i": 2, "t_start": 4.0, "t_end": 6.0, "text": "editing your own videos takes forever"}]
+_V = lambda *copy: [{"beat": i, "treatment": ["text"], "text_content": c}
+                    for i, c in enumerate(copy)]
+_sub = A.overlay_restates_speech(
+    _V("BEING A CONTENT CREATOR", "POSTING TEN TIMES A DAY", "EDITING YOUR OWN VIDEOS"), _B)
+check("three consecutive beats each chunking their own sentence is a SUBTITLE TRACK",
+      _sub["verdict"] == "SUBTITLE TRACK" and _sub["longest_run"] == 3, str(_sub))
+_lab = A.overlay_restates_speech(_V("THE REAL COST", "WHO?", "10"), _B)
+check("labels that say what the captions cannot are editorial",
+      _lab["verdict"] == "editorial" and _lab["n_restating"] == 0, str(_lab))
+_stamp = A.overlay_restates_speech(_V("CREATOR", "HOURS", "FOREVER"), _B)
+check("a ONE-WORD stamp taken from the speech is still editorial, not a subtitle",
+      _stamp["verdict"] == "editorial", str(_stamp))
+_gap = A.overlay_restates_speech(
+    [{"beat": 0, "treatment": ["text"], "text_content": "BEING A CONTENT CREATOR"},
+     {"beat": 2, "treatment": ["text"], "text_content": "EDITING YOUR OWN VIDEOS"}], _B)
+check("two NON-consecutive restating beats are not a track (car_mid's shape)",
+      _gap["verdict"] == "editorial" and _gap["longest_run"] == 1, str(_gap))
+check("no text rulings reads ABSENT, never a clean 'editorial'",
+      A.overlay_restates_speech([], _B)["state"] == "ABSENT"
+      and A.overlay_restates_speech(None, None)["state"] == "ABSENT")
+check("a ruling with no copy cannot be counted as clean",
+      A.overlay_restates_speech([{"beat": 0, "treatment": ["text"]}], _B)["state"]
+      == "ABSENT")
+# the surface where the choice is made must carry the rule
+_tc = [v for n in ast.walk(tree) if isinstance(n, ast.Dict)
+       for k, v in zip(n.keys, n.values)
+       if isinstance(k, ast.Constant) and k.value == "text_content"]
+check("the text_content FIELD says the captions already carry every spoken word",
+      any("CAPTIONS ALREADY" in ast.unparse(v).upper() for v in _tc),
+      "the rule lives in a knowledge doc the agent does not read; it has to be "
+      "where the ruling is written")
+check("and it says what to write INSTEAD, not only what to avoid",
+      any("worth" in ast.unparse(v) and "label" in ast.unparse(v) for v in _tc),
+      "educate rather than validate")
+check("the measurement is wired, printed with its denominator, and named",
+      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "print"
+          and any(isinstance(x, ast.Constant) and isinstance(x.value, str)
+                  and "OVERLAY vs SPEECH" in x.value for x in ast.walk(n))
+          and any(isinstance(x, ast.Name) and x.id == "_ors" for x in ast.walk(n))
+          for n in ast.walk(tree)))
+check("and a subtitle track fails LOUDLY to us",
+      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "fail"
+          and any(isinstance(x, ast.Constant)
+                  and x.value == "overlay_is_a_second_subtitle_track"
+                  for x in ast.walk(n)) for n in ast.walk(tree)))
+check("it reads the EXECUTED rulings first — the record is rewritten after the build",
+      any(isinstance(n, ast.Call)
+          and getattr(n.func, "id", "") == "overlay_restates_speech"
+          and any(isinstance(x, ast.Constant) and x.value == "executed_verdicts"
+                  for x in ast.walk(n)) for n in ast.walk(tree)))
+
 print()
 if fails:
     print("ASK-AND-INTENT: FAIL")
@@ -223,4 +283,5 @@ if fails:
     sys.exit(1)
 print("ASK-AND-INTENT: PASS — no overlay without a ruling, the executed rulings "
       "are frozen, an ambiguous request stops and asks for free, and a blind "
-      "rebuild is counted against its denominator")
+      "rebuild is counted against its denominator, and an overlay track that "
+      "repeats the captions is named")

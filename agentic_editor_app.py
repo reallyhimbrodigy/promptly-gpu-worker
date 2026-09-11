@@ -283,7 +283,25 @@ def _write_asset_inventory():
 _ASSET_INV = _write_asset_inventory() if modal.is_local() else None
 
 _SKILLS_SRC = os.path.expanduser("~/.claude/skills")
-_SKILLS_IGNORE = ["arcads-*", "awesome-claude-skills", "claude-video",
+# WHAT IS MOUNTED, AND FOR WHICH SURFACE. Every entry below was written in one
+# commit (ae1f35d, 2026-09-03) that argued what it MOUNTED and gave no reason
+# for any single ignore. Opened by contents 2026-09-10; the reasons are now on
+# the record beside the list.
+#   MOUNTED  remotion-*, remotion-official  authoring a component
+#   MOUNTED  karpathy                       behaviour (K1-K5, resident in the prompt)
+#   MOUNTED  arcads-*                       the GENERATION surface, unbuilt today.
+#            Zac's ruling 2026-09-10: in scope, stays mounted, and is NOT
+#            synthesised into the editing prefix — generator prompting
+#            (Seedance/Sora/Veo/Kling shot formulas) inside an editor's craft
+#            document is the wrong-corpus mistake this repo has already paid
+#            for. It gets read when generation is built.
+#   IGNORED  superpowers        software-development workflow; its one rule this
+#                               agent needed is distilled as K6
+#   IGNORED  claude-video/watch the /watch tool — zero editing content in 39 files
+#   IGNORED  the rest           skill indexes, UI/UX rules, duplicates
+# NONE OF THEM is the short-form EDITING knowledge; that repo is not on this
+# machine (FILING_SKILLS_PREFIX_SCOPE.md).
+_SKILLS_IGNORE = ["awesome-claude-skills", "claude-video",
                   "interactivity-best-practices", "superpowers",
                   "ui-ux-pro-max-skill", "watch",
                   "**/node_modules", "**/.git", "**/*.png", "**/*.jpg",
@@ -1486,9 +1504,14 @@ Violating any of them produces a BROKEN video that still exits 0.
                     Choosing between them is the wrong question — the reference
                     hooks do both on the same beat.
         text_content — REQUIRED when treatment includes "text": the words to
-                    burn for that beat. The overlay is DERIVED from this — you
-                    do not hand build_overlays a list, it reads your rulings and
-                    builds every one, on the output clock, skipping beats you cut.
+                    burn for that beat. NOT THE BEAT'S OWN SENTENCE — the
+                    captions already carry every spoken word, so an overlay
+                    that repeats a run of them is a second subtitle track
+                    stacked on the first. A label about the moment, the one
+                    word worth stamping, the figure. The overlay is DERIVED
+                    from this — you do not hand build_overlays a list, it reads
+                    your rulings and builds every one, on the output clock,
+                    skipping beats you cut.
         sfx       — "yes" | "no", REQUIRED on the hook and close beats
         cut       — "keep" | "cut"
         why       — about THAT beat's content
@@ -2073,8 +2096,22 @@ KNOWLEDGE_TOOLS = [{
                                      "description": "REQUIRED when treatment "
                                                     "includes 'text': the words "
                                                     "to burn on screen for this "
-                                                    "beat. Short, punchy, upper "
-                                                    "case reads best."},
+                                                    "beat. THE CAPTIONS ALREADY "
+                                                    "CARRY EVERY SPOKEN WORD. "
+                                                    "Copy out a run of this "
+                                                    "beat's own sentence and you "
+                                                    "have built a SECOND "
+                                                    "SUBTITLE TRACK above the "
+                                                    "first — measured on real "
+                                                    "output: one source did it "
+                                                    "on five consecutive beats. "
+                                                    "Write what the captions "
+                                                    "cannot: a label for the "
+                                                    "moment ('THE REAL COST', "
+                                                    "'WHO?'), the ONE word worth "
+                                                    "stamping, the figure. Short, "
+                                                    "punchy, upper case reads "
+                                                    "best."},
                                  "sfx": {"type": "string", "enum": ["yes", "no"],
                                          "description": "REQUIRED on hook and "
                                                         "close beats: does this "
@@ -2402,6 +2439,72 @@ def split_beat_text(beat, t, words):
         return _base, _base
     return (_l or f"[no words in {_a:.2f}-{t:.2f}s]",
             _r or f"[no words in {t:.2f}-{_z:.2f}s]")
+
+
+def overlay_restates_speech(verdicts, beats, min_run=3):
+    """Is the overlay track a SECOND SUBTITLE TRACK stacked on the captions?
+
+    THE DEFECT, seen on real output. talking_head carried an upper overlay
+    accumulating the transcript verbatim in caps while the caption track below
+    showed the same words; car_mid, same code, stamped single keywords. The
+    rule that forbids it has existed all along and perfectly stated, in
+    knowledge/04_text_overlays.md: "the transcript already lives in the
+    captions... if the candidate text duplicates what captions are about to
+    show, rewrite it as a label or skip it." It lives in a document the agent
+    must spend a `read_knowledge` turn to reach, and does not, while the
+    text_content field it is ruling into said only "short, punchy, upper case
+    reads best". Same shape as card_props, which cost three rounds of zero
+    cards: the rule was reachable and the surface where the choice is made did
+    not carry it.
+
+    TWO ARMS, because a rolling transcript shows up two ways:
+      run   three or more CONSECUTIVE beats each reproducing a contiguous run
+            of their own spoken words — that IS a subtitle track
+      share most text beats doing it at all
+
+    CALIBRATED ON 9 fixture-runs across rounds 51, 52 and 54, and stated so it
+    can be re-checked: the three talking_head runs read (5/7, run 4), (5/7,
+    run 2), (5/5, run 5); the six others read 0-2 restating with a longest run
+    of 0 or 1. A bar drawn between those is not fitted to one draw, and it is
+    one-sided in the cheap direction — this fails loudly to US, never to the
+    user.
+    """
+    _by_i = {b.get("i"): b for b in (beats or [])}
+    _marks, _n = {}, 0
+    for _v in (verdicts or []):
+        if "text" not in [str(t).lower() for t in (_v.get("treatment") or [])]:
+            continue
+        _cp = str(_v.get("text_content") or "")
+        _b = _by_i.get(_v.get("beat"))
+        if not _cp or not _b:
+            continue
+        _n += 1
+        _c = re.findall(r"[a-z0-9']+", _cp.lower())
+        _spoken = " ".join(re.findall(r"[a-z0-9']+",
+                                      str(_b.get("text") or "").lower()))
+        _best = 0
+        for _i in range(len(_c)):
+            for _j in range(len(_c), _i, -1):
+                if " ".join(_c[_i:_j]) in _spoken:
+                    _best = max(_best, _j - _i)
+                    break
+        _marks[_v.get("beat")] = _best >= min_run
+    if not _n:
+        return {"state": "ABSENT", "n_text": 0, "n_restating": 0,
+                "longest_run": 0, "share": None, "verdict": "no text rulings"}
+    _cur = _run = 0
+    for _i in sorted(_by_i):
+        if _marks.get(_i):
+            _cur += 1
+            _run = max(_run, _cur)
+        else:
+            _cur = 0
+    _rest = sum(1 for _x in _marks.values() if _x)
+    _share = _rest / _n
+    _sub = (_run >= min_run) or (_rest >= 3 and _share >= 0.7)
+    return {"state": "MEASURED", "n_text": _n, "n_restating": _rest,
+            "longest_run": _run, "share": round(_share, 2),
+            "verdict": "SUBTITLE TRACK" if _sub else "editorial"}
 
 
 def blind_rebuilds(turns):
@@ -11021,6 +11124,23 @@ def edit(source_key: str, brief: str,
     # measured. Two placements collide when they overlap in TIME and in PIXELS;
     # declared anchors are excluded on purpose, because a component that
     # overflows its anchor still reports the anchor.
+    # IS THE OVERLAY TRACK A SECOND SUBTITLE TRACK? Measured from the rulings
+    # that produced it, printed with its denominator, and LOUD when it is.
+    _ors = overlay_restates_speech(led.get("executed_verdicts")
+                                   or led.get("beat_verdicts"), led.get("beats"))
+    led["overlay_restates_speech"] = _ors
+    print("  OVERLAY vs SPEECH: %s  %s of %s text beat(s) reproduce a run of "
+          "their OWN spoken words, longest consecutive run %s  -> %s"
+          % (_ors["state"], _ors["n_restating"], _ors["n_text"],
+             _ors["longest_run"], _ors["verdict"]), flush=True)
+    if _ors["verdict"] == "SUBTITLE TRACK":
+        fail("overlay_is_a_second_subtitle_track",
+             "%s of %s text beats reproduce a contiguous run of their own "
+             "spoken words (longest consecutive run %s) — the captions already "
+             "carry every one of those words, so this overlay track is a second "
+             "subtitle stacked on the first"
+             % (_ors["n_restating"], _ors["n_text"], _ors["longest_run"]))
+
     # K6, MEASURED. A rebuild with no measurement since the last one is a
     # render billed for a guess. The rule is hoisted (blind_rebuilds) so the
     # check drives the SHIPPED function instead of a copy of it.
