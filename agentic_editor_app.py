@@ -5416,6 +5416,50 @@ _REGION_EFFECT_BAR_DB = 6.0
 #
 # Until that control exists, bar_separates below is what stands between a
 # short-label run and five false INERT verdicts.
+def empty_alpha_layer(dst, width=1080, height=1920, fps=30, duration_s=1.0,
+                      env=None):
+    """(state, path) — a fully transparent layer, for the SAME-WINDOW control.
+
+    THE CONTROL THIS EXISTS FOR. The region bar's control used to be a window
+    somewhere ELSE in the video, which carries the difference between two
+    unrelated moments' encode noise: measured 2026-09-11 at -10.75..8.13 dB with
+    no ink at all, against production short labels reading 4.70-6.76. Running
+    the SAME step with the ink withheld puts the control at the SAME instant,
+    and the null collapses to exactly 0.00.
+
+    TWO TRAPS, both hit while measuring this and both silent:
+      * `color=black@0.0` through qtrle/argb comes back with an alpha mean of
+        255 — OPAQUE. Every "null" composite was then a black frame reading
+        4.45 dB against real footage, which looks exactly like a measurement.
+        Alpha is written with geq here, and CHECKED before the file is used.
+      * drawbox does not write alpha at all, so a layer built that way is
+        transparent everywhere and every arm returns the null.
+    """
+    import subprocess
+    _r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi",
+         "-i", "color=c=black:s=%dx%d:r=%d:d=%.3f"
+               % (int(width), int(height), int(fps), max(0.1, float(duration_s))),
+         "-vf", "format=rgba,geq=r='0':g='0':b='0':a='0'",
+         "-c:v", "qtrle", dst],
+        capture_output=True, text=True, timeout=600, env=env)
+    if _r.returncode != 0 or not os.path.exists(dst):
+        return ("FAILED", None)
+    _a = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", dst, "-vf", "alphaextract,scale=4:4",
+         "-frames:v", "1", "-f", "rawvideo", "-"],
+        capture_output=True, timeout=300, env=env)
+    _d = _a.stdout or b""
+    if not _d:
+        # ABSENT is not OPAQUE and is not a pass. `(mean or 255) > 1` was the
+        # first version of this check and it REFUSED THE CORRECT LAYER, because
+        # a transparent one measures 0.0 and `0.0 or 255` is 255.
+        return ("ABSENT", None)
+    if (sum(_d[:16]) / 16.0) > 1.0:
+        return ("OPAQUE", None)
+    return ("MEASURED", dst)
+
+
 def bar_separates(deltas, bar=_REGION_EFFECT_BAR_DB, min_gap_db=1.0):
     """Does this bar still SPLIT the population it is being applied to?
 
@@ -7100,7 +7144,7 @@ def edit(source_key: str, brief: str,
         return None
 
     def _record_effect(family, before, after, t0_s, t1_s, note="", ctrl_t0=None,
-                       layer=None):
+                       layer=None, ctrl_same=None):
         # CLAMPED, AND THE CLAMPED WINDOW IS WHAT GETS RECORDED. Reporting the
         # declared span while having measured 0.5s in the middle of it would be
         # a number that does not describe what was done.
@@ -7149,10 +7193,20 @@ def edit(source_key: str, brief: str,
             _db = region_psnr(before, after, t0_s, t1_s, box=_bx,
                               env=_SUBPROCESS_ENV)
             _cdb = None
-            if ctrl_t0 is not None:
+            if ctrl_same:
+                # SAME WINDOW, INK WITHHELD. The control is the identical step
+                # with an empty layer, measured at the SAME instant, so the only
+                # difference between the two readings is the ink. Null measured
+                # at exactly 0.00 across 32 windows; the window-elsewhere
+                # control it replaces measured -10.75..8.13 with no ink at all.
+                _cdb = region_psnr(before, ctrl_same, t0_s, t1_s, box=_bx,
+                                   env=_SUBPROCESS_ENV)
+                _rec["ctrl_scheme"] = "same_window_layer_withheld"
+            elif ctrl_t0 is not None:
                 _cdb = region_psnr(before, after, float(ctrl_t0),
                                    float(ctrl_t0) + (t1_s - t0_s), box=_bx,
                                    env=_SUBPROCESS_ENV)
+                _rec["ctrl_scheme"] = "window_elsewhere"
             _delta = region_effect_delta(_db, _cdb)
             _rec["psnr_db"] = None if _db in (float("inf"), None) else round(_db, 2)
             _rec["ctrl_psnr_db"] = (None if _cdb in (float("inf"), None)
@@ -8617,6 +8671,37 @@ def edit(source_key: str, brief: str,
                  "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast", "-c:a", "copy", _cco],
                 capture_output=True, text=True, timeout=900,
                 env=_SUBPROCESS_ENV)
+            # THE SAME-WINDOW CONTROL, built once per run: the identical
+            # composite with an EMPTY layer. 2.1-3.2% of wall on every fixture
+            # measured, for the only control that can see a short label.
+            _ctrl_comp = None
+            if _ccr.returncode == 0 and os.path.exists(_cco):
+                _cl0 = time.time()
+                _el_state, _el = empty_alpha_layer(
+                    "/work/empty_layer.mov", fps=30,
+                    duration_s=float(_out_dur or 1.0), env=_SUBPROCESS_ENV)
+                if _el_state != "MEASURED":
+                    fail("control_layer_unbuildable",
+                         f"the empty control layer came back {_el_state} — every "
+                         f"region verdict this run falls back to a control "
+                         f"window elsewhere in the video, which measured "
+                         f"-10.75..8.13 dB on no ink at all")
+                else:
+                    _cr = subprocess.run(
+                        ["ffmpeg", "-y", "-v", "error", "-i", _cc_before,
+                         "-i", _el, "-filter_complex", alpha_composite_filter(30),
+                         "-map", "[outv]", "-c:v", "libx264", "-crf", "18",
+                         "-x264-params", f"threads={_X264_ENCODE_THREADS}",
+                         "-preset", "veryfast", "/work/ctrl_composite.mp4"],
+                        capture_output=True, text=True, timeout=900,
+                        env=_SUBPROCESS_ENV)
+                    if _cr.returncode == 0 and os.path.exists("/work/ctrl_composite.mp4"):
+                        _ctrl_comp = "/work/ctrl_composite.mp4"
+                    else:
+                        fail("control_composite_failed",
+                             f"ffmpeg {_cr.returncode}: {(_cr.stderr or '')[-200:]}")
+                _mark(led, "build_control_composite", _cl0)
+                led["ctrl_composite"] = bool(_ctrl_comp)
             _mark(led, "composite_captions", _cc0)
             if _ccr.returncode == 0 and os.path.exists(_cco):
                 # THE GREEN THIS REPLACES. `path=remotion composited=True` fired
@@ -8645,6 +8730,7 @@ def edit(source_key: str, brief: str,
                                        _it3["t_start"], _it3["t_end"],
                                        note=str(_it3.get("text") or "")[:40],
                                        ctrl_t0=_txt_ctrl,
+                                       ctrl_same=_ctrl_comp,
                                        layer=led.get("caption_mov"))
                     built["text"] = len(items)
                     steps.append({"step": "text", "n": len(items),
@@ -8666,6 +8752,7 @@ def edit(source_key: str, brief: str,
                         _record_effect("caption", _cc_before, _cco, _pa, _pz,
                                        layer=led.get("caption_mov"),
                                        note=str(_cap_style or ""),
+                                       ctrl_same=_ctrl_comp,
                                        ctrl_t0=_cap_ctrl)
                 cur = "captioned.mp4"
                 led["caption_composited"] = True
@@ -8833,7 +8920,6 @@ def edit(source_key: str, brief: str,
                                                  else ZOOM_NATURAL_SCALE.get(_ztype, 1.22)),
                                "peak_lands_at_s": round(_cs + _peak_s, 3),
                                "beat_at_s": round(a2, 3),
-                               "beat": v.get("beat"),
                                "head_clamped": _clamped})
             _zcursor += _n_frames
 
@@ -11362,6 +11448,17 @@ def edit(source_key: str, brief: str,
                  "re-measured against a null on THIS population."
                  % (_fam6, _bwhy6))
 
+    # K6, MEASURED. A rebuild with no measurement since the last one is a
+    # render billed for a guess. The rule is hoisted (blind_rebuilds) so the
+    # check drives the SHIPPED function instead of a copy of it.
+    _k6_state, _k6_blind, _k6_total = blind_rebuilds(led.get("turns"))
+    led["rebuilds_without_measurement"] = _k6_blind
+    led["execute_plan_calls_total"] = _k6_total
+    led["rebuilds_state"] = _k6_state
+    print("  K6 REBUILDS     : %s  %d of %d execute_plan call(s) ran with NO "
+          "inspect_output since the previous build"
+          % (_k6_state, _k6_blind, _k6_total), flush=True)
+
     # WHAT THIS RUN COST. Printed against the law it is held to, because a cost
     # with no law beside it is a number nobody acts on.
     _cost = run_cost(led, round(time.time() - t0, 1), cpu=8, memory_mb=16384)
@@ -11422,16 +11519,6 @@ def edit(source_key: str, brief: str,
              "subtitle stacked on the first"
              % (_ors["n_restating"], _ors["n_text"], _ors["longest_run"]))
 
-    # K6, MEASURED. A rebuild with no measurement since the last one is a
-    # render billed for a guess. The rule is hoisted (blind_rebuilds) so the
-    # check drives the SHIPPED function instead of a copy of it.
-    _k6_state, _k6_blind, _k6_total = blind_rebuilds(led.get("turns"))
-    led["rebuilds_without_measurement"] = _k6_blind
-    led["execute_plan_calls_total"] = _k6_total
-    led["rebuilds_state"] = _k6_state
-    print("  K6 REBUILDS     : %s  %d of %d execute_plan call(s) ran with NO "
-          "inspect_output since the previous build"
-          % (_k6_state, _k6_blind, _k6_total), flush=True)
     led["placement_collisions"] = placement_collisions(led.get("_painted_boxes") or [])
     _pb = led.get("_painted_boxes") or []
     _uniq = {(x.get("family"), round(float(x.get("t0", 0)), 3),
