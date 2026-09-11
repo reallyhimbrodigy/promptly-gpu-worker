@@ -17,7 +17,19 @@ import json
 import os
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
+# THE CHECKOUT THIS FILE IS IN, not the checkout two directories up. _ROOT was
+# `../..`, which from `.worktrees/<lane>/` is the MAIN checkout — so every lane
+# built its inventory from whatever branch the main tree happened to have
+# checked out, and a throwaway worktree anywhere else (a red proof's) could not
+# import the app at all: `/T/type_registries.py` does not exist. handler.py and
+# type_registries.py are tracked at the repo root, so the checkout that holds
+# this file holds them too. `../..` survives only as a fallback, and it says so.
+_ROOT = _HERE
+if not os.path.exists(os.path.join(_HERE, "type_registries.py")):
+    _ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
+    print(f"[asset-inventory] type_registries.py is not beside this file; reading "
+          f"the checkout at {_ROOT} — a CROSS-CHECKOUT read, another branch's "
+          f"literals", flush=True)
 
 
 def _literals_from(path, wanted):
