@@ -229,7 +229,26 @@ for (const j of jobs) {
       ...(j.alpha
         ? { codec: "prores", proResProfile: "4444", pixelFormat: "yuva444p10le" }
         : { codec: j.codec ?? "h264" }),
-      logLevel: "error",
+      // PER-FRAME VISIBILITY, ON DEMAND. Five black-box rungs bounded the
+      // zoom cost from outside and could not name it: everything reproducible
+      // by hand is ~310 ms/frame and the same component through
+      // PromptlyMicroSegments is 1,859, with <Video> and an <Img> sequence
+      // costing the SAME inside it — so the delay is not painting. A frame
+      // that waits on something other than paint shows up here and nowhere
+      // else. Opt-in so the shipped path is byte-identical.
+      logLevel: process.env.PROMPTLY_REMOTION_LOG || "error",
+      // renderMedia's progress callback is onProgress({renderedFrames, ...}).
+      // My first version used onFrameUpdate, which renderFrames has and
+      // renderMedia does not — an unknown option is IGNORED, so the hook
+      // emitted nothing and the probe reported no frame gaps, which read as
+      // "no gaps found" rather than "the instrument never ran". The probe now
+      // FAILS when the timing is requested and no FRAME line arrives.
+      onProgress: ({ renderedFrames }) => {
+        if (process.env.PROMPTLY_REMOTION_FRAME_TIMING) {
+          console.log(`FRAME ${JSON.stringify({ id: j.id, n: renderedFrames,
+            ms: Date.now() - started })}`);
+        }
+      },
       // CONCURRENCY 8, NOT 1.
       //
       // This shipped at 1 because it was copied from the measurement harness,

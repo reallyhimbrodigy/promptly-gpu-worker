@@ -2047,6 +2047,25 @@ WHAT THE BUILDER WILL ACCEPT, so nothing you rule is lost at build time:
 - It must NOT be the footage that plays right after this beat (the next few
   seconds). The viewer is about to see that anyway; showing it early is a
   stutter, not a reveal. Cut to something from elsewhere in the clip.
+
+WHAT TO ASK BEFORE YOU REACH FOR ONE — from the b-roll craft, which until now
+existed only as a rule the builder enforced after you had already proposed:
+
+- IT EARNS ITS PLACE BY EXTENDING THE MOMENT. Name what the frame gives the
+  viewer beyond what the words and the speaker's face already deliver. When
+  the frame and the line carry the same single fact, the speaker and the
+  captions own that beat cleanly and a cutaway takes something away.
+- THE SOURCE IS OFTEN ALREADY ITS OWN EVIDENCE. Read what the underlying shot
+  is showing first — when the source IS the visual proof, a cutaway competes
+  with it rather than adding to it.
+- IT ALSO BELONGS BY ITS LOOK. Past relevance and the extend test, read the
+  moment's colour world against this beat's: shared warmth, light level, grade.
+  A cutaway that is right about the subject and wrong about the light reads as
+  someone else's footage.
+- NOT IN THE FIRST ~3 SECONDS. The opening earns the next three seconds on its
+  own; leaving it that early spends the hook.
+- NOT OVER A FACE MOMENT. Any word inside an emphasis carrying a zoom is a
+  face moment — the zoom is there because the face is the shot.
 - The beat must survive the cut. A beat you also ruled `cut` has no output span
   to cover, so it cannot carry one.
 - The beat needs at least 0.6s in the OUTPUT. Shorter than that a cutaway reads

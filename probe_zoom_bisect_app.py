@@ -192,7 +192,14 @@ def ladder(source_url: str = "", seconds: float = 2.2) -> dict:
         json.dump([{"id": tag, "composition": comp, "propsFile": pf,
                     "out": f"/tmp/bis_{tag}.mp4"}], open(qf, "w"))
         t0 = time.time()
-        rr = run(["node", "remotion_batch.mjs", qf], cwd=R, timeout=3000)
+        _env = dict(os.environ)
+        if tag in ("6_real", "9_wrapper"):
+            # THE TWO THAT DISAGREE: same component, 5x apart. Only these two
+            # carry the cost of verbose logging.
+            _env["PROMPTLY_REMOTION_FRAME_TIMING"] = "1"
+            _env["PROMPTLY_REMOTION_LOG"] = "verbose"
+        rr = run(["node", "remotion_batch.mjs", qf], cwd=R, timeout=3000,
+                 env=_env)
         job = {}
         for ln in ((rr.stdout or "") + "\n" + (rr.stderr or "")).splitlines():
             if ln.startswith("JOB "):
@@ -211,7 +218,39 @@ def ladder(source_url: str = "", seconds: float = 2.2) -> dict:
                 _actual = int((_pr.stdout or "").strip())
             except (TypeError, ValueError):
                 _actual = None
+        _frames_log, _delay = [], []
+        for ln in ((rr.stdout or "") + "\n" + (rr.stderr or "")).splitlines():
+            if ln.startswith("FRAME "):
+                try:
+                    _frames_log.append(json.loads(ln[6:]))
+                except Exception:                                 # noqa: BLE001
+                    pass
+            low = ln.lower()
+            if "delayrender" in low or "handle" in low or "timed out" in low:
+                _delay.append(ln[:200])
+        # ABSENCE IS A STATE. Asking for frame timing and getting none means
+        # the hook never fired — not that the frames were evenly spaced.
+        _gaps = ("REQUESTED_BUT_ABSENT"
+                 if tag in ("6_real", "9_wrapper") and not _frames_log else None)
+        if len(_frames_log) > 3:
+            _ms = [f["ms"] for f in _frames_log]
+            _d = [b - a for a, b in zip(_ms, _ms[1:])]
+            _d.sort()
+            # WHERE THE TIME IS, not just how it is distributed. A median of
+            # 3ms with a max of 5,381 says the total is in a tail; this says
+            # how much of it and in how many stalls.
+            _big = [x for x in _d if x >= 100]
+            _gaps = {"n": len(_d), "median": _d[len(_d) // 2], "max": _d[-1],
+                     "p90": _d[int(len(_d) * 0.9)] if len(_d) > 9 else _d[-1],
+                     "total_ms": sum(_d),
+                     "stalls_over_100ms": len(_big),
+                     "stall_ms": sum(_big),
+                     "stall_share": (round(sum(_big) / sum(_d), 3)
+                                     if sum(_d) else None),
+                     "top5": _d[-5:]}
         return {"wall_s": round(time.time() - t0, 2), "job": job,
+                "frame_gaps_ms": _gaps,
+                "delay_lines": _delay[:6],
                 "frames_actual": _actual,
                 "ms_per_frame": (round(job["ms"] / n, 1)
                                  if job.get("ok") and job.get("ms") else None),
@@ -281,6 +320,12 @@ def main():
     print(f"  state={r['state']}  {r.get('detail','')}  source_class="
           f"{r.get('source_class')}  frames={r.get('frames')}")
     prev = None
+    for k in ("6_real", "9_wrapper"):
+        v = r.get("rungs", {}).get(k) or {}
+        if v.get("frame_gaps_ms"):
+            print(f"    {k} frame gaps ms: {v['frame_gaps_ms']}")
+        for ln in (v.get("delay_lines") or [])[:4]:
+            print(f"      {k} | {ln}")
     for k in sorted(r.get("rungs", {})):
         v = r["rungs"][k]
         mf = v["ms_per_frame"]
