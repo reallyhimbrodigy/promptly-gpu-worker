@@ -112,12 +112,25 @@ while IFS=$'\t' read -r name key brief model; do
     exit 2
   fi
   echo "[launch] $name  model=${model:-claude-sonnet-5}"
+  # SETSID, BECAUSE --detach PROTECTS THE APP AND NOT THE CLIENT.
+  #
+  # Round 58 lost four of five arms: three cancelled TWICE and one deadline.
+  # Every failed log ends "[modal-client] Received a cancellation signal" —
+  # CLIENT-side. `modal run --detach` keeps the Modal APP alive when the client
+  # disconnects, but the client still cancels its own inputs when IT is
+  # signalled, and this script runs inside a process group that gets reaped.
+  # car_mid had already reached BENCH AT PAINT when it was killed. The arms
+  # were never a Modal problem, and the round-19/22 note above — "it is
+  # infrastructure" — has been wrong about at least this class since.
+  #
+  # setsid.py (macOS ships no setsid) puts each launch in its own session and
+  # ignores HUP/INT/TERM, so nothing upstream can reap it.
   # THE RESULT JSON LANDS BESIDE THE LOG. keep_spans crossed the container
   # boundary correctly and was then dropped here, because this captured stdout
   # and nothing else. Judging whether a placement hit the right moment needs the
   # SPANS, and the log only ever carried their count.
   PROMPTLY_RESULT_JSON="$OUT/$name.result.json" \
-  modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
+  python3 "$(dirname "$0")/setsid.py" modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
     --model "${model:-claude-sonnet-5}" \
     --src-url "$S" --out-url "$O" --out-key "$K" > "$OUT/$name.log" 2>&1
 
@@ -158,7 +171,7 @@ while IFS=$'\t' read -r name key brief model; do
     echo "$name CANCELLED_RETRIED" >> "$OUT/appmap.txt"
     mv "$OUT/$name.log" "$OUT/$name.cancelled.log"
     IFS=$'\t' read -r S O K < <(python3 presign.py "$key")
-    modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
+    python3 "$(dirname "$0")/setsid.py" modal run --detach agentic_editor_app.py --source "$key" --brief "$brief" \
       --model "${model:-claude-sonnet-5}" \
       --src-url "$S" --out-url "$O" --out-key "$K" > "$OUT/$name.log" 2>&1
     if grep -qE "cancellation signal|was modified during build process" "$OUT/$name.log" 2>/dev/null; then
