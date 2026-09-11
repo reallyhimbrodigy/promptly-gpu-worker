@@ -154,3 +154,47 @@ matter most and neither is in any document the agent can reach:
   and it fired 2 of 2 on round 58 — both times on a cutaway the agent proposed
   in good faith, because nothing told it the rule existed. A mechanically
   enforced rule the agent is never told is a refusal it will keep earning.
+
+
+---
+
+# ADDENDUM 2026-09-11 (2) — "no guidance anywhere" was a claim about my extractor
+
+I reported that `build` and `breather` had no craft in the catalogue. **They
+have it, stated outright, in the middle of a paragraph:**
+
+> "A mask zoom CLAIMS the arc position of the word it sits on — **build/breather
+> claims exist for exactly this job, and offer nothing else.**"
+
+`knowledge_reach` extracts HEADINGS. This claim is mid-paragraph, so the
+instrument could not see it, and I reported its absence as a fact about the
+corpus. **A heading-based sweep understates the corpus in a way it cannot
+self-report** — which means the instructable count of 7 is a floor, not a
+figure, and every "the catalogue says nothing about X" conclusion drawn from it
+carries the same caveat.
+
+That is the second correction to this file's own numbers in one day. The first
+was mapping documents to fields without checking the fields exist; this one is
+mistaking an extractor's blind spot for an absence. Both stay on the record.
+
+## What the mask rule is, and why it explains round 46
+
+Four arc values are PEAK positions with a job each. `build` and `breather` are
+the MASK positions: a functional zoom covering a splice — "the small punch on
+the first word after a hard splice that carries the eye across the jump" —
+small, sub-second, outside the moment ledger.
+
+Round 46's zooms clustered on `build` at 9-23× the reference rate because it was
+the vaguest label available. **The reason it was vague is that its one job sat
+where a heading sweep could not reach it.** The field now carries it, and says
+outright that a mask position is NOT a peak.
+
+## Two independent derivations agree, which is the strongest evidence here
+
+`ZOOM_ARC_HOMES` maps `build` and `breather` to exactly `('SnapReframe',
+'StepZoom')` — the two small, sub-second types the mask text names — while every
+peak position gets the slower moves. The harness already implemented the rule
+from the components; the catalogue states it in prose; neither was derived from
+the other. `smoke_knowledge_reach` now asserts they keep agreeing, because a
+drift between them would mean one of the two is wrong and nothing would say
+which.

@@ -84,6 +84,33 @@ check("the marker names a real knowledge document",
       "a marker naming a document that does not exist counts a claim that has "
       "no source: %s" % sorted(_w))
 
+# THE MASK-ZOOM JOB, which I reported as absent and is not.
+_ms, _marcs, _mtext = A.mask_zoom_job()
+check("the mask-zoom rule is found in the catalogue", _ms == "MEASURED",
+      "%s: %s — it is the ONLY guidance build and breather have, and a silent "
+      "absence puts them back to being the cheap slot that took zoom 9-23x "
+      "over reference in round 46" % (_ms, _mtext))
+check("it names build and breather as the mask positions",
+      set(_marcs or ()) == {"build", "breather"}, str(_marcs))
+check("the harness's own type map agrees with it independently",
+      A.ZOOM_ARC_HOMES.get("build") == A.ZOOM_ARC_HOMES.get("breather")
+      == ("SnapReframe", "StepZoom"),
+      "the mask text names SnapReframe/StepZoom as the small sub-second types; "
+      "ZOOM_ARC_HOMES giving build or breather anything else means one of the "
+      "two derivations drifted")
+_teach = A.arc_jobs_teach(["hook", "build", "mid_peak", "payoff", "breather", "close"])
+check("every one of the six arc values gets a job in the field text",
+      all(_a in _teach for _a in
+          ("hook", "build", "mid_peak", "payoff", "breather", "close")))
+check("and the field says a mask position is NOT a peak",
+      "NOT peaks" in _teach,
+      "the defect was the agent claiming build for an emphasis zoom; the field "
+      "has to say the position is functional")
+check("no arc is left reading as having no guidance",
+      "NO guidance" not in _teach,
+      "an arc with no job is the cheap slot, and the census's claim that build "
+      "and breather had none was a claim about a HEADING sweep, not the corpus")
+
 check("the census is on the record", DOC.exists())
 if DOC.exists():
     _t = DOC.read_text()

@@ -425,23 +425,69 @@ if _ZOOM_JOB_STATE == "FAILED":
                        "so" % _ZOOM_JOB_WHY)
 
 
-def arc_jobs_teach(enum_values):
-    """The arc-position craft for the zoom_arc field, and the arcs it lacks.
+def mask_zoom_job(doc="06_emphasis_zoom.md"):
+    """(state, arcs, text) — the MASK-zoom job, and which arcs own it.
 
-    TWO OF THE SIX HAVE NO GUIDANCE ANYWHERE. `build` and `breather` are in
-    this app's enum and NOT in the catalogue, which was written against a
-    different vocabulary — so the honest surface says which arcs the craft
-    covers and which it does not, rather than leaving the agent to assume the
-    silence means anything.
+    I REPORTED THAT `build` AND `breather` HAD NO GUIDANCE ANYWHERE. They have
+    it, stated outright, in the middle of a paragraph:
+
+        "A mask zoom CLAIMS the arc position of the word it sits on —
+         build/breather claims exist for exactly this job, and offer nothing
+         else."
+
+    My census extracts HEADINGS, and this claim is mid-paragraph, so the
+    instrument could not see it and I reported its absence as fact. A
+    heading-based sweep understates the corpus in a way it cannot self-report,
+    and "no guidance anywhere" was a claim about my extractor.
+
+    AND THE HARNESS ALREADY IMPLEMENTS IT INDEPENDENTLY. ZOOM_ARC_HOMES maps
+    build and breather to exactly ('SnapReframe', 'StepZoom') — the two small,
+    sub-second types the mask text names — while every peak position gets the
+    slower moves. Two derivations of the same rule agreeing is the strongest
+    evidence available that the rule is real and that neither is invented.
+    """
+    import re as _re
+    try:
+        _txt = open(os.path.join(_KNOWLEDGE_DIR, doc), encoding="utf-8").read()
+    except OSError as _e:
+        return ("FAILED", (), "cannot read %s: %s" % (doc, _e))
+    _m = _re.search(r"MASK zooms are functional: ([^.]+\.)", _txt)
+    _c = _re.search(r"([a-z_]+)/([a-z_]+) claims exist for exactly this job", _txt)
+    if not _m or not _c:
+        return ("ABSENT", (),
+                "the mask-zoom rule is not in %s in the shape this reads — it "
+                "is the only guidance build and breather have, and a silent "
+                "absence would put them back to being the cheap slot" % doc)
+    return ("MEASURED", (_c.group(1), _c.group(2)), _m.group(1).strip())
+
+
+_MASK_STATE, MASK_ARCS, MASK_JOB_TEXT = mask_zoom_job()
+
+
+def arc_jobs_teach(enum_values):
+    """The arc-position craft for zoom_arc, all six of them.
+
+    FOUR ARE PEAK POSITIONS with a job each. The other two are the MASK
+    positions, and the catalogue reserves them for exactly that: a functional
+    zoom covering a splice, small, outside the moment ledger. Round 46's zooms
+    clustered on `build` at 9-23x the reference rate because it was the vaguest
+    label available — and the reason it was vague is that its one job was
+    mid-paragraph where a heading sweep could not reach it.
     """
     _have = [(_k, ZOOM_ARC_JOBS[_k]) for _k in enum_values if _k in ZOOM_ARC_JOBS]
-    _missing = [_k for _k in enum_values if _k not in ZOOM_ARC_JOBS]
     _txt = " ".join("%s = %s" % (_k, _v) for _k, _v in _have)
-    if _missing:
-        _txt += (" The catalogue has NO guidance for %s — it was written "
-                 "against a different arc vocabulary. Rule them on the beat, "
-                 "not on a rule that does not exist."
-                 % " or ".join(_missing))
+    _mask = [_k for _k in enum_values if _k in (MASK_ARCS or ())]
+    if _mask and _MASK_STATE == "MEASURED":
+        _txt += (" %s = MASK, the only job they have: %s They are NOT peaks — "
+                 "a mask zoom serves the CUT, not the moment, and claiming one "
+                 "on a beat that wanted no zoom is how this field became the "
+                 "cheap slot."
+                 % (" and ".join(_mask), MASK_JOB_TEXT))
+    _unknown = [_k for _k in enum_values
+                if _k not in ZOOM_ARC_JOBS and _k not in (MASK_ARCS or ())]
+    if _unknown:
+        _txt += (" The catalogue has NO guidance for %s. Rule them on the beat, "
+                 "not on a rule that does not exist." % " or ".join(_unknown))
     return _txt
 
 

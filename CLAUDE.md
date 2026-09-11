@@ -888,3 +888,52 @@ inflated by retries into an apparent outage.
   that no longer exists and must fail `0x` rather than land somewhere
   plausible**, because a resolver that lands plausibly is the false green this
   entire family is about.
+
+## Standing rule earned 2026-09-11 (the sixth way a mutation stops mutating)
+
+- **A STALE TARGET: THE ANCHOR MATCHES AND THE PROPERTY MOVED.** (Named by Zac
+  2026-09-11.) Five ways were already recorded — anchor `0x`, a match landing
+  in prose, a vacuous operand, a no-op in the branch where the values are
+  already equal, and a mutation orphaned by a refactor. This is the sixth and
+  it is the quietest: **the anchor resolves EXACTLY, the edit applies, and it
+  no longer touches the thing the leg tests.**
+
+  A leg asserted that a census names `06_emphasis_zoom` as the largest
+  instructable gap. Its mutation had been re-pointed at a table row while the
+  leg was later tightened to read the gap SENTENCE — so mutation and leg ended
+  up aimed at different lines in the same file, and the mutant passed with the
+  sentence fully intact. Nothing was stale about the anchor; the TARGET moved
+  out from under it.
+
+  **When a leg moves, its mutation moves with it** — and the tell is a mutant
+  that passes while the property looks obviously broken by the diff. Earlier
+  the same day, in the same file: `"insert_requests" in SRC`, `'hero_too_long'
+  in SRC`, `"route_demand" in SRC`, `"UNVALIDATED" in src`, `'card_props' in
+  json.dumps(t)` matching `_card_props_unused`, and a hybrid message leg
+  accepting `"can create"` from a sentence that said the opposite. **Six legs
+  in one stretch satisfied by a sentence they did not mean.** The general form:
+  *a leg that tests for the PRESENCE of words is satisfied by any sentence
+  containing them, and documents and code both grow sentences.*
+
+  `smoke_legs_are_unambiguous` closes the half that counting can close — a
+  literal owned by more than one site. The other half is this one, and it needs
+  the mutation and the leg to be written and re-read together.
+
+- **A HEADING SWEEP UNDERSTATES A CORPUS IN A WAY IT CANNOT SELF-REPORT.** I
+  reported that two of six `zoom_arc` values had "no guidance anywhere". The
+  guidance exists, stated outright, MID-PARAGRAPH: *"build/breather claims
+  exist for exactly this job, and offer nothing else"* — the mask-zoom rule.
+  `knowledge_reach` extracts headings, so it could not see it, and I published
+  its blind spot as a fact about the corpus.
+
+  Every "the documents say nothing about X" conclusion from a structural sweep
+  carries that caveat, and the count it produces is a FLOOR rather than a
+  figure. Say which shape was searched, not just what was not found — the same
+  discipline as *sample the bucket you intend to measure*.
+
+  The corroboration worth keeping: `ZOOM_ARC_HOMES` maps `build` and `breather`
+  to exactly `('SnapReframe', 'StepZoom')` — the two small sub-second types the
+  prose names — derived from the components, independently of the catalogue.
+  **Two derivations agreeing is the strongest evidence available that a rule is
+  real and neither was invented**, and the smoke now asserts they keep
+  agreeing, because a drift would mean one is wrong with nothing saying which.
