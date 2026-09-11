@@ -126,7 +126,19 @@ def fingerprint(verbose=False):
                        capture_output=True, text=True,
                        cwd=os.path.dirname(os.path.abspath(__file__))
                        ).stdout.strip() or "UNKNOWN"
-        _dirty = _sp.run(["git", "status", "--porcelain", "--untracked-files=no"],
+        # DIRTY OVER THE MOUNTED PATHS ONLY.
+        #
+        # My first version ran `git status` over the WHOLE worktree, so editing
+        # an UNMOUNTED file — a probe, a smoke — flipped the suffix and the
+        # round runner's equality check aborted the round as mount drift.
+        # Round 61 died that way after one arm, from an edit to a probe that
+        # cannot reach a container. A guard that fires on something it does not
+        # guard is worse than no suffix: it makes the honest answer ("the
+        # mounted tree is unchanged") unsayable.
+        _mp = [p for p in mounted_paths()
+               if str(p).startswith(os.path.dirname(os.path.abspath(__file__)))]
+        _dirty = _sp.run(["git", "status", "--porcelain",
+                          "--untracked-files=no", "--"] + _mp,
                          capture_output=True, text=True,
                          cwd=os.path.dirname(os.path.abspath(__file__))
                          ).stdout.strip()

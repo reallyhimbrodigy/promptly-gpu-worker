@@ -6580,6 +6580,19 @@ REFERENCE_FAMILY_NAME = {"text": "overlay_text", "card": "card", "sfx": "sfx",
 
 
 
+
+# WHAT `card` ACTUALLY OFFERS, said plainly rather than implied by a catalogue
+# count. Builder-2 audited it: derive_card_type can only ever return StatCard
+# or PullQuote — a figure gives StatCard, five words or fewer gives PullQuote,
+# and the only other branch needs a SIX-WORD hero. The observed population is
+# 23 heroes over 30 ledgers, 5 distinct, LONGEST ONE WORD. So 23 of the 25
+# prop-table types have never been built once, and a surface that offers
+# "card" while the catalogue is two wide is offering breadth nobody has shown
+# exists. Zac, 2026-09-11: say it in the text.
+_CARD_BREADTH_NOTE = (
+    "\n    On `card`: what gets built is StatCard for a figure and PullQuote "
+    "for a short phrase. The other 23 catalogue types have never been "
+    "produced once, so treat card as those two and not as a catalogue.")
 def offered_treatments(purpose, beats=None):
     """(families, n_beats) — what editors reached for at moments of this
     purpose, in OUR family names, with the denominator. PURE.
@@ -6926,7 +6939,8 @@ def _reference_block(our_beats, k=2):
                           + ((" — never here: " + ", ".join(_none))
                              if _none else "")
                           + ". Choose among these or outside them; if you go "
-                            "outside, say why in `why`. This is not a quota.")
+                            "outside, say why in `why`. This is not a quota."
+                          + (_CARD_BREADTH_NOTE if _off.get("card") else ""))
         if len(_pool) < k:
             _lines.append("  (only %d buildable example%s — thin, not absent)"
                           % (len(_pool), "" if len(_pool) == 1 else "s"))
