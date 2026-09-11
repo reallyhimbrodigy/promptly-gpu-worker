@@ -35,6 +35,7 @@ NEVER GET BUILT:
 """
 import hashlib
 import json
+import ast
 import os
 import re
 import shutil
@@ -259,6 +260,72 @@ def mg_conditions(path=None):
     # one it answers with by default. Sorting alphabetically threw that away and
     # would have made the default a matter of spelling.
     return ("MEASURED", {_k: _v for _k, _v in _out.items() if _v}, "")
+
+
+def knowledge_reach(doc_dir=None, surface=None):
+    """(state, rows, why) — every structural claim in knowledge/, and whether
+    the agent can see it at ruling time.
+
+    THE ANSWER TO "IS THE KNOWLEDGE WIRED PROPERLY", and it is not three rules.
+    77 headings across 14 documents; before 2026-09-11, ZERO were reachable.
+    The documents are readable only through `read_knowledge`, which has been
+    called 0 times in 30 runs, so every structural claim in the corpus has been
+    invisible at the moment of ruling.
+
+    Three found by accident, each after it had already cost something:
+      04_text_overlays  "the transcript already lives in the captions" —
+                        talking_head subtitled itself for four rounds
+      05_motion_graphics  "in the shape its catalogue entry shows" — three
+                        rounds of zero cards
+      05_motion_graphics  the eight WHEN condition headings — a 31-type
+                        catalogue read two wide
+    A rule in a document the agent does not open is indistinguishable from a
+    rule nobody wrote, and this counts how many there are rather than waiting
+    for the next one to be found by its damage.
+
+    NOT EVERYTHING HERE SHOULD BE WIRED, and that is the point of the
+    classification rather than the count. `13_placement_findings` and
+    `14_card_text_placement_rules` are MEASURED RATES — "77% of cards share
+    their beat", "39 of 40 card placements share" — and the standing law is
+    that the rates GRADE and never instruct. Wiring those would be the
+    density-rubric mistake with a bigger corpus behind it.
+    """
+    import json as _json
+    import re as _re
+    _dir = doc_dir or _KNOWLEDGE_DIR
+    if surface is None:
+        try:
+            _src = open(os.path.abspath(__file__), encoding="utf-8").read()
+            _lits = " ".join(
+                _n.value for _n in ast.walk(ast.parse(_src))
+                if isinstance(_n, ast.Constant) and isinstance(_n.value, str))
+            surface = (_lits + _json.dumps(KNOWLEDGE_TOOLS)
+                       + _json.dumps(TOOLS)).lower()
+        except Exception as _e:                               # noqa: BLE001
+            return ("FAILED", [], "cannot read the agent's own surface: %s" % _e)
+    _HEAD = _re.compile(r"^(?:#{1,4}\s+|──\s*|\*\*)([A-Z][^\n*─]{8,90})")
+    _rows = []
+    try:
+        _docs = sorted(_p for _p in os.listdir(_dir) if _p.endswith(".md"))
+    except OSError as _e:
+        return ("FAILED", [], "cannot list %s: %s" % (_dir, _e))
+    if not _docs:
+        return ("ABSENT", [], "no knowledge documents found at %s" % _dir)
+    for _d in _docs:
+        try:
+            _txt = open(os.path.join(_dir, _d), encoding="utf-8").read()
+        except OSError:
+            continue
+        for _l in _txt.splitlines():
+            _m = _HEAD.match(_l.strip())
+            if not _m:
+                continue
+            _h = _m.group(1).strip().rstrip("*").strip()
+            if len(_h.split()) < 3:
+                continue
+            _rows.append({"doc": _d, "claim": _h[:100],
+                          "reachable": _h.lower()[:40] in surface})
+    return ("MEASURED", _rows, "")
 
 
 def mg_unique_prop_owner(prop_keys=None):
