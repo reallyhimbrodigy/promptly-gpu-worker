@@ -4051,6 +4051,27 @@ def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0, spans=Non
     return ("TRUNCATED" if worst > tol else "OK"), detail
 
 
+
+# DELIVERY RATES. A VFR source's measured average (35.905 on motion) is a
+# faithful number and not a rate anything delivers at; every frame above 30
+# is a frame painted — at 1,418 ms each — for nothing a viewer can see. A
+# source already at a standard rate keeps it; anything else becomes 30.
+_STANDARD_FPS = (23.976, 24.0, 25.0, 29.97, 30.0, 50.0, 59.94, 60.0)
+
+
+def delivery_fps(actual, tol=0.1):
+    """The CFR rate to normalise a source to. PURE, so a test can call it."""
+    try:
+        a = float(actual)
+    except (TypeError, ValueError):
+        return 30.0
+    if a <= 0:
+        return 30.0
+    # NEAREST standard within tolerance, not the first: 30.0 is 0.03 from
+    # 29.97 and the first-match loop returned 29.97 for an exact 30.
+    near = min(_STANDARD_FPS, key=lambda std: abs(a - std))
+    return near if abs(a - near) <= tol else 30.0
+
 def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920):
     """(filter, mode, crop_loss) to bring a source to the delivery geometry.
 
@@ -6609,6 +6630,21 @@ def cutaway_plan(rulings, keep_spans, source_duration_s, beats=None,
         # A cutaway to the beat's OWN footage shows the same picture and is a
         # no-op. Named, not silently accepted.
         _bs, _be = float(b.get("t_start") or 0), float(b.get("t_end") or 0)
+        # AND THE FOOTAGE THAT PLAYS NEXT. Round 54 motion cut away from beat 2
+        # (4.5-10.5s) to source 10.5s: the viewer saw the group shot at 4.5s
+        # and again at 10.5s when the timeline reached it. car_short did the
+        # same one second ahead. A cutaway to what the viewer is about to see
+        # anyway is a stutter, not a reveal — it spends the next shot early.
+        # Rejected when the cutaway window lands inside [beat end, beat end +
+        # its own length + 1s], the stretch that would replay right after.
+        _next_end = _be + want + 1.0
+        if f0 >= _be and f0 < _next_end:
+            rejects.append({"beat": bi,
+                            "why": f"cutaway_from_s {f0:.2f} is the footage that "
+                                   f"plays right after this beat "
+                                   f"({_be:.2f}-{_next_end:.2f}s) — the viewer "
+                                   f"would see it twice, once early"})
+            continue
         if f0 < _be and (f0 + want) > _bs:
             rejects.append({"beat": bi,
                             "why": f"cutaway_from_s {f0:.2f} overlaps the beat's "
@@ -7635,7 +7671,7 @@ def edit(source_key: str, brief: str,
     if _fps_state == "VFR" and _actual:
         # Resample to the ACTUAL rate. The declared value is the lie; the
         # measured average is what the file contains.
-        _tgt = max(1.0, min(60.0, float(_actual)))
+        _tgt = delivery_fps(float(_actual))
         _norm = src.rsplit(".", 1)[0] + ".cfr.mp4"
         _vn = subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", src,

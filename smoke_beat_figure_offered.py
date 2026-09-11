@@ -105,7 +105,8 @@ check("the beat record carries the figure", '_b["figure"] = extract_figure(' in 
 check("the brief prints the figure rather than the boolean",
       '"  (figure: %s)" % b["figure"]' in src)
 check("the boolean remains as the fallback when no figure parses",
-      '"  (has a number)" if b["has_number"]' in src,
+      ('"  (has a number)" if b["has_number"]' in src
+       or '"  (has a number)" if b.get("has_number")' in src),
       "a beat whose number the extractor cannot parse must still say a number "
       "is there — dropping to silence would hide it")
 check("it is offered as MATERIAL, not as an instruction",
