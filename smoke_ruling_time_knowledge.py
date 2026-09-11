@@ -66,7 +66,18 @@ tree = ast.parse(src)
 BLOCK = A.ruling_time_knowledge()
 
 # ── 1. THE FOUR DOCUMENTS, AND ONLY THOSE ───────────────────────────────────
-check("exactly four documents are selected", len(A._RULING_TIME_DOCS) == 4,
+# SIX, since 2026-09-10: the four judgement documents plus the two craft
+# reports (the standard, then the wider field — order is load-bearing and each
+# file also states its own precedence). Zac's call; the cost was MEASURED, not
+# estimated: +4,690 tokens per distinct prefix on round 52 (turn-1
+# cache_write + cache_read against the recorded round-51 baseline).
+check("exactly six documents are selected", len(A._RULING_TIME_DOCS) == 6,
+      str(A._RULING_TIME_DOCS))
+check("the standard is selected before the wider field",
+      A._RULING_TIME_DOCS.index("16_craft_the_standard.md")
+      < A._RULING_TIME_DOCS.index("17_craft_the_wider_field.md")
+      if {"16_craft_the_standard.md", "17_craft_the_wider_field.md"}
+      <= set(A._RULING_TIME_DOCS) else False,
       str(A._RULING_TIME_DOCS))
 for _d in ("02_intent_standard.md", "13_placement_findings.md",
            "14_card_text_placement_rules.md"):
@@ -124,7 +135,11 @@ _sys_calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
 check("asserted on the CALL, not on a mention", len(_sys_calls) >= 1)
 
 # ── 5. THE BUDGET, WHICH IS A STANDING COST ─────────────────────────────────
-check("the block is under 3,500 tokens", len(BLOCK) // 4 < 3500,
+# CEILING RAISED WITH THE DOCUMENTS, NOT REMOVED. The old 3,500 guarded prefix
+# bloat; the two craft reports were an approved +4,690 measured. 8,000 on this
+# estimator (chars/4, which reads ~7,300 today) leaves room for a document
+# edit and none for a seventh document nobody approved.
+check("the block is under 8,000 tokens", len(BLOCK) // 4 < 8000,
       f"{len(BLOCK)//4} tokens — it rides the cached prefix on every run")
 check("and is not trivially small either", len(BLOCK) // 4 > 800,
       f"{len(BLOCK)//4} — if the documents stopped loading this would be the "
@@ -164,5 +179,5 @@ if fails:
     for f in fails:
         print("  - " + f)
     sys.exit(1)
-print(f"RULING-TIME-KNOWLEDGE: PASS — 4 documents, ~{len(BLOCK)//4} tokens in "
+print(f"RULING-TIME-KNOWLEDGE: PASS — {len(A._RULING_TIME_DOCS)} documents, ~{len(BLOCK)//4} tokens in "
       f"the cached prefix; catalogues and skills stay on disk")
