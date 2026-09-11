@@ -638,9 +638,19 @@ if __name__ == "__main__":
         if any("MORE THAN HALF" in x for x in _l6):
             _bad.append("a sheet of DECLARED placements must not warn about "
                         "tie-breaks — there are none")
-        if any("BUILT BUT NOT RULED" in x for x in _l6):
+        # ASSERT THE BEAT IDENTITY, not a downstream symptom. The first draft
+        # watched for "BUILT BUT NOT RULED" and the mutant produced "NO VERDICT
+        # FOUND" instead — a different string for the same defect, so the leg
+        # passed. Name the row's beat directly: it must be the declared 0, and
+        # must not be the reconstructed 1.
+        _hdr = [x for x in _l6 if x.lstrip().startswith("1.")]
+        if not _hdr or "beat 0 " not in _hdr[0]:
             _bad.append("a declared beat must be used to find the ruling, not "
-                        "only to report the basis")
+                        "only to report the basis — the row reads %r"
+                        % (_hdr[0][:80] if _hdr else "(no row)"))
+        if any("NO VERDICT FOUND" in x or "BUILT BUT NOT RULED" in x for x in _l6):
+            _bad.append("a declared beat resolved to its own ruling must not "
+                        "report the ruling missing")
 
         # THE MOMENT FROM THE STEP, for ledgers that predate t_moment.
         _led_old = {"execute_plan": {"steps": [
