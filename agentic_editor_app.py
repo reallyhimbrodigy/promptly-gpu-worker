@@ -5384,6 +5384,47 @@ def region_psnr(before, after, t0, t1, box=None, env=None):
 _REGION_EFFECT_BAR_DB = 6.0
 
 
+def bar_separates(deltas, bar=_REGION_EFFECT_BAR_DB, min_gap_db=1.0):
+    """Does this bar still SPLIT the population it is being applied to?
+
+    THE DEFECT THIS CLOSES, caught the day it happened. `_REGION_EFFECT_BAR_DB`
+    = 6.0 was calibrated on a corpus where text overlays were whole sentences:
+    worst CHANGED 19.98, best INERT 0.24, so 6.0 sat in a 19.7 dB gap. Round 58
+    shipped the text_content fix, overlays became SHORT LABELS — which is the
+    desired behaviour — and every one of the seven read between 4.70 and 6.76.
+    The bar now falls INSIDE a single tight cluster, and it called five
+    correctly-rendered overlays INERT.
+
+    A BAR THAT FALLS INSIDE ONE POPULATION IS NOT A THRESHOLD, WHATEVER IT WAS
+    WHEN IT WAS DRAWN. This is the repo's own recorded lesson — a check
+    calibrated on one population has learned that population — arriving from a
+    new direction: nobody changed the bar, the CONTENT moved under it. And the
+    error runs the expensive way, which the bar's own note names: a false INERT
+    sends someone to edit a component that works.
+
+    Returns (state, detail). SEPARATES only when the observed values leave a
+    gap of at least `min_gap_db` clear on ONE side of the bar; INSIDE_CLUSTER
+    when the bar sits within the run of values with no such gap. ABSENT below
+    two values — two points cannot show a gap.
+    """
+    _v = sorted(float(d) for d in (deltas or [])
+                if d is not None and d not in (float("inf"), float("-inf")))
+    if len(_v) < 2:
+        return ("ABSENT", "fewer than two measured deltas")
+    _below = [x for x in _v if x < bar]
+    _above = [x for x in _v if x >= bar]
+    if not _below or not _above:
+        return ("SEPARATES", "every value falls on one side of %.1f dB" % bar)
+    _gap = min(_above) - max(_below)
+    if _gap >= min_gap_db:
+        return ("SEPARATES", "a %.2f dB gap straddles the bar" % _gap)
+    return ("INSIDE_CLUSTER",
+            "%d value(s) in %.2f-%.2f dB straddle the %.1f dB bar with only a "
+            "%.2f dB gap — the bar falls inside one population and its verdicts "
+            "are not trustworthy for it"
+            % (len(_v), _v[0], _v[-1], bar, _gap))
+
+
 def region_effect_delta(place_psnr, ctrl_psnr):
     """How much MORE the region moved at the placement than at the control."""
     _inf = float("inf")
@@ -11268,6 +11309,27 @@ def edit(source_key: str, brief: str,
     # measured. Two placements collide when they overlap in TIME and in PIXELS;
     # declared anchors are excluded on purpose, because a component that
     # overflows its anchor still reports the anchor.
+    # DOES THE INERT BAR STILL SPLIT THIS RUN'S POPULATION? Checked per family,
+    # because the fix that shortened overlays moved the text family's
+    # distribution and nothing else's.
+    _fx = {}
+    for _e in (led.get("placement_effects") or []):
+        if _e.get("mode") != "region" or _e.get("region_delta_db") is None:
+            continue
+        _fx.setdefault(_e.get("family"), []).append(_e["region_delta_db"])
+    led["region_bar_separation"] = {}
+    for _fam6, _ds in sorted(_fx.items()):
+        _bs, _bwhy6 = bar_separates(sorted(set(_ds)))
+        led["region_bar_separation"][_fam6] = {"state": _bs, "why": _bwhy6,
+                                               "n": len(set(_ds))}
+        print("  INERT BAR (%s) : %s — %s" % (_fam6, _bs, _bwhy6), flush=True)
+        if _bs == "INSIDE_CLUSTER":
+            fail("inert_bar_inside_population",
+                 "%s: %s. Every INERT verdict for this family in this run is "
+                 "UNVALIDATED — do not read them as defects until the bar is "
+                 "re-measured against a null on THIS population."
+                 % (_fam6, _bwhy6))
+
     # WHAT THIS RUN COST. Printed against the law it is held to, because a cost
     # with no law beside it is a number nobody acts on.
     _cost = run_cost(led, round(time.time() - t0, 1), cpu=8, memory_mb=16384)
