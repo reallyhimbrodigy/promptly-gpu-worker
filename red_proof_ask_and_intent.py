@@ -67,7 +67,7 @@ MUTATIONS = [
     ("an absent turn record reads as a clean zero",
      '    if not turns:\n        return ("ABSENT", 0, 0)',
      '    if not turns:\n        return ("MEASURED", 0, 0)',
-     "NEVER a clean zero", _INJECTS),
+     "never a clean zero", _INJECTS),
     ("the ledger takes a local copy instead of the hoisted rule",
      '    led["rebuilds_without_measurement"] = _k6_blind',
      '    led["rebuilds_without_measurement"] = 0',
