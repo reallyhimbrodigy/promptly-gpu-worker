@@ -425,6 +425,23 @@ def sheet(result, ref_beats, provenance):
                           "  <-- THIS ROW IS A CONVENTION'S OUTPUT, not yet a "
                           "finding about the pipeline"))
         if _v:
+            # A REASON THAT NAMES A FAMILY THE HARNESS REFUSED IS DESCRIBING AN
+            # EDIT THAT IS NOT IN THE VIDEO. Round 58 talking_head beat 2 was
+            # ruled ['text', 'cutaway'] and its why is two thirds about the
+            # cutaway — "Cutaway to wide shot shows the speaker in context" —
+            # which the next-footage guard correctly refused. Judging the TEXT
+            # placement's reason against the frame then grades a sentence about
+            # a shot that was never cut in. Say which part of the ruling
+            # survived before asking whether its reason holds.
+            _ruled_f = [str(t).lower() for t in (_v.get("treatment") or [])]
+            _built_f = {str(x.get("family") or "").lower() for x in placements}
+            _lost = [f for f in _ruled_f
+                     if f not in ("none", "keep", "cut") and f not in _built_f]
+            if _lost:
+                out.append("    !! THE REASON COVERS A REFUSED FAMILY: this "
+                           "beat was ruled %s and %s never reached the video. "
+                           "The why below describes an edit that is not there."
+                           % ("+".join(_ruled_f), "+".join(_lost)))
             out.append("    agent's why: %s" % str(_v.get("why") or "")[:88])
             out.append("    agent ruled: %s%s"
                        % ("+".join(_v.get("treatment") or []) or "none",
@@ -616,6 +633,31 @@ if __name__ == "__main__":
             _bad.append("a sheet that is mostly tie-breaks does not say so "
                         "loudly — which is how its counts get passed on as "
                         "facts about the pipeline")
+
+        # A REASON COVERING A REFUSED FAMILY IS FLAGGED.
+        _demo7 = {"ledger": {
+            "keep_spans": [[0.0, 9.0]], "beats": _demo["ledger"]["beats"],
+            "placements": [{"family": "text", "t_start": 0.4, "t_moment": 0.4,
+                            "beat": 0, "content": "HI"}],
+            "beat_verdicts": [{"beat": 0, "treatment": ["text", "cutaway"],
+                               "why": "cutaway to a wide shot carries it"}],
+            "executed_verdicts": [{"beat": 0, "treatment": ["text", "cutaway"],
+                                   "why": "cutaway to a wide shot carries it"}]}}
+        if not any("THE REASON COVERS A REFUSED FAMILY" in x
+                   for x in sheet(_demo7, _refs, _prov)):
+            _bad.append("a why whose ruling names a family that never reached "
+                        "the video must be flagged — otherwise the reason "
+                        "column grades a sentence about an edit that is not there")
+        _demo8 = dict(_demo7)
+        _demo8["ledger"] = dict(_demo7["ledger"],
+                                beat_verdicts=[{"beat": 0, "treatment": ["text"],
+                                                "why": "the words carry it"}],
+                                executed_verdicts=[{"beat": 0, "treatment": ["text"],
+                                                    "why": "the words carry it"}])
+        if any("THE REASON COVERS A REFUSED FAMILY" in x
+               for x in sheet(_demo8, _refs, _prov)):
+            _bad.append("a ruling whose every family was built must NOT be "
+                        "flagged as covering a refused one")
 
         # A DECLARED BEAT IS NOT A CONVENTION.
         if resolution_basis({"family": "text", "t_start": 2.0, "t_moment": 2.0,

@@ -303,6 +303,41 @@ check("it reads the EXECUTED rulings first — the record is rewritten after the
           and any(isinstance(x, ast.Constant) and x.value == "executed_verdicts"
                   for x in ast.walk(n)) for n in ast.walk(tree)))
 
+# ── 6. A BAR THAT FALLS INSIDE ONE POPULATION IS NOT A THRESHOLD ────────────
+# _REGION_EFFECT_BAR_DB = 6.0 was drawn when text overlays were whole sentences
+# (worst CHANGED 19.98, best INERT 0.24 — a 19.7 dB gap). Round 58 shipped the
+# text_content fix, overlays became short labels, and all seven read 4.70-6.76:
+# the bar fell inside a single cluster and called five correctly-rendered
+# overlays INERT. Nobody moved the bar; the CONTENT moved under it.
+check("a clean gap on one side of the bar SEPARATES",
+      A.bar_separates([1.0, 2.0, 9.0, 12.0], bar=6.0)[0] == "SEPARATES")
+check("every value on one side also SEPARATES — nothing straddles",
+      A.bar_separates([8.0, 9.0, 12.0], bar=6.0)[0] == "SEPARATES"
+      and A.bar_separates([1.0, 2.0], bar=6.0)[0] == "SEPARATES")
+_ic = A.bar_separates([4.70, 5.09, 5.11, 5.70, 5.91, 6.24, 6.76], bar=6.0)
+check("round 58's REAL text deltas report INSIDE_CLUSTER",
+      _ic[0] == "INSIDE_CLUSTER" and "0.33" in _ic[1], str(_ic))
+check("round 57's REAL text deltas still SEPARATE — the bar was fine until "
+      "the population moved",
+      A.bar_separates([4.29, 7.94, 8.11, 8.13, 8.19, 8.20, 9.75], bar=6.0)[0]
+      == "SEPARATES")
+check("fewer than two values is ABSENT — two points cannot show a gap",
+      A.bar_separates([5.0], bar=6.0)[0] == "ABSENT"
+      and A.bar_separates([], bar=6.0)[0] == "ABSENT")
+check("an infinite delta is not counted as a value",
+      A.bar_separates([float("inf"), 5.0], bar=6.0)[0] == "ABSENT")
+check("the separation is checked PER FAMILY — only the text family's "
+      "distribution moved",
+      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "bar_separates"
+          for n in ast.walk(tree))
+      and "region_bar_separation" in src)
+check("and an unsupportable bar fails LOUDLY, naming its verdicts unvalidated",
+      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "fail"
+          and any(isinstance(x, ast.Constant)
+                  and x.value == "inert_bar_inside_population"
+                  for x in ast.walk(n)) for n in ast.walk(tree))
+      and "UNVALIDATED" in src)
+
 print()
 if fails:
     print("ASK-AND-INTENT: FAIL")
@@ -312,4 +347,5 @@ if fails:
 print("ASK-AND-INTENT: PASS — no overlay without a ruling, the executed rulings "
       "are frozen, an ambiguous request stops and asks for free, and a blind "
       "rebuild is counted against its denominator, and an overlay track that "
-      "repeats the captions is named")
+      "repeats the captions is named, and a bar that no longer splits its "
+      "population refuses to hand down verdicts")
