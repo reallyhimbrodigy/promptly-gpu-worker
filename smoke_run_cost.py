@@ -130,6 +130,18 @@ check("and is PRINTED beside the law it is judged against", bool(_p)
       and any("0.10/job" in ast.unparse(n) for n in _p),
       "a cost with no law beside it is a number nobody acts on")
 
+# ── A STAGE TIMER IS A SUM ACROSS REPEATED CALLS ────────────────────────────
+# Round 58 talking_head ran execute_plan twice and every stage under it roughly
+# doubled on IDENTICAL work. A reader scoping an optimisation against
+# build_alpha_layer's 91.2s would be sizing two builds as one.
+check("the stage line declares how many execute_plan calls it sums",
+      "SUM ACROSS" in src and "not \n"[0:0] + "per-build figures" in src)
+check("and it only says so when there was more than one",
+      any(isinstance(n, ast.Compare) and "_k6_total" in ast.unparse(n)
+          for n in ast.walk(tree)))
+check("a repeat build is reported with what it cost, not just counted",
+      "REPEAT BUILDS" in src and "one FEWER placement" in src)
+
 print()
 if fails:
     print("RUN-COST: FAIL")

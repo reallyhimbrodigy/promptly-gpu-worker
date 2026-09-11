@@ -11347,10 +11347,29 @@ def edit(source_key: str, brief: str,
     if _cost["stage_state"] == "MEASURED":
         _top5 = sorted(_cost["by_stage_container_only"].items(),
                        key=lambda kv: -kv[1]["s"])[:5]
+        # EVERY STAGE TIMER IS A SUM ACROSS REPEATED TOOL CALLS, and saying so
+        # is not a footnote. Round 58 talking_head ran execute_plan TWICE and
+        # every stage under it roughly doubled — build_alpha_layer 38.4s -> 91.2s
+        # on IDENTICAL work (225 reel frames both rounds, 13 placements against
+        # 12). Anyone reading 91.2s as the cost of painting an alpha layer would
+        # scope an optimisation against a number that is two builds.
+        #
+        # AND THE MACHINE WAS NOT THE CAUSE, which is the reading everyone
+        # reaches for: the container bench moved the OTHER WAY, single-thread
+        # 251.2ms on the slow round against 66.7ms on the "slow" one.
         print("  COST BY STAGE   : container only (the model loop spans the "
-              "whole run and is NOT attributable): "
+              "whole run and is NOT attributable)%s: "
+              % ("" if _k6_total <= 1 else
+                 "  [SUM ACROSS %d execute_plan CALL(S) — these are not "
+                 "per-build figures]" % _k6_total)
               + "  ".join("%s $%.4f" % (_k, _v["container_usd"]) for _k, _v in _top5),
               flush=True)
+        if _k6_total > 1:
+            print("  REPEAT BUILDS   : %d execute_plan call(s), %d of them with "
+                  "no measurement since the previous build. A second build is "
+                  "the largest single cost variable observed on a fixture: "
+                  "talking_head r57 -> r58 went 172.0s/$0.1328 to 303.3s/$0.2010 "
+                  "for one FEWER placement." % (_k6_total, _k6_blind), flush=True)
     elif _cost["stage_state"] == "INCOHERENT":
         fail("cost_stage_model_incoherent", _cost["stage_why"])
 
