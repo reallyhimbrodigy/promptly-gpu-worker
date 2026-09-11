@@ -65,10 +65,23 @@ MUTATIONS = [
     ("an insert request stops recording itself unfilled",
      '            "state": "UNFILLED",', '            "state": "ok",',
      "record itself UNFILLED", _INJECTS),
+    # AIMED AT THE NEGATION, not the explanation. The first version replaced
+    # the sentence AFTER "I can create" — which truncated the explanation and
+    # left "isn't something I can create" fully intact, so the message still
+    # said the right thing and the mutant correctly passed. The mutation was
+    # wrong, not the leg: to test whether the message states the negation, the
+    # mutation has to remove the negation.
+    # AIMED AT THE NEGATION, and anchored uniquely. Two earlier attempts
+    # failed differently and both are worth keeping: the first replaced the
+    # sentence AFTER "I can create", which truncated the explanation and left
+    # the negation intact — the mutation was wrong, not the leg. The second
+    # aimed at the negation itself and came back "anchor Nx", because BOTH
+    # messages compute it the same way. Anchored through the PARTIAL branch's
+    # own unique line.
     ("the hybrid message stops saying the insert did not happen",
-     "create yet " + chr(8212) + " this editor cuts, times and adds text, cards, sound ",
-     "create. ",
-     "does not say the insert did NOT happen", _INJECTS),
+     '"for is in there."\n            % ("shot" if _n == 1 else "%d shots" % _n,\n               "isn\'t" if _n == 1 else "aren\'t"))',
+     '"for is in there."\n            % ("shot" if _n == 1 else "%d shots" % _n,\n               "is" if _n == 1 else "are"))',
+     "does not say, as a phrase, that the insert", _INJECTS),
     ("a hybrid whose edit also failed is reported as a partial delivery",
      '    if not edit_ok:\n        return ("REFUSED",',
      '    if False:\n        return ("REFUSED",',
