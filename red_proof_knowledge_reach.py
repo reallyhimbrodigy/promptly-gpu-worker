@@ -62,16 +62,24 @@ try:
     # the eight WHEN headings out of the enum's reach — and confirm the
     # unmutated gate reports the fall.
     _app = pathlib.Path(_wt) / APPNAME
-    # IT HAS TO CUT THE DESCRIPTION, NOT THE ENUM. My first control sliced
-    # MG_CONDITION_ENUM and the ratchet did not move, because the headings reach
-    # the agent's surface through the field's DESCRIPTION — which builds its own
-    # join over the conditions — not through the enum list. A positive control
-    # aimed at the wrong surface proves the gate blind when it is looking
-    # somewhere else.
+    # THE TEXT, NOT THE KEY. Three controls failed before this one and each was
+    # wrong in a way worth keeping:
+    #   slicing MG_CONDITION_ENUM      left the DESCRIPTION's own join intact
+    #   cutting the description's join left the ENUM intact
+    #   renaming the whole field       left BOTH — a renamed property still
+    #                                  carries its enum and description into the
+    #                                  tool JSON, so the model still SEES the
+    #                                  headings; it just cannot answer with them
+    #
+    # The third is the instructive one. knowledge_reach measures VISIBILITY —
+    # does this text reach the model's context — and visibility is genuinely
+    # unchanged by renaming a key. The gate was right and the control was
+    # wrong. Emptying the enum removes both carriers at once, and the
+    # difference between "the agent can see it" and "the agent can act on it"
+    # is now named in knowledge_reach's own docstring.
     _mode, _m = red_proof_anchor.apply_one(
-        _orig[APPNAME],
-        '                                         for _c in MG_CONDITION_ENUM)',
-        '                                         for _c in MG_CONDITION_ENUM[:1])')
+        _orig[APPNAME], "MG_CONDITION_ENUM = list(MG_CONDITIONS)",
+        "MG_CONDITION_ENUM = []")
     if _m is None:
         harness.append("positive control: anchor %s" % _mode)
         print("  HARNESS FAILURE  positive control  :: anchor %s" % _mode)

@@ -283,6 +283,15 @@ def knowledge_reach(doc_dir=None, surface=None):
     rule nobody wrote, and this counts how many there are rather than waiting
     for the next one to be found by its damage.
 
+    IT MEASURES VISIBILITY, NOT ANSWERABILITY, and the two are different. A
+    claim counts as reachable when its text is in the prompt or a tool schema —
+    which is what decides whether the model can READ it. Whether the model can
+    ACT on it is a separate question: renaming `card_condition` to something
+    unusable leaves every heading in the schema's enum and description, so the
+    agent still sees all eight and can answer with none. Proven while trying to
+    build a positive control for this function, which failed three times before
+    the premise was the thing at fault rather than the gate.
+
     NOT EVERYTHING HERE SHOULD BE WIRED, and that is the point of the
     classification rather than the count. `13_placement_findings` and
     `14_card_text_placement_rules` are MEASURED RATES — "77% of cards share
