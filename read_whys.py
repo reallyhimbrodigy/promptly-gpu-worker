@@ -63,10 +63,15 @@ CONTRADICTIONS = ((re.compile(r"not dead air", re.I),
                    re.compile(r"\bis dead air\b|\bdead air\b", re.I),
                    "the beat says NOT dead air; the ruling calls it dead air"),)
 
+# 'state' IS NOT A SPEECH WORD. The first list matched "states?" and every one
+# of screen_recording's flags in three rounds was "static state" / "typing
+# state" — a UI description, not a claim. Five flags, one regex, zero slips.
+# The counts I reported for that fixture were the regex, not the agent. Kept:
+# only words that presuppose somebody SPOKE.
 SPEECH_WORDS = re.compile(
-    r"\b(claims?|claimed|says?|said|speaker|narrator|narration|line|states?|"
-    r"stated|assertion|asserts?|words?|sentence|spoken|voice|tells?|"
-    r"delivers? the)\b", re.I)
+    r"\b(claims?|claimed|says?|said|speaker|narrator|narration|spoken|"
+    r"assertion|asserts?|sentence|voice|delivers? the line|"
+    r"states? that|the words)\b", re.I)
 
 LINK = re.compile(
     r"\b(because|so that|so the|so it|after the|before the|while the|"
