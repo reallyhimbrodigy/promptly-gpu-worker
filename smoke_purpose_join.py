@@ -142,8 +142,9 @@ _purpose_enums = [e for e in _pay if sorted(e) == sorted(_PURPOSES)]
 _arc_enums = [e for e in _pay if sorted(e) != sorted(_PURPOSES)]
 check(f"the purpose enum appears on BOTH ruling surfaces ({len(_purpose_enums)})",
       len(_purpose_enums) == 2, f"{_purpose_enums}")
-check(f"the zoom_arc vocabulary is still its own ({len(_arc_enums)})",
-      len(_arc_enums) == 1 and "mid_peak" in _arc_enums[0], f"{_arc_enums}")
+_ARC = ["hook", "build", "mid_peak", "payoff", "breather", "close"]
+check(f"the zoom_arc vocabulary is still its own, on every surface it appears ({len(_arc_enums)})",
+      bool(_arc_enums) and all(e == _ARC for e in _arc_enums), f"{_arc_enums}")
 _shared = set(_PURPOSES) & set(_arc_enums[0] if _arc_enums else [])
 check("the two vocabularies overlap on exactly hook/payoff/close",
       _shared == {"hook", "payoff", "close"}, f"{sorted(_shared)}")

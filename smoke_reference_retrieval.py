@@ -24,7 +24,6 @@ import ast
 import json
 import pathlib
 import sys
-import types
 
 import modal_stub                                         # noqa: E402
 modal_stub.install()
@@ -190,10 +189,14 @@ if _patched:
     # list, so the test that survives cutaway shipping is the inverse of the
     # original: take a real family OUT of the enum and the derivation must
     # report it unbuildable, with nobody editing the filter.
-    _i = _e.index("cutaway")
-    _e.pop(_i)
+    # the derivation UNIONS every ruling surface's enum, so the family must
+    # leave all of them for the derivation to see it go
+    _slots = [(e, e.index("cutaway")) for e in _patched if "cutaway" in e]
+    for e, _i in _slots:
+        e.pop(_i)
     _after = set(A.reference_unbuildable())
-    _e.insert(_i, "cutaway")
+    for e, _i in _slots:
+        e.insert(_i, "cutaway")
     check("a family leaving the enum joins the unbuildable set by derivation",
           "cutaway" not in _before and "cutaway" in _after,
           f"before={sorted(_before)} after={sorted(_after)} — the filter must "
