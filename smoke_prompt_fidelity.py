@@ -94,6 +94,47 @@ check("'cut the bit where I stumble' is FAITHFUL when only a cut happened",
 check("and a cut nobody asked for is an overreach",
       f(T("text"), _P("text"), cut_made=True)[:3] == (OVER, [], ["cut"]))
 
+# ── CAPTIONS ARE BURNED, NEVER A PLACEMENT ──────────────────────────────────
+# "Just add captions" is THE canonical minimal brief, and captions leave no
+# manifest entry — without the captions_made channel it reads SHORT by
+# construction even when 29 pages composited. Never tested until now; the check
+# existed and the case did not.
+check("'just add captions' with captions burned is FAITHFUL",
+      f(T("caption"), _P(), captions_made=True)[0] == OK)
+check("'just add captions' with captions AND four zooms has OVERREACHED",
+      f(T("caption"), _P("zoom", "zoom", "zoom", "zoom"), captions_made=True)[:3]
+      == (OVER, [], ["zoom"]))
+check("'just add captions' with no captions is SHORT — the one thing missing",
+      f(T("caption"), _P(), captions_made=False)[:2] == (SHORT, ["caption"]))
+# Wiring read from the AST — the call's keyword must be an EXPRESSION over the
+# ledger, never a constant. `captions_made=False` keeps every substring a grep
+# would look for and disconnects the wire.
+_calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+          and getattr(n.func, "id", "") == "spec_fidelity"]
+_kw = {k.arg: k.value for c in _calls for k in c.keywords}
+check("the call site passes captions_made from the ledger, not a constant",
+      "captions_made" in _kw and not isinstance(_kw["captions_made"], ast.Constant)
+      and "caption_composited" in ast.unparse(_kw.get("captions_made", ast.Constant(0))))
+
+# ── cut_made IS NOT PRESENCE ────────────────────────────────────────────────
+# Round 52 screen_recording: keep_spans=[[0.0, 90.46]] — the whole source kept —
+# beside built[cut]=35. bool(keep_spans) calls that a cut. A cut was made when
+# the KEPT TOTAL IS LESS THAN THE SOURCE.
+# Resolve the keyword through its binding: cut_made=<Name> whose assignment
+# carries a strict comparison of kept total against source duration.
+_cm = _kw.get("cut_made")
+_cm_assign = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+              and isinstance(_cm, ast.Name)
+              and any(getattr(t, "id", "") == _cm.id for t in n.targets)]
+_cm_has_lt = any(isinstance(x, ast.Compare) and any(isinstance(o, ast.Lt) for o in x.ops)
+                 and "_kept" in ast.unparse(x) and "_srcd" in ast.unparse(x)
+                 for a_ in _cm_assign for x in ast.walk(a_.value))
+check("cut_made is derived from kept total < source duration, not from "
+      "keep_spans existing",
+      _cm_has_lt,
+      "presence tested where shape was needed — in my own wiring, the class I "
+      "wrote into the wire contract three times today")
+
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)
 check("and is PRINTED", "FIDELITY        :" in src,

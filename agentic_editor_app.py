@@ -6272,7 +6272,7 @@ FIDELITY_OK, FIDELITY_SHORT, FIDELITY_OVER, FIDELITY_UNSCOPED = (
     "FAITHFUL", "SHORT", "OVERREACHED", "UNSCOPED")
 
 
-def spec_fidelity(spec, placements, cut_made=False):
+def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
     """(state, missing, unasked, detail) — did the output contain what was asked
     and NOTHING THAT WAS NOT?
 
@@ -6304,6 +6304,12 @@ def spec_fidelity(spec, placements, cut_made=False):
     _built.discard("")
     if cut_made:
         _built.add("cut")
+    # CAPTIONS ARE BURNED, NEVER A PLACEMENT. They leave no manifest entry, so
+    # without this "just add captions" — the canonical minimal brief — reads
+    # SHORT by construction even when 29 caption pages composited. The evidence
+    # is led["caption_composited"], and the caller passes it.
+    if captions_made:
+        _built.add("caption")
     if _mode != "targeted_change":
         return (FIDELITY_UNSCOPED, [], sorted(_built),
                 "mode=%s — no declared family scope, so fidelity cannot be "
@@ -11229,9 +11235,21 @@ def edit(source_key: str, brief: str,
     # families built outside a targeted scope AT BUILD TIME — and nothing
     # caught the other: a family ASKED FOR and never delivered reads as a
     # successful run.
+    # cut_made IS NOT "keep_spans EXISTS". Round 52 screen_recording carried
+    # keep_spans = [[0.0, 90.46]] — the WHOLE source, nothing removed — beside
+    # built[cut]=35. bool(keep_spans) would have called that a cut, which is
+    # presence tested where shape was needed: the class I wrote into the wire
+    # contract three times today, in my own wiring. A cut was made when the
+    # KEPT TOTAL IS LESS THAN THE SOURCE.
+    _kept = sum(max(0.0, float(_e) - float(_s0))
+                for _s0, _e in (led.get("keep_spans") or []))
+    _srcd = float(led.get("source_duration_s") or 0.0)
+    _cut_made = bool(led.get("keep_spans")) and _srcd > 0 and _kept < (_srcd - 0.05)
+    led["cut_made"] = _cut_made
     _fid_state, _fid_missing, _fid_unasked, _fid_why = spec_fidelity(
         led.get("spec"), led.get("placements") or [],
-        cut_made=bool(led.get("keep_spans")))
+        cut_made=_cut_made,
+        captions_made=bool(led.get("caption_composited")))
     led["fidelity"] = {"state": _fid_state, "missing": _fid_missing,
                        "unasked": _fid_unasked, "why": _fid_why}
     print("  FIDELITY        : %s — %s" % (_fid_state, _fid_why), flush=True)
