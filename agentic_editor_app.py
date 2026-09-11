@@ -1359,6 +1359,162 @@ SPEC_MODES = ("full_edit", "targeted_change", "question", "unsupported")
 # tier and priced per second — not a quiet widening of this one.
 UNSUPPORTED_CLASSES = ("generate_footage", "change_in_frame")
 
+# ── THE CAPABILITY ROUTER ───────────────────────────────────────────────────
+#
+# set_spec ALREADY IS the router; its fourth branch is a refusal. Turning that
+# branch into a route is the zero-reject law arriving at the capability layer:
+# content classes are ROUTES, not errors, and so are capability classes.
+#
+# ONE ROUTE IS BUILT. The others terminate, charge nothing, and — the part that
+# did not exist — ARE COUNTED. `unsupported_request` was built to be the demand
+# signal and has fired ZERO times across rounds 51-59, so the case for building
+# generation currently rests on a count nobody has taken rather than a low one.
+# A route that terminates still records what was asked for.
+ROUTE_EDIT = "edit"                 # BUILT: cut, caption, text, card, zoom, sfx
+ROUTE_HYBRID = "hybrid"             # UNBUILT: keep the edit, insert a generated clip
+ROUTE_GENERATE = "generate"         # UNBUILT: a clip that is not in the upload
+ROUTE_IN_FRAME = "change_in_frame"  # UNBUILT, and NOT a clip generator's shape
+ROUTE_QUESTION = "question"         # BUILT: answer, edit nothing
+ROUTES_BUILT = (ROUTE_EDIT, ROUTE_QUESTION)
+
+# THE HYBRID IS THE DEFAULT CASE, NOT THE EXOTIC ONE. Every generate-shaped
+# phrasing in the schema today is ADDITIVE — "add a shot", "put some b-roll
+# OVER THIS", "make a scene where" — and a router that treats generate and edit
+# as exclusive answers a question nobody asked. Matched on the request's own
+# words rather than inferred, because a silent choice between two routes that
+# differ by minutes and dollars is the one place guessing is least defensible.
+_ADDITIVE_MARKERS = ("add ", "put ", "insert ", "over this", "over it",
+                     "on top", "throw in", "drop in", "include a", "include some",
+                     "as well", "also ", "plus a", "alongside", "in between",
+                     "cut in ", "mix in")
+
+
+def capability_route(mode, unsupported_class=None, brief=""):
+    """(route, state, why) — which capability this request needs.
+
+    STATE IS MEASURED OR AMBIGUOUS, never a silent pick. AMBIGUOUS is the K5
+    case: the caller must ask rather than choose, because the two readings
+    differ by orders of magnitude in time and money.
+    """
+    _m = str(mode or "").lower()
+    _b = " " + str(brief or "").lower() + " "
+    if _m == "question":
+        return (ROUTE_QUESTION, "MEASURED", "the request asks something")
+    if _m in ("full_edit", "targeted_change"):
+        return (ROUTE_EDIT, "MEASURED",
+                "the request is satisfiable with the footage the user gave us")
+    if _m != "unsupported":
+        return (ROUTE_EDIT, "AMBIGUOUS",
+                "mode %r is not a routing answer — defaulting to the built "
+                "route is the safe direction, and the ambiguity is on the "
+                "record rather than resolved by silence" % (mode,))
+    if unsupported_class == "change_in_frame":
+        # NAMED SEPARATELY ON PURPOSE. Editing pixels inside existing footage is
+        # an image-edit surface, not a clip generator, and routing it to one
+        # would send the request somewhere that cannot serve it.
+        return (ROUTE_IN_FRAME, "MEASURED",
+                "the request changes what is inside the existing frame")
+    if unsupported_class == "generate_footage":
+        if any(_k in _b for _k in _ADDITIVE_MARKERS):
+            return (ROUTE_HYBRID, "MEASURED",
+                    "the request is ADDITIVE — it keeps the edit and inserts "
+                    "something that is not in the upload")
+        return (ROUTE_GENERATE, "AMBIGUOUS",
+                "footage that does not exist is needed, and nothing in the "
+                "request says whether the user's own footage is kept. Ask "
+                "before committing: the two readings differ by minutes and by "
+                "an unmeasured amount of money")
+    return (ROUTE_GENERATE, "AMBIGUOUS",
+            "unsupported with no class named — which capability is needed "
+            "cannot be read from the request")
+
+
+# WHAT EACH ROUTE COSTS, AND THE ONES THAT HAVE NEVER BEEN RUN SAY SO.
+# edit: MEASURED over 15 runs, rounds 51/52/54 — wall p50 233.5s, max 416.2s,
+# and cost_usd now on every run (0.1016-0.2549 observed, 1.02x-2.55x the law).
+# Everything else: ABSENT. Not "minutes" — ABSENT, because nothing here has
+# ever called a generator, and a router that quotes a number it does not have
+# is the probe-collapse defect making a product decision.
+_ROUTE_COST = {
+    ROUTE_EDIT: {"state": "MEASURED", "wall_p50_s": 233.5, "wall_max_s": 416.2,
+                 "usd_observed": [0.1016, 0.2549], "n": 15,
+                 "src": "rounds 51/52/54, five fixtures x three rounds"},
+    ROUTE_QUESTION: {"state": "MEASURED", "wall_p50_s": 0.0, "wall_max_s": 0.0,
+                     "usd_observed": [0.0, 0.0], "n": 0,
+                     "src": "answers without editing; no render"},
+}
+
+
+def insert_request(brief, why="", at_s=None, duration_s=None):
+    """One piece of footage the user asked for that is not in their upload.
+
+    THE HYBRID ROUTE'S WHOLE POINT. Today "add a shot of a city over this" is
+    refused ENTIRELY and the user gets nothing back — an honest refusal, and
+    the wrong one, because the request was ADDITIVE. They asked for their edit
+    PLUS something. We can do the first half.
+
+    So the hybrid route delivers the edit and records the second half as a
+    NAMED, ADDRESSABLE HOLE rather than as a reason to refuse the first. The
+    record is what makes the demand signal specific: not "someone wanted
+    generation" but what they wanted, where, and for how long. That is the
+    difference between a tally that cannot justify building anything and a
+    queue that can.
+    """
+    return {"asked_for": str(brief or "")[:300], "why": str(why or "")[:200],
+            "at_s": (round(float(at_s), 2) if at_s is not None else None),
+            "duration_s": (round(float(duration_s), 2)
+                           if duration_s is not None else None),
+            "state": "UNFILLED",
+            "fillable_by": "the generate route, which is not built"}
+
+
+def hybrid_delivery(insert_requests, edit_ok):
+    """(state, user_message) for a hybrid run.
+
+    THREE STATES, because "we did some of it" is not one thing:
+      PARTIAL   the edit is delivered and the inserts are not — say BOTH halves
+      REFUSED   the edit did not come out either; there is nothing to hand over
+      ABSENT    nothing was asked to be inserted, so this is not a hybrid run
+
+    IT NEVER CLAIMS THE INSERT HAPPENED. The prompt's standing rule is that a
+    competent edit which ignores the request reads as the product not working —
+    which is true, and is about SILENCE, not about partial delivery. Naming the
+    missing half out loud is the opposite of ignoring it.
+    """
+    _n = len(insert_requests or [])
+    if not _n:
+        return ("ABSENT", "")
+    if not edit_ok:
+        return ("REFUSED",
+                "I couldn't finish this one, and the %s you asked me to add %s "
+                "something this editor can create — it works with the footage "
+                "you upload. Nothing was charged."
+                % ("shot" if _n == 1 else "%d shots" % _n,
+                   "isn't" if _n == 1 else "aren't"))
+    return ("PARTIAL",
+            "Here's your edit. The %s you asked me to add %s something I can "
+            "create yet — this editor cuts, times and adds text, cards, sound "
+            "and zooms to the footage you upload. Everything else you asked "
+            "for is in there."
+            % ("shot" if _n == 1 else "%d shots" % _n,
+               "isn't" if _n == 1 else "aren't"))
+
+
+def route_cost(route):
+    """(state, detail). ABSENT means nobody has measured it — the router may
+    say 'longer and more expensive' and may NOT say a number."""
+    _c = _ROUTE_COST.get(route)
+    if not _c:
+        return ("ABSENT",
+                {"why": "%s has never been run here; four things must be "
+                        "measured before any figure is quoted — per-model wall "
+                        "clock for a real clip, per-clip dollars from an "
+                        "invoice line, the failure rate and what a failure "
+                        "bills, and whether the clip lands in a usable aspect "
+                        "and frame rate" % route})
+    return (_c["state"], _c)
+
+
 # The declare_placement `type` vocabulary is NOT the family vocabulary, and the
 # gap is where a scope check would silently pass everything: `emphasis` is the
 # zoom family and `overlay_text` is text. Declared once, here, so the scope
@@ -5966,6 +6122,41 @@ def region_psnr(before, after, t0, t1, box=None, env=None):
 # above the best null — both far over the 2.0 registered in advance.
 _REGION_EFFECT_BAR_DB = 6.0
 
+# REDRAWN 2026-09-11 ON THE MEASURED NULL, AND IT IS PER CONTROL SCHEME,
+# because the old single number was the whole defect: one bar was being applied
+# to two populations whose nulls differ by 8 dB.
+#
+#   scheme                      null (measured, n=32)   bar        basis
+#   same_window_layer_withheld  EXACTLY 0.00, no spread  1.0   1 dB of margin
+#                               (byte-identical: with no ink the two files are
+#                               the same frames and the x264 thread pin makes
+#                               that exact)
+#   window_elsewhere            -10.75 .. 8.13           None  UNSUPPORTABLE
+#                               (production's real short labels read 4.70-6.76,
+#                               entirely BELOW the null's maximum — no bar
+#                               exists that separates them, so the verdict is
+#                               refused rather than guessed)
+#
+# The 6.0 above is kept, unused by the region path, as the ABSOLUTE-mode bar and
+# as the number the correction is measured against.
+_REGION_BAR_BY_SCHEME = {
+    "same_window_layer_withheld": 1.0,
+    "window_elsewhere": None,
+}
+
+
+def region_bar_for(scheme):
+    """(bar_db, basis) for a control scheme. bar_db None = no verdict is
+    supportable under that scheme, and the caller must not invent one."""
+    if scheme in _REGION_BAR_BY_SCHEME:
+        _b = _REGION_BAR_BY_SCHEME[scheme]
+        return (_b, "measured null 2026-09-11, n=32"
+                if _b is not None else
+                "the measured null (-10.75..8.13 dB) exceeds production's real "
+                "signal (4.70-6.76 dB); no bar separates them")
+    return (None, "unknown control scheme %r — a bar cannot be chosen for a "
+                  "control nobody measured" % (scheme,))
+
 
 # THE NULL, MEASURED 2026-09-11, and it says the bar cannot be redrawn.
 #
@@ -8263,7 +8454,20 @@ def edit(source_key: str, brief: str,
                 _rec["changed"] = None
                 led.setdefault("placement_effects", []).append(_rec)
                 return None, None
-            _chg = _delta >= _REGION_EFFECT_BAR_DB
+            _bar, _bar_basis = region_bar_for(_rec.get("ctrl_scheme"))
+            _rec["bar_db"] = _bar
+            _rec["bar_basis"] = _bar_basis
+            if _bar is None:
+                # NO BAR, NO VERDICT. Under a control whose null is wider than
+                # the signal there is nothing to threshold, and emitting
+                # CHANGED or INERT would be picking one at random.
+                _rec["region_verdict"] = "UNVALIDATED"
+                _rec["changed"] = None
+                led.setdefault("placement_effects", []).append(_rec)
+                led["region_effect_unvalidated"] = (
+                    led.get("region_effect_unvalidated", 0) + 1)
+                return None, _db
+            _chg = _delta >= _bar
             _rec["region_verdict"] = "CHANGED" if _chg else "INERT"
         else:
             _chg, _db = step_changed_output(before, after, t0_s, t1_s,
@@ -8293,6 +8497,22 @@ def edit(source_key: str, brief: str,
                 _rec["mode"] = "absolute"
         _rec["changed"] = _chg
         led.setdefault("placement_effects", []).append(_rec)
+        if _chg is False and _rec.get("mode") == "region":
+            # DEFERRED, NOT SUPPRESSED. Whether a region delta below the bar
+            # means "nothing was painted" depends on where the REST of that
+            # family's deltas landed, and that population does not exist yet at
+            # this call. Round 58 fired five placement_inert on overlays that
+            # every one of them rendered, because the bar sat inside a single
+            # tight cluster — a per-placement verdict answering a question only
+            # the run can answer. Resolved at the end of the run against
+            # bar_separates, which is the gate; see the block after the build.
+            led.setdefault("_deferred_inert", []).append(
+                {"family": family, "t": list(_rec["t"]), "note": note,
+                 "psnr_db": _rec.get("psnr_db"),
+                 "ctrl_psnr_db": _rec.get("ctrl_psnr_db"),
+                 "delta_db": _rec.get("region_delta_db"),
+                 "domain": _rec["domain"], "mode": _rec["mode"]})
+            return _chg, _db
         if _chg is False:
             fail("placement_inert",
                  f"{family} declared a placement over "
@@ -12398,8 +12618,87 @@ def edit(source_key: str, brief: str,
                         continue
                     if _sc["mode"] == "unsupported":
                         _cls = _sc.get("unsupported_class")
+                        # THE ROUTE, NAMED AND COUNTED. unsupported_request was
+                        # built to be the demand signal and has fired ZERO times
+                        # across rounds 51-59, so what gets built next rests on
+                        # a count nobody has taken. A terminated route still
+                        # records what was asked for, and which capability it
+                        # needed — "add a shot over this" is a HYBRID request
+                        # and answering it as pure generation would throw the
+                        # user's own edit away.
+                        _rt, _rt_state, _rt_why = capability_route(
+                            _sc["mode"], _cls, brief)
+                        _rc_state, _rc_detail = route_cost(_rt)
+                        led["capability_route"] = {
+                            "route": _rt, "state": _rt_state, "why": _rt_why,
+                            "class": _cls, "built": _rt in ROUTES_BUILT,
+                            "cost_state": _rc_state, "cost": _rc_detail}
+                        led.setdefault("route_demand", {})
+                        led["route_demand"][_rt] = led["route_demand"].get(_rt, 0) + 1
+                        print("  ROUTE           : %s (%s) — %s | cost %s"
+                              % (_rt, _rt_state, _rt_why[:90], _rc_state),
+                              flush=True)
+                        if _rt == ROUTE_HYBRID:
+                            # THE ONE ROUTE THAT DOES NOT TERMINATE. The request
+                            # was additive, so the edit half is servable and
+                            # refusing it throws away work the user asked for
+                            # and we can do. The insert is recorded as an
+                            # addressable hole; `mode` falls back to the editing
+                            # spec so everything downstream behaves normally.
+                            led.setdefault("insert_requests", []).append(
+                                insert_request(brief, _sc.get("why") or ""))
+                            _sc["mode"] = "full_edit"
+                            _sc["families"] = None
+                            led["capability_route"]["delivered"] = "edit_half"
+                            print("  HYBRID          : the edit proceeds; %d "
+                                  "insert request(s) recorded UNFILLED — "
+                                  "refusing the whole job would discard the "
+                                  "half we can serve"
+                                  % len(led["insert_requests"]), flush=True)
+                            fail("hybrid_insert_unfilled",
+                                 "the user asked for footage that is not in "
+                                 "their upload; the edit is delivered and the "
+                                 "insert is recorded UNFILLED rather than the "
+                                 "whole request being refused")
+                            _sc["targets"] = _good_t
+                            # COPIED FROM THE EXISTING CALL SITE, not written
+                            # from memory. My first version passed `families`
+                            # into the third positional, which is `beat_source`
+                            # — a silent clip would have been scored against the
+                            # talking-head corpus. An existing check caught it,
+                            # and Builder-1 lost two rounds this week to exactly
+                            # this: arguments written from memory into a
+                            # signature that had moved.
+                            led["rubric"] = derive_rubric(
+                                _sc.get("targets"), _sc["mode"],
+                                beat_source=_beat_source)
+                            led["spec"] = _sc
+                            results.append({"type": "tool_result",
+                                            "tool_use_id": tu.id,
+                                            "content": json.dumps(
+                                                {"route": "hybrid",
+                                                 "note": "Edit this footage as "
+                                                         "asked. The shot they "
+                                                         "want ADDED cannot be "
+                                                         "created — do not "
+                                                         "substitute something "
+                                                         "else for it, and do "
+                                                         "not mention it in the "
+                                                         "edit. It is recorded.",
+                                                 "spec": _sc})})
+                            continue
+                        if _rt_state == "AMBIGUOUS":
+                            # K5 AT THE CAPABILITY LAYER. Two readings that
+                            # differ by orders of magnitude in time and money is
+                            # the one place a silent pick is least defensible.
+                            fail("route_ambiguous",
+                                 "route %s is AMBIGUOUS: %s. The run stops and "
+                                 "the question goes to the user rather than a "
+                                 "capability being chosen for them."
+                                 % (_rt, _rt_why))
                         led["unsupported_request"] = {
                             "class": _cls,
+                            "route": _rt,
                             "why": _sc.get("why") or "",
                             "credit_charged": False,
                         }
@@ -13045,9 +13344,22 @@ def edit(source_key: str, brief: str,
         _fx.setdefault(_e.get("family"), []).append(_e["region_delta_db"])
     led["region_bar_separation"] = {}
     for _fam6, _ds in sorted(_fx.items()):
-        _bs, _bwhy6 = bar_separates(sorted(set(_ds)))
+        _scheme6 = next((e.get("ctrl_scheme") for e in
+                         (led.get("placement_effects") or [])
+                         if e.get("family") == _fam6 and e.get("ctrl_scheme")), None)
+        _bar6, _basis6 = region_bar_for(_scheme6)
+        if _bar6 is None:
+            led["region_bar_separation"][_fam6] = {
+                "state": "NO BAR", "why": _basis6, "n": len(set(_ds)),
+                "scheme": _scheme6}
+            print("  INERT BAR (%s) : NO BAR under control %r — %s"
+                  % (_fam6, _scheme6, _basis6), flush=True)
+            continue
+        _bs, _bwhy6 = bar_separates(sorted(set(_ds)), bar=_bar6)
         led["region_bar_separation"][_fam6] = {"state": _bs, "why": _bwhy6,
-                                               "n": len(set(_ds))}
+                                               "n": len(set(_ds)),
+                                               "bar_db": _bar6,
+                                               "scheme": _scheme6}
         print("  INERT BAR (%s) : %s — %s" % (_fam6, _bs, _bwhy6), flush=True)
         if _bs == "INSIDE_CLUSTER":
             fail("inert_bar_inside_population",
@@ -13055,6 +13367,39 @@ def edit(source_key: str, brief: str,
                  "UNVALIDATED — do not read them as defects until the bar is "
                  "re-measured against a null on THIS population."
                  % (_fam6, _bwhy6))
+
+    # THE GATE. A deferred INERT becomes a reported defect only where the bar
+    # is shown to SEPARATE that family's population in this run. Anywhere else
+    # it is recorded as UNVALIDATED and named, because the two errors are not
+    # symmetric and the bar's own note says which way to fail: a false INERT
+    # sends someone to edit a component that works — five times on round 58,
+    # on the run that fixed the defect it was reporting.
+    _held = []
+    for _di in (led.get("_deferred_inert") or []):
+        _sep = (led["region_bar_separation"].get(_di["family"]) or {}).get("state")
+        if _sep == "SEPARATES":
+            fail("placement_inert",
+                 "%s declared a placement over %.2f-%.2fs but the %s there is "
+                 "unchanged (%s: %s vs control %s; the bar SEPARATES this "
+                 "family's population in this run) — a declared placement that "
+                 "changes nothing is not a placement"
+                 % (_di["family"], _di["t"][0], _di["t"][1], _di["domain"],
+                    _di["mode"], _di["psnr_db"], _di["ctrl_psnr_db"]))
+        else:
+            _held.append(dict(_di, held_because=_sep or "ABSENT"))
+    if _held:
+        led["inert_unvalidated"] = _held
+        print("  INERT HELD      : %d region verdict(s) NOT reported as inert "
+              "because the bar does not separate their family's population "
+              "this run: %s"
+              % (len(_held), [(h["family"], h["t"][0], h["delta_db"],
+                               h["held_because"]) for h in _held[:6]]), flush=True)
+        fail("inert_verdict_unvalidated",
+             "%d placement(s) measured below the bar were NOT reported inert: "
+             "the bar does not separate their family's population in this run, "
+             "so the verdict is unsupportable in either direction. Fix the "
+             "control or re-measure the bar; do not read these as clean and do "
+             "not read them as defects." % len(_held))
 
     # K6, MEASURED. A rebuild with no measurement since the last one is a
     # render billed for a guess. The rule is hoisted (blind_rebuilds) so the

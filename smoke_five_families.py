@@ -219,9 +219,17 @@ for _n in TREE.body:
             "SPEC_MODES", "SPEC_FAMILIES", "UNSUPPORTED_CLASSES",
             "REFERENCE_PER_25S"):
         exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
-_nsf = next(n for n in TREE.body
-            if isinstance(n, ast.FunctionDef) and n.name == "normalize_spec")
-exec(compile(ast.Module([_nsf], []), "<s>", "exec"), _ns)
+# The router's constants and its two pure functions, so the checks below DRIVE
+# the shipped rule instead of restating it.
+for _n in TREE.body:
+    if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "").startswith(
+            ("ROUTE_", "ROUTES_", "_ADDITIVE_MARKERS", "_ROUTE_COST")):
+        exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
+for _fname in ("normalize_spec", "capability_route", "route_cost"):
+    _f = next((n for n in TREE.body
+               if isinstance(n, ast.FunctionDef) and n.name == _fname), None)
+    if _f is not None:
+        exec(compile(ast.Module([_f], []), "<s>", "exec"), _ns)
 norm = _ns["normalize_spec"]
 
 got = norm({"mode": "unsupported", "unsupported_class": "generate_footage"})
@@ -301,6 +309,123 @@ for _nm, _if in sorted(_terms.items()):
        f"terminal and then lets the run continue")
 ok('"credit_charged": True' not in SRC,
    "something records credit_charged: True on a terminal path")
+
+# ── THE CAPABILITY ROUTER ───────────────────────────────────────────────────
+# set_spec's fourth branch was a refusal; it is a ROUTE now. One route is
+# built, the others terminate and are COUNTED — unsupported_request has fired
+# zero times across rounds 51-59, so what gets built next currently rests on a
+# count nobody has taken.
+_cr, _rcost = _ns.get("capability_route"), _ns.get("route_cost")
+ok(callable(_cr) and callable(_rcost),
+   "capability_route/route_cost are not importable — a router that can only be "
+   "exercised through the dispatch is a rule the check has to restate")
+if callable(_cr) and callable(_rcost):
+    ok(_cr("full_edit", None, "punchy")[0] == "edit",
+       "an editable request does not route to edit")
+    ok(_cr("question", None, "what is this")[0] == "question",
+       "a question does not route to question")
+    ok(_cr("unsupported", "change_in_frame", "remove the background")[0]
+       == "change_in_frame",
+       "an in-frame change routes to a CLIP GENERATOR, which cannot serve it")
+    # THE ADDITIVE RULE, both directions. "Add a shot OVER THIS" keeps the
+    # user's edit; answering it as pure generation throws their footage away.
+    ok(_cr("unsupported", "generate_footage", "add a shot of a city over this")[0]
+       == "hybrid",
+       "an ADDITIVE generate request does not route to hybrid — the user's own "
+       "edit would be discarded")
+    ok(_cr("unsupported", "generate_footage", "make a scene where a car drives")
+       [1] == "AMBIGUOUS",
+       "a non-additive generate request is answered silently instead of asked "
+       "about — two readings differing by minutes and dollars")
+    ok(_cr("weird_mode", None, "x")[1] == "AMBIGUOUS",
+       "an unrecognised mode resolves silently rather than recording the "
+       "ambiguity")
+    ok(_cr("weird_mode", None, "x")[0] == "edit",
+       "an unrecognised mode does not default to the BUILT route, which is the "
+       "safe direction")
+    # COST: measured where it was measured, ABSENT where nothing ever ran.
+    ok(_rcost("edit")[0] == "MEASURED" and _rcost("edit")[1]["n"] == 15,
+       "the edit route's cost is not MEASURED with its denominator")
+    for _r in ("generate", "hybrid", "change_in_frame"):
+        ok(_rcost(_r)[0] == "ABSENT",
+           f"route {_r} quotes a cost figure — nothing here has ever run it, "
+           f"and a router that quotes a number it does not have is probe "
+           f"collapse making a product decision")
+        ok("never been run" in str(_rcost(_r)[1]),
+           f"route {_r}'s ABSENT does not say what must be measured first")
+# COUNTED, not merely mentioned. `"route_demand" in SRC` survived deleting the
+# increment, because the setdefault that creates the dict is a separate line —
+# so the demand signal would have stayed permanently empty while the check read
+# green. That is the exact defect this counter exists to end.
+_inc = [n for n in ast.walk(TREE) if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Subscript)
+                and isinstance(getattr(t, "value", None), ast.Subscript)
+                and isinstance(t.value.slice, ast.Constant)
+                and t.value.slice.value == "route_demand" for t in n.targets)
+        and "+ 1" in ast.unparse(n.value)]
+ok(bool(_inc) and "capability_route" in SRC,
+   "nothing INCREMENTS led['route_demand'] — the demand signal would stay "
+   "empty while the ledger key exists, which is how unsupported_request read "
+   "zero for nine rounds")
+ok('fail("route_ambiguous"' in SRC,
+   "an AMBIGUOUS route does not fail loudly — it would be chosen silently")
+
+# ── THE HYBRID ROUTE DELIVERS THE HALF IT CAN ───────────────────────────────
+# "Add a shot of a city over this" is ADDITIVE: the user asked for their edit
+# PLUS something. Refusing the whole job throws away the half we can serve.
+for _fn in ("insert_request", "hybrid_delivery"):
+    _f = next((n for n in TREE.body
+               if isinstance(n, ast.FunctionDef) and n.name == _fn), None)
+    if _f is not None:
+        exec(compile(ast.Module([_f], []), "<s>", "exec"), _ns)
+_ir, _hd = _ns.get("insert_request"), _ns.get("hybrid_delivery")
+ok(callable(_ir) and callable(_hd),
+   "insert_request/hybrid_delivery are not importable")
+if callable(_ir) and callable(_hd):
+    _r = _ir("add a shot of a city over this", "establishing")
+    ok(_r["state"] == "UNFILLED",
+       "an insert request does not record itself UNFILLED — a hole nobody can "
+       "see is the same as a refusal nobody logged")
+    ok(_r["asked_for"] and "fillable_by" in _r,
+       "the insert request does not record WHAT was asked for and what could "
+       "fill it — a tally that cannot justify building anything")
+    ok(_hd([], True)[0] == "ABSENT",
+       "a run with no insert requests is treated as a hybrid delivery")
+    ok(_hd([1], True)[0] == "PARTIAL",
+       "an edit that came out with an unfilled insert is not reported PARTIAL")
+    ok(_hd([1, 2], False)[0] == "REFUSED",
+       "a hybrid whose EDIT also failed is reported as a partial delivery — "
+       "there is nothing to hand over")
+    # IT MUST NEVER CLAIM THE INSERT HAPPENED.
+    for _n2, _okk in (([1], True), ([1, 2], False)):
+        _msg = _hd(_n2, _okk)[1].lower()
+        ok("added" not in _msg and "i've added" not in _msg,
+           "the hybrid message implies the insert was made")
+        # THE NEGATION AS A PHRASE. "can create" alone survived cutting the
+        # explanation down to "something I can create." — which says the
+        # OPPOSITE and kept every word the check looked for. A disjunction of
+        # loose substrings is not a test of a sentence's meaning.
+        ok(("isn't something i can create" in _msg
+            or "aren't something i can create" in _msg
+            or "isn't something this editor can create" in _msg
+            or "aren't something this editor can create" in _msg),
+           "the hybrid message does not say, as a phrase, that the insert "
+           "CANNOT be created — silence about the missing half is what reads "
+           "as the product not working, and a message that says 'something I "
+           "can create' says the opposite")
+    ok("charged" in _hd([1], False)[1].lower(),
+       "a REFUSED hybrid does not say nothing was charged")
+ok("insert_requests" in SRC and 'led["capability_route"]["delivered"]' in SRC,
+   "the hybrid route does not record its insert requests or what it delivered")
+_hyb = [n for n in ast.walk(TREE) if isinstance(n, ast.If)
+        and any(isinstance(x, ast.Name) and x.id == "ROUTE_HYBRID"
+                for x in ast.walk(n.test))
+        and any(isinstance(x, ast.Continue) for x in ast.walk(n))
+        and not any(isinstance(x, ast.Name) and x.id == "_unsupported_stop"
+                    for x in ast.walk(n))]
+ok(bool(_hyb),
+   "the hybrid branch either does not exist or TERMINATES the run — it is the "
+   "one route that must proceed to the edit")
 _break = [n for n in ast.walk(TREE)
           if isinstance(n, ast.If)
           and any(getattr(t, "id", "") == "_unsupported_stop" for t in ast.walk(n.test))

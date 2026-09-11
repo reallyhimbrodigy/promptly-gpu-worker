@@ -1,0 +1,227 @@
+[
+ {
+  "file": "smoke_alpha_not_empty.py",
+  "literal": "_bad_props",
+  "count_at_baseline": 4
+ },
+ {
+  "file": "smoke_authoring_reachable.py",
+  "literal": "\"hero\": str(hero)[:60]",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_authoring_reachable.py",
+  "literal": "no_catalogue_component",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_caption_port.py",
+  "literal": "\"composition\": \"PromptlyOverlay\"",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_caption_port.py",
+  "literal": "render_remotion_batch([{",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_caption_port.py",
+  "literal": "\"alpha\": True",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_caption_port.py",
+  "literal": "not led.get(\"caption_mov\")",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_caption_port.py",
+  "literal": "led[\"caption_path\"]",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_caption_port.py",
+  "literal": "CAPTIONS        :",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_chain_paths.py",
+  "literal": "chain_writes_its_own_input",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_durable_plan.py",
+  "literal": "plan=_plan",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_edit_quality.py",
+  "literal": "_tot_s",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_edit_quality.py",
+  "literal": "NOT RECORDED",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_encode_threads_pinned.py",
+  "literal": "x264-params",
+  "count_at_baseline": 15
+ },
+ {
+  "file": "smoke_five_families.py",
+  "literal": "capability_route",
+  "count_at_baseline": 4
+ },
+ {
+  "file": "smoke_five_families.py",
+  "literal": "insert_requests",
+  "count_at_baseline": 4
+ },
+ {
+  "file": "smoke_half_ruling.py",
+  "literal": "half_ruling_stripped",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_localised_effect.py",
+  "literal": "inf|[0-9.]",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_localised_effect.py",
+  "literal": "_rec[\"region_verdict\"]",
+  "count_at_baseline": 4
+ },
+ {
+  "file": "smoke_one_execution_pass.py",
+  "literal": "_exec_repair_ok",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_one_execution_pass.py",
+  "literal": "_exec_repair_used",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_pack_reel.py",
+  "literal": "_reel_key",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_pack_reel.py",
+  "literal": "reel_reused",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_placement_effect_families.py",
+  "literal": "led.setdefault(\"placement_effects\"",
+  "count_at_baseline": 5
+ },
+ {
+  "file": "smoke_placement_effect_wired.py",
+  "literal": "fail(\"placement_inert\"",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_placement_effect_wired.py",
+  "literal": "if _chg is False:",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_placement_effect_wired.py",
+  "literal": "led.setdefault(\"placement_effects\"",
+  "count_at_baseline": 5
+ },
+ {
+  "file": "smoke_placement_effect_wired.py",
+  "literal": "PLACEMENT EFFECT:",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_reference_retrieval.py",
+  "literal": "reference_index.json",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_repeat_bound.py",
+  "literal": "none \u2014 ",
+  "count_at_baseline": 4
+ },
+ {
+  "file": "smoke_repeat_bound.py",
+  "literal": "repeat_answered",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_repeat_bound.py",
+  "literal": "spec_shortfall",
+  "count_at_baseline": 15
+ },
+ {
+  "file": "smoke_rubric_grades_only.py",
+  "literal": "FAMILY MIX",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_rubric_grades_only.py",
+  "literal": "rate_regimes",
+  "count_at_baseline": 4
+ },
+ {
+  "file": "smoke_run_cost.py",
+  "literal": "container only",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_run_cost.py",
+  "literal": "SUM ACROSS",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_shared_process.py",
+  "literal": "\"bundle_ms\"",
+  "count_at_baseline": 12
+ },
+ {
+  "file": "smoke_shared_process.py",
+  "literal": "_BATCH_MJS",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_spec_grading.py",
+  "literal": "FAMILY MIX",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_stage_accounting.py",
+  "literal": "_NESTED_PREFIXES",
+  "count_at_baseline": 3
+ },
+ {
+  "file": "smoke_transitions_wired.py",
+  "literal": "overlay=0:0:enable='between(t,",
+  "count_at_baseline": 5
+ },
+ {
+  "file": "smoke_transitions_wired.py",
+  "literal": "\"-map\", \"0:a?\",\n                           \"-c:v\", \"libx264\"",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_zoom_wired.py",
+  "literal": "\"head_clamped\"",
+  "count_at_baseline": 5
+ },
+ {
+  "file": "smoke_zoom_wired.py",
+  "literal": "\"-c:v\", \"libx264\", \"-crf\", \"16\"",
+  "count_at_baseline": 2
+ },
+ {
+  "file": "smoke_zoom_wired.py",
+  "literal": "_stages[-1][\"scale\"] if _stages",
+  "count_at_baseline": 2
+ }
+]
