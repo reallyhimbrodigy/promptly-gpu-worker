@@ -100,9 +100,26 @@ if CENSUS.exists():
     _missing = [k for k in _want if k not in _txt]
     check("every always-zero counter from the census is named in it",
           not _missing, "missing: %s" % ", ".join(_missing))
-    # Each must be classified, so a zero cannot be read as a result by default.
+    # EVERY COUNTER CARRIES A CLASSIFICATION IN ITS OWN ROW. A bare
+    # `"UNREACHED" in _txt` passed while the defining sentence was mutated,
+    # because the word also appears in seven table rows — the
+    # ambiguous-literal class, in the check I wrote an hour after gating it.
+    # What matters is that each row is classified, so read the rows.
+    _rows = [l for l in _txt.splitlines()
+             if l.startswith("| `") and l.count("|") >= 4]
+    check("the census table has a row per always-zero counter",
+          len(_rows) >= 13, "%d row(s)" % len(_rows))
+    _unclassified = [l.split("|")[1].strip() for l in _rows
+                     if not any(_c in l.split("|")[2]
+                                for _c in ("GOOD ZERO", "NO WIRE", "UNREACHED"))]
+    check("every row carries one of the three classifications",
+          not _unclassified,
+          "unclassified: %s — a zero with no class is read as a result by "
+          "default, which is the whole defect" % ", ".join(_unclassified[:6]))
     for _cls in ("GOOD ZERO", "NO WIRE", "UNREACHED"):
-        check("the census uses the %r classification" % _cls, _cls in _txt)
+        check("the %r class is actually used by a row" % _cls,
+              any(_cls in l.split("|")[2] for l in _rows),
+              "a vocabulary nothing uses is not a classification scheme")
     check("and it states the denominator it was taken over",
           "28 ledger" in _txt and "rounds 51-60" in _txt)
     check("the phantom is recorded as FIXED rather than quietly removed",
