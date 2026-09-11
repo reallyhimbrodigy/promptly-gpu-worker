@@ -183,6 +183,10 @@ const ClipRenderer: React.FC<{ clip: ClipSpec; sourceUrl: string }> = ({
         <ZoomComp
           src={resolveSrc(clip.src)}
           events={events}
+          // THE SEQUENCE, WHEN THE PLAN CARRIES ONE. Absent means <Video> and
+          // byte-identical output, so a plan written before this existed
+          // renders exactly as it did.
+          frames={clip.frames ?? null}
           {...extraZoomProps}
         />
       );

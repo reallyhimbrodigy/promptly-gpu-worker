@@ -28,6 +28,14 @@ export type MGAnchor =
 // ── Clip and transition shapes ───────────────────────────────────────────────
 export interface ClipSpec {
   id: string;
+  /**
+   * A PRE-EXTRACTED FRAME SEQUENCE for this clip, when the plan carries one.
+   * Absent is the shipped path: the zoom mounts a <Video> and the output is
+   * byte-identical. Present routes the zoom through <Img> per frame —
+   * measured 3.9x faster on REAL footage in one container (2.0x on synthetic;
+   * the source class travels with the number).
+   */
+  frames?: { dir: string; count: number; pad?: number; ext?: string } | null;
   startFromFrames: number;
   playbackRate: number;
   durationInFrames: number;

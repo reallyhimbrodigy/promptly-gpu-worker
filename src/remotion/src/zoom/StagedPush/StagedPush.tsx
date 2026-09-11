@@ -6,7 +6,7 @@ import {
   interpolate,
   Easing,
 } from "remotion";
-import { Video } from "@remotion/media";
+import { ZoomSource } from "../shared/ZoomSource";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
 import { cornerPx, planCappedRampIn, planCappedRelease } from "../shared/velocity-cap";
@@ -34,7 +34,7 @@ import type { StagedPushProps } from "../types";
  *     and sits), a SMOOTH MODERATE ease-out back to baseline — not a snap (glitch), not a
  *     slow drift (drags). A graceful ease that feels intentional.
  */
-export const StagedPush: React.FC<StagedPushProps> = ({ src, events, style }) => {
+export const StagedPush: React.FC<StagedPushProps> = ({ src, events, style, frames }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames, width, height } = useVideoConfig();
   // VELOCITY CAP (Zac 2026-08-01). OFF -> today's exact cubic pixels.
@@ -153,7 +153,7 @@ export const StagedPush: React.FC<StagedPushProps> = ({ src, events, style }) =>
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <Video
+      <ZoomSource
         src={src}
         style={{
           width: "100%",
@@ -162,7 +162,7 @@ export const StagedPush: React.FC<StagedPushProps> = ({ src, events, style }) =>
           transform: `scale(${scale})`,
           transformOrigin: `${originX * 100}% ${originY * 100}%`,
         }}
-      />
+       frames={frames}/>
     </AbsoluteFill>
   );
 };

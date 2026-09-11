@@ -6,7 +6,7 @@ import {
   interpolate,
   Easing,
 } from "remotion";
-import { Video } from "@remotion/media";
+import { ZoomSource } from "../shared/ZoomSource";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
 import {
@@ -21,6 +21,7 @@ import type { LetterboxPushProps } from "../types";
  * narrows as the zoom deepens.
  */
 export const LetterboxPush: React.FC<LetterboxPushProps> = ({
+  frames,
   src,
   events,
   style,
@@ -135,14 +136,14 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <Video
+      <ZoomSource
         src={src}
         style={{
           width: "100%",
           height: "100%",
           objectFit: "cover",
         }}
-      />
+       frames={frames}/>
 
       <AbsoluteFill
         style={{
@@ -161,7 +162,7 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
           overflow: "hidden",
         }}
       >
-        <Video
+        <ZoomSource
           src={src}
           style={{
             width: "100%",
@@ -173,7 +174,7 @@ export const LetterboxPush: React.FC<LetterboxPushProps> = ({
             transform: `scale(${scale})`,
             transformOrigin: `${originX * 100}% ${originY * 100}%`,
           }}
-        />
+         frames={frames}/>
       </div>
     </AbsoluteFill>
   );

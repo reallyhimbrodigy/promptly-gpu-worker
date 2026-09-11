@@ -7,7 +7,7 @@ import {
   Easing,
   spring,
 } from "remotion";
-import { Video } from "@remotion/media";
+import { ZoomSource } from "../shared/ZoomSource";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import { useResprungZooms } from "../shared/resprung-flag";
 import type { FocusWindowProps } from "../types";
@@ -18,6 +18,7 @@ import type { FocusWindowProps } from "../types";
  * Clean border on the window. Editorial, premium, broadcast feel.
  */
 export const FocusWindow: React.FC<FocusWindowProps> = ({
+  frames,
   src,
   events,
   style,
@@ -76,14 +77,14 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
   if (!active) {
     return (
       <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-        <Video
+        <ZoomSource
           src={src}
           style={{
             width: "100%",
             height: "100%",
             objectFit: "cover",
           }}
-        />
+         frames={frames}/>
       </AbsoluteFill>
     );
   }
@@ -94,7 +95,7 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <Video
+      <ZoomSource
         src={src}
         style={{
           width: "100%",
@@ -103,7 +104,7 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
           transform: `scale(${currentBgScale})`,
           transformOrigin: `${originX * 100}% ${originY * 100}%`,
         }}
-      />
+       frames={frames}/>
 
       <AbsoluteFill
         style={{
@@ -133,7 +134,7 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
             position: "relative",
           }}
         >
-          <Video
+          <ZoomSource
             src={src}
             style={{
               width: `${(1 / currentWindowScale) * 100}%`,
@@ -144,7 +145,7 @@ export const FocusWindow: React.FC<FocusWindowProps> = ({
               left: "50%",
               transform: "translate(-50%, -50%)",
             }}
-          />
+           frames={frames}/>
         </div>
       </AbsoluteFill>
     </AbsoluteFill>

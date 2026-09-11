@@ -5,7 +5,7 @@ import {
   useVideoConfig,
   spring,
 } from "remotion";
-import { Video } from "@remotion/media";
+import { ZoomSource } from "../shared/ZoomSource";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import { useResprungZooms } from "../shared/resprung-flag";
 import type { SnapReframeProps } from "../types";
@@ -16,6 +16,7 @@ import type { SnapReframeProps } from "../types";
  * clean reframe like a professional camera operator pulling focus.
  */
 export const SnapReframe: React.FC<SnapReframeProps> = ({
+  frames,
   src,
   events,
   style,
@@ -66,7 +67,7 @@ export const SnapReframe: React.FC<SnapReframeProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <Video
+      <ZoomSource
         src={src}
         style={{
           width: "100%",
@@ -75,7 +76,7 @@ export const SnapReframe: React.FC<SnapReframeProps> = ({
           transform: `scale(${scale})`,
           transformOrigin: `${originX * 100}% ${originY * 100}%`,
         }}
-      />
+       frames={frames}/>
     </AbsoluteFill>
   );
 };

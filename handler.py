@@ -17643,11 +17643,17 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
             for _tr in (edit_plan.get("transitions") or []):
                 if isinstance(_tr, dict) and isinstance(_tr.get("after_word_index"), int):
                     _anchored_src_indices.add(_tr["after_word_index"])
-            for _bc in (edit_plan.get("broll_clips") or []):
-                if isinstance(_bc, dict):
+            # RENAMED FROM _bc. `import brand_components as _bc` is bound
+            # 310 lines above in the SAME function and used at 17548; this loop
+            # rebound the name to a dict. It works today only because the
+            # module use comes first — "an edit above a rebinding is not an
+            # edit", from the other direction. pyflakes named it; nothing was
+            # running pyflakes.
+            for _bclip in (edit_plan.get("broll_clips") or []):
+                if isinstance(_bclip, dict):
                     for _k in ("start_word_index", "end_word_index"):
-                        if isinstance(_bc.get(_k), int):
-                            _anchored_src_indices.add(_bc[_k])
+                        if isinstance(_bclip.get(_k), int):
+                            _anchored_src_indices.add(_bclip[_k])
 
             if raw_remove_words and _anchored_src_indices and _dg_words:
                 _anchored_times = []
@@ -17953,9 +17959,14 @@ WHEN IN DOUBT, CUT (do not preserve). Punchy is the default of this genre; a kep
                         if 0 <= int(_ni2) < len(new_to_src):
                             _shot_seam_src.add(int(new_to_src[int(_ni2)]))
                     _broll_edges_for_seams = set()
-                    for _bc in (edit_plan.get("broll_clips") or []):
-                        if isinstance(_bc, dict):
-                            _bs2, _be2 = _bc.get("start_word_index"), _bc.get("end_word_index")
+                    # SAME RENAME, SECOND SITE. Two loops in one function
+                    # rebound the brand_components alias; pyflakes reported
+                    # them one at a time, so fixing the first revealed the
+                    # second. A shadow does not queue — it is reported by
+                    # first occurrence.
+                    for _bclip in (edit_plan.get("broll_clips") or []):
+                        if isinstance(_bclip, dict):
+                            _bs2, _be2 = _bclip.get("start_word_index"), _bclip.get("end_word_index")
                             if isinstance(_bs2, int):
                                 _broll_edges_for_seams.add(_bs2 - 1)
                             if isinstance(_be2, int):

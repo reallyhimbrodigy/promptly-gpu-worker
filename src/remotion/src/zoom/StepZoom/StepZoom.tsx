@@ -4,7 +4,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { Video } from "@remotion/media";
+import { ZoomSource } from "../shared/ZoomSource";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import type { StepZoomProps } from "../types";
 
@@ -14,6 +14,7 @@ import type { StepZoomProps } from "../types";
  * Like cutting between a wide and tight shot of the same camera.
  */
 export const StepZoom: React.FC<StepZoomProps> = ({
+  frames,
   src,
   events,
   style,
@@ -39,7 +40,7 @@ export const StepZoom: React.FC<StepZoomProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <Video
+      <ZoomSource
         src={src}
         style={{
           width: "100%",
@@ -48,7 +49,7 @@ export const StepZoom: React.FC<StepZoomProps> = ({
           transform: `scale(${scale})`,
           transformOrigin: `${originX * 100}% ${originY * 100}%`,
         }}
-      />
+       frames={frames}/>
     </AbsoluteFill>
   );
 };

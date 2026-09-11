@@ -6,7 +6,7 @@ import {
   interpolate,
   Easing,
 } from "remotion";
-import { Video } from "@remotion/media";
+import { ZoomSource } from "../shared/ZoomSource";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
 import {
@@ -20,6 +20,7 @@ import type { SmoothPushProps } from "../types";
  * The most essential zoom in professional editing.
  */
 export const SmoothPush: React.FC<SmoothPushProps> = ({
+  frames,
   src,
   events,
   style,
@@ -135,7 +136,7 @@ export const SmoothPush: React.FC<SmoothPushProps> = ({
 
   return (
     <AbsoluteFill style={{ overflow: "hidden", ...style }}>
-      <Video
+      <ZoomSource
         src={src}
         style={{
           width: "100%",
@@ -144,7 +145,7 @@ export const SmoothPush: React.FC<SmoothPushProps> = ({
           transform: `scale(${scale})`,
           transformOrigin: `${originX * 100}% ${originY * 100}%`,
         }}
-      />
+       frames={frames}/>
     </AbsoluteFill>
   );
 };

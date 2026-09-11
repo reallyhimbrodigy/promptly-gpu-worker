@@ -6,7 +6,7 @@ import {
   interpolate,
   Easing,
 } from "remotion";
-import { Video } from "@remotion/media";
+import { ZoomSource } from "../shared/ZoomSource";
 import { msToFrames, msToFramesFloor } from "../shared/timing";
 import { useSmoothGraphics } from "../../motion-graphics/shared/smooth-graphics-flag";
 import {
@@ -29,6 +29,7 @@ const BOKEH_ORBS = [
  * The look of an HBO title sequence.
  */
 export const DepthPull: React.FC<DepthPullProps> = ({
+  frames,
   src,
   events,
   style,
@@ -165,7 +166,7 @@ export const DepthPull: React.FC<DepthPullProps> = ({
       }}
     >
       <AbsoluteFill>
-        <Video
+        <ZoomSource
           src={src}
           style={{
             width: "100%",
@@ -175,7 +176,7 @@ export const DepthPull: React.FC<DepthPullProps> = ({
             transformOrigin: `${originX * 100}% ${originY * 100}%`,
             filter: `saturate(${bgSaturation}) brightness(0.95)`,
           }}
-        />
+         frames={frames}/>
       </AbsoluteFill>
 
       <div
