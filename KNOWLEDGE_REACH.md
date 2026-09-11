@@ -83,3 +83,74 @@ wall clock is where the money is. 27 claims is a few hundred tokens.
 target in the other direction, because three of these documents must stay
 unreachable and a check that pushed the number up would be arguing for exactly
 the wiring this file says not to do.
+
+
+---
+
+# ADDENDUM 2026-09-11 — the wiring, and a correction to this file's own count
+
+## My "27 instructable" was over-counted, and reading the bodies is why
+
+The first pass mapped each DOCUMENT to the field it governs and counted its
+headings. That is a mapping, not an audit: it never asked whether each claim
+describes a field **this lane actually exposes**. Reading the bodies:
+
+| document | claimed instructable | actually applicable here | why the rest are not |
+|---|---|---|---|
+| `06_emphasis_zoom` | 11 | **4** | the other 7 describe `durationMs`, `scale`, `originX/Y`, `key_moments` and per-clip splitting — fields this app does not expose — or are harness-owned back-timing and spacing |
+| `08_broll` | 6 | **0 on this lane** | **`cutaway` is not in this lane's treatment enum** (card, text, sfx, zoom, transition, none). Builder-1 built the family and it is not merged here. Wiring a field that does not exist is offering a capability that cannot fire |
+| `04_text_overlays` | 2 | **0** | position is harness-chosen (`build_overlays` defaults to top and the agent has no position field); the two-homes routing choice does not exist in this lane's shape |
+| `03_captions` | 2 | **0** | `caption_style` is not a field here at all — the harness picks it |
+| `05_motion_graphics` | 5 remaining | **3** | the three-band layout is positioning the harness owns; "reach for the choice that reads as inevitable" is framing, not a rule |
+| `07_sound_effects` | 1 | **0** | "pick by ROLE from the table" is already in the `sfx_name` description |
+| `00_job_and_arc` | 14 | **not assessed** | identity and arc framing; needs Zac's read on which are craft and which are the old pipeline's voice |
+
+**So the honest instructable count for fields this lane exposes is 7, not 27** —
+4 zoom, 3 motion-graphics — and **five were wired today.** The remaining two
+are the three-band layout and the inevitability framing, both judgement calls
+rather than mechanical gaps.
+
+That correction stays here rather than replacing the original number, because
+the original number is the evidence that a document-to-field mapping is not an
+audit.
+
+## What was wired, and how it is counted
+
+`knowledge_reach` matches a document's HEADING against the agent's surface. It
+is mechanical and cannot drift — and it **understates** reach, because wiring a
+claim's substance without copying its heading does not move the number. Four
+claims were wired and the heading count stayed at 8.
+
+So every wired claim now carries a marker naming its source document, and
+`wired_claims()` counts the markers. The marker is IN the text the agent reads,
+so a claim cannot be counted as wired unless its text is actually on the
+surface — not a hand-kept list, and not fuzzy matching.
+
+| field | claim | source |
+|---|---|---|
+| `zoom_arc` | the arc-position JOBS — hook = GRIP, mid_peak = PUNCTUATION, payoff = COMMITMENT, close = CALLBACK — extracted as bullets at import, with `build` and `breather` named as having NO guidance because the catalogue predates this enum | `06_emphasis_zoom` |
+| `why` (both surfaces) | "name the specific moment that asked for it, in twelve words or fewer" | `05_motion_graphics` |
+| `card_hero` | author it in the speaker's own voice | `05_motion_graphics` |
+| `card_props` | `timestamp`, `wordcount`, `wpm` are computed live rather than typed | `05_motion_graphics` |
+| `card_condition` | the eight WHEN conditions | `05_motion_graphics` |
+
+**`rule_all_beats`' `why` field had NO DESCRIPTION AT ALL** — on the surface
+called every single run, while `beat_verdict`'s repair path had one. Both now
+read one hoisted constant, because a field on one ruling surface and not the
+other is now the fourth instance in this lane after `purpose`,
+`card_condition` and this.
+
+## What belongs to Builder-1
+
+`08_broll`'s six claims are ready to wire and cannot be wired here. Two of them
+matter most and neither is in any document the agent can reach:
+
+- **"B-roll earns its place by EXTENDING the moment"** — name what the frame
+  gives the viewer beyond what the words and the speaker's face already
+  deliver. When the frame and the line carry the same single fact, the speaker
+  and the captions own that beat.
+- **The next-footage rule, which is in NO document at all.** Builder-1's guard
+  rejects a cutaway whose window sits in `[beat end, beat end + hold + 1s]`,
+  and it fired 2 of 2 on round 58 — both times on a cutaway the agent proposed
+  in good faith, because nothing told it the rule existed. A mechanically
+  enforced rule the agent is never told is a refusal it will keep earning.

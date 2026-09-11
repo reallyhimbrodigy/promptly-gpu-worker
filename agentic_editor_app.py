@@ -213,6 +213,25 @@ def _mg_props_teach():
 
 MG_PROPS_TEACH = _mg_props_teach()
 
+# ONE TEXT, TWO SURFACES. The same field exists on rule_all_beats and
+# beat_verdict, and this file has now shipped a field on one ruling surface and
+# not the other three times (purpose, card_condition, and this).
+#
+# FROM 05_motion_graphics, previously unreachable: "Every transition, overlay,
+# and motion graphic carries a `why` — <=12 words naming the specific moment
+# that asked for it". The judgment sheet's reason-grounding column has been
+# grading exactly this field against the frame while the agent was never told
+# what it is for — and rule_all_beats' copy had NO DESCRIPTION AT ALL, on the
+# surface called every run, while beat_verdict's repair path had one.
+WHY_FIELD_TEACH = (
+    "about THIS beat's content. NAME THE SPECIFIC MOMENT that asked for this "
+    "treatment, in twelve words or fewer - 'the 55 degree spec is the payoff "
+    "number', 'pivot from problem into the demo'. A reason that would fit any "
+    "beat in the genre has not named one; the judgment sheet grades whether "
+    "your why holds against what is actually in the frame, so assert something "
+    "checkable rather than something agreeable. "
+    "[05_motion_graphics, wired 2026-09-11]")
+
 
 def mg_conditions(path=None):
     """{condition: [components]} — EXTRACTED FROM THE CATALOGUE, never typed.
@@ -260,6 +279,30 @@ def mg_conditions(path=None):
     # one it answers with by default. Sorting alphabetically threw that away and
     # would have made the default a matter of spelling.
     return ("MEASURED", {_k: _v for _k, _v in _out.items() if _v}, "")
+
+
+def wired_claims(surface=None):
+    """{doc: count} — claims whose SUBSTANCE was wired, by marker.
+
+    WHY THIS EXISTS BESIDE knowledge_reach. That function matches a document's
+    HEADING against the agent's surface, which is mechanical and cannot drift —
+    and it UNDERSTATES reach, because wiring a claim's substance without
+    copying its heading does not move the number. Four claims were wired on
+    2026-09-11 and the heading count stayed at 8.
+
+    So a wired claim carries a marker naming its source document, and this
+    counts the markers. It is not fuzzy matching and it is not a hand-kept
+    list: the marker is IN the text the agent reads, so a claim cannot be
+    counted as wired unless its text is actually on the surface.
+    """
+    import json as _json
+    import re as _re
+    if surface is None:
+        surface = _json.dumps(KNOWLEDGE_TOOLS) + _json.dumps(TOOLS)
+    _out = {}
+    for _m in _re.finditer(r"\[(\d\d_[a-z_]+), wired (\d{4}-\d\d-\d\d)\]", surface):
+        _out[_m.group(1)] = _out.get(_m.group(1), 0) + 1
+    return _out
 
 
 def knowledge_reach(doc_dir=None, surface=None):
@@ -335,6 +378,71 @@ def knowledge_reach(doc_dir=None, surface=None):
             _rows.append({"doc": _d, "claim": _h[:100],
                           "reachable": _h.lower()[:40] in surface})
     return ("MEASURED", _rows, "")
+
+
+def catalogue_bullets(doc, pattern=r"^\s*•\s*([a-z_]+)\s*→\s*(.+)$"):
+    """(state, {key: first sentence}, why) — condition-to-action bullets.
+
+    THE SAME MECHANISM AS mg_conditions AND FOR THE SAME REASON. The catalogue
+    writes its craft as `• hook → GRIP, instant — ...`, which is already
+    condition-to-action; it just lives in a document `read_knowledge` has been
+    called 0 times on. Extracted rather than hand-copied so a catalogue edit
+    cannot leave the prompt behind.
+
+    THE FIRST SENTENCE IS THE JOB and the rest is the register. Truncating
+    mechanically at the sentence boundary keeps the extraction honest — a
+    hand-written condensation is a second copy of the craft, which is the thing
+    this is fixing.
+    """
+    import re as _re
+    _p = os.path.join(_KNOWLEDGE_DIR, doc)
+    try:
+        _txt = open(_p, encoding="utf-8").read()
+    except OSError as _e:
+        return ("FAILED", {}, "cannot read %s: %s" % (doc, _e))
+    _out = {}
+    for _m in _re.finditer(pattern, _txt, _re.M):
+        _k, _v = _m.group(1), _m.group(2).strip()
+        # first sentence: up to the first '. ' that is not inside an ellipsis
+        _cut = len(_v)
+        for _sep in (". ", "; for ", " A close within"):
+            _i = _v.find(_sep)
+            if _i > 20:
+                _cut = min(_cut, _i + (1 if _sep == ". " else 0))
+        _out.setdefault(_k, _v[:_cut].strip())
+    if not _out:
+        return ("ABSENT", {},
+                "no condition-to-action bullets in %s — the document's shape "
+                "changed and a silent {} would read as 'no craft here'" % doc)
+    return ("MEASURED", _out, "")
+
+
+_ZOOM_JOB_STATE, ZOOM_ARC_JOBS, _ZOOM_JOB_WHY = catalogue_bullets(
+    "06_emphasis_zoom.md")
+if _ZOOM_JOB_STATE == "FAILED":
+    raise RuntimeError("the zoom catalogue could not be read (%s) — zoom_arc "
+                       "would ship with no craft behind it and nothing saying "
+                       "so" % _ZOOM_JOB_WHY)
+
+
+def arc_jobs_teach(enum_values):
+    """The arc-position craft for the zoom_arc field, and the arcs it lacks.
+
+    TWO OF THE SIX HAVE NO GUIDANCE ANYWHERE. `build` and `breather` are in
+    this app's enum and NOT in the catalogue, which was written against a
+    different vocabulary — so the honest surface says which arcs the craft
+    covers and which it does not, rather than leaving the agent to assume the
+    silence means anything.
+    """
+    _have = [(_k, ZOOM_ARC_JOBS[_k]) for _k in enum_values if _k in ZOOM_ARC_JOBS]
+    _missing = [_k for _k in enum_values if _k not in ZOOM_ARC_JOBS]
+    _txt = " ".join("%s = %s" % (_k, _v) for _k, _v in _have)
+    if _missing:
+        _txt += (" The catalogue has NO guidance for %s — it was written "
+                 "against a different arc vocabulary. Rule them on the beat, "
+                 "not on a rule that does not exist."
+                 % " or ".join(_missing))
+    return _txt
 
 
 def mg_unique_prop_owner(prop_keys=None):
@@ -2497,7 +2605,13 @@ KNOWLEDGE_TOOLS = [{
                                                     "'WHO?'), the ONE word worth "
                                                     "stamping, the figure. Short, "
                                                     "punchy, upper case reads "
-                                                    "best."},
+                                                    "best. AUTHOR IT IN THE "
+                                                    "SPEAKER'S OWN VOICE — the "
+                                                    "words on screen are part "
+                                                    "of the edit's voice, not a "
+                                                    "narrator's summary of it "
+                                                    "[05_motion_graphics, "
+                                                    "wired 2026-09-11]"},
                                  "sfx": {"type": "string", "enum": ["yes", "no"],
                                          "description": "REQUIRED on hook and "
                                                         "close beats: does this "
@@ -2593,7 +2707,13 @@ KNOWLEDGE_TOOLS = [{
                                          + " Send the props for ONE component; "
                                            "keys from two is refused, and so is "
                                            "a component the condition you named "
-                                           "does not cover.")},
+                                           "does not cover. Three values are "
+                                           "computed live rather than typed: "
+                                           "'timestamp' renders T+N.Ns, "
+                                           "'wordcount' a ticking count, 'wpm' "
+                                           "words per minute "
+                                           "(05_motion_graphics, previously "
+                                           "unreachable).")},
                                  "card_condition": {
                                      "type": "string",
                                      "enum": MG_CONDITION_ENUM,
@@ -2606,7 +2726,9 @@ KNOWLEDGE_TOOLS = [{
                                              for _c in MG_CONDITION_ENUM)
                                          + ". Omit it and you get StatCard for a "
                                            "figure or PullQuote for a phrase, "
-                                           "which is two of thirty-one.")},
+                                           "which is two of thirty-one. "
+                                           "[05_motion_graphics, wired "
+                                           "2026-09-11]")},
                                  # WHICH COMPONENT, and its props. This is the
                                  # one family whose TYPE the harness cannot
                                  # derive: a quoted headline number is a
@@ -2641,8 +2763,31 @@ KNOWLEDGE_TOOLS = [{
                                                     "function — `purpose` is "
                                                     "the function axis. Where "
                                                     "they share a word they "
-                                                    "must agree."},
-                                 "why": {"type": "string"}},
+                                                    "must agree.\n\n"
+                                     # THE CRAFT, FROM THE CATALOGUE. Eleven
+                                     # claims about this field sat in
+                                     # 06_emphasis_zoom and none of them reached
+                                     # here; read_knowledge has been called 0
+                                     # times in 30 runs. Extracted at import so
+                                     # a catalogue edit cannot leave it behind,
+                                     # and the arcs the catalogue does NOT
+                                     # cover say so rather than reading as
+                                     # silence.
+                                                    "WHAT THE MOVE MUST DO at "
+                                                    "each position — the "
+                                                    "position names the JOB, "
+                                                    "the vibe picks the "
+                                                    "register, and they are "
+                                                    "ORTHOGONAL: do not let "
+                                                    "'it is a peak' default you "
+                                                    "to punchy. "
+                                                    "[06_emphasis_zoom, wired "
+                                                    "2026-09-11] "
+                                                    + arc_jobs_teach(
+                                                        ["hook", "build", "mid_peak",
+                                                         "payoff", "breather", "close"])},
+                                 "why": {"type": "string",
+                                     "description": WHY_FIELD_TEACH}},
                              "required": ["beat", "purpose", "treatment",
                                           "cut", "why"]}}},
                      "required": ["verdicts"]},
@@ -2678,7 +2823,7 @@ KNOWLEDGE_TOOLS = [{
                                                 "transition", "none"]},
                          "cut": {"type": "string", "enum": ["keep", "cut"]},
                          "why": {"type": "string",
-                                 "description": "about THIS beat's content"}},
+                                 "description": WHY_FIELD_TEACH}},
                      "required": ["beat", "purpose", "treatment", "cut",
                                   "why"]},
 }, {

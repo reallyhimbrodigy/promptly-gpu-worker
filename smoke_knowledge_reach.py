@@ -69,6 +69,21 @@ if BASE.exists():
               "in the commit WHICH claim was wired and to which field"
               % (_r - _b.get("reachable", 0)))
 
+# WIRED CLAIMS ARE COUNTED BY A MARKER IN THE TEXT THE AGENT READS, not by a
+# hand-kept list. knowledge_reach matches HEADINGS and understates reach: five
+# claims were wired 2026-09-11 and the heading count stayed at 8.
+_w = A.wired_claims()
+check("wired claims are counted by their marker", bool(_w),
+      "no [<doc>, wired <date>] markers on the agent's surface — a claim wired "
+      "without one cannot be distinguished from one nobody wired")
+check("at least five claims are wired, across two documents",
+      sum(_w.values()) >= 5 and len(_w) >= 2, str(_w))
+check("the marker names a real knowledge document",
+      all(pathlib.Path("knowledge") / (_d + ".md") for _d in _w)
+      and all((pathlib.Path("knowledge") / (_d + ".md")).exists() for _d in _w),
+      "a marker naming a document that does not exist counts a claim that has "
+      "no source: %s" % sorted(_w))
+
 check("the census is on the record", DOC.exists())
 if DOC.exists():
     _t = DOC.read_text()
@@ -82,6 +97,16 @@ if DOC.exists():
     # THE SAME LINE, not anywhere in the file: both names appear in the table
     # and in the prose, so "each is present" says nothing about whether the
     # census still connects the field to the document with the largest gap.
+    check("the census CORRECTS its own over-count rather than replacing it",
+          "over-counted" in _t and "not 27" in _t,
+          "the 27-instructable figure was a document-to-field mapping, not an "
+          "audit — it never asked whether a claim describes a field this lane "
+          "exposes, and the correction is the evidence that mapping is not "
+          "auditing")
+    check("it records that cutaway is not a field on this lane",
+          "not in this lane's treatment enum" in _t,
+          "08_broll's six claims cannot be wired here and saying they are "
+          "pending would be claiming work that is not this lane's to do")
     check("and it names the largest instructable gap by field",
           any("06_emphasis_zoom" in _l and "zoom_arc" in _l
               for _l in _t.splitlines()),
