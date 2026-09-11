@@ -130,6 +130,35 @@ def _words(text):
     ).split() if len(w) > 3 and w not in _STOP}
 
 
+def resolve_beat(beats, src_t):
+    """The beat a SOURCE-clock instant belongs to: half-open [t_start, t_end),
+    the last beat closed at its end.
+
+    WHY HALF-OPEN. 53 of 80 placements across rounds 51-52 sit EXACTLY on a
+    boundary two beats share, because the agent places at the beat's t_start
+    and the previous beat's t_end is the same number. The first draft of this
+    sheet tested `t_start <= t <= t_end` and took the FIRST match — so two
+    thirds of placements were judged against the PREVIOUS beat's vision and
+    the previous beat's ruling, which is where most of "BUILT BUT NOT RULED"
+    came from: the ruling naming the family was on the next beat, one number
+    away. The why-vs-frame column was comparing the right why to the wrong
+    frame. A closed interval and first-match-wins is a tie-break nobody chose.
+    """
+    if not beats:
+        return None
+    for b in beats:
+        if _f(b.get("t_start")) <= src_t < _f(b.get("t_end")):
+            return b
+    # No beat starts at or contains this instant. If a beat ENDS exactly here
+    # — the last beat, or a beat followed by a gap — it owns the instant. The
+    # first draft closed only the LAST beat and left 2 of 80 real placements
+    # UNMATCHED at the end of a beat that had a gap after it.
+    for b in beats:
+        if abs(src_t - _f(b.get("t_end"))) < 1e-6:
+            return b
+    return None
+
+
 def reason_grounding(why, beat_text):
     """(state, detail) — WHERE the stated reason could be checked.
 
@@ -199,17 +228,19 @@ def sheet(result, ref_beats, provenance):
     out.append("")
 
     for _n, p in enumerate(placements, 1):
-        _t = p.get("t_start")
+        # THE MOMENT, NOT THE RENDER START. A card renders attack_ms before the
+        # moment it is for, so t_start sits 0.08s before the beat it was ruled
+        # on — resolving on it put 4 of 5 card placements one beat early and
+        # called them BUILT BUT NOT RULED. t_moment is written by the producer;
+        # a record without it (older ledgers) falls back to t_start and the
+        # sheet says which it used.
+        _t = p.get("t_moment") if p.get("t_moment") is not None else p.get("t_start")
+        _tsrc = "moment" if p.get("t_moment") is not None else "render start"
         # OUTPUT time -> SOURCE time before any containment test. Beats live on
         # the source clock and placements on the output clock; comparing them
         # directly is only correct when nothing was cut.
         _mstate, _src_t = output_to_source(_keep, _t)
-        _b = None
-        if _mstate == MAPPED:
-            for b in beats:
-                if _f(b.get("t_start")) <= _src_t <= _f(b.get("t_end")):
-                    _b = b
-                    break
+        _b = resolve_beat(beats, _src_t) if _mstate == MAPPED else None
         _dur = (_f(_b.get("t_end")) - _f(_b.get("t_start"))) if _b else 0.0
         _all_v = verdicts.get(_b.get("i")) if _b else None
         # The ruling that PRODUCED this placement is the one whose treatment
@@ -229,8 +260,8 @@ def sheet(result, ref_beats, provenance):
                 _pos = "  [INFERRED: last beat — a close position]"
 
         out.append("─" * 74)
-        out.append("%2d. %-9s at %ss out%s   beat %s (%.2fs)%s"
-                   % (_n, p.get("family") or p.get("type") or "?", _t,
+        out.append("%2d. %-9s at %ss out (%s)%s   beat %s (%.2fs)%s"
+                   % (_n, p.get("family") or p.get("type") or "?", _t, _tsrc,
                       (" = %.2fs src" % _src_t) if _mstate == MAPPED else "",
                       _b.get("i") if _b else "UNMATCHED", _dur, _pos))
         out.append("    placed: %s" % (str(p.get("content") or "")[:88] or "(no content recorded)"))
@@ -317,6 +348,68 @@ if __name__ == "__main__":
             "beat_verdicts": [{"beat": 0, "treatment": ["card"], "why": "a figure"}]}}
         _lines = sheet(_demo, _refs, _prov)
         _bad = []
+
+        # BEAT RESOLUTION ON THE BOUNDARY. 53 of 80 real placements (rounds
+        # 51-52) sit exactly on a boundary two beats share; the rule that says
+        # which beat owns it decides which why and which FRAME the placement is
+        # judged against. Closed-interval-first-match judged two thirds of them
+        # against the previous beat.
+        _rb = [{"i": 0, "t_start": 0.0, "t_end": 2.0},
+               {"i": 1, "t_start": 2.0, "t_end": 4.0},
+               {"i": 2, "t_start": 5.0, "t_end": 6.0}]
+        for _t, _want, _lbl in (
+                (2.0, 1, "a shared boundary belongs to the beat that STARTS there"),
+                (6.0, 2, "the last beat is closed at its end"),
+                (4.0, 1, "an end with a gap after it belongs to the beat that ENDS there"),
+                (3.0, 1, "an interior instant belongs to the beat containing it"),
+                (4.5, None, "an instant inside a gap belongs to no beat")):
+            _got = resolve_beat(_rb, _t)
+            _gi = _got.get("i") if _got else None
+            if _gi != _want:
+                _bad.append("resolve_beat(%.1f) -> %s, expected %s: %s"
+                            % (_t, _gi, _want, _lbl))
+
+        # BUILT BUT NOT RULED fires on a placement whose beat carries no ruling
+        # naming its family, and stays silent on the ruled one.
+        # keep_spans is REQUIRED here: without it every placement is UNMAPPED,
+        # no beat resolves, and this leg reads 0 for a reason that has nothing
+        # to do with the rule it tests — the first run of it did exactly that.
+        _demo2 = {"ledger": {
+            "keep_spans": [[0.0, 9.0]],
+            "beats": _demo["ledger"]["beats"],
+            "placements": [{"family": "card", "t_start": 0.4, "content": "10"},
+                           {"family": "zoom", "t_start": 0.5}],
+            "beat_verdicts": _demo["ledger"]["beat_verdicts"]}}
+        _n_bnr = sum("BUILT BUT NOT RULED" in x for x in sheet(_demo2, _refs, _prov))
+        # A card ruled on beat 1 renders 0.08s before beat 1 starts (attack
+        # lead). Resolving on t_moment keeps it on beat 1 and ruled; resolving
+        # on t_start would put it on beat 0 and call it BUILT BUT NOT RULED.
+        _demo3 = {"ledger": {
+            "keep_spans": [[0.0, 9.0]],
+            "beats": _demo["ledger"]["beats"],
+            "placements": [{"family": "card", "t_start": 2.82, "t_moment": 2.9,
+                            "content": "10"}],
+            "beat_verdicts": [{"beat": 1, "treatment": ["card"], "why": "a figure"}]}}
+        _l3 = sheet(_demo3, _refs, _prov)
+        if any("BUILT BUT NOT RULED" in x for x in _l3) or not any(
+                "beat 1 " in x and "(moment)" in x for x in _l3):
+            _bad.append("a card with t_moment on beat 1 and t_start 0.08s before "
+                        "it must resolve to beat 1 via the moment, ruled")
+        if _n_bnr != 1:
+            _bad.append("BUILT BUT NOT RULED fired %d time(s) on one unruled + "
+                        "one ruled placement; expected exactly 1" % _n_bnr)
+
+        # OUTPUT -> SOURCE through a cut, and UNMAPPED past the kept material.
+        _o2s = [(output_to_source([[0.0, 1.0], [3.0, 4.0]], 1.5), (MAPPED, 3.5),
+                 "an output instant inside the second kept span maps into it"),
+                (output_to_source([[0.0, 1.0], [3.0, 4.0]], 2.5), None,
+                 "an output instant past the kept total is UNMAPPED")]
+        for _got, _want, _lbl in _o2s:
+            if _want is None:
+                if _got[0] == MAPPED:
+                    _bad.append("output_to_source: %s (got %r)" % (_lbl, _got))
+            elif (_got[0], round(_got[1], 6)) != _want:
+                _bad.append("output_to_source: %s (got %r)" % (_lbl, _got))
         if not any("what an editor did" in x for x in _lines):
             _bad.append("no matched pair produced")
         for _need in ("PLACEMENT: ____", "REASON:    ____"):
@@ -360,8 +453,9 @@ if __name__ == "__main__":
                 print("  - " + _m)
             sys.exit(1)
         print("JUDGE-PLACEMENTS (self-test): PASS — %d reference beat(s), a "
-              "matched pair, two blank verdict axes, and four distinct "
-              "grounding states" % len(_refs))
+              "matched pair, two blank verdict axes, four distinct grounding "
+              "states, boundary resolution (5 legs), BUILT BUT NOT RULED "
+              "fires once, output->source through a cut" % len(_refs))
         sys.exit(0)
     with open(sys.argv[1], encoding="utf-8") as fh:
         _r = json.load(fh)
