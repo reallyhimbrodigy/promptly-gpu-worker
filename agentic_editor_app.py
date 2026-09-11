@@ -8197,8 +8197,17 @@ def edit(source_key: str, brief: str,
             # two functions in this file disagreeing about the shape between
             # them, with the disagreement surfacing as an opaque batch error.
             _dur = min(3.0, max(0.6, b["t_end"] - b["t_start"]))
+            # THE BEAT, CARRIED. The producer knows exactly which beat this
+            # overlay is for and used to drop it, leaving every reader to
+            # RECONSTRUCT it from a timestamp — and a placement sits on a beat
+            # BOUNDARY by construction, because its time IS the beat's start.
+            # So the reconstruction always landed on a tie-break: round 57's
+            # sheet resolved 35 of 38 placements by convention with nothing
+            # actually ambiguous. Same lesson as t_moment: stop reconstructing
+            # what the producer already knows.
             items.append({"t_start": round(out_t, 2),
                           "t_end": round(out_t + _dur, 2),
+                          "beat": v.get("beat"),
                           "text": copy})
         if not items and ruled_text_n:
             _skips.append({"family": "text", "beat": None,
@@ -8567,6 +8576,7 @@ def edit(source_key: str, brief: str,
                     built["text"] = len(items)
                     steps.append({"step": "text", "n": len(items),
                                   "items": [{"t": _i.get("t_start"),
+                                             "beat": _i.get("beat"),
                                              "content": str(_i.get("text") or "")[:80]}
                                             for _i in items]})
                 if _cap_pages:
@@ -8750,6 +8760,7 @@ def edit(source_key: str, brief: str,
                                                  else ZOOM_NATURAL_SCALE.get(_ztype, 1.22)),
                                "peak_lands_at_s": round(_cs + _peak_s, 3),
                                "beat_at_s": round(a2, 3),
+                               "beat": v.get("beat"),
                                "head_clamped": _clamped})
             _zcursor += _n_frames
 
@@ -8891,6 +8902,7 @@ def edit(source_key: str, brief: str,
                                       "type": _sg["type"], "arc": _sg["arc"],
                                       "peak_lands_at_s": _sg["peak_lands_at_s"],
                                       "beat_at_s": _sg["beat_at_s"],
+                                      "beat": _sg.get("beat"),
                                       "head_clamped": _sg["head_clamped"],
                                       "geometry_psnr_db": _sg.get("geometry_psnr_db")})
 
@@ -9261,6 +9273,7 @@ def edit(source_key: str, brief: str,
                  "from": "card_props" if isinstance(v.get("card_props"), dict)
                          and v.get("card_props") else "hero/label shorthand"})
             _cards.append({"t_start": round(_mg_at, 2), "type": _ctype,
+                           "beat": v.get("beat"),
                            "duration_s": min(2.5, b["t_end"] - b["t_start"]),
                            "hero": hero, "label": str(v.get("card_label") or "")[:60],
                            "props": _cprops,
@@ -9354,6 +9367,7 @@ def edit(source_key: str, brief: str,
                     built["card"] = len(_cards)
                     steps.append({"step": "card", "n": len(_cards),
                                   "items": [{"t": _c3.get("t_start"),
+                                             "beat": _c3.get("beat"),
                                              "type": _c3.get("type"),
                                              "anchor_s": _c3.get("anchor_s"),
                                              "attack_ms": _c3.get("attack_ms"),
@@ -9404,7 +9418,8 @@ def edit(source_key: str, brief: str,
                                _s_a, _s_a + float(_sd if _sd else 0.5), note=nm)
                 cur = _sout
                 built["sfx"] += 1
-                steps.append({"step": "sfx", "name": nm, "t": round(at, 2)})
+                steps.append({"step": "sfx", "name": nm, "t": round(at, 2),
+                              "beat": v.get("beat")})
 
         subprocess.run(["cp", os.path.join("/work", cur), "/work/out.mp4"],
                        capture_output=True, text=True, timeout=120,
@@ -9495,6 +9510,7 @@ def edit(source_key: str, brief: str,
                         {"type": _TYPE[_k], "family": _k,
                          "t_start": _it2.get("t"),
                          "t_moment": _it2.get("anchor_s", _it2.get("t")),
+                         "beat": _it2.get("beat"),
                          "method": "ffmpeg", "declared_by": "execute_plan",
                          "content": _it2.get("content") or ""})
             else:
@@ -9505,6 +9521,7 @@ def edit(source_key: str, brief: str,
                      # a zoom's t is [start, end] with the start a pre-roll
                      # before the beat; the moment it is for is beat_at_s.
                      # sfx and transition record the moment as t already.
+                     "beat": _s.get("beat"),
                      "t_moment": (_s.get("beat_at_s") if _s.get("beat_at_s") is not None
                                   else (_s.get("t", [None])[0] if isinstance(_s.get("t"), list)
                                         else _s.get("t"))),

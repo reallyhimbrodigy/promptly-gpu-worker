@@ -209,6 +209,7 @@ def resolve_beat(beats, src_t):
     return None
 
 
+RESOLVED_DECLARED = "DECLARED"
 RESOLVED_INTERIOR = "INTERIOR"
 RESOLVED_BOUNDARY = "BOUNDARY TIE-BREAK"
 RESOLVED_FALLBACK = "MOMENT FALLBACK"
@@ -232,6 +233,15 @@ def resolution_basis(p, beats, keep_spans):
 
     INTERIOR is the only basis that needs no convention to be right.
     """
+    # DECLARED BEATS EVERY RECONSTRUCTION. The producer knows which beat a
+    # placement is for; when it says so there is no convention in play at all.
+    # Round 57 read 35 of 38 placements as BOUNDARY TIE-BREAK with nothing
+    # ambiguous about any of them: a placement sits on a beat boundary BY
+    # CONSTRUCTION, because its instant IS the beat's start. The warning was
+    # correct about the reconstruction and wrong about the pipeline, which is
+    # the same error one level up — so the fix is to stop reconstructing.
+    if p.get("beat") is not None:
+        return (RESOLVED_DECLARED, "the producer recorded the beat")
     _t, _tsrc = placement_moment(p, {})
     _mstate, _src_t = output_to_source(keep_spans, _t)
     if _mstate != MAPPED:
@@ -341,7 +351,8 @@ def sheet(result, ref_beats, provenance):
         return out
     out.append("  %d placement(s) over %d beat(s)" % (len(placements), len(beats)))
     _bases = [resolution_basis(p, beats, _keep) for p in placements]
-    _conv = [b for b, _d in _bases if b != RESOLVED_INTERIOR]
+    _conv = [b for b, _d in _bases
+             if b not in (RESOLVED_INTERIOR, RESOLVED_DECLARED)]
     out.append("  resolution: %d of %d placement(s) rest on a CONVENTION, not "
                "on an instant strictly inside one beat  [%s]"
                % (len(_conv), len(placements),
@@ -368,7 +379,10 @@ def sheet(result, ref_beats, provenance):
         # the source clock and placements on the output clock; comparing them
         # directly is only correct when nothing was cut.
         _mstate, _src_t = output_to_source(_keep, _t)
-        _b = resolve_beat(beats, _src_t) if _mstate == MAPPED else None
+        if p.get("beat") is not None:
+            _b = next((x for x in beats if x.get("i") == p.get("beat")), None)
+        else:
+            _b = resolve_beat(beats, _src_t) if _mstate == MAPPED else None
         _dur = (_f(_b.get("t_end")) - _f(_b.get("t_start"))) if _b else 0.0
         _all_v = verdicts.get(_b.get("i")) if _b else None
         # The ruling that PRODUCED this placement is the one whose treatment
@@ -602,6 +616,25 @@ if __name__ == "__main__":
             _bad.append("a sheet that is mostly tie-breaks does not say so "
                         "loudly — which is how its counts get passed on as "
                         "facts about the pipeline")
+
+        # A DECLARED BEAT IS NOT A CONVENTION.
+        if resolution_basis({"family": "text", "t_start": 2.0, "t_moment": 2.0,
+                             "beat": 1}, _rb2, _ks2)[0] != RESOLVED_DECLARED:
+            _bad.append("a placement that RECORDS its beat must resolve "
+                        "DECLARED — reconstructing a fact the producer already "
+                        "stated is how 35 of 38 rows read as tie-breaks")
+        _demo6 = {"ledger": {
+            "keep_spans": [[0.0, 9.0]], "beats": _demo["ledger"]["beats"],
+            "placements": [{"family": "card", "t_start": 2.9, "t_moment": 2.9,
+                            "beat": 1, "content": "10"}],
+            "beat_verdicts": [{"beat": 1, "treatment": ["card"], "why": "x"}]}}
+        _l6 = sheet(_demo6, _refs, _prov)
+        if any("MORE THAN HALF" in x for x in _l6):
+            _bad.append("a sheet of DECLARED placements must not warn about "
+                        "tie-breaks — there are none")
+        if any("BUILT BUT NOT RULED" in x for x in _l6):
+            _bad.append("a declared beat must be used to find the ruling, not "
+                        "only to report the basis")
 
         # THE MOMENT FROM THE STEP, for ledgers that predate t_moment.
         _led_old = {"execute_plan": {"steps": [
