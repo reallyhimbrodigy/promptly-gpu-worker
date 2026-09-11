@@ -259,8 +259,20 @@ if callable(_cr) and callable(_rcost):
            f"collapse making a product decision")
         ok("never been run" in str(_rcost(_r)[1]),
            f"route {_r}'s ABSENT does not say what must be measured first")
-ok("route_demand" in SRC and "capability_route" in SRC,
-   "the route is not recorded or counted in the ledger")
+# COUNTED, not merely mentioned. `"route_demand" in SRC` survived deleting the
+# increment, because the setdefault that creates the dict is a separate line —
+# so the demand signal would have stayed permanently empty while the check read
+# green. That is the exact defect this counter exists to end.
+_inc = [n for n in ast.walk(TREE) if isinstance(n, ast.Assign)
+        and any(isinstance(t, ast.Subscript)
+                and isinstance(getattr(t, "value", None), ast.Subscript)
+                and isinstance(t.value.slice, ast.Constant)
+                and t.value.slice.value == "route_demand" for t in n.targets)
+        and "+ 1" in ast.unparse(n.value)]
+ok(bool(_inc) and "capability_route" in SRC,
+   "nothing INCREMENTS led['route_demand'] — the demand signal would stay "
+   "empty while the ledger key exists, which is how unsupported_request read "
+   "zero for nine rounds")
 ok('fail("route_ambiguous"' in SRC,
    "an AMBIGUOUS route does not fail loudly — it would be chosen silently")
 _break = [n for n in ast.walk(TREE)
