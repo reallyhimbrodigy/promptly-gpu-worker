@@ -105,14 +105,23 @@ check("the model loop is NOT attributed to a build stage",
       "NOT attributable" in src and "container only" in src)
 
 # ── IT IS WIRED, LEDGERED AND PRINTED ───────────────────────────────────────
-check("cost_usd reaches the ledger",
-      any(isinstance(n, ast.Assign)
-          and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
-                  and t.slice.value == "cost_usd" for t in n.targets)
-          for n in ast.walk(tree)))
+# RESOLVE THE BINDING. The first draft asked whether a cost_usd assignment
+# existed AND whether run_cost was called anywhere — both survive
+# `led["cost_usd"] = 0.0`, because the call still happens one line below for a
+# different key. One hop of indirection is still scope.
+_cu = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
+       and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+               and t.slice.value == "cost_usd" for t in n.targets)]
+check("cost_usd reaches the ledger", bool(_cu))
+_rc_names = {t.id for n in ast.walk(tree) if isinstance(n, ast.Assign)
+             and isinstance(n.value, ast.Call)
+             and getattr(n.value.func, "id", "") == "run_cost"
+             for t in n.targets if isinstance(t, ast.Name)}
 check("the ledger value comes from run_cost, not a local computation",
-      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "run_cost"
-          for n in ast.walk(tree)))
+      bool(_rc_names) and any(
+          any(isinstance(x, ast.Name) and x.id in _rc_names
+              for x in ast.walk(a_.value)) for a_ in _cu),
+      f"cost_usd must read the value bound from run_cost ({sorted(_rc_names)})")
 _p = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
       and getattr(n.func, "id", "") == "print"
       and any(isinstance(x, ast.Constant) and isinstance(x.value, str)
