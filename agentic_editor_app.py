@@ -773,9 +773,23 @@ def container_benchmark():
         with ThreadPoolExecutor(max_workers=par_n) as ex:
             list(ex.map(lambda _: _bench_once(buf), range(par_n)))
         par = _t.time() - t
+        # WHICH MACHINE, NAMED. effective_cores spanned 13.3-20.7 on a
+        # cpu_quota of 24.0 and that spread IS the 6x paint spread. Two
+        # explanations with different owners: heterogeneous hosts (a Modal
+        # question) or contention (ours). The model string separates them and
+        # costs one file read.
+        model = "UNREAD"
+        try:
+            for _ln in open("/proc/cpuinfo"):
+                if _ln.lower().startswith("model name"):
+                    model = _ln.split(":", 1)[1].strip()
+                    break
+        except Exception:                                         # noqa: BLE001
+            model = "UNREADABLE"
         return {
             "ok": True,
             "cpu_quota": quota,
+            "cpu_model": model,
             "host_cpu_count": _os.cpu_count(),
             "cpu_basis": "cgroup_quota" if quota else "host_count_FALLBACK",
             "single_ms": round(single * 1000, 1),
@@ -4661,7 +4675,7 @@ def _probe_frame_count(path, env=None):
         return None
 
 
-def render_remotion_batch(jobs, env=None, timeout=1800):
+def render_remotion_batch(jobs, env=None, timeout=1800, led=None):
     """Render N compositions in ONE Remotion process. Returns {id: {...}}.
 
     THE COST IT REMOVES, measured in-container: bundle 9.79s + selectComposition
@@ -4683,6 +4697,42 @@ def render_remotion_batch(jobs, env=None, timeout=1800):
     import subprocess
     if not jobs:
         return {}
+
+    # THE BENCH, AGAIN, IMMEDIATELY BEFORE THE PAINT.
+    #
+    # MEASURED 2026-09-10 over 6 containers and 540 painted frames: paint cost
+    # tracks effective_cores at rho -0.94, and cpu_quota read 24.0 on EVERY
+    # one while effective_cores measured 13.3 to 20.7. The container never
+    # gets what it asks for and the shortfall IS the 6x spread — 3,139
+    # ms/frame on 13.3 cores against 708 on 20.7.
+    #
+    # Two explanations with DIFFERENT OWNERS, and the startup bench cannot
+    # tell them apart because it runs minutes before the paint:
+    #   heterogeneous hosts — a Modal question (does a 24-core request land on
+    #     a consistent machine, and does a bigger request or another region)
+    #   contention — ours
+    # A second bench here, against the first, separates them: the SAME number
+    # means the machine is just that machine; a LOWER one means something
+    # arrived in between. Printed, because a counter that reaches the ledger
+    # and no output answers nothing.
+    _pre = container_benchmark()
+    # LEDGERED AS WELL AS PRINTED — the log answers a reading, the ledger
+    # answers the comparison against the startup bench across every fixture.
+    # Appended, because one job can call this more than once.
+    if led is not None:
+        led.setdefault("bench_at_paint", []).append(
+            {k: _pre.get(k) for k in ("ok", "effective_cores", "single_ms",
+                                      "cpu_quota", "cpu_model", "error")})
+    if _pre.get("ok"):
+        print(f"  BENCH AT PAINT  : effective_cores {_pre.get('effective_cores')}"
+              f"  single {_pre.get('single_ms')}ms  quota {_pre.get('cpu_quota')}"
+              f"  cpu={_pre.get('cpu_model')}", flush=True)
+    else:
+        # ABSENT, not assumed unchanged. A failed second bench must not read
+        # as "the machine did not move".
+        print(f"  BENCH AT PAINT  : FAILED ({_pre.get('error')}) — this paint "
+              f"cannot be attributed to machine or contention", flush=True)
+
     qf = "/work/remotion-jobs.json"
     with open(qf, "w") as fh:
         json.dump(jobs, fh)
@@ -8148,7 +8198,7 @@ def edit(source_key: str, brief: str,
                                                text_overlays=_text_overlays,
                                                tight_cut_overlays=_tc_overlays), fh)
             _cap_t0 = time.time()
-            _cap_res = render_remotion_batch([{
+            _cap_res = render_remotion_batch(led=led, jobs=[{
                 "id": "captions", "composition": "PromptlyOverlay",
                 "propsFile": _cap_plan, "out": "/work/captions.mov",
                 "alpha": True,
@@ -8531,7 +8581,7 @@ def edit(source_key: str, brief: str,
             # times. This is the whole reason render_remotion_batch exists.
             _t_batch = time.time()
             _zres = render_remotion_batch(_zoom_jobs, env=_SUBPROCESS_ENV,
-                                          timeout=2400)
+                                          timeout=2400, led=led)
             _zt("remotion_batch", _t_batch)
             # seq + bundle_cached + public_synced, THE SAME FIELDS THE REEL
             # RECORDS. This record had neither, and zoom_render was not in the
@@ -11682,8 +11732,16 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                   f"effective_cores {_cb.get('effective_cores')}  "
                   f"cpu_quota {_cb.get('cpu_quota')} "
                   f"({_cb.get('cpu_basis')}) host {_cb.get('host_cpu_count')}{_warn}")
-            print(f"     divide any stage below by single_ms/1000 to compare "
-                  f"across runs; a paint stage scales with effective_cores")
+            # MEASURED 2026-09-10, n=6 containers, 540 painted frames:
+            #   rho(ms/frame, effective_cores) = -0.94
+            #   rho(ms/frame, single_ms)       = -0.60, POINTING THE WRONG WAY
+            # The two containers that hash SLOWEST per core painted FASTEST.
+            # Paint is multi-core, so it sees aggregate throughput; single_ms
+            # is the wrong normaliser and the old line here told the next
+            # reader to use it. A stale instruction gets followed.
+            print("     normalise a PAINT stage by effective_cores, NOT by "
+                  "single_ms — single-core speed anti-correlates with paint "
+                  "(rho -0.60, wrong sign; effective_cores rho -0.94)")
         else:
             # ABSENT, not assumed fast. A run without this number cannot be
             # compared to another run, and saying so beats normalising by 1.0.
