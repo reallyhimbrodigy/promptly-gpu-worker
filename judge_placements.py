@@ -623,11 +623,17 @@ if __name__ == "__main__":
             _bad.append("a placement that RECORDS its beat must resolve "
                         "DECLARED — reconstructing a fact the producer already "
                         "stated is how 35 of 38 rows read as tie-breaks")
+        # THE DECLARATION MUST DISAGREE WITH THE RECONSTRUCTION, or the leg
+        # proves nothing: with beat 1 declared AND 2.9s reconstructing to beat
+        # 1, ignoring the declaration changed no outcome and the mutant passed.
+        # Here the producer says beat 0 and the instant reconstructs to beat 1,
+        # which is the real case — a card anchored on a figure spoken in the
+        # next beat's window, or any beat whose bounds were trimmed.
         _demo6 = {"ledger": {
             "keep_spans": [[0.0, 9.0]], "beats": _demo["ledger"]["beats"],
             "placements": [{"family": "card", "t_start": 2.9, "t_moment": 2.9,
-                            "beat": 1, "content": "10"}],
-            "beat_verdicts": [{"beat": 1, "treatment": ["card"], "why": "x"}]}}
+                            "beat": 0, "content": "10"}],
+            "beat_verdicts": [{"beat": 0, "treatment": ["card"], "why": "x"}]}}
         _l6 = sheet(_demo6, _refs, _prov)
         if any("MORE THAN HALF" in x for x in _l6):
             _bad.append("a sheet of DECLARED placements must not warn about "
