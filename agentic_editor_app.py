@@ -3470,11 +3470,27 @@ def extract_beat_frames(video_path, times, out_dir, width=_VISION_FRAME_W, env=N
     except Exception as exc:
         return "FAILED", [], f"cannot create {out_dir}: {exc}"
     # One decode pass: select the frame nearest each timestamp.
+    # ONE FRAME PER TIMESTAMP, MAPPED BY THE TIME IT WAS ACTUALLY TAKEN.
+    #
+    # FOUND BY WATCHING, round 54 motion. A 60ms window at 35.905 fps holds
+    # 2-3 frames, so 9 timestamps wrote 19 files and the old code kept the
+    # FIRST NINE positionally: the model was shown beats 0,0,0,1,1,2,2,3,3
+    # labelled "Frame 1..9" and described the first 11.5s of a 28s clip as all
+    # nine beats. Every visual-route ruling on that fixture, rounds 51-54,
+    # reasoned from the wrong beat's frame — and agreed with SEEN perfectly,
+    # because SEEN faithfully described the wrong picture. The guard checked
+    # too FEW and silently truncated too MANY.
+    #
+    # showinfo prints each selected frame's pts_time in write order, exact at
+    # any fps, so every written file is paired with the time it came from and
+    # each requested time takes its nearest. A time with no frame is FAILED by
+    # name; the extras are deleted; nothing is ever assigned by position.
+    import re as _re
     expr = "+".join(f"between(t,{t - 0.03:.3f},{t + 0.03:.3f})" for t in times)
     pat = os.path.join(out_dir, "beat%03d.jpg")
     r = subprocess.run(
-        ["ffmpeg", "-y", "-v", "error", "-i", video_path,
-         "-vf", f"select='{expr}',scale={int(width)}:-2", "-vsync", "0",
+        ["ffmpeg", "-y", "-v", "info", "-i", video_path,
+         "-vf", f"select='{expr}',showinfo,scale={int(width)}:-2", "-vsync", "0",
          "-q:v", "6", pat],
         capture_output=True, text=True, timeout=900, env=env)
     got = sorted(glob.glob(os.path.join(out_dir, "beat*.jpg")))
@@ -3483,13 +3499,29 @@ def extract_beat_frames(video_path, times, out_dir, width=_VISION_FRAME_W, env=N
     if not got:
         return "FAILED", [], ("ffmpeg exited 0 and wrote NO frames — exit 0 is "
                               "not evidence a frame exists")
-    if len(got) < len(times):
-        # NAMED, not silently short. Fewer frames than beats means the mapping
-        # from frame to beat is no longer positional, and a description attached
-        # to the wrong beat is worse than no description.
-        return "FAILED", got, (f"asked for {len(times)} frames, got {len(got)} — "
-                               f"frame-to-beat mapping is no longer positional")
-    return "MEASURED", got[:len(times)], f"{len(got)} frame(s) at {width}px wide"
+    pts = [float(m) for m in _re.findall(r"pts_time:\s*([0-9.]+)", r.stderr or "")]
+    if len(pts) != len(got):
+        return "FAILED", [], (f"wrote {len(got)} frames but showinfo reported "
+                              f"{len(pts)} — cannot map frames to times, and "
+                              f"positional mapping is the bug this replaces")
+    chosen, chosen_t, keep = [], [], set()
+    for t in times:
+        k = min(range(len(pts)), key=lambda i: abs(pts[i] - t))
+        if abs(pts[k] - t) > 0.031:
+            return "FAILED", [], (f"no frame within 31ms of {t:.3f}s "
+                                  f"(nearest {pts[k]:.3f}s) — this beat has no "
+                                  f"picture and must not borrow one")
+        chosen.append(got[k]); chosen_t.append(pts[k]); keep.add(k)
+    for i, pth in enumerate(got):
+        if i not in keep:
+            try:
+                os.remove(pth)
+            except OSError:
+                pass
+    global _last_beat_frame_times
+    _last_beat_frame_times = chosen_t
+    return "MEASURED", chosen, (f"{len(chosen)} frame(s) at {width}px wide, "
+                                f"one per beat, from {len(got)} candidates")
 
 
 # THE PROMPT IS THE QUALITY LEVER, and it is written for what an EDITOR needs.
@@ -3501,6 +3533,8 @@ def extract_beat_frames(video_path, times, out_dir, width=_VISION_FRAME_W, env=N
 # because the landscape framing choice (fit / crop / blur-fill) cannot be made
 # without it. Readable text means fit or blur-fill; a subject with room around it
 # means crop.
+_last_beat_frame_times = []   # capture times of the last extract_beat_frames, for the smoke
+
 _VISION_SYSTEM = (
     "You label frames from a video an editor is cutting into a vertical short. "
     "For each frame, in ONE line under 22 words:\n"
@@ -6859,6 +6893,15 @@ def edit(source_key: str, brief: str,
             # normalised is the absence-as-success shape this file is about.
             fail("vfr_normalise_failed", (_vn.stderr or "")[-300:])
     led["vfr_normalised"] = _vfr_fixed
+    # WHICH CODE MADE THIS LEDGER. Twelve ledgers from three rounds carried no
+    # commit, no fingerprint, nothing — so a check that must only run on
+    # post-fix output had no way to tell them apart from it. Computed here in
+    # the container from the mounted source, so it cannot disagree with what ran.
+    try:
+        import hashlib as _hl
+        led["app_sha"] = _hl.sha256(open(__file__, "rb").read()).hexdigest()[:12]
+    except Exception as _e:                                       # noqa: BLE001
+        led["app_sha"] = f"UNREADABLE:{type(_e).__name__}"
     _mark(led, "vfr_normalise", _vf_t0)
     print(f"  SOURCE FPS      : {_fps_state}  declared={_declared} "
           f"actual={_actual}"
@@ -9256,8 +9299,17 @@ def edit(source_key: str, brief: str,
         # that read "text well under reference" was reading a step count.
         #
         # zoom and sfx were already correct: those emit one step per ruling.
+        # CUTAWAY WAS BUILT AND THEN DROPPED HERE. Builder-2 found it running
+        # the judgment on rounds 51-53: ruled 4, planned 3, built 1 on three
+        # fixtures, placements with family=cutaway ZERO — execute_plan appends
+        # {"step": "cutaway"} and this table never learned the word, so the
+        # manifest could not represent one. "Cutaway ruled zero" was partly the
+        # instrument. `cut` is deliberately NOT here: it is carried by
+        # keep_spans (smoke_every_step_becomes_a_placement names that carrier
+        # and checks it is non-empty whenever cuts were built).
         _TYPE = {"text": "overlay_text", "zoom": "emphasis", "sfx": "sfx",
-                 "card": "card", "transition": "transition"}
+                 "card": "card", "transition": "transition",
+                 "cutaway": "cutaway"}
         for _s in steps:
             _k = _s.get("step")
             if _k not in _TYPE:
@@ -9289,7 +9341,9 @@ def edit(source_key: str, brief: str,
                      "t_start": _s.get("t", [None])[0] if isinstance(_s.get("t"), list)
                                 else _s.get("t"),
                      "method": "ffmpeg", "declared_by": "execute_plan",
-                     "content": _s.get("name") or ""})
+                     "content": _s.get("name")
+                                or (f"src@{_s['src_t'][0]:.2f}s"
+                                    if isinstance(_s.get("src_t"), list) else "")})
         _mark(led, "build_sfx", _ts0)
         # ── EVERY DECLARED FAMILY MEASURES ITS EFFECT ───────────────────────
         # AN ARITHMETIC IDENTITY, for the same reason the ruled/built/skipped
