@@ -84,8 +84,20 @@ fi
 echo "[mount] $(python3 mount_fingerprint.py --verbose | tail -1)"
 echo "$MOUNT_SHA" > "$OUT/mount_sha.txt"
 
+# ONE FIXTURE, WHEN THE QUESTION IS ABOUT ONE FIXTURE. PROMPTLY_ONLY=car_short
+# re-runs a single arm after a document fix instead of spending the other four
+# on a question they cannot answer. The corpus guard still runs over the WHOLE
+# plan first, so the filter can never smuggle in an undeclared corpus — it only
+# decides which declared rows launch, and the skipped ones are PRINTED so a
+# partial round can never be read as a full one.
+ONLY="${PROMPTLY_ONLY:-}"
+[ -n "$ONLY" ] && echo "[scope] PROMPTLY_ONLY=$ONLY — this is a PARTIAL round"
+
 while IFS=$'\t' read -r name key brief model; do
   [ -z "$name" ] && continue
+  if [ -n "$ONLY" ] && [ "$name" != "$ONLY" ]; then
+    echo "[skip] $name (PROMPTLY_ONLY=$ONLY)"; continue
+  fi
   IFS=$'\t' read -r S O K < <(python3 presign.py "$key")
   if [ -z "${S:-}" ]; then
     echo "$name PRESIGN_FAILED" >> "$OUT/appmap.txt"; continue

@@ -68,7 +68,16 @@ Music is the engine for pace. It should start immediately and drive the edit for
 
 ### Silence, pauses and dead air
 
-All dead air is a liability unless it is deliberately deployed.
+**First, what dead air is.** Dead air is silence with NOTHING IN IT. Silence
+with visible content in it is SETUP, and it is one of the most common openings
+in these videos — a wet street, a car door, a room before anyone speaks. The
+beat tells you which one you are looking at: a beat that says there is visible
+content before the first word is setup, and it is not yours to cut. Do not
+reach for "trim the dead air" on a beat that has already told you it is not
+dead air. The question a pre-speech beat asks is whether the SHOT earns its
+time, not whether the silence does.
+
+With that settled: dead air is a liability unless it is deliberately deployed.
 
 *   **The test for a load-bearing pause:** Does it create tension or anticipation? Holding on the speaker's face for a silent beat just before they reveal "the secret" makes the audience lean in. This is a pause that works. A pause while the speaker is just thinking of the next word is dead weight; cut it.
 *   **The test for load-bearing silence:** Does it give a final command space to land? Cutting the music abruptly after the call to action ("...right now") makes the silence that follows feel sharp and intentional, focusing the viewer on the end card or the action they need to take.

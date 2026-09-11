@@ -66,6 +66,25 @@ strong EVEN IF they describe it at different moments or count it differently —
 two readings that both explain a moment agree on what matters even when they
 disagree on how many there were.
 
+ONE DISTINCTION THE FIRST SYNTHESIS FLATTENED, AND IT COST A REAL EDIT
+
+When you write the section on silence, separate DEAD AIR from SETUP and say
+which is which. Dead air is silence with nothing in it. Silence with visible
+content in it is setup — a street, a door, a room before anyone speaks — and
+these videos open on it constantly, so the distinction is in the source
+material whether or not any single analysis spells it out.
+
+The first version of this report wrote "trim all dead air" as a general
+instruction. An editor read it as one, called 5.7 seconds of visible
+pre-speech footage dead air, and cut 5.68 seconds out of a ten-second video —
+overriding a note in front of it that said, in those words, "visible content,
+not dead air". A clause that is true about pauses in speech is false about
+openings, and written flat it does damage on the second one.
+
+The rule for you: whenever an instruction would apply differently before the
+first word than it does mid-sentence, say so in the instruction. Do not leave
+the reader to infer the boundary.
+
 STRUCTURE
 Write prose with headers, not a list of rules. Suggested shape, adapt freely:
 
