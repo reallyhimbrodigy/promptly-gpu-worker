@@ -111,3 +111,63 @@ API reference. What was wrong was my audit reporting it in the same row as the
 knowledge docs, which made a correctly-unread reference look like a failure.
 
 **Not started. Reporting first, as asked.**
+
+---
+
+# ADDENDUM 2026-09-10 — the IGNORED repos, opened
+
+Zac: "resolved from the repos rather than the folder names... Zac gave four
+repositories: Remotion, a reasoning/behaviour skill, and knowledge on how to
+edit short-form content."
+
+## git blame on `_SKILLS_IGNORE`
+
+One commit, `ae1f35d` (Codex, 2026-09-03), "Wire all four inputs into one run,
+and assert each one separately". The list has never been edited since. The
+commit message states the reason for what it MOUNTED (Remotion skills were
+unreachable, not unread; Karpathy is resident in the prompt) and **gives no
+reason for any individual ignore entry**. The entries are not argued anywhere —
+they were written once, in a commit about something else, and have been load-
+bearing ever since. That is the stale-comment failure with no comment at all.
+
+## What each ignored repo actually is, from its contents
+
+| repo | what it is | editing knowledge |
+|---|---|---|
+| `krusemediallc/arcads-claude-code` | AI-generation pack: Seedance/Sora/Veo/Kling/Nano Banana prompt libraries, a 37-template Meta image-ad library, a Meta Marketing API publisher | 16 editing-shaped statements; **15 instruct a GENERATOR**, 1 is a caption burn-in tool chain. Zero craft rules for cutting real footage. |
+| `obra/superpowers` | 59,363 words of software-development workflow: TDD, systematic debugging, git worktrees, plans, code review | none |
+| `bradautomates/claude-video` | the `/watch` tool: yt-dlp + ffmpeg frame extraction + Whisper, so an agent can watch a video | **zero** editing statements in 39 files |
+| `ComposioHQ/awesome-claude-skills`, `ui-ux-pro-max-skill`, `arcads-external-api`, `interactivity-best-practices`, `watch` | skill indexes, UI/UX rules, a duplicate of arcads' API skill, a Remotion pointer, a copy of claude-video's skill | none |
+
+**THE SHORT-FORM EDITING KNOWLEDGE IS NOT ON THIS MACHINE.** Not in
+`~/.claude/skills` (21 entries, all opened), not in `~/.claude/plugins`, not in
+any git clone under `~` to depth 3. The craft synthesis cannot run on a source
+that is not here; it needs a repo URL.
+
+The nearest thing that exists is OURS: `knowledge/` (15 files), which is the
+Gemini system prompt sectioned into documents at `ad2cb73`.
+
+## The behaviour skill: two of them, and what was distilled
+
+`superpowers` IS a reasoning/behaviour skill — the second one, larger than
+Karpathy and coding-framed. Three of its iron laws are behaviour rather than
+code; two were already in the prompt:
+
+    "NO COMPLETION CLAIMS WITHOUT FRESH VERIFICATION EVIDENCE"   = K3
+    "IF any item is unclear: STOP ... ASK"                       = K5
+    "NO FIXES WITHOUT ROOT CAUSE INVESTIGATION FIRST"            -> K6, new
+
+K5 is Zac's own ruling for ambiguous re-edit instructions and Karpathy §1;
+superpowers arriving at it independently is corroboration, not a source.
+
+NOT ADOPTED, with reasons: TDD, the brainstorming hard gate, writing-plans,
+using-git-worktrees, subagent-driven-development — all coding-shaped, and this
+agent writes no production code.
+
+## The audit that produced this was itself wrong twice
+
+The first pass reported "three Remotion repos and Karpathy": three DIRECTORIES,
+one repo — 8 of the 9 `remotion-*` dirs are byte-identical to
+`remotion-official/packages/skills/skills/*`. And it used Spotlight for
+"short-form", which is a search for a phrase, not a read of a repo. Both are
+the same error: **naming what is present instead of opening it.**
