@@ -27,9 +27,12 @@ MUTATIONS = [
      "`13_placement_findings` and\n`14_card_text_placement_rules` are measured RATES",
      "two documents are measured RATES",
      "names the rates that must NEVER be wired"),
+    # AIMED AT EVERY OCCURRENCE. The first version rewrote only the bolded
+    # sentence and both `06_emphasis_zoom` and `zoom_arc` still appeared in the
+    # table row above it, so the leg passed — the ambiguous-literal class, in a
+    # markdown file this time.
     ("the census stops naming the largest instructable gap", DOCNAME,
-     "**`06_emphasis_zoom` is the largest instructable gap",
-     "**The largest instructable gap",
+     "| `zoom_arc` | `06_emphasis_zoom` |", "| `zoom_ARC` | `06_emphasis` |",
      "names the largest instructable gap"),
 ]
 
@@ -59,9 +62,16 @@ try:
     # the eight WHEN headings out of the enum's reach — and confirm the
     # unmutated gate reports the fall.
     _app = pathlib.Path(_wt) / APPNAME
+    # IT HAS TO CUT THE DESCRIPTION, NOT THE ENUM. My first control sliced
+    # MG_CONDITION_ENUM and the ratchet did not move, because the headings reach
+    # the agent's surface through the field's DESCRIPTION — which builds its own
+    # join over the conditions — not through the enum list. A positive control
+    # aimed at the wrong surface proves the gate blind when it is looking
+    # somewhere else.
     _mode, _m = red_proof_anchor.apply_one(
         _orig[APPNAME],
-        '"enum": MG_CONDITION_ENUM,', '"enum": MG_CONDITION_ENUM[:1],')
+        '                                         for _c in MG_CONDITION_ENUM)',
+        '                                         for _c in MG_CONDITION_ENUM[:1])')
     if _m is None:
         harness.append("positive control: anchor %s" % _mode)
         print("  HARNESS FAILURE  positive control  :: anchor %s" % _mode)

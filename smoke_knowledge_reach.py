@@ -79,8 +79,15 @@ if DOC.exists():
               "wiring all 77 would be worse than wiring none")
     check("it names the rates that must NEVER be wired",
           "13_placement_findings" in _t and "grade" in _t.lower())
+    # THE SAME LINE, not anywhere in the file: both names appear in the table
+    # and in the prose, so "each is present" says nothing about whether the
+    # census still connects the field to the document with the largest gap.
     check("and it names the largest instructable gap by field",
-          "06_emphasis_zoom" in _t and "zoom_arc" in _t)
+          any("06_emphasis_zoom" in _l and "zoom_arc" in _l
+              for _l in _t.splitlines()),
+          "no single line ties zoom_arc to 06_emphasis_zoom — 11 claims about "
+          "a field answered on every beat is the finding, and it has to survive "
+          "an edit to either name")
 
 print()
 if fails:
