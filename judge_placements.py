@@ -228,7 +228,14 @@ def sheet(result, ref_beats, provenance):
     out.append("")
 
     for _n, p in enumerate(placements, 1):
-        _t = p.get("t_start")
+        # THE MOMENT, NOT THE RENDER START. A card renders attack_ms before the
+        # moment it is for, so t_start sits 0.08s before the beat it was ruled
+        # on — resolving on it put 4 of 5 card placements one beat early and
+        # called them BUILT BUT NOT RULED. t_moment is written by the producer;
+        # a record without it (older ledgers) falls back to t_start and the
+        # sheet says which it used.
+        _t = p.get("t_moment") if p.get("t_moment") is not None else p.get("t_start")
+        _tsrc = "moment" if p.get("t_moment") is not None else "render start"
         # OUTPUT time -> SOURCE time before any containment test. Beats live on
         # the source clock and placements on the output clock; comparing them
         # directly is only correct when nothing was cut.
@@ -253,8 +260,8 @@ def sheet(result, ref_beats, provenance):
                 _pos = "  [INFERRED: last beat — a close position]"
 
         out.append("─" * 74)
-        out.append("%2d. %-9s at %ss out%s   beat %s (%.2fs)%s"
-                   % (_n, p.get("family") or p.get("type") or "?", _t,
+        out.append("%2d. %-9s at %ss out (%s)%s   beat %s (%.2fs)%s"
+                   % (_n, p.get("family") or p.get("type") or "?", _t, _tsrc,
                       (" = %.2fs src" % _src_t) if _mstate == MAPPED else "",
                       _b.get("i") if _b else "UNMATCHED", _dur, _pos))
         out.append("    placed: %s" % (str(p.get("content") or "")[:88] or "(no content recorded)"))
@@ -374,6 +381,20 @@ if __name__ == "__main__":
                            {"family": "zoom", "t_start": 0.5}],
             "beat_verdicts": _demo["ledger"]["beat_verdicts"]}}
         _n_bnr = sum("BUILT BUT NOT RULED" in x for x in sheet(_demo2, _refs, _prov))
+        # A card ruled on beat 1 renders 0.08s before beat 1 starts (attack
+        # lead). Resolving on t_moment keeps it on beat 1 and ruled; resolving
+        # on t_start would put it on beat 0 and call it BUILT BUT NOT RULED.
+        _demo3 = {"ledger": {
+            "keep_spans": [[0.0, 9.0]],
+            "beats": _demo["ledger"]["beats"],
+            "placements": [{"family": "card", "t_start": 2.82, "t_moment": 2.9,
+                            "content": "10"}],
+            "beat_verdicts": [{"beat": 1, "treatment": ["card"], "why": "a figure"}]}}
+        _l3 = sheet(_demo3, _refs, _prov)
+        if any("BUILT BUT NOT RULED" in x for x in _l3) or not any(
+                "beat 1 " in x and "(moment)" in x for x in _l3):
+            _bad.append("a card with t_moment on beat 1 and t_start 0.08s before "
+                        "it must resolve to beat 1 via the moment, ruled")
         if _n_bnr != 1:
             _bad.append("BUILT BUT NOT RULED fired %d time(s) on one unruled + "
                         "one ruled placement; expected exactly 1" % _n_bnr)

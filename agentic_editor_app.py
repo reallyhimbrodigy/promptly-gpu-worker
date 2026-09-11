@@ -2080,7 +2080,11 @@ KNOWLEDGE_TOOLS = [{
                                                     "derives the zoom. A figure "
                                                     "becomes a counting card; a "
                                                     "short claim becomes a "
-                                                    "quote card"},
+                                                    "quote card. A beat line "
+                                                    "showing `figure: N spoken "
+                                                    "@t` is where that number "
+                                                    "is said; a card for it is "
+                                                    "anchored on that instant"},
                                  "card_label": {"type": "string",
                                      "description": "the card's supporting line"},
                                  # WHICH COMPONENT, and its props. This is the
@@ -2332,6 +2336,70 @@ def beat_split_candidates(t0, t1, words=None, shot_changes=None,
     return out
 
 
+def split_beat_text(beat, t, words):
+    """The text each half of a split beat carries: ITS OWN words.
+
+    THE DEFECT. Both halves used to copy the parent's full sentence. Round 51
+    talking_head: 4 beats -> 7, and beats 0 and 1 both read "...10 times a
+    day..." while the word "10" is spoken at 3.52s, inside beat 1 only. The
+    agent read the figure in beat 0's text; has_number — by TIME — said False
+    on beat 0, the text disagreed, and the agent believed the text.
+    card_beat_alignment's `grounded` (digits in the beat's text) was laundered
+    the same way: True on a beat that never says the number.
+
+    With words: each half gets the words whose midpoint falls inside it. A half
+    with no words inside SAYS SO rather than borrowing — "[no words in a-b s]"
+    is true and the parent's sentence is not. When NEITHER half has words (an
+    un-narrated edge beat split on a shot change, or no words at all), both
+    keep the parent's text: there is nothing to slice by, and the edge beat's
+    description is the only text it has.
+    """
+    _base = str(beat.get("text") or "")
+    if not words:
+        return _base, _base
+    _a, _z = float(beat.get("t_start") or 0.0), float(beat.get("t_end") or 0.0)
+
+    def _inside(w, lo, hi):
+        try:
+            _m = (float(w["s"]) + float(w["e"])) / 2.0
+        except (KeyError, TypeError, ValueError):
+            return False
+        return lo <= _m < hi
+
+    _l = " ".join(str(w.get("w") or "") for w in words if _inside(w, _a, t)).strip()
+    _r = " ".join(str(w.get("w") or "") for w in words if _inside(w, t, _z)).strip()
+    if not _l and not _r:
+        return _base, _base
+    return (_l or f"[no words in {_a:.2f}-{t:.2f}s]",
+            _r or f"[no words in {t:.2f}-{_z:.2f}s]")
+
+
+def figure_instant(beat, numeric_ts):
+    """The INSTANT the beat's figure is spoken, or None.
+
+    Rounds 51-52: 6 of 6 figure cards landed 0.96-1.52s BEFORE their number,
+    both rounds, deterministically. The beat offered "figure: 10" and nothing
+    else, so the agent put the card at the beat's start — the only instant it
+    had. number_beats knew 3.52s all along. Value comps land on the instant the
+    number resolves, never before it; this is the material for that.
+    """
+    try:
+        _a, _z = float(beat.get("t_start")), float(beat.get("t_end"))
+    except (TypeError, ValueError):
+        return None
+    _in = sorted(float(t) for t in (numeric_ts or ()) if _a <= float(t) <= _z)
+    return _in[0] if _in else None
+
+
+def figure_note(b):
+    """The beat's figure and when it is spoken, for the beat line in the brief."""
+    if b.get("figure"):
+        if b.get("figure_t") is not None:
+            return "  (figure: %s spoken @%.2fs)" % (b["figure"], float(b["figure_t"]))
+        return "  (figure: %s)" % b["figure"]
+    return "  (has a number)" if b.get("has_number") else ""
+
+
 def subdivide_beats(beats, words=None, shot_changes=None, motion_curve=None,
                     target_s=_BEAT_TARGET_S, min_beat_s=1.2, window_s=1.0,
                     max_splits=64):
@@ -2396,9 +2464,8 @@ def subdivide_beats(beats, words=None, shot_changes=None, motion_curve=None,
             left = dict(b); right = dict(b)
             left["t_end"] = round(t, 3)
             right["t_start"] = round(t, 3)
-            _base = str(b.get("text") or "")
-            left["text"] = _base
-            right["text"] = _base
+            # ITS OWN WORDS, not the parent's sentence — see split_beat_text.
+            left["text"], right["text"] = split_beat_text(b, t, words)
             right["split_from"] = b.get("i")
             right["split_at"] = f"{kind}@{t:.2f}"
             out[idx:idx + 1] = [left, right]
@@ -8663,7 +8730,16 @@ def edit(source_key: str, brief: str,
                 _skips.append({"family": "card", "beat": v.get("beat"),
                                "why": "ruled 'card' with no card_hero"})
                 continue
-            at = src_to_out(b["t_start"], merged)
+            # A FIGURE CARD LANDS ON ITS NUMBER. `at` was the beat's START for
+            # every card; with the figure spoken 1-1.5s into the beat, the card
+            # led its own number by that much on 6 of 6 in rounds 51-52, both
+            # rounds, deterministically. The value comp lands on the instant
+            # the number resolves, never before it. A phrase card (no digits in
+            # the hero) keeps the beat start — there is no instant to land on.
+            _ft = b.get("figure_t")
+            _card_src_t = (float(_ft) if (_ft is not None and re.sub(r"[^0-9]", "", hero))
+                           else float(b["t_start"]))
+            at = src_to_out(_card_src_t, merged)
             if at is None:
                 _skips.append({"family": "card", "beat": v.get("beat"),
                                "why": "beat was cut, so it has no output time"})
@@ -8827,6 +8903,18 @@ def edit(source_key: str, brief: str,
             led.setdefault("card_beat_alignment", []).append(dict(
                 card_beat_alignment({"anchor_s": _mg_at, "hero": hero}, b),
                 beat=v.get("beat"), type=_ctype))
+            # CARD vs FIGURE: how far the card's MOMENT sits from the instant
+            # its number is spoken. Negative = early. Three states, because a
+            # beat with no figure_t is ABSENT, not on time.
+            # ONE CLOCK: `at` is output time, figure_t is source time; the lead
+            # is taken with both on the output clock. Head-clamping shows as a
+            # positive lead here, which is the one way this can now be non-zero.
+            _ft_out = src_to_out(float(_ft), merged) if _ft is not None else None
+            led.setdefault("card_vs_figure", []).append(
+                {"beat": v.get("beat"), "anchor_s": round(float(at), 2),
+                 "figure_t": _ft, "figure_t_out": _ft_out,
+                 "lead_s": (round(float(at) - float(_ft_out), 2) if _ft_out is not None else None),
+                 "state": "MEASURED" if _ft_out is not None else "ABSENT"})
             led.setdefault("card_props_seen", []).append(
                 {"beat": v.get("beat"), "type": _ctype,
                  "keys": sorted(_cprops.keys()),
@@ -8839,6 +8927,15 @@ def edit(source_key: str, brief: str,
                            "anchor_s": round(at, 2),
                            "attack_ms": (_mg_attack or {}).get(_ctype, 150),
                            "head_clamped": _mg_clamped})
+        # PRINTED IN THE COMMIT THAT ADDS IT.
+        _cvf = led.get("card_vs_figure") or []
+        _cvf_m = [c for c in _cvf if c["state"] == "MEASURED"]
+        print("  CARD vs FIGURE  : n=%d  early(<-0.05s)=%d  on=%d  late(>+0.05s)=%d  "
+              "leads=%s  ABSENT=%d"
+              % (len(_cvf), sum(1 for c in _cvf_m if c["lead_s"] < -0.05),
+                 sum(1 for c in _cvf_m if -0.05 <= c["lead_s"] <= 0.05),
+                 sum(1 for c in _cvf_m if c["lead_s"] > 0.05),
+                 [c["lead_s"] for c in _cvf_m], len(_cvf) - len(_cvf_m)), flush=True)
         if _cards:
             # DO NOT RE-RENDER AN IDENTICAL REEL. execute_plan rebuilds the whole
             # pipeline, and the agent calls it more than once — round 15's
@@ -9040,9 +9137,15 @@ def edit(source_key: str, brief: str,
             _items = _s.get("items")
             if isinstance(_items, list) and _items:
                 for _it2 in _items:
+                    # t_start is the RENDER start; a card's render starts
+                    # attack_ms before the moment it is for (anchor_s), so a
+                    # reader resolving t_start against beat windows puts every
+                    # card one beat early — 4 of 5 card "BUILT BUT NOT RULED"
+                    # in rounds 51-52 were this. t_moment is the moment.
                     led.setdefault("placements", []).append(
                         {"type": _TYPE[_k], "family": _k,
                          "t_start": _it2.get("t"),
+                         "t_moment": _it2.get("anchor_s", _it2.get("t")),
                          "method": "ffmpeg", "declared_by": "execute_plan",
                          "content": _it2.get("content") or ""})
             else:
@@ -9050,6 +9153,8 @@ def edit(source_key: str, brief: str,
                     {"type": _TYPE[_k], "family": _k,
                      "t_start": _s.get("t", [None])[0] if isinstance(_s.get("t"), list)
                                 else _s.get("t"),
+                     "t_moment": _s.get("t", [None])[0] if isinstance(_s.get("t"), list)
+                                 else _s.get("t"),
                      "method": "ffmpeg", "declared_by": "execute_plan",
                      "content": _s.get("name") or ""})
         _mark(led, "build_sfx", _ts0)
@@ -9555,6 +9660,8 @@ def edit(source_key: str, brief: str,
         # instruction — a beat carrying a figure is not a beat that must take a
         # card, and the rates grade, they never instruct.
         _b["figure"] = extract_figure(_b.get("text") or "")[0] if _b["has_number"] else None
+        # THE INSTANT, NOT ONLY THE VALUE — see figure_instant.
+        _b["figure_t"] = figure_instant(_b, _numeric_ts) if _b["has_number"] else None
     led["beats"] = _beats
 
     # ── RE-EDIT: LOAD THE PRIOR PLAN ────────────────────────────────────────
@@ -9686,8 +9793,7 @@ def edit(source_key: str, brief: str,
             f"need to compute these:\n{_gap_txt}\n\n"
             f"BEATS ({len(_beats)}) — rule on EVERY one with `beat_verdict`:\n"
             + "\n".join(f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
-                        + (("  (figure: %s)" % b["figure"]) if b.get("figure")
-                           else ("  (has a number)" if b["has_number"] else ""))
+                        + figure_note(b)
                         + f"  {b['text'][:90]}" for b in _beats) + "\n\n"
             # ── THE EXAMPLES, AT THE MOMENT OF RULING ──────────────────────
             # Not a description of the craft — the craft. For each beat, the
@@ -10038,8 +10144,7 @@ def edit(source_key: str, brief: str,
                      f"finished with {len(_unruled)} of {len(_beats)} beats unruled")
                 _lst = "\n".join(
                     f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
-                    + (("  (figure: %s)" % b["figure"]) if b.get("figure")
-                       else ("  (has a number)" if b["has_number"] else ""))
+                    + figure_note(b)
                     + f"  {b['text'][:80]}" for b in _unruled[:20])
                 msgs.append({"role": "user", "content": [{"type": "text", "text":
                     f"NOT DONE. {len(_unruled)} of {len(_beats)} beats have no "
