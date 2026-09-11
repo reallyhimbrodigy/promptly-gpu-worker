@@ -156,19 +156,9 @@ check("the prompt does not describe the job as running shell commands",
 print("\n6b. SYMBOLS EXIST AT RUNTIME")
 _rt_missing = []
 try:
-    import sys as _sys, types as _types
-    _m = _types.ModuleType("modal")
-
-    class _S:
-        def __init__(self, *a, **k): pass
-        def __getattr__(self, n): return _S()
-        def __call__(self, *a, **k): return _S()
-        def function(self, *a, **k): return lambda f: f
-        def local_entrypoint(self, *a, **k): return lambda f: f
-    for _n in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
-        setattr(_m, _n, _S())
-    _m.is_local = lambda: True
-    _sys.modules.setdefault("modal", _m)
+    import sys as _sys
+    import modal_stub
+    modal_stub.install()
     _sys.path.insert(0, HERE)
     import agentic_editor_app as _A
     for _n in ("_REQUIRED_PROMPT_BLOCKS", "_assert_prompt_blocks_present",

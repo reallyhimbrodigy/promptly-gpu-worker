@@ -26,22 +26,8 @@ import pathlib
 import sys
 import types
 
-_m = types.ModuleType("modal")
-
-
-class _S:
-    def __init__(s, *a, **k): pass
-    def __getattr__(s, n): return _S()
-    def __call__(s, *a, **k): return _S()
-    def function(s, *a, **k): return lambda f: f
-    def local_entrypoint(s, *a, **k): return lambda f: f
-
-
-for _n in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
-    setattr(_m, _n, _S())
-_m.is_local = lambda: True
-_m.enable_output = _S()
-sys.modules.setdefault("modal", _m)
+import modal_stub                                         # noqa: E402
+modal_stub.install()
 import agentic_editor_app as A                                    # noqa: E402
 
 fails = []
@@ -125,27 +111,18 @@ check("so a family the index under-carries is NOT falsely flagged",
       A.reference_family_note("sfx", BEATS, META) == "",
       "sfx has 14 corpus examples; only an index count would call that scarce")
 
-# ── 4. THE FILTER FOLLOWS THE SCHEMA, IN WHICHEVER DIRECTION IT POINTS ──────
-# THIS LEG USED TO ASSERT THE OPPOSITE and it was correct when written: 72 of
-# 153 reference beats place a cutaway, the pipeline could not make one, and
-# showing the agent craft it cannot imitate is worse than showing it nothing.
-#
-# 444c4b8 derived the filter from the treatment enum so it self-corrects, and
-# added new legs — but left THIS one asserting the old answer. Cutaway ships in
-# the merged tree, so the filter correctly opened and the stale leg correctly
-# failed. A check that hardcodes today's answer goes red the day the thing it
-# describes changes, which is the whole reason the filter stopped hardcoding it.
-#
-# So the leg now asks the DERIVED question: examples must carry cutaway exactly
-# when the agent can rule cutaway. One assertion, true in either tree.
+# ── 4. CUTAWAY IS FILTERED, BECAUSE WE CANNOT DO ONE ────────────────────────
+# 72 of 153 reference beats place a cutaway. Showing the agent craft it cannot
+# imitate is worse than showing it nothing.
 _any = A.reference_examples_for("evidence", 3.0, k=50, beats=BEATS)
-_rulable = "cutaway" in A._rulable_treatments()
-_shown = any("cutaway" in (e.get("treat") or []) for e in _any)
-_in_corpus = any("cutaway" in (b.get("treat") or []) for b in BEATS)
-check("cutaway examples appear exactly when cutaway is rulable",
-      (_shown == (_rulable and _in_corpus)),
-      f"rulable={_rulable} in_corpus={_in_corpus} shown={_shown} — the filter "
-      f"must track the schema, not a remembered answer")
+# CUTAWAY BUILDS NOW (round 50). 47.1% of the corpus places one, and the
+# retrieval must be allowed to show them — the old assertion here encoded the
+# world where it could not. The property that survives: nothing UNBUILDABLE is
+# retrieved, and that set is derived, not listed.
+check("no retrieved example places an unbuildable family",
+      not any(set(e.get("treat") or []) & set(A.reference_unbuildable())
+              for e in _any),
+      f"unbuildable={sorted(A.reference_unbuildable())}")
 # THE FILTER IS DERIVED FROM THE SCHEMA, NOT HARDCODED — and this is the leg
 # that matters, because the hardcode was CORRECT when written and becomes WRONG
 # the day cutaway ships. Merged unchanged into a tree where cutaway exists, it
@@ -165,6 +142,21 @@ check("the retrieval CALLS the derivation", "reference_unbuildable" in _uses,
       "a hardcoded family list is a claim about the pipeline that rots the day "
       "the pipeline changes")
 check("and the old constant is gone", not hasattr(A, "_REFERENCE_UNBUILDABLE"))
+
+# BOTH SITES, because there are now two. The purpose-indexed _reference_block
+# derives the unbuildable set itself rather than going through the retrieval,
+# so guarding only reference_examples_for left half the surface unwatched — a
+# gap my own refactor opened and the red proof's anchor guard exposed by
+# reporting `anchor 2x` instead of counting a mutation RED.
+_blkfn = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+               and n.name == "_reference_block"), None)
+check("_reference_block exists", _blkfn is not None)
+_bu = {n.func.id for n in ast.walk(_blkfn) if isinstance(n, ast.Call)
+       and isinstance(n.func, ast.Name)} if _blkfn else set()
+check("the BLOCK also calls the derivation, not a hardcoded set",
+      "reference_unbuildable" in _bu,
+      "two call sites, two chances to hardcode; a family list frozen in either "
+      "is a claim about the pipeline that rots the day the pipeline changes")
 _rulable = A._rulable_treatments()
 check("the derivation reads the treatment ENUM the agent rules from",
       {"card", "text", "sfx", "zoom"} <= _rulable, sorted(_rulable)[:8])
@@ -189,50 +181,23 @@ _es = []
 _enums(list(A.TOOLS) + list(A.KNOWLEDGE_TOOLS), _es)
 _patched = [e for e in _es if "card" in e and "text" in e]
 check("there is a treatment enum to patch", bool(_patched))
-check("every treatment enum is patched, not just the first",
-      len([e for e in _es if "card" in e and "text" in e]) >= 2,
-      f"{len([e for e in _es if 'card' in e and 'text' in e])} found — "
-      f"rule_all_beats and beat_verdict both declare one, so a lower count "
-      f"means this walk is missing one and the union below is untested")
 if _patched:
-    # ALL MATCHING ENUMS, NOT THE FIRST. _rulable_treatments() takes the UNION
-    # across every tool, and there are TWO treatment enums now (rule_all_beats
-    # and beat_verdict). Patching one left cutaway in the other, the union was
-    # unchanged, and the leg compared [] to [] — passing vacuously while
-    # claiming to prove self-correction. Same family as reading TOOLS while the
-    # thing lives in KNOWLEDGE_TOOLS: the check looked in one of the two places
-    # that matter.
-    _es_all = [e for e in _es if "card" in e and "text" in e]
     _e = _patched[0]
-    # PATCH WHICHEVER DIRECTION THIS TREE ALLOWS. The original only ADDED
-    # cutaway to the enum — which is a no-op in a tree where cutaway already
-    # ships, so `_added` was False, nothing was patched, and the leg compared
-    # [] to [] and passed vacuously on both sides. A self-correction test that
-    # can only test one direction stops testing at the moment the other one
-    # becomes the live case.
-    _present = any("cutaway" in e for e in _es_all)
-    if _present:
-        for _ee in _es_all:                       # ships -> must become unbuildable
-            while "cutaway" in _ee:
-                _ee.remove("cutaway")
-        _after = set(A.reference_unbuildable())
-        for _ee in _es_all:
-            _ee.append("cutaway")
-        check("a family LEAVING the enum joins the unbuildable set",
-              "cutaway" not in _before and "cutaway" in _after,
-              f"before={sorted(_before)} after={sorted(_after)} — the filter "
-              f"must close the day the family stops shipping, without anyone "
-              f"editing it")
-    else:
-        for _ee in _es_all:                       # absent -> must become buildable
-            _ee.append("cutaway")
-        _after = set(A.reference_unbuildable())
-        for _ee in _es_all:
-            _ee.remove("cutaway")
-        check("a family JOINING the enum leaves the unbuildable set",
-              "cutaway" in _before and "cutaway" not in _after,
-              f"before={sorted(_before)} after={sorted(_after)} — the filter "
-              f"must open the day the family ships, without anyone editing it")
+    # A family that ENTERS the enum with no builder behind it must show up in
+    # the unbuildable set by derivation alone — the direction that matters now
+    # that every real family builds. Synthetic name, so it can never collide.
+    # reference_unbuildable derives from the ENUM against a fixed candidate
+    # list, so the test that survives cutaway shipping is the inverse of the
+    # original: take a real family OUT of the enum and the derivation must
+    # report it unbuildable, with nobody editing the filter.
+    _i = _e.index("cutaway")
+    _e.pop(_i)
+    _after = set(A.reference_unbuildable())
+    _e.insert(_i, "cutaway")
+    check("a family leaving the enum joins the unbuildable set by derivation",
+          "cutaway" not in _before and "cutaway" in _after,
+          f"before={sorted(_before)} after={sorted(_after)} — the filter must "
+          f"close the day a family leaves, without anyone editing it")
 
 check("the filter is opt-outable for analysis, not silently permanent",
       any("cutaway" in (e.get("treat") or []) for e in

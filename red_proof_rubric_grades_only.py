@@ -1,19 +1,21 @@
+import ast
 import shutil, subprocess, sys
-APP="agentic_editor_app.py"; SMOKE="smoke_rubric_grades_only.py"
-# BACKUP IN MEMORY, NEVER A SHARED FILE — see red_proof_alpha_state.py for
-# the full note. A "/tmp/..." backup path is shared across every branch and
-# worktree on this machine; Builder-2 watched one silently restore another
-# branch's app over their working copy and then print 19/19 RED-proven.
-_ORIG_SRC = open(APP, encoding="utf-8").read()
-None
+APP="agentic_editor_app.py"; SMOKE="smoke_rubric_grades_only.py"; _ORIG_SRC = {}   # IN MEMORY, never a file
+_ORIG_SRC.setdefault(APP, open(APP, encoding="utf-8").read())
 def run():
     r=subprocess.run([sys.executable,SMOKE],capture_output=True,text=True)
     return r.returncode,(r.stdout+r.stderr)
 def mut(old,new,label,expect):
     src=open(APP).read()
     if src.count(old)!=1: print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
-    open(APP,'w').write(src.replace(old,new,1))
-    rc,out=run(); open(APP, "w", encoding="utf-8").write(_ORIG_SRC)
+    _mutant=src.replace(old,new,1)
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN — it fails the check for a reason
+    # unrelated to the property, which is a pass it did not earn.
+    try: ast.parse(_mutant)
+    except SyntaxError as _se:
+        print(f"  HARNESS FAILURE [{label}] mutant does not parse: {_se.msg}"); return False
+    open(APP,'w').write(_mutant)
+    rc,out=run(); open(APP, "w", encoding="utf-8").write(_ORIG_SRC[APP])
     ok=rc!=0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     return ok
@@ -21,7 +23,14 @@ rc,out=run(); print(f"BASELINE exit={rc}"); assert rc==0, out
 r=[]
 r.append(mut('    "render_frames_mismatch",','    "spec_shortfall_unresolved",\n    "render_frames_mismatch",',
  "a density floor returns as a contract failure","no longer fails the round"))
-r.append(mut('''includes 'text': the words ''','''includes 'text' (corpus rate 7.28 per 25s): the words ''',
+# RE-ANCHORED 2026-09-09. The old anchor `"REQUIRED when treatment includes `
+# exists on the MERGED tree and not on this branch, so the guard reported
+# `anchor 0x` and the leg proved nothing here. That is a STALE BASE, not a
+# defect — but a leg that can only run on someone else's branch is a leg that is
+# red for as long as the branches differ, and a check that is always red stops
+# being read. Anchored on the wrapped form this tree actually has.
+r.append(mut('"description": "REQUIRED when treatment "\n                                                    "includes \'text\': the words "',
+ '"description": "Corpus rate is 2.35 per 25s. REQUIRED when treatment "\n                                                    "includes \'text\': the words "',
  "a rate reappears in a tool description","reaches the agent via the tool schemas"))
 r.append(mut('        # NOT a failure. Density below a reference rate is an observation about\n        # the edit, not a defect in it.',
  '        if led.get("spec_shortfall"):\n            fail("x", "rulings fall short of your own spec")',
@@ -46,9 +55,9 @@ r.append(mut('''                        "executions_used": led["execute_plan_cal
  "names only fields that exist"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-# A FLOOR, BECAUSE all([]) IS TRUE. A red proof whose mutation list is
-# emptied — by a bad merge, a botched refactor, a commented-out block —
-# reports SUCCESS. An instrument built to prove a check CAN FAIL,
-# rendering its own absence as success. Found in 10 of 11 here and 16 of
-# 16 on Builder-2's tree: 26 of 27 across both.
-sys.exit(0 if r and all(r) and rc==0 else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if r and all(r) and rc == 0 else 1)

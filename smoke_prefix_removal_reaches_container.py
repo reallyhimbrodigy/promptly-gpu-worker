@@ -41,22 +41,9 @@ TREE = ast.parse(SRC)
 FAIL = []
 ok = lambda c, m: None if c else FAIL.append(m)
 
-_m = types.ModuleType("modal")
-
-
-class _S:
-    def __init__(s, *a, **k): pass
-    def __getattr__(s, n): return _S()
-    def __call__(s, *a, **k): return _S()
-    def function(s, *a, **k): return lambda f: f
-    def local_entrypoint(s, *a, **k): return lambda f: f
-
-
-for _n in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
-    setattr(_m, _n, _S())
-_m.is_local = lambda: True
-_m.enable_output = _S()
-sys.modules.setdefault("modal", _m)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import modal_stub                                                # noqa: E402
+modal_stub.install()
 import agentic_editor_app as app                                    # noqa: E402
 
 # ── LEG 1: the parameter exists on BOTH sides and is forwarded ───────────────

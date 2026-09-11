@@ -33,6 +33,7 @@ NEVER GET BUILT:
 
   ./run_modal.sh agentic_editor_app.py --source <s3-key> --brief "..."
 """
+import hashlib
 import json
 import os
 import re
@@ -1780,6 +1781,19 @@ Reach for it when the words point at something and the picture is still a
 talking head. Do not reach for it to break up a long take; that is what a cut
 is for, and a cutaway used as pacing shows the viewer something irrelevant while
 the voice says something specific.
+WHEN THE CATALOGUE CANNOT SERVE A BEAT
+You rule `card` and the harness answers `no_catalogue_component` for that beat:
+the hero is neither a figure nor a short claim, so no StatCard, no PullQuote,
+nothing in the twenty-five fits. That beat comes back UNSERVED unless you write
+something for it. `author_component` is what that is for — a full TSX exporting
+`Comp`, 1080x1920, 30fps, transparent background — and `search_skills` is the
+Remotion API reference while you write it.
+
+This is NOT a standing invitation. It is the response to a condition the harness
+REPORTS, with the hero named, after it has tried every catalogue type and none
+fit. Do not author when a catalogue component would do: the twenty-five exist
+because they are known to render, and a component written for one beat is a
+render round-trip you are paying for.
 
 HARD RULES
 - The output must be 1080x1920, H.264, with audio.
@@ -1923,6 +1937,16 @@ KNOWLEDGE_TOOLS = [{
         "SPECIFICATION of this job. Everything you place derives from it — "
         "there is nothing else to satisfy.\n\n"
         "Read the request and say what it specifies:\n"
+        "THE BRIEF SETS THE SCOPE ON EVERY RUN, not only on "
+        "re-edits. A brief that asks for LITTLE MUST PRODUCE LITTLE. Placing "
+        "more than was asked is a FAILURE, not generosity — it is the edit the "
+        "user did not request, delivered over the one they did. 'Just add "
+        "captions' is a targeted_change naming text, and an output carrying "
+        "four zooms has failed it however good the zooms are.\n\n"
+        "Choosing full_edit for a narrow request is how that happens: "
+        "full_edit has no family scope, so nothing downstream can object. Pick "
+        "it because the request describes a VIBE, never because you are "
+        "unsure.\n\n"
         "  full_edit       — the request describes a VIBE ('punchy and direct', "
         "'clean and professional', 'like a movie trailer'). The vibe is the "
         "spec: derive the whole edit from it, and derive your own density "
@@ -2053,7 +2077,11 @@ KNOWLEDGE_TOOLS = [{
     "name": "author_component",
     "description": (
         "WRITE a Remotion component when the catalogue has none, then render it. "
-        "Zoom is the case: there is no PunchIn component, so author one. Pass the "
+        "THE CASE IS A CARD THE CATALOGUE CANNOT SERVE. When you rule `card` and "
+        "the harness reports back `no_catalogue_component` for that beat, the "
+        "hero is neither a figure nor a short claim — no StatCard, no PullQuote, "
+        "nothing in the 25 fits — and the beat comes back UNSERVED unless you "
+        "write something for it. That report names the beat and the hero. Pass the "
         "full TSX exporting `Comp` — that is the name the project registers — at "
         "1080x1920, 30fps, TRANSPARENT background so it composites over the "
         "footage. It renders to an alpha PNG sequence and returns a .mov plus the "
@@ -2089,6 +2117,31 @@ KNOWLEDGE_TOOLS = [{
                          "verdicts": {"type": "array", "items": {"type": "object",
                              "properties": {
                                  "beat": {"type": "integer"},
+                                 "purpose": {
+                                     "type": "string",
+                                     "enum": ["hook", "claim", "evidence",
+                                              "turn", "payoff", "close",
+                                              "breath"],
+                                     "description":
+                                         "WHAT THIS BEAT DOES — its rhetorical "
+                                         "function. hook opens; claim asserts; "
+                                         "evidence backs a claim up; turn "
+                                         "pivots; payoff is the reason-to-exist "
+                                         "line; close lands it; breath is a "
+                                         "pause that carries nothing new.\n\n"
+                                         "NOT THE SAME AXIS AS `zoom_arc`. That "
+                                         "one is ENERGY POSITION in the arc "
+                                         "(build, mid_peak, breather); this is "
+                                         "FUNCTION. A claim can sit at build or "
+                                         "at mid_peak. Where the two share a "
+                                         "word — hook, payoff, close — they "
+                                         "must agree: a beat is not a hook by "
+                                         "function and a close by energy.\n\n"
+                                         "The reference exemplars are indexed "
+                                         "by this, so it decides which editor's "
+                                         "read applies. Name what the beat IS, "
+                                         "not what you want to place on it, and "
+                                         "not a quota to fill."},
                                  "treatment": {
                                      "type": "array",
                                      "description": "one or more families for "
@@ -2201,9 +2254,15 @@ KNOWLEDGE_TOOLS = [{
                                                     "reason-to-exist line, at "
                                                     "most one per video; "
                                                     "breather = a lull; close = "
-                                                    "the landing."},
+                                                    "the landing.\n\n"
+                                                    "ENERGY POSITION, not "
+                                                    "function — `purpose` is "
+                                                    "the function axis. Where "
+                                                    "they share a word they "
+                                                    "must agree."},
                                  "why": {"type": "string"}},
-                             "required": ["beat", "treatment", "cut", "why"]}}},
+                             "required": ["beat", "purpose", "treatment",
+                                          "cut", "why"]}}},
                      "required": ["verdicts"]},
 }, {
     "name": "beat_verdict",
@@ -2225,7 +2284,14 @@ KNOWLEDGE_TOOLS = [{
                          # sfx, zoom or transition. Found by the surface
                          # assert the moment it started comparing the two
                          # lists instead of grepping one stale spelling.
-                         "treatment": {"type": "array",
+                         "purpose": {"type": "string",
+                                     "enum": ["hook", "claim", "evidence",
+                                              "turn", "payoff", "close",
+                                              "breath"],
+                                     "description":
+                                         "what this moment IS — the key the "
+                                         "reference exemplars are indexed by"},
+                                                  "treatment": {"type": "array",
                                        "items": {
                                            "type": "string",
                                            "enum": ["card", "text", "sfx",
@@ -2260,8 +2326,8 @@ KNOWLEDGE_TOOLS = [{
                                             "screen for this beat."},
                          "zoom_arc": {
                              "type": "string",
-                             "enum": ["breather", "build", "close", "hook",
-                                      "mid_peak", "payoff"],
+                             "enum": ["hook", "build", "mid_peak",
+                                      "payoff", "breather", "close"],
                              "description": "REQUIRED when treatment includes "
                                             "'zoom': WHICH MOMENT this is. It "
                                             "decides the move and cannot be "
@@ -2301,7 +2367,8 @@ KNOWLEDGE_TOOLS = [{
                              "description": "the card's supporting line"},
                          "why": {"type": "string",
                                  "description": "about THIS beat's content"}},
-                     "required": ["beat", "treatment", "cut", "why"]},
+                     "required": ["beat", "purpose", "treatment", "cut",
+                                  "why"]},
 }, {
     "name": "search_skills",
     "description": (
@@ -2606,11 +2673,14 @@ def cover_unnarrated_edges(beats, duration_s, min_beat_s=1.2):
     if head >= floor:
         out.insert(0, {"i": -1, "t_start": 0.0, "t_end": round(head, 2),
                        "text": f"[no narration] {head:.1f}s of footage before "
-                               f"the first word — visible content, not dead air"})
+                               f"the first word — footage doing a job before "
+                               f"speech starts; a hook or an establish, not "
+                               f"dead air"})
     if dur - tail_start >= floor:
         out.append({"i": -1, "t_start": round(tail_start, 2), "t_end": round(dur, 2),
                     "text": f"[no narration] {dur - tail_start:.1f}s of footage "
-                            f"after the last word — visible content, not dead air"})
+                            f"after the last word — footage after speech ends; a "
+                            f"close or a breath, not leftover"})
     # RE-INDEX AND RE-ROLE. `i` is the agent's handle on a beat and hook/close
     # are marked mechanically as first and last; leaving them on the old first
     # beat would put the hook in the middle of the timeline.
@@ -3720,6 +3790,103 @@ def fps_verdict(r_frame_rate, nb_frames, duration_s, vfr_tol=0.03):
     return (declared, actual,
             "CFR" if abs(declared - actual) <= vfr_tol * max(declared, actual)
             else "VFR")
+
+
+# ── ENCODE DETERMINISM ──────────────────────────────────────────────────────
+# PIN THE X264 THREAD COUNT. x264 auto (threads=0) picks ~min(cores*1.5, 128),
+# so the OUTPUT BYTES depend on the MACHINE's core count rather than the config.
+# handler.py pinned this on 2026-08-01 after render_burst at cpu=48 diverged
+# byte-for-byte from cpu=16 production, and cert_encode_threads_bench measured
+# 48 as FASTER than auto on both boxes AND byte-deterministic AND byte-identical
+# across cpu.
+#
+# THE FIX NEVER REACHED THIS PATH until 2026-09-10: thirteen libx264
+# invocations here, none pinned, in containers where os.cpu_count() reports the
+# HOST's cores (24/28/48 for arms requesting 8/16/32). Two runs of an IDENTICAL
+# PLAN could encode differently and nothing would report it — the video looks
+# right, every gate passes, and only a byte comparison sees it. No agentic
+# output was reproducible.
+#
+# The form is `-x264-params threads=N`, NOT ffmpeg's `-threads`, because the
+# deploy gate's byte-identity check recognises this spelling. NEVER 0.
+#
+# ALL 13 SITES TAKE IT, confirmed by tracing rather than on the provisional
+# ruling: the execute_plan chain is cut.mp4 -> overlaid -> captioned -> zoomed
+# -> transitioned -> carded -> _sout, each stage reading `cur` and writing the
+# next, and the two `-an` extracts feed Remotion compositions whose pixels land
+# in the reel. There is no analysed-and-discarded proxy in this path, so nothing
+# here takes handler.py's Gemini-proxy exemption.
+_X264_ENCODE_THREADS = 48
+
+
+SRC_DUR_MEASURED, SRC_DUR_ABSENT, SRC_DUR_FAILED = "MEASURED", "ABSENT", "FAILED"
+
+
+def source_duration_state(meta):
+    """(state, seconds, why) — how long the source is, or WHY we do not know.
+
+    MODULE LEVEL AND PURE so a test can drive every branch.
+
+    THIS REPLACES `float(meta["format"].get("duration") or 0)`, which is the
+    LAUNDERING shape: it converts *absent* into a present, well-typed 0.0 and
+    writes it to the ledger, after which no consumer-side check can tell a
+    fabricated duration from a measured one — the key is there, the type is
+    right, and there is nothing left to test. `probe()` returns `{}` when ffprobe
+    fails or its JSON will not parse, so the absent path is reachable, not
+    theoretical.
+
+    WHAT A ZERO COSTS, and it is not confined to one route:
+        visual     `segment_beats_visual(src, 0.0)` divides a 0-second video.
+                   The AssertionError below it fires on the empty beat list, so
+                   this half at least ends loudly — but it names the extractor
+                   as the culprit while quoting "0.0s source", which points the
+                   next reader at the wrong component.
+        transcript `cover_unnarrated_edges(beats, 0.0)` covers nothing. That is
+                   exactly the car_short regression (10.0s delivered 0.975s)
+                   coming back SILENTLY, with beats still present from the word
+                   list so nothing looks empty.
+        both       `_ceil = (len - 1) / _vdur if _vdur else 0.0` — a guarded
+                   divisor that prints a FABRICATED cut-rate ceiling of 0.000
+                   against a reference median of 0.253, i.e. the instrument
+                   reports the worst possible score for the one number it exists
+                   to move.
+
+    THE FALLBACK STOPS WHERE THE MEASUREMENTS DO. format.duration, then the
+    video stream's own duration — two measurements of the same thing. It does
+    NOT derive a duration from `r_frame_rate`, because `fps_verdict` above
+    exists precisely because that number lies on VFR (motion declares 59.94 and
+    runs 35.94). Deriving one unknown from the field we already proved
+    untrustworthy would rebuild the defect one layer up.
+
+    States, so ABSENT and FAILED cannot both collapse into a number:
+        MEASURED  a duration was read and is > 0
+        ABSENT    no duration field anywhere — ffprobe failed, or gave us none
+        FAILED    a field is present and does not parse, or is <= 0
+    """
+    if not isinstance(meta, dict):
+        return (SRC_DUR_FAILED, None, "meta is %s, not a dict" % type(meta).__name__)
+    _fmt = meta.get("format") or {}
+    _vs = next((x for x in (meta.get("streams") or [])
+                if isinstance(x, dict) and x.get("codec_type") == "video"), {})
+    _seen = []
+    for _src, _raw in (("format.duration", _fmt.get("duration")),
+                       ("stream.duration", _vs.get("duration"))):
+        if _raw is None or _raw == "":
+            continue
+        _seen.append(_src)
+        try:
+            _v = float(_raw)
+        except (TypeError, ValueError):
+            return (SRC_DUR_FAILED, None,
+                    "%s=%r does not parse as a number" % (_src, _raw))
+        if _v > 0:
+            return (SRC_DUR_MEASURED, _v, _src)
+        return (SRC_DUR_FAILED, None, "%s=%s is not a positive duration"
+                % (_src, _v))
+    return (SRC_DUR_ABSENT, None,
+            "no duration field in format or video stream"
+            + (" (fields seen: %s)" % ", ".join(_seen) if _seen else
+               " — probe returned %d stream(s)" % len(meta.get("streams") or [])))
 
 
 def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0, spans=None):
@@ -5313,6 +5480,42 @@ _CARD_FIGURE_RICH = re.compile(
     re.I)
 
 
+# ── THE FIGURE EXTRACTOR, ONE DEFINITION ────────────────────────────────────
+#
+# A MULTIPLIER SUFFIX MUST BE ATTACHED TO THE DIGITS, not merely near them.
+# `[0-9][0-9,.]*\s?[kKmMxX]?` matched "5 M" in "5 MINUTES" and coerce_mg_props
+# read it as FIVE MILLION. A suffix only counts when it is not the start of a
+# word.
+_FIGURE_RE = re.compile(r"[$£€]?\s?[0-9][0-9,.]*(?:[%kKmMxX](?![A-Za-z]))?")
+
+
+def extract_figure(phrase):
+    """(figure, remainder) or (None, "") — the number in a phrase, and the words
+    around it.
+
+    HOISTED SO THERE IS ONE EXTRACTOR. The beat brief used to tell the agent
+    only `(has a number)` — a BOOLEAN — while this regex, which the harness
+    already owns, had found the figure itself. The pipeline located "10 TIMES A
+    DAY" and told the agent "there is one", so the agent re-derived by eye what
+    the harness had already computed. That is cutaway in miniature: a capability
+    offered as a blank rather than as material.
+
+    Two callers now, and they MUST agree — if the brief showed a figure that
+    derive_card_props then failed to find, the agent would be shown material the
+    builder refuses, which is the advertise-a-shape-the-acceptor-rejects class
+    this repo has paid for three times.
+    """
+    if not phrase:
+        return (None, "")
+    _m = _FIGURE_RE.search(str(phrase))
+    if not _m:
+        return (None, "")
+    _fig = _m.group(0).strip()
+    _rest = (str(phrase)[:_m.start()] + " "
+             + str(phrase)[_m.end():]).strip(" -–—:,")
+    return (_fig, _rest)
+
+
 def derive_card_props(mg_type, hero, label=""):
     """The props THIS component reads, filled from the phrase. Never a guess.
 
@@ -5343,11 +5546,9 @@ def derive_card_props(mg_type, hero, label=""):
         # them. `[0-9][0-9,.]*\s?[kKmMxX]?` matched "5 M" in "5 MINUTES" and
         # coerce_mg_props read it as FIVE MILLION. A suffix only counts when it
         # is not the start of a word.
-        _m = re.search(r"[$£€]?\s?[0-9][0-9,.]*(?:[%kKmMxX](?![A-Za-z]))?", _h)
-        if not _m:
+        _fig, _rest = extract_figure(_h)
+        if _fig is None:
             return ({}, "%s needs a figure and %r has none" % (mg_type, _h))
-        _fig = _m.group(0).strip()
-        _rest = (_h[:_m.start()] + " " + _h[_m.end():]).strip(" -–—:,")
 
     _p = {}
     for _k in _req:
@@ -5483,6 +5684,41 @@ def reference_unbuildable():
                         "punch_in") if t not in _ours}
 
 
+def reference_provenance(path=None):
+    """One line naming WHO produced the reference rates and HOW — never a blank.
+
+    THE RATES LOOK LIKE MEASUREMENTS AND ARE MODEL JUDGEMENTS. The 153 beats are
+    claude-sonnet-5's READING of ten videos: one annotator, one pass, no second
+    rater, so the corpus has no measured inter-rater reliability at all. Nothing
+    in the artifact said so, and "reference median 0.253" has been printing in
+    the agent's own report all week as though it were counted.
+
+    Same shape as Builder-1's two-quantities-one-name finding on 2026-09-09
+    (visual cuts 8.27/25s compared against beats-ruled-cut 4.75/25s, which
+    inverted the direction of the result), one level up — and worse in one way:
+    that was two real measurements confused, this is a judgement wearing a
+    measurement's clothes.
+
+    AN ABSENT PROVENANCE PRINTS AS "PROVENANCE UNKNOWN", never as nothing. A
+    rate whose origin is invisible will be read as a count.
+    """
+    try:
+        with open(path or _REFERENCE_INDEX_PATH, encoding="utf-8") as fh:
+            _p = (json.load(fh) or {}).get("provenance") or {}
+    except Exception:                                         # noqa: BLE001
+        return "PROVENANCE UNKNOWN (index unreadable)"
+    if not _p:
+        return "PROVENANCE UNKNOWN (no provenance block in the index)"
+    return "%s by %s, n=%s videos, %s" % (
+        _p.get("kind") or "KIND UNSTATED",
+        _p.get("annotator") or "ANNOTATOR UNSTATED",
+        _p.get("n_videos") if _p.get("n_videos") is not None else "?",
+        _p.get("annotated") or "date unstated")
+
+
+_REFERENCE_PROVENANCE = reference_provenance()
+
+
 def load_reference_index(path=None):
     """(beats, meta). Never raises — an unreadable index is an absence, said."""
     _p = path or _REFERENCE_INDEX_PATH
@@ -5570,12 +5806,98 @@ def reference_family_note(family, beats=None, meta=None):
     return ""
 
 
-def _reference_block(our_beats, k=3):
-    """The reference examples for this run's beats, as prompt text.
+BEAT_PURPOSES = ("hook", "claim", "evidence", "turn", "payoff", "close",
+                 "breath")
 
-    ABSENCE IS SPOKEN, three times over — a partial index says so, a family with
-    too few examples says so, and a family with none says so. None of the three
-    returns something that reads as a judgement.
+# ── THE VISUAL ROUTE'S OWN LANGUAGE ─────────────────────────────────────────
+#
+# THE DEFECT, with the evidence. 46.5% of real traffic has no narration, and
+# until now the silent route was told to "rule on them exactly as you would rule
+# on spoken beats" and that stillness is "the visual equivalent of dead air".
+# It borrowed the speech route's language because it had none of its own.
+# Round 52, car_short beat 0: the beat's OWN TEXT said "visible content, not
+# dead air", and the agent's why said "5.7s of pre-speech setup is dead air"
+# and cut it. Wet street footage building tension, deleted as silence.
+#
+# NOT A SECOND VOCABULARY. The seven purposes stay the join key — the reference
+# exemplars are indexed by them and adding a visual axis would recreate the
+# purpose/zoom_arc collision fixed this morning. What changes is the DEFINITION
+# each purpose is given on the silent route: the same seven words, described in
+# what footage DOES rather than what a sentence says. A hook is still a hook; on
+# a silent clip it is the first look at the subject, not the first line.
+#
+# GROUNDED IN WHAT THE ROUTE CAN MEASURE — motion energy, shot changes, held
+# stretches, and the frame description when vision ran — and in the reference
+# reads, which already think this way even on speech videos: "static wide shot
+# lets it breathe", "new framing marks the pivot", "held shot", "cuts away".
+VISUAL_PURPOSE_READS = {
+    "hook":     "the first look at the subject, place or motion — what the eye "
+                "is given before anything else. Establishing footage is a hook "
+                "doing its job, not waiting.",
+    "claim":    "the footage asserts something on its own: the subject in full "
+                "view, the action clearly stated, the thing the clip is ABOUT "
+                "shown plainly.",
+    "evidence": "the picture backs the claim up — the detail, the close-up, the "
+                "second angle, the thing that proves the first shot.",
+    "turn":     "a change of framing, subject or energy. A shot change is a turn "
+                "when it changes what the clip is about, not merely where the "
+                "camera is.",
+    "payoff":   "the moment the footage was building to — the impact, the "
+                "reveal, the peak of motion, the thing arriving. At most one per "
+                "clip.",
+    "close":    "energy falls and the picture settles. The last look. Footage "
+                "after the peak is a close, not leftover.",
+    "breath":   "a held shot or a still stretch that carries no new "
+                "information — and is often THE POINT. Stillness after motion "
+                "is where the eye rests. It is a beat to rule on, not dead air "
+                "to delete.",
+}
+assert set(VISUAL_PURPOSE_READS) == set(BEAT_PURPOSES), (
+    "the visual reads must cover exactly the seven purposes — a purpose with a "
+    "speech definition and no visual one is the defect this closes")
+
+
+def visual_purpose_block():
+    """The seven purposes in footage terms, for the silent route's brief."""
+    return ("WHAT EACH KIND OF MOMENT IS, IN FOOTAGE TERMS. This source has no "
+            "narration, so the beats are what the PICTURE does. Rule on them by "
+            "what is happening in the frame — motion, framing, subject, "
+            "stillness — never by what would have been said.\n"
+            + "\n".join("  %-9s %s" % (_p.upper(), VISUAL_PURPOSE_READS[_p])
+                         for _p in BEAT_PURPOSES)
+            + "\n\nSTILLNESS IS NOT DEAD AIR. Dead air is a speech concept: "
+              "silence between words. A held shot has no words to be between. "
+              "A still stretch is a BREATH if it lets the eye rest, and a HOOK or "
+              "a CLOSE if it is the first or last look — it is footage, and it "
+              "is ruled on, not cleared.\n")
+
+
+def _reference_block(our_beats, k=2):
+    """The reference exemplars, INDEXED BY PURPOSE. Two per purpose.
+
+    WHY NOT PER BEAT, and this is a correction to what the previous version
+    claimed to do. It looped over our beats taking the k nearest BY DURATION and
+    deduping on `read[:40]` — and with 39 beats in the index the same handful
+    always won. Measured: a 7-beat fixture and a 36-beat fixture produced a
+    BYTE-IDENTICAL block (sha e0237dcb69). It varied with the fixture's duration
+    profile and with nothing else. It was never per-beat retrieval; it was a
+    fixed block chosen by the weakest available key.
+
+    So this is not a trade of personalisation for a fixed block. It is the same
+    fixed block, organised by the key that decides what belongs on a moment.
+    DURATION IS NOT A CRAFT SIGNAL. A beat is a hook or a claim or a payoff, and
+    that is what an editor answers.
+
+    AND IT DISSOLVES THE ORDERING PROBLEM. Retrieval runs when the brief is
+    built, before the agent has ruled, so OUR purpose does not exist yet — which
+    is why the old version matched on duration and said so. Indexing by purpose
+    needs no purpose of ours: it shows what each of the seven looks like, and the
+    agent names its beat's purpose while ruling with the exemplars in front of
+    it. No extra turn, no cache invalidation.
+
+    ABSENCE IS SPOKEN, still three times over: a removed block says it was
+    removed, an unreadable index says so, and a purpose the corpus has too few
+    of says how few rather than quietly showing fewer.
     """
     if not prefix_material_enabled("reference_examples"):
         return ("REFERENCE EXAMPLES: REMOVED for this run "
@@ -5586,26 +5908,44 @@ def _reference_block(our_beats, k=3):
         return ("REFERENCE EXAMPLES: NONE AVAILABLE — the reference index could "
                 "not be read (%s). You are ruling without the examples this "
                 "product is graded against." % (_meta.get("why") or "no index"))
-    _lines = ["HOW REAL EDITS TREAT MOMENTS LIKE THESE — from %d annotated beats "
-              "of the reference corpus. These are what editors DID, not rules." %
+    _lines = ["WHAT EDITORS DO AT EACH KIND OF MOMENT — from %d annotated beats "
+              "of the reference corpus. These are what editors DID, not rules, "
+              "and not a quota." %
               (_meta.get("beats_in_corpus") or len(_b))]
     if _meta.get("state") == "PARTIAL":
         _lines.append("  (index is PARTIAL: %s)" % _meta.get("why"))
-    _seen = set()
-    for _ob in (our_beats or []):
-        _dur = float(_ob.get("t_end", 0)) - float(_ob.get("t_start", 0))
-        # The agent has not named this beat's purpose yet — that is what it is
-        # about to do. Match on DURATION alone and show the nearest moments,
-        # which is honest about what is knowable before the ruling exists.
-        for _e in reference_examples_for(None, _dur, k=k, beats=_b):
-            _key = (_e.get("read") or "")[:40]
-            if _key in _seen:
-                continue
-            _seen.add(_key)
-            _lines.append(
-                "  %-8s %4.2fs  %-28s %s"
-                % (_e.get("purpose") or "?", _e.get("dur") or 0,
-                   "+".join(_e.get("treat") or []), (_e.get("read") or "")[:150]))
+    _unbuildable = reference_unbuildable()
+    for _p in BEAT_PURPOSES:
+        _pool = [x for x in _b
+                 if str(x.get("purpose") or "").lower() == _p
+                 and not (_unbuildable & set(x.get("treat") or []))]
+        _lines.append("")
+        if not _pool:
+            # A PURPOSE WITH NOTHING BUILDABLE SAYS SO. Showing the header and
+            # then nothing reads as "editors place nothing here", which is a
+            # judgement the corpus never made.
+            _lines.append("%s — no buildable example in the corpus (%d beat(s) "
+                          "carry this purpose, all using treatments this "
+                          "pipeline cannot place)"
+                          % (_p.upper(),
+                             sum(1 for x in _b
+                                 if str(x.get("purpose") or "").lower() == _p)))
+            continue
+        _lines.append("%s (%d in corpus)" % (_p.upper(), len(_pool)))
+        if len(_pool) < k:
+            _lines.append("  (only %d buildable example%s — thin, not absent)"
+                          % (len(_pool), "" if len(_pool) == 1 else "s"))
+        # Longest READ first: the exemplar that explains the most is the one
+        # worth the tokens, and the read is the whole value of the corpus.
+        for _e in sorted(_pool, key=lambda x: -len(str(x.get("read") or "")))[:k]:
+            _lines.append("  %4.2fs  %-26s %s"
+                          % (float(_e.get("dur") or 0),
+                             "+".join(_e.get("treat") or []),
+                             str(_e.get("read") or "")[:150]))
+            if _e.get("card_text"):
+                _lines.append("          words: %s"
+                              % str(_e.get("card_text"))[:80])
+    _lines.append("")
     for _fam in ("text", "card", "sfx", "zoom", "transition"):
         _note = reference_family_note(_fam, _b, _meta)
         if _note:
@@ -5719,9 +6059,56 @@ def ruling_time_knowledge(dirs=None, docs=None):
 #
 # AND THE STATE IS PRINTED, always — a removal nobody can see in the log is a
 # round whose prefix nobody can reconstruct afterwards.
+_FLAG_TRUE = ("1", "true", "yes", "on")
+_FLAG_FALSE = ("0", "false", "no", "off")
+
+
 def prefix_material_enabled(name):
-    """False only when explicitly disabled. Unset means ON."""
-    return str(os.environ.get("PROMPTLY_DISABLE_" + name.upper(), "")).strip() != "1"
+    """Is this prefix material IN this run? Unset means ON. A value we cannot
+    read RAISES — it never picks a side.
+
+    THE DEFECT THIS CLOSES (Builder-1, 2026-09-09). The old body was
+    `... .strip() != "1"`, so ONLY a literal "1" disabled the material: an
+    ablation arm set to "true", "yes" or "on" ran with the material IN and
+    reported a null. A FABRICATED NULL, in the one experiment whose entire value
+    is its null case.
+
+    MY FIRST FIX WAS TO INVERT THE POLARITY AND IT WAS WRONG — it moves the
+    fabricated arm rather than removing it. With OFF as the explicit state, a
+    typo'd ON value silently runs OFF and the CONTROL becomes the fabricated
+    arm. Either way a mis-set string quietly picks a side and the experiment
+    cannot tell.
+
+    The property is that the switch NEVER GUESSES:
+        unset                          -> ON, so an ordinary round is unaffected
+                                          and a forgotten variable cannot
+                                          silently darken the material (that is
+                                          the KNOWN_OUTAGE_UNTIL / unset-global
+                                          class in Rule 2, nine features shipped
+                                          gate-green doing nothing)
+        a recognised spelling          -> that state, case-insensitive
+        ANYTHING ELSE                  -> RAISE, naming variable and value
+
+    This is MEASURED / ABSENT / FAILED one level up. Folding an unreadable value
+    into ON is a value standing in for "I could not read this", which is the
+    substitution this lane has spent a week on: alpha_layer_max returning None
+    and reading as a pass, paint_ms absent printing 0.0s, `or 0` turning absent
+    into a measured zero. A flag is not different because it is a string.
+    """
+    _var = "PROMPTLY_DISABLE_" + name.upper()
+    _raw = os.environ.get(_var)
+    if _raw is None or str(_raw).strip() == "":
+        return True
+    _v = str(_raw).strip().lower()
+    if _v in _FLAG_TRUE:
+        return False        # DISABLE_X is true -> the material is removed
+    if _v in _FLAG_FALSE:
+        return True
+    raise ValueError(
+        "%s=%r is not a value I can read. Accepted: %s (on) / %s (off), "
+        "case-insensitive, or unset for ON. Refusing to guess — a flag that "
+        "picks a side quietly turns an ablation arm into a fabricated null."
+        % (_var, _raw, "/".join(_FLAG_TRUE), "/".join(_FLAG_FALSE)))
 
 
 def prefix_material_state():
@@ -6349,6 +6736,309 @@ def normalise_verdict(v):
     rec["beat"] = beat
     rec["treatment"] = fams
     return True, rec, ""
+# ── THE DURABLE PLAN ────────────────────────────────────────────────────────
+#
+# `execute_plan` takes NO ARGUMENTS: it runs from the verdicts in harness state.
+# So the plan already exists and is already the right size — it needs a durable
+# address and somewhere to be written, not inventing.
+#
+# WHY BEAT INDEX CANNOT BE THE ADDRESS. Verdicts are keyed by beat index, and
+# indices are derived per run — round 48 moved a fixture 8 -> 9 when subdivision
+# changed. An index is a position in a list that is rebuilt every time. SOURCE
+# TIME IS NOT: re-segmentation moves indices without moving the moment an editor
+# ruled on, and a changed cut moves OUTPUT time without moving source time. A
+# re-edit MAY change the cut (ruled 2026-09-09), so anchoring to output seconds
+# is not merely worse, it is wrong.
+#
+# THE ID IS DERIVED FROM THE ANCHOR, not bolted on beside it. An independently
+# assigned id is a second thing to keep in sync, and this repo has paid for
+# every one of those.
+
+
+def plan_anchor_id(src_t0, src_t1, family, content=""):
+    """Stable address for one ruling: source span + family + content. PURE."""
+    _key = "%.3f|%.3f|%s|%s" % (float(src_t0), float(src_t1),
+                                str(family), str(content or ""))
+    return hashlib.sha1(_key.encode("utf-8")).hexdigest()[:12]
+
+
+PLAN_ORPHAN, PLAN_UNPLACEABLE = "ORPHAN_VERDICT", "UNPLACEABLE"
+
+
+def durable_plan(beats, verdicts):
+    """(plan, problems) — verdicts re-keyed from beat INDEX to SOURCE SPAN.
+
+    A verdict whose beat index is not in `beats` is an ORPHAN and is REPORTED,
+    never dropped. Dropping it would silently shrink a user's edit on reload,
+    which is the failure this whole feature exists to prevent.
+    """
+    _by_i = {b.get("i"): b for b in (beats or []) if isinstance(b, dict)}
+    plan, problems = [], []
+    for v in (verdicts or []):
+        if not isinstance(v, dict):
+            continue
+        _b = _by_i.get(v.get("beat"))
+        if _b is None:
+            problems.append({"state": PLAN_ORPHAN, "beat": v.get("beat"),
+                             "why": "verdict names a beat index the beat list "
+                                    "does not contain"})
+            continue
+        _t0, _t1 = _b.get("t_start"), _b.get("t_end")
+        if _t0 is None or _t1 is None:
+            problems.append({"state": PLAN_ORPHAN, "beat": v.get("beat"),
+                             "why": "beat carries no source span to anchor to"})
+            continue
+        _fam = ",".join(sorted(v.get("treatment") or [])) or "none"
+        _content = str(v.get("text_content") or v.get("card_hero") or "")
+        _e = {k: v.get(k) for k in VERDICT_FIELDS if k != "beat"}
+        _e.update({"src_t0": round(float(_t0), 3),
+                   "src_t1": round(float(_t1), 3),
+                   "id": plan_anchor_id(_t0, _t1, _fam, _content)})
+        plan.append(_e)
+    return plan, problems
+
+
+def plan_onto_beats(plan, beats, min_overlap=0.5):
+    """(verdicts, problems) — re-map a persisted plan onto a FRESH beat list.
+
+    The load half. Each entry is placed on the beat it overlaps MOST, and only
+    when that overlap covers at least `min_overlap` of the entry's own span.
+
+    AN ENTRY THAT PLACES NOWHERE IS UNPLACEABLE AND IS REPORTED — not dropped,
+    and NOT forced onto the nearest beat. A ruling silently moved to a different
+    moment is worse than one the user is told could not be carried.
+    """
+    verdicts, problems = [], []
+    _bs = [b for b in (beats or []) if isinstance(b, dict)
+           and b.get("t_start") is not None and b.get("t_end") is not None]
+    for e in (plan or []):
+        if not isinstance(e, dict):
+            continue
+        _t0, _t1 = e.get("src_t0"), e.get("src_t1")
+        if _t0 is None or _t1 is None:
+            problems.append({"state": PLAN_UNPLACEABLE, "id": e.get("id"),
+                             "why": "plan entry carries no source span"})
+            continue
+        _span = max(1e-9, float(_t1) - float(_t0))
+        _best, _cov = None, 0.0
+        for b in _bs:
+            _ov = (min(float(_t1), float(b["t_end"]))
+                   - max(float(_t0), float(b["t_start"])))
+            if _ov > _cov:
+                _best, _cov = b, _ov
+        if _best is None or (_cov / _span) < float(min_overlap):
+            problems.append({"state": PLAN_UNPLACEABLE, "id": e.get("id"),
+                             "src_t0": _t0, "src_t1": _t1,
+                             "why": "no beat overlaps this span by at least "
+                                    "%.0f%% (best %.0f%%)"
+                                    % (100.0 * float(min_overlap),
+                                       100.0 * (_cov / _span))})
+            continue
+        _v = {k: e.get(k) for k in VERDICT_FIELDS if k != "beat"}
+        _v["beat"] = _best.get("i")
+        verdicts.append(_v)
+    return verdicts, problems
+
+
+# ── BATCH PRICING: BUILT, THEN REMOVED, AND THE REASON IS THE USEFUL PART ───
+#
+# I built plan_batch and batch_dispatch_plan here — price ten sources against a
+# balance, dispatch the affordable ones, hold the rest by name. The arithmetic
+# was right (60 credits, 10 per job, SIX answered and four held) and the
+# MECHANISM was wrong, which Frontend established by reading the real credit
+# path rather than taking my example at face value:
+#
+#   Credits are RevenueCat VIRTUAL CURRENCIES, not a Supabase table, moved
+#   through lib/credits.js against the RC API. `debit()` deliberately has NO
+#   PRE-READ, and its comment says why: RC checks the balance and deducts in
+#   ONE operation, so reading first only opens a race between the read and the
+#   spend.
+#
+# A price-then-dispatch design IS that race, moved one process further away.
+# Between pricing ten and dispatching six the balance can move — a concurrent
+# render, a refund, a renewal. And pricing here would have put a money decision
+# inside a container that holds no RC and no Supabase credentials BY DESIGN,
+# making the server's number look authoritative in the one place it cannot be
+# checked.
+#
+# THE REPLACEMENT IS BETTER AND IS THE SERVER'S: debit per source, in order,
+# stop at the first INSUFFICIENT. "Six answered, four held by name" becomes an
+# OUTCOME of the debits instead of a prediction of them. RC's atomic
+# check-and-deduct IS the pricing. Same user-visible behaviour, one fewer thing
+# to be wrong, and no balance read anywhere.
+#
+# So run_agentic stays PER-SOURCE. The server calls it N times and only for
+# sources whose debit already succeeded. Nothing here fans out a batch.
+#
+# Deleted rather than left in place: a feature that exists and cannot be reached
+# is the class this repo has shipped nine times, and Frontend asked to be told
+# now rather than find it looking live later.
+CREDITS_PER_JOB = 10          # the RC cost per render, for reference only —
+                              # the DEBIT happens server-side, never here
+
+
+CUTAWAY_REF_OK, CUTAWAY_REF_BAD = "OK", "BAD_REF"
+
+
+def cutaway_source_ref(ref, sources, durations):
+    """(state, source_index, t, why) — resolve a cutaway's address.
+
+    WHY THE ADDRESS CHANGES SHAPE. With ONE source a cutaway is a timestamp:
+    `cutaway_from_s: 12.4` means 12.4s into the only footage there is. With TEN
+    it is ambiguous, and an ambiguous address resolved by a default is the
+    silent-wrong-moment class — the picture cuts to the right second of the
+    wrong clip and nothing reports it.
+
+    So a multi-source cutaway names BOTH: `{"source": 3, "t": 12.4}`. A bare
+    number stays legal and means source 0, which keeps every single-source
+    ruling working unchanged — but ONLY when there is one source. With several,
+    a bare number is REFUSED rather than defaulted, because defaulting is
+    exactly the guess this exists to prevent.
+
+    BOUNDS ARE PER SOURCE. Clip 3 being 40s long says nothing about clip 7, and
+    a timestamp valid in one is routinely past the end of another. The duration
+    checked is the duration OF THE NAMED SOURCE.
+
+    PURE, so a check drives the shipped rule rather than a copy.
+    """
+    _n = len(sources or [])
+    if _n <= 0:
+        return (CUTAWAY_REF_BAD, None, None, "no sources")
+    if isinstance(ref, (int, float)) and not isinstance(ref, bool):
+        if _n > 1:
+            return (CUTAWAY_REF_BAD, None, None,
+                    "a bare timestamp is ambiguous across %d sources — name "
+                    "which one, as {\"source\": i, \"t\": seconds}" % _n)
+        _idx, _t = 0, float(ref)
+    elif isinstance(ref, dict):
+        _idx, _t = ref.get("source"), ref.get("t")
+        if _idx is None or _t is None:
+            return (CUTAWAY_REF_BAD, None, None,
+                    "a cutaway ref needs BOTH source and t; got %r" % (ref,))
+        try:
+            _idx, _t = int(_idx), float(_t)
+        except (TypeError, ValueError):
+            return (CUTAWAY_REF_BAD, None, None,
+                    "source must be an index and t a number of seconds")
+    else:
+        return (CUTAWAY_REF_BAD, None, None,
+                "a cutaway ref is a number or {source, t}; got %s"
+                % type(ref).__name__)
+    if not (0 <= _idx < _n):
+        return (CUTAWAY_REF_BAD, None, None,
+                "source %d does not exist (%d uploaded)" % (_idx, _n))
+    _dur = (durations or {}).get(_idx) if isinstance(durations, dict) \
+        else (durations[_idx] if durations and _idx < len(durations) else None)
+    if _dur is None:
+        # UNKNOWN LENGTH IS NOT ZERO LENGTH. Refusing here is the same rule as
+        # source_duration_state: a bound we could not read must not become a
+        # bound of 0, which would reject every timestamp in the clip.
+        return (CUTAWAY_REF_BAD, None, None,
+                "source %d has no measured duration, so t=%.2f cannot be "
+                "bounded" % (_idx, _t))
+    if _t < 0 or _t >= float(_dur):
+        return (CUTAWAY_REF_BAD, None, None,
+                "t=%.2f is outside source %d (0-%.2fs)" % (_t, _idx, float(_dur)))
+    return (CUTAWAY_REF_OK, _idx, _t, "source %d at %.2fs" % (_idx, _t))
+
+
+FIDELITY_OK, FIDELITY_SHORT, FIDELITY_OVER, FIDELITY_UNSCOPED = (
+    "FAITHFUL", "SHORT", "OVERREACHED", "UNSCOPED")
+
+
+def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
+    """(state, missing, unasked, detail) — did the output contain what was asked
+    and NOTHING THAT WAS NOT?
+
+    THE REQUIREMENT. The user's prompt is the source of truth. "Just add
+    captions" gets captions and nothing else. "Make it viral" gets the full
+    treatment. A brief that asks for little must produce little, and PLACING
+    MORE THAN WAS ASKED IS A FAILURE, NOT GENEROSITY — it is the edit the user
+    did not request, delivered over the one they did.
+
+    TWO DIRECTIONS, and only one of them was ever measured. `not_asked_for`
+    recorded families built outside a targeted scope at build time. Nothing
+    recorded the other direction: a family ASKED FOR and never delivered. An
+    edit that quietly drops the one thing requested reads as a successful run.
+
+        SHORT        asked for and not delivered
+        OVERREACHED  delivered and not asked for
+        FAITHFUL     neither
+        UNSCOPED     the run declared full_edit, so there is no scope to judge
+                     against. NOT a pass — it is the absence of the question,
+                     and it is reported as such so a minimal brief declared
+                     full_edit is visible rather than excused.
+
+    PURE, so the check drives the shipped rule rather than a copy.
+    """
+    _sc = spec or {}
+    _mode = _sc.get("mode")
+    _built = {str(p.get("family") or p.get("type") or "").lower()
+              for p in (placements or [])}
+    _built.discard("")
+    if cut_made:
+        _built.add("cut")
+    # CAPTIONS ARE BURNED, NEVER A PLACEMENT. They leave no manifest entry, so
+    # without this "just add captions" — the canonical minimal brief — reads
+    # SHORT by construction even when 29 caption pages composited. The evidence
+    # is led["caption_composited"], and the caller passes it.
+    if captions_made:
+        _built.add("caption")
+    if _mode != "targeted_change":
+        return (FIDELITY_UNSCOPED, [], sorted(_built),
+                "mode=%s — no declared family scope, so fidelity cannot be "
+                "judged. A minimal brief declared full_edit gets a full edit "
+                "and nothing here objects." % _mode)
+    _asked = {str(f).lower() for f in (_sc.get("families") or [])}
+    _missing = sorted(_asked - _built)
+    _unasked = sorted(_built - _asked)
+    if _missing and _unasked:
+        return (FIDELITY_OVER, _missing, _unasked,
+                "asked for %s and did not deliver %s; delivered %s that was "
+                "not asked for" % (sorted(_asked), _missing, _unasked))
+    if _unasked:
+        return (FIDELITY_OVER, [], _unasked,
+                "delivered %s that the request did not ask for — more than was "
+                "asked is not generosity" % _unasked)
+    if _missing:
+        return (FIDELITY_SHORT, _missing, [],
+                "asked for %s and did not deliver %s" % (sorted(_asked),
+                                                         _missing))
+    return (FIDELITY_OK, [], [],
+            "asked for %s and delivered exactly that" % sorted(_asked))
+
+
+def reedit_merge(prior, targets, incoming):
+    """(verdicts, refused) — apply a re-edit's incoming rulings to the prior set.
+
+    HOISTED OUT OF THE DISPATCH ON PURPOSE. A local copy of this logic inside
+    the agent loop let two mutations pass green — the smoke drove its own
+    reimplementation while the shipped path went untested, which is the same
+    defect `spec_shortfall` was hoisted for. A check that exercises a copy
+    proves the copy.
+
+    THE RULE. A ruling on a beat inside `targets` REPLACES the prior one. A
+    ruling outside is REFUSED and returned, never silently applied and never
+    silently dropped. An empty target set therefore changes NOTHING, which is
+    the safe direction when the instruction's scope is unclear: a re-edit that
+    quietly rewrites beats the user did not ask about is the user's previous
+    work moving under them.
+    """
+    out = [dict(v) for v in (prior or [])]
+    refused = []
+    _t = set(targets or ())
+    for v in (incoming or []):
+        if not isinstance(v, dict) or v.get("beat") is None:
+            continue
+        _b = v.get("beat")
+        if _b in _t:
+            out = [o for o in out if o.get("beat") != _b] + [dict(v)]
+        else:
+            refused.append({"beat": _b,
+                            "why": "not named by the instruction — a re-edit "
+                                   "may not change a beat the user did not ask "
+                                   "about"})
+    return out, refused
 
 
 VERDICT_FIELDS = _verdict_fields()
@@ -6567,6 +7257,8 @@ DEFAULT_EFFORT = "high"
 
 @app.function(image=IMG, secrets=SECRETS, timeout=3600, cpu=8, memory=16384)
 def edit(source_key: str, brief: str,
+         prior_plan: list = None, instruction: str = "",
+         result_url: str = "",
          src_url: str = "", out_url: str = "", out_key: str = "",
          max_iters: int = MAX_ITERS,
          use_knowledge: bool = True, effort: str = DEFAULT_EFFORT,
@@ -6881,7 +7573,9 @@ def edit(source_key: str, brief: str,
         _vn = subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", src,
              "-fps_mode", "cfr", "-r", f"{_tgt:.3f}",
-             "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+             "-c:v", "libx264", "-crf", "18",
+             "-x264-params", f"threads={_X264_ENCODE_THREADS}",
+             "-preset", "veryfast",
              "-pix_fmt", "yuv420p", "-c:a", "copy", _norm],
             capture_output=True, text=True, timeout=900, env=_SUBPROCESS_ENV)
         if _vn.returncode == 0 and os.path.exists(_norm) and os.path.getsize(_norm) > 0:
@@ -7067,8 +7761,16 @@ def edit(source_key: str, brief: str,
         info = probe(out)
         v = next((s for s in info.get("streams", []) if s.get("codec_type") == "video"), {})
         a = next((s for s in info.get("streams", []) if s.get("codec_type") == "audio"), {})
-        dur = float(info.get("format", {}).get("duration") or 0)
-        res = {"exists": True, "duration_s": round(dur, 2),
+        # THE OUTPUT'S OWN LENGTH, three-state for the same reason the source's
+        # is. A rendered file reported as 0.0s is the probe-collapse class on the
+        # thing we just built — and this is the QA tool, so it must be able to
+        # say it could not read it rather than report a zero-length render.
+        _ods, _odv, _odw = source_duration_state(info)
+        if _ods != SRC_DUR_MEASURED:
+            fail("output_duration_unmeasured", _odw)
+        res = {"exists": True,
+               "duration_s": round(_odv, 2) if _ods == SRC_DUR_MEASURED else None,
+               "duration_state": _ods,
                "width": v.get("width"), "height": v.get("height"),
                "vcodec": v.get("codec_name"), "has_audio": bool(a),
                "size_mb": round(os.path.getsize(out) / 1e6, 1)}
@@ -7288,7 +7990,15 @@ def edit(source_key: str, brief: str,
             return {"error": f"keep_spans must be [[start,end],...]: {e}"}
         if not spans:
             return {"error": "keep_spans is empty"}
-        dur = float(meta.get("format", {}).get("duration") or 0)
+        # THE BOUND EVERY SPAN IS CHECKED AGAINST. `or 0` here was the worst of
+        # the five: a fabricated 0.0 makes `s[1] > dur + 0.05` true for EVERY
+        # span, so the tool refuses the agent's entire cut with "spans outside
+        # 0..0.00s" — a total refusal that reads as the agent proposing nonsense.
+        # Says which of the three states it is in instead.
+        _ds, dur, _dw = source_duration_state(meta)
+        if _ds != SRC_DUR_MEASURED:
+            return {"error": f"source duration {_ds}: {_dw} — keep_spans cannot "
+                             f"be bounded against a source of unknown length"}
         bad = [s for s in spans if s[1] <= s[0] or s[0] < 0 or s[1] > dur + 0.05]
         if bad:
             return {"error": f"spans outside 0..{dur:.2f}s or non-increasing: {bad[:3]}"}
@@ -7384,12 +8094,12 @@ def edit(source_key: str, brief: str,
             "captions_srt": "/work/captions.srt",
             "run_this": ("cd /work && filt=$(cat filter.txt) && ffmpeg -y -i source.mp4 "
                          "-filter_complex \"$filt\" -map '[outv]' -map '[outa]' "
-                         "-c:v libx264 -crf 18 -preset veryfast -c:a aac cut.mp4"),
+                         "-c:v libx264 -crf 18 -x264-params threads=48 -preset veryfast -c:a aac cut.mp4"),
             "then_captions": ("cd /work && ffmpeg -y -i cut.mp4 -vf "
                               "\"subtitles=captions.srt:force_style='Fontname=DejaVu Sans,"
                               "Bold=1,FontSize=18,PrimaryColour=&H00FFFFFF,"
                               "OutlineColour=&H00000000,Outline=2,Alignment=2,MarginV=120'\" "
-                              "-c:v libx264 -crf 18 -preset veryfast -c:a copy capped.mp4"),
+                              "-c:v libx264 -crf 18 -x264-params threads=48 -preset veryfast -c:a copy capped.mp4"),
 
             "note": "Captions are already remapped to OUTPUT time. Do not shift them.",
         }
@@ -7551,7 +8261,8 @@ def edit(source_key: str, brief: str,
             "filter_file": "/work/overlays.txt",
             "run_this": (f"cd /work && filt=$(cat overlays.txt) && ffmpeg -y "
                          f"-i {input_file}{extra} -vf \"$filt\" -c:v libx264 "
-                         f"-crf 18 -preset veryfast -c:a copy {output_file}"),
+                         f"-crf 18 -x264-params threads={_X264_ENCODE_THREADS} "
+                         f"-preset veryfast -c:a copy {output_file}"),
             "note": "Apostrophes and colons are already escaped. Do not sed this "
                     "file — hand-patching escaping is what cost a turn last run.",
         }
@@ -7735,7 +8446,7 @@ def edit(source_key: str, brief: str,
             "segments": packed["segments"],
             "run_this": (f"cd /work && filt=$(cat reel-filter.txt) && ffmpeg -y -i "
                          f"cut.mp4 -i reel.mov -filter_complex \"$filt\" "
-                         f"-map '[{last}]' -map 0:a -c:v libx264 -crf 18 "
+                         f"-map '[{last}]' -map 0:a -c:v libx264 -crf 18 -x264-params threads=48 "
                          f"-preset veryfast -c:a copy out.mp4"),
             "note": "ONE render for all components. Offsets are already computed "
                     "— do not shift anything by hand.",
@@ -7770,13 +8481,13 @@ def edit(source_key: str, brief: str,
         if complex_:
             cmd = ["ffmpeg", "-y", "-v", "error", "-i", "/work/source.mp4",
                    "-filter_complex", filt, "-map", "[outv]", "-map", "[outa]",
-                   "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                   "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                    "-c:a", "aac", outp]
         else:
             inp = os.path.join("/work", os.path.basename(
                 recipe.get("input_file") or "cut.mp4"))
             cmd = ["ffmpeg", "-y", "-v", "error", "-i", inp, "-vf", filt,
-                   "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                   "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                    "-c:a", "copy", outp]
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=1200,
                            env=_SUBPROCESS_ENV)
@@ -7916,9 +8627,23 @@ def edit(source_key: str, brief: str,
         _cw_rulings = [v for v in vs
                        if "cutaway" in [str(t).lower()
                                         for t in (v.get("treatment") or [])]]
-        _cw_plans, _cw_rejects = cutaway_plan(
-            _cw_rulings, merged,
-            float((meta.get("format") or {}).get("duration") or 0), beats=beats)
+        # A bound we could not read must not become 0.0: every cutaway would
+        # then be "past the end of the source" and refused with a reason that
+        # is not the reason. source_duration_state says MEASURED/ABSENT/FAILED.
+        _cds, _cdur, _cdw = source_duration_state(meta)
+        if _cds != SRC_DUR_MEASURED:
+            # SHOUT FIRST. An unreadable source bound is a defect whether or
+            # not a cutaway was ruled this run; the rulings are then refused
+            # with the real reason rather than "past the end of a 0.0s source".
+            fail("cutaway_source_duration_" + str(_cds).lower(), _cdw)
+            _cw_plans = []
+            _cw_rejects = [{"beat": _r.get("beat"),
+                            "why": f"source duration {_cds}: {_cdw} — a cutaway "
+                                   f"cannot be bounded, so none is built"}
+                           for _r in _cw_rulings]
+        else:
+            _cw_plans, _cw_rejects = cutaway_plan(
+                _cw_rulings, merged, float(_cdur), beats=beats)
         led["cutaway_ruled"] = len(_cw_rulings)
         led["cutaway_planned"] = len(_cw_plans)
         led["cutaway_rejects"] = _cw_rejects
@@ -7972,7 +8697,9 @@ def edit(source_key: str, brief: str,
                       "-i", _cw_before, "-i", "/work/source.mp4",
                       "-filter_complex", ";".join(_cparts),
                       "-map", f"[{_clast}]", "-map", "0:a?",
-                      "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                      "-c:v", "libx264", "-crf", "18",
+                      "-x264-params", f"threads={_X264_ENCODE_THREADS}",
+                      "-preset", "veryfast",
                       "-c:a", "copy", "/work/cutaway.mp4"]
             _cc = subprocess.run(_cargs, capture_output=True, text=True,
                                  timeout=1800, env=_SUBPROCESS_ENV)
@@ -8395,7 +9122,7 @@ def edit(source_key: str, brief: str,
                  alpha_composite_filter(30),
                  "-map", "[outv]", "-map", "0:a?",
                  "-c:v", "libx264", "-crf", "18",
-                 "-preset", "veryfast", "-c:a", "copy", _cco],
+                 "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast", "-c:a", "copy", _cco],
                 capture_output=True, text=True, timeout=900,
                 env=_SUBPROCESS_ENV)
             _mark(led, "composite_captions", _cc0)
@@ -8560,7 +9287,7 @@ def edit(source_key: str, brief: str,
             _ex = subprocess.run(
                 ["ffmpeg", "-y", "-v", "error", "-ss", f"{_cs:.3f}",
                  "-t", f"{_ce - _cs:.3f}", "-i", _zoom_cur_in,
-                 "-an", "-c:v", "libx264", "-crf", "16", "-preset", "veryfast",
+                 "-an", "-c:v", "libx264", "-crf", "16", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                  "-pix_fmt", "yuv420p", os.path.join(_zpub, _zsrc)],
                 capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
             _zt("pre_extract", _t_ex)
@@ -8756,7 +9483,7 @@ def edit(source_key: str, brief: str,
                     _zargs += ["-i", _sg["out"]]
                 _zargs += ["-filter_complex", open(_zfilt).read().strip(),
                            "-map", f"[{_last}]", "-map", "0:a?",
-                           "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                           "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                            "-c:a", "copy", "/work/zoomed.mp4"]
                 _t_comp = time.time()
                 _zc = subprocess.run(_zargs, capture_output=True, text=True,
@@ -8829,7 +9556,7 @@ def edit(source_key: str, brief: str,
                 _ex2 = subprocess.run(
                     ["ffmpeg", "-y", "-v", "error", "-ss", f"{_st:.3f}",
                      "-t", f"{_d_s:.3f}", "-i", os.path.join("/work", cur),
-                     "-an", "-c:v", "libx264", "-crf", "16", "-preset", "veryfast",
+                     "-an", "-c:v", "libx264", "-crf", "16", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                      "-pix_fmt", "yuv420p", os.path.join(_zpub, _nm2)],
                     capture_output=True, text=True, timeout=600, env=_SUBPROCESS_ENV)
                 if _ex2.returncode != 0:
@@ -8909,7 +9636,7 @@ def edit(source_key: str, brief: str,
                     _targs += ["-i", _sg["out"]]
                 _targs += ["-filter_complex", ";".join(_tparts),
                            "-map", f"[{_tlast}]", "-map", "0:a?",
-                           "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                           "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                            "-c:a", "copy", "/work/transitioned.mp4"]
                 _tc2 = subprocess.run(_targs, capture_output=True, text=True,
                                       timeout=1800, env=_SUBPROCESS_ENV)
@@ -9001,8 +9728,33 @@ def edit(source_key: str, brief: str,
                 # REFUSING IS A REAL ANSWER. A card nobody can read is the
                 # failure this whole thread began with, and it is worse than no
                 # card at all.
+                # THE ONE MOMENT THE CATALOGUE PROVABLY CANNOT SERVE A BEAT,
+                # and until now it was absorbed into a skip. `author_component`
+                # exists for exactly this and the agent was never told the
+                # moment had arrived — the tool's own worked example was ZOOM,
+                # which the harness took over, so its only illustration pointed
+                # at a case it must not do.
+                #
+                # This does not invite authoring anywhere else. The signal is
+                # DERIVED — the agent ruled a card, the harness tried every
+                # catalogue type and none fit — so it is offered where the need
+                # is proven rather than as a standing option.
                 _skips.append({"family": "card", "beat": v.get("beat"),
-                               "why": _dwhy})
+                               "why": _dwhy,
+                               "code": "no_catalogue_component",
+                               "hero": str(hero)[:60],
+                               "remedy": "no catalogue component fits this "
+                                         "hero; author_component is how this "
+                                         "beat gets served"})
+                # RENAMED FROM authorable_beats 2026-09-10. Builder-1's harness
+                # uses that name for a DENOMINATOR — beats eligible to carry a
+                # placement at all — and this is a DEFECT COUNT: beats where a
+                # card was ruled and no catalogue component fits. Same word, one
+                # a rate's denominator and the other a failure tally, and we
+                # nearly shipped both.
+                led.setdefault("catalogue_gap_beats", []).append(
+                    {"beat": v.get("beat"), "hero": str(hero)[:60],
+                     "why": _dwhy[:120]})
                 continue
             led.setdefault("card_type_derived", []).append(
                 {"beat": v.get("beat"), "type": _ctype,
@@ -9154,7 +9906,7 @@ def edit(source_key: str, brief: str,
                          "-i", os.path.join("/work", cur), "-i", "/work/reel.mov",
                          "-filter_complex", open(_filt).read().strip(),
                          "-map", f"[{rc.get('final_label') or '0:v'}]", "-map", "0:a?",
-                         "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
+                         "-c:v", "libx264", "-crf", "18", "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast",
                          "-c:a", "copy", "/work/carded.mp4"],
                         capture_output=True, text=True, timeout=1200,
                         env=_SUBPROCESS_ENV)
@@ -9443,8 +10195,15 @@ def edit(source_key: str, brief: str,
         if v.get("r_frame_rate") and "/" in str(v["r_frame_rate"]):
             _n, _d = str(v["r_frame_rate"]).split("/")
             fps = round(float(_n) / float(_d), 3) if float(_d) else None
+        _psd = source_duration_state(meta)
         out = {"width": v.get("width"), "height": v.get("height"), "fps": fps,
-               "duration_s": round(float(meta.get("format", {}).get("duration") or 0), 2),
+               # WHAT THE AGENT IS TOLD. A source it is told runs 0.0s is a
+               # source it will rule on as if empty; educate rather than
+               # validate applies to the absence too, so it gets the state.
+               "duration_s": (round(_psd[1], 2)
+                              if _psd[0] == SRC_DUR_MEASURED else None),
+               "duration_state": _psd[0],
+               "duration_why": None if _psd[0] == SRC_DUR_MEASURED else _psd[2],
                "has_audio": a is not None}
         if shot_changes:
             r = subprocess.run(
@@ -9508,7 +10267,7 @@ def edit(source_key: str, brief: str,
         r = subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", inp, "-filter_complex", f,
              "-map", "[outv]", "-map", "0:a?", "-c:v", "libx264", "-crf", "18",
-             "-preset", "veryfast", "-c:a", "copy", outp],
+             "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast", "-c:a", "copy", outp],
             capture_output=True, text=True, timeout=900, env=_SUBPROCESS_ENV)
         if r.returncode != 0:
             fail("build_zoom_failed", (r.stderr or "")[-300:])
@@ -9718,7 +10477,33 @@ def edit(source_key: str, brief: str,
     # definition dominating both branches there is no scope question left to get
     # wrong. Fourth instance of *scope is not text* in this repo, and the first
     # one I authored.
-    _vdur = float(meta.get("format", {}).get("duration") or 0)
+    # THE ONE DURATION READ. Was `float(meta["format"].get("duration") or 0)`,
+    # which laundered absence into a present 0.0 — see source_duration_state for
+    # what a zero costs on each route. There is no downstream path where a
+    # fabricated duration produces a correct edit: it is the beat span on the
+    # visual route, the edge-coverage span on the transcript route, and the
+    # cut-rate ceiling's denominator on both. So this raises HERE, once, while
+    # the absence is still visible, rather than degrading three things quietly.
+    _vdur_state, _vdur, _vdur_why = source_duration_state(meta)
+    led["source_duration_state"] = _vdur_state
+    led["source_duration_why"] = _vdur_why
+    # THE GUARD DOMINATES EVERY USE, INCLUDING THE PRINT. My first version put
+    # the print above the raise with the value in a conditional branch — safe by
+    # evaluation order, and still wrong: the rule is that nothing touches _vdur
+    # before the state is checked, and a version that needs a reader to reason
+    # about f-string branch evaluation to see it is safe has already lost the
+    # property. The raise carries _vdur_why, so no diagnosis is lost by moving
+    # the print below it. (Caught by smoke_source_duration_state's own
+    # dominance leg, on the commit that introduced it.)
+    if _vdur_state != SRC_DUR_MEASURED:
+        raise AssertionError(
+            f"source duration {_vdur_state}: {_vdur_why}. Refusing to segment a "
+            f"source of unknown length — a 0.0s span silently returns no beats "
+            f"on the visual route and no edge coverage on the transcript route.")
+    # PRINTED IN THE SAME COMMIT THAT ADDS IT — a counter that reaches only the
+    # ledger answers nothing.
+    print(f"  SOURCE DURATION : {_vdur_state}  {_vdur:.2f}s  ({_vdur_why})",
+          flush=True)
     # SHOT CHANGES FOR BOTH ROUTES, hoisted for the same reason _vdur was.
     #
     # It was detected only on the visual route, so the TRANSCRIPT route had no
@@ -9801,7 +10586,7 @@ def edit(source_key: str, brief: str,
     _ceil = (len(_beats) - 1) / _vdur if _vdur else 0.0
     print(f"[beats] {_pre_sub} -> {len(_beats)} after subdivision "
           f"(+{len(_beats) - _pre_sub}); cut-rate ceiling now {_ceil:.3f}/s "
-          f"(reference median 0.253)"
+          f"(reference median 0.253 — {_REFERENCE_PROVENANCE})"
           + ("" if _ceil >= 0.253 else "  <-- STILL under the reference median"),
           flush=True)
     # ── VISION: WHAT IS ON SCREEN, PER BEAT ─────────────────────────────────
@@ -9845,7 +10630,42 @@ def edit(source_key: str, brief: str,
     _numeric_ts = {b["t"] for b in _number_beats}
     for _b in _beats:
         _b["has_number"] = any(_b["t_start"] <= t <= _b["t_end"] for t in _numeric_ts)
+        # THE FIGURE, NOT THE FACT OF ONE. The harness already located it; the
+        # brief used to report a boolean and leave the agent to re-find by eye
+        # what had already been computed. Offered as MATERIAL, never as an
+        # instruction — a beat carrying a figure is not a beat that must take a
+        # card, and the rates grade, they never instruct.
+        _b["figure"] = extract_figure(_b.get("text") or "")[0] if _b["has_number"] else None
     led["beats"] = _beats
+
+    # ── RE-EDIT: LOAD THE PRIOR PLAN ────────────────────────────────────────
+    # A prior plan turns this from an edit into a MODIFICATION. The verdicts are
+    # re-mapped onto THIS run's beats by source-span overlap, so the plan
+    # survives resegmentation and a changed cut.
+    #
+    # THE FLOOR IS ENFORCED HERE, NOT ONLY IN THE CHECK. An entry that only
+    # grazes a beat is REFUSED rather than placed: on a re-edit that is the
+    # USER'S PREVIOUS WORK MOVING UNDER THEM, to a moment they never chose,
+    # which is exactly what the re-edit law forbids. Below the floor it fails.
+    _reedit = bool(prior_plan)
+    _reedit_targets = set()
+    if _reedit:
+        _prior, _prior_probs = plan_onto_beats(prior_plan, _beats)
+        led["beat_verdicts"] = list(_prior)
+        led["reedit_loaded"] = len(_prior)
+        led["reedit_unplaceable"] = _prior_probs
+        print(f"  RE-EDIT         : loaded {len(_prior)} of "
+              f"{len(prior_plan)} prior ruling(s) onto {len(_beats)} beat(s)"
+              + (f"   <-- {len(_prior_probs)} UNPLACEABLE"
+                 if _prior_probs else "   all placed"), flush=True)
+        if _prior_probs:
+            # LOUD, AND IT STOPS THE RUN'S CLAIM TO BE SURGICAL. A re-edit that
+            # silently loses part of the previous edit is the failure this
+            # feature exists to prevent, so it is named rather than absorbed.
+            fail("reedit_prior_lost",
+                 f"{len(_prior_probs)} prior ruling(s) could not be placed on "
+                 f"this run's beats — the previous edit would come back short: "
+                 f"{_prior_probs[0].get('why')}")
     led["beat_verdicts"] = []
     led["component_verdicts"] = []   # legacy field, retained so old runs still parse
 
@@ -9860,7 +10680,10 @@ def edit(source_key: str, brief: str,
     # there is no bucket string left to shadow. The lesson it encoded — a loop
     # variable rebinding a name used 300s later — is now carried by the
     # `_w0/_w1` naming in the dead-air loop itself.
-    _src_dur = float(meta.get('format', {}).get('duration') or 0)
+    # SAME `meta`, SAME READ — so take the value already measured above rather
+    # than laundering the field a second time 100 lines apart. The guard at the
+    # single read dominates this line, so _vdur here is always MEASURED.
+    _src_dur = _vdur
     # LEDGERED because count_cuts needs it at report time, and a counter given a
     # duration of 0 returns 0 silently — the same shape as the cost_usd key that
     # would have printed $0.0000 forever.
@@ -9915,21 +10738,48 @@ def edit(source_key: str, brief: str,
                                  "beats_with_candidates": len(_cw_cands)}
     print(f"  CUTAWAY CANDS   : {_cw_state}  {_cw_why}", flush=True)
 
-    user = (f"{_REQ_OPEN}\n{_neutralise_brief(brief)}\n{_REQ_CLOSE}\n\n"
+    # BUILT AS A PLAIN STRING, not inline in the prompt expression. The first
+    # version nested `','.join(...)` inside an f-string using the same quote —
+    # legal only on 3.12+ — and sat between two implicitly-concatenated
+    # fragments without a `+`, which is a SyntaxError at import: the container
+    # would have failed before any work ran.
+    _reedit_block = ""
+    if _reedit:
+        _rows = []
+        for _v in (led.get("beat_verdicts") or []):
+            _tr = ",".join(_v.get("treatment") or []) or "none"
+            _tx = str(_v.get("text_content") or "")[:48]
+            _rows.append("  beat %s  %s  cut=%s  %s"
+                         % (_v.get("beat"), _tr, _v.get("cut"), _tx))
+        _reedit_block = (
+            "YOU ARE MODIFYING AN EXISTING EDIT, NOT MAKING A NEW ONE.\n"
+            "THE INSTRUCTION: " + _neutralise_brief(instruction) + "\n\n"
+            "The rulings below are what the user already has. Change ONLY what "
+            "the instruction names. Declare the beats you are allowed to touch "
+            "with `set_spec` — anything you rule outside that set is REFUSED, "
+            "and anything you do not re-rule comes back exactly as it is.\n"
+            + "\n".join(_rows) + "\n\n")
+
+    user = (_reedit_block
+            + f"{_REQ_OPEN}\n{_neutralise_brief(brief)}\n{_REQ_CLOSE}\n\n"
             f"SOURCE: /work/source.mp4 — {vs.get('width')}x{vs.get('height')}, "
             f"{_src_dur:.1f}s\n\n"
             + (f"TRANSCRIPT ({len(words)} words):\n{tl}\n\n" if words else
                "NO SPEECH. This source carries no transcript, so the beats below "
                "were derived from the VIDEO ITSELF — motion energy and shot "
                "changes. Each beat's text shows its mean motion (0-1) and "
-               "whether a shot change falls inside it. Rule on them exactly as "
-               "you would rule on spoken beats: a high-motion beat is a moment "
-               "landing, a shot change is a boundary the edit should respect. "
-               "Do NOT place captions — there is nothing to caption.\n\n")
-            + (("STILLNESS ALREADY DETECTED — these are the visual equivalent of "
-                "dead air: stretches where this clip is much quieter than it "
-                "typically is. They are CANDIDATES to remove, not instructions; "
-                "a held shot is sometimes the point, so rule on each.\n"
+               "whether a shot change falls inside it. Rule on them by what "
+               "the PICTURE does: a high-motion beat is a moment landing, a "
+               "shot change is a boundary the edit should respect, a held "
+               "shot is a beat in its own right. "
+               "Do NOT place captions — there is nothing to caption.\n\n"
+               + visual_purpose_block() + "\n")
+            + (("STILLNESS ALREADY DETECTED — stretches where this clip moves "
+                "much less than it typically does. These are NOT dead air; that "
+                "is a speech concept and there is no speech here. They are "
+                "CANDIDATES to consider, not instructions: a held shot is often "
+                "the point — a breath after motion, the first look, the last — "
+                "so rule on each as footage.\n"
                 + "\n".join(f"  [{_v['t_start']:.2f}-{_v['t_end']:.2f}] "
                              f"{_v['duration_s']:.1f}s, motion {_v['mean_motion']}"
                              for _v in (led.get("visual_cut_candidates") or []))
@@ -9956,7 +10806,8 @@ def edit(source_key: str, brief: str,
             f"need to compute these:\n{_gap_txt}\n\n"
             f"BEATS ({len(_beats)}) — rule on EVERY one with `beat_verdict`:\n"
             + "\n".join(f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
-                        + ("  (has a number)" if b["has_number"] else "")
+                        + (("  (figure: %s)" % b["figure"]) if b.get("figure")
+                           else ("  (has a number)" if b["has_number"] else ""))
                         + f"  {b['text'][:90]}" for b in _beats) + "\n\n"
             # ── THE EXAMPLES, AT THE MOMENT OF RULING ──────────────────────
             # Not a description of the craft — the craft. For each beat, the
@@ -10308,7 +11159,8 @@ def edit(source_key: str, brief: str,
                      f"finished with {len(_unruled)} of {len(_beats)} beats unruled")
                 _lst = "\n".join(
                     f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
-                    + ("  (has a number)" if b["has_number"] else "")
+                    + (("  (figure: %s)" % b["figure"]) if b.get("figure")
+                       else ("  (has a number)" if b["has_number"] else ""))
                     + f"  {b['text'][:80]}" for b in _unruled[:20])
                 msgs.append({"role": "user", "content": [{"type": "text", "text":
                     f"NOT DONE. {len(_unruled)} of {len(_beats)} beats have no "
@@ -10427,6 +11279,13 @@ def edit(source_key: str, brief: str,
                           or ("NO_OUTPUT" if out.get("exists") is False else "OK"))
                     _iv.append("OK" if str(_v).startswith("OK") else str(_v)[:40])
             elif tu.name == "set_spec":
+                # ON A RE-EDIT the declared beats ARE the allow-list. Declaring
+                # none leaves the set empty, which makes the run a no-op rather
+                # than a free hand — the safe direction when a scope is unclear.
+                if _reedit:
+                    _reedit_targets = set(
+                        (tu.input.get("scope") or {}).get("beats") or [])
+                    led["reedit_targets"] = sorted(_reedit_targets)
                 try:
                     _sc = normalize_spec(dict(tu.input or {}))
                     _sc["why"] = str((tu.input or {}).get("why") or "")[:200]
@@ -10622,8 +11481,30 @@ def edit(source_key: str, brief: str,
                                           "reason": _why2})
                         continue
                     _v = _norm
-                    if _v["beat"] in _seen:
-                        continue        # first ruling wins; a re-call tops up
+                    if _v.get("beat") in _seen:
+                        # ── THE SURGICAL GUARANTEE, MECHANICAL ─────────────
+                        # On a fresh edit "first ruling wins" and a re-call tops
+                        # up. On a RE-EDIT the prior plan is already loaded, so
+                        # every beat is `_seen` — and the agent must be able to
+                        # change the ones the instruction names, and MUST NOT be
+                        # able to change the ones it does not.
+                        #
+                        # Trusting the prompt for this would make "surgical" a
+                        # claim rather than a property. The scope the agent
+                        # declared through set_spec is the allow-list, and a
+                        # ruling outside it is REFUSED AND COUNTED, not
+                        # silently applied and not silently dropped.
+                        if not _reedit:
+                            continue    # first ruling wins; a re-call tops up
+                        # THE SHIPPED RULE, called not copied.
+                        _kept, _ref7 = reedit_merge(
+                            led["beat_verdicts"], _reedit_targets, [_v])
+                        if _ref7:
+                            led.setdefault("reedit_refused", []).extend(_ref7)
+                            continue
+                        led["beat_verdicts"] = [
+                            _o for _o in _kept if _o.get("beat") != _v.get("beat")]
+                        _seen.discard(_v.get("beat"))
                     _tr6 = [str(t).lower() for t in (_v.get("treatment") or [])]
                     # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
                     # Both of these used to be discovered at BUILD time, where
@@ -11543,12 +12424,301 @@ def edit(source_key: str, brief: str,
     # after every stage, so it counts the whole run rather than whatever had
     # accumulated at some earlier point.
     led["instrument_s"] = dict(_INSTRUMENT_S)
+    # ── EMIT THE DURABLE PLAN ───────────────────────────────────────────────
+    # Written from the verdicts AS THEY FINALLY STAND. This is the ONLY artefact
+    # besides out.mp4 that has to outlive the container, and it is emitted
+    # unconditionally so an early finish still carries whatever was ruled.
+    # PROBLEMS ARE LEDGERED AND PRINTED: an orphan verdict is a ruling a re-edit
+    # would silently lose.
+    # ── PROMPT FIDELITY, ON EVERY RUN ───────────────────────────────────────
+    # THE USER'S PROMPT IS THE SOURCE OF TRUTH. A brief that asks for little
+    # must produce little; placing more than was asked is a failure, not
+    # generosity. Only one direction was ever measured — `not_asked_for` caught
+    # families built outside a targeted scope AT BUILD TIME — and nothing
+    # caught the other: a family ASKED FOR and never delivered reads as a
+    # successful run.
+    # cut_made IS NOT "keep_spans EXISTS". Round 52 screen_recording carried
+    # keep_spans = [[0.0, 90.46]] — the WHOLE source, nothing removed — beside
+    # built[cut]=35. bool(keep_spans) would have called that a cut, which is
+    # presence tested where shape was needed: the class I wrote into the wire
+    # contract three times today, in my own wiring. A cut was made when the
+    # KEPT TOTAL IS LESS THAN THE SOURCE.
+    _kept = sum(max(0.0, float(_e) - float(_s0))
+                for _s0, _e in (led.get("keep_spans") or []))
+    _srcd = float(led.get("source_duration_s") or 0.0)
+    _cut_made = bool(led.get("keep_spans")) and _srcd > 0 and _kept < (_srcd - 0.05)
+    led["cut_made"] = _cut_made
+    _fid_state, _fid_missing, _fid_unasked, _fid_why = spec_fidelity(
+        led.get("spec"), led.get("placements") or [],
+        cut_made=_cut_made,
+        captions_made=bool(led.get("caption_composited")))
+    led["fidelity"] = {"state": _fid_state, "missing": _fid_missing,
+                       "unasked": _fid_unasked, "why": _fid_why}
+    print("  FIDELITY        : %s — %s" % (_fid_state, _fid_why), flush=True)
+    if _fid_state == FIDELITY_SHORT:
+        fail("fidelity_short",
+             "the request asked for %s and the output does not contain it — "
+             "the one thing asked for is the one thing missing"
+             % _fid_missing)
+    elif _fid_state == FIDELITY_OVER:
+        fail("fidelity_overreached",
+             "the output contains %s that the request did not ask for. More "
+             "than was asked is not generosity: it is the edit the user did "
+             "not request, delivered over the one they did." % _fid_unasked)
+
+    # ── THE PURPOSE DISTRIBUTION, PRINTED ───────────────────────────────────
+    # THE FIRST FAILURE MODE TO READ, registered before this shipped: if the
+    # seven values do not discriminate, the agent picks one anyway and the join
+    # is confident and meaningless. A round ruling 90% of beats one purpose has
+    # a vocabulary that is decoration, not a key.
+    #
+    # Printed in the same commit that adds it — a counter that reaches only the
+    # ledger answers nothing.
+    _purposes = [str(_v.get("purpose") or "UNNAMED")
+                 for _v in (led.get("beat_verdicts") or [])]
+    if _purposes:
+        _pc = {}
+        for _p9 in _purposes:
+            _pc[_p9] = _pc.get(_p9, 0) + 1
+        _top, _topn = max(_pc.items(), key=lambda kv: kv[1])
+        _share = _topn / float(len(_purposes))
+        led["purpose_distribution"] = _pc
+        led["purpose_top_share"] = round(_share, 3)
+        print("  PURPOSE MIX     : "
+              + "  ".join("%s=%d" % (_k, _v9) for _k, _v9 in sorted(_pc.items()))
+              + "   (%d beat(s), top %s %.0f%%)" % (len(_purposes), _top,
+                                                    100.0 * _share)
+              + ("   <-- ONE PURPOSE DOMINATES; the vocabulary may not be "
+                 "discriminating and the join would be decoration"
+                 if _share >= 0.9 else ""), flush=True)
+        if "UNNAMED" in _pc:
+            fail("purpose_unnamed",
+                 "%d of %d verdict(s) carry no purpose — the reference join has "
+                 "no key for them" % (_pc["UNNAMED"], len(_purposes)))
+
+    # ── THE TWO AXES MUST NOT CONTRADICT ────────────────────────────────────
+    # `purpose` (function) and `zoom_arc` (energy position) are different axes
+    # and both ask "what is this moment". They SHARE three words — hook, payoff,
+    # close — and where a beat carries both, they must agree. A beat ruled
+    # purpose=hook and zoom_arc=close is incoherent, and it would send the
+    # reference join and the zoom lookup to opposite ends of the video.
+    #
+    # I introduced this collision by adding `purpose` beside a `zoom_arc` that
+    # already asked "what this moment IS in the arc". Two names for overlapping
+    # things is the class this lane has paid for repeatedly; the fix is to say
+    # which axis is which AND to check the overlap rather than trust the prose.
+    _SHARED_AXIS = {"hook", "payoff", "close"}
+    _incoherent = [
+        {"beat": _v.get("beat"), "purpose": _v.get("purpose"),
+         "zoom_arc": _v.get("zoom_arc")}
+        for _v in (led.get("beat_verdicts") or [])
+        if _v.get("purpose") in _SHARED_AXIS
+        and _v.get("zoom_arc") in _SHARED_AXIS
+        and _v.get("purpose") != _v.get("zoom_arc")]
+    led["axis_incoherent"] = _incoherent
+    if _incoherent:
+        print("  AXIS CONFLICT   : %d beat(s) name one moment two ways: %s"
+              % (len(_incoherent), _incoherent[:3]), flush=True)
+        fail("axis_incoherent",
+             "%d beat(s) carry a purpose and a zoom_arc that share the "
+             "vocabulary and disagree — the reference join and the zoom lookup "
+             "would point at different moments" % len(_incoherent))
+
+    _plan, _plan_problems = durable_plan(led.get("beats") or [],
+                                         led.get("beat_verdicts") or [])
+    led["plan"] = _plan
+    led["plan_problems"] = _plan_problems
+    print(f"  PLAN            : {len(_plan)} entr(ies) keyed by source span"
+          + (f"   <-- {len(_plan_problems)} UNADDRESSABLE: "
+             f"{_plan_problems[0].get('why')}" if _plan_problems else
+             "   every ruling addressable"), flush=True)
+    if _plan_problems:
+        fail("plan_unaddressable",
+             f"{len(_plan_problems)} of {len(_plan) + len(_plan_problems)} "
+             f"ruling(s) could not be keyed to a source span — a re-edit would "
+             f"lose them silently")
+    # ── THE RESULT, WRITTEN SOMEWHERE THAT OUTLIVES THE CALL ────────────────
+    # WHY THIS EXISTS. A poll-only collection depends on the call id staying
+    # resolvable, and the server auto-deploys on push — this repo already has a
+    # documented failure of exactly that shape: a completion tail behind an
+    # in-process await that no deploy survived, which is why completion-reconcile
+    # and the durable poller exist.
+    #
+    # I DO NOT KNOW whether a Modal call id survives an app redeploy, and I am
+    # not willing to find out on real traffic. So the dependency is REMOVED
+    # rather than characterised: the server hands a presigned PUT, the worker
+    # writes the result there, and collection becomes a read of the server's own
+    # storage. A deploy mid-edit then strands nothing, and result_agentic stays
+    # as the fast path rather than the only one.
+    #
+    # It writes BEFORE returning, and a failure to write is LOUD — a result that
+    # exists only in a return value the caller may never collect is the
+    # in-process-await class again.
+    _res_obj = _result(ok=bool(final.get("exists")),
+                       wall_s=round(time.time() - t0, 1),
+                       plan=_plan, plan_problems=_plan_problems,
+                       download_s=dl_s, transcript_s=transcript_s,
+                       source_words=len(words), final=final, ledger=led,
+                       output_key=key, s3_key=key,
+                       contract_violations=_contract_violations(led))
+    if result_url:
+        try:
+            import urllib.request as _url3
+            _payload = json.dumps(_res_obj, default=str).encode("utf-8")
+            _rq = _url3.Request(result_url, data=_payload, method="PUT",
+                                headers={"Content-Type": "application/json",
+                                         "Content-Length": str(len(_payload))})
+            with _url3.urlopen(_rq, timeout=120) as _rp:
+                if _rp.status not in (200, 204):
+                    fail("result_put_failed", "HTTP %s writing the result" % _rp.status)
+                else:
+                    print("  RESULT          : written to the presigned URL "
+                          "(%d bytes) — collection does not depend on the call "
+                          "id" % len(_payload), flush=True)
+        except Exception as _e3:                              # noqa: BLE001
+            fail("result_put_failed",
+                 "%s: %s — the caller can still collect by call_id, but a "
+                 "deploy mid-edit would strand this job"
+                 % (type(_e3).__name__, str(_e3)[:200]))
     return _result(ok=bool(final.get("exists")), wall_s=round(time.time() - t0, 1),
+                   plan=_plan, plan_problems=_plan_problems,
                    download_s=dl_s, transcript_s=transcript_s,
                    source_words=len(words), final=final, ledger=led,
                    output_key=key, s3_key=key,
                    contract_violations=_contract_violations(led),
                    agent_last_message=final_text[:1200])
+
+
+# ── THE SERVER'S WAY IN ─────────────────────────────────────────────────────
+#
+# THE GAP THIS CLOSES. The server dispatches every job to MODAL_ENDPOINT_URL,
+# which is `run_job` on modal_app.py — handler.py's path. Nothing anywhere
+# routed to THIS app: `grep -ic agentic server.js lib/` returned zero. So
+# re-edit and multi-upload were built in the worker and unreachable from the
+# product, which is the difference between "re-edit works" and "a user can
+# re-edit".
+#
+# A SEPARATE URL IS THE ROUTE DECISION, and that is deliberate. The scope said a
+# per-job record of which pipeline produced a job must be stored at creation and
+# never inferred from which plan column is populated. Giving this app its own
+# endpoint makes the choice explicit at dispatch: the server picks a URL, and
+# the URL IS the pipeline. Nothing has to be guessed from an artefact later.
+#
+# THE PLAN COMES BACK IN THE RESPONSE. This container holds no Supabase
+# credentials — deliberately, which is why it is handed a presigned URL rather
+# than a bucket name — so it CANNOT persist its own plan. It returns it and the
+# server writes it. That is not a limitation to work around; it is the boundary
+# that keeps the credential surface small.
+#
+# AUTH POSTURE, stated rather than assumed: `run_job` on modal_app.py is
+# unauthenticated today and MODAL_RUN_SECRET is half-built (shipping it would
+# 403 all dispatch). This endpoint matches the existing posture rather than
+# inventing a new one — it is not worse, and it is not a place to fix inbound
+# auth quietly. When that gate lands it lands on both.
+@app.function(image=IMG, secrets=SECRETS, timeout=60)
+@modal.fastapi_endpoint(method="POST")
+def run_agentic(body: dict):
+    """Dispatch an agentic edit. Returns immediately with a call id.
+
+    SPAWN, NOT CALL. An edit runs for minutes and an HTTP request must not hold
+    it open — `.remote()` dies with the client, which this repo has already paid
+    for. `.spawn()` returns a call id the server polls or receives a callback
+    for, exactly as run_job does under PROMPTLY_SPAWN_MODE.
+
+    THE RE-EDIT PAYLOAD IS THE SAME SHAPE AS AN EDIT plus two fields, so the
+    server has one call to make and not two:
+
+        prior_plan   the `plan` from the previous run's result. Present = this
+                     is a MODIFICATION; absent = a plain edit. There is no
+                     'reinterpret' here: the agentic no-plan case IS a plain
+                     edit, and mapping handler's mode onto it would send an
+                     instruction with no plan — a fresh edit wearing a re-edit's
+                     name, counted as one in every metric.
+        instruction  the user's change_request, verbatim.
+    """
+    _b = body or {}
+    _plan = _b.get("prior_plan")
+    if _plan is not None and not isinstance(_plan, list):
+        # A PLAN OF THE WRONG SHAPE IS REFUSED, not coerced. handler's
+        # `edit_recipe` is a dict and this is a list of source-span entries; if
+        # the server ever hands one to the other, that must fail here rather
+        # than produce a confident edit from a plan this path cannot read.
+        return {"error": "prior_plan must be a list of plan entries; got %s. "
+                         "This is the agentic plan shape, not handler's "
+                         "edit_recipe." % type(_plan).__name__}
+    _fc = edit.spawn(
+        result_url=_b.get("result_url") or "",
+        source_key=_b.get("source_key") or "",
+        brief=_b.get("brief") or "",
+        prior_plan=_plan,
+        instruction=_b.get("instruction") or "",
+        src_url=_b.get("src_url") or "",
+        out_url=_b.get("out_url") or "",
+        out_key=_b.get("out_key") or "",
+    )
+    print("[run_agentic] spawned call=%s job=%s reedit=%s"
+          % (_fc.object_id, _b.get("job_id"), bool(_plan)), flush=True)
+    return {"spawned": True, "call_id": _fc.object_id,
+            "job_id": _b.get("job_id"),
+            # THE SOURCE IDENTITY THE CALLER SUPPLIED, echoed back. The client
+            # picked ASSETS, not job ids; if the mapping dies here the UI can
+            # say "four failed" and not WHICH four.
+            "source_key": _b.get("source_key") or "",
+            "result_url_given": bool(_b.get("result_url")),
+            "mode": "reedit" if _plan else "edit"}
+
+
+@app.function(image=IMG, secrets=SECRETS, timeout=60)
+@modal.fastapi_endpoint(method="POST")
+def result_agentic(body: dict):
+    """Collect a spawned agentic edit. POST {"call_id": "..."}.
+
+    WHY A POLL AND NOT A CALLBACK. handler's path posts back to
+    /api/modal-complete, which means the WORKER calls the SERVER — it needs the
+    server's URL and reachability, and this container is deliberately credential-
+    free and outbound-minimal. A poll inverts that: the server already knows
+    where Modal is, already holds the call id it was handed, and nothing new has
+    to be trusted in the container.
+
+    NON-BLOCKING BY DEFAULT. `timeout=0` returns immediately with RUNNING rather
+    than holding the HTTP request open across a multi-minute edit — the mistake
+    the spawn exists to avoid, reintroduced at the collection end.
+
+    THREE STATES, because a collection that cannot answer is not a failure of
+    the edit:
+        DONE     the edit finished; `result` carries the plan and the ledger
+        RUNNING  not finished yet — poll again. NOT an error.
+        FAILED   the edit raised; `error` says what. A failed edit and an
+                 unfinished one are different facts and this repo has paid for
+                 collapsing them.
+
+    THE PLAN COMES BACK HERE. That is the whole point of the round trip: the
+    container holds no Supabase credentials, so it cannot persist its own plan.
+    `result["plan"]` is what the server stores against the job id, and what it
+    hands back as `prior_plan` on a re-edit.
+    """
+    _cid = (body or {}).get("call_id")
+    if not _cid:
+        return {"state": "FAILED", "error": "call_id is required"}
+    try:
+        _fc = modal.FunctionCall.from_id(_cid)
+    except Exception as _e:                                   # noqa: BLE001
+        return {"state": "FAILED", "call_id": _cid,
+                "error": "no such call: %s" % str(_e)[:160]}
+    try:
+        _r = _fc.get(timeout=0)
+    except TimeoutError:
+        return {"state": "RUNNING", "call_id": _cid}
+    except Exception as _e:                                   # noqa: BLE001
+        # THE EDIT RAISED. Distinct from RUNNING, and named — an edit that died
+        # reported as "not finished" would be polled forever.
+        return {"state": "FAILED", "call_id": _cid,
+                "error": "%s: %s" % (type(_e).__name__, str(_e)[:300])}
+    _plan = (_r or {}).get("plan") if isinstance(_r, dict) else None
+    print("[result_agentic] DONE call=%s plan_entries=%s"
+          % (_cid, len(_plan) if isinstance(_plan, list) else "none"), flush=True)
+    return {"state": "DONE", "call_id": _cid, "result": _r,
+            "plan_entries": len(_plan) if isinstance(_plan, list) else 0}
 
 
 @app.local_entrypoint()
@@ -11724,8 +12894,11 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"{((r['ledger'].get('execute_plan') or {}).get('built') or {}).get('cutaway', 0)}"
               + (f"   frames {_cwf.get('before')}->{_cwf.get('after')}"
                  if _cwf else "   frames UNMEASURED"))
-        for _rj in (r["ledger"].get("cutaway_rejects") or [])[:6]:
+        _rjs = r["ledger"].get("cutaway_rejects") or []
+        for _rj in _rjs[:6]:
             print(f"    rejected b{_rj.get('beat')}: {_rj.get('why')}")
+        if len(_rjs) > 6:
+            print(f"    ... showing 6 of {len(_rjs)} rejections")
     _fm2 = r["ledger"].get("family_mentions") or {}
     if _fm2:
         print(f"  FAMILY MENTIONS : {_fm2}  over {r.get('ledger').get('trace_chars',0):,} "
@@ -12193,9 +13366,13 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
                  if not _off and not _ung and _could_fail == 0 else ""))
     _pc = (r.get("ledger") or {}).get("placement_collisions")
     if _pc is not None:
-        _nb = (r.get("ledger") or {}).get("painted_boxes_measured") or 0
-        _dup = (r.get("ledger") or {}).get("painted_boxes_duplicate") or 0
-        print(f"  COLLISIONS      : {len(_pc)} over {_nb} painted box(es)"
+        # Same idiom, same fix. A collision count over an UNRECORDED box count
+        # is not "0 over 0" — it is a number with no denominator, and printing
+        # a zero denominator is how an absence becomes a finding.
+        _nb = (r.get("ledger") or {}).get("painted_boxes_measured")
+        _nb_s = "? (NOT RECORDED)" if _nb is None else str(_nb)
+        _dup = (r.get("ledger") or {}).get("painted_boxes_duplicate")
+        print(f"  COLLISIONS      : {len(_pc)} over {_nb_s} painted box(es)"
               + (f"  ({_dup} DUPLICATE record(s) collapsed — the run answered a "
                  f"repeated execute_plan)" if _dup else "")
               + ("  " + "  ".join(f"[{'+'.join(c['families'])} "
@@ -12213,8 +13390,19 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
               f"the paint half of build_reel")
 
     _regs = (r.get("ledger") or {}).get("rate_regimes") or {}
+    # THE DENOMINATOR THE RATES ARE COMPUTED AGAINST, so it says what it is.
+    # `or 0` printed a fabricated 0.00 here — every rate in this line is per
+    # 25s of THIS number, and a zero denominator quietly makes the whole line
+    # meaningless while still rendering as a result. The producer now raises on
+    # a duration it cannot read, so an absent key means a run that died BEFORE
+    # the ledger write; that is a different fact and it prints as one.
+    _dled = (r.get("ledger") or {})
+    _dst = _dled.get("source_duration_state")
     print("  RATE REGIMES    : " + json.dumps({
-        "dur_s": round(float((r.get("ledger") or {}).get("source_duration_s") or 0), 2),
+        "dur_s": (round(float(_dled.get("source_duration_s")), 2)
+                  if _dst == "MEASURED" and _dled.get("source_duration_s") is not None
+                  else (_dst or "ABSENT (no ledger duration — run died before "
+                                "the source was probed)")),
         "families": {_f: {"regime": _d["regime"],
                           "rate": _d["rate"],
                           "expected": _d["expected"],

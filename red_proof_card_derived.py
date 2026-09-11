@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """RED proof for the card derivation."""
+import ast
 import os, shutil, subprocess, sys
-APP="agentic_editor_app.py"
-# BACKUP IN MEMORY, NEVER A SHARED FILE — see red_proof_alpha_state.py for
-# the full note. A "/tmp/..." backup path is shared across every branch and
-# worktree on this machine; Builder-2 watched one silently restore another
-# branch's app over their working copy and then print 19/19 RED-proven.
-_ORIG_SRC = open(APP, encoding="utf-8").read()
-None; env=dict(os.environ,PYTHONPATH=".")
+APP="agentic_editor_app.py"; _ORIG_SRC = {}   # IN MEMORY, never a file
+_ORIG_SRC.setdefault(APP, open(APP, encoding="utf-8").read()); env=dict(os.environ,PYTHONPATH=".")
 def run():
     r=subprocess.run([sys.executable,"smoke_card_derived.py"],capture_output=True,text=True,env=env)
     return r.returncode, r.stdout+r.stderr
@@ -15,8 +11,14 @@ def mut(old,new,label,expect):
     src=open(APP,encoding="utf-8").read()
     if src.count(old)!=1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
-    open(APP,"w",encoding="utf-8").write(src.replace(old,new,1))
-    rc,out=run(); open(APP, "w", encoding="utf-8").write(_ORIG_SRC)
+    _mutant=src.replace(old,new,1)
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN — it fails the check for a reason
+    # unrelated to the property, which is a pass it did not earn.
+    try: ast.parse(_mutant)
+    except SyntaxError as _se:
+        print(f"  HARNESS FAILURE [{label}] mutant does not parse: {_se.msg}"); return False
+    open(APP,"w",encoding="utf-8").write(_mutant)
+    rc,out=run(); open(APP, "w", encoding="utf-8").write(_ORIG_SRC[APP])
     ok=rc!=0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok: print(f"      expected {expect!r}")
@@ -84,10 +86,7 @@ r.append(mut('"text are NOT alternatives "',
 r.append(mut('"description": "REQUIRED when treatment "\n                                                    "includes \'card\': the "',
              '"description": "when treatment "\n                                                    "includes \'card\': the "',
              "card_hero stops saying REQUIRED",
-             # The leg is per-declaration now: it asserts EVERY card_hero says
-             # REQUIRED, because with two declaration sites a check that read
-             # only the last one passed while this very mutation was applied.
-             "card_hero says REQUIRED in EVERY declaration"))
+             "card_hero says REQUIRED, like zoom_arc"))
 # 12. THE GATE DEMANDS THE RETIRED FIELD AGAIN — round 47's control loop.
 r.append(mut('                        _hero6 = str(_v.get("card_hero") or "").strip()',
              '                        _hero6 = str(_v.get("card_type") or "").strip()',
@@ -101,9 +100,9 @@ r.append(mut('                                 "card_hero": {"type": "string",',
              "offers every field the gate demands"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-# A FLOOR, BECAUSE all([]) IS TRUE. A red proof whose mutation list is
-# emptied — by a bad merge, a botched refactor, a commented-out block —
-# reports SUCCESS. An instrument built to prove a check CAN FAIL,
-# rendering its own absence as success. Found in 10 of 11 here and 16 of
-# 16 on Builder-2's tree: 26 of 27 across both.
-sys.exit(0 if r and all(r) and rc==0 else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if r and all(r) and rc == 0 else 1)

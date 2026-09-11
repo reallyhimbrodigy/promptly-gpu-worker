@@ -28,22 +28,8 @@ import pathlib
 import sys
 import types
 
-_m = types.ModuleType("modal")
-
-
-class _S:
-    def __init__(s, *a, **k): pass
-    def __getattr__(s, n): return _S()
-    def __call__(s, *a, **k): return _S()
-    def function(s, *a, **k): return lambda f: f
-    def local_entrypoint(s, *a, **k): return lambda f: f
-
-
-for _n in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
-    setattr(_m, _n, _S())
-_m.is_local = lambda: True
-_m.enable_output = _S()
-sys.modules.setdefault("modal", _m)
+import modal_stub                                         # noqa: E402
+modal_stub.install()
 import agentic_editor_app as A                                    # noqa: E402
 
 fails = []
@@ -387,6 +373,35 @@ for _key, _label in (("cut_word_intrusions", "CUT INTRUSIONS"),
     check(f"{_label} is PRINTED", _printed,
           "the label exists somewhere but no print() call carries it — a "
           "measure nobody prints is a measure nobody reads")
+
+# ── 4. A NEVER-RECORDED VALUE MUST NOT PRINT AS A MEASURED ZERO ─────────────
+# Builder-1 found paint_ms printing 0.0s for six rounds against 458s of real
+# wall, because the key was never written and the printer said `or 0`. I had the
+# same idiom in three places — and in the exact lines Zac asked me to report
+# distributions from, where "0 of 0 boundaries land inside a word" reads as a
+# clean edit rather than as an unrecorded denominator.
+#
+# READ THE PRINT EXPRESSIONS, not the file text: the denominator must come from
+# a value that can say it is absent.
+check("the cut denominator can report ABSENT",
+      "_tot_s" in src and '"?" if _tot is None' in src,
+      "`or 0` turns a key nobody wrote into a measurement")
+check("the collision denominator can report ABSENT",
+      "_nb_s" in src and "NOT RECORDED" in src)
+_bad = [n.lineno for n in ast.walk(tree)
+        if isinstance(n, ast.BoolOp) and isinstance(n.op, ast.Or)
+        and len(n.values) == 2
+        and isinstance(n.values[1], ast.Constant) and n.values[1].value == 0
+        and isinstance(n.values[0], ast.Call)
+        and getattr(n.values[0].func, "attr", "") == "get"
+        and n.values[0].args
+        and isinstance(n.values[0].args[0], ast.Constant)
+        and str(n.values[0].args[0].value) in (
+            "cut_boundaries_total", "painted_boxes_measured",
+            "cut_quantisation_floor_ms")]
+check("no measure I report uses `.get(...) or 0` for a denominator",
+      not _bad, f"line(s) {_bad} — a never-written key becomes a zero and the "
+                f"zero becomes a finding")
 
 if fails:
     print(f"EDIT-QUALITY: {len(fails)} FAILED")

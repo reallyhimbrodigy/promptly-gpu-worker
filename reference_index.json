@@ -1,482 +1,491 @@
 {
-"beats_in_corpus": 153,
-"beats": [
-{
-"i": 0,
-"purpose": "hook",
-"dur": 2.83,
-"treat": [
-"overlay_text"
-],
-"spk": true,
-"card_text": "the CAPTIONS → you're READING right → I didn't → single WORD",
-"read": "Single continuous talking-head shot; the hook lives entirely in the escalating word-by-word caption reveal, not in the cut, making the viewer read along until the twist lands."
-},
-{
-"i": 2,
-"purpose": "evidence",
-"dur": 0.67,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": false,
-"card_text": "SAME FONT",
-"read": "Very short punch-cut on a single-line card acts as a breath/list-beat, keeping the complaint list punchy without adding new visual information."
-},
-{
-"i": 3,
-"purpose": "evidence",
-"dur": 3.03,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": false,
-"card_text": "SAME STYLE / same boring look / as everyone else",
-"read": "A static wide shot lets the complaint breathe while three stacked cards build the sameness argument, matching the visual widening to the widening claim."
-},
-{
-"i": 4,
-"purpose": "turn",
-"dur": 1.37,
-"treat": [
-"cut",
-"overlay_text",
-"card"
-],
-"spk": false,
-"card_text": "in your feed / that's why / I use / SUBMAGIC",
-"read": "New framing marks the pivot from problem to solution, ending on the bold brand-name card as the mini-payoff that closes this stretch."
-},
-{
-"i": 5,
-"purpose": "claim",
-"dur": 5.57,
-"treat": [
-"overlay_text"
-],
-"spk": true,
-"card_text": "it auto GENERATES / my CAPTIONS / and makes them fully",
-"read": "Returns to direct-to-camera delivery held in one continuous shot; caption ticker alone carries the pacing while the speaker makes the core product claim."
-},
-{
-"i": 1,
-"purpose": "hook",
-"dur": 5.05,
-"treat": [
-"overlay_text",
-"cut",
-"sfx"
-],
-"spk": true,
-"card_text": "POSTED ON / TIKTOK (red, huge) / QUALITY / JUST LOOKS LIKE / TRASH (red)",
-"read": "Rapid-fire kinetic captions punch in word-by-word, escalating from neutral white text to aggressive red on the pain word ('TRASH') then back to white on the resolution ('SOLUTION'), using color-coding to editorialize the emotional beats of the line."
-},
-{
-"i": 3,
-"purpose": "breath",
-"dur": 0.16,
-"treat": [
-"cut"
-],
-"spk": true,
-"card_text": "AS A COLLEGE STUDENT / A CAREER IN VIDEOGRAPHY",
-"read": "Three quick mechanical cuts in under 0.2s land on near-identical framing, a micro-adjustment/jump-cut cluster to keep the talking-head segment feeling alive rather than a true content change."
-},
-{
-"i": 8,
-"purpose": "turn",
-"dur": 2.0,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": true,
-"card_text": "AND THIS IS / THE SAUCE / I USE",
-"read": "Brief return to speaker builds anticipation ('the sauce') before the bitrate reveal, a classic tease-cut back to face to re-engage attention before more screen text."
-},
-{
-"i": 1,
-"purpose": "hook",
-"dur": 2.0,
-"treat": [
-"overlay_text",
-"punch_in"
-],
-"spk": true,
-"card_text": "IF YOURE NOT MAKING VIDEOS because",
-"read": "Kinetic word-by-word caption build (NOT in red, VIDEOS in giant yellow) forces the eye to the accusation while speaker walks toward camera to build presence."
-},
-{
-"i": 2,
-"purpose": "hook",
-"dur": 2.5,
-"treat": [
-"overlay_text",
-"punch_in",
-"sfx"
-],
-"spk": true,
-"card_text": "YOU DONT KNOW HOW TO EDIT / EXCUSE = NO GOOD",
-"read": "Continues the callout with DONT in red for emphasis then whip-crossfades into a big yellow EXCUSE card with red NO GOOD stamp, editorializing the audience's assumed objection before he even states it."
-},
-{
-"i": 4,
-"purpose": "claim",
-"dur": 4.55,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": true,
-"card_text": "And trust me. / I get it.",
-"read": "Hard cut to a static window-lit talking-head setup builds trust/rapport tone (no punch-ins), simple burned-in captions carry the sincerity beat without visual noise."
-},
-{
-"i": 5,
-"purpose": "claim",
-"dur": 2.13,
-"treat": [
-"cut",
-"card",
-"overlay_text"
-],
-"spk": true,
-"card_text": "FULL SUITE OF AI TOOLS",
-"read": "Cuts to a full-screen bold sans-serif title card to isolate and emphasize the value proposition apart from the talking head."
-},
-{
-"i": 0,
-"purpose": "hook",
-"dur": 0.03,
-"treat": [
-"card"
-],
-"spk": true,
-"card_text": "captions",
-"read": "The clip opens already mid-reveal, with the word 'captions' slammed over the speaker's face before any spoken setup — a hard, cut-in-media-res start."
-},
-{
-"i": 3,
-"purpose": "evidence",
-"dur": 1.17,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": true,
-"card_text": "that eats your entire day",
-"read": "Punches back to the speaker rubbing his eye in visible fatigue, pairing the exhaustion gesture with the 'entire day' text for emotional proof."
-},
-{
-"i": 6,
-"purpose": "claim",
-"dur": 3.0,
-"treat": [
-"overlay_text"
-],
-"spk": true,
-"card_text": "he sold this / $100K / he / the profits / and / made an app",
-"read": "rapid word-by-word captions keep pace with speech to sell the sale price and pivot into the new venture without any cutaways, letting the number ($100K) hit hard on its own beat."
-},
-{
-"i": 8,
-"purpose": "payoff",
-"dur": 2.9,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": true,
-"card_text": "made / $20 / $20,000,000 / in the past year",
-"read": "back on the speaker for the big reveal number, the '$20' card intentionally under-delivers for a half-second before snapping to the full '$20,000,000' figure as a comedic/dramatic beat."
-},
-{
-"i": 11,
-"purpose": "claim",
-"dur": 3.47,
-"treat": [
-"overlay_text"
-],
-"spk": true,
-"card_text": "how / can / can do this / with / 0 / 0 coding experience",
-"read": "big oversized '0' graphic isolates the most surprising fact (no coding background) as its own visual beat before the explanatory text catches up."
-},
-{
-"i": 0,
-"purpose": "hook",
-"dur": 0.5,
-"treat": [
-"overlay_text"
-],
-"spk": true,
-"card_text": "HERE'S HOW",
-"read": "Cold open on the speaker's face with a bold white caption locking in the promise before any cut, so viewers commit before the payoff is shown."
-},
-{
-"i": 5,
-"purpose": "turn",
-"dur": 0.03,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": true,
-"card_text": "BUT THE",
-"read": "A snap cut to full-frame face on 'but' flags a pivot line, using the mechanical cut to physically punctuate the turn in the script."
-},
-{
-"i": 8,
-"purpose": "evidence",
-"dur": 1.5,
-"treat": [
-"overlay_text",
-"card"
-],
-"spk": true,
-"card_text": "ZOOMS / TRANSITIONS / SOUND EFFECTS",
-"read": "Feature icons (magnifier, transition arrow, speaker) stack up over the same warm-graded talking-head shot to visually tally the growing feature list without needing new footage."
-},
-{
-"i": 1,
-"purpose": "hook",
-"dur": 4.2,
-"treat": [
-"overlay_text",
-"card",
-"punch_in"
-],
-"spk": true,
-"card_text": "Hello, everyone. / Jaden Kohan / Separation Manager / LEGAL SOFT (logo)",
-"read": "Motion-blur whip-pan grabs attention on frame 1, then a fast stack of identity cards (name, title, logo) front-loads authority before any claim is made."
-},
-{
-"i": 5,
-"purpose": "claim",
-"dur": 2.87,
-"treat": [
-"overlay_text"
-],
-"spk": true,
-"card_text": "Helping them / BUILD / GROW / OPTIMIZE / their teams",
-"read": "Returns to talking head but keeps energy up with giant cycling background words timed to each verb, a no-cut way to punctuate a list."
-},
-{
-"i": 1,
-"purpose": "hook",
-"dur": 4.6,
-"treat": [
-"overlay_text",
-"sfx"
-],
-"spk": true,
-"card_text": "stop manually / YOUR CAPTIONS / I KNOW ITS COSTING [clock 01:11 -> 03:00:00]",
-"read": "Word-by-word caption build plus a fake ticking clock overlay dramatizes the time-cost claim while the speaker stays in single unbroken shot, letting the text do the pacing instead of a cut."
-},
-{
-"i": 5,
-"purpose": "close",
-"dur": 4.0,
-"treat": [
-"cut",
-"card"
-],
-"spk": false,
-"card_text": "TikTok / @socialcontentki...",
-"read": "A final cut to a TikTok-app loading/search mockup functions as a bare CTA card, prompting the viewer to search the creator's handle with no additional treatment needed since the graphic is self-explanatory."
-},
-{
-"i": 0,
-"purpose": "hook",
-"dur": 4.0,
-"treat": [
-"overlay_text",
-"sfx"
-],
-"spk": true,
-"card_text": "EDITS / today i'm going to show you how / i get clean edits just like this",
-"read": "A spinning ring graphic slams in around a bold 'EDITS' title while captions build word-by-word to state the video's premise, front-loading the promise before any edit is shown."
-},
-{
-"i": 1,
-"purpose": "payoff",
-"dur": 0.5,
-"treat": [
-"cut"
-],
-"spk": true,
-"card_text": "And it's all",
-"read": "Hard cut from desk setup to a completely different room/angle mid-sentence, delivering the 'clean edit' the hook promised as an immediate demonstrable payoff."
-},
-{
-"i": 9,
-"purpose": "close",
-"dur": 4.13,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": true,
-"card_text": "now EVERY VIDEO / I post / looks like me / tap the link",
-"read": "Cuts back to the speaker for the CTA, mirroring the opening's direct-address framing to bookend the video before the ask."
-},
-{
-"i": 11,
-"purpose": "payoff",
-"dur": 3.9,
-"treat": [
-"overlay_text"
-],
-"spk": true,
-"card_text": "AND THAT'S / MY PREMIERE EXPORT / SETTINGS",
-"read": "Summary captions restate the video's core deliverable verbatim, a recap treatment giving skimmers a plain-text takeaway even without watching the demo section."
-},
-{
-"i": 9,
-"purpose": "breath",
-"dur": 2.17,
-"treat": [
-"cut",
-"card"
-],
-"spk": false,
-"card_text": "I was amazed / how much time / it actually saves",
-"read": "A blank white card sequence pulls focus entirely onto typography, giving the reaction beat room to breathe before the demo starts."
-},
-{
-"i": 13,
-"purpose": "payoff",
-"dur": 2.9,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": true,
-"card_text": "SO IF / LEVEL UP / YOUR CONTENT / BUT DON'T / WANNA HIRE / EDITOR",
-"read": "Cut settles into a sustained clean talking-head close for the direct-address payoff line, letting per-word color changes carry emphasis without further visual noise."
-},
-{
-"i": 14,
-"purpose": "close",
-"dur": 0.9,
-"treat": [
-"card",
-"overlay_text"
-],
-"spk": true,
-"card_text": "CHECKOUT / SUBMAGIC",
-"read": "Brand logo cards drop in over the still-talking face as a soft CTA, naming the product explicitly right before the video ends."
-},
-{
-"i": 13,
-"purpose": "turn",
-"dur": 1.67,
-"treat": [
-"card",
-"overlay_text"
-],
-"spk": false,
-"card_text": "We make that seamless.",
-"read": "Full-screen statement card with drifting headshot bubbles delivers the pivot line as a standalone graphic beat for emphasis."
-},
-{
-"i": 10,
-"purpose": "breath",
-"dur": 0.8,
-"treat": [
-"cut"
-],
-"spk": true,
-"card_text": null,
-"read": "brief uncaptioned cut to a third location keeps momentum without adding new information, functioning as a visual palate-cleanser."
-},
-{
-"i": 11,
-"purpose": "payoff",
-"dur": 4.38,
-"treat": [
-"cut",
-"overlay_text",
-"card"
-],
-"spk": true,
-"card_text": "Here's the / original clip / and here's / Results",
-"read": "Return to a new speaker angle with an elegant serif 'Results' title card orbited by a sparkle animation, signaling the reveal segment with a tonal upgrade from casual captions to a polished title treatment."
-},
-{
-"i": 12,
-"purpose": "close",
-"dur": 9.13,
-"treat": [
-"cut",
-"overlay_text"
-],
-"spk": true,
-"card_text": "If you're trying / to post more consistently / but struggling / with the edit",
-"read": "A new high-angle handheld setup with italicized serif captions signals the CTA/summary section, using a more stylized caption font to feel like a testimonial-style closer distinct from the earlier casual captions."
-},
-{
-"i": 1,
-"purpose": "evidence",
-"dur": 2.57,
-"treat": [
-"cut",
-"cutaway",
-"overlay_text"
-],
-"spk": false,
-"card_text": "most auto CAPTION tools / gives you / ZERO CONTROL",
-"read": "Cuts away from the speaker to a relatable phone-scrolling shot to dramatize the frustration, escalating to a bold 'ZERO CONTROL' card as the mini-punchline of the complaint."
-},
-{
-"i": 1,
-"purpose": "evidence",
-"dur": 2.5,
-"treat": [
-"cutaway",
-"card",
-"overlay_text"
-],
-"spk": false,
-"card_text": "EDIT / 100 / 100 TIKTOKS PER HOUR",
-"read": "The face is defocused and pushed to background so the escalating counter card becomes the sole legible element, manufacturing urgency around volume before any explanation."
-},
-{
-"i": 7,
-"purpose": "turn",
-"dur": 1.07,
-"treat": [
-"cutaway",
-"card",
-"overlay_text"
-],
-"spk": false,
-"card_text": "boring parts of editing",
-"read": "A split-frame cutaway to genuine frustrated-editing footage visually literalizes 'boring parts' as a tonal pivot, breaking the studio setting."
-},
-{
-"i": 11,
-"purpose": "evidence",
-"dur": 3.17,
-"treat": [
-"cutaway",
-"card",
-"overlay_text"
-],
-"spk": false,
-"card_text": "40% Increase in law firm profits / 28% / 53% / 60% Savings",
-"read": "Data visualization dump substitutes for spoken proof, letting numbers carry the credibility beat with no speaker distraction."
-}
-],
-"source": "reference_beats",
-"note": "SEED transcribed verbatim from reference_beats. Regenerate the full 153 with build_reference_index.py where SUPABASE creds exist.",
-"family_counts_in_corpus": {
-"overlay_text": 124,
-"cut": 81,
-"cutaway": 72,
-"card": 40,
-"sfx": 14,
-"punch_in": 6
-}
+  "provenance": {
+    "annotator": "claude-sonnet-5",
+    "annotated": "2026-08-25",
+    "corpus": "reference_videos",
+    "n_videos": 10,
+    "kind": "MODEL-ANNOTATED",
+    "caveat": "These beats are a MODEL'S READING of ten videos, not a mechanical count. One annotator, one pass, no second rater, so the corpus has no measured inter-rater reliability. Two consequences: (1) a rate derived from it is an annotation statistic and must never be printed as though it were counted; (2) any comparison against a corpus annotated by a DIFFERENT model family carries an unbounded confound — trend_analyses is gemini-2.5-pro, 2026-03-16, six months and a family apart. Builder-1 found the first instance of that confound on 2026-09-09 while comparing cut rates, where two different quantities also shared one name (visual cuts 8.27/25s vs beats-ruled-cut 4.75/25s).",
+    "grades_only": "Ruled by Zac 2026-09-08: these rates GRADE, they never instruct. They must not reach the agent as a target, appear in the prompt, or be enforced as a floor at ruling time."
+  },
+  "beats_in_corpus": 153,
+  "beats": [
+    {
+      "i": 0,
+      "purpose": "hook",
+      "dur": 2.83,
+      "treat": [
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "the CAPTIONS → you're READING right → I didn't → single WORD",
+      "read": "Single continuous talking-head shot; the hook lives entirely in the escalating word-by-word caption reveal, not in the cut, making the viewer read along until the twist lands."
+    },
+    {
+      "i": 2,
+      "purpose": "evidence",
+      "dur": 0.67,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": false,
+      "card_text": "SAME FONT",
+      "read": "Very short punch-cut on a single-line card acts as a breath/list-beat, keeping the complaint list punchy without adding new visual information."
+    },
+    {
+      "i": 3,
+      "purpose": "evidence",
+      "dur": 3.03,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": false,
+      "card_text": "SAME STYLE / same boring look / as everyone else",
+      "read": "A static wide shot lets the complaint breathe while three stacked cards build the sameness argument, matching the visual widening to the widening claim."
+    },
+    {
+      "i": 4,
+      "purpose": "turn",
+      "dur": 1.37,
+      "treat": [
+        "cut",
+        "overlay_text",
+        "card"
+      ],
+      "spk": false,
+      "card_text": "in your feed / that's why / I use / SUBMAGIC",
+      "read": "New framing marks the pivot from problem to solution, ending on the bold brand-name card as the mini-payoff that closes this stretch."
+    },
+    {
+      "i": 5,
+      "purpose": "claim",
+      "dur": 5.57,
+      "treat": [
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "it auto GENERATES / my CAPTIONS / and makes them fully",
+      "read": "Returns to direct-to-camera delivery held in one continuous shot; caption ticker alone carries the pacing while the speaker makes the core product claim."
+    },
+    {
+      "i": 1,
+      "purpose": "hook",
+      "dur": 5.05,
+      "treat": [
+        "overlay_text",
+        "cut",
+        "sfx"
+      ],
+      "spk": true,
+      "card_text": "POSTED ON / TIKTOK (red, huge) / QUALITY / JUST LOOKS LIKE / TRASH (red)",
+      "read": "Rapid-fire kinetic captions punch in word-by-word, escalating from neutral white text to aggressive red on the pain word ('TRASH') then back to white on the resolution ('SOLUTION'), using color-coding to editorialize the emotional beats of the line."
+    },
+    {
+      "i": 3,
+      "purpose": "breath",
+      "dur": 0.16,
+      "treat": [
+        "cut"
+      ],
+      "spk": true,
+      "card_text": "AS A COLLEGE STUDENT / A CAREER IN VIDEOGRAPHY",
+      "read": "Three quick mechanical cuts in under 0.2s land on near-identical framing, a micro-adjustment/jump-cut cluster to keep the talking-head segment feeling alive rather than a true content change."
+    },
+    {
+      "i": 8,
+      "purpose": "turn",
+      "dur": 2.0,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "AND THIS IS / THE SAUCE / I USE",
+      "read": "Brief return to speaker builds anticipation ('the sauce') before the bitrate reveal, a classic tease-cut back to face to re-engage attention before more screen text."
+    },
+    {
+      "i": 1,
+      "purpose": "hook",
+      "dur": 2.0,
+      "treat": [
+        "overlay_text",
+        "punch_in"
+      ],
+      "spk": true,
+      "card_text": "IF YOURE NOT MAKING VIDEOS because",
+      "read": "Kinetic word-by-word caption build (NOT in red, VIDEOS in giant yellow) forces the eye to the accusation while speaker walks toward camera to build presence."
+    },
+    {
+      "i": 2,
+      "purpose": "hook",
+      "dur": 2.5,
+      "treat": [
+        "overlay_text",
+        "punch_in",
+        "sfx"
+      ],
+      "spk": true,
+      "card_text": "YOU DONT KNOW HOW TO EDIT / EXCUSE = NO GOOD",
+      "read": "Continues the callout with DONT in red for emphasis then whip-crossfades into a big yellow EXCUSE card with red NO GOOD stamp, editorializing the audience's assumed objection before he even states it."
+    },
+    {
+      "i": 4,
+      "purpose": "claim",
+      "dur": 4.55,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "And trust me. / I get it.",
+      "read": "Hard cut to a static window-lit talking-head setup builds trust/rapport tone (no punch-ins), simple burned-in captions carry the sincerity beat without visual noise."
+    },
+    {
+      "i": 5,
+      "purpose": "claim",
+      "dur": 2.13,
+      "treat": [
+        "cut",
+        "card",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "FULL SUITE OF AI TOOLS",
+      "read": "Cuts to a full-screen bold sans-serif title card to isolate and emphasize the value proposition apart from the talking head."
+    },
+    {
+      "i": 0,
+      "purpose": "hook",
+      "dur": 0.03,
+      "treat": [
+        "card"
+      ],
+      "spk": true,
+      "card_text": "captions",
+      "read": "The clip opens already mid-reveal, with the word 'captions' slammed over the speaker's face before any spoken setup — a hard, cut-in-media-res start."
+    },
+    {
+      "i": 3,
+      "purpose": "evidence",
+      "dur": 1.17,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "that eats your entire day",
+      "read": "Punches back to the speaker rubbing his eye in visible fatigue, pairing the exhaustion gesture with the 'entire day' text for emotional proof."
+    },
+    {
+      "i": 6,
+      "purpose": "claim",
+      "dur": 3.0,
+      "treat": [
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "he sold this / $100K / he / the profits / and / made an app",
+      "read": "rapid word-by-word captions keep pace with speech to sell the sale price and pivot into the new venture without any cutaways, letting the number ($100K) hit hard on its own beat."
+    },
+    {
+      "i": 8,
+      "purpose": "payoff",
+      "dur": 2.9,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "made / $20 / $20,000,000 / in the past year",
+      "read": "back on the speaker for the big reveal number, the '$20' card intentionally under-delivers for a half-second before snapping to the full '$20,000,000' figure as a comedic/dramatic beat."
+    },
+    {
+      "i": 11,
+      "purpose": "claim",
+      "dur": 3.47,
+      "treat": [
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "how / can / can do this / with / 0 / 0 coding experience",
+      "read": "big oversized '0' graphic isolates the most surprising fact (no coding background) as its own visual beat before the explanatory text catches up."
+    },
+    {
+      "i": 0,
+      "purpose": "hook",
+      "dur": 0.5,
+      "treat": [
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "HERE'S HOW",
+      "read": "Cold open on the speaker's face with a bold white caption locking in the promise before any cut, so viewers commit before the payoff is shown."
+    },
+    {
+      "i": 5,
+      "purpose": "turn",
+      "dur": 0.03,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "BUT THE",
+      "read": "A snap cut to full-frame face on 'but' flags a pivot line, using the mechanical cut to physically punctuate the turn in the script."
+    },
+    {
+      "i": 8,
+      "purpose": "evidence",
+      "dur": 1.5,
+      "treat": [
+        "overlay_text",
+        "card"
+      ],
+      "spk": true,
+      "card_text": "ZOOMS / TRANSITIONS / SOUND EFFECTS",
+      "read": "Feature icons (magnifier, transition arrow, speaker) stack up over the same warm-graded talking-head shot to visually tally the growing feature list without needing new footage."
+    },
+    {
+      "i": 1,
+      "purpose": "hook",
+      "dur": 4.2,
+      "treat": [
+        "overlay_text",
+        "card",
+        "punch_in"
+      ],
+      "spk": true,
+      "card_text": "Hello, everyone. / Jaden Kohan / Separation Manager / LEGAL SOFT (logo)",
+      "read": "Motion-blur whip-pan grabs attention on frame 1, then a fast stack of identity cards (name, title, logo) front-loads authority before any claim is made."
+    },
+    {
+      "i": 5,
+      "purpose": "claim",
+      "dur": 2.87,
+      "treat": [
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "Helping them / BUILD / GROW / OPTIMIZE / their teams",
+      "read": "Returns to talking head but keeps energy up with giant cycling background words timed to each verb, a no-cut way to punctuate a list."
+    },
+    {
+      "i": 1,
+      "purpose": "hook",
+      "dur": 4.6,
+      "treat": [
+        "overlay_text",
+        "sfx"
+      ],
+      "spk": true,
+      "card_text": "stop manually / YOUR CAPTIONS / I KNOW ITS COSTING [clock 01:11 -> 03:00:00]",
+      "read": "Word-by-word caption build plus a fake ticking clock overlay dramatizes the time-cost claim while the speaker stays in single unbroken shot, letting the text do the pacing instead of a cut."
+    },
+    {
+      "i": 5,
+      "purpose": "close",
+      "dur": 4.0,
+      "treat": [
+        "cut",
+        "card"
+      ],
+      "spk": false,
+      "card_text": "TikTok / @socialcontentki...",
+      "read": "A final cut to a TikTok-app loading/search mockup functions as a bare CTA card, prompting the viewer to search the creator's handle with no additional treatment needed since the graphic is self-explanatory."
+    },
+    {
+      "i": 0,
+      "purpose": "hook",
+      "dur": 4.0,
+      "treat": [
+        "overlay_text",
+        "sfx"
+      ],
+      "spk": true,
+      "card_text": "EDITS / today i'm going to show you how / i get clean edits just like this",
+      "read": "A spinning ring graphic slams in around a bold 'EDITS' title while captions build word-by-word to state the video's premise, front-loading the promise before any edit is shown."
+    },
+    {
+      "i": 1,
+      "purpose": "payoff",
+      "dur": 0.5,
+      "treat": [
+        "cut"
+      ],
+      "spk": true,
+      "card_text": "And it's all",
+      "read": "Hard cut from desk setup to a completely different room/angle mid-sentence, delivering the 'clean edit' the hook promised as an immediate demonstrable payoff."
+    },
+    {
+      "i": 9,
+      "purpose": "close",
+      "dur": 4.13,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "now EVERY VIDEO / I post / looks like me / tap the link",
+      "read": "Cuts back to the speaker for the CTA, mirroring the opening's direct-address framing to bookend the video before the ask."
+    },
+    {
+      "i": 11,
+      "purpose": "payoff",
+      "dur": 3.9,
+      "treat": [
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "AND THAT'S / MY PREMIERE EXPORT / SETTINGS",
+      "read": "Summary captions restate the video's core deliverable verbatim, a recap treatment giving skimmers a plain-text takeaway even without watching the demo section."
+    },
+    {
+      "i": 9,
+      "purpose": "breath",
+      "dur": 2.17,
+      "treat": [
+        "cut",
+        "card"
+      ],
+      "spk": false,
+      "card_text": "I was amazed / how much time / it actually saves",
+      "read": "A blank white card sequence pulls focus entirely onto typography, giving the reaction beat room to breathe before the demo starts."
+    },
+    {
+      "i": 13,
+      "purpose": "payoff",
+      "dur": 2.9,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "SO IF / LEVEL UP / YOUR CONTENT / BUT DON'T / WANNA HIRE / EDITOR",
+      "read": "Cut settles into a sustained clean talking-head close for the direct-address payoff line, letting per-word color changes carry emphasis without further visual noise."
+    },
+    {
+      "i": 14,
+      "purpose": "close",
+      "dur": 0.9,
+      "treat": [
+        "card",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "CHECKOUT / SUBMAGIC",
+      "read": "Brand logo cards drop in over the still-talking face as a soft CTA, naming the product explicitly right before the video ends."
+    },
+    {
+      "i": 13,
+      "purpose": "turn",
+      "dur": 1.67,
+      "treat": [
+        "card",
+        "overlay_text"
+      ],
+      "spk": false,
+      "card_text": "We make that seamless.",
+      "read": "Full-screen statement card with drifting headshot bubbles delivers the pivot line as a standalone graphic beat for emphasis."
+    },
+    {
+      "i": 10,
+      "purpose": "breath",
+      "dur": 0.8,
+      "treat": [
+        "cut"
+      ],
+      "spk": true,
+      "card_text": null,
+      "read": "brief uncaptioned cut to a third location keeps momentum without adding new information, functioning as a visual palate-cleanser."
+    },
+    {
+      "i": 11,
+      "purpose": "payoff",
+      "dur": 4.38,
+      "treat": [
+        "cut",
+        "overlay_text",
+        "card"
+      ],
+      "spk": true,
+      "card_text": "Here's the / original clip / and here's / Results",
+      "read": "Return to a new speaker angle with an elegant serif 'Results' title card orbited by a sparkle animation, signaling the reveal segment with a tonal upgrade from casual captions to a polished title treatment."
+    },
+    {
+      "i": 12,
+      "purpose": "close",
+      "dur": 9.13,
+      "treat": [
+        "cut",
+        "overlay_text"
+      ],
+      "spk": true,
+      "card_text": "If you're trying / to post more consistently / but struggling / with the edit",
+      "read": "A new high-angle handheld setup with italicized serif captions signals the CTA/summary section, using a more stylized caption font to feel like a testimonial-style closer distinct from the earlier casual captions."
+    },
+    {
+      "i": 1,
+      "purpose": "evidence",
+      "dur": 2.57,
+      "treat": [
+        "cut",
+        "cutaway",
+        "overlay_text"
+      ],
+      "spk": false,
+      "card_text": "most auto CAPTION tools / gives you / ZERO CONTROL",
+      "read": "Cuts away from the speaker to a relatable phone-scrolling shot to dramatize the frustration, escalating to a bold 'ZERO CONTROL' card as the mini-punchline of the complaint."
+    },
+    {
+      "i": 1,
+      "purpose": "evidence",
+      "dur": 2.5,
+      "treat": [
+        "cutaway",
+        "card",
+        "overlay_text"
+      ],
+      "spk": false,
+      "card_text": "EDIT / 100 / 100 TIKTOKS PER HOUR",
+      "read": "The face is defocused and pushed to background so the escalating counter card becomes the sole legible element, manufacturing urgency around volume before any explanation."
+    },
+    {
+      "i": 7,
+      "purpose": "turn",
+      "dur": 1.07,
+      "treat": [
+        "cutaway",
+        "card",
+        "overlay_text"
+      ],
+      "spk": false,
+      "card_text": "boring parts of editing",
+      "read": "A split-frame cutaway to genuine frustrated-editing footage visually literalizes 'boring parts' as a tonal pivot, breaking the studio setting."
+    },
+    {
+      "i": 11,
+      "purpose": "evidence",
+      "dur": 3.17,
+      "treat": [
+        "cutaway",
+        "card",
+        "overlay_text"
+      ],
+      "spk": false,
+      "card_text": "40% Increase in law firm profits / 28% / 53% / 60% Savings",
+      "read": "Data visualization dump substitutes for spoken proof, letting numbers carry the credibility beat with no speaker distraction."
+    }
+  ],
+  "source": "reference_beats",
+  "note": "SEED transcribed verbatim from reference_beats. Regenerate the full 153 with build_reference_index.py where SUPABASE creds exist.",
+  "family_counts_in_corpus": {
+    "overlay_text": 124,
+    "cut": 81,
+    "cutaway": 72,
+    "card": 40,
+    "sfx": 14,
+    "punch_in": 6
+  }
 }

@@ -1,28 +1,14 @@
 #!/usr/bin/env python3
 """RED proof for the localised effect measure."""
+import ast
 import os
 import shutil
 import subprocess
 import sys
 
 APP = "agentic_editor_app.py"
-# BACKUP IN MEMORY, NEVER A FILE. This was `_ORIG_SRC = "/tmp/..."` — a FIXED
-# PATH SHARED ACROSS EVERY BRANCH AND WORKTREE ON THIS MACHINE. Builder-2
-# observed it silently restore ANOTHER BRANCH'S agentic_editor_app.py over
-# their working copy: a 914-line diff, `git status` the only witness, and
-# the harness printed 19/19 RED-proven about a file it had just replaced
-# with a stranger.
-#
-# A per-branch filename does NOT fix it: the file still outlives the
-# process and can be restored from after the tree moves under it. The
-# backup must not survive the run that made it.
-#
-# THIRD SYMPTOM OF ONE DEFECT — a fixture outside the tree can be MISSING
-# (dies at import, reports nothing), DRIFTED (anchor 0x), or STALE FROM
-# ANOTHER BRANCH (this one, which reports SUCCESS while corrupting the
-# file under test). The third is worst because it is silent AND green.
-_ORIG_SRC = open(APP, encoding="utf-8").read()
-None
+_ORIG_SRC = {}   # IN MEMORY, never a file
+_ORIG_SRC.setdefault(APP, open(APP, encoding="utf-8").read())
 env = dict(os.environ, PYTHONPATH=".")
 
 
@@ -37,9 +23,19 @@ def mut(old, new, label, expect):
     if src.count(old) != 1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x")
         return False
-    open(APP, "w", encoding="utf-8").write(src.replace(old, new, 1))
+    _mutant = src.replace(old, new, 1)
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN. The check then fails for a reason
+    # unrelated to the property under test, which is a pass it did not earn.
+    # None of the other guards see it: the anchor matched, the match was code.
+    try:
+        ast.parse(_mutant)
+    except SyntaxError as _se:
+        print(f"  HARNESS FAILURE [{label}] mutant does not parse: {_se.msg} "
+              f"(line {_se.lineno}) — it never ran, so it proved nothing")
+        return False
+    open(APP, "w", encoding="utf-8").write(_mutant)
     rc, out = run()
-    open(APP, "w", encoding="utf-8").write(_ORIG_SRC)
+    open(APP, "w", encoding="utf-8").write(_ORIG_SRC[APP])
     ok = rc != 0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok:
@@ -102,9 +98,9 @@ r.append(mut('            _bx_st, _bx, _bx_why = alpha_paint_box(',
 rc, out = run()
 print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-# A FLOOR, BECAUSE all([]) IS TRUE. A red proof whose mutation list is
-# emptied — by a bad merge, a botched refactor, a commented-out block —
-# reports SUCCESS. An instrument built to prove a check CAN FAIL,
-# rendering its own absence as success. Found in 10 of 11 here and 16 of
-# 16 on Builder-2's tree: 26 of 27 across both.
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
 sys.exit(0 if r and all(r) and rc == 0 else 1)

@@ -855,6 +855,359 @@ else's laptop. Same rot, one gets looked at.
   _commit` and *never trust origin/main for what is running*: ask the system that
   holds the truth, not the copy that once agreed with it.
 
+## Standing rules earned 2026-09-09
+
+- **`or 0` ON A VALUE THAT MIGHT NOT EXIST IS A PROHIBITION WHEREVER A NUMBER
+  REACHES A REPORT.** (Ruled by Zac 2026-09-09, after the second instance.)
+  This is *probe collapse* — a failed measurement published as a confident
+  number — reduced to its smallest possible form: seven characters, on the line
+  that prints.
+
+  Two instances, both in the same week and both on numbers headed for a round
+  report. `paint_ms or 0` reported `paint 0.0s` against 458.6s of wall for six
+  rounds — a paint that was never measured, reading as *instant* and
+  indistinguishable from a real zero.
+  My own two edit-quality lines carried the same idiom on the distributions I
+  was about to publish. Neither was a typo; both were the ordinary defensive
+  reflex, applied to the one category of value where the default is a lie.
+
+  **THE RULE IS NOT "BAN `or 0`" — IT IS A DISTINCTION, AND THE DISTINCTION IS
+  THE WHOLE RULE.** `execute_plan_calls or 0` is a COUNTER: absent genuinely
+  means zero, nothing happened, the default is TRUE. `paint_ms or 0` is a
+  MEASUREMENT: absent means *unknown*, and zero is a claim the instrument never
+  made. A check that bans the idiom outright gets suppressed within a week
+  because most of its hits are counters, sums and divisor guards. Ten instances
+  are pinned by owner and reason for exactly this reason — a pin is an argument
+  on the record, not an exemption.
+
+  **THE CHECK, NAMED: `smoke_no_absent_as_zero.py`** (RED-proven by
+  `red_proof_no_absent_as_zero.py`), and its scope took three attempts, each
+  wrong in a way worth keeping:
+    * inside `print()` only — too narrow, and it missed MY OWN instance, which
+      was an assignment one line above the print;
+    * any function containing a print — too wide: 17 innocents inside the
+      3,000-line `edit`, which is how a check earns its own deletion;
+    * **def-use into a print** — the value's path, not its neighbourhood.
+
+  And the mutation lesson underneath it: **both RED mutations were defeated by a
+  `str(...)` wrapper.** `str(paint_ms or 0)` is the identical defect and the
+  naive matcher saw a call, not a fallback. Walk the WHOLE assigned expression;
+  a disguise one node deep is not a different bug.
+
+  Where a value can be absent, say which: MEASURED / ABSENT / FAILED, the same
+  three states `alpha_layer_state` returns. A report that cannot say *absent*
+  will say *zero*, and a tidy zero is the most expensive result to trust.
+
+- **A DEFAULT ON A FIELD THAT NEVER EXISTED IS THE SAME DEFECT WITH NO IDIOM TO
+  GREP FOR.** `source_fps` was read off every fixture and was never a key any
+  producer wrote — so every fixture silently took the 30fps floor, and a VFR
+  source, which has no floor at all, took it too. Nothing was wrong at the read
+  site; the field simply did not exist. Assert the KEY is present before
+  defaulting its value, or the default becomes the measurement for 100% of the
+  population and reads perfectly plausible while doing it.
+
+- **LAUNDERING: A DEFAULT AT THE PRODUCER MAKES EVERY CONSUMER-SIDE CHECK
+  STRUCTURALLY BLIND.** (Named by Zac 2026-09-09, found by the rule above one
+  commit after it was written, in its own pin table.) The third shape in this
+  family and the one no downstream guard can catch.
+
+  `float(meta['format'].get('duration') or 0)` converts *absent* into a
+  **present, well-typed 0.0** and writes it to the ledger. Downstream, the key
+  is there, the type is right, the value is fabricated, and nothing — no `is
+  None` test, no three-state read, no wider def-use scope — can tell it from a
+  measurement, because by then there is nothing left to tell. My own pinned
+  `source_duration_s` was the print at the END of that chain: removing its
+  `or 0` would have changed nothing and closed the item.
+
+  The consequences run past reports and into behaviour. The same idiom binds
+  `_vdur`, which is printed twice as a source duration AND passed as the SPAN to
+  `segment_beats_visual` and `cover_unnarrated_edges` — so an unreadable
+  duration segments a **0-second video** and the visual route returns no beats:
+  a silent total failure on 46.5% of traffic, from a missing key. It degrades a
+  plan rather than raising, which is the failure mode the boundary contract
+  already forbids for out-parameters, arriving here through a different door.
+
+  **THE FIX IS ALWAYS AT THE PRODUCER, AND A DOCSTRING STATING THE GAP BEATS
+  WIDENING THE SCOPE.** Def-use resolves within a function; laundering crosses
+  functions by design. A check that grew until it claimed to cover this would be
+  claiming something it cannot do — say the gap, and put the guard where the
+  absence is still visible.
+
+- **A STALE COMMENT IS READ AS FACT BY THE NEXT PERSON, INCLUDING THE PERSON WHO
+  WROTE IT.** (Ruled by Zac 2026-09-09.) A pin, a justification, a note beside a
+  constant — each is an ARGUMENT ON THE RECORD, and a plausible wrong one is
+  worse than none, because it is what gets re-derived next time instead of
+  checked. `"duration": "ffprobe duration into arithmetic, guarded downstream"`
+  was mine, was wrong, and described a divisor guard that was actually the beat
+  span for the whole visual route.
+
+  So when a note turns out to be wrong, **keep it in place as the correction**
+  rather than replacing it with a clean one. The wrong sentence is the evidence
+  that the class recurs; a silent overwrite leaves the next reader with a tidy
+  note and no reason to distrust the next tidy note.
+
+- **SEMANTIC VACUITY: A MUTATION CAN STOP MUTATING WITHOUT ITS ANCHOR MOVING.**
+  (Found by Builder-1 2026-09-09, in Builder-2's retrieval proof.) The second
+  kind of *a mutation that does not mutate*, and `mut()`'s occurrence guard is
+  blind to it — every previous instance in this file was an anchor that stopped
+  matching, which counting catches.
+
+  The mutation removed an unbuildable-family filter to prove the filter filters.
+  Once cutaway shipped, `_unbuildable` was EMPTY — so removing an empty filter
+  changed nothing. The anchor matched, the edit applied, the mutant was
+  byte-different and behaviourally identical, and the proof read NOT RED with
+  nothing wrong in the code. **A vacuous mutation and a blind check are
+  indistinguishable in a tally**, which is the same shape as *a failed
+  measurement and a clean result are indistinguishable once you are only reading
+  numbers*.
+
+  **THE SECOND GUARD, NAMED: a PRECONDITION per mutation.** The anchor guard
+  asks *does the target exist*; the precondition asks *does the target DO
+  anything*. Every mutation that WEAKENS OR REMOVES something declares a
+  callable over the unmutated source, evaluated BEFORE the edit — the filter's
+  operand is non-empty, the guard is present and reachable, the branch is taken
+  by something. A mutation that INJECTS a defect declares `None` and says so:
+  new material cannot be vacuous in this way, and a precondition that is always
+  true is noise that teaches the next reader to skip the field.
+
+  When a mutant passes, the precondition is what separates the two diagnoses.
+  Implemented in `red_proof_source_duration_state.py`: it prints VACUOUS,
+  refuses to count the mutation, and exits non-zero. RED-proven by falsifying a
+  precondition — 7/7 fell to 6/7 with VACUOUS named and exit 1.
+
+  It is a per-mutation obligation rather than a free rule, and that is its
+  honest cost. The alternative is a proof that goes on reporting a number.
+
+- **A BROKEN FILE THAT NOTHING MOUNTS BREAKS NOTHING UNTIL IT BREAKS
+  EVERYTHING.** `ff9311f` committed three `git stash pop` conflict blocks into
+  handler.py — the main pipeline worker — and it went unnoticed for a day
+  because every consequence landed where nobody was looking: handler.py is not
+  one of the ten mounted paths, so no round could fail on it; ~20 certs went red
+  at once, which reads as *the handler certs are red again* rather than as one
+  file; and the deploy branch never carried it, so nothing live broke. A
+  landmine for whoever merged a lane, not an outage.
+
+  Two things generalise. **A commit's diff is not confined to the file it is
+  about** — that commit was card-contract work and had no business in
+  handler.py, which is precisely why nobody looked. And **when many checks go
+  red together, find the one cause before reading any of them as findings**;
+  a class of failures is a single fact wearing a crowd.
+
+  **THE CHECK, NAMED: `smoke_tree_parses.py`** — every tracked file, no conflict
+  markers at line start, every tracked `.py` compiles. Repo-wide deliberately:
+  scoped to *the files this lane touches* it would be a population fitted to
+  today's lane, and this landed in a file its own commit was not editing.
+  RED-proven 2/2 with the real block shape, including one leg whose markers sit
+  inside a string literal so the file still parses — proving the marker scan and
+  the parse scan are independent and neither is carrying the other.
+
+  A note on the repair: taking the `Updated upstream` side of all three blocks
+  reproduced `ff9311f~1:handler.py` BYTE-IDENTICALLY. That is what made fixing a
+  file outside my region a revert of an accident rather than a choice between
+  two versions — and it is the check to run before touching anyone else's file.
+
+- **A CHECK THAT IS ALWAYS RED STOPS BEING READ, INCLUDING THE PART THAT IS
+  TRUE.** (Named by Zac 2026-09-09, on two instances in one day in two lanes.)
+  `smoke_modal_app_preflight` has been failing on a clean tree for days
+  (`lumen_first_edit_app.py:53`, a different app, awaiting a ruling), and
+  handler.py's ~20 red certs were read as *the handler certs are red again*
+  rather than as one broken file. Both are the same mechanism: a permanent red
+  becomes furniture, and the next real failure arrives inside it wearing the
+  same colour.
+
+  This is the twin of *a check that has never failed is not yet a check*. One
+  fails to fire; the other fires constantly and stops being heard. A red that
+  will not be fixed today must be either **fixed, quarantined with an owner and
+  a date, or deleted** — never left to accumulate a second meaning.
+
+- **A MUTATION CAN BE RE-TARGETED BY PROSE, AND THE COUNT GUARD CANNOT SEE IT.**
+  (Found 2026-09-09.) The third way a mutation stops mutating, and the one with
+  the nastiest cause: **documenting a defect silently re-targets the mutation
+  that hunts it.**
+
+  `red_proof_ruling_time_knowledge` leg 7 anchored on `.strip() != "1"`.
+  Rewriting `prefix_material_enabled` removed that predicate AND REPLACED IT
+  WITH A DOCSTRING SENTENCE QUOTING IT — the sentence recording the defect for
+  the next reader. The anchor still matched EXACTLY ONCE, `count != 1` passed,
+  the mutation edited a comment, and the proof printed NOT RED with nothing
+  wrong in the code.
+
+      anchor 0x                 a refactor moved it        count guard
+      anchor lands in prose     a comment now owns it      _match_is_prose
+      operand is empty          the edit is a no-op        precondition
+
+  **THE CHECK, NAMED: `_match_is_prose`** — tokenize the file, collect STRING
+  and COMMENT character spans, refuse a mutation whose single match sits wholly
+  inside one. RED-proven by aiming a mutation at the prose-only anchor: refused,
+  8/9, exit 1; restored 8/8, exit 0.
+
+  Two traps in building it, both mine. The first version blanked string
+  CONTENTS, which refused 7 of 8 legs — almost every anchor legitimately
+  contains a literal, and the question is not whether the anchor has quotes but
+  **where the match lands**. The second computed line offsets inside the token
+  loop, O(n^2) on 45,000 lines, and did not finish in 120s: *a guard nobody can
+  afford to run is not a guard.*
+
+- **AN OBSERVABLE MUST BE COMPUTED ON THE SIDE OF THE BOUNDARY IT DESCRIBES.**
+  (2026-09-09.) The container-boundary member of the absent-as-zero family, and
+  the most convincing one yet, because the value is produced by THE SAME
+  FUNCTION reading THE SAME VARIABLE — in the wrong process.
+
+  `prefix_material_enabled` gates the prefix material inside `_reference_block`,
+  called at line 9543 inside `edit`, which is `@app.function` and RUNS IN THE
+  CONTAINER. `prefix_material_state()` — the PREFIX MATERIAL report line — is
+  called at line 11632 inside `main`, which is `@app.local_entrypoint()` and
+  RUNS ON THE LOCAL MACHINE. `os.environ` is per-process, so
+  `PROMPTLY_DISABLE_...=1 ./run_round.sh` exports into the local shell, the
+  report prints REMOVED, and the container never saw the variable and builds the
+  prompt with the material fully IN.
+
+  **THE LOG DOES NOT CATCH THE FABRICATED NULL; IT CERTIFIES IT.** Both lanes
+  credited that line as the thing making an ablation arm checkable rather than
+  trusted. It was the opposite.
+
+  It survives the obvious fix in the opposite direction: pass the removal as a
+  parameter applied to `os.environ` inside `edit()`, and now the container
+  honours it while the locally-computed report prints ON. An arm that really was
+  OFF, reported as ON, is equally unattributable.
+
+  **Report the state FROM WHERE IT IS READ** — put it in the ledger inside the
+  remote function and print THAT. Then the line measures the arm that ran, and a
+  disagreement between requested and actual becomes visible instead of
+  impossible to see.
+
+- **A FLAG'S TEST SURFACE IS THE PAIR, NOT THE READER.** The same switch had a
+  smoke driving every spelling, a red proof mutating the predicate, and a
+  hardened reader that raises on anything unreadable — and **nothing anywhere
+  set the variable in the container**. A consumer with no producer, in the
+  mechanism a whole round's attribution depended on. Every leg asked whether the
+  predicate READS correctly; none asked whether anything WRITES.
+
+  This repo already has the producer/consumer law (`card_props_mismatch` sat in
+  `CONTRACT_FAILURES` with no producer and a round dropped 3/3 cards scoring
+  green). It was not applied here because a flag reads as *configuration* rather
+  than as a *wire*. It is a wire. Grep for what sets it before trusting anything
+  that reads it — and note that hardening the reader does nothing for this: a
+  perfect predicate on the wrong side of a boundary still reads the wrong
+  environment.
+
+- **A FIXTURE BELONGS IN THE TREE. A BACKUP BELONGS IN MEMORY.** (2026-09-09.)
+  Two OPPOSITE answers to what looked like one problem, and the wrong
+  convergence came from trying to agree rather than from disagreeing.
+
+  A **fixture** — a mutation block, a golden, an expected output — belongs IN
+  the tree, so it drifts with the tree or fails loudly at merge. Builder-1's
+  `/tmp` copy of a mutation block had rewrapped four lines of comment away from
+  the source and reported `anchor 0x`; moving it into `red_proof_blocks/` fixed
+  it. Deriving it from the source by anchor, which is what I did, is WORSE — an
+  anchor couples the mutation to the source's exact line shape, and line shape
+  is precisely what drifted.
+
+  A **backup** is not a fixture. It belongs IN MEMORY so it cannot survive the
+  run that made it. `red_proof_edit_quality` kept its backup at the fixed path
+  `/tmp/_eq_bak.py`, shared across every branch and worktree on the machine: a
+  run on one branch wrote it, a later run on another restored from it, and
+  `agentic_editor_app.py` was silently replaced with the other branch's content
+  — a 914-line diff — **while the harness printed 19/19 RED-PROVEN.** Eleven of
+  sixteen harnesses did this.
+
+  **AND I WAS ONE STEP FROM MOVING THE BACKUPS INTO THE REPO TO CONVERGE**,
+  which would have made them DURABLE — the exact property that caused the
+  corruption. Two lanes agreeing is not the same as two lanes being right; ask
+  what the artifact IS before copying where someone else put theirs.
+
+  **THE COMPLETE SYMPTOM SET for a fixture outside the tree**, with the caveat
+  that makes it usable:
+
+      MISSING              open() raises at import; the harness dies and reports
+                           nothing. Reads as an environment problem — a category
+                           people skip rather than investigate.
+      DRIFTED              the copy disagrees with the source; anchor 0x.
+      STALE FROM A BRANCH  a restore rewrites the file under test with another
+                           branch's content, under a GREEN tally. The worst,
+                           because it reports success.
+      INTERRUPTED          a killed run leaves the mutant on disk. **ORTHOGONAL
+                           TO BACKUP LOCATION** — in-memory restore does not
+                           survive a SIGKILL either, and no relocation reaches
+                           it. Only a POST-RUN TREE CHECK catches it.
+
+  That caveat is the point of recording the set: **do not relocate a backup to
+  fix a symptom relocation cannot reach.** A sweep that mutates source must
+  `git status --porcelain` the mutated file after EVERY harness and restore if
+  dirty, so an interrupted run announces itself instead of being found by
+  committing. Mine left `led["cut_word_intrusions"] = []` on disk — one line in
+  12,000, in the measurement whose entire job is counting cut-word intrusions,
+  and every gate passes on an empty list.
+
+  **THE CHECK, NAMED: `smoke_red_proofs_guarded.py`** — no red proof may keep a
+  source backup outside the tree, and none may exit 0 with zero legs executed
+  (all sixteen could: `all([])` is True and `0 == 0` is True). RED-proven 4/4.
+
+- **A RULE THAT LIVES INSIDE A DISPATCH CANNOT BE DRIVEN BY A CHECK — HOIST IT,
+  OR THE CHECK TESTS A COPY.** (Twice in this file now, 2026-09-10.) When the
+  logic sits inline in a tool-dispatch branch, the only way to exercise it from
+  a smoke is to reimplement it — and then the smoke proves the reimplementation
+  while the shipped path goes untested.
+
+  `spec_shortfall` was hoisted out of the dispatch for exactly this reason: *"a
+  local copy of this logic let two mutations pass green"*. The re-edit merge
+  repeated it in the same file: two mutations to the real dispatch — the
+  allow-list no longer refusing, and an empty scope becoming a free hand —
+  passed green, because `smoke_reedit_surgical` drove its own `_merge`.
+
+  **The wiring legs did not save it, and that is the second half of the rule.**
+  They were substring checks, and the mutations walked past them: `elif
+  _reedit:` -> `elif False:` leaves `led.setdefault("reedit_refused"` intact in
+  the source. A presence check cannot see control flow.
+
+  So: any rule a check must exercise is a MODULE-LEVEL PURE FUNCTION that the
+  dispatch calls. `reedit_merge` and `plan_batch` are both that shape. The test
+  for whether you have done it: can the smoke import the rule, or does it have
+  to restate it?
+
+- **A NO-OP EDIT IN THE BRANCH WHERE THE VALUES ARE ALREADY EQUAL.** A mutation
+  changed `_afford * _per` to `_n * _per` to prove an overcharge is caught — in
+  the `OK` branch, where `_afford == _n` holds by construction. Same value, no
+  behaviour change, and it had declared `_INJECTS` so the vacuity precondition
+  never ran. **An injection can still be vacuous if it lands where the two
+  expressions are provably equal**; the overcharge only exists in the PARTIAL
+  branch, which is where the mutation belonged.
+
+- **A STALE IDENTIFIER AND A REAL ONE ARE INDISTINGUISHABLE ONCE WRITTEN DOWN.**
+  (Named by Zac 2026-09-09.) I recorded round 49's mount fingerprint as
+  `91f4d58c3c1c0e51` in a PRE-REGISTRATION — a document whose entire value is
+  that it fixes facts before the numbers exist. It was the fingerprint of a
+  launch Builder-1 had KILLED. The real one was `3ca73fad8c8f279c`. The wrong
+  value sat there for an hour looking exactly like a fact, in the one class of
+  document nobody re-checks, because re-checking it after the result is what a
+  pre-registration exists to prevent.
+
+  A hash carries no evidence of its own currency. `.last_deployed_commit`, a
+  branch name, a container id, a run id, a fingerprint: each is a claim about a
+  moment, and the moment is not in the string. **Re-read an identifier from the
+  system that owns it at the moment you write it down, and say which system
+  that was** — the same instruction as *ask Modal what is deployed*, applied to
+  every identifier rather than only to deploys.
+
+  The tell is that a killed run and a live one produce identically well-formed
+  ids. This is the identifier member of the family: a failed measurement and a
+  clean result look the same once you are only reading the value.
+
+- **A VERIFICATION THAT CAN REACH THE THING IT VERIFIES IS NOT A VERIFICATION.**
+  I ran a mutating sweep to prove a tree was clean, and the sweep was the writer
+  that made it dirty. The check-of-the-check must run where it cannot touch what
+  it is checking.
+
+  **THE CHECK, NAMED: `smoke_sweep_detects_residue.py`** — it BUILDS ITS OWN
+  throwaway `git worktree`, kills a mutation inside it, and asserts the residue
+  check fires, restores, stays silent on a clean tree, is sensitive at ONE LINE
+  (the size the real incident was), and removes the worktree afterwards. An
+  earlier draft mutated the checkout it ran from; it restored correctly, and if
+  killed halfway it would have left exactly the residue it exists to detect, in
+  whatever branch happened to be checked out. **Shipping that would have put the
+  hazard into the repo under the name of the check for it.** RED-proven by
+  blinding the check: 5 legs fail, exit 1.
+
 ## Contract rules for the three-container split (PR #1)
 
 - **What crosses a boundary: artifacts staged to S3 plus plain data. Never a

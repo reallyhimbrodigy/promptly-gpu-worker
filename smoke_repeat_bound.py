@@ -26,22 +26,8 @@ import pathlib
 import sys
 import types
 
-_m = types.ModuleType("modal")
-
-
-class _S:
-    def __init__(s, *a, **k): pass
-    def __getattr__(s, n): return _S()
-    def __call__(s, *a, **k): return _S()
-    def function(s, *a, **k): return lambda f: f
-    def local_entrypoint(s, *a, **k): return lambda f: f
-
-
-for _n in ("App", "Image", "Secret", "Volume", "Cls", "Function"):
-    setattr(_m, _n, _S())
-_m.is_local = lambda: True
-_m.enable_output = _S()
-sys.modules.setdefault("modal", _m)
+import modal_stub                                         # noqa: E402
+modal_stub.install()
 import agentic_editor_app as A                                    # noqa: E402
 
 fails = []

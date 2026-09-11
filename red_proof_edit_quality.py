@@ -1,13 +1,9 @@
 #!/usr/bin/env python3
 """RED proof: the truncation cure, and the three edit-quality measures."""
+import ast
 import os, shutil, subprocess, sys
-APP = "agentic_editor_app.py"
-# BACKUP IN MEMORY, NEVER A SHARED FILE — see red_proof_alpha_state.py for
-# the full note. A "/tmp/..." backup path is shared across every branch and
-# worktree on this machine; Builder-2 watched one silently restore another
-# branch's app over their working copy and then print 19/19 RED-proven.
-_ORIG_SRC = open(APP, encoding="utf-8").read()
-None
+APP = "agentic_editor_app.py"; _ORIG_SRC = {}   # IN MEMORY, never a file
+_ORIG_SRC.setdefault(APP, open(APP, encoding="utf-8").read())
 env = dict(os.environ, PYTHONPATH=".")
 
 
@@ -21,8 +17,18 @@ def mut(old, new, label, expect):
     src = open(APP, encoding="utf-8").read()
     if src.count(old) != 1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
-    open(APP, "w", encoding="utf-8").write(src.replace(old, new, 1))
-    rc, out = run(); open(APP, "w", encoding="utf-8").write(_ORIG_SRC)
+    _mutant = src.replace(old, new, 1)
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN. The check then fails for a reason
+    # unrelated to the property under test, which is a pass it did not earn.
+    # None of the other guards see it: the anchor matched, the match was code.
+    try:
+        ast.parse(_mutant)
+    except SyntaxError as _se:
+        print(f"  HARNESS FAILURE [{label}] mutant does not parse: {_se.msg} "
+              f"(line {_se.lineno}) — it never ran, so it proved nothing")
+        return False
+    open(APP, "w", encoding="utf-8").write(_mutant)
+    rc, out = run(); open(APP, "w", encoding="utf-8").write(_ORIG_SRC[APP])
     ok = rc != 0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok:
@@ -100,24 +106,33 @@ r.append(mut('    led["placement_collisions"] = placement_collisions(led.get("_p
 # print() carrying the label EXISTS, not that it executes. That limit is real
 # and stated rather than papered over; what the check guards is "nobody wrote
 # the print", which is the defect that actually happened.
-# THE BLOCKS LIVE IN THE REPO, NOT /tmp.
+# DERIVED FROM THE SOURCE, NOT FROM /tmp. These were two scratch files I wrote
+# while authoring this mutation. They are long gone, so `open()` raised at
+# IMPORT time and THE WHOLE HARNESS DIED — legs 1 through 13 never ran either,
+# and this proof has been reporting nothing for as long as the files have been
+# missing. A red proof that cannot run is a check that has stopped being a
+# check while still sitting in the suite with a name that says otherwise.
 #
-# These were read from /tmp/block_old.txt and /tmp/block_new.txt — scratch files
-# outside version control. /tmp is cleared on reboot, so this proof was one
-# restart away from reporting HARNESS FAILURE forever, and the failure mode is
-# the quiet one: mut() finds 0 occurrences, says "anchor 0x", and the leg stops
-# proving anything while every other leg still reads green.
-#
-# It already half-happened today: the source drifted from the scratch copy by
-# four lines of comment rewrap and the proof went red with nothing wrong in the
-# code it guards. An anchor that lives outside the tree cannot be kept in step
-# with the tree by anything but memory.
-_BLOCKS = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                       "red_proof_blocks")
-_OLD_BLOCK = open(os.path.join(_BLOCKS,
-                               "edit_quality_cut_distribution_old.txt")).read()
-_NEW_BLOCK = open(os.path.join(_BLOCKS,
-                               "edit_quality_cut_distribution_new.txt")).read()
+# The block is now located by anchor and the mutant built by deleting its
+# print() calls, so the mutation travels with the code it mutates.
+_APPSRC = open(APP, encoding="utf-8").read()
+_B0 = _APPSRC.index("        if _fl is None:\n")
+_B1 = _APPSRC.index("   MEASURED, no threshold\")\n", _B0) + len("   MEASURED, no threshold\")\n")
+_OLD_BLOCK = _APPSRC[_B0:_B1]
+# Kill BOTH prints — the block has a MEASURED and an UNMEASURED branch and
+# removing one leaves the other, which is why a single-print mutation could not
+# fire. Replaced with a pass in each branch so the mutant still parses; the
+# ast.parse guard would refuse it otherwise, which is the guard working.
+_NEW_BLOCK = """        if _fl is None:
+            pass
+        else:
+            _above = [x for x in _cwi if x.get("intrusion_ms", 0) > _fl]
+            pass
+"""
+assert _OLD_BLOCK.count("print(") == 2, (
+    "expected exactly two prints in the CUT INTRUSIONS block, found "
+    f"{_OLD_BLOCK.count('print(')} — the block moved and this mutation would "
+    "no longer be testing what it claims")
 r.append(mut(_OLD_BLOCK, _NEW_BLOCK,
              "neither branch prints the cut distribution",
              "CUT INTRUSIONS is PRINTED"))
@@ -168,11 +183,19 @@ r.append(mut("                 if not _off and not _ung and _could_fail == 0 els
              "UNEXERCISED stops keying on cards that could have failed",
              "UNEXERCISED keys on cards that could have failed"))
 
+# 19. THE `or 0` IDIOM RETURNS on a denominator — Builder-1's paint_ms defect,
+#     in my lines, on the numbers Zac asked me to report.
+r.append(mut('        _tot = (r.get("ledger") or {}).get("cut_boundaries_total")\n'
+             '        _tot_s = "?" if _tot is None else str(_tot)',
+             '        _tot = (r.get("ledger") or {}).get("cut_boundaries_total") or 0\n'
+             '        _tot_s = str(_tot)',
+             "a never-written denominator prints as a measured zero again",
+             "no measure I report uses"))
 rc, out = run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-# A FLOOR, BECAUSE all([]) IS TRUE. A red proof whose mutation list is
-# emptied — by a bad merge, a botched refactor, a commented-out block —
-# reports SUCCESS. An instrument built to prove a check CAN FAIL,
-# rendering its own absence as success. Found in 10 of 11 here and 16 of
-# 16 on Builder-2's tree: 26 of 27 across both.
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
 sys.exit(0 if r and all(r) and rc == 0 else 1)

@@ -1,11 +1,8 @@
+import ast
 import os, shutil, subprocess, sys
 APP="agentic_editor_app.py"; CERT="cert_mg_prop_keys.py"; CAT="knowledge/05_motion_graphics.md"
-# BACKUP IN MEMORY, NEVER A SHARED FILE — see red_proof_alpha_state.py for
-# the full note. A "/tmp/..." backup path is shared across every branch and
-# worktree on this machine; Builder-2 watched one silently restore another
-# branch's app over their working copy and then print 19/19 RED-proven.
-_ORIG={p: open(p, encoding="utf-8").read() for p in (APP,CERT,CAT)}
-for p,b in _ORIG.items(): shutil.copy(p,b)
+BAKS={p:"/tmp/_cl_"+os.path.basename(p) for p in (APP,CERT,CAT)}
+for p,b in BAKS.items(): shutil.copy(p,b)
 env=dict(os.environ,PYTHONPATH=".")
 def run(s):
     r=subprocess.run([sys.executable,s],capture_output=True,text=True,env=env)
@@ -14,8 +11,20 @@ def mut(path,old,new,label,expect,smoke):
     src=open(path,encoding="utf-8").read()
     if src.count(old)!=1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
-    open(path,"w",encoding="utf-8").write(src.replace(old,new,1))
-    rc,out=run(smoke); open(path, "w", encoding="utf-8").write(_ORIG[path])
+    _mutant=src.replace(old,new,1)
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN — it fails the check for a reason
+    # unrelated to the property, which is a pass it did not earn.
+    # ONLY FOR PYTHON TARGETS. This harness mutates a MARKDOWN catalogue and a
+    # JSON index as well as source, and ast.parse on markdown fails every time
+    # — my first version of this guard turned a working harness red on its own
+    # first run. A rule applied without asking what it is being applied to.
+    if str(path).endswith(".py"):
+        try: ast.parse(_mutant)
+        except SyntaxError as _se:
+            print(f"  HARNESS FAILURE [{label}] mutant does not parse: "
+                  f"{_se.msg} — it never ran, so it proved nothing"); return False
+    open(path,"w",encoding="utf-8").write(_mutant)
+    rc,out=run(smoke); shutil.copy(BAKS[path],path)
     ok=rc!=0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
     if not ok: print(f"      expected {expect!r}")
@@ -36,9 +45,9 @@ for s in (CERT,"smoke_card_choice_retired.py"):
     rc,out=run(s); print(f"RESTORED {s} exit={rc}")
     if rc!=0: print(out); sys.exit(1)
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-# A FLOOR, BECAUSE all([]) IS TRUE. A red proof whose mutation list is
-# emptied — by a bad merge, a botched refactor, a commented-out block —
-# reports SUCCESS. An instrument built to prove a check CAN FAIL,
-# rendering its own absence as success. Found in 10 of 11 here and 16 of
-# 16 on Builder-2's tree: 26 of 27 across both.
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
 sys.exit(0 if r and all(r) else 1)

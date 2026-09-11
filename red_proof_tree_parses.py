@@ -6,6 +6,7 @@ ff9311f committed into handler.py — rather than a synthetic broken file, so th
 proof shows the check catching the thing that happened, in the state it
 happened in.
 """
+import ast
 import pathlib
 import subprocess
 import sys
@@ -55,6 +56,24 @@ for label, block, expects in MUTATIONS:
         harness.append(f"{label}: mutation was a no-op")
         print(f"  HARNESS FAILURE  {label}  :: nothing changed")
         continue
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN. Leg 1 here deliberately mutates
+    # handler.py into something that does NOT parse — that IS the defect under
+    # test — so this harness asserts the mutant is unparseable exactly when the
+    # leg says it should be, rather than refusing every mutant that fails to
+    # compile. The guard is the same question, asked with the expected answer
+    # stated: "does this mutant compile, and did I mean it to?"
+    _parses = True
+    try:
+        ast.parse(mutated)
+    except SyntaxError:
+        _parses = False
+    if _parses is not ("DOES NOT PARSE" not in " ".join(expects)):
+        harness.append(f"{label}: mutant parse state {_parses} contradicts the "
+                       f"leg's own expectation")
+        print(f"  HARNESS FAILURE  {label}  :: the mutant "
+              f"{'parses' if _parses else 'does not parse'}, which contradicts "
+              f"what this leg claims to be testing")
+        continue
     TARGET.write_text(mutated)
     mrc, mout = run()
     TARGET.write_text(ORIG)
@@ -74,9 +93,9 @@ frc, _ = run()
 print(f"\nRESTORED exit={frc}")
 print(f"{red}/{len(MUTATIONS)} RED-proven"
       + (f"   HARNESS FAILURES: {harness}" if harness else ""))
-# A FLOOR, BECAUSE all([]) IS TRUE. A red proof whose mutation list is
-# emptied — by a bad merge, a botched refactor, a commented-out block —
-# reports SUCCESS. An instrument built to prove a check CAN FAIL,
-# rendering its own absence as success. Found in 10 of 11 here and 16 of
-# 16 on Builder-2's tree: 26 of 27 across both.
-sys.exit(0 if MUTATIONS and red == len(MUTATIONS) and not harness and frc == 0 else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if red and red == len(MUTATIONS) and not harness and frc == 0 else 1)

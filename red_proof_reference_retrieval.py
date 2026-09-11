@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """RED proof: every absence must stay spoken, and the filter must stay on."""
+import ast
 import os, shutil, subprocess, sys
 APP="agentic_editor_app.py"; IDX="reference_index.json"
-# BACKUP IN MEMORY, NEVER A SHARED FILE — see red_proof_alpha_state.py for
-# the full note. A "/tmp/..." backup path is shared across every branch and
-# worktree on this machine; Builder-2 watched one silently restore another
-# branch's app over their working copy and then print 19/19 RED-proven.
-_ORIG = {}   # path -> content, in memory, per run
-_ORIG.setdefault(APP, open(APP, encoding="utf-8").read()); _ORIG.setdefault(IDX, open(IDX, encoding="utf-8").read())
+# IN MEMORY, NEVER FILES — a fixed /tmp backup is shared across branches
+# and worktrees, and a stale restore rewrites the file under test.
+_ORIG = {APP: open(APP, encoding="utf-8").read(),
+         IDX: open(IDX, encoding="utf-8").read()}
 env=dict(os.environ,PYTHONPATH=".")
 def run():
     r=subprocess.run([sys.executable,"smoke_reference_retrieval.py"],
@@ -15,10 +14,21 @@ def run():
     return r.returncode, r.stdout+r.stderr
 def mut(path,old,new,label,expect):
     src=open(path,encoding="utf-8").read()
-    _ORIG.setdefault(path, src)          # in memory, first touch, per run
     if src.count(old)!=1:
         print(f"  HARNESS FAILURE [{label}] anchor {src.count(old)}x"); return False
-    open(path,"w",encoding="utf-8").write(src.replace(old,new,1))
+    _mutant=src.replace(old,new,1)
+    # A MUTANT THAT DOES NOT PARSE NEVER RAN — it fails the check for a reason
+    # unrelated to the property, which is a pass it did not earn.
+    # ONLY FOR PYTHON TARGETS. This harness mutates a MARKDOWN catalogue and a
+    # JSON index as well as source, and ast.parse on markdown fails every time
+    # — my first version of this guard turned a working harness red on its own
+    # first run. A rule applied without asking what it is being applied to.
+    if str(path).endswith(".py"):
+        try: ast.parse(_mutant)
+        except SyntaxError as _se:
+            print(f"  HARNESS FAILURE [{label}] mutant does not parse: "
+                  f"{_se.msg} — it never ran, so it proved nothing"); return False
+    open(path,"w",encoding="utf-8").write(_mutant)
     rc,out=run(); open(path,"w",encoding="utf-8").write(_ORIG[path])
     ok=rc!=0 and expect in out
     print(f"  {'RED ok ' if ok else 'NOT RED'} [{label}] exit={rc}")
@@ -32,25 +42,11 @@ r=[]
 #    derivation, so the old anchor no longer existed and the harness said
 #    "anchor 0x" rather than counting it RED. A refactor is exactly where a
 #    mutation stops applying.
-# THIS MUTATION WENT VACUOUS THE DAY CUTAWAY SHIPPED, and that is worth stating
-# rather than quietly reversing. It removed the unbuildable filter to prove the
-# filter filters — but in a tree where cutaway IS rulable, `_unbuildable` is
-# EMPTY and removing an empty filter changes nothing. The mutant was
-# byte-different and behaviourally identical, so the proof read NOT RED with
-# nothing wrong.
-#
-# A mutation that does not mutate proves nothing — and this is the subtler form
-# of it: the anchor still matched, the edit still applied, and the SEMANTICS had
-# gone no-op underneath. Counting occurrences cannot catch that.
-#
-# So it is inverted to the defect that is live in THIS tree: the filter drops
-# examples the agent CAN rule. The smoke now asserts cutaway examples appear
-# exactly when cutaway is rulable, so suppressing them must fire it.
 r.append(mut(APP,
     '             or not (_unbuildable & set(x.get("treat") or []))]',
-    '             or not set(x.get("treat") or []) & {"cutaway"}]',
-    "the filter suppresses a family the agent CAN rule",
-    "cutaway examples appear exactly when cutaway is rulable"))
+    '             or True]',
+    "cutaway beats are retrieved again",
+    "no retrieved example places a cutaway"))
 
 # 2. transition returns an empty list instead of saying nothing exists.
 r.append(mut(APP,
@@ -102,24 +98,40 @@ r.append(mut(APP, '       .add_local_file(_REFERENCE_INDEX_SRC, "/root/reference
     "the index is no longer mounted into the image",
     "mounted via add_local_file, asserted on the CALL"))
 # 9. THE HARDCODE COMES BACK — correct today, wrong the day cutaway ships.
-r.append(mut(APP, '    _unbuildable = reference_unbuildable()',
-    '    _unbuildable = {"cutaway"}',
-    "the unbuildable set is hardcoded again",
+#
+# RE-ANCHORED 2026-09-10. `_unbuildable = reference_unbuildable()` now appears
+# TWICE: once in reference_examples_for and once in the purpose-indexed
+# _reference_block I added the same day. The anchor guard refused the mutation
+# with `anchor 2x` rather than counting it RED — a refactor of mine orphaning a
+# mutation, caught by the guard that exists for exactly that.
+#
+# Anchored on the BLOCK's site, since that is the one smoke_reference_retrieval
+# exercises: it reads the assembled block and checks no unbuildable example
+# survives into it.
+r.append(mut(APP, '''        _lines.append("  (index is PARTIAL: %s)" % _meta.get("why"))
+    _unbuildable = reference_unbuildable()''',
+    '''        _lines.append("  (index is PARTIAL: %s)" % _meta.get("why"))
+    _unbuildable = {"cutaway"}''',
+    "the unbuildable set is hardcoded again (BLOCK)",
+    "the BLOCK also calls the derivation"))
+# 9b. THE SAME HARDCODE IN THE OTHER SITE. Two call sites, two mutations —
+#     guarding one and trusting the other is how half a surface goes unwatched.
+r.append(mut(APP, '''    _p = str(purpose or "").lower()
+    _unbuildable = reference_unbuildable()''',
+    '''    _p = str(purpose or "").lower()
+    _unbuildable = {"cutaway"}''',
+    "the unbuildable set is hardcoded again (RETRIEVAL)",
     "the retrieval CALLS the derivation"))
 # 10. The derivation stops reading the enum, so a shipped family stays filtered.
 r.append(mut(APP, '    _ours = {v for k, v in REFERENCE_FAMILY_NAME.items()\n             if v and k in _rulable}',
     '    _ours = {v for k, v in REFERENCE_FAMILY_NAME.items()\n             if v and k in _rulable and k != "cutaway"}',
     "a shipped family never leaves the unbuildable set",
-    # The leg patches whichever direction THIS tree allows: cutaway ships here,
-    # so the live assertion is that removing it from the enum makes it
-    # unbuildable again. The add-direction wording only existed in a tree
-    # where cutaway was absent.
-    "a family LEAVING the enum joins the unbuildable set"))
+    "a family joining the enum leaves the unbuildable set"))
 rc,out=run(); print(f"RESTORED exit={rc}")
 print(f"\n{sum(r)}/{len(r)} RED-proven")
-# A FLOOR, BECAUSE all([]) IS TRUE. A red proof whose mutation list is
-# emptied — by a bad merge, a botched refactor, a commented-out block —
-# reports SUCCESS. An instrument built to prove a check CAN FAIL,
-# rendering its own absence as success. Found in 10 of 11 here and 16 of
-# 16 on Builder-2's tree: 26 of 27 across both.
-sys.exit(0 if r and all(r) and rc==0 else 1)
+# A HARNESS WITH NO LEGS MUST NOT EXIT 0. all([]) is True and 0 == 0 is
+# True, so every red proof in this repo reported success on an empty leg
+# list — the empty-set rule, sixteen times, inside the instruments built
+# to catch exactly this. A suite PASS has to mean "ran and passed", not
+# "did not run".
+sys.exit(0 if r and all(r) and rc == 0 else 1)
