@@ -551,6 +551,69 @@ def arc_jobs_teach(enum_values):
     return _txt
 
 
+def component_selection_arrows(doc="05_motion_graphics.md", min_arrows=20):
+    """(state, [(condition, component)], why) — the catalogue's own selection table.
+
+    THE CATALOGUE STATES SELECTION AS ARROWS, mid-paragraph, in the FITS/FIGHTS
+    lines: "Static numbers -> StatCard", "scattered hand-written notes ->
+    StickyNotes", "an ordered ranked list -> RankedList", "one bar toward a goal
+    -> ProgressBar". 39 of them across 21 components, and a heading sweep
+    reached none.
+
+    This is the complement to the two surfaces already wired. The WHEN
+    conditions say which QUESTION a beat asks; the content keys say which
+    component a given payload selects; these say what each component is FOR in
+    the agent's own terms — which is the half that was missing, because an agent
+    that knows eight questions and ten payload keys still has to decide that a
+    ranked list is what this moment wants.
+
+    ABSENT BELOW min_arrows, because the arrows are a prose convention and a
+    rewrite could drop them silently. A table that quietly shrank to three
+    entries would read as a catalogue with three selectable components.
+    """
+    import re as _re
+    try:
+        _txt = open(os.path.join(_KNOWLEDGE_DIR, doc), encoding="utf-8").read()
+    except OSError as _e:
+        return ("FAILED", [], "cannot read %s: %s" % (doc, _e))
+    _pat = _re.compile(r"([^.\n→*•]{6,70}?)\s*→\s*([A-Z][A-Za-z]+)")
+    _out, _seen = [], set()
+    for _m in _pat.finditer(_txt):
+        _cond = " ".join(_m.group(1).split())
+        _comp = _m.group(2)
+        if _comp not in VALID_MG_TYPES:
+            continue
+        # trim the leading fragment a sentence boundary leaves behind
+        _cond = _re.sub(r"^[^A-Za-z0-9]+", "", _cond)
+        _cond = _re.sub(r"^(?:pass the card label|one short word reads best)\.?\s*",
+                        "", _cond, flags=_re.I).strip()
+        if len(_cond) < 4 or (_cond.lower(), _comp) in _seen:
+            continue
+        _seen.add((_cond.lower(), _comp))
+        _out.append((_cond, _comp))
+    if len(_out) < min_arrows:
+        return ("ABSENT", _out,
+                "only %d selection arrows found in %s (expected at least %d) — "
+                "the prose convention changed, and a table that quietly shrank "
+                "would read as a catalogue with that many selectable components"
+                % (len(_out), doc, min_arrows))
+    return ("MEASURED", _out, "")
+
+
+_ARROW_STATE, COMPONENT_ARROWS, _ARROW_WHY = component_selection_arrows()
+
+
+def component_arrows_teach():
+    """The selection table as one line, or a named absence."""
+    if _ARROW_STATE != "MEASURED":
+        return ("THE CATALOGUE'S SELECTION TABLE COULD NOT BE READ (%s) — pick "
+                "by the content key instead." % _ARROW_WHY)
+    return ("WHAT EACH COMPONENT IS FOR, from the catalogue's own FITS/FIGHTS "
+            "lines: " + "; ".join("%s -> %s" % (_c, _t)
+                                  for _c, _t in COMPONENT_ARROWS)
+            + ". [05_motion_graphics, wired 2026-09-11]")
+
+
 def mg_unique_prop_owner(prop_keys=None):
     """{prop key: component} for every key declared by EXACTLY ONE component.
 
@@ -2834,7 +2897,8 @@ KNOWLEDGE_TOOLS = [{
                                            "figure or PullQuote for a phrase, "
                                            "which is two of thirty-one. "
                                            "[05_motion_graphics, wired "
-                                           "2026-09-11]")},
+                                           "2026-09-11] "
+                                         + component_arrows_teach())},
                                  # WHICH COMPONENT, and its props. This is the
                                  # one family whose TYPE the harness cannot
                                  # derive: a quoted headline number is a

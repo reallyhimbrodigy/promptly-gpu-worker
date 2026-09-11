@@ -229,11 +229,30 @@ keyword filter measured the prose style rather than the rules.
 
 `FOREIGN` drops sentences naming the OLD pipeline's schema — `key_moments`,
 `broll_clips`, `emphasis_moments`, `cut_refinements`, `zoom_effect`,
-`word_indices`, `durationMs`. **That exclusion is the other half of the
-finding: this corpus was written for a different pipeline**, and a rule naming a
-field this lane does not have cannot be wired without editorial translation.
-Extraction reaches the 159 that survive; the rest need someone to decide what
-they mean here.
+`word_indices`, `durationMs`.
+
+**CORRECTION, MEASURED 2026-09-11: that filter removes SIX sentences, not the
+82.** I wrote that 241 became 159 "by dropping the old pipeline's schema" and
+never measured which filter did the work. The exact decomposition:
+
+| excluded because | n |
+|---|---|
+| names NO lane enum value at all | **66** |
+| names a foreign schema field | **6** |
+| already reachable | 10 |
+| **total excluded** | **82** |
+
+So the corpus being written for a different pipeline is real but SMALL — six
+sentences. The large exclusion is 66 rule-shaped sentences that name no value
+this lane rules on: transitions, caption styles, cleanup requests, event
+budgets. Those are craft for families the harness owns or that this lane
+handles differently, and they need a per-family read rather than a schema
+translation.
+
+That is the third time in this file I have stated a filter's effect without
+measuring which filter produced it. The pattern is worth the space: **a funnel
+reported as one number hides which stage did the work**, and the stage that did
+the work here was not the one I named.
 
 ## What was wired from it
 
@@ -281,3 +300,62 @@ So neither document is wrong and neither needs correcting. The thing worth
 carrying forward is that a single enum value can be governed by two families'
 rules, and checking one document would have produced a confident wrong answer
 in either direction.
+
+
+---
+
+# ADDENDUM 2026-09-11 (4) — the selection table, and what the 82 would take
+
+## Wired: the catalogue's own selection arrows
+
+`05_motion_graphics` states selection as arrows, mid-paragraph, inside the
+FITS/FIGHTS lines: **37 of them across 21 components.** A heading sweep reached
+none.
+
+    Static numbers -> StatCard            one bar toward a goal -> ProgressBar
+    scattered hand-written notes ->       an ordered ranked list -> RankedList
+      StickyNotes                         a continuous scrolling ticker ->
+    unordered keyword tags ->               PillMarquee
+      PillCluster                         attributed quotes -> EditorialQuote
+    Phone events -> Notification          multi-message exchanges -> ChatThread
+
+**This is the half that was missing.** The WHEN conditions say which question a
+beat asks; the content keys say which component a payload selects; these say
+what each component is FOR. An agent that knows eight questions and ten payload
+keys still has to decide that a ranked list is what this moment wants.
+
+`component_selection_arrows()` reports ABSENT below 20 arrows, because they are
+a prose convention and a rewrite could drop them silently — a table that shrank
+to three would read as a catalogue with three selectable components.
+
+`card_condition`'s description is now 664 tokens and the whole tool list 5,126.
+
+## What the 82 would take, by the reason each was excluded
+
+**6 need schema translation, and the mapping is short:**
+
+| foreign field | what it is here |
+|---|---|
+| `key_moments`, `emphasis_moments` | the beats ruled `zoom` — this lane rules per beat rather than keeping a separate peak ledger, so "1:1 with key_moments" becomes "one zoom per beat that earns it" |
+| `cut_refinements` | `cut` = keep/cut, per beat |
+| `zoom_effect` | `zoom_arc` plus the harness's type derivation |
+| `editorial_vision` | `set_spec.why`, the vibe |
+| `word_indices`, `durationMs`, `originX` | **nothing** — the harness derives every timing and geometry, so these rules have no addressee here and translating them would invent a field |
+
+Five of the six are translatable by someone who knows both schemas; the sixth
+class has no target and should be marked as such rather than left looking
+pending.
+
+**66 name no value this lane rules on** — transitions (the harness picks from
+measured room), caption styles (harness-chosen), cleanup requests, event
+budgets. These are not translation work. Each needs a per-family decision about
+whether this lane should expose the choice at all, and that is Zac's call rather
+than an extraction.
+
+**10 are already reachable.**
+
+So the honest answer to "what would the 82 take": **six schema translations, of
+which five have a target; and sixty-six product decisions about which families
+this lane should let the agent choose.** Neither is a sweep, and calling the
+whole 82 "craft written against a dead schema" would have been wrong by an
+order of magnitude — which is the correction recorded above.

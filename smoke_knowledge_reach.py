@@ -132,6 +132,28 @@ check("the rules reach the zoom_arc field text",
 check("a failed extraction degrades to PARTIAL rather than silence",
       "PARTIAL:" in pathlib.Path("agentic_editor_app.py").read_text())
 
+# THE SELECTION ARROWS — the half that was missing. The WHEN conditions say
+# which question a beat asks and the content keys say which component a payload
+# selects; these say what each component is FOR.
+_arw_state, _arw, _arw_why = A.component_selection_arrows()
+check("the catalogue's selection arrows are found",
+      _arw_state == "MEASURED", _arw_why)
+check("at least 30 arrows across at least 18 components",
+      len(_arw) >= 30 and len({_t for _c, _t in _arw}) >= 18,
+      "%d arrows, %d components" % (len(_arw), len({_t for _c, _t in _arw})))
+check("every arrow names a REAL component",
+      all(_t in A.VALID_MG_TYPES for _c, _t in _arw),
+      "an arrow naming a component that does not exist offers a capability "
+      "that cannot fire: %s"
+      % sorted({_t for _c, _t in _arw} - set(A.VALID_MG_TYPES)))
+check("the table reaches the card_condition field",
+      "Static numbers" in json.dumps(A.KNOWLEDGE_TOOLS),
+      "extracted and not delivered is the measured-table-with-no-reader defect")
+check("a shrunken table reports ABSENT rather than a short list",
+      A.component_selection_arrows(min_arrows=999)[0] == "ABSENT",
+      "the arrows are a prose convention; a rewrite that dropped them would "
+      "read as a catalogue with three selectable components")
+
 check("the census is on the record", DOC.exists())
 if DOC.exists():
     _t = DOC.read_text()
