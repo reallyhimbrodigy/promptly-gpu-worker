@@ -213,6 +213,125 @@ def _mg_props_teach():
 MG_PROPS_TEACH = _mg_props_teach()
 
 
+def mg_conditions(path=None):
+    """{condition: [components]} — EXTRACTED FROM THE CATALOGUE, never typed.
+
+    THE CATALOGUE ALREADY ANSWERS THE SELECTION QUESTION and the agent has never
+    seen it. `knowledge/05_motion_graphics.md` is organised under eight
+    condition headings — WHEN A NUMBER LANDS, WHEN A CLAIM GETS A VERDICT OR
+    STAMP, WHEN TIME OR SEQUENCE IS THE STORY — and every documented component
+    sits under the question it answers. That is the discriminator
+    `derive_card_type` does not have, written down for months, in a document
+    `read_knowledge` has been called ZERO times on.
+
+    Third instance of the same class: the overlay rule that stopped talking_head
+    subtitling itself, the card_props shape that cost three rounds of zero
+    cards, and this. A rule in a document the agent does not open is
+    indistinguishable from a rule nobody wrote.
+
+    DERIVED, so a catalogue edit cannot leave this behind — the repo's standing
+    rule after the hand-copied asset tables.
+    """
+    import re as _re
+    _p = path or os.path.join(_KNOWLEDGE_DIR, "05_motion_graphics.md")
+    try:
+        _txt = open(_p, encoding="utf-8").read()
+    except OSError as _e:
+        return ("FAILED", {}, "cannot read the catalogue: %s" % _e)
+    _heads = [(m.start(), m.group(1).strip())
+              for m in _re.finditer(r"──\s*(WHEN [^─]+?)\s*──", _txt)]
+    if not _heads:
+        return ("ABSENT", {},
+                "the catalogue carries no WHEN headings — the selection "
+                "structure this reads is gone, and a silent {} would read as "
+                "'no conditions' rather than 'the source changed shape'")
+    _out = {_h: [] for _p2, _h in _heads}
+    for _m in _re.finditer(r"\*\*([A-Z][A-Za-z]+)\*\*\s*\(", _txt):
+        _prev = [_h for _p2, _h in _heads if _p2 < _m.start()]
+        if not _prev:
+            continue                    # documented before the first heading
+        _c = _m.group(1)
+        if _c not in _out[_prev[-1]]:
+            _out[_prev[-1]].append(_c)
+    # DOCUMENT ORDER IS KEPT, NOT SORTED. The catalogue states primacy by
+    # ordering and by its own words — "DropCard: the floating-card sibling of
+    # DropBanner" — so the first component documented under a condition is the
+    # one it answers with by default. Sorting alphabetically threw that away and
+    # would have made the default a matter of spelling.
+    return ("MEASURED", {_k: _v for _k, _v in _out.items() if _v}, "")
+
+
+def mg_unique_prop_owner(prop_keys=None):
+    """{prop key: component} for every key declared by EXACTLY ONE component.
+
+    THE COMPONENT IS IDENTIFIED BY WHAT IT IS GIVEN. 9 of the 10 content keys
+    in the catalogue are unique — `messages` is only ChatThread, `notes` only
+    StickyNotes, `bars` only BarRace — and every variant carries a unique
+    distinguishing prop too: `firstSide` only TimelineRoadmap, `step` only
+    StepDivider, `titleLead` only DropCard. So the selection is mechanical and
+    nothing here is taste anyone invented.
+
+    DERIVED FROM MG_PROP_KEYS, which is itself generated from the components.
+    A new component with a new content key becomes selectable the day it lands.
+    """
+    _P = prop_keys if prop_keys is not None else MG_PROP_KEYS
+    _own = {}
+    for _t, _sp in (_P or {}).items():
+        for _k in (set((_sp or {}).get("declared") or [])
+                   | set((_sp or {}).get("required") or [])):
+            _own.setdefault(_k, set()).add(_t)
+    return {_k: next(iter(_v)) for _k, _v in _own.items() if len(_v) == 1}
+
+
+_MG_COND_STATE, MG_CONDITIONS, _MG_COND_WHY = mg_conditions()
+if _MG_COND_STATE != "MEASURED":
+    # LOUD AT IMPORT. A silent {} makes every condition unoffered and the card
+    # catalogue silently narrows back to two, which is the state this whole
+    # thread is about.
+    raise RuntimeError(
+        "the motion-graphics catalogue's condition headings could not be read "
+        "(%s: %s) — the condition enum would be EMPTY and the card catalogue "
+        "would narrow back to StatCard and PullQuote with nothing saying so"
+        % (_MG_COND_STATE, _MG_COND_WHY))
+MG_CONDITION_ENUM = list(MG_CONDITIONS)
+MG_UNIQUE_PROP_OWNER = mg_unique_prop_owner()
+
+
+def condition_components(condition, one_field_only=False):
+    """The components under a condition, in DOCUMENT ORDER.
+
+    one_field_only keeps those whose required props are a single text field —
+    the ones a bare `card_hero` can fill with no props at all.
+    """
+    _cs = MG_CONDITIONS.get(condition) or []
+    if not one_field_only:
+        return list(_cs)
+    _out = []
+    for _c in _cs:
+        _req = list((MG_PROP_KEYS.get(_c) or {}).get("required") or [])
+        if len(_req) == 1 and _req[0] in ("text", "title", "label"):
+            _out.append(_c)
+    # NO PRIMACY IS INVENTED HERE, and two attempts to derive one both failed:
+    #
+    #   document order   puts StepDivider — which exists to carry a "STEP 2/05"
+    #                    kicker — ahead of SectionDivider, the general chapter
+    #                    card. The VARIANT before the PRIMARY, decided by where
+    #                    an entry sits in a markdown file.
+    #   unique-prop count  StepDivider owns 6, SectionDivider 8, so it picks the
+    #                    variant AGAIN. The count measures how many STYLING
+    #                    knobs a component exposes (scrimColor, showVignette),
+    #                    not how specialised its CONTENT is. A proxy that
+    #                    conflates the two is a guess wearing arithmetic.
+    #
+    # So the order is left as the catalogue's and the CALLER refuses when there
+    # is more than one candidate. Five of the eight conditions have exactly one
+    # and are answered outright; the other two name their choices and the prop
+    # that selects each, which is educate-rather-than-validate instead of a
+    # default nobody chose.
+    return _out
+
+
+
 _REMOTION_SRC = os.path.abspath(os.path.join(_HERE, "..", "..", "src", "remotion"))
 _REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))
 _MOODREEL_SRC = os.path.join(_REPO_ROOT, "moodreel_editor.py")
@@ -2345,6 +2464,73 @@ KNOWLEDGE_TOOLS = [{
                                                     "anchored on that instant"},
                                  "card_label": {"type": "string",
                                      "description": "the card's supporting line"},
+                                 # THE CONDITION, NOT THE COMPONENT. A bare
+                                 # 29-name enum is what failed: round 42 read
+                                 # "1 distinct of 29 selectable, StatCard=4"
+                                 # because the cached prefix named StatCard and
+                                 # nothing else, and the field description wrote
+                                 # the incumbency down. Eight questions, each
+                                 # already carrying its own sentence in the
+                                 # catalogue, is a choice the agent can actually
+                                 # make — and the harness derives the component
+                                 # from it, where the derivation is checkable.
+                                 #
+                                 # THE ENUM IS DERIVED FROM THE CATALOGUE at
+                                 # import and raises if the headings cannot be
+                                 # read, so it cannot drift from the document it
+                                 # describes and cannot silently become empty.
+                                 # THE PROP TABLE'S FIELD, WHICH DID NOT EXIST.
+                                 # `card_props` is read by the builder at two
+                                 # sites and by RULING_DECISION_FIELDS, and was
+                                 # offered by NO SCHEMA — a consumer with no
+                                 # producer. MG_PROPS_TEACH was generated and
+                                 # referenced only at its own definition: a
+                                 # measured table with no reader, the class this
+                                 # repo has paid for twice. So "the prop table
+                                 # has never been exercised" was never a
+                                 # judgement the agent made; there was no way to
+                                 # send it.
+                                 #
+                                 # THE CONTENT KEY IS THE SELECTOR and it is
+                                 # derived from the components, so a new one is
+                                 # offered the day it lands. 208 tokens for the
+                                 # shapes, ~150 for the map — and at Haiku's
+                                 # cache rate prefix size is nearly free while
+                                 # wall clock is the cost, so this is not a
+                                 # budget question.
+                                 "card_props": {
+                                     "type": "object",
+                                     "description": (
+                                         "the card's CONTENT, when a phrase is "
+                                         "not enough. The key you send selects "
+                                         "the component: " + ", ".join(
+                                             "%s -> %s" % (_k, _v) for _k, _v in
+                                             sorted(MG_UNIQUE_PROP_OWNER.items())
+                                             if _k in ("annotations", "bars",
+                                                       "items", "messages",
+                                                       "notes", "notifications",
+                                                       "pills", "stats", "tags",
+                                                       "firstSide", "step",
+                                                       "titleLead", "count",
+                                                       "number"))
+                                         + ". Full shapes: " + MG_PROPS_TEACH
+                                         + " Send the props for ONE component; "
+                                           "keys from two is refused, and so is "
+                                           "a component the condition you named "
+                                           "does not cover.")},
+                                 "card_condition": {
+                                     "type": "string",
+                                     "enum": MG_CONDITION_ENUM,
+                                     "description": (
+                                         "which question this beat's card "
+                                         "answers. The catalogue is organised "
+                                         "by these and the component is derived "
+                                         "from your answer: " + "; ".join(
+                                             "%s -> %s" % (_c, ", ".join(MG_CONDITIONS[_c][:3]))
+                                             for _c in MG_CONDITION_ENUM)
+                                         + ". Omit it and you get StatCard for a "
+                                           "figure or PullQuote for a phrase, "
+                                           "which is two of thirty-one.")},
                                  # WHICH COMPONENT, and its props. This is the
                                  # one family whose TYPE the harness cannot
                                  # derive: a quoted headline number is a
@@ -5920,50 +6106,8 @@ def derive_card_props(mg_type, hero, label=""):
     return (_p, "filled %s from the phrase" % sorted(_p))
 
 
-def mg_conditions(path=None):
-    """{condition: [components]} — EXTRACTED FROM THE CATALOGUE, never typed.
-
-    THE CATALOGUE ALREADY ANSWERS THE SELECTION QUESTION and the agent has never
-    seen it. `knowledge/05_motion_graphics.md` is organised under eight
-    condition headings — WHEN A NUMBER LANDS, WHEN A CLAIM GETS A VERDICT OR
-    STAMP, WHEN TIME OR SEQUENCE IS THE STORY — and every documented component
-    sits under the question it answers. That is the discriminator
-    `derive_card_type` does not have, written down for months, in a document
-    `read_knowledge` has been called ZERO times on.
-
-    Third instance of the same class: the overlay rule that stopped talking_head
-    subtitling itself, the card_props shape that cost three rounds of zero
-    cards, and this. A rule in a document the agent does not open is
-    indistinguishable from a rule nobody wrote.
-
-    DERIVED, so a catalogue edit cannot leave this behind — the repo's standing
-    rule after the hand-copied asset tables.
-    """
-    import re as _re
-    _p = path or os.path.join(_KNOWLEDGE_DIR, "05_motion_graphics.md")
-    try:
-        _txt = open(_p, encoding="utf-8").read()
-    except OSError as _e:
-        return ("FAILED", {}, "cannot read the catalogue: %s" % _e)
-    _heads = [(m.start(), m.group(1).strip())
-              for m in _re.finditer(r"──\s*(WHEN [^─]+?)\s*──", _txt)]
-    if not _heads:
-        return ("ABSENT", {},
-                "the catalogue carries no WHEN headings — the selection "
-                "structure this reads is gone, and a silent {} would read as "
-                "'no conditions' rather than 'the source changed shape'")
-    _out = {_h: [] for _p2, _h in _heads}
-    for _m in _re.finditer(r"\*\*([A-Z][A-Za-z]+)\*\*\s*\(", _txt):
-        _prev = [_h for _p2, _h in _heads if _p2 < _m.start()]
-        if not _prev:
-            continue                    # documented before the first heading
-        _c = _m.group(1)
-        if _c not in _out[_prev[-1]]:
-            _out[_prev[-1]].append(_c)
-    return ("MEASURED", {_k: sorted(_v) for _k, _v in _out.items() if _v}, "")
-
-
-def derive_card_type(hero, beat_text="", vibe=""):
+def derive_card_type(hero, beat_text="", vibe="", condition=None,
+                     card_props=None):
     """(type, why) — WHICH component this claim wants. Never a default.
 
     Returns (None, why) when the claim does not want a card at all, which is a
@@ -5971,13 +6115,49 @@ def derive_card_type(hero, beat_text="", vibe=""):
     nobody can read is the failure this whole thread began with.
     """
     _h = str(hero or "").strip()
+    # WHAT IT IS GIVEN IDENTIFIES IT. A prop key owned by exactly one component
+    # names that component outright — `messages` is ChatThread and nothing
+    # else — so structured content selects its own carrier and the 12 components
+    # that need a list stop being unreachable. This is the path `card_props`
+    # was built for and had never been used on.
+    _owned = sorted({MG_UNIQUE_PROP_OWNER[_k]
+                     for _k in (card_props or {})
+                     if _k in MG_UNIQUE_PROP_OWNER})
+    if len(_owned) == 1:
+        _c = _owned[0]
+        if condition and _c not in (MG_CONDITIONS.get(condition) or []):
+            # THE TWO ANSWERS DISAGREE. Say so instead of silently preferring
+            # one: the props name a component the stated condition does not
+            # cover, and picking either would be inventing an answer neither
+            # input gave.
+            return (None, "PROPS_CONDITION_CONFLICT: card_props name %s, which "
+                          "the catalogue does not list under %r. Send props for "
+                          "a component under that condition, or name the "
+                          "condition %s belongs to"
+                          % (_c, condition,
+                             next((_k for _k, _v in MG_CONDITIONS.items()
+                                   if _c in _v), "(undocumented)")))
+        return (_c, "card_props carry %s, which only %s declares"
+                % (", ".join(_k for _k in (card_props or {})
+                             if MG_UNIQUE_PROP_OWNER.get(_k) == _c), _c))
+    if len(_owned) > 1:
+        return (None, "PROPS_AMBIGUOUS: card_props carry keys owned by %s — "
+                      "send the props for one component, not several"
+                      % ", ".join(_owned))
     if not _h:
         return (None, "no phrase to stamp — the agent ruled a card and named "
                       "nothing to put on it")
     # A QUOTED FIGURE WANTS THE COUNTER. StatCard requires value:number and
     # counts up to it; that is what an escalating-counter hook IS, and it is the
     # component the three missed moments wanted.
-    if _CARD_FIGURE.search(_h):
+    # A STATED CONDITION OUTRANKS THE FIGURE HEURISTIC. "The 3-Part Hook" is a
+    # TITLE that happens to contain a numeral, and the figure rule sent it to
+    # StatCard even under WHEN STEPS OR ITEMS ARE ENUMERATED. The heuristic
+    # exists for when nothing was said; when the agent has named the question
+    # the beat answers, a digit in the phrase is not a better answer than the
+    # answer it gave.
+    if _CARD_FIGURE.search(_h) and (
+            not condition or "StatCard" in (MG_CONDITIONS.get(condition) or [])):
         return ("StatCard", "the phrase carries a figure, and StatCard is the "
                             "only component that counts up to one")
     # A PHRASE WITH NO FIGURE IS STILL A CLAIM. "HOURS TO EDIT" is the third
@@ -5987,8 +6167,36 @@ def derive_card_type(hero, beat_text="", vibe=""):
     # can carry.
     _words = [w for w in re.split(r"\s+", _h) if w]
     if len(_words) <= 5:
-        return ("PullQuote", "a short claim with no figure — PullQuote reads "
-                             "`text` and carries a phrase whole")
+        # THE CONDITION PICKS THE PHRASE CARD. Eight components take a single
+        # text field and the catalogue already says which question each answers;
+        # without a condition this returned the only one it had ever been told
+        # about, which is how a 31-type catalogue read two wide.
+        if condition:
+            _cands = condition_components(condition, one_field_only=True)
+            if len(_cands) == 1:
+                return (_cands[0],
+                        "a short claim with no figure, and %s is the only "
+                        "component under %r that a bare phrase fills"
+                        % (_cands[0], condition))
+            if len(_cands) > 1:
+                # REFUSED RATHER THAN DEFAULTED. Both take a title and nothing
+                # in the catalogue ranks them, so naming the distinguishing
+                # prop hands the choice back to the agent instead of making it
+                # on a proxy.
+                _sel = "; ".join(
+                    "%s: send %s" % (_c, " or ".join(
+                        sorted(_k for _k, _v in MG_UNIQUE_PROP_OWNER.items()
+                               if _v == _c)[:3]) or "nothing distinctive")
+                    for _c in _cands)
+                return (None, "CONDITION_AMBIGUOUS: %d components under %r take "
+                              "a bare phrase and the catalogue does not rank "
+                              "them — %s" % (len(_cands), condition, _sel))
+            return (None, "NO_ONE_FIELD_COMPONENT: nothing under %r takes a "
+                          "bare phrase — the components there need structured "
+                          "content, so send card_props" % condition)
+        return ("PullQuote", "a short claim with no figure and no condition "
+                             "named — PullQuote reads `text` and carries a "
+                             "phrase whole")
     # A COPY FAULT IS NOT A CATALOGUE GAP, and conflating them sent the one
     # reachable refusal at the wrong remedy. `author_component` was offered for
     # a hero of six words — a 270-token tool, plus a 431-token prompt block,
@@ -9625,7 +9833,12 @@ def edit(source_key: str, brief: str,
             # The 29-name enum is retired with this line, and it was the
             # incumbency mechanism itself.
             _ctype, _dwhy = derive_card_type(hero, str(b.get("text") or ""),
-                                             led.get("vibe") or "")
+                                             led.get("vibe") or "",
+                                             condition=v.get("card_condition"),
+                                             card_props=v.get("card_props"))
+            led.setdefault("card_conditions_named", []).append(
+                {"beat": v.get("beat"), "condition": v.get("card_condition"),
+                 "derived": _ctype})
             if not _ctype:
                 # REFUSING IS A REAL ANSWER. A card nobody can read is the
                 # failure this whole thread began with, and it is worse than no

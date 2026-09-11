@@ -12,6 +12,7 @@ tool surface, the enums and the rubric, or the next person to widen an enum
 quietly restores a family with no implementation behind it.
 """
 import ast
+import json
 import pathlib
 import sys
 
@@ -219,6 +220,76 @@ if _mgc is not None:
         ok("DeviceMockup" in _out[3] and "EmojiCard" in _out[3],
            "the undocumented components changed — the reach census names "
            "exactly which have no catalogue entry: %s" % _out[3])
+# ── THE CARD CATALOGUE IS REACHABLE BEYOND TWO ──────────────────────────────
+for _fn in ("mg_unique_prop_owner", "condition_components"):
+    _f = next((n for n in TREE.body
+               if isinstance(n, ast.FunctionDef) and n.name == _fn), None)
+    if _f is not None:
+        exec(compile(ast.Module([_f], []), "<s>", "exec"), _ns)
+import subprocess as _sp2
+_probe = _sp2.run([sys.executable, "-c", """
+import modal_stub, json; modal_stub.install(); import agentic_editor_app as A
+lang = sorted({A.derive_card_type('a claim', condition=c)[0]
+               for c in A.MG_CONDITION_ENUM} - {None}) + ['StatCard']
+props = sorted({A.derive_card_type('x', card_props={k: [1]})[0]
+                for k in A.MG_UNIQUE_PROP_OWNER} - {None})
+json.dump({'n_cond': len(A.MG_CONDITION_ENUM), 'lang': sorted(set(lang)),
+           'props': props,
+           'conflict': A.derive_card_type('x', condition='WHEN A NUMBER LANDS',
+                                          card_props={'messages': [1]})[1][:30],
+           'ambig': A.derive_card_type('x', card_props={'messages': [1], 'notes': [1]})[1][:16],
+           'cond_ambig': A.derive_card_type('a claim',
+                         condition='WHEN TIME OR SEQUENCE IS THE STORY')[1][:19],
+           'no_cond': A.derive_card_type('a claim')[0]}, __import__('sys').stdout)
+"""], capture_output=True, text=True)
+try:
+    _pr = json.loads(_probe.stdout or "{}")
+except Exception:
+    _pr = {}
+ok(bool(_pr), "the card-reach probe did not run: %r" % (_probe.stderr or "")[:200])
+if _pr:
+    ok(_pr["n_cond"] == 8, "the condition enum is not 8 wide: %s" % _pr["n_cond"])
+    ok(len(_pr["lang"]) >= 5,
+       "fewer than 5 components are reachable from language alone (%s) — the "
+       "catalogue was two wide and the condition field is what widened it"
+       % _pr["lang"])
+    ok(len(_pr["props"]) >= 10,
+       "fewer than 10 components are reachable by sending content props (%s) — "
+       "the prop table was offered by NO schema, which is why it had never "
+       "been exercised" % len(_pr["props"]))
+    ok(_pr["no_cond"] == "PullQuote",
+       "omitting the condition changed the existing answer — every plan and "
+       "ruling written before this must still derive what it derived")
+    ok(_pr["conflict"].startswith("PROPS_CONDITION_CONFLICT"),
+       "props naming a component the condition does not cover is silently "
+       "resolved instead of refused")
+    ok(_pr["ambig"].startswith("PROPS_AMBIGUOUS"),
+       "props for two components are silently resolved to one")
+    ok(_pr["cond_ambig"].startswith("CONDITION_AMBIGUOUS"),
+       "a condition with two bare-phrase components picks one on a proxy "
+       "instead of naming the choices — two derivations of primacy were tried "
+       "and both picked the VARIANT over the primary")
+# OFFERED, NOT JUST READ. card_props was read by the builder at two sites and
+# exposed by no schema — a consumer with no producer, which is the whole reason
+# "the prop table has never been exercised" was never a judgement the agent
+# made. Read the schemas, not the source.
+_cp_offered = any("card_props" in json.dumps(_t)
+                  for _t in (_ns.get("KNOWLEDGE_TOOLS") or []))
+if not _cp_offered:
+    _probe2 = _sp2.run([sys.executable, "-c",
+        "import modal_stub,json;modal_stub.install();import agentic_editor_app as A;"
+        "print(json.dumps([('card_props' in json.dumps(t), 'card_condition' in json.dumps(t))"
+        " for t in A.KNOWLEDGE_TOOLS if 'card_hero' in json.dumps(t)]))"],
+        capture_output=True, text=True)
+    try:
+        _rows = json.loads(_probe2.stdout or "[]")
+    except Exception:
+        _rows = []
+    ok(bool(_rows) and all(_r[0] for _r in _rows),
+       "card_props is not offered on a ruling surface that offers card_hero — "
+       "the builder reads it and nothing can send it")
+    ok(bool(_rows) and all(_r[1] for _r in _rows),
+       "card_condition is not offered on every surface that offers card_hero")
 ok(pathlib.Path("CARD_CATALOGUE_REACH.md").exists(),
    "the catalogue reach census is not on the record")
 ok(pathlib.Path("AUTHORING_VERDICT.md").exists(),
