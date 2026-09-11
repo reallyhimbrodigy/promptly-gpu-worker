@@ -127,9 +127,17 @@ for _n in TREE.body:
             "SPEC_MODES", "SPEC_FAMILIES", "UNSUPPORTED_CLASSES",
             "REFERENCE_PER_25S"):
         exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
-_nsf = next(n for n in TREE.body
-            if isinstance(n, ast.FunctionDef) and n.name == "normalize_spec")
-exec(compile(ast.Module([_nsf], []), "<s>", "exec"), _ns)
+# The router's constants and its two pure functions, so the checks below DRIVE
+# the shipped rule instead of restating it.
+for _n in TREE.body:
+    if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "").startswith(
+            ("ROUTE_", "ROUTES_", "_ADDITIVE_MARKERS", "_ROUTE_COST")):
+        exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
+for _fname in ("normalize_spec", "capability_route", "route_cost"):
+    _f = next((n for n in TREE.body
+               if isinstance(n, ast.FunctionDef) and n.name == _fname), None)
+    if _f is not None:
+        exec(compile(ast.Module([_f], []), "<s>", "exec"), _ns)
 norm = _ns["normalize_spec"]
 
 got = norm({"mode": "unsupported", "unsupported_class": "generate_footage"})
@@ -207,6 +215,54 @@ for _nm, _if in sorted(_terms.items()):
        f"terminal and then lets the run continue")
 ok('"credit_charged": True' not in SRC,
    "something records credit_charged: True on a terminal path")
+
+# ── THE CAPABILITY ROUTER ───────────────────────────────────────────────────
+# set_spec's fourth branch was a refusal; it is a ROUTE now. One route is
+# built, the others terminate and are COUNTED — unsupported_request has fired
+# zero times across rounds 51-59, so what gets built next currently rests on a
+# count nobody has taken.
+_cr, _rcost = _ns.get("capability_route"), _ns.get("route_cost")
+ok(callable(_cr) and callable(_rcost),
+   "capability_route/route_cost are not importable — a router that can only be "
+   "exercised through the dispatch is a rule the check has to restate")
+if callable(_cr) and callable(_rcost):
+    ok(_cr("full_edit", None, "punchy")[0] == "edit",
+       "an editable request does not route to edit")
+    ok(_cr("question", None, "what is this")[0] == "question",
+       "a question does not route to question")
+    ok(_cr("unsupported", "change_in_frame", "remove the background")[0]
+       == "change_in_frame",
+       "an in-frame change routes to a CLIP GENERATOR, which cannot serve it")
+    # THE ADDITIVE RULE, both directions. "Add a shot OVER THIS" keeps the
+    # user's edit; answering it as pure generation throws their footage away.
+    ok(_cr("unsupported", "generate_footage", "add a shot of a city over this")[0]
+       == "hybrid",
+       "an ADDITIVE generate request does not route to hybrid — the user's own "
+       "edit would be discarded")
+    ok(_cr("unsupported", "generate_footage", "make a scene where a car drives")
+       [1] == "AMBIGUOUS",
+       "a non-additive generate request is answered silently instead of asked "
+       "about — two readings differing by minutes and dollars")
+    ok(_cr("weird_mode", None, "x")[1] == "AMBIGUOUS",
+       "an unrecognised mode resolves silently rather than recording the "
+       "ambiguity")
+    ok(_cr("weird_mode", None, "x")[0] == "edit",
+       "an unrecognised mode does not default to the BUILT route, which is the "
+       "safe direction")
+    # COST: measured where it was measured, ABSENT where nothing ever ran.
+    ok(_rcost("edit")[0] == "MEASURED" and _rcost("edit")[1]["n"] == 15,
+       "the edit route's cost is not MEASURED with its denominator")
+    for _r in ("generate", "hybrid", "change_in_frame"):
+        ok(_rcost(_r)[0] == "ABSENT",
+           f"route {_r} quotes a cost figure — nothing here has ever run it, "
+           f"and a router that quotes a number it does not have is probe "
+           f"collapse making a product decision")
+        ok("never been run" in str(_rcost(_r)[1]),
+           f"route {_r}'s ABSENT does not say what must be measured first")
+ok("route_demand" in SRC and "capability_route" in SRC,
+   "the route is not recorded or counted in the ledger")
+ok('fail("route_ambiguous"' in SRC,
+   "an AMBIGUOUS route does not fail loudly — it would be chosen silently")
 _break = [n for n in ast.walk(TREE)
           if isinstance(n, ast.If)
           and any(getattr(t, "id", "") == "_unsupported_stop" for t in ast.walk(n.test))

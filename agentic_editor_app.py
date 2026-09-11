@@ -1234,6 +1234,107 @@ SPEC_MODES = ("full_edit", "targeted_change", "question", "unsupported")
 # tier and priced per second — not a quiet widening of this one.
 UNSUPPORTED_CLASSES = ("generate_footage", "change_in_frame")
 
+# ── THE CAPABILITY ROUTER ───────────────────────────────────────────────────
+#
+# set_spec ALREADY IS the router; its fourth branch is a refusal. Turning that
+# branch into a route is the zero-reject law arriving at the capability layer:
+# content classes are ROUTES, not errors, and so are capability classes.
+#
+# ONE ROUTE IS BUILT. The others terminate, charge nothing, and — the part that
+# did not exist — ARE COUNTED. `unsupported_request` was built to be the demand
+# signal and has fired ZERO times across rounds 51-59, so the case for building
+# generation currently rests on a count nobody has taken rather than a low one.
+# A route that terminates still records what was asked for.
+ROUTE_EDIT = "edit"                 # BUILT: cut, caption, text, card, zoom, sfx
+ROUTE_HYBRID = "hybrid"             # UNBUILT: keep the edit, insert a generated clip
+ROUTE_GENERATE = "generate"         # UNBUILT: a clip that is not in the upload
+ROUTE_IN_FRAME = "change_in_frame"  # UNBUILT, and NOT a clip generator's shape
+ROUTE_QUESTION = "question"         # BUILT: answer, edit nothing
+ROUTES_BUILT = (ROUTE_EDIT, ROUTE_QUESTION)
+
+# THE HYBRID IS THE DEFAULT CASE, NOT THE EXOTIC ONE. Every generate-shaped
+# phrasing in the schema today is ADDITIVE — "add a shot", "put some b-roll
+# OVER THIS", "make a scene where" — and a router that treats generate and edit
+# as exclusive answers a question nobody asked. Matched on the request's own
+# words rather than inferred, because a silent choice between two routes that
+# differ by minutes and dollars is the one place guessing is least defensible.
+_ADDITIVE_MARKERS = ("add ", "put ", "insert ", "over this", "over it",
+                     "on top", "throw in", "drop in", "include a", "include some",
+                     "as well", "also ", "plus a", "alongside", "in between",
+                     "cut in ", "mix in")
+
+
+def capability_route(mode, unsupported_class=None, brief=""):
+    """(route, state, why) — which capability this request needs.
+
+    STATE IS MEASURED OR AMBIGUOUS, never a silent pick. AMBIGUOUS is the K5
+    case: the caller must ask rather than choose, because the two readings
+    differ by orders of magnitude in time and money.
+    """
+    _m = str(mode or "").lower()
+    _b = " " + str(brief or "").lower() + " "
+    if _m == "question":
+        return (ROUTE_QUESTION, "MEASURED", "the request asks something")
+    if _m in ("full_edit", "targeted_change"):
+        return (ROUTE_EDIT, "MEASURED",
+                "the request is satisfiable with the footage the user gave us")
+    if _m != "unsupported":
+        return (ROUTE_EDIT, "AMBIGUOUS",
+                "mode %r is not a routing answer — defaulting to the built "
+                "route is the safe direction, and the ambiguity is on the "
+                "record rather than resolved by silence" % (mode,))
+    if unsupported_class == "change_in_frame":
+        # NAMED SEPARATELY ON PURPOSE. Editing pixels inside existing footage is
+        # an image-edit surface, not a clip generator, and routing it to one
+        # would send the request somewhere that cannot serve it.
+        return (ROUTE_IN_FRAME, "MEASURED",
+                "the request changes what is inside the existing frame")
+    if unsupported_class == "generate_footage":
+        if any(_k in _b for _k in _ADDITIVE_MARKERS):
+            return (ROUTE_HYBRID, "MEASURED",
+                    "the request is ADDITIVE — it keeps the edit and inserts "
+                    "something that is not in the upload")
+        return (ROUTE_GENERATE, "AMBIGUOUS",
+                "footage that does not exist is needed, and nothing in the "
+                "request says whether the user's own footage is kept. Ask "
+                "before committing: the two readings differ by minutes and by "
+                "an unmeasured amount of money")
+    return (ROUTE_GENERATE, "AMBIGUOUS",
+            "unsupported with no class named — which capability is needed "
+            "cannot be read from the request")
+
+
+# WHAT EACH ROUTE COSTS, AND THE ONES THAT HAVE NEVER BEEN RUN SAY SO.
+# edit: MEASURED over 15 runs, rounds 51/52/54 — wall p50 233.5s, max 416.2s,
+# and cost_usd now on every run (0.1016-0.2549 observed, 1.02x-2.55x the law).
+# Everything else: ABSENT. Not "minutes" — ABSENT, because nothing here has
+# ever called a generator, and a router that quotes a number it does not have
+# is the probe-collapse defect making a product decision.
+_ROUTE_COST = {
+    ROUTE_EDIT: {"state": "MEASURED", "wall_p50_s": 233.5, "wall_max_s": 416.2,
+                 "usd_observed": [0.1016, 0.2549], "n": 15,
+                 "src": "rounds 51/52/54, five fixtures x three rounds"},
+    ROUTE_QUESTION: {"state": "MEASURED", "wall_p50_s": 0.0, "wall_max_s": 0.0,
+                     "usd_observed": [0.0, 0.0], "n": 0,
+                     "src": "answers without editing; no render"},
+}
+
+
+def route_cost(route):
+    """(state, detail). ABSENT means nobody has measured it — the router may
+    say 'longer and more expensive' and may NOT say a number."""
+    _c = _ROUTE_COST.get(route)
+    if not _c:
+        return ("ABSENT",
+                {"why": "%s has never been run here; four things must be "
+                        "measured before any figure is quoted — per-model wall "
+                        "clock for a real clip, per-clip dollars from an "
+                        "invoice line, the failure rate and what a failure "
+                        "bills, and whether the clip lands in a usable aspect "
+                        "and frame rate" % route})
+    return (_c["state"], _c)
+
+
 # The declare_placement `type` vocabulary is NOT the family vocabulary, and the
 # gap is where a scope check would silently pass everything: `emphasis` is the
 # zoom family and `overlay_text` is text. Declared once, here, so the scope
@@ -10928,8 +11029,38 @@ def edit(source_key: str, brief: str,
                         continue
                     if _sc["mode"] == "unsupported":
                         _cls = _sc.get("unsupported_class")
+                        # THE ROUTE, NAMED AND COUNTED. unsupported_request was
+                        # built to be the demand signal and has fired ZERO times
+                        # across rounds 51-59, so what gets built next rests on
+                        # a count nobody has taken. A terminated route still
+                        # records what was asked for, and which capability it
+                        # needed — "add a shot over this" is a HYBRID request
+                        # and answering it as pure generation would throw the
+                        # user's own edit away.
+                        _rt, _rt_state, _rt_why = capability_route(
+                            _sc["mode"], _cls, brief)
+                        _rc_state, _rc_detail = route_cost(_rt)
+                        led["capability_route"] = {
+                            "route": _rt, "state": _rt_state, "why": _rt_why,
+                            "class": _cls, "built": _rt in ROUTES_BUILT,
+                            "cost_state": _rc_state, "cost": _rc_detail}
+                        led.setdefault("route_demand", {})
+                        led["route_demand"][_rt] = led["route_demand"].get(_rt, 0) + 1
+                        print("  ROUTE           : %s (%s) — %s | cost %s"
+                              % (_rt, _rt_state, _rt_why[:90], _rc_state),
+                              flush=True)
+                        if _rt_state == "AMBIGUOUS":
+                            # K5 AT THE CAPABILITY LAYER. Two readings that
+                            # differ by orders of magnitude in time and money is
+                            # the one place a silent pick is least defensible.
+                            fail("route_ambiguous",
+                                 "route %s is AMBIGUOUS: %s. The run stops and "
+                                 "the question goes to the user rather than a "
+                                 "capability being chosen for them."
+                                 % (_rt, _rt_why))
                         led["unsupported_request"] = {
                             "class": _cls,
+                            "route": _rt,
                             "why": _sc.get("why") or "",
                             "credit_charged": False,
                         }
