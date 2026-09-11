@@ -175,23 +175,45 @@ check("the wire contract documents it for the server half",
 # 9 of 15 runs called execute_plan more often than inspect_output.
 check("K6 is in the working-discipline block", "K6." in src)
 check("K6 is in the prompt-section fingerprint", src.count('"K6."') >= 2)
+# DRIVEN, not read. Both of the first draft's legs were AST-shape checks and
+# both mutants PASSED: gutting the counting branch left the For loop standing,
+# and rewriting the print's format string left the literal and the variable
+# standing. The rule is hoisted now, so these run it.
+_T = lambda *seq: [{"tools": list(t)} for t in seq]
+check("a rebuild after a measurement is not blind",
+      A.blind_rebuilds(_T(("execute_plan",), ("inspect_output",), ("execute_plan",)))
+      == ("MEASURED", 0, 2))
+check("a rebuild with NO measurement since the last one IS blind",
+      A.blind_rebuilds(_T(("execute_plan",), ("execute_plan",)))
+      == ("MEASURED", 1, 2))
+check("the first build is never blind — there is nothing to have measured",
+      A.blind_rebuilds(_T(("execute_plan",))) == ("MEASURED", 0, 1))
+check("two measurements do not bank credit for two rebuilds",
+      A.blind_rebuilds(_T(("inspect_output",), ("execute_plan",), ("execute_plan",)))
+      == ("MEASURED", 1, 2))
+check("a turn calling both counts the measurement it actually made",
+      A.blind_rebuilds(_T(("execute_plan",), ("inspect_output", "execute_plan")))
+      == ("MEASURED", 0, 2))
+check("NO TURN RECORD IS ABSENT, never a clean zero",
+      A.blind_rebuilds([]) == ("ABSENT", 0, 0)
+      and A.blind_rebuilds(None) == ("ABSENT", 0, 0))
 _blind = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
           and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
                   and t.slice.value == "rebuilds_without_measurement" for t in n.targets)]
-check("the rebuild-without-measurement counter is ledgered", bool(_blind))
-check("it is computed from the TURN RECORD, not a self-report",
-      any(isinstance(n, ast.For) and "turns" in ast.unparse(n.iter)
-          for n in ast.walk(tree)
-          if isinstance(n, ast.For) and "_t6" in ast.unparse(n.target)))
-check("and PRINTED in the same commit that adds it, with its denominator",
-      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "print"
-          and any(isinstance(x, ast.Constant) and isinstance(x.value, str)
-                  and "K6 REBUILDS" in x.value for x in ast.walk(n))
-          and any(isinstance(x, ast.Name) and x.id == "_blind" for x in ast.walk(n))
-          for n in ast.walk(tree)),
+check("the counter is ledgered", bool(_blind))
+check("the ledger value comes FROM the hoisted rule, not a local copy",
+      any(isinstance(x, ast.Name) and x.id == "_k6_blind"
+          for a_ in _blind for x in ast.walk(a_.value))
+      and any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "blind_rebuilds"
+              for n in ast.walk(tree)))
+_k6p = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+        and getattr(n.func, "id", "") == "print"
+        and any(isinstance(x, ast.Constant) and isinstance(x.value, str)
+                and "K6 REBUILDS" in x.value for x in ast.walk(n))]
+check("and PRINTED with BOTH numbers and the state",
+      any(all(any(isinstance(x, ast.Name) and x.id == _nm for x in ast.walk(n))
+              for _nm in ("_k6_state", "_k6_blind", "_k6_total")) for n in _k6p),
       "a count with no denominator is the reporting defect this repo bans")
-check("an absent turn record says ABSENT rather than reading 0 of 0 as clean",
-      "ABSENT: no turn record" in src)
 
 print()
 if fails:

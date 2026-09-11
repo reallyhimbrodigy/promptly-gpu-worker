@@ -1667,11 +1667,15 @@ knowledge set at all — it answers "how to work", never "how to cut".
   K6. MEASURE BEFORE YOU REBUILD. If a build did not come out right, find out
       WHY before running execute_plan again. `inspect_output` is how; the
       ledger's own defect lines (placement_inert, RULED vs BUILT gaps) name
-      what went wrong. Measured across rounds 51-54: 9 of 15 runs called
-      execute_plan more often than inspect_output, and two called it THREE
-      times against ONE measurement — rebuilding on a guess, which is the same
-      render billed twice. A second identical failure is not bad luck; it is
-      the first diagnosis never made.
+      what went wrong. A second identical failure is not bad luck; it is the
+      first diagnosis never made.
+      MEASURED, and the first number was the WRONG INSTRUMENT — kept here as
+      the correction. "9 of 15 runs called execute_plan more often than
+      inspect_output" is true and is not this: a run can call three builds and
+      two measurements with every build measured. The rule's own counter, run
+      over rounds 51-54, says 2 BLIND REBUILDS OF 33 execute_plan calls, both
+      in round 54 (car_short, talking_head). K6 is worth its lines at 2/33;
+      it was not worth the lines the wrong number claimed for it.
 
   NOT ADOPTED — "simplicity first / nothing beyond what was asked". It is good
   advice for writing code and it is WRONG FOR THIS JOB, measured: across five
@@ -2398,6 +2402,33 @@ def split_beat_text(beat, t, words):
         return _base, _base
     return (_l or f"[no words in {_a:.2f}-{t:.2f}s]",
             _r or f"[no words in {t:.2f}-{_z:.2f}s]")
+
+
+def blind_rebuilds(turns):
+    """(state, blind, total) — rebuilds that ran with no measurement since the
+    last one, from the TURN RECORD rather than a self-report.
+
+    HOISTED, because a rule that lives inside `edit` can only be checked by
+    reimplementing it, and then the check tests the copy. Two mutations to the
+    inline version passed green for exactly that reason.
+
+    THREE STATES. No turn record is ABSENT, not zero: a ledger that never
+    recorded its turns and a run that never rebuilt blindly are different
+    facts, and only one of them is good news.
+    """
+    if not turns:
+        return ("ABSENT", 0, 0)
+    _seen, _blind, _total = True, 0, 0
+    for _t in turns:
+        for _tool in (_t.get("tools") or []):
+            if _tool == "inspect_output":
+                _seen = True
+            elif _tool == "execute_plan":
+                _total += 1
+                if not _seen:
+                    _blind += 1
+                _seen = False
+    return ("MEASURED", _blind, _total)
 
 
 def figure_instant(beat, numeric_ts):
@@ -10991,26 +11022,15 @@ def edit(source_key: str, brief: str,
     # declared anchors are excluded on purpose, because a component that
     # overflows its anchor still reports the anchor.
     # K6, MEASURED. A rebuild with no measurement since the last one is a
-    # render billed for a guess. Counted from the turn record — the tools the
-    # agent actually called, in order — not from a self-report.
-    _seen_inspect, _blind = True, 0
-    for _t6 in (led.get("turns") or []):
-        for _tool in (_t6.get("tools") or []):
-            if _tool == "inspect_output":
-                _seen_inspect = True
-            elif _tool == "execute_plan":
-                if not _seen_inspect:
-                    _blind += 1
-                _seen_inspect = False
-    led["rebuilds_without_measurement"] = _blind
-    led["execute_plan_calls_total"] = sum(
-        1 for _t6 in (led.get("turns") or []) for _x in (_t6.get("tools") or [])
-        if _x == "execute_plan")
-    print("  K6 REBUILDS     : %d of %d execute_plan call(s) ran with NO "
-          "inspect_output since the previous build%s"
-          % (_blind, led["execute_plan_calls_total"],
-             "" if led["execute_plan_calls_total"] else
-             "  (ABSENT: no turn record)"), flush=True)
+    # render billed for a guess. The rule is hoisted (blind_rebuilds) so the
+    # check drives the SHIPPED function instead of a copy of it.
+    _k6_state, _k6_blind, _k6_total = blind_rebuilds(led.get("turns"))
+    led["rebuilds_without_measurement"] = _k6_blind
+    led["execute_plan_calls_total"] = _k6_total
+    led["rebuilds_state"] = _k6_state
+    print("  K6 REBUILDS     : %s  %d of %d execute_plan call(s) ran with NO "
+          "inspect_output since the previous build"
+          % (_k6_state, _k6_blind, _k6_total), flush=True)
     led["placement_collisions"] = placement_collisions(led.get("_painted_boxes") or [])
     _pb = led.get("_painted_boxes") or []
     _uniq = {(x.get("family"), round(float(x.get("t0", 0)), 3),
