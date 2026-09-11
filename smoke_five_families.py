@@ -275,6 +275,55 @@ ok(bool(_inc) and "capability_route" in SRC,
    "zero for nine rounds")
 ok('fail("route_ambiguous"' in SRC,
    "an AMBIGUOUS route does not fail loudly — it would be chosen silently")
+
+# ── THE HYBRID ROUTE DELIVERS THE HALF IT CAN ───────────────────────────────
+# "Add a shot of a city over this" is ADDITIVE: the user asked for their edit
+# PLUS something. Refusing the whole job throws away the half we can serve.
+for _fn in ("insert_request", "hybrid_delivery"):
+    _f = next((n for n in TREE.body
+               if isinstance(n, ast.FunctionDef) and n.name == _fn), None)
+    if _f is not None:
+        exec(compile(ast.Module([_f], []), "<s>", "exec"), _ns)
+_ir, _hd = _ns.get("insert_request"), _ns.get("hybrid_delivery")
+ok(callable(_ir) and callable(_hd),
+   "insert_request/hybrid_delivery are not importable")
+if callable(_ir) and callable(_hd):
+    _r = _ir("add a shot of a city over this", "establishing")
+    ok(_r["state"] == "UNFILLED",
+       "an insert request does not record itself UNFILLED — a hole nobody can "
+       "see is the same as a refusal nobody logged")
+    ok(_r["asked_for"] and "fillable_by" in _r,
+       "the insert request does not record WHAT was asked for and what could "
+       "fill it — a tally that cannot justify building anything")
+    ok(_hd([], True)[0] == "ABSENT",
+       "a run with no insert requests is treated as a hybrid delivery")
+    ok(_hd([1], True)[0] == "PARTIAL",
+       "an edit that came out with an unfilled insert is not reported PARTIAL")
+    ok(_hd([1, 2], False)[0] == "REFUSED",
+       "a hybrid whose EDIT also failed is reported as a partial delivery — "
+       "there is nothing to hand over")
+    # IT MUST NEVER CLAIM THE INSERT HAPPENED.
+    for _n2, _okk in (([1], True), ([1, 2], False)):
+        _msg = _hd(_n2, _okk)[1].lower()
+        ok("added" not in _msg and "i've added" not in _msg,
+           "the hybrid message implies the insert was made")
+        ok("can create" in _msg or "cannot" in _msg or "isn't something" in _msg,
+           "the hybrid message does not say the insert did NOT happen — "
+           "silence about the missing half is what reads as the product not "
+           "working")
+    ok("charged" in _hd([1], False)[1].lower(),
+       "a REFUSED hybrid does not say nothing was charged")
+ok("insert_requests" in SRC and 'led["capability_route"]["delivered"]' in SRC,
+   "the hybrid route does not record its insert requests or what it delivered")
+_hyb = [n for n in ast.walk(TREE) if isinstance(n, ast.If)
+        and any(isinstance(x, ast.Name) and x.id == "ROUTE_HYBRID"
+                for x in ast.walk(n.test))
+        and any(isinstance(x, ast.Continue) for x in ast.walk(n))
+        and not any(isinstance(x, ast.Name) and x.id == "_unsupported_stop"
+                    for x in ast.walk(n))]
+ok(bool(_hyb),
+   "the hybrid branch either does not exist or TERMINATES the run — it is the "
+   "one route that must proceed to the edit")
 _break = [n for n in ast.walk(TREE)
           if isinstance(n, ast.If)
           and any(getattr(t, "id", "") == "_unsupported_stop" for t in ast.walk(n.test))

@@ -1320,6 +1320,61 @@ _ROUTE_COST = {
 }
 
 
+def insert_request(brief, why="", at_s=None, duration_s=None):
+    """One piece of footage the user asked for that is not in their upload.
+
+    THE HYBRID ROUTE'S WHOLE POINT. Today "add a shot of a city over this" is
+    refused ENTIRELY and the user gets nothing back — an honest refusal, and
+    the wrong one, because the request was ADDITIVE. They asked for their edit
+    PLUS something. We can do the first half.
+
+    So the hybrid route delivers the edit and records the second half as a
+    NAMED, ADDRESSABLE HOLE rather than as a reason to refuse the first. The
+    record is what makes the demand signal specific: not "someone wanted
+    generation" but what they wanted, where, and for how long. That is the
+    difference between a tally that cannot justify building anything and a
+    queue that can.
+    """
+    return {"asked_for": str(brief or "")[:300], "why": str(why or "")[:200],
+            "at_s": (round(float(at_s), 2) if at_s is not None else None),
+            "duration_s": (round(float(duration_s), 2)
+                           if duration_s is not None else None),
+            "state": "UNFILLED",
+            "fillable_by": "the generate route, which is not built"}
+
+
+def hybrid_delivery(insert_requests, edit_ok):
+    """(state, user_message) for a hybrid run.
+
+    THREE STATES, because "we did some of it" is not one thing:
+      PARTIAL   the edit is delivered and the inserts are not — say BOTH halves
+      REFUSED   the edit did not come out either; there is nothing to hand over
+      ABSENT    nothing was asked to be inserted, so this is not a hybrid run
+
+    IT NEVER CLAIMS THE INSERT HAPPENED. The prompt's standing rule is that a
+    competent edit which ignores the request reads as the product not working —
+    which is true, and is about SILENCE, not about partial delivery. Naming the
+    missing half out loud is the opposite of ignoring it.
+    """
+    _n = len(insert_requests or [])
+    if not _n:
+        return ("ABSENT", "")
+    if not edit_ok:
+        return ("REFUSED",
+                "I couldn't finish this one, and the %s you asked me to add %s "
+                "something this editor can create — it works with the footage "
+                "you upload. Nothing was charged."
+                % ("shot" if _n == 1 else "%d shots" % _n,
+                   "isn't" if _n == 1 else "aren't"))
+    return ("PARTIAL",
+            "Here's your edit. The %s you asked me to add %s something I can "
+            "create yet — this editor cuts, times and adds text, cards, sound "
+            "and zooms to the footage you upload. Everything else you asked "
+            "for is in there."
+            % ("shot" if _n == 1 else "%d shots" % _n,
+               "isn't" if _n == 1 else "aren't"))
+
+
 def route_cost(route):
     """(state, detail). ABSENT means nobody has measured it — the router may
     say 'longer and more expensive' and may NOT say a number."""
@@ -11049,6 +11104,55 @@ def edit(source_key: str, brief: str,
                         print("  ROUTE           : %s (%s) — %s | cost %s"
                               % (_rt, _rt_state, _rt_why[:90], _rc_state),
                               flush=True)
+                        if _rt == ROUTE_HYBRID:
+                            # THE ONE ROUTE THAT DOES NOT TERMINATE. The request
+                            # was additive, so the edit half is servable and
+                            # refusing it throws away work the user asked for
+                            # and we can do. The insert is recorded as an
+                            # addressable hole; `mode` falls back to the editing
+                            # spec so everything downstream behaves normally.
+                            led.setdefault("insert_requests", []).append(
+                                insert_request(brief, _sc.get("why") or ""))
+                            _sc["mode"] = "full_edit"
+                            _sc["families"] = None
+                            led["capability_route"]["delivered"] = "edit_half"
+                            print("  HYBRID          : the edit proceeds; %d "
+                                  "insert request(s) recorded UNFILLED — "
+                                  "refusing the whole job would discard the "
+                                  "half we can serve"
+                                  % len(led["insert_requests"]), flush=True)
+                            fail("hybrid_insert_unfilled",
+                                 "the user asked for footage that is not in "
+                                 "their upload; the edit is delivered and the "
+                                 "insert is recorded UNFILLED rather than the "
+                                 "whole request being refused")
+                            _sc["targets"] = _good_t
+                            # COPIED FROM THE EXISTING CALL SITE, not written
+                            # from memory. My first version passed `families`
+                            # into the third positional, which is `beat_source`
+                            # — a silent clip would have been scored against the
+                            # talking-head corpus. An existing check caught it,
+                            # and Builder-1 lost two rounds this week to exactly
+                            # this: arguments written from memory into a
+                            # signature that had moved.
+                            led["rubric"] = derive_rubric(
+                                _sc.get("targets"), _sc["mode"],
+                                beat_source=_beat_source)
+                            led["spec"] = _sc
+                            results.append({"type": "tool_result",
+                                            "tool_use_id": tu.id,
+                                            "content": json.dumps(
+                                                {"route": "hybrid",
+                                                 "note": "Edit this footage as "
+                                                         "asked. The shot they "
+                                                         "want ADDED cannot be "
+                                                         "created — do not "
+                                                         "substitute something "
+                                                         "else for it, and do "
+                                                         "not mention it in the "
+                                                         "edit. It is recorded.",
+                                                 "spec": _sc})})
+                            continue
                         if _rt_state == "AMBIGUOUS":
                             # K5 AT THE CAPABILITY LAYER. Two readings that
                             # differ by orders of magnitude in time and money is
