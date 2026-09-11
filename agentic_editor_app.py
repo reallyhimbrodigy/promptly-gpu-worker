@@ -5383,6 +5383,41 @@ def region_psnr(before, after, t0, t1, box=None, env=None):
 # above the best null — both far over the 2.0 registered in advance.
 _REGION_EFFECT_BAR_DB = 6.0
 
+# REDRAWN 2026-09-11 ON THE MEASURED NULL, AND IT IS PER CONTROL SCHEME,
+# because the old single number was the whole defect: one bar was being applied
+# to two populations whose nulls differ by 8 dB.
+#
+#   scheme                      null (measured, n=32)   bar        basis
+#   same_window_layer_withheld  EXACTLY 0.00, no spread  1.0   1 dB of margin
+#                               (byte-identical: with no ink the two files are
+#                               the same frames and the x264 thread pin makes
+#                               that exact)
+#   window_elsewhere            -10.75 .. 8.13           None  UNSUPPORTABLE
+#                               (production's real short labels read 4.70-6.76,
+#                               entirely BELOW the null's maximum — no bar
+#                               exists that separates them, so the verdict is
+#                               refused rather than guessed)
+#
+# The 6.0 above is kept, unused by the region path, as the ABSOLUTE-mode bar and
+# as the number the correction is measured against.
+_REGION_BAR_BY_SCHEME = {
+    "same_window_layer_withheld": 1.0,
+    "window_elsewhere": None,
+}
+
+
+def region_bar_for(scheme):
+    """(bar_db, basis) for a control scheme. bar_db None = no verdict is
+    supportable under that scheme, and the caller must not invent one."""
+    if scheme in _REGION_BAR_BY_SCHEME:
+        _b = _REGION_BAR_BY_SCHEME[scheme]
+        return (_b, "measured null 2026-09-11, n=32"
+                if _b is not None else
+                "the measured null (-10.75..8.13 dB) exceeds production's real "
+                "signal (4.70-6.76 dB); no bar separates them")
+    return (None, "unknown control scheme %r — a bar cannot be chosen for a "
+                  "control nobody measured" % (scheme,))
+
 
 # THE NULL, MEASURED 2026-09-11, and it says the bar cannot be redrawn.
 #
@@ -7218,7 +7253,20 @@ def edit(source_key: str, brief: str,
                 _rec["changed"] = None
                 led.setdefault("placement_effects", []).append(_rec)
                 return None, None
-            _chg = _delta >= _REGION_EFFECT_BAR_DB
+            _bar, _bar_basis = region_bar_for(_rec.get("ctrl_scheme"))
+            _rec["bar_db"] = _bar
+            _rec["bar_basis"] = _bar_basis
+            if _bar is None:
+                # NO BAR, NO VERDICT. Under a control whose null is wider than
+                # the signal there is nothing to threshold, and emitting
+                # CHANGED or INERT would be picking one at random.
+                _rec["region_verdict"] = "UNVALIDATED"
+                _rec["changed"] = None
+                led.setdefault("placement_effects", []).append(_rec)
+                led["region_effect_unvalidated"] = (
+                    led.get("region_effect_unvalidated", 0) + 1)
+                return None, _db
+            _chg = _delta >= _bar
             _rec["region_verdict"] = "CHANGED" if _chg else "INERT"
         else:
             _chg, _db = step_changed_output(before, after, t0_s, t1_s,
@@ -7248,6 +7296,22 @@ def edit(source_key: str, brief: str,
                 _rec["mode"] = "absolute"
         _rec["changed"] = _chg
         led.setdefault("placement_effects", []).append(_rec)
+        if _chg is False and _rec.get("mode") == "region":
+            # DEFERRED, NOT SUPPRESSED. Whether a region delta below the bar
+            # means "nothing was painted" depends on where the REST of that
+            # family's deltas landed, and that population does not exist yet at
+            # this call. Round 58 fired five placement_inert on overlays that
+            # every one of them rendered, because the bar sat inside a single
+            # tight cluster — a per-placement verdict answering a question only
+            # the run can answer. Resolved at the end of the run against
+            # bar_separates, which is the gate; see the block after the build.
+            led.setdefault("_deferred_inert", []).append(
+                {"family": family, "t": list(_rec["t"]), "note": note,
+                 "psnr_db": _rec.get("psnr_db"),
+                 "ctrl_psnr_db": _rec.get("ctrl_psnr_db"),
+                 "delta_db": _rec.get("region_delta_db"),
+                 "domain": _rec["domain"], "mode": _rec["mode"]})
+            return _chg, _db
         if _chg is False:
             fail("placement_inert",
                  f"{family} declared a placement over "
@@ -11437,9 +11501,22 @@ def edit(source_key: str, brief: str,
         _fx.setdefault(_e.get("family"), []).append(_e["region_delta_db"])
     led["region_bar_separation"] = {}
     for _fam6, _ds in sorted(_fx.items()):
-        _bs, _bwhy6 = bar_separates(sorted(set(_ds)))
+        _scheme6 = next((e.get("ctrl_scheme") for e in
+                         (led.get("placement_effects") or [])
+                         if e.get("family") == _fam6 and e.get("ctrl_scheme")), None)
+        _bar6, _basis6 = region_bar_for(_scheme6)
+        if _bar6 is None:
+            led["region_bar_separation"][_fam6] = {
+                "state": "NO BAR", "why": _basis6, "n": len(set(_ds)),
+                "scheme": _scheme6}
+            print("  INERT BAR (%s) : NO BAR under control %r — %s"
+                  % (_fam6, _scheme6, _basis6), flush=True)
+            continue
+        _bs, _bwhy6 = bar_separates(sorted(set(_ds)), bar=_bar6)
         led["region_bar_separation"][_fam6] = {"state": _bs, "why": _bwhy6,
-                                               "n": len(set(_ds))}
+                                               "n": len(set(_ds)),
+                                               "bar_db": _bar6,
+                                               "scheme": _scheme6}
         print("  INERT BAR (%s) : %s — %s" % (_fam6, _bs, _bwhy6), flush=True)
         if _bs == "INSIDE_CLUSTER":
             fail("inert_bar_inside_population",
@@ -11447,6 +11524,39 @@ def edit(source_key: str, brief: str,
                  "UNVALIDATED — do not read them as defects until the bar is "
                  "re-measured against a null on THIS population."
                  % (_fam6, _bwhy6))
+
+    # THE GATE. A deferred INERT becomes a reported defect only where the bar
+    # is shown to SEPARATE that family's population in this run. Anywhere else
+    # it is recorded as UNVALIDATED and named, because the two errors are not
+    # symmetric and the bar's own note says which way to fail: a false INERT
+    # sends someone to edit a component that works — five times on round 58,
+    # on the run that fixed the defect it was reporting.
+    _held = []
+    for _di in (led.get("_deferred_inert") or []):
+        _sep = (led["region_bar_separation"].get(_di["family"]) or {}).get("state")
+        if _sep == "SEPARATES":
+            fail("placement_inert",
+                 "%s declared a placement over %.2f-%.2fs but the %s there is "
+                 "unchanged (%s: %s vs control %s; the bar SEPARATES this "
+                 "family's population in this run) — a declared placement that "
+                 "changes nothing is not a placement"
+                 % (_di["family"], _di["t"][0], _di["t"][1], _di["domain"],
+                    _di["mode"], _di["psnr_db"], _di["ctrl_psnr_db"]))
+        else:
+            _held.append(dict(_di, held_because=_sep or "ABSENT"))
+    if _held:
+        led["inert_unvalidated"] = _held
+        print("  INERT HELD      : %d region verdict(s) NOT reported as inert "
+              "because the bar does not separate their family's population "
+              "this run: %s"
+              % (len(_held), [(h["family"], h["t"][0], h["delta_db"],
+                               h["held_because"]) for h in _held[:6]]), flush=True)
+        fail("inert_verdict_unvalidated",
+             "%d placement(s) measured below the bar were NOT reported inert: "
+             "the bar does not separate their family's population in this run, "
+             "so the verdict is unsupportable in either direction. Fix the "
+             "control or re-measure the bar; do not read these as clean and do "
+             "not read them as defects." % len(_held))
 
     # K6, MEASURED. A rebuild with no measurement since the last one is a
     # render billed for a guess. The rule is hoisted (blind_rebuilds) so the

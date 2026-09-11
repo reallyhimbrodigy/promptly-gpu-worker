@@ -338,6 +338,36 @@ check("and an unsupportable bar fails LOUDLY, naming its verdicts unvalidated",
                   for x in ast.walk(n)) for n in ast.walk(tree))
       and "UNVALIDATED" in src)
 
+# ── 7. THE BAR IS PER CONTROL SCHEME, AND REFUSES WHERE NONE IS SUPPORTABLE ──
+# One bar was being applied to two populations whose nulls differ by 8 dB. It
+# is now chosen by the control that produced the number, and where the measured
+# null exceeds the real signal there is no bar and therefore no verdict.
+check("the same-window control has a bar drawn on its measured null",
+      A.region_bar_for("same_window_layer_withheld")[0] == 1.0)
+check("the window-elsewhere control has NO bar — its null exceeds the signal",
+      A.region_bar_for("window_elsewhere")[0] is None
+      and "no bar separates them" in A.region_bar_for("window_elsewhere")[1])
+check("an unknown scheme gets no bar and says why, rather than a default",
+      A.region_bar_for("invented_later")[0] is None
+      and "nobody measured" in A.region_bar_for("invented_later")[1])
+check("a missing scheme is treated as unknown, not as the old default",
+      A.region_bar_for(None)[0] is None)
+check("and the basis is carried with the bar, never just the number",
+      all(isinstance(A.region_bar_for(k)[1], str) and A.region_bar_for(k)[1]
+          for k in ("same_window_layer_withheld", "window_elsewhere", "x")))
+check("a region measurement with no supportable bar records UNVALIDATED and "
+      "changed=None, never CHANGED or INERT",
+      '_rec["region_verdict"] = "UNVALIDATED"' in src
+      and "return None, _db" in src)
+check("the INERT verdict is DEFERRED to the end of the run, where the "
+      "family's population exists",
+      '_deferred_inert' in src
+      and any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "fail"
+              and any(isinstance(x, ast.Constant) and x.value == "inert_verdict_unvalidated"
+                      for x in ast.walk(n)) for n in ast.walk(tree)))
+check("and it is reported as a defect ONLY where the bar separates that family",
+      '_sep == "SEPARATES"' in src)
+
 print()
 if fails:
     print("ASK-AND-INTENT: FAIL")
@@ -348,4 +378,5 @@ print("ASK-AND-INTENT: PASS — no overlay without a ruling, the executed ruling
       "are frozen, an ambiguous request stops and asks for free, and a blind "
       "rebuild is counted against its denominator, and an overlay track that "
       "repeats the captions is named, and a bar that no longer splits its "
-      "population refuses to hand down verdicts")
+      "population refuses to hand down verdicts, with the bar chosen by "
+      "the control that produced the number")
