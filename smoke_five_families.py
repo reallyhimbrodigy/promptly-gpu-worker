@@ -12,6 +12,7 @@ tool surface, the enums and the rubric, or the next person to widen an enum
 quietly restores a family with no implementation behind it.
 """
 import ast
+import pathlib
 import sys
 
 SRC = open("agentic_editor_app.py", encoding="utf-8").read()
@@ -121,7 +122,7 @@ classes = _top.get("UNSUPPORTED_CLASSES") or ()
 ok(set(classes) == {"generate_footage", "change_in_frame"},
    f"UNSUPPORTED_CLASSES changed: {classes}")
 
-_ns = {}
+_ns = {"re": __import__("re")}
 for _n in TREE.body:
     if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "") in (
             "SPEC_MODES", "SPEC_FAMILIES", "UNSUPPORTED_CLASSES",
@@ -132,7 +133,7 @@ for _n in TREE.body:
 for _n in TREE.body:
     if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "").startswith(
             ("ROUTE_", "ROUTES_", "_ADDITIVE_MARKERS", "_ROUTE_COST",
-             "_PLAN_KIND_INSERT")):
+             "_PLAN_KIND_INSERT", "_CARD_FIGURE")):
         exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
 for _fname in ("normalize_spec", "capability_route", "route_cost"):
     _f = next((n for n in TREE.body
@@ -155,6 +156,45 @@ try:
     FAIL.append("an arbitrary unsupported_class is accepted")
 except ValueError:
     pass
+# ── A COPY FAULT IS NOT A CATALOGUE GAP ─────────────────────────────────────
+# derive_card_type returns None for two reasons and only one is a catalogue
+# gap. A hero of six words is the agent writing a sentence into a card field;
+# offering author_component for it spends a render round-trip on a copy edit.
+_dct = next((n for n in TREE.body
+             if isinstance(n, ast.FunctionDef) and n.name == "derive_card_type"), None)
+if _dct is not None:
+    exec(compile(ast.Module([_dct], []), "<s>", "exec"), _ns)
+_d = _ns.get("derive_card_type")
+ok(callable(_d), "derive_card_type is not importable")
+if callable(_d):
+    ok(_d("10")[0] == "StatCard", "a figure does not derive StatCard")
+    ok(_d("HOURS TO EDIT")[0] == "PullQuote", "a short phrase does not derive PullQuote")
+    _long = _d("TEN TIMES A DAY TAKES HOURS")
+    ok(_long[0] is None, "a six-word hero is given a component")
+    ok(_long[1].startswith("HERO_TOO_LONG"),
+       "a too-long hero is not MARKED as a copy fault, so the caller cannot "
+       "tell it from a catalogue gap and offers authoring for both")
+    ok("Shorten it" in _long[1] or "shorten" in _long[1].lower(),
+       "the too-long refusal does not say what to do instead")
+    # EVERY OBSERVED HERO IS ONE WORD; the trigger needs six. If the boundary
+    # ever moves, this is the leg that notices.
+    ok(_d("a b c d e")[0] == "PullQuote" and _d("a b c d e f")[0] is None,
+       "the five-word boundary moved — AUTHORING_VERDICT.md's reachability "
+       "argument is measured against it")
+# THE BRANCH, not the word: "hero_too_long" appears in the skip, the tally and
+# the code field, so its presence says nothing about whether the distinction is
+# actually made. Read the assignment that makes it.
+_tl = [n for n in ast.walk(TREE) if isinstance(n, ast.Assign)
+       and any(getattr(t, "id", "") == "_too_long" for t in n.targets)
+       and "HERO_TOO_LONG" in ast.unparse(n.value)]
+ok(bool(_tl),
+   "nothing derives _too_long from the HERO_TOO_LONG marker, so the skip "
+   "cannot distinguish a copy fault from a catalogue gap and offers authoring "
+   "for both")
+ok(pathlib.Path("AUTHORING_VERDICT.md").exists(),
+   "the authoring verdict is not on the record — Zac asked twice and the "
+   "answer has to survive this session")
+
 ok("cutaway" not in _ns["SPEC_FAMILIES"],
    "cutaway is back in SPEC_FAMILIES — a targeted_change could scope to it")
 

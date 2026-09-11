@@ -5936,8 +5936,16 @@ def derive_card_type(hero, beat_text="", vibe=""):
     if len(_words) <= 5:
         return ("PullQuote", "a short claim with no figure — PullQuote reads "
                              "`text` and carries a phrase whole")
-    return (None, "the phrase is too long to stamp (%d words); a card is a "
-                  "few words at reading size, not a sentence" % len(_words))
+    # A COPY FAULT IS NOT A CATALOGUE GAP, and conflating them sent the one
+    # reachable refusal at the wrong remedy. `author_component` was offered for
+    # a hero of six words — a 270-token tool, plus a 431-token prompt block,
+    # answering a problem that needs THREE FEWER WORDS. Marked so the caller
+    # can tell the two apart; see AUTHORING_VERDICT.md for why the other kind
+    # has never been observed.
+    return (None, "HERO_TOO_LONG: the phrase is too long to stamp (%d words); "
+                  "a card is a few words at reading size, not a sentence. "
+                  "Shorten it to five words or fewer — PullQuote carries a "
+                  "phrase whole" % len(_words))
 
 
 # ── REFERENCE RETRIEVAL — the examples, at the moment of ruling ─────────────
@@ -9567,13 +9575,24 @@ def edit(source_key: str, brief: str,
                 # DERIVED — the agent ruled a card, the harness tried every
                 # catalogue type and none fit — so it is offered where the need
                 # is proven rather than as a standing option.
+                # WHICH KIND OF REFUSAL. derive_card_type returns None for
+                # two different reasons and only one of them is a catalogue
+                # gap. A hero of six words is the agent writing a sentence into
+                # a card field; the remedy is fewer words, and pointing it at
+                # authoring spends a render round-trip on a copy edit.
+                _too_long = str(_dwhy).startswith("HERO_TOO_LONG")
                 _skips.append({"family": "card", "beat": v.get("beat"),
                                "why": _dwhy,
-                               "code": "no_catalogue_component",
+                               "code": ("hero_too_long" if _too_long
+                                        else "no_catalogue_component"),
                                "hero": str(hero)[:60],
-                               "remedy": "no catalogue component fits this "
-                                         "hero; author_component is how this "
-                                         "beat gets served"})
+                               "remedy": ("shorten card_hero to five words or "
+                                          "fewer and rule the beat again — "
+                                          "PullQuote carries a phrase whole"
+                                          if _too_long else
+                                          "no catalogue component fits this "
+                                          "hero; author_component is how this "
+                                          "beat gets served")})
                 # RENAMED FROM authorable_beats 2026-09-10. Builder-1's harness
                 # uses that name for a DENOMINATOR — beats eligible to carry a
                 # placement at all — and this is a DEFECT COUNT: beats where a
@@ -9582,6 +9601,7 @@ def edit(source_key: str, brief: str,
                 # nearly shipped both.
                 led.setdefault("catalogue_gap_beats", []).append(
                     {"beat": v.get("beat"), "hero": str(hero)[:60],
+                     "kind": "hero_too_long" if _too_long else "catalogue_gap",
                      "why": _dwhy[:120]})
                 continue
             led.setdefault("card_type_derived", []).append(
