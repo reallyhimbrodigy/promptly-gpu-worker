@@ -249,21 +249,58 @@ ok("cutaway" in _ns["SPEC_FAMILIES"],
 ok(SRC.count("_unsupported_stop = False") == 1,
    "_unsupported_stop is not initialised before the loop — the ordinary path "
    "would raise NameError")
-ok(SRC.count("_unsupported_stop = True") == 1,
-   "nothing SETS _unsupported_stop")
 ok(SRC.count("if _unsupported_stop:") == 1,
    "nothing READS _unsupported_stop — the run would continue and produce an "
    "edit that ignores the request, and charge for it")
-# BOTH sites, and the absence of the opposite. A substring test for
-# '"credit_charged": False' passed while one of the two was flipped to True,
-# because the other still matched — an existence check cannot see a change it
-# does not count.
-ok(SRC.count('"credit_charged": False') == 2,
-   f'expected credit_charged:False at BOTH the ledger and the tool-result '
-   f'site, found {SRC.count(chr(34) + "credit_charged" + chr(34) + ": False")} '
-   f'— the user must not be charged for a request we cannot serve')
+
+# PER TERMINAL, DISCOVERED FROM THE SOURCE — not counted. These three legs were
+# `count(...) == 1` and `count(...) == 2`, fitted to a world with exactly ONE
+# terminal (`unsupported`). K5's `needs_input` is a second, and the counts went
+# red on correct code while asserting nothing about the new branch: a count
+# tells you the number changed, never which terminal is unguarded. The property
+# is per-terminal — EVERY terminal stops the loop and charges NOTHING — so the
+# terminals are enumerated from the source and each is checked. A third one
+# added later is covered the day it lands.
+_terms = {}
+for _if in ast.walk(TREE):
+    if not isinstance(_if, ast.If):
+        continue
+    _names = [n.value.value for n in ast.walk(_if)
+              if isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+              and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                      and t.slice.value == "terminal" for t in n.targets)]
+    for _nm in _names:
+        # the TIGHTEST enclosing If wins — a nested branch is the real owner
+        _prev = _terms.get(_nm)
+        if _prev is None or len(ast.dump(_if)) < len(ast.dump(_prev)):
+            _terms[_nm] = _if
+ok(len(_terms) >= 2,
+   f"expected at least two terminals (unsupported_request, needs_input), "
+   f"found {sorted(_terms)} — a terminal that stops the run without being "
+   f"named here is one nobody checked for charging")
+for _nm, _if in sorted(_terms.items()):
+    _charged = [n for n in ast.walk(_if) if isinstance(n, ast.Dict)
+                for k, v in zip(n.keys, n.values)
+                if isinstance(k, ast.Constant) and k.value == "credit_charged"]
+    _vals = [v.value for n in ast.walk(_if) if isinstance(n, ast.Dict)
+             for k, v in zip(n.keys, n.values)
+             if isinstance(k, ast.Constant) and k.value == "credit_charged"
+             and isinstance(v, ast.Constant)]
+    ok(len(_vals) >= 2,
+       f"terminal {_nm!r} states credit_charged at {len(_vals)} site(s) — it "
+       f"must say so at BOTH the ledger and the tool-result site, because an "
+       f"existence check cannot see one of two flipped")
+    ok(_vals and all(v is False for v in _vals),
+       f"terminal {_nm!r} records credit_charged {_vals} — the user must not "
+       f"be charged for a request we did not serve")
+    ok(any(isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+           and n.value.value is True
+           and any(getattr(t, "id", "") == "_unsupported_stop" for t in n.targets)
+           for n in ast.walk(_if)),
+       f"terminal {_nm!r} does not set _unsupported_stop — it names itself "
+       f"terminal and then lets the run continue")
 ok('"credit_charged": True' not in SRC,
-   "something records credit_charged: True on the unsupported path")
+   "something records credit_charged: True on a terminal path")
 _break = [n for n in ast.walk(TREE)
           if isinstance(n, ast.If)
           and any(getattr(t, "id", "") == "_unsupported_stop" for t in ast.walk(n.test))
