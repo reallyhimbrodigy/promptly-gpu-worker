@@ -61,6 +61,15 @@ import {SmoothGraphicsProvider} from "./motion-graphics/shared/smooth-graphics-f
 import {ResprungZoomsProvider} from "./zoom/shared/resprung-flag";
 import {MotionBlurProvider, MotionBlurWrap} from "./motion-graphics/shared/motion-blur";
 
+export const CompInput: React.FC<{input: {dir: string; n: number; rung: string}}> = ({input}) => (
+  <Comp dir={input.dir} n={input.n} rung={input.rung} />
+);
+
+export const calcBisect = ({props}: {props: {input: {n: number}}}) => ({
+  width: 1080, height: 1920, fps: 30,
+  durationInFrames: Math.max(1, props.input.n),
+});
+
 export const Comp: React.FC<{dir: string; n: number; rung: string}> = ({dir, n, rung}) => {
   const f = useCurrentFrame();
   const {fps} = useVideoConfig();
@@ -164,11 +173,16 @@ def ladder(source_url: str = "", seconds: float = 2.2) -> dict:
     _r = open(root).read()
     if "BisectZoom" not in _r:
         _r = _r.replace('import React',
-                        'import {Comp as BisectZoom} from "./BisectZoom";\nimport React', 1)
+                        'import {Comp as BisectZoom, CompInput as BisectMicro, '
+                        'calcBisect} from "./BisectZoom";\nimport React', 1)
         _r = _r.replace("</>", (
             '<Composition id="BisectZoom" component={BisectZoom} '
             f'durationInFrames={{{n}}} fps={{30}} width={{1080}} height={{1920}} '
-            f'defaultProps={{{{dir: "bis_seq", n: {n}, rung: "0"}}}} />\n</>'), 1)
+            f'defaultProps={{{{dir: "bis_seq", n: {n}, rung: "0"}}}} />\n'
+            '<Composition id="BisectMicro" component={BisectMicro} '
+            f'durationInFrames={{{n}}} fps={{30}} width={{1080}} height={{1920}} '
+            f'defaultProps={{{{input: {{dir: "bis_seq", n: {n}, rung: "5"}}}}}} '
+            'calculateMetadata={calcBisect} />\n</>'), 1)
         open(root, "w").write(_r)
 
     def batch(tag, comp, props):
@@ -186,9 +200,24 @@ def ladder(source_url: str = "", seconds: float = 2.2) -> dict:
                     job = json.loads(ln[4:])
                 except Exception:                                 # noqa: BLE001
                     pass
+        _actual = None
+        _out_mp4 = f"/tmp/bis_{tag}.mp4"
+        if os.path.exists(_out_mp4):
+            _pr = run(["ffprobe", "-v", "error", "-count_frames",
+                       "-select_streams", "v:0",
+                       "-show_entries", "stream=nb_read_frames",
+                       "-of", "csv=p=0", _out_mp4])
+            try:
+                _actual = int((_pr.stdout or "").strip())
+            except (TypeError, ValueError):
+                _actual = None
         return {"wall_s": round(time.time() - t0, 2), "job": job,
+                "frames_actual": _actual,
                 "ms_per_frame": (round(job["ms"] / n, 1)
                                  if job.get("ok") and job.get("ms") else None),
+                "ms_per_actual_frame": (round(job["ms"] / _actual, 1)
+                                        if job.get("ok") and job.get("ms")
+                                        and _actual else None),
                 "err": (str(job.get("error"))[:160] if job.get("ok") is False
                         else "")}
 
@@ -206,6 +235,12 @@ def ladder(source_url: str = "", seconds: float = 2.2) -> dict:
                                         {"dir": "bis_seq", "n": n, "rung": "8"})
     out["rungs"]["9_wrapper"] = batch("9_wrapper", "BisectZoom",
                                       {"dir": "bis_seq", "n": n, "rung": "9"})
+    # IS IT THE REGISTRATION? Same content as rung 5, but through a
+    # composition with calculateMetadata and an `input`-shaped prop — the two
+    # things PromptlyMicroSegments has that BisectZoom does not.
+    out["rungs"]["10_registration"] = batch(
+        "10_registration", "BisectMicro",
+        {"input": {"dir": "bis_seq", "n": n, "rung": "5"}})
     # rung 6: the real component, through the real composition
     plan = {"input": {"sourceUrl": "bis_src.mp4", "fps": 30, "width": 1080,
                       "height": 1920, "totalDurationInFrames": n,
@@ -226,6 +261,11 @@ def ladder(source_url: str = "", seconds: float = 2.2) -> dict:
                                                              "originX": 0.5,
                                                              "originY": 0.4}]}}}]}}
     out["rungs"]["6_real"] = batch("6_real", "PromptlyMicroSegments", plan)
+    import copy as _copy
+    _plan_novideo = _copy.deepcopy(plan)
+    _plan_novideo["input"]["segments"][0]["clip"].pop("frames", None)
+    out["rungs"]["11_real_video"] = batch("11_real_video",
+                                          "PromptlyMicroSegments", _plan_novideo)
     bad = [k for k, v in out["rungs"].items() if v["ms_per_frame"] is None]
     if bad:
         out["state"] = "PARTIAL"
@@ -246,7 +286,17 @@ def main():
         mf = v["ms_per_frame"]
         step = ("" if mf is None or prev is None
                 else f"   step x{mf / prev:.2f}" if prev else "")
-        print(f"    {k:12s} {str(mf):>8} ms/frame{step}"
+        _fa = v.get("frames_actual")
+        _mfa = v.get("ms_per_actual_frame")
+        if _fa is None:
+            _den = "   frames_actual=ABSENT (ffprobe gave no count — the " \
+                   "denominator is UNVERIFIED, not confirmed)"
+        elif _fa != r.get("frames"):
+            _den = (f"   *** {_fa} FRAMES RENDERED, not {r.get('frames')} — "
+                    f"{_mfa} ms per ACTUAL frame")
+        else:
+            _den = f"   [{_fa} frames confirmed]"
+        print(f"    {k:12s} {str(mf):>8} ms/frame{step}{_den}"
               + (f"   FAILED: {v['err']}" if v.get("err") else ""))
         if mf:
             prev = mf
