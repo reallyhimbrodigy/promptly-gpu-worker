@@ -44,8 +44,14 @@ MUTATIONS = [
     ("the census stops recording that cutaway has no field here", DOCNAME,
      "not in this lane's treatment enum", "absent from this lane",
      "cutaway is not a field on this lane"),
+    # AIMED AT WHAT THE LEG READS. This was re-pointed at the table row when
+    # the leg tested for two words co-occurring, and then the leg was tightened
+    # to read the GAP SENTENCE — so mutation and leg ended up aimed at
+    # different lines and the mutant passed while the sentence was intact. When
+    # a leg moves, its mutation moves with it.
     ("the census stops naming the largest instructable gap", DOCNAME,
-     "| `zoom_arc` | `06_emphasis_zoom` |", "| `zoom_ARC` | `06_emphasis` |",
+     "**`06_emphasis_zoom` is the largest instructable gap",
+     "**The largest instructable gap",
      "names the largest instructable gap"),
 ]
 
