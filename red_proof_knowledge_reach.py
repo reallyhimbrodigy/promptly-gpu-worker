@@ -31,6 +31,19 @@ MUTATIONS = [
     # sentence and both `06_emphasis_zoom` and `zoom_arc` still appeared in the
     # table row above it, so the leg passed — the ambiguous-literal class, in a
     # markdown file this time.
+    ("the wired-claim marker is dropped from a field the agent reads", APPNAME,
+     '"[06_emphasis_zoom, wired "\n                                                    "2026-09-11] "',
+     '""\n                                                    "" ',
+     "at least five claims are wired"),
+    ("a marker names a document that does not exist", APPNAME,
+     "[05_motion_graphics, wired 2026-09-11]", "[99_invented, wired 2026-09-11]",
+     "names a real knowledge document"),
+    ("the census stops correcting its own over-count", DOCNAME,
+     "over-counted", "counted",
+     "CORRECTS its own over-count"),
+    ("the census stops recording that cutaway has no field here", DOCNAME,
+     "not in this lane's treatment enum", "absent from this lane",
+     "cutaway is not a field on this lane"),
     ("the census stops naming the largest instructable gap", DOCNAME,
      "| `zoom_arc` | `06_emphasis_zoom` |", "| `zoom_ARC` | `06_emphasis` |",
      "names the largest instructable gap"),
