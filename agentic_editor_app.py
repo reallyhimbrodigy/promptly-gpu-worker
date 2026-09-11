@@ -2666,7 +2666,17 @@ _MODAL_MEM_USD_PER_GIB_S = 0.00000667
 # 139.4s on car_short, and the nested set sums to 76.3 inside an 83.5s parent.
 _NESTED_IN_EXECUTE = ("build_cut", "build_alpha_layer", "composite_captions",
                       "build_zoom", "build_transitions", "build_sfx",
-                      "build_reel", "build_cutaway")
+                      "build_reel", "build_cutaway",
+                      # ADDED 2026-09-11, AND THE GUARD CAUGHT ITS OMISSION.
+                      # build_control_composite is called from inside
+                      # execute_plan (twice: once for the caption/text input,
+                      # once for card's). Left out of this set it counted as
+                      # top-level, the top-level sum reached 248.8s against a
+                      # 219.4s run, and run_cost reported INCOHERENT rather
+                      # than printing a share — which is the negative-remainder
+                      # guard working on the person who wrote it, one commit
+                      # after adding the stage it did not know about.
+                      "build_control_composite")
 
 
 def container_usd_per_s(cpu, memory_mb):
@@ -7434,9 +7444,22 @@ def edit(source_key: str, brief: str,
     def _control_composite(before, dur_s):
         """(path or None) — `before` composited with an EMPTY layer.
 
-        One extra ffmpeg pass per distinct input, measured at 11.43s of a
-        314.4s run. Failure is LOUD and falls back to the window control rather
-        than silently leaving the family unmeasurable."""
+        THE PRICE, CORRECTED BY THE SECOND MEASUREMENT. I quoted 2.1-3.2% of
+        wall from composite_captions, then 3.6% from round 60's single
+        composite. Round 61 ran TWO — text/caption's input and card's are
+        different files — and cost 30.43s of a 219.4s run: 13.9%. Both earlier
+        figures were right about what they measured and wrong as the price of
+        the feature, because the feature grew a second composite when card was
+        wired. A per-input cost quoted before the number of inputs was settled
+        is an estimate wearing a measurement's clothes.
+
+        Still worth it at 13.9%: it is the only control that can see a short
+        label, and without it five of seven real overlays read INERT. But it is
+        now the third-largest stage on this fixture and a candidate for the
+        same decode work as build_reel and build_alpha_layer.
+
+        Failure is LOUD and falls back to the window control rather than
+        silently leaving the family unmeasurable."""
         _key = str(before)
         if _key in _ctrl_cache:
             return _ctrl_cache[_key]
