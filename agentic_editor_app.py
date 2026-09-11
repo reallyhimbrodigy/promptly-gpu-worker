@@ -5384,6 +5384,38 @@ def region_psnr(before, after, t0, t1, box=None, env=None):
 _REGION_EFFECT_BAR_DB = 6.0
 
 
+# THE NULL, MEASURED 2026-09-11, and it says the bar cannot be redrawn.
+#
+# 64 measurements, 8 real UGC clips x 4 windows x 2 control schemes, through
+# the SHIPPED alpha_composite_filter / alpha_paint_box / region_psnr /
+# region_effect_delta. Raw rows in measured/region_bar_null_2026-09-11.json,
+# harness beside them. $0 — local ffmpeg.
+#
+#   control scheme            null (no ink)                 ink band present
+#   DIFFERENT WINDOW (today)  -10.75 .. 8.13   med  0.75    med 26.6 (2% band)
+#   SAME WINDOW, no layer       0.00 .. 0.00   med  0.00    med 26.2
+#
+# PRODUCTION'S REAL SHORT LABELS READ 4.70-6.76 dB (round 58 talking_head, the
+# real path). THAT ENTIRE RANGE SITS BELOW THE NULL'S MAXIMUM OF 8.13. There is
+# no threshold that separates them, so the answer to "redraw the bar" is that
+# the bar is not the problem: a control window somewhere ELSE in the video
+# carries the difference between two unrelated moments' encode noise, and that
+# noise is larger than the signal a short label produces.
+#
+# And 8.13 is a LOWER BOUND for production, not an estimate of it: these were
+# measured on a single clean encode reading ~50 dB, while production's `after`
+# carries accumulated generations at 25-28 dB, where inter-window variance is
+# larger, not smaller.
+#
+# THE FIX IS THE CONTROL, NOT THE NUMBER. Measure the control at the SAME
+# window with the layer withheld: the null is then exactly 0.00 across all 32
+# measurements, because with no ink the two files are identical there and the
+# x264 thread pin makes that byte-identical. It costs ONE extra composite pass
+# — composite_captions is 2.1-3.2% of wall on every fixture measured — and then
+# any bar in (0, signal) works, biased low the way this one already is.
+#
+# Until that control exists, bar_separates below is what stands between a
+# short-label run and five false INERT verdicts.
 def bar_separates(deltas, bar=_REGION_EFFECT_BAR_DB, min_gap_db=1.0):
     """Does this bar still SPLIT the population it is being applied to?
 
