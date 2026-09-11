@@ -307,10 +307,18 @@ if callable(_ir) and callable(_hd):
         _msg = _hd(_n2, _okk)[1].lower()
         ok("added" not in _msg and "i've added" not in _msg,
            "the hybrid message implies the insert was made")
-        ok("can create" in _msg or "cannot" in _msg or "isn't something" in _msg,
-           "the hybrid message does not say the insert did NOT happen — "
-           "silence about the missing half is what reads as the product not "
-           "working")
+        # THE NEGATION AS A PHRASE. "can create" alone survived cutting the
+        # explanation down to "something I can create." — which says the
+        # OPPOSITE and kept every word the check looked for. A disjunction of
+        # loose substrings is not a test of a sentence's meaning.
+        ok(("isn't something i can create" in _msg
+            or "aren't something i can create" in _msg
+            or "isn't something this editor can create" in _msg
+            or "aren't something this editor can create" in _msg),
+           "the hybrid message does not say, as a phrase, that the insert "
+           "CANNOT be created — silence about the missing half is what reads "
+           "as the product not working, and a message that says 'something I "
+           "can create' says the opposite")
     ok("charged" in _hd([1], False)[1].lower(),
        "a REFUSED hybrid does not say nothing was charged")
 ok("insert_requests" in SRC and 'led["capability_route"]["delivered"]' in SRC,
