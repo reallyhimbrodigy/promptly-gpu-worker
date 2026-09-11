@@ -31,6 +31,20 @@ MUTATIONS = [
     # sentence and both `06_emphasis_zoom` and `zoom_arc` still appeared in the
     # table row above it, so the leg passed — the ambiguous-literal class, in a
     # markdown file this time.
+    ("the mask-zoom rule stops being found, putting build back to the cheap slot", APPNAME,
+     'r"MASK zooms are functional: ([^.]+\\.)"', 'r"MASK zooms are ceremonial: ([^.]+\\.)"',
+     "mask-zoom rule is found in the catalogue"),
+    ("build and breather stop being named as the mask positions", APPNAME,
+     'r"([a-z_]+)/([a-z_]+) claims exist for exactly this job"',
+     'r"([a-z_]+)/([a-z_]+) claims exist for precisely this job"',
+     "mask-zoom rule is found in the catalogue"),
+    ("the field stops saying a mask position is NOT a peak", APPNAME,
+     '"They are NOT peaks — "', '"They are peaks — "',
+     "says a mask position is NOT a peak"),
+    ("the harness type map drifts from the catalogue's mask rule", APPNAME,
+     '"breather": ("SnapReframe", "StepZoom")',
+     '"breather": ("SmoothPush", "StepZoom")',
+     "type map agrees with it independently"),
     ("the wired-claim marker is dropped from a field the agent reads", APPNAME,
      '"[06_emphasis_zoom, wired "\n                                                    "2026-09-11] "',
      '""\n                                                    "" ',
