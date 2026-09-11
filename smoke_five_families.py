@@ -131,7 +131,8 @@ for _n in TREE.body:
 # the shipped rule instead of restating it.
 for _n in TREE.body:
     if isinstance(_n, ast.Assign) and getattr(_n.targets[0], "id", "").startswith(
-            ("ROUTE_", "ROUTES_", "_ADDITIVE_MARKERS", "_ROUTE_COST")):
+            ("ROUTE_", "ROUTES_", "_ADDITIVE_MARKERS", "_ROUTE_COST",
+             "_PLAN_KIND_INSERT")):
         exec(compile(ast.Module([_n], []), "<s>", "exec"), _ns)
 for _fname in ("normalize_spec", "capability_route", "route_cost"):
     _f = next((n for n in TREE.body
@@ -323,6 +324,52 @@ if callable(_ir) and callable(_hd):
        "a REFUSED hybrid does not say nothing was charged")
 ok("insert_requests" in SRC and 'led["capability_route"]["delivered"]' in SRC,
    "the hybrid route does not record its insert requests or what it delivered")
+# THE HOLE SURVIVES A RE-EDIT. The plan is what the server persists and hands
+# back, so anything not in it does not survive the turn — and an UNFILLED
+# insert that vanishes is worse than a refusal, because the user was told it
+# was recorded.
+for _fn in ("plan_with_inserts", "inserts_from_plan"):
+    _f = next((n for n in TREE.body
+               if isinstance(n, ast.FunctionDef) and n.name == _fn), None)
+    if _f is not None:
+        exec(compile(ast.Module([_f], []), "<s>", "exec"), _ns)
+_pwi, _ifp = _ns.get("plan_with_inserts"), _ns.get("inserts_from_plan")
+ok(callable(_pwi) and callable(_ifp),
+   "plan_with_inserts/inserts_from_plan are not importable")
+if callable(_pwi) and callable(_ifp):
+    _ruling = {"src_t0": 0.0, "src_t1": 2.0, "id": "a", "treatment": ["text"]}
+    _hole = {"asked_for": "a city shot", "state": "UNFILLED"}
+    _merged = _pwi([_ruling], [_hole])
+    ok(len(_merged) == 2,
+       "an UNFILLED insert does not reach the durable plan — it would vanish on "
+       "the next turn after the user was told it was recorded")
+    _r, _i = _ifp(_merged)
+    ok(len(_r) == 1 and len(_i) == 1 and _i[0]["state"] == "UNFILLED",
+       "a loaded plan does not split back into rulings and inserts")
+    ok("kind" not in _i[0],
+       "the insert keeps its transport marker after loading, which would reach "
+       "the ruling path as a stray field")
+    # BACKWARD COMPATIBILITY, or the first re-edit after this shipped discards
+    # every plan written before it.
+    _r2, _i2 = _ifp([_ruling])
+    ok(len(_r2) == 1 and not _i2,
+       "a plan written BEFORE inserts existed is not read as rulings — every "
+       "prior plan would be discarded on its first re-edit")
+    # A FILLED insert must NOT be carried forward as a hole.
+    ok(len(_pwi([], [dict(_hole, state="FILLED")])) == 0,
+       "a FILLED insert is carried forward as an unfilled hole")
+# THE RESTORE, read from the AST. `"insert_requests" in SRC` appears in this
+# file twice now and in the app many times, so it says nothing about whether
+# the RE-EDIT path restores them. The ratchet caught this one before it
+# shipped, which is what it is for.
+_rest = [n for n in ast.walk(TREE) if isinstance(n, ast.Assign)
+         and any(isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                 and t.slice.value == "insert_requests" for t in n.targets)
+         and "_prior_inserts" in ast.unparse(n.value)]
+ok(bool(_rest),
+   "the re-edit path does not assign the carried inserts back into the ledger "
+   "— a hole the user was told we recorded would be dropped on the next turn")
+
 _hyb = [n for n in ast.walk(TREE) if isinstance(n, ast.If)
         and any(isinstance(x, ast.Name) and x.id == "ROUTE_HYBRID"
                 for x in ast.walk(n.test))
