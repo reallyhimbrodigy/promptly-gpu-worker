@@ -38,8 +38,11 @@ MUTATIONS = [
      'r"([a-z_]+)/([a-z_]+) claims exist for exactly this job"',
      'r"([a-z_]+)/([a-z_]+) claims exist for precisely this job"',
      "mask-zoom rule is found in the catalogue"),
+    # THE LITERAL AS IT IS WRITTEN, em-dash and all. My first anchor quoted a
+    # tidied version of the line and reported 0x — the sixth stale-target
+    # cousin: an anchor written from what I MEANT the line to say.
     ("the field stops saying a mask position is NOT a peak", APPNAME,
-     '"They are NOT peaks — "', '"They are peaks — "',
+     "They are NOT peaks", "They are peaks",
      "says a mask position is NOT a peak"),
     ("the harness type map drifts from the catalogue's mask rule", APPNAME,
      '"breather": ("SnapReframe", "StepZoom")',
