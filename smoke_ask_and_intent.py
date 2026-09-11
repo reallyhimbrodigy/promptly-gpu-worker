@@ -236,6 +236,34 @@ check("labels that say what the captions cannot are editorial",
 _stamp = A.overlay_restates_speech(_V("CREATOR", "HOURS", "FOREVER"), _B)
 check("a ONE-WORD stamp taken from the speech is still editorial, not a subtitle",
       _stamp["verdict"] == "editorial", str(_stamp))
+# THE TWO ARMS, ISOLATED. The first draft's cases all tripped BOTH arms, so
+# deleting either one left the smoke green — two mutants passed. A case that
+# fires on both proves neither.
+_B6 = [{"i": i, "t_start": i * 2.0, "t_end": i * 2.0 + 2.0,
+        "text": t} for i, t in enumerate(
+    ["being a content creator is not easy", "posting ten times a day takes hours",
+     "editing your own videos takes forever", "so i made a mobile app",
+     "it takes care of everything", "five minutes to edit"])]
+_run_only = A.overlay_restates_speech(
+    [{"beat": 0, "treatment": ["text"], "text_content": "BEING A CONTENT CREATOR"},
+     {"beat": 1, "treatment": ["text"], "text_content": "POSTING TEN TIMES A DAY"},
+     {"beat": 2, "treatment": ["text"], "text_content": "EDITING YOUR OWN VIDEOS"},
+     {"beat": 3, "treatment": ["text"], "text_content": "THE REAL COST"},
+     {"beat": 4, "treatment": ["text"], "text_content": "WHO?"},
+     {"beat": 5, "treatment": ["text"], "text_content": "60x"}], _B6)
+check("the CONSECUTIVE-RUN arm alone catches a rolling transcript "
+      "(3 in a row, share only 0.5)",
+      _run_only["verdict"] == "SUBTITLE TRACK" and _run_only["longest_run"] == 3
+      and _run_only["share"] == 0.5, str(_run_only))
+_share_only = A.overlay_restates_speech(
+    [{"beat": 0, "treatment": ["text"], "text_content": "BEING A CONTENT CREATOR"},
+     {"beat": 2, "treatment": ["text"], "text_content": "EDITING YOUR OWN VIDEOS"},
+     {"beat": 4, "treatment": ["text"], "text_content": "TAKES CARE OF EVERYTHING"}], _B6)
+check("the SHARE arm alone catches it when no three are adjacent "
+      "(3 of 3 restating, longest run 1)",
+      _share_only["verdict"] == "SUBTITLE TRACK" and _share_only["longest_run"] == 1,
+      str(_share_only))
+
 _gap = A.overlay_restates_speech(
     [{"beat": 0, "treatment": ["text"], "text_content": "BEING A CONTENT CREATOR"},
      {"beat": 2, "treatment": ["text"], "text_content": "EDITING YOUR OWN VIDEOS"}], _B)
