@@ -5891,6 +5891,43 @@ REFERENCE_FAMILY_NAME = {"text": "overlay_text", "card": "card", "sfx": "sfx",
                          "transition": None}
 
 
+
+def offered_treatments(purpose, beats=None):
+    """(families, n_beats) — what editors reached for at moments of this
+    purpose, in OUR family names, with the denominator. PURE.
+
+    OFFERED, NEVER ENFORCED (Zac, 2026-09-10). This is the same corpus the
+    reference rates came from, and those were ruled GRADE-ONLY for the same
+    reason: a set the harness enforces is the harness editing. The agent
+    chooses inside it or outside it, and a ruling outside is correct whenever
+    the moment says so — it just has to say why.
+
+    WHAT THE FULL INDEX CORRECTED. On the 39-beat seed, cutaway appeared only
+    on evidence and turn. On all 153 it is on ALL SEVEN purposes and is the
+    most-used visual move in the corpus — 72 of 153. A surface built on the
+    seed would have withheld the family that had just been built from five of
+    the seven moments where editors actually use it. The seed was not a small
+    corpus; it was a differently-shaped one.
+
+    A family the corpus never uses at a purpose is not offered there, and one
+    it never uses anywhere (transition: 0 of 153) is offered nowhere. That is
+    not a gap in the surface — it is what the examples do, and the examples
+    are the standard.
+    """
+    _b = beats if beats is not None else load_reference_index()[0]
+    _p = str(purpose or "").strip().lower()
+    _corpus_to_family = {v: k for k, v in REFERENCE_FAMILY_NAME.items() if v}
+    _fams, _n = {}, 0
+    for _x in _b:
+        if str(_x.get("purpose") or "").strip().lower() != _p:
+            continue
+        _n += 1
+        for _t in (_x.get("treat") or []):
+            _f = _corpus_to_family.get(_t)
+            if _f:
+                _fams[_f] = _fams.get(_f, 0) + 1
+    return _fams, _n
+
 def _rulable_treatments():
     """The treatments the agent can actually rule, from the SCHEMA's own enum.
 
@@ -6185,6 +6222,23 @@ def _reference_block(our_beats, k=2):
                                  if str(x.get("purpose") or "").lower() == _p)))
             continue
         _lines.append("%s (%d in corpus)" % (_p.upper(), len(_pool)))
+        # WHAT WAS REACHED FOR HERE, with the denominator, and named as a
+        # choice rather than a quota. Rulable families the corpus never used at
+        # this purpose are named too — an absence an editor can see is worth
+        # more than a list that quietly omits it.
+        _off, _offn = offered_treatments(_p, _b)
+        _rul = sorted(f for f in _rulable_treatments() if f != "none")
+        _have = [(f, _off[f]) for f in _rul if _off.get(f)]
+        _none = [f for f in _rul if not _off.get(f)]
+        if _have:
+            _lines.append("  REACHED FOR HERE: "
+                          + ", ".join("%s (%d of %d)" % (f, k, _offn)
+                                      for f, k in sorted(_have,
+                                                         key=lambda x: -x[1]))
+                          + ((" — never here: " + ", ".join(_none))
+                             if _none else "")
+                          + ". Choose among these or outside them; if you go "
+                            "outside, say why in `why`. This is not a quota.")
         if len(_pool) < k:
             _lines.append("  (only %d buildable example%s — thin, not absent)"
                           % (len(_pool), "" if len(_pool) == 1 else "s"))
@@ -8308,6 +8362,21 @@ def edit(source_key: str, brief: str,
                 # already the delivery geometry: no filter, and the trim's own
                 # label is what concat reads.
                 parts.append(f"[v{i}]null[g{i}]")
+        # FRAMING CHANGES THE PICTURE, NEVER THE CLOCK — asserted, not assumed.
+        # Every reader that maps an output instant back to source (the judge's
+        # output_to_source, the caption remap, every placement in every sheet)
+        # walks keep_spans accumulating DURATIONS. If a framing mode ever
+        # changed a segment's length, all of them would shift silently and the
+        # failure would look exactly like the boundary conventions Builder-2
+        # spent a night removing. So the split must partition the kept spans
+        # exactly.
+        _vsum = sum(_b - _a for _a, _b, _ in _vsegs)
+        _ssum = sum(_b - _a for _a, _b in spans)
+        if abs(_vsum - _ssum) > 1e-6:
+            return {"error": f"framing split covers {_vsum:.6f}s of "
+                             f"{_ssum:.6f}s of kept span — the video and audio "
+                             f"clocks would diverge and every output-to-source "
+                             f"mapping with them"}
         parts.append("".join(f"[g{i}]" for i in range(len(_vsegs)))
                      + f"concat=n={len(_vsegs)}:v=1:a=0[outv]")
         parts.append("".join(f"[a{i}]" for i in range(n))
@@ -8320,7 +8389,9 @@ def edit(source_key: str, brief: str,
         led["geometry_normalise"] = {
             "src": [_v0.get("width"), _v0.get("height")],
             "out": [1080, 1920], "mode": _gmode, "crop_loss": _gloss,
-            "segments": [{"t0": round(_a, 2), "t1": round(_b, 2),
+            # SOURCE CLOCK, in the field names. t0/t1 with no clock named is
+            # the single most expensive ambiguity in this file's history.
+            "segments": [{"src_t0": round(_a, 2), "src_t1": round(_b, 2),
                           "framing": _fr, "mode": _m}
                          for (_a, _b, _fr), _m in zip(_vsegs, _modes)],
         }

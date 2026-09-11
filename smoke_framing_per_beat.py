@@ -96,5 +96,36 @@ if "build_cut(merged, framing_spans=_fr_spans)" not in _src:
           "field would be accepted and ignored")
     fail += 1
 
+# THE CLOCK IDENTITY. Framing changes the picture, never the length: the split
+# must partition the kept spans exactly, or every output-to-source mapping in
+# every sheet shifts silently.
+for _spans, _fs in (([[0, 10]], [(0, 4, "crop"), (6, 10, "blur")]),
+                    ([[0, 4], [6, 10]], [(2, 8, "fit")]),
+                    ([[1.234, 5.678]], [(2.0, 3.0, "crop"), (3.0, 4.0, "blur")]),
+                    ([[0, 10]], None)):
+    _segs = A.split_spans_by_framing(_spans, _fs)
+    _v = sum(b - a for a, b, _ in _segs)
+    _s = sum(b - a for a, b in _spans)
+    if abs(_v - _s) > 1e-6:
+        print(f"  *** the split covers {_v}s of {_s}s — video and audio clocks "
+              f"would diverge: {_segs}")
+        fail += 1
+# The assertion must be IN build_cut, not only in this file — checked on the
+# AST so a comment mentioning it cannot satisfy it.
+import ast                                                       # noqa: E402
+_bc = next((n for n in ast.walk(ast.parse(open(os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "agentic_editor_app.py")).read()))
+    if isinstance(n, ast.FunctionDef) and n.name == "build_cut"), None)
+_has = _bc is not None and any(
+    isinstance(n, ast.Compare) and isinstance(n.ops[0], ast.Gt)
+    and any(isinstance(c, ast.Call) and getattr(c.func, "id", "") == "abs"
+            for c in ast.walk(n.left))
+    for n in ast.walk(_bc))
+if not _has:
+    print("  *** build_cut does not ASSERT the duration identity — a split "
+          "that loses time would only surface as a shifted sheet")
+    fail += 1
+
 print(f"smoke_framing_per_beat: {fail} wrong")
 sys.exit(1 if fail else 0)
