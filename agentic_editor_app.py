@@ -1655,6 +1655,15 @@ knowledge set at all — it answers "how to work", never "how to cut".
       composition name, use `search_skills` or `npx remotion compositions`.
       A guessed prop name costs a whole render round-trip.
 
+  K5. WHEN THE REQUEST IS AMBIGUOUS, STOP AND ASK. If the instruction could
+      mean two materially different edits — "cut the part where I stumble" on
+      a source with three stumbles, "make it tighter" on a re-edit whose scope
+      names no beats — do not pick one silently. Put the question in
+      set_spec.clarification and stop: no plan, no render, no charge. Asking
+      costs the user one reply; guessing costs them the edit. (Karpathy §1
+      "if something is unclear, stop, name what is confusing, ask" — Zac's
+      ruling for ambiguous re-edit instructions, 2026-09-10.)
+
   NOT ADOPTED — "simplicity first / nothing beyond what was asked". It is good
   advice for writing code and it is WRONG FOR THIS JOB, measured: across five
   runs this agent placed 0-1 cards where the beats plainly called for more.
@@ -1861,6 +1870,14 @@ KNOWLEDGE_TOOLS = [{
             "unsupported_class": {"type": "string",
                                   "enum": ["generate_footage", "change_in_frame"],
                                   "description": "unsupported ONLY: which class"},
+            "clarification": {"type": "string",
+                              "description": "K5. The ONE question whose answer "
+                                             "changes what gets built, when the "
+                                             "request could mean two materially "
+                                             "different edits. Setting it STOPS "
+                                             "the run: no plan, no render, no "
+                                             "charge. Leave it out when the "
+                                             "request is clear enough to act on."},
             "families": {"type": "array", "items": {"type": "string"},
                          "description": "targeted_change ONLY: the families the "
                                         "request asks for. One of: text, card, "
@@ -6091,7 +6108,7 @@ _REQUIRED_CONSTRAINTS = [
     # asset library that reported mounted_unread on every run; E4 was a
     # tombstone for a retired rule. ~4,200 chars describing paths the agent no
     # longer takes, billed on every turn of every render.
-    "C8.", "C9.", "F1.", "S1.", "E1.", "E2.", "E3.", "E5.", "K1.", "K2.", "K3.", "K4."]
+    "C8.", "C9.", "F1.", "S1.", "E1.", "E2.", "E3.", "E5.", "K1.", "K2.", "K3.", "K4.", "K5."]
 # Every one of these was tried against this image and FAILED. If a future edit
 # reintroduces them the agent inherits 31 failed attempts again.
 _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
@@ -7440,14 +7457,36 @@ def edit(source_key: str, brief: str,
             fail("overlay_on_cut_beat",
                  f"{_acct['skipped_cut']} text ruling(s) are on beats removed by "
                  f"the cut — no overlay belongs there, but the ruling was made")
-        # Anything the caller passed is additive — a hand-authored overlay that
-        # is not a beat ruling still lands.
+        # A CALLER-SUPPLIED OVERLAY IS NOT ADDITIVE. This used to read "a
+        # hand-authored overlay that is not a beat ruling still lands" — a
+        # second channel into the picture that bypassed the rulings, reachable
+        # through the build_overlays tool in repair. Zac's ruling (2026-09-10):
+        # whatever places without a ruling is placing without intent; close it.
+        # An item lands only if its OUTPUT instant falls inside a beat the agent
+        # ruled `text`; otherwise it is REFUSED, on the record, loudly. To place
+        # text, rule the beat text.
         _seen_t = {round(d["t_start"], 1) for d in _derived}
-        _dropped_passthru = []
+        _text_beats = [_by_i.get(v.get("beat")) for v in (led.get("beat_verdicts") or [])
+                       if "text" in (v.get("treatment") or [])]
+        _text_windows = []
+        for _tb in _text_beats:
+            if not _tb:
+                continue
+            _w0 = src_to_out(_tb["t_start"], _spans) if _spans else _tb["t_start"]
+            _w1 = src_to_out(_tb["t_end"], _spans) if _spans else _tb["t_end"]
+            if _w0 is not None and _w1 is not None:
+                _text_windows.append((float(_w0), float(_w1)))
+        _dropped_passthru, _unruled_refused = [], []
         for it in (items or []):
             try:
-                if round(float(it.get("t_start")), 1) not in _seen_t:
-                    _derived.append(it)
+                _it_t = round(float(it.get("t_start")), 1)
+                if _it_t in _seen_t:
+                    continue
+                if not any(_a - 1e-3 <= _it_t <= _b + 1e-3 for _a, _b in _text_windows):
+                    _unruled_refused.append(
+                        {"t_start": _it_t, "text": str(it.get("text") or "")[:60]})
+                    continue
+                _derived.append(it)
             except Exception as _de:
                 # A DROPPED OVERLAY MUST LEAVE A RECORD. An unparseable t_start
                 # skipped the append and said NOTHING, so a caller-supplied
@@ -7457,6 +7496,17 @@ def edit(source_key: str, brief: str,
                 _dropped_passthru.append(
                     {"t_start": str(it.get("t_start"))[:40],
                      "why": f"t_start unusable ({type(_de).__name__})"})
+        if _unruled_refused:
+            led["overlays_unruled_refused"] = _unruled_refused
+            # PRINTED IN THE COMMIT THAT ADDS IT.
+            print(f"  OVERLAY REFUSED : {len(_unruled_refused)} caller-supplied "
+                  f"overlay(s) on no beat ruled text: "
+                  f"{[(r['t_start'], r['text'][:24]) for r in _unruled_refused[:6]]}"
+                  f"{' ...' if len(_unruled_refused) > 6 else ''}", flush=True)
+            fail("overlay_unruled_refused",
+                 f"{len(_unruled_refused)} caller-supplied overlay(s) refused — "
+                 f"no beat ruled text at their instant. To place text, rule the "
+                 f"beat text.")
         if _dropped_passthru:
             led["overlay_passthrough_dropped"] = _dropped_passthru
             fail("overlay_dropped_bad_t_start",
@@ -7743,6 +7793,21 @@ def edit(source_key: str, brief: str,
         is now done here, once, without a turn each.
         """
         vs = led.get("beat_verdicts") or []
+        # THE RULINGS THIS BUILD USED, FROZEN. beat_verdicts is mutated after
+        # the fact — the half-ruling stripper rewrites `treatment` in place, and
+        # a later rule_all_beats/beat_verdict pass replaces entries — so on
+        # round 54 talking_head the ledger's beat 0 read ['cutaway'] while the
+        # overlay at 0.0s had been built from a ruling that named text. The
+        # judgment sheet then called the agent's own placement BUILT BUT NOT
+        # RULED. The record has to follow the build: a deep copy, per call.
+        import copy as _copy
+        led["executed_verdicts"] = _copy.deepcopy(vs)
+        led["executed_verdicts_call"] = int(led.get("execute_plan_calls") or 0) + 1
+        print("  EXECUTED FROM   : %d ruling(s) — %s"
+              % (len(vs), "  ".join(
+                  "%s %d" % (_fam, sum(1 for _v in vs if _fam in (_v.get("treatment") or [])))
+                  for _fam in ("text", "card", "zoom", "sfx", "transition", "cutaway"))),
+              flush=True)
         if not vs:
             return {"error": "no verdicts yet — call rule_all_beats first"}
         # Refuse while the rulings fall short of the agent's OWN spec and it has
@@ -8900,8 +8965,13 @@ def edit(source_key: str, brief: str,
             # that beat says? Two questions, recorded separately because they
             # fail for different reasons. grounded is None when the hero has no
             # digits — not applicable, never False.
+            # ONE CLOCK HERE TOO. This passed _mg_at — OUTPUT time, attack_ms
+            # BEFORE the moment — against a beat window on the SOURCE clock, so
+            # r51 car_mid's PullQuote read on_beat=False while sitting on the
+            # beat it was ruled for. The card's source-clock instant is what the
+            # beat window can be compared with.
             led.setdefault("card_beat_alignment", []).append(dict(
-                card_beat_alignment({"anchor_s": _mg_at, "hero": hero}, b),
+                card_beat_alignment({"anchor_s": _card_src_t, "hero": hero}, b),
                 beat=v.get("beat"), type=_ctype))
             # CARD vs FIGURE: how far the card's MOMENT sits from the instant
             # its number is spoken. Negative = early. Three states, because a
@@ -8930,7 +9000,16 @@ def edit(source_key: str, brief: str,
         # PRINTED IN THE COMMIT THAT ADDS IT.
         _cvf = led.get("card_vs_figure") or []
         _cvf_m = [c for c in _cvf if c["state"] == "MEASURED"]
-        print("  CARD vs FIGURE  : n=%d  early(<-0.05s)=%d  on=%d  late(>+0.05s)=%d  "
+        # CAVEAT (Builder-1, 2026-09-10): after f5ffe09 the anchor IS figure_t,
+        # so a lead of 0 here is a tautology, not a measurement — what this
+        # line still detects is head-clamping (a positive lead) and an ABSENT
+        # instant. The honest independent number — card resolution frame vs
+        # the AUDIBLE onset from a source the anchor did not use — is NOT
+        # BUILT; and the raw Deepgram word clock reads ~1-3 frames late against
+        # audible onset, so a correct anchor should read slightly LATE against
+        # audio, never exactly 0. Read a clean 0 as unverified, not as proof.
+        print("  CARD vs FIGURE  : (anchor vs figure_t — tautological after f5ffe09; "
+              "detects head-clamp and ABSENT only)  n=%d  early(<-0.05s)=%d  on=%d  late(>+0.05s)=%d  "
               "leads=%s  ABSENT=%d"
               % (len(_cvf), sum(1 for c in _cvf_m if c["lead_s"] < -0.05),
                  sum(1 for c in _cvf_m if -0.05 <= c["lead_s"] <= 0.05),
@@ -9153,8 +9232,12 @@ def edit(source_key: str, brief: str,
                     {"type": _TYPE[_k], "family": _k,
                      "t_start": _s.get("t", [None])[0] if isinstance(_s.get("t"), list)
                                 else _s.get("t"),
-                     "t_moment": _s.get("t", [None])[0] if isinstance(_s.get("t"), list)
-                                 else _s.get("t"),
+                     # a zoom's t is [start, end] with the start a pre-roll
+                     # before the beat; the moment it is for is beat_at_s.
+                     # sfx and transition record the moment as t already.
+                     "t_moment": (_s.get("beat_at_s") if _s.get("beat_at_s") is not None
+                                  else (_s.get("t", [None])[0] if isinstance(_s.get("t"), list)
+                                        else _s.get("t"))),
                      "method": "ffmpeg", "declared_by": "execute_plan",
                      "content": _s.get("name") or ""})
         _mark(led, "build_sfx", _ts0)
@@ -10309,6 +10392,30 @@ def edit(source_key: str, brief: str,
                     # they asked for. Recorded as a named class so the demand is
                     # countable — that count is what decides whether the
                     # generated-footage family is worth building.
+                    _clar = str((tu.input or {}).get("clarification") or "").strip()
+                    if _clar:
+                        # K5. THE AGENT ASKED. A terminal like `unsupported`:
+                        # nothing is built, nothing is charged, the question
+                        # goes back to the user through result_agentic as
+                        # state NEEDS_INPUT. Mirrors the unsupported branch so
+                        # the stop mechanism stays one thing.
+                        led["needs_input"] = {"question": _clar[:500],
+                                              "why": str((tu.input or {}).get("why") or "")[:200],
+                                              "credit_charged": False}
+                        led["terminal"] = "needs_input"
+                        led["user_message"] = _clar[:500]
+                        print("  NEEDS INPUT     : %s" % _clar[:160], flush=True)
+                        results.append({"type": "tool_result",
+                                        "tool_use_id": tu.id,
+                                        "content": json.dumps(
+                                            {"terminal": True,
+                                             "needs_input": _clar[:500],
+                                             "credit_charged": False,
+                                             "note": "Stop here. The question "
+                                                     "goes to the user; do not "
+                                                     "guess and edit."})})
+                        _unsupported_stop = True
+                        continue
                     if _sc["mode"] == "unsupported":
                         _cls = _sc.get("unsupported_class")
                         led["unsupported_request"] = {
@@ -10967,8 +11074,8 @@ def edit(source_key: str, brief: str,
         # Verified against sys_text, NOT the module constant, so an arm that
         # ships a stripped prompt cannot pass on the constant's behalf.
         "karpathy_behaviour": {
-            "mounted": all(k in sys_text for k in ("K1.", "K2.", "K3.", "K4.")),
-            "used": [k for k in ("K1.", "K2.", "K3.", "K4.") if k in sys_text],
+            "mounted": all(k in sys_text for k in ("K1.", "K2.", "K3.", "K4.", "K5.")),
+            "used": [k for k in ("K1.", "K2.", "K3.", "K4.", "K5.") if k in sys_text],
             "want": ["K1.", "K2.", "K3.", "K4."],
             "resident": True,
         },
@@ -11618,6 +11725,17 @@ def result_agentic(body: dict):
         return {"state": "FAILED", "call_id": _cid,
                 "error": "%s: %s" % (type(_e).__name__, str(_e)[:300])}
     _plan = (_r or {}).get("plan") if isinstance(_r, dict) else None
+    _led = (_r or {}).get("ledger") if isinstance(_r, dict) else None
+    _ni = (_led or {}).get("needs_input") if isinstance(_led, dict) else None
+    if isinstance(_ni, dict) and _ni.get("question"):
+        # THE FOURTH STATE. The agent stopped to ASK (K5). Not DONE — there is
+        # no edit — and not FAILED — nothing broke. The server shows the
+        # question and re-dispatches with the answer folded into the brief.
+        print("[result_agentic] NEEDS_INPUT call=%s q=%r"
+              % (_cid, str(_ni.get("question"))[:120]), flush=True)
+        return {"state": "NEEDS_INPUT", "call_id": _cid,
+                "question": _ni.get("question"), "why": _ni.get("why"),
+                "credit_charged": False, "result": _r, "plan_entries": 0}
     print("[result_agentic] DONE call=%s plan_entries=%s"
           % (_cid, len(_plan) if isinstance(_plan, list) else "none"), flush=True)
     return {"state": "DONE", "call_id": _cid, "result": _r,

@@ -74,6 +74,17 @@ there BEFORE returning, and a failure to write is loud. Collection then becomes
 a read of YOUR OWN storage and a deploy mid-edit strands nothing.
 `result_agentic` stays the fast path, not the only one.
 
+## NEEDS_INPUT — the agent asked (K5, added 2026-09-10)
+
+`result_agentic` has a FOURTH state: `{ state: "NEEDS_INPUT", call_id,
+question, why, credit_charged: false, result, plan_entries: 0 }`. The agent
+found the request ambiguous in a way that changes what gets built ("cut the
+part where I stumble" on a source with three stumbles) and STOPPED — no plan,
+no render, nothing charged. Show `question` to the user; re-dispatch the same
+job with their answer appended to the brief (`instruction` on a re-edit). It is
+not DONE (there is no edit) and not FAILED (nothing broke). Zac's ruling for
+ambiguous re-edit instructions; Karpathy §1.
+
 ## FAILED CARRIES A CODE (fc's C)
 
 `AGENTIC_CODES`: BAD_REQUEST, UNSUPPORTED, SOURCE_UNREADABLE, AGENT_FAILED,

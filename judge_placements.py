@@ -82,11 +82,56 @@ def output_to_source(keep_spans, t_out):
         except (TypeError, ValueError, IndexError):
             return (UNMAPPED, None)
         _len = max(0.0, _b - _a)
-        if _f(t_out) <= _acc + _len:
+        # HALF-OPEN. An output instant exactly at a span boundary is the START
+        # of the next kept span, not the end of this one: the agent places at
+        # beat starts, and a kept span's start IS a beat start. The first draft
+        # used <= and sent r51 screen_recording's "CHAT HISTORY" (out 2.75) to
+        # source 4.50 — the last instant of a beat ruled none — instead of 6.50,
+        # the start of the sidebar-with-chat-history beat it was ruled for. The
+        # third boundary convention in this file to hand a placement to the
+        # wrong beat; the last span's end stays closed.
+        if _f(t_out) < _acc + _len:
             return (MAPPED, _a + (_f(t_out) - _acc))
         _acc += _len
+    _last = keep_spans[-1]
+    try:
+        if abs(_f(t_out) - _acc) < 1e-6:
+            return (MAPPED, float(_last[1]))
+    except (TypeError, ValueError, IndexError):
+        pass
     # past the end of the kept material: report rather than clamp
     return (UNMAPPED, None)
+
+
+def placement_moment(p, led):
+    """(moment_out, source) — the OUTPUT-clock instant a placement is FOR.
+
+    Producers since f5ffe09 write t_moment. Older ledgers carry only t_start,
+    the render start, which sits attack_ms (cards), a pre-roll (zooms) or an
+    attack (sfx) before the moment — so this joins the placement to its step
+    in execute_plan and takes the moment the step recorded: a card item's
+    anchor_s, a zoom step's beat_at_s. sfx and text steps record the moment
+    as t already. A placement with neither falls back to t_start and SAYS SO.
+    """
+    if p.get("t_moment") is not None:
+        return _f(p.get("t_moment")), "moment"
+    _fam = str(p.get("family") or p.get("type") or "").lower()
+    _t = _f(p.get("t_start"))
+    _ep = (led or {}).get("execute_plan")
+    _steps = _ep.get("steps") if isinstance(_ep, dict) else None
+    for _s in (_steps or []):
+        if _s.get("step") != _fam:
+            continue
+        if _fam == "card":
+            for _it in (_s.get("items") or []):
+                if abs(_f(_it.get("t")) - _t) < 1e-6 and _it.get("anchor_s") is not None:
+                    return _f(_it.get("anchor_s")), "step anchor_s"
+        elif _fam == "zoom":
+            _st = _s.get("t")
+            if isinstance(_st, list) and _st and abs(_f(_st[0]) - _t) < 1e-6 \
+                    and _s.get("beat_at_s") is not None:
+                return _f(_s.get("beat_at_s")), "step beat_at_s"
+    return _t, "render start"
 
 
 # ── DOES THE STATED REASON HOLD UP AGAINST THE FRAME? ───────────────────────
@@ -146,8 +191,13 @@ def resolve_beat(beats, src_t):
     """
     if not beats:
         return None
+    # SNAP. output_to_source returns _a + (t_out - _acc), and 8.16 through a
+    # span starting at 2.88 came back 8.719999999999999 — 1e-15 below the beat
+    # that starts at 8.72, so it resolved to the beat that ENDS there. Ledger
+    # times carry 2-3 decimals; compare at that resolution.
+    src_t = round(float(src_t), 3)
     for b in beats:
-        if _f(b.get("t_start")) <= src_t < _f(b.get("t_end")):
+        if round(_f(b.get("t_start")), 3) <= src_t < round(_f(b.get("t_end")), 3):
             return b
     # No beat starts at or contains this instant. If a beat ENDS exactly here
     # — the last beat, or a beat followed by a gap — it owns the instant. The
@@ -205,13 +255,27 @@ def sheet(result, ref_beats, provenance):
     # beat would have shown the second and hidden that the first existed, and
     # every "agent's why" in this sheet would have been the wrong ruling with
     # nothing to indicate it. (Flagged by Builder-1 before I ran it.)
+    # THE RULINGS THE BUILD USED, when the ledger carries them. beat_verdicts is
+    # mutated after the fact (the half-ruling stripper rewrites treatment in
+    # place; later passes replace entries), so on round 54 talking_head the
+    # recorded beat 0 read ['cutaway'] while the overlay at 0.0s was built from
+    # a ruling that named text — and this sheet called the agent's own
+    # placement BUILT BUT NOT RULED. executed_verdicts is the frozen copy
+    # execute_plan built from; a ledger without it falls back and SAYS SO.
+    _exec_v = led.get("executed_verdicts")
+    _vsrc = "EXECUTED" if isinstance(_exec_v, list) and _exec_v else "RECORDED"
     verdicts = {}
-    for _v in (led.get("beat_verdicts") or []):
+    for _v in (_exec_v if _vsrc == "EXECUTED" else (led.get("beat_verdicts") or [])):
         verdicts.setdefault(_v.get("beat"), []).append(_v)
     _keep = led.get("keep_spans") or []
     out = []
 
     out.append("PLACEMENT JUDGMENT SHEET")
+    out.append("  rulings read: %s (%d)%s"
+               % (_vsrc, sum(len(x) for x in verdicts.values()),
+                  "" if _vsrc == "EXECUTED" else
+                  " — this ledger predates executed_verdicts; treatments may "
+                  "have been rewritten after the build"))
     out.append("  reference corpus: %s by %s, n=%s, %s"
                % (provenance.get("kind") or "KIND UNSTATED",
                   provenance.get("annotator") or "ANNOTATOR UNSTATED",
@@ -234,8 +298,7 @@ def sheet(result, ref_beats, provenance):
         # called them BUILT BUT NOT RULED. t_moment is written by the producer;
         # a record without it (older ledgers) falls back to t_start and the
         # sheet says which it used.
-        _t = p.get("t_moment") if p.get("t_moment") is not None else p.get("t_start")
-        _tsrc = "moment" if p.get("t_moment") is not None else "render start"
+        _t, _tsrc = placement_moment(p, led)
         # OUTPUT time -> SOURCE time before any containment test. Beats live on
         # the source clock and placements on the output clock; comparing them
         # directly is only correct when nothing was cut.
@@ -362,6 +425,7 @@ if __name__ == "__main__":
                 (6.0, 2, "the last beat is closed at its end"),
                 (4.0, 1, "an end with a gap after it belongs to the beat that ENDS there"),
                 (3.0, 1, "an interior instant belongs to the beat containing it"),
+                (1.9999999999999998, 1, "a float 1e-16 below a beat start is that beat, not the one ending there"),
                 (4.5, None, "an instant inside a gap belongs to no beat")):
             _got = resolve_beat(_rb, _t)
             _gi = _got.get("i") if _got else None
@@ -381,6 +445,19 @@ if __name__ == "__main__":
                            {"family": "zoom", "t_start": 0.5}],
             "beat_verdicts": _demo["ledger"]["beat_verdicts"]}}
         _n_bnr = sum("BUILT BUT NOT RULED" in x for x in sheet(_demo2, _refs, _prov))
+        # EXECUTED RULINGS WIN. The recorded ruling says cutaway; the executed
+        # copy says text; the text overlay on that beat is RULED.
+        _demo4 = {"ledger": {
+            "keep_spans": [[0.0, 9.0]],
+            "beats": _demo["ledger"]["beats"],
+            "placements": [{"family": "text", "t_start": 0.0, "content": "HOOK"}],
+            "beat_verdicts": [{"beat": 0, "treatment": ["cutaway"], "why": "recorded"}],
+            "executed_verdicts": [{"beat": 0, "treatment": ["text"], "why": "executed"}]}}
+        _l4 = sheet(_demo4, _refs, _prov)
+        if any("BUILT BUT NOT RULED" in x for x in _l4) or not any(
+                "rulings read: EXECUTED" in x for x in _l4):
+            _bad.append("executed_verdicts must be read in preference to the "
+                        "recorded beat_verdicts, and the sheet must say so")
         # A card ruled on beat 1 renders 0.08s before beat 1 starts (attack
         # lead). Resolving on t_moment keeps it on beat 1 and ruled; resolving
         # on t_start would put it on beat 0 and call it BUILT BUT NOT RULED.
@@ -403,7 +480,29 @@ if __name__ == "__main__":
         _o2s = [(output_to_source([[0.0, 1.0], [3.0, 4.0]], 1.5), (MAPPED, 3.5),
                  "an output instant inside the second kept span maps into it"),
                 (output_to_source([[0.0, 1.0], [3.0, 4.0]], 2.5), None,
-                 "an output instant past the kept total is UNMAPPED")]
+                 "an output instant past the kept total is UNMAPPED"),
+                # THE BOUNDARY: out 1.0 is the START of the second span (3.0),
+                # not the end of the first (1.0).
+                (output_to_source([[0.0, 1.0], [3.0, 4.0]], 1.0), (MAPPED, 3.0),
+                 "an output instant on a span boundary is the START of the next span"),
+                (output_to_source([[0.0, 1.0], [3.0, 4.0]], 2.0), (MAPPED, 4.0),
+                 "the last span's end stays closed")]
+        # THE MOMENT FROM THE STEP, for ledgers that predate t_moment.
+        _led_old = {"execute_plan": {"steps": [
+            {"step": "card", "items": [{"t": 1.92, "anchor_s": 2.0, "content": "10"}]},
+            {"step": "zoom", "t": [4.167, 4.867], "beat_at_s": 4.5}]}}
+        for _p, _want, _lbl in (
+                ({"family": "card", "t_start": 1.92}, (2.0, "step anchor_s"),
+                 "a card without t_moment takes its step's anchor_s"),
+                ({"family": "zoom", "t_start": 4.167}, (4.5, "step beat_at_s"),
+                 "a zoom without t_moment takes its step's beat_at_s"),
+                ({"family": "text", "t_start": 3.25}, (3.25, "render start"),
+                 "a text placement with no step moment falls back and says so"),
+                ({"family": "card", "t_start": 1.92, "t_moment": 2.0}, (2.0, "moment"),
+                 "t_moment wins when present")):
+            _got = placement_moment(_p, _led_old)
+            if (round(_got[0], 6), _got[1]) != _want:
+                _bad.append("placement_moment: %s (got %r, want %r)" % (_lbl, _got, _want))
         for _got, _want, _lbl in _o2s:
             if _want is None:
                 if _got[0] == MAPPED:

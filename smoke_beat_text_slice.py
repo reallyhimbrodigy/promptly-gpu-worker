@@ -164,6 +164,15 @@ check("every placement record carries t_moment beside t_start",
           for d in _dicts), f"{len(_dicts)} record literal(s)")
 check("a card's t_moment is its anchor_s (the moment), falling back to t",
       any(_has_const(d, "anchor_s") for d in _dicts))
+check("a zoom's t_moment is its step's beat_at_s, not the pre-roll start",
+      any(_has_const(d, "beat_at_s") for d in _dicts))
+_cba = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+        and getattr(n.func, "id", "") == "card_beat_alignment" and n.args
+        and isinstance(n.args[0], ast.Dict)]
+check("card_beat_alignment is handed the card's SOURCE-clock instant, not _mg_at",
+      any(any(isinstance(x, ast.Name) and x.id == "_card_src_t" for x in ast.walk(c.args[0]))
+          and not any(isinstance(x, ast.Name) and x.id == "_mg_at" for x in ast.walk(c.args[0]))
+          for c in _cba))
 
 print()
 if fails:

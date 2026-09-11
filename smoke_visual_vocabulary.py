@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
 """The silent route reasons in footage terms, not borrowed speech terms.
 
-THE DEFECT, WITH THE EVIDENCE. 46.5% of real traffic has no narration. The
-silent route was told to "rule on them exactly as you would rule on spoken
-beats" and that stillness is "the visual equivalent of dead air" — it borrowed
-the speech route's language because it had none of its own. Round 52, car_short
-beat 0: the beat's OWN TEXT said "visible content, not dead air", and the
-agent's why said "5.7s of pre-speech setup is dead air" and cut it. Wet street
-footage building tension, deleted as silence.
+THE DEFECT, WITH THE EVIDENCE — AND A CORRECTION KEPT IN PLACE. 46.5% of real
+traffic has no narration. The silent route was told to "rule on them exactly
+as you would rule on spoken beats" and that stillness is "the visual
+equivalent of dead air" — it borrowed the speech route's language because it
+had none of its own. Round 52, car_short beat 0: the beat's OWN TEXT said
+"visible content, not dead air", and the agent's why said "5.7s of pre-speech
+setup is dead air" and cut it (that quote is in the r52 ledger, verified
+2026-09-10). Wet street footage building tension, deleted as silence.
+
+WHAT WAS NOT EVIDENCE: the "five speech-vocabulary slips" this file was first
+built against were an instrument artefact — Builder-1's regex matched "static
+state" — and the corrected count is r51 0, r52 1, r54 0. The design stands on
+its own grounds (the silent route needs its own terms); the count it was sold
+on did not exist. Recorded here rather than tidied away, per the stale-comment
+rule: a plausible wrong number is what gets re-derived next time.
 
 NOT A SECOND VOCABULARY. The seven purposes stay the join key. What changes is
 the DEFINITION each gets on the silent route: the same seven words in what
