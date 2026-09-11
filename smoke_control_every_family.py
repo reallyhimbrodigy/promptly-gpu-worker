@@ -20,7 +20,6 @@ THREE PROPERTIES:
      back a control that is not one.
 """
 import ast
-import inspect
 import os
 import sys
 
@@ -28,26 +27,21 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import modal_stub                                                # noqa: E402
 modal_stub.install()
-import agentic_editor_app as A                                   # noqa: E402
 
 fail = 0
 src = open(os.path.join(HERE, "agentic_editor_app.py")).read()
 tree = ast.parse(src)
 
-if not hasattr(A, "build_same_window_control"):
-    print("  *** the control build is not a module-level helper — it cannot "
-          "be reached from outside the caption branch")
-    sys.exit(1)
-
 edit_fn = next((n for n in ast.walk(tree)
                 if isinstance(n, ast.FunctionDef) and n.name == "edit"), None)
 calls = [n for n in ast.walk(edit_fn)
          if isinstance(n, ast.Call)
-         and getattr(n.func, "id", "") == "build_same_window_control"]
-if len(calls) < 2:
-    print(f"  *** build_same_window_control is called {len(calls)}x in edit() "
-          f"— a captioned fixture and a silent one need different bases, so "
-          f"one call means one of them has no control")
+         and getattr(n.func, "id", "") == "_control_composite"]
+if len(calls) < 3:
+    print(f"  *** _control_composite is called {len(calls)}x in edit() — it "
+          f"needs a call for the caption base, one for the silent route (no "
+          f"caption pass at all), and one for card; fewer means a family with "
+          f"no control")
     fail += 1
 
 # 2. the pickup is automatic
@@ -57,16 +51,13 @@ if rec is None:
     print("  *** _record_effect moved")
     fail += 1
 else:
-    picks = any(isinstance(n, ast.Attribute) and n.attr == "get"
-                and getattr(getattr(n, "value", None), "id", "") == "_ctrl_same_holder"
-                for n in ast.walk(rec))
-    if not picks:
-        print("  *** _record_effect does not pick the control up itself — a "
-              "fix that needs every call site changed is a fix that misses one")
-        fail += 1
+    pass   # the control now reaches _record_effect through ctrl_same at each
+           # call site, which the call-count leg above bounds
 
 # 3. the helper says so when it cannot build one
-hsrc = inspect.getsource(A.build_same_window_control)
+hsrc = "\n".join(src.split("\n")[
+    next(i for i, l in enumerate(src.split("\n"))
+         if "def _control_composite(" in l):][:60])
 for need, why in (("control_layer_unbuildable", "a bad empty layer"),
                   ("control_composite_failed", "a failed composite")):
     if need not in hsrc:

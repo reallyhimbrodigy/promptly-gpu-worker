@@ -1468,6 +1468,41 @@ def insert_request(brief, why="", at_s=None, duration_s=None):
             "fillable_by": "the generate route, which is not built"}
 
 
+# THE PLAN ENTRY THAT IS NOT A BEAT RULING. durable_plan keys every ruling to a
+# SOURCE SPAN, which is right for a ruling and wrong for an insert: the user
+# asked for footage that does not exist, so there is no span in their source to
+# key it to. Carried as its own entry kind instead, so a re-edit restores the
+# hole rather than losing it — an UNFILLED insert that vanishes on the next turn
+# is worse than a refusal, because the user was told it was recorded.
+_PLAN_KIND_INSERT = "insert_request"
+
+
+def plan_with_inserts(plan, insert_requests):
+    """The durable plan plus the unfilled holes, as distinguishable entries."""
+    _out = list(plan or [])
+    for _ir in (insert_requests or []):
+        if str(_ir.get("state")) != "UNFILLED":
+            continue
+        _out.append(dict(_ir, kind=_PLAN_KIND_INSERT))
+    return _out
+
+
+def inserts_from_plan(plan):
+    """(rulings, inserts) — split a loaded plan back into its two kinds.
+
+    A plan entry with no `kind` is a ruling, because every plan written before
+    inserts existed has none. Reading kind as REQUIRED would have discarded
+    every prior plan on the first re-edit after this shipped.
+    """
+    _rulings, _inserts = [], []
+    for _e in (plan or []):
+        if isinstance(_e, dict) and _e.get("kind") == _PLAN_KIND_INSERT:
+            _inserts.append({_k: _v for _k, _v in _e.items() if _k != "kind"})
+        else:
+            _rulings.append(_e)
+    return (_rulings, _inserts)
+
+
 def hybrid_delivery(insert_requests, edit_ok):
     """(state, user_message) for a hybrid run.
 
@@ -6235,50 +6270,6 @@ def empty_alpha_layer(dst, width=1080, height=1920, fps=30, duration_s=1.0,
 
 
 
-def build_same_window_control(base_path, out_dur, led, fail, env=None,
-                              dst="/work/ctrl_composite.mp4"):
-    """The identical composite with an EMPTY alpha layer, or None. Records why.
-
-    WHY IT IS NOT INSIDE THE CAPTION BRANCH ANY MORE. Builder-2 built it there
-    and flagged the consequence: `motion` came back ctrl_composite=None,
-    because a fixture with no caption pass never entered that branch. It had
-    no text rulings so nothing was scored — but a silent-route source that
-    DOES place text would fall back to the window-elsewhere control, which
-    measured -10.75..8.13 dB on no ink at all, and every one of its verdicts
-    would read UNVALIDATED. 46.5% of traffic is the silent route.
-
-    A CONTROL THAT ONLY EXISTS FOR SOME FIXTURES IS NOT A CONTROL. It is
-    built once per run from whatever composite exists.
-    """
-    import subprocess
-    import time as _t
-    _t0 = _t.time()
-    _st, _el = empty_alpha_layer("/work/empty_layer.mov", fps=30,
-                                 duration_s=float(out_dur or 1.0), env=env)
-    if _st != "MEASURED":
-        fail("control_layer_unbuildable",
-             f"the empty control layer came back {_st} — every region verdict "
-             f"this run falls back to a control window elsewhere in the video, "
-             f"which measured -10.75..8.13 dB on no ink at all")
-        _mark(led, "build_control_composite", _t0)
-        led["ctrl_composite"] = False
-        return None
-    _r = subprocess.run(
-        ["ffmpeg", "-y", "-v", "error", "-i", base_path, "-i", _el,
-         "-filter_complex", alpha_composite_filter(30),
-         "-map", "[outv]", "-c:v", "libx264", "-crf", "18",
-         "-x264-params", f"threads={_X264_ENCODE_THREADS}",
-         "-preset", "veryfast", dst],
-        capture_output=True, text=True, timeout=900, env=env)
-    _mark(led, "build_control_composite", _t0)
-    if _r.returncode == 0 and os.path.exists(dst):
-        led["ctrl_composite"] = True
-        return dst
-    fail("control_composite_failed",
-         f"ffmpeg {_r.returncode}: {(_r.stderr or '')[-200:]}")
-    led["ctrl_composite"] = False
-    return None
-
 def bar_separates(deltas, bar=_REGION_EFFECT_BAR_DB, min_gap_db=1.0):
     """Does this bar still SPLIT the population it is being applied to?
 
@@ -8424,21 +8415,59 @@ def edit(source_key: str, brief: str,
             _t += 0.25
         return None
 
-    # THE CONTROL, ONCE PER RUN, FOR EVERY FAMILY. Builder-2 built the
-    # same-window control inside the caption-composite branch and flagged what
-    # that costs: `motion` came back ctrl_composite=None because it has no
-    # caption pass, and on round 60 `card` was still scored against the
-    # window-elsewhere control — the one that measured -10.75..8.13 dB on NO
-    # INK AT ALL. A control that exists for some families is not a control.
+    # THE CONTROL, FOR ANY COMPOSITE-BASED FAMILY. It was built inside the
+    # caption-composite branch, so only text and caption could reach it — and
+    # round 60 showed the consequence: card measured on `window_elsewhere`,
+    # which now has NO BAR, so every card verdict would read UNVALIDATED by
+    # construction. A measurement that cannot be made is the visual route
+    # measuring nothing, again.
     #
-    # Held in a dict rather than passed through eight call sites: every
-    # _record_effect caller gets it without any of them knowing, and a caller
-    # that passes ctrl_same explicitly still wins.
-    _ctrl_same_holder = {"path": None}
+    # Memoised per input file: the control is the same composite whatever
+    # family asks for it, and building it twice would pay 3.6% of wall twice.
+    _ctrl_cache = {}
+
+    def _control_composite(before, dur_s):
+        """(path or None) — `before` composited with an EMPTY layer.
+
+        One extra ffmpeg pass per distinct input, measured at 11.43s of a
+        314.4s run. Failure is LOUD and falls back to the window control rather
+        than silently leaving the family unmeasurable."""
+        _key = str(before)
+        if _key in _ctrl_cache:
+            return _ctrl_cache[_key]
+        _ctrl_cache[_key] = None
+        _t0c = time.time()
+        _el_state, _el = empty_alpha_layer(
+            "/work/empty_layer.mov", fps=30,
+            duration_s=float(dur_s or 1.0), env=_SUBPROCESS_ENV)
+        if _el_state != "MEASURED":
+            fail("control_layer_unbuildable",
+                 f"the empty control layer came back {_el_state} — region "
+                 f"verdicts for this input fall back to a control window "
+                 f"elsewhere in the video, which measured -10.75..8.13 dB on "
+                 f"no ink at all and therefore supports no verdict")
+            return None
+        _out = "/work/ctrl_%d.mp4" % len(_ctrl_cache)
+        _cr = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-i", before, "-i", _el,
+             "-filter_complex", alpha_composite_filter(30), "-map", "[outv]",
+             "-c:v", "libx264", "-crf", "18",
+             "-x264-params", f"threads={_X264_ENCODE_THREADS}",
+             "-preset", "veryfast", _out],
+            capture_output=True, text=True, timeout=900, env=_SUBPROCESS_ENV)
+        _mark(led, "build_control_composite", _t0c)
+        if _cr.returncode != 0 or not os.path.exists(_out):
+            fail("control_composite_failed",
+                 f"ffmpeg {_cr.returncode}: {(_cr.stderr or '')[-200:]}")
+            return None
+        _ctrl_cache[_key] = _out
+        led["ctrl_composite"] = True
+        led.setdefault("ctrl_composites", []).append(
+            {"before": os.path.basename(str(before)), "out": os.path.basename(_out)})
+        return _out
 
     def _record_effect(family, before, after, t0_s, t1_s, note="", ctrl_t0=None,
                        layer=None, ctrl_same=None):
-        ctrl_same = ctrl_same or _ctrl_same_holder.get("path")
         # CLAMPED, AND THE CLAMPED WINDOW IS WHAT GETS RECORDED. Reporting the
         # declared span while having measured 0.5s in the middle of it would be
         # a number that does not describe what was done.
@@ -9972,20 +10001,12 @@ def edit(source_key: str, brief: str,
                                   "src_t": [_p["src_t0"], _p["src_t1"]],
                                   "duration_s": _p["duration_s"]})
 
-        # NO CAPTION PASS, STILL A CONTROL. 46.5% of traffic is the silent
-        # route; without this those fixtures fall back to the window control
-        # and every region verdict they produce reads UNVALIDATED.
-        # TWO BUILDS ON A CAPTIONED FIXTURE, ON PURPOSE. This one is the
-        # video BEFORE text overlays burn, which is the correct control for
-        # text/card/zoom; the caption branch rebuilds it from the post-text
-        # video, which is the correct control for captions. Each family is
-        # compared against the composite without ITS OWN ink. The price is one
-        # extra composite — measured at 3.6% of wall for the first — and it is
-        # reported per run rather than assumed.
-        if not _ctrl_same_holder.get("path"):
-            _ctrl_same_holder["path"] = build_same_window_control(
-                os.path.join("/work", cur), _out_dur, led, fail,
-                env=_SUBPROCESS_ENV)
+        # A FIXTURE WITH NO CAPTION PASS STILL NEEDS ONE. 46.5% of traffic
+        # is the silent route; without this, a silent-route source that places
+        # text falls back to the window control and every verdict it produces
+        # reads UNVALIDATED. Memoised per input, so a captioned fixture whose
+        # base is unchanged pays for one composite, not two.
+        _control_composite(os.path.join("/work", cur), _out_dur)
 
         _tov0 = time.time()
         # 2. TEXT, derived from the text rulings + their copy.
@@ -10365,14 +10386,10 @@ def edit(source_key: str, brief: str,
                  "-x264-params", f"threads={_X264_ENCODE_THREADS}", "-preset", "veryfast", "-c:a", "copy", _cco],
                 capture_output=True, text=True, timeout=900,
                 env=_SUBPROCESS_ENV)
-            # THE SAME-WINDOW CONTROL, built once per run: the identical
-            # composite with an EMPTY layer. 2.1-3.2% of wall on every fixture
-            # measured, for the only control that can see a short label.
-            _ctrl_comp = None
-            if _ccr.returncode == 0 and os.path.exists(_cco):
-                _ctrl_comp = build_same_window_control(
-                    _cc_before, _out_dur, led, fail, env=_SUBPROCESS_ENV)
-                _ctrl_same_holder["path"] = _ctrl_comp
+            # THE SAME-WINDOW CONTROL, from the hoisted builder so the card
+            # family can reach the same thing.
+            _ctrl_comp = (_control_composite(_cc_before, _out_dur)
+                          if _ccr.returncode == 0 and os.path.exists(_cco) else None)
             _mark(led, "composite_captions", _cc0)
             if _ccr.returncode == 0 and os.path.exists(_cco):
                 # THE GREEN THIS REPLACES. `path=remotion composited=True` fired
@@ -11223,12 +11240,18 @@ def edit(source_key: str, brief: str,
                         [(_c5["t_start"],
                           _c5["t_start"] + float(_c5.get("duration_s") or 1.0))
                          for _c5 in _cards], _out_dur)
+                    # CARD IS A REGION MEASUREMENT TOO, and it was the family
+                    # left on the window control — round 60 read card on
+                    # `window_elsewhere`, which supports no verdict at all.
+                    _cd_same = _control_composite(os.path.join("/work", cur),
+                                                  _out_dur)
                     for _c4 in _cards:
                         _record_effect("card", os.path.join("/work", cur),
                                        "/work/carded.mp4", _c4["t_start"],
                                        _c4["t_start"] + float(_c4.get("duration_s") or 1.0),
                                        note=str(_c4.get("hero") or "")[:40],
                                        ctrl_t0=_cd_ctrl,
+                                       ctrl_same=_cd_same,
                                        layer="/work/reel.mov")
                     cur = "carded.mp4"
                     _mark(led, "build_reel", _tcd0)
@@ -11969,6 +11992,16 @@ def edit(source_key: str, brief: str,
     _reedit = bool(prior_plan)
     _reedit_targets = set()
     if _reedit:
+        # SPLIT FIRST. An insert has no source span, so feeding it to
+        # plan_onto_beats would report it UNPLACEABLE — a hole the user was told
+        # we recorded, arriving on the next turn as a defect and then dropped.
+        prior_plan, _prior_inserts = inserts_from_plan(prior_plan)
+        if _prior_inserts:
+            led["insert_requests"] = list(_prior_inserts)
+            led["inserts_restored"] = len(_prior_inserts)
+            print("  INSERTS CARRIED : %d unfilled insert request(s) restored "
+                  "from the prior plan — still UNFILLED, still addressable"
+                  % len(_prior_inserts), flush=True)
         _prior, _prior_probs = plan_onto_beats(prior_plan, _beats)
         led["beat_verdicts"] = list(_prior)
         led["reedit_loaded"] = len(_prior)
@@ -13633,7 +13666,18 @@ def edit(source_key: str, brief: str,
     if _rs["status"] == "mounted_unread" and (led.get("skill_searches") or []):
         _rs["status"] = "searched_no_hits"
         _rs["queries_tried"] = [s["q"] for s in led["skill_searches"]]
-    led["skill_gate_blocks"] = led.get("skill_gate_blocks", 0)
+    # THE C7 GATE DOES NOT EXIST, so its counter is gone rather than pinned at
+    # zero. This line was `led["skill_gate_blocks"] = led.get(
+    # "skill_gate_blocks", 0)` — a self-assignment whose only effect was to
+    # make the key exist. Nothing anywhere incremented it, C7 was retired from
+    # the prompt, and the counter and its report line were left behind.
+    #
+    # AND THE REPORT READ THE ZERO AS GOOD NEWS: "0 render(s) blocked before
+    # first search (searched unprompted)" printed on all 28 ledgers, while
+    # skill_searches is EMPTY on all 28. The agent never searched once, and the
+    # line said it searched without being told to. A counter that cannot
+    # increment is not a signal, and a report that reads its zero as a result
+    # states the opposite of the truth.
     led["inputs"] = _inputs
     # CLIP-BRAIN IS DELIBERATELY ABSENT, recorded so its absence is a DECISION in
     # the ledger rather than an omission someone rediscovers. See CLIP_BRAIN_
@@ -14126,6 +14170,9 @@ def edit(source_key: str, brief: str,
 
     _plan, _plan_problems = durable_plan(led.get("beats") or [],
                                          led.get("beat_verdicts") or [])
+    # THE UNFILLED HOLES RIDE THE PLAN. The plan is what the server persists and
+    # hands back as prior_plan, so anything not in it does not survive the turn.
+    _plan = plan_with_inserts(_plan, led.get("insert_requests"))
     led["plan"] = _plan
     led["plan_problems"] = _plan_problems
     print(f"  PLAN            : {len(_plan)} entr(ies) keyed by source span"
@@ -14523,9 +14570,16 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     if _fm2:
         print(f"  FAMILY MENTIONS : {_fm2}  over {r.get('ledger').get('trace_chars',0):,} "
               f"chars of reasoning   (0 = never considered, >0 = weighed)")
-    _gb = r["ledger"].get("skill_gate_blocks", 0)
-    print(f"    C7 gate       : {_gb} render(s) blocked before first search"
-          + ("  (gate did the work)" if _gb else "  (searched unprompted)"))
+    # WHAT ACTUALLY HAPPENED, from the field that records it. skill_gate_blocks
+    # was a phantom: never incremented, and its zero printed as "searched
+    # unprompted" on every run in a corpus where skill_searches is empty on
+    # every run.
+    _sq = r["ledger"].get("skill_searches") or []
+    _sh = r["ledger"].get("skill_hits")
+    print(f"    skills        : {len(_sq)} search(es)"
+          + (f", {_sh} hit(s)" if _sh is not None else ", hits ABSENT")
+          + ("   <-- NEVER SEARCHED (the C7 gate that used to force this is "
+             "retired; nothing replaces it)" if not _sq else ""))
     print(f"  ok              : {r.get('ok')}")
     print(f"  WALL            : {r.get('wall_s')}s  "
           f"(download {r.get('download_s')}s, transcript {r.get('transcript_s')}s)")
