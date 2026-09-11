@@ -276,11 +276,28 @@ if _pr:
 _cp_offered = any("card_props" in json.dumps(_t)
                   for _t in (_ns.get("KNOWLEDGE_TOOLS") or []))
 if not _cp_offered:
-    _probe2 = _sp2.run([sys.executable, "-c",
-        "import modal_stub,json;modal_stub.install();import agentic_editor_app as A;"
-        "print(json.dumps([('card_props' in json.dumps(t), 'card_condition' in json.dumps(t))"
-        " for t in A.KNOWLEDGE_TOOLS if 'card_hero' in json.dumps(t)]))"],
-        capture_output=True, text=True)
+    # THE PROPERTY KEY, NOT A SUBSTRING OF THE JSON. Renaming the field to
+    # `_card_props_unused` kept `card_props` as a substring and the leg passed
+    # while the field was gone — the fifth time today a presence test has been
+    # satisfied by a name that no longer means anything.
+    _probe2 = _sp2.run([sys.executable, "-c", """
+import modal_stub, json; modal_stub.install(); import agentic_editor_app as A
+def keys(d, acc):
+    if isinstance(d, dict):
+        for k, v in d.items():
+            if k == 'properties' and isinstance(v, dict):
+                acc.update(v.keys())
+            keys(v, acc)
+    elif isinstance(d, list):
+        for v in d: keys(v, acc)
+    return acc
+rows = []
+for t in A.KNOWLEDGE_TOOLS:
+    ks = keys(t.get('input_schema') or {}, set())
+    if 'card_hero' in ks:
+        rows.append(['card_props' in ks, 'card_condition' in ks])
+print(json.dumps(rows))
+"""], capture_output=True, text=True)
     try:
         _rows = json.loads(_probe2.stdout or "[]")
     except Exception:
