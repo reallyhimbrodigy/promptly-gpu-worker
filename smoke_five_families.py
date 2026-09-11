@@ -122,7 +122,7 @@ for _bad in ("http://", "https://", "requests", "urlopen", "urllib", "boto3",
 ok(len(_cut_tokens) >= 20,
    f"only {len(_cut_tokens)} tokens read out of cutaway_plan — the AST walk is "
    f"not reaching its body, so every mechanism check above passes vacuously")
-ok("cutaway_from_s" in SRC,
+ok("set `cutaway_from_s` to one of these timestamps" in SRC,
    "cutaway has no source-moment field — it would name nothing, which is the "
    "ungrounded shape the intent requirement exists to prevent")
 # BOTH LISTS. The agent's surface is `TOOLS + KNOWLEDGE_TOOLS` (see the

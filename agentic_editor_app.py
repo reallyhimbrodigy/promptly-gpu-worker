@@ -6234,6 +6234,51 @@ def empty_alpha_layer(dst, width=1080, height=1920, fps=30, duration_s=1.0,
     return ("MEASURED", dst)
 
 
+
+def build_same_window_control(base_path, out_dur, led, fail, env=None,
+                              dst="/work/ctrl_composite.mp4"):
+    """The identical composite with an EMPTY alpha layer, or None. Records why.
+
+    WHY IT IS NOT INSIDE THE CAPTION BRANCH ANY MORE. Builder-2 built it there
+    and flagged the consequence: `motion` came back ctrl_composite=None,
+    because a fixture with no caption pass never entered that branch. It had
+    no text rulings so nothing was scored — but a silent-route source that
+    DOES place text would fall back to the window-elsewhere control, which
+    measured -10.75..8.13 dB on no ink at all, and every one of its verdicts
+    would read UNVALIDATED. 46.5% of traffic is the silent route.
+
+    A CONTROL THAT ONLY EXISTS FOR SOME FIXTURES IS NOT A CONTROL. It is
+    built once per run from whatever composite exists.
+    """
+    import subprocess
+    import time as _t
+    _t0 = _t.time()
+    _st, _el = empty_alpha_layer("/work/empty_layer.mov", fps=30,
+                                 duration_s=float(out_dur or 1.0), env=env)
+    if _st != "MEASURED":
+        fail("control_layer_unbuildable",
+             f"the empty control layer came back {_st} — every region verdict "
+             f"this run falls back to a control window elsewhere in the video, "
+             f"which measured -10.75..8.13 dB on no ink at all")
+        _mark(led, "build_control_composite", _t0)
+        led["ctrl_composite"] = False
+        return None
+    _r = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-i", base_path, "-i", _el,
+         "-filter_complex", alpha_composite_filter(30),
+         "-map", "[outv]", "-c:v", "libx264", "-crf", "18",
+         "-x264-params", f"threads={_X264_ENCODE_THREADS}",
+         "-preset", "veryfast", dst],
+        capture_output=True, text=True, timeout=900, env=env)
+    _mark(led, "build_control_composite", _t0)
+    if _r.returncode == 0 and os.path.exists(dst):
+        led["ctrl_composite"] = True
+        return dst
+    fail("control_composite_failed",
+         f"ffmpeg {_r.returncode}: {(_r.stderr or '')[-200:]}")
+    led["ctrl_composite"] = False
+    return None
+
 def bar_separates(deltas, bar=_REGION_EFFECT_BAR_DB, min_gap_db=1.0):
     """Does this bar still SPLIT the population it is being applied to?
 
@@ -8379,8 +8424,21 @@ def edit(source_key: str, brief: str,
             _t += 0.25
         return None
 
+    # THE CONTROL, ONCE PER RUN, FOR EVERY FAMILY. Builder-2 built the
+    # same-window control inside the caption-composite branch and flagged what
+    # that costs: `motion` came back ctrl_composite=None because it has no
+    # caption pass, and on round 60 `card` was still scored against the
+    # window-elsewhere control — the one that measured -10.75..8.13 dB on NO
+    # INK AT ALL. A control that exists for some families is not a control.
+    #
+    # Held in a dict rather than passed through eight call sites: every
+    # _record_effect caller gets it without any of them knowing, and a caller
+    # that passes ctrl_same explicitly still wins.
+    _ctrl_same_holder = {"path": None}
+
     def _record_effect(family, before, after, t0_s, t1_s, note="", ctrl_t0=None,
                        layer=None, ctrl_same=None):
+        ctrl_same = ctrl_same or _ctrl_same_holder.get("path")
         # CLAMPED, AND THE CLAMPED WINDOW IS WHAT GETS RECORDED. Reporting the
         # declared span while having measured 0.5s in the middle of it would be
         # a number that does not describe what was done.
@@ -9914,6 +9972,21 @@ def edit(source_key: str, brief: str,
                                   "src_t": [_p["src_t0"], _p["src_t1"]],
                                   "duration_s": _p["duration_s"]})
 
+        # NO CAPTION PASS, STILL A CONTROL. 46.5% of traffic is the silent
+        # route; without this those fixtures fall back to the window control
+        # and every region verdict they produce reads UNVALIDATED.
+        # TWO BUILDS ON A CAPTIONED FIXTURE, ON PURPOSE. This one is the
+        # video BEFORE text overlays burn, which is the correct control for
+        # text/card/zoom; the caption branch rebuilds it from the post-text
+        # video, which is the correct control for captions. Each family is
+        # compared against the composite without ITS OWN ink. The price is one
+        # extra composite — measured at 3.6% of wall for the first — and it is
+        # reported per run rather than assumed.
+        if not _ctrl_same_holder.get("path"):
+            _ctrl_same_holder["path"] = build_same_window_control(
+                os.path.join("/work", cur), _out_dur, led, fail,
+                env=_SUBPROCESS_ENV)
+
         _tov0 = time.time()
         # 2. TEXT, derived from the text rulings + their copy.
         items = []
@@ -10297,32 +10370,9 @@ def edit(source_key: str, brief: str,
             # measured, for the only control that can see a short label.
             _ctrl_comp = None
             if _ccr.returncode == 0 and os.path.exists(_cco):
-                _cl0 = time.time()
-                _el_state, _el = empty_alpha_layer(
-                    "/work/empty_layer.mov", fps=30,
-                    duration_s=float(_out_dur or 1.0), env=_SUBPROCESS_ENV)
-                if _el_state != "MEASURED":
-                    fail("control_layer_unbuildable",
-                         f"the empty control layer came back {_el_state} — every "
-                         f"region verdict this run falls back to a control "
-                         f"window elsewhere in the video, which measured "
-                         f"-10.75..8.13 dB on no ink at all")
-                else:
-                    _cr = subprocess.run(
-                        ["ffmpeg", "-y", "-v", "error", "-i", _cc_before,
-                         "-i", _el, "-filter_complex", alpha_composite_filter(30),
-                         "-map", "[outv]", "-c:v", "libx264", "-crf", "18",
-                         "-x264-params", f"threads={_X264_ENCODE_THREADS}",
-                         "-preset", "veryfast", "/work/ctrl_composite.mp4"],
-                        capture_output=True, text=True, timeout=900,
-                        env=_SUBPROCESS_ENV)
-                    if _cr.returncode == 0 and os.path.exists("/work/ctrl_composite.mp4"):
-                        _ctrl_comp = "/work/ctrl_composite.mp4"
-                    else:
-                        fail("control_composite_failed",
-                             f"ffmpeg {_cr.returncode}: {(_cr.stderr or '')[-200:]}")
-                _mark(led, "build_control_composite", _cl0)
-                led["ctrl_composite"] = bool(_ctrl_comp)
+                _ctrl_comp = build_same_window_control(
+                    _cc_before, _out_dur, led, fail, env=_SUBPROCESS_ENV)
+                _ctrl_same_holder["path"] = _ctrl_comp
             _mark(led, "composite_captions", _cc0)
             if _ccr.returncode == 0 and os.path.exists(_cco):
                 # THE GREEN THIS REPLACES. `path=remotion composited=True` fired

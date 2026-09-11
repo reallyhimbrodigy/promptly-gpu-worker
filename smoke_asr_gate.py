@@ -65,7 +65,7 @@ for label, peak, want in CASES:
 _g = SRC[SRC.index("# ── DOES THIS SOURCE HAVE AUDIBLE CONTENT AT ALL?"):]
 _g = _g[:_g.index('led["asr_gate"]')]
 
-ok("UNMEASURED" in SRC and "transcribing rather than guessing" in SRC,
+ok("peak level UNMEASURED — transcribing rather than guessing" in SRC,
    "the app does not state what happens when the peak cannot be measured — an "
    "unmeasured probe must TRANSCRIBE, never skip")
 ok("_peak_db is None" in _g and "elif" in _g,

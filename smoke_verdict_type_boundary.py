@@ -164,7 +164,7 @@ _nvc = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
         and getattr(n.func, "id", "") == "normalise_verdict"]
 check("the ingest CALLS normalise_verdict", len(_nvc) == 1, f"{len(_nvc)} call(s)")
 check("rejections are PRINTED, not only ledgered",
-      "verdict REJECTED" in src)
+      "[verdict REJECTED] beat " in src)
 
 print()
 if fails:

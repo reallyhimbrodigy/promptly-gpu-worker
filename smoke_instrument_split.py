@@ -85,7 +85,8 @@ ok('led["instrument_s"]' in SRC,
    "reads it")
 
 # ── LEG 4: PRINTED ─────────────────────────────────────────────────────────
-ok("INSTRUMENT" in SRC and "PRODUCT WALL" in SRC,
+ok("PRODUCT WALL" in SRC
+   and "of which INSTRUMENT (verification, not product)" in SRC,
    "the product/gate split is never PRINTED — a counter in the ledger and "
    "nowhere else answers no question anyone can ask")
 # And ABSENT must be printed as absent, never as a free gate.

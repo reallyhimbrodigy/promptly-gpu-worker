@@ -69,7 +69,8 @@ ok("float(_actual)" in _w,
 ok("vfr_normalise_failed" in _w,
    "a failed normalisation is silent — the job would proceed as though the "
    "source had been fixed")
-ok('led["vfr_normalised"]' in SRC and "SOURCE FPS" in SRC,
+ok('led["vfr_normalised"]' in SRC
+   and "-> NORMALISED to CFR" in SRC,
    "the outcome never reaches the ledger and the log together")
 
 print(f"VFR-NORMALISED  {len(CASES)} rate cases driven against fps_verdict")
