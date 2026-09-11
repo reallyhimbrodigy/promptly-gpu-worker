@@ -61,10 +61,20 @@ def _has_const(node, val):
 # ── 1. NO PLACEMENT WITHOUT A RULING ────────────────────────────────────────
 _bo = _fn("build_overlays")
 check("build_overlays exists and is drivable", _bo is not None)
+# THE GUARD, NOT THE NAME. The first draft asserted the name _unruled_refused
+# appeared somewhere in build_overlays — and it appears in its own
+# initialisation, so DELETING THE WHOLE GUARD left the smoke green. A presence
+# check cannot see control flow; this reads the If that does the refusing.
+_guard = [n for n in ast.walk(_bo) if isinstance(n, ast.If)
+          and any(isinstance(x, ast.Name) and x.id == "_text_windows"
+                  for x in ast.walk(n.test))
+          and any(isinstance(x, ast.Name) and x.id == "_unruled_refused"
+                  for x in ast.walk(n))
+          and any(isinstance(x, ast.Continue) for x in ast.walk(n))] if _bo else []
 check("a caller-supplied overlay is refused when no beat ruled text at its instant",
-      _bo is not None and any(isinstance(n, ast.Name) and n.id == "_unruled_refused"
-                              for n in ast.walk(_bo)),
-      "the refusal list must exist inside build_overlays")
+      bool(_guard),
+      "an If testing the ruled-text windows, recording the refusal, and "
+      "skipping the item — all three, or the item still lands")
 # The candidate beats must be FILTERED BY THE RULING. The first draft of this
 # leg looked for "text" and _text_windows in ONE assignment; they are two
 # (_text_beats filters, _text_windows maps to output time), so it read FAIL on
@@ -98,7 +108,12 @@ check("execute_plan freezes the rulings it built from as executed_verdicts",
 check("it is a DEEP COPY — beat_verdicts is mutated in place downstream",
       any("deepcopy" in ast.unparse(a_.value) for a_ in _ev),
       "a shallow reference would be rewritten by the half-ruling stripper")
-check("and the count is printed", "EXECUTED FROM" in src)
+# A LITERAL SURVIVES ITS OWN print() BEING RENAMED. Read the call.
+check("and the count is printed",
+      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "print"
+          and any(isinstance(x, ast.Constant) and isinstance(x.value, str)
+                  and "EXECUTED FROM" in x.value for x in ast.walk(n))
+          for n in ast.walk(tree)))
 # the mutation it defends against is real and still present
 check("the half-ruling stripper still rewrites treatment in place "
       "(the reason the snapshot exists)",

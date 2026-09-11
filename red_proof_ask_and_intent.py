@@ -18,7 +18,7 @@ MUTATIONS = [
      "                        {\"t_start\": _it_t, \"text\": str(it.get(\"text\") or \"\")[:60]})\n"
      "                    continue\n",
      "",
-     "the refusal list must exist", _INJECTS),
+     "a caller-supplied overlay is refused", _INJECTS),
     ("the candidate windows stop being filtered by the ruling",
      '        _text_beats = [_by_i.get(v.get("beat")) for v in (led.get("beat_verdicts") or [])\n'
      '                       if "text" in (v.get("treatment") or [])]',
@@ -35,7 +35,7 @@ MUTATIONS = [
     ("the executed-ruling snapshot becomes a shallow reference the stripper rewrites",
      '        led["executed_verdicts"] = _copy.deepcopy(vs)',
      '        led["executed_verdicts"] = vs',
-     "must be a DEEP COPY", _INJECTS),
+     "it is a DEEP COPY", _INJECTS),
     ("the snapshot count stops being printed",
      '        print("  EXECUTED FROM   : %d ruling(s) — %s"',
      '        _quiet("  EXECUTED FROM   : %d ruling(s) — %s"',
