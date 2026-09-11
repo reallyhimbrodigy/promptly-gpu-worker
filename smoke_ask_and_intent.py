@@ -359,12 +359,24 @@ check("a region measurement with no supportable bar records UNVALIDATED and "
       "changed=None, never CHANGED or INERT",
       '_rec["region_verdict"] = "UNVALIDATED"' in src
       and "return None, _db" in src)
+# THE BRANCH, NOT THE NAME. `'_deferred_inert' in src` survived gutting the
+# deferral entirely, because the name still appears in the block that resolves
+# the list at the end of the run. Read the If that does the deferring: it must
+# test the region mode, append to the list, and RETURN before the inline fail.
+_defer = [n for n in ast.walk(tree) if isinstance(n, ast.If)
+          and any(isinstance(x, ast.Constant) and x.value == "region"
+                  for x in ast.walk(n.test))
+          and any(isinstance(x, ast.Constant) and x.value == "_deferred_inert"
+                  for x in ast.walk(n))
+          and any(isinstance(x, ast.Return) for x in ast.walk(n))]
 check("the INERT verdict is DEFERRED to the end of the run, where the "
       "family's population exists",
-      '_deferred_inert' in src
+      bool(_defer)
       and any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "fail"
               and any(isinstance(x, ast.Constant) and x.value == "inert_verdict_unvalidated"
-                      for x in ast.walk(n)) for n in ast.walk(tree)))
+                      for x in ast.walk(n)) for n in ast.walk(tree)),
+      "an If testing region mode, recording the deferral, and returning before "
+      "the inline fail — all three, or the verdict still fires per placement")
 check("and it is reported as a defect ONLY where the bar separates that family",
       '_sep == "SEPARATES"' in src)
 
