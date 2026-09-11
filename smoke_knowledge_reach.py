@@ -107,12 +107,16 @@ if DOC.exists():
           "not in this lane's treatment enum" in _t,
           "08_broll's six claims cannot be wired here and saying they are "
           "pending would be claiming work that is not this lane's to do")
+    # THE GAP CLAIM SPECIFICALLY. Requiring both names on one line stopped
+    # distinguishing once the addendum added a WIRED row carrying both — my own
+    # edit satisfied the leg from a different sentence. The claim being tested
+    # is that the census still NAMES the largest gap, so test that phrase.
     check("and it names the largest instructable gap by field",
-          any("06_emphasis_zoom" in _l and "zoom_arc" in _l
+          any("06_emphasis_zoom" in _l and "largest instructable gap" in _l
               for _l in _t.splitlines()),
-          "no single line ties zoom_arc to 06_emphasis_zoom — 11 claims about "
-          "a field answered on every beat is the finding, and it has to survive "
-          "an edit to either name")
+          "no line names 06_emphasis_zoom as the largest instructable gap — a "
+          "field answered on every beat with the most craft it cannot see is "
+          "the finding, and a WIRED row mentioning both names is not it")
 
 print()
 if fails:
