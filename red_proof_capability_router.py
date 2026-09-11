@@ -58,7 +58,7 @@ MUTATIONS = [
     ("the route stops being counted",
      '                        led["route_demand"][_rt] = led["route_demand"].get(_rt, 0) + 1',
      '                        pass',
-     "not recorded or counted", _INJECTS),
+     "nothing INCREMENTS", _INJECTS),
     ("an AMBIGUOUS route stops failing loudly",
      '                            fail("route_ambiguous",',
      '                            _note("route_ambiguous",',
