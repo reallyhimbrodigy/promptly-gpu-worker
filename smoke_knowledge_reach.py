@@ -76,8 +76,17 @@ _w = A.wired_claims()
 check("wired claims are counted by their marker", bool(_w),
       "no [<doc>, wired <date>] markers on the agent's surface — a claim wired "
       "without one cannot be distinguished from one nobody wired")
-check("at least five claims are wired, across two documents",
-      sum(_w.values()) >= 5 and len(_w) >= 2, str(_w))
+# PER DOCUMENT, not a total. A total floor of five stopped distinguishing once
+# eight markers existed: dropping the zoom marker left six across two documents
+# and the leg passed while zoom_arc lost its craft. A floor on the sum hides
+# which contributor vanished.
+_WIRED_FLOOR = {"05_motion_graphics": 4, "06_emphasis_zoom": 2, "01_cut_pass": 1}
+_short = {_d: (_w.get(_d, 0), _n) for _d, _n in _WIRED_FLOOR.items()
+          if _w.get(_d, 0) < _n}
+check("each document that was wired still carries its claims",
+      not _short,
+      "below floor: %s — a total is not a per-document count, and the field "
+      "that lost its craft is the one nobody sees go" % _short)
 check("the marker names a real knowledge document",
       all(pathlib.Path("knowledge") / (_d + ".md") for _d in _w)
       and all((pathlib.Path("knowledge") / (_d + ".md")).exists() for _d in _w),

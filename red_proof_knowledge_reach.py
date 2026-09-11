@@ -49,11 +49,14 @@ MUTATIONS = [
      '"breather": ("SmoothPush", "StepZoom")',
      "type map agrees with it independently"),
     ("the wired-claim marker is dropped from a field the agent reads", APPNAME,
-     '"[06_emphasis_zoom, wired "\n                                                    "2026-09-11] "',
-     '""\n                                                    "" ',
-     "at least five claims are wired"),
+     '" [01_cut_pass, wired 2026-09-11] [06_emphasis_zoom, wired "\n                 "2026-09-11] "',
+     '" "',
+     "still carries its claims"),
+    # A UNIQUE OCCURRENCE. The marker now appears eight times, so the bare
+    # string is Nx; anchored through the arrows teach, which carries exactly
+    # one.
     ("a marker names a document that does not exist", APPNAME,
-     "[05_motion_graphics, wired 2026-09-11]", "[99_invented, wired 2026-09-11]",
+     'lines: " + "; ".join', 'lines: [99_invented, wired 2026-09-11]" + "; ".join',
      "names a real knowledge document"),
     ("the census stops correcting its own over-count", DOCNAME,
      "over-counted", "counted",
