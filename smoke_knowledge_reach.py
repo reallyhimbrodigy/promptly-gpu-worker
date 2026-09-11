@@ -111,6 +111,27 @@ check("no arc is left reading as having no guidance",
       "an arc with no job is the cheap slot, and the census's claim that build "
       "and breather had none was a claim about a HEADING sweep, not the corpus")
 
+# THE BODY-SWEEP RULES, extracted by anchor rather than transcribed.
+_ar_state, _ar, _ar_why = A.arc_rules()
+check("every arc-rule anchor still matches the catalogue",
+      _ar_state == "MEASURED",
+      "%s — an anchor that stops matching is a rule that left the catalogue or "
+      "a sentence that was reworded, and the prompt must not ship without it "
+      "silently" % _ar_why)
+check("four arc rules are extracted", len(_ar) >= 4, "%d" % len(_ar))
+check("they include the peaks rule that corroborates the mask job",
+      any("Zooms belong to peaks" in _r for _r in _ar),
+      "this is a THIRD independent statement that build is not a peak position, "
+      "after the mask paragraph and ZOOM_ARC_HOMES")
+check("and the breather/build confusion rule, which names the actual mistake",
+      any("wearing a disguise" in _r for _r in _ar))
+_teach2 = A.arc_jobs_teach(["hook", "build", "mid_peak", "payoff", "breather", "close"])
+check("the rules reach the zoom_arc field text",
+      all(_r[:40] in _teach2 for _r in _ar),
+      "extracted and not delivered is the measured-table-with-no-reader defect")
+check("a failed extraction degrades to PARTIAL rather than silence",
+      "PARTIAL:" in pathlib.Path("agentic_editor_app.py").read_text())
+
 check("the census is on the record", DOC.exists())
 if DOC.exists():
     _t = DOC.read_text()

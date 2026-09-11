@@ -464,6 +464,58 @@ def mask_zoom_job(doc="06_emphasis_zoom.md"):
 _MASK_STATE, MASK_ARCS, MASK_JOB_TEXT = mask_zoom_job()
 
 
+# THE ARC RULES THE BODY SWEEP FOUND, pulled by anchor phrase so the text is
+# EXTRACTED and not transcribed. A heading sweep reached none of these: every
+# one is mid-paragraph.
+#
+# THE BODY SWEEP'S FUNNEL, 2026-09-11: 609 sentences name a ruling field or a
+# lane enum value; 241 are normative or definitional; 159 of those reference no
+# foreign schema and were unreachable. My earlier "7 instructable" was low by a
+# factor of twenty, because a heading sweep cannot see a rule stated in prose.
+_ARC_RULE_ANCHORS = (
+    ("06_emphasis_zoom.md", "Count follows the footage"),
+    ("01_cut_pass.md", "Zooms belong to peaks"),
+    # THE DOCUMENT NAME WAS WRONG in my first version — this sentence is in
+    # 00_job_and_arc, and I wrote 01_cut_pass from the sweep output's
+    # neighbouring row. The ABSENT state caught it and refused to ship the
+    # prompt without the rule, which is what the three-state return is for.
+    ("00_job_and_arc.md", "tempted to mark breather"),
+    ("01_cut_pass.md", "of any two zooms within 2s"),
+)
+
+
+def arc_rules(anchors=_ARC_RULE_ANCHORS):
+    """(state, [sentences], why) — arc rules extracted by anchor phrase."""
+    import re as _re
+    _out, _missing = [], []
+    for _doc, _anchor in anchors:
+        try:
+            _txt = open(os.path.join(_KNOWLEDGE_DIR, _doc), encoding="utf-8").read()
+        except OSError:
+            _missing.append("%s (unreadable)" % _doc)
+            continue
+        _i = _txt.find(_anchor)
+        if _i < 0:
+            _missing.append("%s: %r" % (_doc, _anchor[:40]))
+            continue
+        # the sentence containing the anchor
+        _start = max(_txt.rfind(".", 0, _i), _txt.rfind("\n", 0, _i)) + 1
+        _m = _re.search(r"[.!?]", _txt[_i:])
+        _end = _i + (_m.end() if _m else 200)
+        _out.append(" ".join(_txt[_start:_end].split()).lstrip("*• "))
+    if _missing:
+        # AN ANCHOR THAT NO LONGER MATCHES IS A RULE THAT LEFT THE CATALOGUE, or
+        # a sentence that was reworded. Either way the prompt must not silently
+        # ship without it.
+        return ("ABSENT", _out,
+                "%d arc rule anchor(s) no longer match: %s"
+                % (len(_missing), "; ".join(_missing)))
+    return ("MEASURED", _out, "")
+
+
+_ARC_RULE_STATE, ARC_RULES, _ARC_RULE_WHY = arc_rules()
+
+
 def arc_jobs_teach(enum_values):
     """The arc-position craft for zoom_arc, all six of them.
 
@@ -488,6 +540,14 @@ def arc_jobs_teach(enum_values):
     if _unknown:
         _txt += (" The catalogue has NO guidance for %s. Rule them on the beat, "
                  "not on a rule that does not exist." % " or ".join(_unknown))
+    # THE BODY-SWEEP RULES. Four sentences a heading sweep could not reach,
+    # extracted by anchor. If any anchor stops matching the state is ABSENT and
+    # the text says so rather than shipping a prompt missing a rule silently.
+    if _ARC_RULE_STATE == "MEASURED" and ARC_RULES:
+        _txt += (" [01_cut_pass, wired 2026-09-11] [06_emphasis_zoom, wired "
+                 "2026-09-11] " + " ".join(ARC_RULES))
+    elif ARC_RULES:
+        _txt += (" PARTIAL: %s. %s" % (_ARC_RULE_WHY, " ".join(ARC_RULES)))
     return _txt
 
 

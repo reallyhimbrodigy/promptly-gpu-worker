@@ -198,3 +198,86 @@ from the components; the catalogue states it in prose; neither was derived from
 the other. `smoke_knowledge_reach` now asserts they keep agreeing, because a
 drift between them would mean one of the two is wrong and nothing would say
 which.
+
+
+---
+
+# ADDENDUM 2026-09-11 (3) — the body-first sweep, and 7 was low by twenty times
+
+Zac: sweep the corpus body-first, not by heading. Done, and the funnel is the
+finding:
+
+| stage | n |
+|---|---|
+| sentences naming a ruling field or a lane enum value | **609** |
+| of those, normative or definitional | **241** |
+| of those, referencing no foreign schema and unreachable | **159** |
+| reachable on the agent's surface before today | 10 |
+
+**So the instructable count is 159, not 7.** My earlier figure was low by a
+factor of twenty, for the reason the mask-zoom rule already demonstrated: a
+heading sweep cannot see a rule stated in prose, and almost all of this corpus
+is prose.
+
+## The filter, stated so it can be re-checked
+
+The vocabulary is DERIVED from the schemas — every field the agent fills on a
+beat, plus every enum value — not guessed from how the documents read. That
+matters because the first body sweep used normative keywords (MUST, NEVER) and
+found 20 lines in 14 documents: the documents do not write in imperatives, so a
+keyword filter measured the prose style rather than the rules.
+
+`FOREIGN` drops sentences naming the OLD pipeline's schema — `key_moments`,
+`broll_clips`, `emphasis_moments`, `cut_refinements`, `zoom_effect`,
+`word_indices`, `durationMs`. **That exclusion is the other half of the
+finding: this corpus was written for a different pipeline**, and a rule naming a
+field this lane does not have cannot be wired without editorial translation.
+Extraction reaches the 159 that survive; the rest need someone to decide what
+they mean here.
+
+## What was wired from it
+
+Four arc rules, extracted by ANCHOR PHRASE so the text is pulled rather than
+retyped, into `zoom_arc`:
+
+- "Count follows the footage — the real peaks set it, however many there are."
+- **"Zooms belong to peaks — build stretches run flat, and that flatness is the
+  contrast a peak's zoom lands against."** A THIRD independent statement that
+  `build` is not a peak position, after the mask paragraph and
+  `ZOOM_ARC_HOMES`.
+- "A 3+ second segment you're tempted to mark breather may be BUILD wearing a
+  disguise" — which names the actual mistake between the two mask positions.
+- The refractory floor: of any two zooms within 2s, the higher arc-ranked beat
+  keeps its zoom.
+
+`arc_rules()` returns MEASURED / ABSENT, and **ABSENT caught two of my own
+errors before either shipped**: an anchor written with a straight apostrophe
+where the document has none, and an anchor naming the wrong document — I wrote
+`01_cut_pass` for a sentence in `00_job_and_arc`, taken from the sweep output's
+neighbouring row. A three-state return refused the prompt rather than shipping
+it a rule short.
+
+`zoom_arc`'s description is now 516 tokens and the whole tool list 4,660. At
+Haiku's cache rate that is not a budget question.
+
+## The 08_broll / 06_emphasis_zoom conflict: they agree
+
+One word, two families, and reading both bodies resolves it:
+
+- `06_emphasis_zoom`: *"build / breather → **the camera holds**; the ONLY zoom
+  sayable there is the MASK"*, and *"A build/breather claim offers ONLY the mask
+  form — arc punctuation there is unsayable."*
+- `08_broll`: *"**build** is where B-roll lives — the concrete nouns named
+  during build are your cutaway candidates."*
+- `01_cut_pass`, independently: *"Zooms belong to peaks — build stretches run
+  flat."*
+
+**They are a division of labour, not a contradiction.** At a build beat the
+camera holds and the CUTAWAY carries the change — the picture moves by cutting
+away rather than by moving the camera. `06` says so itself: *"only the routing
+changes when the camera is the one tool that's quiet."*
+
+So neither document is wrong and neither needs correcting. The thing worth
+carrying forward is that a single enum value can be governed by two families'
+rules, and checking one document would have produced a confident wrong answer
+in either direction.
