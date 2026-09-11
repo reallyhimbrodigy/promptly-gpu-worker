@@ -2359,6 +2359,19 @@ KNOWLEDGE_TOOLS = [{
                                          "footage — that is the same picture. "
                                          "Only the uploaded material; there is "
                                          "no stock and no generated shot."},
+                                 "keep_from_s": {"type": "number",
+                                     "description":
+                                         "OPTIONAL, cut=keep only. Keep this "
+                                         "beat from this SOURCE second instead "
+                                         "of its start — trim a breath or a "
+                                         "stall without losing the beat."},
+                                 "keep_to_s": {"type": "number",
+                                     "description":
+                                         "OPTIONAL, cut=keep only. Keep until "
+                                         "this SOURCE second. The kept window "
+                                         "must be at least 0.6s and must not "
+                                         "split a spoken word; a trim that "
+                                         "does is REFUSED and named."},
                                  "framing": {"type": "string",
                                      "enum": ["blur", "fit", "crop"],
                                      "description":
@@ -2457,6 +2470,18 @@ KNOWLEDGE_TOOLS = [{
                              "description": "REQUIRED when treatment includes "
                                             "'text': the words to burn on "
                                             "screen for this beat."},
+                         "keep_from_s": {"type": "number",
+                             "description":
+                                 "OPTIONAL, cut=keep only. Keep this beat from "
+                                 "this SOURCE second instead of its start — "
+                                 "trim a breath or a stall without losing the "
+                                 "beat."},
+                         "keep_to_s": {"type": "number",
+                             "description":
+                                 "OPTIONAL, cut=keep only. Keep until this "
+                                 "SOURCE second. The kept window must be at "
+                                 "least 0.6s and must not split a spoken word; "
+                                 "a trim that does is REFUSED and named."},
                          "framing": {"type": "string",
                              "enum": ["blur", "fit", "crop"],
                              "description":
@@ -4523,6 +4548,57 @@ def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920,
             f"[_bgb{{i}}][_fgs{{i}}]overlay=(W-w)/2:(H-h)/2,setsar=1[{{OUT}}]"), "blur_fill", 0.0
 
 
+
+
+_TRIM_MIN_S = 0.6
+
+
+def _trim_window(verdict, t_start, t_end):
+    """(keep_from, keep_to) or (None, why). PURE.
+
+    REFUSES LOUDLY rather than clamping. A silent clamp turns the trim into a
+    no-op on exactly the beats someone was trying to tighten, which is the
+    absence-as-success shape — the beat would render whole and the ledger
+    would say nothing.
+    """
+    _f, _t = verdict.get("keep_from_s"), verdict.get("keep_to_s")
+    if _f is None and _t is None:
+        return t_start, t_end
+    try:
+        a = t_start if _f is None else float(_f)
+        z = t_end if _t is None else float(_t)
+    except (TypeError, ValueError):
+        return None, f"keep_from_s/keep_to_s are not numbers: {_f!r}, {_t!r}"
+    if a < t_start - 1e-6 or z > t_end + 1e-6:
+        return None, (f"trim {a:.2f}-{z:.2f}s falls outside the beat "
+                      f"({t_start:.2f}-{t_end:.2f}s) — a trim shortens a beat, "
+                      f"it does not move it")
+    if z - a < _TRIM_MIN_S:
+        return None, (f"trim would keep {z - a:.2f}s, under the {_TRIM_MIN_S}s "
+                      f"floor — refused rather than clamped, because a clamp "
+                      f"is a no-op on the beat you were tightening")
+    return a, z
+
+
+def _word_split_by(words, a, z):
+    """The reason a trim boundary splits a spoken word, or None.
+
+    THREE STATES, NOT TWO. On a source with no speech — 46.5% of traffic —
+    this check cannot fire, and a refusal that cannot fire must not read as
+    one that passed. It says ABSENT by name.
+    """
+    if not words:
+        return None            # ABSENT: no word table, nothing to split
+    for _w in words:
+        try:
+            _s0, _e0 = float(_w.get("s")), float(_w.get("e"))
+        except (TypeError, ValueError):
+            continue
+        for _b, _nm in ((a, "head"), (z, "tail")):
+            if _s0 + 1e-3 < _b < _e0 - 1e-3:
+                return (f"the {_nm} trim at {_b:.2f}s lands inside the word "
+                        f"{_w.get('w')!r} ({_s0:.2f}-{_e0:.2f}s)")
+    return None
 
 def split_spans_by_framing(spans, framing_spans=None):
     """Kept spans cut at framing boundaries: [(t0, t1, framing), ...]. PURE.
@@ -9398,7 +9474,44 @@ def edit(source_key: str, brief: str,
                                "why": "verdict names a beat index that does not exist"})
                 continue
             if str(v.get("cut", "keep")).lower() != "cut":
-                keep.append([b["t_start"], b["t_end"]])
+                # WITHIN-BEAT TRIM — and the trim is applied TO THE BEAT, not
+                # only to the span.
+                #
+                # Builder-2 found the defect in my first design: intersecting
+                # the span while leaving beats[i] alone gives TWO WINDOWS for
+                # one beat, and every beat-indexed consumer reads the wrong
+                # one. A card anchored inside the trimmed-away part reports
+                # on_beat=True over footage that is gone; figure_t resolves to
+                # an instant not in the output; split_beat_text claims words
+                # the viewer never hears; a kept-but-head-trimmed beat records
+                # the skip reason "beat was cut". One window per beat, and
+                # everything downstream is correct without touching any of it.
+                _a0, _z0 = float(b["t_start"]), float(b["t_end"])
+                _ka, _kz = _trim_window(v, _a0, _z0)
+                if _ka is None:
+                    _skips.append({"family": "trim", "beat": v.get("beat"),
+                                   "why": _kz})
+                    keep.append([_a0, _z0])
+                else:
+                    if (_ka, _kz) != (_a0, _z0):
+                        _wi = _word_split_by(words, _ka, _kz)
+                        if _wi:
+                            _skips.append({"family": "trim",
+                                           "beat": v.get("beat"),
+                                           "why": _wi})
+                            keep.append([_a0, _z0])
+                        else:
+                            b["t_start_untrimmed"] = _a0
+                            b["t_end_untrimmed"] = _z0
+                            b["t_start"], b["t_end"] = _ka, _kz
+                            led.setdefault("trims", []).append(
+                                {"beat": v.get("beat"),
+                                 "from": [round(_a0, 3), round(_z0, 3)],
+                                 "to": [round(_ka, 3), round(_kz, 3)],
+                                 "trimmed_s": round((_z0 - _a0) - (_kz - _ka), 3)})
+                            keep.append([_ka, _kz])
+                    else:
+                        keep.append([_a0, _z0])
         merged = []
         for a, z in keep:
             if merged and a - merged[-1][1] < 0.05:
