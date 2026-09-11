@@ -2692,6 +2692,133 @@ def split_beat_text(beat, t, words):
             _r or f"[no words in {t:.2f}-{_z:.2f}s]")
 
 
+# ── WHAT A RUN COSTS ────────────────────────────────────────────────────────
+# The router cannot choose between paths it cannot price, and neither can we:
+# the ledger carried `tokens` and `wall_s` and no dollar figure, so the ONE
+# path this lane has actually built has never been priced against the $0.10/job
+# law it is held to.
+#
+# EVERY RATE BELOW HAS IN-REPO PROVENANCE AND A DATE. A rate typed from memory
+# is the stale-identifier defect wearing a decimal point: it carries no evidence
+# of its own currency, and a wrong one produces a confident number nobody
+# re-checks. When a rate is missing the cost is ABSENT — never zero, never
+# partial.
+_MODEL_USD_PER_MTOK = {
+    # in, out. cache_write is 1.25x input and cache_read 0.1x input.
+    # SOURCE: this file, line ~3487 — "Haiku's confirmed $1/$5 per MTok with
+    # cache_write 1.25x and cache_read 0.1x", written against MEASURED spend.
+    "claude-haiku-4-5": {"in": 1.00, "out": 5.00,
+                         "src": "agentic_editor_app.py:~3487, measured 2026-09"},
+    # SOURCE: build_reference_records.py:52-53, USD_IN/OUT_PER_MTOK.
+    "claude-sonnet-5": {"in": 3.00, "out": 15.00,
+                        "src": "build_reference_records.py:52, 2026-08"},
+}
+_CACHE_WRITE_MULT, _CACHE_READ_MULT = 1.25, 0.10
+# SOURCE: query_recovery_metrics_app.py:19-20, which carries the caveat this
+# inherits verbatim — THE MODAL DASHBOARD IS AUTHORITATIVE, this is a computed
+# estimate from the container's shape.
+_MODAL_CPU_USD_PER_CORE_S = 0.0000375
+_MODAL_MEM_USD_PER_GIB_S = 0.00000667
+# Stages that run INSIDE tool:execute_plan. Summing every entry of wall_by_stage
+# double-counts them, and a model of what nests that is wrong produces a
+# NEGATIVE remainder — the "(unattributed) -79.82s" defect this repo has already
+# paid for. Verified on rounds 54 and 57: top-level + tools reaches 138.6 of
+# 139.4s on car_short, and the nested set sums to 76.3 inside an 83.5s parent.
+_NESTED_IN_EXECUTE = ("build_cut", "build_alpha_layer", "composite_captions",
+                      "build_zoom", "build_transitions", "build_sfx",
+                      "build_reel", "build_cutaway")
+
+
+def container_usd_per_s(cpu, memory_mb):
+    """Modal container cost per wall second for this shape. ESTIMATE."""
+    return (float(cpu) * _MODAL_CPU_USD_PER_CORE_S
+            + (float(memory_mb) / 1024.0) * _MODAL_MEM_USD_PER_GIB_S)
+
+
+def model_usd(tokens_by_model):
+    """(state, usd, detail) for the agent loop's token spend.
+
+    A model with no rate makes the whole figure ABSENT and names itself. A
+    PARTIAL total is the worst of the three outcomes: it reads as a total.
+    """
+    if not tokens_by_model:
+        return ("ABSENT", None, {"why": "no tokens_by_model in the ledger"})
+    _unpriced, _per, _tot = [], {}, 0.0
+    for _m, _t in (tokens_by_model or {}).items():
+        _r = _MODEL_USD_PER_MTOK.get(_m)
+        if not _r:
+            _unpriced.append(_m)
+            continue
+        _u = (float(_t.get("in") or 0) * _r["in"]
+              + float(_t.get("out") or 0) * _r["out"]
+              + float(_t.get("cache_write") or 0) * _r["in"] * _CACHE_WRITE_MULT
+              + float(_t.get("cache_read") or 0) * _r["in"] * _CACHE_READ_MULT) / 1e6
+        _per[_m] = round(_u, 6)
+        _tot += _u
+    if _unpriced:
+        return ("ABSENT", None,
+                {"why": "no rate for %s — add one with its source rather than "
+                        "letting the total read as complete" % ", ".join(sorted(_unpriced)),
+                 "priced": _per})
+    return ("MEASURED", round(_tot, 6), {"per_model": _per})
+
+
+def run_cost(led, wall_s, cpu=8, memory_mb=16384):
+    """What this run cost, and which stages it is attributable to.
+
+    THE MODEL SPEND IS NOT ATTRIBUTABLE PER STAGE and does not pretend to be:
+    it is one agent loop spanning the whole run. Container time IS attributable,
+    so the per-stage figures are container cost only and say so.
+    """
+    _rate = container_usd_per_s(cpu, memory_mb)
+    _w = float(wall_s or 0.0)
+    _cstate = "MEASURED" if _w > 0 else "ABSENT"
+    _container = round(_w * _rate, 6) if _cstate == "MEASURED" else None
+    _mstate, _model, _mdetail = model_usd((led or {}).get("tokens_by_model"))
+    _total = (round(_container + _model, 6)
+              if _cstate == "MEASURED" and _mstate == "MEASURED" else None)
+
+    _stages = (led or {}).get("wall_by_stage") or {}
+    _nested = {k: v for k, v in _stages.items() if k in _NESTED_IN_EXECUTE}
+    _top = {k: v for k, v in _stages.items() if k not in _NESTED_IN_EXECUTE}
+    _by_stage, _coherent, _why = {}, True, ""
+    if _stages and _cstate == "MEASURED":
+        _top_sum = sum(float(v or 0) for v in _top.values())
+        _parent = float(_stages.get("tool:execute_plan") or 0)
+        _nest_sum = sum(float(v or 0) for v in _nested.values())
+        if _top_sum > _w + 0.5:
+            _coherent, _why = False, (
+                "top-level stages sum to %.1fs against a %.1fs run — the model "
+                "of what nests is wrong, and every share below it would be a "
+                "fabrication" % (_top_sum, _w))
+        elif _parent and _nest_sum > _parent + 0.5:
+            _coherent, _why = False, (
+                "stages believed to nest inside execute_plan sum to %.1fs "
+                "against its %.1fs" % (_nest_sum, _parent))
+        else:
+            for _k, _v in sorted(_stages.items(), key=lambda kv: -float(kv[1] or 0)):
+                _by_stage[_k] = {"s": round(float(_v or 0), 2),
+                                 "container_usd": round(float(_v or 0) * _rate, 6),
+                                 "nests_in": "tool:execute_plan"
+                                             if _k in _NESTED_IN_EXECUTE else None}
+            _by_stage["(unattributed)"] = {
+                "s": round(_w - _top_sum, 2),
+                "container_usd": round(max(0.0, _w - _top_sum) * _rate, 6),
+                "nests_in": None}
+    return {"state": "MEASURED" if _total is not None else "ABSENT",
+            "total_usd": _total, "container_usd": _container,
+            "container_state": _cstate, "model_usd": _model,
+            "model_state": _mstate, "model_detail": _mdetail,
+            "rate_note": "container = wall_s x (%s core x $%s/core-s + %.0f GiB "
+                         "x $%s/GiB-s); MODAL DASHBOARD IS AUTHORITATIVE"
+                         % (cpu, _MODAL_CPU_USD_PER_CORE_S, memory_mb / 1024.0,
+                            _MODAL_MEM_USD_PER_GIB_S),
+            "by_stage_container_only": _by_stage if _coherent else {},
+            "stage_state": ("MEASURED" if (_by_stage and _coherent)
+                            else "INCOHERENT" if not _coherent else "ABSENT"),
+            "stage_why": _why}
+
+
 def overlay_restates_speech(verdicts, beats, min_run=3):
     """Is the overlay track a SECOND SUBTITLE TRACK stacked on the captions?
 
@@ -9320,8 +9447,17 @@ def edit(source_key: str, brief: str,
             # two functions in this file disagreeing about the shape between
             # them, with the disagreement surfacing as an opaque batch error.
             _dur = min(3.0, max(0.6, b["t_end"] - b["t_start"]))
+            # THE BEAT, CARRIED. The producer knows exactly which beat this
+            # overlay is for and used to drop it, leaving every reader to
+            # RECONSTRUCT it from a timestamp — and a placement sits on a beat
+            # BOUNDARY by construction, because its time IS the beat's start.
+            # So the reconstruction always landed on a tie-break: round 57's
+            # sheet resolved 35 of 38 placements by convention with nothing
+            # actually ambiguous. Same lesson as t_moment: stop reconstructing
+            # what the producer already knows.
             items.append({"t_start": round(out_t, 2),
                           "t_end": round(out_t + _dur, 2),
+                          "beat": v.get("beat"),
                           "text": copy})
         if not items and ruled_text_n:
             _skips.append({"family": "text", "beat": None,
@@ -9690,6 +9826,7 @@ def edit(source_key: str, brief: str,
                     built["text"] = len(items)
                     steps.append({"step": "text", "n": len(items),
                                   "items": [{"t": _i.get("t_start"),
+                                             "beat": _i.get("beat"),
                                              "content": str(_i.get("text") or "")[:80]}
                                             for _i in items]})
                 if _cap_pages:
@@ -9875,6 +10012,7 @@ def edit(source_key: str, brief: str,
                                                  else ZOOM_NATURAL_SCALE.get(_ztype, 1.22)),
                                "peak_lands_at_s": round(_cs + _peak_s, 3),
                                "beat_at_s": round(a2, 3),
+                               "beat": v.get("beat"),
                                "head_clamped": _clamped})
             _zcursor += _n_frames
 
@@ -10044,6 +10182,7 @@ def edit(source_key: str, brief: str,
                                       "type": _sg["type"], "arc": _sg["arc"],
                                       "peak_lands_at_s": _sg["peak_lands_at_s"],
                                       "beat_at_s": _sg["beat_at_s"],
+                                      "beat": _sg.get("beat"),
                                       "head_clamped": _sg["head_clamped"],
                                       "geometry_psnr_db": _sg.get("geometry_psnr_db")})
 
@@ -10425,6 +10564,7 @@ def edit(source_key: str, brief: str,
                  "from": "card_props" if isinstance(v.get("card_props"), dict)
                          and v.get("card_props") else "hero/label shorthand"})
             _cards.append({"t_start": round(_mg_at, 2), "type": _ctype,
+                           "beat": v.get("beat"),
                            "duration_s": min(2.5, b["t_end"] - b["t_start"]),
                            "hero": hero, "label": str(v.get("card_label") or "")[:60],
                            "props": _cprops,
@@ -10518,6 +10658,7 @@ def edit(source_key: str, brief: str,
                     built["card"] = len(_cards)
                     steps.append({"step": "card", "n": len(_cards),
                                   "items": [{"t": _c3.get("t_start"),
+                                             "beat": _c3.get("beat"),
                                              "type": _c3.get("type"),
                                              "anchor_s": _c3.get("anchor_s"),
                                              "attack_ms": _c3.get("attack_ms"),
@@ -10568,7 +10709,8 @@ def edit(source_key: str, brief: str,
                                _s_a, _s_a + float(_sd if _sd else 0.5), note=nm)
                 cur = _sout
                 built["sfx"] += 1
-                steps.append({"step": "sfx", "name": nm, "t": round(at, 2)})
+                steps.append({"step": "sfx", "name": nm, "t": round(at, 2),
+                              "beat": v.get("beat")})
 
         subprocess.run(["cp", os.path.join("/work", cur), "/work/out.mp4"],
                        capture_output=True, text=True, timeout=120,
@@ -10668,6 +10810,7 @@ def edit(source_key: str, brief: str,
                         {"type": _TYPE[_k], "family": _k,
                          "t_start": _it2.get("t"),
                          "t_moment": _it2.get("anchor_s", _it2.get("t")),
+                         "beat": _it2.get("beat"),
                          "method": "ffmpeg", "declared_by": "execute_plan",
                          "content": _it2.get("content") or ""})
             else:
@@ -10678,6 +10821,7 @@ def edit(source_key: str, brief: str,
                      # a zoom's t is [start, end] with the start a pre-roll
                      # before the beat; the moment it is for is beat_at_s.
                      # sfx and transition record the moment as t already.
+                     "beat": _s.get("beat"),
                      "t_moment": (_s.get("beat_at_s") if _s.get("beat_at_s") is not None
                                   else (_s.get("t", [None])[0] if isinstance(_s.get("t"), list)
                                         else _s.get("t"))),
@@ -12540,6 +12684,30 @@ def edit(source_key: str, brief: str,
     # measured. Two placements collide when they overlap in TIME and in PIXELS;
     # declared anchors are excluded on purpose, because a component that
     # overflows its anchor still reports the anchor.
+    # WHAT THIS RUN COST. Printed against the law it is held to, because a cost
+    # with no law beside it is a number nobody acts on.
+    _cost = run_cost(led, round(time.time() - t0, 1), cpu=8, memory_mb=16384)
+    led["cost_usd"] = _cost["total_usd"]
+    led["cost"] = _cost
+    print("  COST            : %s  $%s total = $%s container + $%s model "
+          "(%s)  vs the $0.10/job law%s"
+          % (_cost["state"],
+             "%.4f" % _cost["total_usd"] if _cost["total_usd"] is not None else "ABSENT",
+             "%.4f" % _cost["container_usd"] if _cost["container_usd"] is not None else "ABSENT",
+             "%.4f" % _cost["model_usd"] if _cost["model_usd"] is not None else "ABSENT",
+             _cost["model_detail"].get("why") or "priced",
+             "" if _cost["total_usd"] is None else
+             "  -> %.2fx" % (_cost["total_usd"] / 0.10)), flush=True)
+    if _cost["stage_state"] == "MEASURED":
+        _top5 = sorted(_cost["by_stage_container_only"].items(),
+                       key=lambda kv: -kv[1]["s"])[:5]
+        print("  COST BY STAGE   : container only (the model loop spans the "
+              "whole run and is NOT attributable): "
+              + "  ".join("%s $%.4f" % (_k, _v["container_usd"]) for _k, _v in _top5),
+              flush=True)
+    elif _cost["stage_state"] == "INCOHERENT":
+        fail("cost_stage_model_incoherent", _cost["stage_why"])
+
     # IS THE OVERLAY TRACK A SECOND SUBTITLE TRACK? Measured from the rulings
     # that produced it, printed with its denominator, and LOUD when it is.
     _ors = overlay_restates_speech(led.get("executed_verdicts")

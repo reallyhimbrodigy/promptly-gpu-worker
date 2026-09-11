@@ -8,6 +8,8 @@ axis appearing beside the seven purposes, and a read written in speech terms.
 """
 import ast, pathlib, shutil, subprocess, sys, tempfile
 
+import red_proof_anchor
+
 SMOKE = pathlib.Path("smoke_visual_vocabulary.py").resolve()
 APPNAME = "agentic_editor_app.py"
 _INJECTS = None
@@ -62,11 +64,15 @@ try:
         print("BASELINE IS NOT GREEN:\n" + out[-1200:]); sys.exit(2)
     print("baseline: PASS (isolated worktree)\n")
     for label, old, new, expect, precond in MUTATIONS:
-        txt = APP.read_text(); n = txt.count(old)
-        if n != 1:
-            harness.append(f"{label}: anchor {n}x")
-            print(f"  HARNESS FAILURE  {label}  :: anchor {n}x"); continue
-        _m = txt.replace(old, new, 1)
+        txt = APP.read_text()
+        _mode, _m = red_proof_anchor.apply_one(txt, old, new)
+        if _m is None:
+            harness.append(f"{label}: anchor {_mode}")
+            print(f"  HARNESS FAILURE  {label}  :: anchor {_mode}"); continue
+        if _mode != red_proof_anchor.EXACT:
+            # NEWS, not noise: the source drifted under this mutation. It still
+            # applies, and the next drift may be semantic.
+            print(f"  note             {label}  :: matched {_mode}")
         try:
             ast.parse(_m)
         except SyntaxError as e:

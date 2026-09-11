@@ -9,6 +9,8 @@ RULED silenced, and the output clock passed off as the source clock.
 """
 import ast, pathlib, shutil, subprocess, sys, tempfile
 
+import red_proof_anchor
+
 TARGET = "judge_placements.py"
 _INJECTS = None
 MUTATIONS = [
@@ -27,6 +29,14 @@ MUTATIONS = [
      "            return (MAPPED, _a + (_f(t_out) - _acc))",
      "            return (MAPPED, _f(t_out))",
      "maps into it", _INJECTS),
+    ("a declared beat is ignored and the sheet reconstructs it anyway",
+     '    if p.get("beat") is not None:\n        return (RESOLVED_DECLARED, "the producer recorded the beat")',
+     '    if False:\n        pass',
+     "must resolve DECLARED", _INJECTS),
+    ("a declared beat reports its basis but is not used to find the ruling",
+     '        if p.get("beat") is not None:\n            _b = next((x for x in beats if x.get("i") == p.get("beat")), None)',
+     '        if False:\n            _b = None',
+     "used to find the ruling", _INJECTS),
     ("the boundary snap is removed — a float 1e-16 below a beat start goes to the previous beat",
      "    src_t = round(float(src_t), 3)\n",
      "    src_t = float(src_t)\n",
@@ -65,11 +75,15 @@ try:
         print("BASELINE IS NOT GREEN:\n" + out[-1200:]); sys.exit(2)
     print("baseline: PASS (isolated worktree)\n")
     for label, old, new, expect, precond in MUTATIONS:
-        txt = APP.read_text(); n = txt.count(old)
-        if n != 1:
-            harness.append(f"{label}: anchor {n}x")
-            print(f"  HARNESS FAILURE  {label}  :: anchor {n}x"); continue
-        _m = txt.replace(old, new, 1)
+        txt = APP.read_text()
+        _mode, _m = red_proof_anchor.apply_one(txt, old, new)
+        if _m is None:
+            harness.append(f"{label}: anchor {_mode}")
+            print(f"  HARNESS FAILURE  {label}  :: anchor {_mode}"); continue
+        if _mode != red_proof_anchor.EXACT:
+            # NEWS, not noise: the source drifted under this mutation. It still
+            # applies, and the next drift may be semantic.
+            print(f"  note             {label}  :: matched {_mode}")
         try:
             ast.parse(_m)
         except SyntaxError as e:

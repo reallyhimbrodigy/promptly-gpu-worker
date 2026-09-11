@@ -1224,3 +1224,70 @@ else's laptop. Same rot, one gets looked at.
   local work_dir works whether or not the contract is right. Relocation needs its
   own verification: a job through the REAL boundary, output compared against the
   in-process baseline. Same lesson as cert-green vs deploy-green.
+
+## Standing rules earned 2026-09-10 (the reader, and the surface)
+
+- **A READER'S OUTPUT IS NOT A FACT ABOUT THE SYSTEM, AND A COUNT THAT HIDES
+  ITS CONVENTIONS INVITES THE CONFUSION.** (Named by Zac 2026-09-10: *"I passed
+  a reader's output to you as a fact about the pipeline, which is the third
+  time this week."*) The judgment sheet reported BUILT BUT NOT RULED 14 and 19;
+  **44 of 47 of those rows were its own tie-breaks** — a closed beat interval,
+  the card attack lead and zoom pre-roll, a kept-span boundary mapped to the
+  wrong side, and a float 1e-15 below a beat start. Both counts were relayed
+  onward as findings about the agent, and a whole task was scoped from them.
+
+  What would have caught it in one line: **the finding was concentrated exactly
+  on the conventions' edges.** A finding that clusters on a tie-break is a
+  finding about the tie-break. Nobody could see that, because the sheet printed
+  counts and never printed how it reached them.
+
+  **THE CHECK, NAMED: `resolution_basis`** — every placement reports INTERIOR |
+  BOUNDARY TIE-BREAK | MOMENT FALLBACK | SPAN EDGE | UNMAPPED, the header
+  discloses the split, and a sheet that is more than half tie-breaks says so
+  loudly. Run over rounds 51-54 it reads **100% MOMENT FALLBACK**, because
+  those ledgers predate the field it needs. Every count ever taken off them was
+  a claim about a fallback.
+
+  Generalised: **an instrument that emits counts emits, in the same breath, how
+  much of each count rests on a convention it chose.** Same family as
+  MEASURED/ABSENT/FAILED, one level up — there the question is whether the
+  instrument read anything, here it is whether the instrument decided anything.
+
+- **REACHABLE IS NOT CARRIED: PUT THE RULE WHERE THE CHOICE IS MADE.** (Second
+  instance, and the first cost three rounds of zero cards.) talking_head
+  shipped an upper overlay reproducing the transcript verbatim beside the
+  caption track. The rule against it has always existed and is perfectly
+  stated — `knowledge/04_text_overlays.md`: *"the transcript already lives in
+  the captions... if the candidate text duplicates what captions are about to
+  show, rewrite it as a label or skip it."* It lives in a document the agent
+  must spend a `read_knowledge` turn to reach, and does not. The
+  `text_content` field it was actually ruling into said *"Short, punchy, upper
+  case reads best."*
+
+  **A rule in a document the agent does not open is indistinguishable from a
+  rule nobody wrote** — the same sentence as *a capability the agent cannot
+  name is indistinguishable from one it declined*. When a defect is visible in
+  the output and the rule against it already exists, the bug is never the rule;
+  it is which surface carries it.
+
+- **A CASE THAT TRIPS BOTH ARMS OF A TWO-ARM RULE PROVES NEITHER.** A verdict
+  fired on `(run >= 3) or (share >= 0.7)`, and every test case satisfied both,
+  so deleting either arm left the smoke green — two mutants passed. Isolate each
+  arm: a case that fires on the first and provably not the second, and the
+  reverse. Corollary of *a mutation that does not mutate*, on the test side.
+
+- **ANCHOR FRAGILITY, DIAGNOSED RATHER THAN ASSUMED.** Six mutations went stale
+  in one hour, all orphaned by my own refactors. Read before fixing:
+
+      2 of 6  a MULTI-LINE anchor where one line changed   -> anchor one line
+      1 of 6  a STRING LITERAL RE-WRAPPED as its text grew -> whitespace-loose
+      1 of 6  the rule MOVED INTO A NEW FUNCTION           -> re-aim by hand
+      2 of 6  not anchors at all: the smoke was too weak   -> no resolver helps
+
+  `red_proof_anchor.find_one` fixes the one mechanical cause and refuses the
+  rest: exact where it can, whitespace-insensitive for a re-wrapped literal,
+  and it REPORTS WHICH — a loose match is news, the source drifted. It does no
+  fuzzy matching on purpose. **An anchor whose TOKENS changed points at code
+  that no longer exists and must fail `0x` rather than land somewhere
+  plausible**, because a resolver that lands plausibly is the false green this
+  entire family is about.

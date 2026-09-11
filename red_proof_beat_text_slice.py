@@ -9,6 +9,8 @@ print is demoted to a logger nobody reads.
 """
 import ast, pathlib, shutil, subprocess, sys, tempfile
 
+import red_proof_anchor
+
 SMOKE = pathlib.Path("smoke_beat_text_slice.py").resolve()
 APPNAME = "agentic_editor_app.py"
 _INJECTS = None
@@ -38,8 +40,8 @@ MUTATIONS = [
      '                 "lead_s": (round(float(at) - float(_ft), 2) if _ft is not None else None),',
      "ON THE OUTPUT CLOCK", _INJECTS),
     ("the print is demoted to a logger nobody reads",
-     '        print("  CARD vs FIGURE  : n=%d',
-     '        logging.debug("  CARD vs FIGURE  : n=%d',
+     '        print("  CARD vs FIGURE  : (anchor vs figure_t',
+     '        logging.debug("  CARD vs FIGURE  : (anchor vs figure_t',
      "PRINTED, reading the ledgered list", _INJECTS),
 ]
 
@@ -65,11 +67,15 @@ try:
         print("BASELINE IS NOT GREEN:\n" + out[-1500:]); sys.exit(2)
     print("baseline: PASS (isolated worktree)\n")
     for label, old, new, expect, precond in MUTATIONS:
-        txt = APP.read_text(); n = txt.count(old)
-        if n != 1:
-            harness.append(f"{label}: anchor {n}x")
-            print(f"  HARNESS FAILURE  {label}  :: anchor {n}x"); continue
-        _m = txt.replace(old, new, 1)
+        txt = APP.read_text()
+        _mode, _m = red_proof_anchor.apply_one(txt, old, new)
+        if _m is None:
+            harness.append(f"{label}: anchor {_mode}")
+            print(f"  HARNESS FAILURE  {label}  :: anchor {_mode}"); continue
+        if _mode != red_proof_anchor.EXACT:
+            # NEWS, not noise: the source drifted under this mutation. It still
+            # applies, and the next drift may be semantic.
+            print(f"  note             {label}  :: matched {_mode}")
         try:
             ast.parse(_m)
         except SyntaxError as e:
