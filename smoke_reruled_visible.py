@@ -23,7 +23,7 @@ because the second execute_plan was refused every time.
 Wiring legs are AST — grep proves a string is present, only the AST proves the
 code runs. Behaviour legs drive the SHIPPED function, never a copy of it.
 """
-import ast, importlib.util, pathlib, sys
+import ast, importlib.util, pathlib, re, sys
 
 APP = pathlib.Path("agentic_editor_app.py")
 fails = []
@@ -208,6 +208,73 @@ check("the reply NAMES the duplicated beats back to the agent",
 check("no deduped `ruled` count survives in that reply",
       '"ruled": len({v["beat"] for v in led["beat_verdicts"]})' not in _src,
       "the lying count is still there")
+
+# ── A KEY NEVER WRITTEN IS NOT A KEY SET TO None ────────────────────────────
+# I reproduced the absent-as-zero family INSIDE the reporter built to expose it:
+# `_r.get(k)` returned None for both, so round 63 printed `sfx 'yes' -> None`
+# when the truth was `sfx 'yes' -> KEY ABSENT`. Not cosmetic — a STORED None
+# defeats `.get("sfx", "no")` and the beat goes silently sfx-less, while an
+# ABSENT key lets the default stand. A peer reported the stored-None failure
+# from its own lane; on this lane the key is absent, and only a reporter that
+# separates the two can say which lane has which.
+_miss = [{"beat": 0, "sfx": "yes", "zoom_arc": "hook"},
+         {"beat": 0, "sfx": None}]
+_stm, _rm = rb(_miss, executed=_miss[:1])
+check("a key present-then-ABSENT is rendered as absent, not as None",
+      _rm and _rm[0]["changed"].get("zoom_arc") == ["hook", _app._MISSING],
+      repr(_rm[0]["changed"].get("zoom_arc") if _rm else None))
+check("a key present-then-None is rendered as None, distinct from absent",
+      _rm and _rm[0]["changed"].get("sfx") == ["yes", None],
+      repr(_rm[0]["changed"].get("sfx") if _rm else None))
+check("both count as LOST — the field's guidance is gone either way",
+      _rm and set(_rm[0]["lost_fields"]) == {"sfx", "zoom_arc"},
+      repr(_rm[0]["lost_fields"] if _rm else None))
+
+_noise = [{"beat": 0, "card_hero": None, "purpose": "hook"}, {"beat": 0}]
+_stn, _rn = rb(_noise, executed=_noise[:1])
+check("a field empty in EVERY ruling is not reported as a change — eleven "
+      "`None -> <key absent>` rows per beat bury the ones that matter",
+      _rn and "card_hero" not in _rn[0]["changed"] and "purpose" in _rn[0]["changed"],
+      repr(sorted(_rn[0]["changed"]) if _rn else None))
+
+# ── A TOOL MUST NOT ADVERTISE A FIELD ITS HANDLER DISCARDS ───────────────────
+# `beat_verdict` declares 5 fields and its handler stores 4: `purpose` is
+# offered to the agent and dropped on the floor. That is why `purpose` is LOST
+# on all four of round 63's re-ruled beats. A field the schema invites and the
+# code ignores is worse than one it never offered — the agent has no way to
+# learn the difference.
+_bv_decl = None
+def _walk(o):
+    global _bv_decl
+    if isinstance(o, dict):
+        if o.get("name") == "beat_verdict":
+            _bv_decl = o
+        for v in o.values():
+            _walk(v)
+    elif isinstance(o, (list, tuple)):
+        for v in o:
+            _walk(v)
+for _n in dir(_app):
+    try:
+        _walk(getattr(_app, _n))
+    except Exception:
+        pass
+check("the beat_verdict tool declaration is findable", _bv_decl is not None)
+if _bv_decl:
+    _sch = _bv_decl.get("input_schema") or _bv_decl.get("parameters") or {}
+    _declared = set((_sch.get("properties") or {}))
+    _lines = _src.splitlines()
+    _st_i = next(i for i, l in enumerate(_lines)
+                 if 'elif tu.name == "beat_verdict":' in l)
+    _en_i = next(i for i, l in enumerate(_lines)
+                 if i > _st_i and 'elif tu.name == "cut_verdict":' in l)
+    _seg = "\n".join(_lines[_st_i:_en_i])
+    _read = set(re.findall(r'tu\.input\.get\("([a-z_]+)"', _seg))
+    _dropped = sorted(_declared - _read)
+    check("every field beat_verdict DECLARES is read by its handler",
+          not _dropped,
+          "declared and silently discarded: %s — the schema invites the agent "
+          "to supply it and the code throws it away" % _dropped)
 
 print()
 if fails:

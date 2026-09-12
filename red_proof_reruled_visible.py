@@ -96,6 +96,22 @@ MUTATIONS = [
      '                    out["ALREADY_RULED"] = _dupes',
      '                    _unused_dupes = _dupes',
      "NAMES the duplicated beats"),
+
+    ("a declared field goes back to being dropped on the floor",
+     '                       "purpose": tu.input.get("purpose"),\n',
+     '',
+     "DECLARES is read by its handler"),
+
+    ("a key never written reads as None again, hiding whether the default "
+     "survives",
+     '            _vals = [(_r[_k] if _k in _r else _MISSING) for _r in _rul]',
+     '            _vals = [_r.get(_k) for _r in _rul]',
+     "rendered as absent, not as None"),
+
+    ("fields empty in every ruling flood the report again",
+     '            if all(_x in _EMPTYISH or _x == _MISSING for _x in _vals):\n                continue\n',
+     '',
+     "not reported as a change"),
 ]
 
 

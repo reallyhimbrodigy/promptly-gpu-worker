@@ -3470,6 +3470,17 @@ def blind_rebuilds(turns):
                 _seen = False
     return ("MEASURED", _blind, _total)
 _EMPTYISH = (None, "", [], {})
+# A KEY THAT WAS NEVER WRITTEN IS NOT A KEY SET TO None, and conflating them is
+# the absent-as-zero family — which I reproduced inside the very reporter built
+# to expose it. `_r.get(k)` returned None for both, so round 63's motion beat 0
+# printed `sfx 'yes' -> None` when the truth is `sfx 'yes' -> KEY ABSENT`.
+#
+# The difference is not cosmetic. A STORED None defeats `.get("sfx", "no")` and
+# the beat goes silently sfx-less; an ABSENT key lets the default stand and the
+# beat is safe. A peer session reported the stored-None failure from its own
+# lane; on this lane the key is absent, so that failure does not occur here —
+# and only a reporter that tells the two apart can say so.
+_MISSING = "<key absent>"
 
 
 def verdicts_fingerprint(vs):
@@ -3545,10 +3556,17 @@ def reruled_beats(verdicts, executed=None, executed_fp=None):
             _keys |= set(_r)
         _changed, _lost = {}, []
         for _k in sorted(_keys - {"beat"}):
-            _vals = [_r.get(_k) for _r in _rul]
+            _vals = [(_r[_k] if _k in _r else _MISSING) for _r in _rul]
+            # A FIELD THAT WAS EMPTY THROUGHOUT IS NOT A CHANGE. `None ->
+            # <key absent>` differs technically and tells a reader nothing, and
+            # eleven such rows per beat bury the four that matter. Report a
+            # field only if some ruling actually said something about it.
+            if all(_x in _EMPTYISH or _x == _MISSING for _x in _vals):
+                continue
             if any(_x != _vals[0] for _x in _vals):
                 _changed[_k] = _vals
-                if _vals[0] not in _EMPTYISH and _vals[-1] in _EMPTYISH:
+                if (_vals[0] not in _EMPTYISH and _vals[0] != _MISSING
+                        and (_vals[-1] in _EMPTYISH or _vals[-1] == _MISSING)):
                     _lost.append(_k)
         # WHICH RULING BUILT, derived from the frozen executed copy rather than
         # asserted from the merge rule — the merge rule is the thing in doubt.
@@ -12574,9 +12592,16 @@ def edit(source_key: str, brief: str,
                                   "that field — without it nothing is built. "
                                   "Re-call with copy for each.")
             elif tu.name == "beat_verdict":
+                # `purpose` WAS DECLARED BY THIS TOOL AND DROPPED ON THE
+                # FLOOR. The schema invites the agent to supply it, the handler
+                # never read it, and that is why `purpose` is LOST on all four
+                # of round 63's re-ruled beats. A field the schema offers and
+                # the code ignores is worse than one it never offered — the
+                # agent cannot tell the difference and keeps paying to send it.
                 _bv = {"beat": tu.input.get("beat"),
                        "treatment": tu.input.get("treatment"),
                        "cut": tu.input.get("cut"),
+                       "purpose": tu.input.get("purpose"),
                        "why": str(tu.input.get("why") or "")}
                 led["beat_verdicts"].append(_bv)
                 # `"ruled": len({v["beat"] ...})` DEDUPES, so an agent that
