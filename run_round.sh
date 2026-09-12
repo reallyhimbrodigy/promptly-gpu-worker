@@ -14,6 +14,15 @@ cd "$(dirname "$0")"
 ROUND="${1:?usage: run_round.sh <round-number>}"
 OUT="/tmp/fixtures/round${ROUND}"; mkdir -p "$OUT"; : > "$OUT/appmap.txt"
 
+# ANNOUNCE THE ROUND SO NOBODY EDITS ITS TREE UNDER IT. The fingerprint catches
+# drift mid-round, which is DETECTION — the round dies with N arms already paid
+# for. Rounds 61, 62 and 64 all died that way. This is the prevention half:
+# round_in_flight_guard.py, wired into the pre-commit hook, refuses a commit to
+# a MOUNTED path while this file exists. Cleared on every exit path, including
+# the aborts below, so a failed launch never leaves a lock behind blocking
+# everyone.
+trap 'rm -f "$OUT/.in_flight"' EXIT INT TERM
+
 # ── WHICH CORPUS, DECLARED AND PRINTED ──────────────────────────────────────
 # Rounds 35-41 all ran ab-sources/reliability-fixtures-v1 — the flat/noise set —
 # because the plan came from /tmp/fixtures/staged.json, a per-checkout cache that
@@ -34,6 +43,9 @@ python3 build_plan.py "$CORPUS" > "$OUT/plan.tsv" || {
 # list, into this round's log, so the numbers can never again be read without
 # knowing what they were measured on. Six RED legs proven in smoke_corpus_guard.
 python3 corpus_guard.py "$OUT/plan.tsv" "$CORPUS" || exit 2
+
+python3 mount_fingerprint.py > "$OUT/.in_flight" 2>/dev/null || \
+  { echo "could not fingerprint the tree — not launching"; exit 2; }
 
 # ── THE MOUNT MUST BE IDENTICAL ACROSS EVERY ARM ────────────────────────────
 # Modal mounts agentic_editor_app.py per LAUNCH, and launches here are
