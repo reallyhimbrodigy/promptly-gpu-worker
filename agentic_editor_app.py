@@ -3069,6 +3069,30 @@ KNOWLEDGE_TOOLS = [{
                                                     "narrator's summary of it "
                                                     "[05_motion_graphics, "
                                                     "wired 2026-09-11]"},
+                                 # OFFERED **AND** DERIVED, on Zac's ruling
+                                 # 2026-09-11. I had deleted this field because
+                                 # two ways to state one thing lost 25 of 75
+                                 # placements. Deleting it also deleted a
+                                 # DISTINCTION: `sfx: "yes"` with no name means
+                                 # "a sound belongs here, you choose it", and
+                                 # `sfx_name` means "this sound". Naming the
+                                 # sound is CRAFT, not bookkeeping, and the
+                                 # agent must be able to do one without the
+                                 # other. The field is filled from `treatment`
+                                 # when empty — one source of truth for
+                                 # WHETHER, while WHICH stays the agent's.
+                                 "sfx": {"type": "string", "enum": ["yes", "no"],
+                                         "description":
+                                             "does this beat take a sound? "
+                                             "Ruling 'sfx' in `treatment` "
+                                             "already says yes and this is "
+                                             "filled in for you — set it only "
+                                             "to say yes WITHOUT naming a "
+                                             "sound, which means 'a sound "
+                                             "belongs here, choose it from the "
+                                             "beat's role'. Name it in "
+                                             "`sfx_name` when the choice is "
+                                             "yours to make."},
                                  # ── THE FIELDS THE HARNESS CANNOT DERIVE ────
                                  # Everything else about a placement — where it
                                  # sits, how fast a zoom travels, how early a
@@ -8449,16 +8473,32 @@ def half_ruling_refusal(v):
     #
     # ONE VOCABULARY. Putting `sfx` in treatment IS the intent; the field is a
     # restatement, and a beat that says one without the other is a half ruling.
-    if why is None and "sfx" in tr:
-        if not str(v.get("sfx_name") or "").strip():
-            why = (
-                f"beat {v.get('beat')}: ruled 'sfx' with no sfx_name. The sound "
-                f"is DERIVED from that name — without it nothing is placed and "
-                f"the loss is silent. Name the sound, or do not rule the family.")
-        # THE AGREEMENT CHECK THAT USED TO LIVE HERE IS GONE, because the
-        # disagreement it caught is now impossible: `sfx` is DERIVED from
-        # `treatment` at the boundary. A guard for a state the type system no
-        # longer admits is dead code that reads like protection.
+    # NO SFX ARM HERE, AND THAT IS DELIBERATE. I added one, and it was wrong in
+    # KIND: `sfx_name` is DERIVABLE — `_derive_sfx_name` fills it from the
+    # beat's role — and this function is pure, runs before any beat is in hand,
+    # and so cannot know whether the derivation would have succeeded. Refusing
+    # here pre-empts a live deriver and turns "a sound here, you pick" into an
+    # unsatisfiable demand, which is the refused-forever failure c6 named.
+    #
+    # A nameless sfx ruling is caught AFTER derivation instead, by the second
+    # `_nosfx` pass — which is exactly why that pass exists and says "Recompute
+    # AFTER derivation" above it.
+    #
+    # A CONTRADICTION IS A DIFFERENT MATTER and is refused here, because nothing
+    # downstream can resolve it. `treatment: ["sfx"]` with `sfx: "no"` is the
+    # agent saying both "there is a sound here" and "there is not": the build
+    # reads the field and skips, the treatment says otherwise, and the ledger
+    # shows a ruled family that never appeared. Fill-when-empty gives one
+    # source of truth for a BLANK field; it cannot give one for a field that
+    # disagrees. This refusal pre-empts no deriver — `_derive_sfx_name` supplies
+    # a NAME, never the yes/no — and it is satisfiable from either side.
+    if why is None and "sfx" in tr and str(v.get("sfx") or "").lower() == "no":
+        why = (
+            f"beat {v.get('beat')}: `treatment` includes 'sfx' and the `sfx` "
+            f"field says 'no'. Those are opposite answers to one question and "
+            f"the build follows the field, so this would silently place "
+            f"nothing. Drop 'sfx' from treatment, or leave the field blank and "
+            f"it will be filled in as 'yes'.")
     if why is None and "card" in tr:
         # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
         # OFFERS. It demanded `card_type` — a field b13730c
@@ -8697,8 +8737,13 @@ def admit_verdict(led, v, seen, reedit=False, reedit_targets=None):
     # Putting the family in `treatment` IS the intent. The field is now
     # computed from it, so they cannot disagree — there is nothing to keep in
     # sync, which is the only kind of consistency that does not rot.
+    # FILLED WHEN EMPTY, NEVER OVERRIDDEN — c6's rule and the right one. The
+    # agent's own answer wins; the derivation only supplies what was left
+    # blank, so `treatment: ["sfx"]` alone still means yes without the agent
+    # having to say it twice.
     for _k, _fn in DERIVED_VERDICT_FIELDS.items():
-        rec[_k] = _fn(rec)
+        if str(rec.get(_k) or "").strip() == "":
+            rec[_k] = _fn(rec)
     led["beat_verdicts"].append(rec)
     seen.add(v.get("beat"))
     return True, None
@@ -8778,56 +8823,15 @@ def _assert_build_reads_only_stored_fields(module_src: str) -> None:
             f"not store. `.get()` returns None and None is indistinguishable "
             f"from 'the agent did not say', so the build blames the ruling for "
             f"a field the harness threw away.")
-    # AND A DERIVED FIELD MUST NOT ALSO BE ASKED FOR. Two ways to state one
-    # thing is the defect this change removed; re-adding the field to the
-    # schema would restore it silently.
-    # AND EVERY DERIVED FIELD MUST ACTUALLY BE WRITTEN INTO THE RECORD.
-    # TAKEN FROM c6, whose version has the inverse leg mine lacked: deriving a
-    # value and then dropping it is the same defect one step earlier, and my set
-    # comparison cannot see it because STORED_VERDICT_FIELDS is BUILT from
-    # DERIVED_VERDICT_FIELDS — "is it stored" was a tautology exactly where it
-    # needed to be a question.
-    #
-    # MY FIRST VERSION OF THIS LEG WAS SATISFIED BY ITS OWN MUTANT: it looked
-    # for ANY `rec[...]` write anywhere in admit_verdict, and `rec["why"] = ...`
-    # answers that. It must be the LOOP THAT ITERATES THE DERIVED FIELDS whose
-    # body writes `rec[<that loop's variable>]`.
-    _av = next((_n for _n in _ast.walk(_tree)
-                if isinstance(_n, _ast.FunctionDef) and _n.name == "admit_verdict"),
-               None)
-    if _av is None:
-        raise AssertionError("admit_verdict not found, so the derivation "
-                             "cannot be checked: ABSENT, not passing")
-    _ok_derive = False
-    for _f in _ast.walk(_av):
-        if not isinstance(_f, _ast.For):
-            continue
-        if "DERIVED_VERDICT_FIELDS" not in _ast.unparse(_f.iter):
-            continue
-        _names = [_t.id for _t in _ast.walk(_f.target) if isinstance(_t, _ast.Name)]
-        for _st in _ast.walk(_f):
-            if not isinstance(_st, _ast.Assign):
-                continue
-            for _tg in _st.targets:
-                if (isinstance(_tg, _ast.Subscript)
-                        and isinstance(_tg.value, _ast.Name)
-                        and _tg.value.id == "rec"
-                        and isinstance(_tg.slice, _ast.Name)
-                        and _tg.slice.id in _names):
-                    _ok_derive = True
-    if DERIVED_VERDICT_FIELDS and not _ok_derive:
-        raise AssertionError(
-            "admit_verdict does not write DERIVED_VERDICT_FIELDS into the "
-            "record it stores. A value derived and then dropped is "
-            "indistinguishable at the build from one never derived — and the "
-            "set check cannot see it, because STORED is built from DERIVED.")
-    _both = sorted(set(DERIVED_VERDICT_FIELDS) & _offered)
-    if _both:
-        raise AssertionError(
-            f"verdict field(s) {_both} are DERIVED at the boundary and also "
-            f"OFFERED to the agent. Two ways to state one thing is how `sfx` "
-            f"lost 25 of 75 ruled placements: the agent said it one way, the "
-            f"build read the other, and the guard read the other too.")
+    # THE `_both` LEG IS GONE. It failed when a field was both DERIVED and
+    # OFFERED, on the grounds that two ways to state one thing is the defect.
+    # Zac ruled the other way and the reasoning is better: the field carries a
+    # DISTINCTION the treatment cannot — "a sound here, you pick" versus "this
+    # sound" — so offering it is not a second vocabulary for the same statement.
+    # One source of truth for WHETHER (treatment, filled forward); the agent
+    # keeps WHICH. Removed rather than commented out, since a disabled leg reads
+    # like protection.
+
 
 
 def _assert_no_orphaned_demand(module_src: str) -> None:

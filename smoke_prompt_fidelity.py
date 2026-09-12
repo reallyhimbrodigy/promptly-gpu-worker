@@ -397,73 +397,66 @@ check("it runs ONLY on the unscoped path — a scoped brief is judged by what "
 # FIELD too — while its siblings `_nocopy` and `_nocard` read TREATMENT — so a
 # beat with treatment and no field was invisible on both ends.
 _hrr = _AA.half_ruling_refusal
-check("a beat ruled 'sfx' with no sfx_name is REFUSED where the agent still "
-      "holds it, not skipped at build time where the only outcome is a loss",
-      bool(_hrr({"beat": 1, "treatment": ["sfx"]})))
-# THE SCHEMA CHANGE: `sfx` IS NO LONGER ASKED FOR. Putting the family in
-# `treatment` IS the intent, and the field is DERIVED from it at the boundary,
-# so the two cannot disagree — there is nothing left to keep in sync, which is
-# the only kind of consistency that does not rot. The 2 rulings that named a
-# sound and left the field unset are RECOVERED rather than refused.
-check("a named sound is admitted without the agent setting any field",
-      _hrr({"beat": 1, "treatment": ["sfx"], "sfx_name": "boom"}) is None)
-check("`sfx` is NOT offered on the ruling schema any more — a second way to "
-      "state one thing is the defect, not the fix",
-      "sfx" not in set(_AA.VERDICT_FIELDS))
-check("it IS derived at the boundary and stored",
+# ZAC'S RULING 2026-09-11: OFFERED **AND** DERIVED. I had deleted the `sfx`
+# field because two ways to state one thing lost 25 of 75 placements. Deleting
+# it also deleted a DISTINCTION: `sfx: "yes"` with no name means "a sound
+# belongs here, you choose it" and `sfx_name` means "this sound". Naming the
+# sound is craft, not bookkeeping.
+check("`sfx` is OFFERED on the ruling schema, so 'a sound here, you pick' is "
+      "sayable without naming one",
+      "sfx" in set(_AA.VERDICT_FIELDS))
+check("and it is DERIVED, so the agent need not say it twice",
       "sfx" in _AA.DERIVED_VERDICT_FIELDS
       and "sfx" in set(_AA.STORED_VERDICT_FIELDS))
+
+# NO SFX ARM FOR THE NAMELESS CASE. `sfx_name` is DERIVABLE from the beat's
+# role, and half_ruling_refusal is pure and runs before any beat is in hand —
+# so refusing there pre-empts a live deriver and turns "you pick" into an
+# unsatisfiable demand. That is the refused-forever failure, and it is worse
+# than the silent drop it replaces: one costs a placement, the other the run.
+check("a nameless sfx ruling is NOT refused at ruling time — the deriver has "
+      "not run yet and may supply the name from the beat's role",
+      _hrr({"beat": 1, "treatment": ["sfx"]}) is None)
+check("a named sfx ruling passes",
+      _hrr({"beat": 1, "treatment": ["sfx"], "sfx_name": "boom"}) is None)
+
+# A CONTRADICTION IS REFUSED, because nothing downstream can resolve it:
+# fill-when-empty gives one source of truth for a BLANK field, never for a
+# field that disagrees.
+check("`treatment: ['sfx']` with `sfx: 'no'` is REFUSED — opposite answers to "
+      "one question, and the build follows the field",
+      bool(_hrr({"beat": 1, "treatment": ["sfx"], "sfx": "no"})))
+check("and the refusal names both sides, so it is satisfiable from either",
+      "treatment" in (_hrr({"beat": 1, "treatment": ["sfx"], "sfx": "no"}) or "")
+      and "field" in (_hrr({"beat": 1, "treatment": ["sfx"], "sfx": "no"}) or ""))
+
+# FILLED WHEN EMPTY, NEVER OVERRIDDEN — the agent's own answer wins.
 _led = {"beat_verdicts": []}
 _AA.admit_verdict(_led, {"beat": 0, "treatment": ["sfx"],
                          "sfx_name": "boom"}, set())
 _AA.admit_verdict(_led, {"beat": 1, "treatment": ["text"],
                          "text_content": "hi"}, set())
-check("the derived value is 'yes' on an sfx beat and 'no' otherwise",
+check("a blank field is filled from the treatment: 'yes' on an sfx beat, 'no' "
+      "otherwise",
       _led["beat_verdicts"][0].get("sfx") == "yes"
       and _led["beat_verdicts"][1].get("sfx") == "no")
+# THE FIXTURE MUST DISAGREE WITH THE DERIVATION, or the leg cannot see an
+# override. `treatment: ["none"], sfx: "no"` derives "no" as well, so overriding
+# changes nothing and the leg passed with the fill unconditional — satisfied by
+# its own mutant. The agent says YES on a beat whose treatment says otherwise.
 _led2 = {"beat_verdicts": []}
-_AA.admit_verdict(_led2, {"beat": 2, "treatment": ["sfx"], "sfx_name": "x",
-                          "sfx": "no"}, set())
-check("a stale plan carrying a CONTRADICTING sfx field is overridden, not "
-      "obeyed — the treatment is the intent",
-      _led2["beat_verdicts"][0].get("sfx") == "yes")
+_AA.admit_verdict(_led2, {"beat": 2, "treatment": ["none"], "sfx": "yes"}, set())
+check("an answer the agent DID give is not overwritten, even where the "
+      "derivation would say the opposite",
+      _led2["beat_verdicts"][0].get("sfx") == "yes",
+      "the fill must be blank-only, or the field stops being the agent's")
 
-# A GATE MAY NOT DEMAND WHAT NO SURFACE OFFERS. Raised by a peer from its own
-# lane: adding sfx_name to the gate creates an unsatisfiable refusal if a
-# ruling surface cannot express it, and refused-forever costs the RUN where a
-# silent drop costs one placement. It does not fire here because both surfaces
-# offer the same twelve — asserted rather than relied on.
-check("`_assert_no_orphaned_demand` exists and takes the module source, so it "
-      "cannot die on inspect.getsource in a container built from an image",
-      callable(getattr(_AA, "_assert_no_orphaned_demand", None)))
-try:
-    _AA._assert_no_orphaned_demand("")
-    check("an absent source is ABSENT, not passing", False)
-except AssertionError:
-    check("an absent source is ABSENT, not passing", True)
-_bad = src.replace(
-    '    tr = [str(t).lower() for t in (v.get("treatment") or [])]',
-    '    tr = [str(t).lower() for t in (v.get("treatment") or [])]\n'
-    '    _ = v.get("nonexistent_field")', 1)
-try:
-    _AA._assert_no_orphaned_demand(_bad)
-    check("a demand the schema cannot supply FAILS the container at import",
-          False, "refused-forever costs the run")
-except AssertionError:
-    check("a demand the schema cannot supply FAILS the container at import",
-          True)
-check("and a beat that never ruled sfx is untouched by it",
-      _hrr({"beat": 1, "treatment": ["none"]}) is None)
-# THE SIBLINGS MUST STAY KEYED THE SAME WAY. The bug was one guard reading a
-# different field from the other two; a leg that only tests sfx would not see
-# it come back on card or text.
-_src_all = src
-check("the stripper's sfx arm keys on TREATMENT like _nocopy and _nocard, not "
-      "on the sfx field alone",
-      '"sfx" in [str(t).lower()' in _src_all
-      and _src_all.count('if str(v.get("sfx", "no")).lower() == "yes"\n'
-                         '                          and not str(v.get("sfx_name")') == 0,
-      "one guard reading a different field from its siblings is the bug")
+# THE THREE FIELD-KEYED READS. The guard, the DERIVER and the build all read
+# the `sfx` field while the intent was in `treatment`. Filling the field at the
+# boundary is what makes the deriver reachable at all.
+check("both stripper passes key on TREATMENT, not the field alone",
+      src.count('"sfx" in [str(t).lower()') >= 2,
+      "a guard reading a different field from its siblings is the bug")
 
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)

@@ -79,19 +79,11 @@ CASES = [
      '        _TYPE = dict(BUILT_FAMILIES)',
      '        _TYPE = {"text": "overlay_text", "zoom": "emphasis"}',
      "ONE declaration shared with the dispatch"),
-    ('sfx leaves half_ruling_refusal again - back to a silent build-time skip',
-     '    if why is None and "sfx" in tr:',
-     '    if False and "sfx" in tr:',
-     'with no sfx_name is REFUSED'),
     # THE OBSOLETE MUTATION THAT USED TO SIT HERE tested the agreement branch
     # between `treatment` and the `sfx` field. The schema change DELETED that
     # branch — the disagreement is impossible once the field is derived — so
     # its anchor went to 0x and the harness said [ANCHOR]. A mutation whose
     # property no longer exists is retired, not repaired.
-    ("the boundary stops deriving sfx, so the build reads None again",
-     '    for _k, _fn in DERIVED_VERDICT_FIELDS.items():\n        rec[_k] = _fn(rec)',
-     '    for _k, _fn in DERIVED_VERDICT_FIELDS.items():\n        pass',
-     "derived value is 'yes' on an sfx beat"),
     # THE ANCHOR MUST BE UNIQUE AND IT MUST ACTUALLY BITE. Both stripper sites
     # carry identical text, so the bare expression matched twice ([ANCHOR]);
     # anchoring on the comment alone applied cleanly and changed NOTHING
@@ -100,7 +92,23 @@ CASES = [
     ("the stripper reverts to reading the sfx field alone (post-derivation)",
      '                # just established.\n                # KEYED ON TREATMENT, like its siblings _nocopy and _nocard.\n                # It read only the `sfx` FIELD, so `treatment: ["sfx"]` with no\n                # field set was never in this list and never stripped — the 25\n                # dropped placements. half_ruling_refusal now refuses these\n                # where the agent still holds the beat; this is defence in\n                # depth for anything arriving by another route.\n                _nosfx = [v.get("beat") for v in led["beat_verdicts"]\n                          if ("sfx" in [str(t).lower()\n                                        for t in (v.get("treatment") or [])]\n                              or str(v.get("sfx", "no")).lower() == "yes")\n                          and not str(v.get("sfx_name") or "").strip()]',
      '                # just established.\n                # KEYED ON TREATMENT, like its siblings _nocopy and _nocard.\n                _nosfx = [v.get("beat") for v in led["beat_verdicts"]\n                          if str(v.get("sfx", "no")).lower() == "yes"\n                          and not str(v.get("sfx_name") or "").strip()]',
-     "keys on TREATMENT like _nocopy and _nocard"),
+     "key on TREATMENT, not the field alone"),
+    ('the blank sfx field stops being filled from the treatment, so the deriver is never reachable and the build reads no',
+     '        if str(rec.get(_k) or "").strip() == "":\n            rec[_k] = _fn(rec)',
+     '        if False:\n            rec[_k] = _fn(rec)',
+     'blank field is filled from the treatment'),
+    ('the fill starts OVERRIDING an answer the agent gave',
+     '        if str(rec.get(_k) or "").strip() == "":\n            rec[_k] = _fn(rec)',
+     '        if True:\n            rec[_k] = _fn(rec)',
+     'answer the agent DID give is not overwritten'),
+    ('the contradiction stops being refused, so treatment and field disagree silently and the build follows the field',
+     '    if why is None and "sfx" in tr and str(v.get("sfx") or "").lower() == "no":',
+     '    if False:',
+     'is REFUSED — opposite answers'),
+    ('a nameless sfx ruling goes back to being refused, pre-empting the deriver',
+     '    if why is None and "card" in tr:',
+     '    if why is None and "sfx" in tr and not v.get("sfx_name"):\n        why = "no name"\n    if why is None and "card" in tr:',
+     'NOT refused at ruling time'),
 ]
 
 orig = APP.read_text()
