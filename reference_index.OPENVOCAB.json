@@ -1,0 +1,2926 @@
+{
+"beats_in_corpus": 155,
+"family_counts_in_corpus": {
+"Escalating counter/stat ticking animation": 8,
+"tilted polaroid-style frame reveal": 1,
+"Decorative kinetic caption styling effects": 10,
+"photo swap on a whip": 1,
+"Name/identity card overlay": 4,
+"Screen-recording UI demo cutaway": 19,
+"descriptive caption card under the screenshot": 1,
+"3D icon animation sequence (lock, laptop)": 1,
+"prop-to-3D-icon transformation": 1,
+"3D perspective UI/gallery browse graphic": 4,
+"emoji/stat overlay": 1,
+"Physical prop as visual proof/gesture": 4,
+"Word-by-word caption build assembling one full sentence": 7,
+"multi-object 3D scatter with dollar-figure labels": 1,
+"quote-mark emphasis on a single word": 1,
+"Logo branding sting/idle animation": 4,
+"kinetic greeting text swipe": 1,
+"oversized stat numeral animation": 1,
+"walking-through-door b-roll": 1,
+"animated map with escalating pin-drop": 1,
+"Giant kinetic title-card slam": 9,
+"outdoor walk-and-text overlay": 1,
+"Mood b-roll cutaway illustrating a claim": 8,
+"Colored keyword highlight within running captions": 8,
+"Full-screen title/thesis card (no speaker)": 7,
+"location-reveal walk-in": 1,
+"recurring location/prop callback": 1,
+"Flash-wipe transition between segments": 12,
+"animated search-bar type-on": 1,
+"contact info card slide-in": 1,
+"pause-icon wipe transition": 1,
+"App/brand icon pop-in over speaker": 5,
+"rapid punch-in zoom cuts": 1,
+"vertical line wipe": 1,
+"Split-screen picture-in-picture composition": 2,
+"small reaction icons": 1,
+"Cut back to talking head (re-anchor after detour)": 4,
+"Icon pop-in illustrating spoken word/feature list": 2,
+"Native TikTok loading/search-bar simulated outro": 6,
+"Whip-pan camera reframe transition": 4,
+"downshift to smaller instructional captions": 1,
+"duplicate/split mirrored panel of the same footage": 1,
+"oversized single-word caption drop ('cheating') with colored punctuation dot": 1,
+"Cursor/UI callout box": 6,
+"Discrete caption cards narrating a demo without voiceover": 2,
+"over-the-shoulder framing on a real edit session": 1,
+"Hard cut to new location (resets energy)": 4,
+"sped-through progress/loading states": 1,
+"extreme low-angle handheld close-up, no captions": 1,
+"wide static shot with direct-address pointing gesture": 1,
+"animated circular scribble graphic": 1,
+"continuous high-angle tracking shot": 1,
+"slow push/reveal as subject leans back": 1,
+"hold across cut (title persists through location change)": 1,
+"sped-through UI scrolling": 1,
+"italic serif caption card over blurred zoom footage": 1,
+"Sustained micro-punch-ins during monologue": 2,
+"finished vertical clip preview with styled highlighted captions playing inside a framed inset": 1,
+"extreme close-up on eye, very shallow focus, direct address": 1,
+"white-flash whip transition into black screen with app splash logos (CapCut, then TikTok)": 1
+},
+"vocabulary": [
+"3D icon animation sequence (lock, laptop)",
+"3D perspective UI/gallery browse graphic",
+"App/brand icon pop-in over speaker",
+"Colored keyword highlight within running captions",
+"Cursor/UI callout box",
+"Cut back to talking head (re-anchor after detour)",
+"Decorative kinetic caption styling effects",
+"Discrete caption cards narrating a demo without voiceover",
+"Escalating counter/stat ticking animation",
+"Flash-wipe transition between segments",
+"Full-screen title/thesis card (no speaker)",
+"Giant kinetic title-card slam",
+"Hard cut to new location (resets energy)",
+"Icon pop-in illustrating spoken word/feature list",
+"Logo branding sting/idle animation",
+"Mood b-roll cutaway illustrating a claim",
+"Name/identity card overlay",
+"Native TikTok loading/search-bar simulated outro",
+"Physical prop as visual proof/gesture",
+"Screen-recording UI demo cutaway",
+"Split-screen picture-in-picture composition",
+"Sustained micro-punch-ins during monologue",
+"Whip-pan camera reframe transition",
+"Word-by-word caption build assembling one full sentence",
+"animated circular scribble graphic",
+"animated map with escalating pin-drop",
+"animated search-bar type-on",
+"contact info card slide-in",
+"continuous high-angle tracking shot",
+"descriptive caption card under the screenshot",
+"downshift to smaller instructional captions",
+"duplicate/split mirrored panel of the same footage",
+"emoji/stat overlay",
+"extreme close-up on eye, very shallow focus, direct address",
+"extreme low-angle handheld close-up, no captions",
+"finished vertical clip preview with styled highlighted captions playing inside a framed inset",
+"hold across cut (title persists through location change)",
+"italic serif caption card over blurred zoom footage",
+"kinetic greeting text swipe",
+"location-reveal walk-in",
+"multi-object 3D scatter with dollar-figure labels",
+"outdoor walk-and-text overlay",
+"over-the-shoulder framing on a real edit session",
+"oversized single-word caption drop ('cheating') with colored punctuation dot",
+"oversized stat numeral animation",
+"pause-icon wipe transition",
+"photo swap on a whip",
+"prop-to-3D-icon transformation",
+"quote-mark emphasis on a single word",
+"rapid punch-in zoom cuts",
+"recurring location/prop callback",
+"slow push/reveal as subject leans back",
+"small reaction icons",
+"sped-through UI scrolling",
+"sped-through progress/loading states",
+"tilted polaroid-style frame reveal",
+"vertical line wipe",
+"walking-through-door b-roll",
+"white-flash whip transition into black screen with app splash logos (CapCut, then TikTok)",
+"wide static shot with direct-address pointing gesture"
+],
+"beats": [
+{
+"i": 0,
+"purpose": "hook",
+"dur": 2.0,
+"treat": [
+"Escalating counter/stat ticking animation",
+"tilted polaroid-style frame reveal"
+],
+"treat_raw": [
+"tilted polaroid-style frame reveal",
+"word-by-word dollar count-up"
+],
+"does": {
+"tilted polaroid-style frame reveal": "photo swings into frame at a dutch angle from off-screen, giving a scrapbook/reveal feel rather than a straight cut",
+"word-by-word dollar count-up": "the figure visibly grows digit by digit ($2,000 -> $2,000,000) landing on 'a month' as a punchline"
+},
+"spk": false,
+"card_text": "this kid makes $2,000,000 a month",
+"read": "Opens on a money-shock hook that needs no speaker yet, pulling curiosity before identity is revealed.",
+"craft": "Escalating the number in real time instead of just stating it turns a simple stat into a suspense beat — a cheap trick done with clean timing."
+},
+{
+"i": 1,
+"purpose": "hook",
+"dur": 1.7,
+"treat": [
+"Decorative kinetic caption styling effects",
+"photo swap on a whip"
+],
+"treat_raw": [
+"photo swap on a whip",
+"word-by-word build with de-emphasized tail"
+],
+"does": {
+"photo swap on a whip": "a blurred motion whip transitions from the pixelated kid photo to a clear graduation-cap portrait",
+"word-by-word build with de-emphasized tail": "'but hasn't even graduated high school' builds word by word, with each new word appearing lighter/grayer until fully bolded, drawing the eye to the twist"
+},
+"spk": false,
+"card_text": "but hasn't even graduated high school",
+"read": "Delivers the contradiction/loss-frame that makes the big number feel absurd rather than just impressive.",
+"craft": "The reveal that the earner hasn't finished high school lands right as the photo resolves into focus — image clarity and text reveal are timed together for one combined 'gotcha'."
+},
+{
+"i": 2,
+"purpose": "claim",
+"dur": 3.0,
+"treat": [
+"Decorative kinetic caption styling effects",
+"Name/identity card overlay"
+],
+"treat_raw": [
+"word-by-word caption typography with numeral emphasis",
+"name-card overlay"
+],
+"does": {
+"word-by-word caption typography with numeral emphasis": "the number '13' renders oversized compared to surrounding words, visually flagging it as the key fact",
+"name-card overlay": "'Zach Yadegari' builds in white sans over his chest as he says it, functioning as an identity card without cutting away"
+},
+"spk": true,
+"card_text": "at 13 years old / Zach Yadegari",
+"read": "Cuts to the on-camera interviewee to ground the hook in a real, named person and start the origin story.",
+"craft": null
+},
+{
+"i": 3,
+"purpose": "evidence",
+"dur": 4.73,
+"treat": [
+"Screen-recording UI demo cutaway",
+"descriptive caption card under the screenshot"
+],
+"treat_raw": [
+"screen-grab cutaway with soft glow background",
+"descriptive caption card under the screenshot"
+],
+"does": {
+"screen-grab cutaway with soft glow background": "a blurred lavender radial background frames a screenshot of a games website, making a plain product shot feel designed",
+"descriptive caption card under the screenshot": "small business-style text block gives factual context (location, business description) as if pulled from a company database"
+},
+"spk": true,
+"card_text": "Totally Science / Developer of a gaming platform based in San Francisco, California. The company offers various games, mobile games, and online player games without the restrictions of school internet filters.",
+"read": "Substantiates the '13-year-old built a website' claim with what looks like documentary evidence rather than just his own words.",
+"craft": "Wrapping a screenshot in a soft gradient vignette and a factual caption gives a low-fi product page the polish of an investigative dossier."
+},
+{
+"i": 4,
+"purpose": "turn",
+"dur": 4.0,
+"treat": [
+"3D icon animation sequence (lock, laptop)",
+"Decorative kinetic caption styling effects"
+],
+"treat_raw": [
+"3D icon animation sequence (lock, laptop)",
+"kinetic word trail with motion blur"
+],
+"does": {
+"3D icon animation sequence (lock, laptop)": "a padlock rendered in 3D twists/unlocks in sync with the word 'bypass', then a floating laptop shows the actual game being played, dramatizing an abstract action",
+"kinetic word trail with motion blur": "words like 'it led kids' and 'bypass' streak/blur as they fly in, giving the graphic package kinetic energy matching the narration pace"
+},
+"spk": true,
+"card_text": "it led kids to bypass school restrictions and play games on their laptop",
+"read": "Explains the mechanism of the first business (bypassing school filters) with a graphic metaphor instead of more talking-head exposition.",
+"craft": "The lock visually 'opening' exactly on the word bypass is a small sync detail that sells the whole explainer graphic as intentional rather than stock."
+},
+{
+"i": 5,
+"purpose": "turn",
+"dur": 1.73,
+"treat": [
+"prop-to-3D-icon transformation"
+],
+"treat_raw": [
+"prop-to-3D-icon transformation"
+],
+"does": {
+"prop-to-3D-icon transformation": "the black apple-shaped object he holds in-hand maps directly into the same-shaped 3D app icon on screen, so the cutaway feels physically continuous with his gesture"
+},
+"spk": true,
+"card_text": null,
+"read": "Bridges from the interview beat into an app-demo beat using his own hand motion as the transition anchor.",
+"craft": "Matching the shape of the physical prop in his hands to the on-screen icon is a small match-cut that most editors wouldn't bother with — it makes the graphic feel sourced from his gesture rather than pasted on top of it."
+},
+{
+"i": 6,
+"purpose": "evidence",
+"dur": 2.37,
+"treat": [
+"3D perspective UI/gallery browse graphic",
+"emoji/stat overlay"
+],
+"treat_raw": [
+"floating phone mockup with parallax tilt",
+"emoji/stat overlay"
+],
+"does": {
+"floating phone mockup with parallax tilt": "a rendered iPhone tilts and drifts in 3D space showing the app's food-scanning UI, simulating a product demo video without real screen capture",
+"emoji/stat overlay": "a fire emoji and bold calorie count sit beside the phone, adding a visual 'punch' to a plain nutrition-tracking screen"
+},
+"spk": false,
+"card_text": "1,990 cal",
+"read": "Shows the actual product (CalAI) in an idealized render since no real screen recording is used, keeping visual polish consistent with the rest of the package.",
+"craft": null
+},
+{
+"i": 7,
+"purpose": "payoff",
+"dur": 2.9,
+"treat": [
+"Escalating counter/stat ticking animation"
+],
+"treat_raw": [
+"word-by-word build to oversized full-number reveal"
+],
+"does": {
+"word-by-word build to oversized full-number reveal": "'$20' pops small then instantly re-renders as a huge '$20,000,000' filling the frame, creating a scale-shock beat"
+},
+"spk": true,
+"card_text": "$20,000,000 in the past year",
+"read": "Delivers the second, bigger revenue payoff after the mechanism explanation, closing the loop opened by the cold open's smaller number.",
+"craft": "The tiny '$20' baiting the eye before snapping to '$20,000,000' is a deliberate misdirection gag — a rhythm trick, not just a caption."
+},
+{
+"i": 8,
+"purpose": "turn",
+"dur": 6.33,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": null,
+"read": "New interview subject (different set, different look) is allowed to speak plainly with only captions running — restraint here lets the location/lighting change do the work of signaling a new voice.",
+"craft": null
+},
+{
+"i": 9,
+"purpose": "claim",
+"dur": 1.57,
+"treat": [
+"Physical prop as visual proof/gesture"
+],
+"treat_raw": [
+"handheld physical-gesture prop caption"
+],
+"does": {
+"handheld physical-gesture prop caption": "a large '0' graphic is held/framed as if he's physically presenting it in his hand, syncing his 'ok' hand gesture to the zero shape"
+},
+"spk": true,
+"card_text": "0 coding experience",
+"read": "Emphasizes the improbability of the achievement (zero coding experience) with a graphic that visually rhymes with his hand shape.",
+"craft": "Placing the '0' exactly where his fingers form a circle (an 'ok' gesture) turns a stock stat card into a sight gag keyed to his own body language."
+},
+{
+"i": 10,
+"purpose": "turn",
+"dur": 3.7,
+"treat": [
+"Word-by-word caption build assembling one full sentence"
+],
+"treat_raw": [
+"3D folder icon reveal with kinetic caption chain"
+],
+"does": {
+"3D folder icon reveal with kinetic caption chain": "a blue 'TOP SECRET' folder icon drifts into frame while a caption chain builds ('making anything go viral and a few other...') phrase by phrase beside it"
+},
+"spk": false,
+"card_text": "TOP SECRET / making anything go viral and a few other",
+"read": "Signals a pivot to withheld/teased information (his marketing skills) without needing him back on camera yet.",
+"craft": "Using a literal secrecy icon to visualize an unnamed skill set is a slightly cheeky, self-aware graphic choice that matches the video's tone."
+},
+{
+"i": 11,
+"purpose": "evidence",
+"dur": 1.73,
+"treat": [
+"Word-by-word caption build assembling one full sentence",
+"multi-object 3D scatter with dollar-figure labels"
+],
+"treat_raw": [
+"multi-object 3D scatter with dollar-figure labels",
+"text label build synced to reveal"
+],
+"does": {
+"multi-object 3D scatter with dollar-figure labels": "four floating question-mark/box icons each display a distinct large dollar figure, implying multiple revenue streams at once",
+"text label build synced to reveal": "'multi-million dollar app ideas' assembles word by word as the numbers settle into place"
+},
+"spk": false,
+"card_text": "$9,876,234.00 / $15,876,129.00 / $2,872,678.00 / $4,453,768.00 / multi-million dollar app ideas",
+"read": "Visualizes 'multiple ventures' as a cluster of mystery boxes with real-looking numbers, implying scale without naming specifics.",
+"craft": null
+},
+{
+"i": 12,
+"purpose": "close",
+"dur": 6.13,
+"treat": [
+"quote-mark emphasis on a single word"
+],
+"treat_raw": [
+"quote-mark emphasis on a single word"
+],
+"does": {
+"quote-mark emphasis on a single word": "the word 'App' appears in oversized quotation marks each time he says it, treating it as a running bit/punchline about disguising the DM"
+},
+"spk": true,
+"card_text": "the word \"App\" / I'll DM it \"App\" to you right now",
+"read": "Closes with a direct call-to-action (DM the word to get the content) using a callback graphic instead of a generic 'link in bio' card.",
+"craft": "Repeating the same stylized '\"App\"' card across many beats turns a single word into a recurring visual joke, reinforcing the video's soft CTA without a hard sell."
+},
+{
+"i": 13,
+"purpose": "close",
+"dur": 4.03,
+"treat": [
+"Logo branding sting/idle animation"
+],
+"treat_raw": [
+"dimmed freeze with pulsing platform icon overlay"
+],
+"does": {
+"dimmed freeze with pulsing platform icon overlay": "the frame darkens and holds on essentially the same still while an Instagram logo icon pulses over the caption, repeating for several seconds"
+},
+"spk": true,
+"card_text": "right now \"App\"",
+"read": "Reads as a loop-out/end-card placeholder rather than a deliberate treatment — the repeated identical frame suggests an unfinished or platform-generated tail rather than an edited choice.",
+"craft": null
+},
+{
+"i": 1,
+"purpose": "hook",
+"dur": 4.2,
+"treat": [
+"Logo branding sting/idle animation",
+"Name/identity card overlay",
+"kinetic greeting text swipe"
+],
+"treat_raw": [
+"kinetic greeting text swipe",
+"oversized name/title reveal",
+"blurred zoom-through logo transition"
+],
+"does": {
+"kinetic greeting text swipe": "bold 'Hello, everyone.' slides in over the shoulder, establishing a casual direct-address tone before he's even fully framed",
+"oversized name/title reveal": "his name 'Jaden Kohan' wipes across the frame in huge type, then settles small while a blue pill tag 'Separation Manager' drops in beneath it",
+"blurred zoom-through logo transition": "the frame zooms and defocuses into the 'LegalSoft' logo card, masking the cut into the next scene as a single smooth push rather than a hard jump"
+},
+"spk": true,
+"card_text": "Hello, everyone. / Jaden Kohan / Separation Manager",
+"read": "establishes who is speaking and plants an unexplained job title to create curiosity before any claim is made.",
+"craft": "the zoom-blur into the logo is timed to land exactly as he finishes his opening line, so the transition reads as a produced sting rather than an edit point."
+},
+{
+"i": 2,
+"purpose": "claim",
+"dur": 0.9,
+"treat": [
+"oversized stat numeral animation"
+],
+"treat_raw": [
+"oversized stat numeral animation"
+],
+"does": {
+"oversized stat numeral animation": "a large orange '2' and 'yrs' scale in beside him at his desk, giving visual weight to the spoken timeframe"
+},
+"spk": false,
+"card_text": "Over the last 2yrs.",
+"read": "grounds the credibility claim in a concrete number while cutting away from the direct-address shot.",
+"craft": null
+},
+{
+"i": 3,
+"purpose": "evidence",
+"dur": 1.77,
+"treat": [
+"walking-through-door b-roll"
+],
+"treat_raw": [
+"walking-through-door b-roll"
+],
+"does": {
+"walking-through-door b-roll": "he physically walks through a glass office door as the sentence about opportunity plays, adding forward motion to a static claim"
+},
+"spk": false,
+"card_text": "I've had the opportunity to work closely",
+"read": "b-roll chosen to literalize the language being spoken rather than just filling time.",
+"craft": "the door physically opening lines up with the word 'opportunity,' turning a generic walking shot into a small visual pun."
+},
+{
+"i": 4,
+"purpose": "evidence",
+"dur": 2.5,
+"treat": [
+"animated map with escalating pin-drop"
+],
+"treat_raw": [
+"animated map with escalating pin-drop"
+],
+"does": {
+"animated map with escalating pin-drop": "orange location pins multiply rapidly across a US map beneath the title 'Our Traction', visualizing scale without narration"
+},
+"spk": false,
+"card_text": "Our Traction",
+"read": "a pure-graphic proof beat that gives the eye a break from the talking head while making a scale claim.",
+"craft": "the pin-drop rate visibly accelerates through the beat, creating a sense of real-time growth rather than a static count."
+},
+{
+"i": 5,
+"purpose": "claim",
+"dur": 2.87,
+"treat": [
+"Giant kinetic title-card slam"
+],
+"treat_raw": [
+"giant kinetic keyword backdrop"
+],
+"does": {
+"giant kinetic keyword backdrop": "huge orange words (BUILD, then GROW, then OPTIMIZE) fill the wall behind him, changing in sync with the verb he's currently saying"
+},
+"spk": true,
+"card_text": "Helping them",
+"read": "keeps a plain talking-head shot visually busy through typography rather than cutting away.",
+"craft": "the backdrop word changes exactly on the beat of the corresponding spoken verb, a tight sync that makes a static seated shot feel active."
+},
+{
+"i": 6,
+"purpose": "evidence",
+"dur": 2.37,
+"treat": [
+"3D perspective UI/gallery browse graphic"
+],
+"treat_raw": [
+"staggered UI card cascade"
+],
+"does": {
+"staggered UI card cascade": "role/profile cards populate a website mockup one after another left to right, filling out a grid of staff options"
+},
+"spk": false,
+"card_text": "View Our Roles For Your Firm",
+"read": "lets the actual product interface make the abundance-of-options argument without narration.",
+"craft": "the cards enter staggered rather than all at once, which reads as more alive and deliberate than a flat screenshot."
+},
+{
+"i": 7,
+"purpose": "claim",
+"dur": 2.0,
+"treat": [
+"outdoor walk-and-text overlay"
+],
+"treat_raw": [
+"outdoor walk-and-text overlay"
+],
+"does": {
+"outdoor walk-and-text overlay": "casual walking shot with running captions plus a bold orange role-title card layered on top"
+},
+"spk": false,
+"card_text": "And my role as / Separation Manager",
+"read": "varies the visual register from the office desk shots while returning to and defining the earlier planted job title.",
+"craft": null
+},
+{
+"i": 8,
+"purpose": "breath",
+"dur": 1.23,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": false,
+"card_text": "my focus is making sure",
+"read": "a plain hold on b-roll with only captions carrying the line — restraint that lets the explanation breathe before the next visual beat.",
+"craft": null
+},
+{
+"i": 9,
+"purpose": "evidence",
+"dur": 1.7,
+"treat": [
+"Mood b-roll cutaway illustrating a claim"
+],
+"treat_raw": [
+"candid interaction b-roll matched to claim"
+],
+"does": {
+"candid interaction b-roll matched to claim": "two men greet warmly in an office as the text 'every client has a smooth experience' builds, using a human moment as visual proof of the claim"
+},
+"spk": false,
+"card_text": "every client has a smooth experience",
+"read": "humanizes an abstract service claim with a genuine-feeling interaction rather than a stock handshake.",
+"craft": "the embrace lands right as 'smooth experience' finishes appearing on screen, turning a generic office cutaway into an illustration of the specific phrase."
+},
+{
+"i": 10,
+"purpose": "claim",
+"dur": 1.5,
+"treat": [
+"Colored keyword highlight within running captions"
+],
+"treat_raw": [
+"colored keyword highlight"
+],
+"does": {
+"colored keyword highlight": "the word 'changes' renders in orange within otherwise black caption text, pulling the eye to the key risk term"
+},
+"spk": false,
+"card_text": "whenever staffing changes.",
+"read": "continues the walking-with-phone motif while reinforcing brand presence via the neon sign in frame.",
+"craft": null
+},
+{
+"i": 11,
+"purpose": "evidence",
+"dur": 3.17,
+"treat": [
+"3D perspective UI/gallery browse graphic",
+"Escalating counter/stat ticking animation"
+],
+"treat_raw": [
+"3D staff-profile carousel",
+"escalating percentage counter"
+],
+"does": {
+"3D staff-profile carousel": "profile cards for virtual staff (name, country, skills) slide across the screen in perspective, implying a large roster to choose from",
+"escalating percentage counter": "the profit/savings percentages tick upward rapidly (24%, 39%, 40%...60%) before settling, mimicking a live calculation"
+},
+"spk": false,
+"card_text": "Our Powerful Capabilities / 60% Savings compared to hiring locally",
+"read": "stacks two graphic proof formats back to back to hammer numeric credibility without more talking-head time.",
+"craft": "the numbers visibly count upward instead of just appearing, giving a live-calculation feel that's more persuasive than a static stat card."
+},
+{
+"i": 12,
+"purpose": "turn",
+"dur": 3.63,
+"treat": [
+"Decorative kinetic caption styling effects",
+"Name/identity card overlay"
+],
+"treat_raw": [
+"scattered kinetic word cluster",
+"inset circular profile photo"
+],
+"does": {
+"scattered kinetic word cluster": "multiple words of the sentence appear at once in different sizes and positions rather than a single sequential caption line, creating a busier read",
+"inset circular profile photo": "a small round headshot appears near his shoulder, implying a team/testimonial reference without cutting away"
+},
+"spk": true,
+"card_text": "or ensuring a transition / why we're committed to providing",
+"read": "signals a pivot toward the company's values with a busier text treatment matching the longer, multi-clause sentence.",
+"craft": null
+},
+{
+"i": 13,
+"purpose": "payoff",
+"dur": 1.67,
+"treat": [
+"Full-screen title/thesis card (no speaker)",
+"Name/identity card overlay"
+],
+"treat_raw": [
+"clean typographic thesis card",
+"orbiting photo bubbles"
+],
+"does": {
+"clean typographic thesis card": "the full frame goes to a single bold line, 'We make that seamless.', with no speaker visible",
+"orbiting photo bubbles": "small circular headshots drift around the text, implying a surrounding team/client base"
+},
+"spk": false,
+"card_text": "We make that seamless.",
+"read": "functions as the pull-quote of the whole piece, deliberately separated from the talking-head flow.",
+"craft": "isolating this line on an empty background, with nothing else competing for attention, gives the ad's thesis statement real weight instead of crowding it into a caption."
+},
+{
+"i": 14,
+"purpose": "turn",
+"dur": 1.33,
+"treat": [
+"location-reveal walk-in"
+],
+"treat_raw": [
+"location-reveal walk-in"
+],
+"does": {
+"location-reveal walk-in": "he walks into a real, branded LegalSoft office space, grounding the abstract graphics section in a physical place"
+},
+"spk": false,
+"card_text": null,
+"read": "returns to tangible reality after several abstract graphic beats, re-anchoring the brand.",
+"craft": null
+},
+{
+"i": 15,
+"purpose": "claim",
+"dur": 1.7,
+"treat": [
+"recurring location/prop callback"
+],
+"treat_raw": [
+"recurring location/prop callback"
+],
+"does": {
+"recurring location/prop callback": "the same Kobe/Lakers wall art from an earlier beat reappears, quietly signaling continuity of one real office rather than assorted stock footage"
+},
+"spk": false,
+"card_text": "that your staff is a critical part",
+"read": "reinforces the staffing message with another genuine-feeling office interaction.",
+"craft": null
+},
+{
+"i": 16,
+"purpose": "claim",
+"dur": 1.2,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": false,
+"card_text": "of your firm's operation.",
+"read": "lets the sentence complete over a matching walk-away motion rather than adding a new graphic device.",
+"craft": null
+},
+{
+"i": 17,
+"purpose": "claim",
+"dur": 4.27,
+"treat": [
+"Giant kinetic title-card slam"
+],
+"treat_raw": [
+"giant kinetic keyword backdrop (repeat)"
+],
+"does": {
+"giant kinetic keyword backdrop (repeat)": "huge orange words 'EXCEPTIONAL SERVICE' then 'OUTSTANDING TALENT' fill the wall behind him, synced to speech"
+},
+"spk": true,
+"card_text": "EXCEPTIONAL SERVICE / OUTSTANDING TALENT",
+"read": "reuses the earlier backdrop-word device to mark this as the pitch's closing value statement.",
+"craft": null
+},
+{
+"i": 18,
+"purpose": "evidence",
+"dur": 1.17,
+"treat": [
+"Mood b-roll cutaway illustrating a claim"
+],
+"treat_raw": [
+"handheld verite b-roll"
+],
+"does": {
+"handheld verite b-roll": "unposed, documentary-style footage at a trade show booth signals real industry presence rather than staged studio content"
+},
+"spk": false,
+"card_text": null,
+"read": "switches register to prove the company shows up in the real industry, not just in a produced studio.",
+"craft": null
+},
+{
+"i": 19,
+"purpose": "evidence",
+"dur": 1.8,
+"treat": [
+"Mood b-roll cutaway illustrating a claim"
+],
+"treat_raw": [
+"macro close-up cutaway"
+],
+"does": {
+"macro close-up cutaway": "tight shot of hands flipping through a brochure, slowing the pace and adding tactile detail"
+},
+"spk": false,
+"card_text": null,
+"read": "a scale-varying detail shot inside the trade-show sequence, breaking up the wide shots.",
+"craft": null
+},
+{
+"i": 20,
+"purpose": "evidence",
+"dur": 1.53,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": false,
+"card_text": null,
+"read": "continues the same documentary style, reinforcing that these are genuine networking moments.",
+"craft": null
+},
+{
+"i": 21,
+"purpose": "turn",
+"dur": 0.1,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"rapid blur whip-transition"
+],
+"does": {
+"rapid blur whip-transition": "three near-identical motion-blurred frames in quick succession simulate a fast whip pan, snapping from b-roll back to the presenter"
+},
+"spk": true,
+"card_text": null,
+"read": "used specifically to reset the viewer's attention onto the host for the closing pitch.",
+"craft": "compressing the cut into a blurred whip rather than a hard jump smooths the return from documentary b-roll to studio talking head."
+},
+{
+"i": 22,
+"purpose": "close",
+"dur": 6.0,
+"treat": [
+"animated search-bar type-on",
+"contact info card slide-in",
+"pause-icon wipe transition"
+],
+"treat_raw": [
+"animated search-bar type-on",
+"contact info card slide-in",
+"pause-icon wipe transition"
+],
+"does": {
+"animated search-bar type-on": "'LegalSoft.com' builds letter by letter inside a rounded search-bar graphic as if being typed live",
+"contact info card slide-in": "phone number and email fade in beneath the search bar with icon bullets, spelling out the CTA",
+"pause-icon wipe transition": "a pause symbol grows to cover his face before cutting to the final logo card, an unusual meta-transition that signals the segment ending"
+},
+"spk": true,
+"card_text": "LegalSoft.com / Contact us now! / +1 (424) 341-4917 / support@legalsoft.com",
+"read": "escalates the on-screen device specifically because this is the direct-response CTA moment.",
+"craft": "the type-on search bar turns a generic 'visit our website' beat into a mini interaction demo rather than static text on screen."
+},
+{
+"i": 23,
+"purpose": "close",
+"dur": 4.0,
+"treat": [
+"Logo branding sting/idle animation"
+],
+"treat_raw": [
+"logo icon morph cycle",
+"pulsing gradient icon hold"
+],
+"does": {
+"logo icon morph cycle": "the LegalSoft mark cycles through several colored/styled variants in place, a logo-sting flourish",
+"pulsing gradient icon hold": "the Instagram icon's color gradient shifts subtly while otherwise static, keeping the end card from feeling like a dead frame"
+},
+"spk": false,
+"card_text": "LEGAL SOFT / @LEGALSOFTHQ",
+"read": "standard end-card follow CTA, given just enough motion to not read as a hard stop.",
+"craft": "the slow color pulse on an otherwise static end card is a small touch that keeps the final seconds alive instead of just holding a flat logo."
+},
+{
+"i": 1,
+"purpose": "hook",
+"dur": 2.9,
+"treat": [
+"App/brand icon pop-in over speaker",
+"Escalating counter/stat ticking animation",
+"rapid punch-in zoom cuts"
+],
+"treat_raw": [
+"rapid punch-in zoom cuts",
+"escalating stat card",
+"AI chip icon reveal"
+],
+"does": {
+"rapid punch-in zoom cuts": "the frame jumps in tighter on the face every fraction of a second, creating jittery, high-energy motion typical of a cold open",
+"escalating stat card": "a rounded card counts up 53 -> 80 -> 100 above the speaker's head, visually racing to match the spoken number",
+"AI chip icon reveal": "a purple 'AI' processor icon pops in over the speaker's face, planting the tool/technology angle before it's named"
+},
+"spk": true,
+"card_text": "53 / 80 / 100 / 100 TIKTOKS / PER HOUR",
+"read": "An escalating number hooks attention faster than a static claim card because it reads as proof-in-motion rather than assertion.",
+"craft": "The counter's climb is timed almost exactly to the escalating numbers in speech, so the visual and verbal claim accelerate together — this is what makes the opening feel like a stat rather than a boast."
+},
+{
+"i": 2,
+"purpose": "turn",
+"dur": 0.3,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"warm color-flash transition"
+],
+"does": {
+"warm color-flash transition": "the frame briefly washes to a sepia/orange tone across a few quick cuts, softening the jump between the hook and the demo"
+},
+"spk": true,
+"card_text": "FIRST GO TO",
+"read": "A short color hit signals 'new section' without a hard edit, keeping pace but marking the pivot to instructions.",
+"craft": null
+},
+{
+"i": 3,
+"purpose": "evidence",
+"dur": 2.0,
+"treat": [
+"Screen-recording UI demo cutaway",
+"vertical line wipe"
+],
+"treat_raw": [
+"screen-recording demo",
+"vertical line wipe"
+],
+"does": {
+"screen-recording demo": "shows an actual search bar being typed into ('submagic.co') and the resulting website loading, functioning as literal proof of the step being described",
+"vertical line wipe": "a thin scan-line sweeps across the frame as the UI updates, masking the transition between typing and the loaded page"
+},
+"spk": false,
+"card_text": "submagic.co / YOUR VIDEO / AND UPLOAD",
+"read": "Showing the real interface instead of describing it removes any doubt that the process is as simple as claimed.",
+"craft": null
+},
+{
+"i": 4,
+"purpose": "breath",
+"dur": 0.23,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"white flash cut"
+],
+"does": {
+"white flash cut": "the screen briefly blows out to near-white before the next scene, acting as a hard punctuation mark between sections"
+},
+"spk": false,
+"card_text": "YOUR VIDEO",
+"read": "A flash frame gives the eye a full reset before the layout changes to split-screen.",
+"craft": null
+},
+{
+"i": 5,
+"purpose": "claim",
+"dur": 3.57,
+"treat": [
+"Colored keyword highlight within running captions",
+"Split-screen picture-in-picture composition",
+"small reaction icons"
+],
+"treat_raw": [
+"split-screen PIP composition",
+"per-word colored caption highlight",
+"small reaction icons"
+],
+"does": {
+"split-screen PIP composition": "the talking head shrinks into a corner window beside a looping night-street b-roll clip, letting both run simultaneously",
+"per-word colored caption highlight": "individual words like 'HERE'S HOW' and 'YOU' change color (green/red) as spoken, drawing the eye to key phrases within the running caption",
+"small reaction icons": "a thumbs-up and a walking-man emoji pop over the b-roll to reinforce the words being spoken"
+},
+"spk": true,
+"card_text": "HERE'S HOW / IN A FEW SECONDS / A MAN WORKING / CAN USE TIKTOK / IT'LL GENERATE / CAPTIONS",
+"read": "The split-screen sustains visual interest through a longer explanatory stretch that would otherwise be a static talking-head hold.",
+"craft": "Layering the b-roll behind a live talking head instead of cutting away entirely keeps the presenter's authority intact while still giving the eye new visual information every second — this density without loss of presence is the core trick of the whole video's mid-section."
+},
+{
+"i": 6,
+"purpose": "breath",
+"dur": 0.03,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"sepia flash frame"
+],
+"does": {
+"sepia flash frame": "a single warm-toned frame flickers between the split-screen and the return to full-frame speaker"
+},
+"spk": true,
+"card_text": null,
+"read": "A one-frame color hit smooths the jump back to a single full-bleed shot.",
+"craft": null
+},
+{
+"i": 7,
+"purpose": "claim",
+"dur": 0.7,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": "BUT THE / BEST PART",
+"read": "Holding on the plain talking head here lets the pivot phrase 'best part' land without visual competition.",
+"craft": null
+},
+{
+"i": 8,
+"purpose": "evidence",
+"dur": 1.33,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"software UI screen-recording"
+],
+"does": {
+"software UI screen-recording": "shows the actual Submagic caption panel with a 'Magic B-rolls' button being clicked and a loading spinner cycling"
+},
+"spk": false,
+"card_text": "BEST PART / JUST CLICK / AUTO B-ROLL / AND IT",
+"read": "Demonstrating the literal button-press makes the 'auto b-roll' claim verifiable rather than assumed.",
+"craft": "The cursor visibly clicking the exact button and the spinner running is the strongest possible evidence for a one-click software claim — it's the click itself being shown, not just narrated."
+},
+{
+"i": 9,
+"purpose": "turn",
+"dur": 0.63,
+"treat": [
+"Cut back to talking head (re-anchor after detour)"
+],
+"treat_raw": [
+"cut back to full-frame speaker"
+],
+"does": {
+"cut back to full-frame speaker": "returns from the screen recording to the presenter mid-sentence, re-establishing his face as the anchor"
+},
+"spk": true,
+"card_text": "WILL ADD",
+"read": "Returning to the speaker after the demo re-grounds the pitch in a person before listing more features.",
+"craft": null
+},
+{
+"i": 10,
+"purpose": "claim",
+"dur": 0.4,
+"treat": [
+"Icon pop-in illustrating spoken word/feature list"
+],
+"treat_raw": [
+"feature icon pop-in"
+],
+"does": {
+"feature icon pop-in": "a purple zoom/magnifying-glass icon appears beside the caption as 'zooms' is said"
+},
+"spk": true,
+"card_text": "ZOOMS",
+"read": "Pairing the spoken feature word with a matching icon gives an instant visual anchor for an otherwise abstract term.",
+"craft": null
+},
+{
+"i": 11,
+"purpose": "evidence",
+"dur": 2.27,
+"treat": [
+"Icon pop-in illustrating spoken word/feature list"
+],
+"treat_raw": [
+"accumulating icon row"
+],
+"does": {
+"accumulating icon row": "each new feature icon (transition arrow, sound-wave, camera) slides in and joins the previous ones in a growing horizontal row, visually itemizing the list as it's spoken"
+},
+"spk": true,
+"card_text": "TRANSITIONS / SOUND EFFECTS / B-ROLL CLIPS / TO YOUR",
+"read": "Stacking icons instead of restating them each time keeps the growing feature list legible without cluttering new cards.",
+"craft": "The icon row never resets between beats — it keeps growing — so the viewer can literally see the value proposition accumulate feature by feature, which is a subtler and more convincing device than a static bullet list."
+},
+{
+"i": 12,
+"purpose": "breath",
+"dur": 0.07,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"warm flash frame"
+],
+"does": {
+"warm flash frame": "a brief orange-toned frame flickers before the next full sentence begins"
+},
+"spk": true,
+"card_text": "VIDEO",
+"read": "Same punctuation device used earlier, keeping the section transitions visually consistent.",
+"craft": null
+},
+{
+"i": 13,
+"purpose": "claim",
+"dur": 3.17,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": "THIS TOOL / WORKS / INSANELY / WELL",
+"read": "A sustained hold on the speaker without added graphics lets the enthusiasm in his delivery ('insanely well') carry the moment on its own, which reads as sincerity rather than sales copy.",
+"craft": null
+},
+{
+"i": 14,
+"purpose": "payoff",
+"dur": 3.8,
+"treat": [
+"Colored keyword highlight within running captions",
+"Full-screen title/thesis card (no speaker)",
+"Split-screen picture-in-picture composition"
+],
+"treat_raw": [
+"split-screen PIP composition (reprise)",
+"per-word colored caption highlight",
+"product logo card"
+],
+"does": {
+"split-screen PIP composition (reprise)": "returns to the same talking-head-plus-b-roll layout used earlier, bookending the structure",
+"per-word colored caption highlight": "keywords like 'FACE' and 'BRANDS' flash in accent colors within the caption stream",
+"product logo card": "the Submagic wand-and-star icon appears full-frame as the payoff/CTA beat"
+},
+"spk": true,
+"card_text": "FOR FACELESS / CONTENT / BRANDS / FACE / WANNA HIRE / VIDEO EDITOR / CHECKOUT / SUBMAGIC",
+"read": "Returning to a familiar visual pattern before the CTA signals 'we're wrapping up' without needing a verbal cue.",
+"craft": "Reprising the exact split-screen device from the middle section closes the loop structurally, and ending on a clean, static logo card after 20+ seconds of movement gives the CTA a moment of stillness that makes it register as the destination rather than another beat in the list."
+},
+{
+"i": 15,
+"purpose": "close",
+"dur": 4.05,
+"treat": [
+"Native TikTok loading/search-bar simulated outro"
+],
+"treat_raw": [
+"native TikTok loading-screen mimicry"
+],
+"does": {
+"native TikTok loading-screen mimicry": "recreates the app's own splash/loading animation, then auto-fills a search bar with the creator's handle, mimicking the platform's own UI as the outro"
+},
+"spk": false,
+"card_text": "@kellanhenneberry...",
+"read": "Ending on a mimicked in-app search rather than a graphic end-card keeps the CTA feeling organic to the platform instead of promotional.",
+"craft": "Using the platform's own loading animation as the sign-off is a low-cost, native-feeling CTA — it reads as 'go search me' rather than an ad card, which fits the DIY-creator tone of the whole video."
+},
+{
+"i": 0,
+"purpose": "hook",
+"dur": 4.88,
+"treat": [
+"Giant kinetic title-card slam"
+],
+"treat_raw": [
+"giant kinetic word cards, color-coded"
+],
+"does": {
+"giant kinetic word cards, color-coded": "each spoken word/phrase fills most of the frame, red for the accusatory nouns (INSTAGRAM, TIKTOK, TRASH) and white for connective words, popping in tightly synced to speech cadence"
+},
+"spk": true,
+"card_text": "HAVE YOU POSTED ON INSTAGRAM AND TIKTOK AND YOUR QUALITY JUST LOOKS LIKE TRASH",
+"read": "front-loads a shame/loss hook so the viewer self-identifies with the problem before any solution is offered.",
+"craft": "the color escalation lands hardest on 'TRASH', turning a plain complaint into a pointed callout that functions as the loss-framed hook."
+},
+{
+"i": 1,
+"purpose": "turn",
+"dur": 0.17,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"flash whip transition"
+],
+"does": {
+"flash whip transition": "a warm orange light-leak wash overexposes the frame across a burst of three rapid mechanical cuts, bridging the hook into the thesis statement"
+},
+"spk": true,
+"card_text": "FOR YOU",
+"read": "marks the pivot from problem-framing to premise-reveal with a hard visual punctuation instead of a plain cut.",
+"craft": null
+},
+{
+"i": 2,
+"purpose": "claim",
+"dur": 3.42,
+"treat": [
+"Giant kinetic title-card slam",
+"Whip-pan camera reframe transition"
+],
+"treat_raw": [
+"giant kinetic word cards, color-coded",
+"quick whip-pan camera reframe"
+],
+"does": {
+"giant kinetic word cards, color-coded": "same red/white system continues, now naming the series premise",
+"quick whip-pan camera reframe": "the camera blurs and resettles mid-beat (~7.6s), a small in-camera jolt rather than an edit cut, adding energy without a visible splice"
+},
+"spk": true,
+"card_text": "THIS IS DAY 17 OF THE LIFE OF A STUDENT VIDEOGRAPHER",
+"read": "establishes the numbered-series conceit that gives the tips that follow earned authority.",
+"craft": null
+},
+{
+"i": 3,
+"purpose": "claim",
+"dur": 5.38,
+"treat": [
+"Giant kinetic title-card slam"
+],
+"treat_raw": [
+"giant kinetic word cards, color-coded"
+],
+"does": {
+"giant kinetic word cards, color-coded": "continues the same system through the longer premise sentence, red highlighting '60 DAYS', 'EXPERIENCES', 'COLLEGE STUDENT', 'VIDEOGRAPHY'"
+},
+"spk": true,
+"card_text": "A SERIES WHERE FOR THE NEXT 60 DAYS I'LL BE SHARING MY EXPERIENCES AND WHAT I'VE LEARNED AS A COLLEGE STUDENT PURSUING A CAREER IN VIDEOGRAPHY",
+"read": "extends the premise-setup, letting captions do the heavy lifting while the speaker's delivery stays flat and conversational.",
+"craft": null
+},
+{
+"i": 4,
+"purpose": "turn",
+"dur": 0.21,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"overexposed flash transition"
+],
+"does": {
+"overexposed flash transition": "a bright near-white flash frame plus a tight cluster of six mechanical cuts wipes the premise section into the tutorial section"
+},
+"spk": true,
+"card_text": null,
+"read": "signals a tonal shift from series-intro to actionable content.",
+"craft": null
+},
+{
+"i": 5,
+"purpose": "claim",
+"dur": 7.72,
+"treat": [
+"downshift to smaller instructional captions"
+],
+"treat_raw": [
+"downshift to smaller instructional captions"
+],
+"does": {
+"downshift to smaller instructional captions": "the giant red/white cards are replaced by smaller, single-color white bold captions centered lower on the frame, a visibly calmer caption style than the hook"
+},
+"spk": true,
+"card_text": "AFTER LOTS AND LOTS OF TESTING I FOUND THAT THESE ARE THE BEST PREMIERE EXPORT SETTINGS FOR POSTING ON INSTAGRAM AND TIKTOK",
+"read": "sets up the tutorial payload with a lower-energy caption treatment matching the more technical content to come.",
+"craft": "the caption style change itself acts as a mode-switch cue, telling the viewer 'we're past the hook, now it's instructional' without any dialogue announcing it."
+},
+{
+"i": 6,
+"purpose": "evidence",
+"dur": 2.79,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"screen-recording cutaway"
+],
+"does": {
+"screen-recording cutaway": "cuts fully away from the speaker to a captured Premiere Pro export dialog on a green cutting-mat background, showing real settings toggles"
+},
+"spk": false,
+"card_text": "1350 X 1080P AT 24 FPS",
+"read": "backs up the 'best export settings' claim with the actual numbers on the actual screen.",
+"craft": "swapping to literal software footage converts a spoken claim into demonstrable proof, which is what separates this from a generic talking-head tips video."
+},
+{
+"i": 7,
+"purpose": "claim",
+"dur": 3.75,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": "BECAUSE I FEEL THAT'S THE MOST CINEMATIC THEN I GO TO MORE",
+"read": "returns to the speaker to justify the frame-rate choice before cutting away again, a bare hold that lets the reasoning land without visual noise.",
+"craft": null
+},
+{
+"i": 8,
+"purpose": "evidence",
+"dur": 3.38,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"screen-recording cutaway with sequential labels"
+],
+"does": {
+"screen-recording cutaway with sequential labels": "captures the render-quality checkboxes being ticked while short white captions step through 'RENDER' / 'AT MAXIMUM DEPTH' / 'AND USE MAXIMUM' / 'RENDER QUALITY' in time with the clicks"
+},
+"spk": false,
+"card_text": "RENDER / AT MAXIMUM DEPTH / AND USE MAXIMUM / RENDER QUALITY",
+"read": "keeps building the proof-of-work stack, matching caption text to the exact UI action happening on screen.",
+"craft": null
+},
+{
+"i": 9,
+"purpose": "claim",
+"dur": 2.0,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": "AND THIS IS THE SAUCE I USE",
+"read": "a short bridge line back to camera before the final technical cutaway, keeping the speaker present as narrator between demos.",
+"craft": null
+},
+{
+"i": 10,
+"purpose": "evidence",
+"dur": 4.67,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"screen-recording cutaway with sequential labels"
+],
+"does": {
+"screen-recording cutaway with sequential labels": "shows the bitrate sliders being dragged in Premiere's export panel while captions step through 'VBR 2 PASS' / 'WITH A TARGET' / 'BITRATE OF 25' / 'AND A MAXIMUM' / 'BITRATE OF 33'"
+},
+"spk": false,
+"card_text": "VBR 2 PASS / WITH A TARGET / BITRATE OF 25 / AND A MAXIMUM / BITRATE OF 33",
+"read": "closes out the proof-of-work sequence with the exact numbers viewers would need to replicate the settings.",
+"craft": null
+},
+{
+"i": 11,
+"purpose": "close",
+"dur": 16.73,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": "AFTER LONG HOURS OF TESTING AND UPLOADING TO TIKTOK AND INSTAGRAM I FOUND THAT THAT'S THE BEST BITRATE TO KEEP THE HIGHEST QUALITY WHILE BYPASSING INSTAGRAM AND TIKTOK'S COMPRESSION AND THAT'S MY PREMIERE EXPORT SETTINGS FOR TIKTOK AND INSTAGRAM AS A STUDENT VIDEOGRAPHER AND THAT'S IT FOR DAY 17 FOLLOW ME TO LEARN WHAT I'VE LEARNED AS A STUDENT VIDEOGRAPHER",
+"read": "a long bare hold is correct here because the content is summary and call-to-action, not new evidence that needs a cutaway.",
+"craft": "roughly seventeen seconds with zero cuts, after a video full of them, reads as earned confidence — the editor trusts the payoff and the CTA to hold attention without visual crutches."
+},
+{
+"i": 12,
+"purpose": "turn",
+"dur": 0.08,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"flash whip transition"
+],
+"does": {
+"flash whip transition": "a warm light-leak flash across a tight cluster of three mechanical cuts pushes the video from live-action into the outro graphic"
+},
+"spk": true,
+"card_text": null,
+"read": "uses the same transitional device from the opening to bookend the video, signaling 'this is the end' the same way it signaled 'new chapter' earlier.",
+"craft": null
+},
+{
+"i": 13,
+"purpose": "close",
+"dur": 4.13,
+"treat": [
+"Native TikTok loading/search-bar simulated outro"
+],
+"treat_raw": [
+"mocked-up TikTok UI animation"
+],
+"does": {
+"mocked-up TikTok UI animation": "a simulated app loading screen resolves into a search bar that types out the creator's handle, mimicking the actual in-app action the viewer is being asked to perform"
+},
+"spk": false,
+"card_text": "@r0nin.lee",
+"read": "closes with a rehearsed action instead of a static subscribe card, nudging the viewer toward the exact behavior wanted.",
+"craft": "rehearsing the follow action as a literal on-screen search reduces the friction between watching and acting, a small but deliberate CTA design choice rather than a plain text card."
+},
+{
+"i": 0,
+"purpose": "hook",
+"dur": 4.6,
+"treat": [
+"Decorative kinetic caption styling effects",
+"Escalating counter/stat ticking animation"
+],
+"treat_raw": [
+"word-by-word kinetic caption with pop-in scale",
+"escalating on-screen cost counter (00:00:00 climbing to 03:00:00)"
+],
+"does": {
+"word-by-word kinetic caption with pop-in scale": "Each word ('edit', 'stop', 'manually', 'captions') lands on the beat of speech, snapping bigger than the base caption size",
+"escalating on-screen cost counter (00:00:00 climbing to 03:00:00)": "A ticking orange digital-clock graphic overlays the frame and visibly increases as he talks, dramatizing 'wasted time' without needing b-roll"
+},
+"spk": true,
+"card_text": "editing / stop / manually / your / captions / I know it's costing / 03:00:00",
+"read": "A single unbroken take carries the entire hook because the escalating counter graphic manufactures rising tension in place of a cut.",
+"craft": "The counter's numbers are timed to keep climbing exactly as the line escalates ('I know it's costing... 03:00:00'), so a static talking head still feels like it's building toward something."
+},
+{
+"i": 1,
+"purpose": "claim",
+"dur": 5.17,
+"treat": [
+"Giant kinetic title-card slam",
+"Logo branding sting/idle animation",
+"Screen-recording UI demo cutaway",
+"duplicate/split mirrored panel of the same footage"
+],
+"treat_raw": [
+"desaturated background with a bordered floating phone-frame inset",
+"logo lockup with sparkle/rocket particle animation",
+"duplicate/split mirrored panel of the same footage",
+"kinetic caption callouts ('SUBMAGIC AUTOMATES', 'THIS WHOLE', 'ENTIRE PROCESS')"
+],
+"does": {
+"desaturated background with a bordered floating phone-frame inset": "The live speaker footage shrinks into a rounded rectangle that looks like a phone screen, while the surrounding frame goes greyscale, visually promoting a 'demo' framing",
+"logo lockup with sparkle/rocket particle animation": "The 'submagic' wordmark sits pinned at top with small particle FX pulsing beside it, branding the moment as a product reveal",
+"duplicate/split mirrored panel of the same footage": "The single video suddenly doubles into two side-by-side identical frames, visually punctuating 'this whole entire process' with a graphic doubling gag",
+"kinetic caption callouts ('SUBMAGIC AUTOMATES', 'THIS WHOLE', 'ENTIRE PROCESS')": "Large bold phrase cards replace running captions temporarily to hammer the product's core claim"
+},
+"spk": true,
+"card_text": "SUBMAGIC AUTOMATES / THIS WHOLE / ENTIRE PROCESS",
+"read": "This is the pivot from problem to product, so the editor swaps the visual language (greyscale, framed, duplicated) to mark a distinct register from the raw hook.",
+"craft": "The doubling of the frame into twin panels is a cheap-looking but rhythmically precise gag — it happens exactly on 'this whole' and gives the eye something new right when the sentence needs a beat of emphasis."
+},
+{
+"i": 2,
+"purpose": "evidence",
+"dur": 10.9,
+"treat": [
+"Escalating counter/stat ticking animation",
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"screen-recorded software walkthrough with a fixed step-counter badge (1,2,3,4) attached to the floating logo",
+"cursor-driven UI interaction shown at native speed with no narration",
+"held frame on completed export screen with visible progress percentage climbing"
+],
+"does": {
+"screen-recorded software walkthrough with a fixed step-counter badge (1,2,3,4) attached to the floating logo": "As the demo progresses through upload, caption styling, b-roll insertion, and export, a small circular counter increments, giving the otherwise dry UI footage a game-like sense of progress",
+"cursor-driven UI interaction shown at native speed with no narration": "Lets the software's own motion (dropdowns, progress bars filling, toast notifications like 'B-rolls with transitions added successfully') carry the pacing",
+"held frame on completed export screen with visible progress percentage climbing": "Mimics the earlier cost-counter device, letting a number tick upward again to sustain momentum through a long process section"
+},
+"spk": false,
+"card_text": "Generate captions with AI / Submagic AI is working... / B-rolls with transitions added successfully! / Exporting video 4%...79%",
+"read": "This is pure proof/demonstration territory, so the camera-off, UI-on approach lets the software speak for itself while the step-counter keeps the viewer oriented in a multi-stage process.",
+"craft": "Nearly eleven seconds pass with only one mechanical cut logged in this stretch, yet it never feels static because the UI itself is animating continuously (cursor moves, progress bars, toasts) — the editor chose to trust the screen capture's native motion rather than cut it up."
+},
+{
+"i": 3,
+"purpose": "turn",
+"dur": 0.63,
+"treat": [
+"Cut back to talking head (re-anchor after detour)"
+],
+"treat_raw": [
+"hard cut to extreme close-up, motion-blurred re-entry"
+],
+"does": {
+"hard cut to extreme close-up, motion-blurred re-entry": "Snaps back to the human speaker abruptly and close, breaking the clean software footage with a messier, more physical frame"
+},
+"spk": true,
+"card_text": null,
+"read": "A jarring re-entry cut signals the return to personal commentary after the impersonal software demo, resetting viewer attention.",
+"craft": null
+},
+{
+"i": 4,
+"purpose": "payoff",
+"dur": 0.7,
+"treat": [
+"oversized single-word caption drop ('cheating') with colored punctuation dot"
+],
+"treat_raw": [
+"oversized single-word caption drop ('cheating') with colored punctuation dot"
+],
+"does": {
+"oversized single-word caption drop ('cheating') with colored punctuation dot": "The word fills most of the lower frame in bold white, landing hard on the punchline of the whole demo sequence"
+},
+"spk": true,
+"card_text": "It feels like / cheating.",
+"read": "This is the thesis statement of the video, so the caption gets maximum visual weight to match its narrative weight.",
+"craft": "The caption size increase exactly on the word 'cheating' turns a plain confession into the video's emotional peak — it's the biggest text in the whole edit and it appears at the payoff of the proof section, not before."
+},
+{
+"i": 5,
+"purpose": "close",
+"dur": 2.57,
+"treat": [
+"Word-by-word caption build assembling one full sentence"
+],
+"treat_raw": [
+"continuous word-by-word caption run building a full CTA sentence"
+],
+"does": {
+"continuous word-by-word caption run building a full CTA sentence": "Captions accumulate phrase by phrase ('i know', 'give it a', 'try on your next video') until the full CTA sentence is legible on screen"
+},
+"spk": true,
+"card_text": "i know but give it a try on your next video.",
+"read": "A plain held talking-head shot is correct here because the CTA needs to feel direct and unadorned, letting the caption text do the work.",
+"craft": null
+},
+{
+"i": 6,
+"purpose": "breath",
+"dur": 4.0,
+"treat": [
+"Native TikTok loading/search-bar simulated outro"
+],
+"treat_raw": [
+"fake TikTok app-relaunch sequence (logo splash, loading bar, search bar auto-typing the handle)"
+],
+"does": {
+"fake TikTok app-relaunch sequence (logo splash, loading bar, search bar auto-typing the handle)": "Mimics the native TikTok loading screen and simulates someone searching the creator's handle, baiting a re-watch or follow via platform-native visual language"
+},
+"spk": false,
+"card_text": "TikTok / @socialcontentki...",
+"read": "The video ends by pretending to relaunch the app itself, nudging viewers toward searching/following without a spoken CTA.",
+"craft": "Disguising the outro as the app's own loading screen is a clever bit of misdirection that borrows platform trust to extend engagement, though it runs long relative to its payoff."
+},
+{
+"i": 1,
+"purpose": "hook",
+"dur": 2.8,
+"treat": [
+"Full-screen title/thesis card (no speaker)"
+],
+"treat_raw": [
+"oversized title card overlay"
+],
+"does": {
+"oversized title card overlay": "a huge 'captions' headline with a smaller subhead line sits fixed over the speaker for the first few seconds, dominating the frame more than the person"
+},
+"spk": true,
+"card_text": "captions are stealing your editing time",
+"read": "Leads with a bold graphic claim to stop the scroll before the viewer even processes who's talking.",
+"craft": "The type is scaled so large it competes with the face for attention, which is an unusual but confident choice — it tells you the claim matters more than the person saying it."
+},
+{
+"i": 2,
+"purpose": "evidence",
+"dur": 1.17,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": false,
+"card_text": null,
+"read": "Cuts to a literal illustration of 'typing/editing' the moment the words 'captions are the part' are spoken.",
+"craft": null
+},
+{
+"i": 3,
+"purpose": "evidence",
+"dur": 0.6,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": null,
+"read": "A tired gesture sells 'eats your entire day' without narration needing to explain the emotion.",
+"craft": null
+},
+{
+"i": 4,
+"purpose": "evidence",
+"dur": 1.67,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": false,
+"card_text": null,
+"read": "Shows the repetitive-labor visual ('every hour... stuck') from a fresh angle to keep footage varied.",
+"craft": null
+},
+{
+"i": 5,
+"purpose": "claim",
+"dur": 2.0,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": null,
+"read": "Return to direct-address speaker to restate the pain point personally before pivoting to the solution.",
+"craft": null
+},
+{
+"i": 6,
+"purpose": "evidence",
+"dur": 1.5,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": false,
+"card_text": null,
+"read": "Another b-roll room/angle swap keeps visual rhythm going under the setup for the tool reveal ('Submagic').",
+"craft": null
+},
+{
+"i": 7,
+"purpose": "turn",
+"dur": 2.17,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": null,
+"read": "Speaker delivers the pivot line ('showed me their tool') that sets up the amazement beat, held on camera for sincerity.",
+"craft": null
+},
+{
+"i": 8,
+"purpose": "turn",
+"dur": 1.13,
+"treat": [
+"Decorative kinetic caption styling effects"
+],
+"treat_raw": [
+"kinetic type on blank white background",
+"mixed-font emphasis"
+],
+"does": {
+"kinetic type on blank white background": "isolates the phrase 'I was amazed' with no other visual noise, letting typography carry the emotional beat",
+"mixed-font emphasis": "'amazed' rendered larger and bolder than 'I was' to visually stress the key word"
+},
+"spk": false,
+"card_text": "I was amazed",
+"read": "The blank-canvas title card forces the viewer to sit with the claim rather than glossing over it as another caption.",
+"craft": "Cutting to total white silence after a run of busy handheld footage is a real tonal swing — it reads as a deliberate breath, not a mistake, and makes the claim feel more considered."
+},
+{
+"i": 9,
+"purpose": "turn",
+"dur": 1.07,
+"treat": [
+"Decorative kinetic caption styling effects"
+],
+"treat_raw": [
+"kinetic type, script/serif mix"
+],
+"does": {
+"kinetic type, script/serif mix": "'how much' in sans, 'time' in large italic script, staged as two separate reveals"
+},
+"spk": false,
+"card_text": "how much time",
+"read": "Continues the white-card rhythm to build a question the viewer wants answered before cutting to proof.",
+"craft": null
+},
+{
+"i": 10,
+"purpose": "turn",
+"dur": 1.8,
+"treat": [
+"Decorative kinetic caption styling effects"
+],
+"treat_raw": [
+"kinetic type, script/serif mix"
+],
+"does": {
+"kinetic type, script/serif mix": "'it actually saves' rendered with 'saves' in large script, echoing the prior card's visual grammar"
+},
+"spk": false,
+"card_text": "it actually saves",
+"read": "Completes the suspended sentence right before the visual cuts back to the real world, which pays off the pause.",
+"craft": "The three-card white sequence (amazed / how much time / it actually saves) reads as one connected sentence built across separate cuts — a small structural trick that makes plain text feel like a scripted reveal rather than three random captions."
+},
+{
+"i": 11,
+"purpose": "evidence",
+"dur": 6.03,
+"treat": [
+"Cursor/UI callout box",
+"Discrete caption cards narrating a demo without voiceover"
+],
+"treat_raw": [
+"screen recording with cursor-tracking highlight box",
+"discrete caption card overlay on top of the screen recording"
+],
+"does": {
+"screen recording with cursor-tracking highlight box": "an orange rounded rectangle follows the mouse across the software UI so the viewer's eye is guided exactly where clicks happen",
+"discrete caption card overlay on top of the screen recording": "short kinetic phrases like 'editors like us', 'if you want it', 'on brand', 'for your client', 'just customize' narrate the demo without needing a voiceover cut"
+},
+"spk": false,
+"card_text": "editors like us / if you want it / on brand / for your client / just customize / size and animation / in seconds",
+"read": "This is the proof section, so the editor trades fast-cut energy for legibility — you need time to read a UI, not a face.",
+"craft": "Letting one continuous unbroken screen-recording run this long (nearly 6 seconds of real time per shot) without cutting away is unusual restraint for TikTok pacing — it works because the orange highlight box and rotating caption cards keep giving the eye something new without needing a hard cut, so the long take never feels slow."
+},
+{
+"i": 12,
+"purpose": "claim",
+"dur": 0.93,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": null,
+"read": "Returns to the speaker to reassert personal voice after the long screen-recording demo, re-anchoring trust in a person.",
+"craft": null
+},
+{
+"i": 13,
+"purpose": "evidence",
+"dur": 3.57,
+"treat": [
+"Discrete caption cards narrating a demo without voiceover",
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"screen recording, second demo pass",
+"discrete caption cards"
+],
+"does": {
+"screen recording, second demo pass": "shows the auto-B-roll and auto-zoom feature list and a live transcript/scene editor with real client footage (Hong Kong hotel story) populating the timeline",
+"discrete caption cards": "'there's auto b-rolls', 'and it even', 'removes', 'bad takes', 'for you' narrate feature by feature"
+},
+"spk": false,
+"card_text": "there's auto B-rolls / and it even / removes / bad takes / for you",
+"read": "Second demo block covers a different, more advanced feature set, reusing the proven caption-narrated screen-recording formula.",
+"craft": null
+},
+{
+"i": 14,
+"purpose": "payoff",
+"dur": 1.97,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": null,
+"read": "Speaker delivers the benefit statement ('this frees up your time') directly to camera as the emotional payoff of the demo.",
+"craft": null
+},
+{
+"i": 15,
+"purpose": "close",
+"dur": 1.37,
+"treat": [
+"over-the-shoulder framing on a real edit session"
+],
+"treat_raw": [
+"over-the-shoulder framing on a real edit session"
+],
+"does": {
+"over-the-shoulder framing on a real edit session": "shows the editor's own hands and screen mid-work, positioning the pitch as coming from a working professional, not just a talking head"
+},
+"spk": false,
+"card_text": null,
+"read": "Grounds the closing claim ('you're editing for clients') in an authentic work-in-progress shot rather than another studio take.",
+"craft": null
+},
+{
+"i": 16,
+"purpose": "turn",
+"dur": 1.43,
+"treat": [
+"Mood b-roll cutaway illustrating a claim"
+],
+"treat_raw": [
+"reflection shot on a curved monitor with rack-focus"
+],
+"does": {
+"reflection shot on a curved monitor with rack-focus": "blurry reflected content on glossy monitor bezel creates a moody, abstract visual under the words 'or you're just starting out'"
+},
+"spk": false,
+"card_text": "or you're just starting out creating content",
+"read": "Widens the addressed audience (not just working editors but beginners) with a visually softer, more atmospheric cutaway.",
+"craft": "The soft-focus reflection shot is the one moment in the video that reaches for a mood/texture over literal illustration, giving the close a slightly more cinematic, less tutorial-y feel right before the CTA."
+},
+{
+"i": 17,
+"purpose": "close",
+"dur": 2.7,
+"treat": [
+"Word-by-word caption build assembling one full sentence"
+],
+"treat_raw": [
+"stacked multi-line caption reveal"
+],
+"does": {
+"stacked multi-line caption reveal": "main CTA line 'tap the link in my profile' stays fixed while smaller italic sub-words cycle beneath it ([you], [wanna], [try], [Submagic])"
+},
+"spk": true,
+"card_text": "tap the link in my profile [you] [wanna] [try] [Submagic]",
+"read": "Standard direct-to-camera CTA, but the cycling subtext keeps a static shot visually active through the sign-off.",
+"craft": "The layered caption where a stable headline holds while secondary words cycle underneath is a neat trick that makes six rapid mechanical cuts (all within one held shot, per the cut timestamps) feel like a single evolving sentence rather than a jump-cut CTA."
+},
+{
+"i": 18,
+"purpose": "close",
+"dur": 4.02,
+"treat": [
+"Native TikTok loading/search-bar simulated outro"
+],
+"treat_raw": [
+"native app loading/search screen graphic"
+],
+"does": {
+"native app loading/search screen graphic": "simulates the TikTok search bar auto-filling '@ciggmedia' as if the viewer is being walked through finding the account"
+},
+"spk": false,
+"card_text": "@ciggmedia",
+"read": "Closes with an explicit, unambiguous pointer to the account handle to maximize follow conversion.",
+"craft": "Using a fake-but-recognizable app screen as the literal final frame is a cheap-feeling template move — it's functional as a handle callout but doesn't match the polish of the rest of the edit."
+},
+{
+"i": 0,
+"purpose": "hook",
+"dur": 4.34,
+"treat": [
+"Colored keyword highlight within running captions",
+"Giant kinetic title-card slam"
+],
+"treat_raw": [
+"word-by-word kinetic title card",
+"color-coded emphasis word"
+],
+"does": {
+"word-by-word kinetic title card": "each phrase (IF YOURE NOT / MAKING VIDEOS / because / YOU DONT KNOW HOW TO / EDIT) slams in oversized, filling the frame and overpowering the handheld shot beneath it",
+"color-coded emphasis word": "'NOT' and 'DONT' render in red against white/yellow text, visually flagging the negation as the sting of the accusation"
+},
+"spk": true,
+"card_text": "IF YOURE NOT MAKING VIDEOS because YOU DONT KNOW HOW TO EDIT",
+"read": "An aggressive direct-address hook needs the text to do the emotional heavy lifting since the visual is just someone walking into frame.",
+"craft": "The text scale escalates beat by beat (small phrase -> huge single word 'VIDEOS'/'EDIT'), giving the walking b-roll a manufactured crescendo that lands exactly as the accusation completes."
+},
+{
+"i": 1,
+"purpose": "claim",
+"dur": 3.67,
+"treat": [
+"App/brand icon pop-in over speaker",
+"Hard cut to new location (resets energy)"
+],
+"treat_raw": [
+"location/angle cut to a different room",
+"app logo pop-in over speaker"
+],
+"does": {
+"location/angle cut to a different room": "breaks the walking loop and resets attention as the subject introduces the product",
+"app logo pop-in over speaker": "the Captions app icon and wordmark animate in above the subject's head as he names it, anchoring the verbal mention to a visual brand asset"
+},
+"spk": true,
+"card_text": "the Captions App.",
+"read": "Naming the product needs a visual tag so it's memorable and searchable, hence the logo overlay timed to the line.",
+"craft": null
+},
+{
+"i": 2,
+"purpose": "turn",
+"dur": 4.17,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": null,
+"read": "A held medium shot by a window lets the personal, vulnerable admission ('I get it... I used to feel discouraged') breathe without visual noise competing for attention.",
+"craft": null
+},
+{
+"i": 3,
+"purpose": "evidence",
+"dur": 2.25,
+"treat": [
+"Hard cut to new location (resets energy)"
+],
+"treat_raw": [
+"rapid-fire location cuts"
+],
+"does": {
+"rapid-fire location cuts": "four cuts in under 2.5s show the subject moving around a living room from different high angles, compressing time and implying restless energy"
+},
+"spk": true,
+"card_text": "how to edit.",
+"read": "The choppy multi-angle cutaway covers the transition from testimonial monologue into the tutorial section without lingering.",
+"craft": null
+},
+{
+"i": 4,
+"purpose": "evidence",
+"dur": 9.63,
+"treat": [
+"Cursor/UI callout box",
+"Screen-recording UI demo cutaway",
+"sped-through progress/loading states"
+],
+"treat_raw": [
+"phone-mockup screen recording on a colored cutting-mat background",
+"red circle callout on UI element",
+"sped-through progress/loading states"
+],
+"does": {
+"phone-mockup screen recording on a colored cutting-mat background": "shows the actual app flow (AI Edit button, upload, style select, generate, editing progress, final export timeline) while a flat green grid fills the rest of frame",
+"red circle callout on UI element": "draws the eye directly to the 'AI Edit' button so the viewer doesn't have to hunt for what's being discussed",
+"sped-through progress/loading states": "compresses what would be a slow real-time wait (upload, generate, 5% progress) into a few seconds, implying speed without lying about the interface"
+},
+"spk": false,
+"card_text": "inside the Captions App / then the Captions App / will edit everything / for me in minutes. / and even if / I want to / change a few things / I still can.",
+"read": "This is the proof section, so the edit switches entirely to screen-capture evidence rather than talking-head claims.",
+"craft": "The red circle + colored grid background is a cheap trick that reads expensive because it isolates the UI as the hero of the frame instead of competing with a real room, which is exactly what a tutorial/demo section needs."
+},
+{
+"i": 5,
+"purpose": "breath",
+"dur": 2.5,
+"treat": [
+"extreme low-angle handheld close-up, no captions"
+],
+"treat_raw": [
+"extreme low-angle handheld close-up, no captions"
+],
+"does": {
+"extreme low-angle handheld close-up, no captions": "the frame goes quiet — no text, tight on his face looking down/smirking — creating a beat of held suspense before the payoff"
+},
+"spk": true,
+"card_text": null,
+"read": "A wordless reaction beat is used to build anticipation right before the before/after payoff.",
+"craft": "Dropping the caption track entirely here is a deliberate silence that makes this the one moment the video asks the viewer to just watch a face, setting up the reveal."
+},
+{
+"i": 6,
+"purpose": "payoff",
+"dur": 3.67,
+"treat": [
+"Physical prop as visual proof/gesture"
+],
+"treat_raw": [
+"dual physical picture frames held as a live before/after"
+],
+"does": {
+"dual physical picture frames held as a live before/after": "one frame shows the raw clip screenshot, the other shows the finished edited thumbnail with title text, both visible in the same shot as he gestures between them"
+},
+"spk": true,
+"card_text": "Now look at this / raw clip / final version / compared to the / cool app that / does all the editing",
+"read": "The claim needs a comparison, and doing it practically in-camera is a higher-trust choice than an editing effect would be.",
+"craft": "Physically holding both results in one static wide shot is more convincing than a screen wipe or split-screen because nothing about it could be a compositing trick — the comparison is staged as tangible proof."
+},
+{
+"i": 7,
+"purpose": "close",
+"dur": 4.3,
+"treat": [
+"App/brand icon pop-in over speaker",
+"wide static shot with direct-address pointing gesture"
+],
+"treat_raw": [
+"wide static shot with direct-address pointing gesture",
+"logo pop-in repeated from beat 1"
+],
+"does": {
+"wide static shot with direct-address pointing gesture": "the subject repeatedly points at the camera on 'you' and 'your', reinforcing the direct call to action physically as well as verbally",
+"logo pop-in repeated from beat 1": "the Captions app icon reappears above his head exactly as he says 'download the Captions App', bookending the video with the same brand asset"
+},
+"spk": true,
+"card_text": "So if you / wanna start posting videos / and your / creative journey / download the Captions App",
+"read": "The CTA restates the hook's direct-address energy and closes the loop by reusing the exact logo treatment from the product intro.",
+"craft": null
+},
+{
+"i": 8,
+"purpose": "close",
+"dur": 4.03,
+"treat": [
+"Native TikTok loading/search-bar simulated outro"
+],
+"treat_raw": [
+"platform loading-screen simulation ending on the creator's handle"
+],
+"does": {
+"platform loading-screen simulation ending on the creator's handle": "mimics the native TikTok splash/search screen and lands on '@lucasxmoua', functioning as an outro credit disguised as app chrome"
+},
+"spk": false,
+"card_text": "@ lucasxmoua",
+"read": "A platform-native outro card is a low-effort but on-brand way to close and credit without breaking the phone-screen aesthetic established earlier.",
+"craft": null
+},
+{
+"i": 0,
+"purpose": "hook",
+"dur": 0.6,
+"treat": [
+"Giant kinetic title-card slam",
+"animated circular scribble graphic"
+],
+"treat_raw": [
+"animated circular scribble graphic",
+"kinetic title card build"
+],
+"does": {
+"animated circular scribble graphic": "a hand-drawn loop animates around the speaker's torso as bold 'EDITS' title card text builds letter by letter",
+"kinetic title card build": "'EDITS' text assembles on screen letter-by-letter, syncing to speech"
+},
+"spk": true,
+"card_text": "EDITS",
+"read": "Establishes the video's subject (edits) visually before the sentence finishes, front-loading the topic for scroll-stopping clarity.",
+"craft": "The scribble loop and the letter-by-letter title build both land inside the same half-second window, giving the open a designed, produced feel rather than a plain talking-head start."
+},
+{
+"i": 1,
+"purpose": "claim",
+"dur": 3.4,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": null,
+"read": "Holding on the speaker mid-gesture with only captions running lets his exaggerated body language carry the sentence uninterrupted.",
+"craft": null
+},
+{
+"i": 2,
+"purpose": "claim",
+"dur": 2.83,
+"treat": [
+"App/brand icon pop-in over speaker",
+"Hard cut to new location (resets energy)"
+],
+"treat_raw": [
+"hard cut to new location (hallway, low angle)",
+"floating app-icon graphic"
+],
+"does": {
+"hard cut to new location (hallway, low angle)": "abruptly changes background and camera height, resetting visual energy after the desk scene",
+"floating app-icon graphic": "a colorful captions-app icon appears above the speaker's head, literally illustrating the app being named"
+},
+"spk": true,
+"card_text": null,
+"read": "New location plus icon overlay signals a topic pivot (introducing the specific app) without needing a verbal transition.",
+"craft": "The app icon is timed to appear right as he references 'captions app,' turning a verbal claim into a labeled visual so the viewer doesn't have to hold the name in memory."
+},
+{
+"i": 3,
+"purpose": "evidence",
+"dur": 8.46,
+"treat": [
+"Physical prop as visual proof/gesture"
+],
+"treat_raw": [
+"seated cutaway with phone prop"
+],
+"does": {
+"seated cutaway with phone prop": "speaker sits, holds up phone showing a paused video, and gestures/points at it as physical proof of the 'raw clip'"
+},
+"spk": true,
+"card_text": null,
+"read": "Sitting down and holding the phone as a physical prop grounds the abstract claim ('raw footage') in something the viewer can see and point to.",
+"craft": null
+},
+{
+"i": 4,
+"purpose": "turn",
+"dur": 1.46,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"app splash-screen insert"
+],
+"does": {
+"app splash-screen insert": "cuts fully away from the speaker to the Captions app logo on a gradient background, marking entry into screen-recording mode"
+},
+"spk": false,
+"card_text": "captions",
+"read": "The splash screen acts as a scene-break card, clearly demarcating 'now we're inside the app' for the viewer.",
+"craft": null
+},
+{
+"i": 5,
+"purpose": "evidence",
+"dur": 3.04,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"screen recording of app UI"
+],
+"does": {
+"screen recording of app UI": "shows real taps through import/trim screens; captions run beneath the phone mockup rather than over live footage"
+},
+"spk": false,
+"card_text": "use their AI edit feature.",
+"read": "Direct screen capture serves as literal proof of the workflow being described, prioritizing legibility over visual flair.",
+"craft": null
+},
+{
+"i": 6,
+"purpose": "evidence",
+"dur": 3.42,
+"treat": [
+"3D perspective UI/gallery browse graphic"
+],
+"treat_raw": [
+"3D-tilted template browse grid"
+],
+"does": {
+"3D-tilted template browse grid": "the app's template gallery is shown at a dramatic perspective angle, scrolling through style cards (Chalk, Align, etc.)"
+},
+"spk": false,
+"card_text": "\"JOURNEY\" Solo travel in a remote island",
+"read": "Showing template variety visually answers 'what does this actually generate' more persuasively than the speaker describing it.",
+"craft": "The tilted 3D perspective on what is otherwise a static settings screen adds unexpected dimensionality, making a menu scroll feel like a product showcase rather than a dry demo."
+},
+{
+"i": 7,
+"purpose": "evidence",
+"dur": 3.29,
+"treat": [
+"Escalating counter/stat ticking animation"
+],
+"treat_raw": [
+"real-time progress UI capture"
+],
+"does": {
+"real-time progress UI capture": "shows the app's 'Queued / Editing video / Exporting' states with percentage counters ticking up"
+},
+"spk": false,
+"card_text": "Exporting — Please do not exit the app or lock your screen",
+"read": "Showing the actual wait/progress bar is transparent proof the process is real and automated, even though it's the least dynamic visual stretch.",
+"craft": null
+},
+{
+"i": 8,
+"purpose": "turn",
+"dur": 1.46,
+"treat": [
+"Cut back to talking head (re-anchor after detour)"
+],
+"treat_raw": [
+"hard cut back to original desk set"
+],
+"does": {
+"hard cut back to original desk set": "returns to the speaker in the same room/outfit as the opening, closing the screen-recording detour"
+},
+"spk": true,
+"card_text": null,
+"read": "Returning to the original set signals 'back to the real presenter' after the app walkthrough, resetting viewer attention for the payoff.",
+"craft": null
+},
+{
+"i": 9,
+"purpose": "payoff",
+"dur": 2.92,
+"treat": [
+"Decorative kinetic caption styling effects",
+"Full-screen title/thesis card (no speaker)"
+],
+"treat_raw": [
+"large script-font title card ('Results')",
+"dual caption layers (top serif phrase + bottom kinetic word captions)"
+],
+"does": {
+"large script-font title card ('Results')": "a swash serif title with a small sparkle icon hovers above the speaker for the results segment, staying on screen across multiple cuts",
+"dual caption layers (top serif phrase + bottom kinetic word captions)": "two different text styles run simultaneously — a stylized recap phrase and the standard word-by-word track — layering emphasis"
+},
+"spk": true,
+"card_text": "Results",
+"read": "The ornate title signals a shift from process-explanation to results-declaration, giving the back half of the video a distinct visual register.",
+"craft": "Running two distinct caption treatments at once (a persistent elegant title plus the usual kinetic captions) visually marks this as the 'summary/proof' chapter without needing a scene change, a cheap trick executed with enough restraint to read as intentional rather than cluttered."
+},
+{
+"i": 10,
+"purpose": "close",
+"dur": 9.25,
+"treat": [
+"Decorative kinetic caption styling effects",
+"continuous high-angle tracking shot"
+],
+"treat_raw": [
+"continuous high-angle tracking shot",
+"italic serif keyword captions"
+],
+"does": {
+"continuous high-angle tracking shot": "camera follows the speaker walking around/leaning on furniture from an overhead vantage for a full ~9 seconds uninterrupted",
+"italic serif keyword captions": "select words ('trying', 'consistently', 'create', 'editing') render in italic serif rather than the default sans caption style, visually underlining them"
+},
+"spk": true,
+"card_text": null,
+"read": "A single long take here lets the summary point ('easiest ways to create polished content') breathe without the visual chatter used earlier.",
+"craft": "Sustaining one unbroken high-angle shot for nearly ten seconds while the captions do all the beat-changing work is a confident, efficient choice — it avoids the cut-heavy fatigue of the rest of the video and lets the camera movement itself function as pacing."
+},
+{
+"i": 11,
+"purpose": "close",
+"dur": 3.46,
+"treat": [
+"App/brand icon pop-in over speaker",
+"Whip-pan camera reframe transition"
+],
+"treat_raw": [
+"whip-pan/spin transition into blur",
+"floating app icon re-appearance"
+],
+"does": {
+"whip-pan/spin transition into blur": "a fast rotational camera move blurs the frame completely, masking a cut to a new close-up angle with a magnifying glass prop",
+"floating app icon re-appearance": "the Captions app icon reappears hovering by the speaker as a final call-to-action anchor"
+},
+"spk": true,
+"card_text": "Download",
+"read": "The disorienting spin plus a new prop (magnifying glass) resets energy for the final direct call-to-action, ending the video on a distinct visual beat rather than a fade.",
+"craft": "The whip-pan blur transition is the single most technically deliberate cut in the video — it disguises a location/angle change entirely inside motion, which is a harder trick to pull off than a straight cut and reads as more expensive."
+},
+{
+"i": 0,
+"purpose": "hook",
+"dur": 2.83,
+"treat": [
+"Word-by-word caption build assembling one full sentence"
+],
+"treat_raw": [
+"layered kinetic caption reveal"
+],
+"does": {
+"layered kinetic caption reveal": "words 'the CAPTIONS' / 'you're READING' / 'right now' / 'I didn't type a single WORD' build across the same static shot, escalating the claim without a cut"
+},
+"spk": true,
+"card_text": "the CAPTIONS / you're READING / right now / I didn't type a single WORD",
+"read": "Opens on direct address plus a self-aware premise so the viewer's own action becomes the proof of the claim before any product is named.",
+"craft": "Naming the exact thing the viewer is doing in that instant (reading captions) creates an immediate self-referential loop that stops the scroll — the hook is the medium commenting on itself."
+},
+{
+"i": 1,
+"purpose": "evidence",
+"dur": 2.57,
+"treat": [
+"Mood b-roll cutaway illustrating a claim",
+"Word-by-word caption build assembling one full sentence"
+],
+"treat_raw": [
+"cut to phone-scrolling cutaway",
+"stacked caption escalation"
+],
+"does": {
+"cut to phone-scrolling cutaway": "breaks the direct-address hook and drops into a relatable 'researching' moment",
+"stacked caption escalation": "'most auto CAPTION tools' then 'gives you ZERO CONTROL' builds a complaint in two beats"
+},
+"spk": true,
+"card_text": "most auto CAPTION tools / gives you ZERO CONTROL",
+"read": "Cuts away to a mundane, relatable action (scrolling phone) to ground the complaint in a lived scenario rather than pure narration.",
+"craft": null
+},
+{
+"i": 2,
+"purpose": "claim",
+"dur": 0.67,
+"treat": [
+"Hard cut to new location (resets energy)"
+],
+"treat_raw": [
+"hard cut to new location/lighting"
+],
+"does": {
+"hard cut to new location/lighting": "signals a new argument beat with a visibly different room and softbox lighting"
+},
+"spk": true,
+"card_text": "SAME FONT",
+"read": "Short beat used to punch a single word claim before moving into a longer list.",
+"craft": null
+},
+{
+"i": 3,
+"purpose": "claim",
+"dur": 3.03,
+"treat": [
+"slow push/reveal as subject leans back"
+],
+"treat_raw": [
+"slow push/reveal as subject leans back"
+],
+"does": {
+"slow push/reveal as subject leans back": "the camera holds while the subject's body language (leaning back, stretching) visually performs 'boredom' in sync with the words 'same style / same boring look'"
+},
+"spk": true,
+"card_text": "SAME STYLE / same boring look",
+"read": "Uses a single continuous shot of restless body language to embody the complaint rather than cutting to more graphics.",
+"craft": "The subject's physical stretch-and-sigh is timed almost exactly to the word 'boring,' letting body language illustrate the caption instead of just narrating over unrelated footage."
+},
+{
+"i": 4,
+"purpose": "turn",
+"dur": 1.37,
+"treat": [
+"Whip-pan camera reframe transition"
+],
+"treat_raw": [
+"whip/reframe to a wider doorway shot"
+],
+"does": {
+"whip/reframe to a wider doorway shot": "physically moves the camera further from the subject, opening the frame right as the pivot line 'that's why I use...' lands"
+},
+"spk": true,
+"card_text": "that's why / I use",
+"read": "The wider, voyeuristic doorway framing marks the tonal pivot from complaint to solution.",
+"craft": null
+},
+{
+"i": 5,
+"purpose": "claim",
+"dur": 4.73,
+"treat": [
+"Full-screen title/thesis card (no speaker)",
+"hold across cut (title persists through location change)"
+],
+"treat_raw": [
+"brand name card as full-bleed title",
+"hold across cut (title persists through location change)"
+],
+"does": {
+"brand name card as full-bleed title": "SUBMAGIC appears oversized, holding through a cut back to the talking head so the word persists across the edit",
+"hold across cut (title persists through location change)": "the 'I use SUBMAGIC' card stays on screen as the shot cuts from the desk to the red-hoodie mic setup, gluing two locations together as one sentence"
+},
+"spk": true,
+"card_text": "I use SUBMAGIC / it auto GENERATES / my CAPTIONS / and makes them fully / on-brand / without SPENDING / too much time",
+"read": "The name-drop is treated as the payoff of the setup, given the biggest, boldest single card in the video.",
+"craft": "Letting the title card survive the location cut is a small technical flourish — it treats the graphic as glue between two disconnected shots, making the reveal feel like one continuous thought instead of two separate clips stitched together."
+},
+{
+"i": 6,
+"purpose": "turn",
+"dur": 0.83,
+"treat": [
+"Full-screen title/thesis card (no speaker)"
+],
+"treat_raw": [
+"title card as chapter marker"
+],
+"does": {
+"title card as chapter marker": "'HOW I USE IT' functions like a section header, cueing the audience a tutorial is coming"
+},
+"spk": true,
+"card_text": "here's exactly / HOW I USE IT",
+"read": "Signposts the transition into the screen-recording demo so the format switch doesn't feel abrupt.",
+"craft": null
+},
+{
+"i": 7,
+"purpose": "evidence",
+"dur": 2.07,
+"treat": [
+"Cursor/UI callout box",
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"cut to screen recording with drag-and-drop demo",
+"red box callout tracking the cursor"
+],
+"does": {
+"cut to screen recording with drag-and-drop demo": "shows the literal upload interface instead of describing it",
+"red box callout tracking the cursor": "highlights exactly which UI element ('upload your video', 'click captions') the narration refers to"
+},
+"spk": false,
+"card_text": "upload your video / click captions",
+"read": "Screen capture is the only honest way to prove a software claim, and the callout box removes any ambiguity about where to click.",
+"craft": null
+},
+{
+"i": 8,
+"purpose": "evidence",
+"dur": 4.2,
+"treat": [
+"Cursor/UI callout box",
+"sped-through UI scrolling"
+],
+"treat_raw": [
+"sped-through UI scrolling",
+"red box callout following cursor across style grid, font dropdown, sliders"
+],
+"does": {
+"sped-through UI scrolling": "compresses a long menu of caption style presets into a quick scan so it doesn't feel like dead time",
+"red box callout following cursor across style grid, font dropdown, sliders": "keeps directing attention to the specific control being adjusted amid a dense settings panel"
+},
+"spk": false,
+"card_text": "and pick a style / if you want it / to match your brand / hit customize / change the font / the size / the color / the animation",
+"read": "Rapid successive labels keep pace with a naturally fast, click-heavy UI tour.",
+"craft": "The caption text is edited to mirror the cursor's literal path through the UI in real time, so the on-screen words function as a live transcript of the mouse rather than generic voiceover — this synchrony is what makes a screen-recording section watchable instead of tedious."
+},
+{
+"i": 9,
+"purpose": "evidence",
+"dur": 0.83,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"color picker overlay pop-in"
+],
+"does": {
+"color picker overlay pop-in": "shows a native app tool (swatch palette) appearing mid-demo, adding texture/authenticity to the capture"
+},
+"spk": false,
+"card_text": "the color",
+"read": "Continues the click-by-click walkthrough without narration interruption.",
+"craft": null
+},
+{
+"i": 10,
+"purpose": "evidence",
+"dur": 6.13,
+"treat": [
+"Cursor/UI callout box",
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"toggle-flip demonstration",
+"red box callout on each toggle row"
+],
+"does": {
+"toggle-flip demonstration": "shows switches for Auto B-rolls, Auto Zooms, Remove Bad Takes flicking on/off to literally demonstrate the feature list",
+"red box callout on each toggle row": "isolates which specific AI feature is being mentioned in a list of many"
+},
+"spk": false,
+"card_text": "and if you wanna go further / auto B rolls / zoom ins / remove bad takes / it's all in here too",
+"read": "Extends the proof-of-features beat to cover the full toolset without needing new footage setups.",
+"craft": null
+},
+{
+"i": 11,
+"purpose": "turn",
+"dur": 1.63,
+"treat": [
+"Cut back to talking head (re-anchor after detour)"
+],
+"treat_raw": [
+"cut back to talking head after long screen-recording stretch"
+],
+"does": {
+"cut back to talking head after long screen-recording stretch": "re-anchors the video in the human presenter, resetting attention after a dense UI section"
+},
+"spk": true,
+"card_text": "now / EVERY VIDEO",
+"read": "Returns to the face for the personal-result claim, which lands better delivered by a person than a UI screenshot.",
+"craft": null
+},
+{
+"i": 12,
+"purpose": "close",
+"dur": 2.5,
+"treat": [
+"Word-by-word caption build assembling one full sentence"
+],
+"treat_raw": [
+"sequential caption reveal building one sentence across a bare hold"
+],
+"does": {
+"sequential caption reveal building one sentence across a bare hold": "'I POST' -> 'looks like me' -> 'tap the link' -> 'IN MY PROFILE' -> 'to try SUBMAGIC' assembles the full CTA sentence word-by-word over an unbroken take"
+},
+"spk": true,
+"card_text": "I POST / looks like me / tap the link / IN MY PROFILE / to try / SUBMAGIC",
+"read": "The CTA is delivered as one continuous, calm sentence rather than a hard-sell montage, matching the video's conversational register.",
+"craft": "Holding a single uncut shot for the entire CTA and letting the caption alone carry the escalating rhythm is a confident, unfussy way to close — it trusts the words and the face rather than reaching for a final cutaway or graphic flourish."
+},
+{
+"i": 13,
+"purpose": "close",
+"dur": 4.03,
+"treat": [
+"Native TikTok loading/search-bar simulated outro"
+],
+"treat_raw": [
+"native TikTok loading/search-bar animation as outro"
+],
+"does": {
+"native TikTok loading/search-bar animation as outro": "mimics the platform's own UI (loading screen, search bar with handle typed in) as a stylized way to point viewers to the profile"
+},
+"spk": false,
+"card_text": "@ciggmedia",
+"read": "Closes with a platform-native visual metaphor for 'find my account' that doubles as a memorable sign-off.",
+"craft": "Faking the native TikTok chrome is a slightly cheeky, low-cost way to visually reinforce 'go search my profile' without filming an actual screen recording of the app — it reads as a template effect rather than bespoke footage, which is the one moment that feels slightly less handmade than the rest."
+},
+{
+"i": 1,
+"purpose": "hook",
+"dur": 1.7,
+"treat": [
+"Giant kinetic title-card slam"
+],
+"treat_raw": [
+"bold yellow kinetic caption building word by word"
+],
+"does": {
+"bold yellow kinetic caption building word by word": "spells out 'THIS IS HOW YOUR GONNA...' across multiple quick cuts, creating momentum into the promise"
+},
+"spk": true,
+"card_text": "THIS IS HOW / YOUR GONNA / ADD CAPTIONS",
+"read": "Front-loads the specific promise (captions) in bold text to stop the scroll immediately.",
+"craft": null
+},
+{
+"i": 2,
+"purpose": "hook",
+"dur": 0.7,
+"treat": [
+"Whip-pan camera reframe transition",
+"italic serif caption card over blurred zoom footage"
+],
+"treat_raw": [
+"whip-pan into a second clip with different wardrobe/lighting",
+"italic serif caption card over blurred zoom footage"
+],
+"does": {
+"whip-pan into a second clip with different wardrobe/lighting": "abruptly swaps context (pink shirt, mic) to tease a second, unrelated hook line before returning to the main setup",
+"italic serif caption card over blurred zoom footage": "delivers 'WAS A blessing in disguise... made redundant... without doing it' as a stacked curiosity tease"
+},
+"spk": true,
+"card_text": "WAS A blessing in disguise / WHEN I GOT MADE REDUNDANT / without doing it",
+"read": "A compressed teaser-within-a-hook that raises stakes (redundancy) before the video settles into its real subject.",
+"craft": "The sudden wardrobe/location swap combined with motion blur reads as an intentional 'teaser reel' sting rather than a mistake, adding a second curiosity layer before settling into the tutorial."
+},
+{
+"i": 3,
+"purpose": "hook",
+"dur": 1.8,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"warm flare whip transition back to main seated setup"
+],
+"does": {
+"warm flare whip transition back to main seated setup": "visually 'wipes' from the teaser back to the primary talking head, signaling the real content is starting"
+},
+"spk": true,
+"card_text": "without doing it / manually.",
+"read": "Closes the loop on the teaser and returns to the promise of automation.",
+"craft": null
+},
+{
+"i": 4,
+"purpose": "claim",
+"dur": 1.6,
+"treat": [
+"Colored keyword highlight within running captions"
+],
+"treat_raw": [
+"colored keyword caption ('CapCut' in yellow serif)"
+],
+"does": {
+"colored keyword caption ('CapCut' in yellow serif)": "isolates the tool name as the key takeaway word in a different font/color from the rest of the sentence"
+},
+"spk": true,
+"card_text": "We're going to use CapCut / as they have a",
+"read": "Names the tool as the claim's proof point before the payoff card.",
+"craft": null
+},
+{
+"i": 5,
+"purpose": "claim",
+"dur": 1.4,
+"treat": [
+"Full-screen title/thesis card (no speaker)"
+],
+"treat_raw": [
+"full-screen bold title card, black-on-cream, building phrase across multiple cards"
+],
+"does": {
+"full-screen bold title card, black-on-cream, building phrase across multiple cards": "isolates 'FULL SUITE OF AI TOOLS' with no visual distraction, giving the claim its own beat of emphasis"
+},
+"spk": false,
+"card_text": "FULL SUITE OF AI TOOLS",
+"read": "A clean graphic pause to let the core value proposition land without competing with footage.",
+"craft": "The stripped-down white card with no b-roll is a deliberate contrast beat — after nonstop reframing, this dead-stop silence makes the phrase feel like a headline, not a caption."
+},
+{
+"i": 6,
+"purpose": "claim",
+"dur": 0.8,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": "which makes the",
+"read": "Bridges back to the speaker to continue the sentence naturally after the card interrupt.",
+"craft": null
+},
+{
+"i": 7,
+"purpose": "turn",
+"dur": 2.4,
+"treat": [
+"Mood b-roll cutaway illustrating a claim"
+],
+"treat_raw": [
+"split-screen: serif title text over cream field stacked above a dim window-lit clip of the creator hunched at a laptop"
+],
+"does": {
+"split-screen: serif title text over cream field stacked above a dim window-lit clip of the creator hunched at a laptop": "visually stages 'boring parts of editing' as a mood/tone shot distinct from the bright main interview"
+},
+"spk": true,
+"card_text": "boring parts of editing",
+"read": "Illustrates the pain point viscerally before pivoting to the tool that solves it.",
+"craft": "Cutting to a different location, lighting, and framing (natural light, slouched posture) to illustrate 'boring' is a small but effective show-don't-tell choice — the drudgery is dramatized rather than just described."
+},
+{
+"i": 8,
+"purpose": "turn",
+"dur": 0.2,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"warm flare whip transition"
+],
+"does": {
+"warm flare whip transition": "snaps back from the moody cutaway into the bright main interview setup"
+},
+"spk": true,
+"card_text": "a breeze.",
+"read": "Returns from the pain-point cutaway with the punchline ('a breeze') delivered back in the main setting.",
+"craft": null
+},
+{
+"i": 9,
+"purpose": "turn",
+"dur": 0.7,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": "Let's jump in",
+"read": "Simple verbal pivot line into the tutorial proper, held without extra treatment because the transition itself does the work.",
+"craft": null
+},
+{
+"i": 10,
+"purpose": "evidence",
+"dur": 5.8,
+"treat": [
+"Cursor/UI callout box",
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"screen-recording of CapCut UI with darkened/dimmed interview footage visible behind it",
+"cursor/finger tap highlight circle"
+],
+"does": {
+"screen-recording of CapCut UI with darkened/dimmed interview footage visible behind it": "layers the tutorial screen over a translucent background of the speaker, keeping some visual continuity while showing the actual app steps",
+"cursor/finger tap highlight circle": "draws the eye to the exact button being pressed (Transcript) so the viewer can follow the workflow"
+},
+"spk": false,
+"card_text": "and upload our footage. / to our menu / and hit transcript. / And once it's done,",
+"read": "Demonstrates the described action in real time so the claim is verified, not just told.",
+"craft": "Dimming the live-action footage to a background layer rather than cutting away entirely keeps the video from feeling like a disconnected screen-share — it still feels hosted."
+},
+{
+"i": 11,
+"purpose": "evidence",
+"dur": 1.0,
+"treat": [
+"Escalating counter/stat ticking animation"
+],
+"treat_raw": [
+"in-app progress percentage counter shown live"
+],
+"does": {
+"in-app progress percentage counter shown live": "displays 'Transcribing... 2%' up through 8%, proving real processing time rather than an instant cut"
+},
+"spk": false,
+"card_text": "it'll give us the option",
+"read": "Shows real software latency instead of hiding it, which reads as honest documentation of the workflow.",
+"craft": null
+},
+{
+"i": 12,
+"purpose": "evidence",
+"dur": 5.0,
+"treat": [
+"Colored keyword highlight within running captions"
+],
+"treat_raw": [
+"colored keyword emphasis on captions ('remove', 'filler', 'errors')"
+],
+"does": {
+"colored keyword emphasis on captions ('remove', 'filler', 'errors')": "highlights the specific verbs/nouns of the workflow in yellow within the white caption line"
+},
+"spk": true,
+"card_text": "to remove / any filler words. / You know, the / \"ums\", the \"ahhs\"",
+"read": "Explains the next feature verbally with emphasis before cutting to it being used.",
+"craft": null
+},
+{
+"i": 13,
+"purpose": "evidence",
+"dur": 3.2,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"in-app 'Remove filler words' modal with struck-through highlighted text scrolling"
+],
+"does": {
+"in-app 'Remove filler words' modal with struck-through highlighted text scrolling": "visually shows each filler word being detected and marked for deletion in real transcript text"
+},
+"spk": false,
+"card_text": null,
+"read": "Direct proof of the filler-word-removal claim via live UI capture.",
+"craft": "Letting the transcript scroll and highlight in real detected order (not just a static screenshot) makes the AI feature feel demonstrably functional rather than asserted."
+},
+{
+"i": 14,
+"purpose": "breath",
+"dur": 0.2,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"warm flare whip transition"
+],
+"does": {
+"warm flare whip transition": "bridges from the app demo back to the speaker for the next verbal beat"
+},
+"spk": true,
+"card_text": null,
+"read": "Standard connective transition between demo and talking-head segments.",
+"craft": null
+},
+{
+"i": 15,
+"purpose": "evidence",
+"dur": 5.2,
+"treat": [
+"Sustained micro-punch-ins during monologue"
+],
+"treat_raw": [
+"sustained micro-punch-ins on every few words"
+],
+"does": {
+"sustained micro-punch-ins on every few words": "keeps the single continuous take feeling edited/alive during a longer explanatory monologue about pauses, spelling errors, and checking the transcript"
+},
+"spk": true,
+"card_text": "awkward pauses. / make sure / to check the transcript / for spelling errors / before moving on.",
+"read": "A held explanatory stretch broken up only by reframes rather than new cutaways, appropriate since there's no new visual info to show yet.",
+"craft": null
+},
+{
+"i": 16,
+"purpose": "turn",
+"dur": 0.8,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": "Now for the best part,",
+"read": "Verbal pivot flagging the next feature as the highlight, setting up anticipation before the reveal.",
+"craft": null
+},
+{
+"i": 17,
+"purpose": "evidence",
+"dur": 4.0,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"in-app captions panel with live edit list scrolling and highlight circle on 'Captions' button"
+],
+"does": {
+"in-app captions panel with live edit list scrolling and highlight circle on 'Captions' button": "shows the exact tap sequence and the resulting auto-generated caption list populating"
+},
+"spk": false,
+"card_text": "we simply click / Add Captions / and boom it's / done for you.",
+"read": "Delivers the payoff of the tutorial's core promise with proof baked into the same UI walkthrough.",
+"craft": "The reveal of the finished caption styling directly inside the editing software (rather than cutting to a separate 'after' clip) closes the demonstration loop cleanly — claim, action, result, in one continuous screen capture."
+},
+{
+"i": 18,
+"purpose": "breath",
+"dur": 0.6,
+"treat": [
+"Flash-wipe transition between segments"
+],
+"treat_raw": [
+"warm flare whip transition"
+],
+"does": {
+"warm flare whip transition": "returns from the screen demo to the speaker for the next topic (styling)"
+},
+"spk": true,
+"card_text": "can play around",
+"read": "Connective tissue back into a new sub-topic (caption styling).",
+"craft": null
+},
+{
+"i": 19,
+"purpose": "evidence",
+"dur": 4.0,
+"treat": [
+"Colored keyword highlight within running captions"
+],
+"treat_raw": [
+"colored keyword emphasis ('styling', 'key words')"
+],
+"does": {
+"colored keyword emphasis ('styling', 'key words')": "highlights the specific customization options being described in yellow"
+},
+"spk": true,
+"card_text": "with the styling, / highlight key words,",
+"read": "Sets up the next screen demo verbally with the keywords that will be shown.",
+"craft": null
+},
+{
+"i": 20,
+"purpose": "evidence",
+"dur": 2.6,
+"treat": [
+"Screen-recording UI demo cutaway"
+],
+"treat_raw": [
+"in-app 'Highlight' word-picker grid demo with a specific word ('landed') turning yellow live"
+],
+"does": {
+"in-app 'Highlight' word-picker grid demo with a specific word ('landed') turning yellow live": "shows the exact tap that turns a transcript word into a styled highlighted caption in the preview"
+},
+"spk": false,
+"card_text": "or just stick / with the / default captions.",
+"read": "Concrete proof of the styling feature discussed moments earlier, tightly sequenced.",
+"craft": null
+},
+{
+"i": 21,
+"purpose": "evidence",
+"dur": 2.0,
+"treat": [
+"finished vertical clip preview with styled highlighted captions playing inside a framed inset"
+],
+"treat_raw": [
+"finished vertical clip preview with styled highlighted captions playing inside a framed inset"
+],
+"does": {
+"finished vertical clip preview with styled highlighted captions playing inside a framed inset": "shows the actual polished output — colored keyword captions on the creator's other content — as a result sample"
+},
+"spk": false,
+"card_text": "As a solo creator / the more time",
+"read": "Provides an external example of the finished product to validate the technique beyond the tutorial's own footage.",
+"craft": "Cutting to an entirely different piece of finished content (not the tutorial footage itself) as the 'proof of output' is a subtle credibility move — it shows the technique working on real client-style content, not just a staged demo."
+},
+{
+"i": 22,
+"purpose": "turn",
+"dur": 2.0,
+"treat": [],
+"treat_raw": [],
+"does": {},
+"spk": true,
+"card_text": "I can save, / the more headspace",
+"read": "Shifts from feature-explanation into personal benefit/testimonial framing.",
+"craft": null
+},
+{
+"i": 23,
+"purpose": "turn",
+"dur": 1.4,
+"treat": [
+"Mood b-roll cutaway illustrating a claim"
+],
+"treat_raw": [
+"extreme close-up cutaway of hands typing on a laptop, shallow depth of field"
+],
+"does": {
+"extreme close-up cutaway of hands typing on a laptop, shallow depth of field": "illustrates 'I have to be creative' with a mood shot of focused work rather than the talking head"
+},
+"spk": false,
+"card_text": "I have to be creative",
+"read": "Visualizes the abstract benefit (freed-up creative energy) with a concrete physical action.",
+"craft": "The rack-focus close-up on hands typing is a classic 'productivity' b-roll cliché, but its placement right after the headspace line makes the abstract claim (creative energy freed up) feel tangible."
+},
+{
+"i": 24,
+"purpose": "evidence",
+"dur": 0.2,
+"treat": [
+"Mood b-roll cutaway illustrating a claim"
+],
+"treat_raw": [
+"brief cutaway to a color-grading panel (color wheels) in an editing app"
+],
+"does": {
+"brief cutaway to a color-grading panel (color wheels) in an editing app": "flashes a glimpse of advanced creative work (color correction) to imply the extra time is spent on higher-value editing"
+},
+"spk": false,
+"card_text": "So if you want",
+"read": "Quick visual aside reinforcing that saved time goes toward creative/technical polish, not just idle time.",
+"craft": null
+},
+{
+"i": 25,
+"purpose": "breath",
+"dur": 0.6,
+"treat": [
+"extreme close-up on eye, very shallow focus, direct address"
+],
+"treat_raw": [
+"extreme close-up on eye, very shallow focus, direct address"
+],
+"does": {
+"extreme close-up on eye, very shallow focus, direct address": "creates a sudden intimate, intense visual beat right before the CTA sequence begins"
+},
+"spk": true,
+"card_text": "So if you want",
+"read": "Uses proximity and stillness to mark the transition into the video's call to action.",
+"craft": "The abrupt cut to an extreme eye close-up right before the call-to-action is a deliberate tonal jolt — it slows the pace and adds gravity to signal 'listen closely, this is the ask.'"
+},
+{
+"i": 26,
+"purpose": "claim",
+"dur": 2.0,
+"treat": [
+"Colored keyword highlight within running captions"
+],
+"treat_raw": [
+"colored keyword emphasis ('speed up', 'captions')"
+],
+"does": {
+"colored keyword emphasis ('speed up', 'captions')": "highlights the CTA's key action words in yellow"
+},
+"spk": true,
+"card_text": "to speed up your editing / workflow, / comment \"captions\"",
+"read": "States the CTA clearly with visual emphasis on the trigger word viewers need to type.",
+"craft": null
+},
+{
+"i": 27,
+"purpose": "close",
+"dur": 1.8,
+"treat": [
+"Physical prop as visual proof/gesture"
+],
+"treat_raw": [
+"close-up finger hovering/pressing over a keyboard, moody teal-blue lighting"
+],
+"does": {
+"close-up finger hovering/pressing over a keyboard, moody teal-blue lighting": "visually stages 'sending the link' as a suspenseful, cinematic micro-action distinct from the rest of the video's lighting"
+},
+"spk": false,
+"card_text": "and I'll send you / the link right now",
+"read": "Dramatizes the mechanical act of sending the promised resource to make the offer feel concrete and imminent.",
+"craft": "The lighting and color shift to cool blue for this one cutaway (vs. the warm interview tones throughout) marks the CTA visually as its own distinct 'chapter,' giving the ask more weight than a same-toned cut would."
+},
+{
+"i": 28,
+"purpose": "close",
+"dur": 6.2,
+"treat": [
+"Sustained micro-punch-ins during monologue"
+],
+"treat_raw": [
+"sustained micro-punch-ins through closing monologue"
+],
+"does": {
+"sustained micro-punch-ins through closing monologue": "keeps the extended closing pitch (about AI tools, workflow, saving time) visually active despite being one continuous take"
+},
+"spk": true,
+"card_text": "so you can jump / straight in and start / using the AI tools. / Let me know / which of the AI tools / you use / and which saves the / most time for you.",
+"read": "Closes with a direct engagement question, held on the speaker since the ask needs to feel personal and unadorned.",
+"craft": null
+},
+{
+"i": 29,
+"purpose": "close",
+"dur": 6.2,
+"treat": [
+"white-flash whip transition into black screen with app splash logos (CapCut, then TikTok)"
+],
+"treat_raw": [
+"white-flash whip transition into black screen with app splash logos (CapCut, then TikTok)"
+],
+"does": {
+"white-flash whip transition into black screen with app splash logos (CapCut, then TikTok)": "signals the definitive end of content and mimics an app-loading screen as an outro gag/sting"
+},
+"spk": false,
+"card_text": null,
+"read": "A thematically consistent outro that reinforces brand/handle recall through mimicry of the tools discussed rather than a generic end card.",
+"craft": "Ending on fake app-loading splash screens (CapCut then TikTok) is a knowing, on-brand outro joke for an editing-software tutorial — it reinforces the subject matter one last time instead of just fading out."
+}
+],
+"source": "reference_beats"
+}

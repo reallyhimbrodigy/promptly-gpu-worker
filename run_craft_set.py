@@ -18,7 +18,7 @@ import time
 import modal
 
 EX = os.path.expanduser("~/Desktop/EXAMPLES")
-OUT = "/tmp/craft_out"
+OUT = os.environ.get("CRAFT_OUT", "/tmp/craft_out")
 DONE = "v09044g40000cm9oa7nog65s2crhkf00.mp4"      # the shape check, already run
 
 os.makedirs(OUT, exist_ok=True)
@@ -40,9 +40,16 @@ def measured(path):
 
 def main():
     weight = sys.argv[1] if len(sys.argv) > 1 else "zac_reference"
+    # THE ONLY THING THAT CHANGES BETWEEN ARMS. Same bytes, same prompt, same
+    # weights — so a difference is attributable to the sample rate and to
+    # nothing else.
+    fps = float(os.environ.get("CRAFT_FPS", "0") or 0)
+    print(f"  video sample rate: {fps or 'DEFAULT (1 fps)'}   out: {OUT}")
     names = sorted(n for n in os.listdir(EX) if n.endswith(".mp4"))
     todo = [n for n in names if not measured(f"{OUT}/{n}.json")]
-    if DONE in todo and os.path.exists("/tmp/craft_one.json"):
+    if fps and DONE in todo:
+        pass          # a new rate re-runs every video, including the shape check
+    elif DONE in todo and os.path.exists("/tmp/craft_one.json"):
         # carry the shape-check result into the set rather than paying twice
         r = json.load(open("/tmp/craft_one.json"))
         json.dump(r, open(f"{OUT}/{DONE}.json", "w"))
@@ -64,13 +71,13 @@ def main():
     def one(name):
         b = open(os.path.join(EX, name), "rb").read()
         t0 = time.time()
-        r = fn.remote(b, name, weight)
+        r = fn.remote(b, name, weight, sample_fps=fps)
         r["_client_wall_s"] = round(time.time() - t0, 1)
         json.dump(r, open(f"{OUT}/{name}.json", "w"))
         return name, r
 
     t0 = time.time()
-    with cf.ThreadPoolExecutor(max_workers=3) as ex:
+    with cf.ThreadPoolExecutor(max_workers=2) as ex:
         for fut in cf.as_completed([ex.submit(one, n) for n in todo]):
             try:
                 name, r = fut.result()

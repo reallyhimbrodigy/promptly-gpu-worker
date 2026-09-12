@@ -1,0 +1,262 @@
+{
+ "Platform outro/end card": {
+  "requests": 28,
+  "distinct_texts": 24,
+  "users": 24,
+  "pct_users": 0.3,
+  "note": "an explicit closing card",
+  "samples": [
+   "can you edit this for me, take out silence and remove into and outro space.",
+   "quero vídeo estilo jornalismo mostrando imagens de exemplos com linguagem boa com legendas intro do vídeo most",
+   "edit this vlog into a professional cinematic video. remove unnecessary parts, trim pauses and mistakes, keep t"
+  ]
+ },
+ "Cursor/UI callout highlight": {
+  "requests": 42,
+  "distinct_texts": 23,
+  "users": 22,
+  "pct_users": 0.3,
+  "note": "pointing at the screen",
+  "samples": [
+   "next clip after that -the boy wants to call out to her, but the girl—who is wearing a burqa—won't notice him a",
+   "viral engaging video add text :- location air port road , dharapur chariali . \"add hand-drawn pastel scribble ",
+   "se você é lojista de pet shop, agropecuária, avicultura ou tem um criatório, precisa conhecer a trincapet. som"
+  ]
+ },
+ "Automated progress/loading indicator": {
+  "requests": 4,
+  "distinct_texts": 4,
+  "users": 4,
+  "pct_users": 0.1,
+  "note": "a progress/loading graphic",
+  "samples": [
+   "• generate 100% accurate captions. • use bold uppercase text. • font: modern, clean, easy to read. • highlight",
+   "transform this talking-head video into a premium, viral social media reel. add clean, dynamic, word-by-word an",
+   "edit this lipstick application video into a high-retention beauty reel optimized for instagram reels, youtube "
+  ]
+ },
+ "Escalating counter/stat ticking animation": {
+  "requests": 20,
+  "distinct_texts": 9,
+  "users": 8,
+  "pct_users": 0.1,
+  "note": "a number that ticks",
+  "samples": [
+   "auto captions — add auto-generated captions synced to my speech, word-by-word animated style, bold text with a",
+   "cinematic close-up food photography sequence, starting with a high-angle static shot of a row of empty mini-ba",
+   "edit this into a short, fast-paced youtube short for my “road to rich” series. important text placement: * kee"
+  ]
+ },
+ "Split-screen comparison of two contents": {
+  "requests": 32,
+  "distinct_texts": 24,
+  "users": 24,
+  "pct_users": 0.3,
+  "note": "two things shown together",
+  "samples": [
+   "mujhe instagram par reels upload krni he isko before and after wali reels bana do aesthetics cinematic fece 10",
+   "edit this vdo with sound effects and highlight the points and make before and after and also generate captions",
+   "make this 43-second football video about gabriel martinelli look like a professional viral tiktok football edi"
+  ]
+ },
+ "Typed search/URL graphic": {
+  "requests": 1,
+  "distinct_texts": 1,
+  "users": 1,
+  "pct_users": 0.0,
+  "note": "a typed search/URL graphic",
+  "samples": [
+   "3 iphone tricks you’ll actually use” title: 3 iphone tricks you’ll actually use scene 1 (0–3 seconds) – hook v"
+  ]
+ },
+ "Simple stat/emoji graphic overlay": {
+  "requests": 160,
+  "distinct_texts": 122,
+  "users": 109,
+  "pct_users": 1.4,
+  "note": "emoji/sticker overlay",
+  "samples": [
+   "emoji caption delete",
+   "add captions in hinglish with emojis",
+   "clean video with song and stickers a slomos"
+  ]
+ },
+ "Step-by-step caption narration over demo": {
+  "requests": 37,
+  "distinct_texts": 27,
+  "users": 23,
+  "pct_users": 0.3,
+  "note": "stepped narration",
+  "samples": [
+   "make smooth video of it explaining basic rules of football step by step",
+   "viral engaging video and add step by step 1 iphone 12 64gb 85% 🔋 all original complete kit and bill price ₹5,5",
+   "create a advertisement for this new packaging of carbonara samyang,make it delicious and realistic,put a step "
+  ]
+ },
+ "Floating labeled UI/graphic elements": {
+  "requests": 25,
+  "distinct_texts": 13,
+  "users": 11,
+  "pct_users": 0.1,
+  "note": "floating labelled elements",
+  "samples": [
+   "premium viral reels edit with energetic after effects motion graphics, kinetic captions, rapid punch-in zooms,",
+   "edit this as a clean, professional educational reel for dental exam preparation. • auto-generate word-level ca",
+   "auto captions — add auto-generated captions synced to my speech, word-by-word animated style, bold text with a"
+  ]
+ },
+ "Floating people/location graphic": {
+  "requests": 9,
+  "distinct_texts": 9,
+  "users": 9,
+  "pct_users": 0.1,
+  "note": "people/location graphics",
+  "samples": [
+   "can you please blur out the bikini top of the avatar? blur it out for the entire video please. do not edit any",
+   "🎬 hook (0–3 sec) “ai videos banana chahte ho, lekin camera ke saamne aana nahi? to ye top 5 free ai video webs",
+   "add smooth zoom-in/zoom-out (ken burns) effects on wide shots, and quick jump cuts on action/movement clips. u"
+  ]
+ },
+ "Full-screen title/thesis card": {
+  "requests": 14,
+  "distinct_texts": 8,
+  "users": 7,
+  "pct_users": 0.1,
+  "note": "a full-frame title card",
+  "samples": [
+   "edit this as a clean, professional educational reel for dental exam preparation. • auto-generate word-level ca",
+   "edit this as a clean, professional educational reel for dental exam preparation. • auto-generate word-level ca",
+   "edit this video as a high-energy, stylish, funny and cinematic day 3/21 fitness challenge reel. important: * t"
+  ]
+ },
+ "Dominant kinetic title text synced to speech": {
+  "requests": 345,
+  "distinct_texts": 249,
+  "users": 206,
+  "pct_users": 2.6,
+  "note": "frame-dominant animated type",
+  "samples": [
+   "typography video edit",
+   "add typography caption in english",
+   "create minimal edit with typography texts"
+  ]
+ },
+ "Decorative per-word caption styling": {
+  "requests": 53,
+  "distinct_texts": 32,
+  "users": 31,
+  "pct_users": 0.4,
+  "note": "styled captions",
+  "samples": [
+   "caption font",
+   "create the best caption font and make it in zoom out zoom in and add perfect sfx",
+   "put captions for the video and add elements and dynamic effects and sound effects when u put the elements . th"
+  ]
+ },
+ "Colored keyword highlight within captions": {
+  "requests": 12,
+  "distinct_texts": 6,
+  "users": 7,
+  "pct_users": 0.1,
+  "note": "coloured keyword in captions",
+  "samples": [
+   "edit this video as a dynamic and energetic christian youth reel promoting a youth gathering. use fast but natu",
+   "transform this pre-recorded video into a cinematic, high-end professional reel suitable for medical education.",
+   "\"edit this video with auto-generated captions in roman urdu (write urdu words using english/roman letters, e.g"
+  ]
+ },
+ "Word-by-word caption build": {
+  "requests": 130,
+  "distinct_texts": 67,
+  "users": 60,
+  "pct_users": 0.8,
+  "note": "word-by-word caption build",
+  "samples": [
+   "colorful, dynamic captions with active word-by-word highlighting (kinetic typography), pop-up motion graphics/",
+   "viral engaging video, add zooms, + sound effects and motion graphics and captions: roman telugu (telugu spoken",
+   "viral high-retention dropshipping style. fast-paced punchy cuts with zero dead air. kinetic word-by-word capti"
+  ]
+ },
+ "3D perspective UI/gallery browse graphic": {
+  "requests": 127,
+  "distinct_texts": 104,
+  "users": 97,
+  "pct_users": 1.2,
+  "note": "3D/perspective graphics",
+  "samples": [
+   "8k 3d quality",
+   "make 3d ammunition",
+   "make this video smooth and edite 3d"
+  ]
+ },
+ "3D icon animation": {
+  "requests": 5,
+  "distinct_texts": 2,
+  "users": 2,
+  "pct_users": 0.0,
+  "note": "animated 3D icons",
+  "samples": [
+   "create a clean, premium, medical-style instagram reel with high audience retention. the doctor remains the pri",
+   "professional video editing + motion graphics master prompt you are an elite professional video editor, motion "
+  ]
+ },
+ "Polaroid-style graphic reveal": {
+  "requests": 3,
+  "distinct_texts": 2,
+  "users": 2,
+  "pct_users": 0.0,
+  "note": "photo-frame reveal",
+  "samples": [
+   "animate the uploaded image directly. keep the original ramdev pir artwork exactly the same — do not redraw, re",
+   "core identity & subject instruction: extract the exact face and body of the young man wearing glasses and a bl"
+  ]
+ },
+ "Logo idle branding animation": {
+  "requests": 163,
+  "distinct_texts": 147,
+  "users": 142,
+  "pct_users": 1.8,
+  "note": "logo/branding animation",
+  "samples": [
+   "remove watermark",
+   "remove the watermark",
+   "remove instagram logo and user name"
+  ]
+ },
+ "Split-screen picture-in-picture": {
+  "requests": 11,
+  "distinct_texts": 9,
+  "users": 4,
+  "pct_users": 0.1,
+  "note": "PIP composition",
+  "samples": [
+   "edit this reel for finance ugc. add sound effects, picture in picture and transitions",
+   "edit this like a tech ugc video. make it engaging and add pip, sound effects, logos and video effects.",
+   "vertical edit — beginner tier. critical rule: cuts only happen at real silence/breaths in the audio, never on "
+  ]
+ },
+ "Whoosh/Pop Accent SFX": {
+  "requests": 1696,
+  "distinct_texts": 956,
+  "users": 1182,
+  "pct_users": 14.8,
+  "note": "accent sound effects",
+  "samples": [
+   "tambahkan sfx",
+   "add sound effects",
+   "add zoom sound effect"
+  ]
+ },
+ "Click/Interaction SFX": {
+  "requests": 4,
+  "distinct_texts": 4,
+  "users": 4,
+  "pct_users": 0.1,
+  "note": "interaction sound effects",
+  "samples": [
+   "edit my video in a clean, modern instagram style. do not add subtitles or captions. keep my original video and",
+   "edit this video for [lusine’s account]. remove all dead air, filler words (um, uh, like), and silences longer ",
+   "viral engaging video the dmca-free music strategy (no bans, no mutes)since this is an asmr video, the music mu"
+  ]
+ }
+}

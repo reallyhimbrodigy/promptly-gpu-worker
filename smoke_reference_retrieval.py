@@ -87,28 +87,84 @@ if META["state"] == "PARTIAL":
 # ── 3. THE THREE ABSENCES, EACH SPOKEN ──────────────────────────────────────
 # All three are the same rule: say what is missing rather than return something
 # that reads as a judgement.
-_t = A.reference_family_note("transition", BEATS, META)
-check("transition says NO REFERENCE explicitly", "NO REFERENCE" in _t, _t[:80])
-check("and refuses to be read as permission or prohibition",
-      "not permission" in _t and "not a prohibition" in _t,
-      "an empty list reads as 'nothing to say', which is a judgement")
-_z = A.reference_family_note("zoom", BEATS, META)
-check("zoom is labelled as its example COUNT, not as a corpus",
-      "6 EXAMPLES" in _z, _z[:90])
-check("and says why that matters",
-      "not a pattern" in _z or "bottleneck" in _z, _z[:90])
+# A FAMILY WITH NO EXAMPLES SAYS SO — asked of whichever family that is.
+# This named `transition`, whose "NO REFERENCE" was the closed enum's shape
+# rather than the corpus's behaviour: the annotator had no word for one. It now
+# measures 16 occurrences across 8 of 10 videos, so the leg was asserting the
+# absence of the very thing the re-read found.
+_absent = [f for f in sorted(A.TREATMENT_FAMILIES) if f != "none"
+           and ("NO REFERENCE" in (A.reference_family_note(f, BEATS, META) or "")
+                or "NOT RECORDABLE" in (A.reference_family_note(f, BEATS, META) or ""))]
+# EVERY FAMILY HAVING REFERENCES IS THE GOOD STATE, and this leg used to FAIL
+# on it. The merged corpus records all six, so there is no natural absence left
+# to exercise — which is an improvement, not a regression. Exercise the
+# mechanism on a family the index genuinely does not carry instead.
+if not _absent:
+    print("  (note: every family has references — the absence rule is "
+          "exercised on a synthetic family)")
+    _synth = A.reference_family_note("__no_such_family__", BEATS, META)
+    check("an unknown family says NO REFERENCE or NOT RECORDABLE",
+          "NO REFERENCE" in _synth or "NOT RECORDABLE" in _synth, _synth[:80])
+    check("and refuses to be read as permission or prohibition",
+          "not permission" in _synth or "Neither permission" in _synth,
+          "an empty list reads as 'nothing to say', which is a judgement")
+for _f in _absent:
+    _t = A.reference_family_note(_f, BEATS, META)
+    check(f"{_f} says NO REFERENCE or NOT RECORDABLE explicitly",
+          "NO REFERENCE" in _t or "NOT RECORDABLE" in _t, _t[:80])
+    check(f"and {_f} refuses to be read as permission or prohibition",
+          "not permission" in _t or "Neither permission" in _t,
+          "an empty list reads as 'nothing to say', which is a judgement")
+# A SCARCE FAMILY IS LABELLED BY ITS COUNT — asked of whichever family is
+# actually scarce, not of `zoom` at exactly "6 EXAMPLES". That was the
+# six-word corpus's number; the re-read puts zoom at 2 and card at 4, and a
+# check pinned to 6 tests the old data rather than the property.
+_scarce = [f for f in sorted(A.TREATMENT_FAMILIES) if f != "none"
+           and "EXAMPLES" in (A.reference_family_note(f, BEATS, META) or "")]
+check("some family is scarce enough to be labelled by count (non-vacuity)",
+      bool(_scarce),
+      "no family is scarce, so the two legs below would pass for the wrong "
+      "reason")
+for _f in _scarce[:3]:
+    _z = A.reference_family_note(_f, BEATS, META)
+    _n = sum(1 for _x in BEATS
+             if _f in {(META.get("builds_as") or {}).get(_t, _t)
+                       for _t in (_x.get("treat") or [])})
+    check(f"{_f} is labelled as its example COUNT, not as a corpus",
+          "EXAMPLES" in _z and str(_n) in _z, _z[:90])
+    check(f"and {_f} says why that matters",
+          "not a pattern" in _z or "bottleneck" in _z, _z[:90])
 
 # COUNTS COME FROM THE CORPUS, NOT THE INDEX. A seeded index reporting "only 4
 # examples of sfx in the whole corpus" when the corpus holds 14 is the
 # absence-misreported-as-a-finding this feature exists to prevent — and it was
 # the first thing the function did.
-check("family counts come from the corpus, not the index",
-      META.get("family_counts_in_corpus", {}).get("sfx") == 14,
-      f"{META.get('family_counts_in_corpus')} — the index carries fewer sfx "
-      f"beats than the corpus, and must not report its own size as the corpus's")
-check("so a family the index under-carries is NOT falsely flagged",
-      A.reference_family_note("sfx", BEATS, META) == "",
-      "sfx has 14 corpus examples; only an index count would call that scarce")
+# COUNTS COME FROM THE CORPUS, NOT THE INDEX — asked structurally. This
+# asserted `family_counts_in_corpus["sfx"] == 14`, a number from the six-word
+# corpus. It is now 0, and for a reason worth stating rather than encoding: the
+# annotator was sent silent frames and could not hear a sound effect however
+# many there were. Pinning the leg to 14 tested that one reading, not the
+# partial-index property it was written for.
+_fc = META.get("family_counts_in_corpus") or {}
+check("the corpus counts are present and cover the shipped vocabulary",
+      bool(_fc) and set(_fc) >= {_t for _x in BEATS
+                                 for _t in (_x.get("treat") or [])},
+      f"{sorted(set(_fc))[:4]}... — a count table that does not cover the "
+      f"index's own treatments cannot stop the index reporting its own size "
+      f"as the corpus's")
+check("and every count is at least what the index itself carries",
+      all(_fc.get(_t, 0) >= sum(1 for _x in BEATS
+                                if _t in (_x.get("treat") or []))
+          for _t in {_t for _x in BEATS for _t in (_x.get("treat") or [])}),
+      "a corpus count BELOW the index count is the seeded-index failure: the "
+      "index would be reporting its own size as the corpus's")
+# AND AN UNRECORDABLE FAMILY SAYS SO rather than reading as unused.
+for _u in sorted(A.reference_unmeasurable()):
+    _n = A.reference_family_note(_u, BEATS, META)
+    check(f"{_u} is reported as NOT RECORDABLE, not as unused",
+          "NOT RECORDABLE" in _n,
+          f"{_n[:100]} — saying 'no reference beat uses it' states a fact "
+          f"about editors that this instrument never measured")
 
 # ── 4. CUTAWAY IS FILTERED, BECAUSE WE CANNOT DO ONE ────────────────────────
 # 72 of 153 reference beats place a cutaway. Showing the agent craft it cannot

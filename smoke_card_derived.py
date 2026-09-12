@@ -299,13 +299,36 @@ check("the gate's demands were found", len(_demanded) >= 2, sorted(_demanded))
 check("and they are real field names, not strangers from another scope",
       all(len(_f) > 2 for _f in _demanded), sorted(_demanded))
 
+# ASKED BY EXECUTION, NOT BY SET DIFFERENCE. The static form compared every
+# field the gate READS against every field a tool OFFERS — correct while the
+# gate demanded the same things of every surface, and wrong the moment it
+# became surface-aware. `beat_verdict` cannot express `sfx_name`, so adding sfx
+# to the gate made this leg red; the gate's answer is to SKIP the demand for a
+# surface that cannot satisfy it (and record the placement as lost to the
+# schema instead), which no set difference can see.
+#
+# The property is unchanged and is the one that cost three rounds of zero
+# cards: A TOOL MUST NEVER BE REFUSED FOR A FIELD IT CANNOT SUPPLY. So drive
+# the real gate with each tool's own field set and read the refusals.
 for _t in _verdict_tools:
     _offered = _props_of(_t)
-    _orphaned = sorted(_demanded - _offered - {"beat"})
-    check(f"{_t['name']} offers every field the gate demands",
-          not _orphaned,
-          f"{_orphaned} — this tool can rule a treatment and cannot supply "
-          f"what the gate then requires, so every such ruling is rejected and "
+    _bad = []
+    for _fam, _extra in (("zoom", {}), ("card", {}), ("sfx", {}),
+                         ("text", {}), ("cutaway", {}), ("transition", {})):
+        _v = {"beat": 1, "purpose": "hook", "cut": "keep", "why": "w",
+              "treatment": [_fam]}
+        _v.update(_extra)
+        _why = A.half_ruling_refusal(_v, can_express=_offered)
+        if not _why:
+            continue
+        # a refusal is legitimate only if the tool COULD have satisfied it
+        _names = {_f for _f in _demanded if _f in _why}
+        if _names and not (_names & _offered):
+            _bad.append((_fam, sorted(_names)))
+    check(f"{_t['name']} is never refused for a field it cannot supply",
+          not _bad,
+          f"{_bad} — this tool can rule the treatment and cannot supply what "
+          f"the gate then requires, so every such ruling is rejected and "
           f"re-ruled identically until the turn budget absorbs it")
 
 _retired = {"card_type", "card_props"}

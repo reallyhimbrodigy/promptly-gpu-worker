@@ -1,0 +1,921 @@
+{
+ "n_videos": 10,
+ "arm_a": {
+  "dir": "/tmp/refcorpus_open",
+  "reader": "claude-sonnet-5, silent frames"
+ },
+ "arm_b": {
+  "dir": "/tmp/refcorpus_listen_c",
+  "reader": "gemini-2.5-pro, clip with audio"
+ },
+ "families": [
+  {
+   "family": "Screen-recording UI demo cutaway",
+   "what_it_does": "Cuts away from the speaker to captured app/software footage demonstrating a feature step by step.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 9,
+   "videos_heard": 9,
+   "videos_max": 9,
+   "silent_names": [
+    "Screen-recording UI demo cutaway"
+   ],
+   "heard_names": [
+    "Screen Recording Product Demo"
+   ]
+  },
+  {
+   "family": "Dominant kinetic title text synced to speech",
+   "what_it_does": "Oversized or animated text fills the frame, timed to slam in or move in sync with spoken phrases.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 6,
+   "videos_heard": 9,
+   "videos_max": 9,
+   "silent_names": [
+    "Giant kinetic title-card slam"
+   ],
+   "heard_names": [
+    "Kinetic Text Overlay"
+   ]
+  },
+  {
+   "family": "Platform outro/end card",
+   "what_it_does": "Closes the video with a stylized platform splash/loading screen or standardized branding card pointing to the profile/handle.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 6,
+   "videos_heard": 9,
+   "videos_max": 9,
+   "silent_names": [
+    "Native TikTok loading/search-bar simulated outro"
+   ],
+   "heard_names": [
+    "Platform End Card"
+   ]
+  },
+  {
+   "family": "Escalating counter/stat ticking animation",
+   "what_it_does": "A number rapidly ticks or counts upward on screen to dramatize scale, cost, or success.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 6,
+   "videos_heard": 4,
+   "videos_max": 6,
+   "silent_names": [
+    "Escalating counter/stat ticking animation"
+   ],
+   "heard_names": [
+    "Animated Stat/Counter Reveal"
+   ]
+  },
+  {
+   "family": "Cursor/UI callout highlight",
+   "what_it_does": "A colored box, circle, or animated cursor directs viewer attention to a specific UI element being tapped.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 4,
+   "videos_heard": 6,
+   "videos_max": 6,
+   "silent_names": [
+    "Cursor/UI callout box"
+   ],
+   "heard_names": [
+    "Guided UI Highlight (Cursor/Callout)"
+   ]
+  },
+  {
+   "family": "Whip/blur transition",
+   "what_it_does": "A fast rotational or motion-blurred camera move disguises a cut to a new angle or location.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 4,
+   "videos_heard": 6,
+   "videos_max": 6,
+   "silent_names": [
+    "Whip-pan camera reframe transition"
+   ],
+   "heard_names": [
+    "Blur/Whip Transition"
+   ]
+  },
+  {
+   "family": "Atmospheric b-roll cutaway",
+   "what_it_does": "Cuts to non-UI footage of people/settings to visually ground or support a spoken claim.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 4,
+   "videos_heard": 6,
+   "videos_max": 6,
+   "silent_names": [
+    "Mood b-roll cutaway illustrating a claim"
+   ],
+   "heard_names": [
+    "Cutaway to Grounding B-roll"
+   ]
+  },
+  {
+   "family": "Flash-wipe transition",
+   "what_it_does": "A bright full-screen flash is used as a hard-cut transition or pattern interrupt.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 4,
+   "videos_heard": 5,
+   "videos_max": 5,
+   "silent_names": [
+    "Flash-wipe transition between segments"
+   ],
+   "heard_names": [
+    "Flash Transition"
+   ]
+  },
+  {
+   "family": "Decorative per-word caption styling",
+   "what_it_does": "Individual words within a caption receive distinct typographic treatment to visually underline them.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 5,
+   "videos_heard": 1,
+   "videos_max": 5,
+   "silent_names": [
+    "Decorative kinetic caption styling effects"
+   ],
+   "heard_names": [
+    "Stylized Caption Font"
+   ]
+  },
+  {
+   "family": "Branded icon/logo reveal",
+   "what_it_does": "A branded icon or logo animates in beside the speaker or on screen, paired with a sound cue, to anchor a brand/feature mention.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 3,
+   "videos_heard": 4,
+   "videos_max": 4,
+   "silent_names": [
+    "App/brand icon pop-in over speaker"
+   ],
+   "heard_names": [
+    "Icon/Logo Reveal with SFX"
+   ]
+  },
+  {
+   "family": "Reframing cut back to speaker",
+   "what_it_does": "Cuts back to the presenter, often at a new angle or shot size, to re-anchor after a detour or mark a structural beat.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 4,
+   "videos_heard": 4,
+   "videos_max": 4,
+   "silent_names": [
+    "Cut back to talking head (re-anchor after detour)"
+   ],
+   "heard_names": [
+    "Reframing Cut (Angle/Shot Change)"
+   ]
+  },
+  {
+   "family": "Phone as physical prop",
+   "what_it_does": "The speaker holds/interacts with a phone as tangible proof for a claim.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 4,
+   "videos_heard": 1,
+   "videos_max": 4,
+   "silent_names": [
+    "Physical prop as visual proof/gesture"
+   ],
+   "heard_names": [
+    "Phone Screen as Prop"
+   ]
+  },
+  {
+   "family": "Split-screen comparison of two contents",
+   "what_it_does": "Two pieces of footage are mirrored/split side-by-side to let viewers compare states.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 3,
+   "videos_max": 3,
+   "silent_names": [
+    "duplicate/split mirrored panel of the same footage"
+   ],
+   "heard_names": [
+    "Split-Screen Before/After Comparison"
+   ]
+  },
+  {
+   "family": "Typed search/URL graphic",
+   "what_it_does": "An animated search-bar or address-bar graphic types out text to instruct viewers where to go.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 2,
+   "videos_max": 2,
+   "silent_names": [
+    "animated search-bar type-on"
+   ],
+   "heard_names": [
+    "Typed Search/URL Graphic"
+   ]
+  },
+  {
+   "family": "Automated progress/loading indicator",
+   "what_it_does": "Shows loading bars, checkmarks, or sped-through progress states to signal the software completing a task.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 2,
+   "videos_max": 2,
+   "silent_names": [
+    "sped-through progress/loading states"
+   ],
+   "heard_names": [
+    "Automated Progress Indicator"
+   ]
+  },
+  {
+   "family": "Direct-to-camera emphasis gesture",
+   "what_it_does": "The speaker breaks the fourth wall or points directly at camera to underline a statement.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 2,
+   "videos_max": 2,
+   "silent_names": [
+    "wide static shot with direct-address pointing gesture"
+   ],
+   "heard_names": [
+    "Direct-to-Camera Emphasis Gesture"
+   ]
+  },
+  {
+   "family": "3D icon animation",
+   "what_it_does": "A rendered 3D icon (lock, laptop) animates to illustrate a concept.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [
+    "3D icon animation sequence (lock, laptop)"
+   ],
+   "heard_names": [
+    "Illustrative 3D Animation"
+   ]
+  },
+  {
+   "family": "Floating labeled UI/graphic elements",
+   "what_it_does": "Multiple UI or object graphics float on screen with numeric/dollar labels to imply data or value.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [
+    "multi-object 3D scatter with dollar-figure labels"
+   ],
+   "heard_names": [
+    "Floating UI Overlay"
+   ]
+  },
+  {
+   "family": "Floating people/location graphic",
+   "what_it_does": "Floating pins or profile graphics represent a pool of people or locations to suggest scale/reach.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [
+    "animated map with escalating pin-drop"
+   ],
+   "heard_names": [
+    "Floating Talent/People Graphic"
+   ]
+  },
+  {
+   "family": "Simple stat/emoji graphic overlay",
+   "what_it_does": "A small emoji or stat graphic overlays the frame to punctuate a point.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [
+    "emoji/stat overlay"
+   ],
+   "heard_names": [
+    "Graphic Overlay"
+   ]
+  },
+  {
+   "family": "Polaroid-style graphic reveal",
+   "what_it_does": "A tilted polaroid-style frame builds in to reveal a photo or graphic.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [
+    "tilted polaroid-style frame reveal"
+   ],
+   "heard_names": [
+    "Graphic Reveal (Polaroid)"
+   ]
+  },
+  {
+   "family": "Rapid cut montage",
+   "what_it_does": "A sequence of very fast punch-in zoom cuts keeps energy high during a take.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [
+    "rapid punch-in zoom cuts"
+   ],
+   "heard_names": [
+    "Rapid Cut Montage"
+   ]
+  },
+  {
+   "family": "Split-screen picture-in-picture",
+   "what_it_does": "The talking head shrinks into a corner window beside looping b-roll running simultaneously.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [
+    "Split-screen picture-in-picture composition"
+   ],
+   "heard_names": [
+    "Split Screen"
+   ]
+  },
+  {
+   "family": "Step-by-step caption narration over demo",
+   "what_it_does": "Short caption cards step through feature-by-feature narration over a screen recording, replacing voiceover.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [
+    "Discrete caption cards narrating a demo without voiceover"
+   ],
+   "heard_names": [
+    "Numbered Step Overlay"
+   ]
+  },
+  {
+   "family": "Intimate over-the-shoulder/POV framing",
+   "what_it_does": "Camera frames the action from behind/over the shoulder to simulate a first-person viewpoint.",
+   "arms": "both",
+   "evidence": "CORROBORATED",
+   "videos_silent": 1,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [
+    "over-the-shoulder framing on a real edit session"
+   ],
+   "heard_names": [
+    "POV Shot"
+   ]
+  },
+  {
+   "family": "Whoosh/Pop Accent SFX",
+   "what_it_does": "A whoosh or pop sound effect accompanies the appearance of a graphic or text element.",
+   "arms": "heard",
+   "evidence": "single-arm",
+   "videos_silent": 0,
+   "videos_heard": 8,
+   "videos_max": 8,
+   "silent_names": [],
+   "heard_names": [
+    "Whoosh/Pop Accent SFX"
+   ]
+  },
+  {
+   "family": "Full-screen title/thesis card",
+   "what_it_does": "The frame goes fully to bold typography or logo, isolating a claim or chapter marker with no speaker visible.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 6,
+   "videos_heard": 0,
+   "videos_max": 6,
+   "silent_names": [
+    "Full-screen title/thesis card (no speaker)"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "Click/Interaction SFX",
+   "what_it_does": "A click or typing sound effect is layered onto an on-screen tap or keyboard action.",
+   "arms": "heard",
+   "evidence": "single-arm",
+   "videos_silent": 0,
+   "videos_heard": 5,
+   "videos_max": 5,
+   "silent_names": [],
+   "heard_names": [
+    "Click/Interaction SFX"
+   ]
+  },
+  {
+   "family": "Colored keyword highlight within captions",
+   "what_it_does": "Specific words within a caption line render in contrasting color to flag key terms.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 4,
+   "videos_heard": 0,
+   "videos_max": 4,
+   "silent_names": [
+    "Colored keyword highlight within running captions"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "Word-by-word caption build",
+   "what_it_does": "Captions accumulate phrase by phrase over an unbroken shot until a full sentence is legible.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 4,
+   "videos_heard": 0,
+   "videos_max": 4,
+   "silent_names": [
+    "Word-by-word caption build assembling one full sentence"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "3D perspective UI/gallery browse graphic",
+   "what_it_does": "A rendered 3D or tilted perspective gallery/carousel scrolls to imply abundance of options.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 3,
+   "videos_heard": 0,
+   "videos_max": 3,
+   "silent_names": [
+    "3D perspective UI/gallery browse graphic"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "Hard cut to new location",
+   "what_it_does": "An abrupt cut changes room, angle, or lighting to reset visual energy.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 3,
+   "videos_heard": 0,
+   "videos_max": 3,
+   "silent_names": [
+    "Hard cut to new location (resets energy)"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "Logo idle branding animation",
+   "what_it_does": "A logo subtly animates while otherwise static to keep an end-card or brand moment alive.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 3,
+   "videos_heard": 0,
+   "videos_max": 3,
+   "silent_names": [
+    "Logo branding sting/idle animation"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "Name/identity card overlay",
+   "what_it_does": "A name, title, or small photo builds in near the speaker to establish identity without cutting away.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 2,
+   "videos_heard": 0,
+   "videos_max": 2,
+   "silent_names": [
+    "Name/identity card overlay"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "Performative Emotion Cutaway",
+   "what_it_does": "Shows the speaker physically acting out an emotional state to dramatize a problem.",
+   "arms": "heard",
+   "evidence": "single-arm",
+   "videos_silent": 0,
+   "videos_heard": 2,
+   "videos_max": 2,
+   "silent_names": [],
+   "heard_names": [
+    "Performative Emotion Cutaway"
+   ]
+  },
+  {
+   "family": "Icon pop-in illustrating spoken feature list",
+   "what_it_does": "A small icon appears beside a caption or joins a growing row to itemize a feature list.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "Icon pop-in illustrating spoken word/feature list"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "Sustained micro-punch-ins during monologue",
+   "what_it_does": "Frequent small zoom punch-ins keep a single continuous take visually active.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "Sustained micro-punch-ins during monologue"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "animated circular scribble graphic",
+   "what_it_does": "A hand-drawn style circular scribble animates onto the frame.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "animated circular scribble graphic"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "contact info card slide-in",
+   "what_it_does": "A card with contact information slides into frame.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "contact info card slide-in"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "continuous high-angle tracking shot",
+   "what_it_does": "A single continuous tracking shot from a high angle follows the subject.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "continuous high-angle tracking shot"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "descriptive caption card under the screenshot",
+   "what_it_does": "A caption card sits beneath a screenshot describing it.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "descriptive caption card under the screenshot"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "downshift to smaller instructional captions",
+   "what_it_does": "Captions shrink in size to shift into a more instructional register.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "downshift to smaller instructional captions"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "extreme close-up on eye, direct address",
+   "what_it_does": "An extreme close-up on the eye with shallow focus creates an intimate direct-address moment.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "extreme close-up on eye, very shallow focus, direct address"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "extreme low-angle handheld close-up",
+   "what_it_does": "A low-angle handheld close-up shot with no captions.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "extreme low-angle handheld close-up, no captions"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "finished vertical clip preview inset",
+   "what_it_does": "A finished vertical clip with styled captions plays inside a framed inset preview.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "finished vertical clip preview with styled highlighted captions playing inside a framed inset"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "hold across cut (title persists)",
+   "what_it_does": "A title persists on screen through a location-change cut.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "hold across cut (title persists through location change)"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "italic serif caption card over blurred zoom footage",
+   "what_it_does": "An italic serif caption card overlays blurred zoomed footage.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "italic serif caption card over blurred zoom footage"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "kinetic greeting text swipe",
+   "what_it_does": "A greeting text swipes onto the screen kinetically.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "kinetic greeting text swipe"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "location-reveal walk-in",
+   "what_it_does": "The subject walks into frame revealing a new location.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "location-reveal walk-in"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "outdoor walk-and-text overlay",
+   "what_it_does": "The speaker walks outdoors while text overlays appear.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "outdoor walk-and-text overlay"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "oversized single-word caption drop",
+   "what_it_does": "A single oversized word caption drops in with a colored punctuation dot.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "oversized single-word caption drop ('cheating') with colored punctuation dot"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "oversized stat numeral animation",
+   "what_it_does": "A large stat numeral animates onto the screen.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "oversized stat numeral animation"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "pause-icon wipe transition",
+   "what_it_does": "A pause-icon graphic wipes across the frame as a transition.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "pause-icon wipe transition"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "photo swap on a whip",
+   "what_it_does": "A whip motion is used to swap between photos.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "photo swap on a whip"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "prop-to-3D-icon transformation",
+   "what_it_does": "A physical prop morphs into a 3D icon graphic.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "prop-to-3D-icon transformation"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "quote-mark emphasis on a single word",
+   "what_it_does": "Quote marks emphasize a single word on screen.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "quote-mark emphasis on a single word"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "recurring location/prop callback",
+   "what_it_does": "A location or prop reappears across the video as a callback.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "recurring location/prop callback"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "slow push/reveal as subject leans back",
+   "what_it_does": "A slow camera push reveals more of the frame as the subject leans back.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "slow push/reveal as subject leans back"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "small reaction icons",
+   "what_it_does": "Small reaction icons (emoji-like) appear on screen.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "small reaction icons"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "sped-through UI scrolling",
+   "what_it_does": "UI scrolling is sped up to show rapid browsing.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "sped-through UI scrolling"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "vertical line wipe",
+   "what_it_does": "A vertical line wipes across the frame as a transition.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "vertical line wipe"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "walking-through-door b-roll",
+   "what_it_does": "B-roll footage shows someone walking through a door.",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "walking-through-door b-roll"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "white-flash whip transition into app splash logos",
+   "what_it_does": "A white-flash whip transitions into a black screen showing app splash logos (CapCut, TikTok).",
+   "arms": "silent",
+   "evidence": "single-arm",
+   "videos_silent": 1,
+   "videos_heard": 0,
+   "videos_max": 1,
+   "silent_names": [
+    "white-flash whip transition into black screen with app splash logos (CapCut, then TikTok)"
+   ],
+   "heard_names": []
+  },
+  {
+   "family": "Color Drain and Spotlight",
+   "what_it_does": "Color desaturates around a spotlighted subject or element.",
+   "arms": "heard",
+   "evidence": "single-arm",
+   "videos_silent": 0,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [],
+   "heard_names": [
+    "Color Drain and Spotlight"
+   ]
+  },
+  {
+   "family": "L-cut",
+   "what_it_does": "Audio from the next scene begins before its visual cut, bridging shots.",
+   "arms": "heard",
+   "evidence": "single-arm",
+   "videos_silent": 0,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [],
+   "heard_names": [
+    "L-cut"
+   ]
+  },
+  {
+   "family": "Phone Camera UI Overlay",
+   "what_it_does": "A UI overlay is shown as captured through a phone camera view.",
+   "arms": "heard",
+   "evidence": "single-arm",
+   "videos_silent": 0,
+   "videos_heard": 1,
+   "videos_max": 1,
+   "silent_names": [],
+   "heard_names": [
+    "Phone Camera UI Overlay"
+   ]
+  }
+ ]
+}

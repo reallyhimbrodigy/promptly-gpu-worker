@@ -135,6 +135,7 @@ export const Comp: React.FC<{dir: string; n: number; rung: string}> = ({dir, n, 
 @app.function(image=image, cpu=8, memory=16384, timeout=3600)
 def ladder(source_url: str = "", seconds: float = 2.2) -> dict:
     import json
+    import re
     import subprocess
     import time
 
@@ -227,7 +228,7 @@ def ladder(source_url: str = "", seconds: float = 2.2) -> dict:
                     pass
             low = ln.lower()
             if "delayrender" in low or "handle" in low or "timed out" in low:
-                _delay.append(ln[:200])
+                _delay.append(ln[:220])
         # ABSENCE IS A STATE. Asking for frame timing and getting none means
         # the hook never fired — not that the frames were evenly spaced.
         _gaps = ("REQUESTED_BUT_ABSENT"
@@ -248,9 +249,28 @@ def ladder(source_url: str = "", seconds: float = 2.2) -> dict:
                      "stall_share": (round(sum(_big) / sum(_d), 3)
                                      if sum(_d) else None),
                      "top5": _d[-5:]}
+        # EVERY HANDLE, BY LABEL, WITH ITS LIFETIME. Verbose prints
+        # `[Tab N, delayRender()] "label" handle was cleared after Xms`. The
+        # handle holding ~500ms per frame names itself; six sampled lines
+        # could not show which, and a median that lands on a round number is a
+        # timer waiting on something, not work.
+        _h = {}
+        for ln in _delay:
+            _m = re.search(r'delayRender\(\)\]\s*"([^"]{0,90})".*?after\s+(\d+)ms', ln)
+            if not _m:
+                continue
+            _lab = _m.group(1)[:60]
+            _ms = int(_m.group(2))
+            _e = _h.setdefault(_lab, {"n": 0, "total_ms": 0, "max_ms": 0})
+            _e["n"] += 1
+            _e["total_ms"] += _ms
+            _e["max_ms"] = max(_e["max_ms"], _ms)
+        _handles = dict(sorted(_h.items(), key=lambda kv: -kv[1]["total_ms"])[:6])
         return {"wall_s": round(time.time() - t0, 2), "job": job,
                 "frame_gaps_ms": _gaps,
-                "delay_lines": _delay[:6],
+                "handles": _handles or ("NO HANDLE LINES PARSED from %d "
+                                        "delay-ish line(s)" % len(_delay)),
+                "delay_lines": _delay[:4],
                 "frames_actual": _actual,
                 "ms_per_frame": (round(job["ms"] / n, 1)
                                  if job.get("ok") and job.get("ms") else None),
@@ -324,6 +344,8 @@ def main():
         v = r.get("rungs", {}).get(k) or {}
         if v.get("frame_gaps_ms"):
             print(f"    {k} frame gaps ms: {v['frame_gaps_ms']}")
+        if v.get("handles"):
+            print(f"    {k} handles by total ms: {v['handles']}")
         for ln in (v.get("delay_lines") or [])[:4]:
             print(f"      {k} | {ln}")
     for k in sorted(r.get("rungs", {})):

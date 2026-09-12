@@ -1,0 +1,131 @@
+You are building a REFERENCE RECORD of how this video is EDITED.
+
+You are watching an edit a professional made. Two jobs: say WHAT IS THERE, in
+your own words, and say WHAT MAKES IT GOOD.
+
+Return JSON only, matching exactly:
+
+{
+  "hook_structure": "<the hook named as a STRUCTURE, not a label. e.g. 'curiosity-gap + insider hook: secret framing -> loss/threat framing'>",
+  "first_visual_change_s": <float or null>,
+  "what_makes_this_good": "<2-4 sentences. What would a professional editor point at in this video and say 'that is why this works'? Be specific to THIS video: the thing that makes it feel expensive, elegant, deliberate — or the thing that makes it feel cheap, if that is the honest answer. Not a summary of the content.>",
+  "signature_moves": [
+    {
+      "move": "<a move this editor uses REPEATEDLY in this video, your own words>",
+      "what_it_does": "<the observable effect on the viewer or the screen>",
+      "where": "<beat indices, e.g. '2, 7, 11'>"
+    }
+  ],
+  "beats": [
+    {
+      "beat_index": <int>,
+      "t_start": <float>, "t_end": <float>,
+      "purpose": "hook|claim|evidence|turn|payoff|close|breath",
+      "speaker_on_screen": <bool>,
+      "caption_layer": "running"|"absent",
+      "treatment": [
+        {
+          "name": "<what this IS, in your own words>",
+          "what_it_does": "<the observable effect — what changes on screen or in the ear>"
+        }
+      ],
+      "cutaway_subject": "<what the b-roll literally SHOWS>" or null,
+      "card_text": "<verbatim on-screen text>" or null,
+      "craft": "<what makes THIS moment work, or null if nothing here stands out. Why it feels professional, elegant, expensive. A beat that is merely competent gets null — do not manufacture craft.>",
+      "read": "<one sentence: why this treatment, here>"
+    }
+  ]
+}
+
+RULES THAT MATTER:
+
+- `treatment` IS AN OPEN VOCABULARY. Name whatever you actually notice, in your
+  own words. It is NOT a menu. Earlier versions of this schema shipped a closed
+  enum of six — cut, punch_in, cutaway, card, text_placement, sfx — and the
+  corpus it produced recorded ZERO transitions across 153 beats, not because
+  there were none but because the annotator had no word for one. An enum is a
+  HYPOTHESIS about what exists; this pass exists to find out what actually does.
+  If you see a speed ramp, a colour shift, a held frame, a match cut, a sound
+  that carries across a cut, a freeze, a reframe, a text kinetic, a
+  masked reveal, a J-cut, a beat that lands on the music — say so, in the words
+  that describe it. The families above are worth knowing as COMMON cases. They
+  are not the permitted set and you are not scored on using them.
+
+- ANYTHING NAMED MUST SAY WHAT IT DOES. `what_it_does` is required on every
+  treatment. A name with nothing behind it is not a finding — it is a label,
+  and this corpus has been read as measurement before. If you cannot say what
+  a thing does on screen or in the ear, do not name it.
+
+- DO NOT INFLATE. An open vocabulary is an invitation to find something at every
+  beat, which would be worth less than the zero it replaces. Name what is
+  ACTUALLY there. A beat where the editor did nothing but hold is the most
+  common choice in a good edit and must be recorded as such.
+
+- CAPTIONS ARE NOT A TREATMENT. `caption_layer` records whether word-by-word
+  captions are running under this beat. They usually are, for the whole video —
+  that is a property of the edit, NOT a per-beat decision. Recording them as a
+  treatment made every beat non-bare and made restraint unmeasurable: on one
+  pass over 10 references, 126 of 175 beats carried a caption treatment and ZERO
+  beats came back bare. Put running captions in `caption_layer` and leave them
+  out of `treatment`. A DISCRETE text event — a title, a callout, a label that
+  appears for this beat and is not part of the running caption track — IS a
+  treatment and you should name it.
+
+- `treatment: []` is a REAL AND EXPECTED ANSWER, and on a well-edited video it
+  should be COMMON — the editor holding on the speaker with only captions
+  running is a deliberate act of restraint. A bare beat still requires a `read`
+  saying WHY it is bare — what made holding correct there.
+
+- `craft` IS THE POINT OF THIS PASS AND IT IS NOT A SECOND `read`. `read` says
+  why this treatment is HERE. `craft` says what makes it GOOD — the timing that
+  makes a cut feel inevitable, the restraint that makes the next thing land, the
+  detail that costs money. Most beats have no craft worth naming and get null.
+  A record where every beat has craft is a record where none of it means
+  anything.
+
+- `first_visual_change_s` is when ANYTHING first changes on screen — a cut, a
+  cutaway, a card, a title. If nothing changes for the whole video, return null.
+  Null is a finding, not a failure.
+
+- Describe ONLY what is visible in the frames, or audible if you are told about
+  audio. Do not infer a cut you cannot see. Cut timestamps detected mechanically
+  are supplied below; treat them as ground truth for WHERE cuts are.
+
+- Per-word caption treatment is in scope and valuable: if a specific word is
+  styled (colour, italic, size) note it in `card_text` and `read`.
+
+YOU CAN HEAR THIS CLIP. THAT IS NEW AND IT CHANGES WHAT IS OBSERVABLE.
+
+Every previous reading of this corpus was made from SILENT JPEG FRAMES. The
+annotator was sent stills and a transcript and nothing else, so it could not
+hear a sound effect however many there were — and the corpus still reported a
+sound-effect rate, which was a measurement of what a deaf instrument saw. An
+open vocabulary on a deaf reader can still only discover VISUAL families.
+
+So: the audible edit is in scope and is as much a treatment as anything on
+screen. Name what you HEAR the same way you name what you see, in your own
+words, each with what it does. Among the things that were structurally
+unsayable before:
+
+- SOUND EFFECTS — whooshes, risers, impacts, clicks, stingers, pops. Where they
+  land relative to the cut and the word.
+- MUSIC — whether a bed is running, when it enters or drops out, whether it
+  changes with the section. A DROP TO SILENCE is a treatment and often the
+  strongest one in a video.
+- THE BEAT — whether cuts land on it, ahead of it, or ignore it entirely.
+  "Cuts land on the beat" is a claim you can now actually check.
+- SILENCE BEFORE A PAYOFF — a held pause with nothing under it. The corpus has
+  never been able to record one.
+- VOICE — a laugh, a breath, an emphasis, a pitch shift, a delivery change.
+  Where a laugh lands is an editorial decision.
+- AUDIO ACROSS A CUT — sound that starts before the picture changes or carries
+  over after it (a J-cut or L-cut). Invisible by construction in frames.
+- AUDIO PROCESSING — a filter, a duck under voiceover, a sudden loudness change.
+
+THE SAME DISCIPLINE APPLIES. Anything you name must say what it does, in
+`what_it_does`. Do not inflate: a video with no music has no music, and saying
+so is the finding. A sound you are not confident you hear is not a finding.
+
+AND DO NOT LET AUDIO CROWD OUT THE PICTURE. The visual families are still the
+majority of the edit. This pass must be a SUPERSET of what a silent reading
+would find, not a replacement for it.

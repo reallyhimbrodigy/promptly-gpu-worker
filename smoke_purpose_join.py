@@ -104,10 +104,48 @@ check("a removed block says it was REMOVED, not absent",
 check("an unreadable index says so",
       "NONE AVAILABLE"
       in _blk_with(load_reference_index=lambda *a, **k: ([], {"why": "x"}))([]))
+# THE STUB IS DERIVED FROM THE LIVE INDEX, NOT A LIST OF CORPUS NAMES. This
+# hardcoded {"overlay_text","cut","card","punch_in","sfx"} — the SIX-WORD
+# corpus's vocabulary — to force the "everything here is unbuildable" branch.
+# Against an open-vocabulary index those names appear nowhere, so the filter
+# removed nothing, a pool survived, and the branch under test never ran. The
+# leg did not catch a regression; it stopped being able to reach its own
+# subject. Make the stub say "every treatment this corpus actually contains is
+# unbuildable" and it reaches the branch whatever the vocabulary is.
+# READ THE SHIPPED INDEX FILE DIRECTLY. This smoke deliberately never imports
+# the module — it execs one compiled block against a stub namespace — so it has
+# no load_reference_index to call.
+_all_treats = {_t for _x in (json.loads(
+                   pathlib.Path("reference_index.json").read_text()
+               ).get("beats") or [])
+               for _t in (_x.get("treat") or [])}
+check("the unbuildable stub covers the shipped vocabulary (non-vacuity)",
+      bool(_all_treats),
+      "the index carries no treatments at all, so the leg below cannot reach "
+      "the branch it tests")
+# THE BRANCH IS DRIVEN DIRECTLY, because the corpus can no longer reach it
+# through the unbuildable stub alone. The filter is
+# `not (_unbuildable & set(beat["treat"]))`, and a BARE beat has an empty treat
+# set — so it survives any filter, correctly: an editor holding is a buildable
+# example. The merged corpus carries 38 bare beats where the six-word corpus
+# carried ZERO (captions were recorded as a treatment on every beat), so the
+# stub that used to empty every pool now cannot empty any.
+#
+# That is the corpus improving, not the check failing. Supply an index whose
+# beats ALL carry an unbuildable treatment, and the branch is reachable again
+# whatever the real corpus looks like.
+_UNB = "__unbuildable_family__"
+_fake = [{"i": _i, "purpose": _p, "dur": 2.0, "treat": [_UNB],
+          "spk": True, "card_text": None, "read": "x"}
+         for _i, _p in enumerate(_PURPOSES)]
 check("a purpose with no BUILDABLE example says how many carry it",
       "no buildable example" in _blk_with(
-          reference_unbuildable=lambda *a, **k: {"overlay_text", "cut", "card",
-                                                 "punch_in", "sfx"})([]),
+          load_reference_index=lambda *a, **k: (_fake, {"state": "COMPLETE",
+                                                        "beats_in_corpus": len(_fake),
+                                                        "builds_as": {},
+                                                        "vocabulary": [_UNB],
+                                                        "why": ""}),
+          reference_unbuildable=lambda *a, **k: {_UNB})([]),
       "a header with nothing under it reads as 'editors place nothing here' — "
       "a judgement the corpus never made")
 

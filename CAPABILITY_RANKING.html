@@ -1,0 +1,591 @@
+<title>Capability Ranking</title>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;800&family=Source+Sans+3:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+:root {
+  --ground:#F4F2ED; --surface:#FFFFFF; --sunk:#EAE7E0;
+  --ink:#16201F; --ink-2:#4A5856; --muted:#778482; --line:#D8D4CB;
+  --signal:#B4762A;
+  --now:#1F8F68; --route:#B4762A; --layer:#4C63C4; --behav:#8B54B8; --build:#B9503F;
+  --disp:"Archivo",system-ui,sans-serif;
+  --body:"Source Sans 3",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground:#0D1315; --surface:#141D1F; --sunk:#0A1011;
+    --ink:#E3EAE8; --ink-2:#A7B6B4; --muted:#7D8C8B; --line:#243033;
+    --signal:#E8A33D;
+    --now:#43BE8E; --route:#E8A33D; --layer:#7D93EC; --behav:#B989E0; --build:#DE7563;
+  }
+}
+:root[data-theme="dark"] {
+  --ground:#0D1315; --surface:#141D1F; --sunk:#0A1011;
+  --ink:#E3EAE8; --ink-2:#A7B6B4; --muted:#7D8C8B; --line:#243033;
+  --signal:#E8A33D;
+  --now:#43BE8E; --route:#E8A33D; --layer:#7D93EC; --behav:#B989E0; --build:#DE7563;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--body);
+  font-size:16px;line-height:1.5;margin:0;padding-block:40px;padding-left:20px;
+  padding-right:20px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1000px;margin:0 auto}
+h1{font-family:var(--disp);font-weight:800;font-size:clamp(28px,5vw,44px);
+  line-height:1.04;letter-spacing:-.022em;margin:0 0 14px;text-wrap:balance}
+.lede{font-size:18px;color:var(--ink-2);max-width:62ch;margin:0 0 26px}
+.lede b{color:var(--ink)}
+.den{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 30px;padding:0;list-style:none}
+.den li{font-family:var(--mono);font-size:12px;color:var(--ink-2);
+  background:var(--sunk);border:1px solid var(--line);border-radius:3px;
+  padding:6px 10px;font-variant-numeric:tabular-nums}
+.den b{color:var(--ink);font-weight:600}
+.headline{background:var(--surface);border:1px solid var(--line);
+  border-left:3px solid var(--signal);border-radius:4px;padding:20px 22px;
+  margin:0 0 40px;display:grid;grid-template-columns:repeat(3,1fr);gap:20px}
+.headline div{min-width:0}
+.headline b{font-family:var(--disp);font-weight:800;font-size:34px;
+  display:block;line-height:1;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums}
+.headline span{font-size:13px;color:var(--muted);display:block;margin-top:6px}
+.headline .hi b{color:var(--signal)}
+.hnote{grid-column:1/-1;font-size:14px;color:var(--ink-2);margin:2px 0 0;
+  padding-top:14px;border-top:1px solid var(--line)}
+.tier{margin:0 0 34px}
+.tier-h{display:flex;gap:14px;align-items:center;margin:0 0 6px}
+.ord{font-family:var(--disp);font-weight:800;font-size:15px;flex:none;
+  width:28px;height:28px;border-radius:50%;display:grid;place-items:center;
+  color:var(--ground);background:var(--tc)}
+.tier h2{font-family:var(--disp);font-weight:600;font-size:20px;margin:0;
+  letter-spacing:-.01em}
+.tag{margin:1px 0 0;font-size:13px;color:var(--tc);font-weight:600}
+.blurb{margin:0 0 14px;font-size:14.5px;color:var(--ink-2);max-width:74ch}
+.t-now{--tc:var(--now)} .t-route{--tc:var(--route)}
+.t-layer{--tc:var(--layer)} .t-behav{--tc:var(--behav)} .t-build{--tc:var(--build)}
+.rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:1px;
+  background:var(--line);border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.row{background:var(--surface);display:grid;
+  grid-template-columns:86px 132px 1fr;gap:18px;padding:14px 16px;align-items:start}
+.demand{text-align:right;font-variant-numeric:tabular-nums}
+.demand b{font-family:var(--disp);font-weight:800;font-size:19px;display:block;
+  line-height:1.1}
+.demand .u{font-size:11px;color:var(--muted);display:block}
+.demand .pct{font-family:var(--mono);font-size:12px;color:var(--tc);
+  font-weight:600;display:block;margin-top:3px}
+.supply{display:flex;flex-direction:column;gap:4px}
+.arm{display:flex;align-items:center;gap:6px}
+.al{font-size:10px;color:var(--muted);width:34px;flex:none;letter-spacing:.04em;
+  text-transform:uppercase}
+.bar{display:flex;gap:1.5px;flex:none}
+.bar i{width:5px;height:11px;border-radius:1px;background:var(--sunk);
+  border:1px solid var(--line)}
+.bar i.on{background:var(--tc);border-color:var(--tc)}
+.an{font-family:var(--mono);font-size:10.5px;color:var(--ink-2);
+  font-variant-numeric:tabular-nums}
+.corro,.single{font-family:var(--mono);font-size:10px;letter-spacing:.03em;
+  margin-top:2px}
+.corro{color:var(--tc);font-weight:600}
+.single{color:var(--muted)}
+.what{min-width:0}
+.what h3{font-family:var(--disp);font-weight:600;font-size:16px;margin:0 0 3px;
+  letter-spacing:-.005em;text-wrap:balance}
+.q{font-family:var(--mono);font-size:10px;color:var(--muted);
+  border:1px solid var(--line);border-radius:2px;padding:1px 4px;
+  vertical-align:2px;font-weight:400}
+.how{margin:0 0 6px;font-size:14px;color:var(--ink-2)}
+.near{margin:0;font-size:12px}
+.nl{font-size:10px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--muted);margin-right:5px}
+.near code{font-family:var(--mono);font-size:12px;color:var(--ink);
+  background:var(--sunk);border:1px solid var(--line);border-radius:2px;
+  padding:1px 5px}
+footer{margin-top:44px;padding-top:20px;border-top:1px solid var(--line);
+  font-size:13px;color:var(--muted);max-width:78ch}
+footer p{margin:0 0 9px}
+footer b{color:var(--ink-2);font-weight:600}
+footer code{font-family:var(--mono);font-size:12px}
+@media (max-width:640px){
+  .headline{grid-template-columns:1fr 1fr}
+  .row{grid-template-columns:1fr;gap:10px}
+  .demand{text-align:left;display:flex;align-items:baseline;gap:7px}
+  .demand .u,.demand .pct{display:inline;margin:0}
+}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<div class="wrap">
+<h1>What the examples do, and what users ask for</h1>
+<p class="lede">Every capability the pipeline cannot currently place, ranked by
+<b>evidence</b> — how many of the ten reference videos use it — against
+<b>demand</b> — how many real users ask for it by name. Supply is shown per
+reader, because two readers saw different things.</p>
+
+<ul class="den">
+  <li><b>10</b> reference videos · two independent readings</li>
+  <li><b>11,723</b> requests · <b>5,921</b> distinct · <b>7,960</b> users</li>
+  <li>demand counted across <b>users</b>, not requests</li>
+</ul>
+
+<div class="headline">
+  <div><b>31</b><span>motion-graphics components ship</span></div>
+  <div class="hi"><b>2</b><span>the agent can reach today</span></div>
+  <div><b>29</b><span>rendered, tested, unreachable</span></div>
+  <p class="hnote"><code>derive_card_type</code> returns only <code>StatCard</code>
+  or <code>PullQuote</code>. The largest category below is not missing
+  capability — it is capability with no route from a ruling to the component.</p>
+</div>
+
+
+<section class="tier t-now">
+  <header class="tier-h">
+    <span class="ord">1</span>
+    <div>
+      <h2>Buildable now</h2>
+      <p class="tag">Nothing to build · 2 families</p>
+    </div>
+  </header>
+  <p class="blurb">The component and the placement path both ship. These were never placed because the corpus that teaches the agent could not hear them.</p>
+  <ol class="rows">
+
+    <li class="row">
+      <div class="demand">
+        <b>1,182</b><span class="u">users</span>
+        <span class="pct">14.8%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">0/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h"></i><i class="h"></i></span><span class="an">8/10</span></span>
+        <span class="single">heard only</span>
+      </div>
+      <div class="what">
+        <h3>Whoosh/Pop Accent SFX</h3>
+        <p class="how">Nothing to build. Never placed because the corpus could not hear it.</p>
+        <p class="near"><span class="nl">nearest</span> <code>place_sfx + sfx inventory (SHIP)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>4</b><span class="u">users</span>
+        <span class="pct">0.1%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">0/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">5/10</span></span>
+        <span class="single">heard only</span>
+      </div>
+      <div class="what">
+        <h3>Click/Interaction SFX</h3>
+        <p class="how">Nothing to build. Same cause.</p>
+        <p class="near"><span class="nl">nearest</span> <code>place_sfx + sfx inventory (SHIP)</code></p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section class="tier t-route">
+  <header class="tier-h">
+    <span class="ord">2</span>
+    <div>
+      <h2>Route</h2>
+      <p class="tag">Needs a route, not a build · 11 families</p>
+    </div>
+  </header>
+  <p class="blurb">The component is rendered, tested and in VALID_MG_TYPES. What is missing is a path from a ruling to it — the same mechanism as the card conditions: the agent names what the moment is, the harness derives the component.</p>
+  <ol class="rows">
+
+    <li class="row">
+      <div class="demand">
+        <b>109</b><span class="u">users</span>
+        <span class="pct">1.4%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">1/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Simple stat/emoji graphic overlay</h3>
+        <p class="how">Route a ruling to EmojiCard. No new component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>EmojiCard (ships)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>24</b><span class="u">users</span>
+        <span class="pct">0.3%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">6/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h"></i></span><span class="an">9/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Platform outro/end card</h3>
+        <p class="how">Route a ruling to EndCard. No new component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>EndCard (ships)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>24</b><span class="u">users</span>
+        <span class="pct">0.3%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">3/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Split-screen comparison of two contents</h3>
+        <p class="how">Route + two source spans. No new component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>EvidenceCard / DeviceMockup (ship)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>23</b><span class="u">users</span>
+        <span class="pct">0.3%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">1/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Step-by-step caption narration over demo</h3>
+        <p class="how">Route + step text per beat. No new component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>StepDivider / SectionDivider (ship)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>22</b><span class="u">users</span>
+        <span class="pct">0.3%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">4/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">6/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Cursor/UI callout highlight</h3>
+        <p class="how">Route + a cursor position per beat. No new component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>Reticle / AnnotationArrow / MouseDrag (ship)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>11</b><span class="u">users</span>
+        <span class="pct">0.1%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">1/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Floating labeled UI/graphic elements</h3>
+        <p class="how">Route a ruling to PillCluster. No new component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>PillCluster (ships)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>9</b><span class="u">users</span>
+        <span class="pct">0.1%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">1/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Floating people/location graphic</h3>
+        <p class="how">Route a ruling. No new component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>PillCluster / NamePlate (ship)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>7</b><span class="u">users</span>
+        <span class="pct">0.1%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">6/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">0/10</span></span>
+        <span class="single">silent only</span>
+      </div>
+      <div class="what">
+        <h3>Full-screen title/thesis card</h3>
+        <p class="how">Route a ruling. No new component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>EditorialQuote / SectionDivider (ship)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>4</b><span class="u">users</span>
+        <span class="pct">0.1%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">2/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Automated progress/loading indicator</h3>
+        <p class="how">Route a ruling to ProgressBar. No new component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>ProgressBar (ships)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>2</b><span class="u">users</span>
+        <span class="pct">0.0%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">1/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>3D icon animation <span class="q" title="nearest component is not the same move">approx</span></h3>
+        <p class="how">Nearest ships but is not the same move. Needs a real 3D path.</p>
+        <p class="near"><span class="nl">nearest</span> <code>DeviceMockup (ships) — not 3D</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>1</b><span class="u">users</span>
+        <span class="pct">0.0%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">2/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Typed search/URL graphic</h3>
+        <p class="how">Route + the string to type. Closest, not exact.</p>
+        <p class="near"><span class="nl">nearest</span> <code>Stamp / DropBanner (ship)</code></p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section class="tier t-layer">
+  <header class="tier-h">
+    <span class="ord">3</span>
+    <div>
+      <h2>Caption Layer</h2>
+      <p class="tag">One capability, not three · 3 families</p>
+    </div>
+  </header>
+  <p class="blurb">All three are the caption layer, which already runs on every job. What is missing is per-word control exposed to the ruling surface.</p>
+  <ol class="rows">
+
+    <li class="row">
+      <div class="demand">
+        <b>60</b><span class="u">users</span>
+        <span class="pct">0.8%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">4/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">0/10</span></span>
+        <span class="single">silent only</span>
+      </div>
+      <div class="what">
+        <h3>Word-by-word caption build</h3>
+        <p class="how">Expose per-word reveal timing on the existing caption layer.</p>
+        <p class="near"><span class="nl">nearest</span> <code>caption layer (runs every job)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>31</b><span class="u">users</span>
+        <span class="pct">0.4%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">5/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">1/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Decorative per-word caption styling</h3>
+        <p class="how">Expose per-word style on the existing caption layer.</p>
+        <p class="near"><span class="nl">nearest</span> <code>caption layer (runs every job)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>7</b><span class="u">users</span>
+        <span class="pct">0.1%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">4/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">0/10</span></span>
+        <span class="single">silent only</span>
+      </div>
+      <div class="what">
+        <h3>Colored keyword highlight within captions</h3>
+        <p class="how">Expose per-word colour on the existing caption layer.</p>
+        <p class="near"><span class="nl">nearest</span> <code>caption layer (runs every job)</code></p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section class="tier t-behav">
+  <header class="tier-h">
+    <span class="ord">4</span>
+    <div>
+      <h2>Behaviour</h2>
+      <p class="tag">Reachable component, wrong behaviour · 1 family</p>
+    </div>
+  </header>
+  <p class="blurb">StatCard is one of the only two components the agent can reach today. The corpus says the number ticks; the component renders it static.</p>
+  <ol class="rows">
+
+    <li class="row">
+      <div class="demand">
+        <b>8</b><span class="u">users</span>
+        <span class="pct">0.1%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">6/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">4/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Escalating counter/stat ticking animation</h3>
+        <p class="how">Component reachable, wrong behaviour: add a count-up to StatCard.</p>
+        <p class="near"><span class="nl">nearest</span> <code>StatCard (REACHABLE, static)</code></p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section class="tier t-build">
+  <header class="tier-h">
+    <span class="ord">5</span>
+    <div>
+      <h2>Build</h2>
+      <p class="tag">Genuinely new work · 5 families</p>
+    </div>
+  </header>
+  <p class="blurb">Nothing close ships. These are the only entries on this page that are a build in the ordinary sense.</p>
+  <ol class="rows">
+
+    <li class="row">
+      <div class="demand">
+        <b>206</b><span class="u">users</span>
+        <span class="pct">2.6%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">6/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h on"></i><i class="h"></i></span><span class="an">9/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Dominant kinetic title text synced to speech</h3>
+        <p class="how">Frame-dominant kinetic type synced to word timing. New.</p>
+        <p class="near"><span class="nl">nearest</span> <code>text family (overlay only)</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>142</b><span class="u">users</span>
+        <span class="pct">1.8%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">3/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">0/10</span></span>
+        <span class="single">silent only</span>
+      </div>
+      <div class="what">
+        <h3>Logo idle branding animation</h3>
+        <p class="how">Needs a brand-asset pipeline (user logo upload).</p>
+        <p class="near"><span class="nl">nearest</span> <code>nothing close</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>97</b><span class="u">users</span>
+        <span class="pct">1.2%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s on"></i><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">3/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">0/10</span></span>
+        <span class="single">silent only</span>
+      </div>
+      <div class="what">
+        <h3>3D perspective UI/gallery browse graphic</h3>
+        <p class="how">No 3D compositor exists.</p>
+        <p class="near"><span class="nl">nearest</span> <code>nothing close</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>4</b><span class="u">users</span>
+        <span class="pct">0.1%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">1/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Split-screen picture-in-picture</h3>
+        <p class="how">No PIP compositor.</p>
+        <p class="near"><span class="nl">nearest</span> <code>nothing close</code></p>
+      </div>
+    </li>
+
+    <li class="row">
+      <div class="demand">
+        <b>2</b><span class="u">users</span>
+        <span class="pct">0.0%</span>
+      </div>
+      <div class="supply">
+        <span class="arm"><span class="al">silent</span><span class="bar"><i class="s on"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i><i class="s"></i></span><span class="an">1/10</span></span>
+        <span class="arm"><span class="al">heard</span><span class="bar"><i class="h on"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i><i class="h"></i></span><span class="an">1/10</span></span>
+        <span class="corro" title="found independently by both readers">both arms</span>
+      </div>
+      <div class="what">
+        <h3>Polaroid-style graphic reveal</h3>
+        <p class="how">No photo-frame component.</p>
+        <p class="near"><span class="nl">nearest</span> <code>nothing close</code></p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<footer>
+  <p><b>Supply</b> — the ten reference videos, read twice and merged without
+  collapsing. Arm A: claude-sonnet-5 over silent frames, 173 names, richer on
+  visual craft. Arm B: gemini-2.5-pro over the clip with audio, 136 names, the
+  only arm that can hear. Neither is a superset; a family both arms found is
+  marked <b>both arms</b> and is stronger evidence than either alone.</p>
+  <p><b>Demand</b> — <code>video_jobs.vibe_input</code>, 11,723 non-empty
+  requests, whitespace and case normalised, counted as distinct users. Matched
+  by word-boundary patterns in several languages; every match is auditable in
+  <code>demand_by_family.json</code>.</p>
+  <p><b>What is not here</b> — three families the references use that are not a
+  pipeline job at all: a phone held as a prop, a direct-to-camera gesture, an
+  over-the-shoulder framing. Those live in the source footage.</p>
+</footer>
+</div>

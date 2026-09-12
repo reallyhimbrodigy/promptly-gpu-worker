@@ -44,7 +44,7 @@ _MODEL = os.environ.get("PROMPTLY_CRAFT_MODEL", "gemini-2.5-pro")
               secrets=[modal.Secret.from_name("promptly-secrets"),
                        modal.Secret.from_name("gemini-vertex")])
 def analyse(video_bytes: bytes, label: str, weight: str,
-            model: str = _MODEL, url: str = "") -> dict:
+            model: str = _MODEL, url: str = "", sample_fps: float = 0.0) -> dict:
     """(state, prose, detail).
 
     TWO WAYS IN, because the two corpora live in different places. Zac's ten
@@ -57,10 +57,13 @@ def analyse(video_bytes: bytes, label: str, weight: str,
 
     t0 = time.time()
 
-    def out(state, prose=None, detail=""):
-        return {"label": label, "weight": weight, "state": state,
-                "prose": prose, "detail": detail, "model": model,
-                "wall_s": round(time.time() - t0, 1)}
+    def out(state, prose=None, detail="", **kw):
+        d = {"label": label, "weight": weight, "state": state,
+             "prose": prose, "detail": detail, "model": model,
+             "sample_fps": sample_fps or 1.0,
+             "wall_s": round(time.time() - t0, 1)}
+        d.update(kw)
+        return d
 
     if url and not video_bytes:
         # A DOWNLOAD THAT RETURNED SOMETHING THAT IS NOT A VIDEO must not be
@@ -108,8 +111,32 @@ def analyse(video_bytes: bytes, label: str, weight: str,
             location=os.environ.get("GOOGLE_CLOUD_LOCATION") or "global",
             credentials=creds,
             http_options=_gt.HttpOptions(timeout=900_000))
-        contents = [_gt.Part.from_bytes(data=video_bytes,
-                                        mime_type="video/mp4"), prompt]
+        # THE VIDEO SAMPLE RATE, NAMED RATHER THAN DEFAULTED.
+        #
+        # With no VideoMetadata, Gemini samples video at 1 FPS while the AUDIO
+        # track arrives continuously — two resolutions from one file. A 300ms
+        # dissolve is AUDIBLE and INVISIBLE, which is exactly the split in the
+        # corpus: sfx survived at 0.82/25s because the hits are heard, and
+        # transition read 0 of 153 because it exists only in frames that were
+        # never sampled. The worker pipeline has set VideoMetadata(fps=) since
+        # the Vertex migration; this pass never did.
+        _vpart = _gt.Part.from_bytes(data=video_bytes, mime_type="video/mp4")
+        if sample_fps and hasattr(_gt, "VideoMetadata"):
+            try:
+                _vpart.video_metadata = _gt.VideoMetadata(fps=float(sample_fps))
+            except Exception as _e:                               # noqa: BLE001
+                # NAMED, NOT SWALLOWED. A rate that did not take would make
+                # this run indistinguishable from the 1 fps one it is being
+                # compared against.
+                return out("FAILED", detail=f"VideoMetadata(fps={sample_fps}) "
+                                            f"refused: {type(_e).__name__} "
+                                            f"{str(_e)[:120]}")
+        elif sample_fps:
+            return out("FAILED", detail="VideoMetadata is absent from the "
+                                        "installed google-genai — the rate "
+                                        "cannot be set and the arm would be a "
+                                        "duplicate of the 1 fps pass")
+        contents = [_vpart, prompt]
         text, waited = "", 0.0
         for attempt in range(4):
             try:
@@ -146,7 +173,8 @@ def analyse(video_bytes: bytes, label: str, weight: str,
                           f"moment account")
     return out("MEASURED", prose=text,
                detail=f"{words} words, {stamps} timestamps "
-                      f"({stamps / max(words, 1) * 100:.1f}% density)")
+                      f"({stamps / max(words, 1) * 100:.1f}% density), "
+                      f"video sampled at {sample_fps or 1.0} fps")
 
 
 # A RATE IN THE CACHED PREFIX IS THE REGRESSION THIS WHOLE PASS EXISTS TO AVOID.
