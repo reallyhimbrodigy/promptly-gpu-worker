@@ -4988,6 +4988,66 @@ def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920,
 _TRIM_MIN_S = 0.6
 
 
+# THE BAR, AND THE POPULATION IT WAS MEASURED ON. Five round-65 clips, each
+# re-transcribed through the same nova-3 multi call the lane uses:
+#
+#   clip              words  language   min    p10    MEDIAN
+#   talking_head         85  en 85     0.723  0.981   1.000   real speech
+#   car_mid              23  en 23     0.198  0.532   0.824   real speech, noisy
+#   car_short             3  pt  3     0.142  0.142   0.418   NOTHING WAS SAID
+#   motion                0  —          —      —       —      no words at all
+#   screen_recording      0  —          —      —       —      no words at all
+#
+# car_short is a car in a flooded intersection: engine noise and a crowd, no
+# speech. Deepgram returned three Portuguese words and the pipeline burned one
+# on screen as a Cyrillic caption. The bar sits at 0.60, inside a gap running
+# from 0.418 to 0.824 — not fitted to a point, placed in the space between two
+# populations. n=1 on the failure side and that is stated rather than hidden:
+# a second no-speech clip that transcribes CONFIDENTLY would refute it.
+_CAPTION_CONF_FLOOR = 0.60
+
+
+def caption_confidence_state(words, floor=_CAPTION_CONF_FLOOR):
+    """(state, why) — may this clip be captioned at all? PURE.
+
+    PER CLIP, NEVER PER WORD, AND THAT IS THE WHOLE DESIGN. The obvious fix is
+    to drop words below a floor, and it is forbidden: patchy captions are a
+    DEFECT in this product, and the only permitted answers are full captions, no
+    captions with an honest note, or reject. Dropping the three worst words from
+    a sentence produces a caption that is wrong in a way the viewer blames on
+    the speaker.
+
+    So the question is not "which words are real" but "did anyone say anything".
+    A clip whose whole transcript is low-confidence is noise the model gave
+    words to, and the honest answer is silence.
+
+    THREE STATES. ABSENT is not a pass: if Deepgram returned no confidence at
+    all the instrument did not answer, and captioning on the strength of a
+    field that was never populated is the absence-as-value shape on the
+    decision that puts text on screen.
+    """
+    ws = list(words or [])
+    if not ws:
+        return "NO_SPEECH", "no words at all — nothing to caption"
+    confs = [w["conf"] for w in ws if isinstance(w.get("conf"), (int, float))]
+    if not confs:
+        return "ABSENT", ("the transcript carries no per-word confidence, so "
+                          "whether anyone spoke cannot be established — "
+                          "ABSENT, not assumed good")
+    import statistics
+    med = statistics.median(confs)
+    langs = {w["lang"] for w in ws if w.get("lang")}
+    if med < floor:
+        return "REFUSED", (
+            f"median word confidence {med:.3f} is below the {floor:.2f} floor "
+            f"over {len(confs)} word(s)"
+            + (f", all tagged {sorted(langs)}" if langs else "")
+            + " — this reads as noise the model gave words to, and a caption "
+              "nobody said is worse than no caption")
+    return "MEASURED", (f"median word confidence {med:.3f} over {len(confs)} "
+                        f"word(s)" + (f", {sorted(langs)}" if langs else ""))
+
+
 def beat_stalls(words, beats):
     """Per beat: the mechanical evidence a cut or trim could key on. PURE.
 
@@ -9640,8 +9700,51 @@ def edit(source_key: str, brief: str,
                                      utterances=True, filler_words=True))
         d = dgr.to_dict() if hasattr(dgr, "to_dict") else json.loads(dgr.to_json())
         alt = d["results"]["channels"][0]["alternatives"][0]
-        words = [{"w": w["word"], "s": round(w["start"], 3), "e": round(w["end"], 3)}
-                 for w in (alt.get("words") or [])]
+        # KEEP WHAT DECIDES WHETHER A WORD IS REAL. This kept the text and the
+        # timings and threw away the two fields Deepgram returns for exactly
+        # this question: per-word `confidence`, and — under language="multi" —
+        # the language it thinks each word is. Discarded at ingest, so nothing
+        # downstream could tell a word somebody said from a word the model
+        # guessed out of noise.
+        #
+        # ROUND 65, car_short: a 10s clip of a car in a flooded intersection,
+        # no speech, engine noise and a crowd. Deepgram returned one word and
+        # the pipeline burned it on screen as a Cyrillic caption — "ОЙ" — the
+        # only text in the whole output. A caption nobody said is worse than no
+        # caption, and the evidence to refuse it arrived in the same response
+        # and was dropped one line later.
+        #
+        # THREE STATES, NOT A DEFAULT. A word with no confidence field is
+        # ABSENT, never 1.0: `or 1.0` here would turn "the instrument did not
+        # say" into "certain", on the number that decides whether a caption
+        # appears.
+        words = []
+        for w in (alt.get("words") or []):
+            _wd = {"w": w["word"], "s": round(w["start"], 3),
+                   "e": round(w["end"], 3)}
+            if w.get("confidence") is not None:
+                try:
+                    _wd["conf"] = round(float(w["confidence"]), 4)
+                except (TypeError, ValueError):
+                    pass
+            _lang = w.get("language") or alt.get("language")
+            if _lang:
+                _wd["lang"] = str(_lang)
+            words.append(_wd)
+        led["asr_confidence"] = (
+            "MEASURED" if any("conf" in x for x in words)
+            else ("ABSENT" if words else "NO_WORDS"))
+        led["asr_languages"] = sorted({x["lang"] for x in words if x.get("lang")})
+        if words:
+            _cs = [x["conf"] for x in words if "conf" in x]
+            if _cs:
+                # NOT `_st` — pyflakes caught that name shadowed by a loop
+                # variable 4,500 lines below. Scope is not text.
+                import statistics as _stats_conf
+                led["asr_conf_stats"] = {
+                    "n": len(_cs), "min": round(min(_cs), 3),
+                    "median": round(_stats_conf.median(_cs), 3),
+                    "max": round(max(_cs), 3)}
       except Exception as e:
         # Guarded because run 5 proved it can throw. An unguarded network call
         # here crashes the container and the failure taxonomy learns nothing —
@@ -10045,11 +10148,31 @@ def edit(source_key: str, brief: str,
         # OUTPUT-TIME REMAP — module-level and unit-tested, because this is the
         # step the agent got wrong twice by hand and the failure is SILENT: the
         # captions simply drift against the speech and ffmpeg exits 0.
-        kept, cues = remap_words(spans, words), []
-        for i in range(0, len(kept), words_per_cue):
-            grp = kept[i:i + words_per_cue]
-            cues.append((grp[0]["s"], grp[-1]["e"],
-                         " ".join(g["w"] for g in grp).upper()))
+        kept = remap_words(spans, words)
+        # DID ANYBODY SAY ANYTHING? Asked once, for the whole clip, before a
+        # single cue exists. Round 65's car_short is 10s of engine noise and a
+        # crowd with no speech; Deepgram returned three Portuguese words and
+        # this loop burned one on screen as a Cyrillic caption — the only text
+        # in the output. The evidence to refuse it arrived in the same ASR
+        # response and was discarded at ingest.
+        #
+        # PER CLIP, NEVER PER WORD: dropping the worst words would produce a
+        # PATCHY CAPTION, which is a defect in this product and reads as the
+        # speaker misspeaking. Full captions, no captions with the reason said,
+        # or reject — those are the three answers.
+        _cap_state, _cap_why = caption_confidence_state(kept or words)
+        led["caption_state"] = _cap_state
+        led["caption_state_why"] = _cap_why
+        cues = []
+        if _cap_state == "MEASURED":
+            for i in range(0, len(kept), words_per_cue):
+                grp = kept[i:i + words_per_cue]
+                cues.append((grp[0]["s"], grp[-1]["e"],
+                             " ".join(g["w"] for g in grp).upper()))
+        else:
+            # LOUD, NOT SILENT. A run with no captions and no reason is
+            # indistinguishable from a caption step that never fired.
+            print(f"  CAPTIONS {_cap_state}: {_cap_why}", flush=True)
         # THE OUTPUT-TIME WORDS, KEPT. The Remotion caption pass rebuilds pages
         # from these — the SAME remap the SRT is written from — because caption
         # drift against speech is silent and ffmpeg exits 0 either way. One
