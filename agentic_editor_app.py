@@ -2839,6 +2839,34 @@ KNOWLEDGE_TOOLS = [{
                          "description": "targeted_change ONLY: the families the "
                                         "request asks for. One of: text, card, "
                                         "sfx, zoom, transition, cut, caption"},
+            # MEASURED ON REAL TRAFFIC, 2026-06-25..2026-09-12: 425 of 5,943
+            # distinct briefs (7.2%) and 338 of 7,958 users (4.2%) name
+            # something the edit must NOT do. "no captions" dominates, and the
+            # most common shape is a WHOLE-VIDEO brief with one exclusion —
+            # "viral and engaging no captions in video" — which declares
+            # full_edit and had nothing to carry the exclusion at all.
+            "forbidden": {"type": "array", "items": {"type": "string"},
+                          "description":
+                              "ANY MODE. The families this request says NOT to "
+                              "do — 'no captions', 'without subtitles', 'no "
+                              "filters', 'nothing else'. This is NOT the "
+                              "opposite of `families` and it is not only for "
+                              "targeted_change: a request can ask for a full "
+                              "edit AND rule one thing out, and that is the "
+                              "commonest shape it takes.\n\n"
+                              "PUT IT HERE EVEN WHEN THE REST OF THE BRIEF IS "
+                              "VAGUE. 'make it viral, no captions' is a full "
+                              "edit with `forbidden: [\"caption\"]` — the "
+                              "vagueness of the rest does not soften the one "
+                              "thing they were specific about.\n\n"
+                              "An exclusive phrasing names the OTHERS: 'only "
+                              "zooms' means every family except zoom is "
+                              "forbidden. 'just add captions and nothing else' "
+                              "is the same shape.\n\n"
+                              "Delivering a forbidden family FAILS THE RUN. It "
+                              "is the one part of the brief the user was "
+                              "explicit about, and it is the cheapest thing in "
+                              "the world to honour."},
             "targets": {"type": "object",
                         "description": (
                             "RESOLVE THE SOFT MODIFIERS. A request rarely gives "
@@ -8107,6 +8135,10 @@ def cutaway_source_ref(ref, sources, durations):
 
 FIDELITY_OK, FIDELITY_SHORT, FIDELITY_OVER, FIDELITY_UNSCOPED = (
     "FAITHFUL", "SHORT", "OVERREACHED", "UNSCOPED")
+# A FIFTH STATE, AND THE ONLY ONE THE USER SPELLED OUT. "no captions" is not a
+# scope the edit overshot — it is an instruction, and delivering the thing
+# somebody explicitly refused is a different failure from delivering extra.
+FIDELITY_FORBIDDEN = "FORBIDDEN"
 
 
 def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
@@ -8147,6 +8179,17 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
     # is led["caption_composited"], and the caller passes it.
     if captions_made:
         _built.add("caption")
+    # ── FORBIDDEN RUNS FIRST, AND IN EVERY MODE ────────────────────────────
+    # This sat behind the mode gate in every earlier version, which meant the
+    # commonest negative-constraint brief on real traffic — a full_edit that
+    # rules one thing out — returned UNSCOPED and NOTHING OBJECTED while the
+    # pipeline burned the captions the user had just refused.
+    _forbidden = {str(_f).lower() for _f in (_sc.get("forbidden") or [])}
+    _violated = sorted(_forbidden & _built)
+    if _violated:
+        return (FIDELITY_FORBIDDEN, [], _violated,
+                "the request said NOT to do %s and the edit contains it. This "
+                "is the one thing they were explicit about." % _violated)
     if _mode != "targeted_change":
         return (FIDELITY_UNSCOPED, [], sorted(_built),
                 "mode=%s — no declared family scope, so fidelity cannot be "
@@ -14228,7 +14271,16 @@ def edit(source_key: str, brief: str,
     led["fidelity"] = {"state": _fid_state, "missing": _fid_missing,
                        "unasked": _fid_unasked, "why": _fid_why}
     print("  FIDELITY        : %s — %s" % (_fid_state, _fid_why), flush=True)
-    if _fid_state == FIDELITY_SHORT:
+    if _fid_state == FIDELITY_FORBIDDEN:
+        # LOUDEST OF THE FOUR FAILURES. SHORT and OVERREACHED are misjudged
+        # scope; this is an instruction disobeyed. 7.2% of distinct briefs and
+        # 4.2% of users name something the edit must not do, and the pipeline
+        # had never been tested on one.
+        fail("fidelity_forbidden",
+             "the request said NOT to do %s and the edit contains it — the one "
+             "part of the brief the user was explicit about"
+             % _fid_unasked)
+    elif _fid_state == FIDELITY_SHORT:
         fail("fidelity_short",
              "the request asked for %s and the output does not contain it — "
              "the one thing asked for is the one thing missing"
