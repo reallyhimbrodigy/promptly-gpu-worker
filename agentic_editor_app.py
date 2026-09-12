@@ -8781,6 +8781,46 @@ def _assert_build_reads_only_stored_fields(module_src: str) -> None:
     # AND A DERIVED FIELD MUST NOT ALSO BE ASKED FOR. Two ways to state one
     # thing is the defect this change removed; re-adding the field to the
     # schema would restore it silently.
+    # AND EVERY DERIVED FIELD MUST ACTUALLY BE WRITTEN INTO THE RECORD.
+    # TAKEN FROM c6, whose version has the inverse leg mine lacked: deriving a
+    # value and then dropping it is the same defect one step earlier, and my set
+    # comparison cannot see it because STORED_VERDICT_FIELDS is BUILT from
+    # DERIVED_VERDICT_FIELDS — "is it stored" was a tautology exactly where it
+    # needed to be a question.
+    #
+    # MY FIRST VERSION OF THIS LEG WAS SATISFIED BY ITS OWN MUTANT: it looked
+    # for ANY `rec[...]` write anywhere in admit_verdict, and `rec["why"] = ...`
+    # answers that. It must be the LOOP THAT ITERATES THE DERIVED FIELDS whose
+    # body writes `rec[<that loop's variable>]`.
+    _av = next((_n for _n in _ast.walk(_tree)
+                if isinstance(_n, _ast.FunctionDef) and _n.name == "admit_verdict"),
+               None)
+    if _av is None:
+        raise AssertionError("admit_verdict not found, so the derivation "
+                             "cannot be checked: ABSENT, not passing")
+    _ok_derive = False
+    for _f in _ast.walk(_av):
+        if not isinstance(_f, _ast.For):
+            continue
+        if "DERIVED_VERDICT_FIELDS" not in _ast.unparse(_f.iter):
+            continue
+        _names = [_t.id for _t in _ast.walk(_f.target) if isinstance(_t, _ast.Name)]
+        for _st in _ast.walk(_f):
+            if not isinstance(_st, _ast.Assign):
+                continue
+            for _tg in _st.targets:
+                if (isinstance(_tg, _ast.Subscript)
+                        and isinstance(_tg.value, _ast.Name)
+                        and _tg.value.id == "rec"
+                        and isinstance(_tg.slice, _ast.Name)
+                        and _tg.slice.id in _names):
+                    _ok_derive = True
+    if DERIVED_VERDICT_FIELDS and not _ok_derive:
+        raise AssertionError(
+            "admit_verdict does not write DERIVED_VERDICT_FIELDS into the "
+            "record it stores. A value derived and then dropped is "
+            "indistinguishable at the build from one never derived — and the "
+            "set check cannot see it, because STORED is built from DERIVED.")
     _both = sorted(set(DERIVED_VERDICT_FIELDS) & _offered)
     if _both:
         raise AssertionError(

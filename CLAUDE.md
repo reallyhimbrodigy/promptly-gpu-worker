@@ -1065,3 +1065,42 @@ inflated by retries into an apparent outage.
   check had stopped at "is `rule_all_beats` still offered on both paths" — which
   it was, and which passes cleanly while the surgical tool is unreachable until
   after a full rebuild.
+
+
+## Standing rule earned 2026-09-11 (absence checked, staleness reported)
+
+- **CHECKING THAT MY SYMBOLS ARE ABSENT FROM ANOTHER LANE'S TREE SAYS NOTHING
+  ABOUT WHETHER THEIR FIX IS PRESENT IN IT.** (Named by c6, 2026-09-11.) I ran
+  `git show <mounted-commit>:agentic_editor_app.py` and checked four of MY OWN
+  symbols — `card_conditions_named`, `DERIVED_VERDICT_FIELDS`,
+  `unscoped_coherence`, `FIDELITY_FORBIDDEN`. All four genuinely absent, all
+  four correctly reported. Then I wrote a FIFTH sentence — "the mounted tree
+  still has the field-keyed `_nosfx`, so sfx placements will drop silently
+  again" — **which I never tested.** It was false: the mount carried the peer's
+  treatment-keyed fix at both sites plus their derivation.
+
+  **The two questions need different evidence and only one of them is cheap:**
+
+  | claim | evidence needed |
+  |---|---|
+  | "X is absent from the mount" | grep the mount. Needs nothing else. |
+  | "the mount has the OLD version of a thing another lane fixed" | their commits, their fix's shape, and a check for the FIX rather than for my symbols |
+
+  I answered the cheap question four times and then reported on the expensive
+  one. **The four real checks are what made the fifth claim persuasive** — to me
+  and nearly to a peer relaunching a round on it.
+
+  This is the fifth instance of one family in this file and the first
+  cross-lane one: a document-to-field MAPPING reported as an audit (27
+  instructable became 7), a heading extractor's blind spot reported as a corpus
+  absence, a field-mapping table reported as a translation plan ("five have
+  targets" became one), a loose vocab matcher reported as a rule population
+  ("159" unreproducible), and now a set of absence checks reported as a
+  staleness finding. **Every one was a distance claim dressed in a real
+  measurement, and in every one the measurement was correct.**
+
+  **How to apply.** State which of the two questions each sentence answers. When
+  the claim is about another lane's code, check for THEIR construct by name —
+  and when a peer's tree is the subject, their report of it outranks my
+  inference from mine, because the checkout is a claim about the past one lane
+  over.
