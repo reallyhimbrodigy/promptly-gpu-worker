@@ -26,7 +26,13 @@ Return JSON only, matching exactly:
       "treatment": [
         {
           "name": "<what this IS, in your own words>",
-          "what_it_does": "<the observable effect — what changes on screen or in the ear>"
+          "what_it_does": "<the observable effect — what changes on screen or in the ear>",
+          "where": "<ON-SCREEN placements only, else null. Where it sits: upper_third | middle | lower_third | full_frame | corner | edge>",
+          "over_subject": "<ON-SCREEN only, else null. over_face | over_body | clear_of_subject | no_subject_visible>",
+          "size": "<ON-SCREEN only, else null. Share of FRAME HEIGHT it occupies: tiny | small | medium | large | dominant>",
+          "case": "<TEXT only, else null. UPPER | lower | Title | Mixed>",
+          "colour": "<ON-SCREEN only, else null. Its colour and the ground behind it, in plain words — e.g. 'white on the footage', 'black on cream', 'yellow word inside white caption'>",
+          "hold_s": "<ON-SCREEN only, else null. How long it stays up, in seconds, as a number>"
         }
       ],
       "cutaway_subject": "<what the b-roll literally SHOWS>" or null,
@@ -50,6 +56,19 @@ RULES THAT MATTER:
   masked reveal, a J-cut, a beat that lands on the music — say so, in the words
   that describe it. The families above are worth knowing as COMMON cases. They
   are not the permitted set and you are not scored on using them.
+
+- THE SIX PLACEMENT FIELDS ARE THE POINT OF THIS PASS AND THEY ARE NOT
+  OPTIONAL ON AN ON-SCREEN PLACEMENT. `where`, `over_subject`, `size`, `case`,
+  `colour` and `hold_s` are questions this corpus has never been asked, so
+  nobody knows what these editors actually do — and the pipeline has been
+  guessing. It puts an opaque numeral across the speaker's face; it renders
+  every overlay full-size and ALL CAPS. Whether that is wrong is a question
+  about YOUR TEN VIDEOS, and it can only be answered if you record it.
+  Answer them for every treatment that puts something ON SCREEN. Use null on a
+  sound, and null for `case` on anything that is not text. Do not guess: if a
+  placement is off-frame or you cannot see it clearly enough to say, write
+  null rather than a plausible value — a fabricated field is worse here than a
+  missing one, because the whole point is to count them.
 
 - ANYTHING NAMED MUST SAY WHAT IT DOES. `what_it_does` is required on every
   treatment. A name with nothing behind it is not a finding — it is a label,

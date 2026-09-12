@@ -5048,6 +5048,46 @@ def caption_confidence_state(words, floor=_CAPTION_CONF_FLOOR):
                         f"word(s)" + (f", {sorted(langs)}" if langs else ""))
 
 
+def cutaway_filter_graph(plans, geo):
+    """(filtergraph, last_label) for the cutaway composite. PURE.
+
+    HOISTED OUT OF THE DISPATCH, because a rule that lives inside `edit()` can
+    only be checked by a smoke that RESTATES it — and then the smoke proves its
+    own copy while the shipped path goes untested. This file has hoisted
+    `reedit_merge`, `plan_batch` and `spec_shortfall` for exactly that, and I
+    wrote the check for this one before the function, so my first three
+    properties were passing against a reimplementation: mutating the real graph
+    builder could not change the smoke's verdict at all.
+
+    Input 0 is the cut so far; input 1 is the ORIGINAL source, where the other
+    moment lives. There is no third input and no fetch.
+
+    `geo` is `geometry_normalise_filter`'s fragment: a semicolon-separated,
+    LABELLED GRAPH carrying {IN}/{OUT}/{i}, NOT a filter. Comma-appending it
+    onto a chain makes ffmpeg read the literal `[{IN}]` as a second input pad
+    to scale — "Too many inputs specified for the scale filter", which lost
+    every cutaway on round 65's motion. It is spliced as its own part with the
+    labels substituted, and `{i}` is made unique per cutaway or two of them
+    collide on the same intermediate.
+    """
+    n = len(plans)
+    parts = ["[1:v]split=%d%s" % (n, "".join(f"[cs{k}]" for k in range(n)))]
+    last = "0:v"
+    for k, p in enumerate(plans):
+        ch = (f"[cs{k}]trim={float(p['src_t0']):.3f}:{float(p['src_t1']):.3f},"
+              f"setpts=PTS-STARTPTS+{float(p['out_t0']):.3f}/TB")
+        if geo:
+            parts.append(ch + f"[cwraw{k}]")
+            parts.append(geo.format(IN=f"cwraw{k}", OUT=f"cw{k}", i=f"cw{k}"))
+        else:
+            parts.append(ch + f"[cw{k}]")
+        parts.append(f"[{last}][cw{k}]overlay=0:0:enable="
+                     f"'between(t,{float(p['out_t0']):.3f},"
+                     f"{float(p['out_t1']):.3f})'[cm{k}]")
+        last = f"cm{k}"
+    return ";".join(parts), last
+
+
 def beat_stalls(words, beats):
     """Per beat: the mechanical evidence a cut or trim could key on. PURE.
 
@@ -10891,27 +10931,10 @@ def edit(source_key: str, brief: str,
                          if _x.get("codec_type") == "video"), {})
             _cgeo, _cgmode, _ = geometry_normalise_filter(_cvs.get("width"),
                                                           _cvs.get("height"))
-            _n_cw = len(_cw_plans)
-            # split=N even when N is 1 — one idiom, so the single-cutaway case
-            # is not a second code path that only the rare run exercises.
-            _cparts = ["[1:v]split=%d%s" % (
-                _n_cw, "".join(f"[cs{_k}]" for _k in range(_n_cw)))]
-            _clast = "0:v"
-            for _k, _p in enumerate(_cw_plans):
-                _ch = (f"[cs{_k}]trim={_p['src_t0']:.3f}:{_p['src_t1']:.3f},"
-                       f"setpts=PTS-STARTPTS+{_p['out_t0']:.3f}/TB")
-                if _cgeo:
-                    # THE SAME NORMALISER THE CUT USED. Without it a landscape
-                    # source's cutaway arrives 3826x2160 and overlay pins it at
-                    # 0:0 — the delivered frame shows the top-left corner of the
-                    # extract, at the wrong scale, and every duration and frame
-                    # count still checks out.
-                    _ch += f",{_cgeo}"
-                _cparts.append(_ch + f"[cw{_k}]")
-                _cparts.append(f"[{_clast}][cw{_k}]overlay=0:0:enable="
-                               f"'between(t,{_p['out_t0']:.3f},"
-                               f"{_p['out_t1']:.3f})'[cm{_k}]")
-                _clast = f"cm{_k}"
+            # ONE BUILDER, CALLED NOT COPIED. This was thirteen lines of
+            # inline graph assembly that no check could reach.
+            _cfg, _clast = cutaway_filter_graph(_cw_plans, _cgeo)
+            _cparts = [_cfg]
             if cur == "cutaway.mp4":
                 fail("chain_writes_its_own_input",
                      "the cutaway composite would read and write "

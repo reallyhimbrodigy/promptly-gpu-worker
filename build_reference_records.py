@@ -184,7 +184,13 @@ Return JSON only, matching exactly:
       "treatment": [
         {
           "name": "<what this IS, in your own words>",
-          "what_it_does": "<the observable effect — what changes on screen or in the ear>"
+          "what_it_does": "<the observable effect — what changes on screen or in the ear>",
+          "where": "<ON-SCREEN placements only, else null. Where it sits: upper_third | middle | lower_third | full_frame | corner | edge>",
+          "over_subject": "<ON-SCREEN only, else null. over_face | over_body | clear_of_subject | no_subject_visible>",
+          "size": "<ON-SCREEN only, else null. Share of FRAME HEIGHT it occupies: tiny | small | medium | large | dominant>",
+          "case": "<TEXT only, else null. UPPER | lower | Title | Mixed>",
+          "colour": "<ON-SCREEN only, else null. Its colour and the ground behind it, in plain words — e.g. 'white on the footage', 'black on cream', 'yellow word inside white caption'>",
+          "hold_s": "<ON-SCREEN only, else null. How long it stays up, in seconds, as a number>"
         }
       ],
       "cutaway_subject": "<what the b-roll literally SHOWS>" or null,
@@ -208,6 +214,19 @@ RULES THAT MATTER:
   masked reveal, a J-cut, a beat that lands on the music — say so, in the words
   that describe it. The families above are worth knowing as COMMON cases. They
   are not the permitted set and you are not scored on using them.
+
+- THE SIX PLACEMENT FIELDS ARE THE POINT OF THIS PASS AND THEY ARE NOT
+  OPTIONAL ON AN ON-SCREEN PLACEMENT. `where`, `over_subject`, `size`, `case`,
+  `colour` and `hold_s` are questions this corpus has never been asked, so
+  nobody knows what these editors actually do — and the pipeline has been
+  guessing. It puts an opaque numeral across the speaker's face; it renders
+  every overlay full-size and ALL CAPS. Whether that is wrong is a question
+  about YOUR TEN VIDEOS, and it can only be answered if you record it.
+  Answer them for every treatment that puts something ON SCREEN. Use null on a
+  sound, and null for `case` on anything that is not text. Do not guess: if a
+  placement is off-frame or you cannot see it clearly enough to say, write
+  null rather than a plausible value — a fabricated field is worse here than a
+  missing one, because the whole point is to count them.
 
 - ANYTHING NAMED MUST SAY WHAT IT DOES. `what_it_does` is required on every
   treatment. A name with nothing behind it is not a finding — it is a label,
@@ -421,7 +440,25 @@ def main():
             if not _wd:
                 _ungrounded.append((_b.get("beat_index"), _nm, "no what_it_does"))
                 continue
-            _keep.append({"name": _nm, "what_it_does": _wd})
+            # KEEP THE WHOLE OBJECT. This rebuilt each treatment as exactly
+            # {"name", "what_it_does"} — so every field the annotator answered
+            # beyond the two being VALIDATED was silently deleted at the
+            # boundary. The six placement fields came back on all 22
+            # treatments of the shape check and arrived here as nothing.
+            #
+            # Same shape as the ASR ingest keeping word/start/end and dropping
+            # confidence, in the function written TODAY to stop names arriving
+            # without their evidence. A validator that reconstructs its input
+            # instead of annotating it throws away everything it was not
+            # looking for.
+            #
+            # And the accounting below ran AFTER this, so it printed 0 of 22
+            # and read as "the annotator ignored the new fields" when it was
+            # "this line deleted them" — a measurement of my own bug, reported
+            # as the model's behaviour.
+            _t2 = dict(_t)
+            _t2["name"], _t2["what_it_does"] = _nm, _wd
+            _keep.append(_t2)
         _b["treatment"] = _keep
     if _ungrounded:
         print(f"  UNGROUNDED  {len(_ungrounded)} treatment(s) dropped — a name "
@@ -430,6 +467,23 @@ def main():
             print(f"     beat {_bi}: {_nm!r} ({_why})")
     rec["ungrounded_dropped"] = [{"beat": b, "name": n, "why": w}
                                  for b, n, w in _ungrounded]
+    # ANSWERED vs LEFT NULL, COUNTED. The six placement fields are nullable by
+    # design — a sound has no colour — so a pass where the annotator ignored
+    # them entirely would look exactly like a pass over a video with nothing on
+    # screen. Without this the derived constraint would rest on a denominator
+    # nobody checked, which is how `transition: 0 of 153` happened.
+    _PF = ("where", "over_subject", "size", "case", "colour", "hold_s")
+    _ans = {k: 0 for k in _PF}
+    _tot = 0
+    for _b in (rec.get("beats") or []):
+        for _t in (_b.get("treatment") or []):
+            _tot += 1
+            for _k in _PF:
+                if _t.get(_k) not in (None, "", "null"):
+                    _ans[_k] += 1
+    rec["placement_fields_answered"] = {"of_treatments": _tot, **_ans}
+    print(f"  PLACEMENT   {_tot} treatment(s): "
+          + "  ".join(f"{_k} {_ans[_k]}" for _k in _PF))
 
     json.dump(rec, open(a.out, "w"), indent=1)
     beats = rec.get("beats") or []
