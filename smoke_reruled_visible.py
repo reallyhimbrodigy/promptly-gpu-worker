@@ -357,6 +357,96 @@ check("the eight fields are DERIVED from rule_all_beats, not pasted into "
       "hand-copied: %s — two declarations of one field is the divergence this "
       "closed, reintroduced by the fix for it" % _pasted)
 
+# ── beat_verdict IS A RE-EDIT TOOL ──────────────────────────────────────────
+# MEASURED over 24 runs in 8 rounds: 47 calls, 42 of them re-ruling a beat
+# rule_all_beats had already ruled — 89% discarded by first-wins. That is a
+# second ruling surface being reached for during a FIRST edit, where there is
+# nothing to be surgical about, at ~4,400 prefix tokens.
+_bv_filters = [n for n in ast.walk(_tree)
+               if isinstance(n, ast.ListComp)
+               and "beat_verdict" in ast.unparse(n)
+               and "name" in ast.unparse(n)]
+check("the tool list is filtered on `beat_verdict` at all",
+      len(_bv_filters) >= 1)
+_gate_src = _src
+check("it is WITHHELD on a first edit, not merely discouraged — a capability "
+      "in the schema will be used",
+      "if not _reedit:" in _gate_src
+      and 't.get("name") != "beat_verdict"' in _gate_src,
+      "telling a model not to use a tool it has is a preference, not a "
+      "property")
+
+# THE SAVING IS CONDITIONAL. A first edit stops carrying it; a re-edit pays.
+for _k in ("tool_prefix_tokens", "beat_verdict_offered",
+           "beat_verdict_tokens_saved"):
+    check("ledger key `%s` is assigned" % _k, _k in _assigned)
+_ts_prints = [n for n in ast.walk(_tree) if isinstance(n, ast.Call)
+              and getattr(n.func, "id", "") == "print"
+              and "TOOL SURFACE" in ast.unparse(n)]
+check("both numbers reach a real print() — a conditional saving reported as "
+      "one number is the blended-metric failure",
+      len(_ts_prints) >= 1)
+
+# EQUAL CAPABILITY, ASSERTED IN THE APP. Withholding a tool from one path must
+# not leave that path unable to do something the other can.
+check("the app RAISES if rule_all_beats is ever absent from a path — "
+      "withholding the singular tool is only safe while the plural one is "
+      "universal",
+      "rule_all_beats is not offered on this path" in _gate_src,
+      "without that, a re-edit could only change beats one at a time")
+
+# AND NO CAPABILITY IS LOST ON THE FIRST EDIT, because a re-ruling there is
+# discarded whichever tool sends it. Driven through the shipped rule, not
+# asserted from the source.
+_led = {"beat_verdicts": []}
+_seen = set()
+_app.admit_verdict(_led, {"beat": 0, "treatment": ["text"],
+                          "text_content": "a"}, _seen)
+_ok, _ = _app.admit_verdict(_led, {"beat": 0, "treatment": ["text"],
+                                   "text_content": "CHANGED"}, _seen,
+                            reedit=False)
+check("on a FIRST edit a re-ruling is discarded whichever tool sends it, so "
+      "withholding beat_verdict removes no working capability",
+      _ok is False and _led["beat_verdicts"][0]["text_content"] == "a")
+_led2 = {"beat_verdicts": [{"beat": 0, "treatment": ["text"],
+                            "text_content": "a"}]}
+_ok2, _ = _app.admit_verdict(_led2, {"beat": 0, "treatment": ["text"],
+                                     "text_content": "CHANGED"}, {0},
+                             reedit=True, reedit_targets={0})
+check("on a RE-EDIT inside the declared scope the change LANDS — the tool does "
+      "the job it is now named for",
+      _ok2 is True and _led2["beat_verdicts"][0]["text_content"] == "CHANGED")
+_led3 = {"beat_verdicts": [{"beat": 1, "treatment": ["text"],
+                            "text_content": "b"}]}
+_ok3, _ = _app.admit_verdict(_led3, {"beat": 1, "treatment": ["text"],
+                                     "text_content": "NOPE"}, {1},
+                             reedit=True, reedit_targets={0})
+check("and a beat the instruction did NOT name is refused and counted",
+      _ok3 is False and _led3["beat_verdicts"][0]["text_content"] == "b"
+      and bool(_led3.get("reedit_refused")))
+
+# IT REPAIRS A RULING, NOT A FILE — so the ordering rule written for the file
+# tools must not hold it. Gated by the schema instead.
+check("`beat_verdict` is no longer in _REPAIR_ONLY — refusing it until "
+      "execute_plan has run would force a re-edit to rebuild the whole prior "
+      "edit before changing one beat",
+      '"author_component", "beat_verdict"}' not in _gate_src)
+
+# THE WORDING IS THE OTHER HALF. It read as a general ruling surface, which is
+# why it was picked up as an alternative to rule_all_beats.
+if _bv_decl:
+    _d = str(_bv_decl.get("description") or "")
+    check("the description no longer tells the agent every beat needs one",
+          "Every beat in your brief needs one" not in _d,
+          "that sentence is what made it read as an alternative")
+    check("it names itself a re-edit instrument",
+          "RE-EDIT" in _d.upper())
+    check("it points multi-beat changes at rule_all_beats rather than leaving "
+          "the agent to infer it",
+          "rule_all_beats" in _d)
+    check("and it says a second ruling is DISCARDED, not merged",
+          "DISCARDED" in _d.upper())
+
 print()
 if fails:
     print("RE-RULED VISIBLE: FAIL")

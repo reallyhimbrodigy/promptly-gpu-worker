@@ -3225,12 +3225,30 @@ KNOWLEDGE_TOOLS = [{
 }, {
     "name": "beat_verdict",
     "description": (
-        "Rule on ONE beat — the whole decision, once. What goes here (a card, a "
-        "text overlay, or nothing), whether the beat is kept or cut, and WHY. "
-        "Every beat in your brief needs one before you finish. This replaced "
-        "three separate gates: each of those forced a family, and forcing one "
-        "family measurably starved the others. There is one question per beat "
-        "so nothing can be satisfied at another family's expense."),
+        "THE SURGICAL INSTRUMENT, AND IT IS ONLY OFFERED ON A RE-EDIT. You are "
+        "changing an edit that already exists: this beat's previous ruling is "
+        "already loaded, and so is every other beat's. Use this to change the "
+        "ONE beat the instruction named — and nothing else.\n\n"
+        "IT IS NOT AN ALTERNATIVE TO rule_all_beats. If the instruction touches "
+        "several beats, rule them TOGETHER with rule_all_beats: that is not a "
+        "worse way to do this, it is the right one, and it is available to you "
+        "here for exactly that. Reach for this tool when the change is one "
+        "beat.\n\n"
+        "A SECOND RULING OF A BEAT YOU HAVE ALREADY RULED IS DISCARDED, NOT "
+        "MERGED. The first ruling stands and you will be told the beat was "
+        "already ruled. This is not a retry surface: to change a beat you have "
+        "just ruled, you must be inside the scope the instruction declared, and "
+        "the ruling must carry EVERY field it should keep — a ruling cannot "
+        "carry over what it does not repeat.\n\n"
+        "WHAT GOES HERE is the whole decision for that beat, once: the families "
+        "(a card, a text overlay, a zoom, a sound, or none), whether it is kept "
+        "or cut, and WHY. One question per beat, so nothing is satisfied at "
+        "another family's expense — three separate gates were tried and each "
+        "forced a family, which measurably starved the others.\n\n"
+        "THE BEATS THE INSTRUCTION DID NOT NAME ARE NOT YOURS TO CHANGE. A "
+        "ruling on a beat outside the declared scope is REFUSED and counted — "
+        "it is neither silently applied nor silently dropped. The user asked "
+        "for one thing; the rest of their edit is not in question."),
     "input_schema": {"type": "object",
                      "properties": {
                          "beat": {"type": "integer", "description": "the beat index"},
@@ -12351,8 +12369,18 @@ def edit(source_key: str, brief: str,
     # for repair — is now enforced where it costs nothing: the dispatch refuses
     # them until execute_plan has run, and says why. Same behaviour, no cache
     # invalidation.
+    # `beat_verdict` IS NO LONGER IN THIS SET, and the distinction is the point:
+    # every other member operates on FILES that do not exist until execute_plan
+    # has run in this container, so "nothing is built yet" is literally true of
+    # them. beat_verdict changes a RULING. On a re-edit the built edit is the
+    # PREVIOUS one, already loaded as the prior plan — so refusing it until
+    # execute_plan runs would force a re-edit to rebuild the entire old edit,
+    # at full render cost, before it could change the one beat the user named.
+    # That is the equal-capability standard broken by an ordering rule written
+    # for a different kind of tool. It is now gated by the schema instead: it is
+    # only offered on a re-edit at all.
     _REPAIR_ONLY = {"build_cut", "build_overlays", "build_zoom", "place_sfx",
-                    "render_components", "author_component", "beat_verdict"}
+                    "render_components", "author_component"}
     # Haiku reaches the same verdicts as Sonnet and pays nine extra turns to
     # read first. The role is judgment; the readers serve an execution job the
     # agent no longer has.
@@ -12374,6 +12402,49 @@ def edit(source_key: str, brief: str,
     if _judgment_only:
         _READERS = {"read_knowledge", "search_skills"}
         tools = [t for t in tools if t.get("name") not in _READERS]
+
+    # ── beat_verdict IS A RE-EDIT TOOL. WITHHELD ON A FIRST EDIT. ───────────
+    # MEASURED over 24 runs in 8 rounds: 47 calls, and 42 of them re-ruled a
+    # beat rule_all_beats had already ruled — 89% discarded by first-wins. That
+    # is the agent reaching for a second ruling surface during a FIRST edit,
+    # where there is nothing to be surgical about, and paying ~4,400 prefix
+    # tokens for the privilege.
+    #
+    # WITHHELD, NOT DISCOURAGED — this lane's own law: a capability in the
+    # schema will be used, and telling a model not to use a tool it has is a
+    # preference, not a property. Filtered ONCE before the loop, like the
+    # readers, so the cached prefix stays constant for the whole run.
+    #
+    # THE SAVING IS CONDITIONAL AND BOTH NUMBERS ARE REPORTED. A first edit
+    # stops carrying the tool; a re-edit still pays for it, and should.
+    _bv_tok = None
+    if not _reedit:
+        _bv = [t for t in tools if t.get("name") == "beat_verdict"]
+        _bv_tok = len(json.dumps(_bv)) // 4 if _bv else 0
+        tools = [t for t in tools if t.get("name") != "beat_verdict"]
+    _tools_tok = len(json.dumps(tools)) // 4
+    led["tool_prefix_tokens"] = _tools_tok
+    led["beat_verdict_offered"] = bool(_reedit)
+    led["beat_verdict_tokens_saved"] = _bv_tok
+    print("  TOOL SURFACE    : %s  ~%d tok%s"
+          % ("RE-EDIT (beat_verdict offered)" if _reedit
+             else "FIRST EDIT (beat_verdict withheld)",
+             _tools_tok,
+             "   saved ~%d by withholding beat_verdict" % _bv_tok
+             if _bv_tok else ""), flush=True)
+
+    # EQUAL CAPABILITY, CHECKED RATHER THAN ASSUMED. Withholding a tool from one
+    # path must not leave that path unable to do something the other can. The
+    # plural ruling surface has to be on BOTH, or a first edit could rule beats
+    # and a re-edit could only touch them one at a time — Zac's standard broken
+    # in the direction this change could actually break it.
+    _names = {t.get("name") for t in tools}
+    if "rule_all_beats" not in _names:
+        raise AssertionError(
+            "rule_all_beats is not offered on this path (%s) — withholding "
+            "beat_verdict is only safe while the plural surface is universal; "
+            "without it this path cannot rule more than one beat at a time"
+            % ("re-edit" if _reedit else "first edit"))
 
 
 

@@ -129,6 +129,31 @@ MUTATIONS = [
      '    _src_props = _items.get("properties") or {}',
      '    _src_props = {}',
      "declares no verdict item properties"),
+
+    ("the tool stops being withheld on a first edit",
+     '    if not _reedit:\n        _bv = [t for t in tools if t.get("name") == "beat_verdict"]',
+     '    if False:\n        _bv = [t for t in tools if t.get("name") == "beat_verdict"]',
+     "WITHHELD on a first edit"),
+
+    ("the equal-capability assert is removed, so a path could lose the\n     plural ruling surface silently",
+     '            "rule_all_beats is not offered on this path (%s) — withholding "',
+     '            "rule_all_beats was not checked on this path (%s) — withholding "',
+     "RAISES if rule_all_beats is ever absent"),
+
+    ("the conditional saving stops being printed as two numbers",
+     '"  TOOL SURFACE    : %s  ~%d tok%s"',
+     '"  tool_surface_renamed : %s  ~%d tok%s"',
+     "both numbers reach a real print"),
+
+    ("beat_verdict goes back into _REPAIR_ONLY, forcing a re-edit to rebuild\n     the whole prior edit before it can change one beat",
+     '                    "render_components", "author_component"}',
+     '                    "render_components", "author_component", "beat_verdict"}',
+     "no longer in _REPAIR_ONLY"),
+
+    ("the description goes back to reading as a general ruling surface",
+     '        "THE SURGICAL INSTRUMENT, AND IT IS ONLY OFFERED ON A RE-EDIT. You are "',
+     '        "Every beat in your brief needs one before you finish. You are "',
+     "no longer tells the agent every beat needs one"),
 ]
 
 
