@@ -3219,13 +3219,21 @@ KNOWLEDGE_TOOLS = [{
                                              "does this beat take a sound? "
                                              "Ruling 'sfx' in `treatment` "
                                              "already says yes and this is "
-                                             "filled in for you — set it only "
-                                             "to say yes WITHOUT naming a "
-                                             "sound, which means 'a sound "
-                                             "belongs here, choose it from the "
-                                             "beat's role'. Name it in "
-                                             "`sfx_name` when the choice is "
-                                             "yours to make."},
+                                             "FILLED IN FOR YOU -- you do not need to set it.\n\n"
+                                             # THIS FIELD SAID: set it without a name and "a sound belongs
+                                             # here, choose it from the beats ROLE". sfx_name, two fields
+                                             # below, says "pick by the MOMENT in the footage, NOT by the
+                                             # beats role". Adjacent fields, one axis, opposite instructions --
+                                             # and I wrote the role sentence in the same hour I fixed sfx_name
+                                             # to reject it. 07_sound_effects settles it: "where none exists,
+                                             # the moment carries no sound."
+                                             "A SOUND WITH NO MOMENT IS NOT A SOUND YOU WANT. If nothing in "
+                                             "this beat matches a sounds predicate, DO NOT RULE sfx -- silence "
+                                             "chosen on purpose is a signed answer, and marking a nothing is "
+                                             "as wrong as missing a peak. The harness can fall back to the "
+                                             "beats role when you name no sound, but that is a LAST RESORT the "
+                                             "pipeline takes, never a way to choose one. Name the sound in "
+                                             "sfx_name. [07_sound_effects, wired 2026-09-12]"},
                                  # ── THE FIELDS THE HARNESS CANNOT DERIVE ────
                                  # Everything else about a placement — where it
                                  # sits, how fast a zoom travels, how early a
@@ -3253,12 +3261,23 @@ KNOWLEDGE_TOOLS = [{
                                      "description": "REQUIRED when treatment "
                                                     "includes 'card': the "
                                                     "number or short phrase the "
-                                                    "card is ABOUT. This is the "
-                                                    "ONLY thing you say about a "
-                                                    "card — the component and "
-                                                    "its props are derived from "
-                                                    "it, the way zoom_arc "
-                                                    "derives the zoom. A figure "
+                                                    "card is ABOUT.\n\n"
+                                                    # IT USED TO CLAIM IT WAS "the ONLY thing you say about a card",
+                                                    # while card_props says "the key you send selects the component"
+                                                    # and card_condition says "the component is derived from your
+                                                    # answer". Three fields, three claims on one decision, each
+                                                    # internally consistent. derive_card_type settles it: props >
+                                                    # figure-in-hero > condition > PullQuote. So this field was the
+                                                    # FALSE one, and it told the agent not to send the two that
+                                                    # actually decide -- which is why 0 cards across every round to
+                                                    # date came from the prop table.
+                                                    "IT IS NOT THE ONLY THING YOU SAY. card_props OUTRANKS it (a "
+                                                    "uniquely-owned key names its component outright), a FIGURE here "
+                                                    "comes next (a number becomes StatCard), then card_condition "
+                                                    "narrows a short phrase, then PullQuote. SEND WHICHEVER OF THEM "
+                                                    "YOU KNOW. "
+                                                    "A figure becomes a counting card; a short claim becomes a quote "
+                                                    "card. "
                                                     "becomes a counting card; a "
                                                     "short claim becomes a "
                                                     "quote card. A beat line "
@@ -3333,9 +3352,19 @@ KNOWLEDGE_TOOLS = [{
                                      "enum": MG_CONDITION_ENUM,
                                      "description": (
                                          "which question this beat's card "
-                                         "answers. The catalogue is organised "
-                                         "by these and the component is derived "
-                                         "from your answer: " + "; ".join(
+                                         "answers. "
+                                         # IT SAID "the component IS DERIVED FROM YOUR ANSWER", which is
+                                         # the third field to claim that one decision. derive_card_type:
+                                         # props > figure-in-hero > condition > PullQuote. So condition
+                                         # NARROWS; it does not decide, and a uniquely-owned prop key or a
+                                         # figure in card_hero both overrule it. Found by the leg that
+                                         # allows at most ONE field to claim the authority -- I had fixed
+                                         # card_hero and card_props and would have left this one.
+                                         "THIS NARROWS, IT DOES NOT DECIDE: a uniquely-owned `card_props` "
+                                         "key names its component outright and a FIGURE in `card_hero` "
+                                         "becomes StatCard, both ahead of this. Where neither settles it, "
+                                         "the catalogue is organised by these and your answer picks among "
+                                         "them: " + "; ".join(
                                              "%s -> %s" % (_c, ", ".join(MG_CONDITIONS[_c][:3]))
                                              for _c in MG_CONDITION_ENUM)
                                          + ". Omit it and you get StatCard for a "

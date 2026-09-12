@@ -608,6 +608,48 @@ check("the structural anchor rule is wired — an overlay marks where the viewer
 check("and the generic-text rule",
       "COULD FIT ANY VIDEO" in _td.upper())
 
+# ── THE CONTRADICTION CLASS ────────────────────────────────────────
+# A field instructing the OPPOSITE of the craft that owns it. Invisible to every
+# other check because both sides are internally consistent: nothing is missing,
+# nothing is malformed, and the two never meet. Swept all 12 ruling fields
+# against their documents; two found, both self-inflicted.
+_rab = None
+for _t in list(_AA.TOOLS) + list(_AA.KNOWLEDGE_TOOLS):
+    if _t.get("name") == "rule_all_beats":
+        _rab = ((((_t.get("input_schema") or {}).get("properties") or {})
+                 .get("verdicts") or {}).get("items", {}).get("properties", {}))
+_desc = {_k: " ".join(str(_v.get("description") or "").split())
+         for _k, _v in (_rab or {}).items()}
+
+# 1. `sfx` offered selection-by-ROLE while `sfx_name` forbids exactly that.
+check("`sfx` does not offer role-based sound selection — `sfx_name` forbids it "
+      "two fields below, and 07_sound_effects says a beat with no matching "
+      "moment carries NO sound",
+      "choose it from the beat" not in _desc.get("sfx", ""),
+      "adjacent fields, one axis, opposite instructions")
+check("and it names the role fallback as the pipeline's LAST RESORT rather "
+      "than a way for the agent to choose",
+      "LAST RESORT" in _desc.get("sfx", ""))
+check("`sfx_name` still rejects role-based selection, so the pair agrees",
+      "not by the beat" in _desc.get("sfx_name", "").lower())
+
+# 2. THREE card fields each claimed to determine the component. THE CLASS,
+#    not the instance: at most ONE field may claim that authority, or the agent
+#    is told three incompatible things and 0 cards come from the prop table.
+_claims = sorted(_k for _k, _d in _desc.items()
+                 if "selects the component" in _d
+                 or "component is derived from your answer" in _d
+                 or "is the ONLY thing you say" in _d)
+check("at most ONE ruling field claims authority over which component is "
+      "built — three claimed it, and the one that was false told the agent "
+      "not to send the two that actually decide",
+      len(_claims) <= 1, "fields claiming it: %s" % _claims)
+check("`card_hero` no longer claims to be the only card input",
+      "is the ONLY thing you say" not in _desc.get("card_hero", ""))
+check("and it states the real precedence instead — props, then a figure "
+      "here, then condition, then PullQuote",
+      "OUTRANKS it" in _desc.get("card_hero", ""))
+
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)
 check("and is PRINTED", "FIDELITY        :" in src,

@@ -137,6 +137,18 @@ CASES = [
      '                                                    "\'WHO?\') **or SKIP IT** "',
      '                                                    "\'WHO?\'). "',
      'including the SKIP option'),
+    ('the sfx field offers role-based selection again, contradicting sfx_name',
+     '"beats role when you name no sound, but that is a LAST RESORT the "',
+     '"beats role when you name no sound, which means a sound belongs "\n                                             "here, choose it from the beat role. "',
+     'does not offer role-based sound selection'),
+    ('card_hero claims to be the only card input again',
+     '"IT IS NOT THE ONLY THING YOU SAY. card_props OUTRANKS it (a "',
+     '"This is the ONLY thing you say about a card. card_props OUTRANKS it (a "',
+     'no longer claims to be the only card input'),
+    ('a second field claims authority over the component',
+     '"THIS NARROWS, IT DOES NOT DECIDE: a uniquely-owned `card_props` "',
+     '"the component is derived from your answer. A uniquely-owned `card_props` "',
+     'at most ONE ruling field claims authority'),
 ]
 
 orig = APP.read_text()
