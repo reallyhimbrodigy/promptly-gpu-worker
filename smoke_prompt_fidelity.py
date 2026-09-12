@@ -112,28 +112,105 @@ check("'just add captions' with no captions is SHORT — the one thing missing",
 _calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
           and getattr(n.func, "id", "") == "spec_fidelity"]
 _kw = {k.arg: k.value for c in _calls for k in c.keywords}
+# THE KEYWORD IS FOLLOWED TRANSITIVELY, not one hop. The call site used to be
+# `captions_made=bool(led.get("caption_composited"))`; the re-edit fidelity work
+# made it `captions_made=_cap_for_fid`, bound through a TUPLE assignment. A
+# one-hop resolver reported both wires as cut when neither was — a leg testing
+# the SPELLING of the call rather than the property. Follow the name through
+# every binding, tuple targets included, and ask whether the required evidence
+# appears anywhere in its derivation.
+def _sources_of(node, depth=6):
+    """Every expression a keyword's value can be derived from."""
+    _out, _front = [], [node]
+    for _ in range(depth):
+        _next = []
+        for _n in _front:
+            if _n is None:
+                continue
+            _out.append(_n)
+            if not isinstance(_n, ast.Name):
+                continue
+            for _a in ast.walk(tree):
+                _tgts = []
+                if isinstance(_a, ast.Assign):
+                    for _t in _a.targets:
+                        _tgts.extend(_t.elts if isinstance(_t, ast.Tuple) else [_t])
+                    for _i, _t in enumerate(_tgts):
+                        if getattr(_t, "id", "") != _n.id:
+                            continue
+                        _v = _a.value
+                        if isinstance(_v, ast.Tuple) and isinstance(
+                                _a.targets[0], ast.Tuple) and _i < len(_v.elts):
+                            _next.append(_v.elts[_i])
+                        else:
+                            _next.append(_v)
+        _front = _next
+        if not _front:
+            break
+    return _out
+
+def _derivation_text(kw):
+    return " ".join(ast.unparse(n) for n in _sources_of(_kw.get(kw))
+                    if n is not None)
+
 check("the call site passes captions_made from the ledger, not a constant",
-      "captions_made" in _kw and not isinstance(_kw["captions_made"], ast.Constant)
-      and "caption_composited" in ast.unparse(_kw.get("captions_made", ast.Constant(0))))
+      "captions_made" in _kw
+      and not isinstance(_kw["captions_made"], ast.Constant)
+      and "caption_composited" in _derivation_text("captions_made"),
+      "the wire is cut or constant: " + _derivation_text("captions_made")[:160])
 
 # ── cut_made IS NOT PRESENCE ────────────────────────────────────────────────
 # Round 52 screen_recording: keep_spans=[[0.0, 90.46]] — the whole source kept —
 # beside built[cut]=35. bool(keep_spans) calls that a cut. A cut was made when
 # the KEPT TOTAL IS LESS THAN THE SOURCE.
-# Resolve the keyword through its binding: cut_made=<Name> whose assignment
-# carries a strict comparison of kept total against source duration.
-_cm = _kw.get("cut_made")
-_cm_assign = [n for n in ast.walk(tree) if isinstance(n, ast.Assign)
-              and isinstance(_cm, ast.Name)
-              and any(getattr(t, "id", "") == _cm.id for t in n.targets)]
-_cm_has_lt = any(isinstance(x, ast.Compare) and any(isinstance(o, ast.Lt) for o in x.ops)
-                 and "_kept" in ast.unparse(x) and "_srcd" in ast.unparse(x)
-                 for a_ in _cm_assign for x in ast.walk(a_.value))
+_cm_has_lt = any(
+    isinstance(x, ast.Compare) and any(isinstance(o, ast.Lt) for o in x.ops)
+    and "_kept" in ast.unparse(x) and "_srcd" in ast.unparse(x)
+    for n in _sources_of(_kw.get("cut_made")) for x in ast.walk(n))
 check("cut_made is derived from kept total < source duration, not from "
       "keep_spans existing",
       _cm_has_lt,
       "presence tested where shape was needed — in my own wiring, the class I "
       "wrote into the wire contract three times today")
+
+# ── ONE FIDELITY STANDARD, BOTH PATHS ───────────────────────────────────────
+# The rule does not change on a re-edit; the POPULATION does. A re-edit's
+# placements are the whole prior plan, so "make the captions bigger" reads
+# FAITHFUL on a run that changed nothing — the paid re-edit no-op scored as a
+# success. The caller must hand spec_fidelity the placements on beats this run
+# actually changed.
+check("there is exactly ONE spec_fidelity call site — one standard, not two",
+      len(_calls) == 1, f"{len(_calls)} call sites")
+check("the re-edit delta rule is hoisted, so the check drives the shipped rule",
+      any(isinstance(n, ast.FunctionDef) and n.name == "reedit_delta"
+          for n in ast.walk(tree)))
+# THE POSITIONAL ARGUMENT, FOLLOWED. Not a source-presence grep: `_rd_beats`
+# appears several times in the file, so `"_rd_beats" in src` would pass with the
+# wire cut. Resolve the placements argument through its bindings and require the
+# delta to be in its derivation.
+_pl_arg = _calls[0].args[1] if _calls and len(_calls[0].args) > 1 else None
+_pl_txt = " ".join(ast.unparse(n) for n in _sources_of(_pl_arg) if n is not None)
+check("the placements handed to spec_fidelity are narrowed by the re-edit "
+      "delta, not the whole prior plan",
+      "_rd_beats" in _pl_txt,
+      "a re-edit that changed nothing would read FAITHFUL; derivation was: "
+      + _pl_txt[:200])
+_rd = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+       and getattr(n.func, "id", "") == "reedit_delta"]
+check("reedit_delta is CALLED, not merely defined", len(_rd) >= 1,
+      f"{len(_rd)} call sites")
+# AN ACTUAL print() CALL, not the literal's presence. Mutating `print(` to
+# `_no_print = (` left the string in the file and a source-presence leg stayed
+# green with nothing printed — the same shape as `for _r in []` keeping `_r`
+# inside a print. Ask the AST whether a print carries it.
+_delta_prints = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call)
+                 and getattr(n.func, "id", "") == "print"
+                 and "RE-EDIT DELTA" in ast.unparse(n)]
+check("the delta reaches the ledger AND a real print() call",
+      'led["reedit_delta_beats"]' in src and len(_delta_prints) >= 1,
+      "a counter in the ledger and nowhere else answers no question anyone "
+      "can ask")
 
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)

@@ -537,6 +537,129 @@ def arc_rules(anchors=_ARC_RULE_ANCHORS):
 _ARC_RULE_STATE, ARC_RULES, _ARC_RULE_WHY = arc_rules()
 
 
+def enum_craft(doc_dir=None, values=None):
+    """{enum value: [(doc, sentence)]} — the corpus's craft, keyed by the value
+    it governs. EXTRACTED AT IMPORT, never hand-copied.
+
+    THE 159 (154 BY THIS RECONSTRUCTION). A body-first sweep of knowledge/
+    found 241 sentences; 164 name a value this lane's schema actually offers
+    and 10 of those were already reachable through a heading. The rest were
+    craft the agent never sees — written about `payoff`, `zoom`, `text`,
+    `card`, `hook`, `build`, in prose under headings that do not match any
+    field name, so a heading sweep cannot find them and a hand-copy would rot.
+
+    DERIVED, so it cannot drift from the corpus: the sentences are read from
+    the documents at import and keyed by the enum value they mention. A claim
+    that leaves the corpus leaves the prompt in the same commit, and nobody has
+    to remember to update a list. This is the same rule the card catalogue is
+    built under, applied to prose.
+
+    The match is the VALUE AS A WORD, not a substring: `none` must not be
+    caught inside "nonetheless" and `cut` must not be caught inside "cutaway"
+    — which on this lane is a retired family, so admitting it here would wire
+    craft for something the pipeline refuses to build.
+    """
+    import re as _re, pathlib as _pl
+    _dir = _pl.Path(doc_dir or "knowledge")
+    # NO DEFAULT FROM THE FAMILY CONSTANTS. This runs BEFORE them — the tool
+    # schema is a literal evaluated at import — so the caller names the values.
+    # A silent empty default here would wire nothing and read as "the corpus
+    # says nothing", which is the absence-as-result failure this file keeps
+    # paying for.
+    _vals = list(values or [])
+    if not _vals:
+        raise ValueError("enum_craft needs the values to key on; an empty set "
+                         "would return {} and read as an empty corpus")
+    out = {}
+    if not _dir.is_dir():
+        return out                      # ABSENT is the caller's to report
+    for _f in sorted(_dir.glob("*.md")):
+        _txt = _f.read_text(errors="replace")
+        for _s in _re.split(r"(?<=[.!?])\s+", _txt):
+            _s = " ".join(_s.split())
+            if len(_s) < 25 or _s.startswith("#") or _s.startswith("|"):
+                continue
+            for _v in _vals:
+                if _re.search(r"(?<![A-Za-z_])%s(?![A-Za-z_])" % _re.escape(_v),
+                              _s, _re.I):
+                    out.setdefault(_v, []).append((_f.name, _s))
+    return out
+
+
+def craft_lines(value, craft=None, limit=6):
+    """The craft for ONE enum value as prompt text, each line marked with the
+    document it came from, or "" when the corpus says nothing about it.
+
+    MARKED, because a reader has to be able to tell a claim this pipeline
+    LIFTED from one a human reinterpreted — `wired` versus `translated` — and
+    because wired_claims counts the markers rather than a hand-kept list.
+    """
+    _c = (craft if craft is not None else enum_craft()).get(value) or []
+    if not _c:
+        return ""
+    # ROUND-ROBIN ACROSS DOCUMENTS, not first-come. Taking the first N matches
+    # in file order gave 49 of 72 wired claims to 00_job_and_arc purely because
+    # it sorts first — the craft would have come from whichever document the
+    # glob reached first rather than from the documents that own the value.
+    # One sentence from each document, then a second from each, until the cap.
+    _by_doc = {}
+    for _doc, _s in _c:
+        _by_doc.setdefault(_doc, []).append(_s)
+    _seen, _out, _i = set(), [], 0
+    while len(_out) < limit:
+        _took = False
+        for _doc in sorted(_by_doc):
+            if _i >= len(_by_doc[_doc]):
+                continue
+            _s = _by_doc[_doc][_i]
+            _took = True
+            if _s in _seen:
+                continue
+            _seen.add(_s)
+            _out.append("%s [%s, wired 2026-09-11]"
+                        % (_s, _doc.replace(".md", "")))
+            if len(_out) >= limit:
+                break
+        if not _took:
+            break
+        _i += 1
+    return "  ".join(_out)
+
+
+# ── THE CORPUS'S CRAFT, KEYED BY THE VALUE IT GOVERNS ───────────────────────
+# A body-first sweep of knowledge/ found 241 sentences. 164 name a value this
+# lane's schema actually offers; 10 were already reachable through a heading,
+# and the other 154 were craft the agent never saw — written about `payoff`,
+# `zoom`, `text`, `card`, `hook`, `build`, in prose under headings that match no
+# field name. A heading sweep cannot see them and a hand-copy would rot, so they
+# are EXTRACTED AT IMPORT and attached to the field each one governs.
+_ARC_VALUES = ["hook", "build", "mid_peak", "payoff", "breather", "close"]
+_FAMILY_VALUES = ["card", "text", "sfx", "zoom", "transition", "none"]
+_CUT_VALUES = ["keep", "cut"]
+_CORPUS_CRAFT = enum_craft(values=_ARC_VALUES + _FAMILY_VALUES + _CUT_VALUES)
+
+
+def _craft_block(values, label):
+    """One prompt block for a group of values, or a NAMED ABSENCE.
+
+    A value the corpus says nothing about prints as such. Silence and
+    "the document had no rule for this" are different facts, and only one of
+    them means the agent is free to choose.
+    """
+    _parts = []
+    for _v in values:
+        _t = craft_lines(_v, _CORPUS_CRAFT, limit=4)
+        _parts.append("%s: %s" % (_v, _t if _t else
+                                  "the catalogue states no rule for this value "
+                                  "— that is silence, not permission"))
+    return "\n\nWHAT THE CATALOGUE SAYS ABOUT EACH %s\n" % label + "\n".join(_parts)
+
+
+ARC_CORPUS_CRAFT = _craft_block(_ARC_VALUES, "ARC POSITION")
+FAMILY_CORPUS_CRAFT = _craft_block(_FAMILY_VALUES, "FAMILY")
+CUT_CORPUS_CRAFT = _craft_block(_CUT_VALUES, "CUT DECISION")
+
+
 def arc_jobs_teach(enum_values):
     """The arc-position craft for zoom_arc, all six of them.
 
@@ -2778,13 +2901,14 @@ KNOWLEDGE_TOOLS = [{
                                                     "figure or a claim worth "
                                                     "stamping takes BOTH: the "
                                                     "caption carries the words, "
-                                                    "the card carries the number",
+                                                    "the card carries the number"
+                                                    + FAMILY_CORPUS_CRAFT,
                                      "items": {"type": "string",
                                                "enum": ["card", "text", "sfx",
                                                         "zoom", "transition",
                                                         "none"]}},
                                  "cut": {"type": "string", "enum": ["keep", "cut"],
-                                         "description": CUT_FIELD_TEACH},
+                                         "description": CUT_FIELD_TEACH + CUT_CORPUS_CRAFT},
                                  "text_content": {
                                      "type": "string",
                                      "description": "REQUIRED when treatment "
@@ -2986,7 +3110,8 @@ KNOWLEDGE_TOOLS = [{
                                                     "2026-09-11] "
                                                     + arc_jobs_teach(
                                                         ["hook", "build", "mid_peak",
-                                                         "payoff", "breather", "close"])},
+                                                         "payoff", "breather", "close"])
+                                                    + ARC_CORPUS_CRAFT},
                                  "why": {"type": "string",
                                      "description": WHY_FIELD_TEACH}},
                              "required": ["beat", "purpose", "treatment",
@@ -3035,7 +3160,7 @@ KNOWLEDGE_TOOLS = [{
                                                           "zoom", "transition",
                                                           "none"]}},
                          "cut": {"type": "string", "enum": ["keep", "cut"],
-                                         "description": CUT_FIELD_TEACH},
+                                         "description": CUT_FIELD_TEACH + CUT_CORPUS_CRAFT},
                          "why": {"type": "string",
                                  "description": WHY_FIELD_TEACH}},
                      "required": ["beat", "purpose", "treatment", "cut",
@@ -7864,6 +7989,54 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
             "asked for %s and delivered exactly that" % sorted(_asked))
 
 
+
+
+def reedit_delta(prior, current):
+    """(state, beats, families) — what a RE-EDIT actually changed. PURE.
+
+    ONE FIDELITY STANDARD, BOTH PATHS — and the standard is the same question,
+    so what has to change is the POPULATION it is asked about, not the rule.
+    `spec_fidelity` asks: did what was asked for land, and did anything land
+    that was not asked for. On a fresh edit every placement is the answer. On a
+    RE-EDIT the placements are the whole prior plan, so "make the captions
+    bigger" reads FAITHFUL on a run that changed nothing — the captions were
+    already there from last time. That is the paid re-edit no-op, scored as a
+    success.
+
+    So the caller hands spec_fidelity the placements on the beats this run
+    actually changed. Same function, same thresholds, right population.
+
+    A beat counts as changed if it is NEW, or if any field the boundary stores
+    differs from the prior ruling. `why` is EXCLUDED: rewording the rationale
+    for an identical ruling is not an edit, and counting it would make every
+    re-edit look like it delivered.
+
+    THREE STATES. No prior snapshot is ABSENT — a run with no record of what it
+    started from cannot say what it changed, and that is different from a run
+    that changed nothing.
+    """
+    if not isinstance(prior, list) or not isinstance(current, list):
+        return ("ABSENT", [], [])
+    _pri = {}
+    for _v in prior:
+        if isinstance(_v, dict) and _v.get("beat") is not None:
+            _pri.setdefault(_v["beat"], _v)
+    _beats, _fams = [], set()
+    for _v in current:
+        if not isinstance(_v, dict) or _v.get("beat") is None:
+            continue
+        _b = _v["beat"]
+        _was = _pri.get(_b)
+        _keys = [_k for _k in VERDICT_FIELDS if _k != "why"]
+        if _was is None or any(_v.get(_k) != _was.get(_k) for _k in _keys):
+            _beats.append(_b)
+            for _t in (_v.get("treatment") or []):
+                _fams.add(str(_t).lower())
+            if str(_v.get("cut") or "").lower() == "cut":
+                _fams.add("cut")
+    return ("MEASURED", sorted(set(_beats)), sorted(_fams - {"none", ""}))
+
+
 def reedit_merge(prior, targets, incoming):
     """(verdicts, refused) — apply a re-edit's incoming rulings to the prior set.
 
@@ -11805,6 +11978,12 @@ def edit(source_key: str, brief: str,
                   % len(_prior_inserts), flush=True)
         _prior, _prior_probs = plan_onto_beats(prior_plan, _beats)
         led["beat_verdicts"] = list(_prior)
+        # THE PRIOR RULINGS, FROZEN, so fidelity on a re-edit can be judged
+        # against WHAT CHANGED. Without this the re-edit's placements are the
+        # whole prior plan, and a re-edit that delivers NOTHING reads FAITHFUL
+        # because the thing asked for was already there from last time.
+        import copy as _cp8
+        led["prior_verdicts"] = _cp8.deepcopy(list(_prior))
         led["reedit_loaded"] = len(_prior)
         led["reedit_unplaceable"] = _prior_probs
         print(f"  RE-EDIT         : loaded {len(_prior)} of "
@@ -13709,10 +13888,33 @@ def edit(source_key: str, brief: str,
     _srcd = float(led.get("source_duration_s") or 0.0)
     _cut_made = bool(led.get("keep_spans")) and _srcd > 0 and _kept < (_srcd - 0.05)
     led["cut_made"] = _cut_made
+    # ONE FIDELITY STANDARD, BOTH PATHS. The question is identical on a
+    # re-edit — did what was asked for land, and did anything land that was not
+    # asked for — so the RULE does not change. The POPULATION does: a re-edit's
+    # placements are the whole prior plan, and "make the captions bigger" would
+    # read FAITHFUL on a run that changed nothing, because the captions were
+    # already there from last time. That is the paid re-edit no-op scored as a
+    # success, and it is the shape `reedit_taxonomy` is about.
+    _fid_pl = led.get("placements") or []
+    _cut_for_fid, _cap_for_fid = _cut_made, bool(led.get("caption_composited"))
+    _rd_state, _rd_beats, _rd_fams = reedit_delta(led.get("prior_verdicts"),
+                                                  led.get("beat_verdicts"))
+    led["reedit_delta_state"] = _rd_state
+    if led.get("prior_verdicts") is not None:
+        led["reedit_delta_beats"] = _rd_beats
+        led["reedit_delta_families"] = _rd_fams
+        print("  RE-EDIT DELTA   : %s  %d beat(s) changed %s"
+              % (_rd_state, len(_rd_beats), _rd_fams or "[]"), flush=True)
+        if _rd_state == "MEASURED":
+            _fid_pl = [_p for _p in _fid_pl
+                       if _p.get("beat") in set(_rd_beats)]
+            # A family is only DELIVERED by this run if this run changed it.
+            _cut_for_fid = _cut_made and "cut" in _rd_fams
+            _cap_for_fid = _cap_for_fid and "caption" in _rd_fams
     _fid_state, _fid_missing, _fid_unasked, _fid_why = spec_fidelity(
-        led.get("spec"), led.get("placements") or [],
-        cut_made=_cut_made,
-        captions_made=bool(led.get("caption_composited")))
+        led.get("spec"), _fid_pl,
+        cut_made=_cut_for_fid,
+        captions_made=_cap_for_fid)
     led["fidelity"] = {"state": _fid_state, "missing": _fid_missing,
                        "unasked": _fid_unasked, "why": _fid_why}
     print("  FIDELITY        : %s — %s" % (_fid_state, _fid_why), flush=True)
