@@ -3019,9 +3019,21 @@ KNOWLEDGE_TOOLS = [{
                                      "description":
                                          "what this moment IS — the key the "
                                          "reference exemplars are indexed by"},
-                         "treatment": {"type": "string",
-                                       "enum": ["card", "text", "sfx", "zoom",
-                                                "transition", "none"]},
+                         # AN ARRAY, LIKE THE OTHER SURFACE. This declared
+                         # `"type": "string"` while rule_all_beats declares an
+                         # array of the same enum — so a ruling made through
+                         # this tool arrived as a BARE STRING and every consumer
+                         # doing `for t in (v.get("treatment") or [])` iterated
+                         # it character by character. That is round 46's
+                         # 'c','a','r','d' families exactly, and this lane has
+                         # no boundary that would have caught it: round 63
+                         # missed it only because the agent sent lists anyway,
+                         # against its own schema.
+                         "treatment": {"type": "array",
+                                       "items": {"type": "string",
+                                                 "enum": ["card", "text", "sfx",
+                                                          "zoom", "transition",
+                                                          "none"]}},
                          "cut": {"type": "string", "enum": ["keep", "cut"],
                                          "description": CUT_FIELD_TEACH},
                          "why": {"type": "string",
@@ -7540,7 +7552,20 @@ _REFUTED_IN_PROMPT = ["--codec=prores", "yuva444p10le"]
 # with a different cost model. It is not a gap to be closed later in this lane —
 # when generated footage arrives it is a NEW family with its own tool, gated on
 # tier and priced per second.
+# SIX, AND `cutaway` IS DELIBERATELY NOT ONE OF THEM. I added it here and
+# smoke_five_families stopped me: it asserts `"cutaway" not in
+# _TREATMENT_FAMILIES` because cutaway was REMOVED from this pipeline rather
+# than left unbuilt. My justification was that round 63 ruled cutaway 6 times
+# against a list that did not offer it — but those ledgers PREDATE the removal.
+# I read the data and not the gate, which is the copy-without-re-reading trap
+# exactly: lane/agentic-editor carries cutaway in its set, and importing that
+# set wholesale would have silently un-retired a family on this lane.
+# normalise_verdict now REJECTS a cutaway ruling with a reason, which is the
+# right outcome for a family this pipeline does not build.
 _TREATMENT_FAMILIES = ["card", "text", "sfx", "zoom", "transition", "none"]
+# PORTED FROM lane/agentic-editor (c6). normalise_verdict needs an immutable
+# closed set; the list above is read by consumers that predate it.
+TREATMENT_FAMILIES = tuple(_TREATMENT_FAMILIES)
 
 
 # ── THE BOUNDARY MUST KEEP EVERY FIELD THE SCHEMA OFFERS ────────────────────
@@ -7876,6 +7901,297 @@ VERDICT_FIELDS = _verdict_fields()
 assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
     "the verdict schema could not be read, so the boundary would store nothing")
 
+# ==========================================================================
+# ONE ADMISSION DOOR FOR BOTH RULING SURFACES.
+#
+# PORTED VERBATIM FROM lane/agentic-editor (c6, 08e2c56) on Zac's ruling:
+# "Don't invent a second shape. Two divergent copies of one rule is the bill
+# this file keeps paying." The four functions below are theirs. Only the
+# FIELD COUNTS in the prose are corrected to this lane's, because the two
+# files have diverged and quoting theirs here would be the same error one
+# level up: on lane/agentic-editor the plural tool declares 15 fields and the
+# singular 13; HERE it is 13 and 5.
+#
+# What this lane adds, both verified here and not present in the filing:
+#   * `beat_verdict.treatment` was declared "type": "string" against the
+#     plural tool's array — a bare string stored verbatim and then iterated
+#     character by character by every consumer. Round 46's 'c','a','r','d'
+#     families, latent on this lane because the agent sent lists anyway.
+#   * `cutaway` was ruled 6 times on round 63 against a closed set that did
+#     not contain it.
+# ==========================================================================
+
+
+def half_ruling_refusal(v):
+    """The reason this ruling is HALF a ruling, or None. PURE.
+
+    EXTRACTED 2026-09-11 because it was enforced on exactly one of two ruling
+    surfaces. `rule_all_beats` ran these checks; the singular `beat_verdict`
+    tool ran NONE of them, and its handler read four hardcoded fields out of
+    the THIRTEEN its own schema offers — so zoom_arc, purpose, text_content,
+    sfx_name and the card fields were accepted by the schema and silently
+    dropped by the handler. Builder-2 measured the consequence on round 63:
+    four re-ruled beats each LOST fields the first ruling supplied — a beat
+    ruled `text` with no copy, a beat ruled `sfx` with no name.
+
+    It was inert only because the second execute was refused 4 of 4. The
+    build's per-beat lookup is a dict comprehension — LAST WINS — so on any run
+    where that refusal does not fire, the zoom builds with zoom_arc=None.
+    Latent, not absent.
+
+    One function, both surfaces. Two copies of a rule is how a rule ends up
+    enforced on one of them.
+    """
+    tr = [str(t).lower() for t in (v.get("treatment") or [])]
+    # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
+    # Both of these used to be discovered at BUILD time, where
+    # the only outcome is a skip: the placement is lost, the run
+    # is paid for, and the log blames the ruling. Here it costs
+    # one line to fix and the agent is still holding the beat.
+    why = None
+    if "zoom" in tr:
+        arc = str(v.get("zoom_arc") or "").strip().lower()
+        if arc not in ZOOM_ARC_HOMES:
+            why = (
+                f"beat {v.get('beat')}: ruled 'zoom' with "
+                f"zoom_arc={v.get('zoom_arc')!r}. WHICH MOMENT "
+                f"this is cannot be derived from timing, and it "
+                f"decides the move: payoff takes a committed "
+                f"push, a hook takes a snap or a pull. Give one "
+                f"of {sorted(ZOOM_ARC_HOMES)}.")
+    if why is None and "card" in tr:
+        # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
+        # OFFERS. It demanded `card_type` — a field b13730c
+        # REMOVED from the schema when cards became derived. The
+        # agent could not supply it, was rejected, and re-ruled
+        # the same beat identically about five times: round 47's
+        # control shows exactly that loop, three beats each.
+        #
+        # I removed the field and left the gate demanding it.
+        # That is the mirror of the card_props_mismatch orphan —
+        # there a NAME with no producer, here a DEMAND with no
+        # supply — and both are invisible until something tries
+        # to satisfy them.
+        hero = str(v.get("card_hero") or "").strip()
+        if not hero:
+            why = (
+                f"beat {v.get('beat')}: ruled 'card' with no "
+                f"card_hero. That is the ONE thing you say about "
+                f"a card — the component and its props are "
+                f"derived from it, the way zoom_arc derives the "
+                f"zoom. Give the figure or the short phrase the "
+                f"card is about.")
+        else:
+            # SAME DERIVATION THE BUILDER USES. A gate that
+            # accepts what the builder then refuses is a second
+            # opinion nobody asked for, and this file has paid
+            # for divergent copies of one rule before.
+            ct, dw = derive_card_type(
+                hero, str(v.get("text_content") or ""))
+            if not ct:
+                why = f"beat {v.get('beat')}: {dw}"
+            else:
+                _pp6, _pw6 = derive_card_props(ct, hero,
+                                               str(v.get("card_label") or ""))
+                _, bad = coerce_mg_props(dict(_pp6))
+                if bad:
+                    why = (
+                        f"beat {v.get('beat')}: {ct} needs a "
+                        f"NUMBER for {bad} and {hero!r} does "
+                        f"not give one. It counts up to a target, "
+                        f"so a word renders a blank card with no "
+                        f"error. If this beat has no quoted "
+                        f"figure, a short claim still takes a "
+                        f"card — the phrase becomes a quote card.")
+    return why
+
+
+def normalise_verdict(v):
+    """(ok, record, reason) — the TYPE BOUNDARY for one beat ruling. PURE.
+
+    WHY THIS EXISTS. Round 46, talking_head, printed this:
+
+        RULED vs BUILT : a 3->0 GAP  c 3->0 GAP  card 0->0  d 3->0 GAP  r 3->0 GAP
+        [1] ['c', 'a', 'r', 'd']/keep  10 times a day workload. StatCard hero '10'.
+
+    The agent supplied `treatment` as the BARE STRING "card" against a schema
+    that correctly declares an array. Nothing rejected it, so:
+
+      * seven consumers doing `for t in (v.get("treatment") or [])` iterated the
+        STRING and got 'c','a','r','d';
+      * led["ruled_vs_built"] keys off set(_fam_ruled), so those four letters
+        became four reported FAMILIES, each 3->0 with a GAP marker, while the
+        real `card 0->0` read clean;
+      * three cards were ruled and ZERO built, and the accounting blamed
+        families that do not exist.
+
+    AND THE SAME PAYLOAD BROKE THE DEDUP. The ingest guard is
+    `if _v.get("beat") in _seen: continue` — first ruling wins — but `_seen`
+    holds whatever type arrived. Proven directly:
+
+        beat 1 (int) then beat 1 (int)   -> 1 stored, dedup works
+        beat 1 (int) then beat "1" (str) -> 2 STORED, dedup BYPASSED
+
+    So beat 1 carried BOTH ['none'] and the corrupt ruling, and every per-beat
+    count in that round counted one beat twice. One missing check, two symptoms:
+    the character-families and the duplicate verdict.
+
+    REJECTS RATHER THAN COERCES, because Zac ruled it loud. A coerced
+    `"card" -> ["card"]` would paper over an agent that is emitting the wrong
+    shape, and we would never learn it was. The rejection is recorded in
+    led["verdicts_rejected"] with the reason and printed, so a run that loses
+    rulings says which and why instead of reporting phantom families.
+    """
+    if not isinstance(v, dict):
+        return False, None, f"verdict is {type(v).__name__}, not an object"
+    if v.get("beat") is None:
+        return False, None, "no beat index"
+    # BEAT: one canonical type, so the dedup set cannot be bypassed by "1" vs 1.
+    _b = v.get("beat")
+    if isinstance(_b, bool) or not isinstance(_b, (int, float, str)):
+        return False, None, f"beat is {type(_b).__name__}"
+    try:
+        beat = int(str(_b).strip())
+    except (TypeError, ValueError):
+        return False, None, f"beat {_b!r} is not an integer index"
+    # TREATMENT: a LIST. A bare string is the defect, named explicitly.
+    _t = v.get("treatment")
+    if isinstance(_t, str):
+        return False, None, (f"treatment is the STRING {_t!r}, not a list — a "
+                             f"string is iterated character by character and "
+                             f"becomes {sorted(set(_t))} families")
+    if _t is None:
+        _t = []
+    if not isinstance(_t, (list, tuple)):
+        return False, None, f"treatment is {type(_t).__name__}, not a list"
+    fams, bad = [], []
+    for _x in _t:
+        if not isinstance(_x, str):
+            bad.append(repr(_x)); continue
+        _n = _x.strip().lower()
+        (fams if _n in TREATMENT_FAMILIES else bad).append(_n)
+    if bad:
+        return False, None, (f"treatment carries {bad} — outside the closed set "
+                             f"{list(TREATMENT_FAMILIES)}")
+    # A FAMILY THAT NAMES NOTHING IS NOT A RULING. cutaway is the first family
+    # built with the grounding requirement in place, so it is enforced HERE
+    # rather than discovered at build time as another ruled_not_built.
+    if "cutaway" in fams and v.get("cutaway_from_s") is None:
+        return False, None, ("treatment includes 'cutaway' but no "
+                             "cutaway_from_s — a cutaway must name the source "
+                             "moment it cuts to")
+    rec = dict(v)
+    rec["beat"] = beat
+    rec["treatment"] = fams
+    return True, rec, ""
+
+
+def record_rejection(led, rj):
+    """Ledger AND PRINT one refused ruling. The only place either happens.
+
+    TWO SHAPES IN ONE LIST IS HOW THIS BROKE BEFORE. One append put a bare
+    STRING into `_rejected` while its sibling twelve lines up put
+    {"beat", "reason"} — and the printer reads `.get('beat')`. It crashed round
+    47's talking_head on the FIRST rejection this pipeline has ever produced:
+    nothing had been rejected before, so two shapes lived in one list for as
+    long as the list stayed empty. An empty container is where a shape
+    disagreement hides, because every consumer of nothing agrees.
+
+    Now there is one constructor (admit_verdict) and one recorder, so there is
+    no second shape to disagree with. It also means the "[verdict REJECTED]"
+    line has exactly one source: the second ruling surface printing its own
+    copy would make every source-presence check on that literal ambiguous —
+    delete the one that matters and the check stays green.
+
+    PRINTED, not only ledgered. A rejected ruling is a LOST PLACEMENT and the
+    round must say which; a counter in the ledger and nowhere else answers no
+    question anyone can ask.
+    """
+    led.setdefault("verdicts_rejected", []).append(rj)
+    # LOUD ABOUT A WRONG SHAPE, never crashing on one. A malformed rejection is
+    # still a lost placement; dying here loses the whole run to a formatting
+    # bug in a diagnostic.
+    if not isinstance(rj, dict):
+        print(f"  [verdict REJECTED] (MALFORMED rejection record, not a "
+              f"dict): {rj!r}", flush=True)
+        return
+    print(f"  [verdict REJECTED] beat {rj.get('beat')!r}: "
+          f"{rj.get('reason')}", flush=True)
+
+
+def admit_verdict(led, v, seen, reedit=False, reedit_targets=None):
+    """Admit ONE beat ruling. -> (admitted, rejection|None). MUTATES led/seen.
+
+    THE WHOLE ADMISSION, IN ONE PLACE, BECAUSE THERE ARE TWO RULING SURFACES.
+    `rule_all_beats` ran the type boundary, the dedup and the half-ruling
+    refusal. The singular `beat_verdict` tool ran NONE of them: its handler
+    built a four-key dict by hand out of the THIRTEEN fields its own schema
+    offers, appended it unconditionally, and reported a DEDUPED count. So a
+    re-ruling through the singular tool
+
+      * skipped normalise_verdict, so a bare-string treatment or a string beat
+        got in (round 46's 'c','a','r','d' families, and a dedup set bypassed
+        because "1" != 1);
+      * skipped half_ruling_refusal, so a zoom with no arc and a card with no
+        hero were stored as rulings and discovered at BUILD time as skips;
+      * dropped nine of thirteen fields on the floor — zoom_arc, purpose,
+        text_content, framing, the keep window, the cutaway and both card
+        fields — so a second ruling of a beat REPLACED a complete first ruling
+        with a stub. Builder-2 measured it on round 63: text_content
+        'ChatGPT' -> None with 'text' still in the treatment, i.e. an overlay
+        with nothing to render;
+      * appended past the dedup entirely, and then hid the fact by counting
+        `len({v["beat"] for v in beat_verdicts})`. Two contradictory rulings
+        for one beat reported as one ruled beat.
+
+    That last pair is the live hazard. The build's per-beat lookup is
+    `{v.get("beat"): v for v in beat_verdicts}` — a dict comprehension, LAST
+    WINS — while the frozen `executed_verdicts` copy keeps the FIRST. The only
+    thing that kept them agreeing was `refused_second_execute`, a guard built
+    for an unrelated reason and observed refusing 4 of 4. Latent, not absent.
+
+    So: one function, both surfaces. Extracting the three checks and leaving
+    two call sites to assemble them in the right order is how a rule ends up
+    enforced on one of them again.
+
+    `seen` is the caller's dedup set and is updated in place, so a caller
+    admitting a batch gets first-ruling-wins WITHIN the batch as well as
+    against the stored set.
+    """
+    # 1. THE TYPE BOUNDARY. Nothing downstream may assume a shape this did
+    #    not enforce.
+    ok, norm, why = normalise_verdict(v)
+    if not ok:
+        return False, {"beat": (v.get("beat") if isinstance(v, dict) else None),
+                       "reason": why}
+    v = norm
+    # 2. THE DEDUP. A second ruling is either a re-edit inside declared scope
+    #    or it is discarded — and a discarded ruling is COUNTED, because the
+    #    model was paid to produce it.
+    if v.get("beat") in seen:
+        if not reedit:
+            led["rulings_discarded"] = led.get("rulings_discarded", 0) + 1
+            led.setdefault("rulings_discarded_beats", []).append(v.get("beat"))
+            return False, None
+        kept, refused = reedit_merge(
+            led["beat_verdicts"], reedit_targets, [v])
+        if refused:
+            led.setdefault("reedit_refused", []).extend(refused)
+            return False, None
+        led["beat_verdicts"] = [
+            o for o in kept if o.get("beat") != v.get("beat")]
+        seen.discard(v.get("beat"))
+    # 3. THE HALF-RULING REFUSAL, where the agent is still holding the beat.
+    why = half_ruling_refusal(v)
+    if why:
+        return False, {"beat": v.get("beat"), "reason": why}
+    # 4. EVERY FIELD THE SCHEMA OFFERS.
+    rec = {k: v.get(k) for k in VERDICT_FIELDS}
+    rec["why"] = str(v.get("why") or "")
+    led["beat_verdicts"].append(rec)
+    seen.add(v.get("beat"))
+    return True, None
+
 
 def _assert_build_reads_only_stored_fields(module_src: str) -> None:
     """Every verdict field the BUILD reads must be one the BOUNDARY stores.
@@ -7901,12 +8217,29 @@ def _assert_build_reads_only_stored_fields(module_src: str) -> None:
                 and isinstance(_n.args[0].value, str)):
             _read.add(_n.args[0].value)
     # The store step must copy from ONE schema-derived list, not a hand list.
-    if not re.search(r"_rec = \{k: _v\.get\(k\) for k in VERDICT_FIELDS\}",
-                     module_src):
+    # WAS A REGEX FOR ONE SPELLING (`_rec = {k: _v.get(k) ...}`). That spelling
+    # was the plural handler's local; the copy now lives in admit_verdict, the
+    # single admission door, under its own names. A regex for a variable name
+    # tests the name, so this asks the structural question instead: the
+    # comprehension must exist INSIDE admit_verdict and iterate VERDICT_FIELDS.
+    # Strictly stronger than the grep — it also fails if the copy migrates back
+    # out to a call site, which is the drift the original was written for.
+    _av = next((n for n in _ast.walk(_tree)
+                if isinstance(n, _ast.FunctionDef) and n.name == "admit_verdict"),
+               None)
+    if _av is None:
         raise AssertionError(
-            "the boundary no longer copies the verdict fields from a single "
-            "schema-derived list — a hand-written copy list is a second "
-            "vocabulary and it drifted silently once already")
+            "admit_verdict not found — there is no single admission door, so "
+            "the boundary cannot be copying from one schema-derived list")
+    if not any(isinstance(_n, _ast.DictComp)
+               and any(isinstance(_g.iter, _ast.Name)
+                       and _g.iter.id == "VERDICT_FIELDS"
+                       for _g in _n.generators)
+               for _n in _ast.walk(_av)):
+        raise AssertionError(
+            "admit_verdict no longer copies the verdict fields from "
+            "VERDICT_FIELDS — a hand-written copy list is a second vocabulary "
+            "and it drifted silently once already")
     # AND THE LIST ITSELF MUST COVER WHAT THE BUILD READS. Comparing
     # VERDICT_FIELDS against VERDICT_FIELDS is a tautology — the first version
     # of this did exactly that and passed while the list was truncated to three
@@ -8057,6 +8390,125 @@ def _assert_prompt_blocks_present():
             f"looks normal and behaves differently, which is how a prompt that "
             f"still described the deleted `shell` tool cost 3x for a full day.")
 
+def _assert_verdict_surfaces_offer_the_same_fields() -> None:
+    """The two ruling tools must offer the same fields, or name the difference.
+
+    THE OTHER HALF OF THE SAME DEFECT. admit_verdict makes both surfaces
+    ADMIT alike; it cannot make them OFFER alike. ON THIS LANE `rule_all_beats` declares 13
+    fields and `beat_verdict` declares 5 — not 15 and 13, which is
+    lane/agentic-editor's shape. Eight fields can be ruled through one tool and
+    not the other: card_condition, card_hero, card_label, card_props, sfx,
+    sfx_name, text_content, zoom_arc.
+
+    AND THE FAILURE DIFFERS BY LANE, which is why the numbers matter. There the
+    singular tool DECLARES sfx, the boundary stores None, and
+    `_derive_sfx_name`'s `.get("sfx", "no")` returns the stored None rather than
+    the default — silently sfx-less. Here the key is simply ABSENT, so the
+    default stands and that particular failure does not occur. Same tool, same
+    filing, opposite outcomes.
+
+    Nothing asserted this. `_assert_treatment_surface_agrees` compares PROSE
+    against SCHEMA and `_assert_beat_contract_identical` compares the two beat
+    SOURCES; neither compares the two verdict TOOLS to each other.
+
+    THE KNOWN DIFFERENCE IS NAMED, NOT TOLERATED. Tool schemas are Builder-2's
+    region, so this records the gap with its owner instead of closing it — and
+    any NEW divergence fails the container at import. A check that silently
+    accepted the current state would rot into "the surfaces agree" the first
+    time someone read it.
+    """
+    def _props(name):
+        for t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
+            if t.get("name") != name:
+                continue
+            s = t.get("input_schema") or {}
+            if name == "rule_all_beats":
+                return set((((s.get("properties") or {}).get("verdicts") or {})
+                            .get("items", {}).get("properties", {})))
+            return set(s.get("properties") or {})
+        return set()
+    plural, single = _props("rule_all_beats"), _props("beat_verdict")
+    if not plural or not single:
+        raise AssertionError(
+            "a verdict tool could not be read, so this check is ABSENT: "
+            f"rule_all_beats={len(plural)} beat_verdict={len(single)}")
+    # RECORDED, NOT TOLERATED. Closing this is a schema change to
+    # beat_verdict and it is not part of the unification Zac scoped, so the gap
+    # is named with its consequence instead of quietly widened. Every NEW
+    # divergence fails the container at import, and so does silently CLOSING
+    # one of these without deleting it here — a check that absorbs the current
+    # state rots into "the surfaces agree" the first time someone reads it.
+    KNOWN = {"card_condition", "card_hero", "card_label", "card_props",
+             "sfx", "sfx_name", "text_content", "zoom_arc"}
+    diff = (plural - single) | (single - plural)
+    new_diff = diff - KNOWN
+    assert not new_diff, (
+        "the two ruling surfaces offer different fields and the difference is "
+        f"not the recorded one: {sorted(new_diff)}. A field on one surface "
+        f"only is a ruling the agent can make through one tool and not the "
+        f"other, and the boundary stores None either way")
+    _closed = KNOWN - diff
+    assert not _closed, (
+        f"recorded divergences {sorted(_closed)} are gone — delete them from "
+        f"KNOWN in the same commit that closes them, so this check stops "
+        f"excusing something that no longer happens")
+
+
+def _assert_one_admission_surface(module_src: str) -> None:
+    """No ruling reaches led["beat_verdicts"] except through admit_verdict.
+
+    THE CHECK THAT MAKES THIS REGRESSION IMPOSSIBLE. The defect was never that
+    the checks were wrong — `rule_all_beats` ran all three correctly. It was
+    that a SECOND tool appended to the same list without them, and nothing
+    anywhere said the list had one legitimate door. Two ruling surfaces, one of
+    them guarded, and the gap was invisible for as long as the unguarded one
+    was rarely used.
+
+    So the door is now named and this asserts there is only one. A third
+    surface — a repair tool, a re-edit path, a fixture loader — cannot append a
+    ruling without either calling admit_verdict or failing the container at
+    import.
+
+    BOUNDED ON PURPOSE: this catches `.append`/`.extend`, the act of admitting
+    ONE new ruling. Whole-list rebinds are left alone because seeding a re-edit
+    from a prior plan (`led["beat_verdicts"] = list(_prior)`) is a legitimate
+    non-admission, and a check that rejects it would be turned off.
+    """
+    if not module_src:
+        # NAMED, NOT SILENT. A cert that cannot read its own source is ABSENT,
+        # and an absent check that returns cleanly is the failure class this
+        # file has paid for four times.
+        raise AssertionError(
+            "_assert_one_admission_surface got no module source: the check "
+            "is ABSENT, not passing")
+    import ast
+    tree = ast.parse(module_src)
+    owner = {}
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for node in ast.walk(fn):
+                owner.setdefault(node, fn.name)
+    bad = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        if not (isinstance(f, ast.Attribute) and f.attr in ("append", "extend")):
+            continue
+        tgt = f.value
+        if not (isinstance(tgt, ast.Subscript)
+                and isinstance(tgt.slice, ast.Constant)
+                and tgt.slice.value == "beat_verdicts"):
+            continue
+        where = owner.get(node, "<module>")
+        if where != "admit_verdict":
+            bad.append(f"{where}() at line {node.lineno}")
+    assert not bad, (
+        "a beat ruling is admitted outside admit_verdict, so it skips the "
+        "type boundary, the dedup and the half-ruling refusal: "
+        + ", ".join(bad))
+
+
 
 _assert_prompt_blocks_present()
 
@@ -8067,6 +8519,15 @@ _assert_treatment_surface_agrees(open(__file__).read()
 # defect the moment execute_plan first read `v.get("zoom_arc")`.
 _assert_build_reads_only_stored_fields(open(__file__).read()
                                        if os.path.exists(__file__) else "")
+# ONE ADMISSION DOOR, asserted in the container on every launch. The defect was
+# never that the checks were wrong — it was that a SECOND tool appended to the
+# same list without them, and nothing said the list had one legitimate door.
+_assert_one_admission_surface(open(__file__).read()
+                              if os.path.exists(__file__) else "")
+# admit_verdict makes both surfaces ADMIT alike; it cannot make them OFFER
+# alike. This names the eight fields only one tool offers, and fails on any new
+# divergence AND on a recorded one closed without deleting it here.
+_assert_verdict_surfaces_offer_the_same_fields()
 # Runs at IMPORT, in the container, on every run — not in a test file that can
 # be skipped. The two beat sources must stay interchangeable or the verdict
 # machinery silently rules on a field one of them does not supply.
@@ -12228,108 +12689,19 @@ def edit(source_key: str, brief: str,
                 _incoming = tu.input.get("verdicts") or []
                 _seen = {v.get("beat") for v in led["beat_verdicts"]}
                 _added = 0
-                _rejected = []
+                # ONE ADMISSION DOOR. The type boundary, the dedup (with the
+                # re-edit branch) and the half-ruling refusal all live in
+                # admit_verdict, and BOTH ruling surfaces call it. Extracting
+                # the three checks and leaving two call sites to assemble them
+                # in the right order is how a rule ends up enforced on one of
+                # them again — which is exactly what this file just paid for.
                 for _v in _incoming:
-                    if not isinstance(_v, dict) or _v.get("beat") is None:
-                        continue
-                    if _v.get("beat") in _seen:
-                        # ── THE SURGICAL GUARANTEE, MECHANICAL ─────────────
-                        # On a fresh edit "first ruling wins" and a re-call tops
-                        # up. On a RE-EDIT the prior plan is already loaded, so
-                        # every beat is `_seen` — and the agent must be able to
-                        # change the ones the instruction names, and MUST NOT be
-                        # able to change the ones it does not.
-                        #
-                        # Trusting the prompt for this would make "surgical" a
-                        # claim rather than a property. The scope the agent
-                        # declared through set_spec is the allow-list, and a
-                        # ruling outside it is REFUSED AND COUNTED, not
-                        # silently applied and not silently dropped.
-                        if not _reedit:
-                            continue    # first ruling wins; a re-call tops up
-                        # THE SHIPPED RULE, called not copied.
-                        _kept, _ref7 = reedit_merge(
-                            led["beat_verdicts"], _reedit_targets, [_v])
-                        if _ref7:
-                            led.setdefault("reedit_refused", []).extend(_ref7)
-                            continue
-                        led["beat_verdicts"] = [
-                            _o for _o in _kept if _o.get("beat") != _v.get("beat")]
-                        _seen.discard(_v.get("beat"))
-                    _tr6 = [str(t).lower() for t in (_v.get("treatment") or [])]
-                    # ── A HALF-RULING IS REFUSED WHERE IT IS MADE ───────────
-                    # Both of these used to be discovered at BUILD time, where
-                    # the only outcome is a skip: the placement is lost, the run
-                    # is paid for, and the log blames the ruling. Here it costs
-                    # one line to fix and the agent is still holding the beat.
-                    _why6 = None
-                    if "zoom" in _tr6:
-                        _arc6 = str(_v.get("zoom_arc") or "").strip().lower()
-                        if _arc6 not in ZOOM_ARC_HOMES:
-                            _why6 = (
-                                f"beat {_v.get('beat')}: ruled 'zoom' with "
-                                f"zoom_arc={_v.get('zoom_arc')!r}. WHICH MOMENT "
-                                f"this is cannot be derived from timing, and it "
-                                f"decides the move: payoff takes a committed "
-                                f"push, a hook takes a snap or a pull. Give one "
-                                f"of {sorted(ZOOM_ARC_HOMES)}.")
-                    if _why6 is None and "card" in _tr6:
-                        # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
-                        # OFFERS. It demanded `card_type` — a field b13730c
-                        # REMOVED from the schema when cards became derived. The
-                        # agent could not supply it, was rejected, and re-ruled
-                        # the same beat identically about five times: round 47's
-                        # control shows exactly that loop, three beats each.
-                        #
-                        # I removed the field and left the gate demanding it.
-                        # That is the mirror of the card_props_mismatch orphan —
-                        # there a NAME with no producer, here a DEMAND with no
-                        # supply — and both are invisible until something tries
-                        # to satisfy them.
-                        _hero6 = str(_v.get("card_hero") or "").strip()
-                        if not _hero6:
-                            _why6 = (
-                                f"beat {_v.get('beat')}: ruled 'card' with no "
-                                f"card_hero. That is the ONE thing you say about "
-                                f"a card — the component and its props are "
-                                f"derived from it, the way zoom_arc derives the "
-                                f"zoom. Give the figure or the short phrase the "
-                                f"card is about.")
-                        else:
-                            # SAME DERIVATION THE BUILDER USES. A gate that
-                            # accepts what the builder then refuses is a second
-                            # opinion nobody asked for, and this file has paid
-                            # for divergent copies of one rule before.
-                            _ct6, _dw6 = derive_card_type(
-                                _hero6, str(_v.get("text_content") or ""))
-                            if not _ct6:
-                                _why6 = f"beat {_v.get('beat')}: {_dw6}"
-                            else:
-                                _pp6, _pw6 = derive_card_props(_ct6, _hero6,
-                                                               str(_v.get("card_label") or ""))
-                                _, _bad6 = coerce_mg_props(dict(_pp6))
-                                if _bad6:
-                                    _why6 = (
-                                        f"beat {_v.get('beat')}: {_ct6} needs a "
-                                        f"NUMBER for {_bad6} and {_hero6!r} does "
-                                        f"not give one. It counts up to a target, "
-                                        f"so a word renders a blank card with no "
-                                        f"error. If this beat has no quoted "
-                                        f"figure, a short claim still takes a "
-                                        f"card — the phrase becomes a quote card.")
-                    if _why6:
-                        _rejected.append(_why6)
-                        continue
-                    # EVERY FIELD THE SCHEMA OFFERS. Six of twelve used to
-                    # survive; zoom_arc, card_type, card_props and card_label
-                    # had no deriver and were therefore always empty, so the
-                    # build read None and blamed the agent for not saying.
-                    _rec = {k: _v.get(k) for k in VERDICT_FIELDS}
-                    _rec["why"] = str(_v.get("why") or "")
-                    led["beat_verdicts"].append(_rec)
-                    _seen.add(_v.get("beat")); _added += 1
-                if _rejected:
-                    led.setdefault("verdicts_rejected", []).extend(_rejected)
+                    _ok6, _rj6 = admit_verdict(led, _v, _seen,
+                                               _reedit, _reedit_targets)
+                    if _ok6:
+                        _added += 1
+                    elif _rj6:
+                        record_rejection(led, _rj6)
                 _nocopy = [v.get("beat") for v in led["beat_verdicts"]
                            if "text" in (v.get("treatment") or [])
                            and not v.get("text_content")]
@@ -12592,39 +12964,43 @@ def edit(source_key: str, brief: str,
                                   "that field — without it nothing is built. "
                                   "Re-call with copy for each.")
             elif tu.name == "beat_verdict":
-                # `purpose` WAS DECLARED BY THIS TOOL AND DROPPED ON THE
-                # FLOOR. The schema invites the agent to supply it, the handler
-                # never read it, and that is why `purpose` is LOST on all four
-                # of round 63's re-ruled beats. A field the schema offers and
-                # the code ignores is worse than one it never offered — the
-                # agent cannot tell the difference and keeps paying to send it.
-                _bv = {"beat": tu.input.get("beat"),
-                       "treatment": tu.input.get("treatment"),
-                       "cut": tu.input.get("cut"),
-                       "purpose": tu.input.get("purpose"),
-                       "why": str(tu.input.get("why") or "")}
-                led["beat_verdicts"].append(_bv)
-                # `"ruled": len({v["beat"] ...})` DEDUPES, so an agent that
-                # re-ruled beat 0 was told "ruled 10 of 10" and could not see
-                # it had just contradicted itself — it will do it again, and on
-                # round 63 it did, four times across two fixtures. The count the
-                # agent needs is RULINGS vs BEATS, and the duplicate named.
+                # THE SAME DOOR THE PLURAL TOOL USES. This handler used to build
+                # a four-key dict by hand out of the thirteen fields its own
+                # schema offers and append it unconditionally, running none of
+                # the three guards: no type boundary, no dedup, no half-ruling
+                # refusal — and no reedit_merge, so on a RE-EDIT it could change
+                # a beat the instruction never named. "Surgical" was enforced on
+                # one surface and asserted on the other.
+                _bv = {k: tu.input.get(k) for k in VERDICT_FIELDS
+                       if k in tu.input}
+                _bseen_set = {v.get("beat") for v in led["beat_verdicts"]}
+                _pre7 = led.get("rulings_discarded", 0)
+                _ok7, _rj7 = admit_verdict(led, _bv, _bseen_set,
+                                           _reedit, _reedit_targets)
+                if _rj7:
+                    record_rejection(led, _rj7)
                 _bseen = [v.get("beat") for v in led["beat_verdicts"]]
-                _dupes = sorted({_x for _x in _bseen if _bseen.count(_x) > 1})
-                out = {"recorded": True,
+                # RULINGS vs BEATS, never a deduped count. `"ruled":
+                # len({v["beat"] ...})` told an agent that had just re-ruled
+                # beat 0 "ruled 10 of 10", so it could not see the
+                # contradiction and made it again — four times across two
+                # fixtures on round 63.
+                out = {"recorded": bool(_ok7),
                        "rulings": len(_bseen),
                        "beats_ruled": len(set(_bseen)),
                        "of": len(_beats)}
-                if _dupes:
-                    out["ALREADY_RULED"] = _dupes
+                if led.get("rulings_discarded", 0) > _pre7:
+                    out["DISCARDED_already_ruled"] = _bv.get("beat")
                     out["fix"] = (
-                        "You have ruled %s more than once. This tool writes "
-                        "beat/treatment/cut/why ONLY — zoom_arc, purpose, "
-                        "text_content, sfx_name and the card fields cannot be "
-                        "supplied through it, so a second ruling here DROPS "
-                        "them. The first ruling is what built. To change a "
-                        "beat, re-call rule_all_beats with every field you "
-                        "want it to keep." % _dupes)
+                        "Beat %s was already ruled and the FIRST ruling stands "
+                        "— this one was discarded, not merged. To change a "
+                        "beat, re-call rule_all_beats with every field it "
+                        "should keep; a second ruling cannot carry over what "
+                        "it does not repeat." % _bv.get("beat"))
+                elif not _ok7 and not _rj7:
+                    out["fix"] = ("The ruling was not admitted and no reason "
+                                  "was produced — report this rather than "
+                                  "re-ruling blindly.")
             elif tu.name == "cut_verdict":
                 led["cut_verdict"] = {"decision": tu.input.get("decision"),
                                       "why": str(tu.input.get("why") or "")}

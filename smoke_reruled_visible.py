@@ -203,8 +203,9 @@ check("a non-list fingerprints as None rather than raising",
 check("the singular beat_verdict reply reports RULINGS and BEATS separately",
       '"rulings": len(_bseen)' in _src and '"beats_ruled": len(set(_bseen))' in _src,
       "a deduped count cannot show the agent its own duplicate")
-check("the reply NAMES the duplicated beats back to the agent",
-      "ALREADY_RULED" in _src)
+check("the reply NAMES the duplicated beat back to the agent",
+      "DISCARDED_already_ruled" in _src,
+      "a discarded re-ruling the agent cannot see is one it will make again")
 check("no deduped `ruled` count survives in that reply",
       '"ruled": len({v["beat"] for v in led["beat_verdicts"]})' not in _src,
       "the lying count is still there")
@@ -269,12 +270,26 @@ if _bv_decl:
     _en_i = next(i for i, l in enumerate(_lines)
                  if i > _st_i and 'elif tu.name == "cut_verdict":' in l)
     _seg = "\n".join(_lines[_st_i:_en_i])
+    # TWO ACCEPTABLE SHAPES, and the second is the stronger one. Originally
+    # the handler named fields one by one and this counted the literals; it now
+    # builds from VERDICT_FIELDS by comprehension, which reads EVERY schema
+    # field rather than a hand list — so a literal count reports "all five
+    # dropped" on a handler that drops none. Check the property, not the
+    # spelling: either every declared field is named, or the handler projects
+    # VERDICT_FIELDS and the declared set is inside it.
     _read = set(re.findall(r'tu\.input\.get\("([a-z_]+)"', _seg))
-    _dropped = sorted(_declared - _read)
+    _projects = ("for k in VERDICT_FIELDS" in _seg
+                 and "tu.input.get(k)" in _seg)
+    _covered = set(_app.VERDICT_FIELDS) if _projects else _read
+    _dropped = sorted(_declared - _covered)
     check("every field beat_verdict DECLARES is read by its handler",
           not _dropped,
           "declared and silently discarded: %s — the schema invites the agent "
           "to supply it and the code throws it away" % _dropped)
+    check("the singular handler projects the schema-derived field list rather "
+          "than a hand-written one",
+          _projects,
+          "a hand list is a second vocabulary; it drifted silently once")
 
 print()
 if fails:
