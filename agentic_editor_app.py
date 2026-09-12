@@ -8402,6 +8402,12 @@ def reedit_merge(prior, targets, incoming):
     return out, refused
 
 
+# FIELDS THE BOUNDARY COMPUTES RATHER THAN ASKS FOR. Declared, because a
+# derived field is invisible to any check scoped to "what the schema offers" —
+# and that is the scoping the build-reads guard used, so a derived field was
+# structurally unchecked.
+BOUNDARY_DERIVED = {"sfx"}
+
 VERDICT_FIELDS = _verdict_fields()
 assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
     "the verdict schema could not be read, so the boundary would store nothing")
@@ -8702,13 +8708,35 @@ def _assert_build_reads_only_stored_fields(module_src: str) -> None:
                  .get("verdicts") or {}).get("items", {}).get("properties", {}))
     if not _offered:
         raise AssertionError("the verdict schema could not be read")
-    _gap = sorted((_read & _offered) - set(VERDICT_FIELDS))
+    # OFFERED **OR DERIVED**, AND THE `OR DERIVED` IS THE WHOLE FIX.
+    # This scoped to `_read & _offered` — every field the build reads that the
+    # SCHEMA currently offers. So a field REMOVED from the schema drops out of
+    # `_offered` and STOPS BEING CHECKED, at the exact moment it is most likely
+    # to be wrong. The guard would go silent on precisely the field somebody
+    # just changed.
+    #
+    # It is not hypothetical here: the boundary now DERIVES `sfx` from the
+    # treatment (two vocabularies for one intent, 25 of 75 placements lost to
+    # the mismatch). A derived field is read by the build and may not be
+    # offered by any tool, which is the removed-field case wearing different
+    # clothes. Builder-2 hit it from the other direction on their lane, having
+    # deleted the field outright.
+    _gap = sorted((_read & (_offered | BOUNDARY_DERIVED)) - set(VERDICT_FIELDS))
     if _gap:
         raise AssertionError(
             f"execute_plan reads verdict field(s) {_gap} that the boundary does "
             f"not store. `.get()` returns None and None is indistinguishable "
             f"from 'the agent did not say', so the build blames the ruling for "
             f"a field the harness threw away.")
+    # AND A FIELD THE BOUNDARY DERIVES MUST ACTUALLY BE STORED. Deriving a
+    # value and then not keeping it is the same defect one step earlier — the
+    # build reads None and blames the ruling for something the harness computed
+    # and dropped.
+    _lost = sorted(BOUNDARY_DERIVED - set(VERDICT_FIELDS))
+    if _lost:
+        raise AssertionError(
+            f"the boundary derives {_lost} and does not store it — the "
+            f"derivation is thrown away before the build can read it")
 
 
 def _assert_treatment_surface_agrees(module_src: str) -> None:
