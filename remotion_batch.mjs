@@ -171,10 +171,33 @@ if (cached) {
 } else {
   fs.rmSync(cacheDir, { recursive: true, force: true });
   fs.mkdirSync(cacheDir, { recursive: true });
+  // THE FONT SHIM, WHICH THIS CALLER NEVER APPLIED.
+  //
+  // prebundle.mjs aliases every @remotion/google-fonts subpath to a local
+  // no-op shim and its header promises "zero network dependency". THIS
+  // bundle() had no webpackOverride, so the alias never reached the bundle
+  // that every job actually renders from, and the real package shipped.
+  // Measured inside the render loop on a zoom composition that draws NO TEXT:
+  // Roboto n=96 total 253,971ms, Oswald n=96 total 252,243ms, JetBrains Mono
+  // n=48 total 144,816ms — 240 network font fetches per render, while a file
+  // in the tree said there were none.
+  const { GOOGLE_FONT_ALIASES, REMOTION_MEDIA_ALIAS } =
+    await import(pathToFileURL(path.join(R, "font-aliases.mjs")).href);
   serveUrl = await bundle({
     entryPoint: path.join(R, "src", "index.ts"),
     outDir: cacheDir,
     onProgress: () => {},
+    webpackOverride: (config) => ({
+      ...config,
+      resolve: {
+        ...config.resolve,
+        alias: {
+          ...(config.resolve?.alias ?? {}),
+          ...GOOGLE_FONT_ALIASES,
+          ...REMOTION_MEDIA_ALIAS,
+        },
+      },
+    }),
   });
   fs.writeFileSync(marker, key);
 }

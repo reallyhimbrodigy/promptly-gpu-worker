@@ -33,38 +33,10 @@ const BUNDLE_DIR = process.env.PROMPTLY_BUNDLE_DIR || "/remotion/bundle";
 // Keep this list in lock-step with src/shims/google-fonts/. If a new component
 // imports a font not listed here, the real Google Fonts module will load and
 // re-introduce network fetches at render time.
-const GOOGLE_FONT_ALIASES = {
-  "@remotion/google-fonts/Anton":             resolve(__dirname, "src/shims/google-fonts/Anton.ts"),
-  "@remotion/google-fonts/CaveatBrush":       resolve(__dirname, "src/shims/google-fonts/CaveatBrush.ts"),
-  "@remotion/google-fonts/CormorantGaramond": resolve(__dirname, "src/shims/google-fonts/CormorantGaramond.ts"),
-  "@remotion/google-fonts/DMSans":            resolve(__dirname, "src/shims/google-fonts/DMSans.ts"),
-  "@remotion/google-fonts/DMSerifDisplay":    resolve(__dirname, "src/shims/google-fonts/DMSerifDisplay.ts"),
-  "@remotion/google-fonts/Inter":             resolve(__dirname, "src/shims/google-fonts/Inter.ts"),
-  "@remotion/google-fonts/JetBrainsMono":     resolve(__dirname, "src/shims/google-fonts/JetBrainsMono.ts"),
-  "@remotion/google-fonts/Lora":              resolve(__dirname, "src/shims/google-fonts/Lora.ts"),
-  "@remotion/google-fonts/Montserrat":        resolve(__dirname, "src/shims/google-fonts/Montserrat.ts"),
-  "@remotion/google-fonts/Oswald":            resolve(__dirname, "src/shims/google-fonts/Oswald.ts"),
-  "@remotion/google-fonts/PlayfairDisplay":   resolve(__dirname, "src/shims/google-fonts/PlayfairDisplay.ts"),
-  "@remotion/google-fonts/Poppins":           resolve(__dirname, "src/shims/google-fonts/Poppins.ts"),
-  "@remotion/google-fonts/Roboto":            resolve(__dirname, "src/shims/google-fonts/Roboto.ts"),
-  "@remotion/google-fonts/SpaceMono":         resolve(__dirname, "src/shims/google-fonts/SpaceMono.ts"),
-  "@remotion/google-fonts/Teko":              resolve(__dirname, "src/shims/google-fonts/Teko.ts"),
-};
+// ONE MAP, TWO BUNDLERS. It lived only here while remotion_batch.mjs —
+// the path that renders every job — bundled without it.
+import { GOOGLE_FONT_ALIASES, REMOTION_MEDIA_ALIAS } from "./font-aliases.mjs";
 
-mkdirSync(BUNDLE_DIR, { recursive: true });
-
-console.log("[prebundle] Bundling Remotion project...");
-// Redirect `@remotion/media` to a local shim that re-exports `OffthreadVideo`
-// as `Video`. The five ABE.zip zoom components import `Video` from
-// `@remotion/media`; on short pre-extracted zoom clips that WebCodecs path
-// times out at frame 1-3 with "Timeout while extracting frame at time Nsec".
-// OffthreadVideo uses Chromium's standard HTMLVideoElement + frame capture,
-// which decodes every frame the components ask for. The component files
-// remain byte-identical to ABE.zip — only the package resolution is
-// redirected at build time.
-const REMOTION_MEDIA_ALIAS = {
-  "@remotion/media": resolve(__dirname, "src/shims/remotion-media.ts"),
-};
 
 console.log(`[prebundle] Aliasing ${Object.keys(GOOGLE_FONT_ALIASES).length} @remotion/google-fonts imports to local shims (no network fetches at render time).`);
 console.log(`[prebundle] Aliasing @remotion/media → src/shims/remotion-media.ts (Video → OffthreadVideo, avoids WebCodecs frame-extract timeouts on short clips).`);
