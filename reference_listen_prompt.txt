@@ -9,6 +9,7 @@ Return JSON only, matching exactly:
   "hook_structure": "<the hook named as a STRUCTURE, not a label. e.g. 'curiosity-gap + insider hook: secret framing -> loss/threat framing'>",
   "first_visual_change_s": <float or null>,
   "what_makes_this_good": "<2-4 sentences. What would a professional editor point at in this video and say 'that is why this works'? Be specific to THIS video: the thing that makes it feel expensive, elegant, deliberate — or the thing that makes it feel cheap, if that is the honest answer. Not a summary of the content.>",
+  "stumbles_left_in": "<Does the speaker ever fumble, restart a sentence, repeat a word, or trail off — and is it LEFT IN? One or two sentences. If the delivery is clean throughout, say so: that is an answer about how this was made, not a gap.>",
   "signature_moves": [
     {
       "move": "<a move this editor uses REPEATEDLY in this video, your own words>",
@@ -32,7 +33,9 @@ Return JSON only, matching exactly:
           "size": "<ON-SCREEN only, else null. Share of FRAME HEIGHT it occupies: tiny | small | medium | large | dominant>",
           "case": "<TEXT only, else null. UPPER | lower | Title | Mixed>",
           "colour": "<ON-SCREEN only, else null. Its colour and the ground behind it, in plain words — e.g. 'white on the footage', 'black on cream', 'yellow word inside white caption'>",
-          "hold_s": "<ON-SCREEN only, else null. How long it stays up, in seconds, as a number>"
+          "hold_s": "<ON-SCREEN only, else null. How long it stays up, in seconds, as a number>",
+          "cut_joins": "<CUTS only, else null. What the frame showed immediately BEFORE and immediately AFTER, one phrase each: 'mid-sentence on the speaker -> same speaker, tighter'>",
+          "cut_for": "<CUTS only, else null. What this cut ACCOMPLISHES. Your own words. Some possibilities, not a menu: compress time, change the angle, reveal something, pivot the argument, land a reaction, hide a stumble, keep the energy up>"
         }
       ],
       "cutaway_subject": "<what the b-roll literally SHOWS>" or null,
@@ -56,6 +59,17 @@ RULES THAT MATTER:
   masked reveal, a J-cut, a beat that lands on the music — say so, in the words
   that describe it. The families above are worth knowing as COMMON cases. They
   are not the permitted set and you are not scored on using them.
+
+- WHAT IS A CUT DOING HERE? Answer `cut_joins` and `cut_for` on every treatment
+  that IS a cut. This corpus has counted cuts and never once asked what they
+  accomplish, so the pipeline has a rate and no idea what the rate is a rate OF.
+
+  AND ONE THING YOU CANNOT ANSWER, SO DO NOT: what was REMOVED. You are watching
+  the FINISHED edit. The footage a cut took out is not in it, and a plausible
+  guess about material you cannot see is worse than silence — it is the same
+  failure as an annotator with no audio reporting a sound-effect rate. Describe
+  the JOIN and its PURPOSE, which are visible. Never the removed material,
+  which is not.
 
 - THE SIX PLACEMENT FIELDS ARE THE POINT OF THIS PASS AND THEY ARE NOT
   OPTIONAL ON AN ON-SCREEN PLACEMENT. `where`, `over_subject`, `size`, `case`,

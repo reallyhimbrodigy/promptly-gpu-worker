@@ -5137,7 +5137,18 @@ def beat_stalls(words, beats):
                    key=lambda x: x["s"])
         dur = float(b["t_end"]) - float(b["t_start"])
         rec = {"max_gap_s": 0.0, "gap_at_s": None, "rate_ratio": None,
-               "words": len(w)}
+               "repeat": None, "words": len(w)}
+        # A REPEATED WORD IS THE ONLY DEAD AIR A BEAT CAN ACTUALLY CONTAIN.
+        # Adjacent duplicates are a restart — "the the", "I I mean" — and
+        # unlike silence they survive segmentation, because segment_beats cuts
+        # on TIMING and a stumble has none. Full-word repeats only: this
+        # product's standing rule is that phoneme-prefix matching produces
+        # false positives on ordinary speech.
+        _seq = [str(x.get("w") or "").strip().lower().strip(".,!?") for x in w]
+        for _a, _b in zip(_seq, _seq[1:]):
+            if _a and _a == _b:
+                rec["repeat"] = _a
+                break
         if len(w) >= 2:
             gaps = [(w[i + 1]["s"] - w[i]["e"], w[i]["e"])
                     for i in range(len(w) - 1)]
@@ -5162,8 +5173,26 @@ def stall_note(b, stalls):
     """
     r = (stalls or {}).get(b.get("i")) or {}
     bits = []
-    if r.get("max_gap_s", 0) >= 0.35:
+    # THE SILENCE ARM WAS DEAD BY CONSTRUCTION AND I SHIPPED IT.
+    # segment_beats splits on `gap >= 0.35`, so a 0.35s gap INSIDE a beat
+    # cannot exist — it would have been a beat boundary. Measured on round 65:
+    # the largest intra-beat gap across every beat is 0.16s. The arm fired at
+    # >= 0.35 and could never fire once.
+    #
+    # And beats are defined BY word boundaries (t_start = first word's start,
+    # t_end = last word's end), so there is no head or tail silence either.
+    # There is NO SILENCE INSIDE A BEAT TO TRIM, anywhere, by construction.
+    #
+    # So a within-beat trim can only ever remove SPEECH — a stumble, a
+    # restart, a repeated word. That is a different signal and it is the one
+    # worth showing. The floor is kept and named rather than deleted, because
+    # the arm becomes reachable the moment segment_beats' gap_s changes, and a
+    # silently removed check is how the next reader concludes it was never
+    # needed.
+    if r.get("max_gap_s", 0) >= 0.35:                      # unreachable at gap_s=0.35
         bits.append(f"{r['max_gap_s']:.1f}s silence @{r['gap_at_s']:.1f}s")
+    if r.get("repeat"):
+        bits.append(f"repeats {r['repeat']!r}")
     rr = r.get("rate_ratio")
     if rr is not None and rr <= 0.7:
         bits.append(f"{rr:.2f}x this speaker's own pace")
