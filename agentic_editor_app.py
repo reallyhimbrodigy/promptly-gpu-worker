@@ -8243,11 +8243,49 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
 
 
 
-COHERENT, INCOHERENT, VACANT = "COHERENT", "INCOHERENT", "VACANT"
+COHERENT, INCOHERENT, VACANT, INERT = (
+    "COHERENT", "INCOHERENT", "VACANT", "INERT")
+
+
+def caption_evidence(words):
+    """(n, scripts, dominant) — WHAT the captions say, not that they happened.
+
+    `caption_composited` IS A PRESENCE FLAG and my fidelity rule was taking it
+    as evidence that captions were DELIVERED. Round 65's car_short shows the
+    gap: the flag read True and the only caption on screen was "ОЙ" — Cyrillic,
+    the transcriber hearing engine noise and crowd as Russian speech on a car
+    video with no talking. "Captions were composited" and "captions say
+    something" are different facts, and the second is the one a user sees.
+
+    The script census is recorded rather than judged. I will not infer an
+    EXPECTED language here: this lane has a real multilingual route, Arabic
+    graduated on nine of nine Tier-1 checks, and a check that assumed Latin
+    would reject correct work. What it does is make the distribution visible so
+    a run whose captions are entirely one unexpected script is legible in the
+    log instead of only in the pixels.
+    """
+    import unicodedata as _ud
+    _n, _scripts = 0, {}
+    for _w in (words or []):
+        _t = str((_w or {}).get("w") or (_w or {}).get("word") or _w or "").strip()
+        if not _t:
+            continue
+        _n += 1
+        for _ch in _t:
+            if not _ch.isalpha():
+                continue
+            try:
+                _name = _ud.name(_ch)
+            except ValueError:
+                continue
+            _sc = _name.split()[0]
+            _scripts[_sc] = _scripts.get(_sc, 0) + 1
+    _dom = max(_scripts, key=_scripts.get) if _scripts else None
+    return (_n, _scripts, _dom)
 
 
 def unscoped_coherence(ruled_vs_built, placements, cut_made=False,
-                       captions_made=False):
+                       captions_made=False, beats_ruled=0):
     """(state, dropped, unbuildable, why) — the ONLY thing judgeable when the
     brief declared no scope. PURE.
 
@@ -8293,6 +8331,28 @@ def unscoped_coherence(ruled_vs_built, placements, cut_made=False,
         return (VACANT, _dropped, _unb,
                 "the edit contains nothing — no placement, no cut, no captions. "
                 "A brief with no scope still asked for an edit.")
+    # ── INERT: SOMETHING CHANGED, AND NOTHING WAS PLACED ───────────────────
+    # ROUND 65 DEFEATED THE VACANT ARM WITH A 1.4-SECOND CUT. screen_recording
+    # ruled all 36 of its beats `none`, placed NOTHING, and removed 1.4s of
+    # 90.5s — and `bool(cut_made)` was enough to call that "something happened"
+    # and grade it COHERENT. I tested PRESENCE where the question was whether
+    # the run did any editorial work, which is the `bool(keep_spans)` shape I
+    # fixed elsewhere and re-introduced here within the hour.
+    #
+    # STATED WITHOUT A RATE, deliberately. Not "cut less than N% of the source"
+    # — that is a population constant and the density rates GRADE, never
+    # instruct. ZERO PLACEMENTS ACROSS BEATS THAT WERE RULED is rate-free: zero
+    # is zero at 3 beats and at 36, and a run that takes none of 36 chances is
+    # abstaining rather than being restrained.
+    #
+    # A run that places two things because two moments deserved them is still
+    # COHERENT. This arm fires only at zero.
+    if not placements and beats_ruled:
+        return (INERT, _dropped, _unb,
+                "nothing was placed on any of %d ruled beat(s) — the only "
+                "change is a cut. Restraint is placing few things; this is "
+                "placing none, and a brief with no scope asked for an edit."
+                % beats_ruled)
     if _dropped:
         _n = sum(_r - _b for _r, _b in _dropped.values())
         return (INCOHERENT, _dropped, _unb,
@@ -10977,6 +11037,18 @@ def edit(source_key: str, brief: str,
                                        ctrl_t0=_cap_ctrl)
                 cur = "captioned.mp4"
                 led["caption_composited"] = True
+                # WHAT THEY SAY, not that they ran. The flag above is presence;
+                # these are the shape. car_short round 65 had the flag True and
+                # one Cyrillic caption transcribed from engine noise.
+                _cw_n, _cw_s, _cw_d = caption_evidence(_cap_words)
+                led["caption_words_n"] = _cw_n
+                led["caption_scripts"] = _cw_s
+                led["caption_script_dominant"] = _cw_d
+                print("  CAPTION CONTENT : %d word(s), dominant script %s  %s"
+                      % (_cw_n, _cw_d or "NONE",
+                         "   <-- composited with NO WORDS: the flag says "
+                         "captions and the frame has none"
+                         if not _cw_n else ""), flush=True)
             else:
                 # The render succeeded and the composite did not, so the video
                 # has NO captions at all — worse than the fallback, and it must
@@ -14471,7 +14543,13 @@ def edit(source_key: str, brief: str,
     # already there from last time. That is the paid re-edit no-op scored as a
     # success, and it is the shape `reedit_taxonomy` is about.
     _fid_pl = led.get("placements") or []
-    _cut_for_fid, _cap_for_fid = _cut_made, bool(led.get("caption_composited"))
+    # CAPTIONS COUNT AS DELIVERED ONLY IF THEY SAY SOMETHING. The flag is
+    # presence; `caption_words_n` is the shape. A composite that ran over zero
+    # words burns nothing and must not satisfy "just add captions".
+    _cap_words_n = led.get("caption_words_n")
+    _cut_for_fid, _cap_for_fid = _cut_made, (
+        bool(led.get("caption_composited"))
+        and (_cap_words_n is None or _cap_words_n > 0))
     _rd_state, _rd_beats, _rd_fams = reedit_delta(led.get("prior_verdicts"),
                                                   led.get("beat_verdicts"))
     led["reedit_delta_state"] = _rd_state
@@ -14540,7 +14618,8 @@ def edit(source_key: str, brief: str,
         _co_state, _co_drop, _co_unb, _co_why = unscoped_coherence(
             led.get("ruled_vs_built"), led.get("placements") or [],
             cut_made=_cut_made,
-            captions_made=bool(led.get("caption_composited")))
+            captions_made=bool(led.get("caption_composited")),
+            beats_ruled=len(led.get("beat_verdicts") or []))
         led["coherence"] = {"state": _co_state, "dropped": _co_drop,
                             "unbuildable": _co_unb, "why": _co_why}
         print("  COHERENCE       : %s — %s" % (_co_state, _co_why), flush=True)

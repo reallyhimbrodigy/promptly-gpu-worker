@@ -458,6 +458,55 @@ check("both stripper passes key on TREATMENT, not the field alone",
       src.count('"sfx" in [str(t).lower()') >= 2,
       "a guard reading a different field from its siblings is the bug")
 
+# ── THE TWO HOLES ROUND 65 FOUND IN THIS INSTRUMENT ─────────────────────────
+# 1. A 1.4-SECOND CUT DEFEATED THE VACANT ARM. screen_recording ruled all 36 of
+#    its beats `none`, placed NOTHING, removed 1.4s of 90.5s — and `bool(cut_made)`
+#    was enough to grade it COHERENT. Presence tested where the question was
+#    whether the run did any editorial work.
+check("zero placements across ruled beats is INERT, even when a cut happened",
+      _uc({}, [], cut_made=True, beats_ruled=36)[0] == "INERT")
+check("nothing at all is still VACANT, which is a different fact",
+      _uc({}, [], beats_ruled=36)[0] == "VACANT")
+# AND IT MUST NOT BECOME A RATE. The standing law: the density rates GRADE and
+# never instruct. A run that places two things because two moments deserved them
+# is COHERENT, and this arm fires only at ZERO — which is rate-free, because
+# zero is zero at 3 beats and at 36.
+check("a SMALL edit that placed something is COHERENT — the arm fires only at "
+      "zero, so there is no population constant to mis-fit",
+      _uc({"zoom": {"ruled": 1, "built": 1}}, [{"family": "zoom"}],
+          beats_ruled=3)[0] == "COHERENT")
+check("INERT does not pre-empt INCOHERENT — a dropped family still reports as "
+      "the more specific failure",
+      _uc({"transition": {"ruled": 3, "built": 0}}, [{"family": "sfx"}],
+          beats_ruled=10)[0] == "INCOHERENT")
+check("the call site passes beats_ruled, or the arm can never fire",
+      "beats_ruled=len(led.get(\"beat_verdicts\") or [])" in src)
+
+# 2. `caption_composited` IS A PRESENCE FLAG. car_short had it True and the only
+#    caption on screen was "ОЙ" — Cyrillic, from engine noise on a car video
+#    with no speech. "Composited" and "says something" are different facts.
+_ce = _AA.caption_evidence
+check("`caption_evidence` is hoisted and reports word count and script",
+      callable(_ce) and _ce([{"w": "hello"}, {"w": "world"}])[0] == 2)
+check("no words is 0 with no dominant script — not an empty pass",
+      _ce([])[:1] == (0,) and _ce([])[2] is None)
+check("it names the script rather than judging it — a lane with a live "
+      "multilingual route must not assume Latin",
+      _ce([{"w": "\u041e\u0419"}])[2] == "CYRILLIC")
+check("fidelity counts captions as delivered only if they SAY something",
+      "_cap_words_n is None or _cap_words_n > 0" in src,
+      "a composite over zero words burns nothing and must not satisfy "
+      "'just add captions'")
+check("and the content reaches a real print(), so a wordless composite is "
+      "visible in the log rather than only in the pixels",
+      any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "print"
+          and "CAPTION CONTENT" in ast.unparse(n) for n in ast.walk(tree)))
+# BACKWARD COMPATIBLE: ledgers written before this key exists must not read as
+# "captions absent" — that would re-report every prior round as SHORT.
+check("a ledger with no caption_words_n key still counts captions as delivered "
+      "— absent is not zero",
+      "_cap_words_n is None" in src)
+
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)
 check("and is PRINTED", "FIDELITY        :" in src,
