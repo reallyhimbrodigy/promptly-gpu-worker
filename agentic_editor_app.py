@@ -9235,6 +9235,7 @@ def edit(source_key: str, brief: str,
          cheap_model: str = "claude-haiku-4-5",
          exec_model: str = MODEL,
          recent_styles: str = "",
+         offer_readers: bool = False,
          prefix_removals: str = "") -> dict:
     """`recent_styles`: this user's last caption picks, most recent FIRST,
     comma-separated.
@@ -13295,7 +13296,22 @@ def edit(source_key: str, brief: str,
     # Haiku reaches the same verdicts as Sonnet and pays nine extra turns to
     # read first. The role is judgment; the readers serve an execution job the
     # agent no longer has.
-    _judgment_only = "haiku" in str(model).lower()
+    # THE AUTHORING DOOR, AND WHETHER IT IS OPEN IS AN ARM.
+    #
+    # `_judgment_only` strips read_knowledge and search_skills on Haiku, and 43
+    # of 43 runs on disk ran Haiku — so search_skills is 0 across every round
+    # because the TOOL IS NOT THERE, not because the agent declined it. The
+    # rationale is measured (rounds 12-13: Sonnet called them zero times; Haiku
+    # spent nine turns and reached the same place, and turns are ~75% of wall)
+    # but "the same place" was measured against an output we now know carries a
+    # card over the speaker's face, zero cuts and doubled captions.
+    #
+    # A PARAMETER, NOT AN ENV VAR. The removal switches already taught this
+    # file that an observable must be computed on the side of the boundary it
+    # describes: a local export reads as ON while the container runs OFF, and
+    # the log certifies the wrong arm. This travels with the call, and the
+    # state ACTUALLY USED is recorded in the ledger below.
+    _judgment_only = "haiku" in str(model).lower() and not offer_readers
     tools = TOOLS + (list(KNOWLEDGE_TOOLS) if use_knowledge else [])
     # THE READERS COME OUT FOR THE JUDGMENT-ONLY ROLE.
     #
@@ -13313,6 +13329,16 @@ def edit(source_key: str, brief: str,
     if _judgment_only:
         _READERS = {"read_knowledge", "search_skills"}
         tools = [t for t in tools if t.get("name") not in _READERS]
+    # RECORDED WHERE IT IS READ. Not "what was requested" — what this container
+    # actually built the tool list with.
+    led["readers_offered"] = not _judgment_only
+    led["tool_names"] = sorted(t.get("name") for t in tools)
+    print("  READERS        : %s  (model=%s, offer_readers=%s) — "
+          "search_skills %s in the tool list"
+          % ("OFFERED" if not _judgment_only else "WITHHELD", model,
+             offer_readers,
+             "IS" if any(t.get("name") == "search_skills" for t in tools)
+             else "is NOT"), flush=True)
 
 
 
