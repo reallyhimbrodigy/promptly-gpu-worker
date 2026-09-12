@@ -3469,6 +3469,76 @@ def blind_rebuilds(turns):
                     _blind += 1
                 _seen = False
     return ("MEASURED", _blind, _total)
+_EMPTYISH = (None, "", [], {})
+
+
+def reruled_beats(verdicts, executed=None):
+    """(state, rows) — beats ruled more than once: WHAT CHANGED, WHAT WAS LOST,
+    and WHICH ruling the build actually used.
+
+    Round 63 `motion` carried 12 `beat_verdicts` for 10 beats and nothing said
+    so. The singular `beat_verdict` tool appends with NO duplicate check (
+    `rule_all_beats` has one, plus the half-ruling refusal and the full
+    VERDICT_FIELDS projection), writes 4 of the schema's fields, and replies
+    `"ruled": len({v["beat"] for v in beat_verdicts})` — a DEDUPED count, so
+    the agent is told "ruled 10 of 10" and cannot tell it just contradicted
+    itself. Beat 0's second ruling dropped `zoom_arc` from "hook" to None while
+    keeping "zoom" in `treatment`.
+
+    It was inert on that round only because the second execute_plan was
+    REFUSED. Had it run, the build's own per-beat lookup is
+    `{v.get("beat"): v for v in beat_verdicts}` — a dict comprehension, so LAST
+    WINS — and the zoom would have been built with no arc, silently, in the
+    field this lane spent the day wiring craft into. **Latent, not fixed**, and
+    bounding it is Builder-1's; this reports it.
+
+    THREE STATES, because the zero is ambiguous otherwise. `verdicts` not a
+    list is ABSENT — a ledger that never recorded rulings and a run that never
+    re-ruled a beat are different facts. A present list with no duplicate is a
+    MEASURED zero.
+    """
+    if not isinstance(verdicts, list):
+        return ("ABSENT", [])
+    _order = {}
+    for _v in verdicts:
+        if isinstance(_v, dict) and _v.get("beat") is not None:
+            _order.setdefault(_v["beat"], []).append(_v)
+    _ex = {}
+    for _v in (executed if isinstance(executed, list) else []):
+        # FIRST occurrence, because executed_verdicts is a frozen copy that can
+        # itself carry duplicates; taking the last here would read the defect
+        # as the answer to the question about the defect.
+        if isinstance(_v, dict) and _v.get("beat") is not None:
+            _ex.setdefault(_v["beat"], _v)
+    _rows = []
+    for _beat, _rul in sorted(_order.items(), key=lambda kv: (kv[0] is None, kv[0])):
+        if len(_rul) < 2:
+            continue
+        _keys = set()
+        for _r in _rul:
+            _keys |= set(_r)
+        _changed, _lost = {}, []
+        for _k in sorted(_keys - {"beat"}):
+            _vals = [_r.get(_k) for _r in _rul]
+            if any(_x != _vals[0] for _x in _vals):
+                _changed[_k] = _vals
+                if _vals[0] not in _EMPTYISH and _vals[-1] in _EMPTYISH:
+                    _lost.append(_k)
+        # WHICH RULING BUILT, derived from the frozen executed copy rather than
+        # asserted from the merge rule — the merge rule is the thing in doubt.
+        if not _changed:
+            _built = "identical"          # not vacuously "first": nothing differs
+        elif _beat not in _ex:
+            _built = "NOT_EXECUTED"
+        else:
+            _e = _ex[_beat]
+            _first = all(_e.get(_k) == _rul[0].get(_k) for _k in _changed)
+            _last = all(_e.get(_k) == _rul[-1].get(_k) for _k in _changed)
+            _built = ("first==later" if _first and _last else
+                      "first" if _first else "later" if _last else "MIXED")
+        _rows.append({"beat": _beat, "rulings": len(_rul), "built_from": _built,
+                      "changed": _changed, "lost_fields": _lost})
+    return ("MEASURED", _rows)
 
 
 def figure_instant(beat, numeric_ts):
@@ -12589,6 +12659,36 @@ def edit(source_key: str, brief: str,
              "so the verdict is unsupportable in either direction. Fix the "
              "control or re-measure the bar; do not read these as clean and do "
              "not read them as defects." % len(_held))
+
+    # RE-RULINGS, MADE VISIBLE. Not bounded here — the merge and the tool that
+    # bypasses it are Builder-1's — but a disagreement the ledger records and
+    # nobody prints is the counter-with-no-consumer class, and this one hides a
+    # latent defect: the build's per-beat lookup is a dict comprehension, so a
+    # second ruling WINS there while the frozen executed copy kept the first.
+    _rr_state, _rr_rows = reruled_beats(led.get("beat_verdicts"),
+                                        led.get("executed_verdicts"))
+    led["reruled_state"] = _rr_state
+    led["reruled_beats"] = _rr_rows
+    led["reruled_count"] = len(_rr_rows)
+    _rr_n = len({v.get("beat") for v in (led.get("beat_verdicts") or [])
+                 if isinstance(v, dict)})
+    print("  RE-RULED BEATS  : %s  %d beat(s) ruled more than once "
+          "(%d ruling(s) over %d beat(s))"
+          % (_rr_state, len(_rr_rows),
+             len(led.get("beat_verdicts") or []), _rr_n), flush=True)
+    for _r in _rr_rows:
+        print("     beat %s: %d rulings, BUILT FROM %s%s"
+              % (_r["beat"], _r["rulings"], _r["built_from"],
+                 "   LOST: " + ", ".join(_r["lost_fields"])
+                 if _r["lost_fields"] else ""), flush=True)
+        for _k, _vals in _r["changed"].items():
+            print("        %-13s %s" % (_k, " -> ".join(repr(_x) for _x in _vals)),
+                  flush=True)
+    if _rr_rows and any(_r["lost_fields"] for _r in _rr_rows):
+        print("     NOTE: a later ruling that drops a field does NOT clear it "
+              "in the frozen executed copy, but DOES win the build's own "
+              "`{beat: v}` lookup — last one in. Inert here only while the "
+              "second execute_plan is refused.", flush=True)
 
     # K6, MEASURED. A rebuild with no measurement since the last one is a
     # render billed for a guess. The rule is hoisted (blind_rebuilds) so the
