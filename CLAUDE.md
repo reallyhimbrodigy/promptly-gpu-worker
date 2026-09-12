@@ -1017,3 +1017,51 @@ inflated by retries into an apparent outage.
   and it has now fired twice for real (a red proof that was itself an
   unrecorded `red_proof_*.py`, and a worktree at a HEAD that predated the
   change).
+
+
+## Standing rule earned 2026-09-11 (a set named for the schedule, not the property)
+
+- **A SET WHOSE NAME DESCRIBES *WHEN* ITS MEMBERS RUN, NOT *WHAT* THEY TOUCH,
+  HOLDS CORRECTLY UNTIL ONE MEMBER'S SCHEDULE CHANGES — AND NOTHING IN THE NAME
+  TELLS YOU WHICH MEMBER THAT IS.** (Named by Zac 2026-09-11.) This is distinct
+  from the seven ways a mutation misleads: those are all failures of an
+  INSTRUMENT. This one is a failure of a CATEGORY, and it survives every check
+  because **the set was never wrong — only about to be.**
+
+  `_REPAIR_ONLY = {build_cut, build_overlays, build_zoom, place_sfx,
+  render_components, author_component, beat_verdict}` refused every member until
+  `execute_plan` had run, on the rule that a repair tool needs something built to
+  repair. True of six of them: they operate on FILES that do not exist until
+  execute_plan runs in this container. False of the seventh: `beat_verdict`
+  changes a RULING, and on a re-edit the thing it repairs is the PREVIOUS edit,
+  already loaded as the prior plan.
+
+  The set was named for the schedule ("only after the build") when the property
+  was the material ("operates on rendered files"). While every member happened
+  to share both, the name was indistinguishable from the property.
+
+  **IT WAS LATENT UNTIL THE TOOL WAS PROMOTED TO THE JOB IT WAS FOR.** It sat
+  harmlessly for as long as a re-edit's real work went through `rule_all_beats`
+  and the singular tool was mostly first-edit fidgeting. Ruling it "the surgical
+  instrument for re-edits" is what would have fired it: a tool promoted to a job
+  while an ordering rule still said it could not run until a render had
+  happened. **A latent break that only fires when the thing is promoted to the
+  job it is for** is the shape to watch for — the promotion looks like the safe
+  part.
+
+  **AND IT WOULD HAVE SURFACED IN THE WORST POSSIBLE FORM.** The symptom is a
+  re-edit that renders twice: once to satisfy the ordering rule, once to deliver
+  the change. That reads as a SLOW RE-EDIT — a performance problem, filed
+  against latency, investigated in the render path — when it is a capability
+  failure in the tool surface. Nothing would have pointed at the set.
+
+  **How to apply.** When withholding, gating or ordering a group of tools, write
+  down the PROPERTY that justifies the grouping, not the schedule that currently
+  correlates with it — then check each member against the property individually.
+  And when promoting anything to a new role, re-check every rule that constrains
+  it: the rules were written for the old role and none of them announce that.
+
+  Found only because Zac said to check that direction. My own equal-capability
+  check had stopped at "is `rule_all_beats` still offered on both paths" — which
+  it was, and which passes cleanly while the surgical tool is unreachable until
+  after a full rebuild.
