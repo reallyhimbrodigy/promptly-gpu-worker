@@ -62,6 +62,9 @@ check("it is called with the executed copy too, so `built_from` is derived "
       any(len(c.args) >= 2 for c in _calls),
       "every call site passes one argument — `built_from` would be unanswerable")
 
+_assigned_names = {t.id for n in ast.walk(_tree)
+                   if isinstance(n, ast.Assign) for t in n.targets
+                   if isinstance(t, ast.Name)}
 _assigned = set()
 for n in ast.walk(_tree):
     if isinstance(n, ast.Assign):
@@ -290,6 +293,69 @@ if _bv_decl:
           "than a hand-written one",
           _projects,
           "a hand list is a second vocabulary; it drifted silently once")
+
+# ── BOTH PATHS EDIT EQUALLY WELL ────────────────────────────────────────────
+# beat_verdict offered 5 of the 13 fields rule_all_beats offers. A re-edit
+# surface missing eight fields is structurally worse at obeying the user, and
+# NOTHING catches it: a field nobody offers produces no error anywhere. The
+# agent is not offered it, cannot supply it, and the beat is ruled without it.
+_p_props, _s_props = None, None
+def _tool(nm):
+    _hit = []
+    def _w(o):
+        if isinstance(o, dict):
+            if o.get("name") == nm:
+                _hit.append(o)
+            for _v in o.values():
+                _w(_v)
+        elif isinstance(o, (list, tuple)):
+            for _v in o:
+                _w(_v)
+    for _n in dir(_app):
+        try:
+            _w(getattr(_app, _n))
+        except Exception:
+            pass
+    return _hit[0] if _hit else None
+
+_pt, _st = _tool("rule_all_beats"), _tool("beat_verdict")
+check("both verdict tools are declared", _pt is not None and _st is not None)
+if _pt and _st:
+    _p_props = set(((((_pt.get("input_schema") or {}).get("properties") or {})
+                     .get("verdicts") or {}).get("items") or {})
+                   .get("properties") or {})
+    _s_props = set((_st.get("input_schema") or {}).get("properties") or {})
+    check("the two ruling surfaces offer the SAME fields — neither path can "
+          "make a ruling the other cannot",
+          _p_props == _s_props,
+          "only on rule_all_beats: %s   only on beat_verdict: %s"
+          % (sorted(_p_props - _s_props), sorted(_s_props - _p_props)))
+    check("and the set is the full schema vocabulary, not a shared subset",
+          _s_props == set(_app.VERDICT_FIELDS),
+          "beat_verdict offers %d of %d VERDICT_FIELDS"
+          % (len(_s_props & set(_app.VERDICT_FIELDS)), len(_app.VERDICT_FIELDS)))
+
+# DERIVED, NOT PASTED. Eight copied property blocks would drift the first time
+# one side was edited — the divergence the fix exists to prevent, reintroduced
+# by the fix. The singular tool's literal must NOT spell these out; they come
+# from the plural tool's schema at import.
+check("`_sync_verdict_surfaces` exists and runs at import",
+      "_sync_verdict_surfaces" in _fns
+      and "VERDICT_SURFACES_SYNCED" in _assigned_names,
+      "a sync nobody calls leaves the surfaces as they were")
+check("it reports WHICH fields it added, so a silent no-op is visible",
+      isinstance(getattr(_app, "VERDICT_SURFACES_SYNCED", None), list))
+_st_i = next(i for i, l in enumerate(_src.splitlines())
+             if '"name": "beat_verdict",' in l)
+_st_seg = "\n".join(_src.splitlines()[_st_i:_st_i + 120])
+_pasted = [k for k in ("card_condition", "card_hero", "card_label",
+                       "card_props", "sfx_name", "text_content", "zoom_arc")
+           if '"%s":' % k in _st_seg]
+check("the eight fields are DERIVED from rule_all_beats, not pasted into "
+      "beat_verdict's literal",
+      not _pasted,
+      "hand-copied: %s — two declarations of one field is the divergence this "
+      "closed, reintroduced by the fix for it" % _pasted)
 
 print()
 if fails:

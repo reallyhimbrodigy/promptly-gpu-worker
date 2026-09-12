@@ -3184,6 +3184,65 @@ KNOWLEDGE_TOOLS = [{
 }]
 
 
+def _sync_verdict_surfaces():
+    """beat_verdict offers EXACTLY the fields rule_all_beats offers. DERIVED.
+
+    ZAC'S STANDARD IS THAT BOTH PATHS EDIT EQUALLY WELL, and the re-edit surface
+    was structurally worse at obeying the user: eight of the thirteen fields the
+    main surface offers were simply absent from this one — card_condition,
+    card_hero, card_label, card_props, sfx, sfx_name, text_content, zoom_arc.
+    Nothing caught it, because a missing field produces no error anywhere. The
+    agent is not offered it, so it cannot supply it, so the beat is ruled
+    without it and the boundary stores nothing. A beat re-ruled through
+    beat_verdict could never carry a caption's copy, a card's hero, a zoom's
+    arc or a sound's name.
+
+    `_assert_verdict_surfaces_offer_the_same_fields` RECORDED that gap as KNOWN
+    rather than closing it, which was the right call for a check and the wrong
+    place to leave a product. This closes it.
+
+    DERIVED, NOT COPIED, and that is the whole point. Eight pasted property
+    blocks would drift the first time one side was edited — the divergence they
+    are meant to prevent, reintroduced by the fix for it. The singular tool's
+    properties are now BUILT from the plural tool's item schema at import, so
+    the two surfaces cannot disagree: there is one declaration and one place to
+    change it.
+
+    Fields the singular tool already declares KEEP their own text: `treatment`
+    and `cut` carry descriptions tuned to a one-beat call, and overwriting them
+    with the batch tool's wording would make the prompt worse in the name of
+    symmetry. Symmetry is required of the FIELD SET, not of the prose.
+    """
+    import copy as _cp
+    _plural = next((t for t in KNOWLEDGE_TOOLS
+                    if t.get("name") == "rule_all_beats"), None)
+    _single = next((t for t in KNOWLEDGE_TOOLS
+                    if t.get("name") == "beat_verdict"), None)
+    if _plural is None or _single is None:
+        raise AssertionError(
+            "a verdict tool is missing, so the surfaces cannot be synced: "
+            "rule_all_beats=%s beat_verdict=%s"
+            % (_plural is not None, _single is not None))
+    _items = ((((_plural.get("input_schema") or {}).get("properties") or {})
+               .get("verdicts") or {}).get("items") or {})
+    _src_props = _items.get("properties") or {}
+    if not _src_props:
+        raise AssertionError(
+            "rule_all_beats declares no verdict item properties — the sync "
+            "would silently leave beat_verdict as it was, which is the "
+            "absence-as-success failure this file keeps paying for")
+    _dst = (_single.get("input_schema") or {}).setdefault("properties", {})
+    _added = []
+    for _k, _v in _src_props.items():
+        if _k not in _dst:
+            _dst[_k] = _cp.deepcopy(_v)
+            _added.append(_k)
+    return sorted(_added)
+
+
+VERDICT_SURFACES_SYNCED = _sync_verdict_surfaces()
+
+
 # BOTH files are required for the capability arm: 14 says WHERE families go,
 # 15 gives the exact ffmpeg invocation that draws them. Runs 6/8/9 placed ZERO
 # cards and ZERO text with 14 read, which is the hypothesis 15 tests — knowing
@@ -8605,14 +8664,24 @@ def _assert_verdict_surfaces_offer_the_same_fields() -> None:
         raise AssertionError(
             "a verdict tool could not be read, so this check is ABSENT: "
             f"rule_all_beats={len(plural)} beat_verdict={len(single)}")
-    # RECORDED, NOT TOLERATED. Closing this is a schema change to
-    # beat_verdict and it is not part of the unification Zac scoped, so the gap
-    # is named with its consequence instead of quietly widened. Every NEW
-    # divergence fails the container at import, and so does silently CLOSING
-    # one of these without deleting it here — a check that absorbs the current
-    # state rots into "the surfaces agree" the first time someone reads it.
-    KNOWN = {"card_condition", "card_hero", "card_label", "card_props",
-             "sfx", "sfx_name", "text_content", "zoom_arc"}
+    # EMPTY, AND THAT IS THE POINT. It held eight fields that beat_verdict did
+    # not offer — card_condition, card_hero, card_label, card_props, sfx,
+    # sfx_name, text_content, zoom_arc — recorded rather than closed. Closing
+    # them was the right call: a re-edit surface missing eight of the main
+    # surface's thirteen fields is structurally worse at obeying the user, and
+    # no check catches that because a field nobody offers produces no error
+    # anywhere.
+    #
+    # `_sync_verdict_surfaces` now DERIVES the singular tool's properties from
+    # the plural tool's item schema, so the two cannot diverge by construction
+    # and there is nothing left to excuse. The check below is now the strict
+    # one: ANY divergence fails the container at import.
+    #
+    # If a future divergence is genuinely intended, add it here WITH its
+    # consequence — and the assert after it fails if it is ever closed without
+    # being deleted from this set, so the record cannot rot into "the surfaces
+    # agree".
+    KNOWN = set()
     diff = (plural - single) | (single - plural)
     new_diff = diff - KNOWN
     assert not new_diff, (

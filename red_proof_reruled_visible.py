@@ -88,19 +88,19 @@ MUTATIONS = [
      "FREEZE_MUTATED"),
 
     ("the singular tool's reply goes back to a deduped count",
-     '                out = {"recorded": True,\n                       "rulings": len(_bseen),\n                       "beats_ruled": len(set(_bseen)),',
-     '                out = {"recorded": True,\n                       "ruled": len({v["beat"] for v in led["beat_verdicts"]}),\n                       "beats_ruled": len(set(_bseen)),',
+     '                out = {"recorded": bool(_ok7),\n                       "rulings": len(_bseen),',
+     '                out = {"recorded": bool(_ok7),\n                       "ruled": len(set(_bseen)),',
      "RULINGS and BEATS separately"),
 
-    ("the reply stops naming the duplicated beats back to the agent",
-     '                    out["ALREADY_RULED"] = _dupes',
-     '                    _unused_dupes = _dupes',
-     "NAMES the duplicated beats"),
+    ("the reply stops naming the duplicated beat back to the agent",
+     '                    out["DISCARDED_already_ruled"] = _bv.get("beat")',
+     '                    _unused = _bv.get("beat")',
+     "NAMES the duplicated beat"),
 
-    ("a declared field goes back to being dropped on the floor",
-     '                       "purpose": tu.input.get("purpose"),\n',
-     '',
-     "DECLARES is read by its handler"),
+    ("the singular handler goes back to a hand-written field list",
+     '                _bv = {k: tu.input.get(k) for k in VERDICT_FIELDS\n                       if k in tu.input}',
+     '                _bv = {"beat": tu.input.get("beat")}',
+     "projects the schema-derived field list"),
 
     ("a key never written reads as None again, hiding whether the default "
      "survives",
@@ -112,6 +112,23 @@ MUTATIONS = [
      '            if all(_x in _EMPTYISH or _x == _MISSING for _x in _vals):\n                continue\n',
      '',
      "not reported as a change"),
+
+    ("the surfaces diverge again — a field is dropped from the sync",
+     '        if _k not in _dst:\n            _dst[_k] = _cp.deepcopy(_v)\n            _added.append(_k)',
+     '        if _k not in _dst and _k != "zoom_arc":\n            _dst[_k] = _cp.deepcopy(_v)\n            _added.append(_k)',
+     # STRONGER THAN THE LEG: the import-time cert fires first and the
+     # container refuses to start, so the smoke never reaches its legs.
+     "ruling surfaces offer different fields"),
+
+    ("the sync stops running at import",
+     "VERDICT_SURFACES_SYNCED = _sync_verdict_surfaces()",
+     "VERDICT_SURFACES_SYNCED = []",
+     "ruling surfaces offer different fields"),
+
+    ("the sync reads an empty source schema — it must RAISE, not\n     silently leave beat_verdict as it was",
+     '    _src_props = _items.get("properties") or {}',
+     '    _src_props = {}',
+     "declares no verdict item properties"),
 ]
 
 
