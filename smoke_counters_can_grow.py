@@ -125,6 +125,56 @@ if CENSUS.exists():
     check("the phantom is recorded as FIXED rather than quietly removed",
           "skill_gate_blocks" in _txt and "FIXED" in _txt)
 
+# ── A READER'S ZERO NEEDS ITS DENOMINATOR IN THE SAME LEDGER ────────────────
+# `read_knowledge` was called 0 times in 37 runs and `skill_searches` was empty
+# on all of them. Both zeros are ONE CAUSE: every run was Haiku, and the
+# judgment-only filter strips {read_knowledge, search_skills} before the loop —
+# so the readers were OFFERED IN 0 OF 37 RUNS. The count of calls was true and
+# said nothing, and it was quoted in a scope document as evidence the agent
+# never needs them.
+#
+# A counter that has never incremented is a signal or a broken wire and the two
+# look identical — UNLESS the number of chances is written beside it.
+import ast as _ast
+_src2 = pathlib.Path("agentic_editor_app.py").read_text()
+_tree2 = _ast.parse(_src2)
+_assigned2 = {t.slice.value for n in _ast.walk(_tree2)
+              if isinstance(n, _ast.Assign)
+              for t in n.targets
+              if isinstance(t, _ast.Subscript) and isinstance(t.slice, _ast.Constant)
+              and isinstance(t.slice.value, str)}
+for _k in ("readers_offered", "readers_withheld"):
+    check("the reader denominator `%s` is recorded" % _k, _k in _assigned2,
+          "without it a reader's zero cannot be told from a withheld tool")
+_rd_prints = [n for n in _ast.walk(_tree2) if isinstance(n, _ast.Call)
+              and getattr(n.func, "id", "") == "print"
+              and "READERS" in _ast.unparse(n)]
+check("and PRINTED — a denominator in the ledger and nowhere else is how the "
+      "zero got quoted without it in the first place",
+      len(_rd_prints) >= 1)
+# BOTH HALVES, AND NEITHER MAY CONSULT THE MODEL NAME. An `or` here was
+# satisfied by its own mutant: replacing the `offered` expression left the
+# `withheld` one standing and the leg stayed green. The property is that BOTH
+# denominators are read off the tool list the agent actually got — a value
+# re-derived from `_judgment_only` is a second source that can disagree with
+# the list, which is the whole failure being instrumented.
+_off_expr = '{t.get("name") for t in tools} & _READERS'
+_wit_expr = '_READERS - {t.get("name") for t in tools}'
+check("`readers_offered` is read off the tool list itself", _off_expr in _src2)
+check("`readers_withheld` is read off the tool list itself", _wit_expr in _src2)
+_den_fn = [n for n in _ast.walk(_tree2)
+           if isinstance(n, _ast.Assign)
+           and any(isinstance(t, _ast.Subscript)
+                   and isinstance(t.slice, _ast.Constant)
+                   and t.slice.value in ("readers_offered", "readers_withheld")
+                   for t in n.targets)]
+check("neither denominator is derived from the model role — a value restated "
+      "from `_judgment_only` can disagree with the list the agent got",
+      _den_fn and not any("_judgment_only" in _ast.unparse(n.value)
+                          for n in _den_fn),
+      "the denominator must come from the tools, not from the reason they were "
+      "filtered")
+
 print()
 if fails:
     print("COUNTERS-CAN-GROW: FAIL")

@@ -12399,9 +12399,27 @@ def edit(source_key: str, brief: str,
     # not a property. Filtered ONCE before the loop so the cached prefix stays
     # constant for the whole run; changing the tool list mid-run cost 43,222
     # cache_write tokens on a previous measurement.
+    _READERS = {"read_knowledge", "search_skills"}
     if _judgment_only:
-        _READERS = {"read_knowledge", "search_skills"}
         tools = [t for t in tools if t.get("name") not in _READERS]
+    # THE DENOMINATOR FOR THE READER COUNTERS, RECORDED WHERE IT IS DECIDED.
+    # `read_knowledge` has been called 0 times in 37 runs and `skill_searches`
+    # is empty on all of them — and BOTH zeros are this filter, not a finding.
+    # Every one of those runs was Haiku, so the readers were offered in 0 of 37.
+    # "Called zero times" was true and meaningless, and I quoted it in a scope
+    # document as evidence the agent never needs them.
+    #
+    # A counter that has never incremented is a signal or a broken wire and the
+    # two look identical — UNLESS the count of chances is written down beside
+    # it. This is that number.
+    led["readers_offered"] = sorted(
+        {t.get("name") for t in tools} & _READERS)
+    led["readers_withheld"] = sorted(
+        _READERS - {t.get("name") for t in tools})
+    print("  READERS         : offered %s   withheld %s%s"
+          % (led["readers_offered"] or "NONE", led["readers_withheld"] or "none",
+             "   (judgment-only role: a zero from these counters says nothing "
+             "about need)" if _judgment_only else ""), flush=True)
 
     # ── beat_verdict IS A RE-EDIT TOOL. WITHHELD ON A FIRST EDIT. ───────────
     # MEASURED over 24 runs in 8 rounds: 47 calls, and 42 of them re-ruled a

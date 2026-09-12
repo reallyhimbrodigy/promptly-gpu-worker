@@ -128,13 +128,41 @@ of the decision rather than 6,000 tokens earlier. This is where condition→acti
 material keyed to MOMENTS belongs, and it is the closest analogue to how the
 per-beat `why` field already works.
 
-**(b) `read_knowledge` — which exists, costs 72 tokens, and has been called ZERO
-times in 30 runs.** A retrieval surface that is present and dead. Before
-building a second one, that zero has to be diagnosed: it is either a signal (the
-agent never needs it) or a broken wire (it cannot tell when it would help), and
-**a counter that has never incremented looks identical in both cases**. The
-honest sequence is: find out why it is zero, THEN decide whether per-beat notes
-go behind it.
+**(b) `read_knowledge` — DIAGNOSED 2026-09-11, AND THIS SECTION WAS WRONG.**
+
+I wrote here that it "exists, costs 72 tokens, and has been called ZERO times in
+30 runs — a retrieval surface that is present and dead", and said the zero had
+to be diagnosed before per-beat notes could go behind it. The diagnosis came
+back and **it is not present.** It is withheld:
+
+| | |
+|---|---:|
+| runs with a turn record | 37 |
+| `use_knowledge` true | 37 |
+| runs on Haiku | **37** |
+| **runs where `read_knowledge` was OFFERED** | **0** |
+| calls | 0 |
+
+`_judgment_only = "haiku" in model` strips `{read_knowledge, search_skills}`
+from the tool list before the loop. Every round ran on Haiku, so the tool was
+never on the table. **"Called zero times in 30 runs" was true and meaningless,
+and I quoted it as evidence about need.** `skill_searches` being empty on 28 of
+28 has the same single cause.
+
+It is withheld DELIBERATELY and on a measured basis: rounds 12 and 13 found
+Haiku spending NINE turns on the readers to reach a byte-identical result that
+Sonnet reached without them, and turns are ~75% of wall.
+
+**So the architecture question is settled, and not the way either branch
+predicted.** It is not "reachable and never needed" — that branch is refuted.
+It is unreachable on the role this pipeline actually runs, for a reason that was
+measured and is still good. Re-enabling it to carry per-beat craft would
+reintroduce the nine-turn cost that was removed on evidence.
+
+**The per-beat brief is therefore the only home** — and for a better reason than
+"the agent never needs it": the retrieval surface is deliberately absent from
+the role that runs, and putting the craft behind it would trade a wall-clock
+regression for a retrieval convenience.
 
 **Cost:** near-zero prefix by design. The cost moves to per-run input, which
 scales with the video rather than the corpus — the right axis.
@@ -201,7 +229,7 @@ count, a denominator and a sample — every run.
 | class | home | prefix cost | displaces |
 |---|---|---:|---|
 | signature moves | `set_spec` description + a declared `signature` field | ~700 for 10 | nothing |
-| per-beat craft notes | the per-beat brief; `read_knowledge` only after its zero is diagnosed | ~0 | nothing |
+| per-beat craft notes | the per-beat brief — `read_knowledge` is RULED OUT, see §3 | ~0 | nothing |
 | unbuildable families | a ranked report for Zac | **0 — must not reach the agent** | nothing |
 | the mapping itself | code, not prompt | ~0 | nothing |
 
