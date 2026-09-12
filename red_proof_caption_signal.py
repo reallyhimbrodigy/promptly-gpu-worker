@@ -57,6 +57,45 @@ CASES = [
      '                              "ANY MODE. The families this request says NOT to "',
      '                              "targeted_change only: the families it says NOT to "',
      "applies in ANY mode"),
+    # THE UNSCOPED HALF. 48.2% of users, all 37 fixture runs, 20 of them
+    # INCOHERENT — and nothing judged any of it before this.
+    ("a dropped family stops being INCOHERENT",
+     '            (_dropped if _fam in BUILT_FAMILIES else _unb)[_fam] = (_r, _b)',
+     '            _unb[_fam] = (_r, _b)',
+     "is INCOHERENT"),
+    ("VACANT collapses into COHERENT — placing nothing stops being a failure",
+     '    if not _did_anything:',
+     '    if False:',
+     "VACANT is its own state"),
+    ("an unbuildable family starts counting against the run",
+     '        if _r > _b:\n            (_dropped if _fam in BUILT_FAMILIES else _unb)[_fam] = (_r, _b)',
+     '        if _r > _b:\n            _dropped[_fam] = (_r, _b)',
+     "UNBUILDABLE, not the run"),
+    ("the grade stops failing the run",
+     '            fail("unscoped_incoherent", _co_why)',
+     '            _unemitted = ("unscoped_incoherent", _co_why)',
+     "unscoped_incoherent` fails loudly"),
+    ("the builder set becomes a second hand-written copy",
+     '        _TYPE = dict(BUILT_FAMILIES)',
+     '        _TYPE = {"text": "overlay_text", "zoom": "emphasis"}',
+     "ONE declaration shared with the dispatch"),
+    ('sfx leaves half_ruling_refusal again - back to a silent build-time skip',
+     '    if why is None and "sfx" in tr:',
+     '    if False and "sfx" in tr:',
+     'with no sfx_name is REFUSED'),
+    ('the vocabularies stop having to agree - a named sound with the field unset goes back to placing nothing silently',
+     '        elif str(v.get("sfx") or "").lower() != "yes":',
+     '        elif False:',
+     'leaves the `sfx` field unset is refused'),
+    # THE ANCHOR MUST BE UNIQUE AND IT MUST ACTUALLY BITE. Both stripper sites
+    # carry identical text, so the bare expression matched twice ([ANCHOR]);
+    # anchoring on the comment alone applied cleanly and changed NOTHING
+    # ([NOT RED] — the seventh way, a mutation that does not mutate). The
+    # anchor spans the unique comment AND the expression it guards.
+    ("the stripper reverts to reading the sfx field alone (post-derivation)",
+     '                # just established.\n                # KEYED ON TREATMENT, like its siblings _nocopy and _nocard.\n                # It read only the `sfx` FIELD, so `treatment: ["sfx"]` with no\n                # field set was never in this list and never stripped — the 25\n                # dropped placements. half_ruling_refusal now refuses these\n                # where the agent still holds the beat; this is defence in\n                # depth for anything arriving by another route.\n                _nosfx = [v.get("beat") for v in led["beat_verdicts"]\n                          if ("sfx" in [str(t).lower()\n                                        for t in (v.get("treatment") or [])]\n                              or str(v.get("sfx", "no")).lower() == "yes")\n                          and not str(v.get("sfx_name") or "").strip()]',
+     '                # just established.\n                # KEYED ON TREATMENT, like its siblings _nocopy and _nocard.\n                _nosfx = [v.get("beat") for v in led["beat_verdicts"]\n                          if str(v.get("sfx", "no")).lower() == "yes"\n                          and not str(v.get("sfx_name") or "").strip()]',
+     "keys on TREATMENT like _nocopy and _nocard"),
 ]
 
 orig = APP.read_text()

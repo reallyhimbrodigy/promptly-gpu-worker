@@ -8133,6 +8133,13 @@ def cutaway_source_ref(ref, sources, durations):
     return (CUTAWAY_REF_OK, _idx, _t, "source %d at %.2fs" % (_idx, _t))
 
 
+# WHAT execute_plan CAN ACTUALLY BUILD, family -> step type. The dispatch reads
+# this and so does the grader, so "the pipeline never built it" and "the agent
+# never ruled it" can never be confused for one another.
+BUILT_FAMILIES = {"text": "overlay_text", "zoom": "emphasis", "sfx": "sfx",
+                  "card": "card", "transition": "transition"}
+
+
 FIDELITY_OK, FIDELITY_SHORT, FIDELITY_OVER, FIDELITY_UNSCOPED = (
     "FAITHFUL", "SHORT", "OVERREACHED", "UNSCOPED")
 # A FIFTH STATE, AND THE ONLY ONE THE USER SPELLED OUT. "no captions" is not a
@@ -8214,6 +8221,71 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
             "asked for %s and delivered exactly that" % sorted(_asked))
 
 
+
+
+COHERENT, INCOHERENT, VACANT = "COHERENT", "INCOHERENT", "VACANT"
+
+
+def unscoped_coherence(ruled_vs_built, placements, cut_made=False,
+                       captions_made=False):
+    """(state, dropped, unbuildable, why) — the ONLY thing judgeable when the
+    brief declared no scope. PURE.
+
+    48.2% OF USERS WRITE "viral engaging video" AND NOTHING ELSE, and every one
+    of the 37 fixture runs to date is that case. `spec_fidelity` answers
+    UNSCOPED for all of them — correctly, because "did what was asked for land"
+    has no referent when nothing specific was asked. So NOTHING has ever judged
+    the half of traffic that is most of the traffic.
+
+    WHAT CAN BE JUDGED WITHOUT A SCOPE IS THE RUN'S OWN CLAIMS. The agent ruled
+    a family on N beats; the pipeline built it on M. That comparison needs no
+    target, no reference rate and no taste: it holds the run to what it itself
+    decided, which is the same question `spec_fidelity` asks of the brief,
+    asked of the only asker available.
+
+    THIS IS A GRADE AND IT NEVER INSTRUCTS. No count here is a floor, none of
+    it reaches the prompt, and a run that places two things because two moments
+    deserved them is COHERENT. The standing law is that the density rates grade
+    and never instruct; this is built to the same line, and it is a per-run
+    comparison rather than a rate, so there is no population constant to fit.
+
+    TWO KINDS OF GAP, AND THEY BELONG TO DIFFERENT OWNERS:
+      DROPPED      a family with a builder, ruled and not built. 54% of runs,
+                   59 placements (sfx 25, text 22, zoom 8, card 4). The run
+                   decided something and did not deliver it.
+      UNBUILDABLE  ruled, and this pipeline HAS no builder for it. 30 of 30 are
+                   `cutaway`, retired from the enum. Not the run's failure and
+                   not graded as one — it is the capability-gap list.
+
+    THREE STATES. VACANT is not INCOHERENT: an edit that placed nothing, cut
+    nothing and burned no captions is a different failure from one that placed
+    things it had ruled away, and only one of them means the run did nothing.
+    """
+    _dropped, _unb = {}, {}
+    for _fam, _v in (ruled_vs_built or {}).items():
+        if not isinstance(_v, dict):
+            continue
+        _r, _b = int(_v.get("ruled") or 0), int(_v.get("built") or 0)
+        if _r > _b:
+            (_dropped if _fam in BUILT_FAMILIES else _unb)[_fam] = (_r, _b)
+    _did_anything = bool(placements) or bool(cut_made) or bool(captions_made)
+    if not _did_anything:
+        return (VACANT, _dropped, _unb,
+                "the edit contains nothing — no placement, no cut, no captions. "
+                "A brief with no scope still asked for an edit.")
+    if _dropped:
+        _n = sum(_r - _b for _r, _b in _dropped.values())
+        return (INCOHERENT, _dropped, _unb,
+                "%d placement(s) ruled and not built: %s. The run decided these "
+                "and did not deliver them — nothing was asked for specifically, "
+                "so its own rulings are the standard it is held to."
+                % (_n, ", ".join("%s %d->%d" % (_f, _r, _b)
+                                 for _f, (_r, _b) in sorted(_dropped.items()))))
+    return (COHERENT, _dropped, _unb,
+            "everything ruled was built"
+            + ("; %s ruled with no builder in this pipeline (capability gap, "
+               "not this run's failure)"
+               % ", ".join(sorted(_unb)) if _unb else ""))
 
 
 def reedit_delta(prior, current):
@@ -8357,6 +8429,42 @@ def half_ruling_refusal(v):
                 f"decides the move: payoff takes a committed "
                 f"push, a hook takes a snap or a pull. Give one "
                 f"of {sorted(ZOOM_ARC_HOMES)}.")
+    # SFX WAS THE ODD ONE OUT AND IT COST 25 OF 75 RULED PLACEMENTS. The card
+    # and text guards ask whether the FAMILY IS IN `treatment`; the sfx guard
+    # asked whether the separate `sfx` field equals "yes". A beat ruled
+    # `treatment: ["sfx"]` with no `sfx` field was invisible to it, sailed
+    # through the plan, and was silently skipped at build time — where the only
+    # outcome is a skip: the placement is lost, the run is paid for, and the log
+    # blames the ruling. Measured over 37 runs: 50 rulings carried
+    # treatment+field+name and built 50; 25 carried treatment without the field
+    # and dropped 25. Exact on both sides.
+    #
+    # ONE VOCABULARY. Putting `sfx` in treatment IS the intent; the field is a
+    # restatement, and a beat that says one without the other is a half ruling.
+    if why is None and "sfx" in tr:
+        if not str(v.get("sfx_name") or "").strip():
+            why = (
+                f"beat {v.get('beat')}: ruled 'sfx' with no sfx_name. The sound "
+                f"is DERIVED from that name — without it nothing is placed and "
+                f"the loss is silent. Name the sound, or do not rule the family.")
+        elif str(v.get("sfx") or "").lower() != "yes":
+            # THE TWO VOCABULARIES MUST AGREE, and this is the residual case:
+            # a beat that names a sound but leaves `sfx` unset. The build reads
+            # the FIELD, so it drops even though the intent is unambiguous —
+            # two of the 25 were exactly this. Refused rather than coerced,
+            # because normalise_verdict's whole stance is that papering over a
+            # wrong shape means never learning the agent emits it.
+            #
+            # THE REAL FIX IS A SCHEMA CHANGE nobody has made: `sfx` in
+            # `treatment` IS the intent and the `sfx` field restates it, so the
+            # field should be DERIVED rather than asked for twice. Until then
+            # the disagreement is refused where the agent can still fix it.
+            why = (
+                f"beat {v.get('beat')}: treatment says 'sfx' and sfx_name is "
+                f"{str(v.get('sfx_name'))!r}, but the `sfx` field is "
+                f"{v.get('sfx')!r} rather than 'yes'. The build reads the "
+                f"field, so this places NOTHING and says nothing. Set sfx='yes' "
+                f"or drop 'sfx' from treatment.")
     if why is None and "card" in tr:
         # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
         # OFFERS. It demanded `card_type` — a field b13730c
@@ -11641,8 +11749,11 @@ def edit(source_key: str, brief: str,
         # that read "text well under reference" was reading a step count.
         #
         # zoom and sfx were already correct: those emit one step per ruling.
-        _TYPE = {"text": "overlay_text", "zoom": "emphasis", "sfx": "sfx",
-                 "card": "card", "transition": "transition"}
+        # THE ONE DECLARATION OF WHAT THIS PIPELINE CAN BUILD. Hoisted to
+        # BUILT_FAMILIES so the grader reads the same set the builder
+        # dispatches on — a hand-copied second list is how "ruled but not
+        # built" gets attributed to the wrong side.
+        _TYPE = dict(BUILT_FAMILIES)
         for _s in steps:
             _k = _s.get("step")
             if _k not in _TYPE:
@@ -13341,8 +13452,16 @@ def edit(source_key: str, brief: str,
                 # the same four. An informed agent repeating an incomplete
                 # ruling is precisely the case this exists for — so the verdict
                 # is DISCARDED, reported still-missing, and must be re-made.
+                # KEYED ON TREATMENT, like its siblings _nocopy and _nocard.
+                # It read only the `sfx` FIELD, so `treatment: ["sfx"]` with no
+                # field set was never in this list and never stripped — the 25
+                # dropped placements. half_ruling_refusal now refuses these
+                # where the agent still holds the beat; this is defence in
+                # depth for anything arriving by another route.
                 _nosfx = [v.get("beat") for v in led["beat_verdicts"]
-                          if str(v.get("sfx", "no")).lower() == "yes"
+                          if ("sfx" in [str(t).lower()
+                                        for t in (v.get("treatment") or [])]
+                              or str(v.get("sfx", "no")).lower() == "yes")
                           and not str(v.get("sfx_name") or "").strip()]
                 _nocard = [v.get("beat") for v in led["beat_verdicts"]
                            if "card" in [str(t).lower() for t in (v.get("treatment") or [])]
@@ -13413,8 +13532,16 @@ def edit(source_key: str, brief: str,
                 # Recompute AFTER derivation — a field that was just filled is
                 # no longer missing, and stripping it would discard the floor we
                 # just established.
+                # KEYED ON TREATMENT, like its siblings _nocopy and _nocard.
+                # It read only the `sfx` FIELD, so `treatment: ["sfx"]` with no
+                # field set was never in this list and never stripped — the 25
+                # dropped placements. half_ruling_refusal now refuses these
+                # where the agent still holds the beat; this is defence in
+                # depth for anything arriving by another route.
                 _nosfx = [v.get("beat") for v in led["beat_verdicts"]
-                          if str(v.get("sfx", "no")).lower() == "yes"
+                          if ("sfx" in [str(t).lower()
+                                        for t in (v.get("treatment") or [])]
+                              or str(v.get("sfx", "no")).lower() == "yes")
                           and not str(v.get("sfx_name") or "").strip()]
                 _nocard = [v.get("beat") for v in led["beat_verdicts"]
                            if "card" in [str(t).lower() for t in (v.get("treatment") or [])]
@@ -14271,6 +14398,32 @@ def edit(source_key: str, brief: str,
     led["fidelity"] = {"state": _fid_state, "missing": _fid_missing,
                        "unasked": _fid_unasked, "why": _fid_why}
     print("  FIDELITY        : %s — %s" % (_fid_state, _fid_why), flush=True)
+    # ── THE UNSCOPED HALF, WHICH IS MOST OF THE TRAFFIC ────────────────────
+    # 48.2% of users declare no family scope, and every one of the 37 fixture
+    # runs to date is that case — so until now NOTHING judged the majority
+    # shape. "Did what was asked land" has no referent here; what does have one
+    # is whether the run delivered what IT decided.
+    if _fid_state == FIDELITY_UNSCOPED:
+        _co_state, _co_drop, _co_unb, _co_why = unscoped_coherence(
+            led.get("ruled_vs_built"), led.get("placements") or [],
+            cut_made=_cut_made,
+            captions_made=bool(led.get("caption_composited")))
+        led["coherence"] = {"state": _co_state, "dropped": _co_drop,
+                            "unbuildable": _co_unb, "why": _co_why}
+        print("  COHERENCE       : %s — %s" % (_co_state, _co_why), flush=True)
+        if _co_state == VACANT:
+            fail("unscoped_vacant",
+                 "the brief declared no scope and the edit contains nothing — "
+                 "no placement, no cut, no captions")
+        elif _co_state == INCOHERENT:
+            # THE RUN'S OWN RULINGS ARE THE STANDARD. Not a rate, not a floor:
+            # it decided these and did not deliver them.
+            fail("unscoped_incoherent", _co_why)
+        # UNBUILDABLE IS NOT FAILED HERE. A family this pipeline has no builder
+        # for is a capability gap and belongs on the ranked build list, not on
+        # this run's record — failing the run for it would attribute the
+        # pipeline's hole to the agent.
+
     if _fid_state == FIDELITY_FORBIDDEN:
         # LOUDEST OF THE FOUR FAILURES. SHORT and OVERREACHED are misjudged
         # scope; this is an instruction disobeyed. 7.2% of distinct briefs and

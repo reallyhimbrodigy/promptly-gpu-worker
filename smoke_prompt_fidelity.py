@@ -339,6 +339,86 @@ _ff = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
 check("and it FAILS LOUDLY — a state nobody fails on is a diagnostic",
       len(_ff) >= 1)
 
+# ── THE UNSCOPED HALF, WHICH IS MOST OF THE TRAFFIC ─────────────────────────
+# 48.2% of users declare no family scope, and ALL 37 fixture runs to date are
+# that case — so until this shipped, nothing judged the majority shape at all.
+# Scored over that history: 20 of 37 runs INCOHERENT (54%).
+_uc = _AA.unscoped_coherence
+check("`unscoped_coherence` is hoisted and pure, so the check drives the "
+      "shipped rule", callable(_uc))
+check("the builder set is ONE declaration shared with the dispatch — a hand "
+      "copy is how 'the pipeline never built it' gets blamed on the agent",
+      isinstance(getattr(_AA, "BUILT_FAMILIES", None), dict)
+      and "_TYPE = dict(BUILT_FAMILIES)" in src)
+
+check("a run that ruled a family with a builder and did not build it is "
+      "INCOHERENT — its own rulings are the standard",
+      _uc({"text": {"ruled": 20, "built": 18}}, [1])[0] == "INCOHERENT")
+check("a run that built everything it ruled is COHERENT",
+      _uc({"text": {"ruled": 3, "built": 3}}, [1])[0] == "COHERENT")
+# NOT A RATE, AND THIS IS THE LEG THAT KEEPS IT HONEST. The standing law is
+# that the density rates GRADE and never instruct. A run that places two things
+# because two moments deserved them must pass.
+check("a SMALL edit that delivered everything it ruled is COHERENT — this is a "
+      "grade, not a floor, and no count here is a target",
+      _uc({"zoom": {"ruled": 1, "built": 1}}, [{"family": "zoom"}])[0]
+      == "COHERENT")
+check("VACANT is its own state — placing nothing is a different failure from "
+      "placing things you ruled away",
+      _uc({}, [], cut_made=False, captions_made=False)[0] == "VACANT"
+      and _uc({}, [], cut_made=True)[0] == "COHERENT")
+# THE TWO GAPS HAVE DIFFERENT OWNERS.
+_st, _dr, _un, _w = _uc({"cutaway": {"ruled": 3, "built": 0}}, [1])
+check("a family this pipeline has NO builder for is UNBUILDABLE, not the run's "
+      "incoherence — it is the capability gap list",
+      _st == "COHERENT" and "cutaway" in _un and not _dr)
+check("and the run is not FAILED for it — failing here would attribute the "
+      "pipeline's hole to the agent",
+      "unbuildable" not in src.split("fail(\"unscoped_incoherent\"")[0][-400:])
+
+check("the grade reaches the ledger AND a real print()",
+      'led["coherence"]' in src
+      and any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "print"
+              and "COHERENCE" in ast.unparse(n) for n in ast.walk(tree)))
+for _nm in ("unscoped_vacant", "unscoped_incoherent"):
+    check("`%s` fails loudly — a state nobody fails on is a diagnostic" % _nm,
+          any(isinstance(n, ast.Call) and getattr(n.func, "id", "") == "fail"
+              and n.args and isinstance(n.args[0], ast.Constant)
+              and n.args[0].value == _nm for n in ast.walk(tree)))
+check("it runs ONLY on the unscoped path — a scoped brief is judged by what "
+      "was asked, not by what the run decided",
+      "if _fid_state == FIDELITY_UNSCOPED:" in src)
+
+# ── ONE VOCABULARY FOR SFX ──────────────────────────────────────────────────
+# 25 of 75 ruled sfx placements were lost, and it was never a missing
+# capability: place_sfx exists and built the other 50. The agent says "this beat
+# has a sound" by putting `sfx` in `treatment`; the BUILD reads the separate
+# `sfx: "yes"` field. The guard that should have caught the mismatch read the
+# FIELD too — while its siblings `_nocopy` and `_nocard` read TREATMENT — so a
+# beat with treatment and no field was invisible on both ends.
+_hrr = _AA.half_ruling_refusal
+check("a beat ruled 'sfx' with no sfx_name is REFUSED where the agent still "
+      "holds it, not skipped at build time where the only outcome is a loss",
+      bool(_hrr({"beat": 1, "treatment": ["sfx"]})))
+check("a beat that names a sound but leaves the `sfx` field unset is refused "
+      "too — the build reads the field, so this places NOTHING silently",
+      bool(_hrr({"beat": 1, "treatment": ["sfx"], "sfx_name": "boom"})))
+check("a complete sfx ruling passes",
+      _hrr({"beat": 1, "treatment": ["sfx"], "sfx_name": "boom",
+            "sfx": "yes"}) is None)
+check("and a beat that never ruled sfx is untouched by it",
+      _hrr({"beat": 1, "treatment": ["none"]}) is None)
+# THE SIBLINGS MUST STAY KEYED THE SAME WAY. The bug was one guard reading a
+# different field from the other two; a leg that only tests sfx would not see
+# it come back on card or text.
+_src_all = src
+check("the stripper's sfx arm keys on TREATMENT like _nocopy and _nocard, not "
+      "on the sfx field alone",
+      '"sfx" in [str(t).lower()' in _src_all
+      and _src_all.count('if str(v.get("sfx", "no")).lower() == "yes"\n'
+                         '                          and not str(v.get("sfx_name")') == 0,
+      "one guard reading a different field from its siblings is the bug")
+
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)
 check("and is PRINTED", "FIDELITY        :" in src,
