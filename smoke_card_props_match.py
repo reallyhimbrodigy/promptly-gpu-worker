@@ -158,6 +158,64 @@ check("it is emitted from the mismatch refusal itself",
           for n in ast.walk(_ep or tree)),
       "emitted somewhere else entirely would not answer for this refusal")
 
+# ── THE TWO COUNTERS THAT SAY WHETHER 15 COMPONENTS GOT REACHED ──────────────
+# Round 63 could not answer that, and I reported both as `null` when the honest
+# answer was KEY ABSENT. Three separate defects, one class:
+#   * both are written with `led.setdefault(k, []).append(...)`, so a run that
+#     rules no card never creates the key — and an absent key is
+#     indistinguishable from a tree with none of the wiring;
+#   * `card_conditions_named` was written and NEVER PRINTED;
+#   * `card_props_seen`'s print was guarded by `if _cps:`, so zero printed
+#     nothing and "zero cards" read exactly like "no instrumentation".
+#
+# NOTE ON THE SCAN ITSELF: my first AST pass for these looked only for `Assign`
+# to a Subscript and reported BOTH as "assigned NOWHERE" — it does not model
+# `setdefault().append()`. Same family as the out-parameter an AST scan of a
+# closure body cannot see: enumerate the MUTATIONS, not just the assignments.
+_CARD_COUNTERS = ("card_conditions_named", "card_props_seen")
+
+_init_empty = set()
+for n in ast.walk(tree):
+    if isinstance(n, ast.Assign) and isinstance(n.value, ast.List) and not n.value.elts:
+        for t in n.targets:
+            if (isinstance(t, ast.Subscript) and isinstance(t.slice, ast.Constant)
+                    and t.slice.value in _CARD_COUNTERS):
+                _init_empty.add(t.slice.value)
+for _k in _CARD_COUNTERS:
+    check(f"`{_k}` is INITIALISED to [], so wired-and-zero is not ABSENT",
+          _k in _init_empty,
+          "only setdefault-written: on a run with no cards the key never "
+          "exists, and nobody can tell that from an unwired tree")
+
+# PRINTED IN BOTH STATES. The property is an if/else where BOTH arms print, not
+# merely that a print mentions the counter — `if _cps:` with no else satisfied
+# that weaker reading for months.
+_both_arms = set()
+for n in ast.walk(tree):
+    if not isinstance(n, ast.If) or not n.orelse:
+        continue
+    _seg = ast.get_source_segment(src, n) or ""
+    def _has_print(body):
+        return any(isinstance(c, ast.Call) and isinstance(c.func, ast.Name)
+                   and c.func.id == "print"
+                   for b in body for c in ast.walk(b))
+    if _has_print(n.body) and _has_print(n.orelse):
+        for _k in _CARD_COUNTERS:
+            if _k in _seg or _k.split("_")[1][:4].upper() in _seg.upper():
+                _both_arms.add(_k)
+for _k in _CARD_COUNTERS:
+    check(f"`{_k}` is printed in BOTH states (an if/else, both arms printing)",
+          _k in _both_arms,
+          "a guarded print makes a zero silent, which is the ambiguity the "
+          "counter exists to resolve")
+
+check("the ABSENT word reaches the card-counter output, so a missing key is "
+      "named rather than shown as 0",
+      src.count('"MEASURED 0" if isinstance(_ccn, list) else "ABSENT"') == 1
+      and src.count('"MEASURED 0" if isinstance(_cps, list) else "ABSENT"') == 1,
+      "the three-state distinction has to be in the printed text, not only in "
+      "the ledger")
+
 if fails:
     print(f"CARD-PROPS-MATCH: {len(fails)} FAILED")
     for f in fails:

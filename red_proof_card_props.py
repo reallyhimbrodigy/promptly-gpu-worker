@@ -97,6 +97,37 @@ r.append(mut('                fail("card_props_mismatch",',
              "card_props_mismatch goes back to having no producer",
              "card_props_mismatch is actually EMITTED"))
 
+# 8-12. THE TWO COUNTERS THAT ANSWER "DID 15 COMPONENTS GET REACHED".
+# Round 63 could not answer it and I reported KEY ABSENT as `null`. Each of
+# these restores one of the three real defects: setdefault-only keys, an
+# unprinted counter, and a guarded print that made zero look like unwired.
+r.append(mut('    led["card_conditions_named"] = []',
+             '    _dropped_init_ccn = []',
+             "card_conditions_named goes back to setdefault-only, so a "
+             "card-less run has no key at all",
+             "INITIALISED to []"))
+
+r.append(mut('    led["card_props_seen"] = []',
+             '    _dropped_init_cps = []',
+             "card_props_seen goes back to setdefault-only",
+             "INITIALISED to []"))
+
+r.append(mut('    else:\n        print("  CARD CONDITIONS : %s  no card beat reached derive_card_type"\n              % ("MEASURED 0" if isinstance(_ccn, list) else "ABSENT"))',
+             '    else:\n        pass',
+             "the card-conditions zero goes silent again",
+             "printed in BOTH states"))
+
+r.append(mut('    else:\n        print("  CARD PROPS      : %s  no card carried props this run"\n              % ("MEASURED 0" if isinstance(_cps, list) else "ABSENT"))',
+             '    else:\n        pass',
+             "the card-props zero goes silent again - the `if _cps:` guard "
+             "that made zero and unwired identical",
+             "printed in BOTH states"))
+
+r.append(mut('              % ("MEASURED 0" if isinstance(_ccn, list) else "ABSENT"))',
+             '              % ("MEASURED 0" if isinstance(_ccn, list) else "MEASURED 0"))',
+             "a missing key starts printing as a zero",
+             "ABSENT word reaches"))
+
 for _s in ("smoke_card_props_match.py", "cert_mg_prop_keys.py"):
     rc, out = run(_s)
     print(f"RESTORED {_s} exit={rc}")

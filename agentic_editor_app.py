@@ -11309,6 +11309,14 @@ def edit(source_key: str, brief: str,
                  f"this run's beats — the previous edit would come back short: "
                  f"{_prior_probs[0].get('why')}")
     led["beat_verdicts"] = []
+    # INITIALISED, NOT setdefault-ONLY. Both of these are written with
+    # `led.setdefault(k, []).append(...)` at the card sites, so on a run that
+    # rules no card the KEY NEVER EXISTS — and an absent key cannot be told
+    # apart from a tree that has none of the wiring. That is exactly what made
+    # round 63 unreadable: I reported both as `null`, and the honest answer was
+    # KEY ABSENT. Present-and-empty is a MEASURED zero; missing is ABSENT.
+    led["card_conditions_named"] = []
+    led["card_props_seen"] = []
     led["component_verdicts"] = []   # legacy field, retained so old runs still parse
 
     _gap_txt = ("\n".join(f"  [{_s:.2f}-{_e:.2f}] {_g2:.2f}s"
@@ -14016,12 +14024,41 @@ def main(source: str = "ab-sources/talking-head-v1/625dfdc5-73s.mp4",
     # PRINTED IN THE SAME COMMIT THAT RECORDS IT. A counter that reaches the
     # ledger and no output answers nothing — round 29 ran specifically to learn
     # whether a gate had fired and could not find out.
-    _cps = (r.get("ledger") or {}).get("card_props_seen") or []
+    # BOTH STATES, ALWAYS. `if _cps:` printed nothing on a round that ruled no
+    # card, so "zero cards" and "no instrumentation" read identically in the
+    # log — the same ambiguity the counter exists to resolve.
+    _cpl = (r.get("ledger") or {})
+    _cps = _cpl.get("card_props_seen")
     if _cps:
-        print("  CARD PROPS      : " + "  ".join(
-            f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
-            f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
-            for c in _cps))
+        _shorthand = sum(1 for c in _cps if c.get("from") != "card_props")
+        print("  CARD PROPS      : MEASURED  %d card(s), %d via the 25-type "
+              "prop table, %d via hero/label shorthand  "
+              % (len(_cps), len(_cps) - _shorthand, _shorthand)
+              + "  ".join(
+                  f"[{c.get('type')} {'+'.join(c.get('keys') or []) or 'EMPTY'}"
+                  f"{' (shorthand)' if c.get('from') != 'card_props' else ''}]"
+                  for c in _cps))
+    else:
+        print("  CARD PROPS      : %s  no card carried props this run"
+              % ("MEASURED 0" if isinstance(_cps, list) else "ABSENT"))
+
+    # card_conditions_named WAS WRITTEN AND NEVER PRINTED — the counter with no
+    # consumer, on the counter Zac asked for. It is the number that says whether
+    # the derived condition enum reached the ruling surface at all, so an
+    # unprinted one makes the round that was run to answer that unanswerable.
+    _ccn = _cpl.get("card_conditions_named")
+    if _ccn:
+        _named = sum(1 for c in _ccn if c.get("condition"))
+        _derived = sorted({c.get("derived") for c in _ccn if c.get("derived")})
+        print("  CARD CONDITIONS : MEASURED  %d card beat(s), %d named a "
+              "condition, derived types %s"
+              % (len(_ccn), _named, _derived or "NONE")
+              + "".join("\n     beat %s: condition=%r -> %r"
+                        % (c.get("beat"), c.get("condition"), c.get("derived"))
+                        for c in _ccn))
+    else:
+        print("  CARD CONDITIONS : %s  no card beat reached derive_card_type"
+              % ("MEASURED 0" if isinstance(_ccn, list) else "ABSENT"))
     # ALWAYS PRINTED, both states. A removal nobody can see in the log is a
     # round whose prefix nobody can reconstruct afterwards — and the whole point
     # of the switch is a removal EXPERIMENT, which is worthless if the removal
