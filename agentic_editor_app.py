@@ -2441,10 +2441,30 @@ KNOWLEDGE_TOOLS = [{
         "properties": {
             "mode": {"type": "string",
                      "enum": ["full_edit", "targeted_change", "question",
-                              "unsupported"]},
+                              "unsupported"],
+                     "description":
+                         "WHAT KIND OF REQUEST THIS IS, and it decides what "
+                         "the rest of the run may do. "
+                         "full_edit = make the edit; you rule every beat and "
+                         "the whole source is yours to shape. "
+                         "targeted_change = they have an edit already and "
+                         "named something specific to change; you may only "
+                         "touch the beats that naming covers and every other "
+                         "ruling comes back exactly as it was. "
+                         "question = they asked something and do not want a "
+                         "new render; answer it. "
+                         "unsupported = what they want is not an edit at all "
+                         "(see unsupported_class) — say so plainly rather "
+                         "than producing something adjacent."},
             "unsupported_class": {"type": "string",
                                   "enum": ["generate_footage", "change_in_frame"],
-                                  "description": "unsupported ONLY: which class"},
+                                  "description": "unsupported ONLY: which class. "
+                    "generate_footage = the request needs footage that does "
+                    "not exist in the source and cannot be produced by "
+                    "editing it. change_in_frame = it needs something inside "
+                    "the existing frame altered — an object removed, a face "
+                    "changed, text on a wall rewritten. Both are outside what "
+                    "an EDIT can do; naming which one lets the reply say why."},
             "clarification": {"type": "string",
                               "description": "K5. The ONE question whose answer "
                                              "changes what gets built, when the "
@@ -2630,7 +2650,24 @@ KNOWLEDGE_TOOLS = [{
                                                         "zoom", "cutaway",
                                                         "transition",
                                                         "none"]}},
-                                 "cut": {"type": "string", "enum": ["keep", "cut"]},
+                                 "cut": {"type": "string", "enum": ["keep", "cut"],
+        "description":
+            "KEEP this beat in the edit, or CUT it out entirely. "
+            "A BARE ENUM IS A LIST OF WORDS — this field shipped with no "
+            "description at all and the agent kept 93.6% of beats across 517 "
+            "rulings, so here is what the decision actually is. "
+            "An edit is what you REMOVE as much as what you add: a false "
+            "start, a repeated point, a stall before the speaker finds the "
+            "word, a beat that restates the one before it, a run-up that says "
+            "nothing — those are `cut`. The beat line shows mechanical "
+            "evidence in [brackets] where there is any: a long silence inside "
+            "the beat, or a stretch delivered well below this speaker's own "
+            "pace. That is EVIDENCE, not an instruction — a flagged beat may "
+            "still be kept for a reason you give in `why`, and an unflagged "
+            "beat may still be cut because it is redundant. "
+            "If a beat is mostly good but opens with a breath or ends with a "
+            "stall, do not cut it — TRIM it with keep_from_s/keep_to_s and "
+            "keep what works."},
                                  "text_content": {
                                      "type": "string",
                                      "description": "REQUIRED when treatment "
@@ -2653,9 +2690,18 @@ KNOWLEDGE_TOOLS = [{
                                                     "punchy, upper case reads "
                                                     "best."},
                                  "sfx": {"type": "string", "enum": ["yes", "no"],
-                                         "description": "REQUIRED on hook and "
-                                                        "close beats: does this "
-                                                        "beat take a sound?"},
+                                         "description":
+                                             "REQUIRED on hook and close "
+                                             "beats: does this beat take a "
+                                             "sound? yes = a sound belongs "
+                                             "here — name it in sfx_name, or "
+                                             "leave sfx_name empty to say a "
+                                             "sound belongs here and let the "
+                                             "harness pick one for this "
+                                             "beat's role. no = this moment "
+                                             "plays dry. Naming 'sfx' in "
+                                             "treatment already means yes; "
+                                             "the two must not disagree."},
                                  # ── THE FIELDS THE HARNESS CANNOT DERIVE ────
                                  # Everything else about a placement — where it
                                  # sits, how fast a zoom travels, how early a
@@ -2815,7 +2861,24 @@ KNOWLEDGE_TOOLS = [{
                                            "enum": ["card", "text", "sfx",
                                                     "zoom", "cutaway",
                                                     "transition", "none"]}},
-                         "cut": {"type": "string", "enum": ["keep", "cut"]},
+                         "cut": {"type": "string", "enum": ["keep", "cut"],
+        "description":
+            "KEEP this beat in the edit, or CUT it out entirely. "
+            "A BARE ENUM IS A LIST OF WORDS — this field shipped with no "
+            "description at all and the agent kept 93.6% of beats across 517 "
+            "rulings, so here is what the decision actually is. "
+            "An edit is what you REMOVE as much as what you add: a false "
+            "start, a repeated point, a stall before the speaker finds the "
+            "word, a beat that restates the one before it, a run-up that says "
+            "nothing — those are `cut`. The beat line shows mechanical "
+            "evidence in [brackets] where there is any: a long silence inside "
+            "the beat, or a stretch delivered well below this speaker's own "
+            "pace. That is EVIDENCE, not an instruction — a flagged beat may "
+            "still be kept for a reason you give in `why`, and an unflagged "
+            "beat may still be cut because it is redundant. "
+            "If a beat is mostly good but opens with a breath or ends with a "
+            "stall, do not cut it — TRIM it with keep_from_s/keep_to_s and "
+            "keep what works."},
                          # THE COMPANION FIELDS THE GATE DEMANDS. This tool
                          # offered the FULL treatment enum and NONE of the
                          # fields normalise_verdict requires, so every text,
@@ -4923,6 +4986,90 @@ def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920,
 
 
 _TRIM_MIN_S = 0.6
+
+
+def beat_stalls(words, beats):
+    """Per beat: the mechanical evidence a cut or trim could key on. PURE.
+
+    THE AGENT WAS ASKED TO CUT WITH NOTHING TO CUT ON. Measured over every
+    round on disk: 0 of 517 rulings carried keep_from_s/keep_to_s and 33 of 517
+    ruled cut — 6.4%, and 1 of 61 on round 65 — against a reference corpus that
+    cuts on 53% of beats. The harness was never the problem: it drops
+    inter-beat gaps and applied the one cut that was ruled. The RULING never
+    happens.
+
+    Two causes, both in what reaches the agent. `cut` shipped as a bare
+    two-word enum with NO description at all — this lane's own law, written
+    about the 29-name component enum and never applied to the binary that
+    decides what survives. And `dead_air` appears NOWHERE in this file: the
+    mechanical silence detection the main pipeline has used since the cut-stack
+    reform was simply never wired into the agentic lane, so a beat that is
+    half stall looks identical to a beat that is all content.
+
+    MECHANICAL PYTHON DETECTION, per the standing rule, and NORMALISED PER
+    CLIP so there is no population constant to mis-fit: `rate_ratio` compares a
+    beat's words-per-second against THIS speaker's own median, so a naturally
+    slow talker is not flagged as stalling and a fast one is not excused.
+    `max_gap_s` is the longest silence INSIDE the beat, which is what a
+    within-beat trim exists to remove.
+
+    THIS GRADES NOTHING AND DEMANDS NOTHING. It is evidence, not a target: no
+    rate reaches the agent, no floor is enforced, and a beat carrying a stall
+    may still be kept whole for a reason the agent gives in `why`.
+    """
+    out = {}
+    if not beats:
+        return out
+    rates = []
+    for b in beats:
+        w = [x for x in (words or [])
+             if x.get("s") is not None
+             and b["t_start"] - 1e-6 <= x["s"] <= b["t_end"] + 1e-6]
+        dur = float(b["t_end"]) - float(b["t_start"])
+        if dur > 0 and w:
+            rates.append(len(w) / dur)
+    import statistics
+    med = statistics.median(rates) if rates else 0.0
+    for b in beats:
+        w = sorted((x for x in (words or [])
+                    if x.get("s") is not None
+                    and b["t_start"] - 1e-6 <= x["s"] <= b["t_end"] + 1e-6),
+                   key=lambda x: x["s"])
+        dur = float(b["t_end"]) - float(b["t_start"])
+        rec = {"max_gap_s": 0.0, "gap_at_s": None, "rate_ratio": None,
+               "words": len(w)}
+        if len(w) >= 2:
+            gaps = [(w[i + 1]["s"] - w[i]["e"], w[i]["e"])
+                    for i in range(len(w) - 1)]
+            g, at = max(gaps, key=lambda t: t[0])
+            rec["max_gap_s"] = round(max(0.0, g), 2)
+            rec["gap_at_s"] = round(at, 2)
+        # THREE STATES. A beat with no words cannot have a rate, and a rate of
+        # 0.0 would read as "this speaker stopped" rather than "there is no
+        # speech here" — the absence-as-value shape on the number that decides
+        # whether a beat survives.
+        if dur > 0 and w and med > 0:
+            rec["rate_ratio"] = round((len(w) / dur) / med, 2)
+        out[b["i"]] = rec
+    return out
+
+
+def stall_note(b, stalls):
+    """The one-line evidence for THIS beat, or "" when there is nothing to say.
+
+    Empty rather than "no stall detected": a line that says nothing on every
+    beat trains the reader to skip the line on the beat where it matters.
+    """
+    r = (stalls or {}).get(b.get("i")) or {}
+    bits = []
+    if r.get("max_gap_s", 0) >= 0.35:
+        bits.append(f"{r['max_gap_s']:.1f}s silence @{r['gap_at_s']:.1f}s")
+    rr = r.get("rate_ratio")
+    if rr is not None and rr <= 0.7:
+        bits.append(f"{rr:.2f}x this speaker's own pace")
+    if r.get("words") == 0:
+        bits.append("no speech")
+    return ("  [" + ", ".join(bits) + "]") if bits else ""
 
 
 def _trim_window(verdict, t_start, t_end):
@@ -8408,6 +8555,75 @@ def reedit_merge(prior, targets, incoming):
 # structurally unchecked.
 BOUNDARY_DERIVED = {"sfx"}
 
+def _sync_verdict_surfaces():
+    """The singular ruling tool inherits the plural one's field descriptions.
+
+    TWO SURFACES, ONE VOCABULARY — and the descriptions had already diverged
+    with nothing comparing them. `rule_all_beats` explains treatment, purpose
+    and zoom_arc properly; `beat_verdict` shipped `treatment` as a BARE ENUM of
+    seven family names with no description at all, on the surface an agent uses
+    to fix a single beat.
+
+    A capability the agent cannot UNDERSTAND is indistinguishable from one it
+    rejected. This lane has now shipped four bare enums — the 29-name component
+    list, the treatment prose/schema split, `cut`, and this — and this one hid
+    on the tool nobody diffed against its sibling.
+
+    DERIVED, NEVER COPIED. A hand-written second description is a second
+    vocabulary that drifts the day one of them is edited, which is what
+    happened here. Runs at import so a divergence cannot survive a container
+    start.
+    """
+    def _items(t):
+        s_ = t.get("input_schema") or {}
+        return (((s_.get("properties") or {}).get("verdicts") or {})
+                .get("items", {}).get("properties", {}))
+    plural = singular = None
+    for _t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
+        if _t.get("name") == "rule_all_beats":
+            plural = _items(_t)
+        elif _t.get("name") == "beat_verdict":
+            singular = (_t.get("input_schema") or {}).get("properties") or {}
+    if not plural or not singular:
+        raise AssertionError(
+            "could not read both ruling surfaces — this sync is ABSENT, not a "
+            "no-op, and the singular tool would keep whatever it has")
+    filled = []
+    for _k, _spec in singular.items():
+        _src = plural.get(_k)
+        if not isinstance(_spec, dict) or not isinstance(_src, dict):
+            continue
+        if not str(_spec.get("description") or "").strip():
+            _d = _src.get("description")
+            if _d:
+                _spec["description"] = _d
+                filled.append(_k)
+        _si, _pi = _spec.get("items"), _src.get("items")
+        if (isinstance(_si, dict) and isinstance(_pi, dict)
+                and not str(_si.get("description") or "").strip()
+                and _pi.get("description")):
+            _si["description"] = _pi["description"]
+            filled.append(_k + ".items")
+        # A DESCRIPTION THAT NAMES NONE OF ITS OWN VALUES EXPLAINS THE FIELD
+        # AND NOT THE CHOICE. The singular tool's `purpose` and `zoom_arc` each
+        # carried a real sentence that never said what any value MEANS, while
+        # the plural tool spells every one out — a weaker stale variant, not a
+        # deliberate difference. Append the plural's glossary rather than
+        # overwrite the singular's framing: both survive, and the agent can
+        # actually choose.
+        _vals = _spec.get("enum") or (
+            (_spec.get("items") or {}).get("enum") if isinstance(
+                _spec.get("items"), dict) else None) or []
+        _d = str(_spec.get("description") or "")
+        if _vals and _d and not any(str(_v).lower() in _d.lower()
+                                    for _v in _vals):
+            _pd = str(_src.get("description") or "")
+            if _pd and any(str(_v).lower() in _pd.lower() for _v in _vals):
+                _spec["description"] = _d.rstrip(". ") + ". " + _pd
+                filled.append(_k + "+glossary")
+    return filled
+
+
 VERDICT_FIELDS = _verdict_fields()
 assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
     "the verdict schema could not be read, so the boundary would store nothing")
@@ -8884,6 +9100,10 @@ _assert_one_admission_surface(open(__file__).read()
 # The surfaces must ADMIT alike (above) and OFFER alike (here). The first was
 # the defect; the second is the half admit_verdict cannot reach.
 _assert_verdict_surfaces_offer_the_same_fields()
+# The surfaces must OFFER the same fields (above) and EXPLAIN them the same
+# way (here) — a field offered on both and described on one is a choice the
+# agent can make on one surface and only guess at on the other.
+_SYNCED_VERDICT_DESCRIPTIONS = _sync_verdict_surfaces()
 # Runs at IMPORT, in the container, on every run — not in a test file that can
 # be skipped. The two beat sources must stay interchangeable or the verdict
 # machinery silently rules on a field one of them does not supply.
@@ -12720,6 +12940,9 @@ def edit(source_key: str, brief: str,
         # ABSENT AND EMPTY SAY WHICH. "No candidates because the beats are all
         # alike" is a different answer from "no candidates because vision did
         # not arrive", and the agent must not read one as the other.
+        # MECHANICAL, ONCE, BEFORE THE BLOCK IS BUILT. Per-clip normalised
+        # so a slow speaker is not flagged and a fast one is not excused.
+        _stalls = beat_stalls(words, _beats)
         _cutaway_block = (
             f"CUTAWAY CANDIDATES — {_cw_state}: {_cw_why}. Rule cutaway only if "
             f"you can name a source timestamp yourself; otherwise this source "
@@ -12855,6 +13078,11 @@ def edit(source_key: str, brief: str,
             f"BEATS ({len(_beats)}) — rule on EVERY one with `beat_verdict`:\n"
             + "\n".join(f"  [{b['i']}] {b['t_start']:.2f}-{b['t_end']:.2f}"
                         + figure_note(b)
+                        # THE EVIDENCE A CUT COULD KEY ON, which until now did
+                        # not exist anywhere in this lane. A beat that is half
+                        # silence looked identical to a beat that is all
+                        # content, and the agent kept 93.6% of them.
+                        + stall_note(b, _stalls)
                         + f"  {b['text'][:90]}" for b in _beats) + "\n\n"
             # ── THE EXAMPLES, AT THE MOMENT OF RULING ──────────────────────
             # Not a description of the craft — the craft. For each beat, the
