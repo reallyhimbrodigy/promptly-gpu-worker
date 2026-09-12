@@ -1104,3 +1104,40 @@ inflated by retries into an apparent outage.
   and when a peer's tree is the subject, their report of it outranks my
   inference from mine, because the checkout is a claim about the past one lane
   over.
+
+
+## Standing rule earned 2026-09-12 (a ledger is a claim about the tree that made it)
+
+- **EVERY NUMBER I REPORTED FROM A ROUND THIS SESSION CAME FROM ANOTHER LANE'S
+  TREE.** Checked after a peer asked which of two identical-looking zeros mine
+  was: `mount_sha.txt` on rounds 58, 59, 60, 61, 62, 63, 64 and 65 all resolve
+  to `lane/agentic-editor`. **No round has ever mounted lane/duration-producer.**
+  Rounds 51-57 predate the format and resolve to nothing.
+
+  So the ledgers are evidence about the tree that produced them, and they are
+  evidence about MY tree only where I separately confirmed the same code by
+  reading my own file. The two classes must be labelled differently:
+
+  | claim | what it rests on | status |
+  |---|---|---|
+  | "the field-keyed `_nosfx` is a bug" | I read it in my own source | MINE |
+  | "25 of 75 sfx placements dropped" | their ledgers | THEIRS |
+  | "`card_hero` says it is the ONLY card input" | my own source | MINE |
+  | "0 cards came from the prop table on every round" | their ledgers | THEIRS |
+  | "1 of 81 cut beats describes a removal" | reference_corpus | LANE-INDEPENDENT |
+
+  **AND IT CUTS THE OTHER WAY TOO.** I called `cutaway` "retired" on this lane
+  and cited "30 ruled / 0 built across 37 runs" as the evidence. The retirement
+  is real and I verified it three ways — absent from `_TREATMENT_FAMILIES`,
+  absent from `VERDICT_FIELDS` (no `cutaway_from_s`), absent from
+  `BUILT_FAMILIES`, with a gate asserting it stays out. But the 30/0 was
+  measured on a lane where cutaway IS rulable and the builder was BROKEN (an
+  unsubstituted `{IN}` read as a second scale input). **I used their broken
+  builder as evidence for my deliberate removal**, and 0-built looks identical
+  either way — which is the DROPPED vs UNBUILDABLE distinction I built, turned
+  back on me by the peer who needed it.
+
+  **How to apply.** Read `mount_sha.txt` before quoting a round, and say which
+  tree a number describes. A fix on an unmounted lane is unexercised no matter
+  how many rounds have run — "committed" is not "observed", and a ledger from a
+  branch you do not own is somebody else's observation.
