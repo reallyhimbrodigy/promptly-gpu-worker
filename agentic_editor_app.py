@@ -242,7 +242,49 @@ CUT_FIELD_TEACH = (
     "beat removed is a move with nothing to land on. "
     "[01_cut_pass, translated 2026-09-11: the source says 'hook / payoff / "
     "close / key_moments are never cut'; key_moments is the old pipeline's peak "
-    "ledger and its equivalent here is the beats you rule zoom on]")
+    "ledger and its equivalent here is the beats you rule zoom on]"
+    # ── THE CRITERION, WHICH THIS FIELD NEVER CARRIED ──────────────────────
+    # It held a PROHIBITION and nothing else: protected positions are never
+    # cut. 01_cut_pass owns the rule for what TO cut and none of it was here.
+    # A field that says only what not to cut is consistent with round 65
+    # cutting 0.1s, 0s, 0s, 1.4s and 0.48s across five fixtures against a
+    # reference that cuts on 53% of beats.
+    #
+    # TRANSLATED, NOT LIFTED, and the translation is the whole difficulty.
+    # 01_cut_pass names three WORD-RANGE classes — a phrasal restart, a
+    # retake, a filler run — and this field is a WHOLE-BEAT keep/cut. Beats
+    # run 2.5-3.3s on every fixture measured, about a sentence each, so a
+    # restart mid-sentence is NOT addressable here. Wiring the three classes
+    # verbatim would demand something the field cannot express, which is the
+    # unsatisfiable-refusal shape `_assert_no_orphaned_demand` now certifies
+    # against. So: the classes are stated at BEAT granularity, and where a
+    # cut is sub-beat the field says so and names the surface that can do it.
+    "\n\nWHAT A CUT IS FOR. The mechanical pass already took the measured "
+    "silence; what is left for you is the speaker's own STRUCTURAL "
+    "REDUNDANCY, and at this granularity that means a WHOLE BEAT that is "
+    "redundant: a beat that is an abandoned start whose completed take is the "
+    "next beat, a beat that RETAKES a line another beat delivers better (cut "
+    "the weaker one and say which in `why`), or a beat that is filler and "
+    "dead weight end to end.\n\n"
+    "WHAT A CUT IS NOT FOR. It does NOT tighten real speech. A complete, "
+    "meaningful phrase delivered once and fluently is CONTENT, not a drag — "
+    "never cut it for 'leanness' or for pace. 'It took five minutes to edit. "
+    "I did nothing.' is not a stretch that drags; 'to edit' IS the sentence. "
+    "Content words in a flowing sentence are never removable.\n\n"
+    "WHEN UNSURE, KEEP. A pause you cannot tell is dead or dramatic is a "
+    "pause you keep — the mechanical pass already removed the measured "
+    "silence, so what remains is there on purpose until proven otherwise.\n\n"
+    "IF THE REDUNDANCY IS INSIDE A BEAT — a restart in the middle of a "
+    "sentence — this field cannot remove it, and ruling `cut` on the whole "
+    "beat would take the sentence with it. Keep the beat. A sub-beat cut is "
+    "`build_cut` with explicit keep_spans, after the edit is built.\n\n"
+    "AND SAYING [] IS A REAL ANSWER, said on purpose. But the old pipeline's "
+    "cut pass came back EMPTY on 159 of 159 plans, which is not restraint, it "
+    "is a pass that never ran. A lean edit usually has something: an "
+    "abandoned start, a weaker take, a filler run. "
+    "[01_cut_pass, translated 2026-09-12: the source names three WORD-RANGE "
+    "classes; this field is a whole-beat decision, so they are stated at beat "
+    "granularity and the sub-beat case is routed to build_cut]")
 
 WHY_FIELD_TEACH = (
     "about THIS beat's content. NAME THE SPECIFIC MOMENT that asked for this "

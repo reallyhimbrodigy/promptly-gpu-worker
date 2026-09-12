@@ -650,6 +650,38 @@ check("and it states the real precedence instead — props, then a figure "
       "here, then condition, then PullQuote",
       "OUTRANKS it" in _desc.get("card_hero", ""))
 
+# ── THE CUT CRITERION ─────────────────────────────────────────────
+# The field carried a PROHIBITION and nothing else — protected positions are
+# never cut — while 01_cut_pass owns the rule for what TO cut. Round 65 cut
+# 0.1s, 0s, 0s, 1.4s and 0.48s across five fixtures against a reference that
+# cuts on 53% of beats, and the old pipeline's cut pass came back empty on 159
+# of 159 plans. Oldest gap in the project.
+_cutd = " ".join(str((_rab or {}).get("cut", {}).get("description") or "").split())
+check("the field says what a cut IS for, not only what it is not",
+      "WHAT A CUT IS FOR" in _cutd)
+check("all three redundancy classes reach it — abandoned start, retake, filler",
+      all(_w in _cutd for _w in ("abandoned start", "RETAKES", "filler")))
+check("and the prohibition it already had is still there",
+      "PROTECTED POSITIONS ARE NEVER CUT" in _cutd)
+check("it keeps fluent speech out of scope — a phrase delivered once and "
+      "fluently is CONTENT, never cut for leanness",
+      "never cut it for" in _cutd and "CONTENT" in _cutd)
+check("and the unsure-keep rule, since the mechanical pass already took the "
+      "measured silence",
+      "WHEN UNSURE, KEEP" in _cutd)
+
+# THE ORPHAN CHECK, APPLIED TO MY OWN WIRING. 01_cut_pass names three WORD-RANGE
+# classes and this field is a WHOLE-BEAT decision; beats run 2.5-3.3s, about a
+# sentence, so a mid-sentence restart is not addressable here. Demanding it
+# would be the unsatisfiable refusal _assert_no_orphaned_demand certifies
+# against — so the field must ROUTE the sub-beat case, not ask for it.
+check("a sub-beat cut is ROUTED to build_cut rather than demanded here — "
+      "ruling `cut` on the whole beat would take the sentence with it",
+      "build_cut" in _cutd and "cannot remove it" in _cutd)
+check("and the granularity reinterpretation is marked TRANSLATED, not wired — "
+      "a reader must be able to tell which claims a human re-decided",
+      "translated 2026-09-12" in _cutd and "WORD-RANGE" in _cutd)
+
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)
 check("and is PRINTED", "FIDELITY        :" in src,
