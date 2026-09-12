@@ -537,6 +537,77 @@ def arc_rules(anchors=_ARC_RULE_ANCHORS):
 _ARC_RULE_STATE, ARC_RULES, _ARC_RULE_WHY = arc_rules()
 
 
+def sfx_moments(doc=None):
+    """{sound: THE MOMENT clause} — extracted from 07_sound_effects at import.
+
+    THE MATCHED PAIR ZAC NAMED, ANSWERED. Round 65 placed `boom` on car_short's
+    drift ("the moment where the drift happens with massive tire smoke") and
+    `shockingsfx` on car_mid's first frame ("opening hook that establishes the
+    dark mood"). Same family, same round, one earned and one reflex — and the
+    difference was not position, motion, or who chose the name. All eight sfx in
+    that round were agent-named, and Zac's own references put a sound on the
+    first beat 3 times in 14, so neither "derived from role" nor "openings are
+    reflex" survives contact with the evidence.
+
+    THE DIFFERENCE IS WHAT THE `why` POINTS AT, and 07_sound_effects already
+    says so: "A scenario is something the speaker says, shows, or does on camera
+    — the sentence, the number, the reversal, the charm. That is where a sound's
+    `why` points... where none exists, the moment carries no sound." The drift
+    why points at a scenario in the footage. The opening why points at the
+    beat's FUNCTION ("opening hook") and a MOOD ("dark mood") — neither of which
+    is something anyone says, shows or does.
+
+    AND THE FIELD WAS INSTRUCTING THE REFLEX. `sfx_name` carried no enum and
+    thirteen words: "which catalogue sound, when sfx is 'yes'. Pick by ROLE from
+    the table." Pick by ROLE is the opposite of pick by scenario. The reflex
+    placement did exactly what the field told it to do; the earned one ignored
+    the field and followed the document the field never mentions. That is the
+    fifth correct rule found behind a door the agent never opens, and the first
+    where the prompt actively contradicted the door.
+
+    Each of the sixteen sounds carries a LITERAL predicate — money-ching's
+    "minutes, hours and days are TIME words; time words never take the
+    register"; camera-flash's "the sound IS the shutter the story references".
+    Extracted so the agent is offered the predicate rather than a table of
+    names, and so a catalogue edit cannot leave the prompt behind.
+    """
+    import pathlib as _pl
+    _f = _pl.Path(doc or "knowledge/07_sound_effects.md")
+    if not _f.is_file():
+        return {}
+    _out = {}
+    for _line in _f.read_text(errors="replace").splitlines():
+        _m = re.match(r"\*\*([a-z0-9-]+)\*\*\s+—\s+(.*)", _line.strip())
+        if not _m:
+            continue
+        _name, _rest = _m.group(1), _m.group(2)
+        _mm = re.search(r"\*\*THE MOMENT:\*\*\s*(.+?)(?:\s*\*\*WHAT IT DOES|$)",
+                        _rest)
+        if _mm:
+            _out[_name] = " ".join(_mm.group(1).split())
+    return _out
+
+
+SFX_MOMENTS = sfx_moments()
+
+
+def sfx_name_teach():
+    """The sixteen sounds as PREDICATES, or a named absence."""
+    if not SFX_MOMENTS:
+        return ("the sound catalogue could not be read — this field is ABSENT "
+                "its guidance rather than free of it")
+    return ("\n\nEACH SOUND IS A MOMENT, NOT A MOOD. Match the footage against "
+            "the predicate; where no moment matches, the beat carries NO sound "
+            "— `voice` is a signed choice, not a failure. A `why` that names "
+            "the beat's function ('opening hook') or a feeling ('establishes "
+            "the dark mood') has not matched a scenario: a scenario is "
+            "something the speaker SAYS, SHOWS or DOES on camera. Matched "
+            "literally, never by association. [07_sound_effects, wired "
+            "2026-09-12]\n"
+            + "\n".join("  %s — %s" % (_k, SFX_MOMENTS[_k])
+                         for _k in sorted(SFX_MOMENTS)))
+
+
 def enum_craft(doc_dir=None, values=None):
     """{enum value: [(doc, sentence)]} — the corpus's craft, keyed by the value
     it governs. EXTRACTED AT IMPORT, never hand-copied.
@@ -3068,7 +3139,69 @@ KNOWLEDGE_TOOLS = [{
                                                     "of the edit's voice, not a "
                                                     "narrator's summary of it "
                                                     "[05_motion_graphics, "
-                                                    "wired 2026-09-11]"},
+                                                    "wired 2026-09-11]\n\n"
+                                                    # FOUR RULES FROM
+                                                    # 04_text_overlays, the
+                                                    # document that OWNS this
+                                                    # field and was never
+                                                    # wired to it. The
+                                                    # duplicate-captions rule
+                                                    # above came from
+                                                    # 05_motion_graphics and
+                                                    # 9 of 11 overlays in
+                                                    # round 65 were still
+                                                    # co-visible with their
+                                                    # own words, so what 04
+                                                    # adds is the SKIP option
+                                                    # and the structural
+                                                    # anchor — not a louder
+                                                    # version of the same
+                                                    # warning.
+                                                    "AN OVERLAY SHOWS "
+                                                    "FRAMING, THE CAPTIONS "
+                                                    "SHOW SPEECH — two "
+                                                    "different jobs on two "
+                                                    "different layers. If "
+                                                    "the text you are about "
+                                                    "to write duplicates "
+                                                    "what the captions will "
+                                                    "show, rewrite it as a "
+                                                    "LABEL ('THE NAME', "
+                                                    "'WHO?') **or SKIP IT** "
+                                                    "— not every beat wants "
+                                                    "an overlay, and a "
+                                                    "duplicate is worse than "
+                                                    "an absence.\n\n"
+                                                    "THE ANCHOR SUMMONS THE "
+                                                    "OVERLAY: a chapter "
+                                                    "turn, an act shift, a "
+                                                    "cold-open hook naming "
+                                                    "the promise, three "
+                                                    "parallel items the "
+                                                    "speaker enumerates. It "
+                                                    "marks STRUCTURE — it "
+                                                    "tells the viewer where "
+                                                    "they are. A video with "
+                                                    "clear turns wants one "
+                                                    "at each; a video that "
+                                                    "runs as ONE CONTINUOUS "
+                                                    "THOUGHT lets the "
+                                                    "captions carry it "
+                                                    "alone.\n\n"
+                                                    "IF THE TEXT COULD FIT "
+                                                    "ANY VIDEO IN THIS "
+                                                    "GENRE, rewrite it from "
+                                                    "this video's own "
+                                                    "specifics.\n\n"
+                                                    "A LABEL IS <=6 WORDS "
+                                                    "and lives in the UPPER "
+                                                    "THIRD: captions sit at "
+                                                    "the bottom and the face "
+                                                    "in the upper-middle "
+                                                    "band, so that is the "
+                                                    "one free band. "
+                                                    "[04_text_overlays, "
+                                                    "wired 2026-09-12]"},
                                  # OFFERED **AND** DERIVED, on Zac's ruling
                                  # 2026-09-11. I had deleted this field because
                                  # two ways to state one thing lost 25 of 75
@@ -3101,9 +3234,13 @@ KNOWLEDGE_TOOLS = [{
                                  # not: words do not exist until written, and
                                  # what to SHOW is a semantic choice.
                                  "sfx_name": {"type": "string",
-                                     "description": "which catalogue sound, when "
-                                                    "sfx is 'yes'. Pick by ROLE "
-                                                    "from the table."},
+                                     "enum": sorted(SFX_MOMENTS) or None,
+                                     "description": "WHICH sound. Pick by the "
+                                                    "MOMENT in the footage, not "
+                                                    "by the beat's role — role "
+                                                    "is where it sits, the "
+                                                    "moment is what happens."
+                                                    + sfx_name_teach()},
                                  "card_hero": {"type": "string",
                                      # REQUIRED, and it says so now. Removing
                                      # card_type and card_props made this the
@@ -8245,6 +8382,82 @@ def spec_fidelity(spec, placements, cut_made=False, captions_made=False):
 
 COHERENT, INCOHERENT, VACANT, INERT = (
     "COHERENT", "INCOHERENT", "VACANT", "INERT")
+
+
+OVERLAY_WINDOW_CAP_S, OVERLAY_WINDOW_FLOOR_S = 3.0, 0.6
+
+
+def overlay_covisible(placements, beats, caption_words, min_token=3):
+    """(state, rows) — overlays showing a word the CAPTION is showing at the
+    same instant. PURE. MEASURED | ABSENT.
+
+    THE DIFFERENT QUESTION, not a tighter threshold. `overlay_restates_speech`
+    asks whether overlays repeat the SPEECH across beats, and passes on two
+    arms: a consecutive run of 3, or a share of 0.7. Round 65's car_mid scored
+    `share 0.50, longest_run 1, verdict "editorial"` — a pass — while the frame
+    at 5.5s showed "UNEMPLOYED" stacked directly above "unemployed".
+
+    Tightening those arms would be the wrong fix: a threshold chosen to catch
+    this case is calibrated on this case, which is how a corpus gate learned
+    "detailed" and called it "usable". The defect is not a rate at all. It is
+    CO-VISIBILITY — the same word on screen twice at one instant — and that is
+    BINARY. There is no population to mis-fit, because one frame either shows a
+    word twice or it does not.
+
+    It also cannot be answered by the older function, whose signature is
+    `(verdicts, beats, min_run=3)`: it is never told whether captions are on.
+    And when they are, a restating overlay is co-visible BY CONSTRUCTION,
+    because the captions are burned from the same speech the overlay restated.
+
+    The window comes from the build's own rule — `min(3.0, max(0.6, beat
+    duration))` — so the check asks about the interval the overlay is actually
+    on screen rather than an interval of its own invention.
+
+    ABSENT when there are no overlays or no caption words: a run with nothing to
+    duplicate is not a clean run, it is a run this question does not apply to.
+    """
+    import re as _re
+    _texts = [_p for _p in (placements or [])
+              if str((_p or {}).get("family") or "").lower() == "text"]
+    if not _texts or not caption_words:
+        return ("ABSENT", [])
+    _by_i = {_b.get("i"): _b for _b in (beats or []) if isinstance(_b, dict)}
+
+    def _toks(_s):
+        return {_t for _t in _re.findall(r"[a-z0-9']+", str(_s or "").lower())
+                if len(_t) >= min_token}
+
+    _rows = []
+    for _p in _texts:
+        _b = _by_i.get(_p.get("beat")) or {}
+        _t0 = _p.get("t_start")
+        if _t0 is None:
+            continue
+        _bs, _be = _b.get("t_start"), _b.get("t_end")
+        _dur = (min(OVERLAY_WINDOW_CAP_S,
+                    max(OVERLAY_WINDOW_FLOOR_S, float(_be) - float(_bs)))
+                if _bs is not None and _be is not None
+                else OVERLAY_WINDOW_FLOOR_S)
+        _t1 = float(_t0) + _dur
+        _ov = _toks(_p.get("content"))
+        if not _ov:
+            continue
+        _shown = set()
+        for _w in caption_words:
+            _ws, _we = _w.get("s"), _w.get("e")
+            if _ws is None or _we is None:
+                continue
+            if float(_we) > float(_t0) and float(_ws) < _t1:   # half-open overlap
+                _shown |= _toks(_w.get("w") or _w.get("word"))
+        _both = sorted(_ov & _shown)
+        if _both:
+            _rows.append({"beat": _p.get("beat"),
+                          "window": [round(float(_t0), 2), round(_t1, 2)],
+                          "overlay": str(_p.get("content") or "")[:60],
+                          "duplicated": _both})
+    return ("MEASURED", _rows)
+
+
 
 
 def caption_evidence(words):

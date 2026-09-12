@@ -507,6 +507,107 @@ check("a ledger with no caption_words_n key still counts captions as delivered "
       "— absent is not zero",
       "_cap_words_n is None" in src)
 
+# ── CO-VISIBILITY: THE DIFFERENT QUESTION, NOT A TIGHTER THRESHOLD ──────────
+# `overlay_restates_speech` scored car_mid "share 0.50, longest_run 1, verdict
+# editorial" — a PASS — while the frame at 5.5s showed "UNEMPLOYED" stacked
+# above "unemployed". Tightening its arms would calibrate on that one case,
+# which is how a corpus gate learned "detailed" and called it "usable". The
+# defect is BINARY: one frame either shows a word twice or it does not.
+_ocv = _AA.overlay_covisible
+_BEATS = [{"i": 0, "t_start": 0.0, "t_end": 4.0}]
+_PL_T = [{"family": "text", "beat": 0, "t_start": 0.0,
+          "content": "STILL UNEMPLOYED"}]
+_WORDS = [{"s": 1.0, "e": 1.4, "w": "still"},
+          {"s": 1.4, "e": 2.0, "w": "unemployed"}]
+_st, _rows = _ocv(_PL_T, _BEATS, _WORDS)
+check("an overlay showing a word the caption shows at the same instant is "
+      "reported, and the duplicated words are named",
+      _st == "MEASURED" and _rows
+      and _rows[0]["duplicated"] == ["still", "unemployed"],
+      repr(_rows))
+# NOT co-visible when the caption says those words OUTSIDE the overlay window.
+_late = [{"s": 9.0, "e": 9.4, "w": "still"}, {"s": 9.4, "e": 9.9, "w": "unemployed"}]
+check("the same words spoken OUTSIDE the overlay's window are not co-visible — "
+      "the condition is about one instant, not about the whole video",
+      _ocv(_PL_T, _BEATS, _late)[1] == [])
+check("an overlay that says something the captions never say is clean",
+      _ocv([{"family": "text", "beat": 0, "t_start": 0.0,
+             "content": "THE REAL COST"}], _BEATS, _WORDS)[1] == [])
+check("the window comes from the BUILD's own rule, so the check asks about the "
+      "interval the overlay is really on screen",
+      _AA.OVERLAY_WINDOW_CAP_S == 3.0 and _AA.OVERLAY_WINDOW_FLOOR_S == 0.6
+      and _rows[0]["window"] == [0.0, 3.0])
+check("no overlays or no caption words is ABSENT — a run with nothing to "
+      "duplicate is not a clean run, it is one this question does not apply to",
+      _ocv([], _BEATS, _WORDS)[0] == "ABSENT"
+      and _ocv(_PL_T, _BEATS, [])[0] == "ABSENT")
+check("short function words alone cannot trip it",
+      _ocv([{"family": "text", "beat": 0, "t_start": 0.0, "content": "A OF"}],
+           _BEATS, [{"s": 1.0, "e": 1.2, "w": "of"}])[1] == [])
+
+# ── THE SOUND LIBRARY REACHES THE FIELD ─────────────────────────────────────
+# The matched pair: `boom` on car_short's drift was earned, `shockingsfx` on
+# car_mid's first frame was reflex. All eight sfx that round were agent-named
+# and Zac's references put a sound on the first beat 3 times in 14, so neither
+# "derived from role" nor "openings are reflex" survives the evidence. The
+# difference is what the `why` POINTS AT — and the field was instructing the
+# reflex: no enum, thirteen words, "Pick by ROLE from the table."
+check("all sixteen sounds are extracted from the catalogue at import",
+      len(_AA.SFX_MOMENTS) == 16, f"{len(_AA.SFX_MOMENTS)} extracted")
+check("each carries its literal predicate, not a category",
+      "reversal" in _AA.SFX_MOMENTS.get("shockingsfx", "")
+      and "amount" in _AA.SFX_MOMENTS.get("money-ching", ""),
+      "shockingsfx wants a REVERSAL; car_mid used it for 'the dark mood'")
+_sfx_field = None
+for _t in list(_AA.TOOLS) + list(_AA.KNOWLEDGE_TOOLS):
+    if _t.get("name") == "rule_all_beats":
+        _sfx_field = ((((_t.get("input_schema") or {}).get("properties") or {})
+                       .get("verdicts") or {}).get("items", {})
+                      .get("properties", {}).get("sfx_name", {}))
+check("the field offers the sixteen as an ENUM — it had none, so any string "
+      "was acceptable",
+      len(_sfx_field.get("enum") or []) == 16)
+check("and it no longer tells the agent to pick by ROLE, which is the reflex "
+      "the matched pair is about",
+      "Pick by ROLE" not in str(_sfx_field.get("description")),
+      "role is where a beat sits; the moment is what happens in it")
+check("the predicates reach the description",
+      "EACH SOUND IS A MOMENT" in str(_sfx_field.get("description")))
+check("a why naming a function or a feeling is named as not-a-scenario",
+      "opening hook" in str(_sfx_field.get("description")))
+# EXERCISE THE ABSENCE BRANCH, do not look for its words in the happy path.
+# The first version of this leg searched the docstring and the POPULATED
+# return value, so it could only ever pass or fail for the wrong reason.
+_saved_moments = _AA.SFX_MOMENTS
+try:
+    _AA.SFX_MOMENTS = {}
+    _absent_teach = _AA.sfx_name_teach()
+finally:
+    _AA.SFX_MOMENTS = _saved_moments
+check("an unreadable catalogue is a NAMED ABSENCE, not silence — an empty "
+      "library must not read as a field that simply has no rules",
+      "ABSENT" in _absent_teach,
+      repr(_absent_teach[:80]))
+check("and the populated path does NOT claim absence",
+      "ABSENT" not in _AA.sfx_name_teach())
+
+# THE FOUR TEXT RULES FROM THE DOCUMENT THAT OWNS THE FIELD.
+_txt_field = None
+for _t in list(_AA.TOOLS) + list(_AA.KNOWLEDGE_TOOLS):
+    if _t.get("name") == "rule_all_beats":
+        _txt_field = ((((_t.get("input_schema") or {}).get("properties") or {})
+                       .get("verdicts") or {}).get("items", {})
+                      .get("properties", {}).get("text_content", {}))
+_td = str(_txt_field.get("description"))
+check("04_text_overlays is wired to text_content, including the SKIP option "
+      "the 05 rule lacked",
+      "04_text_overlays" in _td and "SKIP IT" in _td)
+check("the structural anchor rule is wired — an overlay marks where the viewer "
+      "is, and a continuous thought lets the captions carry it alone",
+      "ANCHOR SUMMONS" in _td and "CONTINUOUS" in _td.upper())
+check("and the generic-text rule",
+      "COULD FIT ANY VIDEO" in _td.upper())
+
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)
 check("and is PRINTED", "FIDELITY        :" in src,
