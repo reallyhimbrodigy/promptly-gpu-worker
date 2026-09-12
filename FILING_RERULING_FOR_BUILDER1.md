@@ -1,7 +1,24 @@
 # For Builder-1 — the singular `beat_verdict` tool bypasses every guard on the plural one
 
+> **CORRECTION, same day, before this was acted on: THE TOOL IS IN MY OWN FILE.**
+> I wrote "both are yours" below. Both the singular `beat_verdict` handler and
+> the `rule_all_beats` admission live in `agentic_editor_app.py`, which is
+> Builder-2's file. I read Zac's "Builder-1 owns the harness, round runner and
+> merges" as covering the VERDICT merge; it means git merges. A peer session
+> checking the branches is what made me look — its own first answer was wrong
+> too (it grepped filenames rather than contents and reported the surface on one
+> lane where a content sweep finds it on nine) but the question was the right
+> one, and the answer stands: **this is mine to fix, not Builder-1's to
+> receive.**
+>
+> Fixed here under "make it visible", which is what Zac scoped to me: the reply
+> that lied to the agent, and the freeze integrity at the end. **The three guard
+> fixes under "what I would build" are NOT done** — those BOUND the defect, and
+> Zac said bounding is not my lane. They are about one function hoist away and
+> await his call.
+
 Filed by Builder-2, 2026-09-11, from round 63. **I have not changed the merge
-or the tool — both are yours.** I have made the disagreement visible and
+or the tool's guards.** I have made the disagreement visible and
 red-proven the visibility. What follows is the mechanism and the exact lines.
 
 ## What round 63 actually did
@@ -106,3 +123,26 @@ One correction to something I told you earlier today: I said this looked like a
 first-wins merge resolving in ruling one's favour. It is not a merge at all —
 the re-rulings arrive after the freeze and are never merged with anything. The
 observable outcome was the same, which is why the wrong mechanism fit.
+
+
+## Added after the filing, from a peer session's critique
+
+`built_from` is derived from `executed_verdicts`, the copy frozen at execute
+time — and a peer reading this filing pointed out the derivation is only as good
+as the freeze being genuinely untouched. If anything rewrites that copy in
+place, `built_from` returns the same confident value whether or not the freeze
+held. **A number that cannot fail is not a measurement**, and this file has
+already paid for exactly that: the half-ruling stripper rewriting `treatment`
+IN PLACE is why the frozen copy exists at all.
+
+The freeze now carries `executed_verdicts_fp`, a sha256 taken at the same
+instant, and a mismatch reports `built_from: FREEZE_MUTATED` rather than
+`first`.
+
+And the reply no longer deduplicates: `rulings` and `beats_ruled` are separate,
+the duplicated beats come back to the agent as `ALREADY_RULED`, and the `fix`
+string says that this tool cannot carry `zoom_arc`, `purpose`, `text_content`,
+`sfx_name` or the card fields — so a second ruling here DROPS them, and changing
+a beat means re-calling `rule_all_beats` with every field it should keep. That
+is the difference between a tool that silently loses craft and one that says so
+in the turn it happens.

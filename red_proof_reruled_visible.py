@@ -16,9 +16,15 @@ APPNAME = "agentic_editor_app.py"
 
 # (label, old, new, expected phrase in the gate's failure output)
 MUTATIONS = [
+    # THE ANCHOR IS THE THING THAT ROTS. This mutation went stale the moment
+    # the call site gained its third argument, and the harness said [ANCHOR]
+    # rather than [RED] — which is the sixth way a mutation stops mutating,
+    # caught by the leg that requires the anchor to be unique rather than by a
+    # green run. A red proof whose mutation no longer applies is not evidence.
     ("the call drops the executed copy, so `built_from` is unanswerable",
      '''    _rr_state, _rr_rows = reruled_beats(led.get("beat_verdicts"),
-                                        led.get("executed_verdicts"))''',
+                                        led.get("executed_verdicts"),
+                                        led.get("executed_verdicts_fp"))''',
      '''    _rr_state, _rr_rows = reruled_beats(led.get("beat_verdicts"))''',
      "called with the executed copy"),
 
@@ -59,6 +65,37 @@ MUTATIONS = [
      '''                      "first" if _first else "later" if _last else "MIXED")''',
      '''                      "first")''',
      "derived from the executed copy"),
+
+    ("the freeze stops being fingerprinted, so built_from cannot fail",
+     '        led["executed_verdicts_fp"] = verdicts_fingerprint(led["executed_verdicts"])',
+     '        _unused_fp = verdicts_fingerprint(led["executed_verdicts"])',
+     "records its own fingerprint"),
+
+    ("the call site stops passing the fingerprint — the freeze is trusted "
+     "rather than checked",
+     "                                        led.get(\"executed_verdicts_fp\"))",
+     "                                        )",
+     "passes the fingerprint"),
+
+    ("a mutated freeze goes back to reading a confident `first`",
+     '        if not _freeze_ok:\n            _built = "FREEZE_MUTATED"     # the record of what built was rewritten\n        elif not _changed:',
+     '        if not _changed:',
+     "FREEZE_MUTATED"),
+
+    ("the fingerprint stops distinguishing anything",
+     '    return _hl.sha256(\n        _js.dumps(vs, sort_keys=True, default=str).encode("utf-8")).hexdigest()',
+     '    return "constant"',
+     "FREEZE_MUTATED"),
+
+    ("the singular tool's reply goes back to a deduped count",
+     '                out = {"recorded": True,\n                       "rulings": len(_bseen),\n                       "beats_ruled": len(set(_bseen)),',
+     '                out = {"recorded": True,\n                       "ruled": len({v["beat"] for v in led["beat_verdicts"]}),\n                       "beats_ruled": len(set(_bseen)),',
+     "RULINGS and BEATS separately"),
+
+    ("the reply stops naming the duplicated beats back to the agent",
+     '                    out["ALREADY_RULED"] = _dupes',
+     '                    _unused_dupes = _dupes',
+     "NAMES the duplicated beats"),
 ]
 
 

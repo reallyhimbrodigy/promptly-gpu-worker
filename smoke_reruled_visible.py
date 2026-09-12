@@ -163,6 +163,52 @@ check("identical duplicate rulings read `identical`, not a vacuous `first` "
 check("a beat with no `beat` key cannot crash or count",
       rb([{"treatment": ["zoom"]}, {"treatment": ["zoom"]}]) == ("MEASURED", []))
 
+# ── THE FREEZE MUST BE ABLE TO FAIL ──────────────────────────────────────────
+# `built_from` is derived from `executed_verdicts`, the copy frozen at execute
+# time. That derivation is worth nothing unless the freeze is verifiably
+# untouched: if anything rewrites that copy in place, built_from returns the
+# same confident value whether or not the freeze held. This file has paid for
+# exactly that before — the half-ruling stripper rewriting `treatment` IN PLACE
+# is why the frozen copy exists at all.
+check("`verdicts_fingerprint` is a module-level function",
+      "verdicts_fingerprint" in _fns)
+check("the freeze records its own fingerprint at freeze time",
+      "executed_verdicts_fp" in _assigned,
+      "a fingerprint taken later describes whatever the copy became")
+check("the call site passes the fingerprint, so built_from CAN fail",
+      any(len(c.args) >= 3 for c in _calls),
+      "two arguments means the freeze is trusted rather than checked")
+
+_fp_ok = _app.verdicts_fingerprint([_dup[0], _dup[1]])
+_st5, _rows5 = rb(_dup, executed=[_dup[0], _dup[1]], executed_fp=_fp_ok)
+check("an intact freeze still answers `first`",
+      _rows5 and _rows5[0].get("built_from") == "first",
+      repr(_rows5[0].get("built_from") if _rows5 else None))
+
+_st6, _rows6 = rb(_dup, executed=[dict(_dup[0], zoom_arc="TAMPERED"), _dup[1]],
+                  executed_fp=_fp_ok)
+check("a freeze that no longer matches its fingerprint reads FREEZE_MUTATED, "
+      "not a confident `first` — a number that cannot fail is not a "
+      "measurement",
+      _rows6 and _rows6[0].get("built_from") == "FREEZE_MUTATED",
+      repr(_rows6[0].get("built_from") if _rows6 else None))
+
+check("a non-list fingerprints as None rather than raising",
+      _app.verdicts_fingerprint(None) is None)
+
+# ── THE SINGULAR TOOL'S REPLY MUST NOT DEDUPE ───────────────────────────────
+# `"ruled": len({v["beat"] ...})` told an agent that had just re-ruled beat 0
+# "ruled 10 of 10". It cannot see the contradiction, so it makes it again — and
+# on round 63 it did, four times across two fixtures.
+check("the singular beat_verdict reply reports RULINGS and BEATS separately",
+      '"rulings": len(_bseen)' in _src and '"beats_ruled": len(set(_bseen))' in _src,
+      "a deduped count cannot show the agent its own duplicate")
+check("the reply NAMES the duplicated beats back to the agent",
+      "ALREADY_RULED" in _src)
+check("no deduped `ruled` count survives in that reply",
+      '"ruled": len({v["beat"] for v in led["beat_verdicts"]})' not in _src,
+      "the lying count is still there")
+
 print()
 if fails:
     print("RE-RULED VISIBLE: FAIL")

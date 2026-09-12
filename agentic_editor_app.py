@@ -3472,7 +3472,26 @@ def blind_rebuilds(turns):
 _EMPTYISH = (None, "", [], {})
 
 
-def reruled_beats(verdicts, executed=None):
+def verdicts_fingerprint(vs):
+    """sha256 over the verdict list, or None when there is nothing to hash.
+
+    `built_from` is derived from `executed_verdicts`, the frozen copy taken at
+    execute time. That derivation is only worth anything if the freeze is
+    genuinely untouched — if something downstream mutates it in place,
+    `built_from` reports the same answer whether or not the freeze held, and a
+    number that cannot fail is not a measurement. (Raised by a peer session
+    reading the filing; it was right, and this file has paid for exactly this
+    before — the half-ruling stripper rewriting `treatment` IN PLACE is what
+    made the frozen copy necessary in the first place.)
+    """
+    if not isinstance(vs, list):
+        return None
+    import hashlib as _hl, json as _js
+    return _hl.sha256(
+        _js.dumps(vs, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def reruled_beats(verdicts, executed=None, executed_fp=None):
     """(state, rows) — beats ruled more than once: WHAT CHANGED, WHAT WAS LOST,
     and WHICH ruling the build actually used.
 
@@ -3499,6 +3518,13 @@ def reruled_beats(verdicts, executed=None):
     """
     if not isinstance(verdicts, list):
         return ("ABSENT", [])
+    # A DERIVATION IS ONLY AS GOOD AS THE FREEZE IT READS. If the recorded
+    # fingerprint disagrees with the copy in hand, the copy was mutated after
+    # the build and `built_from` is unanswerable — say so rather than return a
+    # confident value that cannot be wrong.
+    _freeze_ok = True
+    if executed_fp is not None and isinstance(executed, list):
+        _freeze_ok = (verdicts_fingerprint(executed) == executed_fp)
     _order = {}
     for _v in verdicts:
         if isinstance(_v, dict) and _v.get("beat") is not None:
@@ -3526,7 +3552,9 @@ def reruled_beats(verdicts, executed=None):
                     _lost.append(_k)
         # WHICH RULING BUILT, derived from the frozen executed copy rather than
         # asserted from the merge rule — the merge rule is the thing in doubt.
-        if not _changed:
+        if not _freeze_ok:
+            _built = "FREEZE_MUTATED"     # the record of what built was rewritten
+        elif not _changed:
             _built = "identical"          # not vacuously "first": nothing differs
         elif _beat not in _ex:
             _built = "NOT_EXECUTED"
@@ -9280,6 +9308,10 @@ def edit(source_key: str, brief: str,
         # RULED. The record has to follow the build: a deep copy, per call.
         import copy as _copy
         led["executed_verdicts"] = _copy.deepcopy(vs)
+        # THE FREEZE'S OWN FINGERPRINT, taken at the same instant. Without it
+        # `built_from` cannot distinguish "the build used the first ruling"
+        # from "something rewrote the record of what the build used".
+        led["executed_verdicts_fp"] = verdicts_fingerprint(led["executed_verdicts"])
         led["executed_verdicts_call"] = int(led.get("execute_plan_calls") or 0) + 1
         print("  EXECUTED FROM   : %d ruling(s) — %s"
               % (len(vs), "  ".join(
@@ -12547,9 +12579,27 @@ def edit(source_key: str, brief: str,
                        "cut": tu.input.get("cut"),
                        "why": str(tu.input.get("why") or "")}
                 led["beat_verdicts"].append(_bv)
+                # `"ruled": len({v["beat"] ...})` DEDUPES, so an agent that
+                # re-ruled beat 0 was told "ruled 10 of 10" and could not see
+                # it had just contradicted itself — it will do it again, and on
+                # round 63 it did, four times across two fixtures. The count the
+                # agent needs is RULINGS vs BEATS, and the duplicate named.
+                _bseen = [v.get("beat") for v in led["beat_verdicts"]]
+                _dupes = sorted({_x for _x in _bseen if _bseen.count(_x) > 1})
                 out = {"recorded": True,
-                       "ruled": len({v["beat"] for v in led["beat_verdicts"]}),
+                       "rulings": len(_bseen),
+                       "beats_ruled": len(set(_bseen)),
                        "of": len(_beats)}
+                if _dupes:
+                    out["ALREADY_RULED"] = _dupes
+                    out["fix"] = (
+                        "You have ruled %s more than once. This tool writes "
+                        "beat/treatment/cut/why ONLY — zoom_arc, purpose, "
+                        "text_content, sfx_name and the card fields cannot be "
+                        "supplied through it, so a second ruling here DROPS "
+                        "them. The first ruling is what built. To change a "
+                        "beat, re-call rule_all_beats with every field you "
+                        "want it to keep." % _dupes)
             elif tu.name == "cut_verdict":
                 led["cut_verdict"] = {"decision": tu.input.get("decision"),
                                       "why": str(tu.input.get("why") or "")}
@@ -12674,7 +12724,8 @@ def edit(source_key: str, brief: str,
     # latent defect: the build's per-beat lookup is a dict comprehension, so a
     # second ruling WINS there while the frozen executed copy kept the first.
     _rr_state, _rr_rows = reruled_beats(led.get("beat_verdicts"),
-                                        led.get("executed_verdicts"))
+                                        led.get("executed_verdicts"),
+                                        led.get("executed_verdicts_fp"))
     led["reruled_state"] = _rr_state
     led["reruled_beats"] = _rr_rows
     led["reruled_count"] = len(_rr_rows)
