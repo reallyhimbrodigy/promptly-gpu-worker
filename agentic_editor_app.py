@@ -3069,10 +3069,6 @@ KNOWLEDGE_TOOLS = [{
                                                     "narrator's summary of it "
                                                     "[05_motion_graphics, "
                                                     "wired 2026-09-11]"},
-                                 "sfx": {"type": "string", "enum": ["yes", "no"],
-                                         "description": "REQUIRED on hook and "
-                                                        "close beats: does this "
-                                                        "beat take a sound?"},
                                  # ── THE FIELDS THE HARNESS CANNOT DERIVE ────
                                  # Everything else about a placement — where it
                                  # sits, how fast a zoom travels, how early a
@@ -8368,6 +8364,18 @@ def reedit_merge(prior, targets, incoming):
 
 
 VERDICT_FIELDS = _verdict_fields()
+# FIELDS THE BOUNDARY COMPUTES RATHER THAN ASKS FOR. The build may read these
+# and the boundary must store them, but the agent is never offered them — a
+# second way to state something it has already stated is a disagreement waiting
+# to happen, and `sfx` was exactly that for 25 placements.
+DERIVED_VERDICT_FIELDS = {
+    "sfx": lambda _r: ("yes" if "sfx" in [str(_t).lower()
+                                          for _t in (_r.get("treatment") or [])]
+                       else "no"),
+}
+# WHAT THE BOUNDARY ACTUALLY KEEPS: asked-for plus derived. The build may read
+# anything in here and nothing outside it.
+STORED_VERDICT_FIELDS = tuple(VERDICT_FIELDS) + tuple(DERIVED_VERDICT_FIELDS)
 assert "beat" in VERDICT_FIELDS and "treatment" in VERDICT_FIELDS, (
     "the verdict schema could not be read, so the boundary would store nothing")
 
@@ -8447,24 +8455,10 @@ def half_ruling_refusal(v):
                 f"beat {v.get('beat')}: ruled 'sfx' with no sfx_name. The sound "
                 f"is DERIVED from that name — without it nothing is placed and "
                 f"the loss is silent. Name the sound, or do not rule the family.")
-        elif str(v.get("sfx") or "").lower() != "yes":
-            # THE TWO VOCABULARIES MUST AGREE, and this is the residual case:
-            # a beat that names a sound but leaves `sfx` unset. The build reads
-            # the FIELD, so it drops even though the intent is unambiguous —
-            # two of the 25 were exactly this. Refused rather than coerced,
-            # because normalise_verdict's whole stance is that papering over a
-            # wrong shape means never learning the agent emits it.
-            #
-            # THE REAL FIX IS A SCHEMA CHANGE nobody has made: `sfx` in
-            # `treatment` IS the intent and the `sfx` field restates it, so the
-            # field should be DERIVED rather than asked for twice. Until then
-            # the disagreement is refused where the agent can still fix it.
-            why = (
-                f"beat {v.get('beat')}: treatment says 'sfx' and sfx_name is "
-                f"{str(v.get('sfx_name'))!r}, but the `sfx` field is "
-                f"{v.get('sfx')!r} rather than 'yes'. The build reads the "
-                f"field, so this places NOTHING and says nothing. Set sfx='yes' "
-                f"or drop 'sfx' from treatment.")
+        # THE AGREEMENT CHECK THAT USED TO LIVE HERE IS GONE, because the
+        # disagreement it caught is now impossible: `sfx` is DERIVED from
+        # `treatment` at the boundary. A guard for a state the type system no
+        # longer admits is dead code that reads like protection.
     if why is None and "card" in tr:
         # THE ACCEPTANCE GATE MUST ASK FOR WHAT THE SCHEMA
         # OFFERS. It demanded `card_type` — a field b13730c
@@ -8694,6 +8688,17 @@ def admit_verdict(led, v, seen, reedit=False, reedit_targets=None):
     # 4. EVERY FIELD THE SCHEMA OFFERS.
     rec = {k: v.get(k) for k in VERDICT_FIELDS}
     rec["why"] = str(v.get("why") or "")
+    # ── DERIVED, NOT ASKED FOR TWICE ───────────────────────────────────────
+    # `sfx` was a SECOND WAY TO SAY the same thing: the agent put "sfx" in
+    # `treatment` AND answered a yes/no field, and the build read only the
+    # field. 25 of 75 ruled placements were lost to the two disagreeing, and
+    # the guard meant to catch it read the field as well.
+    #
+    # Putting the family in `treatment` IS the intent. The field is now
+    # computed from it, so they cannot disagree — there is nothing to keep in
+    # sync, which is the only kind of consistency that does not rot.
+    for _k, _fn in DERIVED_VERDICT_FIELDS.items():
+        rec[_k] = _fn(rec)
     led["beat_verdicts"].append(rec)
     seen.add(v.get("beat"))
     return True, None
@@ -8759,13 +8764,93 @@ def _assert_build_reads_only_stored_fields(module_src: str) -> None:
                  .get("verdicts") or {}).get("items", {}).get("properties", {}))
     if not _offered:
         raise AssertionError("the verdict schema could not be read")
-    _gap = sorted((_read & _offered) - set(VERDICT_FIELDS))
+    # OFFERED **OR DERIVED**, AGAINST WHAT IS ACTUALLY STORED. This compared
+    # `_read & _offered` against VERDICT_FIELDS, so a field REMOVED from the
+    # schema left `_offered` and stopped being checked at all — which is
+    # exactly what just happened to `sfx`, a field the build still reads and
+    # the boundary now DERIVES. The check would have gone quiet on the one
+    # field it was most needed for.
+    _known = _offered | set(DERIVED_VERDICT_FIELDS)
+    _gap = sorted((_read & _known) - set(STORED_VERDICT_FIELDS))
     if _gap:
         raise AssertionError(
             f"execute_plan reads verdict field(s) {_gap} that the boundary does "
             f"not store. `.get()` returns None and None is indistinguishable "
             f"from 'the agent did not say', so the build blames the ruling for "
             f"a field the harness threw away.")
+    # AND A DERIVED FIELD MUST NOT ALSO BE ASKED FOR. Two ways to state one
+    # thing is the defect this change removed; re-adding the field to the
+    # schema would restore it silently.
+    _both = sorted(set(DERIVED_VERDICT_FIELDS) & _offered)
+    if _both:
+        raise AssertionError(
+            f"verdict field(s) {_both} are DERIVED at the boundary and also "
+            f"OFFERED to the agent. Two ways to state one thing is how `sfx` "
+            f"lost 25 of 75 ruled placements: the agent said it one way, the "
+            f"build read the other, and the guard read the other too.")
+
+
+def _assert_no_orphaned_demand(module_src: str) -> None:
+    """Every field a ruling GATE demands must be one the ruling schema OFFERS.
+
+    RAISED BY A PEER SESSION (c6) FROM ITS OWN LANE, and it is the sharper form
+    of a failure this file has already paid for. The acceptance gate once
+    demanded `card_type` after that field had been REMOVED from the schema: the
+    agent could not supply it, was rejected, and re-ruled the same beat
+    identically about five times. Round 47's control shows three beats each.
+
+    A DEMAND WITH NO SUPPLY IS WORSE THAN A SILENT DROP. One costs a placement;
+    the other costs the RUN, because the agent can never satisfy it and keeps
+    trying. Adding `sfx_name` to half_ruling_refusal is precisely the move that
+    creates one if a ruling surface does not offer that field.
+
+    It does not fire on this lane today — `_sync_verdict_surfaces` makes both
+    surfaces offer the same twelve — but that is a property to ASSERT rather
+    than a coincidence to rely on, and the demands are read out of the gate's
+    OWN SOURCE so a new one cannot be added without being checked.
+    """
+    # READ FROM THE MODULE SOURCE, NOT VIA inspect.getsource — which raises
+    # OSError whenever the module was not loaded from a file (exec'd, zipped,
+    # or built into an image), and an import-time cert that CRASHES on its own
+    # introspection kills the container instead of answering. Same shape as the
+    # sibling asserts, which all take the source as an argument.
+    import ast as _ast
+    if not module_src:
+        raise AssertionError(
+            "_assert_no_orphaned_demand got no module source: the check is "
+            "ABSENT, not passing")
+    _gate = next((_n for _n in _ast.walk(_ast.parse(module_src))
+                  if isinstance(_n, _ast.FunctionDef)
+                  and _n.name == "half_ruling_refusal"), None)
+    if _gate is None:
+        raise AssertionError(
+            "half_ruling_refusal not found in the module source, so the "
+            "demands it makes cannot be checked against what is offered")
+    _demanded = {
+        _n.args[0].value
+        for _n in _ast.walk(_gate)
+        if isinstance(_n, _ast.Call) and isinstance(_n.func, _ast.Attribute)
+        and _n.func.attr == "get" and _n.args
+        and isinstance(_n.args[0], _ast.Constant)
+        and isinstance(_n.args[0].value, str)}
+    _demanded -= {"beat", "treatment"}
+    _offered = set()
+    for _t in list(TOOLS) + list(KNOWLEDGE_TOOLS):
+        if _t.get("name") == "rule_all_beats":
+            _offered = set(
+                (((_t.get("input_schema") or {}).get("properties") or {})
+                 .get("verdicts") or {}).get("items", {}).get("properties", {}))
+    if not _offered:
+        raise AssertionError("the verdict schema could not be read, so this "
+                             "check is ABSENT rather than passing")
+    _orphan = sorted(_demanded - _offered - set(DERIVED_VERDICT_FIELDS))
+    if _orphan:
+        raise AssertionError(
+            f"half_ruling_refusal demands {_orphan}, which the ruling schema "
+            f"does not offer. The agent cannot supply it, so the refusal is "
+            f"UNSATISFIABLE and it will re-rule the same beat until the turns "
+            f"run out — refused-forever costs the run, a silent drop costs one "
+            f"placement.")
 
 
 def _assert_treatment_surface_agrees(module_src: str) -> None:
@@ -9044,6 +9129,10 @@ _assert_one_admission_surface(open(__file__).read()
 # alike. This names the eight fields only one tool offers, and fails on any new
 # divergence AND on a recorded one closed without deleting it here.
 _assert_verdict_surfaces_offer_the_same_fields()
+# A GATE MAY NOT DEMAND WHAT NO SURFACE OFFERS. Refused-forever costs the
+# run; a silent drop costs one placement.
+_assert_no_orphaned_demand(open(__file__).read()
+                          if os.path.exists(__file__) else "")
 # Runs at IMPORT, in the container, on every run — not in a test file that can
 # be skipped. The two beat sources must stay interchangeable or the verdict
 # machinery silently rules on a field one of them does not supply.

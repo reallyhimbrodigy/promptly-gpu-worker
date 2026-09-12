@@ -83,10 +83,15 @@ CASES = [
      '    if why is None and "sfx" in tr:',
      '    if False and "sfx" in tr:',
      'with no sfx_name is REFUSED'),
-    ('the vocabularies stop having to agree - a named sound with the field unset goes back to placing nothing silently',
-     '        elif str(v.get("sfx") or "").lower() != "yes":',
-     '        elif False:',
-     'leaves the `sfx` field unset is refused'),
+    # THE OBSOLETE MUTATION THAT USED TO SIT HERE tested the agreement branch
+    # between `treatment` and the `sfx` field. The schema change DELETED that
+    # branch — the disagreement is impossible once the field is derived — so
+    # its anchor went to 0x and the harness said [ANCHOR]. A mutation whose
+    # property no longer exists is retired, not repaired.
+    ("the boundary stops deriving sfx, so the build reads None again",
+     '    for _k, _fn in DERIVED_VERDICT_FIELDS.items():\n        rec[_k] = _fn(rec)',
+     '    for _k, _fn in DERIVED_VERDICT_FIELDS.items():\n        pass',
+     "derived value is 'yes' on an sfx beat"),
     # THE ANCHOR MUST BE UNIQUE AND IT MUST ACTUALLY BITE. Both stripper sites
     # carry identical text, so the bare expression matched twice ([ANCHOR]);
     # anchoring on the comment alone applied cleanly and changed NOTHING

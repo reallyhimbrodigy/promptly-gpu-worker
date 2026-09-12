@@ -400,12 +400,58 @@ _hrr = _AA.half_ruling_refusal
 check("a beat ruled 'sfx' with no sfx_name is REFUSED where the agent still "
       "holds it, not skipped at build time where the only outcome is a loss",
       bool(_hrr({"beat": 1, "treatment": ["sfx"]})))
-check("a beat that names a sound but leaves the `sfx` field unset is refused "
-      "too — the build reads the field, so this places NOTHING silently",
-      bool(_hrr({"beat": 1, "treatment": ["sfx"], "sfx_name": "boom"})))
-check("a complete sfx ruling passes",
-      _hrr({"beat": 1, "treatment": ["sfx"], "sfx_name": "boom",
-            "sfx": "yes"}) is None)
+# THE SCHEMA CHANGE: `sfx` IS NO LONGER ASKED FOR. Putting the family in
+# `treatment` IS the intent, and the field is DERIVED from it at the boundary,
+# so the two cannot disagree — there is nothing left to keep in sync, which is
+# the only kind of consistency that does not rot. The 2 rulings that named a
+# sound and left the field unset are RECOVERED rather than refused.
+check("a named sound is admitted without the agent setting any field",
+      _hrr({"beat": 1, "treatment": ["sfx"], "sfx_name": "boom"}) is None)
+check("`sfx` is NOT offered on the ruling schema any more — a second way to "
+      "state one thing is the defect, not the fix",
+      "sfx" not in set(_AA.VERDICT_FIELDS))
+check("it IS derived at the boundary and stored",
+      "sfx" in _AA.DERIVED_VERDICT_FIELDS
+      and "sfx" in set(_AA.STORED_VERDICT_FIELDS))
+_led = {"beat_verdicts": []}
+_AA.admit_verdict(_led, {"beat": 0, "treatment": ["sfx"],
+                         "sfx_name": "boom"}, set())
+_AA.admit_verdict(_led, {"beat": 1, "treatment": ["text"],
+                         "text_content": "hi"}, set())
+check("the derived value is 'yes' on an sfx beat and 'no' otherwise",
+      _led["beat_verdicts"][0].get("sfx") == "yes"
+      and _led["beat_verdicts"][1].get("sfx") == "no")
+_led2 = {"beat_verdicts": []}
+_AA.admit_verdict(_led2, {"beat": 2, "treatment": ["sfx"], "sfx_name": "x",
+                          "sfx": "no"}, set())
+check("a stale plan carrying a CONTRADICTING sfx field is overridden, not "
+      "obeyed — the treatment is the intent",
+      _led2["beat_verdicts"][0].get("sfx") == "yes")
+
+# A GATE MAY NOT DEMAND WHAT NO SURFACE OFFERS. Raised by a peer from its own
+# lane: adding sfx_name to the gate creates an unsatisfiable refusal if a
+# ruling surface cannot express it, and refused-forever costs the RUN where a
+# silent drop costs one placement. It does not fire here because both surfaces
+# offer the same twelve — asserted rather than relied on.
+check("`_assert_no_orphaned_demand` exists and takes the module source, so it "
+      "cannot die on inspect.getsource in a container built from an image",
+      callable(getattr(_AA, "_assert_no_orphaned_demand", None)))
+try:
+    _AA._assert_no_orphaned_demand("")
+    check("an absent source is ABSENT, not passing", False)
+except AssertionError:
+    check("an absent source is ABSENT, not passing", True)
+_bad = src.replace(
+    '    tr = [str(t).lower() for t in (v.get("treatment") or [])]',
+    '    tr = [str(t).lower() for t in (v.get("treatment") or [])]\n'
+    '    _ = v.get("nonexistent_field")', 1)
+try:
+    _AA._assert_no_orphaned_demand(_bad)
+    check("a demand the schema cannot supply FAILS the container at import",
+          False, "refused-forever costs the run")
+except AssertionError:
+    check("a demand the schema cannot supply FAILS the container at import",
+          True)
 check("and a beat that never ruled sfx is untouched by it",
       _hrr({"beat": 1, "treatment": ["none"]}) is None)
 # THE SIBLINGS MUST STAY KEYED THE SAME WAY. The bug was one guard reading a
