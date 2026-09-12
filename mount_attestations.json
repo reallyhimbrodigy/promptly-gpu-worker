@@ -1,0 +1,16 @@
+{
+  "_why": "A cross-lane file that is MODIFIED but not committed can still be described. Each entry pins the exact bytes by sha256, re-verified from disk on every launch — so if the owner commits, reverts or edits it, the sha stops matching and the abort returns. This is not a skip list and must never become one: an entry with no sha, or a sha nobody re-derived, is a shrug wearing a description's clothes.",
+  "_rule": "Only the file's OWNER may attest to it, and the attestation records who, why, and whether the file is reachable from this lane's render path. Reachability is determined by reading THIS lane's code, not by taking the owner's word — they cannot see our render path and said so.",
+  "attested": [
+    {
+      "path": "src/remotion/render-full.mjs",
+      "sha256": "df64c27e4193072bd9d1daa06aad1c0a29f7ea97964d0bc28a20a388ea353e09",
+      "owner": "promptly-gpu-worker-6e (font-alias lane)",
+      "why": "Fixes the identity webpackOverride on the runtime-bundling fallback at :177, so a render that misses the prebundle applies the same font aliases as prebundle.mjs instead of fetching the real @remotion/google-fonts over the network. +22/-1, node --check clean. Byte-identical to the file that passed 441/441 in situ and survived the six-phase RED-proof. Not committed because zero-reject-routing is the deploy branch and 6e has no GO from Zac; a peer needing it is not the user approving it.",
+      "reachable": "NO — verified by reading this lane's code, not by taking the owner's word. agentic_editor_app.py renders through remotion_batch.mjs (mounted at /promptly-remotion/remotion_batch.mjs, line 394). render-full.mjs is referenced ONLY by handler.py, the main pipeline worker, which this lane does not invoke. The file enters the image via the whole-dir mount of _REMOTION_SRC (line 363) and is never executed, so it cannot change this lane's render output. It CAN move the mount fingerprint, which is exactly why it is pinned here rather than ignored.",
+      "risk_accepted": "If 6e commits or reverts mid-round the fingerprint drifts and the round aborts mid-arm — the way rounds 37 and 38 died. 6e has undertaken to tell this lane before the tree changes. The exposure is one round: 5 fixtures, ~$1.00.",
+      "verified_by": "promptly-gpu-worker (lane-agentic) — sha re-derived from disk with shasum -a 256 and node --check re-run locally, not accepted from the message",
+      "date": "2026-09-11"
+    }
+  ]
+}
