@@ -981,3 +981,39 @@ inflated by retries into an apparent outage.
   green.
 
   **When a check counts things that are individually load-bearing, name them.**
+
+
+## Standing rule earned 2026-09-11 (the seventh way a mutation misleads)
+
+- **A RED THAT IS NOT ABOUT THE PROPERTY.** (Named by Zac 2026-09-11.) The six
+  recorded ways all end in a mutation that fails to BITE — anchor `0x`, a match
+  landing in prose, a vacuous operand, a no-op where the values already agree,
+  an orphan left by a refactor, and the stale target whose anchor still resolves.
+  Every one of them shows up as a **false green**. The seventh runs the other
+  way: **the harness goes RED for a reason that has nothing to do with the thing
+  under test**, and a red that is not about the property is exactly as wrong as a
+  green that is not.
+
+  Both instances came from the same red proof, in one sitting:
+  * deleting the prior-fingerprint guard made `prior_sig.get("fp")` raise on
+    `None`, so the app **crashed** and the gate never reached its leg;
+  * swapping `print(` for `_np = (` left `flush=True` inside a tuple, so the
+    file **stopped parsing**.
+
+  Both printed `[RED]`. Neither exercised the leg named beside it. The proof
+  would have been filed as evidence that two properties were enforced when
+  nothing had tested either.
+
+  **Assert the leg's own words, not just a non-zero exit.** Every mutation
+  carries the phrase its target leg prints, and a red whose output does not
+  contain that phrase is reported as NOT RED. That check is what caught both —
+  `rc=1 phrase=False` is the signature. And when a mutation does crash, the fix
+  is to mutate the ANSWER or the LITERAL rather than the guard or the statement:
+  the point is to make the property false, not the file invalid.
+
+  Corollary already in force and worth restating here: **run the unmutated gate
+  in the same sandbox first and require green.** That catches the other
+  direction — a red produced by a broken sandbox rather than by the mutation —
+  and it has now fired twice for real (a red proof that was itself an
+  unrecorded `red_proof_*.py`, and a worktree at a HEAD that predated the
+  change).
