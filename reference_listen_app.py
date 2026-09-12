@@ -165,7 +165,22 @@ def listen(video_bytes: bytes, label: str, duration_s: float,
                 ungrounded.append({"beat": b.get("beat_index"), "name": nm,
                                    "why": "no what_it_does"})
             else:
-                keep.append({"name": nm, "what_it_does": wd})
+                # KEEP THE WHOLE OBJECT — SECOND COPY OF THE SAME BUG.
+                # build_reference_records.py had this identical line and it
+                # deleted every field the annotator answered beyond the two
+                # being validated. I fixed that copy and not this one, so the
+                # listening arm returned 253 placements with all six placement
+                # fields answered and stored NONE of them.
+                #
+                # Two copies of one rule is how a rule ends up enforced on one
+                # of them — the lesson this file has already paid for twice
+                # (half_ruling_refusal, the verdict surfaces). A validator that
+                # RECONSTRUCTS its input instead of annotating it throws away
+                # everything it was not looking for, and doing it in two places
+                # means fixing it in two places.
+                t2 = dict(t)
+                t2["name"], t2["what_it_does"] = nm, wd
+                keep.append(t2)
         b["treatment"] = keep
     rec["ungrounded_dropped"] = ungrounded
     rec["provenance"] = {"source_file": label, "duration_s": duration_s,

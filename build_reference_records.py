@@ -375,8 +375,33 @@ def main():
             _fh.write(txt)
     except Exception:
         pass
+    def _loads_tolerating_trailing_commas(_txt):
+        """Parse, and retry once with trailing commas removed.
+
+        A PAID CALL LOST TO A COMMA. 56ba6321 came back complete and
+        well-formed except for `,}` at line 478 — Python's json is strict, the
+        record was discarded, and the reference was simply missing from the
+        corpus. The model's output is not ours to dictate; dropping a finished
+        annotation over punctuation is the harness choosing to lose data it
+        already has.
+        REPAIRED ONCE AND NAMED, never silently: the repair is reported so a
+        model that starts emitting malformed JSON constantly is visible rather
+        than absorbed.
+        """
+        try:
+            return json.loads(_txt), False
+        except json.JSONDecodeError:
+            _fixed = re.sub(r",(\s*[}\]])", r"\1", _txt)
+            if _fixed == _txt:
+                raise
+            return json.loads(_fixed), True
+
     try:
-        rec = json.loads(m.group(0))
+        rec, _repaired = _loads_tolerating_trailing_commas(m.group(0))
+        if _repaired:
+            print("  JSON REPAIRED: trailing comma(s) removed — the annotation "
+                  "was complete and would otherwise have been discarded",
+                  flush=True)
     except json.JSONDecodeError as _je:
         # A CAP HIT IS NOT A PARSE ERROR. out == max_tokens means the response was
         # TRUNCATED, and truncated JSON is unparseable — so the cap arrives wearing
