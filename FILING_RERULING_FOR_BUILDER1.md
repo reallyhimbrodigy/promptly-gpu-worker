@@ -146,3 +146,56 @@ string says that this tool cannot carry `zoom_arc`, `purpose`, `text_content`,
 a beat means re-calling `rule_all_beats` with every field it should keep. That
 is the difference between a tool that silently loses craft and one that says so
 in the turn it happens.
+
+
+## A SECOND ESCAPE, found by a peer and confirmed here: the reedit bypass
+
+Credit to promptly-gpu-worker-c6, which closed this on lane/agentic-editor and
+sent it over. I had not found it and would not have looked for it.
+
+**The singular handler never reaches `reedit_merge`.** AST over the handler
+body: `reedit_merge`, `_seen`, `VERDICT_FIELDS` and `_rejected` are all ABSENT.
+
+The plural path treats the re-edit case as the whole point of its dedup branch:
+
+> On a RE-EDIT the prior plan is already loaded, so every beat is `_seen` — and
+> the agent must be able to change the ones the instruction names, and MUST NOT
+> be able to change the ones it does not. Trusting the prompt for this would
+> make "surgical" a claim rather than a property.
+
+`beat_verdict` is that untrusted prompt, restored. **On a re-edit it can change
+a beat the instruction never named** — so surgical is enforced on one surface
+and is a claim on the other, which is the exact failure the plural path's
+comment says it exists to prevent.
+
+This is independent of the field-loss escape and worse in kind: field loss
+degrades a beat that was legitimately re-ruled, this one edits a beat nobody
+asked to touch.
+
+## What did NOT reproduce here, and why the difference matters
+
+c6 also reports `_derive_sfx_name`'s `.get("sfx", "no")` returning a STORED
+`None`, so the deriver cannot rescue a beat and it goes silently sfx-less.
+**That does not occur on this lane.** My singular handler never stores `sfx` at
+all, so the key is ABSENT and the default stands.
+
+Same tool, opposite outcomes, and the lanes have diverged: their plural tool
+declares 15 fields and their singular 13; mine declare 13 and 5. Neither set of
+numbers describes the other file, and a fix copied across without re-reading
+would land on the wrong shape.
+
+**The only reason that distinction was visible is that checking it exposed a
+defect in this reporter** — `reruled_beats` read `_r.get(_k)`, so a key never
+written and a key set to `None` printed identically. Round 63 said
+`sfx 'yes' -> None` where the truth was `sfx 'yes' -> KEY ABSENT`. Now rendered
+`<key absent>` vs `None`; both still count as LOST, because the guidance is gone
+either way.
+
+## And one more: a field this tool ADVERTISES and discards
+
+`beat_verdict` declares `purpose` in its schema and its handler never read it.
+That is why `purpose` is LOST on **all four** of round 63's re-ruled beats — not
+because the agent stopped supplying it, but because the code dropped it on the
+floor. A field a tool offers and ignores is worse than one it never offered: the
+agent cannot tell the difference and keeps paying to send it. Fixed, with a leg
+asserting every field the tool declares is read by its handler.
