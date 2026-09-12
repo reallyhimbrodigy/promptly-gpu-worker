@@ -279,20 +279,19 @@ check("at least one tool rules verdicts", _verdict_tools,
 # Bounded by the gate's own lines: from the verdict-acceptance branch to the
 # rejection it appends. Scoping by ENCLOSING FUNCTION was not enough — the gate
 # lives inside `edit`, which is 3,000 lines and contains the stranger.
-_lines = src.split("\n")
-_g0 = next((i for i, l in enumerate(_lines, 1)
-            if 'if _why6 is None and "card" in _tr6:' in l), None)
-_g1 = next((i for i, l in enumerate(_lines, 1)
-            if i > (_g0 or 0) and '"reason": _why6})' in l), None)
-check("the acceptance gate was located", _g0 and _g1 and _g1 > _g0,
-      f"lines {_g0}..{_g1} — without bounds this walks the whole module and "
-      f"reports strangers as schema fields")
+# THE BOUND IS NOW THE FUNCTION ITSELF. The note above says scoping by
+# enclosing function was not enough because the gate lived inside `edit` — that
+# is fixed at the source: the gate is `half_ruling_refusal`, a named pure
+# function, so there is no stranger to exclude and no line window to drift.
+_gate_fn = next((_n for _n in ast.walk(tree) if isinstance(_n, ast.FunctionDef)
+                 and _n.name == "half_ruling_refusal"), None)
+check("the acceptance gate was located", _gate_fn is not None,
+      "half_ruling_refusal is gone — without it the gate is inline again and "
+      "this walks the whole module reporting strangers as schema fields")
 _demanded = set()
-for _n in ast.walk(tree):
-    if not (_g0 and _g1 and _g0 <= getattr(_n, "lineno", -1) <= _g1):
-        continue
+for _n in (ast.walk(_gate_fn) if _gate_fn else []):
     if (isinstance(_n, ast.Call) and getattr(_n.func, "attr", "") == "get"
-            and getattr(getattr(_n.func, "value", None), "id", "") == "_v"
+            and getattr(getattr(_n.func, "value", None), "id", "") == "v"
             and _n.args and isinstance(_n.args[0], ast.Constant)
             and isinstance(_n.args[0].value, str)):
         _demanded.add(_n.args[0].value)
@@ -316,9 +315,15 @@ check("no acceptance gate reads a retired field",
 check("the gate asks for card_hero, which every verdict tool offers",
       "card_hero" in _demanded
       and all("card_hero" in _props_of(_t) for _t in _verdict_tools))
+# ASKED OF THE AST, not of the gate's old local variable names. This matched
+# `_ct6, _dw6 = derive_card_type(` — names that existed only while the gate was
+# inline — so extracting the gate would have silently un-checked it while the
+# property still held. A check pinned to a variable name is pinned to nothing.
+_gate_calls = {getattr(_n.func, "id", "") for _n in
+               (ast.walk(_gate_fn) if _gate_fn else [])
+               if isinstance(_n, ast.Call)}
 check("and it uses the SAME derivation as the builder",
-      "derive_card_type(\n                                _hero6" in src
-      or "_ct6, _dw6 = derive_card_type(" in src,
+      "derive_card_type" in _gate_calls,
       "a gate that accepts what the builder refuses is a second opinion nobody "
       "asked for")
 

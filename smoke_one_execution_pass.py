@@ -49,14 +49,32 @@ check("a second execute_plan is REFUSED",
 # budget, which is what the shortfall livelock did. A refusal must still name
 # what IS available. The difference is that the available path is now the
 # repair hatch, which exists, rather than a floor to discharge, which does not.
+# ANCHORED ON THIS REFUSAL, NOT ON THE FIRST `what_is_available` IN THE FILE.
+# There are now TWO refusals that name what is available — the second EXECUTE
+# and the second RULING pass — and splitting on the bare field name landed on
+# whichever came first. Both say "repair_permitted" and neither says
+# "shortfall", so deleting the field from the refusal this smoke exists to
+# guard left all three legs GREEN. The execute refusal's own line is unique.
+_anchor = '"refused": "one execution pass"'
+check("the execute refusal is uniquely locatable",
+      src.count(_anchor) == 1,
+      "%d copies — a leg anchored on a repeated literal guards nothing"
+      % src.count(_anchor))
+_refusal = src.split(_anchor)[1][:1500] if src.count(_anchor) == 1 else ""
+# AND THE WINDOW MUST NOT BLEED INTO THE NEXT REFUSAL. If it reached the
+# second-RULING refusal, "repair_permitted" would be satisfied by the wrong
+# one and the leg would be back where it started.
+check("the window covers this refusal only",
+      _refusal and '"refused": "one ruling pass"' not in _refusal,
+      "the window ran past into the second-ruling refusal")
 check("the refusal names what is available rather than only saying no",
-      '"what_is_available"' in src,
+      '"what_is_available"' in _refusal,
       "a bare refusal costs a turn and teaches the agent nothing")
 check("and it points at the repair hatch, which is real",
-      "repair_permitted" in src.split('"what_is_available"')[1][:500],
+      "repair_permitted" in _refusal,
       "naming a path that does not exist is worse than naming none")
 check("the refusal names NO density remedy",
-      "shortfall" not in src.split('"what_is_available"')[1][:500],
+      "shortfall" not in _refusal,
       "the rubric grades; it must not reappear as the thing a refusal asks for")
 check("the refusal is counted, not silent",
       'led["refused_second_execute"]' in src,

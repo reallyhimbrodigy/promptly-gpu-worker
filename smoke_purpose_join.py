@@ -177,13 +177,36 @@ check("an unnamed purpose fails loudly", 'fail("purpose_unnamed"' in src)
 # be a rejection condition in the harness. A miss is reported loudly at the end
 # instead. Marking a field required and ALSO rejecting on it is how a loop
 # starts, and the two look identical in a diff.
-_gate = src[src.index("_why6 = None"):src.index('"reason": _why6})')]
+# BOUNDED BY THE FUNCTION, not by a line window. The gate used to be inline in
+# `edit` — 3,000 lines — so this sliced the source between two literals that
+# happened to bracket it. It is now `half_ruling_refusal`, a named pure
+# function, so the bound is exact and cannot drift when the code around it
+# moves. (It moved: that slice broke the moment the gate was extracted, which
+# is the check working.)
+_hrr = next((n for n in ast.walk(ast.parse(src))
+             if isinstance(n, ast.FunctionDef)
+             and n.name == "half_ruling_refusal"), None)
+if _hrr is None:
+    print("PURPOSE-JOIN: FAIL\n  - half_ruling_refusal not found; the "
+          "acceptance gate cannot be bounded")
+    sys.exit(1)
+_gate = ast.get_source_segment(src, _hrr) or ""
+# ASKED OF THE FIELDS THE GATE READS, not of its source text. The text form
+# failed the moment the gate got a docstring that NAMES purpose as one of the
+# fields the other ruling surface used to drop — prose about a field read as a
+# demand for it. The property is that the gate does not READ purpose.
+_gate_reads = {_n.args[0].value for _n in ast.walk(_hrr)
+               if isinstance(_n, ast.Call)
+               and getattr(_n.func, "attr", "") == "get"
+               and getattr(getattr(_n.func, "value", None), "id", "") == "v"
+               and _n.args and isinstance(_n.args[0], ast.Constant)
+               and isinstance(_n.args[0].value, str)}
 check("the acceptance gate does NOT reject a verdict for a missing purpose",
-      "purpose" not in _gate,
+      "purpose" not in _gate_reads,
       "requiring a field in the schema AND rejecting on it in the harness is "
       "the orphaned-gate loop: three rounds built zero cards that way")
 check("the gate still rejects on zoom_arc, so this leg is not vacuous",
-      "zoom_arc" in _gate,
+      "zoom_arc" in _gate_reads,
       "if the gate stopped rejecting anything, the leg above would pass for "
       "the wrong reason")
 

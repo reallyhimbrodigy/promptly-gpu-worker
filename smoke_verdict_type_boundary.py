@@ -108,24 +108,40 @@ check("verdict_family_unknown is a CONTRACT_FAILURES member",
 # Asked of the AST: every append into _rejected must be a dict literal carrying
 # both keys. A defensive isinstance in the printer is the second half of the
 # contract, not a substitute for this.
-_rej_appends = []
-for _fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
-    for _n in ast.walk(_fn):
-        if (isinstance(_n, ast.Call) and isinstance(_n.func, ast.Attribute)
-                and _n.func.attr == "append"
-                and getattr(_n.func.value, "id", "") == "_rejected"):
-            _rej_appends.append(_n)
-check("_rejected has appends at all (an empty check forbids nothing)",
-      len(_rej_appends) >= 2, f"{len(_rej_appends)} found")
-for _n in _rej_appends:
-    _arg = _n.args[0] if _n.args else None
+#
+# RE-POINTED, NOT RELAXED. The rejections used to be built inline and appended
+# to a local `_rejected`, so the shape was asked of the append. They are now
+# RETURNED by admit_verdict — the single door both ruling surfaces go through —
+# so the shape is asked where it is decided. Same contract, one producer fewer.
+_av = next((n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+            and n.name == "admit_verdict"), None)
+check("admit_verdict was located", _av is not None,
+      "the single admission door is gone; two surfaces would build their own "
+      "rejection shapes again")
+_rej_rets = []
+for _n in ast.walk(_av) if _av else []:
+    if (isinstance(_n, ast.Return) and isinstance(_n.value, ast.Tuple)
+            and len(_n.value.elts) == 2
+            and not (isinstance(_n.value.elts[1], ast.Constant)
+                     and _n.value.elts[1].value is None)):
+        _rej_rets.append(_n)
+check("admit_verdict returns rejections at all (an empty check forbids "
+      "nothing)", len(_rej_rets) >= 2, f"{len(_rej_rets)} found")
+for _n in _rej_rets:
+    _arg = _n.value.elts[1]
     _isdict = isinstance(_arg, ast.Dict)
     _keys = {k.value for k in (_arg.keys if _isdict else [])
              if isinstance(k, ast.Constant)}
-    check(f"_rejected.append at line {_n.lineno} is a dict with beat+reason",
+    check(f"the rejection returned at line {_n.lineno} is a dict with "
+          f"beat+reason",
           _isdict and {"beat", "reason"} <= _keys,
           "a bare value here reaches a printer that calls .get() on it and "
           "kills the run on the first rejection the pipeline ever produces")
+# AND ONE RECORDER. Two copies of the print is how a source-presence check on
+# that literal goes ambiguous: delete the one that matters, stay green.
+check("the [verdict REJECTED] line has exactly one source",
+      src.count("[verdict REJECTED] beat ") == 1,
+      "%d copies" % src.count("[verdict REJECTED] beat "))
 check("the printer refuses to crash on a malformed rejection record",
       "MALFORMED rejection" in src,
       "a formatting bug in a diagnostic must not lose the whole run")
