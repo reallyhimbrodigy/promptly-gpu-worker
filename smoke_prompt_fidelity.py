@@ -190,10 +190,17 @@ check("the re-edit delta rule is hoisted, so the check drives the shipped rule",
 # delta to be in its derivation.
 _pl_arg = _calls[0].args[1] if _calls and len(_calls[0].args) > 1 else None
 _pl_txt = " ".join(ast.unparse(n) for n in _sources_of(_pl_arg) if n is not None)
+# BOTH COORDINATES. Narrowing on the beat alone drags in that beat's
+# PRE-EXISTING placements — "remove the last clip" changes beat 2's `cut`, and a
+# sound effect the beat has carried since the first edit gets attributed to this
+# run and reads OVERREACHED. The delta knows which FAMILIES moved too, and the
+# narrowing must use both or it answers a question about the wrong placements.
+_beat_named = any(_n in _pl_txt for _n in ("_rd_beats", "_rd_set"))
 check("the placements handed to spec_fidelity are narrowed by the re-edit "
-      "delta, not the whole prior plan",
-      "_rd_beats" in _pl_txt,
-      "a re-edit that changed nothing would read FAITHFUL; derivation was: "
+      "delta — by BEAT and by FAMILY, not the whole prior plan",
+      _beat_named and "_rd_fams" in _pl_txt,
+      "a re-edit that changed nothing would read FAITHFUL, or an untouched "
+      "placement on a changed beat would read OVERREACHED; derivation was: "
       + _pl_txt[:200])
 _rd = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
        and getattr(n.func, "id", "") == "reedit_delta"]

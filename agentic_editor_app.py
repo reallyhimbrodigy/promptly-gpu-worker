@@ -13975,11 +13975,32 @@ def edit(source_key: str, brief: str,
         print("  RE-EDIT DELTA   : %s  %d beat(s) changed %s"
               % (_rd_state, len(_rd_beats), _rd_fams or "[]"), flush=True)
         if _rd_state == "MEASURED":
+            # BY BEAT **AND** FAMILY. Narrowing on the beat alone drags in the
+            # beat's PRE-EXISTING placements: "remove the last clip" changes
+            # beat 2's `cut`, and a sound effect that beat has carried since the
+            # first edit is then attributed to this run and reads OVERREACHED.
+            # The delta knows which families moved; use both coordinates.
+            _rd_set = set(_rd_beats)
             _fid_pl = [_p for _p in _fid_pl
-                       if _p.get("beat") in set(_rd_beats)]
-            # A family is only DELIVERED by this run if this run changed it.
+                       if _p.get("beat") in _rd_set
+                       and str(_p.get("family") or _p.get("type") or "").lower()
+                       in set(_rd_fams)]
             _cut_for_fid = _cut_made and "cut" in _rd_fams
-            _cap_for_fid = _cap_for_fid and "caption" in _rd_fams
+            # CAPTIONS ARE NOT PER-BEAT RULINGS, so the delta is BLIND to them
+            # and must not be used to gate them. Burned captions leave no
+            # verdict and no manifest entry — `caption_composited` is the only
+            # evidence — so gating on the beat delta made every caption re-edit
+            # read SHORT. Left ungated, and the blindness is NAMED below rather
+            # than resolved silently in either direction.
+            if not _rd_beats and "caption" in {
+                    str(_f).lower() for _f in
+                    ((led.get("spec") or {}).get("families") or [])}:
+                led["reedit_caption_unverifiable"] = True
+                print("  RE-EDIT LIMIT   : this instruction is about CAPTIONS "
+                      "and captions are not per-beat rulings — the delta sees "
+                      "0 changed beats and CANNOT tell a restyle from a no-op. "
+                      "Fidelity below is judged on caption_composited alone.",
+                      flush=True)
     _fid_state, _fid_missing, _fid_unasked, _fid_why = spec_fidelity(
         led.get("spec"), _fid_pl,
         cut_made=_cut_for_fid,
