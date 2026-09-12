@@ -144,6 +144,58 @@ reedit_case("5b", "add a sound effect at the end  (also re-ruled the zoom)",
             spec("targeted_change", ["sfx"]), _PRIOR, _sfx_over, _PL,
             expect="OVERREACHED")
 
+# ── THE NEGATIVE-CONSTRAINT CLASS, FROM REAL TRAFFIC ────────────────────────
+# 425 of 5,943 distinct briefs (7.2%) and 338 of 7,958 users (4.2%). The briefs
+# below are VERBATIM from video_jobs.vibe_input, held as DATA. Until `forbidden`
+# existed, shape 2 — the commonest — declared full_edit and returned UNSCOPED
+# while the pipeline burned the captions the user had just refused.
+
+def neg_case(label, brief, sp, placements, captions_made=False,
+             cut_made=False, expect=None):
+    st, missing, unasked, why = A.spec_fidelity(
+        sp, placements, cut_made=cut_made, captions_made=captions_made)
+    ROWS.append(("NEGATIVE", label, brief, st, expect, why))
+
+# shape 1 — positive ask + exclusion
+neg_case("n1", 'add zooms. no text on screen or captions  [HONOURED]',
+         spec("targeted_change", ["zoom"]) | {"forbidden": ["caption", "text"]},
+         P("zoom"), captions_made=False, expect="FAITHFUL")
+neg_case("n2", 'add zooms. no text on screen or captions  [captions burned]',
+         spec("targeted_change", ["zoom"]) | {"forbidden": ["caption", "text"]},
+         P("zoom"), captions_made=True, expect="FORBIDDEN")
+
+# shape 2 — whole-video brief with one exclusion. THE ONE THAT WAS UNJUDGEABLE.
+neg_case("n3", 'viral and engaging no captions in video  [captions burned]',
+         spec("full_edit", []) | {"forbidden": ["caption"]},
+         P("zoom", "sfx"), captions_made=True,
+         expect="FORBIDDEN  [was UNSCOPED — nothing objected]")
+neg_case("n4", 'viral and engaging no captions in video  [HONOURED]',
+         spec("full_edit", []) | {"forbidden": ["caption"]},
+         P("zoom", "sfx"), captions_made=False,
+         expect="UNSCOPED  [nothing forbidden was delivered; the rest is a full edit]")
+
+# shape 3 — exclusive phrasing: everything except the named family is forbidden
+neg_case("n5", 'just add visual zooms and transitions nothing else no trimming '
+               'no cutting anything  [a cut was made]',
+         spec("targeted_change", ["zoom", "transition"])
+         | {"forbidden": ["cut", "caption", "text", "card", "sfx"]},
+         P("zoom", "transition"), cut_made=True, expect="FORBIDDEN")
+neg_case("n6", 'only captions  [captions and nothing else]',
+         spec("targeted_change", ["caption"])
+         | {"forbidden": ["zoom", "text", "card", "sfx", "transition", "cut"]},
+         P(), captions_made=True, expect="FAITHFUL")
+
+# shape 4 — THE TRAP. A constraint about something this pipeline never does is
+# satisfied by construction; counting it as a pass inflates the class with cases
+# nobody could fail. It must route as unsupported, not be recorded as honoured.
+neg_case("n7", 'edit this video dont use my face  [change_in_frame — must ROUTE, '
+               'not be scored as honoured]',
+         {"mode": "unsupported", "families": [],
+          "unsupported_class": "change_in_frame"},
+         P(),
+         expect="UNSCOPED  [routes as unsupported; recording it as a kept "
+                "promise would claim credit for an absence]")
+
 _bad = [r for r in ROWS
         if r[4] and not str(r[3]).startswith(str(r[4]).split()[0])]
 print("THE FIVE MINIMAL BRIEFS, judged by the shipped rules (NOT a round)\n")

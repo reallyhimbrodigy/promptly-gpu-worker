@@ -285,6 +285,60 @@ check("fidelity's caption evidence is gated on captions_changed, not on "
       "_cap_for_fid = _cap_for_fid and _cc_changed" in src,
       "an ungated caption family makes every no-op read FAITHFUL")
 
+# ── THE NEGATIVE-CONSTRAINT CLASS ───────────────────────────────────────────
+# MEASURED on real traffic: 425 of 5,943 distinct briefs (7.2%) and 338 of 7,958
+# users (4.2%) name something the edit must NOT do. The pipeline had never been
+# tested on one and could not have passed: set_spec had no field to carry an
+# exclusion, so the commonest shape — "viral and engaging no captions in video"
+# — declared full_edit and returned UNSCOPED while the captions the user had
+# just refused were burned.
+check("FIDELITY_FORBIDDEN exists as its own state — an instruction disobeyed "
+      "is not the same failure as scope overshot",
+      getattr(_AA, "FIDELITY_FORBIDDEN", None) == "FORBIDDEN")
+_sp_props = None
+for _t in list(_AA.TOOLS) + list(_AA.KNOWLEDGE_TOOLS):
+    if _t.get("name") == "set_spec":
+        _sp_props = (_t.get("input_schema") or {}).get("properties") or {}
+check("`forbidden` is offered on set_spec — an exclusion the agent cannot "
+      "express is one the run cannot honour",
+      _sp_props is not None and "forbidden" in _sp_props)
+if _sp_props and "forbidden" in _sp_props:
+    _fd = str(_sp_props["forbidden"].get("description") or "")
+    check("its description says it applies in ANY mode, not targeted_change "
+          "only — the commonest real shape is a full_edit with one exclusion",
+          "ANY MODE" in _fd.upper())
+    check("and that a vague brief does not soften an explicit exclusion",
+          "vagueness" in _fd.lower())
+
+# THE RULE RUNS BEFORE THE MODE GATE. This is the whole fix: behind it, a
+# full_edit escapes the check entirely.
+check("a FULL_EDIT that delivers a forbidden family is FORBIDDEN, not UNSCOPED",
+      f({"mode": "full_edit", "forbidden": ["caption"]}, _P(),
+        captions_made=True)[0] == _AA.FIDELITY_FORBIDDEN)
+check("a full_edit that honours the exclusion is still UNSCOPED — the rest of "
+      "a vague brief remains unjudgeable and is not promoted to a pass",
+      f({"mode": "full_edit", "forbidden": ["caption"]}, _P(),
+        captions_made=False)[0] == UNSCOPED)
+check("a targeted_change that delivers a forbidden family is FORBIDDEN rather "
+      "than OVERREACHED — it was only ever right there by accident",
+      f({"mode": "targeted_change", "families": ["zoom"],
+         "forbidden": ["caption"]}, _P("zoom"),
+        captions_made=True)[:3] == (_AA.FIDELITY_FORBIDDEN, [], ["caption"]))
+check("a forbidden family that was NOT delivered passes",
+      f({"mode": "targeted_change", "families": ["zoom"],
+         "forbidden": ["caption"]}, _P("zoom"), captions_made=False)[0] == OK)
+check("cut counts as a deliverable family for the forbidden check — "
+      "'no trimming no cutting anything' is the exclusive shape",
+      f({"mode": "targeted_change", "families": ["zoom"],
+         "forbidden": ["cut"]}, _P("zoom"), cut_made=True)[0]
+      == _AA.FIDELITY_FORBIDDEN)
+_ff = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+       and getattr(n.func, "id", "") == "fail"
+       and n.args and isinstance(n.args[0], ast.Constant)
+       and n.args[0].value == "fidelity_forbidden"]
+check("and it FAILS LOUDLY — a state nobody fails on is a diagnostic",
+      len(_ff) >= 1)
+
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)
 check("and is PRINTED", "FIDELITY        :" in src,

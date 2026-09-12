@@ -39,6 +39,24 @@ CASES = [
      '    if now_state == "ABSENT":\n        return ("REMOVED" if prior_sig else "ABSENT", False,',
      '    if False:\n        return ("REMOVED" if prior_sig else "ABSENT", False,',
      "gone this turn is REMOVED"),
+    # THE NEGATIVE-CONSTRAINT CLASS. 7.2% of distinct briefs, 4.2% of users,
+    # and the pipeline had never been tested on one.
+    ("the forbidden check moves back behind the mode gate, so a full_edit\n     escapes it — the commonest real shape",
+     '    _forbidden = {str(_f).lower() for _f in (_sc.get("forbidden") or [])}',
+     '    _forbidden = set() if _mode != "targeted_change" else {str(_f).lower() for _f in (_sc.get("forbidden") or [])}',
+     "FULL_EDIT that delivers a forbidden family"),
+    ("a forbidden family stops failing the run",
+     '        fail("fidelity_forbidden",',
+     '        _unemitted = ("fidelity_forbidden",',
+     "FAILS LOUDLY"),
+    ("`forbidden` stops being offered on set_spec",
+     '            "forbidden": {"type": "array", "items": {"type": "string"},',
+     '            "_forbidden_unoffered": {"type": "array", "items": {"type": "string"},',
+     "offered on set_spec"),
+    ("the field stops saying it applies in any mode",
+     '                              "ANY MODE. The families this request says NOT to "',
+     '                              "targeted_change only: the families it says NOT to "',
+     "applies in ANY mode"),
 ]
 
 orig = APP.read_text()
