@@ -219,6 +219,72 @@ check("the delta reaches the ledger AND a real print() call",
       "a counter in the ledger and nowhere else answers no question anyone "
       "can ask")
 
+# ── THE CAPTION SIGNAL ──────────────────────────────────────────────────────
+# Captions are BURNED, not ruled per beat: no verdict, no manifest entry. The
+# beat delta is structurally blind to them, so before this a caption re-edit and
+# a caption no-op were indistinguishable and fidelity fell back to
+# `caption_composited`, which is true in both. That is the paid re-edit no-op
+# scored as a success — the exact shape the delta catches everywhere else.
+import agentic_editor_app as _AA
+_cs = _AA.caption_signature
+check("`caption_signature` and `captions_changed` are hoisted, so the check "
+      "drives the shipped rules",
+      callable(getattr(_AA, "caption_signature", None))
+      and callable(getattr(_AA, "captions_changed", None)))
+
+_a = _cs("CleanCut", 15, [["hello", "world"], ["again"]])
+check("no captions is ABSENT, not an empty signature — a run that burned none "
+      "and a run identical to last time are different facts",
+      _cs("CleanCut", 15, [])[0] == "ABSENT")
+check("an identical caption run is MEASURED False — the no-op is CAUGHT",
+      _AA.captions_changed(_a[1], _a[0], _a[1])[:2] == ("MEASURED", False))
+_b = _cs("TypewriterReveal", 30, [["hello", "world"], ["again"]])
+check("a restyle is MEASURED True",
+      _AA.captions_changed(_a[1], _b[0], _b[1])[:2] == ("MEASURED", True))
+# PAGE LAYOUT IS IN THE FINGERPRINT ON PURPOSE: a re-edit that keeps the style
+# name but regroups the words is a real change the user sees, and a signature
+# over the style alone would call it a no-op.
+_c = _cs("CleanCut", 15, [["hello"], ["world", "again"]])
+check("the same style with the words REGROUPED still counts as changed",
+      _AA.captions_changed(_a[1], _c[0], _c[1])[:2] == ("MEASURED", True))
+check("no prior fingerprint is ABSENT — not 'unchanged', which would invent a "
+      "fact, and not 'changed', which would excuse a no-op",
+      _AA.captions_changed(None, _a[0], _a[1])[0] == "ABSENT")
+check("captions present last turn and gone this turn is REMOVED",
+      _AA.captions_changed(_a[1], "ABSENT", None)[0] == "REMOVED")
+
+# IT MUST SURVIVE THE TURN. The plan is the only thing the server persists and
+# hands back, so a signature that is not on the plan cannot be compared.
+check("the signature rides the durable plan under its own kind",
+      _AA.caption_from_plan(_AA.plan_with_caption([{"src_t0": 0.0}], _a[1]))[1]
+      is not None)
+check("a plan written before the fingerprint existed still loads its rulings",
+      _AA.caption_from_plan([{"src_t0": 0.0}]) == ([{"src_t0": 0.0}], None),
+      "reading `kind` as required would discard every prior plan")
+# CALLS, BY AST. `"plan_with_caption(" in src` is satisfied by the function's
+# own DEFINITION, so deleting the call site left the leg green — a
+# source-presence check that cannot see the wire it is about.
+def _calls_named(nm):
+    return [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+            and getattr(n.func, "id", "") == nm]
+check("the signature is recorded in the ledger", 'led["caption_signature"]' in src)
+check("it is PERSISTED on the durable plan — the only thing that survives the "
+      "turn, so a signature not on it can never be compared",
+      len(_calls_named("plan_with_caption")) >= 1,
+      "defined but never called")
+check("and SPLIT back out of the prior plan on a re-edit",
+      len(_calls_named("caption_from_plan")) >= 1,
+      "defined but never called")
+_cap_prints = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+               and getattr(n.func, "id", "") == "print"
+               and "CAPTION DELTA" in ast.unparse(n)]
+check("the caption delta reaches a real print() call, not only the ledger",
+      len(_cap_prints) >= 1)
+check("fidelity's caption evidence is gated on captions_changed, not on "
+      "caption_composited alone",
+      "_cap_for_fid = _cap_for_fid and _cc_changed" in src,
+      "an ungated caption family makes every no-op read FAITHFUL")
+
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)
 check("and is PRINTED", "FIDELITY        :" in src,

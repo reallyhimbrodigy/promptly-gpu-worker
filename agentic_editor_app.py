@@ -1977,6 +1977,111 @@ def insert_request(brief, why="", at_s=None, duration_s=None):
 _PLAN_KIND_INSERT = "insert_request"
 
 
+_PLAN_KIND_CAPTION = "caption_signature"
+
+
+def caption_signature(style, fps, pages):
+    """(state, sig) — what the captions ACTUALLY are this run, as a comparable
+    fingerprint. MEASURED | ABSENT.
+
+    THE BLIND SPOT THIS CLOSES. Captions are BURNED, not ruled per beat: they
+    leave no verdict and no manifest entry, so `reedit_delta` sees zero changed
+    beats whether a re-edit restyled them or did nothing at all. "Make the
+    captions bigger" and a run that silently no-opped were indistinguishable,
+    and fidelity had to fall back on `caption_composited`, which is true in both
+    cases. That is the paid re-edit no-op scored as a success — the exact shape
+    the delta was built to catch everywhere else.
+
+    So the captions get a fingerprint of their own: the style, the frame rate
+    the style implies, and the PAGE LAYOUT — how the words were grouped and
+    broken. Page layout is included deliberately: a restyle that keeps the same
+    style name but regroups the words is a real change the user will see, and a
+    signature over the style alone would call it a no-op.
+
+    ABSENT when there are no captions, which is NOT "unchanged": a run that
+    burned no captions and a run whose captions are identical to last time are
+    different facts, and only one of them means the instruction was obeyed.
+    """
+    if not pages:
+        return ("ABSENT", None)
+    import hashlib as _h, json as _j
+    _pages = [" ".join(str(_w) for _w in (_pg or [])) if isinstance(_pg, (list, tuple))
+              else str(_pg) for _pg in pages]
+    _body = _j.dumps({"style": str(style or ""), "fps": fps, "pages": _pages},
+                     sort_keys=True)
+    return ("MEASURED", {"style": str(style or ""), "fps": fps,
+                         "pages": len(_pages),
+                         "fp": _h.sha256(_body.encode("utf-8")).hexdigest()})
+
+
+def plan_with_caption(plan, sig):
+    """The durable plan plus the caption fingerprint, as its own kind.
+
+    THE PLAN IS THE ONLY THING THAT SURVIVES THE TURN — the server persists it
+    and hands it back as `prior_plan` — and the plan is a list of PER-BEAT
+    entries while captions are global. So the signature rides as its own kind,
+    exactly as an unfilled insert request does. A comparison needs both sides,
+    and the prior side can only come from here.
+    """
+    if not sig:
+        return list(plan or [])
+    return list(plan or []) + [dict(sig, kind=_PLAN_KIND_CAPTION)]
+
+
+def caption_from_plan(plan):
+    """(rulings, sig|None) — split the caption fingerprint back out.
+
+    An entry with no `kind` is a ruling: every plan written before this existed
+    has none, and reading `kind` as REQUIRED would discard every prior plan on
+    the first re-edit after it shipped — the mistake inserts_from_plan already
+    documents.
+    """
+    _rulings, _sig = [], None
+    for _e in (plan or []):
+        if isinstance(_e, dict) and _e.get("kind") == _PLAN_KIND_CAPTION:
+            _sig = {_k: _v for _k, _v in _e.items() if _k != "kind"}
+        else:
+            _rulings.append(_e)
+    return (_rulings, _sig)
+
+
+def captions_changed(prior_sig, now_state, now_sig):
+    """(state, changed, why) — did THIS run's captions differ from last run's?
+
+    FOUR ANSWERS, because three of them are not "no":
+      MEASURED True   the fingerprints differ — the captions really changed
+      MEASURED False  identical fingerprints — this was a caption no-op
+      ABSENT          no prior signature: the plan predates this feature, or
+                      last run burned none. NOT "unchanged" — unknowable.
+      REMOVED         last run had captions and this one has none
+
+    The ABSENT arm is the one that matters for honesty. A plan written before
+    this shipped carries no signature, and answering "unchanged" for it would
+    invent a fact; answering "changed" would excuse a no-op. It says neither.
+    """
+    if now_state == "ABSENT":
+        return ("REMOVED" if prior_sig else "ABSENT", False,
+                "this run burned no captions"
+                + (" and the previous run did" if prior_sig else ""))
+    if not prior_sig or not prior_sig.get("fp"):
+        return ("ABSENT", False,
+                "no caption fingerprint on the prior plan — it predates this "
+                "record or last run burned none, so a restyle and a no-op "
+                "cannot be told apart for THIS turn")
+    _same = prior_sig.get("fp") == (now_sig or {}).get("fp")
+    if _same:
+        return ("MEASURED", False,
+                "identical caption fingerprint (style=%s fps=%s pages=%s) — "
+                "the captions were NOT changed"
+                % (prior_sig.get("style"), prior_sig.get("fps"),
+                   prior_sig.get("pages")))
+    return ("MEASURED", True,
+            "captions changed: style %s->%s  fps %s->%s  pages %s->%s"
+            % (prior_sig.get("style"), (now_sig or {}).get("style"),
+               prior_sig.get("fps"), (now_sig or {}).get("fps"),
+               prior_sig.get("pages"), (now_sig or {}).get("pages")))
+
+
 def plan_with_inserts(plan, insert_requests):
     """The durable plan plus the unfilled holes, as distinguishable entries."""
     _out = list(plan or [])
@@ -10315,6 +10420,13 @@ def edit(source_key: str, brief: str,
             _cap_fps = 30 if _cap_style == "TypewriterReveal" else 15
             _cap_pages = (caption_pages(_cap_words, 3)
                           if (_want_caps and _cap_words) else [])
+            # THE CAPTION FINGERPRINT, taken where the captions are decided.
+            # Burned captions leave no verdict and no manifest entry, so
+            # without this a re-edit cannot tell a restyle from a no-op.
+            _cap_sig_state, _cap_sig = caption_signature(
+                _cap_style, _cap_fps, _cap_pages)
+            led["caption_signature_state"] = _cap_sig_state
+            led["caption_signature"] = _cap_sig
             # CENTRED ON THE SEAM, in the alpha layer's own frame clock.
             _tc_overlays = [
                 {"type": _c2["type"],
@@ -12039,6 +12151,8 @@ def edit(source_key: str, brief: str,
         # plan_onto_beats would report it UNPLACEABLE — a hole the user was told
         # we recorded, arriving on the next turn as a defect and then dropped.
         prior_plan, _prior_inserts = inserts_from_plan(prior_plan)
+        prior_plan, _prior_cap_sig = caption_from_plan(prior_plan)
+        led["prior_caption_signature"] = _prior_cap_sig
         if _prior_inserts:
             led["insert_requests"] = list(_prior_inserts)
             led["inserts_restored"] = len(_prior_inserts)
@@ -13986,21 +14100,38 @@ def edit(source_key: str, brief: str,
                        and str(_p.get("family") or _p.get("type") or "").lower()
                        in set(_rd_fams)]
             _cut_for_fid = _cut_made and "cut" in _rd_fams
-            # CAPTIONS ARE NOT PER-BEAT RULINGS, so the delta is BLIND to them
-            # and must not be used to gate them. Burned captions leave no
-            # verdict and no manifest entry — `caption_composited` is the only
-            # evidence — so gating on the beat delta made every caption re-edit
-            # read SHORT. Left ungated, and the blindness is NAMED below rather
-            # than resolved silently in either direction.
-            if not _rd_beats and "caption" in {
-                    str(_f).lower() for _f in
-                    ((led.get("spec") or {}).get("families") or [])}:
+            # CAPTIONS ARE NOT PER-BEAT RULINGS, so the beat delta is blind to
+            # them and must never gate them — gating on it made every genuine
+            # caption re-edit read SHORT, which is worse than the no-op it was
+            # trying to catch. They get their OWN signal: a fingerprint over the
+            # style, the frame rate and the page layout, persisted on the plan
+            # and compared against the prior turn's.
+            _cc_state, _cc_changed, _cc_why = captions_changed(
+                led.get("prior_caption_signature"),
+                led.get("caption_signature_state") or "ABSENT",
+                led.get("caption_signature"))
+            led["captions_changed_state"] = _cc_state
+            led["captions_changed"] = _cc_changed
+            led["captions_changed_why"] = _cc_why
+            print("  CAPTION DELTA   : %s  changed=%s — %s"
+                  % (_cc_state, _cc_changed, _cc_why), flush=True)
+            if _cc_state == "MEASURED":
+                # A caption family is DELIVERED by this run only if this run
+                # actually changed the captions.
+                _cap_for_fid = _cap_for_fid and _cc_changed
+            elif _cc_state == "ABSENT":
+                # UNKNOWABLE, AND SAID SO. A plan written before the
+                # fingerprint existed carries none; answering "unchanged"
+                # would invent a fact and "changed" would excuse a no-op.
+                # Fidelity falls back to caption_composited for this turn only,
+                # and the next turn can answer properly because THIS run writes
+                # a signature.
                 led["reedit_caption_unverifiable"] = True
-                print("  RE-EDIT LIMIT   : this instruction is about CAPTIONS "
-                      "and captions are not per-beat rulings — the delta sees "
-                      "0 changed beats and CANNOT tell a restyle from a no-op. "
-                      "Fidelity below is judged on caption_composited alone.",
-                      flush=True)
+                print("  RE-EDIT LIMIT   : %s. Judged on caption_composited "
+                      "alone this turn; the signature this run writes makes "
+                      "the next one answerable." % _cc_why, flush=True)
+            else:                      # REMOVED
+                _cap_for_fid = False
     _fid_state, _fid_missing, _fid_unasked, _fid_why = spec_fidelity(
         led.get("spec"), _fid_pl,
         cut_made=_cut_for_fid,
@@ -14082,6 +14213,10 @@ def edit(source_key: str, brief: str,
     # THE UNFILLED HOLES RIDE THE PLAN. The plan is what the server persists and
     # hands back as prior_plan, so anything not in it does not survive the turn.
     _plan = plan_with_inserts(_plan, led.get("insert_requests"))
+    # THE CAPTION FINGERPRINT RIDES THE PLAN, like the unfilled inserts do. The
+    # plan is what the server persists and hands back as prior_plan, so a
+    # signature that is not in it cannot be compared against next turn.
+    _plan = plan_with_caption(_plan, led.get("caption_signature"))
     led["plan"] = _plan
     led["plan_problems"] = _plan_problems
     print(f"  PLAN            : {len(_plan)} entr(ies) keyed by source span"

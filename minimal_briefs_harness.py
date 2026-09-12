@@ -38,19 +38,29 @@ def main_case(label, brief, sp, placements, cut_made=False, captions_made=False,
 
 
 def reedit_case(label, brief, sp, prior, current, placements,
-                cut_made=False, captions_made=False, expect=None):
+                cut_made=False, captions_made=False, expect=None,
+                prior_cap=None, now_cap=("ABSENT", None)):
     rd_state, rd_beats, rd_fams = A.reedit_delta(prior, current)
     # BEAT **AND** FAMILY — mirrors the shipped call site.
     pl = [p for p in placements
           if p.get("beat") in set(rd_beats)
           and str(p.get("family") or "").lower() in set(rd_fams)]
+    # CAPTIONS GET THEIR OWN SIGNAL — the beat delta is blind to them.
+    cc_state, cc_changed, cc_why = A.captions_changed(
+        prior_cap, now_cap[0], now_cap[1])
+    caps = captions_made
+    if cc_state == "MEASURED":
+        caps = caps and cc_changed
+    elif cc_state == "REMOVED":
+        caps = False
     st, missing, unasked, why = A.spec_fidelity(
         sp, pl,
         cut_made=cut_made and "cut" in rd_fams,
-        captions_made=captions_made)
+        captions_made=caps)
     ROWS.append(("RE-EDIT", label, brief,
-                 "%s  (delta %s: %d beat(s) %s)"
-                 % (st, rd_state, len(rd_beats), rd_fams or "[]"),
+                 "%s  (delta %s: %d beat(s) %s; captions %s)"
+                 % (st, rd_state, len(rd_beats), rd_fams or "[]",
+                    cc_state + ("/changed" if cc_changed else "")),
                  expect, why))
 
 
@@ -81,6 +91,8 @@ _PL = [{"family": "caption", "beat": 0}, {"family": "zoom", "beat": 1},
        {"family": "sfx", "beat": 2}]
 
 import copy
+_CAPS_A = A.caption_signature("CleanCut", 15, [["hello", "world"], ["again"]])
+_CAPS_BIG = A.caption_signature("TypewriterReveal", 30, [["hello", "world"], ["again"]])
 _same = copy.deepcopy(_PRIOR)
 # THE ONE THE RE-EDIT PATH CANNOT ANSWER, and it is named rather than guessed.
 # Captions are BURNED, not ruled per beat: they leave no verdict and no manifest
@@ -92,14 +104,28 @@ _same = copy.deepcopy(_PRIOR)
 reedit_case("3-noop", "make the captions bigger  (run changed NOTHING)",
             spec("targeted_change", ["caption"]), _PRIOR, _same, _PL,
             captions_made=True,
-            expect="FAITHFUL  [KNOWN BLIND SPOT: captions are not per-beat, so "
-                   "a restyle and a no-op are indistinguishable here; the run "
-                   "prints RE-EDIT LIMIT]")
+            prior_cap=_CAPS_A[1], now_cap=_CAPS_A,
+            expect="SHORT  [the caption fingerprint is IDENTICAL, so the no-op is caught]")
 
 _bigger = copy.deepcopy(_PRIOR); _bigger[0]["text_content"] = "HI (bigger)"
-reedit_case("3", "make the captions bigger  (beat 0 actually re-ruled)",
+reedit_case("3", "make the captions bigger  (captions really restyled)",
             spec("targeted_change", ["caption"]), _PRIOR, _bigger, _PL,
-            captions_made=True, expect="FAITHFUL")
+            captions_made=True,
+            prior_cap=_CAPS_A[1], now_cap=_CAPS_BIG,
+            expect="FAITHFUL")
+
+_regroup = A.caption_signature("CleanCut", 15, [["hello"], ["world", "again"]])
+reedit_case("3b", "make the captions bigger  (same style, words REGROUPED)",
+            spec("targeted_change", ["caption"]), _PRIOR, _same, _PL,
+            captions_made=True,
+            prior_cap=_CAPS_A[1], now_cap=_regroup,
+            expect="FAITHFUL")
+
+reedit_case("3c", "make the captions bigger  (prior plan predates the fingerprint)",
+            spec("targeted_change", ["caption"]), _PRIOR, _same, _PL,
+            captions_made=True,
+            prior_cap=None, now_cap=_CAPS_A,
+            expect="FAITHFUL  [ABSENT: unknowable this turn, and said so]")
 
 _cutlast = copy.deepcopy(_PRIOR); _cutlast[2]["cut"] = "cut"
 reedit_case("4", "remove the last clip",
@@ -135,6 +161,9 @@ if _bad:
         print("  %s %s: expected %s, got %s" % (_p, _l, _exp, _got))
     sys.exit(1)
 print("ALL %d CASES MATCH. The main path judges a minimal brief correctly in "
-      "both directions; the re-edit path judges the DELTA, so a no-op is SHORT "
-      "rather than FAITHFUL — except for captions, which are not per-beat and "
-      "are named as a blind spot rather than guessed." % len(ROWS))
+      "both directions. The re-edit path judges the DELTA, so a no-op reads "
+      "SHORT rather than FAITHFUL — INCLUDING captions, which are not per-beat "
+      "and now carry their own fingerprint (style + fps + page layout): an "
+      "identical fingerprint is a caught no-op, a regrouping of the same style "
+      "still counts as a change, and a prior plan that predates the "
+      "fingerprint reads ABSENT and says so instead of guessing." % len(ROWS))
