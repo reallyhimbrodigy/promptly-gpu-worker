@@ -12121,6 +12121,17 @@ def edit(source_key: str, brief: str,
             f"has nothing to cut away to, and that is a real answer.")
     led["cutaway_candidates"] = {"state": _cw_state, "why": _cw_why,
                                  "beats_with_candidates": len(_cw_cands)}
+    # PRINTED IN THE COMMIT THAT ADDS THEM. A discarded ruling is pure cost and
+    # there has never been a number for it; a counter in the ledger and nowhere
+    # else answers no question anyone can ask.
+    _rd6 = led.get("rulings_discarded", 0)
+    print("  RULING PASSES   : %d rule_all_beats call(s), %d refused; "
+          "%d verdict(s) DISCARDED by first-wins%s"
+          % (led.get("rule_all_calls", 0),
+             led.get("refused_second_ruling", 0), _rd6,
+             ("  beats %s" % sorted(set(led.get("rulings_discarded_beats")
+                                        or []))[:8]) if _rd6 else ""),
+          flush=True)
     print(f"  CUTAWAY CANDS   : {_cw_state}  {_cw_why}", flush=True)
 
     # BUILT AS A PLAIN STRING, not inline in the prompt expression. The first
@@ -12987,7 +12998,44 @@ def edit(source_key: str, brief: str,
                                 tu.input.get("input_file") or "out.mp4",
                                 tu.input.get("output_file") or "out_sfx.mp4")
             elif tu.name == "rule_all_beats":
-                _incoming = tu.input.get("verdicts") or []
+                # ONE RULING PASS, SAME BOUND AS ONE EXECUTION PASS (Zac,
+                # 2026-09-11). A second rule_all_beats re-rules beats that are
+                # already ruled, every one of those verdicts is dropped by
+                # "first ruling wins", and the model was paid to produce them.
+                # Round-63 car_mid called it FOUR times and stored five
+                # verdicts for five beats: three whole passes discarded.
+                #
+                # The exception is the same one, and it is a READ rather than a
+                # judgement: a repair authorised by a NAMED contract failure
+                # whose detector does not read UNVALIDATED. `_exec_repair_ok`
+                # is set by exactly that gate. A RE-EDIT is not a repair — it
+                # is the whole point of that path — so it passes through.
+                led["rule_all_calls"] = led.get("rule_all_calls", 0) + 1
+                if (led["rule_all_calls"] > 1 and not _reedit
+                        and not led.get("_exec_repair_ok")):
+                    led["refused_second_ruling"] = led.get(
+                        "refused_second_ruling", 0) + 1
+                    print("  REFUSED RULING  : rule_all_beats call #%d — every "
+                          "beat already carries a ruling and a re-ruling is "
+                          "discarded by first-wins, so it changes nothing and "
+                          "costs a full pass."
+                          % led["rule_all_calls"], flush=True)
+                    out = {
+                        "refused": "one ruling pass",
+                        "why": ("Every beat already carries a ruling. A second "
+                                "rule_all_beats is discarded beat-for-beat by "
+                                "first-ruling-wins: it changes nothing and "
+                                "costs a full pass."),
+                        "what_is_available": (
+                            "`beat_verdict` for a beat that has NO ruling yet. "
+                            "A second full pass is permitted only after a named "
+                            "contract failure, and you will be told so "
+                            "explicitly in repair_permitted."),
+                        "rulings_stored": len(led["beat_verdicts"]),
+                    }
+                    _incoming = []
+                else:
+                    _incoming = tu.input.get("verdicts") or []
                 _seen = {v.get("beat") for v in led["beat_verdicts"]}
                 _added = 0
                 _rejected = []
@@ -13018,7 +13066,19 @@ def edit(source_key: str, brief: str,
                         # ruling outside it is REFUSED AND COUNTED, not
                         # silently applied and not silently dropped.
                         if not _reedit:
-                            continue    # first ruling wins; a re-call tops up
+                            # FIRST RULING WINS — AND THE LOSER WAS NEVER
+                            # COUNTED. Measured over 37 runs: rule_all_beats is
+                            # called more than once in 15 of them, and round-63
+                            # car_mid called it FOUR times for five beats. Every
+                            # verdict after the first for a beat lands here and
+                            # vanishes, and the model was paid to produce all of
+                            # them. A discarded ruling is pure cost and there
+                            # was no number for it.
+                            led["rulings_discarded"] = led.get(
+                                "rulings_discarded", 0) + 1
+                            led.setdefault("rulings_discarded_beats",
+                                           []).append(_v.get("beat"))
+                            continue    # first ruling wins
                         # THE SHIPPED RULE, called not copied.
                         _kept, _ref7 = reedit_merge(
                             led["beat_verdicts"], _reedit_targets, [_v])
