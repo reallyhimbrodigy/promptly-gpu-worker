@@ -192,8 +192,8 @@ Return JSON only, matching exactly:
           "case": "<TEXT only, else null. UPPER | lower | Title | Mixed>",
           "colour": "<ON-SCREEN only, else null. Its colour and the ground behind it, in plain words — e.g. 'white on the footage', 'black on cream', 'yellow word inside white caption'>",
           "hold_s": "<ON-SCREEN only, else null. How long it stays up, in seconds, as a number>",
-          "cut_joins": "<CUTS only, else null. What the frame showed immediately BEFORE and immediately AFTER, one phrase each: 'mid-sentence on the speaker -> same speaker, tighter'>",
-          "cut_for": "<CUTS only, else null. What this cut ACCOMPLISHES. Your own words. Some possibilities, not a menu: compress time, change the angle, reveal something, pivot the argument, land a reaction, hide a stumble, keep the energy up>"
+          "shot_change_joins": "<SHOT CHANGES only, else null. What the frame showed immediately BEFORE and immediately AFTER, one phrase each: 'mid-sentence on the speaker -> same speaker, tighter'>",
+          "shot_change_for": "<SHOT CHANGES only, else null. What this shot change ACCOMPLISHES. Your own words. Some possibilities, not a menu: change the angle, reveal something, pivot the argument, land a reaction, keep the energy up, return from a detour>"
         }
       ],
       "cutaway_subject": "<what the b-roll literally SHOWS>" or null,
@@ -218,8 +218,8 @@ RULES THAT MATTER:
   that describe it. The families above are worth knowing as COMMON cases. They
   are not the permitted set and you are not scored on using them.
 
-- WHAT IS A CUT DOING HERE? Answer `cut_joins` and `cut_for` on every treatment
-  that IS a cut. This corpus has counted cuts and never once asked what they
+- WHAT IS A SHOT CHANGE DOING HERE? Answer `shot_change_joins` and
+  `shot_change_for` on every treatment that changes SHOT. This corpus has counted cuts and never once asked what they
   accomplish, so the pipeline has a rate and no idea what the rate is a rate OF.
 
   AND ONE THING YOU CANNOT ANSWER, SO DO NOT: what was REMOVED. You are watching
@@ -279,8 +279,17 @@ RULES THAT MATTER:
   Null is a finding, not a failure.
 
 - Describe ONLY what is visible in the frames, or audible if you are told about
-  audio. Do not infer a cut you cannot see. Cut timestamps detected mechanically
-  are supplied below; treat them as ground truth for WHERE cuts are.
+  audio. Do not infer a shot change you cannot see. Shot-change timestamps
+  detected mechanically are supplied below; treat them as ground truth for
+  WHERE THE SHOT CHANGES.
+
+- "SHOT CHANGE", NOT "CUT", AND THE RENAME IS THE POINT. Everything you are
+  given is detected in the FINISHED video, so it can only ever mark where the
+  picture changes — never where something was removed, because removed material
+  is not in the artifact. The pipeline reading this corpus has a separate `cut`
+  field that DELETES a beat, and calling both things "cut" made a shot-change
+  density read as a deletion rate for the life of the corpus. One word, two
+  operations, neither side wrong. Say shot change when the picture changes.
 
 - Per-word caption treatment is in scope and valuable: if a specific word is
   styled (colour, italic, size) note it in `card_text` and `read`.
@@ -290,7 +299,7 @@ RULES THAT MATTER:
 def build_request(frames, shots, transcript, duration):
     content = [{"type": "text", "text": SCHEMA_INSTRUCTION}]
     ctx = {"duration_s": duration,
-           "mechanical_cut_timestamps_s": shots if shots is not None else "PROBE_FAILED",
+           "mechanical_shot_change_timestamps_s": shots if shots is not None else "PROBE_FAILED",
            "transcript": (transcript or "")[:6000]}
     content.append({"type": "text",
                     "text": "CONTEXT:\n" + json.dumps(ctx, indent=1)})

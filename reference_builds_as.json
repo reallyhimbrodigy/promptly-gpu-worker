@@ -6,8 +6,8 @@
   "Mood b-roll cutaway illustrating a claim": "cutaway",
   "Flash-wipe transition between segments": "transition",
   "Whip-pan camera reframe transition": "transition",
-  "Cut back to talking head (re-anchor after detour)": "cut",
-  "Hard cut to new location (resets energy)": "cut",
+  "Cut back to talking head (re-anchor after detour)": "cutaway",
+  "Hard cut to new location (resets energy)": null,
   "Name/identity card overlay": "card",
   "Sustained micro-punch-ins during monologue": "zoom",
   "Escalating counter/stat ticking animation": null,
@@ -35,7 +35,7 @@
   "Flash Transition": "transition",
   "Stylized Caption Font": null,
   "Icon/Logo Reveal with SFX": null,
-  "Reframing Cut (Angle/Shot Change)": "cut",
+  "Reframing Cut (Angle/Shot Change)": null,
   "Phone Screen as Prop": null,
   "Split-Screen Before/After Comparison": null,
   "Typed Search/URL Graphic": null,
@@ -55,9 +55,11 @@
   "Performative Emotion Cutaway": null,
   "Color Drain and Spotlight": null,
   "L-cut": null,
-  "Phone Camera UI Overlay": null
+  "Phone Camera UI Overlay": null,
+  "Rapid cut montage": null
  },
  "_why_null": "null means the pipeline has no family that BUILDS this. The caption families are null for a different reason and it is worth stating: running captions are the CAPTION LAYER, present on every job, not a per-beat text treatment — the corpus annotator was explicitly told to record them in caption_layer and keep them out of treatment. Their styling (per-word colour, kinetic build) is a caption-layer capability question, not a placement one.",
  "_sfx_is_unobservable": "NO discovered family maps to `sfx`, and that is an ABSENT, not a zero. The annotator is sent JPEG FRAMES and a transcript — it receives no audio at all, so it cannot observe a sound effect however many there are. Any sfx rate derived from this corpus is a measurement of what a deaf instrument saw. The old corpus reported sfx 0.82/25s from 14 beats; that number came from the same blind annotator.",
- "_sfx": "Only the two PURE sound families map to `sfx` — the family place_sfx builds. 'Icon/Logo Reveal with SFX' is a logo reveal that carries a sting: its sound is placeable but its character is visual, and counting it as sfx evidence would inflate the very number tier 1 is built on."
+ "_sfx": "Only the two PURE sound families map to `sfx` — the family place_sfx builds. 'Icon/Logo Reveal with SFX' is a logo reveal that carries a sting: its sound is placeable but its character is visual, and counting it as sfx evidence would inflate the very number tier 1 is built on.",
+ "_cut_is_not_cut": "THE ANNOTATOR'S `cut` AND THE PIPELINE'S `cut` ARE DIFFERENT OPERATIONS. TREATMENT_FAMILIES has no `cut` at all — it is a keep/remove FIELD on a beat. The corpus's cuts are SHOT CHANGES detected in the FINISHED video, and you cannot see a removal in a finished video because the removed material is gone. Verified in this corpus: every discovered family with 'cut' in its name describes a shot change ('cut to second interviewee, different lighting', 'cut back to original narrator, new backdrop'), not one a removal. Builder-2 found the same on theirs: of 81 corpus beats marked `cut`, 1 read describes a removal and 47 a shot change. So these map by what they NEED, not by what they are called: returning from a detour is the tail of a CUTAWAY; a new location or a new angle needs footage single-source phone video does not have, and is UNBUILDABLE. Mapping them to `cut` made the cutting gap look like a deletion gap when it is a shot-change gap — and the shot-change gap IS the cutaway gap under another name."
 }

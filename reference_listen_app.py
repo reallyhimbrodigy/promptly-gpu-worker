@@ -106,7 +106,15 @@ def listen(video_bytes: bytes, label: str, duration_s: float,
                                         f"{str(e)[:120]}")
 
         ctx = json.dumps({"duration_s": duration_s,
-                          "mechanical_cut_timestamps_s": mechanical_cuts,
+                          # NAMED AS THE PROMPT NAMES IT. The rename left
+                          # this key behind for ten minutes: the prompt
+                          # advertised mechanical_shot_change_timestamps_s and
+                          # the payload carried mechanical_cut_timestamps_s, so
+                          # the annotator was told to read a field that was not
+                          # there. "Advertise a shape, accept that shape" — and
+                          # nothing would have errored; the timestamps would
+                          # simply have gone unread.
+                          "mechanical_shot_change_timestamps_s": mechanical_cuts,
                           "transcript": (transcript or "")[:6000]}, indent=1)
         resp = client.models.generate_content(
             model=model,

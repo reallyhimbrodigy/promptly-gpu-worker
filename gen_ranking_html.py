@@ -24,6 +24,12 @@ TIERS = [
     ("BUILD", "build", "Genuinely new work",
      "Nothing close ships. These are the only entries on this page that are a "
      "build in the ordinary sense."),
+    ("NOT A PIPELINE JOB", "src", "In the source, not the edit",
+     "A prop held on camera, a gesture, a framing choice. These are shooting "
+     "notes — no edit can add them."),
+    ("OBSERVATION", "obs", "One editor, once",
+     "Seen in a single video of ten. Not a capability gap by the corpus's own "
+     "standard: the discovery statistic is videos, not occurrences."),
 ]
 GROUP = {"ROUTE?": "ROUTE"}
 
@@ -203,6 +209,7 @@ reader, because two readers saw different things.</p>
   <li><b>{ref["videos"]}</b> reference videos · two independent readings</li>
   <li><b>{corpus["jobs"]:,}</b> requests · <b>{corpus["distinct_texts"]:,}</b> distinct · <b>{corpus["users"]:,}</b> users</li>
   <li>demand counted across <b>users</b>, not requests</li>
+  <li><b>{len(rows)}</b> of <b>{len(rows)}</b> discovered families assessed</li>
 </ul>
 
 <div class="headline">
