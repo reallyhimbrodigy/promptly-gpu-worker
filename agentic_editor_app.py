@@ -278,6 +278,28 @@ CUT_FIELD_TEACH = (
     "sentence — this field cannot remove it, and ruling `cut` on the whole "
     "beat would take the sentence with it. Keep the beat. A sub-beat cut is "
     "`build_cut` with explicit keep_spans, after the edit is built.\n\n"
+    # WHAT A CUT IS IN THE REFERENCE CORPUS, ASKED OF THE CORPUS RATHER
+    # THAN OF A RATE. The annotator reports what each treatment does. Of 81
+    # beats it marks `cut`, ONE has a read describing removal; 47 describe a
+    # SHOT CHANGE and the rest describe what the new shot shows. The
+    # provenance settles it: `mechanical_cuts` are scene changes DETECTED IN
+    # THE FINISHED VIDEO. You cannot see a removal in a finished video --
+    # the removed material is gone. So the corpus `cut` marks where the edit
+    # changes shot, and it was never a record of what was taken out.
+    #
+    # THIS FIELD IS THE OTHER OPERATION. It removes. Comparing its output
+    # against that number compared two different things, which is why the
+    # gap looked impossible. Only 4 of those 81 beats carry `cut` alone: a
+    # cut travels with overlay_text 67 times, cutaway 25, card 18 -- he
+    # changes shot by cutting TO something.
+    "\n\nTHIS FIELD REMOVES; IT DOES NOT CHANGE THE SHOT. If the beat is "
+    "worth watching, KEEP it and let the families that put something new "
+    "on screen do the work — pace comes from what you ADD to a held shot, "
+    "not from deleting speech that earns its place. There is no number of "
+    "cuts to reach and none to avoid: a video with nothing redundant in it "
+    "is correctly cut at zero. "
+    "[reference_corpus, read 2026-09-12: 1 of 81 cut beats describes a "
+    "removal; the rest mark shot changes]"
     "AND SAYING [] IS A REAL ANSWER, said on purpose. But the old pipeline's "
     "cut pass came back EMPTY on 159 of 159 plans, which is not restraint, it "
     "is a pass that never ran. A lean edit usually has something: an "

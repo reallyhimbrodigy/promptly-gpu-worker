@@ -682,6 +682,28 @@ check("and the granularity reinterpretation is marked TRANSLATED, not wired — 
       "a reader must be able to tell which claims a human re-decided",
       "translated 2026-09-12" in _cutd and "WORD-RANGE" in _cutd)
 
+# ── THE CUT FIELD CARRIES NO RATE, AND SAYS WHICH OPERATION IT IS ───────
+# Asked of the corpus instead of a rate: of 81 beats the annotator marks `cut`,
+# ONE read describes a removal. 47 describe a shot change. `mechanical_cuts` in
+# the provenance are scene changes DETECTED IN THE FINISHED VIDEO — you cannot
+# see a removal in a finished video, the removed material is gone. So the corpus
+# `cut` marks where the edit changes shot; this field removes. Two operations,
+# one word, and comparing them is what made the gap look impossible.
+check("the field says which operation it is — it removes, it does not change "
+      "the shot",
+      "REMOVES; IT DOES NOT CHANGE THE SHOT" in _cutd)
+check("and points pace at what you ADD to a held shot",
+      "what you ADD to a held shot" in _cutd)
+check("NO RATE REACHES THIS FIELD — the density rates GRADE and never instruct, "
+      "and a video with nothing redundant is correctly cut at zero",
+      "no number of cuts to reach" in _cutd
+      and "correctly cut at zero" in _cutd)
+check("no percentage or per-25s figure appears in it at all",
+      not any(_x in _cutd for _x in ("53%", "per 25s", "% of beats")))
+check("the corpus reading is marked with its denominator, so the claim is "
+      "checkable rather than remembered",
+      "1 of 81" in _cutd and "reference_corpus, read" in _cutd)
+
 # ── IT RUNS ON EVERY RUN, AND SAYS SO ───────────────────────────────────────
 check("fidelity reaches the ledger", 'led["fidelity"]' in src)
 check("and is PRINTED", "FIDELITY        :" in src,
