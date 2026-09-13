@@ -117,15 +117,40 @@ _bc = next((n for n in ast.walk(ast.parse(open(os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
     "agentic_editor_app.py")).read()))
     if isinstance(n, ast.FunctionDef) and n.name == "build_cut"), None)
-_has = _bc is not None and any(
+# THE PROPERTY ROSE, SO THE CHECK HAD TO. This looked for an `abs(...) > eps`
+# comparison — the shape of the duration-sum identity that used to guard the
+# framing split. That identity is TRUE UNDER ANY PERMUTATION of the segments:
+# swap two and every frame after the swap carries the wrong sound while the sum
+# stays equal. It has been replaced by av_spans_agree, which compares the
+# SEQUENCES — the video segments must tile the audio spans in order, with no
+# gap and no overlap — and that implies the duration identity as a corollary.
+#
+# So accept either: the stronger sequence contract, or the old sum for anyone
+# who still spells it that way. A check pinned to the weaker shape would have
+# failed the file for getting better, which is the calibrated-on-a-spelling
+# trap this suite has now hit four times in one session.
+_seq = _bc is not None and any(
+    isinstance(n, ast.Call) and getattr(n.func, "id", "") == "av_spans_agree"
+    for n in ast.walk(_bc))
+_sum = _bc is not None and any(
     isinstance(n, ast.Compare) and isinstance(n.ops[0], ast.Gt)
     and any(isinstance(c, ast.Call) and getattr(c.func, "id", "") == "abs"
             for c in ast.walk(n.left))
     for n in ast.walk(_bc))
-if not _has:
-    print("  *** build_cut does not ASSERT the duration identity — a split "
-          "that loses time would only surface as a shifted sheet")
+if not (_seq or _sum):
+    print("  *** build_cut asserts NEITHER the span-sequence contract "
+          "(av_spans_agree) nor the duration identity — a split that loses or "
+          "reorders time would only surface as a shifted sheet")
     fail += 1
+elif _seq:
+    # AND THE STRONGER ONE MUST ACT ON A FAILURE, not merely compute it.
+    _acts = any(isinstance(n, ast.Return) and "error" in ast.unparse(n)
+                for n in ast.walk(_bc))
+    if not _acts:
+        print("  *** av_spans_agree is called and its FAILED state is never "
+              "returned as an error — a contract that computes and does not "
+              "refuse is the caption gate all over again")
+        fail += 1
 
 print(f"smoke_framing_per_beat: {fail} wrong")
 sys.exit(1 if fail else 0)

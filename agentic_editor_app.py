@@ -367,6 +367,51 @@ CUT_EVIDENCE_TEACH = (
     "IF A BEAT IS MOSTLY GOOD but opens with a breath or ends with a stall, "
     "do not cut it — TRIM it with keep_from_s/keep_to_s and keep what works.")
 
+_CONTROL_DIST_PATH = os.path.join(_HERE, "control_distributions.json")
+
+
+def control_teach(field, family="text", path=None):
+    """(state, text) — the reference distribution for one control, as prose.
+
+    DERIVED, NEVER TYPED. The numbers come from control_distributions.json,
+    which derive_control_distributions.py writes from the annotated corpus. A
+    hand-copied share in a docstring is a second vocabulary that drifts the day
+    the corpus is re-read, and this file has watched that happen to a rate, a
+    family list and a prop table already.
+
+    IT DESCRIBES, IT DOES NOT DEMAND. The standing law is that the density
+    rates GRADE and never instruct, and the same applies here: a distribution
+    tells the agent what the reference looks like so it can make a choice, and
+    a run that picks `dominant` four times because four moments deserved it is
+    correct. The wording is deliberately "the reference is", never "aim for".
+
+    ABSENT IS SAID OUT LOUD. With no file the field still ships — a control
+    with no reference behind it is worse taught, not unusable — and the text
+    says so rather than quietly offering a bare enum, which is the exact defect
+    that produced 93.6% keep on `cut` and 1-of-29 on the component list.
+    """
+    try:
+        _d = json.load(open(path or _CONTROL_DIST_PATH, encoding="utf-8"))
+    except Exception as _e:                                       # noqa: BLE001
+        return ("ABSENT",
+                " [reference distribution ABSENT (%s) — this field ships "
+                "without the corpus behind it]" % str(_e)[:60])
+    _f = ((_d.get("by_family") or {}).get(family) or {}).get(field) or {}
+    _vals = _f.get("values") or {}
+    if not _vals:
+        return ("ABSENT",
+                " [no reference answered %s for %s — ABSENT, not uniform]"
+                % (field, family))
+    _top = [(_k, _v) for _k, _v in list(_vals.items())[:4]]
+    return ("MEASURED",
+            "\n\nWHAT THE REFERENCE DOES, over %d answered %s placement(s) in "
+            "%d videos: %s. That is a description of the corpus, not a target "
+            "— pick what THIS moment needs."
+            % (_f.get("answered", 0), family, _f.get("videos", 0),
+               ", ".join("%s %d%%" % (_k, round(100 * (_v.get("share") or 0)))
+                         for _k, _v in _top)))
+
+
 WHY_FIELD_TEACH = (
     "about THIS beat's content. NAME THE SPECIFIC MOMENT that asked for this "
     "treatment, in twelve words or fewer - 'the 55 degree spec is the payoff "
@@ -3902,6 +3947,88 @@ KNOWLEDGE_TOOLS = [{
                                                         ["hook", "build", "mid_peak",
                                                          "payoff", "breather", "close"])
                                                     + ARC_CORPUS_CRAFT},
+                                 # ── THE CONTROLS THE COMPONENTS ALREADY
+                                 #    EXPOSE AND NOTHING COULD SET ──────────
+                                 # MEASURED, round 70, five fixtures: ONE
+                                 # distinct component, ZERO expressible
+                                 # positions (18 of 20 placements carried no
+                                 # position field at all) and 18 of 20 in ALL
+                                 # CAPS — while `text` scored WITHIN 20% of the
+                                 # reference rate. Every density number we have
+                                 # is blind to the output being one object
+                                 # repeated, which is why Zac's template gauge
+                                 # is the acceptance test for these fields and
+                                 # not a rate.
+                                 #
+                                 # The components read size/case/anchor/colour
+                                 # and a hold; the ruling surface offered none
+                                 # of them, so the repetition was not taste, it
+                                 # was the absence of a field. Taught from
+                                 # control_distributions.json — DERIVED, so a
+                                 # corpus re-read moves the prompt and a
+                                 # hand-copied share cannot drift.
+                                 #
+                                 # OPTIONAL, EVERY ONE. A control the agent does
+                                 # not set falls back to what the build already
+                                 # chose, so adding them cannot make a ruling
+                                 # unsatisfiable — the refused-forever shape.
+                                 "size": {
+                                     "type": "string",
+                                     "enum": ["small", "medium", "large",
+                                              "dominant"],
+                                     "description":
+                                         "OPTIONAL. How much frame height this "
+                                         "takes."
+                                         + control_teach("size", "text")[1]},
+                                 "case": {
+                                     "type": "string",
+                                     "enum": ["upper", "lower", "mixed",
+                                              "title"],
+                                     "description":
+                                         "OPTIONAL. The letter case of the "
+                                         "words on screen. ALL CAPS is not the "
+                                         "default; it is one of four answers."
+                                         + control_teach("case", "text")[1]},
+                                 "where": {
+                                     "type": "string",
+                                     "enum": ["middle", "upper_third",
+                                              "lower_third", "full_frame",
+                                              "corner"],
+                                     "description":
+                                         "OPTIONAL. Which band of the frame. "
+                                         "Captions own the bottom and the "
+                                         "speaker's face the upper-middle, so "
+                                         "a choice here is a choice about what "
+                                         "it sits on."
+                                         + control_teach("where", "text")[1]},
+                                 "colour": {
+                                     "type": "string",
+                                     "enum": ["white_on_footage",
+                                              "white_on_black",
+                                              "black_on_white", "accent"],
+                                     "description":
+                                         "OPTIONAL. How it reads against the "
+                                         "footage. white_on_footage burns the "
+                                         "words straight onto the picture and "
+                                         "is what most reference text does; "
+                                         "white_on_black and black_on_white "
+                                         "put them on a solid plate so they "
+                                         "survive a busy frame; accent uses the "
+                                         "video's own colour for a single "
+                                         "emphasis. The corpus spells these "
+                                         "with spaces, so the shares below read "
+                                         "'white on footage' for "
+                                         "white_on_footage."
+                                         + control_teach("colour", "text")[1]},
+                                 "hold_s": {
+                                     "type": "number",
+                                     "description":
+                                         "OPTIONAL. Seconds on screen. Shorter "
+                                         "than the component's own entrance "
+                                         "means it never resolves — StatCard's "
+                                         "count-up lands at 0.8s and its label "
+                                         "arrives at 1.07s."
+                                         + control_teach("hold_s", "text")[1]},
                                  "why": {"type": "string",
                                      "description": WHY_FIELD_TEACH}},
                              "required": ["beat", "purpose", "treatment",
@@ -6482,6 +6609,74 @@ def _word_split_by(words, a, z):
                         f"{_w.get('w')!r} ({_s0:.2f}-{_e0:.2f}s)")
     return None
 
+def av_spans_agree(spans, vsegs, eps=1e-6):
+    """(state, why) — does every kept span's PICTURE still carry its own AUDIO?
+
+    THE CONTRACT, not the bug. Zac saw rearranged clips playing the wrong audio
+    and called it a reorder desync. It is not one, and the mechanism matters
+    because the two have opposite fixes:
+
+      * `build_cut` SORTS keep_spans (`sorted([[float(a), float(b)] ...])`), so
+        a reordering the agent asks for never reaches the concat. It is
+        silently discarded, which is its own problem and a different one.
+      * the cutaway is an ffmpeg OVERLAY with `enable=between(t,...)`. Frames
+        went 609 -> 609 on round 70 and the audio track is never touched.
+
+    So what reads as broken sync is a cutaway showing footage from elsewhere
+    while the original audio continues — CORRECT cutaway behaviour that looks
+    wrong when the cutaway is badly chosen. That is a placement-quality problem
+    and `cutaway_plan`'s look-different arm is where it is fixed.
+
+    THIS SHIPS ANYWAY, because "cannot happen today" is exactly how it happens
+    later. Video is split finer than audio — framing is per-BEAT and a kept
+    span can cover several beats, so the picture concatenates N segments while
+    the sound concatenates one per span. The two are held together by nothing
+    but the splitter happening to preserve order.
+
+    A SUM IS NOT AN ORDER, and that is what the existing check compared. It
+    asserted the total kept video duration equalled the total kept audio
+    duration — true under ANY permutation. Two segments swapped pass it and
+    every frame after the swap carries the wrong sound. This compares the
+    SEQUENCES: the video segments must tile the audio spans exactly, in order,
+    with no gap and no overlap.
+    """
+    _sp = [(float(a), float(b)) for a, b in (spans or [])]
+    _vs = [(float(a), float(b)) for a, b, *_ in (vsegs or [])]
+    if not _sp or not _vs:
+        return ("ABSENT", "no spans (%d) or no video segments (%d) — nothing to "
+                          "compare, which is not the same as agreeing"
+                          % (len(_sp), len(_vs)))
+    _i = 0
+    for _a, _b in _sp:
+        _cur = _a
+        while _i < len(_vs) and _vs[_i][0] < _b - eps:
+            _va, _vb = _vs[_i]
+            if abs(_va - _cur) > eps:
+                return ("FAILED",
+                        "video segment %d starts at %.6f where the audio span "
+                        "expects %.6f — the picture and the sound are %.3fs "
+                        "apart from here on"
+                        % (_i, _va, _cur, abs(_va - _cur)))
+            if _vb > _b + eps:
+                return ("FAILED",
+                        "video segment %d runs to %.6f, past the end of its "
+                        "audio span at %.6f" % (_i, _vb, _b))
+            _cur = _vb
+            _i += 1
+        if abs(_cur - _b) > eps:
+            return ("FAILED",
+                    "audio span %.6f-%.6f is only covered to %.6f by the video "
+                    "segments — %.3fs of sound with no picture of its own"
+                    % (_a, _b, _cur, abs(_b - _cur)))
+    if _i != len(_vs):
+        return ("FAILED",
+                "%d video segment(s) are left over after every audio span is "
+                "covered — picture with no sound behind it" % (len(_vs) - _i))
+    return ("MEASURED",
+            "%d video segment(s) tile %d audio span(s) exactly, in order"
+            % (len(_vs), len(_sp)))
+
+
 def split_spans_by_framing(spans, framing_spans=None):
     """Kept spans cut at framing boundaries: [(t0, t1, framing), ...]. PURE.
 
@@ -8197,6 +8392,101 @@ def variety_census(steps, placements=None):
              for _k, _v in _ax.items()})
 
 
+def apply_case(text, case):
+    """The words as the ruling asked for them. PURE, and a no-op when unruled.
+
+    18 OF 20 PLACEMENTS ON ROUND 70 WERE ALL CAPS, and it was not a preference:
+    the ruling surface had no `case` field, so there was nothing else to be.
+    The reference corpus answers case on 171 text placements — lower 31%,
+    upper 30%, mixed 30%, title 9% — so ALL CAPS is under a third of them.
+
+    UNRULED MEANS UNTOUCHED. `case` is optional and a beat that does not set it
+    keeps whatever the copy already is, so adding the field cannot change a run
+    that ignores it. That is what makes the template gauge a fair test: any
+    movement in it comes from the agent choosing, not from a new default.
+    """
+    _t = str(text or "")
+    _c = str(case or "").strip().lower()
+    if _c == "upper":
+        return _t.upper()
+    if _c == "lower":
+        return _t.lower()
+    if _c == "title":
+        return _t.title()
+    if _c == "mixed":
+        # SENTENCE CASE, not str.capitalize(), which LOWERCASES the rest and
+        # would eat an acronym the speaker actually said.
+        return (_t[:1].upper() + _t[1:]) if _t else _t
+    return _t
+
+
+def hold_seconds(verdict, beat, floor=0.6, cap=3.0):
+    """(seconds, source) — how long this stays up, and who decided.
+
+    The build capped every overlay at the beat's own length. The corpus answers
+    `hold_s` on 182 placements with a median near 1.0s and a 0.4-1.6 range, and
+    a component has its own floor underneath that: StatCard's count-up lands at
+    0.8s and its label arrives at 1.07s, so anything shorter never resolves.
+
+    RETURNS WHO DECIDED, because "the agent asked for 1.2s" and "the beat
+    happened to be 1.2s long" are different facts and a ledger that cannot tell
+    them apart cannot say whether the field is being used.
+    """
+    _b = max(floor, float(beat or floor))
+    _r = (verdict or {}).get("hold_s")
+    try:
+        _r = float(_r)
+    except (TypeError, ValueError):
+        return (min(cap, _b), "beat")
+    if _r <= 0:
+        return (min(cap, _b), "beat")
+    return (min(cap, max(floor, _r)), "ruled")
+
+
+def used_so_far(verdicts):
+    """(state, text) — what this edit has already chosen, so repeat is visible.
+
+    ZAC, 2026-09-12: "the spec carries what's been used, so repetition is
+    visible to the agent." It is the template gauge turned around and handed to
+    the thing that can act on it. Round 70 placed one distinct component, zero
+    expressible positions and 18 of 20 in ALL CAPS across five fixtures — and
+    the agent could not have known, because nothing it received said what it
+    had already done. Every ruling was made as if it were the first.
+
+    A DESCRIPTION, NOT A QUOTA. This says what has been used; it never says
+    "vary it" or names a target. Three cards in a row may be exactly right, and
+    a rubric that calls that wrong is the rubric's problem — the same standing
+    law that keeps the density rates out of the prompt. What the agent cannot
+    do today is make that call knowingly.
+
+    ABSENT until something is ruled, because "nothing used yet" and "this edit
+    is all one thing" must not read the same on turn one.
+    """
+    _vs = [_v for _v in (verdicts or []) if isinstance(_v, dict)]
+    if not _vs:
+        return ("ABSENT", "")
+    _ax = {"families": collections.Counter(), "case": collections.Counter(),
+           "size": collections.Counter(), "where": collections.Counter()}
+    for _v in _vs:
+        for _t in (_v.get("treatment") or []):
+            _ax["families"][str(_t).lower()] += 1
+        for _k in ("case", "size", "where"):
+            _val = str(_v.get(_k) or "").strip().lower()
+            _ax[_k][_val or "(not set)"] += 1
+    _parts = []
+    for _k in ("families", "case", "size", "where"):
+        _c = _ax[_k]
+        if not _c:
+            continue
+        _parts.append("%s: %s" % (_k, ", ".join("%s x%d" % (_n, _m)
+                                                for _n, _m in _c.most_common(5))))
+    return ("MEASURED",
+            "USED SO FAR across %d ruled beat(s) — %s. Stated so you can see "
+            "what this edit already is; it is not a quota and repeating a "
+            "choice on purpose is a real answer."
+            % (len(_vs), "; ".join(_parts)))
+
+
 def card_anchor(verdict, subject_replaced=False):
     """(anchor, why) — WHICH BAND a card takes. PURE, so a test can drive it.
 
@@ -8243,6 +8533,19 @@ def card_anchor(verdict, subject_replaced=False):
     function that can return "no opinion" reintroduces it the first time a
     branch is added without one.
     """
+    # THE RULING OUTRANKS THE DERIVATION. `where` is the agent's own answer and
+    # the band chooser is the fallback for when it did not give one — the same
+    # order as sfx, where the agent's value wins and the boundary only fills a
+    # blank. A derivation that overrode a stated choice would make the field
+    # decorative, which is worse than not offering it.
+    _WHERE_TO_ANCHOR = {"middle": "center", "upper_third": "top",
+                        "lower_third": "bottom", "full_frame": "center",
+                        "corner": "top-right"}
+    _w = str((verdict or {}).get("where") or "").strip().lower()
+    if _w in _WHERE_TO_ANCHOR:
+        return (_WHERE_TO_ANCHOR[_w],
+                "the ruling asked for %s; the band chooser only fills a blank"
+                % _w)
     _tr = [str(_t).lower() for _t in ((verdict or {}).get("treatment") or [])]
     if subject_replaced:
         return ("center",
@@ -12671,13 +12974,18 @@ def edit(source_key: str, brief: str,
         # failure would look exactly like the boundary conventions Builder-2
         # spent a night removing. So the split must partition the kept spans
         # exactly.
-        _vsum = sum(_b - _a for _a, _b, _ in _vsegs)
-        _ssum = sum(_b - _a for _a, _b in spans)
-        if abs(_vsum - _ssum) > 1e-6:
-            return {"error": f"framing split covers {_vsum:.6f}s of "
-                             f"{_ssum:.6f}s of kept span — the video and audio "
-                             f"clocks would diverge and every output-to-source "
-                             f"mapping with them"}
+        # A SUM IS NOT AN ORDER. This compared total kept video duration against
+        # total kept audio duration, which is true under ANY permutation of the
+        # segments: swap two and every frame after the swap carries the wrong
+        # sound while the check stays green. av_spans_agree compares the
+        # SEQUENCES — the video segments must tile the audio spans exactly, in
+        # order, with no gap and no overlap.
+        _av_state, _av_why = av_spans_agree(spans, _vsegs)
+        if _av_state == "FAILED":
+            return {"error": f"picture and sound would not line up: {_av_why}"}
+        if _av_state == "ABSENT":
+            return {"error": f"the audio/video span agreement could not be "
+                             f"checked ({_av_why}) — ABSENT, not assumed fine"}
         parts.append("".join(f"[g{i}]" for i in range(len(_vsegs)))
                      + f"concat=n={len(_vsegs)}:v=1:a=0[outv]")
         parts.append("".join(f"[a{i}]" for i in range(n))
@@ -13556,7 +13864,9 @@ def edit(source_key: str, brief: str,
                 continue
             if "text" not in tr:
                 continue          # not ruled for this family — filtering, not a drop
-            copy = str(v.get("text_content") or "").strip()
+            # THE RULING'S CASE, APPLIED. Unruled leaves the copy untouched.
+            copy = apply_case(str(v.get("text_content") or "").strip(),
+                              v.get("case"))
             if not copy:
                 _skips.append({"family": "text", "beat": v.get("beat"),
                                "why": "ruled 'text' with no text_content"})
@@ -13572,7 +13882,13 @@ def edit(source_key: str, brief: str,
             # why text ruled 10 built 0 on three consecutive equivalence runs:
             # two functions in this file disagreeing about the shape between
             # them, with the disagreement surfacing as an opaque batch error.
-            _dur = min(3.0, max(0.6, b["t_end"] - b["t_start"]))
+            # HOLD, RULED OR DERIVED, AND THE LEDGER SAYS WHICH.
+            _dur, _hsrc = hold_seconds(v, b["t_end"] - b["t_start"])
+            led.setdefault("control_used", []).append(
+                {"beat": v.get("beat"), "family": "text",
+                 "case": v.get("case"), "size": v.get("size"),
+                 "where": v.get("where"), "colour": v.get("colour"),
+                 "hold_s": round(_dur, 2), "hold_from": _hsrc})
             # THE BEAT, CARRIED. The producer knows exactly which beat this
             # overlay is for and used to drop it, leaving every reader to
             # RECONSTRUCT it from a timestamp — and a placement sits on a beat
@@ -14784,14 +15100,38 @@ def edit(source_key: str, brief: str,
             _cw_on_beat = "cutaway" in [str(_t).lower()
                                         for _t in (v.get("treatment") or [])]
             _canch, _canch_why = card_anchor(v, subject_replaced=_cw_on_beat)
+            # SIZE AS A SCALE THE COMPONENT ALREADY READS. resolveMGPosition
+            # takes `scale`; nothing ever sent one, so every card rendered at
+            # 1.0 and the corpus's four sizes were unreachable. Reference for
+            # cards: medium 37%, dominant 25%, large 23%, small 14% over 87
+            # answered placements.
+            _SCALE = {"small": 0.7, "medium": 1.0, "large": 1.3,
+                      "dominant": 1.6}
+            _csize = str(v.get("size") or "").strip().lower()
             _cprops = dict(_cprops, anchor=_canch)
+            if _csize in _SCALE:
+                _cprops["scale"] = _SCALE[_csize]
+            # THE CASE OF THE WORDS ON THE CARD, not just of the overlays.
+            for _ck in ("label",):
+                if _cprops.get(_ck):
+                    _cprops[_ck] = apply_case(_cprops[_ck], v.get("case"))
             led.setdefault("card_anchor", []).append(
                 {"beat": v.get("beat"), "type": _ctype, "anchor": _canch,
                  "why": _canch_why})
+            led.setdefault("control_used", []).append(
+                {"beat": v.get("beat"), "family": "card",
+                 "case": v.get("case"), "size": v.get("size"),
+                 "where": v.get("where"), "colour": v.get("colour"),
+                 "anchor": _canch,
+                 "scale": _cprops.get("scale"),
+                 "hold_from": hold_seconds(v, b["t_end"] - b["t_start"],
+                                           floor=1.1, cap=2.5)[1]})
             _cards.append({"t_start": round(_mg_at, 2), "type": _ctype,
                            "anchor": _canch,
                            "beat": v.get("beat"),
-                           "duration_s": min(2.5, b["t_end"] - b["t_start"]),
+                           "duration_s": hold_seconds(
+                               v, b["t_end"] - b["t_start"], floor=1.1,
+                               cap=2.5)[0],
                            "hero": hero, "label": str(v.get("card_label") or "")[:60],
                            "props": _cprops,
                            "anchor_s": round(at, 2),
@@ -16972,6 +17312,12 @@ def edit(source_key: str, brief: str,
                 _missing = [b["i"] for b in _beats if b["i"] not in _seen]
                 out = {"recorded": _added, "ruled": len(_seen),
                        "of": len(_beats), "still_missing": _missing[:30]}
+                # WHAT THIS EDIT ALREADY IS, returned where the agent will read
+                # it — in the result of the tool it just called, not in a
+                # ledger nobody sees. ~25 tokens a turn.
+                _us_state, _us_text = used_so_far(led.get("beat_verdicts"))
+                if _us_state == "MEASURED":
+                    out["used_so_far"] = _us_text
                 # AA ruled 19 beats `text` and supplied copy for ONE. The schema
                 # could not express "required only when treatment includes
                 # text", so it went unenforced and 18 overlays could not be

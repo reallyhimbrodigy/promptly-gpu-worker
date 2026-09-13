@@ -1,0 +1,3875 @@
+{
+ "state": "MEASURED",
+ "placements": 463,
+ "videos": 10,
+ "arms_missing": [],
+ "all": {
+  "where": {
+   "answered": 369,
+   "of_placements": 463,
+   "videos": 10,
+   "values": {
+    "middle": {
+     "n": 186,
+     "videos": 10,
+     "share": 0.504
+    },
+    "full_frame": {
+     "n": 87,
+     "videos": 10,
+     "share": 0.236
+    },
+    "lower_third": {
+     "n": 56,
+     "videos": 10,
+     "share": 0.152
+    },
+    "upper_third": {
+     "n": 31,
+     "videos": 7,
+     "share": 0.084
+    },
+    "corner": {
+     "n": 7,
+     "videos": 3,
+     "share": 0.019
+    },
+    "edge": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "upper_third to middle, drifting down as it builds": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    }
+   }
+  },
+  "size": {
+   "answered": 368,
+   "of_placements": 463,
+   "videos": 10,
+   "values": {
+    "medium": {
+     "n": 133,
+     "videos": 10,
+     "share": 0.361
+    },
+    "dominant": {
+     "n": 111,
+     "videos": 10,
+     "share": 0.302
+    },
+    "large": {
+     "n": 68,
+     "videos": 9,
+     "share": 0.185
+    },
+    "small": {
+     "n": 51,
+     "videos": 8,
+     "share": 0.139
+    },
+    "tiny": {
+     "n": 4,
+     "videos": 4,
+     "share": 0.011
+    },
+    "medium to dominant (videos fills half the frame height)": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    }
+   }
+  },
+  "case": {
+   "answered": 211,
+   "of_placements": 463,
+   "videos": 10,
+   "values": {
+    "lower": {
+     "n": 67,
+     "videos": 10,
+     "share": 0.318
+    },
+    "mixed": {
+     "n": 64,
+     "videos": 9,
+     "share": 0.303
+    },
+    "upper": {
+     "n": 59,
+     "videos": 9,
+     "share": 0.28
+    },
+    "title": {
+     "n": 21,
+     "videos": 7,
+     "share": 0.1
+    }
+   }
+  },
+  "colour": {
+   "answered": 347,
+   "of_placements": 463,
+   "videos": 10,
+   "values": {
+    "white on footage": {
+     "n": 47,
+     "videos": 8,
+     "share": 0.135
+    },
+    "white on the footage": {
+     "n": 7,
+     "videos": 1,
+     "share": 0.02
+    },
+    "white on black": {
+     "n": 7,
+     "videos": 5,
+     "share": 0.02
+    },
+    "dark ui on green grid background": {
+     "n": 6,
+     "videos": 1,
+     "share": 0.017
+    },
+    "ui on blurred background": {
+     "n": 6,
+     "videos": 1,
+     "share": 0.017
+    },
+    "black on white": {
+     "n": 5,
+     "videos": 2,
+     "share": 0.014
+    },
+    "app ui": {
+     "n": 5,
+     "videos": 1,
+     "share": 0.014
+    },
+    "white bold on dark jacket": {
+     "n": 4,
+     "videos": 1,
+     "share": 0.012
+    },
+    "purple icon": {
+     "n": 4,
+     "videos": 1,
+     "share": 0.012
+    },
+    "white on purple": {
+     "n": 4,
+     "videos": 1,
+     "share": 0.012
+    },
+    "yellow on footage": {
+     "n": 4,
+     "videos": 2,
+     "share": 0.012
+    },
+    "orange on footage": {
+     "n": 3,
+     "videos": 1,
+     "share": 0.009
+    },
+    "yellow word inside white caption": {
+     "n": 3,
+     "videos": 1,
+     "share": 0.009
+    },
+    "footage on white": {
+     "n": 3,
+     "videos": 1,
+     "share": 0.009
+    },
+    "black and blue on footage": {
+     "n": 3,
+     "videos": 1,
+     "share": 0.009
+    },
+    "white on green grid background": {
+     "n": 3,
+     "videos": 1,
+     "share": 0.009
+    },
+    "orange on white ui": {
+     "n": 3,
+     "videos": 1,
+     "share": 0.009
+    },
+    "orange/yellow flash": {
+     "n": 3,
+     "videos": 1,
+     "share": 0.009
+    },
+    "footage": {
+     "n": 3,
+     "videos": 1,
+     "share": 0.009
+    },
+    "blue on footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "orange on white wall": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "white/black mixed on footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "white and red bold sans on the footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "dark ui panel over green grid background": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "yellow overlay on live footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "black on purple gradient": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "white and orange on footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "multi-color on a white background": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "black and orange on footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "white on footage, then red on footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "orange/red on footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "white, red, and yellow on footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "white and multi-colour on footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "multi-color logo on footage": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "yellow flash": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "white on ui": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "dark clip on white ground": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow-green outlined numerals on dark footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white polaroid border on white background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black/grey mixed on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "lavender/purple gradient": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "colorful thumbnails on dark ui, floating on lavender": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "metallic grey/orange glow on lavender": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black on lavender": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "grey laptop on lavender gradient": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white icon on black tile, black tile on white ground": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white phone ui on white background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black numerals on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "real kitchen footage bleeding into white phone chrome": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "pure white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white ui on white background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white bold on dark jacket/background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white bold on cream sweater": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white bold on dark shirt": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue folder on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black text on blue folder, white background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black/grey on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "pastel-colored 3d icons, black numerals on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white/pink gradient icon over a darkening frame": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white 'hello,' with orange 'everyone.' on the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white icon and text on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue logo over a blurred frame": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white with blue keyword on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "orange mark on glass": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "dark blue/black on light blue map": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "orange pins on blue map": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue cards on white background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black text with blue accent words on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue keyword + orange title on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white with a blue bold keyword on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white body text, bold orange accent phrase, on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white with orange accent word on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white cards with blue/orange accents on light blue background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "dark blue numerals on light background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue on light background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "full-color photos in white-ring frames on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "grey body text, blue gradient on the word 'seamless', on a white-blue background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "full-color photos in white-ring frames on white-blue background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue script brand name + white text on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white body text, blue accent word, on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white/black on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blurred mixed tones": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "resolving image on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black text in a white pill on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text/icons over a blue gradient scrim": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue gradient overlay on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white icon on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on a blue gradient": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "faint grey ghosting on the blue background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "gradient icon, white handle text on dark navy": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "purple number on black card with white outline": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white outlined text with purple glow, over blurred footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white chip icon on dark blue-purple gradient square": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "warm orange/cream wash over the live footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black text on white pill, over blurred purple background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white card ui with red/orange accent button, on blurred backdrop": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text with black outline over the thumbnail image": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white card floating on cream/orange textured background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "dark background, two white-bordered video tiles": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "red/green/cyan lettering with heavy black outline, over both tiles": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "green dollar icon on black mic foam": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "warm orange wash over live footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white ui card with red accent tab, blurred purple background behind": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue glow dot on white button": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white icon on purple gradient square": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white icons on purple gradient squares, row growing left to right": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white icon row over daylight desk footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "warm orange wash fading to normal purple-lit footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "red-and-white icon over live footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black background, white/glitch-colored tiktok logo and search bar": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white and red bold sans on the dim bedroom footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "warm orange glow overlaying the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "motion-streaked footage, no added colour": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white overlay wash": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white bold text on the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "dark ui panel over a green grid background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white bold text on the green grid background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "warm orange glow overlaying the footage, cutting to black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white and tiktok-brand red/cyan on black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white word on the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text on the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "orange led digits on the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "color video inside a desaturated grey frame": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "color panels on the desaturated background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow/white text with black stroke on the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white number on a dark rounded badge": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "dark text on a white card": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white percentage text on a black export screen": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "pink/warm motion blur over the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text, black stroke, orange dot, on the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white/red/teal glitch logo on black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white bold text on the live footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white italic text on the footage, sits just below the bold title": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text on green desk mat background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white sans text with an italic serif emphasis word, both on the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text on wood-floor office background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "grey/black mixed-weight text on plain white background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white bold text with yellow curved arrow, on the room background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text on orange rounded background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text on orange rounded pill, sits over the small video preview thumbnail": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white/soft glow blur mask over ui screenshot": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text on orange rounded pill over blurred ui background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text on orange rounded pill over ui screenshot": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text (mixed sans/serif) over dark blurred screen reflection": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text on dark blurred screen background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white bold main text with white italic smaller subtext, both on the footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white tiktok logo and search bar on black background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white and red words on dim room footage, videos in yellow": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow 'excuse' and red 'no good' on the room background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "dark app ui floating on bright green grid background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow text on green background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black-matted frames with full-colour video stills inside, white text labels on the right frame": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow text over the footage stills": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white wordmark and colour icon on the room background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white tiktok logo and glitch-colored loading bar on black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white outline text with white scribble circle on the dim room footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "colourful gradient icon on dark ceiling background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black wordmark on pastel teal-to-orange gradient": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "native app ui colours on black background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "colourful thumbnail grid on black app background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white spinner and text on black chat ui": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "cyan glow ring and sparkles on black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white serif script on the dim studio footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white italic serif on footage, sits above the plain sans caption": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white italic serif text on the dim room footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "colourful gradient icon floating over dim room": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on the footage, italic lowercase 'the' over bold white 'captions'": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on the footage, italic 'you're' over bold 'reading'": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on the footage, bold white 'zero control'": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text inside a solid red rounded bubble, floating over a blurred grey/white desktop screenshot": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white text in red bubble over blurred white settings panel": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white/black tiktok logo on black background, white search bar with @ciggmedia": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow and white on the live footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white bold on blurred pink footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "warm orange overlay on live footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow word inside white caption line": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black bold on cream background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black serif on cream, above natural-light footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "full-color ui on dimmed grayscale background footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black serif on light background strip": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "teal highlight / white strikethrough on black ui": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white serif on live footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white circle outline over dark ui": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "orange overlay on live footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow highlighted word on white caption preview": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow highlighted words in white caption on the finished clip": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black serif on cream strip beneath framed video": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "green/yellow 3d text on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "photo on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "footage on purple gradient": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3d graphics on purple gradient": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3d graphic on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black text and emoji on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3d graphics on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white, blue, and orange on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue, white, and orange on a white background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black, blue, and orange on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue and black on a white background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "full color on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black and blue on a light blue gradient background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue and black on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on a blue overlay": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on blue, then a final instagram logo on dark blue": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on blurred footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "purple on black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white and purple on blurred footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "purple and white icon": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on screen recording": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on dark background": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "blue circle on white ui": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "red and white icon": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white and red on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white and multicolor on black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "glowing orange on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black and white with color inset": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "standard ios ui colors on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "grey on white": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white on footage, with yellow arrow": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "yellow and red on footage": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "n/a": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "red on black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black on gradient": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white, red, cyan on black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black on cream": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "black on cream (top), footage (bottom)": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "white/cyan/magenta on black": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    }
+   }
+  },
+  "over_subject": {
+   "answered": 368,
+   "of_placements": 463,
+   "videos": 10,
+   "values": {
+    "no_subject_visible": {
+     "n": 150,
+     "videos": 10,
+     "share": 0.408
+    },
+    "over_body": {
+     "n": 106,
+     "videos": 10,
+     "share": 0.288
+    },
+    "clear_of_subject": {
+     "n": 74,
+     "videos": 9,
+     "share": 0.201
+    },
+    "over_face": {
+     "n": 38,
+     "videos": 7,
+     "share": 0.103
+    }
+   }
+  },
+  "hold_s": {
+   "answered": 345,
+   "of_placements": 463,
+   "videos": 10,
+   "values": {
+    "1.0": {
+     "n": 24,
+     "videos": 7,
+     "share": 0.07
+    },
+    "0.4": {
+     "n": 22,
+     "videos": 8,
+     "share": 0.064
+    },
+    "0.6": {
+     "n": 18,
+     "videos": 7,
+     "share": 0.052
+    },
+    "1.6": {
+     "n": 18,
+     "videos": 5,
+     "share": 0.052
+    },
+    "4.0": {
+     "n": 16,
+     "videos": 9,
+     "share": 0.046
+    },
+    "0.2": {
+     "n": 15,
+     "videos": 4,
+     "share": 0.043
+    },
+    "1.2": {
+     "n": 15,
+     "videos": 6,
+     "share": 0.043
+    },
+    "0.8": {
+     "n": 12,
+     "videos": 6,
+     "share": 0.035
+    },
+    "1.4": {
+     "n": 11,
+     "videos": 7,
+     "share": 0.032
+    },
+    "0.5": {
+     "n": 11,
+     "videos": 6,
+     "share": 0.032
+    },
+    "2.0": {
+     "n": 11,
+     "videos": 7,
+     "share": 0.032
+    },
+    "1.5": {
+     "n": 10,
+     "videos": 5,
+     "share": 0.029
+    },
+    "1.8": {
+     "n": 9,
+     "videos": 5,
+     "share": 0.026
+    },
+    "2.8": {
+     "n": 7,
+     "videos": 3,
+     "share": 0.02
+    },
+    "0.3": {
+     "n": 7,
+     "videos": 4,
+     "share": 0.02
+    },
+    "1.3": {
+     "n": 6,
+     "videos": 3,
+     "share": 0.017
+    },
+    "2.4": {
+     "n": 6,
+     "videos": 5,
+     "share": 0.017
+    },
+    "2.2": {
+     "n": 5,
+     "videos": 3,
+     "share": 0.014
+    },
+    "2.1": {
+     "n": 5,
+     "videos": 3,
+     "share": 0.014
+    },
+    "1.1": {
+     "n": 4,
+     "videos": 3,
+     "share": 0.012
+    },
+    "3.4": {
+     "n": 4,
+     "videos": 3,
+     "share": 0.012
+    },
+    "1.7": {
+     "n": 4,
+     "videos": 1,
+     "share": 0.012
+    },
+    "2.5": {
+     "n": 4,
+     "videos": 2,
+     "share": 0.012
+    },
+    "1.367": {
+     "n": 4,
+     "videos": 3,
+     "share": 0.012
+    },
+    "5.0": {
+     "n": 3,
+     "videos": 3,
+     "share": 0.009
+    },
+    "4.6": {
+     "n": 3,
+     "videos": 2,
+     "share": 0.009
+    },
+    "5.8": {
+     "n": 3,
+     "videos": 2,
+     "share": 0.009
+    },
+    "2.6": {
+     "n": 3,
+     "videos": 3,
+     "share": 0.009
+    },
+    "0.9": {
+     "n": 3,
+     "videos": 2,
+     "share": 0.009
+    },
+    "0.1": {
+     "n": 2,
+     "videos": 2,
+     "share": 0.006
+    },
+    "1.9": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "3.2": {
+     "n": 2,
+     "videos": 2,
+     "share": 0.006
+    },
+    "3.6": {
+     "n": 2,
+     "videos": 2,
+     "share": 0.006
+    },
+    "1.167": {
+     "n": 2,
+     "videos": 2,
+     "share": 0.006
+    },
+    "0.7": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "2.894": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "2.833": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "1.333": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "3.9": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "0.867": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "1.133": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "2.867": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "3.671": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "1.233": {
+     "n": 2,
+     "videos": 1,
+     "share": 0.006
+    },
+    "0.03": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "0.07": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.5": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "0.25": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "4.1": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "9.6": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "4.2": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.7": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.3": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "6.0": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "5.4": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "2.367": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "1.667": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.8": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "1.334": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "0.633": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.378": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "4.7": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "4.309": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "2.133": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "2.334": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "0.033": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "1.666": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "2.167": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "6.033": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "0.934": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.566": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "1.967": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "1.733": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "4.017": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "9.635": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "4.032": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "0.958": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.042": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.375": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "2.209": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "1.083": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "2.917": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "2.567": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "0.667": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.033": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "4.733": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "0.833": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "1.633": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "4.031": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "1.433": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "1.467": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "2.067": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "4.633": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "2.467": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "0.466": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    },
+    "3.867": {
+     "n": 1,
+     "videos": 1,
+     "share": 0.003
+    }
+   }
+  }
+ },
+ "by_family": {
+  "text": {
+   "placements": 220,
+   "videos": 10,
+   "where": {
+    "answered": 202,
+    "of_placements": 220,
+    "videos": 10,
+    "values": {
+     "middle": {
+      "n": 124,
+      "videos": 10,
+      "share": 0.614
+     },
+     "lower_third": {
+      "n": 39,
+      "videos": 9,
+      "share": 0.193
+     },
+     "upper_third": {
+      "n": 20,
+      "videos": 6,
+      "share": 0.099
+     },
+     "full_frame": {
+      "n": 16,
+      "videos": 7,
+      "share": 0.079
+     },
+     "corner": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.01
+     },
+     "upper_third to middle, drifting down as it builds": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     }
+    }
+   },
+   "size": {
+    "answered": 202,
+    "of_placements": 220,
+    "videos": 10,
+    "values": {
+     "medium": {
+      "n": 91,
+      "videos": 10,
+      "share": 0.45
+     },
+     "large": {
+      "n": 43,
+      "videos": 9,
+      "share": 0.213
+     },
+     "dominant": {
+      "n": 38,
+      "videos": 9,
+      "share": 0.188
+     },
+     "small": {
+      "n": 28,
+      "videos": 8,
+      "share": 0.139
+     },
+     "medium to dominant (videos fills half the frame height)": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "tiny": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     }
+    }
+   },
+   "case": {
+    "answered": 171,
+    "of_placements": 220,
+    "videos": 10,
+    "values": {
+     "lower": {
+      "n": 53,
+      "videos": 8,
+      "share": 0.31
+     },
+     "upper": {
+      "n": 52,
+      "videos": 8,
+      "share": 0.304
+     },
+     "mixed": {
+      "n": 51,
+      "videos": 7,
+      "share": 0.298
+     },
+     "title": {
+      "n": 15,
+      "videos": 6,
+      "share": 0.088
+     }
+    }
+   },
+   "colour": {
+    "answered": 196,
+    "of_placements": 220,
+    "videos": 10,
+    "values": {
+     "white on footage": {
+      "n": 46,
+      "videos": 8,
+      "share": 0.235
+     },
+     "white on the footage": {
+      "n": 6,
+      "videos": 1,
+      "share": 0.031
+     },
+     "white bold on dark jacket": {
+      "n": 4,
+      "videos": 1,
+      "share": 0.02
+     },
+     "black on white": {
+      "n": 4,
+      "videos": 1,
+      "share": 0.02
+     },
+     "white on purple": {
+      "n": 4,
+      "videos": 1,
+      "share": 0.02
+     },
+     "yellow word inside white caption": {
+      "n": 3,
+      "videos": 1,
+      "share": 0.015
+     },
+     "black and blue on footage": {
+      "n": 3,
+      "videos": 1,
+      "share": 0.015
+     },
+     "white on green grid background": {
+      "n": 3,
+      "videos": 1,
+      "share": 0.015
+     },
+     "orange on white ui": {
+      "n": 3,
+      "videos": 1,
+      "share": 0.015
+     },
+     "yellow on footage": {
+      "n": 3,
+      "videos": 2,
+      "share": 0.015
+     },
+     "ui on blurred background": {
+      "n": 3,
+      "videos": 1,
+      "share": 0.015
+     },
+     "orange on white wall": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.01
+     },
+     "white/black mixed on footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.01
+     },
+     "white and red bold sans on the footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.01
+     },
+     "black on purple gradient": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.01
+     },
+     "white and orange on footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.01
+     },
+     "orange on footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.01
+     },
+     "black and orange on footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.01
+     },
+     "white on footage, then red on footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.01
+     },
+     "white, red, and yellow on footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.01
+     },
+     "yellow-green outlined numerals on dark footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black/grey mixed on white": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black on lavender": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white icon on black tile, black tile on white ground": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white bold on dark jacket/background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black/grey on white": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white 'hello,' with orange 'everyone.' on the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "blue on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white with blue keyword on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "dark blue/black on light blue map": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "blue cards on white background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "blue keyword + orange title on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white with a blue bold keyword on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white body text, bold orange accent phrase, on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white with orange accent word on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "grey body text, blue gradient on the word 'seamless', on a white-blue background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "full-color photos in white-ring frames on white-blue background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "blue script brand name + white text on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white body text, blue accent word, on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white/black on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "blue gradient overlay on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on a blue gradient": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text with black outline over the thumbnail image": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white card floating on cream/orange textured background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "red/green/cyan lettering with heavy black outline, over both tiles": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white and red bold sans on the dim bedroom footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "warm orange glow overlaying the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white bold text on the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white bold text on the green grid background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white word on the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text on the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "color panels on the desaturated background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text, black stroke, orange dot, on the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white bold text on the live footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white italic text on the footage, sits just below the bold title": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text on green desk mat background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white sans text with an italic serif emphasis word, both on the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text on wood-floor office background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "grey/black mixed-weight text on plain white background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white bold text with yellow curved arrow, on the room background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text on orange rounded background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text on orange rounded pill, sits over the small video preview thumbnail": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text on orange rounded pill over blurred ui background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text on orange rounded pill over ui screenshot": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text (mixed sans/serif) over dark blurred screen reflection": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text on dark blurred screen background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white bold main text with white italic smaller subtext, both on the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white and red words on dim room footage, videos in yellow": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "yellow 'excuse' and red 'no good' on the room background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "yellow text on green background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "yellow text over the footage stills": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white wordmark and colour icon on the room background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white outline text with white scribble circle on the dim room footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "colourful gradient icon on dark ceiling background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black wordmark on pastel teal-to-orange gradient": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white serif script on the dim studio footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white italic serif on footage, sits above the plain sans caption": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white italic serif text on the dim room footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on the footage, italic lowercase 'the' over bold white 'captions'": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on the footage, italic 'you're' over bold 'reading'": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on the footage, bold white 'zero control'": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text inside a solid red rounded bubble, floating over a blurred grey/white desktop screenshot": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white text in red bubble over blurred white settings panel": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "yellow and white on the live footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white bold on blurred pink footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "yellow word inside white caption line": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black bold on cream background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black serif on cream, above natural-light footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black serif on light background strip": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "teal highlight / white strikethrough on black ui": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white serif on live footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white circle outline over dark ui": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "yellow highlighted word on white caption preview": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "yellow highlighted words in white caption on the finished clip": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black serif on cream strip beneath framed video": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black text and emoji on white": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white, blue, and orange on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black, blue, and orange on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black and blue on a light blue gradient background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "blue and black on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on blurred footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white and purple on blurred footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on screen recording": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on dark background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "orange/red on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white and red on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on black": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "grey on white": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on footage, with yellow arrow": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "yellow and red on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "app ui": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black on cream": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "black on cream (top), footage (bottom)": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "white on ui": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "orange/yellow flash": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     }
+    }
+   },
+   "over_subject": {
+    "answered": 202,
+    "of_placements": 220,
+    "videos": 10,
+    "values": {
+     "over_body": {
+      "n": 75,
+      "videos": 10,
+      "share": 0.371
+     },
+     "no_subject_visible": {
+      "n": 53,
+      "videos": 10,
+      "share": 0.262
+     },
+     "clear_of_subject": {
+      "n": 52,
+      "videos": 9,
+      "share": 0.257
+     },
+     "over_face": {
+      "n": 22,
+      "videos": 5,
+      "share": 0.109
+     }
+    }
+   },
+   "hold_s": {
+    "answered": 182,
+    "of_placements": 220,
+    "videos": 10,
+    "values": {
+     "0.6": {
+      "n": 14,
+      "videos": 6,
+      "share": 0.077
+     },
+     "0.4": {
+      "n": 13,
+      "videos": 6,
+      "share": 0.071
+     },
+     "1.0": {
+      "n": 13,
+      "videos": 6,
+      "share": 0.071
+     },
+     "1.2": {
+      "n": 12,
+      "videos": 6,
+      "share": 0.066
+     },
+     "1.6": {
+      "n": 8,
+      "videos": 5,
+      "share": 0.044
+     },
+     "0.5": {
+      "n": 7,
+      "videos": 5,
+      "share": 0.038
+     },
+     "1.4": {
+      "n": 6,
+      "videos": 4,
+      "share": 0.033
+     },
+     "1.5": {
+      "n": 6,
+      "videos": 4,
+      "share": 0.033
+     },
+     "2.8": {
+      "n": 6,
+      "videos": 3,
+      "share": 0.033
+     },
+     "0.8": {
+      "n": 6,
+      "videos": 4,
+      "share": 0.033
+     },
+     "1.8": {
+      "n": 5,
+      "videos": 4,
+      "share": 0.027
+     },
+     "2.4": {
+      "n": 4,
+      "videos": 4,
+      "share": 0.022
+     },
+     "2.0": {
+      "n": 4,
+      "videos": 4,
+      "share": 0.022
+     },
+     "1.7": {
+      "n": 4,
+      "videos": 1,
+      "share": 0.022
+     },
+     "4.0": {
+      "n": 4,
+      "videos": 2,
+      "share": 0.022
+     },
+     "0.2": {
+      "n": 4,
+      "videos": 3,
+      "share": 0.022
+     },
+     "2.1": {
+      "n": 4,
+      "videos": 3,
+      "share": 0.022
+     },
+     "1.3": {
+      "n": 3,
+      "videos": 2,
+      "share": 0.016
+     },
+     "0.3": {
+      "n": 3,
+      "videos": 2,
+      "share": 0.016
+     },
+     "2.6": {
+      "n": 3,
+      "videos": 3,
+      "share": 0.016
+     },
+     "2.5": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.011
+     },
+     "1.9": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.011
+     },
+     "3.2": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.011
+     },
+     "0.7": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.011
+     },
+     "3.9": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.011
+     },
+     "0.867": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.011
+     },
+     "1.133": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.011
+     },
+     "1.367": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.011
+     },
+     "0.25": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "4.2": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "3.7": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "5.8": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "3.3": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "3.6": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.2": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.1": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.667": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.894": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.133": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.833": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.333": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "4.6": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.167": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.666": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.167": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.867": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "6.033": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "0.934": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.967": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.733": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "3.671": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.209": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.917": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.567": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "0.667": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "3.033": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "4.733": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "0.833": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.633": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.433": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.467": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "4.633": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "5.0": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "2.467": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     },
+     "1.233": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.005
+     }
+    }
+   }
+  },
+  "card": {
+   "placements": 95,
+   "videos": 10,
+   "where": {
+    "answered": 87,
+    "of_placements": 95,
+    "videos": 10,
+    "values": {
+     "middle": {
+      "n": 41,
+      "videos": 10,
+      "share": 0.471
+     },
+     "full_frame": {
+      "n": 17,
+      "videos": 9,
+      "share": 0.195
+     },
+     "upper_third": {
+      "n": 17,
+      "videos": 7,
+      "share": 0.195
+     },
+     "lower_third": {
+      "n": 11,
+      "videos": 7,
+      "share": 0.126
+     },
+     "corner": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.011
+     }
+    }
+   },
+   "size": {
+    "answered": 87,
+    "of_placements": 95,
+    "videos": 10,
+    "values": {
+     "medium": {
+      "n": 32,
+      "videos": 8,
+      "share": 0.368
+     },
+     "dominant": {
+      "n": 22,
+      "videos": 9,
+      "share": 0.253
+     },
+     "large": {
+      "n": 20,
+      "videos": 9,
+      "share": 0.23
+     },
+     "small": {
+      "n": 12,
+      "videos": 5,
+      "share": 0.138
+     },
+     "tiny": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.011
+     }
+    }
+   },
+   "case": {
+    "answered": 51,
+    "of_placements": 95,
+    "videos": 10,
+    "values": {
+     "mixed": {
+      "n": 16,
+      "videos": 6,
+      "share": 0.314
+     },
+     "upper": {
+      "n": 15,
+      "videos": 8,
+      "share": 0.294
+     },
+     "lower": {
+      "n": 11,
+      "videos": 7,
+      "share": 0.216
+     },
+     "title": {
+      "n": 9,
+      "videos": 5,
+      "share": 0.176
+     }
+    }
+   },
+   "colour": {
+    "answered": 86,
+    "of_placements": 95,
+    "videos": 10,
+    "values": {
+     "white on footage": {
+      "n": 8,
+      "videos": 5,
+      "share": 0.093
+     },
+     "white on black": {
+      "n": 4,
+      "videos": 4,
+      "share": 0.047
+     },
+     "white on purple": {
+      "n": 4,
+      "videos": 1,
+      "share": 0.047
+     },
+     "orange on footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.023
+     },
+     "white on the footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.023
+     },
+     "white, red, and yellow on footage": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.023
+     },
+     "yellow-green outlined numerals on dark footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white icon on black tile, black tile on white ground": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black numerals on white": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white bold on dark jacket": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white bold on dark jacket/background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "pastel-colored 3d icons, black numerals on white": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white/pink gradient icon over a darkening frame": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "blue on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "blue cards on white background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black text with blue accent words on white": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white cards with blue/orange accents on light blue background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "dark blue numerals on light background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "blue on light background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "grey body text, blue gradient on the word 'seamless', on a white-blue background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white text/icons over a blue gradient scrim": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "blue gradient overlay on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "faint grey ghosting on the blue background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "gradient icon, white handle text on dark navy": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "purple number on black card with white outline": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white outlined text with purple glow, over blurred footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white chip icon on dark blue-purple gradient square": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white card floating on cream/orange textured background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white ui card with red accent tab, blurred purple background behind": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white icon on purple gradient square": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white bold text on the green grid background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white and tiktok-brand red/cyan on black": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "orange led digits on the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white number on a dark rounded badge": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "dark text on a white card": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white percentage text on a black export screen": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white text, black stroke, orange dot, on the footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white/red/teal glitch logo on black": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white bold text on the live footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "yellow 'excuse' and red 'no good' on the room background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white spinner and text on black chat ui": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white serif script on the dim studio footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white on the footage, italic lowercase 'the' over bold white 'captions'": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white/black tiktok logo on black background, white search bar with @ciggmedia": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black bold on cream background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black serif on cream, above natural-light footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black serif on cream strip beneath framed video": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "green/yellow 3d text on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "photo on white": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "footage on purple gradient": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black on purple gradient": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "blue and black on a white background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black and blue on a light blue gradient background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "blue and black on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white on a blue overlay": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white on blue, then a final instagram logo on dark blue": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "purple on black": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white and purple on blurred footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "red and white icon": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white and multicolor on black": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "glowing orange on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "grey on white": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "yellow and red on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black on gradient": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "app ui": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white, red, cyan on black": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "yellow on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black on cream": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "black on cream (top), footage (bottom)": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "white/cyan/magenta on black": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     }
+    }
+   },
+   "over_subject": {
+    "answered": 87,
+    "of_placements": 95,
+    "videos": 10,
+    "values": {
+     "no_subject_visible": {
+      "n": 43,
+      "videos": 10,
+      "share": 0.494
+     },
+     "over_body": {
+      "n": 20,
+      "videos": 7,
+      "share": 0.23
+     },
+     "clear_of_subject": {
+      "n": 17,
+      "videos": 8,
+      "share": 0.195
+     },
+     "over_face": {
+      "n": 7,
+      "videos": 4,
+      "share": 0.08
+     }
+    }
+   },
+   "hold_s": {
+    "answered": 86,
+    "of_placements": 95,
+    "videos": 10,
+    "values": {
+     "1.6": {
+      "n": 8,
+      "videos": 3,
+      "share": 0.093
+     },
+     "4.0": {
+      "n": 8,
+      "videos": 4,
+      "share": 0.093
+     },
+     "1.0": {
+      "n": 6,
+      "videos": 4,
+      "share": 0.07
+     },
+     "1.2": {
+      "n": 5,
+      "videos": 4,
+      "share": 0.058
+     },
+     "1.4": {
+      "n": 4,
+      "videos": 3,
+      "share": 0.047
+     },
+     "0.8": {
+      "n": 4,
+      "videos": 3,
+      "share": 0.047
+     },
+     "1.8": {
+      "n": 4,
+      "videos": 4,
+      "share": 0.047
+     },
+     "0.6": {
+      "n": 4,
+      "videos": 2,
+      "share": 0.047
+     },
+     "2.4": {
+      "n": 3,
+      "videos": 2,
+      "share": 0.035
+     },
+     "1.3": {
+      "n": 3,
+      "videos": 2,
+      "share": 0.035
+     },
+     "2.0": {
+      "n": 3,
+      "videos": 3,
+      "share": 0.035
+     },
+     "0.5": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.023
+     },
+     "0.4": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.023
+     },
+     "2.8": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.023
+     },
+     "1.9": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.023
+     },
+     "2.2": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.023
+     },
+     "1.7": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "0.2": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "4.1": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "1.5": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "4.2": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "0.3": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "1.1": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "1.667": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "3.8": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "5.8": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "2.1": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "4.309": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "1.333": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "3.9": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "4.6": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "2.167": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "4.017": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "4.032": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "3.375": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "2.917": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "4.031": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "1.433": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "1.467": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     },
+     "3.867": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.012
+     }
+    }
+   }
+  },
+  "cutaway": {
+   "placements": 60,
+   "videos": 9,
+   "where": {
+    "answered": 40,
+    "of_placements": 60,
+    "videos": 9,
+    "values": {
+     "middle": {
+      "n": 18,
+      "videos": 5,
+      "share": 0.45
+     },
+     "full_frame": {
+      "n": 18,
+      "videos": 6,
+      "share": 0.45
+     },
+     "lower_third": {
+      "n": 3,
+      "videos": 2,
+      "share": 0.075
+     },
+     "upper_third": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     }
+    }
+   },
+   "size": {
+    "answered": 40,
+    "of_placements": 60,
+    "videos": 9,
+    "values": {
+     "dominant": {
+      "n": 22,
+      "videos": 6,
+      "share": 0.55
+     },
+     "large": {
+      "n": 11,
+      "videos": 4,
+      "share": 0.275
+     },
+     "small": {
+      "n": 5,
+      "videos": 3,
+      "share": 0.125
+     },
+     "medium": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.05
+     }
+    }
+   },
+   "case": {
+    "answered": 6,
+    "of_placements": 60,
+    "videos": 9,
+    "values": {
+     "mixed": {
+      "n": 3,
+      "videos": 3,
+      "share": 0.5
+     },
+     "lower": {
+      "n": 3,
+      "videos": 2,
+      "share": 0.5
+     }
+    }
+   },
+   "colour": {
+    "answered": 33,
+    "of_placements": 60,
+    "videos": 9,
+    "values": {
+     "ui on blurred background": {
+      "n": 6,
+      "videos": 1,
+      "share": 0.182
+     },
+     "dark ui on green grid background": {
+      "n": 3,
+      "videos": 1,
+      "share": 0.091
+     },
+     "footage": {
+      "n": 3,
+      "videos": 1,
+      "share": 0.091
+     },
+     "dark ui panel over green grid background": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.061
+     },
+     "footage on white": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.061
+     },
+     "white polaroid border on white background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "blurred mixed tones": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "dark background, two white-bordered video tiles": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "white ui card with red accent tab, blurred purple background behind": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "white icon row over daylight desk footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "dark ui panel over a green grid background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "dark text on a white card": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "white text on wood-floor office background": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "white text on orange rounded pill over ui screenshot": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "white on the footage, bold white 'zero control'": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "full-color ui on dimmed grayscale background footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "footage on purple gradient": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "white, blue, and orange on footage": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "purple icon": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "n/a": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "orange/yellow flash": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     },
+     "black on cream (top), footage (bottom)": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.03
+     }
+    }
+   },
+   "over_subject": {
+    "answered": 40,
+    "of_placements": 60,
+    "videos": 9,
+    "values": {
+     "no_subject_visible": {
+      "n": 34,
+      "videos": 8,
+      "share": 0.85
+     },
+     "clear_of_subject": {
+      "n": 4,
+      "videos": 2,
+      "share": 0.1
+     },
+     "over_body": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.05
+     }
+    }
+   },
+   "hold_s": {
+    "answered": 40,
+    "of_placements": 60,
+    "videos": 9,
+    "values": {
+     "1.6": {
+      "n": 3,
+      "videos": 2,
+      "share": 0.075
+     },
+     "1.5": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.05
+     },
+     "1.3": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.05
+     },
+     "0.6": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.05
+     },
+     "4.6": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.05
+     },
+     "0.8": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.05
+     },
+     "1.2": {
+      "n": 2,
+      "videos": 2,
+      "share": 0.05
+     },
+     "1.367": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.05
+     },
+     "1.233": {
+      "n": 2,
+      "videos": 1,
+      "share": 0.05
+     },
+     "0.03": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "3.5": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "2.8": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "3.4": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "1.0": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "5.8": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "1.8": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "0.9": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "1.334": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "2.894": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "3.378": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "4.7": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "9.635": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "0.2": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "1.467": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "2.067": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "2.2": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "4.633": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "5.0": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "2.467": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     },
+     "0.466": {
+      "n": 1,
+      "videos": 1,
+      "share": 0.025
+     }
+    }
+   }
+  }
+ }
+}
