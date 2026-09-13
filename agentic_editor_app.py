@@ -13085,6 +13085,22 @@ def edit(source_key: str, brief: str,
     print(f"  SOURCE FPS      : {_fstate}  declared={_fdec}  actual={_fact}"
           + ("   <-- the two disagree; neither describes the file alone"
              if _fstate == "VFR" else ""), flush=True)
+    # MECHANICAL, ONCE, AND BOUND UNCONDITIONALLY.
+    #
+    # THIS KILLED ALL FIVE ARMS OF ROUND 66. The assignment was inserted by a
+    # string anchor that matched inside the `else:` branch of the cutaway
+    # conditional below — syntactically valid there, so the file parsed — while
+    # the BEATS block 140 lines further down uses `_stalls` unconditionally.
+    # Every fixture taking the `if` branch reached
+    #     NameError: cannot access free variable '_stalls'
+    # and the round collected 5/5 ok=False, no signature, zero placements.
+    #
+    # pyflakes saw an assignment and a use in one function and was satisfied;
+    # 108 smokes passed because none of them drives edit(); the import-time
+    # asserts execute no function body. A conditionally-bound local read
+    # unconditionally is invisible to every check this lane has — which is why
+    # smoke_no_conditional_binding now exists.
+    _stalls = beat_stalls(words, _beats)
     # ── CUTAWAY CANDIDATES, DERIVED AND OFFERED ─────────────────────────────
     #
     # ROUND 50 TESTED THE PREMISE AND THE BLOCK WAS NOT ENOUGH. With thirteen
@@ -13116,9 +13132,6 @@ def edit(source_key: str, brief: str,
         # ABSENT AND EMPTY SAY WHICH. "No candidates because the beats are all
         # alike" is a different answer from "no candidates because vision did
         # not arrive", and the agent must not read one as the other.
-        # MECHANICAL, ONCE, BEFORE THE BLOCK IS BUILT. Per-clip normalised
-        # so a slow speaker is not flagged and a fast one is not excused.
-        _stalls = beat_stalls(words, _beats)
         _cutaway_block = (
             f"CUTAWAY CANDIDATES — {_cw_state}: {_cw_why}. Rule cutaway only if "
             f"you can name a source timestamp yourself; otherwise this source "
