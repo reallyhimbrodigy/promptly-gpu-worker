@@ -76,6 +76,46 @@ app = modal.App("agentic-editor")
 # than an agent one — worth separating in the ledger.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _KNOWLEDGE_DIR = os.path.join(_HERE, "knowledge")
+# THE MOUNT POINT IS NOT THE SOURCE PATH, AND SIX READERS ASSUMED IT WAS.
+# `add_local_dir(_KNOWLEDGE_DIR, "/knowledge")` puts the documents at
+# /knowledge in the container, while _KNOWLEDGE_DIR resolves relative to the
+# APP FILE — /root/knowledge once Modal mounts it. On this laptop the two are
+# the same directory, so every local check, every import-time cert and all 112
+# smokes pass; in the container the second does not exist.
+#
+# Round 68's first arm died on exactly that: `cannot read 06_emphasis_zoom.md:
+# [Errno 2] ... '/root/knowledge/06_emphasis_zoom.md'`, raised at IMPORT by the
+# zoom catalogue's own FAILED state — the guard working exactly as written, on
+# a path that had never been executed anywhere.
+#
+# THE SIX READERS CAME IN WITH THE MERGE and this lane had three uses of
+# _KNOWLEDGE_DIR before it: the definition, the mount, and one resolver that
+# already tried both paths. The merge added six more that try one. So the
+# craft blocks those readers build — the cut corpus craft, the zoom arc jobs,
+# the family craft — have never executed in any container on either lane.
+#
+# One resolver, and a cert below that forbids constructing the path anywhere
+# else. The mount path is tried FIRST because that is the only one that exists
+# where the code actually runs.
+def knowledge_doc(doc, dirs=None):
+    """(text, path) for one knowledge document, or (None, tried) if absent.
+
+    Tried in order: the CONTAINER MOUNT, then the path beside this file. Never
+    raises — callers own the ABSENT/FAILED distinction and several of them must
+    keep reporting it as a state rather than an exception.
+    """
+    _tried = []
+    for _d in (dirs if dirs is not None else ("/knowledge", _KNOWLEDGE_DIR)):
+        _p = os.path.join(_d, doc)
+        _tried.append(_p)
+        if os.path.isfile(_p):
+            try:
+                return open(_p, encoding="utf-8").read(), _p
+            except OSError:
+                continue
+    return None, " or ".join(_tried)
+
+
 
 # THE CLAIM INDEX IS RETIRED (2026-09-09). It parsed a `Claim:` line for each
 # of the 29 components out of knowledge/05_motion_graphics.md at import, and fed
@@ -356,9 +396,11 @@ def mg_conditions(path=None):
     rule after the hand-copied asset tables.
     """
     import re as _re
-    _p = path or os.path.join(_KNOWLEDGE_DIR, "05_motion_graphics.md")
+    _txt, _p = ((open(path, encoding="utf-8").read(), path) if path
+                else knowledge_doc("05_motion_graphics.md"))
     try:
-        _txt = open(_p, encoding="utf-8").read()
+        if _txt is None:
+            raise OSError("not found at %s" % _p)
     except OSError as _e:
         return ("FAILED", {}, "cannot read the catalogue: %s" % _e)
     _heads = [(m.start(), m.group(1).strip())
@@ -447,7 +489,9 @@ def knowledge_reach(doc_dir=None, surface=None):
     """
     import json as _json
     import re as _re
-    _dir = doc_dir or _KNOWLEDGE_DIR
+    # doc_dir stays honoured for tests; otherwise BOTH candidate roots.
+    _dirs = [doc_dir] if doc_dir else ["/knowledge", _KNOWLEDGE_DIR]
+    _dir = next((_d for _d in _dirs if os.path.isdir(_d)), _dirs[-1])
     if surface is None:
         try:
             _src = open(os.path.abspath(__file__), encoding="utf-8").read()
@@ -498,11 +542,9 @@ def catalogue_bullets(doc, pattern=r"^\s*•\s*([a-z_]+)\s*→\s*(.+)$"):
     this is fixing.
     """
     import re as _re
-    _p = os.path.join(_KNOWLEDGE_DIR, doc)
-    try:
-        _txt = open(_p, encoding="utf-8").read()
-    except OSError as _e:
-        return ("FAILED", {}, "cannot read %s: %s" % (doc, _e))
+    _txt, _p = knowledge_doc(doc)
+    if _txt is None:
+        return ("FAILED", {}, "cannot read %s: tried %s" % (doc, _p))
     _out = {}
     for _m in _re.finditer(pattern, _txt, _re.M):
         _k, _v = _m.group(1), _m.group(2).strip()
@@ -550,10 +592,9 @@ def mask_zoom_job(doc="06_emphasis_zoom.md"):
     evidence available that the rule is real and that neither is invented.
     """
     import re as _re
-    try:
-        _txt = open(os.path.join(_KNOWLEDGE_DIR, doc), encoding="utf-8").read()
-    except OSError as _e:
-        return ("FAILED", (), "cannot read %s: %s" % (doc, _e))
+    _txt, _p = knowledge_doc(doc)
+    if _txt is None:
+        return ("FAILED", (), "cannot read %s: tried %s" % (doc, _p))
     _m = _re.search(r"MASK zooms are functional: ([^.]+\.)", _txt)
     _c = _re.search(r"([a-z_]+)/([a-z_]+) claims exist for exactly this job", _txt)
     if not _m or not _c:
@@ -592,10 +633,9 @@ def arc_rules(anchors=_ARC_RULE_ANCHORS):
     import re as _re
     _out, _missing = [], []
     for _doc, _anchor in anchors:
-        try:
-            _txt = open(os.path.join(_KNOWLEDGE_DIR, _doc), encoding="utf-8").read()
-        except OSError:
-            _missing.append("%s (unreadable)" % _doc)
+        _txt, _p = knowledge_doc(_doc)
+        if _txt is None:
+            _missing.append("%s (unreadable: tried %s)" % (_doc, _p))
             continue
         _i = _txt.find(_anchor)
         if _i < 0:
@@ -878,10 +918,9 @@ def component_selection_arrows(doc="05_motion_graphics.md", min_arrows=20):
     entries would read as a catalogue with three selectable components.
     """
     import re as _re
-    try:
-        _txt = open(os.path.join(_KNOWLEDGE_DIR, doc), encoding="utf-8").read()
-    except OSError as _e:
-        return ("FAILED", [], "cannot read %s: %s" % (doc, _e))
+    _txt, _p = knowledge_doc(doc)
+    if _txt is None:
+        return ("FAILED", [], "cannot read %s: tried %s" % (doc, _p))
     _pat = _re.compile(r"([^.\n→*•]{6,70}?)\s*→\s*([A-Z][A-Za-z]+)")
     _out, _seen = [], set()
     for _m in _pat.finditer(_txt):
@@ -10848,6 +10887,70 @@ def _assert_no_orphaned_demand(module_src: str) -> None:
             f"placement.")
 
 
+def _assert_one_knowledge_resolver(module_src: str) -> None:
+    """No reader builds a knowledge path of its own. LOCAL-GREEN IS NOT PROOF.
+
+    THE CLASS. `_KNOWLEDGE_DIR` resolves beside the app file; the mount puts
+    the same documents at `/knowledge`. On a laptop those are one directory, so
+    a reader that uses only `_KNOWLEDGE_DIR` is indistinguishable from a correct
+    one — by every cert, every smoke and every local import. In the container
+    they are different, and one of them does not exist.
+
+    That is the deploy-green/cert-green split applied to a PATH, and it is why
+    this check is a shape rule rather than a behaviour test: the behaviour
+    cannot be observed where the check runs. A container round is the only
+    thing that proves the mount path is right; this only stops the next reader
+    from being written with one path.
+
+    TWO RULES. `os.path.join(_KNOWLEDGE_DIR, ...)` may appear only inside
+    `knowledge_doc`, and any candidate list naming `_KNOWLEDGE_DIR` must also
+    name the mount, so a reader that takes an explicit dirs= argument still
+    gets both.
+    """
+    import ast as _ast
+    if not module_src:
+        raise AssertionError(
+            "_assert_one_knowledge_resolver got no module source: the check is "
+            "ABSENT, not passing")
+    _tree2 = _ast.parse(module_src)
+    _resolver = next((_n for _n in _tree2.body
+                      if isinstance(_n, _ast.FunctionDef)
+                      and _n.name == "knowledge_doc"), None)
+    if _resolver is None:
+        raise AssertionError(
+            "knowledge_doc is gone — every reader is building its own path "
+            "again, and on this machine that looks identical to working")
+    _inside = {id(_n) for _n in _ast.walk(_resolver)}
+    _rogue = []
+    for _n in _ast.walk(_tree2):
+        if (isinstance(_n, _ast.Call)
+                and "os.path.join" in _ast.unparse(_n.func)
+                and _n.args
+                and isinstance(_n.args[0], _ast.Name)
+                and _n.args[0].id == "_KNOWLEDGE_DIR"
+                and id(_n) not in _inside):
+            _rogue.append(_n.lineno)
+    if _rogue:
+        raise AssertionError(
+            f"knowledge paths are built outside knowledge_doc at lines "
+            f"{_rogue} — _KNOWLEDGE_DIR is the SOURCE path and the container "
+            f"mounts the documents at /knowledge, so these resolve to a "
+            f"directory that exists on this machine and nowhere the code runs")
+    _halfsets = []
+    for _n in _ast.walk(_tree2):
+        if isinstance(_n, (_ast.List, _ast.Tuple)):
+            _names = {_e.id for _e in _n.elts if isinstance(_e, _ast.Name)}
+            _consts = {_e.value for _e in _n.elts
+                       if isinstance(_e, _ast.Constant)}
+            if "_KNOWLEDGE_DIR" in _names and "/knowledge" not in _consts:
+                _halfsets.append(_n.lineno)
+    if _halfsets:
+        raise AssertionError(
+            f"candidate lists at lines {_halfsets} name _KNOWLEDGE_DIR without "
+            f"the /knowledge mount — half a resolver reads correctly here and "
+            f"finds nothing in the container")
+
+
 def _assert_no_shadowed_definitions(module_src: str) -> None:
     """No top-level name is defined twice. The merge class, RED-proven by a merge.
 
@@ -11190,6 +11293,11 @@ _SYNCED_VERDICT_DESCRIPTIONS = _sync_verdict_descriptions()
 # a silent drop costs one placement. Raised by Builder-2 from their own lane.
 # ONE DEFINITION PER NAME. Earned by this merge: seven functions arrived twice
 # and every name-based cert read the copy that does not run.
+# ONE KNOWLEDGE RESOLVER. The merge added six readers that build the path from
+# the SOURCE directory; the container mounts the documents somewhere else, and
+# nothing local can tell the difference.
+_assert_one_knowledge_resolver(open(__file__).read()
+                               if os.path.exists(__file__) else "")
 _assert_no_shadowed_definitions(open(__file__).read()
                                 if os.path.exists(__file__) else "")
 _assert_no_orphaned_demand(open(__file__).read()
