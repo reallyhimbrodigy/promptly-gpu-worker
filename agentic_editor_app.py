@@ -693,12 +693,23 @@ def sfx_moments(doc=None):
     Extracted so the agent is offered the predicate rather than a table of
     names, and so a catalogue edit cannot leave the prompt behind.
     """
-    import pathlib as _pl
-    _f = _pl.Path(doc or "knowledge/07_sound_effects.md")
-    if not _f.is_file():
+    # THE SEVENTH READER, AND THE ONLY ONE THAT WAS CWD-RELATIVE.
+    # `Path("knowledge/07_sound_effects.md")` resolves against the working
+    # directory, so it reads on a laptop run from the repo and returns {} in
+    # the container — where the documents are at /knowledge and the process
+    # starts somewhere else. _assert_one_knowledge_resolver did not catch it
+    # because it forbids joining _KNOWLEDGE_DIR, and this never mentioned
+    # _KNOWLEDGE_DIR; the rule has been widened to the relative form too.
+    if doc:
+        import pathlib as _pl
+        _f = _pl.Path(doc)
+        _txt = _f.read_text(errors="replace") if _f.is_file() else None
+    else:
+        _txt, _ = knowledge_doc("07_sound_effects.md")
+    if not _txt:
         return {}
     _out = {}
-    for _line in _f.read_text(errors="replace").splitlines():
+    for _line in _txt.splitlines():
         _m = re.match(r"\*\*([a-z0-9-]+)\*\*\s+—\s+(.*)", _line.strip())
         if not _m:
             continue
@@ -752,8 +763,18 @@ def enum_craft(doc_dir=None, values=None):
     — which on this lane is a retired family, so admitting it here would wire
     craft for something the pipeline refuses to build.
     """
+    # AN EIGHTH SITE, FOUND BY BUILDER-2 ON THEIR OWN TREE AFTER I SENT THEM
+    # SEVEN. `Path("knowledge")` is CWD-relative — a THIRD root, neither the
+    # mount nor the path beside the app, but wherever the process was started.
+    # It reads on a laptop run from the repo and returns {} everywhere else,
+    # and `_craft_block` then renders "the catalogue states no rule for this
+    # value — that is silence, not permission" for every value. A named absence
+    # reporting a MOUNT ERROR as a CORPUS GAP, in the instrument built to stop
+    # exactly that.
     import re as _re, pathlib as _pl
-    _dir = _pl.Path(doc_dir or "knowledge")
+    _roots = ([_pl.Path(doc_dir)] if doc_dir
+              else [_pl.Path("/knowledge"), _pl.Path(_KNOWLEDGE_DIR)])
+    _dir = next((_r for _r in _roots if _r.is_dir()), _roots[-1])
     # NO DEFAULT FROM THE FAMILY CONSTANTS. This runs BEFORE them — the tool
     # schema is a literal evaluated at import — so the caller names the values.
     # A silent empty default here would wire nothing and read as "the corpus
@@ -3615,14 +3636,34 @@ KNOWLEDGE_TOOLS = [{
                                  # is derivable and IS derived. These four are
                                  # not: words do not exist until written, and
                                  # what to SHOW is a semantic choice.
-                                 "sfx_name": {"type": "string",
-                                     "enum": sorted(SFX_MOMENTS) or None,
+                                 # THE KEY IS OMITTED WHEN THE CATALOGUE IS
+                                 # ABSENT, never set to null. This read
+                                 # `sorted(SFX_MOMENTS) or None`, so an
+                                 # unreadable catalogue produced `"enum":
+                                 # null` — not a valid JSON Schema, and the
+                                 # API refuses the WHOLE REQUEST:
+                                 # `tools.10.custom.input_schema: JSON schema
+                                 # is invalid`, 400, before a single tool ran.
+                                 # Round 69 lost all five arms to it, each
+                                 # burning one turn and $0 of output.
+                                 #
+                                 # The `or None` was written as a degradation
+                                 # — sfx_name_teach() already returns a named
+                                 # absence for the description — but a
+                                 # degradation that emits an ILLEGAL VALUE is
+                                 # not a degradation, it is a total outage
+                                 # wearing one. An absent enum means "any
+                                 # string"; a null enum means "no request".
+                                 "sfx_name": dict(
+                                     {"enum": sorted(SFX_MOMENTS)}
+                                     if SFX_MOMENTS else {},
+                                     **{"type": "string",
                                      "description": "WHICH sound. Pick by the "
                                                     "MOMENT in the footage, not "
                                                     "by the beat's role — role "
                                                     "is where it sits, the "
                                                     "moment is what happens."
-                                                    + sfx_name_teach()},
+                                                    + sfx_name_teach()}),
                                  "card_hero": {"type": "string",
                                      # REQUIRED, and it says so now. Removing
                                      # card_type and card_props made this the
@@ -10887,6 +10928,81 @@ def _assert_no_orphaned_demand(module_src: str) -> None:
             f"placement.")
 
 
+def _assert_tool_schemas_are_valid() -> None:
+    """Every tool schema the agent is offered is legal JSON Schema. DRIVEN.
+
+    ROUND 69 LOST ALL FIVE ARMS TO ONE `null`. `sfx_name` declared
+    `"enum": sorted(SFX_MOMENTS) or None`; the sound catalogue was read from a
+    CWD-RELATIVE path, so it came back empty in the container, and the enum
+    became `null`. The API refuses the WHOLE REQUEST for one malformed tool —
+    `tools.10.custom.input_schema: JSON schema is invalid` — so no tool ran, on
+    any fixture. One turn each, $0 of output, five arms.
+
+    THE SHAPE IS THE POINT. `or None` was written as a graceful degradation and
+    sfx_name_teach() already returns a named absence for the description. But a
+    degradation that emits an ILLEGAL VALUE is a total outage wearing one, and
+    it is the absence-as-value family in its most expensive form: the absence
+    was handled where a human reads (the description) and rendered raw where a
+    machine parses (the schema).
+
+    CHECKED AT IMPORT, in the container, against the SHIPPED tool list — not a
+    copy, and not a source pattern. A schema is data; validate the data.
+    """
+    # A PROPERTY NAME IS NOT A KEYWORD, and this check caught itself on that
+    # the first time it ran: `render_components` declares a property called
+    # `type`, whose value is a schema (a dict), and a walker that reads every
+    # key named "type" as the JSON Schema keyword reported the tool as
+    # malformed. `enum`, `items` and `properties` are all legal property names
+    # too. So the walk tracks whether it is standing in a MAP OF NAMES —
+    # `properties` — and interprets keywords only outside one.
+    _NAME_MAPS = ("properties", "$defs", "definitions", "patternProperties")
+
+    def _bad(node, path, in_names=False):
+        _out = []
+        if node is None:
+            return [path + " is null"]
+        if isinstance(node, dict):
+            for _k, _v in node.items():
+                if _v is None:
+                    _out.append(f"{path}.{_k} is null")
+                    continue
+                if not in_names:
+                    if _k == "enum":
+                        if not isinstance(_v, (list, tuple)):
+                            _out.append(f"{path}.enum is "
+                                        f"{type(_v).__name__}, not an array")
+                        elif not _v:
+                            _out.append(f"{path}.enum is EMPTY — draft "
+                                        f"2020-12 wants at least one value, "
+                                        f"and an empty choice list is an "
+                                        f"absence, not a choice")
+                    elif _k == "type" and not isinstance(_v, (str, list)):
+                        _out.append(f"{path}.type is {type(_v).__name__}")
+                _out += _bad(_v, f"{path}.{_k}",
+                             in_names=(not in_names and _k in _NAME_MAPS))
+        elif isinstance(node, (list, tuple)):
+            for _i, _v in enumerate(node):
+                _out += _bad(_v, f"{path}[{_i}]", in_names=False)
+        return _out
+
+    _all = list(TOOLS) + list(KNOWLEDGE_TOOLS)
+    if not _all:
+        raise AssertionError(
+            "no tools at all — this check is ABSENT, not passing")
+    _faults = []
+    for _t in _all:
+        _s = _t.get("input_schema")
+        if not isinstance(_s, dict) or _s.get("type") != "object":
+            _faults.append(f"{_t.get('name')}: input_schema is not an object "
+                           f"schema")
+            continue
+        _faults += _bad(_s, _t.get("name"))
+    if _faults:
+        raise AssertionError(
+            "tool schemas the API will refuse, killing every arm of the round "
+            "before a tool runs: " + "; ".join(_faults[:8]))
+
+
 def _assert_one_knowledge_resolver(module_src: str) -> None:
     """No reader builds a knowledge path of its own. LOCAL-GREEN IS NOT PROOF.
 
@@ -10936,6 +11052,43 @@ def _assert_one_knowledge_resolver(module_src: str) -> None:
             f"{_rogue} — _KNOWLEDGE_DIR is the SOURCE path and the container "
             f"mounts the documents at /knowledge, so these resolve to a "
             f"directory that exists on this machine and nowhere the code runs")
+    # AND THE RELATIVE FORM, which is how the seventh reader got past this.
+    # `Path("knowledge/07_sound_effects.md")` never mentions _KNOWLEDGE_DIR, so
+    # the two rules above saw nothing. A CWD-relative knowledge path is worse
+    # than the source-path form: it depends on where the process was started,
+    # so it reads on a laptop run from the repo and returns nothing anywhere
+    # else — including a laptop run from another directory.
+    # BOTH RELATIVE FORMS, AND AS A ROOT RATHER THAN AS A WORD. Three versions
+    # of this leg, each wrong in a way the next names:
+    #   v1 required a ".md" suffix, so `Path("knowledge")` — the bare DIRECTORY,
+    #      the same defect one level up — passed while it sat in enum_craft.
+    #   v2 matched the bare string anywhere, and fired on `os.path.join(_HERE,
+    #      "knowledge")`, which is the legitimate DEFINITION of the source root,
+    #      and on this rule's own literal. A check that fails on its subject's
+    #      correct form is not a check, it is a style rule with a bug.
+    #   v3 asks the structural question: is a relative "knowledge..." string the
+    #      ROOT of a path construction — the first argument of os.path.join, or
+    #      the argument to Path? Appending it to _HERE is not.
+    _rel = []
+    for _n in _ast.walk(_tree2):
+        if not (isinstance(_n, _ast.Call) and _n.args):
+            continue
+        _fn = _ast.unparse(_n.func)
+        if not (_fn.endswith("Path") or _fn.endswith("os.path.join")
+                or _fn.endswith("path.join")):
+            continue
+        _a0 = _n.args[0]
+        if (isinstance(_a0, _ast.Constant) and isinstance(_a0.value, str)
+                and (_a0.value == "knowledge"
+                     or _a0.value.startswith("knowledge/"))
+                and id(_n) not in _inside):
+            _rel.append(_n.lineno)
+    if _rel:
+        raise AssertionError(
+            f"CWD-relative knowledge paths at lines {_rel} — these resolve "
+            f"against the working directory, which is the repo on a laptop and "
+            f"something else wherever the code runs. Read through "
+            f"knowledge_doc, which tries the mount first")
     _halfsets = []
     for _n in _ast.walk(_tree2):
         if isinstance(_n, (_ast.List, _ast.Tuple)):
@@ -11296,6 +11449,9 @@ _SYNCED_VERDICT_DESCRIPTIONS = _sync_verdict_descriptions()
 # ONE KNOWLEDGE RESOLVER. The merge added six readers that build the path from
 # the SOURCE directory; the container mounts the documents somewhere else, and
 # nothing local can tell the difference.
+# EVERY TOOL SCHEMA IS LEGAL. One null enum refuses the whole request; round 69
+# lost five arms to it and the ledger could only say "model_call_failed".
+_assert_tool_schemas_are_valid()
 _assert_one_knowledge_resolver(open(__file__).read()
                                if os.path.exists(__file__) else "")
 _assert_no_shadowed_definitions(open(__file__).read()

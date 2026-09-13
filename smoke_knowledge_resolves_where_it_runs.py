@@ -108,6 +108,45 @@ check("it fires when the resolver is gone entirely",
                            "def _renamed(doc, dirs=None):", 1)))
 check("empty source is ABSENT, not passing", _raises(""))
 
+# ── 5. THE RELATIVE ROOT — AN EIGHTH SITE, AND BUILDER-2 FOUND IT ───────────
+# After I sent them six reader sites they checked their own tree and came back
+# with a seventh (`sfx_moments`, `Path("knowledge/07_sound_effects.md")`) and
+# the shape behind it: a CWD-relative path is a THIRD root, neither the mount
+# nor the path beside the app, but wherever the process was started. It reads
+# on a laptop run from the repo and nowhere else — including a laptop run from
+# another directory. `enum_craft` had it too, as a bare `Path("knowledge")`,
+# which my first version of this rule passed because it required a `.md`
+# suffix. A rule that matches one spelling of a class has learned the spelling.
+check("it fires on a CWD-relative knowledge FILE",
+      _raises(_src.replace("def knowledge_doc(doc, dirs=None):",
+                           "def _r():\n    import pathlib as _p\n"
+                           "    return _p.Path('knowledge/07_sound_effects.md').read_text()\n"
+                           "\n\ndef knowledge_doc(doc, dirs=None):", 1)))
+check("and on a CWD-relative knowledge DIRECTORY, which the .md-suffix version "
+      "of this rule let through while it sat in enum_craft",
+      _raises(_src.replace("def knowledge_doc(doc, dirs=None):",
+                           "def _r2():\n    import pathlib as _p\n"
+                           "    return list(_p.Path('knowledge').glob('*.md'))\n"
+                           "\n\ndef knowledge_doc(doc, dirs=None):", 1)))
+# AND IT MUST NOT FIRE ON THE DEFINITION ITSELF. `os.path.join(_HERE,
+# "knowledge")` IS the source root — appending the word to an absolute base is
+# correct, and a version of this rule that matched the bare string anywhere
+# failed on its own subject's correct form.
+check("it does NOT fire on os.path.join(_HERE, \"knowledge\") — that is the "
+      "definition of the source root, not a relative read",
+      not _raises(_src))
+
+# ── 6. THE CRAFT BLOCKS ACTUALLY BUILD ──────────────────────────────────────
+# The readers exist to carry the reference corpus into the prompt. A resolver
+# that resolves and a craft block that is empty are the same outcome for the
+# agent, so check the product, not the plumbing.
+check("the cut corpus craft is non-empty", len(A.CUT_CORPUS_CRAFT) > 200,
+      f"{len(A.CUT_CORPUS_CRAFT)} chars")
+check("the sound catalogue read all sixteen predicates",
+      len(A.SFX_MOMENTS) == 16, f"{len(A.SFX_MOMENTS)}")
+check("the zoom arc jobs were read", bool(A.ZOOM_ARC_JOBS),
+      f"{sorted(A.ZOOM_ARC_JOBS)[:4]}")
+
 if fails:
     print("KNOWLEDGE-RESOLVES: FAIL")
     for f in fails:
