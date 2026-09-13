@@ -103,6 +103,13 @@ JSON""",
 # rather than superseded. The Dict is seeded from the Secret once and is the
 # source of truth afterwards.
 TOKENS = modal.Dict.from_name("chatcut-tokens", create_if_missing=True)
+# RESULTS OUTLIVE THE LAUNCHER. Two runs were lost to "Received a cancellation
+# signal" — CLIENT side, the round-58 class, and setsid + --detach did not stop
+# it. The lesson this repo already wrote down is that `.spawn()`ed work outlives
+# the local process, so the RESULT must land somewhere durable rather than being
+# returned to a client that may not be there. A job whose answer dies with the
+# launcher is a job that did the work and reported nothing.
+RESULTS = modal.Dict.from_name("chatcut-results", create_if_missing=True)
 
 
 def _access_token():
@@ -209,6 +216,92 @@ def preflight(access_token):
     return len(names)
 
 
+def classify_stream(path):
+    """Where the turns actually go. Reads the stream-json transcript. PURE-ish.
+
+    93 TURNS HAS A SHAPE AND NOBODY KNEW IT. Re-reading state, retrying
+    malformed calls, verifying frame by frame, or genuinely deciding 93 times
+    are FOUR DIFFERENT FIXES, and a total that does not distinguish them buys
+    nothing. So every tool call is classified, not counted.
+
+    THE FAMILY THIS SERVES, named because all four harness fixes on the first
+    run were one class: SOMETHING THAT SUCCEEDS WHILE DOING NOTHING. curl wrote
+    a 483-byte redirect body and exited 0. A token rotation was warned about and
+    discarded. Three plugin pieces looked sufficient and the fourth was missing.
+    A turn count is the same shape one level up: 93 is a number that reports
+    activity and says nothing about whether any of it moved the edit forward.
+    """
+    import collections
+    calls, errors, turns = [], 0, 0
+    by_tool = collections.Counter()
+    per_turn = collections.Counter()
+    pending = {}
+    with open(path, encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                ev = json.loads(line)
+            except Exception:                                     # noqa: BLE001
+                continue
+            t = ev.get("type")
+            if t == "assistant":
+                turns += 1
+                for blk in (ev.get("message") or {}).get("content") or []:
+                    if blk.get("type") == "tool_use":
+                        nm = blk.get("name", "?")
+                        by_tool[nm] += 1
+                        per_turn[turns] += 1
+                        pending[blk.get("id")] = nm
+                        _in = json.dumps(blk.get("input") or {})[:110]
+                        calls.append({"turn": turns, "tool": nm, "in": _in,
+                                      "err": None})
+            elif t == "user":
+                for blk in (ev.get("message") or {}).get("content") or []:
+                    if blk.get("type") == "tool_result":
+                        nm = pending.get(blk.get("tool_use_id"))
+                        bad = bool(blk.get("is_error"))
+                        if bad:
+                            errors += 1
+                        for c in reversed(calls):
+                            if c["tool"] == nm and c["err"] is None:
+                                c["err"] = bad
+                                break
+    # READ vs WRITE vs VERIFY, because that is what tells the four fixes apart.
+    READ = {"read_project", "browse_assets", "inspect_asset", "inspect_item",
+            "read_script", "read_captions", "find_transcript", "list_projects",
+            "browse_library", "manage_timelines", "edit_track", "search_fonts",
+            "track_progress", "track_export"}
+    VERIFY = {"preview_timeline"}
+    buckets = collections.Counter()
+    for c in calls:
+        base = c["tool"].split("__")[-1]
+        if base in VERIFY:
+            buckets["verify"] += 1
+        elif base in READ:
+            buckets["read"] += 1
+        elif c["tool"].startswith("mcp__"):
+            buckets["write"] += 1
+        else:
+            buckets["local"] += 1
+    # REPEATS: the same tool called with a byte-identical argument set is a
+    # re-read of state the agent already had, not a new decision.
+    seen, repeats = set(), 0
+    for c in calls:
+        k = (c["tool"], c["in"])
+        if k in seen:
+            repeats += 1
+        seen.add(k)
+    return {"assistant_turns": turns, "tool_calls": len(calls),
+            "tool_errors": errors, "identical_repeats": repeats,
+            "buckets": dict(buckets),
+            "by_tool": by_tool.most_common(20),
+            "turns_with_no_tool": sum(1 for i in range(1, turns + 1)
+                                      if per_turn[i] == 0),
+            "calls": calls}
+
+
 CRAFT_CONTEXT = """\
 You are editing a short vertical video for Promptly, through the ChatCut MCP
 tools. You own the judgment; ChatCut owns the timeline and the render.
@@ -250,7 +343,8 @@ Report what you cut and why, what you placed and where, and the render id.
 @app.function(image=IMG, timeout=1800,
               secrets=[modal.Secret.from_name("chatcut-oauth"),
                        modal.Secret.from_name("anthropic-api-key")])
-def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5"):
+def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
+         run_id: str = "latest"):
     t0 = time.time()
     marks = {}
 
@@ -302,7 +396,11 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5"):
     prompt = (f"{CRAFT_CONTEXT}\n\nTHE CLIP: /work/source.mp4\n"
               f"THE BRIEF: {brief}\n")
     r = subprocess.run(
-        ["claude", "-p", prompt, "--output-format", "json",
+        ["claude", "-p", prompt,
+         # STREAM-JSON, because `json` returns only the final result and the
+         # ordered tool calls are then unrecoverable. That gap is what made the
+         # first run's 93 turns a number instead of a diagnosis.
+         "--output-format", "stream-json", "--verbose",
          "--mcp-config", "/work/mcp.json",
          # NOT bypassPermissions. It maps to --dangerously-skip-permissions,
          # which REFUSES to run as root, and every Modal container is root:
@@ -314,17 +412,33 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5"):
          "--model", model],
         cwd="/work", capture_output=True, text=True, timeout=1500)
     mark("agent")
+    with open("/work/stream.jsonl", "w") as fh:
+        fh.write(r.stdout or "")
+    try:
+        shape = classify_stream("/work/stream.jsonl")
+    except Exception as e:                                        # noqa: BLE001
+        shape = {"error": f"classifier failed: {type(e).__name__}: {e}"}
 
     out = {"marks": marks, "tools": n_tools, "rc": r.returncode,
-           "stdout_tail": (r.stdout or "")[-4000:],
+           "shape": shape,
            "stderr_tail": (r.stderr or "")[-2000:]}
     out["wall_s"] = round(time.time() - t0, 2)
+    RESULTS[run_id] = out
+    print(f"  RESULT PERSISTED: chatcut-results[{run_id}]", flush=True)
     return out
 
 
 @app.local_entrypoint()
-def main(clip_url: str = "", brief: str = "Cut this tighter and add one title."):
+def main(clip_url: str = "", brief: str = "Cut this tighter and add one title.",
+         run_id: str = "", wait: bool = False):
     if not clip_url:
         raise SystemExit("pass --clip-url")
-    res = edit.remote(clip_url, brief)
-    print(json.dumps(res, indent=1)[:6000])
+    rid = run_id or f"run-{int(time.time())}"
+    if wait:
+        print(json.dumps(edit.remote(clip_url, brief, run_id=rid), indent=1)[:6000])
+        return
+    # SPAWN, DO NOT WAIT. The result lands in the chatcut-results Dict, so the
+    # answer survives a client that is signalled, disconnected, or simply gone.
+    call = edit.spawn(clip_url, brief, run_id=rid)
+    print(f"SPAWNED run_id={rid} call={call.object_id}")
+    print(f"read it with:  modal run chatcut_read_result.py --run-id {rid}")
