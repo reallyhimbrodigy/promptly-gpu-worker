@@ -5557,8 +5557,22 @@ def stream_length_verdict(video_s, audio_s, expected_s=None, fps=30.0, spans=Non
     return ("TRUNCATED" if worst > tol else "OK"), detail
 
 
-def geometry_normalise_filter(src_w, src_h, out_w=1080, out_h=1920):
+def delivery_geometry_chain(src_w, src_h, out_w=1080, out_h=1920):
     """(filter, mode, crop_loss) to bring a source to the delivery geometry.
+
+    RENAMED FROM `geometry_normalise_filter` 2026-09-12 on Zac's merge ruling.
+    lane/agentic-editor has a function of that name with a DIFFERENT CONTRACT:
+    it takes a `framing` argument and returns a semicolon-separated LABELLED
+    graph carrying {IN}/{OUT}/{i} placeholders. This one returns a PLAIN COMMA
+    CHAIN with no labels, and its caller substitutes it between explicit
+    [cv]/[outv] in a semicolon-joined graph.
+
+    Two functions, one name, two contracts - the collision that cost that lane
+    five 'Too many inputs specified for the scale filter' when the labelled
+    graph was comma-appended unsubstituted. Theirs is the one rounds exercise,
+    so theirs keeps the name and this one takes a name that says what it
+    returns. Nothing here changes behaviour; it removes a merge conflict whose
+    silent resolution would swap one contract for the other.
 
     MODULE LEVEL AND PURE so a test can call it with real dimensions.
 
@@ -10255,7 +10269,7 @@ def edit(source_key: str, brief: str,
         # the downstream name so nothing else has to know this happened.
         _vs = (meta.get("streams") or [{}])
         _v0 = next((_x for _x in _vs if _x.get("codec_type") == "video"), {})
-        _gfilt, _gmode, _gloss = geometry_normalise_filter(_v0.get("width"),
+        _gfilt, _gmode, _gloss = delivery_geometry_chain(_v0.get("width"),
                                                            _v0.get("height"))
         if _gfilt:
             parts.append(f"{cat}concat=n={n}:v=1:a=1[cv][outa]")

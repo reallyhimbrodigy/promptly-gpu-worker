@@ -35,11 +35,26 @@ ok(fams is not None, "_TREATMENT_FAMILIES is gone")
 # SIX now: `transition` joined when the seam-dressing family was wired. The
 # count is asserted so a family cannot quietly leave, and the MEMBERS are
 # asserted so it cannot quietly change identity either.
-ok(set(fams or []) == {"card", "text", "sfx", "zoom", "transition", "none"},
-   f"the treatment families are {sorted(fams or [])}, not the six expected — "
-   f"a family that leaves this list stops being rulable while every other "
-   f"surface still mentions it")
-ok("cutaway" not in (fams or []), "cutaway is back in _TREATMENT_FAMILIES")
+# RULED 2026-09-12 (merge into lane/agentic-editor): cutaway STAYS LIVE. It is
+# 47% of Zac's reference beats and the mechanism behind the shot-change gap, and
+# the 0-built this lane cited as evidence for retiring it was measured on the
+# OTHER lane, where cutaway is rulable and the builder was BROKEN (an
+# unsubstituted {IN} read by ffmpeg as a second scale input, fixed there in
+# 64bc104). Each lane read the other's zero as evidence for its own state.
+#
+# So this leg accepts SIX or SEVEN: six on this lane until the merge lands,
+# seven after. The property is unchanged - a family cannot leave the list
+# silently - and the members are still named, so it cannot change identity.
+_SIX = {"card", "text", "sfx", "zoom", "transition", "none"}
+_SEVEN = _SIX | {"cutaway"}
+ok(set(fams or []) in (_SIX, _SEVEN),
+   f"the treatment families are {sorted(fams or [])}, which is neither the six "
+   f"this lane carries nor the seven the merged tree carries - a family that "
+   f"leaves this list stops being rulable while every other surface still "
+   f"mentions it")
+# THE "cutaway is back" LEG IS RETIRED, not weakened: it asserted the opposite
+# of the ruling. A leg that contradicts a decision is worse than no leg.
+ok(True, "(retired 2026-09-12: cutaway stays live by ruling)")
 
 
 ref = _top.get("REFERENCE_PER_25S") or {}
