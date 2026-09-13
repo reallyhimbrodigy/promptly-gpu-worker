@@ -206,6 +206,25 @@ def preflight(access_token):
             f"PREFLIGHT FAILED: MCP returned HTTP {e.code}. The container has "
             f"NO TOOLS. Refusing to run the agent — a toolless run is "
             f"indistinguishable from an agent that chose to do nothing.")
+    # PER-CALL ROUND TRIP, the number nobody had. If ChatCut answers in 400ms
+    # then 15 calls is six seconds and the ceiling is the model; if it answers
+    # in 3s then no amount of call-collapsing saves us and the ceiling is the
+    # network. Measured with the cheapest real read, three times, so one warm
+    # cache or one slow hop does not become the answer.
+    _rt = []
+    for _i in range(3):
+        _s = time.time()
+        try:
+            rpc("tools/call", {"name": "list_projects", "arguments": {"limit": 1}},
+                10 + _i)
+            _rt.append(round((time.time() - _s) * 1000))
+        except Exception:                                         # noqa: BLE001
+            pass
+    if _rt:
+        print("  MCP ROUND TRIP  : MEASURED  %s ms (min %d, median %d)"
+              % (_rt, min(_rt), sorted(_rt)[len(_rt) // 2]), flush=True)
+    else:
+        print("  MCP ROUND TRIP  : ABSENT — could not time a call", flush=True)
     names = [t["name"] for t in (tools.get("result") or {}).get("tools", [])]
     if "create_project" not in names or "submit_export" not in names:
         raise RuntimeError(
@@ -213,7 +232,7 @@ def preflight(access_token):
             f"({len(names)} tools: {names[:8]}). Refusing to run.")
     print(f"  PREFLIGHT       : MEASURED  {len(names)} tools, create_project "
           f"and submit_export present", flush=True)
-    return len(names)
+    return {"n_tools": len(names), "round_trip_ms": _rt}
 
 
 def classify_stream(path):
@@ -320,7 +339,32 @@ decide anything:
   /craft/reference_index.json
                              the annotated reference beats themselves.
 
-HOW TO WORK
+HOW TO WORK — THE LOOP, AND IT IS A LOOP ON PURPOSE
+
+  PLACE EVERYTHING IN ONE BATCH. PREVIEW THE WHOLE TIMELINE ONCE. REVISE IN ONE
+  BATCH. PREVIEW AGAIN. RENDER.
+
+  `edit_item` takes `adds`, `updates` and `deletes` together and commits them
+  atomically — one call places every overlay, card and trim you have decided on.
+  Eleven separate calls to place eleven things is eleven round trips and eleven
+  turns for one decision you already made.
+
+  THE REVIEW PASSES ARE NOT OPTIONAL. The batch is only safe BECAUSE they
+  exist: placing eleven things blind and rendering would be faster and worse.
+  Never skip a preview to save time. If you are short of budget, cut the number
+  of placements, never the number of looks.
+
+  LOOK AT FRAMES IN CONTACT SHEETS, NOT ONE AT A TIME. Reading 25 stills is 25
+  turns. Tile them into ONE image and read that:
+
+    ffmpeg -v error -i /work/source.mp4 -vf \
+      "select='not(mod(n\,NN))',scale=240:-1,tile=5x3" -frames:v 1 /tmp/sheet.png
+
+  One sheet across the whole clip tells you the shots, the burned-in graphics
+  and the free bands. Go to individual frames only for a moment the sheet
+  cannot resolve. The same applies to verification: `preview_timeline` with
+  `viewerFrameCount` returns several composed frames in ONE call.
+
   1. Import the clip, wait for transcription, place it.
   2. Read the transcript with read_script before deciding the cut. The cut is
      what you REMOVE: a false start, a restated point, a run-up that says
@@ -329,15 +373,98 @@ HOW TO WORK
      choosing where anything goes. The frame decides placement, not the
      timing. Footage with burned-in graphics has different free bands than a
      clean talking head.
-  4. Place what the moment needs. Vary size, case and position deliberately —
-     check control_distributions.json for what the references do rather than
-     defaulting to full-size ALL CAPS in one spot.
+  4. Place what the moment needs, ALL IN ONE edit_item BATCH. Vary size, case
+     and position deliberately — the reference shares are in your context.
   5. Verify composed frames before you call it done. A successful tool call is
-     not verification.
+     not verification. Use one preview_timeline call with viewerFrameCount
+     rather than one call per frame.
   6. Export video, h264, 1080p.
+
+A BUDGET, SO THE LOOP STAYS A LOOP: about fifteen ChatCut calls is the shape of
+a good edit here — setup, transcript, one batch, two previews, export. If you
+are heading past thirty, you are working one item at a time; stop and batch.
+This is a budget on ROUND TRIPS, never on placements or on looks.
 
 Report what you cut and why, what you placed and where, and the render id.
 """
+
+
+# THE DOCUMENTS THE AGENT ACTUALLY READ, chosen from the transcript rather than
+# guessed. Run shape-144148 spent four Read calls on exactly these four, plus
+# three python one-liners pulling shares out of control_distributions.json.
+# 55KB of prose is ~14k tokens, cached across every turn of the session — the
+# agent paid a TURN per document to obtain what a cached system prompt hands it
+# for free. The rest of /craft stays mounted for the rare lookup.
+LOADBEARING = ["00_job_and_arc.md", "02_intent_standard.md", "01_cut_pass.md",
+               "04_text_overlays.md"]
+
+# THE TOOLS, NAMED. Nine ToolSearch calls went on discovering a toolset we
+# already know is needed: ChatCut exposes 60 tools so Claude Code defers their
+# schemas. There is no eager-load flag, so the next best thing is to tell the
+# agent exactly which ones to fetch, in ONE call instead of nine.
+NEEDED_TOOLS = [
+    "create_project", "target_project", "list_projects", "import_media",
+    "browse_assets", "inspect_asset", "trigger_transcript", "track_progress",
+    "read_script", "apply_script", "find_transcript", "preview_timeline",
+    "inspect_item", "edit_item", "edit_track", "manage_timelines",
+    "split_item", "smooth_audio", "browse_library", "search_fonts",
+    "create_motion_graphic_from_code", "edit_asset", "edit_captions",
+    "read_captions", "submit_export", "track_export",
+]
+
+
+def control_digest(path="/craft/control_distributions.json"):
+    """The corpus shares as prose, with denominators. DERIVED at job time.
+
+    The agent computed this itself with three python one-liners. Handing it over
+    costs nothing and saves three turns — and it stays DERIVED from the file, so
+    a corpus re-read moves the prompt and no share is ever hand-typed.
+    """
+    try:
+        d = json.load(open(path, encoding="utf-8"))
+    except Exception as e:                                        # noqa: BLE001
+        return f"[control distributions ABSENT ({e}) — no corpus behind these]"
+    out = []
+    for fam in ("text", "card", "cutaway"):
+        f = (d.get("by_family") or {}).get(fam) or {}
+        bits = []
+        for field in ("case", "size", "where"):
+            dd = f.get(field) or {}
+            vals = list((dd.get("values") or {}).items())[:4]
+            if not vals:
+                continue
+            bits.append("%s (%d of %d answered): %s" % (
+                field, dd.get("answered", 0), dd.get("of_placements", 0),
+                ", ".join("%s %d%%" % (k, round(100 * (v.get("share") or 0)))
+                          for k, v in vals)))
+        if bits:
+            out.append("  %s — %d placements over %d videos\n    %s"
+                       % (fam.upper(), f.get("placements", 0),
+                          f.get("videos", 0), "\n    ".join(bits)))
+    return "\n".join(out)
+
+
+def build_system_prompt():
+    """The craft, in the session's context instead of on its to-do list."""
+    parts = [CRAFT_CONTEXT, "\n\n===== THE CRAFT DOCUMENTS =====\n"]
+    for name in LOADBEARING:
+        p = os.path.join("/craft/knowledge", name)
+        try:
+            parts.append(f"\n----- {name} -----\n" + open(p, encoding="utf-8").read())
+        except Exception as e:                                    # noqa: BLE001
+            # ABSENT IS SAID, never silently skipped — a craft document that
+            # failed to load would otherwise show up as the agent editing
+            # generically, with nothing anywhere saying why.
+            parts.append(f"\n----- {name} : ABSENT ({e}) -----\n")
+    parts.append("\n\n===== WHAT THE REFERENCE CORPUS DOES =====\n"
+                 "Shares with denominators. They DESCRIBE the references and "
+                 "are never a target.\n" + control_digest())
+    parts.append(
+        "\n\n===== THE REST IS ON DISK =====\n"
+        "/craft/knowledge/ holds the other documents and "
+        "/craft/reference_index.json the annotated beats. Read them only if "
+        "this job needs something the above does not cover.\n")
+    return "".join(parts)
 
 
 @app.function(image=IMG, timeout=1800,
@@ -353,7 +480,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
 
     tok = _access_token()
     mark("token")
-    n_tools = preflight(tok)
+    pf = preflight(tok)
+    n_tools = pf["n_tools"]
     mark("preflight")
 
     os.makedirs("/work", exist_ok=True)
@@ -393,10 +521,21 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     with open("/work/CLAUDE.md", "w") as fh:
         fh.write(CRAFT_CONTEXT)
 
-    prompt = (f"{CRAFT_CONTEXT}\n\nTHE CLIP: /work/source.mp4\n"
-              f"THE BRIEF: {brief}\n")
+    sys_prompt = build_system_prompt()
+    with open("/work/system.md", "w") as fh:
+        fh.write(sys_prompt)
+    _sel = ",".join("mcp__chatcut__" + t for t in NEEDED_TOOLS)
+    prompt = (
+        f"THE CLIP: /work/source.mp4\n"
+        f"THE BRIEF: {brief}\n\n"
+        f"The ChatCut tool schemas are DEFERRED. Fetch them in ONE call before "
+        f"you start:\n  ToolSearch query=\"select:{_sel}\"\n"
+        f"The craft is already in your context — do not read /craft unless you "
+        f"need something it does not cover.\n")
+    led_prompt_chars = len(sys_prompt)
     r = subprocess.run(
         ["claude", "-p", prompt,
+         "--append-system-prompt-file", "/work/system.md",
          # STREAM-JSON, because `json` returns only the final result and the
          # ordered tool calls are then unrecoverable. That gap is what made the
          # first run's 93 turns a number instead of a diagnosis.
@@ -420,6 +559,8 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
         shape = {"error": f"classifier failed: {type(e).__name__}: {e}"}
 
     out = {"marks": marks, "tools": n_tools, "rc": r.returncode,
+           "mcp_round_trip_ms": pf["round_trip_ms"],
+           "system_prompt_chars": led_prompt_chars,
            "shape": shape,
            "stderr_tail": (r.stderr or "")[-2000:]}
     out["wall_s"] = round(time.time() - t0, 2)
