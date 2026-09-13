@@ -8118,9 +8118,13 @@ def remap_words(spans, words):
     for a, b in spans:
         for w in words:
             if w["s"] >= a - 1e-6 and w["e"] <= b + 1e-6:
-                kept.append({"w": w["w"],
-                             "s": w["s"] - a + off,
-                             "e": w["e"] - a + off})
+                # ANNOTATE, DO NOT RECONSTRUCT. This rebuilt each word as
+                # {w, s, e} and silently dropped every other field it was
+                # handed. The remap's job is to move the CLOCK, so it now
+                # copies the word and overwrites the two times — anything
+                # else the ingest attached survives by default instead of
+                # surviving only if someone remembered to list it.
+                kept.append(dict(w, s=w["s"] - a + off, e=w["e"] - a + off))
         off += (b - a)
     return kept
 
@@ -10039,8 +10043,25 @@ def edit(source_key: str, brief: str,
                                    utterances=True, filler_words=True))
         d = dgr.to_dict() if hasattr(dgr, "to_dict") else json.loads(dgr.to_json())
         alt = d["results"]["channels"][0]["alternatives"][0]
-        words = [{"w": w["word"], "s": round(w["start"], 3), "e": round(w["end"], 3)}
-                 for w in (alt.get("words") or [])]
+        # PER-WORD CONFIDENCE, CARRIED. This built {w, s, e} and dropped
+        # everything else Deepgram returns, confidence included. Nothing on
+        # this lane reads it, so the drop was harmless HERE — and that is
+        # exactly what made it a merge hazard: lane/agentic-editor has a
+        # caption gate reading per-word `conf`, and a gate that finds none
+        # returns ABSENT and refuses captions. If this boundary survives the
+        # merge unchanged, that gate refuses captions on EVERY run, including
+        # 85 words of clean English at median 0.999.
+        #
+        # THREE STATES, NOT A DEFAULT: the key is present only when Deepgram
+        # gave a number. A fabricated 1.0 would read as certainty nobody
+        # measured, and a fabricated 0.0 would refuse good speech.
+        words = []
+        for w in (alt.get("words") or []):
+            _wd = {"w": w["word"], "s": round(w["start"], 3),
+                   "e": round(w["end"], 3)}
+            if w.get("confidence") is not None:
+                _wd["conf"] = round(float(w["confidence"]), 4)
+            words.append(_wd)
     except Exception as e:
         # Guarded because run 5 proved it can throw. An unguarded network call
         # here crashes the container and the failure taxonomy learns nothing —
@@ -10409,8 +10430,12 @@ def edit(source_key: str, brief: str,
         # drift against speech is silent and ffmpeg exits 0 either way. One
         # clock is what makes the two paths comparable rather than merely both
         # present.
-        led["kept_words_out"] = [{"s": float(k["s"]), "e": float(k["e"]),
-                                  "w": str(k["w"])} for k in kept]
+        # ANNOTATE, NOT RECONSTRUCT — same shape as the remap above. This
+        # whitelisted three keys, so a caption gate reading `conf` off
+        # kept_words_out would find nothing no matter what the ingest
+        # measured.
+        led["kept_words_out"] = [dict(k, s=float(k["s"]), e=float(k["e"]),
+                                      w=str(k["w"])) for k in kept]
         with open("/work/captions.srt", "w") as fh:
             for i, (s, e, txt) in enumerate(cues, 1):
                 fh.write(f"{i}\n{_srt_ts(s)} --> {_srt_ts(e)}\n{txt}\n\n")
