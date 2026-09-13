@@ -281,6 +281,16 @@ CUT_FIELD_TEACH = (
     "keep or cut THIS beat. PROTECTED POSITIONS ARE NEVER CUT: the hook, the "
     "payoff and the close, and any beat you rule `zoom` on — a zoom with its "
     "beat removed is a move with nothing to land on. "
+    # BURIED IS THE SAME LOSS AS CUT, and this field only ever said CUT.
+    # The ChatCut arm protected the hook from removal and then opened the
+    # edit on 1.7s of a dark title card — mean luma 13.9 at t=0 against
+    # 125.7 on the run that did not. Every word of the hook survived and
+    # the viewer still met something else first. A rule that names one
+    # route to a loss teaches that the other routes are fine.
+    "AND A PROTECTED POSITION CAN BE BURIED AS WELL AS CUT: nothing is "
+    "placed in FRONT of the hook. A title card, a logo or a black frame "
+    "before it delivers the same loss by a different route. Anything you "
+    "want to say alongside the hook goes OVER it or AFTER it. "
     "[01_cut_pass, translated 2026-09-11: the source says 'hook / payoff / "
     "close / key_moments are never cut'; key_moments is the old pipeline's peak "
     "ledger and its equivalent here is the beats you rule zoom on]"

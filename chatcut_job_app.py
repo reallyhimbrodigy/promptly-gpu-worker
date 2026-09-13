@@ -525,17 +525,58 @@ def edit(clip_url: str, brief: str, model: str = "claude-sonnet-5",
     with open("/work/system.md", "w") as fh:
         fh.write(sys_prompt)
     _sel = ",".join("mcp__chatcut__" + t for t in NEEDED_TOOLS)
+    # THE MODEL LEVER. ~700 of the 728s is the model thinking, and 39 of 88
+    # turns called no tool at all, so the only remaining saving is thinking
+    # LESS — not plumbing less. The split puts the mechanical legs (import,
+    # wait for transcription, trim to a decided range, place a decided item,
+    # export, poll) on Haiku and keeps every JUDGMENT on the stronger model.
+    #
+    # THE LINE IS DELIBERATE AND IT IS NOT "SIMPLE vs HARD". It is: has the
+    # decision already been made? Choosing WHERE a card goes is editorial and
+    # stays. Executing a placement whose frame, band and duration are already
+    # chosen is mechanical and moves. A subagent that is asked to decide
+    # anything is the wrong split and will show up as a worse edit.
+    agents = {
+        "hands": {
+            "description": (
+                "Executes ChatCut operations that are already decided: import, "
+                "transcription waits, a trim to a given range, a placement with "
+                "given geometry, export, and status polling. Never chooses what "
+                "to cut, where something goes, how large it is, or what it says."),
+            "model": "haiku",
+            "prompt": (
+                "You execute ChatCut operations that have ALREADY BEEN DECIDED. "
+                "You are given exact parameters — frames, ranges, ids, "
+                "geometry — and you make the calls and report what came back.\n\n"
+                "YOU DO NOT MAKE EDITORIAL DECISIONS. If an instruction leaves "
+                "a choice open — which moment, which band, how big, what "
+                "wording, how long — do NOT pick one. Stop and say exactly "
+                "which parameter is missing. A guess from you is indis"
+                "tinguishable from a decision, and it will ship as one.\n\n"
+                "Batch related operations into one call where the tool takes a "
+                "batch. Report tool errors verbatim; never retry a call that "
+                "failed for a reason you cannot name."),
+        }
+    }
     prompt = (
         f"THE CLIP: /work/source.mp4\n"
         f"THE BRIEF: {brief}\n\n"
         f"The ChatCut tool schemas are DEFERRED. Fetch them in ONE call before "
         f"you start:\n  ToolSearch query=\"select:{_sel}\"\n"
         f"The craft is already in your context — do not read /craft unless you "
-        f"need something it does not cover.\n")
+        f"need something it does not cover.\n\n"
+        f"YOU HAVE A `hands` SUBAGENT ON A FASTER MODEL. Delegate the "
+        f"mechanical legs to it — import, waiting for transcription, a trim to "
+        f"a range you have decided, a placement whose geometry you have "
+        f"decided, the export and its polling. Keep every JUDGMENT yourself: "
+        f"what to cut, where things go, how large, what they say, and whether "
+        f"the composed frames are right. Hand it decided parameters, never a "
+        f"choice.\n")
     led_prompt_chars = len(sys_prompt)
     r = subprocess.run(
         ["claude", "-p", prompt,
          "--append-system-prompt-file", "/work/system.md",
+         "--agents", json.dumps(agents),
          # STREAM-JSON, because `json` returns only the final result and the
          # ordered tool calls are then unrecoverable. That gap is what made the
          # first run's 93 turns a number instead of a diagnosis.
