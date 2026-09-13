@@ -92,6 +92,28 @@ for p in ("/craft/knowledge", "/craft/control_distributions.json",
 check("the distributions are handed over as DESCRIPTION, not as a target",
       "never a target" in SRC or "It DESCRIBES" in SRC)
 
+# AND THE DISCLAIMER MUST NOT SIT BESIDE A DEMAND. Presence of "never a target"
+# does not exclude a target being added next to it, and that is exactly how the
+# rates came back last time: "Overlay text is the WORKHORSE (~7.5 per 25s)"
+# survived a careful removal because prose that DESCRIBES a rate reads as
+# harmless beside a schema field that DEMANDS one, and the removal was hunting
+# demands. A rate reaches the agent one plausible sentence at a time.
+#
+# So this checks the CRAFT PROMPT ITSELF for target-shaped language, not the
+# whole file — the corpus numbers live in /craft and belong there; what must
+# never appear is an instruction to hit one.
+_ctx = M.CRAFT_CONTEXT
+import re as _re
+_rates = _re.findall(r"[~\d][\d.]*\s*(?:per|/)\s*\d*\s*s(?:ec|econds)?\b", _ctx, _re.I)
+check("the craft prompt states no per-second or per-25s rate",
+      not _rates, f"{_rates[:4]} — a rate in the prompt is a floor the agent "
+                  f"will hit whatever the moment deserved")
+_demands = [w for w in ("aim for", "aim to", "should place", "must place",
+                        "at least one per", "target of", "hit the", "match the rate")
+            if w in _ctx.lower()]
+check("and no demand-shaped instruction",
+      not _demands, f"{_demands} — the rates GRADE, they never instruct")
+
 if fails:
     print("CHATCUT-PREFLIGHT: FAIL")
     for f in fails:
